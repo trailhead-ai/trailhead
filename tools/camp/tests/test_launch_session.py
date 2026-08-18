@@ -407,3 +407,241 @@ class TestSeamBoundary:
 
         pane = _pane_command(rig["popen"].argv)
         assert pane[:3] == ["env", "-u", "ONLY_THIS_ONE"]
+
+
+# ---------------------------------------------------------------------------
+# confirmation by enumeration membership
+# ---------------------------------------------------------------------------
+
+
+def _record(session_id: str):
+    from trailhead.harness.base import SessionRecord
+
+    return SessionRecord(
+        session_id=session_id,
+        cwd=Path("/tmp"),
+        kind="fake",
+        controllable=True,
+        name=None,
+        pid=1234,
+        started_at=None,
+    )
+
+
+class SequencedHarness:
+    """A harness whose enumeration answer is scripted call-by-call.
+
+    Each entry in *script* is either a list of live session ids, or an
+    exception instance/class to raise from that poll.
+    """
+
+    def __init__(self, script):
+        self._script = list(script)
+        self.enumerate_calls: list[Path] = []
+        self.run_calls = 0
+
+    def session_enumerate(self, workspace=None):
+        self.enumerate_calls.append(workspace)
+        return ["fakeharness", "agents"]
+
+    def parse_session_list(self, output):
+        self.run_calls += 1
+        outcome = self._script[min(self.run_calls - 1, len(self._script) - 1)]
+        if isinstance(outcome, Exception) or (
+            isinstance(outcome, type) and issubclass(outcome, Exception)
+        ):
+            raise outcome
+        return [_record(sid) for sid in outcome]
+
+
+class FakeClock:
+    """Advances by *step* seconds on every read after the first."""
+
+    def __init__(self, step):
+        self._step = step
+        self._t = 0.0
+        self._first = True
+
+    def __call__(self):
+        if self._first:
+            self._first = False
+            return self._t
+        self._t += self._step
+        return self._t
+
+
+@pytest.fixture
+def confirm_rig(monkeypatch, tmp_path):
+    import camp.launch.session as session
+
+    launch_dir = tmp_path / "resolved"
+    launch_dir.mkdir()
+    launched = session.LaunchedSession(
+        session_id="target-id", tmux_name="camp-feat-x-abcd1234", launch_dir=launch_dir
+    )
+
+    calls: list[list[str]] = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(argv)
+        return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+
+    monkeypatch.setattr(session.subprocess, "run", fake_run)
+
+    return {"module": session, "launched": launched, "run": fake_run, "calls": calls}
+
+
+class TestConfirmSession:
+    def test_confirmed_on_a_later_poll_returns_without_raising(self, confirm_rig, monkeypatch):
+        session = confirm_rig["module"]
+        harness = SequencedHarness([[], [], ["target-id"]])
+
+        sleeps: list[float] = []
+        session.confirm_session(
+            harness,
+            confirm_rig["launched"],
+            interval=0.5,
+            timeout=10.0,
+            sleep=sleeps.append,
+            clock=FakeClock(0.5),
+        )
+
+        assert harness.run_calls == 3
+        assert sleeps == [0.5, 0.5]
+
+    def test_membership_is_exact_string_not_prefix(self, confirm_rig, monkeypatch):
+        session = confirm_rig["module"]
+        harness = SequencedHarness([["target-id-extra"]])
+
+        with pytest.raises(session.LaunchError):
+            session.confirm_session(
+                harness,
+                confirm_rig["launched"],
+                interval=0.5,
+                timeout=0.5,
+                sleep=lambda s: None,
+                clock=FakeClock(1.0),
+            )
+
+    def test_harness_error_mid_poll_is_tolerated_and_polling_continues(
+        self, confirm_rig
+    ):
+        session = confirm_rig["module"]
+        from trailhead.harness import HarnessError
+
+        harness = SequencedHarness([HarnessError("boom"), ["target-id"]])
+
+        session.confirm_session(
+            harness,
+            confirm_rig["launched"],
+            interval=0.5,
+            timeout=10.0,
+            sleep=lambda s: None,
+            clock=FakeClock(0.5),
+        )
+
+        assert harness.run_calls == 2
+
+    def test_poll_count_is_bounded_by_timeout_over_interval(self, confirm_rig):
+        session = confirm_rig["module"]
+        harness = SequencedHarness([[]])
+
+        with pytest.raises(session.LaunchError):
+            session.confirm_session(
+                harness,
+                confirm_rig["launched"],
+                interval=0.5,
+                timeout=2.0,
+                sleep=lambda s: None,
+                clock=FakeClock(0.5),
+            )
+
+        assert harness.run_calls <= 5
+
+    def test_never_enumerated_through_timeout_kills_the_exact_tmux_name(self, confirm_rig):
+        session = confirm_rig["module"]
+        harness = SequencedHarness([[]])
+
+        with pytest.raises(session.LaunchError) as excinfo:
+            session.confirm_session(
+                harness,
+                confirm_rig["launched"],
+                interval=0.5,
+                timeout=1.0,
+                sleep=lambda s: None,
+                clock=FakeClock(0.5),
+            )
+
+        kill_calls = [c for c in confirm_rig["calls"] if c[0] == "tmux"]
+        assert len(kill_calls) == 1
+        assert kill_calls[0] == ["tmux", "kill-session", "-t", "camp-feat-x-abcd1234"]
+        assert "trust" in str(excinfo.value).lower()
+
+    def test_failing_kill_is_reported_on_stderr_naming_the_session(
+        self, confirm_rig, monkeypatch, capsys
+    ):
+        session = confirm_rig["module"]
+        harness = SequencedHarness([[]])
+        calls: list[list[str]] = []
+
+        def fake_run(argv, **kwargs):
+            calls.append(argv)
+            if argv[0] == "tmux":
+                return type(
+                    "R", (), {"returncode": 1, "stdout": "", "stderr": "no such session"}
+                )()
+            output = harness.parse_session_list("")
+            return type("R", (), {"returncode": 0, "stdout": output, "stderr": ""})()
+
+        monkeypatch.setattr(session.subprocess, "run", fake_run)
+
+        with pytest.raises(session.LaunchError):
+            session.confirm_session(
+                harness,
+                confirm_rig["launched"],
+                interval=0.5,
+                timeout=0.5,
+                sleep=lambda s: None,
+                clock=FakeClock(1.0),
+            )
+
+        err = capsys.readouterr().err
+        assert "camp-feat-x-abcd1234" in err
+        assert len([c for c in calls if c[0] == "tmux"]) == 1
+
+    def test_enumerate_argument_is_the_resolved_directory_symlink_case(
+        self, confirm_rig, tmp_path, monkeypatch
+    ):
+        session = confirm_rig["module"]
+        real_dir = tmp_path / "real"
+        real_dir.mkdir()
+        link = tmp_path / "link"
+        link.symlink_to(real_dir)
+        resolved = link.resolve()
+
+        launched = session.LaunchedSession(
+            session_id="target-id", tmux_name="camp-feat-x-abcd1234", launch_dir=resolved
+        )
+        harness = SequencedHarness([["target-id"]])
+
+        session.confirm_session(
+            harness,
+            launched,
+            interval=0.5,
+            timeout=10.0,
+            sleep=lambda s: None,
+            clock=FakeClock(0.5),
+        )
+
+        assert harness.enumerate_calls == [resolved]
+
+    def test_constants_exist_and_are_the_defaults_used_by_confirm_session(self):
+        import inspect
+
+        import camp.launch.session as session
+
+        assert session._CONFIRM_POLL_INTERVAL_SECONDS > 0
+        assert session._CONFIRM_POLL_TIMEOUT_SECONDS > 0
+        sig = inspect.signature(session.confirm_session)
+        assert sig.parameters["interval"].default == session._CONFIRM_POLL_INTERVAL_SECONDS
+        assert sig.parameters["timeout"].default == session._CONFIRM_POLL_TIMEOUT_SECONDS

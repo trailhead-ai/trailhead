@@ -24,7 +24,8 @@ already live in the workspace are the deliberate NON-refusal — they are report
 on stderr and the launch proceeds.
 
 This module ends at a successful detached spawn. Confirming the session actually
-registered is a separate concern with its own bounded wait.
+registered is a separate concern with its own bounded wait — :func:`confirm_session`
+below.
 """
 
 from __future__ import annotations
@@ -33,6 +34,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -45,6 +47,13 @@ from .profile import resolve_harness_profile
 #: Seconds to wait on the pre-spawn enumeration probe. It is advisory output
 #: only, so it must never be able to hold up a launch.
 _ENUMERATE_TIMEOUT_SECONDS = 10
+
+#: Poll interval and bound for :func:`confirm_session`, pinned from measured
+#: cold `claude --remote-control` start-to-enumeration latency (min 1.35s /
+#: median 1.39s / max 2.22s across n=8 live launches) — provisional, subject to
+#: revision if that measurement drifts.
+_CONFIRM_POLL_INTERVAL_SECONDS = 0.5
+_CONFIRM_POLL_TIMEOUT_SECONDS = 10.0
 
 
 class LaunchError(Exception):
@@ -206,3 +215,98 @@ def launch_session(
     )
 
     return LaunchedSession(session_id=session_id, tmux_name=tmux_name, launch_dir=launch_dir)
+
+
+def _poll_enumerated(
+    harness, session_id: str, launch_dir: Path, env: dict[str, str]
+) -> bool:
+    """One enumeration attempt: True iff *session_id* is exactly among the live ids.
+
+    Membership is exact-string on ``SessionRecord.session_id`` — never prefix or
+    name matching, which could mistake an unrelated session for camp's own.
+    """
+    argv = harness.session_enumerate(launch_dir)
+    if not argv:
+        return False
+    completed = subprocess.run(
+        argv,
+        cwd=str(launch_dir),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=_ENUMERATE_TIMEOUT_SECONDS,
+    )
+    if completed.returncode != 0:
+        return False
+    records = harness.parse_session_list(completed.stdout)
+    return any(record.session_id == session_id for record in records)
+
+
+def confirm_session(
+    harness,
+    launched: LaunchedSession,
+    *,
+    env: dict[str, str] | None = None,
+    interval: float = _CONFIRM_POLL_INTERVAL_SECONDS,
+    timeout: float = _CONFIRM_POLL_TIMEOUT_SECONDS,
+    sleep=time.sleep,
+    clock=time.monotonic,
+) -> None:
+    """Confirm *launched* registered with the harness, or kill it and refuse.
+
+    Polls ``harness.session_enumerate(launched.launch_dir)`` at *interval* up to
+    *timeout*, testing exact-string membership of ``launched.session_id``. A
+    :class:`HarnessError` mid-poll (e.g. an unsafe-argv guard tripping) is a
+    failed POLL, not a failed launch — polling continues to timeout expiry, since
+    the harness itself may simply not be up yet.
+
+    Confirmed → returns normally: the process exists and is enumerable, no claim
+    of usability beyond that.
+
+    Timed out → kills the tmux session by the exact name camp chose and raises
+    :class:`LaunchError`. A session absent from enumeration is, empirically, most
+    often one stalled at an unaccepted trust prompt — even a successful pretrust
+    still leaves some launches stalled there — so the failure message names that
+    as the probable cause. A failing kill is reported on stderr naming the tmux
+    session; it is never left silent, even though the launch is refused either
+    way.
+    """
+    from trailhead.harness import HarnessError
+
+    env = dict(env if env is not None else os.environ)
+    start = clock()
+    poll_count = 0
+    while True:
+        poll_count += 1
+        try:
+            if _poll_enumerated(harness, launched.session_id, launched.launch_dir, env):
+                return
+        except HarnessError:
+            pass
+        elapsed = clock() - start
+        if elapsed >= timeout:
+            break
+        sleep(interval)
+
+    elapsed = clock() - start
+    print(
+        f"camp: confirmation of session {launched.session_id} timed out after "
+        f"{poll_count} poll(s) over {elapsed:.2f}s; killing tmux session "
+        f"{launched.tmux_name}",
+        file=sys.stderr,
+    )
+    kill = subprocess.run(
+        ["tmux", "kill-session", "-t", launched.tmux_name],
+        capture_output=True,
+        text=True,
+    )
+    if kill.returncode != 0:
+        print(
+            f"camp: failed to kill tmux session {launched.tmux_name}: "
+            f"{(kill.stderr or '').strip() or kill.returncode}",
+            file=sys.stderr,
+        )
+    raise LaunchError(
+        f"camp: launch of session {launched.session_id} could not be confirmed — "
+        f"likely stalled at an unaccepted trust prompt in {launched.launch_dir}"
+    )
