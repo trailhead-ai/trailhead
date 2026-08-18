@@ -505,6 +505,31 @@ class TestPretrustWiring:
         key = str(ws_dir.resolve())
         assert trust["projects"][key]["hasTrustDialogAccepted"] is True
 
+    def test_pretrust_false_does_not_abort_bringup(self, two_member_group, monkeypatch):
+        """pretrust_workspace returning False (an abort path) is still non-fatal
+        for bare `camp new` — bring-up warns and continues."""
+        import camp.provision.provision as provision
+        import camp.launch.claude_trust as claude_trust
+        from camp.provision.provision import bring_up_workspace
+
+        g = two_member_group
+        env = self._env(g)
+        spawned = []
+        monkeypatch.setattr(
+            provision,
+            "spawn_detached_provisioner",
+            lambda **kw: spawned.append(kw),
+        )
+        monkeypatch.setattr(claude_trust, "pretrust_workspace", lambda *a, **kw: False)
+
+        bring_up_workspace(g["group"], "feat-false", env=env)
+
+        from camp.group.manifest import read_central_manifest
+
+        mpath = _workspace_dir("testgroup", "feat-false", env) / "manifest.json"
+        assert read_central_manifest(mpath)["members"]
+        assert len(spawned) == 1
+
 
 # ===========================================================================
 # Test 4: foreground camp setup — provisioning state machine
