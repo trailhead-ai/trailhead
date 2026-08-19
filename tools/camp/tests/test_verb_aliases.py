@@ -200,6 +200,7 @@ def test_reserved_membership_is_pinned() -> None:
             "sessions",
             # Static: canonical/fleet verbs, meta verbs, hook handlers.
             "group",
+            "groups",
             "list",
             "status",
             "sync",

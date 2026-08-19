@@ -61,6 +61,11 @@ _STATIC_RESERVED = frozenset(
     {
         # Canonical group-aware/fleet verbs the taxonomy tables do not model.
         "group",
+        # Read-only group listing. Like "group", it is intercepted in cli/camp
+        # before group resolution, so it never reaches the group-aware router's
+        # RESERVED check — but it is a live verb, and a slug that shadows one is
+        # exactly what this set exists to reject.
+        "groups",
         "list",
         "status",
         "sync",
