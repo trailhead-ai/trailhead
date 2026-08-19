@@ -24,6 +24,7 @@ that single-source claim honest — a wrapper that starts re-inlining the proced
 a second copy waiting to drift.
 """
 
+import re
 from pathlib import Path
 
 import pytest
@@ -520,10 +521,39 @@ def test_trust_boundary_is_named():
     )
 
 
-def test_graph_references_use_bare_task_names():
-    assert "bare task name" in SHARED_REFINE.read_text(), (
-        "_shared/refine.md must require bare task names on graph edges — a prefixed "
-        "or bracketed name silently renders as a detached node"
+def test_graph_references_scope_bare_task_names_to_task_edges():
+    """The bare-name rule is amended, not deleted: it narrows to `task` edges.
+
+    A prose edit that drops the task-edge scoping — teaching agents that
+    prefixes are generally fine on any graph reference — must fail here even
+    though the literal phrase "bare task name" still appears somewhere in the
+    file. The bare-name half and the `kind/name[@stage]` half are pinned to the
+    SAME passage so they cannot drift apart into disconnected sections.
+    """
+    text = SHARED_REFINE.read_text()
+    assert "bare task name" in text, (
+        "_shared/refine.md must require bare task names on `task` graph edges — a "
+        "prefixed or bracketed name silently renders as a detached node"
+    )
+    paragraphs = [p for p in text.split("\n\n") if "bare task name" in p]
+    assert paragraphs, (
+        "_shared/refine.md must state the bare-task-name rule as its own paragraph "
+        "so it can be checked for scoping"
+    )
+    paragraph = paragraphs[0]
+    assert re.search(r"`task`", paragraph), (
+        "_shared/refine.md's bare-task-name rule must explicitly scope itself to "
+        "`task` records — stating it unconditionally teaches agents that prefixes "
+        "are generally fine on any graph reference, not just task edges"
+    )
+    assert "kind/name[@stage]" in paragraph, (
+        "_shared/refine.md must name the `kind/name[@stage]` form for `spec`/`adr` "
+        "depends-on edges in the SAME passage as the bare-task-name rule, so the "
+        "two halves cannot drift apart"
+    )
+    assert re.search(r"`spec`", paragraph) and re.search(r"`adr`", paragraph), (
+        "_shared/refine.md's depends-on guidance must name both `spec` and `adr` "
+        "as the kinds that take the qualified form"
     )
 
 
