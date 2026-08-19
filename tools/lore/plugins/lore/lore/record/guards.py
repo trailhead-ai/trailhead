@@ -12,6 +12,12 @@ Guard-message shape: every line — blocking error, non-blocking warning, ritual
 reminder — is formatted through :func:`graph.format_guard_message` so agents
 parse one machine-parseable ``graph-guard [<guard>]: <message>`` shape off stderr.
 
+Edge confinement: :func:`confine_edge_reference` is kind-parameterized — it
+confines a bare record NAME under a caller-supplied kind, never a hardcoded one.
+Its ordering contract is security-relevant: an edge grammar that qualifies its
+own target must be split and kind-validated before confinement runs, so a
+rejection always names the part that was actually unsafe.
+
 Design-graph loader: :func:`load_design_sidecars` reads the vault's spec/adr
 sidecars into the ``{"kind/name": sidecar}`` shape :mod:`graph`'s design-side
 functions consume — the read half of the same source-of-truth contract
@@ -86,8 +92,8 @@ def load_design_sidecars(vault_root: str) -> dict[str, dict]:
     return graph
 
 
-def confine_edge_reference(value: str, vault_root: str) -> str | None:
-    """Return a guard-error string if *value* is an unsafe task reference, else None.
+def confine_edge_reference(value: str, vault_root: str, kind: str = "task") -> str | None:
+    """Return a guard-error string if *value* is an unsafe *kind* reference, else None.
 
     ``--parent``/``--depends-on`` values are record names, so they flow through the
     SAME name-resolution/confinement guard every RECORD_ID-bearing op uses
@@ -96,14 +102,25 @@ def confine_edge_reference(value: str, vault_root: str) -> str | None:
     is ever written. Existence is deliberately NOT checked — referential integrity
     is not enforced (a dangling edge is valid, per the record model's shape-only
     contract).
+
+    *value* is a bare record NAME and *kind* is the record kind it is confined
+    under — together they form the ``<kind>/<name>`` RECORD_ID handed to the
+    store guard. **Security-relevant ordering contract:** a caller whose edge
+    grammar qualifies the target itself (``kind/name[@stage]``) MUST split the
+    entry and validate its kind BEFORE calling here, then pass the two halves
+    separately. Confining a still-qualified, still-staged string would attribute
+    every rejection to the raw entry, so a bad name would read as a kind or
+    stage error and a rejection would not name the part that was actually
+    unsafe. Both the message and the confined RECORD_ID name *kind*, so a
+    rejection always identifies the surface the value was confined against.
     """
     if not value:
-        return graph_mod.format_guard_message("edge-reference", "empty task reference")
+        return graph_mod.format_guard_message("edge-reference", f"empty {kind} reference")
     try:
-        record_store_mod.confine_record_id(f"task/{value}", vault_root)
+        record_store_mod.confine_record_id(f"{kind}/{value}", vault_root)
     except record_store_mod.InvalidRecordIdError as exc:
         return graph_mod.format_guard_message(
-            "edge-reference", f"unsafe task reference {value!r}: {exc}"
+            "edge-reference", f"unsafe {kind} reference {value!r}: {exc}"
         )
     return None
 

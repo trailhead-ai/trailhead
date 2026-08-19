@@ -92,6 +92,42 @@ def test_confine_edge_reference_rejects_traversal(tmp_path):
     assert "unsafe task reference" in msg
 
 
+def test_confine_edge_reference_accepts_plain_name_for_a_design_kind(tmp_path):
+    g = _guards()
+    assert g.confine_edge_reference("alpha", str(tmp_path), kind="spec") is None
+
+
+def test_confine_edge_reference_names_the_given_kind_when_rejecting_traversal(tmp_path):
+    """The rejection names the kind it confined under, never a hardcoded 'task'."""
+    g = _guards()
+    msg = g.confine_edge_reference("../escape", str(tmp_path), kind="spec")
+    assert msg is not None
+    assert "unsafe spec reference" in msg
+    assert "task" not in msg
+
+
+def test_confine_edge_reference_names_the_given_kind_when_rejecting_empty(tmp_path):
+    g = _guards()
+    msg = g.confine_edge_reference("", str(tmp_path), kind="adr")
+    assert msg is not None
+    assert "empty adr reference" in msg
+
+
+def test_confine_edge_reference_confines_under_the_given_kind(tmp_path, monkeypatch):
+    """The value is confined as ``<kind>/<value>`` — the kind reaches the store guard."""
+    g = _guards()
+    seen: list[str] = []
+    store = g.record_store_mod
+    original = store.confine_record_id
+    monkeypatch.setattr(
+        store,
+        "confine_record_id",
+        lambda record_id, root: seen.append(record_id) or original(record_id, root),
+    )
+    assert g.confine_edge_reference("alpha", str(tmp_path), kind="adr") is None
+    assert seen == ["adr/alpha"]
+
+
 # ---------------------------------------------------------------------------
 # evaluate_task_guards — no-op for non-task kinds
 # ---------------------------------------------------------------------------
