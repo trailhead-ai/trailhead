@@ -165,16 +165,22 @@ def _add_record_field_flags(parser) -> None:
              "dropping the last kind omits related entirely. A pair not present is a "
              "silent no-op.",
     )
-    # Task graph edges (task-only; rejected on other kinds by validate()).
+    # depends-on: a bare TASK name on a task record, or a qualified
+    # KIND/NAME[@STAGE] target (kind spec or adr) on a spec/adr record.
+    # --parent stays task-only, rejected on every other kind by validate().
     parser.add_argument(
-        "--depends-on", dest="depends_on", action="append", default=[], metavar="TASK",
-        help="Append a task this task depends on (task-only, repeatable). Use "
-             "--unset-depends-on TASK to remove one entry.",
+        "--depends-on", dest="depends_on", action="append", default=[],
+        metavar="TASK|KIND/NAME[@STAGE]",
+        help="Append a dependency (repeatable): a bare TASK name on a task record, "
+             "or a qualified KIND/NAME[@STAGE] target (kind spec or adr) on a "
+             "spec/adr record. Use --unset-depends-on to remove one entry.",
     )
     parser.add_argument(
         "--unset-depends-on", dest="unset_depends_on", action="append", default=[],
-        metavar="TASK",
-        help="Remove one depends-on entry (repeatable). Absent value is a silent no-op.",
+        metavar="TASK|KIND/NAME[@STAGE]",
+        help="Remove one depends-on entry (repeatable), matched against the stored "
+             "value byte-for-byte — an unqualified TASK or KIND/NAME entry does not "
+             "match a staged KIND/NAME@STAGE one. Absent value is a silent no-op.",
     )
     parser.add_argument(
         "--parent", dest="parent", default=None, metavar="TASK",
@@ -466,11 +472,12 @@ def _cmd_record_delete(args) -> int:
         # RecordNotFoundError below rather than acting on an orphaned target.
         vault_root = _resolve_record_op_vault(record_id, args)
 
-    # Dependent-warning: deleting a task that others depend-on is allowed (delete
-    # is never blocked) but warns, listing the dependents. Computed before the
-    # delete off the on-disk task graph; a no-op for every non-task kind.
+    # Dependent-warning: deleting a task or design record that others depend-on
+    # is allowed (delete is never blocked) but warns, listing the dependents.
+    # Computed before the delete off the on-disk task/design graph; a no-op
+    # for every kind that carries neither graph.
     kind, _, name = record_id.partition("/")
-    _, guard_notices = guards_mod.evaluate_task_guards(
+    _, guard_notices = guards_mod.evaluate_graph_guards(
         kind=kind,
         name=name,
         sidecar={},
@@ -822,11 +829,12 @@ def _cmd_record_create(args) -> int:
                 scope=scope,
                 vault_root=str(vault_root),
             )
-            # Task graph guards run against the resolved destination vault (the
-            # in-flight record overlaid on the on-disk task graph) before any
-            # write. Blocking errors → nothing written; notices are held for the
-            # success path. A no-op for every non-task kind.
-            guard_errors, guard_notices = guards_mod.evaluate_task_guards(
+            # Graph guards run against the resolved destination vault (the
+            # in-flight record overlaid on the on-disk task/design graph)
+            # before any write. Blocking errors → nothing written; notices are
+            # held for the success path. A no-op for every kind that carries
+            # neither graph.
+            guard_errors, guard_notices = guards_mod.evaluate_graph_guards(
                 kind=kind,
                 name=location.name,
                 sidecar=sidecar,
@@ -1266,11 +1274,12 @@ def _cmd_record_update(args) -> int:
                     ),
                 )
 
-                # Task graph guards run against the record's CURRENT vault (where its
-                # parent/depends-on relatives live), with the mutated record overlaid.
-                # Blocking errors → nothing written; notices are held for the success
-                # path. A no-op for every non-task kind.
-                guard_errors, notices = guards_mod.evaluate_task_guards(
+                # Graph guards run against the record's CURRENT vault (where its
+                # parent/depends-on relatives live), with the mutated record
+                # overlaid. Blocking errors → nothing written; notices are held
+                # for the success path. A no-op for every kind that carries
+                # neither graph.
+                guard_errors, notices = guards_mod.evaluate_graph_guards(
                     kind=location.kind,
                     name=location.name,
                     sidecar=sidecar,
