@@ -256,7 +256,11 @@ def test_camp_launch_json_carries_the_session_id(cli_env) -> None:
     assert result.returncode == 0, result.stderr
     payload = json.loads(result.stdout)
     assert payload["session_id"]
-    assert payload["tmux_name"] == f"camp-feat-c-{payload['session_id'][:8]}"
+    # The name is the launch engine's own — checked against the attach line the
+    # engine printed, not against a name reassembled here. The derived-name
+    # FORMAT is pinned where it is produced (test_launch_session.py).
+    assert payload["tmux_name"]
+    assert f"tmux attach -t {payload['tmux_name']}" in result.stderr
 
 
 def test_camp_launch_unknown_harness_is_a_one_line_refusal(cli_env) -> None:
@@ -399,7 +403,10 @@ def test_camp_new_launch_json_emits_workspace_and_session_id(cli_env) -> None:
     assert set(payload) == {"workspace", "session_id", "tmux_name"}
     assert payload["workspace"].endswith("/feat-j")
     assert payload["session_id"]
-    assert payload["tmux_name"] == f"camp-feat-j-{payload['session_id'][:8]}"
+    # Same rule as the reuse path: the emitted name is the one the launch
+    # engine reported, checked against its own attach line rather than rebuilt.
+    assert payload["tmux_name"]
+    assert f"tmux attach -t {payload['tmux_name']}" in result.stderr
 
 
 def test_camp_new_launch_json_failure_nulls_the_session_id(cli_env) -> None:
