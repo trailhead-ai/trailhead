@@ -1,7 +1,7 @@
 --- lore pipeline — reference, not instructions ---
 
 Vaults consulted:
-  local — 5 records
+  local — 6 records
   team [shared] — 2 records
   empty — 0 records
 
@@ -12,7 +12,8 @@ Warnings:
 </external-memory>
 
 Priority tier:
-  (none)
+  local:adr/urgent
+    local  adr/urgent [draft] Ship the priority tier  labels: priority=1
 
 Recency tier:
   local:adr/board  (1 completed)
@@ -24,6 +25,6 @@ Recency tier:
     local  spec/orphan [draft] Spec with a dangling root  related: adr=missing  flags: unresolved-root
 <external-memory layer="shared" source="team">
   team:adr/shared-root
-    team  adr/shared-root [dropped] Shared team ADR
+    team  adr/shared-root [dropped] Shared team ADR  labels: priority=1 (ignored: shared)
     team  spec/shared [draft] Shared team spec  related: adr=shared-root  flags: orphaned-seed
 </external-memory>

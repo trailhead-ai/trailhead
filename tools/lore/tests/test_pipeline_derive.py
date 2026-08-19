@@ -424,6 +424,147 @@ class TestRecencyOrdering:
         assert _ids(lineages) == ["local:adr/dated", "local:adr/undated"]
 
 
+class TestPriorityTiering:
+    """Splitting the derived lineages into the priority and recency tiers."""
+
+    def test_a_root_priority_label_places_the_lineage_in_the_priority_tier(self):
+        priority, recency = derive.split_tiers(
+            derive.derive_lineages(
+                [_walk("local", {"adr/board": _adr("draft", labels={"priority": "1"})})]
+            )
+        )
+
+        assert [l.id for l in priority] == ["local:adr/board"]
+        assert recency == []
+
+    def test_a_member_priority_label_does_not_lift_the_lineage_out_of_recency(self):
+        priority, recency = derive.split_tiers(
+            derive.derive_lineages(
+                [
+                    _walk(
+                        "local",
+                        {
+                            "adr/board": _adr(),
+                            "spec/one": _spec(adrs=["board"], labels={"priority": "1"}),
+                        },
+                    )
+                ]
+            )
+        )
+
+        assert priority == []
+        assert [l.id for l in recency] == ["local:adr/board"]
+
+    def test_integer_priorities_sort_ascending(self):
+        priority, _ = derive.split_tiers(
+            derive.derive_lineages(
+                [
+                    _walk(
+                        "local",
+                        {
+                            "adr/two": _adr("draft", labels={"priority": "2"}),
+                            "adr/one": _adr("draft", labels={"priority": "1"}),
+                        },
+                    )
+                ]
+            )
+        )
+
+        assert [l.id for l in priority] == ["local:adr/one", "local:adr/two"]
+
+    def test_a_non_integer_priority_sorts_after_every_integer_and_keeps_its_raw_value(self):
+        priority, _ = derive.split_tiers(
+            derive.derive_lineages(
+                [
+                    _walk(
+                        "local",
+                        {
+                            "adr/soon": _adr("draft", labels={"priority": "soon"}),
+                            "adr/two": _adr("draft", labels={"priority": "2"}),
+                        },
+                    )
+                ]
+            )
+        )
+
+        assert [l.id for l in priority] == ["local:adr/two", "local:adr/soon"]
+        assert priority[1].root.sidecar["labels"]["priority"] == "soon"
+
+    def test_the_comparison_never_raises_across_mixed_int_and_string_priorities(self):
+        records = {
+            f"adr/r{index}": _adr("draft", labels={"priority": value})
+            for index, value in enumerate(["3", "soon", "1", "later", "2"])
+        }
+
+        priority, _ = derive.split_tiers(derive.derive_lineages([_walk("local", records)]))
+
+        assert len(priority) == 5
+
+    def test_equal_integer_priorities_tie_break_by_lineage_recency_newest_first(self):
+        priority, _ = derive.split_tiers(
+            derive.derive_lineages(
+                [
+                    _walk(
+                        "local",
+                        {
+                            "adr/older": _adr(
+                                "draft",
+                                labels={"priority": "1"},
+                                **{"updated-at": "2026-08-01T00:00:00Z"},
+                            ),
+                            "adr/newer": _adr(
+                                "draft",
+                                labels={"priority": "1"},
+                                **{"updated-at": "2026-08-02T00:00:00Z"},
+                            ),
+                        },
+                    )
+                ]
+            )
+        )
+
+        assert [l.id for l in priority] == ["local:adr/newer", "local:adr/older"]
+
+    def test_a_shared_root_priority_label_is_ignored_for_tiering(self):
+        """A binding constraint on this board: a shared vault's labels never
+        influence ordering, even though the label still projects verbatim."""
+        priority, recency = derive.split_tiers(
+            derive.derive_lineages(
+                [
+                    _walk(
+                        "team",
+                        {"adr/board": _adr("draft", labels={"priority": "1"})},
+                        shared=True,
+                    )
+                ]
+            )
+        )
+
+        assert priority == []
+        assert [l.id for l in recency] == ["team:adr/board"]
+
+    def test_a_singleton_with_a_priority_label_joins_the_priority_tier(self):
+        lineages = derive.derive_lineages(
+            [
+                _walk(
+                    "local",
+                    {
+                        "task/idea": {
+                            "kind": "task",
+                            "title": "An idea",
+                            "status": "open",
+                            "labels": {"route": "brainstorm", "priority": "1"},
+                        }
+                    },
+                )
+            ]
+        )
+
+        priority, _ = derive.split_tiers(lineages)
+
+        assert [l.id for l in priority] == ["local:task/idea"]
+
+
 class TestHostileSidecarShapes:
     """A sidecar is whatever JSON object was on disk — a synced vault's entry
     never passed this CLI's validator, so every field read here may be the

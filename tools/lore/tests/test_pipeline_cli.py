@@ -848,6 +848,146 @@ class TestLineagesOnTheBoard:
         assert "nothing in flight" in out
 
 
+class TestPriorityTier:
+    """End-to-end: a root's ``priority`` label splits the board into tiers."""
+
+    def _board(self, tmp_path, capsys, records, *, shared=False):
+        name = "team" if shared else "local"
+        vault = tmp_path / name
+        for kind, record_name, sidecar in records:
+            _write_record(vault, kind, record_name, sidecar)
+        vaults = [(name, "team" if shared else "default", vault, shared)]
+        if shared:
+            local = tmp_path / "local"
+            local.mkdir()
+            vaults.append(("local", "default", local, False))
+        _write_config(tmp_path / "config", vaults)
+        code, out, err = _run(["pipeline", "--json"], capsys)
+        assert code == 0, err
+        return json.loads(out)
+
+    def test_a_lower_integer_priority_root_sorts_before_a_higher_one(
+        self, tmp_path, capsys
+    ):
+        payload = self._board(
+            tmp_path, capsys,
+            [
+                ("adr", "one", {"title": "One", "status": "draft",
+                                 "labels": {"priority": "2"}}),
+                ("adr", "two", {"title": "Two", "status": "draft",
+                                 "labels": {"priority": "1"}}),
+            ],
+        )
+
+        assert [l["id"] for l in payload["tiers"]["priority"]] == [
+            "local:adr/two", "local:adr/one",
+        ]
+        assert payload["tiers"]["recency"] == []
+
+    def test_a_priority_label_on_a_member_does_not_lift_its_lineage_out_of_recency(
+        self, tmp_path, capsys
+    ):
+        payload = self._board(
+            tmp_path, capsys,
+            [
+                ("adr", "board", {"title": "Board", "status": "active"}),
+                ("spec", "listing",
+                 {"title": "Listing", "status": "ready",
+                  "related": {"adr": ["board"]}, "labels": {"priority": "1"}}),
+            ],
+        )
+
+        assert payload["tiers"]["priority"] == []
+        assert len(payload["tiers"]["recency"]) == 1
+
+    def test_a_non_integer_priority_stays_in_the_tier_after_every_integer(
+        self, tmp_path, capsys
+    ):
+        payload = self._board(
+            tmp_path, capsys,
+            [
+                ("adr", "soon", {"title": "Soon", "status": "draft",
+                                  "labels": {"priority": "soon"}}),
+                ("adr", "two", {"title": "Two", "status": "draft",
+                                 "labels": {"priority": "2"}}),
+            ],
+        )
+
+        priority = payload["tiers"]["priority"]
+        assert [l["id"] for l in priority] == ["local:adr/two", "local:adr/soon"]
+        assert priority[1]["root"]["labels"]["priority"] == "soon"
+
+    def test_equal_integer_priorities_tie_break_by_recency_newest_first(
+        self, tmp_path, capsys
+    ):
+        payload = self._board(
+            tmp_path, capsys,
+            [
+                ("adr", "older",
+                 {"title": "Older", "status": "draft", "labels": {"priority": "1"},
+                  "updated-at": "2026-08-01T00:00:00Z"}),
+                ("adr", "newer",
+                 {"title": "Newer", "status": "draft", "labels": {"priority": "1"},
+                  "updated-at": "2026-08-02T00:00:00Z"}),
+            ],
+        )
+
+        assert [l["id"] for l in payload["tiers"]["priority"]] == [
+            "local:adr/newer", "local:adr/older",
+        ]
+
+    def test_a_shared_root_priority_label_renders_in_recency_but_is_still_shown(
+        self, tmp_path, capsys
+    ):
+        payload = self._board(
+            tmp_path, capsys,
+            [("adr", "shared-root", {"title": "Shared", "status": "draft",
+                                      "labels": {"priority": "1"}})],
+            shared=True,
+        )
+        assert payload["tiers"]["recency"][0]["id"] == "team:adr/shared-root"
+
+        assert payload["tiers"]["priority"] == []
+        assert len(payload["tiers"]["recency"]) == 1
+        assert payload["tiers"]["recency"][0]["root"]["labels"] == {"priority": "1"}
+
+    def test_a_routed_task_singleton_with_a_priority_label_joins_the_priority_tier(
+        self, tmp_path, capsys
+    ):
+        payload = self._board(
+            tmp_path, capsys,
+            [("task", "idea", {"title": "Idea", "status": "open",
+                                "labels": {"route": "brainstorm", "priority": "1"}})],
+        )
+
+        assert [l["id"] for l in payload["tiers"]["priority"]] == ["local:task/idea"]
+
+    def test_human_mode_renders_the_two_tiers_as_distinct_sections(
+        self, tmp_path, capsys
+    ):
+        vault = tmp_path / "local"
+        _write_record(
+            vault, "adr", "urgent",
+            {"title": "Urgent", "status": "draft", "labels": {"priority": "1"}},
+        )
+        _write_record(vault, "adr", "later", {"title": "Later", "status": "active"})
+        _write_record(
+            vault, "spec", "later-spec",
+            {"title": "Later spec", "status": "ready", "related": {"adr": ["later"]}},
+        )
+        _write_config(tmp_path / "config", [("local", "default", vault, False)])
+
+        code, out, err = _run(["pipeline"], capsys)
+
+        assert code == 0, err
+        priority_idx = out.index("Priority tier:")
+        recency_idx = out.index("Recency tier:")
+        assert priority_idx < recency_idx
+        priority_section = out[priority_idx:recency_idx]
+        assert "local:adr/urgent" in priority_section
+        assert "local:adr/later" not in priority_section
+
+
 class TestNoBodyTextEverSurfaces:
     """Bodies are not opened by the walk, so no projection can carry one — the
     board's whole read path is the sidecar beside it."""
@@ -942,7 +1082,7 @@ class TestSharedLineageFencing:
         _write_record(
             local, "spec", "own",
             {"title": "Own", "status": "draft",
-             "labels": {"priority": "<urgent>&"},
+             "labels": {"owner": "<urgent>&"},
              "related": {"adr": ["<nowhere>&"]}},
         )
         _write_config(tmp_path / "config", [("local", "default", local, False)])
@@ -951,8 +1091,102 @@ class TestSharedLineageFencing:
 
         assert code == 0, err
         root = json.loads(out)["tiers"]["recency"][0]["root"]
-        assert root["labels"] == {"priority": "<urgent>&"}
+        assert root["labels"] == {"owner": "<urgent>&"}
         assert root["related"] == {"adr": ["<nowhere>&"]}
+
+
+class TestIgnoredPriorityMarker:
+    """A shared-vault root's ignored ``priority`` label needs an in-band
+    reason next to it in human mode, so a reader does not have to consult a
+    spec to learn why a labeled root landed in the recency tier."""
+
+    def test_a_shared_roots_priority_label_carries_the_ignored_marker(self):
+        from lore.pipeline import render
+
+        entry = render.project_record(
+            "adr/root", {"title": "T", "status": "draft", "labels": {"priority": "1"}},
+            vault="team", shared=True,
+        )
+        lineage = {"id": "team:adr/root", "root": entry, "members": [], "completed_count": 0}
+
+        block = render._lineage_block(lineage)
+
+        assert any("priority=1 (ignored: shared)" in line for line in block)
+
+    def test_a_members_priority_label_never_carries_the_marker(self):
+        """The marker names a reason a *root* label was ignored; a member's
+        label was never consulted for tiering in the first place."""
+        from lore.pipeline import render
+
+        root = render.project_record(
+            "adr/root", {"title": "T", "status": "draft"}, vault="team", shared=True,
+        )
+        member = render.project_record(
+            "spec/seed", {"title": "S", "status": "draft", "labels": {"priority": "1"}},
+            vault="team", shared=True,
+        )
+        lineage = {
+            "id": "team:adr/root", "root": root, "members": [member], "completed_count": 0,
+        }
+
+        block = render._lineage_block(lineage)
+
+        assert any("priority=1" in line for line in block)
+        assert not any("ignored" in line for line in block)
+
+    def test_a_local_roots_priority_label_carries_no_marker(self):
+        from lore.pipeline import render
+
+        entry = render.project_record(
+            "adr/root", {"title": "T", "status": "draft", "labels": {"priority": "1"}},
+            vault="local", shared=False,
+        )
+        lineage = {"id": "local:adr/root", "root": entry, "members": [], "completed_count": 0}
+
+        block = render._lineage_block(lineage)
+
+        assert any("priority=1" in line for line in block)
+        assert not any("ignored" in line for line in block)
+
+    def test_end_to_end_human_mode_shows_the_marker(self, tmp_path, capsys):
+        local = tmp_path / "local"
+        local.mkdir()
+        team = tmp_path / "team"
+        _write_record(
+            team, "adr", "shared-root",
+            {"title": "Shared", "status": "draft", "labels": {"priority": "1"}},
+        )
+        _write_config(
+            tmp_path / "config",
+            [("local", "default", local, False), ("team", "team", team, True)],
+        )
+
+        code, out, err = _run(["pipeline"], capsys)
+
+        assert code == 0, err
+        assert "priority=1 (ignored: shared)" in out
+
+    def test_json_mode_carries_no_ignored_marker_text(self, tmp_path, capsys):
+        """The JSON consumer can already derive the reason from ``layer`` and
+        the label's presence, so the marker is human-mode only."""
+        local = tmp_path / "local"
+        local.mkdir()
+        team = tmp_path / "team"
+        _write_record(
+            team, "adr", "shared-root",
+            {"title": "Shared", "status": "draft", "labels": {"priority": "1"}},
+        )
+        _write_config(
+            tmp_path / "config",
+            [("local", "default", local, False), ("team", "team", team, True)],
+        )
+
+        code, out, err = _run(["pipeline", "--json"], capsys)
+
+        assert code == 0, err
+        payload = json.loads(out)
+        assert payload["tiers"]["recency"][0]["root"]["labels"] == {"priority": "1"}
+        assert "ignored" not in out
 
 
 class TestHumanRenderingFixture:
@@ -967,6 +1201,12 @@ class TestHumanRenderingFixture:
             local, "adr", "board",
             {"title": "Derived pipeline board", "status": "active",
              "updated-at": "2026-08-19T10:00:00Z"},
+        )
+        _write_record(
+            local, "adr", "urgent",
+            {"title": "Ship the priority tier", "status": "draft",
+             "labels": {"priority": "1"},
+             "updated-at": "2026-08-19T09:00:00Z"},
         )
         _write_record(
             local, "spec", "listing",
@@ -996,6 +1236,7 @@ class TestHumanRenderingFixture:
         _write_record(
             team, "adr", "shared-root",
             {"title": "Shared team ADR", "status": "dropped",
+             "labels": {"priority": "1"},
              "updated-at": "2026-08-15T08:00:00Z"},
         )
         _write_record(

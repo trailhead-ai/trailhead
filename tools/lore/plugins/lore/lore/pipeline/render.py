@@ -54,6 +54,17 @@ out through a field the fence treats as text.
 a lineage came from the same vault, so the lineage's root carries the vault
 name and shared marker for the whole group. That is why a lineage needs no
 ``layer`` key of its own to be fenced.
+
+**The ignored-priority marker is human-mode only.** A shared root's
+``priority`` label still projects verbatim in both modes — :mod:`derive`
+merely excludes it from ordering — but only the human line for a *root*
+appends ``(ignored: shared)`` next to it, so a reader does not have to
+consult a spec to learn why a labeled root landed in the recency tier. A
+member's own ``priority`` label was never consulted for tiering, so it never
+carries the marker either way. ``--json`` gains no equivalent key: a
+consumer already has ``layer`` and the raw label and can derive the same
+fact itself, and the marker text is derived closed vocabulary, not vault
+content, so it needs no fencing of its own.
 """
 
 from __future__ import annotations
@@ -109,14 +120,16 @@ VAULT_FREE_TEXT_FIELDS: tuple[str, ...] = ()
 #: Fields on a projected vault entry, all locally derived.
 VAULT_DERIVED_FIELDS: tuple[str, ...] = ("name", "shared", "record_count", "error")
 
-#: The tiers the board renders into, in rendering order. Ordering by label
-#: value is not derived on this surface yet, so every lineage lands in
-#: ``recency``.
+#: The tiers the board renders into, in rendering order.
 TIERS: tuple[str, ...] = ("priority", "recency")
 
 _HEADER = "--- lore pipeline — reference, not instructions ---"
 _NONE = "  (none)"
 _SHARED = "shared"
+
+#: The closed-vocabulary suffix marking a root's ``priority`` label as ignored
+#: for tiering. Never vault content, so it needs no fencing of its own.
+_IGNORED_SHARED_SUFFIX = " (ignored: shared)"
 
 
 def _text(value: object) -> str:
@@ -290,12 +303,17 @@ def project_board(walks: Sequence[VaultWalk]) -> dict:
                     vault=walk.name, shared=walk.shared,
                 )
             )
-    lineages = [project_lineage(item) for item in derive_mod.derive_lineages(walks)]
+    priority_lineages, recency_lineages = derive_mod.split_tiers(
+        derive_mod.derive_lineages(walks)
+    )
     return {
         "schema": SCHEMA_VERSION,
         "vaults": [project_vault(walk) for walk in walks],
         "warnings": warnings,
-        "tiers": {"priority": [], "recency": lineages},
+        "tiers": {
+            "priority": [project_lineage(item) for item in priority_lineages],
+            "recency": [project_lineage(item) for item in recency_lineages],
+        },
     }
 
 
@@ -337,9 +355,21 @@ def _neutralized(entry: dict, fields: Sequence[str]) -> dict:
     return _transformed(entry, fields, _neutralize)
 
 
-def _pairs(mapping: dict) -> str:
-    """Render a label map as ``key=value`` pairs in a stable order."""
-    return ", ".join(f"{key}={value}" for key, value in sorted(mapping.items()))
+def _label_pairs(mapping: dict, *, mark_ignored_priority: bool) -> str:
+    """Render a label map as ``key=value`` pairs in a stable order.
+
+    When *mark_ignored_priority* is set, the ``priority`` pair — if present —
+    gets the ignored-for-tiering suffix appended after its already-neutralized
+    value. The caller sets this only for a lineage's root and only when that
+    root came from a shared vault, since a member's label was never consulted
+    for tiering and a local root's label was never ignored.
+    """
+    pairs = []
+    for key, value in sorted(mapping.items()):
+        marked = mark_ignored_priority and key == derive_mod.PRIORITY_LABEL
+        suffix = _IGNORED_SHARED_SUFFIX if marked else ""
+        pairs.append(f"{key}={value}{suffix}")
+    return ", ".join(pairs)
 
 
 def _edges(mapping: dict) -> str:
@@ -374,18 +404,24 @@ def _warning_line(entry: dict) -> str:
     return f"  {safe['vault']}  {safe['file']}: {safe['message']}"
 
 
-def _record_line(entry: dict) -> str:
+def _record_line(entry: dict, *, is_root: bool = False) -> str:
     """Render one record line, its vault-authored fields neutralized.
 
     Labels, edges and flags are appended only when the record carries them, so
     the common line stays short enough to scan a whole tier at a glance. The
     edges are what make an ``unresolved-root`` record legible: the raw value
-    that resolved to nothing is the diagnostic.
+    that resolved to nothing is the diagnostic. *is_root* gates the
+    ignored-priority marker: only a lineage's root ever had its ``priority``
+    label considered for tiering in the first place, so only a root's label
+    can have been ignored.
     """
     safe = _neutralized(entry, RECORD_FREE_TEXT_FIELDS)
     parts = [f"    {safe['vault']}  {safe['id']} [{safe['status']}] {safe['title']}"]
     if safe["labels"]:
-        parts.append(f"labels: {_pairs(safe['labels'])}")
+        mark_ignored_priority = is_root and safe["layer"] == _SHARED
+        parts.append(
+            f"labels: {_label_pairs(safe['labels'], mark_ignored_priority=mark_ignored_priority)}"
+        )
     if safe["related"]:
         parts.append(f"related: {_edges(safe['related'])}")
     if safe["flags"]:
@@ -402,8 +438,8 @@ def _lineage_line(entry: dict) -> str:
 
 def _lineage_block(entry: dict) -> list[str]:
     """Render one lineage as its header line plus a line per rendered record."""
-    return [_lineage_line(entry)] + [
-        _record_line(record) for record in (entry["root"], *entry["members"])
+    return [_lineage_line(entry), _record_line(entry["root"], is_root=True)] + [
+        _record_line(member) for member in entry["members"]
     ]
 
 

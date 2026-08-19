@@ -31,7 +31,20 @@ whose own-vault edges point at it:
 
 Two singleton shapes join them, each rooted at the record itself: a spec whose
 edge resolves to nothing (``unresolved-root``), and an ``open`` task labelled
-onto the brainstorm route (``routed-task``).
+onto the brainstorm route (``routed-task``). A singleton takes its own labels
+and ``updated-at`` as the root's, so it tiers and orders on the same rules as
+an adr-rooted lineage.
+
+**Tiering.** :func:`split_tiers` splits an already-derived, already
+recency-ordered list into the priority and recency tiers. A lineage joins the
+priority tier when its root carries a ``priority`` label; an integer value
+sorts ascending, any other value sorts after every integer one with its raw
+text kept for display, and two lineages landing in the same rank keep the
+recency order they arrived in — the newest first. A label on a member is
+never consulted; only the root's own label decides. A root in a ``shared:
+true`` vault has its ``priority`` label ignored for tiering entirely — a
+binding constraint on this board, not a preference — even though the label
+itself still projects untouched for display.
 
 **Edge values are normalized, never trusted.** A value is stored as a bare
 stem by convention only, so an optional leading ``adr/`` is stripped before
@@ -70,6 +83,10 @@ OPEN_TASK_STATUS = "open"
 
 #: The optional prefix an edge value may carry ahead of the bare adr stem.
 _ADR_PREFIX = "adr/"
+
+#: The label whose value orders the priority tier. Read from a lineage's root
+#: only — a label on a member never affects tiering.
+PRIORITY_LABEL = "priority"
 
 #: The derived flags this module assigns. They are its own closed vocabulary —
 #: never vault content — which is why they need no fencing downstream.
@@ -272,3 +289,45 @@ def derive_lineages(walks: Sequence[VaultWalk]) -> list[Lineage]:
     lineages.sort(key=lambda lineage: lineage.id)
     lineages.sort(key=lambda lineage: lineage.recency, reverse=True)
     return lineages
+
+
+def _root_priority(lineage: Lineage) -> str:
+    """The root's raw ``priority`` label, or empty when absent or ignored.
+
+    A ``shared: true`` vault's labels never influence ordering, so a shared
+    root reads as unlabeled here even though :func:`project_record` still
+    shows the label verbatim — the ignored marker that explains why lives in
+    the renderer, not here.
+    """
+    if lineage.shared:
+        return ""
+    return _label(lineage.root.sidecar, PRIORITY_LABEL)
+
+
+def _priority_rank(lineage: Lineage) -> tuple[int, int]:
+    """Sort key ranking every integer-valued priority ahead of every other one.
+
+    The raw label is attacker- or typo-influenced text, so parsing it is the
+    one place this could raise; catching it here keeps the comparison itself
+    total over a mix of integer and non-integer priorities.
+    """
+    try:
+        return (0, int(_root_priority(lineage)))
+    except ValueError:
+        return (1, 0)
+
+
+def split_tiers(lineages: Sequence[Lineage]) -> tuple[list[Lineage], list[Lineage]]:
+    """Split already-derived, recency-ordered *lineages* into the two tiers.
+
+    *lineages* arrives newest first. The recency tier is a plain filter over
+    it, so it keeps that order untouched. The priority tier starts from the
+    same order and layers one more, stable sort of rank on top — integer
+    values ascending, every other value after them — so two lineages that
+    land in the same rank keep the recency order they already had, the newest
+    one first.
+    """
+    priority = [lineage for lineage in lineages if _root_priority(lineage)]
+    recency = [lineage for lineage in lineages if not _root_priority(lineage)]
+    priority.sort(key=_priority_rank)
+    return priority, recency
