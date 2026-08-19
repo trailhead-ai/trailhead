@@ -251,10 +251,16 @@ def rewrite_sidecar(
     call site — never a narrowing of the vault list the sweep walks, which would
     also strip ``related`` and wikilink rewriting of their required all-vault
     reach.
+
+    Vault identity is decided on ``os.path.realpath`` — the same primitive every
+    other confinement and identity check in this module resolves through — so
+    two configured entries naming one physical directory (a symlinked root, a
+    relative path beside an absolute one) are correctly one vault, and a
+    directory reached by a symlink out of the vault is not silently a second.
     """
     updated = dict(sidecar)
     changed = False
-    own_vault = Path(vault.root) == Path(source_vault.root)
+    own_vault = os.path.realpath(vault.root) == os.path.realpath(source_vault.root)
 
     related = updated.get("related")
     if isinstance(related, dict) and isinstance(related.get(kind), list):

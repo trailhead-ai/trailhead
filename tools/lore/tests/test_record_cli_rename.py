@@ -1108,6 +1108,62 @@ def test_resume_adopts_the_suffixed_stem_the_move_actually_landed_on(install):
 
 
 # ---------------------------------------------------------------------------
+# Own-vault identity — resolved real paths, not path strings
+# ---------------------------------------------------------------------------
+
+
+def _sweep_vaults(rename, vault_root, source_root):
+    return {
+        "vault": rename.SweepVault("default", vault_root, False),
+        "source_vault": rename.SweepVault("default", source_root, False),
+    }
+
+
+def test_own_vault_gate_resolves_a_symlinked_root(tmp_path):
+    """Two roots naming the same physical directory are ONE vault.
+
+    The gate decides whether a design ``depends-on`` edge may be rewritten, so
+    it must answer the same question every other confinement check in this
+    module answers — identity of the resolved real path, not of the path
+    string. A vault reached through a symlink is still its own vault.
+    """
+    rename = load_script("lore.record.rename")
+    real = tmp_path / "vault"
+    real.mkdir()
+    link = tmp_path / "link"
+    link.symlink_to(real)
+
+    updated, changed = rename.rewrite_sidecar(
+        {"depends-on": ["spec/old-name@ready"]},
+        "spec",
+        "old-name",
+        "new-name",
+        **_sweep_vaults(rename, link, real),
+    )
+    assert changed
+    assert updated["depends-on"] == ["spec/new-name@ready"]
+
+
+def test_own_vault_gate_still_separates_two_distinct_roots(tmp_path):
+    """Resolving symlinks must not collapse two genuinely different vaults."""
+    rename = load_script("lore.record.rename")
+    one = tmp_path / "one"
+    two = tmp_path / "two"
+    one.mkdir()
+    two.mkdir()
+
+    updated, changed = rename.rewrite_sidecar(
+        {"depends-on": ["spec/old-name@ready"]},
+        "spec",
+        "old-name",
+        "new-name",
+        **_sweep_vaults(rename, two, one),
+    )
+    assert not changed
+    assert updated["depends-on"] == ["spec/old-name@ready"]
+
+
+# ---------------------------------------------------------------------------
 # Symlink confinement
 # ---------------------------------------------------------------------------
 
