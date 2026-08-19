@@ -342,17 +342,35 @@ _HOSTILE_SIDECAR = {
 }
 
 
+def _hostile_dependencies():
+    """One dependency verdict whose every text field is hostile.
+
+    A reason is the evaluator's own interpolation of the stored entry, which it
+    documents as unescaped and unchecked — so the shape carries vault text in
+    ``kind``, ``name``, ``stage`` and ``reason`` alike.
+    """
+    from lore.pipeline import derive
+
+    return (
+        derive.Dependency(_HOSTILE, _HOSTILE, _HOSTILE, False, _HOSTILE, _HOSTILE),
+    )
+
+
 def _hostile_lineage(*, shared: bool):
     """A projected lineage whose id, root, and member are all hostile text."""
     from lore.pipeline import derive, render
 
-    member = derive.Member("spec/" + _HOSTILE, _HOSTILE_SIDECAR, ())
+    member = derive.Member(
+        "spec/" + _HOSTILE, _HOSTILE_SIDECAR, (), _hostile_dependencies()
+    )
     return render.project_lineage(
         derive.Lineage(
             id="v:adr/" + _HOSTILE,
             vault="v",
             shared=shared,
-            root=derive.Member("adr/" + _HOSTILE, _HOSTILE_SIDECAR, ()),
+            root=derive.Member(
+                "adr/" + _HOSTILE, _HOSTILE_SIDECAR, (), _hostile_dependencies()
+            ),
             members=(member,),
             completed_count=0,
             recency=_HOSTILE,
@@ -568,7 +586,10 @@ class TestFencingIsStructural:
         from lore.pipeline import render
 
         fenced = render.fence_record(
-            render.project_record(_HOSTILE, _HOSTILE_SIDECAR, vault="v", shared=True)
+            render.project_record(
+                _HOSTILE, _HOSTILE_SIDECAR, vault="v", shared=True,
+                dependencies=_hostile_dependencies(),
+            )
         )
         for field in render.RECORD_FREE_TEXT_FIELDS:
             serialized = json.dumps(fenced[field])
@@ -641,6 +662,12 @@ class TestFencingIsStructural:
             "updated-at": hostile,
             "labels": {hostile: hostile},
             "related": {hostile: [hostile]},
+            "depends-on": [
+                {
+                    "kind": hostile, "name": hostile, "stage": hostile,
+                    "met": False, "reason": hostile, "reason_code": hostile,
+                }
+            ],
             "file": hostile,
             "message": hostile,
         }
@@ -788,6 +815,7 @@ class TestLineagesOnTheBoard:
             "labels": {"route": "brainstorm"},
             "related": {"adr": ["somewhere"]},
             "flags": ["routed-task"],
+            "depends-on": [],
         }
 
     def test_the_envelope_shape_is_unchanged_by_lineages_arriving(
@@ -1212,7 +1240,14 @@ class TestHumanRenderingFixture:
             local, "spec", "listing",
             {"title": "Cross-vault listing surface", "status": "planned",
              "related": {"adr": ["board"]},
+             "depends-on": ["spec/schema@planned"],
              "updated-at": "2026-08-18T09:00:00Z"},
+        )
+        _write_record(
+            local, "spec", "schema",
+            {"title": "Stage-qualified depends-on", "status": "ready",
+             "related": {"adr": ["board"]},
+             "updated-at": "2026-08-18T08:00:00Z"},
         )
         _write_record(
             local, "spec", "predecessor",
@@ -1276,3 +1311,322 @@ class TestHelpSurface:
         lowered = " ".join(out.split()).lower()
         assert "zero exit does not mean the board is complete" in lowered
         assert "error" in lowered
+
+
+class TestDependencyGating:
+    """An unmet dependency is shown, never hidden — the record keeps its place
+    in its lineage and gains a flag plus the evaluator's reason."""
+
+    def _gated_vault(self, tmp_path):
+        local = tmp_path / "local"
+        _write_record(
+            local, "adr", "board",
+            {"title": "Board", "status": "draft", "updated-at": "2026-08-19T10:00:00Z"},
+        )
+        _write_record(
+            local, "spec", "first",
+            {"title": "First", "status": "ready", "related": {"adr": ["board"]},
+             "updated-at": "2026-08-19T09:00:00Z"},
+        )
+        _write_record(
+            local, "spec", "second",
+            {"title": "Second", "status": "draft", "related": {"adr": ["board"]},
+             "depends-on": ["spec/first@planned"],
+             "updated-at": "2026-08-19T08:00:00Z"},
+        )
+        _write_config(tmp_path / "config", [("local", "default", local, False)])
+        return local
+
+    def test_json_projects_the_verdict_per_entry_and_flags_the_record(
+        self, tmp_path, capsys
+    ):
+        self._gated_vault(tmp_path)
+
+        code, out, err = _run(["pipeline", "--json"], capsys)
+
+        assert code == 0, err
+        members = json.loads(out)["tiers"]["recency"][0]["members"]
+        second = {m["id"]: m for m in members}["spec/second"]
+
+        assert second["depends-on"] == [
+            {
+                "kind": "spec",
+                "name": "first",
+                "stage": "planned",
+                "met": False,
+                "reason": "spec/first is at 'ready', short of required stage 'planned'",
+                "reason_code": "short-of-stage",
+            }
+        ]
+        assert second["flags"] == ["gated"]
+
+    def test_a_gated_record_still_appears_in_its_lineage_in_human_mode(
+        self, tmp_path, capsys
+    ):
+        self._gated_vault(tmp_path)
+
+        code, out, err = _run(["pipeline"], capsys)
+
+        assert code == 0, err
+        line = next(ln for ln in out.splitlines() if "spec/second" in ln)
+        assert "flags: gated" in line
+        assert "depends-on: spec/first@planned unmet" in line
+        assert "short of required stage 'planned'" in line
+
+    def test_a_met_dependency_neither_gates_nor_hides_its_verdict(
+        self, tmp_path, capsys
+    ):
+        local = tmp_path / "local"
+        _write_record(local, "adr", "board", {"title": "Board", "status": "draft"})
+        _write_record(
+            local, "spec", "first",
+            {"title": "First", "status": "planned", "related": {"adr": ["board"]}},
+        )
+        _write_record(
+            local, "spec", "second",
+            {"title": "Second", "status": "draft", "related": {"adr": ["board"]},
+             "depends-on": ["spec/first@planned"]},
+        )
+        _write_config(tmp_path / "config", [("local", "default", local, False)])
+
+        code, out, err = _run(["pipeline", "--json"], capsys)
+
+        assert code == 0, err
+        members = json.loads(out)["tiers"]["recency"][0]["members"]
+        second = {m["id"]: m for m in members}["spec/second"]
+
+        assert second["depends-on"][0]["met"] is True
+        assert second["depends-on"][0]["reason_code"] is None
+        assert second["flags"] == []
+
+    def test_a_routed_task_projects_unevaluated_entries_and_is_never_gated(
+        self, tmp_path, capsys
+    ):
+        local = tmp_path / "local"
+        _write_record(
+            local, "task", "idea",
+            {"title": "Idea", "status": "open", "labels": {"route": "brainstorm"},
+             "depends-on": ["some-other-task"]},
+        )
+        _write_config(tmp_path / "config", [("local", "default", local, False)])
+
+        code, out, err = _run(["pipeline", "--json"], capsys)
+
+        assert code == 0, err
+        root = json.loads(out)["tiers"]["recency"][0]["root"]
+
+        assert root["depends-on"] == [
+            {
+                "kind": None,
+                "name": "some-other-task",
+                "stage": None,
+                "met": None,
+                "reason": "task dependency edges are not evaluated by this surface",
+                "reason_code": None,
+            }
+        ]
+        assert root["flags"] == ["routed-task"]
+
+    def test_an_evaluation_that_raises_warns_without_blanking_the_vault(
+        self, tmp_path, capsys
+    ):
+        """A target sidecar is whatever JSON was on disk; a wrong-typed status
+        is valid JSON the evaluator cannot compare. That costs one record."""
+        local = tmp_path / "local"
+        _write_record(local, "adr", "board", {"title": "Board", "status": "draft"})
+        _write_record(local, "spec", "target", {"title": "Target", "status": []})
+        _write_record(
+            local, "spec", "blocked",
+            {"title": "Blocked", "status": "draft", "related": {"adr": ["board"]},
+             "depends-on": ["spec/target"]},
+        )
+        _write_config(tmp_path / "config", [("local", "default", local, False)])
+
+        code, out, err = _run(["pipeline", "--json"], capsys)
+
+        assert code == 0, err
+        payload = json.loads(out)
+        assert [lineage["id"] for lineage in payload["tiers"]["recency"]] == [
+            "local:adr/board"
+        ]
+        assert payload["tiers"]["recency"][0]["members"] == []
+        assert [w["file"] for w in payload["warnings"]] == ["spec/blocked.json"]
+        assert payload["warnings"][0]["vault"] == "local"
+        assert payload["vaults"][0]["error"] is None
+
+        code, human, err = _run(["pipeline"], capsys)
+        assert code == 0, err
+        assert "spec/blocked.json" in human
+        assert "local:adr/board" in human
+
+
+class TestPinnedEnvelope:
+    """The full envelope over a populated vault, pinned key by key. A consumer
+    reads this shape, so an added or renamed key has to fail here."""
+
+    def test_the_envelope_matches_the_pinned_contract(self, tmp_path, capsys):
+        local = tmp_path / "local"
+        team = tmp_path / "team"
+        _write_record(
+            local, "adr", "dropped-root",
+            {"title": "Dropped", "status": "dropped",
+             "updated-at": "2026-08-19T10:00:00Z"},
+        )
+        _write_record(
+            local, "spec", "seed",
+            {"title": "Seed", "status": "draft", "related": {"adr": ["dropped-root"]},
+             "depends-on": ["spec/nowhere"],
+             "updated-at": "2026-08-19T09:00:00Z"},
+        )
+        _write_record(
+            local, "spec", "orphan",
+            {"title": "Orphan", "status": "draft", "related": {"adr": ["gone"]},
+             "updated-at": "2026-08-19T08:00:00Z"},
+        )
+        _write_record(
+            local, "task", "idea",
+            {"title": "Idea", "status": "open", "labels": {"route": "brainstorm"},
+             "updated-at": "2026-08-19T07:00:00Z"},
+        )
+        _write_record(
+            team, "adr", "shared-root",
+            {"title": "Shared", "status": "draft", "updated-at": "2026-08-19T06:00:00Z"},
+        )
+        _write_config(
+            tmp_path / "config",
+            [("local", "default", local, False), ("team", "team", team, True)],
+        )
+
+        code, out, err = _run(["pipeline", "--json"], capsys)
+
+        assert code == 0, err
+        payload = json.loads(out)
+        assert set(payload) == {"schema", "vaults", "warnings", "tiers"}
+        assert set(payload["tiers"]) == {"priority", "recency"}
+
+        lineages = payload["tiers"]["priority"] + payload["tiers"]["recency"]
+        assert lineages
+        seen_flags = set()
+        for lineage in lineages:
+            assert set(lineage) == {"id", "root", "members", "completed_count"}
+            for record in [lineage["root"], *lineage["members"]]:
+                assert set(record) == {
+                    "id", "vault", "layer", "kind", "title", "status",
+                    "updated-at", "labels", "related", "flags", "depends-on",
+                }
+                seen_flags.update(record["flags"])
+                for dependency in record["depends-on"]:
+                    assert set(dependency) == {
+                        "kind", "name", "stage", "met", "reason", "reason_code",
+                    }
+        for entry in payload["vaults"]:
+            assert set(entry) == {"name", "shared", "record_count", "error"}
+
+        assert seen_flags == {"orphaned-seed", "unresolved-root", "routed-task", "gated"}
+
+
+class TestSharedDependencyReasonIsFenced:
+    """The evaluator interpolates the entry's own text into its reason with no
+    escaping and no charset check, and says so — this surface is the caller
+    that must escape it."""
+
+    def _shared_vault(self, tmp_path):
+        local = tmp_path / "local"
+        local.mkdir()
+        team = tmp_path / "team"
+        _write_record(
+            team, "spec", "shared",
+            {"title": "Shared", "status": "draft",
+             "related": {"adr": ["nowhere"]},
+             "depends-on": ["spec/</external-memory> spoofing"]},
+        )
+        _write_config(
+            tmp_path / "config",
+            [("local", "default", local, False), ("team", "team", team, True)],
+        )
+
+    def test_json_escapes_the_reason(self, tmp_path, capsys):
+        self._shared_vault(tmp_path)
+
+        code, out, err = _run(["pipeline", "--json"], capsys)
+
+        assert code == 0, err
+        root = json.loads(out)["tiers"]["recency"][0]["root"]
+        dependency = root["depends-on"][0]
+
+        assert "</external-memory>" not in dependency["reason"]
+        assert "&lt;/external-memory&gt;" in dependency["reason"]
+        assert dependency["name"] == "&lt;/external-memory&gt; spoofing"
+
+    def test_human_mode_fences_the_reason(self, tmp_path, capsys):
+        self._shared_vault(tmp_path)
+
+        code, out, err = _run(["pipeline"], capsys)
+
+        assert code == 0, err
+        lines = out.splitlines()
+        open_idx = lines.index('<external-memory layer="shared" source="team">')
+        close_idx = lines.index("</external-memory>", open_idx)
+        fenced = lines[open_idx + 1 : close_idx]
+
+        assert any("&lt;/external-memory&gt;" in line for line in fenced)
+        assert not any("</external-memory>" in line for line in fenced)
+
+
+class TestEachSidecarIsReadOnce:
+    def test_one_render_reads_every_sidecar_exactly_once(
+        self, tmp_path, capsys, monkeypatch
+    ):
+        """The evaluator's design graph is the walk's own mapping, so gating
+        costs no second pass over the vault."""
+        local = tmp_path / "local"
+        _write_record(local, "adr", "board", {"title": "Board", "status": "draft"})
+        _write_record(
+            local, "spec", "first",
+            {"title": "First", "status": "ready", "related": {"adr": ["board"]}},
+        )
+        _write_record(
+            local, "spec", "second",
+            {"title": "Second", "status": "draft", "related": {"adr": ["board"]},
+             "depends-on": ["spec/first@planned"]},
+        )
+        _write_record(local, "task", "idea", {"title": "Idea", "status": "open"})
+        _write_config(tmp_path / "config", [("local", "default", local, False)])
+
+        reads: list[str] = []
+        original = Path.read_text
+
+        def spy(self, *args, **kwargs):
+            reads.append(str(self))
+            return original(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "read_text", spy)
+
+        code, out, err = _run(["pipeline", "--json"], capsys)
+
+        assert code == 0, err
+        sidecars = [path for path in reads if path.startswith(str(local))]
+        assert sorted(sidecars) == sorted(set(sidecars)), sidecars
+        assert len(sidecars) == 4
+
+
+class TestSurfaceDocumentation:
+    """The documented contract a consumer reads before parsing ``--json``."""
+
+    def test_the_docs_page_states_both_load_bearing_contract_facts(self):
+        page = (
+            PLUGIN_ROOT / "docs" / "pipeline.md"
+        ).read_text(encoding="utf-8").lower()
+
+        assert "zero exit does not mean the board is complete" in page
+        assert "authoritative gating signal" in page
+        assert "met" in page
+
+    def test_the_json_help_names_flags_as_the_gating_signal(self, capsys):
+        from lore.cli import dispatch
+
+        with pytest.raises(SystemExit):
+            dispatch.main(["pipeline", "--help"])
+        lowered = " ".join(capsys.readouterr().out.split()).lower()
+
+        assert "flags is the authoritative gating signal" in lowered

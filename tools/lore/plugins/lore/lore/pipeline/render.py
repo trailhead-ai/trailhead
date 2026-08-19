@@ -28,12 +28,21 @@ parses this JSON and renders a title into its own context. ``xml_body_escape``
 and ``json.dumps`` escape disjoint character sets, so composing them is exactly
 one round of escaping — a ``&`` never doubles into ``&amp;amp;``.
 
-**A free-text field is not always a bare string.** Labels are a map and
-``related`` edges are a map of lists, and a shared vault authors their keys as
-well as their values. Both fencers therefore walk into a field's value
-(:func:`_mapped`), applying their transform to every string inside it — so
-classifying a field free text protects all of it, not just the shape someone
-happened to have in mind.
+**A free-text field is not always a bare string.** Labels are a map,
+``related`` edges are a map of lists, and ``depends-on`` verdicts are a list of
+maps; a shared vault authors their keys as well as their values. Both fencers
+therefore walk into a field's value (:func:`_mapped`), applying their transform
+to every string inside it — so classifying a field free text protects all of
+it, not just the shape someone happened to have in mind.
+
+**A dependency reason is shared-authored free text.**
+:func:`record.graph.evaluate_dependencies` interpolates the target id out of
+the stored entry with no escaping and no charset check, and documents that a
+caller rendering the reason somewhere unsafe must escape it. This module is
+that caller, so the whole ``depends-on`` projection — target id, stage and
+reason alike — is declared free text and rides both layers with everything
+else. An unmet reason is always rendered, never suppressed: a gating signal
+the operator cannot read is one they cannot act on.
 
 **Line integrity is separate from the fence.** The human view is one record
 per line and carries no terminal control sequences, so every vault-authored
@@ -83,11 +92,14 @@ SCHEMA_VERSION = 1
 
 #: Fields on a projected record whose values came out of the vault — a title,
 #: a status and a timestamp straight from the sidecar, the label map and the
-#: edge map both shown raw, and an id whose name half is a filename stem that
+#: edge map both shown raw, an id whose name half is a filename stem that
 #: only the CLI's own slugifier validates (a record synced in by git never
-#: passed through it).
+#: passed through it), and the dependency verdicts, whose target ids and reason
+#: strings the evaluator interpolates from the stored entry with no escaping
+#: and no charset check — it documents that, and names this surface's caller
+#: role as the one that must escape them.
 RECORD_FREE_TEXT_FIELDS: tuple[str, ...] = (
-    "id", "title", "status", "updated-at", "labels", "related",
+    "id", "title", "status", "updated-at", "labels", "related", "depends-on",
 )
 
 #: Fields on a projected record computed here from the local configuration,
@@ -198,8 +210,15 @@ def project_record(
     vault: str,
     shared: bool,
     flags: Sequence[str] = (),
+    dependencies: Sequence[derive_mod.Dependency] = (),
 ) -> dict:
-    """Project one walked sidecar into the board's record shape, text verbatim."""
+    """Project one walked sidecar into the board's record shape, text verbatim.
+
+    *dependencies* project one object per stored entry, in the derivation's own
+    order — the evaluator returns one verdict per entry and that list is passed
+    through rather than collapsed into a map, so a duplicate entry keeps its
+    own verdict and the Nth object is the Nth stored entry.
+    """
     kind, _, _ = record_id.partition("/")
     return {
         "id": record_id,
@@ -212,6 +231,7 @@ def project_record(
         "labels": _text_map(sidecar.get("labels")),
         "related": _edge_map(sidecar.get("related")),
         "flags": list(flags),
+        "depends-on": [dependency._asdict() for dependency in dependencies],
     }
 
 
@@ -225,6 +245,7 @@ def project_lineage(lineage: derive_mod.Lineage) -> dict:
         return project_record(
             member.record_id, member.sidecar,
             vault=lineage.vault, shared=lineage.shared, flags=member.flags,
+            dependencies=member.dependencies,
         )
 
     return {
@@ -303,9 +324,15 @@ def project_board(walks: Sequence[VaultWalk]) -> dict:
                     vault=walk.name, shared=walk.shared,
                 )
             )
-    priority_lineages, recency_lineages = derive_mod.split_tiers(
-        derive_mod.derive_lineages(walks)
+    derivation = derive_mod.derive_board(walks)
+    warnings.extend(
+        project_warning(
+            warning.file, warning.message,
+            vault=warning.vault, shared=warning.shared,
+        )
+        for warning in derivation.warnings
     )
+    priority_lineages, recency_lineages = derive_mod.split_tiers(derivation.lineages)
     return {
         "schema": SCHEMA_VERSION,
         "vaults": [project_vault(walk) for walk in walks],
@@ -372,6 +399,35 @@ def _label_pairs(mapping: dict, *, mark_ignored_priority: bool) -> str:
     return ", ".join(pairs)
 
 
+def _dependency(entry: dict) -> str:
+    """One dependency's target and verdict, with the reason kept when unmet.
+
+    A met entry needs no reason — the target and the verdict are the whole
+    fact — while anything else carries the evaluator's explanation, because a
+    gating signal the operator cannot read is one they cannot act on. An entry
+    too malformed to name a target renders as its verdict alone rather than
+    inventing a placeholder id.
+    """
+    target = "/".join(part for part in (entry["kind"], entry["name"]) if part)
+    if entry["stage"]:
+        target = f"{target}@{entry['stage']}"
+    if entry["met"] is True:
+        verdict = "met"
+    else:
+        state = "unmet" if entry["met"] is False else "unevaluated"
+        verdict = f"{state} ({entry['reason']})"
+    return f"{target} {verdict}" if target else verdict
+
+
+def _dependencies(entries: Sequence[dict]) -> str:
+    """Render every dependency verdict on one line, in stored order.
+
+    Semicolon-separated because a reason may itself contain a comma, and this
+    view is read one record per line.
+    """
+    return "; ".join(_dependency(entry) for entry in entries)
+
+
 def _edges(mapping: dict) -> str:
     """Render an edge map as ``kind=name`` pairs, stored order within a kind."""
     return ", ".join(
@@ -407,10 +463,11 @@ def _warning_line(entry: dict) -> str:
 def _record_line(entry: dict, *, is_root: bool = False) -> str:
     """Render one record line, its vault-authored fields neutralized.
 
-    Labels, edges and flags are appended only when the record carries them, so
-    the common line stays short enough to scan a whole tier at a glance. The
-    edges are what make an ``unresolved-root`` record legible: the raw value
-    that resolved to nothing is the diagnostic. *is_root* gates the
+    Labels, edges, dependency verdicts and flags are appended only when the
+    record carries them, so the common line stays short enough to scan a whole
+    tier at a glance. The edges are what make an ``unresolved-root`` record
+    legible: the raw value that resolved to nothing is the diagnostic. The
+    verdicts play the same part for a ``gated`` one. *is_root* gates the
     ignored-priority marker: only a lineage's root ever had its ``priority``
     label considered for tiering in the first place, so only a root's label
     can have been ignored.
@@ -424,6 +481,8 @@ def _record_line(entry: dict, *, is_root: bool = False) -> str:
         )
     if safe["related"]:
         parts.append(f"related: {_edges(safe['related'])}")
+    if safe["depends-on"]:
+        parts.append(f"depends-on: {_dependencies(safe['depends-on'])}")
     if safe["flags"]:
         parts.append(f"flags: {', '.join(safe['flags'])}")
     return "  ".join(parts)

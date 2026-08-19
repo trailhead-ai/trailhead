@@ -52,15 +52,40 @@ resolution and ``foo`` and ``adr/foo`` reach the same lineage. The raw value
 survives on the record for display: on an edge that resolves to nothing, the
 value that failed is the whole diagnostic.
 
+**Gating is additive, never subtractive.** A ``spec``/``adr`` record's
+``depends-on`` entries are evaluated against the design records of the vault it
+came from, and a record with any unmet entry keeps its place in its lineage and
+gains the ``gated`` flag plus the evaluator's reason. A dependency the operator
+cannot see is one they cannot act on, so nothing is ever hidden for being
+blocked. The evaluation is confined to one vault for the same reason membership
+is: :func:`record.graph.evaluate_dependencies` is a pure function over whatever
+graph it is handed and enforces no confinement of its own, so a graph spanning
+two vaults would let a shared vault's record satisfy — and so silently un-gate —
+a personal vault's dependency. The graph handed over is exactly one vault's own
+walked sidecars, and no step here ever builds a wider one.
+
+**A task's ``depends-on`` is a different grammar.** Task edges are bare task
+names; the design evaluator parses qualified ``kind/name[@stage]`` ids and reads
+a bare name as unresolvable. Evaluating a routed task's entries through it would
+therefore manufacture a gating verdict out of a grammar mismatch, so a task's
+stored entries project unevaluated — ``met`` is ``None``, with a reason saying
+so — and a routed task is never gated.
+
 **Sidecars carry whatever JSON was on disk.** A record synced in by git never
 passed this CLI's validator, so every field read here is type-checked at the
-point of use and a wrong-typed field reads as absent rather than raising.
+point of use and a wrong-typed field reads as absent rather than raising. The
+one place that guarantee is not this module's to give is the evaluator call: a
+target whose ``status`` is a list is valid JSON and unhashable, and the
+evaluator tests it for failure-set membership. Each record's evaluation is
+therefore guarded as a whole, and a raise costs that record its place on the
+board and yields one warning — never the vault, and never the command.
 """
 
 from __future__ import annotations
 
 from typing import NamedTuple, Sequence
 
+from ..record import graph as graph_mod
 from .walk import VaultWalk
 
 #: Spec statuses that mean the work is over. Omitted from a lineage's rendered
@@ -93,6 +118,63 @@ PRIORITY_LABEL = "priority"
 ORPHANED_SEED = "orphaned-seed"
 UNRESOLVED_ROOT = "unresolved-root"
 ROUTED_TASK = "routed-task"
+GATED = "gated"
+
+#: The sidecar field carrying a record's dependency entries.
+DEPENDS_ON_FIELD = "depends-on"
+
+#: The reason a routed task's entries carry in place of a verdict. Authored
+#: here, so it is closed vocabulary rather than vault content.
+TASK_EDGE_REASON = "task dependency edges are not evaluated by this surface"
+
+
+class Dependency(NamedTuple):
+    """One ``depends-on`` entry's verdict, ready to project.
+
+    The fields mirror :class:`record.graph.DependencyStatus` exactly — a test
+    pins the two together — so an evaluator verdict converts without a mapping
+    layer that could quietly drop a field. ``met`` widens to ``None`` for the
+    one case the evaluator never sees: a task's entries, projected unevaluated.
+
+    ``kind``, ``name``, ``stage`` and ``reason`` all derive from the entry the
+    vault stored, so all four are vault-authored free text.
+    """
+
+    kind: str | None
+    name: str | None
+    stage: str | None
+    met: bool | None
+    reason: str
+    reason_code: str | None
+
+
+class Evaluation(NamedTuple):
+    """What one record's ``depends-on`` evaluation yielded.
+
+    ``gated`` is not derivable from ``dependencies`` by a consumer without
+    re-encoding the rule that ``met is None`` does not block, so the verdict
+    the flag is built from travels with the verdicts themselves.
+    """
+
+    dependencies: tuple[Dependency, ...]
+    gated: bool
+
+
+class DerivedWarning(NamedTuple):
+    """One record the derivation itself could not finish, and why.
+
+    Distinct in origin from the walk's own read failures — the file was read
+    fine — but identical in shape and consequence, so both reach the board's
+    ``warnings`` through the same projection. ``file`` names the sidecar by its
+    on-disk path, whose name half is a filename stem this CLI's slugifier may
+    never have seen, and ``message`` quotes an exception; both are treated as
+    vault-authored free text downstream.
+    """
+
+    vault: str
+    shared: bool
+    file: str
+    message: str
 
 
 class Member(NamedTuple):
@@ -100,11 +182,17 @@ class Member(NamedTuple):
 
     The sidecar rides along verbatim — this module reads it but never rewrites
     it, so the renderer projects from the same bytes the walk read.
+
+    ``dependencies`` is the verdict per stored ``depends-on`` entry, in stored
+    order, duplicates included: the evaluator returns one status per entry and
+    that list passes through unaltered rather than collapsing into a map keyed
+    by target, so the Nth verdict is the Nth stored entry.
     """
 
     record_id: str
     sidecar: dict
     flags: tuple[str, ...]
+    dependencies: tuple[Dependency, ...] = ()
 
 
 class Lineage(NamedTuple):
@@ -130,6 +218,19 @@ class Lineage(NamedTuple):
     members: tuple[Member, ...]
     completed_count: int
     recency: str
+
+
+class Derivation(NamedTuple):
+    """Everything one derivation produced: the board's lineages and its losses.
+
+    The two travel together because a record dropped mid-derivation is only
+    honest as a pair — the lineage it is missing from, and the warning saying
+    why. Returning the lineages alone would let a record vanish from the board
+    with nothing anywhere to say it ever existed.
+    """
+
+    lineages: tuple[Lineage, ...]
+    warnings: tuple[DerivedWarning, ...]
 
 
 def normalize_edge(value: str) -> str:
@@ -178,13 +279,111 @@ def _recency(sidecars: Sequence[dict]) -> str:
     return max((_string(sidecar, "updated-at") for sidecar in sidecars), default="")
 
 
-def _singleton(walk: VaultWalk, record_id: str, sidecar: dict, flag: str) -> Lineage:
+def _entries(sidecar: dict) -> list:
+    """The record's stored ``depends-on`` entries, in stored order.
+
+    Entries are not filtered by type: the evaluator parses any object without
+    raising, and dropping a malformed entry here would silently shorten a list
+    a consumer reads positionally.
+    """
+    entries = sidecar.get(DEPENDS_ON_FIELD)
+    return list(entries) if isinstance(entries, list) else []
+
+
+def _unevaluated(entry: object) -> Dependency:
+    """Project one task entry without a verdict, mirroring the parser's shape.
+
+    ``name`` carries the stored entry when it is text and nothing when it is
+    not — the same reading :func:`record.graph.parse_dependency` gives an entry
+    it cannot split — so no non-string value rides out through a field the
+    renderer fences as text.
+    """
+    return Dependency(
+        None, entry if isinstance(entry, str) else None, None,
+        None, TASK_EDGE_REASON, None,
+    )
+
+
+def _evaluate(record_id: str, sidecar: dict, graph: dict[str, dict]) -> Evaluation:
+    """Evaluate one record's entries against *graph*, and say whether it gates.
+
+    *graph* is the record's own vault's walked sidecars and nothing else. Only
+    an unmet verdict gates: an unevaluated task entry is ``met is None``, which
+    is not a claim that anything is blocked.
+    """
+    entries = _entries(sidecar)
+    if not entries:
+        return Evaluation((), False)
+    if _kind(record_id) == "task":
+        return Evaluation(tuple(_unevaluated(entry) for entry in entries), False)
+    dependencies = tuple(
+        Dependency(*status)
+        for status in graph_mod.evaluate_dependencies(graph, entries)
+    )
+    return Evaluation(
+        dependencies, any(dependency.met is False for dependency in dependencies)
+    )
+
+
+def _evaluate_vault(
+    walk: VaultWalk,
+) -> tuple[dict[str, Evaluation], list[DerivedWarning]]:
+    """Evaluate every record in *walk* against *walk*'s own records.
+
+    The graph is the walk's mapping itself, so no sidecar is read a second time
+    and no mapping spanning two vaults is ever built.
+
+    The guard is deliberately broad. Every enumerated failure the evaluator can
+    hit is already data rather than an exception, so anything that does raise
+    here is by definition unenumerated — and the board degrading to one missing
+    record is always a better answer than a traceback where the operator
+    expected their work.
+    """
+    evaluations: dict[str, Evaluation] = {}
+    warnings: list[DerivedWarning] = []
+    for record_id in sorted(walk.records):
+        try:
+            evaluations[record_id] = _evaluate(
+                record_id, walk.records[record_id], walk.records
+            )
+        except Exception as exc:
+            warnings.append(
+                DerivedWarning(
+                    walk.name, walk.shared, f"{record_id}.json",
+                    f"dependency evaluation failed: {exc}",
+                )
+            )
+    return evaluations, warnings
+
+
+def _member(
+    record_id: str,
+    sidecar: dict,
+    flags: tuple[str, ...],
+    evaluations: dict[str, Evaluation],
+) -> Member:
+    """Build a member, appending :data:`GATED` when its evaluation says so."""
+    evaluation = evaluations[record_id]
+    return Member(
+        record_id, sidecar,
+        flags + ((GATED,) if evaluation.gated else ()),
+        evaluation.dependencies,
+    )
+
+
+def _singleton(
+    walk: VaultWalk,
+    record_id: str,
+    sidecar: dict,
+    flag: str,
+    evaluations: dict[str, Evaluation],
+) -> Lineage:
     """A one-record lineage rooted at the record itself."""
     return Lineage(
         id=f"{walk.name}:{record_id}",
         vault=walk.name,
         shared=walk.shared,
-        root=Member(record_id, sidecar, (flag,)),
+        root=_member(record_id, sidecar, (flag,), evaluations),
         members=(),
         completed_count=0,
         recency=_string(sidecar, "updated-at"),
@@ -232,8 +431,16 @@ def _resolve_specs(
     return seeds, completed, unresolved
 
 
-def _vault_lineages(walk: VaultWalk) -> list[Lineage]:
-    """Every lineage one vault anchors, resolved entirely within that vault."""
+def _vault_lineages(
+    walk: VaultWalk,
+    evaluations: dict[str, Evaluation],
+) -> list[Lineage]:
+    """Every lineage one vault anchors, resolved entirely within that vault.
+
+    *walk* carries only the records whose evaluation finished; the rest are
+    already accounted for as warnings, so nothing here needs to know they
+    existed.
+    """
     adr_ids = {rid for rid in walk.records if _kind(rid) == "adr"}
     seeds, completed, unresolved = _resolve_specs(walk, adr_ids)
 
@@ -246,14 +453,15 @@ def _vault_lineages(walk: VaultWalk) -> list[Lineage]:
             continue
         member_flags = (ORPHANED_SEED,) if root_status in ORPHANING_ADR_STATUSES else ()
         members = tuple(
-            Member(seed_id, walk.records[seed_id], member_flags) for seed_id in seed_ids
+            _member(seed_id, walk.records[seed_id], member_flags, evaluations)
+            for seed_id in seed_ids
         )
         lineages.append(
             Lineage(
                 id=f"{walk.name}:{adr_id}",
                 vault=walk.name,
                 shared=walk.shared,
-                root=Member(adr_id, root_sidecar, ()),
+                root=_member(adr_id, root_sidecar, (), evaluations),
                 members=members,
                 completed_count=completed[adr_id],
                 recency=_recency([root_sidecar, *(m.sidecar for m in members)]),
@@ -261,7 +469,7 @@ def _vault_lineages(walk: VaultWalk) -> list[Lineage]:
         )
 
     lineages.extend(
-        _singleton(walk, record_id, walk.records[record_id], UNRESOLVED_ROOT)
+        _singleton(walk, record_id, walk.records[record_id], UNRESOLVED_ROOT, evaluations)
         for record_id in unresolved
     )
     for record_id in sorted(walk.records):
@@ -271,24 +479,39 @@ def _vault_lineages(walk: VaultWalk) -> list[Lineage]:
             and _string(sidecar, "status") == OPEN_TASK_STATUS
             and _label(sidecar, ROUTE_LABEL) == BRAINSTORM_ROUTE
         ):
-            lineages.append(_singleton(walk, record_id, sidecar, ROUTED_TASK))
+            lineages.append(
+                _singleton(walk, record_id, sidecar, ROUTED_TASK, evaluations)
+            )
     return lineages
 
 
-def derive_lineages(walks: Sequence[VaultWalk]) -> list[Lineage]:
-    """Derive every vault's lineages, newest first.
+def derive_board(walks: Sequence[VaultWalk]) -> Derivation:
+    """Derive every vault's lineages, newest first, plus what was lost deriving them.
 
-    Each vault is derived on its own and the results are concatenated, which is
-    what keeps the resolution own-vault: no step of this function ever holds a
+    Each vault is evaluated and derived on its own and the results are
+    concatenated, which is what keeps both the edge resolution and the
+    dependency evaluation own-vault: no step of this function ever holds a
     mapping spanning two vaults. The ordering sorts by recency descending with
     the lineage id as the tiebreak, so two lineages stamped at the same moment
     keep a stable order across invocations instead of following whatever order
     the directory listing happened to produce.
     """
-    lineages = [lineage for walk in walks for lineage in _vault_lineages(walk)]
+    lineages: list[Lineage] = []
+    warnings: list[DerivedWarning] = []
+    for walk in walks:
+        evaluations, vault_warnings = _evaluate_vault(walk)
+        warnings.extend(vault_warnings)
+        derived = walk._replace(
+            records={
+                record_id: sidecar
+                for record_id, sidecar in walk.records.items()
+                if record_id in evaluations
+            }
+        )
+        lineages.extend(_vault_lineages(derived, evaluations))
     lineages.sort(key=lambda lineage: lineage.id)
     lineages.sort(key=lambda lineage: lineage.recency, reverse=True)
-    return lineages
+    return Derivation(tuple(lineages), tuple(warnings))
 
 
 def _root_priority(lineage: Lineage) -> str:

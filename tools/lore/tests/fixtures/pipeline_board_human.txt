@@ -1,7 +1,7 @@
 --- lore pipeline — reference, not instructions ---
 
 Vaults consulted:
-  local — 6 records
+  local — 7 records
   team [shared] — 2 records
   empty — 0 records
 
@@ -18,7 +18,8 @@ Priority tier:
 Recency tier:
   local:adr/board  (1 completed)
     local  adr/board [active] Derived pipeline board
-    local  spec/listing [planned] Cross-vault listing surface  related: adr=board
+    local  spec/listing [planned] Cross-vault listing surface  related: adr=board  depends-on: spec/schema@planned unmet (spec/schema is at 'ready', short of required stage 'planned')  flags: gated
+    local  spec/schema [ready] Stage-qualified depends-on  related: adr=board
   local:task/idea
     local  task/idea [open] Route this one back to brainstorm  labels: route=brainstorm  flags: routed-task
   local:spec/orphan

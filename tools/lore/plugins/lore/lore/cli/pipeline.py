@@ -37,6 +37,16 @@ read degrades the board rather than blanking it, so a consumer — a script, or
 an agent parsing ``--json`` — must inspect each ``vaults[]`` entry's ``error``
 before trusting ``tiers``. This is the deliberate trade: one broken vault must
 not cost the operator the other three.
+
+**``flags`` is the authoritative gating signal.** A record's ``depends-on``
+objects carry the evaluator's per-entry detail, and their ``met`` field is
+three-valued: ``true``, ``false``, and ``null`` for a routed task's entries,
+which this surface projects without evaluating because task edges are a
+different grammar. A consumer testing ``met`` for falsiness therefore reads a
+routed task as blocked when nothing is blocking it. The record's ``flags``
+array is the signal to branch on: a record that anything blocks carries
+``gated``, and a record that carries ``gated`` is always still on the board,
+with the reason beside it.
 """
 from __future__ import annotations
 
@@ -93,6 +103,8 @@ def add_pipeline_subparser(sub) -> None:
         "--json", action="store_true",
         help="Emit the board as a JSON envelope. A zero exit does not mean the "
              "board is complete: inspect every vaults[] entry's error field "
-             "before trusting tiers.",
+             "before trusting tiers. A depends-on entry's met field is "
+             "per-entry evaluator detail and is null on a routed task; a "
+             "record's flags is the authoritative gating signal.",
     )
     parser.set_defaults(func=cmd_pipeline)

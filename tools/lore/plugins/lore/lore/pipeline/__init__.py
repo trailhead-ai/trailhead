@@ -6,7 +6,8 @@ Three seams, one direction of flow:
     sidecars and nothing else, and never raises: every failure comes back as a
     per-file warning or a per-vault error marker.
   - :mod:`derive` is pure. It turns the walk's output into the board's
-    lineages, resolving every edge inside the vault the record came from and
+    lineages and evaluates each record's ``depends-on`` entries, resolving
+    every edge and every dependency inside the vault the record came from and
     never across a merged view of them all.
   - :mod:`render` owns both output modes and is the single point at which any
     vault-authored value reaches a stream.
