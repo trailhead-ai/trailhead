@@ -41,6 +41,12 @@ def _production_sources() -> list[Path]:
 
 _FORBIDDEN_ARGV_FLAGS = ("--resume", "--session-id")
 
+# Methods that append to a sequence already under construction. A flag constant
+# handed to one of these builds an argv just as surely as a list literal does.
+# Plain-function calls are deliberately NOT covered: `_consume_flag_value(rest,
+# "--group")` is how camp parses its own flags, and that spelling must stay legal.
+_SEQUENCE_GROWERS = frozenset({"append", "insert", "extend", "add"})
+
 
 def _argv_composition_offenders(source: str) -> list[str]:
     """AST-scan one module's source for camp-core argv composition or exec.
@@ -52,11 +58,20 @@ def _argv_composition_offenders(source: str) -> list[str]:
     - a list/tuple literal whose first element is the constant `"claude"`
       (an argv head)
     - a `--resume` or `--session-id` constant appearing as an element of a
-      list/tuple literal (argv under construction)
+      list/tuple literal (argv under construction), or handed to a sequence
+      -growing method such as `.append()` / `.insert()` (the same argv, built
+      one element at a time)
 
     The flag literals are legal everywhere else — a `==` comparison against a
-    parsed CLI arg, a help string, a docstring — because none of those compose
-    an argv.
+    parsed CLI arg, a help string, a docstring, or an argument to camp's own
+    flag parser — because none of those compose an argv.
+
+    Known gap, accepted deliberately: a command assembled as a STRING
+    (`f"claude --resume {sid}"`, `%`-formatting) is not detected. Narrowing
+    that without flagging every help string is not worth the false positives,
+    and camp hands argv to `subprocess` as a list — it never builds a shell
+    string. The positive pins (a resume argv must come from
+    `harness.session_resume(`) are what actually carry that case.
     """
     hits: list[str] = []
     for node in ast.walk(ast.parse(source)):
@@ -66,6 +81,14 @@ def _argv_composition_offenders(source: str) -> list[str]:
             and node.func.attr.startswith("exec")
         ):
             hits.append(f"exec call: {node.func.attr}")
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr in _SEQUENCE_GROWERS
+        ):
+            for arg in node.args:
+                if isinstance(arg, ast.Constant) and arg.value in _FORBIDDEN_ARGV_FLAGS:
+                    hits.append(f"argv literal: {arg.value}")
         if isinstance(node, (ast.List, ast.Tuple)) and node.elts:
             if isinstance(node.elts[0], ast.Constant) and node.elts[0].value == "claude":
                 hits.append("argv literal")
@@ -198,6 +221,40 @@ class TestArgvFlagLiteralScope:
         source = 'sid = "abc"\nargv = ["claude", "--session-id", sid]\n'
         hits = _argv_composition_offenders(source)
         assert any("--session-id" in hit for hit in hits), hits
+
+    def test_flag_appended_to_an_argv_under_construction_is_an_offender(self):
+        """Building the same argv one element at a time is the same crossing.
+
+        A list literal is the obvious spelling, not the only one — an argv grown
+        by `.append()` / `.insert()` / `.extend()` composes exactly as much of a
+        harness command line, and would otherwise slip past a literal-only scan.
+        """
+        for build in (
+            'argv.append("--resume")',
+            'argv.insert(1, "--resume")',
+            'argv.extend("--session-id")',
+            'parts.add("--session-id")',
+        ):
+            source = f"argv = []\nparts = set()\n{build}\n"
+            hits = _argv_composition_offenders(source)
+            assert hits != [], f"missed argv growth: {build}"
+
+    def test_flag_passed_to_camps_own_flag_parser_is_not_an_offender(self):
+        """Consuming a flag from argv is the opposite of composing one.
+
+        `_consume_flag_value(rest, "--resume")` is how camp reads its OWN CLI
+        surface, and it spells the flag as a plain call argument. Only
+        sequence-growing methods count, precisely so this idiom stays legal —
+        a rule that flagged every call argument would forbid camp from parsing
+        the flags it owns.
+        """
+        source = (
+            "def handle(rest):\n"
+            '    ref = _consume_flag_value(rest, "--resume")\n'
+            '    _consume_flag_value(rest, "--session-id")\n'
+            "    return ref\n"
+        )
+        assert _argv_composition_offenders(source) == []
 
     def test_session_id_flag_in_comparison_and_help_text_is_not_an_offender(self):
         source = (
