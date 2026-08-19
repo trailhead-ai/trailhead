@@ -31,8 +31,11 @@ one round of escaping — a ``&`` never doubles into ``&amp;amp;``.
 per line and carries no terminal control sequences, so every vault-authored
 value on a line is neutralized (:func:`_neutralize`) whichever vault it came
 from — entity-escaping touches neither a newline nor an ANSI escape, and it
-only runs on shared vaults. JSON mode needs no equivalent: ``json.dumps``
-escapes control characters itself.
+only runs on shared vaults. Each line renderer neutralizes by iterating its
+object's declared free-text set, exactly as the entity-escaping fencers do:
+declaring a field is what enrols it in both layers, so neither can fall
+behind the other. JSON mode needs no equivalent: ``json.dumps`` escapes
+control characters itself.
 
 **Only strings survive a free-text field.** A shared vault may put any JSON at
 all in a sidecar key. A non-string value renders as the empty string rather
@@ -151,17 +154,16 @@ def fence_warning(entry: dict) -> dict:
 
 
 def project_board(walks: Sequence[VaultWalk]) -> dict:
-    """Assemble the board from *walks*, with every vault's text verbatim."""
-    records = []
+    """Assemble the board from *walks*, with every vault's text verbatim.
+
+    The envelope's top-level keys are exactly ``schema``, ``vaults``,
+    ``warnings`` and ``tiers``, and a consumer pins on that shape: a board is
+    read by walking the tiers and consulting ``vaults`` for what could not be
+    read. A record that belongs to no tier belongs nowhere in the envelope, so
+    there is no fifth key holding the walk's raw yield.
+    """
     warnings = []
     for walk in walks:
-        for record_id in sorted(walk.records):
-            records.append(
-                project_record(
-                    record_id, walk.records[record_id],
-                    vault=walk.name, shared=walk.shared,
-                )
-            )
         for warning in walk.warnings:
             warnings.append(
                 project_warning(
@@ -173,7 +175,6 @@ def project_board(walks: Sequence[VaultWalk]) -> dict:
         "schema": SCHEMA_VERSION,
         "vaults": [project_vault(walk) for walk in walks],
         "warnings": warnings,
-        "records": records,
         "tiers": dict(_EMPTY_TIERS),
     }
 
@@ -182,7 +183,6 @@ def render_json(board: dict) -> str:
     """Render the board as the machine-readable envelope, shared text escaped."""
     fenced = dict(board)
     fenced["warnings"] = [fence_warning(dict(w)) for w in board["warnings"]]
-    fenced["records"] = [fence_record(dict(r)) for r in board["records"]]
     return json.dumps(fenced)
 
 
@@ -208,27 +208,46 @@ def _neutralize(text: str) -> str:
     return "".join(ch if ch.isprintable() else repr(ch)[1:-1] for ch in text)
 
 
+def _neutralized(entry: dict, fields: Sequence[str]) -> dict:
+    """Return a copy of *entry* with every field in *fields* neutralized.
+
+    *fields* is the object's declared free-text set, never a list written out
+    here — the same discipline :func:`_escape` follows, so a field declared
+    free text is neutralized on its way to a line whether or not whoever
+    declared it remembered this layer exists.
+    """
+    return {**entry, **{field: _neutralize(entry[field]) for field in fields}}
+
+
 def _vault_line(entry: dict) -> str:
-    if entry["error"] is not None:
-        detail = f"error: {entry['error']}"
+    """Render one vaults-consulted line.
+
+    Nothing on this line came out of a vault — the name and shared flag are
+    configured locally, the count is computed, and the error is composed from
+    the configured path plus an OS error — so the declared set neutralized
+    here is empty. It is iterated anyway: a later field sourced from vault
+    content is fenced by declaring it, with no second edit to make.
+    """
+    safe = _neutralized(entry, VAULT_FREE_TEXT_FIELDS)
+    if safe["error"] is not None:
+        detail = f"error: {safe['error']}"
     else:
-        count = entry["record_count"]
+        count = safe["record_count"]
         detail = f"{count} record{'' if count == 1 else 's'}"
-    marker = " [shared]" if entry["shared"] else ""
-    return f"  {entry['name']}{marker} — {detail}"
+    marker = " [shared]" if safe["shared"] else ""
+    return f"  {safe['name']}{marker} — {detail}"
 
 
 def _warning_line(entry: dict) -> str:
-    file = _neutralize(entry["file"])
-    message = _neutralize(entry["message"])
-    return f"  {entry['vault']}  {file}: {message}"
+    """Render one warning line, its vault-authored fields neutralized."""
+    safe = _neutralized(entry, WARNING_FREE_TEXT_FIELDS)
+    return f"  {safe['vault']}  {safe['file']}: {safe['message']}"
 
 
 def _record_line(entry: dict) -> str:
-    record_id = _neutralize(entry["id"])
-    status = _neutralize(entry["status"])
-    title = _neutralize(entry["title"])
-    return f"  {entry['vault']}  {record_id} [{status}] {title}"
+    """Render one record line, its vault-authored fields neutralized."""
+    safe = _neutralized(entry, RECORD_FREE_TEXT_FIELDS)
+    return f"  {safe['vault']}  {safe['id']} [{safe['status']}] {safe['title']}"
 
 
 def _fenced_section(entries: Sequence[dict], line_of: Callable[[dict], str]) -> list[str]:
@@ -262,10 +281,6 @@ def render_human(board: dict) -> str:
 
     lines.append("Warnings:")
     lines.extend(_fenced_section(board["warnings"], _warning_line))
-    lines.append("")
-
-    lines.append("Records:")
-    lines.extend(_fenced_section(board["records"], _record_line))
 
     for tier in ("priority", "recency"):
         lines.append("")
