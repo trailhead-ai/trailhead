@@ -1668,6 +1668,65 @@ def test_unset_depends_on_and_parent_round_trip(tmp_path):
     assert "parent" not in after
 
 
+def _stamp_stored_depends_on(vault: Path, record_id: str, entries) -> None:
+    """Write *entries* straight into the sidecar, bypassing the CLI's guards.
+
+    Reproduces a task record whose ``depends-on`` was stored before the
+    task-edge form check existed — the CLI now refuses to write one, so the
+    only way to stand up that on-disk shape is to author the sidecar directly.
+    """
+    kind, name = record_id.split("/", 1)
+    path = vault / kind / f"{name}.json"
+    sidecar = json.loads(path.read_text(encoding="utf-8"))
+    sidecar["depends-on"] = list(entries)
+    path.write_text(json.dumps(sidecar), encoding="utf-8")
+
+
+def test_stored_prefixed_depends_on_does_not_block_a_status_update(tmp_path):
+    """A status flip on a record holding a prefixed entry must still land."""
+    vault, state = _make_vault(tmp_path)
+    rid = _mk_task(vault, state, "a")
+    _stamp_stored_depends_on(vault, rid, ["task/other"])
+
+    u = _run(["record", "update", rid, "--status", "done"], vault=vault, state_dir=state)
+    assert u.returncode == 0, u.stderr
+    assert "task-edge-form" not in u.stderr
+    after = _find_sidecar(vault, rid)
+    assert after["status"] == "done"
+    assert after["depends-on"] == ["task/other"]
+
+
+def test_newly_supplied_prefixed_depends_on_is_still_rejected_on_update(tmp_path):
+    """Grandfathering the stored entries does not open the door for a new one."""
+    vault, state = _make_vault(tmp_path)
+    rid = _mk_task(vault, state, "a")
+    _stamp_stored_depends_on(vault, rid, ["task/other"])
+    before = _find_sidecar(vault, rid)
+
+    u = _run(
+        ["record", "update", rid, "--depends-on", "task/foo"],
+        vault=vault, state_dir=state,
+    )
+    assert u.returncode != 0
+    assert "graph-guard [task-edge-form]" in u.stderr
+    assert "task/foo" in u.stderr
+    assert _find_sidecar(vault, rid) == before
+
+
+def test_unset_depends_on_removes_a_stored_prefixed_entry(tmp_path):
+    """Removal is how an operator repairs a bad entry — it must never be blocked."""
+    vault, state = _make_vault(tmp_path)
+    rid = _mk_task(vault, state, "a")
+    _stamp_stored_depends_on(vault, rid, ["task/other", "keeper"])
+
+    u = _run(
+        ["record", "update", rid, "--unset-depends-on", "task/other"],
+        vault=vault, state_dir=state,
+    )
+    assert u.returncode == 0, u.stderr
+    assert _find_sidecar(vault, rid)["depends-on"] == ["keeper"]
+
+
 def test_depends_on_cycle_rejected_on_update(tmp_path):
     """update introducing A→B→A is rejected and the record is left unchanged."""
     vault, state = _make_vault(tmp_path)

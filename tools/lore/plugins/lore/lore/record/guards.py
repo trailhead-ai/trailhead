@@ -23,6 +23,14 @@ A guard with a counterpart on the other graph carries a namespaced tag
 (``design-depends-on-cycle`` vs ``depends-on-cycle``) so the bracketed tag alone
 says which graph rejected the write.
 
+Merged record vs. supplied values: every guard judges the merged record — what
+would land on disk — except the task-edge FORM check, which judges only the
+``depends-on`` values the write itself supplies (``supplied_depends_on``). That
+rule postdates the data it reads, so a record already holding a prefixed entry
+would otherwise be frozen: every later write to it, down to a plain status
+flip, would be rejected for a value that write never touched. Confinement is
+never narrowed this way — an unsafe reference is unsafe whoever wrote it.
+
 Edge confinement: :func:`confine_edge_reference` is kind-parameterized — it
 confines a bare record NAME under a caller-supplied kind, never a hardcoded one.
 Its ordering contract is security-relevant: an edge grammar that qualifies its
@@ -148,6 +156,7 @@ def evaluate_task_guards(
     vault_root: str,
     status_set: str | None,
     deleting: bool = False,
+    supplied_depends_on: list[str] | None = None,
 ) -> tuple[list[str], list[str]]:
     """Evaluate the task graph guards for a create/update/delete.
 
@@ -161,6 +170,14 @@ def evaluate_task_guards(
         dependent-warning (a depended-on task going ``dropped``/``superseded`` or
         being deleted) and the flow-out reminder (a parent completed without a
         ``## Flow-out`` section).
+
+    *sidecar* is the MERGED record — what would land on disk — so most guards
+    judge the whole record. *supplied_depends_on* narrows exactly one of them:
+    it is the list of ``depends-on`` values this write newly supplies, and only
+    those are judged by the edge-FORM check below. ``None`` (the default) means
+    "every entry is newly supplied", which is what a create passes and what
+    keeps every other caller at today's semantics. Confinement is deliberately
+    NOT narrowed: an unsafe reference is unsafe whoever wrote it.
 
     A no-op — ``([], [])`` — for every non-``task`` kind, so no other kind is
     touched by any of these guards.
@@ -207,7 +224,17 @@ def evaluate_task_guards(
     # an edge the operator believes exists and that nothing ever traverses. It is
     # rejected here, after confinement, so a traversal-shaped value still reports
     # the containment breach it actually is.
-    for dep in deps:
+    #
+    # Scoped to what the write SUPPLIES, not to what the merged record holds: a
+    # record stored before this check existed may carry a prefixed entry, and
+    # judging those would block every later write to it — a plain ``--status``
+    # flip included, stranding the record with no route to repair. Grandfathering
+    # them keeps ``--unset-depends-on`` (the repair) available too, since a
+    # removed entry is not in the merged list at all.
+    form_checked = (
+        deps if supplied_depends_on is None else [d for d in deps if d in supplied_depends_on]
+    )
+    for dep in form_checked:
         if "/" in dep or "@" in dep:
             errors.append(
                 graph_mod.format_guard_message(
@@ -468,6 +495,7 @@ def evaluate_graph_guards(
     vault_root: str,
     status_set: str | None,
     deleting: bool = False,
+    supplied_depends_on: list[str] | None = None,
 ) -> tuple[list[str], list[str]]:
     """Route a create/update/delete to the graph guards for its *kind*.
 
@@ -475,7 +503,12 @@ def evaluate_graph_guards(
     a design kind to :func:`evaluate_design_guards`, and any other kind is the
     same ``([], [])`` no-op both of those return on their own — no kind carries
     two graphs, so exactly one policy ever runs. ``body`` is consumed only by the
-    task policy (the flow-out ritual reminder has no design counterpart).
+    task policy (the flow-out ritual reminder has no design counterpart), and so
+    is *supplied_depends_on*: the task-edge form check is the one guard that
+    grandfathers already-stored entries, because it is the one guard whose rule
+    postdates the data it reads. Every design ``depends-on`` entry on disk was
+    written under the design grammar, so that policy judges the merged record
+    whole.
     """
     if kind == "task":
         return evaluate_task_guards(
@@ -486,6 +519,7 @@ def evaluate_graph_guards(
             vault_root=vault_root,
             status_set=status_set,
             deleting=deleting,
+            supplied_depends_on=supplied_depends_on,
         )
     if kind in graph_mod.DESIGN_KINDS:
         return evaluate_design_guards(

@@ -392,7 +392,7 @@ def test_load_design_sidecars_ignores_task_dir(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def _task_guards(g, tmp_path, sidecar):
+def _task_guards(g, tmp_path, sidecar, **kwargs):
     return g.evaluate_task_guards(
         kind="task",
         name="a",
@@ -400,6 +400,7 @@ def _task_guards(g, tmp_path, sidecar):
         body="",
         vault_root=str(tmp_path),
         status_set="open",
+        **kwargs,
     )
 
 
@@ -440,6 +441,51 @@ def test_task_depends_on_traversal_still_reports_confinement_first(tmp_path):
     errors, notices = _task_guards(g, tmp_path, {"depends-on": ["../evil"]})
     assert any("edge-reference" in e for e in errors)
     assert not any("task-edge-form" in e for e in errors)
+
+
+# ---------------------------------------------------------------------------
+# evaluate_task_guards — the form check only judges what a write supplies
+# ---------------------------------------------------------------------------
+
+
+def test_stored_prefixed_entry_is_grandfathered_when_the_write_supplies_nothing(tmp_path):
+    """A record already holding a prefixed entry stays updatable."""
+    g = _guards()
+    errors, notices = _task_guards(
+        g, tmp_path, {"depends-on": ["task/legacy"]}, supplied_depends_on=[]
+    )
+    assert errors == []
+
+
+def test_a_resupplied_prefixed_entry_is_rejected_and_names_only_itself(tmp_path):
+    """Only the newly supplied entry is judged; the stored one is left alone."""
+    g = _guards()
+    errors, notices = _task_guards(
+        g,
+        tmp_path,
+        {"depends-on": ["task/legacy", "task/fresh"]},
+        supplied_depends_on=["task/fresh"],
+    )
+    assert len(errors) == 1
+    assert "task-edge-form" in errors[0]
+    assert "task/fresh" in errors[0]
+    assert "task/legacy" not in errors[0]
+
+
+def test_omitting_supplied_depends_on_judges_every_entry(tmp_path):
+    """The default is validate-everything — the semantics create depends on."""
+    g = _guards()
+    errors, notices = _task_guards(g, tmp_path, {"depends-on": ["task/legacy"]})
+    assert any("task-edge-form" in e for e in errors)
+
+
+def test_a_stored_traversal_entry_is_confined_even_when_not_resupplied(tmp_path):
+    """Confinement is unchanged by the form check's scoping — it judges every entry."""
+    g = _guards()
+    errors, notices = _task_guards(
+        g, tmp_path, {"depends-on": ["../evil"]}, supplied_depends_on=[]
+    )
+    assert any("edge-reference" in e for e in errors)
 
 
 # ---------------------------------------------------------------------------

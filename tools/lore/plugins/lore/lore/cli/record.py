@@ -1279,6 +1279,12 @@ def _cmd_record_update(args) -> int:
                 # overlaid. Blocking errors → nothing written; notices are held
                 # for the success path. A no-op for every kind that carries
                 # neither graph.
+                #
+                # ``--depends-on`` values are threaded in separately so the
+                # task-edge form check judges only what THIS invocation adds:
+                # an entry stored before that check existed must not block an
+                # unrelated update (a ``--status`` flip) to the record holding
+                # it, nor the ``--unset-depends-on`` that removes it.
                 guard_errors, notices = guards_mod.evaluate_graph_guards(
                     kind=location.kind,
                     name=location.name,
@@ -1286,6 +1292,7 @@ def _cmd_record_update(args) -> int:
                     body=new_body,
                     vault_root=location.vault_root,
                     status_set=getattr(args, "status", None),
+                    supplied_depends_on=list(getattr(args, "depends_on", None) or []),
                 )
                 if guard_errors:
                     raise _UpdateAborted(_fail(guard_errors))
