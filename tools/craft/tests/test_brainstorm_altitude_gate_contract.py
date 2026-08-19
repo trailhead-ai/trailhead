@@ -31,8 +31,8 @@ BRAINSTORM = (
 # recognize as the gate.
 _ALTITUDE_TRIGGER_PHRASE = "one design change, more than one spec of work"
 
-# The seed's related-edge-from-birth rule, pinned verbatim (matches the slice's
-# own Delivers wording so there is exactly one source of truth for the phrase).
+# The seed's related-edge-from-birth rule, pinned verbatim, so the skill prose and
+# this pin share exactly one spelling of the phrase.
 _SEED_EDGE_PHRASE = "related: adr=<the-adr>"
 
 # The rejected-ADR orphan rule, pinned verbatim.
@@ -42,8 +42,35 @@ _ORPHAN_RULE = (
 )
 
 
+# The two exit-gate handoff quotes, each keyed by the heading that introduces it and
+# the heading that ends it. The spec quote is bounded by the adr heading rather than
+# by the shared trailing instruction — bounded on the latter it would swallow the adr
+# quote too, and a pin on "the spec handoff" would be satisfied by the adr one.
+_SPEC_HANDOFF_HEADER = "**Common case (6a):**"
+_ADR_HANDOFF_HEADER = "**Altitude-gate case (6b):**"
+_HANDOFF_STOP = "**Print the handoff command fully formed**"
+
+
 def _text() -> str:
     return BRAINSTORM.read_text(encoding="utf-8")
+
+
+def _handoff_quote(header: str, stop_marker: str) -> str:
+    """One handoff quote, scoped to its own branch.
+
+    Scoped rather than matched file-wide: both branches say similar things, so a
+    file-wide count of a shared phrase is satisfied by either branch saying it
+    twice and pins neither handoff it names.
+    """
+    text = _text()
+    assert header in text, f"brainstorm/SKILL.md must carry a {header!r} handoff quote"
+    start = text.index(header)
+    stop = text.find(stop_marker, start + len(header))
+    assert stop != -1, (
+        f"the {header!r} handoff quote must be followed by {stop_marker!r}, "
+        "the marker that bounds it"
+    )
+    return text[start:stop]
 
 
 def test_brainstorm_skill_ships():
@@ -130,6 +157,27 @@ def test_brainstorm_still_hands_off_to_gauntlet_for_the_spec_branch():
     assert "/craft:gauntlet" in _text()
 
 
+def test_handoff_does_not_cite_the_gauntlet_internal_step_numbering():
+    """The gauntlet's resolution flow forks per mode after its shared steps.
+
+    A spec freezes in the numbered spec tail; an adr freezes in the adr tail, which
+    carries no step number at all. Citing one number for both is wrong for the adr
+    branch, and it re-breaks every time the gauntlet renumbers.
+    """
+    text = " ".join(_text().split())
+    claim = "owns the flip, spec or adr alike"
+    assert claim in text, (
+        "brainstorm/SKILL.md must state that the gauntlet owns the flip for both "
+        "record kinds — that ownership is what makes the review unskippable"
+    )
+    sentence = text[text.index(claim):].split(".")[0]
+    assert "step" not in sentence, (
+        "the flip-ownership claim must not name a step of the gauntlet — the adr "
+        "flip does not live in a numbered step, and a number here pins brainstorm "
+        f"to the gauntlet's headings. Got: {sentence!r}"
+    )
+
+
 def test_brainstorm_never_writes_the_adr_active_flip():
     """Brainstorm creates the draft ADR and hands off — it must never flip statuses
     itself, in either branch. The gauntlet alone owns `draft -> active`
@@ -138,4 +186,54 @@ def test_brainstorm_never_writes_the_adr_active_flip():
     assert "--status active" not in _text(), (
         "brainstorm/SKILL.md must never carry the literal `--status active` write — "
         "the gauntlet alone flips an adr to active, never brainstorm"
+    )
+
+
+def test_spec_handoff_reflects_recommend_then_accept():
+    """The gauntlet gates on one recommendation the user accepts or overrides.
+
+    The spec-branch (6a) handoff quote is what tells the user what to expect next,
+    so it must describe that gate rather than a walk through each finding.
+    """
+    quote = _handoff_quote(_SPEC_HANDOFF_HEADER, _ADR_HANDOFF_HEADER)
+    assert "dispositioned what it finds" not in quote, (
+        "brainstorm/SKILL.md's spec handoff must describe the gauntlet's gate as "
+        "one recommendation the user accepts or overrides, not a finding-by-finding "
+        "disposition walk-through"
+    )
+    assert "accepted its recommendation" in quote, (
+        "brainstorm/SKILL.md's spec handoff must describe flipping to `ready` "
+        "once the user has accepted the gauntlet's recommendation, matching "
+        "gauntlet's recommend-then-accept resolution flow"
+    )
+
+
+def test_adr_handoff_reflects_recommend_then_accept():
+    """Same recommend-then-accept alignment for the altitude-gate (6b) handoff quote."""
+    quote = _handoff_quote(_ADR_HANDOFF_HEADER, _HANDOFF_STOP)
+    assert "dispositioned what it finds" not in quote, (
+        "brainstorm/SKILL.md's adr handoff must describe the gauntlet's gate as "
+        "one recommendation the user accepts or overrides, not a finding-by-finding "
+        "disposition walk-through"
+    )
+    assert "accepted its recommendation" in quote, (
+        "brainstorm/SKILL.md's altitude-gate handoff must describe the flip in "
+        "recommend-then-accept terms — the gauntlet flips a record once its "
+        "recommendation is accepted, not once every finding is individually "
+        "dispositioned"
+    )
+
+
+def test_ready_edge_description_reflects_recommend_then_accept():
+    """The Status Lifecycle section's prose description of the draft -> ready edge
+    must also describe recommend-then-accept, not per-finding disposition."""
+    text = _text()
+    assert "Criticals are dispositioned" not in text, (
+        "brainstorm/SKILL.md must not describe the gauntlet's `draft` -> `ready` "
+        "flip as happening once Criticals 'are dispositioned' — the flip follows "
+        "the operator accepting the gauntlet's recommendation"
+    )
+    assert "operator has accepted" in text or "operator accepts" in text, (
+        "brainstorm/SKILL.md's Status Lifecycle section must describe the "
+        "gauntlet's flip in operator-accepts-the-recommendation terms"
     )
