@@ -12,13 +12,20 @@ camp's own code:
 - a `tmux` stub earlier on PATH that appends the launched session id to that same
   file — so a launch really does become visible to a really-executed enumeration,
   and suppressing the append (CAMP_FAKE_TMUX_NO_REGISTER) reproduces the
-  never-confirms failure without any in-process patching.
+  never-confirms failure without any in-process patching. It also logs every argv
+  it was handed, so a test can read the exact `-s` name and `-c` directory camp
+  asked tmux for.
 
 Test contract:
 - camp launch success: stdout is exactly the session id + newline; stderr carries
   the paste-ready `tmux attach -t <name>` line; --json carries the session id.
 - camp launch refusals (unknown harness, unconfirmed launch): empty stdout, a
   single `camp launch: …` stderr line, non-zero exit.
+- camp launch --dir: rooted at the named directory, named `camp-<basename>-<uuid8>`,
+  spawned with `-c <dir>`; `--json` carries EXACTLY the slug launch's key set.
+  Every refusal — a slug or --resume alongside it, a missing explicit --group, a
+  path that is not an existing directory, an ineligible directory — leaves stdout
+  empty, spawns nothing, and writes nothing under CAMP_STATE_DIR.
 - camp sessions: empty → empty stdout, exit 0; degraded (enumeration error /
   missing enumerate binary / unknown harness) → stderr notice, empty stdout list,
   exit 0; --json carries only normalized SessionRecord fields.
@@ -109,6 +116,10 @@ import os
 import sys
 
 args = sys.argv[1:]
+argv_log = os.environ.get("CAMP_FAKE_TMUX_ARGV_FILE")
+if argv_log:
+    with open(argv_log, "a") as handle:
+        handle.write("\\t".join(args) + "\\n")
 if args and args[0] == "new-session" and not os.environ.get("CAMP_FAKE_TMUX_NO_REGISTER"):
     launch_dir = ""
     for i, arg in enumerate(args):
@@ -180,11 +191,14 @@ def cli_env(tmp_path: Path):
 
     sessions_file = tmp_path / "sessions.tsv"
     sessions_file.write_text("", encoding="utf-8")
+    tmux_argv_file = tmp_path / "tmux-argv.tsv"
+    tmux_argv_file.write_text("", encoding="utf-8")
 
     env = {**os.environ}
     env["CAMP_CONFIG_DIR"] = str(config_dir)
     env["CAMP_STATE_DIR"] = str(state_dir)
     env["CAMP_FAKE_SESSIONS_FILE"] = str(sessions_file)
+    env["CAMP_FAKE_TMUX_ARGV_FILE"] = str(tmux_argv_file)
     env["PATH"] = f"{bin_dir}{os.pathsep}{env.get('PATH', '')}"
     env["PYTHONPATH"] = os.pathsep.join(
         [str(shim_dir), str(_REPO_ROOT), env.get("PYTHONPATH", "")]
@@ -204,10 +218,17 @@ def cli_env(tmp_path: Path):
         assert result.returncode == 0, f"group authoring failed: {result.stderr}"
         _set_harness_binary(config_dir, name, binary)
 
-    return {"env": env, "sessions_file": sessions_file, "state_dir": state_dir}
+    return {
+        "env": env,
+        "config_dir": config_dir,
+        "sessions_file": sessions_file,
+        "state_dir": state_dir,
+        "tmux_argv_file": tmux_argv_file,
+        "tmp_path": tmp_path,
+    }
 
 
-def _camp(cli_env, *args, extra_env=None):
+def _camp(cli_env, *args, extra_env=None, cwd=None):
     env = {**cli_env["env"]}
     if extra_env:
         env.update(extra_env)
@@ -216,6 +237,7 @@ def _camp(cli_env, *args, extra_env=None):
         capture_output=True,
         text=True,
         env=env,
+        cwd=str(cwd) if cwd is not None else None,
     )
 
 
@@ -290,6 +312,293 @@ def test_camp_launch_unconfirmed_session_refuses_with_empty_stdout(cli_env) -> N
     assert result.stdout == ""
     assert "camp launch: launch of session" in result.stderr
     assert "could not be confirmed" in result.stderr
+
+
+# ---------------------------------------------------------------------------
+# camp launch --dir
+# ---------------------------------------------------------------------------
+
+
+def _set_launch_roots(cli_env, *roots, group: str = "mygroup") -> None:
+    """Append a `[launch] roots` allowlist to an authored group config."""
+    path = cli_env["config_dir"] / "groups" / f"{group}.toml"
+    entries = ", ".join(json.dumps(str(root)) for root in roots)
+    path.write_text(
+        path.read_text(encoding="utf-8") + f"\n[launch]\nroots = [{entries}]\n",
+        encoding="utf-8",
+    )
+
+
+def _state_tree(cli_env) -> list[str]:
+    """Every path under CAMP_STATE_DIR, relative and sorted.
+
+    A directory-rooted launch persists nothing, so this is the whole statelessness
+    assertion: the tree before a command and after it must be identical.
+    """
+    root = cli_env["state_dir"]
+    return sorted(str(p.relative_to(root)) for p in root.rglob("*"))
+
+
+def _tmux_new_session_argv(cli_env) -> list[list[str]]:
+    """The argv of every `tmux new-session` camp actually spawned."""
+    lines = cli_env["tmux_argv_file"].read_text(encoding="utf-8").splitlines()
+    return [line.split("\t") for line in lines if line.startswith("new-session\t")]
+
+
+def _flag_value(argv: list[str], flag: str) -> str:
+    return argv[argv.index(flag) + 1]
+
+
+def _assert_clean_refusal(result, *, needle: str) -> None:
+    """One `camp launch: ` stderr line, empty stdout, non-zero exit."""
+    assert result.returncode != 0, result.stdout
+    assert result.stdout == ""
+    lines = [line for line in result.stderr.strip().splitlines() if line.strip()]
+    assert len(lines) == 1, result.stderr
+    assert lines[0].startswith("camp launch: "), lines[0]
+    assert needle in lines[0], lines[0]
+
+
+def test_camp_launch_dir_reports_the_session_like_a_slug_launch(cli_env) -> None:
+    target = cli_env["tmp_path"] / "roots" / "myproject"
+    target.mkdir(parents=True)
+    _set_launch_roots(cli_env, cli_env["tmp_path"] / "roots")
+    before = _state_tree(cli_env)
+
+    result = _camp(cli_env, "launch", "--dir", str(target), "--group", "mygroup")
+
+    assert result.returncode == 0, result.stderr
+    session_id = result.stdout.rstrip("\n")
+    assert result.stdout == f"{session_id}\n"
+    assert len(session_id) == 36
+    assert str(target.resolve()) in result.stderr
+    assert f"tmux attach -t camp-myproject-{session_id[:8]}" in result.stderr
+    assert f"camp launch: confirmed session {session_id}" in result.stderr
+    assert _state_tree(cli_env) == before
+
+
+def test_camp_launch_dir_spawns_tmux_at_the_directory_under_a_derived_name(cli_env) -> None:
+    target = cli_env["tmp_path"] / "roots" / "myproject"
+    target.mkdir(parents=True)
+    _set_launch_roots(cli_env, cli_env["tmp_path"] / "roots")
+    before = _state_tree(cli_env)
+
+    result = _camp(cli_env, "launch", "--dir", str(target), "--group", "mygroup")
+
+    assert result.returncode == 0, result.stderr
+    assert _state_tree(cli_env) == before
+    session_id = result.stdout.strip()
+    spawned = _tmux_new_session_argv(cli_env)
+    assert len(spawned) == 1
+    assert _flag_value(spawned[0], "-c") == str(target.resolve())
+    assert _flag_value(spawned[0], "-s") == f"camp-myproject-{session_id[:8]}"
+
+
+def test_camp_launch_dir_json_key_set_matches_a_slug_launch_exactly(cli_env) -> None:
+    _new_workspace(cli_env, "feat-dir-json")
+    slug_launch = _camp(cli_env, "launch", "feat-dir-json", "--group", "mygroup", "--json")
+    assert slug_launch.returncode == 0, slug_launch.stderr
+
+    target = cli_env["tmp_path"] / "roots" / "myproject"
+    target.mkdir(parents=True)
+    _set_launch_roots(cli_env, cli_env["tmp_path"] / "roots")
+    before = _state_tree(cli_env)
+
+    result = _camp(
+        cli_env, "launch", "--dir", str(target), "--group", "mygroup", "--json"
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert _state_tree(cli_env) == before
+    payload = json.loads(result.stdout)
+    assert set(payload) == {"workspace", "session_id", "tmux_name"}
+    assert set(payload) == set(json.loads(slug_launch.stdout))
+    assert payload["workspace"] == str(target.resolve())
+    assert payload["tmux_name"] == f"camp-myproject-{payload['session_id'][:8]}"
+
+
+def test_camp_launch_dir_with_a_positional_slug_refuses(cli_env) -> None:
+    target = cli_env["tmp_path"] / "roots" / "myproject"
+    target.mkdir(parents=True)
+    _set_launch_roots(cli_env, cli_env["tmp_path"] / "roots")
+    before = _state_tree(cli_env)
+
+    result = _camp(
+        cli_env, "launch", "feat-a", "--dir", str(target), "--group", "mygroup"
+    )
+
+    _assert_clean_refusal(result, needle="--dir")
+    assert "slug" in result.stderr
+    assert cli_env["sessions_file"].read_text() == ""
+    assert _state_tree(cli_env) == before
+
+
+def test_camp_launch_dir_with_a_name_flagged_slug_refuses(cli_env) -> None:
+    """`--name` is a slug spelling, so it collides with `--dir` like a positional."""
+    target = cli_env["tmp_path"] / "roots" / "myproject"
+    target.mkdir(parents=True)
+    _set_launch_roots(cli_env, cli_env["tmp_path"] / "roots")
+    before = _state_tree(cli_env)
+
+    result = _camp(
+        cli_env, "launch", "--name", "feat-a", "--dir", str(target), "--group", "mygroup"
+    )
+
+    _assert_clean_refusal(result, needle="--dir")
+    assert "slug" in result.stderr
+    assert cli_env["sessions_file"].read_text() == ""
+    assert _state_tree(cli_env) == before
+
+
+def test_camp_launch_dir_with_resume_refuses(cli_env) -> None:
+    target = cli_env["tmp_path"] / "roots" / "myproject"
+    target.mkdir(parents=True)
+    _set_launch_roots(cli_env, cli_env["tmp_path"] / "roots")
+    before = _state_tree(cli_env)
+
+    result = _camp(
+        cli_env,
+        "launch",
+        "--dir",
+        str(target),
+        "--resume",
+        "deadbeef",
+        "--group",
+        "mygroup",
+    )
+
+    _assert_clean_refusal(result, needle="--dir")
+    assert "--resume" in result.stderr
+    assert cli_env["sessions_file"].read_text() == ""
+    assert _state_tree(cli_env) == before
+
+
+def test_camp_launch_dir_inside_a_workspace_still_requires_an_explicit_group(cli_env) -> None:
+    """The allowlist is the containment boundary, so it may never come from cwd.
+
+    Run from INSIDE a workspace, where the group resolves perfectly well from the
+    directory camp was invoked in — and refuse anyway. Resolvability was never the
+    question.
+    """
+    workspace = Path(_new_workspace(cli_env, "feat-inside"))
+    target = cli_env["tmp_path"] / "roots" / "myproject"
+    target.mkdir(parents=True)
+    _set_launch_roots(cli_env, cli_env["tmp_path"] / "roots")
+    before = _state_tree(cli_env)
+
+    result = _camp(cli_env, "launch", "--dir", str(target), cwd=workspace)
+
+    _assert_clean_refusal(result, needle="--group")
+    assert cli_env["sessions_file"].read_text() == ""
+    assert _state_tree(cli_env) == before
+
+
+def test_camp_launch_dir_outside_any_group_refuses_on_the_group(cli_env) -> None:
+    """Outside every group the spine's needs-group fallback answers — pinned here.
+
+    It is already a `camp launch: ` one-liner on stderr with empty stdout, so the
+    refusal shape holds without the group-aware handler ever being reached.
+    """
+    target = cli_env["tmp_path"] / "roots" / "myproject"
+    target.mkdir(parents=True)
+    before = _state_tree(cli_env)
+
+    result = _camp(cli_env, "launch", "--dir", str(target), cwd=cli_env["tmp_path"])
+
+    _assert_clean_refusal(result, needle="--group")
+    assert cli_env["sessions_file"].read_text() == ""
+    assert _state_tree(cli_env) == before
+
+
+def test_camp_launch_dir_with_no_value_refuses(cli_env) -> None:
+    _set_launch_roots(cli_env, cli_env["tmp_path"])
+
+    result = _camp(cli_env, "launch", "--dir=", "--group", "mygroup")
+
+    _assert_clean_refusal(result, needle="--dir")
+    assert cli_env["sessions_file"].read_text() == ""
+
+
+def test_camp_launch_dir_that_does_not_exist_refuses_naming_the_path(cli_env) -> None:
+    target = cli_env["tmp_path"] / "roots" / "gone"
+    (cli_env["tmp_path"] / "roots").mkdir()
+    _set_launch_roots(cli_env, cli_env["tmp_path"] / "roots")
+    before = _state_tree(cli_env)
+
+    result = _camp(cli_env, "launch", "--dir", str(target), "--group", "mygroup")
+
+    _assert_clean_refusal(result, needle=str(target.resolve()))
+    assert cli_env["sessions_file"].read_text() == ""
+    assert _state_tree(cli_env) == before
+
+
+def test_camp_launch_dir_naming_a_regular_file_refuses_naming_the_path(cli_env) -> None:
+    roots = cli_env["tmp_path"] / "roots"
+    roots.mkdir()
+    target = roots / "notes.txt"
+    target.write_text("not a directory\n", encoding="utf-8")
+    _set_launch_roots(cli_env, roots)
+    before = _state_tree(cli_env)
+
+    result = _camp(cli_env, "launch", "--dir", str(target), "--group", "mygroup")
+
+    _assert_clean_refusal(result, needle=str(target.resolve()))
+    assert cli_env["sessions_file"].read_text() == ""
+    assert _state_tree(cli_env) == before
+
+
+def test_camp_launch_dir_outside_the_allowlist_refuses_naming_it(cli_env) -> None:
+    allowed = cli_env["tmp_path"] / "roots"
+    allowed.mkdir()
+    target = cli_env["tmp_path"] / "elsewhere"
+    target.mkdir()
+    _set_launch_roots(cli_env, allowed)
+    before = _state_tree(cli_env)
+
+    result = _camp(cli_env, "launch", "--dir", str(target), "--group", "mygroup")
+
+    _assert_clean_refusal(result, needle="[launch] roots")
+    assert str(target.resolve()) in result.stderr
+    assert cli_env["sessions_file"].read_text() == ""
+    assert _tmux_new_session_argv(cli_env) == []
+    assert _state_tree(cli_env) == before
+
+
+def test_camp_launch_dir_with_no_allowlist_configured_refuses(cli_env) -> None:
+    target = cli_env["tmp_path"] / "roots" / "myproject"
+    target.mkdir(parents=True)
+    before = _state_tree(cli_env)
+
+    result = _camp(cli_env, "launch", "--dir", str(target), "--group", "mygroup")
+
+    _assert_clean_refusal(result, needle="[launch] roots")
+    assert cli_env["sessions_file"].read_text() == ""
+    assert _tmux_new_session_argv(cli_env) == []
+    assert _state_tree(cli_env) == before
+
+
+def test_camp_launch_dir_at_a_credential_store_refuses_on_the_credential_rule(cli_env) -> None:
+    """`roots = ["~"]` cannot launder a credential directory past the gate."""
+    home = cli_env["tmp_path"] / "fakehome"
+    (home / ".ssh").mkdir(parents=True)
+    _set_launch_roots(cli_env, "~")
+    before = _state_tree(cli_env)
+
+    result = _camp(
+        cli_env,
+        "launch",
+        "--dir",
+        str(home / ".ssh"),
+        "--group",
+        "mygroup",
+        extra_env={"HOME": str(home)},
+    )
+
+    _assert_clean_refusal(result, needle="credential store")
+    assert "[launch] roots" not in result.stderr
+    assert cli_env["sessions_file"].read_text() == ""
+    assert _tmux_new_session_argv(cli_env) == []
+    assert _state_tree(cli_env) == before
 
 
 # ---------------------------------------------------------------------------

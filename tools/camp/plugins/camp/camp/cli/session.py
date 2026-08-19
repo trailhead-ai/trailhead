@@ -65,16 +65,37 @@ def _consume_json_flag(args: list[str]) -> bool:
     return present
 
 
-def launch_and_confirm(group: dict, slug: str, *, env: dict[str, str] | None = None):
-    """Spawn a session for (*group*, *slug*) and confirm it registered.
+def launch_and_confirm(
+    group: dict,
+    slug: str | None = None,
+    *,
+    env: dict[str, str] | None = None,
+    root: Path | None = None,
+    name_component: str | None = None,
+    trust_scope: Path | None = None,
+):
+    """Spawn a session — by workspace *slug* or at a named *root* — and confirm it.
 
-    Returns the :class:`LaunchedSession`. Raises :class:`LaunchError` on refusal —
-    including a spawn that never confirmed, which the engine has already killed.
+    The addressing arguments are the engine's own, forwarded whole: exactly one of
+    *slug* or the (*root*, *name_component*, *trust_scope*) triple, which the
+    engine enforces. Everything after the spawn is identical for both flavors, so
+    both report the same three stderr lines and return the same
+    :class:`LaunchedSession`.
+
+    Raises :class:`LaunchError` on refusal — including a spawn that never
+    confirmed, which the engine has already killed.
     """
     from ..bookmark import harness_for
     from ..launch.session import confirm_session, launch_session
 
-    launched = launch_session(group, slug, env=env)
+    launched = launch_session(
+        group,
+        slug,
+        env=env,
+        root=root,
+        name_component=name_component,
+        trust_scope=trust_scope,
+    )
     print(
         f"camp launch: launched session {launched.session_id} in {launched.launch_dir}\n"
         f"  attach: tmux attach -t {launched.tmux_name}",
@@ -149,7 +170,24 @@ def _cmd_launch_group_cli(
     group: dict,
     env: dict[str, str] | None,
 ) -> None:
-    """camp launch <slug> [--json] — start a detached harness session.
+    """camp launch <slug> [--json] | camp launch --dir <path> --group <name> [--json].
+
+    Two addressing forms, one engine. A slug launches into the workspace camp
+    provisioned for it; `--dir` launches at a directory the operator names, fenced
+    by the group's `[launch] roots` allowlist. They are mutually exclusive, and so
+    is `--dir` with `--resume` — a launch is rooted at a directory, at a workspace,
+    or re-enters an existing session, never two of the three.
+
+    `--dir` REQUIRES an explicit `--group`. The allowlist is the containment
+    boundary for a directory-rooted launch, so which group supplies it must never
+    depend on the directory camp happened to be invoked from — a boundary that
+    moves with the caller is not a boundary. This is why `--group` is read for its
+    value here rather than merely dropped: the value IS the signal that the
+    operator named the group.
+
+    Both flags are consumed BEFORE slug resolution. An unconsumed `--dir` would be
+    forwarded as a positional and die as a flag-shaped slug, which reports the
+    wrong problem.
 
     Output contract, mirroring `camp pwd`: stdout carries ONLY the session id —
     exactly one line — so a caller can capture it with `$(camp launch …)`. The
@@ -161,15 +199,64 @@ def _cmd_launch_group_cli(
     from .dispatch import _slug_from_args_or_cwd
 
     rest = list(args)
-    _consume_flag_value(rest, "--group")  # already resolved upstream; drop it
+    explicit_group = _consume_flag_value(rest, "--group")
+    directory = _consume_flag_value(rest, "--dir")
     as_json = _consume_json_flag(rest)
 
-    slug = _slug_from_args_or_cwd(
-        rest, group, verb="launch", consume_positional=True, env=env
-    )
+    slug: str | None = None
+    root: Path | None = None
+    name_component: str | None = None
+    trust_scope: Path | None = None
+
+    if directory is None and "--dir" in rest:
+        # `--dir` with nothing after it: consumed by neither branch above.
+        _die("camp launch: --dir requires a directory path")
+    if directory is not None:
+        # Peeked, not consumed: `--resume` belongs to the resume flavor, and
+        # swallowing it here would silently turn a bare `camp launch --resume <ref>`
+        # into a cwd-addressed slug launch.
+        if any(arg == "--resume" or arg.startswith("--resume=") for arg in rest):
+            _die(
+                "camp launch: --dir and --resume are mutually exclusive — a launch "
+                "is rooted at a named directory or re-enters an existing session, "
+                "never both"
+            )
+        if rest:
+            _die(
+                "camp launch: --dir and a workspace slug are mutually exclusive — a "
+                "launch is rooted at a named directory or at a workspace, never both"
+            )
+        if not directory.strip():
+            _die("camp launch: --dir requires a directory path")
+        if explicit_group is None:
+            _die(
+                "camp launch: --dir requires an explicit --group <name> — the "
+                "group's [launch] roots allowlist is what fences a directory-rooted "
+                "launch, so it must never depend on the directory camp was invoked "
+                "from"
+            )
+        root = Path(directory)
+        # The name component comes from the RESOLVED path so that `--dir .` and a
+        # trailing slash name the directory the session actually runs in. The trust
+        # scope is that same directory: a named root is its own confinement, which
+        # is exactly why the eligibility gate — not the trust pre-seed — is the
+        # boundary here.
+        name_component = root.resolve().name
+        trust_scope = root
+    else:
+        slug = _slug_from_args_or_cwd(
+            rest, group, verb="launch", consume_positional=True, env=env
+        )
 
     try:
-        launched = launch_and_confirm(group, slug, env=env)
+        launched = launch_and_confirm(
+            group,
+            slug,
+            env=env,
+            root=root,
+            name_component=name_component,
+            trust_scope=trust_scope,
+        )
     except LaunchError as exc:
         _die(_refusal(exc))
         return
