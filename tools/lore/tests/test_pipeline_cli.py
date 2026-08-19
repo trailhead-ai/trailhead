@@ -694,7 +694,7 @@ class TestFencingIsStructural:
                 render._vault_line,
                 render.VAULT_FREE_TEXT_FIELDS,
                 render.project_vault(
-                    walk.VaultWalk("v", "/p", False, None, {}, ())
+                    walk.VaultWalk("v", False, None, {}, ())
                 ),
             ),
         )

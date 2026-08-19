@@ -31,7 +31,7 @@ DERIVE_MODULE = (
 
 def _walk(name: str, records: dict, *, shared: bool = False) -> VaultWalk:
     """A walked vault carrying *records*, with no read failures."""
-    return VaultWalk(name, f"/vaults/{name}", shared, None, records, ())
+    return VaultWalk(name, shared, None, records, ())
 
 
 def _adr(status: str = "active", **extra) -> dict:

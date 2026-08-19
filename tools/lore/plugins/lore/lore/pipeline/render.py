@@ -315,15 +315,14 @@ def project_board(walks: Sequence[VaultWalk]) -> dict:
     read. A record that belongs to no tier belongs nowhere in the envelope, so
     there is no fifth key holding the walk's raw yield.
     """
-    warnings = []
-    for walk in walks:
-        for warning in walk.warnings:
-            warnings.append(
-                project_warning(
-                    warning.file, warning.message,
-                    vault=walk.name, shared=walk.shared,
-                )
-            )
+    warnings = [
+        project_warning(
+            warning.file, warning.message,
+            vault=walk.name, shared=walk.shared,
+        )
+        for walk in walks
+        for warning in walk.warnings
+    ]
     derivation = derive_mod.derive_board(walks)
     warnings.extend(
         project_warning(

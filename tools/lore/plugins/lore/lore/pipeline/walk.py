@@ -65,7 +65,6 @@ class VaultWalk(NamedTuple):
     """
 
     name: str
-    path: str
     shared: bool
     error: str | None
     records: dict[str, dict]
@@ -80,21 +79,20 @@ def walk_vault(name: str, path: str, *, shared: bool) -> VaultWalk:
     distinction the per-kind reads below cannot make on their own, since an
     absent kind directory is a normal, unremarkable state.
     """
-    root = Path(path)
     try:
-        with os.scandir(root):
+        with os.scandir(path):
             pass
     except OSError as exc:
-        return VaultWalk(name, str(path), shared, f"cannot read vault directory: {exc}", {}, ())
+        return VaultWalk(name, shared, f"cannot read vault directory: {exc}", {}, ())
 
     records: dict[str, dict] = {}
     warnings: list[SidecarWarning] = []
     for kind in PIPELINE_KINDS:
-        sidecars, kind_warnings = guards_mod.load_kind_sidecars_with_warnings(str(root), kind)
+        sidecars, kind_warnings = guards_mod.load_kind_sidecars_with_warnings(path, kind)
         for stem, sidecar in sidecars.items():
             records[f"{kind}/{stem}"] = sidecar
         warnings.extend(SidecarWarning(file, message) for file, message in kind_warnings)
-    return VaultWalk(name, str(path), shared, None, records, tuple(warnings))
+    return VaultWalk(name, shared, None, records, tuple(warnings))
 
 
 def walk_vaults(
