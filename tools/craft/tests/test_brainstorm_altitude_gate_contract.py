@@ -31,8 +31,8 @@ BRAINSTORM = (
 # recognize as the gate.
 _ALTITUDE_TRIGGER_PHRASE = "one design change, more than one spec of work"
 
-# The seed's related-edge-from-birth rule, pinned verbatim (matches the slice's
-# own Delivers wording so there is exactly one source of truth for the phrase).
+# The seed's related-edge-from-birth rule, pinned verbatim, so the skill prose and
+# this pin share exactly one spelling of the phrase.
 _SEED_EDGE_PHRASE = "related: adr=<the-adr>"
 
 # The rejected-ADR orphan rule, pinned verbatim.
@@ -130,6 +130,27 @@ def test_brainstorm_still_hands_off_to_gauntlet_for_the_spec_branch():
     assert "/craft:gauntlet" in _text()
 
 
+def test_handoff_does_not_cite_the_gauntlet_internal_step_numbering():
+    """The gauntlet's resolution flow forks per mode after its shared steps.
+
+    A spec freezes in the numbered spec tail; an adr freezes in the adr tail, which
+    carries no step number at all. Citing one number for both is wrong for the adr
+    branch, and it re-breaks every time the gauntlet renumbers.
+    """
+    text = " ".join(_text().split())
+    claim = "owns the flip, spec or adr alike"
+    assert claim in text, (
+        "brainstorm/SKILL.md must state that the gauntlet owns the flip for both "
+        "record kinds — that ownership is what makes the review unskippable"
+    )
+    sentence = text[text.index(claim):].split(".")[0]
+    assert "step" not in sentence, (
+        "the flip-ownership claim must not name a step of the gauntlet — the adr "
+        "flip does not live in a numbered step, and a number here pins brainstorm "
+        f"to the gauntlet's headings. Got: {sentence!r}"
+    )
+
+
 def test_brainstorm_never_writes_the_adr_active_flip():
     """Brainstorm creates the draft ADR and hands off — it must never flip statuses
     itself, in either branch. The gauntlet alone owns `draft -> active`
@@ -142,14 +163,16 @@ def test_brainstorm_never_writes_the_adr_active_flip():
 
 
 def test_spec_handoff_reflects_recommend_then_accept():
-    """The gauntlet no longer walks the user through a per-finding disposition
-    interrogation — it presents one recommendation the user accepts or overrides.
-    Regression guard for the spec-branch (6a) handoff quote."""
+    """The gauntlet gates on one recommendation the user accepts or overrides.
+
+    The spec-branch (6a) handoff quote is what tells the user what to expect next,
+    so it must describe that gate rather than a walk through each finding.
+    """
     text = _text()
     assert "dispositioned what it finds" not in text, (
-        "brainstorm/SKILL.md's spec handoff must not describe the retired "
-        "per-finding disposition interrogation — the gauntlet now presents a "
-        "recommendation the user accepts or overrides"
+        "brainstorm/SKILL.md's spec handoff must describe the gauntlet's gate as "
+        "one recommendation the user accepts or overrides, not a finding-by-finding "
+        "disposition walk-through"
     )
     assert "accepted its recommendation" in text, (
         "brainstorm/SKILL.md's spec handoff must describe flipping to `ready` "

@@ -275,7 +275,8 @@ so the user can paste it into a fresh session as-is.
 
 **Do not flip the spec to `ready` yourself** — and the same discipline holds for the ADR branch:
 brainstorm writes the spec at `draft`, or the ADR at its default `draft`, and stops there in both
-cases; the `gauntlet` skill owns the flip (its step 6), spec or adr alike. That split is deliberate
+cases; the `gauntlet` skill owns the flip, spec or adr alike — it runs in the accepted tail,
+once the operator has accepted the gauntlet's recommendation. That split is deliberate
 — it makes the review structurally unskippable rather than a checklist item to honor, because
 nothing else in the pipeline freezes either kind of record.
 

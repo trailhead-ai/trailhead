@@ -616,6 +616,40 @@ def test_deliverable_is_compact_and_leads_with_a_capped_synthesis():
     )
 
 
+def test_deliverable_pins_the_route_line_and_the_per_critical_table():
+    """The synthesis is one of four parts, and the other three carry the decision.
+
+    The route is what the operator accepts; the table is what they override
+    against. Left unpinned, either can drift into prose the operator has to parse.
+    """
+    step = _resolution_step(GAUNTLET.read_text())
+    flat = _flat(step)
+    assert "The deliverable is exactly four parts, in this order" in flat, (
+        "the resolution step must fix the deliverable's parts and their order — a "
+        "deliverable assembled differently each run cannot be scanned"
+    )
+    assert "**The recommended route**, on its own line, by name" in flat, (
+        "the route must be its own line, named — a route inferred from prose is a "
+        "route the operator accepts without reading"
+    )
+    assert "| id | finding | proposed disposition | proposed edit |" in step, (
+        "the per-Critical table must pin its columns — id, finding, proposed "
+        "disposition, proposed edit — since those four are what acceptance covers"
+    )
+    assert "**Important and Minor, compressed**" in flat, (
+        "the deliverable's fourth part is the compressed Important/Minor summary"
+    )
+    assert (
+        flat.index("**Synthesis — at most five sentences.**")
+        < flat.index("**The recommended route**")
+        < flat.index("**The per-Critical table**")
+        < flat.index("**Important and Minor, compressed**")
+    ), (
+        "the four parts must appear in the order the step declares — prose order is "
+        "the only thing carrying it"
+    )
+
+
 def test_criticals_carry_stable_presentation_ordered_ids():
     """Ids are the operator's handle for an override and the audit trail's label.
 
@@ -683,6 +717,52 @@ def test_both_route_names_are_pinned():
         )
 
 
+# The route table's rows: each route's spec target, adr target, and handoff
+# direction. The route names alone are vocabulary; this mapping is the mechanical
+# rule the whole flow turns on, and it lives in exactly one table.
+_ROUTE_TABLE_HEADER = "| Route | Spec target | Adr target | Handoff |"
+_ROUTE_TARGETS: dict[str, tuple[str, str, str]] = {
+    "freeze route": ("ready", "active", "forward"),
+    "reframe route": ("superseded", "dropped", "back to brainstorming"),
+}
+
+
+def _route_table_row(step: str, route: str) -> list[str]:
+    prefix = f"| **{route}** |"
+    for line in step.splitlines():
+        if line.strip().startswith(prefix):
+            return [cell.strip() for cell in line.strip().strip("|").split("|")]
+    raise AssertionError(
+        f"the resolution step's route table must carry a row for the {route!r}"
+    )
+
+
+def test_route_table_binds_each_route_to_its_per_mode_targets():
+    """Route names without their target statuses are half a rule.
+
+    An agent reading "reframe route" still has to know it takes a spec to
+    `superseded` and an adr to `dropped`; unpinned, the two rows can swap targets
+    and every other pin in this file still passes.
+    """
+    step = _resolution_step(GAUNTLET.read_text())
+    assert _ROUTE_TABLE_HEADER in step, (
+        "the resolution step's route table must carry the "
+        f"{_ROUTE_TABLE_HEADER!r} header — the column order is what gives each "
+        "cell below it its meaning"
+    )
+    for route, (spec_target, adr_target, handoff) in _ROUTE_TARGETS.items():
+        cells = _route_table_row(step, route)
+        assert cells[1] == f"`{spec_target}`", (
+            f"the {route}'s spec target must be `{spec_target}`; row reads {cells!r}"
+        )
+        assert cells[2] == f"`{adr_target}`", (
+            f"the {route}'s adr target must be `{adr_target}`; row reads {cells!r}"
+        )
+        assert handoff in cells[3], (
+            f"the {route}'s handoff must point {handoff!r}; row reads {cells!r}"
+        )
+
+
 def test_route_rule_is_total_over_the_disposition_vocabulary():
     """Every combination of dispositions must land on exactly one route.
 
@@ -695,12 +775,21 @@ def test_route_rule_is_total_over_the_disposition_vocabulary():
         "the route rule must be stated as total — an incomplete rule is an "
         "invitation to invent an outcome for the uncovered case"
     )
-    assert "**Any Critical dispositioned `reframed`**" in step, (
-        "the reframe arm must fire on any `reframed` Critical, proposed or overridden"
+    assert (
+        "**Any Critical dispositioned `reframed`**, whether you proposed it or the "
+        "operator overrode into it → the **reframe route**"
+    ) in step, (
+        "the reframe arm must fire on any `reframed` Critical, proposed or "
+        "overridden, and must land on the reframe route by name — an arm stated "
+        "without its route reads the same inverted"
     )
-    assert "**Every other combination**" in step, (
-        "the freeze arm must be stated as the complement, covering every remaining "
-        "combination of `resolved` / `accepted-as-risk` / `disputed`"
+    assert (
+        "**Every other combination** of `resolved` / `accepted-as-risk` / "
+        "`disputed`, including a run with no Criticals at all → the **freeze route**"
+    ) in step, (
+        "the freeze arm must be stated as the complement — every remaining "
+        "combination of `resolved` / `accepted-as-risk` / `disputed`, plus the "
+        "no-Criticals run — and must land on the freeze route by name"
     )
 
 
@@ -797,6 +886,14 @@ def test_zero_critical_runs_still_gate_on_acceptance():
         "a run with no Criticals must still present the deliverable and wait — a "
         "gauntlet never freezes a record on its own reading of a clean sweep"
     )
+    assert "the compressed Important and Minor summary" in step, (
+        "a clean-Critical run must still present the compressed Important and Minor "
+        "summary — dropping it presents a run with real findings as one with none"
+    )
+    assert "no per-Critical table" in step, (
+        "what a zero-Critical run omits is the per-Critical table specifically, "
+        "since there are no rows for it to hold"
+    )
 
 
 def test_overrides_apply_in_one_round_trip():
@@ -844,6 +941,29 @@ def test_override_with_an_unknown_id_is_rejected_not_guessed():
     )
 
 
+def test_override_without_a_reason_is_asked_back_never_drafted():
+    """`accepted-as-risk` and `disputed` are the one path by which agent-authored
+    text could enter the permanent audit trail as the operator's judgment.
+
+    The vocabulary requires a reason and the agent may not write one, so an
+    override naming either disposition without one has exactly one safe outcome:
+    ask, and record nothing until it is answered.
+    """
+    step = _flat(_resolution_step(GAUNTLET.read_text()))
+    assert "**An override with no reason is incomplete.**" in step, (
+        "the resolution step must cover an override naming `accepted-as-risk` or "
+        "`disputed` without supplying a reason"
+    )
+    assert "ask for the reason and record nothing until they give it" in step, (
+        "the reasonless override must be asked back before anything is recorded — a "
+        "disposition written now is a disposition written without its reason"
+    )
+    assert "never with the reason slot empty" in step, (
+        "neither a drafted reason nor an empty one may be recorded; both put words "
+        "in the operator's mouth in a permanent trail"
+    )
+
+
 def test_route_changing_override_re_presents_before_any_write():
     """The route is the one thing an override can change that the operator did not
     directly name — so it goes back for acceptance before anything is written.
@@ -855,6 +975,11 @@ def test_route_changing_override_re_presents_before_any_write():
     assert "**before anything is written**" in step, (
         "the re-present must precede every write — a route change discovered after "
         "the tail has started is a record already flipped the wrong way"
+    )
+    assert "**The cap is one re-present per route change, not one per run.**" in step, (
+        "the step must say what happens when the reply to a re-present changes the "
+        "route again — read as a per-run cap, the second change would be written on "
+        "a route the operator never accepted"
     )
 
 
@@ -920,6 +1045,12 @@ _ATOMIC_WRITE = "a single `lore record update --diff` write"
 _ADR_LESSON_CREATE = "lore record create --kind lesson"
 _ADR_LESSON_EDGE = "--related adr=<adr-id>"
 _ADR_COUNTS_ANNOTATION = "--annotation gauntlet="
+
+# The adr's half of the shared atomic write: the `--diff` body write carrying the
+# accepted `resolved` edits. `--diff` and `--annotation` apply inside one
+# read-modify-write, so both ride one invocation and a rejected hunk leaves body
+# and annotation alike unwritten.
+_ADR_EDITS_WRITE = "lore record update <adr-id> --diff"
 
 
 def _accepted_tail(text: str) -> str:
@@ -1127,7 +1258,30 @@ def test_adr_full_detail_goes_to_a_linked_lesson_record():
     )
 
 
-def test_adr_tail_writes_the_lesson_first_then_annotates_then_flips():
+def test_adr_tail_applies_the_accepted_edits_in_the_same_atomic_write():
+    """The adr flip is into an immutable state, so the accepted edits precede it.
+
+    What the exhaustive body contract keeps out of an adr is the *provenance and
+    detail*, never the accepted content edits — those are edits to the record's own
+    four sections, and a sequence that skips them flips a decision to `active` with
+    every approved edit dropped.
+    """
+    tail = _adr_tail(GAUNTLET.read_text())
+    edits_lines = [line for line in tail.splitlines() if _ADR_EDITS_WRITE in line]
+    assert edits_lines, (
+        "the adr tail must carry the shared tail's atomic edits write "
+        f"({_ADR_EDITS_WRITE}) — without it the accepted `resolved` edits never "
+        "reach the record the operator approved them for"
+    )
+    for line in edits_lines:
+        assert _ADR_COUNTS_ANNOTATION in line, (
+            "the edits and the counts annotation must ride ONE invocation — split "
+            "across two writes, a rejected hunk leaves an annotation claiming a "
+            f"review the body never received. Got: {line!r}"
+        )
+
+
+def test_adr_tail_writes_the_lesson_first_then_the_atomic_write_then_flips():
     """Order is the whole contract here, and it is chosen for its failure states.
 
     Lesson-first leaves, at worst, a `draft` adr with an extra record pointing at
@@ -1136,21 +1290,34 @@ def test_adr_tail_writes_the_lesson_first_then_annotates_then_flips():
     """
     tail = _adr_tail(GAUNTLET.read_text())
     lesson_idx = tail.index(_ADR_LESSON_CREATE)
+    edits_idx = tail.index(_ADR_EDITS_WRITE)
     annotation_idx = tail.index(_ADR_COUNTS_ANNOTATION)
     flip_match = _ADR_ADVANCE_RE.search(tail)
     assert flip_match, (
         "the adr tail must show the `--status active` flip as the last write in the "
         "sequence, or the order it pins is incomplete"
     )
-    assert lesson_idx < annotation_idx < flip_match.start(), (
+    assert lesson_idx < edits_idx < flip_match.start(), (
         "the adr tail's sequence must be: create the `lesson` record, then the "
-        "adr's atomic annotation write, then the status flip"
+        "adr's one atomic write, then the status flip"
     )
-    flat = _flat(tail)
-    assert "<n>-resolved,<n>-accepted-as-risk,<n>-disputed" in flat, (
-        "the counts annotation must survive — the lesson record carries the detail "
-        "alongside it, it does not replace it"
+    assert edits_idx < annotation_idx < flip_match.start(), (
+        "the counts annotation belongs to that same atomic write, ahead of the flip"
     )
+
+
+def test_adr_counts_annotation_covers_the_whole_disposition_vocabulary():
+    """A missing slot reads as a zero, and `reframed` is the disposition that drove
+    the reframe route — so a `dropped` adr whose annotation has no `reframed` slot
+    is annotated as a clean run.
+    """
+    flat = _flat(_adr_tail(GAUNTLET.read_text()))
+    for name in _DISPOSITION_NAMES:
+        assert f"<n>-{name}" in flat, (
+            f"the counts annotation must carry a `{name}` slot — the annotation is "
+            "where an auditor reads the run's disposition counts, and an absent "
+            "slot is indistinguishable from a count of zero"
+        )
 
 
 def test_adr_tail_is_fail_closed_and_reports_an_orphaned_lesson():
@@ -1169,6 +1336,29 @@ def test_adr_tail_is_fail_closed_and_reports_an_orphaned_lesson():
     assert "report the orphaned `lesson` record to the operator" in flat, (
         "the report must name the orphan explicitly — the operator decides whether "
         "to re-run or delete it"
+    )
+
+
+def test_adr_tail_states_the_post_flip_supersession_failure_branch():
+    """"The record stays `draft`" cannot describe a write that runs after the flip.
+
+    The predecessor's `superseded` back-edge is the one write ordered after the
+    status flip, so its failure leaves an `active` successor next to an `active`
+    predecessor — the state the supersession section says nothing will heal.
+    """
+    flat = _flat(_adr_tail(GAUNTLET.read_text()))
+    assert "**A failure after the flip reports differently.**" in flat, (
+        "the adr tail must give the post-flip write its own failure branch — the "
+        "fail-closed rule's `draft` promise is already false once the flip landed"
+    )
+    assert "the predecessor is still `active` and unlinked" in flat, (
+        "the report must state the state the operator is actually left in, since "
+        "nothing on any resume path heals an `active` predecessor beside its "
+        "`active` successor"
+    )
+    assert _FORWARD_SUPERSESSION_BACK_EDGE in flat, (
+        "the post-flip failure report must hand back the single write that closes "
+        "the gap, not merely describe it"
     )
 
 
@@ -1216,4 +1406,13 @@ def test_orphaned_lesson_report_names_the_recovery_query():
     assert "kind:lesson related-adr:<adr-name>" in flat, (
         "the orphan report must name the query that finds the lesson record again, "
         "not merely assert the edge makes it discoverable"
+    )
+    assert "reverse edges reflect the last reindex" in flat, (
+        "the lookup's caveat must travel with it — a just-created lesson record can "
+        "return zero results until the index catches up, and a zero-result run "
+        "reads as 'no orphan' to the operator the report exists to warn"
+    )
+    assert "report the record name alongside the query" in flat, (
+        "the orphan report must name the record itself, so it survives a lookup "
+        "that has not been reindexed yet"
     )

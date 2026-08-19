@@ -251,8 +251,11 @@ record left in a state the lifecycle vocabulary has no name for.
 
 #### Zero Criticals is still a decision
 
-A run that produced no Criticals presents the deliverable anyway — synthesis and route, labeled as
-a clean run, with no table — and **still gates on operator acceptance**. A gauntlet never freezes a
+A run that produced no Criticals presents the deliverable anyway — synthesis, route, and the
+compressed Important and Minor summary, labeled as a clean run, with no per-Critical table, since
+there are no rows for it to hold — and **still gates on operator acceptance**. Clean of Criticals is
+not clean of findings: the Important and Minor themes are part of what the operator accepts here,
+and a run that presents none of them reads as a sweep that found nothing. A gauntlet never freezes a
 record on its own reading of a clean sweep; the clean sweep is the finding, and the operator is the
 one who accepts it.
 
@@ -269,9 +272,19 @@ together, and do not walk back through the table finding by finding.
 - **An override naming an id outside the presented range is rejected.** "dispute C7" against a
   five-row table is an error, not a puzzle: say which ids exist and ask again. **Never map an
   unknown id onto the id you think was meant.**
+- **An override with no reason is incomplete.** `accepted-as-risk` and `disputed` carry the
+  operator's reason text, and you may not write it for them — so "dispute C3", with nothing said
+  about why, is not yet a disposition: ask for the reason and record nothing until they give it.
+  **Never record either disposition with a reason you drafted, and never with the reason slot
+  empty.** This is the one path by which text you wrote could enter the permanent trail wearing the
+  operator's signature.
 - **A route-changing override re-presents once.** If applying the overrides changes the route — an
   override that removes the last `reframed`, or one that introduces one — present the revised
-  recommendation once more and take acceptance again **before anything is written**.
+  recommendation once more and take acceptance again **before anything is written**. If that reply
+  changes the route again, it is a further override round-trip and it re-presents again.
+  **The cap is one re-present per route change, not one per run.** What the cap forbids is
+  re-presenting a recommendation nothing changed; what it never licenses is writing a route the
+  operator has not seen and accepted.
 
 #### Escalation points
 
@@ -445,7 +458,7 @@ write ahead of them, and the order of all three is fixed:
 
 ```
 printf '%s' "$DETAIL" | lore record create --kind lesson --title "Gauntlet detail — <adr title>" --related adr=<adr-id>
-lore record update <adr-id> --annotation gauntlet=<date>:7-passes:<n>-resolved,<n>-accepted-as-risk,<n>-disputed:<n>-from-proposal,<n>-operator-override
+printf '%s' "$EDITS" | lore record update <adr-id> --diff --annotation gauntlet=<date>:7-passes:<n>-resolved,<n>-reframed,<n>-accepted-as-risk,<n>-disputed:<n>-from-proposal,<n>-operator-override
 lore record update <adr-id> --status active
 ```
 
@@ -454,9 +467,16 @@ lore record update <adr-id> --status active
    that a failure between the two never writes. It also carries the per-Critical `C1`…`Cn`
    dispositions the shared stamp quotes: an annotation is a key/value, so the ids need a record with
    a body, and this is it.
-2. **Then the adr's atomic annotation write** — the disposition counts alongside the
-   accepted-from-proposal / operator-override split. Those two together are how the provenance stamp
-   renders for an adr.
+2. **Then the shared tail's one atomic write** — `$EDITS` is the unified diff of every `resolved`
+   edit, and the counts annotation rides the same invocation. `--diff` and `--annotation` apply
+   inside a single read-modify-write, so a rejected hunk leaves the body *and* the annotation
+   untouched, and the all-or-nothing property the shared tail depends on holds here unchanged. What
+   the exhaustive body keeps out is the provenance and the finding detail — never the accepted
+   edits, which are edits to Context, Decision, Consequences, and Alternatives rejected and must
+   land before anything freezes. An adr flipped `active` without them is an immutable decision no
+   acceptance ever reached. The counts alongside the accepted-from-proposal / operator-override
+   split are how the provenance stamp renders for an adr, and `<n>-reframed` is what tells an
+   auditor of a `dropped` adr which disposition sent it there.
 3. **Then the status flip** — `--status active` on the freeze route, and, when the successor's edge
    names an `active` predecessor, the two-write supersession above in its pinned order.
 
@@ -473,11 +493,27 @@ Lesson-first is chosen for the state a crash leaves behind. Its worst surviving 
 `draft` adr with an extra record pointing at it, which is harmless and re-runnable; the reverse
 order's is an `active`, immutable decision whose review evidence was never written at all.
 
-**Any failure stops the sequence**: the adr stays `draft`, and a `lesson` record already written
-when a later write fails is **never silently abandoned** — report the orphaned `lesson` record to
-the operator by name, so they can re-run or delete it. Give them the lookup rather than the claim:
-`lore search "kind:lesson related-adr:<adr-name>"` finds it from the adr, which is what makes
-reporting it enough.
+**Any failure before the flip stops the sequence**: the adr stays `draft`, and a `lesson` record
+already written when a later write fails is **never silently abandoned** — report the orphaned
+`lesson` record to the operator by name, so they can re-run or delete it. Give them the lookup as
+well: `lore search "kind:lesson related-adr:<adr-name>"` finds it from the adr. The lookup carries a
+caveat and the caveat travels with it — `lore search` states that reverse edges reflect the last
+reindex, so a `lesson` record written moments ago can come back with zero results until
+`lore reindex` runs, and zero results read as "no orphan" to precisely the operator this report
+exists to warn. So report the record name alongside the query, never the query alone.
+
+**A failure after the flip reports differently.** The predecessor's `superseded` back-edge is the
+only write ordered after the status flip, so the rule above — the adr stays `draft` — cannot
+describe it: the adr is already `active` and immutable, and re-running the flip changes nothing.
+Name both records, say that the successor is `active` and the predecessor is still `active` and
+unlinked, and hand back the one write that closes it:
+
+```
+lore record update <predecessor-adr-id> --status superseded --related adr=<adr-id>
+```
+
+Nothing heals that pair on its own — distill's resume rule walks only distilled ADRs, and this one
+came the forward way.
 
 ### Distilled ADRs skip the gauntlet
 
