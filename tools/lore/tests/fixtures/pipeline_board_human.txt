@@ -1,8 +1,8 @@
 --- lore pipeline — reference, not instructions ---
 
 Vaults consulted:
-  local — 2 records
-  team [shared] — 1 record
+  local — 5 records
+  team [shared] — 2 records
   empty — 0 records
 
 Warnings:
@@ -15,6 +15,15 @@ Priority tier:
   (none)
 
 Recency tier:
-  (none)
-
-nothing in flight
+  local:adr/board  (1 completed)
+    local  adr/board [active] Derived pipeline board
+    local  spec/listing [planned] Cross-vault listing surface  related: adr=board
+  local:task/idea
+    local  task/idea [open] Route this one back to brainstorm  labels: route=brainstorm  flags: routed-task
+  local:spec/orphan
+    local  spec/orphan [draft] Spec with a dangling root  related: adr=missing  flags: unresolved-root
+<external-memory layer="shared" source="team">
+  team:adr/shared-root
+    team  adr/shared-root [dropped] Shared team ADR
+    team  spec/shared [draft] Shared team spec  related: adr=shared-root  flags: orphaned-seed
+</external-memory>

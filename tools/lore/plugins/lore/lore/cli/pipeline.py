@@ -4,6 +4,12 @@ Read-only. Nothing is written, nothing is claimed, and the index is never
 touched: the board is derived from the configured vaults' sidecars on every
 invocation.
 
+**What the board carries.** One lineage per in-flight design root: an adr with
+the non-terminal specs whose own-vault ``related: adr=`` edges point at it,
+plus the singletons — a spec whose edge resolves to nothing, and an ``open``
+task routed to brainstorm. Membership is recomputed from the sidecars on every
+invocation and stored nowhere.
+
 **Vault set.** The configured vaults and the set of ``shared: true`` names both
 come from a single :func:`common._resolve_all_vaults_and_shared` call, so the
 two views cannot disagree and the shared filter cannot fail open. Camp-group

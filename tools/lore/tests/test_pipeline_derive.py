@@ -1,0 +1,471 @@
+"""Lineage membership — the board's whole filter, derived from sidecars alone.
+
+Membership is a read-time derivation with nothing stored, so these tests feed
+the derivation synthetic walks and read back the lineages. Three properties
+carry weight beyond the plain rules:
+
+  1. **Own-vault confinement.** A ``related: adr=`` edge resolves only against
+     its own vault's adrs. A merged lookup would let one vault's record decide
+     another vault's membership, so the same adr name in two vaults must
+     anchor two lineages that never see each other.
+  2. **Terminal records leave a trace, not a row.** A finished member is
+     omitted from the lineage but survives in its count, and a dropped one
+     leaves neither — so "3 of 5 done" and "3 of 4 done, 1 abandoned" stay
+     distinguishable.
+  3. **An unresolvable edge is visible, never silently dropped.** It becomes
+     its own flagged lineage carrying the raw value that failed to resolve.
+"""
+
+from __future__ import annotations
+
+import ast
+from pathlib import Path
+
+from lore.pipeline import derive
+from lore.pipeline.walk import VaultWalk
+
+DERIVE_MODULE = (
+    Path(__file__).parent.parent / "plugins" / "lore" / "lore" / "pipeline" / "derive.py"
+)
+
+
+def _walk(name: str, records: dict, *, shared: bool = False) -> VaultWalk:
+    """A walked vault carrying *records*, with no read failures."""
+    return VaultWalk(name, f"/vaults/{name}", shared, None, records, ())
+
+
+def _adr(status: str = "active", **extra) -> dict:
+    return {"kind": "adr", "title": "An ADR", "status": status, **extra}
+
+
+def _spec(status: str = "ready", *, adrs=None, **extra) -> dict:
+    sidecar = {"kind": "spec", "title": "A spec", "status": status, **extra}
+    if adrs is not None:
+        sidecar["related"] = {"adr": list(adrs)}
+    return sidecar
+
+
+def _task(status: str = "open", *, route=None, **extra) -> dict:
+    sidecar = {"kind": "task", "title": "A task", "status": status, **extra}
+    if route is not None:
+        sidecar["labels"] = {"route": route}
+    return sidecar
+
+
+def _ids(lineages) -> list[str]:
+    return [lineage.id for lineage in lineages]
+
+
+class TestAdrAnchoredLineages:
+    def test_an_active_adr_with_a_non_terminal_member_renders_rooted_at_the_adr(self):
+        lineages = derive.derive_lineages(
+            [_walk("local", {"adr/board": _adr(), "spec/one": _spec(adrs=["board"])})]
+        )
+
+        assert len(lineages) == 1
+        assert lineages[0].root.record_id == "adr/board"
+        assert [m.record_id for m in lineages[0].members] == ["spec/one"]
+
+    def test_an_active_adr_with_no_non_terminal_members_does_not_render(self):
+        lineages = derive.derive_lineages([_walk("local", {"adr/board": _adr()})])
+
+        assert lineages == []
+
+    def test_a_draft_adr_alone_sustains_its_own_lineage(self):
+        """A draft root is itself the in-flight work — it needs gauntleting —
+        so it renders before any spec has been derived from it."""
+        lineages = derive.derive_lineages(
+            [_walk("local", {"adr/fresh": _adr("draft")})]
+        )
+
+        assert _ids(lineages) == ["local:adr/fresh"]
+        assert lineages[0].members == ()
+
+    def test_an_active_adr_whose_only_members_are_terminal_does_not_render(self):
+        lineages = derive.derive_lineages(
+            [
+                _walk(
+                    "local",
+                    {"adr/board": _adr(), "spec/done": _spec("complete", adrs=["board"])},
+                )
+            ]
+        )
+
+        assert lineages == []
+
+
+class TestTerminalMemberAccounting:
+    def _lineage(self, member_statuses):
+        records = {"adr/board": _adr(), "spec/live": _spec("planned", adrs=["board"])}
+        for index, status in enumerate(member_statuses):
+            records[f"spec/m{index}"] = _spec(status, adrs=["board"])
+        lineages = derive.derive_lineages([_walk("local", records)])
+        assert len(lineages) == 1
+        return lineages[0]
+
+    def test_complete_and_superseded_members_are_omitted_but_counted(self):
+        lineage = self._lineage(["complete", "superseded"])
+
+        assert [m.record_id for m in lineage.members] == ["spec/live"]
+        assert lineage.completed_count == 2
+
+    def test_a_dropped_member_is_omitted_and_left_out_of_the_count(self):
+        """Dropped is abandoned, not finished: counting it would inflate the
+        progress the count exists to show."""
+        lineage = self._lineage(["dropped"])
+
+        assert [m.record_id for m in lineage.members] == ["spec/live"]
+        assert lineage.completed_count == 0
+
+
+class TestOrphanedSeeds:
+    def test_a_dropped_root_renders_while_a_non_terminal_spec_still_points_at_it(self):
+        lineages = derive.derive_lineages(
+            [
+                _walk(
+                    "local",
+                    {
+                        "adr/gone": _adr("dropped"),
+                        "spec/seed": _spec("draft", adrs=["gone"]),
+                    },
+                )
+            ]
+        )
+
+        assert _ids(lineages) == ["local:adr/gone"]
+        assert lineages[0].members[0].flags == ("orphaned-seed",)
+
+    def test_a_superseded_root_orphans_its_seeds_the_same_way(self):
+        lineages = derive.derive_lineages(
+            [
+                _walk(
+                    "local",
+                    {
+                        "adr/old": _adr("superseded"),
+                        "spec/seed": _spec("ready", adrs=["old"]),
+                    },
+                )
+            ]
+        )
+
+        assert lineages[0].members[0].flags == ("orphaned-seed",)
+
+    def test_a_dropped_root_with_no_non_terminal_seeds_is_absent_entirely(self):
+        lineages = derive.derive_lineages(
+            [
+                _walk(
+                    "local",
+                    {
+                        "adr/gone": _adr("dropped"),
+                        "spec/done": _spec("complete", adrs=["gone"]),
+                    },
+                )
+            ]
+        )
+
+        assert lineages == []
+
+    def test_a_live_root_leaves_its_members_unflagged(self):
+        lineages = derive.derive_lineages(
+            [_walk("local", {"adr/board": _adr(), "spec/one": _spec(adrs=["board"])})]
+        )
+
+        assert lineages[0].members[0].flags == ()
+
+
+class TestEdgeNormalization:
+    def test_a_bare_stem_and_a_prefixed_value_land_in_the_same_lineage(self):
+        """Edge values are written as bare stems by convention only — a
+        prefixed value stores cleanly and would otherwise read as dangling."""
+        lineages = derive.derive_lineages(
+            [
+                _walk(
+                    "local",
+                    {
+                        "adr/board": _adr(),
+                        "spec/bare": _spec(adrs=["board"]),
+                        "spec/prefixed": _spec(adrs=["adr/board"]),
+                    },
+                )
+            ]
+        )
+
+        assert _ids(lineages) == ["local:adr/board"]
+        assert [m.record_id for m in lineages[0].members] == ["spec/bare", "spec/prefixed"]
+
+
+    def test_two_edges_naming_one_target_route_that_record_once(self):
+        """``foo`` and ``adr/foo`` are one edge after normalization — listing
+        the spec twice would also double the lineage's completed count."""
+        lineages = derive.derive_lineages(
+            [
+                _walk(
+                    "local",
+                    {
+                        "adr/board": _adr(),
+                        "spec/live": _spec(adrs=["board", "adr/board"]),
+                        "spec/done": _spec("complete", adrs=["board", "adr/board"]),
+                    },
+                )
+            ]
+        )
+
+        assert [m.record_id for m in lineages[0].members] == ["spec/live"]
+        assert lineages[0].completed_count == 1
+
+
+class TestUnresolvedRoots:
+    def test_an_edge_matching_no_adr_becomes_a_flagged_singleton(self):
+        lineages = derive.derive_lineages(
+            [_walk("local", {"spec/lost": _spec(adrs=["nowhere"])})]
+        )
+
+        assert _ids(lineages) == ["local:spec/lost"]
+        assert lineages[0].root.record_id == "spec/lost"
+        assert lineages[0].root.flags == ("unresolved-root",)
+        assert lineages[0].members == ()
+
+    def test_the_raw_edge_value_rides_along_on_the_singleton(self):
+        """The value that failed to resolve is the whole diagnostic, so it
+        survives the derivation verbatim rather than being normalized away."""
+        lineages = derive.derive_lineages(
+            [_walk("local", {"spec/lost": _spec(adrs=["adr/nowhere"])})]
+        )
+
+        assert lineages[0].root.sidecar["related"]["adr"] == ["adr/nowhere"]
+
+    def test_a_terminal_spec_with_a_dangling_edge_is_not_board_membership(self):
+        """A finished spec is not in-flight work whichever way its edge points,
+        exactly as a finished spec on a resolving edge is omitted."""
+        lineages = derive.derive_lineages(
+            [_walk("local", {"spec/done": _spec("complete", adrs=["nowhere"])})]
+        )
+
+        assert lineages == []
+
+
+class TestOwnVaultConfinement:
+    def test_an_edge_never_reaches_into_another_vault(self):
+        lineages = derive.derive_lineages(
+            [
+                _walk("a", {"adr/board": _adr()}),
+                _walk("b", {"spec/stray": _spec(adrs=["board"])}),
+            ]
+        )
+
+        assert _ids(lineages) == ["b:spec/stray"]
+        assert lineages[0].root.flags == ("unresolved-root",)
+
+    def test_same_named_adrs_in_two_vaults_anchor_two_distinct_lineages(self):
+        lineages = derive.derive_lineages(
+            [
+                _walk(
+                    "a",
+                    {"adr/board": _adr(), "spec/one": _spec(adrs=["board"], **{"updated-at": "2026-08-02"})},
+                ),
+                _walk(
+                    "b",
+                    {"adr/board": _adr(), "spec/two": _spec(adrs=["board"], **{"updated-at": "2026-08-01"})},
+                ),
+            ]
+        )
+
+        assert _ids(lineages) == ["a:adr/board", "b:adr/board"]
+        assert [m.record_id for lineage in lineages for m in lineage.members] == [
+            "spec/one",
+            "spec/two",
+        ]
+
+    def test_every_lineage_id_carries_its_vault_qualifier(self):
+        lineages = derive.derive_lineages(
+            [
+                _walk(
+                    "solo",
+                    {
+                        "adr/board": _adr("draft"),
+                        "spec/lost": _spec(adrs=["nowhere"]),
+                        "task/idea": _task(route="brainstorm"),
+                    },
+                )
+            ]
+        )
+
+        assert all(lineage.id.startswith("solo:") for lineage in lineages)
+        assert sorted(_ids(lineages)) == [
+            "solo:adr/board",
+            "solo:spec/lost",
+            "solo:task/idea",
+        ]
+
+
+class TestMultipleEdges:
+    def test_a_spec_with_two_resolving_edges_is_emitted_in_both_lineages(self):
+        lineages = derive.derive_lineages(
+            [
+                _walk(
+                    "local",
+                    {
+                        "adr/one": _adr(),
+                        "adr/two": _adr(),
+                        "spec/both": _spec(adrs=["one", "two"]),
+                    },
+                )
+            ]
+        )
+
+        assert sorted(_ids(lineages)) == ["local:adr/one", "local:adr/two"]
+        assert all(
+            [m.record_id for m in lineage.members] == ["spec/both"]
+            for lineage in lineages
+        )
+
+    def test_one_resolving_and_one_dangling_edge_does_both(self):
+        lineages = derive.derive_lineages(
+            [
+                _walk(
+                    "local",
+                    {"adr/one": _adr(), "spec/half": _spec(adrs=["one", "nowhere"])},
+                )
+            ]
+        )
+
+        by_id = {lineage.id: lineage for lineage in lineages}
+        assert sorted(by_id) == ["local:adr/one", "local:spec/half"]
+        assert [m.record_id for m in by_id["local:adr/one"].members] == ["spec/half"]
+        assert by_id["local:spec/half"].root.flags == ("unresolved-root",)
+
+
+class TestRoutedTasks:
+    def test_an_open_brainstorm_routed_task_joins_as_a_flagged_singleton(self):
+        lineages = derive.derive_lineages(
+            [_walk("local", {"task/idea": _task(route="brainstorm")})]
+        )
+
+        assert _ids(lineages) == ["local:task/idea"]
+        assert lineages[0].root.flags == ("routed-task",)
+        assert lineages[0].members == ()
+        assert lineages[0].completed_count == 0
+
+    def test_a_routed_task_past_open_is_excluded(self):
+        """The route label says where the work belongs; the status says whether
+        it is still waiting there."""
+        records = {
+            f"task/t{status}": _task(status, route="brainstorm")
+            for status in ("ready", "in-progress", "blocked", "done", "dropped")
+        }
+
+        assert derive.derive_lineages([_walk("local", records)]) == []
+
+    def test_an_open_task_routed_elsewhere_or_unrouted_is_excluded(self):
+        lineages = derive.derive_lineages(
+            [
+                _walk(
+                    "local",
+                    {
+                        "task/plan": _task(route="plan"),
+                        "task/bare": _task(),
+                        "task/empty": _task(**{"labels": {}}),
+                    },
+                )
+            ]
+        )
+
+        assert lineages == []
+
+
+class TestRecencyOrdering:
+    def test_lineages_are_ordered_newest_first(self):
+        lineages = derive.derive_lineages(
+            [
+                _walk(
+                    "local",
+                    {
+                        "adr/old": _adr("draft", **{"updated-at": "2026-08-01T00:00:00Z"}),
+                        "adr/new": _adr("draft", **{"updated-at": "2026-08-03T00:00:00Z"}),
+                        "adr/mid": _adr("draft", **{"updated-at": "2026-08-02T00:00:00Z"}),
+                    },
+                )
+            ]
+        )
+
+        assert _ids(lineages) == ["local:adr/new", "local:adr/mid", "local:adr/old"]
+
+    def test_a_lineage_is_as_recent_as_its_newest_non_terminal_record(self):
+        lineages = derive.derive_lineages(
+            [
+                _walk(
+                    "local",
+                    {
+                        "adr/stale": _adr(**{"updated-at": "2026-01-01T00:00:00Z"}),
+                        "spec/fresh": _spec(
+                            adrs=["stale"], **{"updated-at": "2026-08-05T00:00:00Z"}
+                        ),
+                        "adr/recent": _adr("draft", **{"updated-at": "2026-06-01T00:00:00Z"}),
+                    },
+                )
+            ]
+        )
+
+        assert _ids(lineages) == ["local:adr/stale", "local:adr/recent"]
+
+    def test_a_record_with_no_timestamp_sorts_last_rather_than_raising(self):
+        lineages = derive.derive_lineages(
+            [
+                _walk(
+                    "local",
+                    {
+                        "adr/undated": _adr("draft"),
+                        "adr/dated": _adr("draft", **{"updated-at": "2026-08-01T00:00:00Z"}),
+                    },
+                )
+            ]
+        )
+
+        assert _ids(lineages) == ["local:adr/dated", "local:adr/undated"]
+
+
+class TestHostileSidecarShapes:
+    """A sidecar is whatever JSON object was on disk — a synced vault's entry
+    never passed this CLI's validator, so every field read here may be the
+    wrong type."""
+
+    def test_a_non_map_related_field_contributes_no_edges(self):
+        records = {
+            "spec/a": {"kind": "spec", "status": "ready", "related": "adr=board"},
+            "spec/b": {"kind": "spec", "status": "ready", "related": {"adr": "board"}},
+            "spec/c": {"kind": "spec", "status": "ready", "related": {"adr": [None, 7]}},
+        }
+
+        assert derive.derive_lineages([_walk("local", records)]) == []
+
+    def test_a_non_map_labels_field_never_routes_a_task(self):
+        records = {"task/a": {"kind": "task", "status": "open", "labels": ["route"]}}
+
+        assert derive.derive_lineages([_walk("local", records)]) == []
+
+    def test_a_non_string_status_is_no_status_at_all(self):
+        records = {"adr/odd": {"kind": "adr", "status": {"draft": True}}}
+
+        assert derive.derive_lineages([_walk("local", records)]) == []
+
+
+class TestDerivationIsPure:
+    def test_the_module_reaches_no_filesystem_and_no_stream(self):
+        """The derivation's contract is that it is a function of the walk's
+        output alone. Nothing here may read a file, so a later rule cannot
+        quietly start consulting one and make the board unreproducible."""
+        tree = ast.parse(DERIVE_MODULE.read_text(encoding="utf-8"))
+        forbidden = {"os", "pathlib", "sys", "json", "shutil", "subprocess", "io"}
+
+        imported: set[str] = set()
+        called: set[str] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                imported.update(alias.name.split(".")[0] for alias in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                imported.add(node.module.split(".")[0])
+            elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+                called.add(node.func.id)
+
+        assert not imported & forbidden, sorted(imported & forbidden)
+        assert not called & {"open", "print", "input", "eval", "exec"}
