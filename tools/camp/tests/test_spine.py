@@ -123,6 +123,38 @@ def test_resolve_slug_normalizes_and_returns() -> None:
     assert result == "my-feature"
 
 
+@pytest.mark.parametrize("raw", ["--help", "--json", "--group", "-x", "--force", "-"])
+def test_resolve_slug_rejects_flag_shaped_input(raw: str) -> None:
+    """A leading '-' is refused outright, never normalized into a real slug.
+
+    Normalization strips the dashes, so `--help` would otherwise become the
+    perfectly valid slug `help` and go on to create or launch a workspace. A
+    caller that mistakenly forwards an unconsumed flag as a positional must get
+    an error, not a workspace named after the flag.
+    """
+    from camp.spine import _resolve_slug
+
+    with pytest.raises(SystemExit):
+        _resolve_slug(raw)
+
+
+def test_resolve_slug_allows_internal_and_trailing_dashes() -> None:
+    """Only a LEADING dash is flag-shaped; dashes elsewhere are ordinary."""
+    from camp.spine import _resolve_slug
+
+    assert _resolve_slug("feat-a") == "feat-a"
+    assert _resolve_slug("feat-a-") == "feat-a"
+
+
+def test_resolve_slug_flag_refusal_names_the_offending_input() -> None:
+    """The refusal has to identify what was passed, or a caller forwarding an
+    unconsumed flag cannot tell which argument it was."""
+    from camp.spine import _resolve_slug
+
+    with pytest.raises(SystemExit):
+        _resolve_slug("--group", context="argument")
+
+
 # ---------------------------------------------------------------------------
 # git-wrapper shapes
 # ---------------------------------------------------------------------------
