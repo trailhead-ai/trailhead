@@ -1125,6 +1125,33 @@ _ADR_EDITS_WRITE = "lore record update <adr-id> --diff"
 # its own pin, symmetric with the adr one above.
 _SPEC_EDITS_WRITE = "lore record update <spec-id> --diff"
 
+# The two treatments the persisted-detail path runs before either payload is
+# assembled. Both bind at the point the text enters `$EDITS` / `$DETAIL`: the
+# retained finding detail is subagent-authored text the compact deliverable never
+# printed, and this write is the only review it ever gets before the vault has it.
+SHARED_EXECUTE = SKILLS_DIR / "_shared" / "execute.md"
+RECEIVING_REVIEW = SKILLS_DIR / "receiving-code-review" / "SKILL.md"
+_SCRUB_SOURCE_REF = "_shared/execute.md"
+_SCRUB_NAME = "credential-pattern scrub"
+_SCRUB_ANCHOR = "Credential-pattern scrub"
+_RECEIVING_REVIEW_REF = "skills/receiving-code-review/SKILL.md"
+_EVIDENCE_MARKER = "retained review evidence"
+
+# The auditor-facing half of the scrub: evidence names a location, not a value.
+# Pinned as the whole rule rather than as the bare token `file:line`, which prose
+# saying the exact opposite would also contain.
+_EVIDENCE_CITATION_RULE = "cut down to a `file:line` citation"
+
+# What each per-mode tail must name to inherit the shared treatments. The tails
+# restate their own deltas and defer everything else upward, so a tail that defers
+# only sequence and failure behavior is a tail that writes unscrubbed text.
+_PRE_WRITE_TREATMENTS = "pre-write scrub and marker"
+
+# Fragments of the scrub's own regex list. They belong to exactly one file; any of
+# them appearing in gauntlet/SKILL.md means the list was forked rather than reused,
+# and the fork is what goes stale while the original gains patterns.
+_SCRUB_PATTERN_FRAGMENTS = ["AKIA", "ghp_", "glpat-", "PRIVATE KEY"]
+
 
 def _accepted_tail(text: str) -> str:
     """The shared accepted tail — everything from its anchor to the end of the step.
@@ -1261,6 +1288,86 @@ def test_provenance_split_is_derived_structurally_not_recalled():
         "the accepted/overridden split must be derived rather than recalled — a "
         "remembered split is an assertion, and the audit trail cannot tell the "
         "difference"
+    )
+
+
+def test_persisted_detail_runs_through_the_shared_credential_scrub():
+    """The retained detail is the one payload nobody reads before it is permanent.
+
+    Both tails write full, verbatim finding text into a git-backed vault that syncs
+    to a whole team, and the compact deliverable is designed to keep most of that
+    text off the operator's screen. A gauntlet run against a codebase holding a
+    committed credential can quote that value as its evidence, so this scrub is the
+    only thing between it and a second, durable home nobody was shown.
+    """
+    text = GAUNTLET.read_text()
+    tail = _flat(_accepted_tail(text))
+
+    assert _SCRUB_NAME in tail and _SCRUB_SOURCE_REF in tail, (
+        "the shared accepted tail must send the persisted text through the "
+        f"{_SCRUB_NAME!r} in {_SCRUB_SOURCE_REF} before the write"
+    )
+    assert "$EDITS" in tail and "$DETAIL" in tail, (
+        "the scrub must bind where the text enters `$EDITS` / `$DETAIL` — a scrub "
+        "named anywhere downstream of that is a scrub that runs after the write"
+    )
+    assert _EVIDENCE_CITATION_RULE in tail, (
+        "a finding quoting a literal secret as evidence must have it cut down to a "
+        f"`file:line` citation ({_EVIDENCE_CITATION_RULE!r}) — retaining the value "
+        "is the whole exposure, and naming `file:line` without saying the value "
+        "goes is a rule prose meaning the opposite would also satisfy"
+    )
+    assert _SCRUB_ANCHOR in SHARED_EXECUTE.read_text(), (
+        f"{_SCRUB_SOURCE_REF} must still carry the scrub the gauntlet points at; a "
+        "reference to a rule that moved is a reference to no rule at all"
+    )
+    for fragment in _SCRUB_PATTERN_FRAGMENTS:
+        assert fragment not in text, (
+            "the scrub's pattern list is reused by reference, never forked into "
+            f"gauntlet/SKILL.md — found {fragment!r}, and two copies drift, with "
+            "the stale one missing what the maintained one catches"
+        )
+    for mode, mode_tail in (("spec", _spec_tail(text)), ("adr", _adr_tail(text))):
+        assert _PRE_WRITE_TREATMENTS in _flat(mode_tail), (
+            f"the {mode} tail must inherit the shared pre-write treatments by name "
+            f"({_PRE_WRITE_TREATMENTS!r}) — a per-mode tail that defers only "
+            "sequence and failure behavior reads as a tail with no scrub"
+        )
+
+
+def test_persisted_detail_is_marked_data_not_instructions():
+    """What this tail writes is what a later run reads back as prior art.
+
+    The fact-verification pass checks claims against sibling records in the vault,
+    and both persisted targets are exactly that sibling text. Unmarked, retained
+    review evidence reads to the next agent as the record's own settled design, and
+    a wrong or planted conclusion propagates into a future review as fact.
+    """
+    text = GAUNTLET.read_text()
+    tail = _flat(_accepted_tail(text))
+
+    assert _RECEIVING_REVIEW_REF in tail, (
+        "the shared tail must cite the receiving-code-review pattern for the text "
+        "it persists, rather than restating a trust scheme of its own"
+    )
+    assert RECEIVING_REVIEW.exists(), (
+        f"{_RECEIVING_REVIEW_REF} must exist — the pointer is the whole mechanism"
+    )
+
+    spec_tail = _flat(_spec_tail(text)).lower()
+    assert _EVIDENCE_MARKER in spec_tail, (
+        "the spec tail's `## Gauntlet` section must carry the marker naming its "
+        f"content {_EVIDENCE_MARKER!r}, evaluated as a claim about the spec"
+    )
+    assert spec_tail.index(_EVIDENCE_MARKER) < spec_tail.index(
+        "adversarial spec review"
+    ), (
+        "the marker must open the retained section — a reader who meets the "
+        "findings first has already read them as the spec's own content"
+    )
+    assert _EVIDENCE_MARKER in _flat(_adr_tail(text)).lower(), (
+        "the adr tail's linked `lesson` record carries the same marker — it is the "
+        "sibling record a later pass reads, exactly like the spec's section"
     )
 
 
