@@ -907,7 +907,7 @@ class TestPriorityTier:
             ],
         )
 
-        assert [l["id"] for l in payload["tiers"]["priority"]] == [
+        assert [ln["id"] for ln in payload["tiers"]["priority"]] == [
             "local:adr/two", "local:adr/one",
         ]
         assert payload["tiers"]["recency"] == []
@@ -942,7 +942,7 @@ class TestPriorityTier:
         )
 
         priority = payload["tiers"]["priority"]
-        assert [l["id"] for l in priority] == ["local:adr/two", "local:adr/soon"]
+        assert [ln["id"] for ln in priority] == ["local:adr/two", "local:adr/soon"]
         assert priority[1]["root"]["labels"]["priority"] == "soon"
 
     def test_equal_integer_priorities_tie_break_by_recency_newest_first(
@@ -960,7 +960,7 @@ class TestPriorityTier:
             ],
         )
 
-        assert [l["id"] for l in payload["tiers"]["priority"]] == [
+        assert [ln["id"] for ln in payload["tiers"]["priority"]] == [
             "local:adr/newer", "local:adr/older",
         ]
 
@@ -988,7 +988,7 @@ class TestPriorityTier:
                                 "labels": {"route": "brainstorm", "priority": "1"}})],
         )
 
-        assert [l["id"] for l in payload["tiers"]["priority"]] == ["local:task/idea"]
+        assert [ln["id"] for ln in payload["tiers"]["priority"]] == ["local:task/idea"]
 
     def test_human_mode_renders_the_two_tiers_as_distinct_sections(
         self, tmp_path, capsys

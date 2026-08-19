@@ -439,7 +439,7 @@ class TestPriorityTiering:
             )
         )
 
-        assert [l.id for l in priority] == ["local:adr/board"]
+        assert [ln.id for ln in priority] == ["local:adr/board"]
         assert recency == []
 
     def test_a_member_priority_label_does_not_lift_the_lineage_out_of_recency(self):
@@ -458,7 +458,7 @@ class TestPriorityTiering:
         )
 
         assert priority == []
-        assert [l.id for l in recency] == ["local:adr/board"]
+        assert [ln.id for ln in recency] == ["local:adr/board"]
 
     def test_integer_priorities_sort_ascending(self):
         priority, _ = derive.split_tiers(
@@ -475,7 +475,7 @@ class TestPriorityTiering:
             )
         )
 
-        assert [l.id for l in priority] == ["local:adr/one", "local:adr/two"]
+        assert [ln.id for ln in priority] == ["local:adr/one", "local:adr/two"]
 
     def test_a_non_integer_priority_sorts_after_every_integer_and_keeps_its_raw_value(self):
         priority, _ = derive.split_tiers(
@@ -492,7 +492,7 @@ class TestPriorityTiering:
             )
         )
 
-        assert [l.id for l in priority] == ["local:adr/two", "local:adr/soon"]
+        assert [ln.id for ln in priority] == ["local:adr/two", "local:adr/soon"]
         assert priority[1].root.sidecar["labels"]["priority"] == "soon"
 
     def test_the_comparison_never_raises_across_mixed_int_and_string_priorities(self):
@@ -528,7 +528,7 @@ class TestPriorityTiering:
             )
         )
 
-        assert [l.id for l in priority] == ["local:adr/newer", "local:adr/older"]
+        assert [ln.id for ln in priority] == ["local:adr/newer", "local:adr/older"]
 
     def test_a_shared_root_priority_label_is_ignored_for_tiering(self):
         """A binding constraint on this board: a shared vault's labels never
@@ -546,7 +546,7 @@ class TestPriorityTiering:
         )
 
         assert priority == []
-        assert [l.id for l in recency] == ["team:adr/board"]
+        assert [ln.id for ln in recency] == ["team:adr/board"]
 
     def test_a_singleton_with_a_priority_label_joins_the_priority_tier(self):
         lineages = _derive(
@@ -567,7 +567,7 @@ class TestPriorityTiering:
 
         priority, _ = derive.split_tiers(lineages)
 
-        assert [l.id for l in priority] == ["local:task/idea"]
+        assert [ln.id for ln in priority] == ["local:task/idea"]
 
 
 class TestHostileSidecarShapes:

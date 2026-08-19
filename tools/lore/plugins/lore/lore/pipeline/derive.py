@@ -532,7 +532,7 @@ def _priority_rank(lineage: Lineage) -> tuple[int, int]:
 
     The raw label is attacker- or typo-influenced text, so parsing it is the
     one place this could raise; catching it here keeps the comparison itself
-    total over a mix of integer and non-integer priorities.
+    total over both integer and non-integer priorities.
     """
     try:
         return (0, int(_root_priority(lineage)))
