@@ -19,13 +19,31 @@ order:
          preserved),
        - ``related.<kind>`` sidecar list entries,
        - ``depends-on`` sidecar list entries and the ``parent`` sidecar string,
-         when the renamed record is a ``task`` (both are task-only graph edges;
-         leaving ``parent`` alone would dangle the renamed task's children).
+         when the renamed record is a ``task`` (leaving ``parent`` alone would
+         dangle the renamed task's children),
+       - ``depends-on`` sidecar list entries of the ``<kind>/<stem>[@stage]``
+         design grammar, when the renamed record is a ``spec`` or ``adr``. The
+         ``@stage`` tail is carried through byte-for-byte and an unqualified
+         entry stays unqualified — a rename never introduces a stage.
 
 **Trust.** ``shared: true`` vaults hold untrusted external content. The sweep
 **skips** them by default and reports what it would have rewritten; the caller
 opts in with ``include_shared``. The primary rename itself is never skipped —
 the operator named that record explicitly.
+
+**Vault scope, and why it differs per reference shape.** Wikilinks and
+``related`` entries are rewritten in every configured vault: they are plain
+cross-references, and a reference is only ever to the record it names. Task
+edges likewise stay vault-wide, unchanged. Design ``depends-on`` edges do NOT:
+they resolve vault-locally, so ``spec/foo`` in another vault names *that*
+vault's ``spec/foo`` — a different record this rename says nothing about. The
+design branch therefore fires only within the renamed record's own vault, which
+is a security boundary and not merely a scoping nicety: other configured vaults
+may be shared, and rewriting their graph edges would let content the operator
+does not control steer writes by choosing a colliding stem. The source vault is
+threaded from each :func:`rename_record` path into :func:`sweep_references` and
+compared per record, never applied by narrowing the vault list — the same sweep
+owes the all-vault shapes their full reach.
 
 **Confinement.** Independently of that trust split, the sweep never reads
 outside the vault it is walking: every kind directory, body, and sidecar is
@@ -65,6 +83,7 @@ from pathlib import Path
 from typing import Any, NamedTuple
 
 from .. import locking
+from . import graph
 from . import model as record_model
 from . import store
 
@@ -171,19 +190,77 @@ def _rewrite_entry(entry: Any, kind: str, old_stem: str, new_stem: str) -> Any:
     return entry
 
 
-def rewrite_sidecar(
-    sidecar: dict, kind: str, old_stem: str, new_stem: str
-) -> tuple[dict, bool]:
-    """Rewrite ``related.<kind>`` (and ``depends-on``/``parent`` for tasks).
+def _rewrite_design_entry(entry: Any, kind: str, old_stem: str, new_stem: str) -> Any:
+    """Rewrite one design ``depends-on`` entry, carrying its ``@stage`` tail through.
 
-    Returns ``(sidecar, changed)``; the input is never mutated. ``depends-on``
-    and ``parent`` are only considered when the renamed record is a ``task`` —
-    both are task-only graph edges (see :data:`model.KIND_GATED_FIELDS`), so a
-    non-task rename can never be the target of one. ``parent`` is a single
-    string, not a list, so it is rewritten in place rather than mapped.
+    The design grammar is ``<kind>/<name>[@stage]``, so only the qualified form
+    matches — a bare name is not a design edge at all (:func:`graph.parse_dependency`
+    rejects it), and rewriting one would invent a reference the operator never
+    wrote. The tail is sliced off and re-appended byte-for-byte rather than
+    re-rendered: an unqualified entry stays unqualified (a rename never
+    introduces a stage), and a stage the current vocabulary would reject is
+    still carried rather than silently dropped.
+    """
+    if not isinstance(entry, str):
+        return entry
+    qualified = f"{kind}/{old_stem}"
+    if entry == qualified:
+        return f"{kind}/{new_stem}"
+    if entry.startswith(f"{qualified}@"):
+        return f"{kind}/{new_stem}{entry[len(qualified):]}"
+    return entry
+
+
+def rewrite_sidecar(
+    sidecar: dict,
+    kind: str,
+    old_stem: str,
+    new_stem: str,
+    *,
+    vault: SweepVault,
+    source_vault: SweepVault,
+) -> tuple[dict, bool]:
+    """Rewrite ``related.<kind>``, plus the graph edges the renamed kind carries.
+
+    Returns ``(sidecar, changed)``; the input is never mutated. *vault* is the
+    vault the record being examined lives in and *source_vault* the vault
+    holding the record being renamed; the two are equal for every record in the
+    renamed record's own vault.
+
+    ``related`` is rewritten in **every** vault — it is a plain cross-reference,
+    and a reference is only ever to the record it names.
+
+    The graph-edge branches are gated on the renamed record's kind, since a kind
+    that cannot be the target of an edge can never be referenced by one (see
+    :data:`model.KIND_GATED_FIELDS`):
+
+    - ``task`` rewrites ``depends-on`` and ``parent`` in every vault. ``parent``
+      is a single string, not a list, so it is rewritten in place rather than
+      mapped.
+    - ``spec``/``adr`` rewrite ``depends-on`` **only within the renamed record's
+      own vault**.
+
+    **Security posture of the own-vault gate.** A design ``depends-on`` target is
+    resolved vault-locally, so ``spec/foo`` in another vault names that vault's
+    ``spec/foo`` — a different record that this rename says nothing about.
+    Rewriting it would reach across a trust boundary: other configured vaults
+    may be ``shared: true``, holding content this operator does not control, and
+    a sweep that edited their graph edges would let an attacker-chosen stem
+    steer writes into records the rename never named. The gate is therefore a
+    per-record decision made here, against the source vault threaded in from the
+    call site — never a narrowing of the vault list the sweep walks, which would
+    also strip ``related`` and wikilink rewriting of their required all-vault
+    reach.
+
+    Vault identity is decided on ``os.path.realpath`` — the same primitive every
+    other confinement and identity check in this module resolves through — so
+    two configured entries naming one physical directory (a symlinked root, a
+    relative path beside an absolute one) are correctly one vault, and a
+    directory reached by a symlink out of the vault is not silently a second.
     """
     updated = dict(sidecar)
     changed = False
+    own_vault = os.path.realpath(vault.root) == os.path.realpath(source_vault.root)
 
     related = updated.get("related")
     if isinstance(related, dict) and isinstance(related.get(kind), list):
@@ -207,6 +284,16 @@ def rewrite_sidecar(
             parent = _rewrite_entry(updated["parent"], kind, old_stem, new_stem)
             if parent != updated["parent"]:
                 updated["parent"] = parent
+                changed = True
+
+    elif kind in graph.DESIGN_KINDS and own_vault:
+        if isinstance(updated.get("depends-on"), list):
+            deps = [
+                _rewrite_design_entry(n, kind, old_stem, new_stem)
+                for n in updated["depends-on"]
+            ]
+            if deps != updated["depends-on"]:
+                updated["depends-on"] = deps
                 changed = True
 
     return updated, changed
@@ -300,6 +387,7 @@ def sweep_references(
     *,
     dry_run: bool,
     include_shared: bool,
+    source_vault: SweepVault,
 ) -> tuple[Rewrite, ...]:
     """Rewrite (or, for skipped shared vaults, report) every inbound reference.
 
@@ -307,6 +395,15 @@ def sweep_references(
     untouched records keep their bytes and their provenance. Shared vaults are
     reported with ``skipped=True`` unless *include_shared* is set; ``dry_run``
     computes the full list without writing anything anywhere.
+
+    *source_vault* is the vault holding the record being renamed. The sweep
+    still walks every vault in *vaults* — wikilinks and ``related`` entries
+    point wherever they point — but :func:`rewrite_sidecar` needs it to tell an
+    own-vault record from a foreign one, since design ``depends-on`` targets
+    resolve vault-locally and must not be rewritten across that boundary. It is
+    threaded rather than inferred: a sweep that guessed its own source would
+    guess wrong on the crash-resume path, where the record sits at a stem the
+    caller resolved by title.
 
     **Fault isolation.** The sweep runs AFTER the primary move has landed, so it
     must never abort partway and leave the operator with a moved record and no
@@ -358,7 +455,8 @@ def sweep_references(
 
             new_body = rewrite_body(body, kind, old_stem, new_stem)
             new_sidecar, sidecar_changed = rewrite_sidecar(
-                sidecar, kind, old_stem, new_stem
+                sidecar, kind, old_stem, new_stem,
+                vault=vault, source_vault=source_vault,
             )
             if new_body == body and not sidecar_changed:
                 continue
@@ -496,7 +594,7 @@ def _resume(
         False,
         sweep_references(
             vaults, kind, old_stem, landed_stem, conn,
-            dry_run=dry_run, include_shared=include_shared,
+            dry_run=dry_run, include_shared=include_shared, source_vault=landed,
         ),
     )
 
@@ -524,6 +622,12 @@ def rename_record(
     every configured vault, since references live wherever they live. A record
     absent from the named vault but present in another one is refused, naming
     the vault that holds it: it is a mis-aimed rename, not a crash to resume.
+
+    Whichever path resolves the source vault — the narrowed lookup, the
+    collision-suffixed placement, or the resume-by-title match — that vault is
+    threaded into :func:`sweep_references`, which needs it to keep design
+    ``depends-on`` rewriting inside the renamed record's own vault. Every other
+    reference shape the sweep rewrites stays vault-wide.
 
     **Commit boundary.** Once the primary move is durable on disk, its index
     repoint is committed before the sweep starts. The sweep is fault-isolated
@@ -594,7 +698,7 @@ def rename_record(
             record_id, f"{kind}/{dest_name}", source.name, False,
             sweep_references(
                 vaults, kind, old_stem, dest_name, conn,
-                dry_run=True, include_shared=include_shared,
+                dry_run=True, include_shared=include_shared, source_vault=source,
             ),
         )
 
@@ -651,6 +755,6 @@ def rename_record(
         record_id, new_id, source.name, moved,
         sweep_references(
             vaults, kind, old_stem, new_stem, conn,
-            dry_run=False, include_shared=include_shared,
+            dry_run=False, include_shared=include_shared, source_vault=source,
         ),
     )

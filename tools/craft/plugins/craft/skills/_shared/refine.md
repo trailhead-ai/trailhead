@@ -253,9 +253,11 @@ unified diff), and every status flip through `lore record update <record-id>
 --status ready`. Never edit a vault file directly — a direct write bypasses the
 index and the sidecar and silently corrupts the record.
 
-Any graph or record reference you write uses **bare task names** (`--parent
-<name>`, `--depends-on <name>`) — a prefixed, pathed, or bracketed name is accepted
-and then renders as a detached node.
+A `--parent <name>` or a `--depends-on <name>` reference to a `task` record is a
+**bare task name** — a prefixed, pathed, or bracketed name is accepted and then
+renders as a detached node. A `--depends-on` reference to a `spec` or `adr` record
+instead takes the qualified form `kind/name[@stage]` (`spec/foo@ready`,
+`adr/bar@active`, or unqualified `spec/foo`).
 
 ## Step 5 — Escalation
 

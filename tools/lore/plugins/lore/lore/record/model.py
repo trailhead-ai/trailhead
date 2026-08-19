@@ -28,8 +28,10 @@ Invariants:
   but in ``v1`` all kinds share one global field schema (``FIELDS_V1``).
 - ``status`` is drawn from the kind's ordered vocab; the **first** element is the
   initial/default value applied when ``status`` is omitted on create.
-- ``depends-on``/``parent`` are gated to ``task`` records only (``KIND_GATED_FIELDS``);
-  present on any other kind, they are rejected naming both the field and the kind.
+- ``depends-on`` and ``parent`` are gated per field (``KIND_GATED_FIELDS``):
+  ``depends-on`` is accepted on ``task``, ``spec``, and ``adr``; ``parent`` on
+  ``task`` alone. Present on any other kind, they are rejected naming both the
+  field and the kind.
 - The validator checks **shape, not referential integrity**: ``related`` keys must
   be valid kinds and values ``list[str]``, but referenced names are *not* verified
   to exist (a dangling ``{"task": ["nope"]}`` validates clean — existence is
@@ -182,12 +184,19 @@ _SCHEMAS: dict[str, dict[str, FieldSpec]] = {"v1": FIELDS_V1}
 
 #: Fields gated to a subset of kinds — present here means "the field is a valid
 #: sidecar key everywhere, but only ``validate()``-clean on the listed kinds".
-#: ``depends-on``/``parent`` are ``task``-only graph edges; naming a field here
-#: is the entire mechanism for rejecting it on every other surviving kind
-#: (naming both the field and the offending kind in the error). A field absent
-#: from this table is ungated — valid on any kind, as before this table existed.
+#: Naming a field here is the entire mechanism for rejecting it on every other
+#: surviving kind (naming both the field and the offending kind in the error). A
+#: field absent from this table is ungated — valid on any kind, as before this
+#: table existed.
+#:
+#: ``parent`` is a ``task``-only containment edge. ``depends-on`` is a dependency
+#: edge on every kind that carries a dependency graph: a ``task`` names bare task
+#: names (the task graph), while a ``spec``/``adr`` names qualified design
+#: targets (``kind/name`` with an optional ``@stage`` tail). This table is a
+#: shape-only gate — it says which kinds may carry the key at all; the per-kind
+#: entry grammar is enforced by the write-time graph guards, not here.
 KIND_GATED_FIELDS: dict[str, frozenset[str]] = {
-    "depends-on": frozenset({"task"}),
+    "depends-on": frozenset({"task", "spec", "adr"}),
     "parent": frozenset({"task"}),
 }
 

@@ -658,6 +658,23 @@ def test_traversal_depends_on_rejected_by_confinement(tmp_path):
     assert not (vault / "task" / "a.md").exists()
 
 
+def test_prefixed_depends_on_rejected_on_create(tmp_path):
+    """Every entry on a create is newly supplied, so every entry is form-checked."""
+    vault, state = _make_vault(tmp_path)
+    r = _create_task(vault, state, "a", extra=["--depends-on", "task/foo"])
+    assert r.returncode != 0
+    assert "graph-guard [task-edge-form]" in r.stderr
+    assert not (vault / "task" / "a.md").exists()
+
+
+def test_staged_depends_on_rejected_on_create(tmp_path):
+    vault, state = _make_vault(tmp_path)
+    r = _create_task(vault, state, "a", extra=["--depends-on", "foo@ready"])
+    assert r.returncode != 0
+    assert "graph-guard [task-edge-form]" in r.stderr
+    assert not (vault / "task" / "a.md").exists()
+
+
 # ---------------------------------------------------------------------------
 # flow-out reminder on parent completion (create with --status done)
 # ---------------------------------------------------------------------------
@@ -701,6 +718,70 @@ def test_no_flow_out_reminder_for_childless_task(tmp_path):
     r = _create_task(vault, state, "a", extra=["--status", "done"], body="just prose\n")
     assert r.returncode == 0, r.stderr
     assert "graph-guard [flow-out]" not in r.stderr
+
+
+# ---------------------------------------------------------------------------
+# design graph guards: spec/adr --depends-on round-trips through the same
+# create-time dispatcher the task guards already use
+# ---------------------------------------------------------------------------
+
+
+def _create_design(vault, state, kind, title, *, extra=None, body="body\n"):
+    """Create a ``spec``/``adr`` record; return the CompletedProcess."""
+    args = ["record", "create", "--kind", kind, "--title", title]
+    if extra:
+        args += extra
+    return _run(args, vault=vault, state_dir=state, stdin_text=body)
+
+
+def test_spec_depends_on_flag_round_trips_verbatim(tmp_path):
+    """A qualified spec depends-on entry is stored byte-identical, in order."""
+    vault, state = _make_vault(tmp_path)
+    r = _create_design(
+        vault, state, "spec", "consumer",
+        extra=["--depends-on", "spec/foo@ready", "--depends-on", "adr/bar"],
+    )
+    assert r.returncode == 0, r.stderr
+    sidecar = _find_sidecar(vault, r.stdout.strip())
+    assert sidecar["depends-on"] == ["spec/foo@ready", "adr/bar"]
+
+
+def test_design_unqualified_depends_on_entry_not_rewritten(tmp_path):
+    """An unqualified depends-on entry is never rewritten to carry an explicit stage."""
+    vault, state = _make_vault(tmp_path)
+    r = _create_design(vault, state, "spec", "consumer", extra=["--depends-on", "spec/foo"])
+    assert r.returncode == 0, r.stderr
+    sidecar = _find_sidecar(vault, r.stdout.strip())
+    assert sidecar["depends-on"] == ["spec/foo"]
+
+
+def test_design_bare_name_depends_on_rejected_at_create(tmp_path):
+    """A depends-on entry with no kind prefix is rejected on a design kind."""
+    vault, state = _make_vault(tmp_path)
+    r = _create_design(vault, state, "spec", "consumer", extra=["--depends-on", "foo"])
+    assert r.returncode != 0
+    assert "graph-guard [design-edge-form]" in r.stderr
+    assert not (vault / "spec" / "consumer.md").exists()
+
+
+def test_design_traversal_depends_on_rejected_by_confinement_at_create(tmp_path):
+    """A path-traversal-shaped design depends-on entry is rejected, nothing written."""
+    vault, state = _make_vault(tmp_path)
+    r = _create_design(vault, state, "spec", "consumer", extra=["--depends-on", "spec/../evil"])
+    assert r.returncode != 0
+    assert "graph-guard [edge-reference]" in r.stderr
+    assert not (vault / "spec" / "consumer.md").exists()
+    assert not (vault / "spec" / "consumer.json").exists()
+
+
+def test_depends_on_help_names_both_task_and_design_forms(tmp_path):
+    """``--help`` describes both the bare-task-name and KIND/NAME[@STAGE] forms."""
+    vault, state = _make_vault(tmp_path)
+    r = _run(["record", "create", "--help"], vault=vault, state_dir=state)
+    assert r.returncode == 0, r.stderr
+    assert "TASK" in r.stdout
+    assert "KIND/NAME" in r.stdout
+    assert "STAGE" in r.stdout
 
 
 def test_search_is_a_registered_command(tmp_path):

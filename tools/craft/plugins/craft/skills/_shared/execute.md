@@ -163,9 +163,10 @@ task itself — and read both the render and the record's sidecar:
     slice of a live plan, not at the plan. Tell the operator to
     re-root the run at that parent and stop. The graph is healthy; the entry point was
     wrong. Never fall through to the standalone branch — a child slice is not standalone.
-  - **It does not resolve** — now the edge is the suspect (a `parent` value that wasn't
-    passed as a bare task name silently renders as a detached node; see
-    [[lesson/lore-task-graph-parent-depends-on-require-bare-task-names]]).
+  - **It does not resolve** — now the edge is the suspect. `parent` is always a bare
+    task name — unlike a `depends-on` edge, it never takes a `kind/name[@stage]`
+    form — and a value that wasn't passed bare silently renders as a detached node;
+    see [[lesson/lore-task-graph-parent-depends-on-require-bare-task-names]].
     Stop and report the suspected mis-wired parent edge, citing that lesson.
 
 **Standalone branch:**

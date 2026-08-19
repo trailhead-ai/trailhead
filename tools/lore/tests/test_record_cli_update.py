@@ -1668,6 +1668,65 @@ def test_unset_depends_on_and_parent_round_trip(tmp_path):
     assert "parent" not in after
 
 
+def _stamp_stored_depends_on(vault: Path, record_id: str, entries) -> None:
+    """Write *entries* straight into the sidecar, bypassing the CLI's guards.
+
+    Reproduces a task record whose ``depends-on`` was stored before the
+    task-edge form check existed — the CLI now refuses to write one, so the
+    only way to stand up that on-disk shape is to author the sidecar directly.
+    """
+    kind, name = record_id.split("/", 1)
+    path = vault / kind / f"{name}.json"
+    sidecar = json.loads(path.read_text(encoding="utf-8"))
+    sidecar["depends-on"] = list(entries)
+    path.write_text(json.dumps(sidecar), encoding="utf-8")
+
+
+def test_stored_prefixed_depends_on_does_not_block_a_status_update(tmp_path):
+    """A status flip on a record holding a prefixed entry must still land."""
+    vault, state = _make_vault(tmp_path)
+    rid = _mk_task(vault, state, "a")
+    _stamp_stored_depends_on(vault, rid, ["task/other"])
+
+    u = _run(["record", "update", rid, "--status", "done"], vault=vault, state_dir=state)
+    assert u.returncode == 0, u.stderr
+    assert "task-edge-form" not in u.stderr
+    after = _find_sidecar(vault, rid)
+    assert after["status"] == "done"
+    assert after["depends-on"] == ["task/other"]
+
+
+def test_newly_supplied_prefixed_depends_on_is_still_rejected_on_update(tmp_path):
+    """Grandfathering the stored entries does not open the door for a new one."""
+    vault, state = _make_vault(tmp_path)
+    rid = _mk_task(vault, state, "a")
+    _stamp_stored_depends_on(vault, rid, ["task/other"])
+    before = _find_sidecar(vault, rid)
+
+    u = _run(
+        ["record", "update", rid, "--depends-on", "task/foo"],
+        vault=vault, state_dir=state,
+    )
+    assert u.returncode != 0
+    assert "graph-guard [task-edge-form]" in u.stderr
+    assert "task/foo" in u.stderr
+    assert _find_sidecar(vault, rid) == before
+
+
+def test_unset_depends_on_removes_a_stored_prefixed_entry(tmp_path):
+    """Removal is how an operator repairs a bad entry — it must never be blocked."""
+    vault, state = _make_vault(tmp_path)
+    rid = _mk_task(vault, state, "a")
+    _stamp_stored_depends_on(vault, rid, ["task/other", "keeper"])
+
+    u = _run(
+        ["record", "update", rid, "--unset-depends-on", "task/other"],
+        vault=vault, state_dir=state,
+    )
+    assert u.returncode == 0, u.stderr
+    assert _find_sidecar(vault, rid)["depends-on"] == ["keeper"]
+
+
 def test_depends_on_cycle_rejected_on_update(tmp_path):
     """update introducing A→B→A is rejected and the record is left unchanged."""
     vault, state = _make_vault(tmp_path)
@@ -1834,6 +1893,107 @@ def test_guard_error_messages_share_one_format(tmp_path):
     assert lines, "expected at least one graph-guard line"
     for ln in lines:
         assert shape.match(ln), f"malformed guard line: {ln!r}"
+
+
+# ===========================================================================
+# Design graph guards on update / delete (spec/adr --depends-on)
+# ===========================================================================
+
+
+def _mk_design(vault, state, kind, title, *, extra=None, body="body\n"):
+    """Create a ``spec``/``adr`` record and return its RECORD_ID."""
+    args = ["record", "create", "--kind", kind, "--title", title]
+    if extra:
+        args += extra
+    r = _run(args, vault=vault, state_dir=state, stdin_text=body)
+    assert r.returncode == 0, r.stderr
+    return r.stdout.strip()
+
+
+def test_unset_depends_on_verbatim_match_removes_the_entry(tmp_path):
+    """--unset-depends-on removes the entry that matches byte-for-byte."""
+    vault, state = _make_vault(tmp_path)
+    rid = _mk_design(vault, state, "spec", "consumer", extra=["--depends-on", "spec/foo@ready"])
+    u = _run(
+        ["record", "update", rid, "--unset-depends-on", "spec/foo@ready"],
+        vault=vault, state_dir=state,
+    )
+    assert u.returncode == 0, u.stderr
+    assert _find_sidecar(vault, rid)["depends-on"] == []
+
+
+def test_unset_depends_on_unqualified_is_a_documented_silent_noop(tmp_path):
+    """Unsetting an unqualified entry does not match a staged stored value.
+
+    ``spec/foo`` and ``spec/foo@ready`` are different stored strings; the
+    removal compares verbatim, so the mismatch leaves the list untouched —
+    this is the documented behavior, not a bug.
+    """
+    vault, state = _make_vault(tmp_path)
+    rid = _mk_design(vault, state, "spec", "consumer", extra=["--depends-on", "spec/foo@ready"])
+    u = _run(
+        ["record", "update", rid, "--unset-depends-on", "spec/foo"],
+        vault=vault, state_dir=state,
+    )
+    assert u.returncode == 0, u.stderr
+    assert _find_sidecar(vault, rid)["depends-on"] == ["spec/foo@ready"]
+
+
+def test_design_cycle_rejected_across_two_writes(tmp_path):
+    """A design-graph cycle closed on a second, separate CLI write is refused.
+
+    ``a`` is created depending on the not-yet-existing ``b`` (dangling is
+    allowed); ``b`` is then updated to depend on ``a``, closing a→b→a.
+    """
+    vault, state = _make_vault(tmp_path)
+    a = _mk_design(vault, state, "spec", "a", extra=["--depends-on", "spec/b"])
+    b = _mk_design(vault, state, "spec", "b")
+    u = _run(["record", "update", b, "--depends-on", "spec/a"], vault=vault, state_dir=state)
+    assert u.returncode != 0
+    assert "graph-guard [design-depends-on-cycle]" in u.stderr
+    # b's sidecar was left unwritten — verified on disk, not just the exit code.
+    assert "depends-on" not in _find_sidecar(vault, b)
+    assert a  # a is unaffected; kept only to document the setup
+
+
+def test_design_edge_rejection_leaves_the_record_unwritten_on_update(tmp_path):
+    """A rejected design depends-on entry leaves the on-disk sidecar untouched."""
+    vault, state = _make_vault(tmp_path)
+    rid = _mk_design(vault, state, "spec", "consumer")
+    before = _find_sidecar(vault, rid)
+    u = _run(
+        ["record", "update", rid, "--depends-on", "spec/../evil"],
+        vault=vault, state_dir=state,
+    )
+    assert u.returncode != 0
+    assert "graph-guard [edge-reference]" in u.stderr
+    assert _find_sidecar(vault, rid) == before
+
+
+def test_dropping_a_depended_on_spec_prints_notice_while_the_flip_succeeds(tmp_path):
+    """Dropping a spec others depend on warns but the status flip still lands."""
+    vault, state = _make_vault(tmp_path)
+    a = _mk_design(vault, state, "spec", "a")
+    b = _mk_design(vault, state, "spec", "b", extra=["--depends-on", "spec/a"])
+    u = _run(["record", "update", a, "--status", "dropped"], vault=vault, state_dir=state)
+    assert u.returncode == 0, u.stderr
+    assert "graph-guard [design-dependents]" in u.stderr
+    assert "spec/b" in u.stderr
+    assert _find_sidecar(vault, a)["status"] == "dropped"
+    assert b  # kept only to document the setup
+
+
+def test_design_dependent_warning_on_delete_does_not_block(tmp_path):
+    """Deleting a depended-on spec warns listing dependents but succeeds."""
+    vault, state = _make_vault(tmp_path)
+    a = _mk_design(vault, state, "spec", "a")
+    _mk_design(vault, state, "spec", "b", extra=["--depends-on", "spec/a"])
+    d = _run(["record", "delete", a], vault=vault, state_dir=state)
+    assert d.returncode == 0, d.stderr
+    assert "graph-guard [design-dependents]" in d.stderr
+    assert "spec/b" in d.stderr
+    kind, name = a.split("/", 1)
+    assert not (vault / kind / f"{name}.md").exists()
 
 
 # ---------------------------------------------------------------------------
