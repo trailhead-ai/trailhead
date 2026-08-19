@@ -28,8 +28,10 @@ Invariants:
   but in ``v1`` all kinds share one global field schema (``FIELDS_V1``).
 - ``status`` is drawn from the kind's ordered vocab; the **first** element is the
   initial/default value applied when ``status`` is omitted on create.
-- ``depends-on``/``parent`` are gated to ``task`` records only (``KIND_GATED_FIELDS``);
-  present on any other kind, they are rejected naming both the field and the kind.
+- ``depends-on`` and ``parent`` are gated per field (``KIND_GATED_FIELDS``):
+  ``depends-on`` is accepted on ``task``, ``spec``, and ``adr``; ``parent`` on
+  ``task`` alone. Present on any other kind, they are rejected naming both the
+  field and the kind.
 - The validator checks **shape, not referential integrity**: ``related`` keys must
   be valid kinds and values ``list[str]``, but referenced names are *not* verified
   to exist (a dangling ``{"task": ["nope"]}`` validates clean — existence is
