@@ -505,6 +505,31 @@ class TestPretrustWiring:
         key = str(ws_dir.resolve())
         assert trust["projects"][key]["hasTrustDialogAccepted"] is True
 
+    def test_pretrust_false_does_not_abort_bringup(self, two_member_group, monkeypatch):
+        """pretrust_workspace returning False (an abort path) is still non-fatal
+        for bare `camp new` — bring-up warns and continues."""
+        import camp.provision.provision as provision
+        import camp.launch.claude_trust as claude_trust
+        from camp.provision.provision import bring_up_workspace
+
+        g = two_member_group
+        env = self._env(g)
+        spawned = []
+        monkeypatch.setattr(
+            provision,
+            "spawn_detached_provisioner",
+            lambda **kw: spawned.append(kw),
+        )
+        monkeypatch.setattr(claude_trust, "pretrust_workspace", lambda *a, **kw: False)
+
+        bring_up_workspace(g["group"], "feat-false", env=env)
+
+        from camp.group.manifest import read_central_manifest
+
+        mpath = _workspace_dir("testgroup", "feat-false", env) / "manifest.json"
+        assert read_central_manifest(mpath)["members"]
+        assert len(spawned) == 1
+
 
 # ===========================================================================
 # Test 4: foreground camp setup — provisioning state machine
@@ -851,6 +876,129 @@ class TestStatusExitCodes:
         assert by_name["repo_a"]["provision_state"] == "ready"
         assert by_name["repo_b"]["provision_state"] == "pending"
         assert report["code"] == code
+
+
+# ===========================================================================
+# Test 7: wait_for_provisioning_ready — bounded poll
+# ===========================================================================
+
+
+class TestWaitForProvisioningReady:
+    def _seed_states(self, group, slug, env, states: dict[str, str]):
+        import camp.provision.provision as provision
+        from camp.group.manifest import flip_member_state_unlocked, reconcile_lock
+
+        provision.seed_pending_workspace(group, slug, env=env)
+        mpath = provision.workspace_dir(group["group"]["name"], slug, env=env) / "manifest.json"
+        for name, state in states.items():
+            with reconcile_lock(mpath.parent):
+                flip_member_state_unlocked(mpath, name, state)
+
+    def test_already_ready_returns_immediately_without_sleeping(self, two_member_group):
+        from camp.provision.lifecycle import wait_for_provisioning_ready
+
+        g = two_member_group
+        self._seed_states(g["group"], "w1", g["env"], {"repo_a": "ready", "repo_b": "ready"})
+
+        sleeps: list[float] = []
+        outcome, _report = wait_for_provisioning_ready(
+            g["group"],
+            "w1",
+            env=g["env"],
+            interval=1.0,
+            timeout=5.0,
+            sleep=sleeps.append,
+        )
+
+        assert outcome == "ready"
+        assert sleeps == []
+
+    def test_flips_pending_to_ready_between_polls(self, two_member_group):
+        from camp.provision.lifecycle import wait_for_provisioning_ready
+        from camp.group.manifest import flip_member_state_unlocked, reconcile_lock
+
+        g = two_member_group
+        self._seed_states(g["group"], "w2", g["env"], {"repo_a": "ready", "repo_b": "pending"})
+        mpath = _workspace_dir("testgroup", "w2", g["env"]) / "manifest.json"
+
+        sleeps: list[float] = []
+
+        def fake_sleep(seconds):
+            sleeps.append(seconds)
+            with reconcile_lock(mpath.parent):
+                flip_member_state_unlocked(mpath, "repo_b", "ready")
+
+        outcome, _report = wait_for_provisioning_ready(
+            g["group"],
+            "w2",
+            env=g["env"],
+            interval=1.0,
+            timeout=5.0,
+            sleep=fake_sleep,
+        )
+
+        assert outcome == "ready"
+        assert sleeps == [1.0]
+
+    def test_any_failed_member_returns_failed_immediately(self, two_member_group):
+        from camp.provision.lifecycle import wait_for_provisioning_ready
+
+        g = two_member_group
+        self._seed_states(g["group"], "w3", g["env"], {"repo_a": "ready", "repo_b": "failed"})
+
+        sleeps: list[float] = []
+        outcome, _report = wait_for_provisioning_ready(
+            g["group"],
+            "w3",
+            env=g["env"],
+            interval=1.0,
+            timeout=5.0,
+            sleep=sleeps.append,
+        )
+
+        assert outcome == "failed"
+        assert sleeps == []
+
+    def test_stuck_pending_past_timeout_returns_timed_out_with_bounded_polls(
+        self, two_member_group
+    ):
+        from camp.provision.lifecycle import wait_for_provisioning_ready
+
+        g = two_member_group
+        self._seed_states(g["group"], "w4", g["env"], {"repo_a": "ready", "repo_b": "pending"})
+
+        sleeps: list[float] = []
+        outcome, _report = wait_for_provisioning_ready(
+            g["group"],
+            "w4",
+            env=g["env"],
+            interval=1.0,
+            timeout=3.0,
+            sleep=sleeps.append,
+        )
+
+        assert outcome == "timed-out"
+        # Bounded: at 1s interval / 3s timeout, no more than a handful of polls.
+        assert 1 <= len(sleeps) <= 4
+
+    def test_timed_out_message_names_camp_status(self, two_member_group):
+        from camp.provision.lifecycle import wait_for_provisioning_ready
+
+        g = two_member_group
+        self._seed_states(g["group"], "w5", g["env"], {"repo_a": "ready", "repo_b": "pending"})
+
+        outcome, report = wait_for_provisioning_ready(
+            g["group"],
+            "w5",
+            env=g["env"],
+            interval=1.0,
+            timeout=2.0,
+            sleep=lambda s: None,
+        )
+
+        assert outcome == "timed-out"
+        assert "camp status" in report["message"]
+        assert "w5" in report["message"]
 
 
 # ===========================================================================

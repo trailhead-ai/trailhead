@@ -462,6 +462,51 @@ def provision_status_code(
     return code, {"slug": slug, "code": code, "members": members}
 
 
+def wait_for_provisioning_ready(
+    group: dict[str, Any],
+    slug: str,
+    *,
+    env: dict[str, str] | None = None,
+    interval: float,
+    timeout: float,
+    sleep: Any,
+) -> tuple[str, dict[str, Any]]:
+    """Poll provisioning state until ready, failed, or timeout.
+
+    Polls `provision_status_code` (the same manifest state it reads) at a fixed
+    `interval` up to a bounded `timeout`, elapsed time tracked purely by counting
+    sleeps rather than a wall clock — so tests can inject a fake `sleep` and never
+    actually sleep. A killed provisioner leaves members `pending` forever with no
+    liveness signal, so this wait is always bounded: it never polls unboundedly.
+
+    Returns (outcome, report):
+        outcome: "ready" | "failed" | "timed-out"
+        report: the last provision_status_code report, plus a "message" key on
+            timeout naming `camp status <slug>` as the way to check current state.
+
+    Already-all-ready returns immediately without calling `sleep`. Any member
+    `failed` returns failed immediately, also without sleeping further.
+    """
+    elapsed = 0.0
+    while True:
+        code, report = provision_status_code(group, slug, env=env)
+        if code == 3:
+            return "failed", report
+        if code == 0:
+            return "ready", report
+
+        if elapsed >= timeout:
+            report = dict(report)
+            report["message"] = (
+                f"timed out waiting for workspace '{slug}' to finish provisioning; "
+                f"run `camp status {slug}` to check current state"
+            )
+            return "timed-out", report
+
+        sleep(interval)
+        elapsed += interval
+
+
 def cmd_sync_group(
     group: dict[str, Any],
     *,

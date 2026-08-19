@@ -86,7 +86,7 @@ def pretrust_workspace(
     *,
     workspace_root: Path | str,
     env: dict[str, str] | None = None,
-) -> None:
+) -> bool:
     """Merge `hasTrustDialogAccepted: true` into ~/.claude.json for launch_dir.
 
     launch_dir   — the directory the harness will be launched in (the trust target).
@@ -97,8 +97,15 @@ def pretrust_workspace(
 
     Idempotent: if the entry already exists and is true, no write is performed.
 
-    Failure posture: malformed / unreadable existing file → emit camp: stderr, return.
-    Out-of-confinement launch_dir → emit camp: stderr, return.  No exception raised.
+    Returns True when trust is in place (a fresh write, or the already-trusted
+    idempotent no-op). Returns False on every abort path below (out-of-confinement,
+    unreadable / malformed / structurally-wrong existing file) — each still emits
+    its camp: stderr line and does not raise.
+
+    Failure posture: malformed / unreadable existing file → emit camp: stderr, return False.
+    Out-of-confinement launch_dir → emit camp: stderr, return False. No exception raised
+    on these paths. An atomic-write failure is a different case — see below — and
+    propagates instead of returning False.
     """
     launch_dir = Path(launch_dir).resolve()
     workspace_root = Path(workspace_root).resolve()
@@ -112,7 +119,7 @@ def pretrust_workspace(
             f"{workspace_root} (confinement check)",
             file=sys.stderr,
         )
-        return
+        return False
 
     home = _home_from_env(env)
     claude_json_path = home / ".claude.json"
@@ -133,7 +140,7 @@ def pretrust_workspace(
             "(unreadable file; aborting to avoid overwriting)",
             file=sys.stderr,
         )
-        return
+        return False
     else:
         try:
             existing_data = json.loads(raw)
@@ -143,7 +150,7 @@ def pretrust_workspace(
                 f"({exc}); not overwriting",
                 file=sys.stderr,
             )
-            return
+            return False
 
         # Parseable but structurally wrong (top-level or projects/entry not a
         # mapping) is treated like malformed: abort without overwriting so the
@@ -155,14 +162,14 @@ def pretrust_workspace(
                 "structure (projects/entry is not an object); not overwriting",
                 file=sys.stderr,
             )
-            return
+            return False
 
     # Idempotency check: skip if already trusted.
     project_key = str(launch_dir)
     if existing_data is not None:
         entry = existing_data.get("projects", {}).get(project_key, {})
         if entry.get("hasTrustDialogAccepted") is True:
-            return
+            return True
 
     # Build the merged payload.
     data = existing_data if existing_data is not None else {}
@@ -187,3 +194,5 @@ def pretrust_workspace(
         except OSError:
             pass
         raise
+
+    return True

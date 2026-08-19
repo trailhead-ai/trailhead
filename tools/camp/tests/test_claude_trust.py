@@ -26,6 +26,8 @@ import sys
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
@@ -406,6 +408,104 @@ class TestConfinement:
         # "confinement" or "outside" or "not under" — distinct from "malformed"/"unreadable"
         assert "malform" not in err.lower()
         assert "unreadable" not in err.lower()
+
+
+# ---------------------------------------------------------------------------
+# pretrust_workspace — return value
+# ---------------------------------------------------------------------------
+
+
+class TestReturnValue:
+    def test_successful_fresh_pretrust_returns_true(self, tmp_path):
+        from camp.launch.claude_trust import pretrust_workspace
+
+        launch_dir = tmp_path / "ws"
+        launch_dir.mkdir()
+        result = pretrust_workspace(
+            launch_dir, workspace_root=launch_dir, env={"HOME": str(tmp_path)}
+        )
+        assert result is True
+
+    def test_already_trusted_idempotent_returns_true(self, tmp_path):
+        from camp.launch.claude_trust import pretrust_workspace
+
+        launch_dir = tmp_path / "ws"
+        launch_dir.mkdir()
+        key = str(launch_dir.resolve())
+        existing = {"projects": {key: {"hasTrustDialogAccepted": True}}}
+        (tmp_path / ".claude.json").write_text(json.dumps(existing))
+
+        result = pretrust_workspace(
+            launch_dir, workspace_root=launch_dir, env={"HOME": str(tmp_path)}
+        )
+        assert result is True
+
+    def test_out_of_confinement_returns_false(self, tmp_path):
+        from camp.launch.claude_trust import pretrust_workspace
+
+        ws = tmp_path / "workspace"
+        ws.mkdir()
+        outside = tmp_path / "other"
+        outside.mkdir()
+
+        result = pretrust_workspace(outside, workspace_root=ws, env={"HOME": str(tmp_path)})
+        assert result is False
+
+    def test_unreadable_file_returns_false(self, tmp_path):
+        from camp.launch.claude_trust import pretrust_workspace
+
+        claude_json = tmp_path / ".claude.json"
+        claude_json.write_text(json.dumps({"projects": {}}))
+
+        launch_dir = tmp_path / "ws"
+        launch_dir.mkdir()
+
+        def _raise_oserror(*_a, **_kw):
+            raise OSError("Permission denied")
+
+        with patch("camp.launch.claude_trust.open", side_effect=_raise_oserror):
+            result = pretrust_workspace(
+                launch_dir, workspace_root=launch_dir, env={"HOME": str(tmp_path)}
+            )
+        assert result is False
+
+    def test_malformed_json_returns_false(self, tmp_path):
+        from camp.launch.claude_trust import pretrust_workspace
+
+        claude_json = tmp_path / ".claude.json"
+        claude_json.write_text("{bad json}")
+
+        launch_dir = tmp_path / "ws"
+        launch_dir.mkdir()
+        result = pretrust_workspace(
+            launch_dir, workspace_root=launch_dir, env={"HOME": str(tmp_path)}
+        )
+        assert result is False
+
+    def test_structurally_wrong_config_returns_false(self, tmp_path):
+        from camp.launch.claude_trust import pretrust_workspace
+
+        claude_json = tmp_path / ".claude.json"
+        claude_json.write_text('{"projects": "nope"}')
+
+        launch_dir = tmp_path / "ws"
+        launch_dir.mkdir()
+        result = pretrust_workspace(
+            launch_dir, workspace_root=launch_dir, env={"HOME": str(tmp_path)}
+        )
+        assert result is False
+
+    def test_atomic_write_failure_still_raises(self, tmp_path):
+        from camp.launch.claude_trust import pretrust_workspace
+
+        launch_dir = tmp_path / "ws"
+        launch_dir.mkdir()
+
+        with patch("camp.launch.claude_trust.os.replace", side_effect=OSError("disk full")):
+            with pytest.raises(OSError):
+                pretrust_workspace(
+                    launch_dir, workspace_root=launch_dir, env={"HOME": str(tmp_path)}
+                )
 
 
 # ---------------------------------------------------------------------------

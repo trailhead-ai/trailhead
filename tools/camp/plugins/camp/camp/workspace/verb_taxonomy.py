@@ -89,7 +89,9 @@ LEGACY_REDIRECTS: dict[str, str] = {
 # BARE capture, which bookmarks the workspace the shell is standing in and so has
 # nothing to act on without one (see bookmark.groupless_subverb, the single
 # classifier both dispatchers consult).
-NEEDS_GROUP_VERBS = frozenset({"new", "remove", "pwd", "activate", "setup", "bookmark"})
+NEEDS_GROUP_VERBS = frozenset(
+    {"new", "remove", "pwd", "activate", "setup", "bookmark", "launch", "sessions"}
+)
 
 _NEEDS_GROUP_CONFIGURE = frozenset({"new", "setup"})
 

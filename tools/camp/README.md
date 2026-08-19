@@ -23,9 +23,12 @@ for the full install flow.
 
 ```
 camp new <slug>      # create or enter a workspace
+camp new <slug> --launch  # create or enter, then start a detached session in it
 camp pwd <slug>      # print workspace path
 camp list            # list all worktrees (alias: ls)
 camp status          # show git + drift status
+camp launch <slug>   # start a detached harness session in a workspace
+camp sessions        # list the harness sessions camp can see
 camp remove          # tear down a worktree (alias: rm)
 camp bookmark        # bookmark this workspace's harness session under a short ref
 camp bookmark ls     # list every bookmark (all groups)
@@ -89,6 +92,36 @@ to a different ref means `camp bookmark rm <old-ref>` first.
 `camp bookmark ls` marks a row whose workspace or transcript has since disappeared,
 and warns with `expires ~Nd` while a transcript is still recoverable but nearing the
 harness's own retention cleanup.
+
+## Detached sessions
+
+`camp launch <slug>` starts a harness session in a tmux pane rooted at the
+workspace and returns immediately — nothing is attached to your terminal. camp
+mints the session id itself, so it can hand it back on stdout (one line,
+`--json` for the machine shape) and report the workspace, the tmux name, and a
+paste-ready `tmux attach -t <name>` on stderr.
+
+```
+camp launch <slug> [--json]       # start one; stdout is the session id
+camp sessions [<slug>] [--json]   # list what camp can see, scoped or global
+camp new <slug> --launch [--no-wait] [--json]
+```
+
+The launch is confirmed, not assumed: camp polls harness enumeration until the
+new session id appears and refuses (killing the pane) if it never does — a
+session stalled at an unanswered trust prompt is invisible to enumeration, so
+camp pre-seeds the workspace's trust before spawning. The pane also drops the
+parent session's environment, so a launched session never inherits the
+credentials of the session that launched it.
+
+`camp new <slug> --launch` blocks until the workspace finishes provisioning
+before launching; `--no-wait` launches immediately and leaves later provisioning
+failures to surface under `camp status <slug>`. Either way stdout stays exactly
+the workspace path.
+
+`camp sessions` degrades rather than failing: an enumeration error, an unknown
+harness, or an absent tmux prints a notice on stderr and an empty list on
+stdout, exit 0.
 
 ## Group setup
 

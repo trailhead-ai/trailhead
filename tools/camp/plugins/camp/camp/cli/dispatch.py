@@ -336,6 +336,12 @@ def _dispatch_group_command(
     if cmd == "pwd":
         _cmd_pwd_group_cli(rest, group, group_env)
         return
+    if cmd in ("launch", "sessions"):
+        from .session import _cmd_launch_group_cli, _cmd_sessions_group_cli
+
+        handler = _cmd_launch_group_cli if cmd == "launch" else _cmd_sessions_group_cli
+        handler(rest, group, group_env)
+        return
     if cmd == "bookmark":
         from ..bookmark import groupless_subverb
         from ..bookmark.capture import cmd_bookmark
