@@ -297,8 +297,10 @@ def _cmd_new_group_cli(
     or the stdout path: a workspace that was created is a success even if the
     session could not start, and a failed launch is a `camp launch: …` stderr line.
     `--json` (which requires `--launch`) replaces the bare path line with
-    `{"workspace": <abs path>, "session_id": <id or null>}` — the single stdout
-    shape a machine caller parses on both outcomes.
+    `{"workspace": <abs path>, "session_id": <id or null>, "tmux_name": <name or
+    null>}` — the single stdout shape a machine caller parses on both outcomes.
+    `tmux_name` is the launch engine's own derived name (never reconstructed
+    here), mirroring what `camp launch --json` already reports on the reuse path.
     """
     from ..spine import _resolve_slug, _consume_flag_value, _die
     from ..provision.provision import bring_up_workspace
@@ -375,7 +377,7 @@ def _cmd_new_group_cli(
             file=sys.stderr,
         )
 
-    session_id: str | None = None
+    launched_session = None
     if launch:
         from .session import launch_for_new, wait_for_provisioning
 
@@ -389,10 +391,18 @@ def _cmd_new_group_cli(
         else:
             ready = wait_for_provisioning(group, slug, env=env)
         if ready:
-            session_id = launch_for_new(group, slug, env=env)
+            launched_session = launch_for_new(group, slug, env=env)
 
     if as_json:
-        print(json.dumps({"workspace": str(ws_dir), "session_id": session_id}))
+        print(
+            json.dumps(
+                {
+                    "workspace": str(ws_dir),
+                    "session_id": launched_session.session_id if launched_session else None,
+                    "tmux_name": launched_session.tmux_name if launched_session else None,
+                }
+            )
+        )
         return
 
     # The workspace abs path is the ONLY thing on stdout: exactly one line, no

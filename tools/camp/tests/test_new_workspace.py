@@ -17,6 +17,7 @@ Test contract:
 from __future__ import annotations
 
 import importlib
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -274,6 +275,37 @@ class TestBringUpInjectHook:
             f"Re-entering an existing workspace must not duplicate the inject hook "
             f"(before={before_drain_count}, after={after_drain_count})"
         )
+
+
+class TestLaunchJsonCarriesTheEngineReportedTmuxName:
+    """`camp new --launch --json` must carry the launch engine's own tmux_name —
+    never reconstruct `camp-<slug>-<uuid8>` at the print site."""
+
+    def test_tmux_name_in_json_output_is_the_engine_reported_value_verbatim(
+        self, camp_cli, group_env, monkeypatch, capsys
+    ):
+        import camp.cli.session as cli_session
+        from camp.launch.session import LaunchedSession
+
+        g = group_env
+        monkeypatch.setattr(cli_session, "wait_for_provisioning", lambda *a, **k: True)
+        fake_launched = LaunchedSession(
+            session_id="11111111-2222-3333-4444-555555555555",
+            tmux_name="not-a-derived-name-at-all",
+            launch_dir=Path("/tmp/wherever"),
+        )
+        monkeypatch.setattr(cli_session, "launch_and_confirm", lambda *a, **k: fake_launched)
+
+        camp_cli._cmd_new_group_cli(
+            ["feat-x", "--launch", "--json"], g["group"], g["env"], dry_run=False
+        )
+
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["tmux_name"] == "not-a-derived-name-at-all", (
+            "tmux_name must be the launch engine's reported value, not a "
+            "re-derivation of camp-<slug>-<uuid8> at the print site"
+        )
+        assert payload["session_id"] == "11111111-2222-3333-4444-555555555555"
 
 
 class TestShellIntegrationNudge:

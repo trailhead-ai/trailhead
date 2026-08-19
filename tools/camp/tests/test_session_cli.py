@@ -24,7 +24,8 @@ Test contract:
   exit 0; --json carries only normalized SessionRecord fields.
 - camp new --launch: stdout is the workspace path alone on BOTH success and
   launch failure, exit 0 in both; --json replaces that with
-  {"workspace", "session_id"} / {"workspace", "session_id": null}.
+  {"workspace", "session_id", "tmux_name"} /
+  {"workspace", "session_id": null, "tmux_name": null}.
 - --no-wait skips the provisioning wait and names `camp status <slug>`; the
   default path runs the provisioning wait and the confirmation wait back to back.
 - Bare `camp new` output is byte-identical to the pre-`--launch` surface.
@@ -395,9 +396,10 @@ def test_camp_new_launch_json_emits_workspace_and_session_id(cli_env) -> None:
 
     assert result.returncode == 0, result.stderr
     payload = json.loads(result.stdout)
-    assert set(payload) == {"workspace", "session_id"}
+    assert set(payload) == {"workspace", "session_id", "tmux_name"}
     assert payload["workspace"].endswith("/feat-j")
     assert payload["session_id"]
+    assert payload["tmux_name"] == f"camp-feat-j-{payload['session_id'][:8]}"
 
 
 def test_camp_new_launch_json_failure_nulls_the_session_id(cli_env) -> None:
@@ -405,8 +407,9 @@ def test_camp_new_launch_json_failure_nulls_the_session_id(cli_env) -> None:
 
     assert result.returncode == 0, result.stderr
     payload = json.loads(result.stdout)
-    assert set(payload) == {"workspace", "session_id"}
+    assert set(payload) == {"workspace", "session_id", "tmux_name"}
     assert payload["session_id"] is None
+    assert payload["tmux_name"] is None
     assert payload["workspace"].endswith("/feat-k")
     assert "camp launch: refusing to launch" in result.stderr
 
