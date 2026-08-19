@@ -584,9 +584,24 @@ def _parse_launch(raw: Any, path: Path) -> dict[str, Any] | None:
     result: dict[str, Any] = {}
 
     if "roots" in raw:
-        result["roots"] = _validate_string_list_field(
+        roots = _validate_string_list_field(
             raw["roots"], path=path, where="launch.roots", allow_empty_list=False
         )
+        # Every entry must name a fixed location. A relative entry would be
+        # resolved against whatever directory the process happens to run from,
+        # so the same config would fence differently per invocation — and an
+        # unexpected cwd widens the boundary rather than narrowing it. An
+        # allowlist that moves with the caller is not a containment boundary.
+        # "~user" is rejected with the rest: it looks anchored but expands
+        # nowhere, leaving a literal relative path.
+        for entry in roots:
+            if not (entry.startswith("/") or entry == "~" or entry.startswith("~/")):
+                raise GroupConfigError(
+                    f"{path}: launch.roots entry {entry!r} must be an absolute path "
+                    "or start with '~/' — a relative entry would depend on the "
+                    "directory camp is invoked from"
+                )
+        result["roots"] = roots
 
     return result
 

@@ -1320,6 +1320,37 @@ def test_launch_roots_invalid_raises(tmp_path: Path, roots_line: str) -> None:
     assert "launch.roots" in str(exc_info.value)
 
 
+@pytest.mark.parametrize(
+    "entry",
+    [
+        "code",
+        "./code",
+        "../code",
+        "~user/code",
+    ],
+)
+def test_launch_roots_rejects_entries_without_a_fixed_anchor(tmp_path: Path, entry: str) -> None:
+    """A roots entry must name a fixed location, not one relative to the caller.
+
+    A relative entry is resolved against whatever directory camp runs from, so
+    one config fences differently per invocation — and an unexpected working
+    directory widens the boundary rather than narrowing it. '~user' is rejected
+    alongside them: it reads as anchored but expands nowhere, leaving a literal
+    relative path with the same defect.
+    """
+    from camp.group.config import GroupConfigError
+
+    with pytest.raises(GroupConfigError) as exc_info:
+        _write_and_load(tmp_path, f'[launch]\nroots = ["{entry}"]\n')
+    assert "launch.roots" in str(exc_info.value)
+
+
+def test_launch_roots_accepts_absolute_and_home_anchored_entries(tmp_path: Path) -> None:
+    """The two anchored spellings both load: absolute, and '~'-anchored."""
+    cfg = _write_and_load(tmp_path, '[launch]\nroots = ["/srv/work", "~/code", "~"]\n')
+    assert cfg["launch"]["roots"] == ["/srv/work", "~/code", "~"]
+
+
 def test_launch_unknown_key_raises(tmp_path: Path) -> None:
     """An unrecognized key inside [launch] fails closed — [launch] configures a
     containment boundary, so a typo must never be silently ignored."""
