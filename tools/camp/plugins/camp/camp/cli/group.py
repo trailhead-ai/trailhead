@@ -1,10 +1,12 @@
-"""The group command group: ``group`` (author/wire a config) and ``new`` (create a workspace).
+"""The group command group: ``group`` (author/wire a config), ``groups`` (list
+configs), and ``new`` (create a workspace).
 
 ``group`` has three modes (wire hooks for an existing config, author a config
-from ``--member`` flags then wire, or write a ``--scaffold`` stub); ``new`` seeds
-a workspace directory + manifest and spawns the detached background provisioner.
-Both are the *creation* verbs — everything that acts on an already-created
-workspace lives in ``workspace`` / ``lifecycle``.
+from ``--member`` flags then wire, or write a ``--scaffold`` stub); ``groups``
+is a read-only listing of every configured group; ``new`` seeds a workspace
+directory + manifest and spawns the detached background provisioner. All three
+are dispatched groupless, before any group resolves from cwd — everything that
+acts on an already-created workspace lives in ``workspace`` / ``lifecycle``.
 """
 from __future__ import annotations
 
@@ -211,6 +213,86 @@ def _cmd_group_cli(args: list[str]) -> None:
     print(f"camp group: hooks wired for group {group_name!r} ({len(group['members'])} member(s))")
 
 
+def _cmd_groups_cli(args: list[str]) -> None:
+    """camp groups [--json] — list every configured group: name + member names.
+
+    Read-only and fully groupless: reads directly from the group config
+    directory, the same source `load_group` reads, and never resolves a group
+    from cwd or accepts `--group`. Runs from any directory, including outside
+    every configured group's member repos.
+
+    No groups configured (missing or empty groups dir) exits 0 with an empty
+    list — `[]` in --json mode, a plain "no groups configured" line in human
+    mode — never an error.
+
+    A group config file that fails to load degrades that one entry with a
+    stderr notice and is dropped from the listing, rather than failing the
+    whole command (matching the best-effort degrade idiom used elsewhere in
+    camp, e.g. provision.py's pretrust step) — one bad file must not hide every
+    other configured group. Unparseable TOML is only the expected case: the
+    glob also matches a directory wearing a `.toml` name, and reading the file
+    can fail on non-UTF-8 bytes or on permissions, none of which may reach the
+    operator as a traceback.
+
+    That degrade covers load failures ONLY — a malformed, unreadable, or absent
+    file. Anything else escaping the loader is a defect in the loader, and it
+    propagates: reporting it as a bad config file would drop a healthy group
+    from the listing and still exit 0, and this is the only group-enumeration
+    surface camp offers, so a silently short listing reads as "that group does
+    not exist".
+    """
+    from ..group.config import GroupConfigError, GroupConfigNotFound, load_group
+    from .common import _groups_dir
+
+    as_json = "--json" in args
+
+    entries: list[dict] = []
+    groups_dir = _groups_dir()
+    if groups_dir.is_dir():
+        for toml_file in sorted(groups_dir.glob("*.toml")):
+            try:
+                config = load_group(toml_file)
+            # The load failures, spelled out: a malformed file, a path that is
+            # not a file at all (a directory wearing a `.toml` name), non-UTF-8
+            # bytes (a UnicodeDecodeError, not an OSError), and an unreadable
+            # file.
+            except (
+                GroupConfigError,
+                GroupConfigNotFound,
+                UnicodeDecodeError,
+                OSError,
+            ) as e:
+                # First line only: a config error's message can carry a
+                # multi-line first-run hint, which is noise inside a listing.
+                # And only some of these name the file — the config errors
+                # embed the path, a decode error from non-UTF-8 bytes names
+                # nothing at all — so the notice supplies it when it is absent.
+                message = str(e).strip()
+                detail = message.splitlines()[0] if message else e.__class__.__name__
+                if str(toml_file) not in detail:
+                    detail = f"{toml_file}: {detail}"
+                print(f"camp groups: {detail} — skipping", file=sys.stderr)
+                continue
+            entries.append(
+                {
+                    "name": config["group"]["name"],
+                    "members": [m["name"] for m in config["members"]],
+                }
+            )
+    entries.sort(key=lambda entry: entry["name"])
+
+    if as_json:
+        print(json.dumps(entries))
+        return
+
+    if not entries:
+        print("no groups configured")
+        return
+
+    for entry in entries:
+        print(f"{entry['name']}: {', '.join(entry['members'])}")
+
+
 def _cmd_new_group_cli(
     args: list[str],
     group: dict,
@@ -243,8 +325,10 @@ def _cmd_new_group_cli(
     or the stdout path: a workspace that was created is a success even if the
     session could not start, and a failed launch is a `camp launch: …` stderr line.
     `--json` (which requires `--launch`) replaces the bare path line with
-    `{"workspace": <abs path>, "session_id": <id or null>}` — the single stdout
-    shape a machine caller parses on both outcomes.
+    `{"workspace": <abs path>, "session_id": <id or null>, "tmux_name": <name or
+    null>}` — the single stdout shape a machine caller parses on both outcomes.
+    `tmux_name` is the launch engine's own derived name (never reconstructed
+    here), mirroring what `camp launch --json` already reports on the reuse path.
     """
     from ..spine import _resolve_slug, _consume_flag_value, _die
     from ..provision.provision import bring_up_workspace
@@ -321,7 +405,7 @@ def _cmd_new_group_cli(
             file=sys.stderr,
         )
 
-    session_id: str | None = None
+    launched_session = None
     if launch:
         from .session import launch_for_new, wait_for_provisioning
 
@@ -335,10 +419,18 @@ def _cmd_new_group_cli(
         else:
             ready = wait_for_provisioning(group, slug, env=env)
         if ready:
-            session_id = launch_for_new(group, slug, env=env)
+            launched_session = launch_for_new(group, slug, env=env)
 
     if as_json:
-        print(json.dumps({"workspace": str(ws_dir), "session_id": session_id}))
+        print(
+            json.dumps(
+                {
+                    "workspace": str(ws_dir),
+                    "session_id": launched_session.session_id if launched_session else None,
+                    "tmux_name": launched_session.tmux_name if launched_session else None,
+                }
+            )
+        )
         return
 
     # The workspace abs path is the ONLY thing on stdout: exactly one line, no

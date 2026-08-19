@@ -9,10 +9,15 @@ seams that are awkward to exercise through the real CLI binary:
 - `camp sessions <slug>` scoping enumeration by the same resolved workspace
   directory the launch engine spawns into, so a symlinked workspace root
   doesn't make a just-launched session invisible to a slug-scoped query.
+- `camp launch --json` emitting the launch engine's own `tmux_name` verbatim.
+  A sentinel name the derivation could never produce is the only way to tell
+  reading it apart from rebuilding `camp-<slug>-<uuid8>` at the print site,
+  which the end-to-end suite cannot inject.
 """
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -89,3 +94,40 @@ class TestSessionsSlugScopingResolvesTheWorkspace:
 
         assert seen["workspace"] == link.resolve()
         assert seen["workspace"] != link
+
+
+class TestLaunchJsonCarriesTheEngineReportedTmuxName:
+    """`camp launch --json` must print the name the launch engine reported.
+
+    Rebuilding `camp-<slug>-<uuid8>` at the print site reproduces the engine's
+    own string, so only a name the derivation could never produce distinguishes
+    the two.
+    """
+
+    def test_tmux_name_in_json_output_is_the_engine_reported_value_verbatim(
+        self, monkeypatch, capsys
+    ):
+        import camp.cli.session as cli_session
+        from camp.launch.session import LaunchedSession
+
+        monkeypatch.setattr(
+            "camp.cli.dispatch._slug_from_args_or_cwd", lambda *a, **k: "feat-x"
+        )
+        monkeypatch.setattr(
+            cli_session,
+            "launch_and_confirm",
+            lambda *a, **k: LaunchedSession(
+                session_id="11111111-2222-3333-4444-555555555555",
+                tmux_name="not-a-derived-name-at-all",
+                launch_dir=Path("/tmp/wherever"),
+            ),
+        )
+
+        cli_session._cmd_launch_group_cli(["feat-x", "--json"], GROUP, {})
+
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["tmux_name"] == "not-a-derived-name-at-all", (
+            "tmux_name must be the launch engine's reported value, not a "
+            "re-derivation of camp-<slug>-<uuid8> at the print site"
+        )
+        assert payload["session_id"] == "11111111-2222-3333-4444-555555555555"

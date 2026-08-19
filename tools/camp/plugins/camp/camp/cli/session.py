@@ -85,8 +85,13 @@ def launch_and_confirm(group: dict, slug: str, *, env: dict[str, str] | None = N
     return launched
 
 
-def launch_for_new(group: dict, slug: str, *, env: dict[str, str] | None = None) -> str | None:
-    """`camp new --launch`'s launch step: the session id, or None on refusal.
+def launch_for_new(group: dict, slug: str, *, env: dict[str, str] | None = None):
+    """`camp new --launch`'s launch step: the LaunchedSession, or None on refusal.
+
+    Returning the whole :class:`LaunchedSession` — not just its session id — is
+    what lets `camp new --launch --json` report `tmux_name` alongside
+    `session_id` without reconstructing `camp-<slug>-<uuid8>` at the print site;
+    the caller carries the exact name the launch engine chose.
 
     Returning None rather than exiting is the whole point: `camp new` already
     created the workspace, and that success is what its exit code and its stdout
@@ -96,7 +101,7 @@ def launch_for_new(group: dict, slug: str, *, env: dict[str, str] | None = None)
     from ..launch.session import LaunchError
 
     try:
-        return launch_and_confirm(group, slug, env=env).session_id
+        return launch_and_confirm(group, slug, env=env)
     except LaunchError as exc:
         print(_refusal(exc), file=sys.stderr)
         return None

@@ -331,14 +331,15 @@ class TestBuildRealAnchorSet:
         for tool in ("lore", "craft", "camp"):
             assert tool in anchors, f"tool {tool!r} missing from anchor set"
 
-    def test_camp_anchors_cover_its_one_skill_and_no_agents(self):
-        """camp is a CLI + hooks tool: no subagents, and `bookmark` is its one skill.
+    def test_camp_anchors_cover_its_skills_and_no_agents(self):
+        """camp is a CLI + hooks tool: no subagents, and two skills —
+        `bookmark` and `concierge`.
 
         Worktree orchestration stays operator-facing (README) — the workspace
         exists before the harness opens — so it is not anchored as a skill.
         """
         anchors = build_real_anchor_set()
-        assert anchors["camp"]["skills"] == {"skills/bookmark"}
+        assert anchors["camp"]["skills"] == {"skills/bookmark", "skills/concierge"}
         assert anchors["camp"]["agents"] == set()
         assert isinstance(anchors["camp"]["skills"], set)
         assert isinstance(anchors["camp"]["agents"], set)

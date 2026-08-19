@@ -61,6 +61,11 @@ _STATIC_RESERVED = frozenset(
     {
         # Canonical group-aware/fleet verbs the taxonomy tables do not model.
         "group",
+        # Read-only group listing. Like "group", it is intercepted in cli/camp
+        # before group resolution, so it never reaches the group-aware router's
+        # RESERVED check — but it is a live verb, and a slug that shadows one is
+        # exactly what this set exists to reject.
+        "groups",
         "list",
         "status",
         "sync",
@@ -419,6 +424,7 @@ def cmd_help(_args: list[str]) -> None:
         "\n"
         "Setup:\n"
         "  camp group <name> [options]       Wire hooks and author a group config\n"
+        "  camp groups [--json]              List every configured group (any cwd)\n"
         "\n"
         "Workspace commands:\n"
         "  camp list [--json]                List all worktrees (alias: ls)\n"
