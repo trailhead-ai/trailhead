@@ -23,6 +23,16 @@ A guard with a counterpart on the other graph carries a namespaced tag
 (``design-depends-on-cycle`` vs ``depends-on-cycle``) so the bracketed tag alone
 says which graph rejected the write.
 
+**Output-neutralization posture.** Node ids in these messages are filename
+stems, and a stem is only character-validated when its record was written
+through the CLI — a record synced into a ``shared: true`` vault by git never
+was. Every node id therefore reaches a message through
+:func:`graph.format_node` / :func:`graph.format_node_path` (or a plain ``!r``),
+never raw, on BOTH graphs. Without that, a stem carrying a newline plus a
+counterfeit ``graph-guard [...]`` line would forge an extra verdict on stderr
+and a stem carrying an ANSI escape would colour a terminal reading it — both
+against a threat model in which agents drive this CLI and parse its stderr.
+
 Merged record vs. supplied values: every guard judges the merged record — what
 would land on disk — except the task-edge FORM check, which judges only the
 ``depends-on`` values the write itself supplies (``supplied_depends_on``). That
@@ -267,7 +277,8 @@ def evaluate_task_guards(
             errors.append(
                 graph_mod.format_guard_message(
                     "depends-on-cycle",
-                    f"task {name!r} would create a dependency cycle: " + " -> ".join(cycle),
+                    f"task {name!r} would create a dependency cycle: "
+                    + graph_mod.format_node_path(cycle),
                 )
             )
         loop = graph_mod.find_ancestor_loop(_graph(), name)
@@ -275,7 +286,8 @@ def evaluate_task_guards(
             errors.append(
                 graph_mod.format_guard_message(
                     "parent-loop",
-                    f"task {name!r} would create a parent ancestor loop: " + " -> ".join(loop),
+                    f"task {name!r} would create a parent ancestor loop: "
+                    + graph_mod.format_node_path(loop),
                 )
             )
 
@@ -447,7 +459,7 @@ def evaluate_design_guards(
             notices.append(
                 graph_mod.format_guard_message(
                     "design-dependents",
-                    f"{qualified_id} deleted but still depended on",
+                    f"{graph_mod.format_node(qualified_id)} deleted but still depended on",
                     offenders=deps,
                 )
             )
@@ -485,7 +497,8 @@ def evaluate_design_guards(
             errors.append(
                 graph_mod.format_guard_message(
                     "design-depends-on-cycle",
-                    f"{qualified_id} would create a dependency cycle: " + " -> ".join(cycle),
+                    f"{graph_mod.format_node(qualified_id)} would create a dependency cycle: "
+                    + graph_mod.format_node_path(cycle),
                 )
             )
     if errors:
@@ -498,7 +511,8 @@ def evaluate_design_guards(
             notices.append(
                 graph_mod.format_guard_message(
                     "design-dependents",
-                    f"{qualified_id} set to {status_set} but still depended on",
+                    f"{graph_mod.format_node(qualified_id)} set to {status_set} "
+                    f"but still depended on",
                     offenders=deps,
                 )
             )

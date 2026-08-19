@@ -18,6 +18,12 @@ Guard-error shape: every graph guard — blocking error, non-blocking warning, a
 the flow-out ritual reminder — is formatted through :func:`format_guard_message`
 so all of them share one machine-parseable ``graph-guard [<guard>]: <message>``
 shape on stderr (agents parse the bracketed guard tag to react programmatically).
+Node ids are untrusted input to that shape — a stem that reached the vault by
+git sync rather than the CLI never had its characters validated — so every one
+of them is neutralized through :func:`format_node` (or :func:`format_node_path`
+for a cycle/loop render) before it is interpolated. That keeps the two
+invariants the output is parsed under: exactly one line per guard message, and
+no terminal control sequences in it.
 
 Design-dependency section: this module also carries the pure design side of a
 second, unrelated dependency grammar — the ``depends-on`` sidecar entries a
@@ -56,20 +62,56 @@ TERMINAL_STATUSES: frozenset[str] = frozenset({"done", "dropped", "superseded"})
 GUARD_ERROR_PREFIX = "graph-guard"
 
 
+def format_node(node: str) -> str:
+    """Render one graph node id for a guard message, neutralized.
+
+    **Security-relevant.** A node id is a record's on-disk filename stem, and a
+    stem is only validated when the record was written through the CLI. A
+    record arriving in a ``shared: true`` vault by git sync never passes that
+    validation, so its stem may hold a newline, an ANSI escape, or a
+    well-formed counterfeit ``graph-guard [...]`` line. Interpolating one raw
+    would break the two invariants the guard output is parsed under — one
+    machine-parseable line per message, and no terminal control sequences — and
+    let untrusted content forge a guard verdict on stderr.
+
+    ``repr`` is the neutralizer: it escapes every non-printable character
+    (newline, ESC, and the unicode separators/format characters ``str`` reports
+    as unprintable) to a backslash sequence, so the result is always a single
+    line of printable text. That is the same ``!r`` treatment every other
+    interpolation in this module and in :mod:`guards` already applies; these
+    helpers exist so the joined renders cannot drift away from it.
+    """
+    return repr(node)
+
+
+def format_node_path(path: Sequence[str]) -> str:
+    """Render a node path (a cycle or an ancestor loop) as ``'a' -> 'b' -> 'a'``.
+
+    Every element goes through :func:`format_node`, so a hostile stem anywhere
+    along the path cannot break the message out of its single line.
+    """
+    return " -> ".join(format_node(node) for node in path)
+
+
 def format_guard_message(
     guard: str, message: str, offenders: Sequence[str] = ()
 ) -> str:
     """Format one graph-guard line in the shared machine-parseable shape.
 
-    Shape: ``graph-guard [<guard>]: <message>`` with an optional ``: a, b``
+    Shape: ``graph-guard [<guard>]: <message>`` with an optional ``: 'a', 'b'``
     offender tail when ``offenders`` is non-empty. All graph guards emit through
     here so agents parse a single stable prefix plus a bracketed ``<guard>`` tag
     off stderr — regardless of whether the line is a blocking error, a
     non-blocking warning, or the flow-out reminder.
+
+    *offenders* are node ids — untrusted, per :func:`format_node` — so each is
+    neutralized through that helper before it is joined. *message* is composed
+    by the caller and is NOT neutralized here: a caller interpolating a node id
+    into it owes it the same treatment, via ``!r`` or :func:`format_node_path`.
     """
     tail = ""
     if offenders:
-        tail = ": " + ", ".join(offenders)
+        tail = ": " + ", ".join(format_node(offender) for offender in offenders)
     return f"{GUARD_ERROR_PREFIX} [{guard}]: {message}{tail}"
 
 

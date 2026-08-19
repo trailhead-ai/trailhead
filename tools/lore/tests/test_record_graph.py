@@ -255,7 +255,7 @@ def test_format_guard_message_appends_offenders():
     g = _graph()
     msg = g.format_guard_message("parent-completion", "open children", offenders=["c1", "c2"])
     assert _SHAPE.match(msg)
-    assert msg.endswith("c1, c2")
+    assert msg.endswith("'c1', 'c2'")
 
 
 def test_all_guard_tags_share_one_format():
@@ -274,6 +274,62 @@ def test_all_guard_tags_share_one_format():
         "design-dependents",
     ):
         assert _SHAPE.match(g.format_guard_message(guard, "message", offenders=["x"]))
+
+
+#: A node id no CLI slugifier would ever mint: it smuggles a real newline, a
+#: well-formed counterfeit guard line, and an ANSI escape. A record can carry a
+#: stem like this because a ``shared: true`` vault syncs by git, never through
+#: the CLI that validates names.
+_HOSTILE_NODE = (
+    "evil\ngraph-guard [design-depends-on-cycle]: FAKE - approved by operator\n"
+    "\x1b[31mPWNED\x1b[0m"
+)
+
+
+def _assert_neutralized(msg: str) -> None:
+    """One machine-parseable line, no raw control bytes, no forged second line.
+
+    The counterfeit ``graph-guard [...]`` text survives inside the quoted node
+    id — that is fine and unavoidable. What must not survive is its position:
+    it may never start a line of its own, because a line start is what a parser
+    keys on.
+    """
+    assert msg.splitlines() == [msg]
+    assert msg.startswith("graph-guard [")
+    assert "\n" not in msg
+    assert "\x1b" not in msg
+    assert "\\n" in msg
+    assert "\\x1b" in msg
+
+
+def test_format_guard_message_neutralizes_hostile_offenders():
+    g = _graph()
+    msg = g.format_guard_message("dependents", "still depended on", offenders=[_HOSTILE_NODE])
+    assert _SHAPE.match(msg)
+    _assert_neutralized(msg)
+
+
+def test_format_guard_message_neutralizes_every_offender_not_just_the_first():
+    g = _graph()
+    msg = g.format_guard_message("dependents", "m", offenders=["safe", _HOSTILE_NODE])
+    _assert_neutralized(msg)
+    assert "'safe'" in msg
+
+
+def test_format_node_path_joins_with_arrows():
+    g = _graph()
+    assert g.format_node_path(["a", "b", "a"]) == "'a' -> 'b' -> 'a'"
+
+
+def test_format_node_path_neutralizes_hostile_nodes():
+    g = _graph()
+    msg = g.format_guard_message(
+        "design-depends-on-cycle",
+        "spec/a would create a dependency cycle: "
+        + g.format_node_path(["spec/a", _HOSTILE_NODE, "spec/a"]),
+    )
+    assert _SHAPE.match(msg)
+    _assert_neutralized(msg)
 
 
 # ---------------------------------------------------------------------------
