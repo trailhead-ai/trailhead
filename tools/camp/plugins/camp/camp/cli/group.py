@@ -225,13 +225,16 @@ def _cmd_groups_cli(args: list[str]) -> None:
     list — `[]` in --json mode, a plain "no groups configured" line in human
     mode — never an error.
 
-    A group config that fails to parse degrades that one entry with a stderr
-    notice and is dropped from the listing, rather than failing the whole
-    command (matching the best-effort degrade idiom used elsewhere in camp,
-    e.g. provision.py's pretrust step) — one bad file must not hide every
-    other configured group.
+    A group config file that fails to LOAD FOR ANY REASON degrades that one
+    entry with a stderr notice and is dropped from the listing, rather than
+    failing the whole command (matching the best-effort degrade idiom used
+    elsewhere in camp, e.g. provision.py's pretrust step) — one bad file must
+    not hide every other configured group. Unparseable TOML is only the
+    expected case: the glob also matches a directory wearing a `.toml` name,
+    and reading the file can fail on non-UTF-8 bytes or on permissions, none of
+    which may reach the operator as a traceback.
     """
-    from ..group.config import load_group, GroupConfigError
+    from ..group.config import load_group
     from .common import _groups_dir
 
     as_json = "--json" in args
@@ -242,8 +245,17 @@ def _cmd_groups_cli(args: list[str]) -> None:
         for toml_file in sorted(groups_dir.glob("*.toml")):
             try:
                 config = load_group(toml_file)
-            except GroupConfigError as e:
-                print(f"camp groups: {e} — skipping", file=sys.stderr)
+            except Exception as e:
+                # First line only: a config error's message can carry a
+                # multi-line first-run hint, which is noise inside a listing.
+                # And only some of these name the file — the config errors
+                # embed the path, a decode error from non-UTF-8 bytes names
+                # nothing at all — so the notice supplies it when it is absent.
+                message = str(e).strip()
+                detail = message.splitlines()[0] if message else e.__class__.__name__
+                if str(toml_file) not in detail:
+                    detail = f"{toml_file}: {detail}"
+                print(f"camp groups: {detail} — skipping", file=sys.stderr)
                 continue
             entries.append(
                 {

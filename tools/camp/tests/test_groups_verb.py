@@ -2,12 +2,16 @@
 
 - `camp groups --json` with two configured groups emits a JSON array of
   {"name": ..., "members": [<member names>]} sorted by name, exit 0.
-- Human mode prints one line per group naming the group and its members.
+- Human mode prints exactly one line per group, `<name>: <members>`, in name
+  order.
 - No groups configured: exit 0, `[]` / "no groups configured" — not an error.
-- A malformed group config file degrades that entry with a stderr notice
-  rather than failing the whole listing.
+- A group config file that cannot be loaded — unparseable TOML, non-UTF-8
+  bytes, a directory wearing a `.toml` name — degrades that one entry with a
+  stderr notice rather than failing the whole listing, and never prints a
+  traceback.
 - The verb runs without a resolved group/workspace: no --group flag, and cwd
   need not resolve to any configured group's member repo.
+- The verb is listed in camp's help menu.
 """
 
 from __future__ import annotations
@@ -88,16 +92,20 @@ def test_camp_groups_json_no_groups_configured_is_empty_array(tmp_path: Path) ->
 
 
 def test_camp_groups_human_mode_prints_one_line_per_group(tmp_path: Path) -> None:
+    """One line per group, in name order — asserted as lines, not as substrings
+    that a single collapsed line would also satisfy."""
     env = _env(tmp_path)
     groups_dir = Path(env["CAMP_CONFIG_DIR"]) / "groups"
+    _write_group(groups_dir, "zebra", ["repo-z"])
     _write_group(groups_dir, "alpha", ["repo-a", "repo-b"])
 
     result = _run_cli(["groups"], env=env)
 
     assert result.returncode == 0, f"stdout: {result.stdout}\nstderr: {result.stderr}"
-    assert "alpha" in result.stdout
-    assert "repo-a" in result.stdout
-    assert "repo-b" in result.stdout
+    assert result.stdout.splitlines() == [
+        "alpha: repo-a, repo-b",
+        "zebra: repo-z",
+    ]
 
 
 def test_camp_groups_human_no_groups_configured_prints_plain_line(tmp_path: Path) -> None:
@@ -110,8 +118,16 @@ def test_camp_groups_human_no_groups_configured_prints_plain_line(tmp_path: Path
 
 
 # ---------------------------------------------------------------------------
-# Malformed config degrades, doesn't fail the whole listing
+# An unloadable config degrades, doesn't fail the whole listing
 # ---------------------------------------------------------------------------
+
+
+def _assert_degraded_to_good_only(result: subprocess.CompletedProcess) -> None:
+    """The one good group still lists, the bad file is named, no traceback."""
+    assert result.returncode == 0, f"stdout: {result.stdout}\nstderr: {result.stderr}"
+    assert json.loads(result.stdout) == [{"name": "good", "members": ["repo-a"]}]
+    assert "bad.toml" in result.stderr
+    assert "Traceback" not in result.stderr
 
 
 def test_camp_groups_malformed_config_degrades_with_stderr_notice(tmp_path: Path) -> None:
@@ -120,12 +136,29 @@ def test_camp_groups_malformed_config_degrades_with_stderr_notice(tmp_path: Path
     _write_group(groups_dir, "good", ["repo-a"])
     (groups_dir / "bad.toml").write_text("not valid toml [[[")
 
-    result = _run_cli(["groups", "--json"], env=env)
+    _assert_degraded_to_good_only(_run_cli(["groups", "--json"], env=env))
 
-    assert result.returncode == 0, f"stdout: {result.stdout}\nstderr: {result.stderr}"
-    data = json.loads(result.stdout)
-    assert data == [{"name": "good", "members": ["repo-a"]}]
-    assert "bad.toml" in result.stderr
+
+def test_camp_groups_non_utf8_config_degrades_with_stderr_notice(tmp_path: Path) -> None:
+    """A file that is not UTF-8 at all never reaches the TOML parser — the read
+    itself raises, and that must degrade like any other unloadable file."""
+    env = _env(tmp_path)
+    groups_dir = Path(env["CAMP_CONFIG_DIR"]) / "groups"
+    _write_group(groups_dir, "good", ["repo-a"])
+    (groups_dir / "bad.toml").write_bytes(b'[group]\nname = "\xff\xfe caf\xe9"\n')
+
+    _assert_degraded_to_good_only(_run_cli(["groups", "--json"], env=env))
+
+
+def test_camp_groups_directory_named_toml_degrades_with_stderr_notice(tmp_path: Path) -> None:
+    """A directory matching the `*.toml` glob is not a config file, and saying
+    so must not cost the rest of the listing."""
+    env = _env(tmp_path)
+    groups_dir = Path(env["CAMP_CONFIG_DIR"]) / "groups"
+    _write_group(groups_dir, "good", ["repo-a"])
+    (groups_dir / "bad.toml").mkdir()
+
+    _assert_degraded_to_good_only(_run_cli(["groups", "--json"], env=env))
 
 
 # ---------------------------------------------------------------------------
@@ -143,6 +176,16 @@ def test_camp_groups_runs_without_resolved_group_or_cwd_context(tmp_path: Path) 
 
     assert result.returncode == 0, f"stdout: {result.stdout}\nstderr: {result.stderr}"
     assert json.loads(result.stdout) == [{"name": "alpha", "members": ["repo-a"]}]
+
+
+def test_camp_groups_is_listed_in_the_help_menu() -> None:
+    """A live verb absent from the menu is a verb nobody finds."""
+    result = subprocess.run(
+        [sys.executable, str(_CLI_CAMP), "--help"], capture_output=True, text=True
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "camp groups [--json]" in result.stdout
 
 
 def test_groups_verb_not_in_needs_group_verbs() -> None:
