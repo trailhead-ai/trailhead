@@ -96,6 +96,7 @@ Read-only queries are unlimited and are how the report gets assembled:
 ```bash
 camp list --group <name> --json
 camp sessions <slug> --group <name> --json
+camp status --name <slug> --group <name> --json
 ```
 
 State-changing work is exactly one mutating camp call per operator action.
@@ -103,7 +104,7 @@ State-changing work is exactly one mutating camp call per operator action.
 Workspaces are keyed by group **and** slug — the same slug can exist in two
 groups at once — so probe for the workspace only inside the group you resolved.
 
-**The workspace does not exist yet:**
+**The workspace does not exist yet** — the create path:
 
 ```bash
 camp new <slug> --group <name> --launch --no-wait --json
@@ -116,9 +117,21 @@ collision, since a workspace holds as many sessions as you launch into it:
 camp launch <slug> --group <name> --json
 ```
 
-Both print the same shape, `{"workspace": …, "session_id": …, "tmux_name": …}`,
-on success and on a launch that never started, where the session and name fields
-come back null and the workspace field still names the path.
+On success both print the same object, `{"workspace": …, "session_id": …,
+"tmux_name": …}`. They part company when the launch does not happen, and the two
+refusals are read differently:
+
+- The create path holds the workspace to be the deliverable. A launch that never
+  started still exits 0 and still prints that object, with the session and name
+  fields null and the workspace field naming the path that now exists.
+- The reuse path holds the session to be the deliverable. Its refusal prints
+  nothing at all on stdout and exits non-zero, with camp's reason on stderr.
+  There is no JSON to parse there — take the reason from stderr.
+
+The workspace field is not the same path on the two calls either. The create
+path reports the workspace root; the reuse path reports the directory the
+harness was launched in, which sits inside the root whenever the group
+configures one. Say which of the two you are naming.
 
 **The workspace lives under a different group:** the group argument is
 validation, not a suggestion. `camp list --group <name> --json` reports each
@@ -128,24 +141,29 @@ refuse, and never silently adopt it.
 ## 6. Report it
 
 Lead with the two facts a narrow screen must not truncate — the session's name
-and the workspace path. Everything else follows as detail:
+and the path camp reported. Everything else follows as detail:
 
 - The slug camp settled on, flagged when it differs from what was typed.
 - The session uuid.
 - Any sessions already live in that workspace, from
   `camp sessions <slug> --group <name> --json`.
-- The provisioning state at the time you report.
+- The provisioning state at the time you report, from
+  `camp status --name <slug> --group <name> --json` — each member's
+  `provision_state`, summarized as ready, still coming up, or failed.
 
 `tmux_name` and the session id are read from camp's output — the derived name
 `camp-<slug>-<uuid8>` is never reconstructed. Present that name as the handle
-for referring to this session later, while making clear that losing the report
-strands nothing.
+for referring to this session while it is alive, and be equally plain about its
+limit: what the report carries cannot be recovered from here once it is lost.
+`camp sessions <slug> --group <name> --json` still lists what is running in a
+workspace, but picking one of those back up is not something this flow can do
+until camp's session-resume surface lands (`## Not yet`).
 
 Because the launch does not wait for provisioning, members may still be coming
-up when the session is already alive. Say so, and point at `camp status` run
-from inside the new session — that is where a provisioning failure landing after
-the report will surface. Do not poll, monitor, or verify beyond what camp
-printed.
+up when the session is already alive, and the state you just read is a snapshot.
+Say so, and point at `camp status` run from inside the new session — that is the
+later moment, where a provisioning failure landing after the report will
+surface. Do not poll, monitor, or verify beyond what camp printed.
 
 ## 7. When it refuses
 

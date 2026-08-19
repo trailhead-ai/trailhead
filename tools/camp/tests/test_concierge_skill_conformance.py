@@ -21,7 +21,12 @@ Three groups:
 2. **Gate conformance** — the load-bearing guarantees are present as required
    anchors. Deleting one fails here rather than on an operator's phone.
 
-3. **Anti-mechanism guard** — the document instructs no direct tmux invocation,
+3. **Output-shape conformance** — every JSON object the document quotes has the
+   key set the emitter actually prints. The document tells an agent what to
+   parse, so a key renamed in an emitter and left stale in the document is a
+   parse that silently reads nothing.
+
+4. **Anti-mechanism guard** — the document instructs no direct tmux invocation,
    no direct harness spawn, and no reconstruction of the derived session name.
    The document legitimately *names* `camp-<slug>-<uuid8>` while forbidding its
    reconstruction, so the guard targets constructive spellings (templates,
@@ -126,15 +131,18 @@ _GROUP_FLAG_REFUSED_BY = frozenset({"group", "groups"})
 _FLAG_RE = re.compile(r"--[a-z][a-z0-9-]*")
 
 
-def _handler_source(verb: str) -> str:
-    """The argument-parsing function's own source — docstring included, since
-    that is where several verbs spell their usage."""
-    relpath, func_name = _VERB_HANDLERS[verb]
+def _function_source(relpath: str, func_name: str) -> str:
     source = (_PLUGIN_DIR / relpath).read_text(encoding="utf-8")
     for node in ast.walk(ast.parse(source)):
         if isinstance(node, ast.FunctionDef) and node.name == func_name:
             return ast.get_source_segment(source, node)
     raise AssertionError(f"{func_name} no longer exists in {relpath}")
+
+
+def _handler_source(verb: str) -> str:
+    """The argument-parsing function's own source — docstring included, since
+    that is where several verbs spell their usage."""
+    return _function_source(*_VERB_HANDLERS[verb])
 
 
 def _accepted_flags(verb: str) -> set[str]:
@@ -239,6 +247,16 @@ REQUIRED_ANCHORS: dict[str, str] = {
     "group mismatch refusal": "never silently adopt",
     "derived name is not rebuilt": "never reconstructed",
     "blocked flows have an answer": "## Not yet",
+    # The reuse path refuses by exiting non-zero with nothing on stdout, so a
+    # reader who expects JSON on every outcome misses the failure entirely.
+    "reuse-path refusal carries no JSON": "prints nothing at all on stdout",
+    # The two paths report different directories under the same key.
+    "the reported path differs by call": "reports the workspace root",
+    # The report requires provisioning state, so the document has to sanction a
+    # read that yields it.
+    "provisioning state is obtainable": "camp status --name <slug> --group <name> --json",
+    # Recovery is not a shipped capability; promising it strands the operator.
+    "a lost report is not recoverable": "cannot be recovered from here",
 }
 
 
@@ -258,15 +276,89 @@ def test_anchor_check_survives_rewrapping(skill_text: str) -> None:
     assert _missing_anchors(skill_text.replace("\n", " ")) == []
 
 
-def test_anchor_check_reports_a_deleted_guarantee(skill_text: str) -> None:
-    """Deleting a guarantee has to fail — proven by deleting one."""
-    label, anchor = next(iter(REQUIRED_ANCHORS.items()))
+@pytest.mark.parametrize("label", sorted(REQUIRED_ANCHORS))
+def test_anchor_check_reports_a_deleted_guarantee(label: str, skill_text: str) -> None:
+    """Deleting a guarantee has to fail — proven for every anchor, one at a
+    time. Run over the whole set because an anchor that no longer matches the
+    document would otherwise sit there checking nothing."""
     flattened = " ".join(skill_text.split())
-    assert _missing_anchors(flattened.replace(anchor, "")) == [label]
+    assert _missing_anchors(flattened.replace(REQUIRED_ANCHORS[label], "")) == [label]
 
 
 # ---------------------------------------------------------------------------
-# 3. Anti-mechanism guard
+# 3. Output-shape conformance
+# ---------------------------------------------------------------------------
+
+# Every JSON object shape the document may quote, mapped to the function that
+# prints it. Key sets are read off the dict literals those functions build, so
+# a renamed key fails here instead of becoming a lookup that returns nothing.
+_EMITTERS: dict[str, tuple[str, str]] = {
+    "camp new --launch --json": ("camp/cli/group.py", "_cmd_new_group_cli"),
+    "camp launch --json": ("camp/cli/session.py", "_cmd_launch_group_cli"),
+    "camp groups --json": ("camp/cli/group.py", "_cmd_groups_cli"),
+}
+
+_JSON_OBJECT_RE = re.compile(r"\{[^{}]*\}")
+_JSON_KEY_RE = re.compile(r'"([a-z_]+)"\s*:')
+
+
+def _emitted_key_sets(emitter: str) -> set[frozenset[str]]:
+    """Every all-string-keyed dict literal the emitter builds."""
+    tree = ast.parse(_function_source(*_EMITTERS[emitter]))
+    shapes = {
+        frozenset(key.value for key in node.keys)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Dict)
+        and node.keys
+        and all(
+            isinstance(key, ast.Constant) and isinstance(key.value, str)
+            for key in node.keys
+        )
+    }
+    assert shapes, f"{emitter} builds no JSON object at all"
+    return shapes
+
+
+def _documented_key_sets(text: str) -> list[frozenset[str]]:
+    """Each JSON object the document quotes, as its set of keys."""
+    return [
+        frozenset(keys)
+        for obj in _JSON_OBJECT_RE.findall(text)
+        if (keys := _JSON_KEY_RE.findall(obj))
+    ]
+
+
+def _unemitted_key_sets(text: str) -> list[list[str]]:
+    known = {shape for emitter in _EMITTERS for shape in _emitted_key_sets(emitter)}
+    return [sorted(shape) for shape in _documented_key_sets(text) if shape not in known]
+
+
+def test_every_documented_json_shape_is_one_camp_prints(skill_text: str) -> None:
+    assert _unemitted_key_sets(skill_text) == []
+
+
+def test_document_quotes_a_json_shape_at_all(skill_text: str) -> None:
+    """The report is assembled out of these objects, so at least one has to be
+    spelled out — otherwise the check above passes on nothing."""
+    assert _documented_key_sets(skill_text)
+
+
+def test_json_shape_check_catches_a_renamed_key() -> None:
+    """A key the document quotes but no emitter prints, proven to fail."""
+    fabricated = 'It prints `{"workspace": …, "session": …, "tmux_name": …}` on success.'
+    assert _unemitted_key_sets(fabricated) == [["session", "tmux_name", "workspace"]]
+
+
+def test_both_launch_paths_print_the_same_success_shape() -> None:
+    """The document shows one object for both launch paths; that is only honest
+    while the two emitters agree."""
+    assert _emitted_key_sets("camp new --launch --json") == _emitted_key_sets(
+        "camp launch --json"
+    )
+
+
+# ---------------------------------------------------------------------------
+# 4. Anti-mechanism guard
 # ---------------------------------------------------------------------------
 
 # Programs the skill must never drive itself: camp's launch path is where the
