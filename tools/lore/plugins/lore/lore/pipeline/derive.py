@@ -78,7 +78,11 @@ one place that guarantee is not this module's to give is the evaluator call: a
 target whose ``status`` is a list is valid JSON and unhashable, and the
 evaluator tests it for failure-set membership. Each record's evaluation is
 therefore guarded as a whole, and a raise costs that record its place on the
-board and yields one warning — never the vault, and never the command.
+board and yields one warning — never the vault, and never the command. A
+dropped adr costs only itself: a live spec whose edge names it is resolved
+against the vault's full adr set, not the post-drop one, so the drop never
+manufactures a false ``unresolved-root`` claim about an edge that in fact
+resolved — see :func:`_resolve_specs`.
 """
 
 from __future__ import annotations
@@ -391,7 +395,7 @@ def _singleton(
 
 
 def _resolve_specs(
-    walk: VaultWalk, adr_ids: set[str]
+    walk: VaultWalk, adr_ids: set[str], known_adr_ids: set[str]
 ) -> tuple[dict[str, list[str]], dict[str, int], list[str]]:
     """Route every spec's edges to their own-vault targets.
 
@@ -399,6 +403,15 @@ def _resolve_specs(
     specs whose edges left them without a resolvable root. Each edge is routed
     independently, so a spec with one resolving and one dangling edge both
     joins a lineage and reports the dangling one.
+
+    *known_adr_ids* is every adr id the vault actually holds, before a
+    dropped record's own evaluation raise cost it its place in *adr_ids*. An
+    edge naming a target in *known_adr_ids* but not *adr_ids* resolved fine —
+    the target adr exists — it is simply unrenderable this invocation, and
+    that is already reported as its own warning. Such an edge is neither a
+    seed nor a dangling one: counting it as dangling would fabricate an
+    ``unresolved-root`` claim about an edge that resolved, and counting it as
+    a seed would join a lineage whose root cannot be built.
 
     Two of a record's edges naming the same target — ``foo`` and ``adr/foo``
     are one target after normalization — route once. A record is in a lineage
@@ -419,8 +432,10 @@ def _resolve_specs(
         for target in dict.fromkeys(
             f"adr/{normalize_edge(value)}" for value in _adr_edges(sidecar)
         ):
-            if target not in adr_ids:
+            if target not in known_adr_ids:
                 dangling = True
+            elif target not in adr_ids:
+                continue
             elif not terminal:
                 seeds[target].append(record_id)
             elif status in COMPLETED_SPEC_STATUSES:
@@ -434,15 +449,18 @@ def _resolve_specs(
 def _vault_lineages(
     walk: VaultWalk,
     evaluations: dict[str, Evaluation],
+    known_adr_ids: set[str],
 ) -> list[Lineage]:
     """Every lineage one vault anchors, resolved entirely within that vault.
 
     *walk* carries only the records whose evaluation finished; the rest are
     already accounted for as warnings, so nothing here needs to know they
-    existed.
+    existed — except for edge resolution, which reads *known_adr_ids* to
+    tell "the target adr exists but was dropped" apart from "the target adr
+    never existed" (see :func:`_resolve_specs`).
     """
     adr_ids = {rid for rid in walk.records if _kind(rid) == "adr"}
-    seeds, completed, unresolved = _resolve_specs(walk, adr_ids)
+    seeds, completed, unresolved = _resolve_specs(walk, adr_ids, known_adr_ids)
 
     lineages: list[Lineage] = []
     for adr_id in sorted(adr_ids):
@@ -501,6 +519,7 @@ def derive_board(walks: Sequence[VaultWalk]) -> Derivation:
     for walk in walks:
         evaluations, vault_warnings = _evaluate_vault(walk)
         warnings.extend(vault_warnings)
+        known_adr_ids = {rid for rid in walk.records if _kind(rid) == "adr"}
         derived = walk._replace(
             records={
                 record_id: sidecar
@@ -508,7 +527,7 @@ def derive_board(walks: Sequence[VaultWalk]) -> Derivation:
                 if record_id in evaluations
             }
         )
-        lineages.extend(_vault_lineages(derived, evaluations))
+        lineages.extend(_vault_lineages(derived, evaluations, known_adr_ids))
     lineages.sort(key=lambda lineage: lineage.id)
     lineages.sort(key=lambda lineage: lineage.recency, reverse=True)
     return Derivation(tuple(lineages), tuple(warnings))

@@ -66,13 +66,15 @@ def cmd_pipeline(args) -> int:
 
     selected = getattr(args, "vault", None)
     if selected:
+        from ..vault import config as vault_config_mod
+
+        wanted = {vault_config_mod.normalize_vault_name(name) for name in selected}
         configured = {name for name, _ in vaults}
-        unknown = sorted(set(selected) - configured)
+        unknown = sorted(wanted - configured)
         if unknown:
             named = ", ".join(repr(name) for name in unknown)
             print(f"lore: no configured vault named {named}", file=sys.stderr)
             return 1
-        wanted = set(selected)
         vaults = [(name, path) for name, path in vaults if name in wanted]
 
     try:

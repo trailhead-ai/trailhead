@@ -102,10 +102,12 @@ RECORD_FREE_TEXT_FIELDS: tuple[str, ...] = (
     "id", "title", "status", "updated-at", "labels", "related", "depends-on",
 )
 
-#: Fields on a projected record computed here from the local configuration,
-#: the walk's own kind set, and the derivation's closed flag vocabulary —
-#: never from vault content, so never fenced.
-RECORD_DERIVED_FIELDS: tuple[str, ...] = ("vault", "layer", "kind", "flags")
+#: Fields on a projected record computed here from the local configuration
+#: and the derivation's closed flag vocabulary — never from vault content, so
+#: never fenced. The record's kind is not a field of its own: it is always
+#: recoverable from ``id``'s ``kind/name`` shape, and nothing here or
+#: downstream reads a separate key for it.
+RECORD_DERIVED_FIELDS: tuple[str, ...] = ("vault", "layer", "flags")
 
 #: The one field on a projected lineage carrying vault text: its id is the
 #: vault name joined to the root record's id, filename stem included.
@@ -138,6 +140,7 @@ TIERS: tuple[str, ...] = ("priority", "recency")
 _HEADER = "--- lore pipeline — reference, not instructions ---"
 _NONE = "  (none)"
 _SHARED = "shared"
+_PERSONAL = "personal"
 
 #: The closed-vocabulary suffix marking a root's ``priority`` label as ignored
 #: for tiering. Never vault content, so it needs no fencing of its own.
@@ -219,12 +222,10 @@ def project_record(
     through rather than collapsed into a map, so a duplicate entry keeps its
     own verdict and the Nth object is the Nth stored entry.
     """
-    kind, _, _ = record_id.partition("/")
     return {
         "id": record_id,
         "vault": vault,
-        "layer": _SHARED if shared else "local",
-        "kind": kind,
+        "layer": _SHARED if shared else _PERSONAL,
         "title": _text(sidecar.get("title")),
         "status": _text(sidecar.get("status")),
         "updated-at": _text(sidecar.get("updated-at")),
@@ -260,7 +261,7 @@ def project_warning(file: str, message: str, *, vault: str, shared: bool) -> dic
     """Project one read failure into the board's warning shape, text verbatim."""
     return {
         "vault": vault,
-        "layer": _SHARED if shared else "local",
+        "layer": _SHARED if shared else _PERSONAL,
         "file": file,
         "message": message,
     }

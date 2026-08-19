@@ -31,6 +31,12 @@ after them; every other lineage joins the `recency` tier, newest `updated-at`
 first. A root in a `shared: true` vault has its `priority` label ignored for
 tiering — the human view marks it `(ignored: shared)` in place.
 
+Within a tier, human mode groups every shared vault's lineages after the
+personal ones, each inside its own `<external-memory>` fence — the ordering
+therefore is not strictly recency-comparable across a mixed personal/shared
+board in that mode. `--json` carries no such grouping and preserves strict
+tier ordering throughout.
+
 ## Vault set
 
 The vaults walked and the set of `shared: true` names both come from a single
@@ -113,6 +119,11 @@ dependency reason strings are all authored there.
   downstream consumer that renders parsed values into its own context —
   keeping the JSON document well-formed is not the same protection.
 
+Every projected record and warning carries `layer`, in both output modes: the
+vault's own `shared: true` config flag makes it `"shared"`, and any other
+vault makes it `"personal"` — the same flag the vaults-consulted listing and
+the tiering rule both read, with no third value.
+
 ## `--json` envelope
 
 ```json
@@ -131,8 +142,10 @@ A lineage is `{ "id", "root", "members", "completed_count" }`, where `id` is
 `<vault>:<root record id>` — the vault qualifier is always present, singletons
 included, so a lineage id is unique across the whole board.
 
-A record is `{ "id", "vault", "layer", "kind", "title", "status",
-"updated-at", "labels", "related", "flags", "depends-on" }`.
+A record is `{ "id", "vault", "layer", "title", "status", "updated-at",
+"labels", "related", "flags", "depends-on" }`. There is no separate `kind`
+key — `id` is `kind/name`, so a consumer wanting the kind alone reads it off
+`id`.
 
 Envelope and lineage keys are snake_case; per-record keys keep their sidecar
 spelling, so they are kebab-case (`updated-at`, `depends-on`). Pin on

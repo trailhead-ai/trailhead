@@ -857,3 +857,22 @@ class TestEvaluationFailureDegrades:
         records = {"adr/board": _adr("draft")}
 
         assert derive.derive_board([_walk("local", records)]).warnings == ()
+
+    def test_a_dropped_adr_does_not_falsely_unresolve_its_live_members(self):
+        """A record's own evaluation can raise and cost it its place on the
+        board without that ripple lying about a different record's edge: the
+        adr the edge names still exists, so the edge resolved fine — it is
+        only the adr's own rendering that was lost."""
+        records = {
+            "adr/board": _adr("draft", **_deps("spec/target")),
+            "spec/target": {"kind": "spec", "title": "T", "status": []},
+            "spec/listing": _spec("draft", adrs=["board"]),
+        }
+
+        derivation = derive.derive_board([_walk("local", records)])
+
+        assert [w.file for w in derivation.warnings] == ["adr/board.json"]
+        assert not any(
+            derive.UNRESOLVED_ROOT in lineage.root.flags
+            for lineage in derivation.lineages
+        )

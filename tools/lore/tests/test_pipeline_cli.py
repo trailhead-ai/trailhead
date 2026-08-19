@@ -189,6 +189,32 @@ class TestVaultSelection:
         assert out == ""
         assert err.startswith("lore: ")
 
+    def test_vault_accepts_the_org_repo_spelling_of_a_configured_name(
+        self, tmp_path, capsys
+    ):
+        """``sync --vault``, ``record show --vault`` and ``is_configured_vault``
+        all accept the raw ``org/repo`` form of a configured (normalized)
+        vault name; this command must too."""
+        default = tmp_path / "default"
+        repo = tmp_path / "repo"
+        default.mkdir()
+        _write_record(repo, "spec", "a", {"title": "A", "status": "draft"})
+        _write_config(
+            tmp_path / "config",
+            [
+                ("default", "default", default, False),
+                ("trailhead-ai/trailhead", "repo", repo, False),
+            ],
+        )
+
+        code, out, err = _run(
+            ["pipeline", "--json", "--vault", "trailhead-ai/trailhead"], capsys
+        )
+
+        assert code == 0, err
+        payload = json.loads(out)
+        assert [v["name"] for v in payload["vaults"]] == ["trailhead-ai_trailhead"]
+
 
 class TestConfigPosture:
     def test_unparseable_config_renders_no_board_at_all(self, tmp_path, capsys):
@@ -412,12 +438,12 @@ class TestFencing:
         assert round_tripped["title"] == _ESCAPED_TITLE
         assert "&amp;amp;" not in round_tripped["title"]
 
-    def test_a_trusted_record_is_marked_local_and_left_verbatim(self):
+    def test_a_trusted_record_is_marked_personal_and_left_verbatim(self):
         from lore.pipeline import render
 
         fenced = render.fence_record(self._hostile_record(shared=False))
 
-        assert fenced["layer"] == "local"
+        assert fenced["layer"] == "personal"
         assert fenced["title"] == _HOSTILE_TITLE
 
     def test_human_mode_wraps_shared_records_in_the_external_memory_fence(self):
@@ -818,9 +844,8 @@ class TestLineagesOnTheBoard:
         record = payload["tiers"]["recency"][0]["root"]
         assert record == {
             "id": "task/idea",
-            "kind": "task",
             "vault": "local",
-            "layer": "local",
+            "layer": "personal",
             "title": "An idea",
             "status": "open",
             "updated-at": "2026-08-19T10:00:00Z",
@@ -1523,7 +1548,7 @@ class TestPinnedEnvelope:
             assert set(lineage) == {"id", "root", "members", "completed_count"}
             for record in [lineage["root"], *lineage["members"]]:
                 assert set(record) == {
-                    "id", "vault", "layer", "kind", "title", "status",
+                    "id", "vault", "layer", "title", "status",
                     "updated-at", "labels", "related", "flags", "depends-on",
                 }
                 seen_flags.update(record["flags"])
