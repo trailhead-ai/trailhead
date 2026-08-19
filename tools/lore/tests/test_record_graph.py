@@ -9,6 +9,11 @@ Also covers the shared guard-error formatting helper: every graph guard message
 (blocking error, non-blocking warning, ritual reminder) is emitted through one
 helper so agents parse a single stable ``graph-guard [<guard>]: …`` shape off
 stderr.
+
+Also covers the design-dependency grammar and evaluator: ``parse_dependency``
+splits a ``kind/name[@stage]`` sidecar entry without ever raising, and
+``evaluate_dependencies`` reads a ``{qualified_id: sidecar}`` design graph to
+report met/unmet with a reason per entry. Pure the same way: no vault, no I/O.
 """
 
 from __future__ import annotations
@@ -30,6 +35,11 @@ def _task(status="open", *, depends_on=None, parent=None):
     if parent is not None:
         sc["parent"] = parent
     return sc
+
+
+def _design(kind, status):
+    """Minimal spec/adr sidecar with the field the evaluator reads."""
+    return {"kind": kind, "status": status}
 
 
 # ---------------------------------------------------------------------------
@@ -256,3 +266,264 @@ def test_all_guard_tags_share_one_format():
         "edge-reference",
     ):
         assert _SHAPE.match(g.format_guard_message(guard, "message", offenders=["x"]))
+
+
+# ---------------------------------------------------------------------------
+# SUCCESS_CHAINS — derived from model.STATUS_VOCAB
+# ---------------------------------------------------------------------------
+
+
+def test_success_chains_derived_for_spec_and_adr():
+    g = _graph()
+    assert g.SUCCESS_CHAINS["spec"] == ("draft", "ready", "planned", "complete")
+    assert g.SUCCESS_CHAINS["adr"] == ("draft", "active")
+
+
+def test_success_chains_move_with_status_vocab_edit(monkeypatch):
+    """A STATUS_VOCAB edit moves the chain — nothing here hand-lists the stages."""
+    model = load_script("lore.record.model")
+    monkeypatch.setitem(
+        model.STATUS_VOCAB, "adr", ("draft", "review", "active", "superseded", "dropped")
+    )
+    g = load_script("lore.record.graph")
+    assert g.SUCCESS_CHAINS["adr"] == ("draft", "review", "active")
+
+
+def test_failure_statuses_excluded_from_every_success_chain():
+    g = _graph()
+    for kind, chain in g.SUCCESS_CHAINS.items():
+        assert not (set(chain) & g.FAILURE_STATUSES), kind
+
+
+# ---------------------------------------------------------------------------
+# parse_dependency — kind/name[@stage] grammar, never raises
+# ---------------------------------------------------------------------------
+
+
+def test_parse_dependency_accepts_unqualified_spec():
+    g = _graph()
+    parsed = g.parse_dependency("spec/foo")
+    assert parsed.kind == "spec"
+    assert parsed.name == "foo"
+    assert parsed.stage is None
+    assert parsed.error is None
+
+
+def test_parse_dependency_accepts_staged_spec():
+    g = _graph()
+    parsed = g.parse_dependency("spec/foo@ready")
+    assert parsed.kind == "spec"
+    assert parsed.name == "foo"
+    assert parsed.stage == "ready"
+    assert parsed.error is None
+
+
+def test_parse_dependency_accepts_staged_adr():
+    g = _graph()
+    parsed = g.parse_dependency("adr/bar@active")
+    assert parsed.kind == "adr"
+    assert parsed.name == "bar"
+    assert parsed.stage == "active"
+    assert parsed.error is None
+
+
+def test_parse_dependency_rejects_bare_unprefixed_name():
+    g = _graph()
+    parsed = g.parse_dependency("foo")
+    assert parsed.error is not None
+
+
+def test_parse_dependency_rejects_task_target():
+    g = _graph()
+    parsed = g.parse_dependency("task/foo")
+    assert parsed.error is not None
+    assert parsed.error != g.parse_dependency("foo").error
+
+
+def test_parse_dependency_rejects_unknown_kind_prefix():
+    g = _graph()
+    parsed = g.parse_dependency("nope/foo")
+    assert parsed.error is not None
+    assert parsed.error != g.parse_dependency("foo").error
+    assert parsed.error != g.parse_dependency("task/foo").error
+
+
+def test_parse_dependency_rejects_stage_absent_from_target_kind_vocab():
+    g = _graph()
+    parsed = g.parse_dependency("spec/foo@active")  # "active" is an adr status, not spec
+    assert parsed.error is not None
+    assert parsed.error not in {
+        g.parse_dependency("foo").error,
+        g.parse_dependency("task/foo").error,
+        g.parse_dependency("nope/foo").error,
+    }
+
+
+def test_parse_dependency_rejects_stage_naming_a_failure_status():
+    g = _graph()
+    parsed = g.parse_dependency("spec/foo@superseded")
+    assert parsed.error is not None
+    assert parsed.error not in {
+        g.parse_dependency("foo").error,
+        g.parse_dependency("task/foo").error,
+        g.parse_dependency("nope/foo").error,
+        g.parse_dependency("spec/foo@active").error,
+    }
+    dropped = g.parse_dependency("spec/foo@dropped")
+    assert dropped.error == parsed.error
+
+
+def test_parse_dependency_never_raises_on_malformed_entries():
+    g = _graph()
+    for entry in ("", "/", "spec/", "/foo", "spec/foo@", "@@@", None, 42, ["spec/foo"]):
+        parsed = g.parse_dependency(entry)
+        assert parsed.error is not None
+
+
+# ---------------------------------------------------------------------------
+# evaluate_dependencies — met/unmet with a reason per entry
+# ---------------------------------------------------------------------------
+
+
+def test_evaluate_dependencies_met_when_target_at_named_stage():
+    g = _graph()
+    design_graph = {"spec/foo": _design("spec", "ready")}
+    [status] = g.evaluate_dependencies(design_graph, ["spec/foo@ready"])
+    assert status.met is True
+    assert status.reason_code is None
+
+
+def test_evaluate_dependencies_met_when_target_past_named_stage():
+    g = _graph()
+    design_graph = {"spec/foo": _design("spec", "complete")}
+    [status] = g.evaluate_dependencies(design_graph, ["spec/foo@ready"])
+    assert status.met is True
+
+
+def test_evaluate_dependencies_unqualified_satisfied_only_at_spec_chain_end():
+    g = _graph()
+    design_graph = {"spec/foo": _design("spec", "planned")}
+    [status] = g.evaluate_dependencies(design_graph, ["spec/foo"])
+    assert status.met is False
+    design_graph["spec/foo"] = _design("spec", "complete")
+    [status] = g.evaluate_dependencies(design_graph, ["spec/foo"])
+    assert status.met is True
+
+
+def test_evaluate_dependencies_unqualified_satisfied_only_at_adr_chain_end():
+    g = _graph()
+    design_graph = {"adr/bar": _design("adr", "draft")}
+    [status] = g.evaluate_dependencies(design_graph, ["adr/bar"])
+    assert status.met is False
+    design_graph["adr/bar"] = _design("adr", "active")
+    [status] = g.evaluate_dependencies(design_graph, ["adr/bar"])
+    assert status.met is True
+
+
+def test_evaluate_dependencies_missing_target():
+    g = _graph()
+    [status] = g.evaluate_dependencies({}, ["spec/foo@ready"])
+    assert status.met is False
+    assert status.reason_code == "missing"
+    assert status.reason
+
+
+def test_evaluate_dependencies_short_of_stage():
+    g = _graph()
+    design_graph = {"spec/foo": _design("spec", "draft")}
+    [status] = g.evaluate_dependencies(design_graph, ["spec/foo@ready"])
+    assert status.met is False
+    assert status.reason_code == "short-of-stage"
+    assert status.reason
+
+
+def test_evaluate_dependencies_target_failed_superseded():
+    g = _graph()
+    design_graph = {"spec/foo": _design("spec", "superseded")}
+    [status] = g.evaluate_dependencies(design_graph, ["spec/foo@ready"])
+    assert status.met is False
+    assert status.reason_code == "target-failed"
+
+
+def test_evaluate_dependencies_target_failed_dropped():
+    g = _graph()
+    design_graph = {"adr/bar": _design("adr", "dropped")}
+    [status] = g.evaluate_dependencies(design_graph, ["adr/bar@active"])
+    assert status.met is False
+    assert status.reason_code == "target-failed"
+
+
+def test_evaluate_dependencies_target_failed_overrides_unqualified_entry():
+    g = _graph()
+    design_graph = {"spec/foo": _design("spec", "superseded")}
+    [status] = g.evaluate_dependencies(design_graph, ["spec/foo"])
+    assert status.met is False
+    assert status.reason_code == "target-failed"
+
+
+def test_evaluate_dependencies_target_failed_overrides_already_passed_stage():
+    g = _graph()
+    design_graph = {"spec/foo": _design("spec", "dropped")}
+    # "ready" is earlier on the chain than where the target would have been
+    # before it failed — target-failed still wins over a stage comparison.
+    [status] = g.evaluate_dependencies(design_graph, ["spec/foo@ready"])
+    assert status.met is False
+    assert status.reason_code == "target-failed"
+
+
+def test_evaluate_dependencies_malformed_status_reads_unmet_conservatively():
+    g = _graph()
+    design_graph = {"spec/foo": {"kind": "spec", "status": "not-a-real-status"}}
+    [status] = g.evaluate_dependencies(design_graph, ["spec/foo@ready"])
+    assert status.met is False
+
+
+def test_evaluate_dependencies_preserves_stored_order_and_duplicates():
+    g = _graph()
+    design_graph = {"spec/foo": _design("spec", "complete"), "adr/bar": _design("adr", "draft")}
+    entries = ["spec/foo", "adr/bar", "spec/foo"]
+    statuses = g.evaluate_dependencies(design_graph, entries)
+    assert isinstance(statuses, list)
+    assert len(statuses) == 3
+    assert [s.met for s in statuses] == [True, False, True]
+
+
+def test_evaluate_dependencies_every_unmet_status_has_a_reason():
+    g = _graph()
+    design_graph = {"spec/foo": _design("spec", "draft")}
+    entries = ["spec/foo@ready", "spec/ghost", "spec/foo@superseded_typo"]
+    for status in g.evaluate_dependencies(design_graph, entries):
+        if not status.met:
+            assert status.reason
+            assert status.reason.strip() != ""
+
+
+def test_evaluate_dependencies_reason_interpolates_stem_verbatim_unescaped():
+    """The target id round-trips into the reason with no sanitization.
+
+    A stem carrying non-slug characters can only reach the vault by a route
+    other than ``place_record`` (a hand-placed file, or an externally-synced
+    record in a ``shared: true`` vault) — the slugifier never runs on it. The
+    evaluator does not re-derive or sanitize the stem; it is on the downstream
+    consumer to escape this before rendering it anywhere unsafe.
+    """
+    g = _graph()
+    weird_name = "Weird Name!! (not a slug)"
+    entry = f"spec/{weird_name}@ready"
+    [status] = g.evaluate_dependencies({}, [entry])
+    assert status.met is False
+    assert weird_name in status.reason
+    assert status.name == weird_name
+
+
+def test_evaluate_dependencies_purity_survives_open_and_read_text_raising(monkeypatch):
+    def _boom(*args, **kwargs):
+        raise OSError("purity violation: this must never be called")
+
+    monkeypatch.setattr("builtins.open", _boom)
+    monkeypatch.setattr("pathlib.Path.read_text", _boom)
+
+    g = _graph()
+    design_graph = {"spec/foo": _design("spec", "complete")}
+    statuses = g.evaluate_dependencies(design_graph, ["spec/foo", "spec/ghost", "task/foo"])
+    assert len(statuses) == 3

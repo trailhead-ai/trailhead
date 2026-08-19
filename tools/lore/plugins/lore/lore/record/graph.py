@@ -18,11 +18,27 @@ Guard-error shape: every graph guard — blocking error, non-blocking warning, a
 the flow-out ritual reminder — is formatted through :func:`format_guard_message`
 so all of them share one machine-parseable ``graph-guard [<guard>]: <message>``
 shape on stderr (agents parse the bracketed guard tag to react programmatically).
+
+Design-dependency section: this module also carries the pure design side of a
+second, unrelated dependency grammar — the ``depends-on`` sidecar entries a
+``spec``/``adr`` record may carry, distinct from the task graph above. An entry
+is a qualified id, ``kind/name``, optionally staged with ``@<status>`` (e.g.
+``spec/foo@ready``); :func:`parse_dependency` splits one entry, never raising,
+and :func:`evaluate_dependencies` reads a ``{qualified_id: sidecar}`` design
+graph to report met/unmet with a reason per entry, in the order given. This
+section imports :mod:`lore.record.model` for ``STATUS_VOCAB`` (to derive each
+kind's success chain) — a one-directional dependency; ``model`` imports nothing
+from here. The purity contract is unchanged: no file reads, no index, nothing
+here ever raises on malformed input — a design graph missing a target, or a
+target whose status is not the record's own true state, is just data.
 """
 
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import NamedTuple
+
+from . import model as model_mod
 
 #: Statuses that satisfy the parent-completion guard — a child in any of these is
 #: "settled" and does not block its parent from completing.
@@ -197,3 +213,195 @@ def find_ancestor_loop(graph: dict[str, dict], start: str) -> list[str] | None:
         path.append(parent)
         seen.add(parent)
         current = parent
+
+
+# ---------------------------------------------------------------------------
+# design dependency grammar + evaluator (spec/adr ``depends-on``)
+# ---------------------------------------------------------------------------
+
+#: Kinds whose ``depends-on`` entries this grammar parses. ``task`` deliberately
+#: stays outside it — task edges are bare names, owned by the section above.
+DESIGN_KINDS: frozenset[str] = frozenset({"spec", "adr"})
+
+#: Statuses that mean a design record failed rather than progressed, shared
+#: across every design kind. A target at one of these is never "met", no
+#: matter what stage a dependency entry asked for.
+FAILURE_STATUSES: frozenset[str] = frozenset({"superseded", "dropped"})
+
+#: Per-kind success chain, derived from :data:`model.STATUS_VOCAB` by dropping
+#: the trailing failure statuses — never hand-listed, so a ``STATUS_VOCAB`` edit
+#: moves the chain automatically. Order is preserved from ``STATUS_VOCAB``.
+SUCCESS_CHAINS: dict[str, tuple[str, ...]] = {
+    kind: tuple(status for status in model_mod.STATUS_VOCAB[kind] if status not in FAILURE_STATUSES)
+    for kind in DESIGN_KINDS
+}
+
+#: :func:`parse_dependency` error codes, one per rejected entry shape.
+_ERR_NO_KIND = "no-kind"
+_ERR_TASK_KIND = "task-kind"
+_ERR_UNKNOWN_KIND = "unknown-kind"
+_ERR_UNKNOWN_STAGE = "unknown-stage"
+_ERR_FAILURE_STAGE = "failure-stage"
+
+#: :func:`evaluate_dependencies` reason codes for an unmet dependency.
+REASON_MISSING = "missing"
+REASON_SHORT_OF_STAGE = "short-of-stage"
+REASON_TARGET_FAILED = "target-failed"
+
+
+class ParsedDependency(NamedTuple):
+    """One parsed ``depends-on`` entry from a spec/adr sidecar.
+
+    ``kind``/``name`` are populated whenever the entry could be split on a
+    ``/`` (even when that split is itself the rejection, e.g. an unknown
+    kind), so a caller reporting the rejection still has something to name.
+    ``stage`` is the ``@``-tail verbatim, or ``None`` when the entry carried
+    none — including on error, and including on an otherwise-valid unqualified
+    entry (never normalized to the chain end; that normalization is the
+    evaluator's job, not the parser's). ``error`` is ``None`` for an accepted
+    entry, else one of a closed set of string codes, one per rejected shape.
+    """
+
+    kind: str | None
+    name: str | None
+    stage: str | None
+    error: str | None
+
+
+def parse_dependency(entry: object) -> ParsedDependency:
+    """Split one ``depends-on`` entry into ``kind/name[@stage]``, never raising.
+
+    Accepts ``kind/name`` and ``kind/name@stage`` where ``kind`` is a design
+    kind (``spec``/``adr``) and, when given, ``stage`` is a status on that
+    kind's success chain. Rejects, with a distinct ``error`` code each:
+
+    - a bare name with no ``/`` (``no-kind``) — also the catch-all for any
+      entry too malformed to split (not a string, an empty kind or name half);
+    - a ``task/`` target (``task-kind``) — task edges are a separate grammar,
+      never this one;
+    - any other kind prefix outside :data:`DESIGN_KINDS` (``unknown-kind``);
+    - a ``@stage`` absent from the target kind's ``STATUS_VOCAB`` entirely
+      (``unknown-stage``);
+    - a ``@stage`` that names a failure status (``failure-stage``) — a
+      dependency cannot require a status that means the target failed.
+    """
+    if not isinstance(entry, str) or "/" not in entry:
+        name = entry if isinstance(entry, str) else None
+        return ParsedDependency(None, name, None, _ERR_NO_KIND)
+    kind_part, _, rest = entry.partition("/")
+    name_part, has_stage, stage_part = rest.partition("@")
+    stage = stage_part if has_stage else None
+    if not kind_part or not name_part:
+        return ParsedDependency(kind_part or None, name_part or None, stage, _ERR_NO_KIND)
+    if kind_part == "task":
+        return ParsedDependency(kind_part, name_part, stage, _ERR_TASK_KIND)
+    if kind_part not in DESIGN_KINDS:
+        return ParsedDependency(kind_part, name_part, stage, _ERR_UNKNOWN_KIND)
+    if stage is not None:
+        if stage not in model_mod.STATUS_VOCAB.get(kind_part, ()):
+            return ParsedDependency(kind_part, name_part, stage, _ERR_UNKNOWN_STAGE)
+        if stage in FAILURE_STATUSES:
+            return ParsedDependency(kind_part, name_part, stage, _ERR_FAILURE_STAGE)
+    return ParsedDependency(kind_part, name_part, stage, None)
+
+
+class DependencyStatus(NamedTuple):
+    """The met/unmet verdict for one ``depends-on`` entry against a design graph.
+
+    ``reason`` is always a non-empty, human-readable string; ``reason_code`` is
+    ``None`` when ``met`` is ``True`` and otherwise one of ``"missing"``
+    (no target at that qualified id), ``"short-of-stage"`` (the target exists
+    but its status is earlier on the chain than required, or is not on the
+    chain/failure-set at all — a malformed sidecar reads unmet, conservatively),
+    or ``"target-failed"`` (the target's status is a failure status, regardless
+    of what stage the entry asked for).
+    """
+
+    kind: str | None
+    name: str | None
+    stage: str | None
+    met: bool
+    reason: str
+    reason_code: str | None
+
+
+def evaluate_dependencies(
+    design_graph: dict[str, dict], entries: Sequence[str]
+) -> list[DependencyStatus]:
+    """Evaluate each ``depends-on`` *entries* string against *design_graph*.
+
+    *design_graph* is a ``{"kind/name": sidecar}`` dict — the vault's spec/adr
+    sidecars, source of truth, in the same shape the task graph above takes
+    (just keyed by qualified id instead of bare name). Returns one
+    :class:`DependencyStatus` per entry, in the order given — never a map keyed
+    by the raw entry, so duplicate entries each get their own status. An entry
+    that fails :func:`parse_dependency` reads unmet with ``reason_code ==
+    "missing"``, since no target can be resolved for it. Reason strings
+    interpolate the target's qualified id (kind and name) exactly as they
+    appear in the entry — no escaping, no charset check — a stem that reached
+    the vault by any route other than the CLI's own slugifier round-trips
+    unaltered; a caller rendering the reason somewhere unsafe must escape it.
+    """
+    return [_evaluate_one(design_graph, entry) for entry in entries]
+
+
+def _evaluate_one(design_graph: dict[str, dict], entry: str) -> DependencyStatus:
+    parsed = parse_dependency(entry)
+    if parsed.error is not None:
+        return DependencyStatus(
+            parsed.kind,
+            parsed.name,
+            parsed.stage,
+            False,
+            f"{entry!r} is not a resolvable dependency ({parsed.error})",
+            REASON_MISSING,
+        )
+    qualified_id = f"{parsed.kind}/{parsed.name}"
+    target = design_graph.get(qualified_id)
+    if target is None:
+        return DependencyStatus(
+            parsed.kind,
+            parsed.name,
+            parsed.stage,
+            False,
+            f"{qualified_id} was not found in the vault",
+            REASON_MISSING,
+        )
+    status = target.get("status")
+    if status in FAILURE_STATUSES:
+        return DependencyStatus(
+            parsed.kind,
+            parsed.name,
+            parsed.stage,
+            False,
+            f"{qualified_id} is {status}",
+            REASON_TARGET_FAILED,
+        )
+    chain = SUCCESS_CHAINS[parsed.kind]
+    required_stage = parsed.stage if parsed.stage is not None else chain[-1]
+    if status not in chain:
+        return DependencyStatus(
+            parsed.kind,
+            parsed.name,
+            parsed.stage,
+            False,
+            f"{qualified_id} has status {status!r}, which is not on the {parsed.kind} success chain",
+            REASON_SHORT_OF_STAGE,
+        )
+    if chain.index(status) < chain.index(required_stage):
+        return DependencyStatus(
+            parsed.kind,
+            parsed.name,
+            parsed.stage,
+            False,
+            f"{qualified_id} is at {status!r}, short of required stage {required_stage!r}",
+            REASON_SHORT_OF_STAGE,
+        )
+    return DependencyStatus(
+        parsed.kind,
+        parsed.name,
+        parsed.stage,
+        True,
+        f"{qualified_id} is at {status!r}, satisfying {required_stage!r}",
+        None,
+    )
