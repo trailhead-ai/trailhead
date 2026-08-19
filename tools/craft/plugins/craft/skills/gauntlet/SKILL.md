@@ -178,7 +178,9 @@ record to judge each item; a recommendation lets them judge in place. So the def
 compact deliverable — target one terminal screen (~40 lines) for a typical run — and one word
 ("go") is a complete answer to it.
 
-The deliverable is exactly four parts, in this order:
+The deliverable is these four parts, in this order — all four whenever there is a Critical to
+disposition, and the same parts minus the table on a run that produced none ("Zero Criticals is
+still a decision", below):
 
 1. **Synthesis — at most five sentences.** What the findings collectively mean for the design,
    written in the design's own terms: its objectives, its criteria, its named parts. Not a finding
@@ -278,6 +280,12 @@ together, and do not walk back through the table finding by finding.
   **Never record either disposition with a reason you drafted, and never with the reason slot
   empty.** This is the one path by which text you wrote could enter the permanent trail wearing the
   operator's signature.
+- **An override off `resolved` withdraws that row's drafted edit.** Every `resolved` row's edit text
+  was drafted before you presented, and only the rows still `resolved` once the overrides are
+  applied belong to the accepted set. An override to `disputed`, `accepted-as-risk`, or `reframed`
+  therefore **removes that row's edit from `$EDITS`**, and the echoed post-override table is what
+  says which edits remain. A diff assembled before the override lands the one change the operator
+  explicitly declined, permanently, in a record about to freeze.
 - **A route-changing override re-presents once.** If applying the overrides changes the route — an
   override that removes the last `reframed`, or one that introduces one — present the revised
   recommendation once more and take acceptance again **before anything is written**. If that reply
@@ -285,6 +293,13 @@ together, and do not walk back through the table finding by finding.
   **The cap is one re-present per route change, not one per run.** What the cap forbids is
   re-presenting a recommendation nothing changed; what it never licenses is writing a route the
   operator has not seen and accepted.
+- **An override *into* `resolved` re-presents too, whatever the route does.** Only the rows you
+  proposed `resolved` have their edit text drafted, so an override moving a `reframed` row to
+  `resolved` produces an accepted row with no edit behind it. Draft that edit, then present once
+  more and take acceptance again — including on a run whose route never moved because another
+  `reframed` row still holds it. The cap above forbids re-presenting a recommendation nothing
+  changed, and **a newly drafted edit is a change**. Skip it and you are composing the edit after
+  acceptance, which is exactly what drafting every `resolved` edit before presenting forbids.
 
 #### Escalation points
 
@@ -297,8 +312,8 @@ no auto-accept flag, and every point below waits on a human today.
 |---|---|
 | **operator acceptance gate** | the operator accepting the presented deliverable — on every run, clean ones included |
 | **override round-trip** | the operator's overrides, applied together and echoed as a full table |
-| **route-change re-present** | acceptance of the revised recommendation, when overrides changed the route |
-| **failed-write report** | nothing — the tail has stopped; the operator is told the partial state and the record stays `draft` |
+| **route-change re-present** | acceptance of the revised recommendation, whenever overrides changed the route — or drafted an edit the presented table did not carry |
+| **failed-write report** | nothing — the tail has stopped and the operator is told the partial state; the record stays `draft` **unless the failure fell after the status flip**, which only the adr tail's supersession write is ordered to do (see "Reviewing an adr") |
 
 #### The accepted tail
 
@@ -354,6 +369,14 @@ record it reviewed:
   C2 `disputed` (operator override — "<their reason, quoted>"), … — <n> from proposal, <n> operator
   overrides. Important <n>, Minor <n>, detail below.
 - <the consolidated detail, per finding, in the shape `_shared/council.md` defines>
+```
+
+That is one invocation. `$EDITS` is the unified diff carrying all three payloads — every `resolved`
+edit to the spec's own sections, plus this `## Gauntlet` section, whose first bullet is the
+provenance stamp and whose remainder is the detail:
+
+```
+printf '%s' "$EDITS" | lore record update <spec-id> --diff
 ```
 
 **Then, and only once that write has succeeded, flip.** On the **freeze route**:
@@ -464,9 +487,13 @@ lore record update <adr-id> --status active
 
 1. **The `lesson` record is written first**, carrying the consolidated detail and its
    `--related adr=<adr-id>` edge on the same command — an edge added by a later write is an edge
-   that a failure between the two never writes. It also carries the per-Critical `C1`…`Cn`
-   dispositions the shared stamp quotes: an annotation is a key/value, so the ids need a record with
-   a body, and this is it.
+   that a failure between the two never writes. It is also where the shared stamp's per-Critical
+   half lands **in full**: the `C1`…`Cn` dispositions, each one **marked from-proposal or
+   operator-override**, and every `accepted-as-risk` / `disputed` reason **quoted in the operator's
+   own words**. An annotation is a key/value — it holds the counts and nothing else — so the ids,
+   the markers, and the reasons need a record with a body, and this is it. Write the counts alone
+   and the operator's stated reason for living with a risk is missing from the trail of a decision
+   nothing can edit afterwards.
 2. **Then the shared tail's one atomic write** — `$EDITS` is the unified diff of every `resolved`
    edit, and the counts annotation rides the same invocation. `--diff` and `--annotation` apply
    inside a single read-modify-write, so a rejected hunk leaves the body *and* the annotation
@@ -476,7 +503,11 @@ lore record update <adr-id> --status active
    land before anything freezes. An adr flipped `active` without them is an immutable decision no
    acceptance ever reached. The counts alongside the accepted-from-proposal / operator-override
    split are how the provenance stamp renders for an adr, and `<n>-reframed` is what tells an
-   auditor of a `dropped` adr which disposition sent it there.
+   auditor of a `dropped` adr which disposition sent it there. **This write runs on every accepted
+   run, including one with zero `resolved` Criticals** — `$EDITS` is then an empty diff, which the
+   CLI applies as a no-op, and the annotation rides the same invocation regardless. Skipped there,
+   the adr flips `active` carrying no provenance at all, because the annotation is the only
+   provenance its exhaustive body will ever hold.
 3. **Then the status flip** — `--status active` on the freeze route, and, when the successor's edge
    names an `active` predecessor, the two-write supersession above in its pinned order.
 
@@ -496,11 +527,22 @@ order's is an `active`, immutable decision whose review evidence was never writt
 **Any failure before the flip stops the sequence**: the adr stays `draft`, and a `lesson` record
 already written when a later write fails is **never silently abandoned** — report the orphaned
 `lesson` record to the operator by name, so they can re-run or delete it. Give them the lookup as
-well: `lore search "kind:lesson related-adr:<adr-name>"` finds it from the adr. The lookup carries a
-caveat and the caveat travels with it — `lore search` states that reverse edges reflect the last
-reindex, so a `lesson` record written moments ago can come back with zero results until
-`lore reindex` runs, and zero results read as "no orphan" to precisely the operator this report
-exists to warn. So report the record name alongside the query, never the query alone.
+well:
+
+```
+lore search 'kind:lesson related-adr:"<adr-id>"'
+```
+
+**The query and the edge are the same `<adr-id>`, spelled the same way.** `--related adr=<adr-id>`
+stores that value verbatim, so a query naming the bare adr name matches nothing — and zero results
+read as "no orphan" to precisely the operator this report exists to warn. The id carries a `/`, so
+it is quoted; unquoted, the query is a parse error rather than a lookup.
+
+That is the `lesson` record's own **forward** edge, which `lore record create` projects as it
+writes, so it resolves immediately and needs no `lore reindex` first. (The reverse direction — a
+query from the adr's side — is a reindex-only property, and is not what this lookup uses.) Still
+report the record name alongside the query, never the query alone: the name is what the operator
+acts on, and it survives an index this report cannot inspect.
 
 **A failure after the flip reports differently.** The predecessor's `superseded` back-edge is the
 only write ordered after the status flip, so the rule above — the adr stays `draft` — cannot
@@ -533,5 +575,6 @@ shaped to avoid:
   the adjudication of the other seven.
 - **Convergence beats confidence.** A finding two blind passes reached independently outranks a
   finding one pass asserted forcefully.
-- **The adjudicator is a reviewer, not a router.** Consolidation, spot-verification, and section
-  mapping are the job. Thirty findings forwarded verbatim is a failed adjudication.
+- **The adjudicator is a reviewer, not a router.** Consolidation, spot-verification, and
+  the single recommendation built out of them are the job. Thirty findings forwarded verbatim is a
+  failed adjudication.

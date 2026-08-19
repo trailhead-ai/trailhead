@@ -624,9 +624,14 @@ def test_deliverable_pins_the_route_line_and_the_per_critical_table():
     """
     step = _resolution_step(GAUNTLET.read_text())
     flat = _flat(step)
-    assert "The deliverable is exactly four parts, in this order" in flat, (
+    assert "The deliverable is these four parts, in this order" in flat, (
         "the resolution step must fix the deliverable's parts and their order — a "
         "deliverable assembled differently each run cannot be scanned"
+    )
+    assert "minus the table on a run that produced none" in flat, (
+        "the part count must reconcile with the zero-Critical run, which presents "
+        "no per-Critical table — stated as an unqualified 'exactly four', the "
+        "deliverable's own definition is false on the clean-run path"
     )
     assert "**The recommended route**, on its own line, by name" in flat, (
         "the route must be its own line, named — a route inferred from prose is a "
@@ -964,6 +969,47 @@ def test_override_without_a_reason_is_asked_back_never_drafted():
     )
 
 
+def test_override_off_resolved_withdraws_that_rows_drafted_edit():
+    """Every `resolved` row's edit is drafted before the deliverable is presented.
+
+    So an override that moves a row OFF `resolved` is an override against text
+    that already exists — and a diff assembled before the override carries the one
+    change the operator explicitly declined into a record about to freeze.
+    """
+    step = _flat(_resolution_step(GAUNTLET.read_text()))
+    assert "**An override off `resolved` withdraws that row's drafted edit.**" in step, (
+        "the override rules must state that overriding a Critical off `resolved` "
+        "withdraws the edit drafted for it — nothing else in the step retracts an "
+        "edit the operator declined"
+    )
+    assert "removes that row's edit from `$EDITS`" in step, (
+        "the withdrawal must name the accepted set the tail actually writes, so "
+        "the rule is applied to the diff rather than to the table's rendering"
+    )
+
+
+def test_override_into_resolved_re_presents_its_newly_drafted_edit():
+    """The re-present fires on a route change — which an override into `resolved`
+    need not cause, on a run another `reframed` row still holds.
+
+    That row's edit was never drafted (only proposals of `resolved` are), so
+    accepting straight through would leave the edit composed after acceptance.
+    """
+    step = _flat(_resolution_step(GAUNTLET.read_text()))
+    assert (
+        "**An override *into* `resolved` re-presents too, whatever the route does.**"
+        in step
+    ), (
+        "the override rules must cover an override INTO `resolved`, whose edit was "
+        "never drafted — the route-change trigger alone misses it whenever another "
+        "`reframed` row holds the route unchanged"
+    )
+    assert "a newly drafted edit is a change" in step, (
+        "the re-present cap must be reconciled with this case explicitly, or the "
+        "cap reads as forbidding the very re-present this rule requires"
+    )
+
+
 def test_route_changing_override_re_presents_before_any_write():
     """The route is the one thing an override can change that the operator did not
     directly name — so it goes back for acceptance before anything is written.
@@ -1010,6 +1056,27 @@ def test_resolution_names_its_escalation_points_in_the_execute_style():
     )
 
 
+def test_failed_write_escalation_row_admits_the_post_flip_failure():
+    """The shared table's `failed-write report` row states the record stays `draft`.
+
+    One write in the whole skill is ordered AFTER the status flip — the adr tail's
+    supersession back-edge — and a failure there leaves a record that is already
+    frozen. Left unqualified, the shared row is simply wrong for that case, and
+    an agent reading it would report a `draft` record that is `active`.
+    """
+    step = _flat(_resolution_step(GAUNTLET.read_text()))
+    assert "unless the failure fell after the status flip" in step, (
+        "the `failed-write report` row must qualify its `draft` claim for the one "
+        "write ordered after the flip, rather than contradicting the per-mode tail "
+        "that describes it"
+    )
+    assert "or drafted an edit the presented table did not carry" in step, (
+        "the `route-change re-present` row must cover the other re-present the "
+        "override rules require — an override into `resolved` on a run whose route "
+        "never moved — or the table lists a trigger narrower than the rule it names"
+    )
+
+
 def test_resolution_ends_at_the_accepted_tail_anchor():
     """The anchor is the seam between deciding and writing.
 
@@ -1051,6 +1118,12 @@ _ADR_COUNTS_ANNOTATION = "--annotation gauntlet="
 # read-modify-write, so both ride one invocation and a rejected hunk leaves body
 # and annotation alike unwritten.
 _ADR_EDITS_WRITE = "lore record update <adr-id> --diff"
+
+# The spec's half of the same shared atomic write. The spec tail's `--diff` write
+# carries all three of its payloads — the accepted edits, the provenance stamp, and
+# the `## Gauntlet` detail section — so the spec mode needs its own command form and
+# its own pin, symmetric with the adr one above.
+_SPEC_EDITS_WRITE = "lore record update <spec-id> --diff"
 
 
 def _accepted_tail(text: str) -> str:
@@ -1209,6 +1282,28 @@ def test_spec_tail_retains_full_detail_in_a_gauntlet_body_section():
         "the detail section must land in the one atomic write, not a second write "
         "after the flip — a `ready` spec missing its own review record is exactly "
         "the artifact the audit trail exists to prevent"
+    )
+
+
+def test_spec_tail_applies_the_accepted_edits_in_the_same_atomic_write():
+    """The spec tail enumerates what its one write carries; it must also SHOW it.
+
+    Symmetric with the adr tail's pin: a tail that names a `## Gauntlet` section
+    and a `--status ready` flip, and gives a command form only for the flip, is a
+    tail an agent can execute by flipping a spec whose accepted edits never landed.
+    """
+    tail = _spec_tail(GAUNTLET.read_text())
+    edits_lines = [line for line in tail.splitlines() if _SPEC_EDITS_WRITE in line]
+    assert edits_lines, (
+        "the spec tail must carry the shared tail's atomic edits write "
+        f"({_SPEC_EDITS_WRITE}) as a command — the only fenced command in the step "
+        "being the flip is how a run freezes a spec with its edits still unwritten"
+    )
+    flip_match = _SPEC_ADVANCE_RE.search(tail)
+    assert flip_match, "the spec tail must carry the `ready` flip as a command"
+    assert tail.index(_SPEC_EDITS_WRITE) < flip_match.start(), (
+        "the edits write must precede the status flip — a flip ahead of the edits "
+        "freezes a spec whose accepted edits are still hypothetical"
     )
 
 
@@ -1388,6 +1483,44 @@ def test_adr_tail_says_where_the_per_id_dispositions_land():
     )
 
 
+def test_adr_lesson_record_holds_the_operator_reason_text_and_the_override_markers():
+    """The shared stamp requires more per Critical than a bare disposition.
+
+    It requires the `accepted-as-risk` / `disputed` reason in the operator's own
+    words and the from-proposal-vs-override marker per id. An annotation is a
+    key/value, so the adr mode has to give both a stated home or the mode drops
+    the operator's own reasons from the trail of an immutable decision.
+    """
+    flat = _flat(_adr_tail(GAUNTLET.read_text()))
+    assert "marked from-proposal or operator-override" in flat, (
+        "the adr tail must say where the per-id from-proposal-vs-override marker "
+        "lands — the counts annotation carries totals, not the per-id split"
+    )
+    assert "quoted in the operator's own words" in flat, (
+        "the adr tail must give the `accepted-as-risk` / `disputed` reason text a "
+        "home in the `lesson` record; written nowhere, the operator's stated reason "
+        "for living with a risk is absent from a decision nothing can edit later"
+    )
+
+
+def test_adr_atomic_write_runs_even_with_no_resolved_edits():
+    """A run with zero `resolved` Criticals still has provenance to write.
+
+    The counts annotation rides the edits write, and an adr's exhaustive body will
+    never hold provenance itself — so skipping the write on an empty diff flips the
+    decision `active` with no record of the review at all.
+    """
+    flat = _flat(_adr_tail(GAUNTLET.read_text()))
+    assert (
+        "This write runs on every accepted run, including one with zero `resolved` "
+        "Criticals" in flat
+    ), (
+        "the adr tail must state that the atomic write runs even when `$EDITS` is "
+        "empty — described only for a non-empty diff, the counts annotation never "
+        "lands on a clean run"
+    )
+
+
 def test_adr_tail_carries_the_reframe_flip_too():
     """The sequence is the same on both routes; only its last write differs."""
     tail = _adr_tail(GAUNTLET.read_text())
@@ -1403,16 +1536,41 @@ def test_orphaned_lesson_report_names_the_recovery_query():
     A reverse-edge lookup they have to invent is one they will not run.
     """
     flat = _flat(_adr_tail(GAUNTLET.read_text()))
-    assert "kind:lesson related-adr:<adr-name>" in flat, (
-        "the orphan report must name the query that finds the lesson record again, "
-        "not merely assert the edge makes it discoverable"
+    assert 'kind:lesson related-adr:"<adr-id>"' in flat, (
+        "the orphan report must name a query that matches the edge the tail wrote. "
+        "The edge is written `--related adr=<adr-id>` and stored verbatim, so the "
+        "query has to name the same `<adr-id>` — quoted, because that id carries a "
+        "`/` and an unquoted `/` is a KQL parse error"
     )
-    assert "reverse edges reflect the last reindex" in flat, (
-        "the lookup's caveat must travel with it — a just-created lesson record can "
-        "return zero results until the index catches up, and a zero-result run "
-        "reads as 'no orphan' to the operator the report exists to warn"
+    assert _ADR_LESSON_EDGE in flat, (
+        "the query and the edge must appear in the same paragraph spelled the same "
+        "way — the failure this lookup exists to catch is the two drifting apart"
+    )
+    assert "projects as it writes" in flat, (
+        "the lookup reads the `lesson` record's own forward edge, which the create "
+        "projects on write — so the report must not attach the reverse-edge "
+        "reindex caveat, which would tell the operator to discount a zero result "
+        "that is in fact conclusive"
     )
     assert "report the record name alongside the query" in flat, (
         "the orphan report must name the record itself, so it survives a lookup "
         "that has not been reindexed yet"
+    )
+
+
+def test_calibration_names_only_adjudication_work_the_steps_still_define():
+    """Calibration is read as a summary of the adjudicator's job.
+
+    A bullet naming a step that no longer exists sends the adjudicator looking for
+    work the process does not ask for — and quietly omits the work it does.
+    """
+    text = GAUNTLET.read_text()
+    assert "section mapping" not in text, (
+        "Calibration must not name 'section mapping' as the adjudicator's job — "
+        "findings are consolidated into stable `C1`…`Cn` ids, not mapped back onto "
+        "the record's sections"
+    )
+    assert "the single recommendation built out of them are the job" in _flat(text), (
+        "Calibration must name the work the process actually defines: consolidate, "
+        "spot-verify, and build the one recommendation the operator decides on"
     )

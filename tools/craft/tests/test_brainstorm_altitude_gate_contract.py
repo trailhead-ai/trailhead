@@ -42,8 +42,35 @@ _ORPHAN_RULE = (
 )
 
 
+# The two exit-gate handoff quotes, each keyed by the heading that introduces it and
+# the heading that ends it. The spec quote is bounded by the adr heading rather than
+# by the shared trailing instruction — bounded on the latter it would swallow the adr
+# quote too, and a pin on "the spec handoff" would be satisfied by the adr one.
+_SPEC_HANDOFF_HEADER = "**Common case (6a):**"
+_ADR_HANDOFF_HEADER = "**Altitude-gate case (6b):**"
+_HANDOFF_STOP = "**Print the handoff command fully formed**"
+
+
 def _text() -> str:
     return BRAINSTORM.read_text(encoding="utf-8")
+
+
+def _handoff_quote(header: str, stop_marker: str) -> str:
+    """One handoff quote, scoped to its own branch.
+
+    Scoped rather than matched file-wide: both branches say similar things, so a
+    file-wide count of a shared phrase is satisfied by either branch saying it
+    twice and pins neither handoff it names.
+    """
+    text = _text()
+    assert header in text, f"brainstorm/SKILL.md must carry a {header!r} handoff quote"
+    start = text.index(header)
+    stop = text.find(stop_marker, start + len(header))
+    assert stop != -1, (
+        f"the {header!r} handoff quote must be followed by {stop_marker!r}, "
+        "the marker that bounds it"
+    )
+    return text[start:stop]
 
 
 def test_brainstorm_skill_ships():
@@ -168,13 +195,13 @@ def test_spec_handoff_reflects_recommend_then_accept():
     The spec-branch (6a) handoff quote is what tells the user what to expect next,
     so it must describe that gate rather than a walk through each finding.
     """
-    text = _text()
-    assert "dispositioned what it finds" not in text, (
+    quote = _handoff_quote(_SPEC_HANDOFF_HEADER, _ADR_HANDOFF_HEADER)
+    assert "dispositioned what it finds" not in quote, (
         "brainstorm/SKILL.md's spec handoff must describe the gauntlet's gate as "
         "one recommendation the user accepts or overrides, not a finding-by-finding "
         "disposition walk-through"
     )
-    assert "accepted its recommendation" in text, (
+    assert "accepted its recommendation" in quote, (
         "brainstorm/SKILL.md's spec handoff must describe flipping to `ready` "
         "once the user has accepted the gauntlet's recommendation, matching "
         "gauntlet's recommend-then-accept resolution flow"
@@ -183,12 +210,17 @@ def test_spec_handoff_reflects_recommend_then_accept():
 
 def test_adr_handoff_reflects_recommend_then_accept():
     """Same recommend-then-accept alignment for the altitude-gate (6b) handoff quote."""
-    text = _text()
-    assert text.count("accepted its recommendation") >= 2, (
-        "brainstorm/SKILL.md must describe both the spec-branch and adr-branch "
-        "handoffs in recommend-then-accept terms — the gauntlet flips a record "
-        "once its recommendation is accepted, not once every finding is "
-        "individually dispositioned"
+    quote = _handoff_quote(_ADR_HANDOFF_HEADER, _HANDOFF_STOP)
+    assert "dispositioned what it finds" not in quote, (
+        "brainstorm/SKILL.md's adr handoff must describe the gauntlet's gate as "
+        "one recommendation the user accepts or overrides, not a finding-by-finding "
+        "disposition walk-through"
+    )
+    assert "accepted its recommendation" in quote, (
+        "brainstorm/SKILL.md's altitude-gate handoff must describe the flip in "
+        "recommend-then-accept terms — the gauntlet flips a record once its "
+        "recommendation is accepted, not once every finding is individually "
+        "dispositioned"
     )
 
 
