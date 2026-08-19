@@ -55,6 +55,28 @@ def body_has_flow_out(body: str) -> bool:
     return bool(_FLOW_OUT_RE.search(body or ""))
 
 
+def _load_kind_sidecars(vault_root: str, kind: str) -> dict[str, dict]:
+    """Read every ``<vault_root>/<kind>/*.json`` sidecar → ``{stem: sidecar}``.
+
+    The single directory-scoped read both public loaders below are built from —
+    sidecars, never the index. A missing kind directory contributes nothing, and
+    a malformed or unreadable sidecar is skipped (best-effort: a guard degrades
+    to not seeing that node rather than failing the whole write).
+    """
+    kind_dir = Path(vault_root) / kind
+    if not kind_dir.is_dir():
+        return {}
+    sidecars: dict[str, dict] = {}
+    for sidecar_path in kind_dir.glob("*.json"):
+        try:
+            data = json.loads(sidecar_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(data, dict):
+            sidecars[sidecar_path.stem] = data
+    return sidecars
+
+
 def load_task_sidecars(vault_root: str) -> dict[str, dict]:
     """Read every task sidecar under ``<vault_root>/task/`` → ``{name: sidecar}``.
 
@@ -62,18 +84,7 @@ def load_task_sidecars(vault_root: str) -> dict[str, dict]:
     A malformed or unreadable sidecar is skipped (best-effort: the guard degrades
     to not seeing that node rather than failing the whole write).
     """
-    task_dir = Path(vault_root) / "task"
-    graph: dict[str, dict] = {}
-    if not task_dir.is_dir():
-        return graph
-    for sidecar_path in task_dir.glob("*.json"):
-        try:
-            data = json.loads(sidecar_path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            continue
-        if isinstance(data, dict):
-            graph[sidecar_path.stem] = data
-    return graph
+    return _load_kind_sidecars(vault_root, "task")
 
 
 def load_design_sidecars(vault_root: str) -> dict[str, dict]:
@@ -88,19 +99,11 @@ def load_design_sidecars(vault_root: str) -> dict[str, dict]:
     ``spec/`` or ``adr/`` directory contributes nothing; a malformed or
     unreadable sidecar is skipped (best-effort, same as the task loader).
     """
-    graph: dict[str, dict] = {}
-    for kind in graph_mod.DESIGN_KINDS:
-        kind_dir = Path(vault_root) / kind
-        if not kind_dir.is_dir():
-            continue
-        for sidecar_path in kind_dir.glob("*.json"):
-            try:
-                data = json.loads(sidecar_path.read_text(encoding="utf-8"))
-            except (OSError, ValueError):
-                continue
-            if isinstance(data, dict):
-                graph[f"{kind}/{sidecar_path.stem}"] = data
-    return graph
+    return {
+        f"{kind}/{stem}": sidecar
+        for kind in graph_mod.DESIGN_KINDS
+        for stem, sidecar in _load_kind_sidecars(vault_root, kind).items()
+    }
 
 
 def confine_edge_reference(value: str, vault_root: str, kind: str = "task") -> str | None:
@@ -303,26 +306,26 @@ def _design_parse_error(entry: object, parsed: graph_mod.ParsedDependency) -> st
     stage-vocabulary rejections ``design-edge-stage``; a stage rejection always
     spells out the *target* kind's usable stages, not just the violation.
     """
-    if parsed.error == graph_mod._ERR_NO_KIND:
+    if parsed.error == graph_mod.ERR_NO_KIND:
         return graph_mod.format_guard_message(
             "design-edge-form",
             f"depends-on entry {entry!r} must be a qualified target "
             f"'<kind>/<name>[@<stage>]' with kind one of {_DESIGN_KIND_LIST}",
         )
-    if parsed.error == graph_mod._ERR_TASK_KIND:
+    if parsed.error == graph_mod.ERR_TASK_KIND:
         return graph_mod.format_guard_message(
             "design-edge-form",
             f"depends-on entry {entry!r} targets a task — a design dependency "
             f"may only target {_DESIGN_KIND_LIST}",
         )
-    if parsed.error == graph_mod._ERR_UNKNOWN_KIND:
+    if parsed.error == graph_mod.ERR_UNKNOWN_KIND:
         return graph_mod.format_guard_message(
             "design-edge-form",
             f"depends-on entry {entry!r} names unknown dependency kind "
             f"{parsed.kind!r} — must be one of {_DESIGN_KIND_LIST}",
         )
     stages = list(graph_mod.SUCCESS_CHAINS[parsed.kind])
-    if parsed.error == graph_mod._ERR_UNKNOWN_STAGE:
+    if parsed.error == graph_mod.ERR_UNKNOWN_STAGE:
         return graph_mod.format_guard_message(
             "design-edge-stage",
             f"depends-on entry {entry!r} names stage {parsed.stage!r}, which is not "

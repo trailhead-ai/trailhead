@@ -249,12 +249,14 @@ SUCCESS_CHAINS: dict[str, tuple[str, ...]] = {
     for kind in DESIGN_KINDS
 }
 
-#: :func:`parse_dependency` error codes, one per rejected entry shape.
-_ERR_NO_KIND = "no-kind"
-_ERR_TASK_KIND = "task-kind"
-_ERR_UNKNOWN_KIND = "unknown-kind"
-_ERR_UNKNOWN_STAGE = "unknown-stage"
-_ERR_FAILURE_STAGE = "failure-stage"
+#: :func:`parse_dependency` error codes — the closed public set
+#: :attr:`ParsedDependency.error` is drawn from, one per rejected entry
+#: shape. Public because the guard policy branches on them by name.
+ERR_NO_KIND = "no-kind"
+ERR_TASK_KIND = "task-kind"
+ERR_UNKNOWN_KIND = "unknown-kind"
+ERR_UNKNOWN_STAGE = "unknown-stage"
+ERR_FAILURE_STAGE = "failure-stage"
 
 #: :func:`evaluate_dependencies` reason codes for an unmet dependency.
 REASON_MISSING = "missing"
@@ -272,7 +274,9 @@ class ParsedDependency(NamedTuple):
     none — including on error, and including on an otherwise-valid unqualified
     entry (never normalized to the chain end; that normalization is the
     evaluator's job, not the parser's). ``error`` is ``None`` for an accepted
-    entry, else one of a closed set of string codes, one per rejected shape.
+    entry, else one of the closed :data:`ERR_NO_KIND` / :data:`ERR_TASK_KIND` /
+    :data:`ERR_UNKNOWN_KIND` / :data:`ERR_UNKNOWN_STAGE` / :data:`ERR_FAILURE_STAGE`
+    set, one code per rejected shape.
     """
 
     kind: str | None
@@ -300,21 +304,21 @@ def parse_dependency(entry: object) -> ParsedDependency:
     """
     if not isinstance(entry, str) or "/" not in entry:
         name = entry if isinstance(entry, str) else None
-        return ParsedDependency(None, name, None, _ERR_NO_KIND)
+        return ParsedDependency(None, name, None, ERR_NO_KIND)
     kind_part, _, rest = entry.partition("/")
     name_part, has_stage, stage_part = rest.partition("@")
     stage = stage_part if has_stage else None
     if not kind_part or not name_part:
-        return ParsedDependency(kind_part or None, name_part or None, stage, _ERR_NO_KIND)
+        return ParsedDependency(kind_part or None, name_part or None, stage, ERR_NO_KIND)
     if kind_part == "task":
-        return ParsedDependency(kind_part, name_part, stage, _ERR_TASK_KIND)
+        return ParsedDependency(kind_part, name_part, stage, ERR_TASK_KIND)
     if kind_part not in DESIGN_KINDS:
-        return ParsedDependency(kind_part, name_part, stage, _ERR_UNKNOWN_KIND)
+        return ParsedDependency(kind_part, name_part, stage, ERR_UNKNOWN_KIND)
     if stage is not None:
         if stage not in model_mod.STATUS_VOCAB.get(kind_part, ()):
-            return ParsedDependency(kind_part, name_part, stage, _ERR_UNKNOWN_STAGE)
+            return ParsedDependency(kind_part, name_part, stage, ERR_UNKNOWN_STAGE)
         if stage in FAILURE_STATUSES:
-            return ParsedDependency(kind_part, name_part, stage, _ERR_FAILURE_STAGE)
+            return ParsedDependency(kind_part, name_part, stage, ERR_FAILURE_STAGE)
     return ParsedDependency(kind_part, name_part, stage, None)
 
 

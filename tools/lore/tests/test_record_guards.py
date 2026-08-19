@@ -21,11 +21,17 @@ def _guards():
     return load_script("lore.record.guards")
 
 
+def _write_record(vault: Path, kind: str, name: str, sidecar: dict) -> None:
+    """Write one ``<vault>/<kind>/<name>.json`` sidecar, ``kind`` field included."""
+    kind_dir = vault / kind
+    kind_dir.mkdir(parents=True, exist_ok=True)
+    (kind_dir / f"{name}.json").write_text(
+        json.dumps({"kind": kind, **sidecar}), encoding="utf-8"
+    )
+
+
 def _write_task(vault: Path, name: str, sidecar: dict) -> None:
-    task_dir = vault / "task"
-    task_dir.mkdir(parents=True, exist_ok=True)
-    sidecar = {"kind": "task", **sidecar}
-    (task_dir / f"{name}.json").write_text(json.dumps(sidecar), encoding="utf-8")
+    _write_record(vault, "task", name, sidecar)
 
 
 # ---------------------------------------------------------------------------
@@ -335,17 +341,10 @@ def test_reference_bearing_update_loads_sidecars_once(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def _write_design(vault: Path, kind: str, name: str, sidecar: dict) -> None:
-    kind_dir = vault / kind
-    kind_dir.mkdir(parents=True, exist_ok=True)
-    sidecar = {"kind": kind, **sidecar}
-    (kind_dir / f"{name}.json").write_text(json.dumps(sidecar), encoding="utf-8")
-
-
 def test_load_design_sidecars_reads_spec_and_adr(tmp_path):
     g = _guards()
-    _write_design(tmp_path, "spec", "a", {"status": "draft"})
-    _write_design(tmp_path, "adr", "b", {"status": "active"})
+    _write_record(tmp_path, "spec", "a", {"status": "draft"})
+    _write_record(tmp_path, "adr", "b", {"status": "active"})
     graph = g.load_design_sidecars(str(tmp_path))
     assert set(graph) == {"spec/a", "adr/b"}
     assert graph["adr/b"]["status"] == "active"
@@ -353,8 +352,8 @@ def test_load_design_sidecars_reads_spec_and_adr(tmp_path):
 
 def test_load_design_sidecars_keeps_same_name_different_kind_distinct(tmp_path):
     g = _guards()
-    _write_design(tmp_path, "spec", "foo", {"status": "draft"})
-    _write_design(tmp_path, "adr", "foo", {"status": "active"})
+    _write_record(tmp_path, "spec", "foo", {"status": "draft"})
+    _write_record(tmp_path, "adr", "foo", {"status": "active"})
     graph = g.load_design_sidecars(str(tmp_path))
     assert set(graph) == {"spec/foo", "adr/foo"}
     assert graph["spec/foo"]["status"] == "draft"
@@ -368,7 +367,7 @@ def test_load_design_sidecars_missing_dirs_is_empty(tmp_path):
 
 def test_load_design_sidecars_skips_malformed(tmp_path):
     g = _guards()
-    _write_design(tmp_path, "spec", "good", {"status": "draft"})
+    _write_record(tmp_path, "spec", "good", {"status": "draft"})
     (tmp_path / "spec" / "bad.json").write_text("{not json", encoding="utf-8")
     graph = g.load_design_sidecars(str(tmp_path))
     assert set(graph) == {"spec/good"}
@@ -562,7 +561,7 @@ def test_design_dangling_target_is_not_blocked(tmp_path):
 
 def test_design_cycle_is_a_blocking_error(tmp_path):
     g = _guards()
-    _write_design(tmp_path, "spec", "b", {"status": "draft", "depends-on": ["spec/a"]})
+    _write_record(tmp_path, "spec", "b", {"status": "draft", "depends-on": ["spec/a"]})
     errors, notices = _design_guards(g, tmp_path, sidecar={"depends-on": ["spec/b"]})
     assert any("design-depends-on-cycle" in e for e in errors)
     assert any("spec/a -> spec/b -> spec/a" in e for e in errors)
@@ -571,21 +570,21 @@ def test_design_cycle_is_a_blocking_error(tmp_path):
 
 def test_design_cycle_is_stage_blind(tmp_path):
     g = _guards()
-    _write_design(tmp_path, "spec", "b", {"status": "draft", "depends-on": ["spec/a@ready"]})
+    _write_record(tmp_path, "spec", "b", {"status": "draft", "depends-on": ["spec/a@ready"]})
     errors, _ = _design_guards(g, tmp_path, sidecar={"depends-on": ["spec/b@draft"]})
     assert any("design-depends-on-cycle" in e for e in errors)
 
 
 def test_design_cycle_spans_kinds(tmp_path):
     g = _guards()
-    _write_design(tmp_path, "adr", "b", {"status": "draft", "depends-on": ["spec/a"]})
+    _write_record(tmp_path, "adr", "b", {"status": "draft", "depends-on": ["spec/a"]})
     errors, _ = _design_guards(g, tmp_path, sidecar={"depends-on": ["adr/b"]})
     assert any("design-depends-on-cycle" in e for e in errors)
 
 
 def test_design_same_name_different_kind_is_not_a_cycle(tmp_path):
     g = _guards()
-    _write_design(tmp_path, "adr", "a", {"status": "draft", "depends-on": ["spec/a"]})
+    _write_record(tmp_path, "adr", "a", {"status": "draft", "depends-on": ["spec/a"]})
     assert _design_guards(g, tmp_path, sidecar={"depends-on": ["spec/other"]}) == ([], [])
 
 
@@ -596,7 +595,7 @@ def test_design_same_name_different_kind_is_not_a_cycle(tmp_path):
 
 def test_design_superseded_with_dependents_warns_but_does_not_block(tmp_path):
     g = _guards()
-    _write_design(tmp_path, "adr", "b", {"status": "draft", "depends-on": ["spec/a@ready"]})
+    _write_record(tmp_path, "adr", "b", {"status": "draft", "depends-on": ["spec/a@ready"]})
     errors, notices = _design_guards(g, tmp_path, status_set="superseded")
     assert errors == []
     assert any("design-dependents" in n for n in notices)
@@ -605,7 +604,7 @@ def test_design_superseded_with_dependents_warns_but_does_not_block(tmp_path):
 
 def test_design_dropped_with_dependents_warns_but_does_not_block(tmp_path):
     g = _guards()
-    _write_design(tmp_path, "spec", "b", {"status": "draft", "depends-on": ["spec/a"]})
+    _write_record(tmp_path, "spec", "b", {"status": "draft", "depends-on": ["spec/a"]})
     errors, notices = _design_guards(g, tmp_path, status_set="dropped")
     assert errors == []
     assert any("design-dependents" in n for n in notices)
@@ -613,13 +612,13 @@ def test_design_dropped_with_dependents_warns_but_does_not_block(tmp_path):
 
 def test_design_superseded_without_dependents_is_silent(tmp_path):
     g = _guards()
-    _write_design(tmp_path, "spec", "b", {"status": "draft"})
+    _write_record(tmp_path, "spec", "b", {"status": "draft"})
     assert _design_guards(g, tmp_path, status_set="superseded") == ([], [])
 
 
 def test_design_delete_with_dependents_warns_only(tmp_path):
     g = _guards()
-    _write_design(tmp_path, "spec", "b", {"status": "draft", "depends-on": ["spec/a"]})
+    _write_record(tmp_path, "spec", "b", {"status": "draft", "depends-on": ["spec/a"]})
     errors, notices = _design_guards(g, tmp_path, sidecar={}, deleting=True)
     assert errors == []
     assert any("design-dependents" in n for n in notices)
@@ -628,7 +627,7 @@ def test_design_delete_with_dependents_warns_only(tmp_path):
 
 def test_design_delete_is_never_blocked_by_a_cycle(tmp_path):
     g = _guards()
-    _write_design(tmp_path, "spec", "b", {"status": "draft", "depends-on": ["spec/a"]})
+    _write_record(tmp_path, "spec", "b", {"status": "draft", "depends-on": ["spec/a"]})
     errors, _ = _design_guards(
         g, tmp_path, sidecar={"depends-on": ["spec/b"]}, deleting=True
     )
@@ -652,7 +651,7 @@ def test_design_status_only_update_skips_the_vault_wide_load(tmp_path, monkeypat
 def test_design_and_task_cycle_tags_are_distinguishable(tmp_path):
     g = _guards()
     _write_task(tmp_path, "b", {"status": "open", "depends-on": ["a"]})
-    _write_design(tmp_path, "spec", "b", {"status": "draft", "depends-on": ["spec/a"]})
+    _write_record(tmp_path, "spec", "b", {"status": "draft", "depends-on": ["spec/a"]})
     task_errors, _ = _task_guards(g, tmp_path, {"depends-on": ["b"]})
     design_errors, _ = _design_guards(g, tmp_path, sidecar={"depends-on": ["spec/b"]})
 
@@ -694,7 +693,7 @@ def test_dispatcher_routes_task_to_the_task_guards(tmp_path):
 
 def test_dispatcher_routes_spec_to_the_design_guards(tmp_path):
     g = _guards()
-    _write_design(tmp_path, "spec", "b", {"status": "draft", "depends-on": ["spec/a"]})
+    _write_record(tmp_path, "spec", "b", {"status": "draft", "depends-on": ["spec/a"]})
     errors, _ = _dispatch(g, tmp_path, kind="spec", sidecar={"depends-on": ["spec/b"]})
     assert any("[design-depends-on-cycle]" in e for e in errors)
 
