@@ -574,6 +574,18 @@ class TestFencingIsStructural:
         assert set(projected) == declared
         assert not set(render.WARNING_FREE_TEXT_FIELDS) & set(render.WARNING_DERIVED_FIELDS)
 
+    def test_projected_vault_fields_are_exactly_the_declared_sets(self):
+        from lore.pipeline import render
+        from lore.pipeline.walk import VaultWalk
+
+        projected = render.project_vault(
+            VaultWalk(name="v", shared=False, error=None, records={}, warnings=()),
+        )
+        declared = set(render.VAULT_FREE_TEXT_FIELDS) | set(render.VAULT_DERIVED_FIELDS)
+
+        assert set(projected) == declared
+        assert not set(render.VAULT_FREE_TEXT_FIELDS) & set(render.VAULT_DERIVED_FIELDS)
+
     def test_every_declared_record_free_text_field_is_actually_escaped(self):
         """The declared set IS the set the fencer iterates: a field named here
         but skipped by the fencer fails this test, which is the point.
