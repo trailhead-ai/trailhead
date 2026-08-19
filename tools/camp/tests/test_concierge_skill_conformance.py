@@ -256,7 +256,20 @@ REQUIRED_ANCHORS: dict[str, str] = {
     # read that yields it.
     "provisioning state is obtainable": "camp status --name <slug> --group <name> --json",
     # Recovery is not a shipped capability; promising it strands the operator.
-    "a lost report is not recoverable": "cannot be recovered from here",
+    # Scoped to a dead session on purpose: while the session is alive the same
+    # facts are still queryable, so an unscoped claim would be false.
+    "a lost report is not recoverable": (
+        "once the session is dead, what the report carried cannot be recovered from here"
+    ),
+    # The create path never waits for provisioning, so the status read is
+    # nonzero in the ordinary case. An agent applying the usual "nonzero means
+    # it broke" rule would report a failure that did not happen.
+    "the status exit code is information": (
+        "a nonzero code here is the provisioning fact the report has to carry"
+    ),
+    # A group-scoped listing only ever reports the group it was asked about, so
+    # the mismatch refusal has to name a read that can surface a different one.
+    "the group-mismatch read is executable": "one listing per group",
 }
 
 

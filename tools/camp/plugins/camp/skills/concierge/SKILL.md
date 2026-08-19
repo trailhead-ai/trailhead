@@ -43,8 +43,11 @@ and runs from any directory.
 
 Offer; never create a group on your own initiative. If the operator accepts,
 gather two things and nothing else: the group name, and its members as
-`<NAME>=<PATH>` pairs. Check each path against the repos camp can see; when one
-is not visible, name it and ask again rather than inventing a substitute.
+`<NAME>=<PATH>` pairs. Do not vet those paths yourself — camp exposes no
+listing of the repos it can see, and the call below already refuses a member
+path that does not exist or holds no git repo, before it writes anything.
+Relay that refusal naming the path, and ask again rather than inventing a
+substitute.
 
 Play the complete definition back and take one explicit confirmation, then:
 
@@ -99,6 +102,13 @@ camp sessions <slug> --group <name> --json
 camp status --name <slug> --group <name> --json
 ```
 
+The status read is the one whose exit code does not mean what an exit code
+usually means: 0 is every member ready, 2 is some member still pending with
+none failed, 3 is at least one member failed. The JSON goes to stdout in all
+three cases. The create path never waits for provisioning, so pending is the
+ordinary outcome — a nonzero code here is the provisioning fact the report has
+to carry, not a command that broke.
+
 State-changing work is exactly one mutating camp call per operator action.
 
 Workspaces are keyed by group **and** slug — the same slug can exist in two
@@ -134,9 +144,12 @@ harness was launched in, which sits inside the root whenever the group
 configures one. Say which of the two you are naming.
 
 **The workspace lives under a different group:** the group argument is
-validation, not a suggestion. `camp list --group <name> --json` reports each
-workspace's group, so say which group camp actually records for that workspace,
-refuse, and never silently adopt it.
+validation, not a suggestion. A listing only ever reports the group it was
+asked about, so naming the group camp actually records for that slug takes a
+sweep — `camp groups --json` for the names, then one listing per group,
+`camp list --group <name> --json` against each, looking for the slug. Read-only
+queries are unlimited, so the sweep is allowed. Name the group whose listing
+carries it, refuse, and never silently adopt it.
 
 ## 6. Report it
 
@@ -149,14 +162,17 @@ and the path camp reported. Everything else follows as detail:
   `camp sessions <slug> --group <name> --json`.
 - The provisioning state at the time you report, from
   `camp status --name <slug> --group <name> --json` — each member's
-  `provision_state`, summarized as ready, still coming up, or failed.
+  `provision_state`, summarized as ready, still coming up, or failed. Its exit
+  code says the same thing (0 ready, 2 pending, 3 failed); relay it as that
+  fact, never as a command that failed.
 
 `tmux_name` and the session id are read from camp's output — the derived name
 `camp-<slug>-<uuid8>` is never reconstructed. Present that name as the handle
 for referring to this session while it is alive, and be equally plain about its
-limit: what the report carries cannot be recovered from here once it is lost.
-`camp sessions <slug> --group <name> --json` still lists what is running in a
-workspace, but picking one of those back up is not something this flow can do
+limit: once the session is dead, what the report carried cannot be recovered
+from here. While it is alive `camp sessions <slug> --group <name> --json` still
+lists what is running in a workspace — each session's name, id, and working
+directory — but picking one of those back up is not something this flow can do
 until camp's session-resume surface lands (`## Not yet`).
 
 Because the launch does not wait for provisioning, members may still be coming

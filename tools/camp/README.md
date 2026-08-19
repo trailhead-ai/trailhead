@@ -22,6 +22,7 @@ for the full install flow.
 ## Quick start
 
 ```
+camp groups          # list every configured group (any cwd)
 camp new <slug>      # create or enter a workspace
 camp new <slug> --launch  # create or enter, then start a detached session in it
 camp pwd <slug>      # print workspace path
