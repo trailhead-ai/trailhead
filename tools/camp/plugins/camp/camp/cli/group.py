@@ -225,16 +225,23 @@ def _cmd_groups_cli(args: list[str]) -> None:
     list — `[]` in --json mode, a plain "no groups configured" line in human
     mode — never an error.
 
-    A group config file that fails to LOAD FOR ANY REASON degrades that one
-    entry with a stderr notice and is dropped from the listing, rather than
-    failing the whole command (matching the best-effort degrade idiom used
-    elsewhere in camp, e.g. provision.py's pretrust step) — one bad file must
-    not hide every other configured group. Unparseable TOML is only the
-    expected case: the glob also matches a directory wearing a `.toml` name,
-    and reading the file can fail on non-UTF-8 bytes or on permissions, none of
-    which may reach the operator as a traceback.
+    A group config file that fails to load degrades that one entry with a
+    stderr notice and is dropped from the listing, rather than failing the
+    whole command (matching the best-effort degrade idiom used elsewhere in
+    camp, e.g. provision.py's pretrust step) — one bad file must not hide every
+    other configured group. Unparseable TOML is only the expected case: the
+    glob also matches a directory wearing a `.toml` name, and reading the file
+    can fail on non-UTF-8 bytes or on permissions, none of which may reach the
+    operator as a traceback.
+
+    That degrade covers load failures ONLY — a malformed, unreadable, or absent
+    file. Anything else escaping the loader is a defect in the loader, and it
+    propagates: reporting it as a bad config file would drop a healthy group
+    from the listing and still exit 0, and this is the only group-enumeration
+    surface camp offers, so a silently short listing reads as "that group does
+    not exist".
     """
-    from ..group.config import load_group
+    from ..group.config import GroupConfigError, GroupConfigNotFound, load_group
     from .common import _groups_dir
 
     as_json = "--json" in args
@@ -245,7 +252,16 @@ def _cmd_groups_cli(args: list[str]) -> None:
         for toml_file in sorted(groups_dir.glob("*.toml")):
             try:
                 config = load_group(toml_file)
-            except Exception as e:
+            # The load failures, spelled out: a malformed file, a path that is
+            # not a file at all (a directory wearing a `.toml` name), non-UTF-8
+            # bytes (a UnicodeDecodeError, not an OSError), and an unreadable
+            # file.
+            except (
+                GroupConfigError,
+                GroupConfigNotFound,
+                UnicodeDecodeError,
+                OSError,
+            ) as e:
                 # First line only: a config error's message can carry a
                 # multi-line first-run hint, which is noise inside a listing.
                 # And only some of these name the file — the config errors

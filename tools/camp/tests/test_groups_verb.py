@@ -9,6 +9,9 @@
   bytes, a directory wearing a `.toml` name — degrades that one entry with a
   stderr notice rather than failing the whole listing, and never prints a
   traceback.
+- An unexpected error raised inside the loader is NOT a bad config file: it
+  propagates instead of degrading, so a loader regression cannot quietly empty
+  the listing while still exiting 0.
 - The verb runs without a resolved group/workspace: no --group flag, and cwd
   need not resolve to any configured group's member repo.
 - The verb is listed in camp's help menu.
@@ -21,6 +24,8 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+
+import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]  # trailhead root
 _PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
@@ -186,6 +191,34 @@ def test_camp_groups_is_listed_in_the_help_menu() -> None:
 
     assert result.returncode == 0, result.stderr
     assert "camp groups [--json]" in result.stdout
+
+
+def test_camp_groups_lets_an_unexpected_loader_error_propagate(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A programming error inside the loader is not a malformed config file.
+
+    Degrading it would drop a perfectly good group from the listing and still
+    exit 0 — and `camp groups --json` is the only enumeration surface some
+    callers have, so a silently short listing reads as "that group does not
+    exist".
+    """
+    if str(_PLUGIN_DIR) not in sys.path:
+        sys.path.insert(0, str(_PLUGIN_DIR))
+    import camp.group.config as group_config
+    from camp.cli.group import _cmd_groups_cli
+
+    env = _env(tmp_path)
+    _write_group(Path(env["CAMP_CONFIG_DIR"]) / "groups", "good", ["repo-a"])
+    monkeypatch.setenv("CAMP_CONFIG_DIR", env["CAMP_CONFIG_DIR"])
+
+    def boom(path: Path) -> dict:
+        raise AttributeError("load_group regression")
+
+    monkeypatch.setattr(group_config, "load_group", boom)
+
+    with pytest.raises(AttributeError, match="load_group regression"):
+        _cmd_groups_cli(["--json"])
 
 
 def test_groups_verb_not_in_needs_group_verbs() -> None:
