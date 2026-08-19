@@ -72,6 +72,14 @@ from . import store as record_store_mod
 # when the parent body genuinely lacks the knowledge-flow-out checklist.
 _FLOW_OUT_RE = re.compile(r"(?im)^\s*#{2,}\s+flow-out\b")
 
+# Sidecars are small metadata, not bulk content — every sidecar across every
+# configured vault measured under 1.3 KB. 1 MiB gives that real distribution
+# roughly 800x headroom for legitimate growth while still refusing a
+# multi-hundred-MB payload before it is ever read into memory: a size this far
+# outside the observed range is read as hostile or corrupt, not as data worth
+# waiting on.
+_MAX_SIDECAR_BYTES = 1_048_576
+
 
 def body_has_flow_out(body: str) -> bool:
     """True iff *body* contains a ``## Flow-out`` section heading."""
@@ -90,15 +98,34 @@ def load_kind_sidecars_with_warnings(
 
     Nothing here raises. A missing kind directory contributes nothing at all
     (an absent kind is not a fault). Every other failure — an unlistable
-    directory, an unreadable file, invalid JSON, or JSON that is not an object
-    — contributes one ``(vault_relative_path, message)`` warning and no entry,
-    so a caller that wants to report the loss can, while a caller that only
-    wants the nodes degrades to not seeing that one node.
+    directory, an unreadable file, a file over :data:`_MAX_SIDECAR_BYTES`,
+    JSON nested deep enough to exceed Python's recursion limit, invalid JSON,
+    or JSON that is not an object — contributes one
+    ``(vault_relative_path, message)`` warning and no entry, so a caller that
+    wants to report the loss can, while a caller that only wants the nodes
+    degrades to not seeing that one node. This is a walked read across every
+    configured vault, potentially run by every teammate on content none of
+    them authored, so a single hostile or corrupt file must cost only itself
+    — never the read as a whole.
 
     A file that vanishes between the directory listing and the open (the torn
     read a vault git-sync pull produces) surfaces here as an unreadable-file
     warning, never as an exception out of the loop — one lost file never costs
     the directory its remaining records.
+
+    An oversized file is caught on its ``stat`` alone, before any read: the
+    size check is a prevention, not a recovery, so a multi-hundred-MB sidecar
+    never enters memory in the first place. A file that stays under that
+    ceiling but is pathologically *shaped* — JSON nested far deeper than any
+    legitimate sidecar ever would be — is still read, and its parse is
+    guarded against :class:`RecursionError` specifically: Python's recursive-
+    descent JSON decoder walks one stack frame per nesting level, and that is
+    the exception it raises when the interpreter's recursion limit is hit.
+    :class:`MemoryError` is deliberately NOT caught alongside it — recovering
+    from it is unsafe in general (the interpreter may already be too low on
+    memory for the warning append or the next loop iteration to succeed), and
+    the size ceiling above is what actually forecloses the memory-exhaustion
+    vector, rather than a per-file catch racing the interpreter's own state.
 
     The dict-only filter is what makes the returned mapping type-safe for the
     graph algorithms: a sidecar holding a JSON array or scalar is reported and
@@ -123,12 +150,25 @@ def load_kind_sidecars_with_warnings(
         sidecar_path = kind_dir / name
         relative = f"{kind}/{name}"
         try:
+            size = sidecar_path.stat().st_size
+        except OSError as exc:
+            warnings.append((relative, f"unreadable sidecar: {exc}"))
+            continue
+        if size > _MAX_SIDECAR_BYTES:
+            warnings.append(
+                (relative, f"sidecar too large ({size} bytes, max {_MAX_SIDECAR_BYTES})")
+            )
+            continue
+        try:
             data = json.loads(sidecar_path.read_text(encoding="utf-8"))
         except OSError as exc:
             warnings.append((relative, f"unreadable sidecar: {exc}"))
             continue
         except ValueError as exc:
             warnings.append((relative, f"invalid JSON: {exc}"))
+            continue
+        except RecursionError as exc:
+            warnings.append((relative, f"sidecar JSON nested too deep: {exc}"))
             continue
         if not isinstance(data, dict):
             warnings.append((relative, "sidecar is not a JSON object"))

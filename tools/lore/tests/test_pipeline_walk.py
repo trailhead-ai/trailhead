@@ -160,6 +160,34 @@ class TestPerFileDegradation:
         assert set(result.records) == {"spec/aaa", "spec/zzz"}
         assert [w.file for w in result.warnings] == ["spec/torn.json"]
 
+    def test_oversized_sidecar_is_reported_as_a_warning_and_never_read(
+        self, tmp_path, monkeypatch
+    ):
+        """A sidecar over the size ceiling is skipped on its stat alone — the
+        content is never read into memory, let alone parsed."""
+        vault = tmp_path / "v"
+        _write_sidecar(vault, "spec", "kept", {"title": "Kept"})
+        guards_mod = load_script("lore.record.guards")
+        ceiling = guards_mod._MAX_SIDECAR_BYTES
+        (vault / "spec" / "huge.json").write_text(
+            "x" * (ceiling + 1), encoding="utf-8"
+        )
+
+        read: list[str] = []
+        real_read_text = Path.read_text
+
+        def spying_read_text(self, *args, **kwargs):
+            read.append(str(self))
+            return real_read_text(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "read_text", spying_read_text)
+        result = _walk_mod().walk_vault("v", str(vault), shared=False)
+
+        assert set(result.records) == {"spec/kept"}
+        assert [w.file for w in result.warnings] == ["spec/huge.json"]
+        assert "too large" in result.warnings[0].message
+        assert str(vault / "spec" / "huge.json") not in read
+
     @pytest.mark.skipif(os.geteuid() == 0, reason="root ignores directory permissions")
     def test_unreadable_kind_directory_is_a_warning_not_a_vault_error(self, tmp_path):
         vault = tmp_path / "v"

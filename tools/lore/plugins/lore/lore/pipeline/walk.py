@@ -9,11 +9,19 @@ atomically-written file, so every record this yields is a coherent snapshot of
 some moment.
 
 **Nothing raises.** A read failure is data, not control flow. A file that is
-unreadable, unparseable, non-object, or gone by the time it is opened becomes
-one :class:`SidecarWarning` and costs only itself. A vault directory that
-cannot be listed at all becomes that vault's ``error`` marker, and every other
-vault still walks. The caller decides what a given failure means for the exit
-code; this module only reports.
+unreadable, unparseable, non-object, oversized, pathologically nested, or gone
+by the time it is opened becomes one :class:`SidecarWarning` and costs only
+itself — never the rest of its vault, and never a sibling vault. A vault
+directory that cannot be listed at all becomes that vault's ``error`` marker,
+and every other vault still walks. This module runs, unattended, over every
+configured vault on every invocation, by every teammate, against content none
+of them necessarily authored — a single hostile or corrupt sidecar committed
+anywhere is something every one of those invocations will read, so the
+per-file guard below (:func:`record.guards.load_kind_sidecars_with_warnings`,
+which this module delegates every actual read to) is the load-bearing
+defense, not the vault-level and command-level ``try``/``except`` that sit
+above it as a backstop for whatever it does not enumerate. The caller decides
+what a given failure means for the exit code; this module only reports.
 
 **Per-vault, never merged.** Each vault comes back as its own
 ``{"kind/name": sidecar}`` mapping — the shape

@@ -334,6 +334,37 @@ class TestWarnings:
         assert "spec/broken.json" in out
 
 
+class TestPathologicalSidecarsDoNotBlankTheBoard:
+    """A single hostile sidecar in one vault must never cost the operator the
+    other configured vaults — the isolation contract this surface promises."""
+
+    def test_a_deeply_nested_sidecar_degrades_to_a_warning_not_a_crash(
+        self, tmp_path, capsys
+    ):
+        bad = tmp_path / "bad"
+        (bad / "adr").mkdir(parents=True)
+        (bad / "adr" / "bomb.json").write_text(
+            "[" * 200_000 + "]" * 200_000, encoding="utf-8"
+        )
+        good = tmp_path / "good"
+        _write_record(good, "spec", "s", {"title": "S", "status": "draft"})
+        _write_config(
+            tmp_path / "config",
+            [("bad", "default", bad, False), ("good", "team", good, False)],
+        )
+
+        code, out, err = _run(["pipeline", "--json"], capsys)
+
+        assert code == 0, err
+        payload = json.loads(out)
+        by_name = {v["name"]: v for v in payload["vaults"]}
+        assert by_name["bad"]["error"] is None
+        assert by_name["good"]["error"] is None
+        assert by_name["good"]["record_count"] == 1
+        warning_files = [w["file"] for w in payload["warnings"]]
+        assert "adr/bomb.json" in warning_files
+
+
 class TestBodiesAreNeverOpened:
     def test_every_body_deleted_still_renders_the_vault_normally(self, tmp_path, capsys):
         local = tmp_path / "local"
