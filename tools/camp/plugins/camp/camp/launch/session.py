@@ -217,7 +217,10 @@ def launch_session(
         )
 
     session_id = str(uuid.uuid4())
-    harness_argv = harness.session_launch(launch_dir, session_id)
+    # One handle everywhere: the tmux session, and — for a harness whose
+    # clients display session names — the name those clients render.
+    tmux_name = f"camp-{slug}-{session_id[:8]}"
+    harness_argv = harness.session_launch(launch_dir, session_id, session_name=tmux_name)
     if harness_argv is None:
         raise LaunchError(
             f"camp: refusing to launch — harness {harness.name or profile.binary!r} "
@@ -243,7 +246,6 @@ def launch_session(
     # request and the new pane inherits the SERVER's environment, not this
     # process's. Only the pane-level `env -u` holds in both cases — fresh server
     # and pre-existing one alike. Both scrubs are applied; neither is redundant.
-    tmux_name = f"camp-{slug}-{session_id[:8]}"
     argv = ["tmux", "new-session", "-d", "-s", tmux_name, "-c", str(launch_dir), "env"]
     for name in scrub:
         argv += ["-u", name]

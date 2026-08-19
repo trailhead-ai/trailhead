@@ -52,10 +52,10 @@ class FakeHarness:
         self._launch_argv = launch_argv
         self._enumerate_argv = enumerate_argv
         self._records = records or []
-        self.launch_calls: list[tuple[Path, str]] = []
+        self.launch_calls: list[tuple[Path, str, str | None]] = []
 
-    def session_launch(self, workspace, session_id):
-        self.launch_calls.append((workspace, session_id))
+    def session_launch(self, workspace, session_id, *, session_name=None):
+        self.launch_calls.append((workspace, session_id, session_name))
         if self._launch_argv is ...:
             return ["fakeharness", "--rc", "--sid", session_id]
         return self._launch_argv
@@ -242,9 +242,17 @@ class TestSessionIdentity:
     def test_the_uuid_handed_to_the_seam_is_the_one_reported_back(self, rig):
         result = _launch(rig)
 
-        workspace, session_id = rig["harness"].launch_calls[0]
+        workspace, session_id, _ = rig["harness"].launch_calls[0]
         assert session_id == result.session_id
         assert workspace == rig["workspace"].resolve()
+
+    def test_the_seam_is_asked_to_name_the_session_after_the_tmux_handle(self, rig):
+        """One handle everywhere: the name requested from the harness is the
+        same string the tmux session is created under."""
+        result = _launch(rig, slug="feat-x")
+
+        _, _, session_name = rig["harness"].launch_calls[0]
+        assert session_name == result.tmux_name
 
     def test_session_id_is_a_fresh_uuid_each_launch(self, rig):
         import uuid

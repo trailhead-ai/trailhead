@@ -576,30 +576,53 @@ class ClaudeCodeHarness(Harness):
     # ``claude --remote-control --session-id <id>`` starts a brand-new session
     # under the caller-chosen id (confirmed by an operator TTY check on
     # 2026-08-14: the CLI honors a supplied id and it enumerates under exactly
-    # that id in ``claude agents --json``). Deliberately absent from the argv,
-    # each for a verified reason:
+    # that id in ``claude agents --json``; the CLI's own help text calls the
+    # flag "reattach", but a fresh id observably creates). ``--name <name>``
+    # sets the session's visible name — both the ``name`` field in
+    # ``claude agents --json`` and the label the claude.ai/code clients render
+    # (verified live 2026-08-19: both flags together create a new session
+    # under the supplied id carrying the supplied name). Without ``--name``,
+    # the derived name is the relay default (hostname-prefixed) on the client
+    # surface and the cwd basename plus two hex characters locally.
     #
-    # - no session-NAME flag — names are not settable on launch; both the
-    #   positional name and ``--remote-control-session-name-prefix`` are
-    #   ignored, and the name Claude Code derives is the cwd basename plus two
-    #   hex characters.
+    # Deliberately absent from the argv, each for a verified reason:
+    #
     # - no ``--bg`` — it silently discards ``--remote-control`` and yields
     #   ``kind: background`` instead of a controllable session.
     # - no workspace path — Claude Code roots a launched session on the
     #   process's cwd, which the exec-owning caller sets; ``workspace`` is
     #   accepted for the seam signature and is unused here.
 
-    def session_launch(self, workspace: Path, session_id: str) -> list[str]:
-        """Return ``["claude", "--remote-control", "--session-id", <session-id>]``.
+    def session_launch(
+        self,
+        workspace: Path,
+        session_id: str,
+        *,
+        session_name: str | None = None,
+    ) -> list[str]:
+        """Return ``["claude", "--remote-control", "--session-id", <session-id>]``,
+        plus ``["--name", <session-name>]`` when a name is requested.
 
         Raises :class:`HarnessError` on a malformed ``session_id`` — see the
         base contract's DIVERGES note: this is the one seam here that raises
         instead of degrading to ``None`` on bad input, since launch is
         constant-valued and ``None`` is reserved for "cannot launch at all".
+
+        ``session_name`` is held to the same inert-token predicate as
+        ``session_id``: it lands in the same argv, so a separator, an empty
+        string, or a leading dash is the same flag-injection surface and
+        raises the same way.
         """
         if not _is_session_id(session_id):
             raise HarnessError(f"session_launch: invalid session_id: {session_id!r}")
-        return ["claude", "--remote-control", "--session-id", session_id]
+        argv = ["claude", "--remote-control", "--session-id", session_id]
+        if session_name is not None:
+            if not _is_session_id(session_name):
+                raise HarnessError(
+                    f"session_launch: invalid session_name: {session_name!r}"
+                )
+            argv += ["--name", session_name]
+        return argv
 
     def session_launch_modality(self) -> Modality:
         """Claude Code launch requires a TTY (interactive terminal)."""
