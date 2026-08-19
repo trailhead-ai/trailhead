@@ -978,9 +978,9 @@ def _base_task_sidecar_with(**extra):
 
 
 def test_kind_gated_fields_table_exact():
-    """``depends-on``/``parent`` are gated to ``task`` only, and nothing else is gated."""
+    """``depends-on`` is gated to the graph-bearing kinds, ``parent`` to ``task`` only."""
     assert rm().KIND_GATED_FIELDS == {
-        "depends-on": frozenset({"task"}),
+        "depends-on": frozenset({"task", "spec", "adr"}),
         "parent": frozenset({"task"}),
     }
 
@@ -1009,7 +1009,23 @@ def test_parent_accepted_on_task():
     assert result.errors == []
 
 
+def test_depends_on_accepted_on_spec():
+    sidecar = _base_sidecar_with(kind="spec", **{"depends-on": ["spec/other"]})
+    result = rm().validate(sidecar)
+    assert result.errors == []
+
+
+def test_depends_on_accepted_on_adr():
+    sidecar = _base_sidecar_with(kind="adr", **{"depends-on": ["spec/other@ready"]})
+    result = rm().validate(sidecar)
+    assert result.errors == []
+
+
 _NON_TASK_KINDS = sorted(rm().KINDS - {"task"})
+
+#: The kinds that carry no dependency graph at all — ``depends-on`` is rejected
+#: on every one of them.
+_NO_DEPENDS_ON_KINDS = sorted(rm().KINDS - {"task", "spec", "adr"})
 
 
 def test_non_task_kinds_are_the_expected_eight():
@@ -1026,8 +1042,20 @@ def test_non_task_kinds_are_the_expected_eight():
     ]
 
 
-def test_depends_on_rejected_on_every_non_task_kind_naming_field_and_kind():
-    for kind in _NON_TASK_KINDS:
+def test_kinds_without_a_dependency_graph_are_the_expected_six():
+    """Guards the rejection test below against a silent kind-set drift."""
+    assert _NO_DEPENDS_ON_KINDS == [
+        "area",
+        "blob",
+        "collaboration",
+        "decision",
+        "lesson",
+        "session",
+    ]
+
+
+def test_depends_on_rejected_on_every_graphless_kind_naming_field_and_kind():
+    for kind in _NO_DEPENDS_ON_KINDS:
         sidecar = _base_sidecar_with(kind=kind, **{"depends-on": ["other"]})
         result = rm().validate(sidecar)
         joined = " ".join(result.errors)

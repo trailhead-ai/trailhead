@@ -182,12 +182,19 @@ _SCHEMAS: dict[str, dict[str, FieldSpec]] = {"v1": FIELDS_V1}
 
 #: Fields gated to a subset of kinds — present here means "the field is a valid
 #: sidecar key everywhere, but only ``validate()``-clean on the listed kinds".
-#: ``depends-on``/``parent`` are ``task``-only graph edges; naming a field here
-#: is the entire mechanism for rejecting it on every other surviving kind
-#: (naming both the field and the offending kind in the error). A field absent
-#: from this table is ungated — valid on any kind, as before this table existed.
+#: Naming a field here is the entire mechanism for rejecting it on every other
+#: surviving kind (naming both the field and the offending kind in the error). A
+#: field absent from this table is ungated — valid on any kind, as before this
+#: table existed.
+#:
+#: ``parent`` is a ``task``-only containment edge. ``depends-on`` is a dependency
+#: edge on every kind that carries a dependency graph: a ``task`` names bare task
+#: names (the task graph), while a ``spec``/``adr`` names qualified design
+#: targets (``kind/name`` with an optional ``@stage`` tail). This table is a
+#: shape-only gate — it says which kinds may carry the key at all; the per-kind
+#: entry grammar is enforced by the write-time graph guards, not here.
 KIND_GATED_FIELDS: dict[str, frozenset[str]] = {
-    "depends-on": frozenset({"task"}),
+    "depends-on": frozenset({"task", "spec", "adr"}),
     "parent": frozenset({"task"}),
 }
 

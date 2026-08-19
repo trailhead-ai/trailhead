@@ -1,16 +1,27 @@
-"""Task-graph guard policy — orchestrates the pure graph checks over a write.
+"""Graph guard policy — orchestrates the pure graph checks over a write.
 
-The decision layer between the on-disk task sidecars and the pure algorithms in
-:mod:`graph`. For a create/update/delete it loads the vault's task sidecars,
-overlays the in-flight record, decides WHICH checks run for the operation's shape,
-and classifies each outcome as a blocking error (nothing is written) or a
+The decision layer between the on-disk record sidecars and the pure algorithms in
+:mod:`graph`. For a create/update/delete it loads the vault's sidecars, overlays
+the in-flight record, decides WHICH checks run for the operation's shape, and
+classifies each outcome as a blocking error (nothing is written) or a
 non-blocking notice (printed only on a successful op). The cycle/loop/containment
-math lives in :mod:`graph` (pure, dict-in/dict-out); this module owns the
-vault I/O and the error-vs-notice policy — a no-op for every non-``task`` kind.
+math lives in :mod:`graph` (pure, dict-in/dict-out); this module owns the vault
+I/O and the error-vs-notice policy.
+
+Two graphs, one entry point: :func:`evaluate_task_guards` polices the ``task``
+graph (bare task names, ``depends-on`` plus ``parent`` containment) and
+:func:`evaluate_design_guards` the spec/adr design graph (qualified
+``kind/name[@stage]`` dependencies, no containment).
+:func:`evaluate_graph_guards` is the dispatcher every caller uses — it routes by
+kind and is a ``([], [])`` no-op for a kind that carries neither graph. No kind
+carries both, so exactly one policy ever runs.
 
 Guard-message shape: every line — blocking error, non-blocking warning, ritual
 reminder — is formatted through :func:`graph.format_guard_message` so agents
 parse one machine-parseable ``graph-guard [<guard>]: <message>`` shape off stderr.
+A guard with a counterpart on the other graph carries a namespaced tag
+(``design-depends-on-cycle`` vs ``depends-on-cycle``) so the bracketed tag alone
+says which graph rejected the write.
 
 Edge confinement: :func:`confine_edge_reference` is kind-parameterized — it
 confines a bare record NAME under a caller-supplied kind, never a hardcoded one.
@@ -173,17 +184,35 @@ def evaluate_task_guards(
 
     # Edge references are confined before the graph is built — a malformed value
     # must never be written, and a traversal-shaped name must never reach disk.
+    deps_field = sidecar.get("depends-on")
+    deps = [d for d in deps_field if isinstance(d, str)] if isinstance(deps_field, list) else []
     references: list[str] = []
     parent = sidecar.get("parent")
     if isinstance(parent, str):
         references.append(parent)
-    deps_field = sidecar.get("depends-on")
-    if isinstance(deps_field, list):
-        references.extend(d for d in deps_field if isinstance(d, str))
+    references.extend(deps)
     for ref in references:
         msg = confine_edge_reference(ref, vault_root)
         if msg:
             errors.append(msg)
+    if errors:
+        return errors, []
+
+    # Task ``depends-on`` targets are BARE task names. The graph matches a stored
+    # value byte-for-byte against a task's stem with no prefix normalization, so a
+    # qualified or staged value writes clean and then reads as a detached node —
+    # an edge the operator believes exists and that nothing ever traverses. It is
+    # rejected here, after confinement, so a traversal-shaped value still reports
+    # the containment breach it actually is.
+    for dep in deps:
+        if "/" in dep or "@" in dep:
+            errors.append(
+                graph_mod.format_guard_message(
+                    "task-edge-form",
+                    f"depends-on entry {dep!r} must be a bare task name — "
+                    f"'/' and '@' are not part of the task-edge grammar",
+                )
+            )
     if errors:
         return errors, []
 
@@ -258,3 +287,210 @@ def evaluate_task_guards(
             )
         )
     return errors, notices
+
+
+#: The design kinds spelled as a sorted list, for error messages (computed once).
+_DESIGN_KIND_LIST: list[str] = sorted(graph_mod.DESIGN_KINDS)
+
+
+def _design_parse_error(entry: object, parsed: graph_mod.ParsedDependency) -> str:
+    """Render one rejected ``depends-on`` entry as a blocking guard message.
+
+    Branches on the closed set of ``error`` codes :func:`graph.parse_dependency`
+    returns — the codes are part of ``ParsedDependency.error``'s contract, so
+    every one of them gets its own named guard line rather than a shared
+    "malformed entry". Grammar rejections carry the ``design-edge-form`` tag,
+    stage-vocabulary rejections ``design-edge-stage``; a stage rejection always
+    spells out the *target* kind's usable stages, not just the violation.
+    """
+    if parsed.error == graph_mod._ERR_NO_KIND:
+        return graph_mod.format_guard_message(
+            "design-edge-form",
+            f"depends-on entry {entry!r} must be a qualified target "
+            f"'<kind>/<name>[@<stage>]' with kind one of {_DESIGN_KIND_LIST}",
+        )
+    if parsed.error == graph_mod._ERR_TASK_KIND:
+        return graph_mod.format_guard_message(
+            "design-edge-form",
+            f"depends-on entry {entry!r} targets a task — a design dependency "
+            f"may only target {_DESIGN_KIND_LIST}",
+        )
+    if parsed.error == graph_mod._ERR_UNKNOWN_KIND:
+        return graph_mod.format_guard_message(
+            "design-edge-form",
+            f"depends-on entry {entry!r} names unknown dependency kind "
+            f"{parsed.kind!r} — must be one of {_DESIGN_KIND_LIST}",
+        )
+    stages = list(graph_mod.SUCCESS_CHAINS[parsed.kind])
+    if parsed.error == graph_mod._ERR_UNKNOWN_STAGE:
+        return graph_mod.format_guard_message(
+            "design-edge-stage",
+            f"depends-on entry {entry!r} names stage {parsed.stage!r}, which is not "
+            f"a status of kind {parsed.kind!r} — valid {parsed.kind} stages: {stages}",
+        )
+    return graph_mod.format_guard_message(
+        "design-edge-stage",
+        f"depends-on entry {entry!r} requires stage {parsed.stage!r}, which means the "
+        f"target failed — valid {parsed.kind} stages: {stages}",
+    )
+
+
+def _design_edge_error(entry: object, vault_root: str) -> str | None:
+    """Return a blocking guard message for *entry*, or ``None`` if it is safe.
+
+    The ordering is the whole point: :func:`graph.parse_dependency` splits the
+    ``@stage`` tail off and validates the kind FIRST, and only the surviving
+    bare name is confined — under the entry's own kind, not a hardcoded one. An
+    entry whose name is traversal-shaped therefore reports a confinement breach
+    against that name, never a kind or stage error that would point the operator
+    at the wrong half of the value.
+    """
+    parsed = graph_mod.parse_dependency(entry)
+    if parsed.error is not None:
+        return _design_parse_error(entry, parsed)
+    return confine_edge_reference(parsed.name, vault_root, kind=parsed.kind)
+
+
+def evaluate_design_guards(
+    *,
+    kind: str,
+    name: str,
+    sidecar: dict,
+    vault_root: str,
+    status_set: str | None,
+    deleting: bool = False,
+) -> tuple[list[str], list[str]]:
+    """Evaluate the design graph guards for a spec/adr create/update/delete.
+
+    Returns ``(errors, notices)`` in the same shape :func:`evaluate_task_guards`
+    does, and is likewise a no-op — ``([], [])`` — for every kind outside
+    :data:`graph.DESIGN_KINDS`:
+
+      - ``errors`` block the operation (nothing is written): every ``depends-on``
+        entry that fails the ``kind/name[@stage]`` grammar or the target kind's
+        stage vocabulary, an entry whose name breaks vault confinement, and a
+        stage-blind dependency cycle over the qualified-id design graph.
+      - ``notices`` are non-blocking, printed only on a successful op: the
+        dependent warning raised when this record flips to a failure status or is
+        deleted while other design records still depend on it.
+
+    Existence is deliberately NOT checked: a dependency on a record that does not
+    exist yet is a valid write (the record model's shape-only contract), so only
+    a cycle — a statement about edges that DO resolve — can block.
+
+    Tags are namespaced against their task-graph counterparts
+    (``design-depends-on-cycle`` vs ``depends-on-cycle``, ``design-dependents``
+    vs ``dependents``) so the bracketed tag alone identifies which graph rejected
+    a write. The confinement guard keeps the shared ``edge-reference`` tag: it is
+    one guard with one meaning on both graphs, and its message names the kind it
+    confined under.
+    """
+    if kind not in graph_mod.DESIGN_KINDS:
+        return [], []
+
+    qualified_id = f"{kind}/{name}"
+
+    # Delete only warns about dependents; it is never blocked.
+    if deleting:
+        deps = graph_mod.design_dependents(load_design_sidecars(vault_root), qualified_id)
+        notices: list[str] = []
+        if deps:
+            notices.append(
+                graph_mod.format_guard_message(
+                    "design-dependents",
+                    f"{qualified_id} deleted but still depended on",
+                    offenders=deps,
+                )
+            )
+        return [], notices
+
+    errors: list[str] = []
+
+    # Every entry is parsed, kind-validated and confined before the graph is
+    # built — a malformed or traversal-shaped value must never reach disk, and
+    # the vault-wide load must not be paid for a write that is already rejected.
+    entries_field = sidecar.get("depends-on")
+    entries = entries_field if isinstance(entries_field, list) else []
+    for entry in entries:
+        msg = _design_edge_error(entry, vault_root)
+        if msg:
+            errors.append(msg)
+    if errors:
+        return errors, []
+
+    # Same lazy load as the task guards: a record with no outgoing edges can
+    # never be the entry point of a NEW cycle, so a plain status update that is
+    # not a failure transition never touches the vault-wide glob+parse.
+    design_graph: dict[str, dict] | None = None
+
+    def _graph() -> dict[str, dict]:
+        nonlocal design_graph
+        if design_graph is None:
+            design_graph = load_design_sidecars(vault_root)
+            design_graph[qualified_id] = sidecar
+        return design_graph
+
+    if entries:
+        cycle = graph_mod.find_design_dependency_cycle(_graph(), start=qualified_id)
+        if cycle:
+            errors.append(
+                graph_mod.format_guard_message(
+                    "design-depends-on-cycle",
+                    f"{qualified_id} would create a dependency cycle: " + " -> ".join(cycle),
+                )
+            )
+    if errors:
+        return errors, []
+
+    notices = []
+    if status_set in graph_mod.FAILURE_STATUSES:
+        deps = graph_mod.design_dependents(_graph(), qualified_id)
+        if deps:
+            notices.append(
+                graph_mod.format_guard_message(
+                    "design-dependents",
+                    f"{qualified_id} set to {status_set} but still depended on",
+                    offenders=deps,
+                )
+            )
+    return errors, notices
+
+
+def evaluate_graph_guards(
+    *,
+    kind: str,
+    name: str,
+    sidecar: dict,
+    body: str,
+    vault_root: str,
+    status_set: str | None,
+    deleting: bool = False,
+) -> tuple[list[str], list[str]]:
+    """Route a create/update/delete to the graph guards for its *kind*.
+
+    One signature for every caller: ``task`` goes to :func:`evaluate_task_guards`,
+    a design kind to :func:`evaluate_design_guards`, and any other kind is the
+    same ``([], [])`` no-op both of those return on their own — no kind carries
+    two graphs, so exactly one policy ever runs. ``body`` is consumed only by the
+    task policy (the flow-out ritual reminder has no design counterpart).
+    """
+    if kind == "task":
+        return evaluate_task_guards(
+            kind=kind,
+            name=name,
+            sidecar=sidecar,
+            body=body,
+            vault_root=vault_root,
+            status_set=status_set,
+            deleting=deleting,
+        )
+    if kind in graph_mod.DESIGN_KINDS:
+        return evaluate_design_guards(
+            kind=kind,
+            name=name,
+            sidecar=sidecar,
+            vault_root=vault_root,
+            status_set=status_set,
+            deleting=deleting,
+        )
+    return [], []
