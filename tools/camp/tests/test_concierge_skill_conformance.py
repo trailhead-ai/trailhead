@@ -290,6 +290,29 @@ _DERIVED_NAME = "camp-<slug>-<uuid8>"
 # comes from, or that it is not to be built.
 _SOURCING_CUES = ("never", "not ", "read", "reads", "reported", "prints", "printed", "output")
 
+# Verbs that describe ASSEMBLING the name. A sourcing cue does not excuse these:
+# a sentence can name where the value comes from and still tell the reader to
+# build it ("... built from the resolved slug and the session uuid8 output"),
+# which is the instruction this guard exists to reject. Only an explicit
+# negation in the same sentence clears one.
+# Matched on word boundaries so the ADJECTIVE "derived" — as in "the derived
+# session name", the document's own neutral term for the value — is not read as
+# an instruction to derive it.
+_CONSTRUCTIVE_RE = re.compile(
+    r"\b(?:build|builds|building|built"
+    r"|construct(?:s|ing|ed)?"
+    r"|assembl(?:e|es|ing|ed)"
+    r"|concatenat(?:e|es|ing|ed)"
+    r"|compos(?:e|es|ing|ed)"
+    r"|deriv(?:e|es|ing)"
+    r"|format(?:s|ting|ted)?"
+    r"|templat(?:e|es|ing|ed)"
+    r"|interpolat(?:e|es|ing|ed)"
+    r"|join(?:s|ing|ed)?)\b",
+    re.IGNORECASE,
+)
+_NEGATIONS = ("never", "not ", "no ", "without", "rather than", "instead of")
+
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?:])\s+")
 
 
@@ -307,8 +330,17 @@ def _forbidden_mechanism_hits(text: str) -> dict[str, list[str]]:
         if spelling in text:
             hits.setdefault("name reconstruction", []).append(spelling)
     for sentence in _sentences(text):
-        if _DERIVED_NAME in sentence and not any(cue in sentence.lower() for cue in _SOURCING_CUES):
+        if _DERIVED_NAME not in sentence:
+            continue
+        lowered = sentence.lower()
+        if not any(cue in lowered for cue in _SOURCING_CUES):
             hits.setdefault("unsourced derived name", []).append(sentence)
+        # Checked independently of the sourcing cue: a cue word elsewhere in the
+        # sentence must not license an instruction to assemble the name.
+        if _CONSTRUCTIVE_RE.search(sentence) and not any(
+            negation in lowered for negation in _NEGATIONS
+        ):
+            hits.setdefault("name assembled rather than read", []).append(sentence)
     return hits
 
 
@@ -332,11 +364,49 @@ def test_document_names_the_derived_name_while_forbidding_its_reconstruction(
         ("The name is `camp-{slug}-{uuid8}`.", "name reconstruction"),
         ("Take the first 8 characters of the session id.", "name reconstruction"),
         ("The handle is camp-<slug>-<uuid8> for later reference.", "unsourced derived name"),
+        # A sourcing cue in the sentence must not excuse an instruction to
+        # assemble the name: each of these carries one ("output", "printed",
+        # "read") and still tells the reader to put the name together.
+        (
+            "The pattern is camp-<slug>-<uuid8>, built from the resolved slug "
+            "and the session uuid8 output value.",
+            "name assembled rather than read",
+        ),
+        (
+            "Read the output, then form camp-<slug>-<uuid8> by concatenating "
+            "the slug and the uuid.",
+            "name assembled rather than read",
+        ),
+        (
+            "You may derive camp-<slug>-<uuid8> yourself from what camp printed.",
+            "name assembled rather than read",
+        ),
     ],
 )
 def test_guard_catches_a_real_violation(violation: str, expected_key: str) -> None:
     """Each forbidden shape, proven to trip the guard on synthetic text."""
     assert expected_key in _forbidden_mechanism_hits(violation)
+
+
+@pytest.mark.parametrize(
+    "permitted",
+    [
+        # The document's own neutral term for the value. "derived" is an
+        # adjective here, not an instruction to derive anything.
+        "camp's normalized slug appears in the derived session name "
+        "camp-<slug>-<uuid8>, so it is always reported.",
+        # Naming the forbidden act in order to forbid it.
+        "`tmux_name` is read from camp's output — the derived name "
+        "camp-<slug>-<uuid8> is never reconstructed.",
+        "Report camp-<slug>-<uuid8> as camp printed it, rather than building "
+        "it from the slug.",
+    ],
+)
+def test_guard_permits_naming_the_pattern_without_instructing_it(permitted: str) -> None:
+    """The guard distinguishes describing the name from assembling it; without
+    this the strict reading above would forbid the document from discussing the
+    value at all."""
+    assert _forbidden_mechanism_hits(permitted) == {}
 
 
 # ---------------------------------------------------------------------------
