@@ -35,6 +35,19 @@ if str(_PLUGIN_DIR) not in sys.path:
 
 SCRUB = ["FAKE_CHILD_SESSION", "FAKECODE", "FAKE_SESSION_TOKEN"]
 
+#: A resumed session id, spelled once so the tests that assert on its first
+#: eight characters cannot drift from the id actually handed to the engine.
+RESUME_ID = "11111111-2222-3333-4444-666677778888"
+
+
+def _completed(*, returncode=0, stdout="", stderr=""):
+    """A `subprocess.run` result stand-in — returncode plus the two streams."""
+    return type(
+        "CompletedProcess",
+        (),
+        {"returncode": returncode, "stdout": stdout, "stderr": stderr},
+    )()
+
 GROUP = {"group": {"name": "testgroup"}}
 GROUP_NO_PRETRUST = {"group": {"name": "testgroup"}, "harness": {"pretrust": False}}
 
@@ -43,22 +56,33 @@ class FakeHarness:
     """Stand-in for the trailhead harness seam.
 
     `launch_argv` None models a harness that cannot launch at all;
-    `enumerate_argv` None models one with no enumeration concept.
+    `resume_argv` None models one that cannot resume; `enumerate_argv` None
+    models one with no enumeration concept.
     """
 
     name = "fakeharness"
 
-    def __init__(self, *, launch_argv=..., enumerate_argv=None, records=None):
+    def __init__(
+        self, *, launch_argv=..., resume_argv=..., enumerate_argv=None, records=None
+    ):
         self._launch_argv = launch_argv
+        self._resume_argv = resume_argv
         self._enumerate_argv = enumerate_argv
         self._records = records or []
         self.launch_calls: list[tuple[Path, str]] = []
+        self.resume_calls: list[str] = []
 
     def session_launch(self, workspace, session_id):
         self.launch_calls.append((workspace, session_id))
         if self._launch_argv is ...:
             return ["fakeharness", "--rc", "--sid", session_id]
         return self._launch_argv
+
+    def session_resume(self, session_id):
+        self.resume_calls.append(session_id)
+        if self._resume_argv is ...:
+            return ["fakeharness", "--reattach", session_id]
+        return self._resume_argv
 
     def session_launch_env_unset(self):
         return list(SCRUB)
@@ -71,18 +95,21 @@ class FakeHarness:
 
 
 class Recorder:
-    """Captures the single Popen call the engine is allowed to make."""
+    """Captures the single tmux spawn the engine is allowed to make.
+
+    The engine reads tmux's exit status — the session-name claim is what makes a
+    second launch of the same session refuse — so the recorder answers like a
+    completed process, with a `returncode` and `stderr` each test can set.
+    """
 
     def __init__(self):
         self.calls: list[dict[str, Any]] = []
+        self.returncode = 0
+        self.stderr = ""
 
     def __call__(self, argv, **kwargs):
         self.calls.append({"argv": argv, "kwargs": kwargs})
-
-        class _Proc:
-            pid = 4242
-
-        return _Proc()
+        return _completed(returncode=self.returncode, stderr=self.stderr)
 
     @property
     def argv(self):
@@ -106,25 +133,37 @@ def rig(monkeypatch, tmp_path):
     state: dict[str, Any] = {
         "harness": FakeHarness(),
         "pretrust": True,
+        "pretrust_calls": [],
         "workspace": ws,
         "which": "/usr/bin/tmux",
-        "popen": Recorder(),
+        "spawn": Recorder(),
+        "enumerate": lambda *a, **k: pytest.fail("unexpected enumeration"),
         "module": session,
     }
+
+    def fake_pretrust(launch_dir, *, workspace_root, env=None):
+        state["pretrust_calls"].append(
+            {"launch_dir": launch_dir, "workspace_root": workspace_root}
+        )
+        return state["pretrust"]
+
+    def fake_run(argv, **kwargs):
+        """Split the engine's two subprocess uses: the spawn, and everything else."""
+        if list(argv[:2]) == ["tmux", "new-session"]:
+            return state["spawn"](argv, **kwargs)
+        return state["enumerate"](argv, **kwargs)
 
     monkeypatch.setattr(session, "harness_for", lambda group: state["harness"])
     monkeypatch.setattr(
         session, "workspace_dir", lambda group, slug, env=None: state["workspace"]
     )
-    monkeypatch.setattr(
-        session,
-        "pretrust_workspace",
-        lambda launch_dir, workspace_root, env=None: state["pretrust"],
-    )
+    monkeypatch.setattr(session, "pretrust_workspace", fake_pretrust)
     monkeypatch.setattr(session.shutil, "which", lambda binary: state["which"])
-    monkeypatch.setattr(session.subprocess, "Popen", state["popen"])
+    monkeypatch.setattr(session.subprocess, "run", fake_run)
     monkeypatch.setattr(
-        session.subprocess, "run", lambda *a, **k: pytest.fail("unexpected subprocess.run")
+        session.subprocess,
+        "Popen",
+        lambda *a, **k: pytest.fail("the engine must spawn through subprocess.run"),
     )
     return state
 
@@ -138,6 +177,137 @@ def _pane_command(argv: list[str]) -> list[str]:
     return argv[argv.index("env") :]
 
 
+def _dir_env(tmp_path: Path) -> dict[str, str]:
+    """An environment whose HOME is sandboxed, so the deny list never reads the
+    invoking operator's real credential stores."""
+    return {"PATH": "/usr/bin", "HOME": str(tmp_path / "home")}
+
+
+def _dir_group(tmp_path: Path, roots=None) -> dict[str, Any]:
+    """A group whose launch-roots allowlist covers *tmp_path* unless told otherwise."""
+    return {
+        "group": {"name": "testgroup"},
+        "launch": {"roots": [str(tmp_path)] if roots is None else roots},
+    }
+
+
+def _launch_at(rig, tmp_path, root, *, group=None, name_component="odd-handle", resume=None):
+    """Launch rooted at *root* — the shape both `--dir` and a resume take."""
+    return rig["module"].launch_session(
+        group if group is not None else _dir_group(tmp_path),
+        root=root,
+        name_component=name_component,
+        trust_scope=root,
+        resume_session_id=resume,
+        env=_dir_env(tmp_path),
+    )
+
+
+# ---------------------------------------------------------------------------
+# the workspace-slug launch, pinned whole
+# ---------------------------------------------------------------------------
+
+
+class TestSlugLaunchShapeIsPinnedWhole:
+    """The slug launch is the default caller; its observable shape is frozen.
+
+    Every other test in this file pins one property of the spawn. This one pins
+    all of them at once, spelled out literally rather than recomputed from the
+    engine's own inputs, so a change that widens the engine for another launch
+    flavor cannot quietly move the shape the existing callers depend on.
+    """
+
+    def test_argv_cwd_env_name_and_stderr_are_all_exactly_as_specified(
+        self, rig, capsys
+    ):
+        result = rig["module"].launch_session(
+            GROUP, "feat-x", env={"PATH": "/usr/bin", "KEEP": "yes"}
+        )
+
+        sid = result.session_id
+        workspace = str(rig["workspace"].resolve())
+
+        assert rig["spawn"].argv == [
+            "tmux",
+            "new-session",
+            "-d",
+            "-s",
+            f"camp-feat-x-{sid[:8]}",
+            "-c",
+            workspace,
+            "env",
+            "-u",
+            "FAKE_CHILD_SESSION",
+            "-u",
+            "FAKECODE",
+            "-u",
+            "FAKE_SESSION_TOKEN",
+            "fakeharness",
+            "--rc",
+            "--sid",
+            sid,
+        ]
+        assert rig["spawn"].kwargs["cwd"] == workspace
+        assert rig["spawn"].kwargs["env"] == {"PATH": "/usr/bin", "KEEP": "yes"}
+        assert rig["spawn"].kwargs["start_new_session"] is True
+        assert result.tmux_name == f"camp-feat-x-{sid[:8]}"
+        assert result.launch_dir == rig["workspace"].resolve()
+        assert capsys.readouterr().err == ""
+
+
+# ---------------------------------------------------------------------------
+# the call contract — exactly one way to name where a session is rooted
+# ---------------------------------------------------------------------------
+
+
+class TestCallContract:
+    """A launch is addressed either by workspace slug or by explicit directory.
+
+    Supplying neither, both, or an incomplete directory triple is a bug in the
+    caller, not a launch to refuse — so it raises before the engine resolves
+    anything, and every one of these cases asserts that nothing was spawned.
+    """
+
+    def test_neither_slug_nor_root_raises_before_any_work(self, rig):
+        with pytest.raises(ValueError):
+            rig["module"].launch_session(GROUP, env={"PATH": "/usr/bin"})
+
+        assert rig["spawn"].calls == []
+        assert rig["pretrust_calls"] == []
+
+    def test_both_slug_and_root_raises(self, rig, tmp_path):
+        with pytest.raises(ValueError):
+            rig["module"].launch_session(
+                GROUP,
+                "feat-x",
+                root=tmp_path,
+                name_component="proj",
+                trust_scope=tmp_path,
+                env={"PATH": "/usr/bin"},
+            )
+
+        assert rig["spawn"].calls == []
+        assert rig["pretrust_calls"] == []
+
+    def test_root_without_a_name_component_raises(self, rig, tmp_path):
+        with pytest.raises(ValueError):
+            rig["module"].launch_session(
+                GROUP, root=tmp_path, trust_scope=tmp_path, env={"PATH": "/usr/bin"}
+            )
+
+        assert rig["spawn"].calls == []
+        assert rig["pretrust_calls"] == []
+
+    def test_root_without_a_trust_scope_raises(self, rig, tmp_path):
+        with pytest.raises(ValueError):
+            rig["module"].launch_session(
+                GROUP, root=tmp_path, name_component="proj", env={"PATH": "/usr/bin"}
+            )
+
+        assert rig["spawn"].calls == []
+        assert rig["pretrust_calls"] == []
+
+
 # ---------------------------------------------------------------------------
 # the env scrub reaches the pane
 # ---------------------------------------------------------------------------
@@ -146,7 +316,7 @@ def _pane_command(argv: list[str]) -> list[str]:
 class TestScrubReachesThePane:
     def test_every_scrub_var_is_an_env_u_operand_in_the_pane_command(self, rig):
         _launch(rig)
-        argv = rig["popen"].argv
+        argv = rig["spawn"].argv
 
         pane = _pane_command(argv)
         assert pane[0] == "env"
@@ -157,7 +327,7 @@ class TestScrubReachesThePane:
 
     def test_env_sits_after_tmux_options_immediately_before_the_harness_argv(self, rig):
         _launch(rig)
-        argv = rig["popen"].argv
+        argv = rig["spawn"].argv
 
         env_at = argv.index("env")
         assert argv[0] == "tmux"
@@ -175,7 +345,7 @@ class TestScrubReachesThePane:
         for var in SCRUB:
             expected += ["-u", var]
         expected += ["fakeharness", "--rc", "--sid", session_id]
-        assert _pane_command(rig["popen"].argv) == expected
+        assert _pane_command(rig["spawn"].argv) == expected
 
 
 # ---------------------------------------------------------------------------
@@ -191,7 +361,7 @@ class TestSpawnShape:
 
         rig["module"].launch_session(GROUP, "feat-x", env=env)
 
-        popen_env = rig["popen"].kwargs["env"]
+        popen_env = rig["spawn"].kwargs["env"]
         for var in SCRUB:
             assert var not in popen_env, f"{var} survived camp's own Popen env"
         assert popen_env["KEEP"] == "yes"
@@ -204,20 +374,20 @@ class TestSpawnShape:
         result = _launch(rig)
 
         resolved = str(link.resolve())
-        argv = rig["popen"].argv
+        argv = rig["spawn"].argv
         assert argv[argv.index("-c") + 1] == resolved
-        assert rig["popen"].kwargs["cwd"] == resolved
+        assert rig["spawn"].kwargs["cwd"] == resolved
         assert str(result.launch_dir) == resolved
 
     def test_start_new_session_is_true(self, rig):
         _launch(rig)
-        assert rig["popen"].kwargs["start_new_session"] is True
+        assert rig["spawn"].kwargs["start_new_session"] is True
 
     def test_command_is_argv_not_a_shell_string(self, rig):
         _launch(rig)
-        assert isinstance(rig["popen"].argv, list)
-        assert all(isinstance(word, str) for word in rig["popen"].argv)
-        assert rig["popen"].kwargs.get("shell", False) is False
+        assert isinstance(rig["spawn"].argv, list)
+        assert all(isinstance(word, str) for word in rig["spawn"].argv)
+        assert rig["spawn"].kwargs.get("shell", False) is False
 
     def test_shell_active_workspace_path_stays_one_word(self, rig, tmp_path):
         hostile = tmp_path / "a b; rm -rf $HOME && echo 'x'"
@@ -226,7 +396,7 @@ class TestSpawnShape:
 
         _launch(rig)
 
-        argv = rig["popen"].argv
+        argv = rig["spawn"].argv
         assert argv[argv.index("-c") + 1] == str(hostile.resolve())
         assert argv.count(str(hostile.resolve())) == 1
 
@@ -234,7 +404,7 @@ class TestSpawnShape:
 class TestSessionIdentity:
     def test_tmux_name_is_camp_slug_and_first_eight_of_the_uuid(self, rig):
         result = _launch(rig, slug="feat-x")
-        argv = rig["popen"].argv
+        argv = rig["spawn"].argv
 
         assert result.tmux_name == f"camp-feat-x-{result.session_id[:8]}"
         assert argv[argv.index("-s") + 1] == result.tmux_name
@@ -271,7 +441,7 @@ class TestRefusals:
             _launch(rig)
 
         assert str(rig["workspace"].resolve()) in str(excinfo.value)
-        assert rig["popen"].calls == []
+        assert rig["spawn"].calls == []
 
     def test_pretrust_raising_refuses_naming_the_workspace_no_process_spawned(
         self, rig, monkeypatch
@@ -289,7 +459,7 @@ class TestRefusals:
             _launch(rig)
 
         assert str(rig["workspace"].resolve()) in str(excinfo.value)
-        assert rig["popen"].calls == []
+        assert rig["spawn"].calls == []
 
     def test_unlaunchable_harness_refuses_naming_the_harness(self, rig):
         rig["harness"] = FakeHarness(launch_argv=None)
@@ -298,7 +468,7 @@ class TestRefusals:
             _launch(rig)
 
         assert "fakeharness" in str(excinfo.value)
-        assert rig["popen"].calls == []
+        assert rig["spawn"].calls == []
 
     def test_unresolvable_harness_refuses(self, rig):
         rig["harness"] = None
@@ -306,7 +476,7 @@ class TestRefusals:
         with pytest.raises(rig["module"].LaunchError):
             _launch(rig)
 
-        assert rig["popen"].calls == []
+        assert rig["spawn"].calls == []
 
     def test_missing_tmux_refuses_naming_the_binary(self, rig):
         rig["which"] = None
@@ -315,7 +485,7 @@ class TestRefusals:
             _launch(rig)
 
         assert "tmux" in str(excinfo.value)
-        assert rig["popen"].calls == []
+        assert rig["spawn"].calls == []
 
     def test_unresolvable_launch_dir_refuses(self, rig, tmp_path):
         rig["workspace"] = tmp_path / "never-created"
@@ -324,14 +494,14 @@ class TestRefusals:
             _launch(rig)
 
         assert "never-created" in str(excinfo.value)
-        assert rig["popen"].calls == []
+        assert rig["spawn"].calls == []
 
     def test_trust_refusal_precedes_any_tmux_spawn(self, rig):
         """The trust gate must fire before the process exists, not after."""
         rig["pretrust"] = False
         with pytest.raises(rig["module"].LaunchError):
             _launch(rig)
-        assert rig["popen"].calls == []
+        assert rig["spawn"].calls == []
 
     def test_none_scrub_refuses_naming_the_harness_no_process_spawned(self, rig, monkeypatch):
         """`None` from session_launch_env_unset means launch is unsupported for
@@ -343,7 +513,7 @@ class TestRefusals:
             _launch(rig)
 
         assert "fakeharness" in str(excinfo.value)
-        assert rig["popen"].calls == []
+        assert rig["spawn"].calls == []
 
     def test_empty_list_scrub_is_genuinely_nothing_to_scrub_and_proceeds(self, rig, monkeypatch):
         """`[]` is the honest "nothing to scrub" answer — distinct from `None` —
@@ -352,7 +522,7 @@ class TestRefusals:
 
         _launch(rig)
 
-        pane = _pane_command(rig["popen"].argv)
+        pane = _pane_command(rig["spawn"].argv)
         assert pane[0] == "env"
         assert pane[1] == "fakeharness"
 
@@ -374,15 +544,11 @@ class TestParseSessionListNoneIsTolerated:
     ):
         rig["harness"] = FakeHarness(enumerate_argv=["fakeharness", "agents"])
         monkeypatch.setattr(rig["harness"], "parse_session_list", lambda output: None)
-        monkeypatch.setattr(
-            rig["module"].subprocess,
-            "run",
-            lambda *a, **k: type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})(),
-        )
+        rig["enumerate"] = lambda *a, **k: _completed()
 
         result = _launch(rig)
 
-        assert len(rig["popen"].calls) == 1
+        assert len(rig["spawn"].calls) == 1
         assert result.session_id
         assert capsys.readouterr().err == ""
 
@@ -423,7 +589,7 @@ class TestNonRefusingWarnings:
     def test_pretrust_disabled_by_config_spawns_with_a_stderr_warning(self, rig, capsys):
         result = _launch(rig, group=GROUP_NO_PRETRUST)
 
-        assert len(rig["popen"].calls) == 1
+        assert len(rig["spawn"].calls) == 1
         assert result.session_id
         err = capsys.readouterr().err
         assert "camp:" in err
@@ -442,36 +608,32 @@ class TestNonRefusingWarnings:
         assert calls == []
 
     def test_already_live_sessions_are_reported_on_stderr_and_do_not_refuse(
-        self, rig, capsys, monkeypatch
+        self, rig, capsys
     ):
         rig["harness"] = FakeHarness(
             enumerate_argv=["fakeharness", "agents"],
             records=[object(), object()],
         )
-        monkeypatch.setattr(
-            rig["module"].subprocess,
-            "run",
-            lambda *a, **k: type("R", (), {"returncode": 0, "stdout": "[]"})(),
-        )
+        rig["enumerate"] = lambda *a, **k: _completed(stdout="[]")
 
         result = _launch(rig)
 
-        assert len(rig["popen"].calls) == 1
+        assert len(rig["spawn"].calls) == 1
         assert result.session_id
         err = capsys.readouterr().err
         assert "camp:" in err
         assert "2" in err
 
-    def test_enumeration_failure_does_not_refuse(self, rig, monkeypatch):
+    def test_enumeration_failure_does_not_refuse(self, rig):
         def boom(*a, **k):
             raise OSError("no such binary")
 
         rig["harness"] = FakeHarness(enumerate_argv=["fakeharness", "agents"])
-        monkeypatch.setattr(rig["module"].subprocess, "run", boom)
+        rig["enumerate"] = boom
 
         result = _launch(rig)
 
-        assert len(rig["popen"].calls) == 1
+        assert len(rig["spawn"].calls) == 1
         assert result.session_id
 
 
@@ -492,7 +654,7 @@ class TestSeamBoundary:
 
         _launch(rig)
 
-        pane = _pane_command(rig["popen"].argv)
+        pane = _pane_command(rig["spawn"].argv)
         assert pane[-4:] == ["odd-binary", "-x", "--weird=1", "tail"]
 
     def test_scrub_var_names_are_taken_from_the_seam(self, rig, monkeypatch):
@@ -503,8 +665,221 @@ class TestSeamBoundary:
 
         _launch(rig)
 
-        pane = _pane_command(rig["popen"].argv)
+        pane = _pane_command(rig["spawn"].argv)
         assert pane[:3] == ["env", "-u", "ONLY_THIS_ONE"]
+
+
+# ---------------------------------------------------------------------------
+# rooting at an explicitly named directory
+# ---------------------------------------------------------------------------
+
+
+class TestDirectoryRootedLaunch:
+    def test_the_named_root_is_the_cwd_the_c_operand_and_the_trust_scope(
+        self, rig, tmp_path
+    ):
+        """One directory again, but supplied rather than derived — and the trust
+        scope is that same directory, which is exactly what makes the pre-seed's
+        containment check vacuous here. The name component is a parameter, not a
+        basename: it is deliberately unlike the directory's own name."""
+        root = tmp_path / "proj"
+        root.mkdir()
+
+        result = _launch_at(rig, tmp_path, root)
+
+        argv = rig["spawn"].argv
+        assert argv[argv.index("-c") + 1] == str(root)
+        assert rig["spawn"].kwargs["cwd"] == str(root)
+        assert result.launch_dir == root
+        assert result.tmux_name == f"camp-odd-handle-{result.session_id[:8]}"
+        assert argv[argv.index("-s") + 1] == result.tmux_name
+        assert rig["pretrust_calls"] == [
+            {"launch_dir": root, "workspace_root": root}
+        ]
+
+    def test_an_ineligible_root_refuses_before_the_trust_preseed_runs(
+        self, rig, tmp_path
+    ):
+        """The eligibility gate is the containment boundary for a named
+        directory, and the trust pre-seed's own confinement check cannot be it —
+        that check compares the launch directory against the trust scope, which
+        for this flavor is the same directory. So the gate must have already
+        answered before the pre-seed is reached, and asserting the pre-seed was
+        never CALLED is what pins that order."""
+        root = tmp_path / "proj"
+        root.mkdir()
+        group = _dir_group(tmp_path, roots=[str(tmp_path / "elsewhere")])
+
+        with pytest.raises(rig["module"].LaunchError) as excinfo:
+            _launch_at(rig, tmp_path, root, group=group)
+
+        assert str(root) in str(excinfo.value)
+        assert rig["pretrust_calls"] == []
+        assert rig["spawn"].calls == []
+
+    def test_a_root_that_is_not_an_existing_directory_refuses(self, rig, tmp_path):
+        """An eligible-but-absent directory must not reach tmux: `new-session -c`
+        falls back to the invoking environment's home rather than failing, which
+        would root the session somewhere nobody named and nothing fenced."""
+        root = tmp_path / "never-created"
+
+        with pytest.raises(rig["module"].LaunchError) as excinfo:
+            _launch_at(rig, tmp_path, root)
+
+        assert "never-created" in str(excinfo.value)
+        assert rig["pretrust_calls"] == []
+        assert rig["spawn"].calls == []
+
+    def test_the_scrub_rides_in_the_pane_and_leaves_the_spawn_env(self, rig, tmp_path):
+        """Both halves of the scrub apply to this flavor too — neither is
+        inherited from the slug path by accident."""
+        root = tmp_path / "proj"
+        root.mkdir()
+        env = _dir_env(tmp_path) | {var: "leaked" for var in SCRUB}
+
+        rig["module"].launch_session(
+            _dir_group(tmp_path),
+            root=root,
+            name_component="odd-handle",
+            trust_scope=root,
+            env=env,
+        )
+
+        pane = _pane_command(rig["spawn"].argv)
+        assert pane[: 1 + 2 * len(SCRUB)] == ["env"] + [
+            tok for var in SCRUB for tok in ("-u", var)
+        ]
+        for var in SCRUB:
+            assert var not in rig["spawn"].kwargs["env"]
+
+
+# ---------------------------------------------------------------------------
+# resuming a session the harness already knows
+# ---------------------------------------------------------------------------
+
+
+class TestResumeFlavor:
+    def test_the_resume_argv_comes_from_the_seam_and_the_id_is_not_minted(
+        self, rig, tmp_path
+    ):
+        root = tmp_path / "proj"
+        root.mkdir()
+
+        result = _launch_at(rig, tmp_path, root, resume=RESUME_ID)
+
+        assert _pane_command(rig["spawn"].argv) == (
+            ["env"]
+            + [tok for var in SCRUB for tok in ("-u", var)]
+            + ["fakeharness", "--reattach", RESUME_ID]
+        )
+        assert rig["harness"].resume_calls == [RESUME_ID]
+        assert rig["harness"].launch_calls == []
+        assert result.session_id == RESUME_ID
+        assert result.tmux_name == f"camp-odd-handle-{RESUME_ID[:8]}"
+
+    def test_a_workspace_resume_keeps_the_slug_as_the_name_component(self, rig):
+        """A resume rooted at a workspace is the slug flavor carrying a session
+        id — so it reclaims the very name its original launch used."""
+        result = rig["module"].launch_session(
+            GROUP, "feat-x", resume_session_id=RESUME_ID, env={"PATH": "/usr/bin"}
+        )
+
+        assert result.session_id == RESUME_ID
+        assert result.tmux_name == f"camp-feat-x-{RESUME_ID[:8]}"
+        assert rig["spawn"].kwargs["cwd"] == str(rig["workspace"].resolve())
+
+    def test_a_harness_that_cannot_resume_refuses_naming_it(self, rig, tmp_path):
+        """An absent answer from the seam at a spawn site is a refusal, never a
+        fall-through to a fresh launch."""
+        root = tmp_path / "proj"
+        root.mkdir()
+        rig["harness"] = FakeHarness(resume_argv=None)
+
+        with pytest.raises(rig["module"].LaunchError) as excinfo:
+            _launch_at(rig, tmp_path, root, resume=RESUME_ID)
+
+        assert "fakeharness" in str(excinfo.value)
+        assert rig["spawn"].calls == []
+
+    def test_a_session_already_live_under_the_root_refuses_as_already_running(
+        self, rig, tmp_path
+    ):
+        root = tmp_path / "proj"
+        root.mkdir()
+        rig["harness"] = FakeHarness(
+            enumerate_argv=["fakeharness", "agents"], records=[_record(RESUME_ID)]
+        )
+        rig["enumerate"] = lambda *a, **k: _completed()
+
+        with pytest.raises(rig["module"].LaunchError) as excinfo:
+            _launch_at(rig, tmp_path, root, resume=RESUME_ID)
+
+        assert "already running" in str(excinfo.value)
+        assert RESUME_ID in str(excinfo.value)
+        assert rig["spawn"].calls == []
+
+    def test_the_two_already_running_refusals_are_one_message(self, rig, tmp_path):
+        """Enumeration answers before the spawn; tmux's own session-name claim
+        answers atomically at the spawn. They catch the same condition at two
+        moments, so the operator must never be able to tell which one fired."""
+        root = tmp_path / "proj"
+        root.mkdir()
+        rig["harness"] = FakeHarness(
+            enumerate_argv=["fakeharness", "agents"], records=[_record(RESUME_ID)]
+        )
+        rig["enumerate"] = lambda *a, **k: _completed()
+
+        with pytest.raises(rig["module"].LaunchError) as enumerated:
+            _launch_at(rig, tmp_path, root, resume=RESUME_ID)
+
+        rig["harness"] = FakeHarness(
+            enumerate_argv=["fakeharness", "agents"], records=[]
+        )
+        rig["spawn"].returncode = 1
+        rig["spawn"].stderr = f"duplicate session: camp-odd-handle-{RESUME_ID[:8]}\n"
+
+        with pytest.raises(rig["module"].LaunchError) as claimed:
+            _launch_at(rig, tmp_path, root, resume=RESUME_ID)
+
+        assert str(claimed.value) == str(enumerated.value)
+
+    def test_an_unrelated_tmux_failure_is_a_distinct_refusal(self, rig, tmp_path):
+        """A misdiagnosed failure is worse than a generic one: only tmux's
+        duplicate-name error means the session is already running."""
+        root = tmp_path / "proj"
+        root.mkdir()
+        rig["harness"] = FakeHarness(
+            enumerate_argv=["fakeharness", "agents"], records=[]
+        )
+        rig["enumerate"] = lambda *a, **k: _completed()
+        rig["spawn"].returncode = 1
+        rig["spawn"].stderr = "width invalid: 0"
+
+        with pytest.raises(rig["module"].LaunchError) as excinfo:
+            _launch_at(rig, tmp_path, root, resume=RESUME_ID)
+
+        assert "already running" not in str(excinfo.value)
+        assert "width invalid" in str(excinfo.value)
+
+    def test_an_unanswerable_enumeration_falls_through_to_the_atomic_claim(
+        self, rig, tmp_path
+    ):
+        """The pre-spawn lookup is a courtesy that produces a legible refusal; it
+        is not the guarantee. When it cannot answer, the launch proceeds and
+        tmux's session-name claim is what actually prevents a doubled session."""
+        root = tmp_path / "proj"
+        root.mkdir()
+        rig["harness"] = FakeHarness(enumerate_argv=["fakeharness", "agents"])
+
+        def boom(*a, **k):
+            raise OSError("no such binary")
+
+        rig["enumerate"] = boom
+
+        result = _launch_at(rig, tmp_path, root, resume=RESUME_ID)
+
+        assert result.session_id == RESUME_ID
+        assert len(rig["spawn"].calls) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -791,6 +1166,35 @@ class TestConfirmSession:
         assert len(kill_calls) == 1
         assert kill_calls[0] == ["tmux", "kill-session", "-t", "camp-feat-x-abcd1234"]
         assert "trust" in str(excinfo.value).lower()
+
+    def test_a_resumed_session_that_never_confirms_is_killed_and_refused(
+        self, confirm_rig
+    ):
+        """Confirmation is flavor-blind: a resumed session that never registers
+        is killed by the exact name camp claimed for it and refused, the same as
+        a fresh launch. Empirically this is a common outcome, not an edge."""
+        session = confirm_rig["module"]
+        tmux_name = f"camp-odd-handle-{RESUME_ID[:8]}"
+        launched = session.LaunchedSession(
+            session_id=RESUME_ID,
+            tmux_name=tmux_name,
+            launch_dir=confirm_rig["launched"].launch_dir,
+        )
+        harness = SequencedHarness([[]])
+
+        with pytest.raises(session.LaunchError) as excinfo:
+            session.confirm_session(
+                harness,
+                launched,
+                interval=0.5,
+                timeout=1.0,
+                sleep=lambda s: None,
+                clock=FakeClock(0.5),
+            )
+
+        kill_calls = [c for c in confirm_rig["calls"] if c[0] == "tmux"]
+        assert kill_calls == [["tmux", "kill-session", "-t", tmux_name]]
+        assert RESUME_ID in str(excinfo.value)
 
     def test_failing_kill_is_reported_on_stderr_naming_the_session(
         self, confirm_rig, monkeypatch, capsys

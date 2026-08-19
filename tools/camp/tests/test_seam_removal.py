@@ -178,15 +178,24 @@ class TestSeamAbsence:
         assert "harness.session_resume(" in source
 
     def test_launch_session_has_no_argv_list_literal(self):
-        """launch/session.py builds no argv list/tuple literal.
+        """launch/session.py builds no harness argv list/tuple literal.
 
-        It does not yet source a resume argv from the harness seam either —
-        that positive half (a `harness.session_resume(` call, mirroring the
-        `bookmark/resume.py` pin above) arrives with its own dedicated test
-        once the call exists.
+        The only argv it spells is tmux's own, and the harness half of that
+        command line is spliced in whole from the seam.
         """
         source = (_CAMP_PKG_DIR / "launch" / "session.py").read_text()
         assert _argv_composition_offenders(source) == []
+
+    def test_launch_session_takes_its_resume_argv_from_the_seam(self):
+        """The launch engine asks the harness for a resume command line.
+
+        The mirror of the `bookmark/resume.py` pin above, and the half the
+        literal scans structurally cannot carry: an engine that spelled the
+        resume flag itself — or grew the argv element by element — would still
+        pass every negative scan if the harness were simply never asked.
+        """
+        source = (_CAMP_PKG_DIR / "launch" / "session.py").read_text()
+        assert "harness.session_resume(" in source
 
 
 # ---------------------------------------------------------------------------

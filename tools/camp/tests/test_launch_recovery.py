@@ -241,16 +241,16 @@ class _FakeHarness:
 
 
 class _SpawnRecorder:
+    """Stands in for the engine's tmux spawn, which reads tmux's exit status."""
+
     def __init__(self) -> None:
         self.calls: list[list[str]] = []
 
     def __call__(self, argv, **kwargs):
         self.calls.append(argv)
-
-        class _Proc:
-            pid = 4242
-
-        return _Proc()
+        return type(
+            "CompletedProcess", (), {"returncode": 0, "stdout": "", "stderr": ""}
+        )()
 
 
 def test_derived_name_reproduces_the_launch_engines_tmux_name(
@@ -282,7 +282,7 @@ def test_derived_name_reproduces_the_launch_engines_tmux_name(
     recorder = _SpawnRecorder()
     monkeypatch.setattr(session, "harness_for", lambda g: _FakeHarness())
     monkeypatch.setattr(session.shutil, "which", lambda binary: "/usr/bin/tmux")
-    monkeypatch.setattr(session.subprocess, "Popen", recorder)
+    monkeypatch.setattr(session.subprocess, "run", recorder)
 
     launched = session.launch_session(group, slug, env=env)
 
