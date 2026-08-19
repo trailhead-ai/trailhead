@@ -99,6 +99,41 @@ class SessionRecord:
     started_at: datetime | None
 
 
+@dataclass(frozen=True)
+class SessionTranscript:
+    """One on-disk session transcript, as enumerated from a harness's own store.
+
+    This is a TRANSCRIPT, not a "resumable session" — the raw pool a harness
+    reports here includes sessions that are still live and therefore not
+    actually recoverable. Subtracting the live set to produce an
+    operator-facing "what can I resume" listing is the CALLER's job; this
+    seam makes no liveness judgment and its noun stays honest about that.
+
+    ``session_id`` is the transcript's filename stem, already checked against
+    the same validity guard :meth:`Harness.session_resume` applies to its own
+    argument — every id this method yields is therefore already safe to pass
+    straight into ``session_resume`` without a caller re-validating it.
+
+    ``cwd`` is the session's START-of-session working directory, read from
+    INSIDE the transcript — never inferred from where the transcript file
+    happens to live on disk (a harness's on-disk layout for its store is that
+    harness's own knowledge, and any munging it does to build a directory name
+    is typically lossy and not safely reversible). ``None`` means the harness
+    could not extract a cwd — an unreadable, undecodable, or cwd-less
+    transcript — and a caller must report that as "unreadable", never guess a
+    location for it.
+
+    ``modified_at`` is always timezone-aware UTC, taken from the transcript
+    file's own mtime — never naive, and never a timestamp parsed out of the
+    transcript's own content (which this seam does not read for that
+    purpose).
+    """
+
+    session_id: str
+    cwd: Path | None
+    modified_at: datetime
+
+
 class Harness(ABC):
     """Abstract installer for one AI code harness.
 
@@ -499,5 +534,68 @@ class Harness(ABC):
         Result order preserves the harness's own output order. Every parsed
         ``session_id`` satisfies the same validity guard that
         :meth:`session_resume` applies to its ``session_id`` argument.
+        """
+        return None
+
+    # -- session transcript enumeration ----------------------------------------
+    #
+    # Enumerating a harness's session-transcript STORE is a different capability
+    # from ``session_enumerate`` above: that method lists LIVE processes via the
+    # harness's own CLI, so a session that has already exited is invisible to
+    # it. This method instead reads the harness's on-disk transcript store
+    # directly, so it can also see sessions that are no longer running. All
+    # store-layout knowledge — where the store lives, how it is organized, what
+    # counts as a "top-level" transcript versus a nested one, how a
+    # start-of-session cwd is extracted from a transcript's contents — is
+    # harness-specific and stays inside that harness's module (Axiom 1); the
+    # core only ever receives resolved :class:`SessionTranscript` rows or
+    # ``None``.
+    #
+    # Same degrading-default convention as every other seam in this module:
+    # ``None`` means "this harness has no recovery concept at all," and a
+    # caller must report that rather than assume an empty store. A concrete
+    # override must NEVER raise for a missing or unreadable store: a store
+    # that does not exist on disk yields ``[]``, and one individual transcript
+    # this harness cannot open, decode, or find a cwd inside still yields a
+    # row — with ``cwd=None`` — rather than being silently dropped. A concrete
+    # override must also never read an entire transcript into memory to answer
+    # this question; real transcripts run to hundreds of megabytes, and a
+    # bounded read is part of the contract, not an incidental optimization.
+
+    def session_transcripts(
+        self, workspace: Path | None = None, *, env: dict[str, str] | None = None
+    ) -> list[SessionTranscript] | None:
+        """Enumerate this harness's on-disk session transcripts, or ``None``.
+
+        Returns TRANSCRIPTS, not "resumable sessions" — the pool this method
+        returns may include sessions that are still live. A caller wanting an
+        operator-facing recoverable listing must subtract the live set itself
+        (using whatever this harness's own live-enumeration seam reports);
+        this method makes no liveness judgment of its own.
+
+        ``workspace``, when given, scopes the listing to rows whose extracted
+        ``cwd`` is equal to or under ``workspace`` — a SUBTREE test on
+        RESOLVED paths, matching :meth:`session_enumerate`'s "rooted under"
+        prefix semantics. This is never a match against how this harness's
+        store happens to lay directories out on disk: a store's on-disk
+        directory-naming scheme is typically a lossy encoding of a path (for
+        example, collapsing more than one distinct source character to the
+        same output character), so recovering a real path from a directory
+        name is ambiguous and MUST NOT be relied on. A row whose ``cwd`` is
+        ``None`` is out of scope for any workspace-scoped call, and in scope
+        only for the unscoped (``workspace=None``) global call.
+
+        ``env`` overrides the process environment (hermetic tests, and callers
+        that already carry an injected env); ``None`` means ``os.environ``.
+
+        Returns ``None`` when the harness has no transcript-store concept at
+        all. A concrete override returns ``[]`` for a missing or empty store
+        — never ``None`` — and never raises for an individual transcript it
+        cannot read or parse; that transcript still yields a row, with
+        ``cwd=None``.
+
+        Ordering is UNSPECIFIED at this seam — a caller that needs a
+        particular order (for example, most-recently-modified first) must
+        sort the result itself rather than rely on the order returned here.
         """
         return None

@@ -71,6 +71,7 @@ from trailhead.harness.base import (
     HarnessError,
     Modality,
     SessionRecord,
+    SessionTranscript,
 )
 
 _REGISTERED_MARKER = ".trailhead-registered"
@@ -102,6 +103,51 @@ def _is_session_id(session_id: object) -> bool:
     a session id this harness recognizes at all.
     """
     return isinstance(session_id, str) and _SESSION_ID_RE.match(session_id) is not None
+
+
+#: Bounded head-scan limits for extracting a session's start cwd out of a
+#: transcript (see :func:`_extract_transcript_cwd`). Real transcripts run to
+#: hundreds of megabytes, so this seam must never read one in full:
+#: ``_CWD_SCAN_MAX_LINES`` bounds how many leading records are inspected, and
+#: ``_CWD_SCAN_MAX_LINE_BYTES`` skips any single record too large to be a
+#: plausible cwd-bearing header line rather than paying to decode it.
+_CWD_SCAN_MAX_LINES = 12
+_CWD_SCAN_MAX_LINE_BYTES = 1_000_000
+
+
+def _extract_transcript_cwd(path: Path) -> Path | None:
+    """Bounded head-scan for the cwd recorded near the start of a transcript.
+
+    Reads at most ``_CWD_SCAN_MAX_LINES`` lines, JSON-decoding each in turn,
+    and returns the first decoded dict's string ``cwd``. A line longer than
+    ``_CWD_SCAN_MAX_LINE_BYTES`` is skipped WITHOUT being decoded, so a huge
+    early line can never win over a plain one further down within the window.
+
+    Returns ``None`` — never raises — when the file cannot be opened, no line
+    within the window decodes to a JSON object, or no decoded object carries a
+    non-empty string ``cwd``. This is the seam's only source of an
+    "unreadable/undecodable transcript" outcome; the caller turns that into a
+    row with ``cwd=None`` rather than dropping the row.
+    """
+    try:
+        with path.open("rb") as f:
+            for _ in range(_CWD_SCAN_MAX_LINES):
+                line = f.readline()
+                if not line:
+                    break
+                if len(line) > _CWD_SCAN_MAX_LINE_BYTES:
+                    continue
+                try:
+                    record = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(record, dict):
+                    cwd = record.get("cwd")
+                    if isinstance(cwd, str) and cwd:
+                        return Path(cwd)
+    except OSError:
+        return None
+    return None
 
 
 #: Cap on the raw-output excerpt embedded in a ``parse_session_list``
@@ -528,6 +574,68 @@ class ClaudeCodeHarness(Harness):
         if not _is_session_id(session_id):
             return None
         return ["claude", "--resume", session_id]
+
+    # -- session transcript enumeration ----------------------------------------
+    #
+    # Enumerates <claude-dir>/projects/*/*.jsonl — DEPTH 2 ONLY. Claude Code
+    # nests per-session subagent and tool-result transcripts under
+    # <session-id>/subagents/ and <session-id>/tool-results/; a recursive glob
+    # would return those too, and on a real store they vastly outnumber genuine
+    # top-level transcripts. Depth-2 is therefore not an optimization — it is
+    # what makes "session transcripts" here mean the same top-level sessions
+    # :meth:`session_resume` can actually re-enter.
+    #
+    # A project directory's NAME is not consulted for anything but locating the
+    # file: it is a lossy munge of a launch cwd ('/' and '.' both collapse to
+    # '-'), so it cannot be reversed into a real path. The cwd this method
+    # returns always comes from :func:`_extract_transcript_cwd` reading the
+    # transcript's own content, never from the directory name.
+
+    def session_transcripts(
+        self, workspace: Path | None = None, *, env: dict[str, str] | None = None
+    ) -> list[SessionTranscript]:
+        """Enumerate top-level transcripts under ``<claude-dir>/projects/``.
+
+        See the base contract for the full semantics. Never raises: a missing
+        projects dir yields ``[]``, and a transcript this harness cannot open,
+        decode, or find a cwd inside still yields a row, with ``cwd=None``.
+        """
+        _env = env if env is not None else dict(os.environ)
+        projects_dir = _claude_dir(_env) / _PROJECTS_SUBDIR
+        if not projects_dir.is_dir():
+            return []
+
+        resolved_workspace = Path(workspace).resolve() if workspace is not None else None
+
+        rows: list[SessionTranscript] = []
+        for candidate in projects_dir.glob("*/*.jsonl"):
+            if not candidate.is_file():
+                continue
+            session_id = candidate.stem
+            if not _is_session_id(session_id):
+                continue
+            try:
+                mtime = candidate.stat().st_mtime
+            except OSError:
+                continue
+
+            raw_cwd = _extract_transcript_cwd(candidate)
+            cwd = raw_cwd.resolve() if raw_cwd is not None else None
+
+            if resolved_workspace is not None and (
+                cwd is None or not cwd.is_relative_to(resolved_workspace)
+            ):
+                continue
+
+            rows.append(
+                SessionTranscript(
+                    session_id=session_id,
+                    cwd=cwd,
+                    modified_at=datetime.fromtimestamp(mtime, tz=timezone.utc),
+                )
+            )
+
+        return rows
 
     # -- session retention ----------------------------------------------------
     #
