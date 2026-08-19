@@ -29,6 +29,10 @@ Schema:
   [branch]
   pattern = "worktree-{slug}"            # optional; default "worktree-{slug}"
 
+  [launch]                               # optional; off by default
+  roots = ["~/code", "/srv/work"]        # allowlist of directories a launch may
+                                         # root at; entries stored unexpanded
+
   [dev_env]                              # optional; warn-and-continue (deferred)
   ...
 
@@ -312,6 +316,9 @@ def load_group(path: Path) -> dict[str, Any]:
     # --- [harness] section (optional) — harness profile config ---
     harness = _parse_harness(raw.get("harness"), path)
 
+    # --- [launch] section (optional) — directory-launch roots allowlist ---
+    launch = _parse_launch(raw.get("launch"), path)
+
     # --- [dev_env] section — warn-and-continue (deferred) ---
     if "dev_env" in raw:
         print(
@@ -402,6 +409,8 @@ def load_group(path: Path) -> dict[str, Any]:
     }
     if harness is not None:
         result["harness"] = harness
+    if launch is not None:
+        result["launch"] = launch
     return result
 
 
@@ -532,6 +541,52 @@ def _parse_harness(raw: Any, path: Path) -> dict[str, Any] | None:
                 f"{type(pretrust).__name__!r}"
             )
         result["pretrust"] = pretrust
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# [launch] directory-launch allowlist block
+# ---------------------------------------------------------------------------
+
+# Keys recognized inside [launch]. Anything else is a misconfiguration and is
+# rejected at load: [launch] configures a containment boundary, so a typo must
+# fail loudly rather than silently leaving the boundary at its default.
+_LAUNCH_KEYS = frozenset({"roots"})
+
+
+def _parse_launch(raw: Any, path: Path) -> dict[str, Any] | None:
+    """Parse + validate the optional [launch] block. Returns None when absent.
+
+    ABSENCE IS MEANINGFUL. No [launch] block returns None and the caller omits
+    the key entirely, so a consumer can distinguish "the operator configured no
+    launch roots" from "the operator configured an empty list" — the former is
+    the off-by-default posture for directory-rooted launches, and an empty
+    default would read as a configured-but-empty allowlist instead.
+
+    `roots` entries are stored EXACTLY as written, including a leading "~".
+    Expansion and resolution belong to the eligibility check, which performs
+    them against the environment the launch actually runs under; expanding here
+    would bake the loading process's home directory into the boundary.
+    """
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise GroupConfigError(f"{path}: [launch] must be a table")
+
+    unknown = sorted(set(raw) - _LAUNCH_KEYS)
+    if unknown:
+        raise GroupConfigError(
+            f"{path}: [launch] has unknown key(s) {', '.join(unknown)} — "
+            f"supported keys: {sorted(_LAUNCH_KEYS)}"
+        )
+
+    result: dict[str, Any] = {}
+
+    if "roots" in raw:
+        result["roots"] = _validate_string_list_field(
+            raw["roots"], path=path, where="launch.roots", allow_empty_list=False
+        )
 
     return result
 
