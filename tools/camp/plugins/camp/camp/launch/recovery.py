@@ -108,6 +108,37 @@ def _name_component(resolved: Path, containers: Iterable[Path]) -> str:
     return slug if slug is not None else resolved.name
 
 
+#: Characters a tmux session name may carry and still be addressable. tmux
+#: reads ``:`` as the session/window separator and ``.`` as the window/pane
+#: separator in a target, so a name containing either is created happily and
+#: then cannot be named again — ``kill-session -t`` answers "can't find pane",
+#: and the ``=`` exact-match prefix does not rescue it. Directory basenames
+#: routinely carry dots, so this is an ordinary input, not a hostile one.
+_NAME_COMPONENT_SAFE = frozenset(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"
+)
+
+#: What an empty or fully-substituted component becomes, so a name is never
+#: built with an empty middle.
+_NAME_COMPONENT_FALLBACK = "dir"
+
+
+def sanitize_name_component(raw: str) -> str:
+    """Fold *raw* to the characters a tmux session name can be addressed by.
+
+    Applied to every flavor's name component at the one place each is derived,
+    so the name camp prints as an attach handle is a name tmux will accept back.
+    Substitution rather than rejection: a directory is not invalid for being
+    called ``my.project``, and refusing to launch there would be a worse answer
+    than launching under a name that works.
+
+    Not reversible, and not meant to be — the session id is the identity, and
+    the name is an operator-facing handle.
+    """
+    folded = "".join(c if c in _NAME_COMPONENT_SAFE else "-" for c in raw)
+    return folded.strip("-") or _NAME_COMPONENT_FALLBACK
+
+
 def derive_name_component(
     cwd: Path | str,
     groups: Iterable[dict[str, Any]],
@@ -121,12 +152,15 @@ def derive_name_component(
     so no caller can accidentally derive a name from the wrong machine's state
     directory.
 
-    Answers for any path, existing or not. A path that resolves to the
-    filesystem root has no basename, and yields the empty string — the one
-    degenerate input, left to answer rather than raise for the same reason as
-    the rest: a caller assembling a listing needs a string per row.
+    Answers for any path, existing or not. The result is folded to the
+    characters a tmux session name can be addressed by (see
+    :func:`sanitize_name_component`), so a path that resolves to the filesystem
+    root — or whose basename is entirely separators — still yields a usable
+    component rather than an empty one.
     """
-    return _name_component(Path(cwd).resolve(), _workspace_containers(groups, env))
+    return sanitize_name_component(
+        _name_component(Path(cwd).resolve(), _workspace_containers(groups, env))
+    )
 
 
 def is_workspace_root(

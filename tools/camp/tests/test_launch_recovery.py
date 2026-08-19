@@ -727,3 +727,58 @@ def test_the_purity_checks_catch_every_violation_they_claim_to(tmp_path: Path) -
         "from argparse import ...",
     ]
     assert _render_or_exit_offenders(tree) == ["print", "__import__", ".exit"]
+
+
+# ---------------------------------------------------------------------------
+# Name components tmux can address
+# ---------------------------------------------------------------------------
+
+
+class TestNameComponentIsAddressable:
+    """A session name is only useful if tmux will accept it back.
+
+    tmux reads ``:`` as the session/window separator and ``.`` as the
+    window/pane separator when resolving a target, so a name carrying either is
+    created without complaint and then cannot be named again — ``kill-session
+    -t`` reports "can't find pane", and the ``=`` exact-match prefix does not
+    rescue it. Directory basenames carry dots routinely, so the launch that
+    prints an attach handle has to fold them first.
+    """
+
+    def test_separators_are_folded(self) -> None:
+        from camp.launch.recovery import sanitize_name_component
+
+        assert sanitize_name_component("my.project") == "my-project"
+        assert sanitize_name_component("a:b") == "a-b"
+        assert sanitize_name_component("v1.2.3") == "v1-2-3"
+
+    def test_ordinary_names_are_untouched(self) -> None:
+        from camp.launch.recovery import sanitize_name_component
+
+        for name in ("feat-x", "session_resume", "abc123", "UPPER-lower_9"):
+            assert sanitize_name_component(name) == name
+
+    def test_a_name_that_folds_away_entirely_still_yields_a_component(self) -> None:
+        """A name is never built with an empty middle."""
+        from camp.launch.recovery import sanitize_name_component
+
+        for name in ("...", "", "---", ":::"):
+            assert sanitize_name_component(name) == "dir"
+
+    def test_the_derived_name_is_folded(self, tmp_path: Path) -> None:
+        """The rule's own output is folded, so all three callers inherit it."""
+        from camp.launch.recovery import derive_name_component
+
+        state = tmp_path / "state"
+        dotted = tmp_path / "code" / "my.project"
+        dotted.mkdir(parents=True)
+
+        assert derive_name_component(dotted, [_group("alpha")], env=_env(state)) == "my-project"
+
+    def test_a_dotted_workspace_slug_is_folded_too(self, tmp_path: Path) -> None:
+        from camp.launch.recovery import derive_name_component
+
+        state = tmp_path / "state"
+        ws = _workspace(state, "alpha", "feat.x")
+
+        assert derive_name_component(ws, [_group("alpha")], env=_env(state)) == "feat-x"

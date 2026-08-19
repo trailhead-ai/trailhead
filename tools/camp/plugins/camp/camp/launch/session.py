@@ -65,6 +65,7 @@ from pathlib import Path
 from ..bookmark import harness_for
 from ..group.manifest import workspace_dir
 from .claude_trust import pretrust_workspace
+from .recovery import sanitize_name_component
 from .profile import resolve_harness_profile
 
 #: Seconds to wait on the pre-spawn enumeration probe. It is advisory output
@@ -365,7 +366,10 @@ def launch_session(
     # request and the new pane inherits the SERVER's environment, not this
     # process's. Only the pane-level `env -u` holds in both cases — fresh server
     # and pre-existing one alike. Both scrubs are applied; neither is redundant.
-    tmux_name = f"camp-{name_component}-{session_id[:8]}"
+    # Folded at the single point every flavor's name is composed, so the handle
+    # camp prints is one tmux will accept back. A caller-supplied component is
+    # a directory basename, which routinely carries a dot.
+    tmux_name = f"camp-{sanitize_name_component(name_component)}-{session_id[:8]}"
     argv = ["tmux", "new-session", "-d", "-s", tmux_name, "-c", str(launch_dir), "env"]
     for name in scrub:
         argv += ["-u", name]
