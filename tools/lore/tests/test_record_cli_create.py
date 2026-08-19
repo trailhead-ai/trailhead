@@ -658,6 +658,23 @@ def test_traversal_depends_on_rejected_by_confinement(tmp_path):
     assert not (vault / "task" / "a.md").exists()
 
 
+def test_prefixed_depends_on_rejected_on_create(tmp_path):
+    """Every entry on a create is newly supplied, so every entry is form-checked."""
+    vault, state = _make_vault(tmp_path)
+    r = _create_task(vault, state, "a", extra=["--depends-on", "task/foo"])
+    assert r.returncode != 0
+    assert "graph-guard [task-edge-form]" in r.stderr
+    assert not (vault / "task" / "a.md").exists()
+
+
+def test_staged_depends_on_rejected_on_create(tmp_path):
+    vault, state = _make_vault(tmp_path)
+    r = _create_task(vault, state, "a", extra=["--depends-on", "foo@ready"])
+    assert r.returncode != 0
+    assert "graph-guard [task-edge-form]" in r.stderr
+    assert not (vault / "task" / "a.md").exists()
+
+
 # ---------------------------------------------------------------------------
 # flow-out reminder on parent completion (create with --status done)
 # ---------------------------------------------------------------------------
