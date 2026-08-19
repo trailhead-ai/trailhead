@@ -64,6 +64,7 @@ import subprocess
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import BinaryIO
 
 from trailhead.harness.base import (
     MODALITY_TTY_REQUIRED,
@@ -115,13 +116,31 @@ _CWD_SCAN_MAX_LINES = 12
 _CWD_SCAN_MAX_LINE_BYTES = 1_000_000
 
 
+def _skip_rest_of_overlong_line(f: BinaryIO) -> None:
+    """Step past the tail of a line that exceeded the byte cap.
+
+    Reads in cap-sized chunks and holds none of them, so stepping over a
+    malformed record costs bounded memory no matter how long the record is.
+    The scan continues from the next line rather than abandoning the file: a
+    huge early record must not hide a plain cwd-bearing one behind it.
+    """
+    while True:
+        chunk = f.readline(_CWD_SCAN_MAX_LINE_BYTES)
+        if not chunk or chunk.endswith(b"\n"):
+            return
+
+
 def _extract_transcript_cwd(path: Path) -> Path | None:
     """Bounded head-scan for the cwd recorded near the start of a transcript.
 
     Reads at most ``_CWD_SCAN_MAX_LINES`` lines, JSON-decoding each in turn,
     and returns the first decoded dict's string ``cwd``. A line longer than
-    ``_CWD_SCAN_MAX_LINE_BYTES`` is skipped WITHOUT being decoded, so a huge
+    ``_CWD_SCAN_MAX_LINE_BYTES`` is skipped without being decoded, so a huge
     early line can never win over a plain one further down within the window.
+
+    The cap bounds the READ, not just the decode: no single call takes more
+    than ``_CWD_SCAN_MAX_LINE_BYTES + 1`` bytes, so a corrupt transcript
+    carrying no newline at all costs bounded memory instead of its full size.
 
     Returns ``None`` — never raises — when the file cannot be opened, no line
     within the window decodes to a JSON object, or no decoded object carries a
@@ -132,10 +151,16 @@ def _extract_transcript_cwd(path: Path) -> Path | None:
     try:
         with path.open("rb") as f:
             for _ in range(_CWD_SCAN_MAX_LINES):
-                line = f.readline()
+                # Read WITH the cap, not merely check it afterwards: an
+                # unbounded readline() materializes the whole record first, so
+                # one malformed line with no newline would pull an entire
+                # multi-hundred-megabyte transcript into memory.
+                line = f.readline(_CWD_SCAN_MAX_LINE_BYTES + 1)
                 if not line:
                     break
                 if len(line) > _CWD_SCAN_MAX_LINE_BYTES:
+                    if not line.endswith(b"\n"):
+                        _skip_rest_of_overlong_line(f)
                     continue
                 try:
                     record = json.loads(line)

@@ -1367,6 +1367,50 @@ class TestClaudeCodeSessionTranscripts:
         rows = ClaudeCodeHarness().session_transcripts(env=self._env(claude_dir))
         assert rows[0].cwd == ws.resolve()
 
+    def test_no_single_read_exceeds_the_byte_cap(self, tmp_path, monkeypatch):
+        """The byte cap bounds the READ, not merely the decode.
+
+        Checking a line's length after reading it is not a bound at all: the
+        whole record is already in memory by then, so one corrupt transcript
+        with no newline in it would cost its full size. Transcripts reach
+        hundreds of megabytes, so this records the largest single read and
+        holds it to the cap.
+        """
+        from trailhead.harness import claude_code as cc
+
+        claude_dir = tmp_path / ".claude"
+        ws = tmp_path / "ws-after-a-corrupt-record"
+        ws.mkdir()
+        # One 8MB record carrying no newline at all, then a plain cwd line.
+        no_newline_blob = "x" * 8_000_000
+        self._write(claude_dir, "proj", "sess-corrupt", [no_newline_blob, json.dumps({"cwd": str(ws)})])
+
+        reads: list[int] = []
+        real_open = Path.open
+
+        def recording_open(self, *args, **kwargs):
+            handle = real_open(self, *args, **kwargs)
+            real_readline = handle.readline
+
+            def readline(*a, **k):
+                chunk = real_readline(*a, **k)
+                reads.append(len(chunk))
+                return chunk
+
+            handle.readline = readline
+            return handle
+
+        monkeypatch.setattr(Path, "open", recording_open)
+        rows = ClaudeCodeHarness().session_transcripts(env=self._env(claude_dir))
+
+        assert reads, "the scan never read anything"
+        assert max(reads) <= cc._CWD_SCAN_MAX_LINE_BYTES + 1, (
+            f"a single read took {max(reads)} bytes, over the "
+            f"{cc._CWD_SCAN_MAX_LINE_BYTES} cap — the cap is not bounding the read"
+        )
+        # Stepping over the corrupt record must not cost the line after it.
+        assert rows[0].cwd == ws.resolve()
+
     def test_cwd_past_the_scan_bound_is_not_found(self, tmp_path):
         """Pins the 12-line bound as CONTRACT: a cwd sitting on line 13 must not
         be found, even though nothing about it is malformed."""
