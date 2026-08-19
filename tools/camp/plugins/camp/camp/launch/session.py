@@ -8,7 +8,10 @@ ONE resolved directory. `HarnessProfile.resolved_cwd(...)` substituted, then
 `Path.resolve()`, yields a single path that serves as the launch cwd, the trust
 target, and the enumeration scope. Three names for the same directory is how a
 session gets launched somewhere it is never found again, so they are computed
-once here and never re-derived downstream.
+once here and never re-derived downstream. Sameness is the guarantee here, not
+containment: the workspace-confinement check lives in `pretrust_workspace` and
+therefore covers only the pre-seeded path, so a group config that opts out of
+the pre-seed launches wherever its `[harness] cwd` template resolves to.
 
 The seam boundary. camp core spells exactly two things: `tmux` and `env -u`.
 Every harness literal — the binary, its flags, the names of the variables to
