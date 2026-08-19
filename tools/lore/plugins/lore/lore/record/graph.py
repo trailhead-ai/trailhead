@@ -31,6 +31,14 @@ kind's success chain) — a one-directional dependency; ``model`` imports nothin
 from here. The purity contract is unchanged: no file reads, no index, nothing
 here ever raises on malformed input — a design graph missing a target, or a
 target whose status is not the record's own true state, is just data.
+
+The design graph also gets its own stage-blind cycle detection and reverse
+scan — :func:`find_design_dependency_cycle` and :func:`design_dependents` —
+mirroring :func:`find_dependency_cycle` and :func:`dependents` from the task
+section above, keyed by qualified id instead of bare name and with any
+``@stage`` tail stripped before a target is compared. Both entry points share
+the same underlying DFS (:func:`_find_cycle_over_edges`) rather than
+duplicating it; the task entry point's signature and behavior are unchanged.
 """
 
 from __future__ import annotations
@@ -159,7 +167,12 @@ def find_dependency_cycle(
     "a"]`` for ``a → b → a`` — so a caller can render the loop verbatim.
     Dangling dependency targets are treated as edge-free leaves.
     """
-    edges = depends_on_edges(graph)
+    return _find_cycle_over_edges(depends_on_edges(graph), start)
+
+
+def _find_cycle_over_edges(
+    edges: dict[str, list[str]], start: str | None
+) -> list[str] | None:
     origins = [start] if start is not None else list(edges)
     visited: set[str] = set()
     for origin in origins:
@@ -404,4 +417,68 @@ def _evaluate_one(design_graph: dict[str, dict], entry: str) -> DependencyStatus
         True,
         f"{qualified_id} is at {status!r}, satisfying {required_stage!r}",
         None,
+    )
+
+
+# ---------------------------------------------------------------------------
+# design-graph cycle/dependents — stage-blind, sharing the task DFS
+# ---------------------------------------------------------------------------
+
+
+def _design_deps(sidecar: dict) -> list[str]:
+    """Return *sidecar*'s ``depends-on`` targets, each reduced to its qualified
+    id — any ``@stage`` tail stripped, ``kind/name`` kept as given.
+
+    Deliberately does not route through :func:`parse_dependency`: cycle
+    detection and the dependents scan only need the ``kind/name`` half of an
+    entry, not a validity verdict on its stage. An entry that is not even
+    shaped like ``kind/name`` (no ``/``, or a ``task/`` target) still reduces
+    to *something* here — it simply never matches a real node in the design
+    graph, so it behaves exactly like a dangling target.
+    """
+    value = sidecar.get("depends-on")
+    if not isinstance(value, list):
+        return []
+    return [item.partition("@")[0] for item in value if isinstance(item, str)]
+
+
+def design_depends_on_edges(design_graph: dict[str, dict]) -> dict[str, list[str]]:
+    """Return ``{qualified_id: [qualified_id, …]}`` with every ``@stage`` tail
+    stripped — the design-graph analogue of :func:`depends_on_edges`."""
+    return {qid: _design_deps(sidecar) for qid, sidecar in design_graph.items()}
+
+
+def find_design_dependency_cycle(
+    design_graph: dict[str, dict], start: str | None = None
+) -> list[str] | None:
+    """Return a stage-blind ``depends-on`` cycle over *design_graph*, or ``None``.
+
+    *design_graph* is keyed by qualified id (``kind/name``, e.g. ``"spec/foo"``)
+    the same shape :func:`evaluate_dependencies` takes. A dependency entry's
+    ``@stage`` tail is stripped before comparison, so ``spec/a@ready`` and
+    ``spec/a`` reduce to the same node and a cycle through differently-staged
+    edges is still found. Kind is never stripped — ``spec/foo`` and ``adr/foo``
+    stay distinct nodes throughout.
+
+    Shares the same DFS as :func:`find_dependency_cycle`, over
+    :func:`design_depends_on_edges` instead of :func:`depends_on_edges`, so the
+    two entry points differ only in how an edge target is reduced to a node
+    id. Same *start*-scoping, same misattribution guard, same closed-path
+    shape, and the same dangling-target-is-a-leaf behavior — see
+    :func:`find_dependency_cycle` for the full contract.
+    """
+    return _find_cycle_over_edges(design_depends_on_edges(design_graph), start)
+
+
+def design_dependents(design_graph: dict[str, dict], qualified_id: str) -> list[str]:
+    """Return the qualified ids whose ``depends-on`` contains *qualified_id*,
+    sorted — the design-graph analogue of :func:`dependents`.
+
+    Matches on the full qualified id with any ``@stage`` tail stripped from
+    each candidate edge, so an entry like ``spec/foo@ready`` still counts as a
+    dependent of ``spec/foo``. Kind is part of the match — ``spec/foo``'s
+    dependents never include an edge that targets ``adr/foo``.
+    """
+    return sorted(
+        qid for qid, sidecar in design_graph.items() if qualified_id in _design_deps(sidecar)
     )

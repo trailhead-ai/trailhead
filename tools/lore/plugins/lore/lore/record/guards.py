@@ -11,6 +11,11 @@ vault I/O and the error-vs-notice policy — a no-op for every non-``task`` kind
 Guard-message shape: every line — blocking error, non-blocking warning, ritual
 reminder — is formatted through :func:`graph.format_guard_message` so agents
 parse one machine-parseable ``graph-guard [<guard>]: <message>`` shape off stderr.
+
+Design-graph loader: :func:`load_design_sidecars` reads the vault's spec/adr
+sidecars into the ``{"kind/name": sidecar}`` shape :mod:`graph`'s design-side
+functions consume — the read half of the same source-of-truth contract
+:func:`load_task_sidecars` gives the task graph.
 """
 
 from __future__ import annotations
@@ -51,6 +56,33 @@ def load_task_sidecars(vault_root: str) -> dict[str, dict]:
             continue
         if isinstance(data, dict):
             graph[sidecar_path.stem] = data
+    return graph
+
+
+def load_design_sidecars(vault_root: str) -> dict[str, dict]:
+    """Read every spec/adr sidecar under ``<vault_root>/{spec,adr}/`` →
+    ``{"kind/name": sidecar}`` — the design-graph analogue of
+    :func:`load_task_sidecars`.
+
+    Directory-scoped the same way its task counterpart is: each of
+    :data:`graph.DESIGN_KINDS` gets its own ``<vault_root>/<kind>/*.json`` glob,
+    keyed by ``<kind>/<stem>`` so a ``spec/foo`` and an ``adr/foo`` never
+    collide — the collision qualified-id keying exists to prevent. A missing
+    ``spec/`` or ``adr/`` directory contributes nothing; a malformed or
+    unreadable sidecar is skipped (best-effort, same as the task loader).
+    """
+    graph: dict[str, dict] = {}
+    for kind in graph_mod.DESIGN_KINDS:
+        kind_dir = Path(vault_root) / kind
+        if not kind_dir.is_dir():
+            continue
+        for sidecar_path in kind_dir.glob("*.json"):
+            try:
+                data = json.loads(sidecar_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if isinstance(data, dict):
+                graph[f"{kind}/{sidecar_path.stem}"] = data
     return graph
 
 

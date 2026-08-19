@@ -527,3 +527,124 @@ def test_evaluate_dependencies_purity_survives_open_and_read_text_raising(monkey
     design_graph = {"spec/foo": _design("spec", "complete")}
     statuses = g.evaluate_dependencies(design_graph, ["spec/foo", "spec/ghost", "task/foo"])
     assert len(statuses) == 3
+
+
+# ---------------------------------------------------------------------------
+# design-graph cycle detection — stage-blind, sharing the task DFS
+# ---------------------------------------------------------------------------
+
+
+def test_find_design_dependency_cycle_strips_stage_across_the_loop():
+    g = _graph()
+    design_graph = {
+        "spec/a": _design_with_deps("spec", "draft", ["spec/b@planned"]),
+        "spec/b": _design_with_deps("spec", "draft", ["spec/a@ready"]),
+    }
+    cycle = g.find_design_dependency_cycle(design_graph, start="spec/a")
+    assert cycle is not None
+    assert cycle[0] == cycle[-1]
+    assert set(cycle) == {"spec/a", "spec/b"}
+
+
+def test_find_design_dependency_cycle_detects_self_edge():
+    g = _graph()
+    design_graph = {"spec/a": _design_with_deps("spec", "draft", ["spec/a@ready"])}
+    cycle = g.find_design_dependency_cycle(design_graph, start="spec/a")
+    assert cycle is not None
+    assert cycle[0] == cycle[-1] == "spec/a"
+
+
+def test_find_design_dependency_cycle_none_for_acyclic():
+    g = _graph()
+    design_graph = {
+        "spec/a": _design_with_deps("spec", "draft", ["spec/b"]),
+        "spec/b": _design_with_deps("spec", "draft", ["adr/c"]),
+        "adr/c": _design("adr", "draft"),
+    }
+    assert g.find_design_dependency_cycle(design_graph, start="spec/a") is None
+
+
+def test_find_design_dependency_cycle_ignores_dangling_target():
+    g = _graph()
+    design_graph = {"spec/a": _design_with_deps("spec", "draft", ["spec/ghost"])}
+    assert g.find_design_dependency_cycle(design_graph, start="spec/a") is None
+
+
+def test_find_design_dependency_cycle_kind_isolation():
+    """An edge to ``spec/foo`` never resolves against ``adr/foo`` — same name,
+    distinct kind, distinct node."""
+    g = _graph()
+    design_graph = {
+        "spec/foo": _design_with_deps("spec", "draft", ["adr/foo"]),
+        "adr/foo": _design("adr", "draft"),
+    }
+    assert g.find_design_dependency_cycle(design_graph, start="spec/foo") is None
+
+
+def test_find_design_dependency_cycle_does_not_attribute_unrelated_cycle_to_start():
+    g = _graph()
+    design_graph = {
+        "spec/a": _design_with_deps("spec", "draft", ["spec/b"]),
+        "spec/b": _design_with_deps("spec", "draft", ["spec/c"]),
+        "spec/c": _design_with_deps("spec", "draft", ["spec/b"]),
+    }
+    assert g.find_design_dependency_cycle(design_graph, start="spec/a") is None
+    assert g.find_design_dependency_cycle(design_graph, start="spec/b") is not None
+
+
+def test_find_design_dependency_cycle_returns_closed_path_shape():
+    g = _graph()
+    design_graph = {
+        "spec/a": _design_with_deps("spec", "draft", ["spec/b"]),
+        "spec/b": _design_with_deps("spec", "draft", ["spec/a"]),
+    }
+    cycle = g.find_design_dependency_cycle(design_graph, start="spec/a")
+    assert cycle == ["spec/a", "spec/b", "spec/a"]
+
+
+# ---------------------------------------------------------------------------
+# design_dependents — reverse scan over qualified-id edges, stage stripped
+# ---------------------------------------------------------------------------
+
+
+def _design_with_deps(kind, status, depends_on):
+    sc = _design(kind, status)
+    sc["depends-on"] = list(depends_on)
+    return sc
+
+
+def test_design_dependents_matches_edge_with_stage_tail():
+    g = _graph()
+    design_graph = {
+        "spec/foo": _design("spec", "draft"),
+        "spec/bar": _design_with_deps("spec", "draft", ["spec/foo@ready"]),
+    }
+    assert g.design_dependents(design_graph, "spec/foo") == ["spec/bar"]
+
+
+def test_design_dependents_kind_isolation():
+    g = _graph()
+    design_graph = {
+        "spec/foo": _design("spec", "draft"),
+        "adr/foo": _design("adr", "draft"),
+        "spec/dependent": _design_with_deps("spec", "draft", ["spec/foo"]),
+        "adr/dependent": _design_with_deps("adr", "draft", ["adr/foo"]),
+    }
+    assert g.design_dependents(design_graph, "spec/foo") == ["spec/dependent"]
+    assert g.design_dependents(design_graph, "adr/foo") == ["adr/dependent"]
+
+
+def test_design_dependents_returns_sorted_qualified_ids():
+    g = _graph()
+    design_graph = {
+        "spec/foo": _design("spec", "draft"),
+        "spec/z": _design_with_deps("spec", "draft", ["spec/foo"]),
+        "adr/a": _design_with_deps("adr", "draft", ["spec/foo"]),
+    }
+    assert g.design_dependents(design_graph, "spec/foo") == ["adr/a", "spec/z"]
+
+
+def test_design_dependents_empty_when_none_depend():
+    g = _graph()
+    design_graph = {"spec/foo": _design("spec", "draft")}
+    assert g.design_dependents(design_graph, "spec/foo") == []

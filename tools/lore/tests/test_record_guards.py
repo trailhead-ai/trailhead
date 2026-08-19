@@ -292,3 +292,61 @@ def test_reference_bearing_update_loads_sidecars_once(tmp_path, monkeypatch):
     assert errors == []
     assert notices == []
     assert calls == [str(tmp_path)]
+
+
+# ---------------------------------------------------------------------------
+# load_design_sidecars
+# ---------------------------------------------------------------------------
+
+
+def _write_design(vault: Path, kind: str, name: str, sidecar: dict) -> None:
+    kind_dir = vault / kind
+    kind_dir.mkdir(parents=True, exist_ok=True)
+    sidecar = {"kind": kind, **sidecar}
+    (kind_dir / f"{name}.json").write_text(json.dumps(sidecar), encoding="utf-8")
+
+
+def test_load_design_sidecars_reads_spec_and_adr(tmp_path):
+    g = _guards()
+    _write_design(tmp_path, "spec", "a", {"status": "draft"})
+    _write_design(tmp_path, "adr", "b", {"status": "active"})
+    graph = g.load_design_sidecars(str(tmp_path))
+    assert set(graph) == {"spec/a", "adr/b"}
+    assert graph["adr/b"]["status"] == "active"
+
+
+def test_load_design_sidecars_keeps_same_name_different_kind_distinct(tmp_path):
+    g = _guards()
+    _write_design(tmp_path, "spec", "foo", {"status": "draft"})
+    _write_design(tmp_path, "adr", "foo", {"status": "active"})
+    graph = g.load_design_sidecars(str(tmp_path))
+    assert set(graph) == {"spec/foo", "adr/foo"}
+    assert graph["spec/foo"]["status"] == "draft"
+    assert graph["adr/foo"]["status"] == "active"
+
+
+def test_load_design_sidecars_missing_dirs_is_empty(tmp_path):
+    g = _guards()
+    assert g.load_design_sidecars(str(tmp_path)) == {}
+
+
+def test_load_design_sidecars_skips_malformed(tmp_path):
+    g = _guards()
+    _write_design(tmp_path, "spec", "good", {"status": "draft"})
+    (tmp_path / "spec" / "bad.json").write_text("{not json", encoding="utf-8")
+    graph = g.load_design_sidecars(str(tmp_path))
+    assert set(graph) == {"spec/good"}
+
+
+def test_load_design_sidecars_skips_non_dict_sidecar(tmp_path):
+    g = _guards()
+    kind_dir = tmp_path / "spec"
+    kind_dir.mkdir(parents=True, exist_ok=True)
+    (kind_dir / "listy.json").write_text("[1, 2, 3]", encoding="utf-8")
+    assert g.load_design_sidecars(str(tmp_path)) == {}
+
+
+def test_load_design_sidecars_ignores_task_dir(tmp_path):
+    g = _guards()
+    _write_task(tmp_path, "t", {"status": "open"})
+    assert g.load_design_sidecars(str(tmp_path)) == {}
