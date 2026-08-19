@@ -208,8 +208,22 @@ def _resolve_slug(raw: str, *, context: str = "argument") -> str:
     """Normalize and validate a slug, printing a notice to stderr if normalized.
 
     Rejects raw input that contains path-traversal sequences (e.g. '..', '/')
-    or shell metacharacters before normalization.
+    or shell metacharacters, or that is flag-shaped, before normalization.
+
+    Both rejections run on the RAW value for the same reason: normalization is
+    lossy, so a hostile or mistaken input that survives it arrives downstream
+    looking like an ordinary slug. A leading '-' is the flag-shaped case —
+    normalization strips it, turning `--help` into the valid slug `help` and a
+    workspace named after a flag. A caller that fails to consume one of its own
+    flags and forwards it as a positional has made a mistake; the honest answer
+    is an error naming the argument, not a workspace.
     """
+    if raw.startswith("-"):
+        _die(
+            f"camp: invalid slug from {context}: {raw!r} — looks like a flag "
+            f"(leading '-'); a slug may not start with a dash"
+        )
+
     if _RAW_DANGEROUS_RE.search(raw):
         _die(
             f"camp: invalid slug from {context}: {raw!r} — contains path-traversal "
