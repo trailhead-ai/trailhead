@@ -206,13 +206,18 @@ class TestCraftInventory:
 class TestOtherInventories:
     def test_camp_inventory(self):
         # camp is a CLI (bin) + hooks tool: no always-on base and no subagents.
-        # Its one selectable skill is `bookmark`, which wraps the bookmark/resume
-        # CLI verbs — the operator-facing worktree orchestration stays in the
-        # README, since a workspace exists before the harness opens.
+        # Two selectable skills wrap CLI verbs an agent drives conversationally —
+        # `bookmark` (bookmark/resume) and `concierge` (create-or-reuse a
+        # workspace and launch a session into it). The operator-facing worktree
+        # orchestration stays in the README, since a workspace exists before the
+        # harness opens.
         m = load_manifest(_CAMP_MANIFEST)
         assert m.base == []
         assert m.subagents == {}
-        assert m.skills == {"bookmark": "skills/bookmark"}
+        assert m.skills == {
+            "bookmark": "skills/bookmark",
+            "concierge": "skills/concierge",
+        }
 
     def test_portage_inventory(self):
         # The four legacy skills (open/update/monitor/merge) collapsed into one
