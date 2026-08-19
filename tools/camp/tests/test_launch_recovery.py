@@ -30,6 +30,9 @@ Test contract:
   marked and still returned.
 - recovery.py stays a pure data-to-data module: asserted over its AST, so a
   later change cannot quietly move rendering, exits, or CLI imports into it.
+  The scan reads syntax, so it catches the spellings someone reaches for by
+  habit, not a determined evasion — a module resolved from a computed string
+  still gets through, and no AST rule closes that.
 
 Every path comes from ``tmp_path`` and every group state dir from an injected
 ``CAMP_STATE_DIR``, so no test reads or touches the operator's real state.
@@ -608,12 +611,21 @@ def test_a_root_that_no_longer_exists_is_marked_and_still_returned(tmp_path: Pat
 
 
 #: Module roots a pure data-to-data module has no business importing: the two
-#: that carry a process or a terminal, and the two that parse or format argv.
-_FORBIDDEN_IMPORT_ROOTS = {"sys", "subprocess", "argparse", "shutil"}
+#: that carry a process or a terminal, the two that parse or format argv, the
+#: one that emits, and the one that would let any of the others in by name.
+_FORBIDDEN_IMPORT_ROOTS = {
+    "sys",
+    "subprocess",
+    "argparse",
+    "shutil",
+    "logging",
+    "importlib",
+}
 
 #: Builtins that render or terminate. Matched as bare NAMES, so `emit = print`
-#: is caught as surely as `print(...)`.
-_FORBIDDEN_NAMES = {"print", "exit", "quit", "input", "breakpoint"}
+#: is caught as surely as `print(...)`. `__import__` is here rather than above
+#: because it defeats the import scan by spelling a module as a string.
+_FORBIDDEN_NAMES = {"print", "exit", "quit", "input", "breakpoint", "__import__"}
 
 #: Attributes that terminate the process — `sys.exit`, `os._exit`.
 _FORBIDDEN_ATTRS = {"exit", "_exit"}
@@ -638,6 +650,11 @@ def _import_offenders(tree: ast.Module) -> list[str]:
             # An absolute `camp.cli...`, or a relative hop into the cli package
             # from anywhere inside camp (`from ..cli import ...`).
             elif module.startswith("camp.cli") or (node.level and "cli" in parts):
+                offenders.append(spelled)
+            # `from camp import cli` names the package as an imported symbol
+            # rather than in the module path, so the checks above never see it.
+            # It is the spelling most likely to be reached for by accident.
+            elif any(alias.name == "cli" for alias in node.names):
                 offenders.append(spelled)
     return offenders
 
@@ -684,12 +701,16 @@ def test_the_purity_checks_catch_every_violation_they_claim_to(tmp_path: Path) -
     violator.write_text(
         "import sys\n"
         "import subprocess\n"
+        "import logging\n"
+        "import importlib\n"
         "from camp.cli.session import render\n"
         "from ..cli import helper\n"
+        "from camp import cli\n"
         "from argparse import ArgumentParser\n"
         "emit = print\n"
         "def go():\n"
         "    emit('hi')\n"
+        "    __import__('camp.cli.session')\n"
         "    sys.exit(2)\n",
         encoding="utf-8",
     )
@@ -698,8 +719,11 @@ def test_the_purity_checks_catch_every_violation_they_claim_to(tmp_path: Path) -
     assert _import_offenders(tree) == [
         "import sys",
         "import subprocess",
+        "import logging",
+        "import importlib",
         "from camp.cli.session import ...",
         "from ..cli import ...",
+        "from camp import ...",
         "from argparse import ...",
     ]
-    assert _render_or_exit_offenders(tree) == ["print", ".exit"]
+    assert _render_or_exit_offenders(tree) == ["print", "__import__", ".exit"]
