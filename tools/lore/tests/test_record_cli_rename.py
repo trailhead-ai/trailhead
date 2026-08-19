@@ -538,6 +538,240 @@ def test_task_parent_edge_is_rewritten(install):
 
 
 # ---------------------------------------------------------------------------
+# Design graph edges
+# ---------------------------------------------------------------------------
+
+
+def test_design_depends_on_rewrite_carries_the_stage_tail_through(install):
+    old_id = install.create("default", "spec", "Old Name", body="x")
+    install.create(
+        "default", "spec", "Downstream", body="x",
+        extra=["--depends-on", "spec/old-name@ready"],
+    )
+
+    proc = install.cli(["record", "rename", old_id, "--title", "New Name"])
+    assert proc.returncode == 0, proc.stderr
+    assert install.sidecar("default", "spec/downstream")["depends-on"] == [
+        "spec/new-name@ready"
+    ]
+
+
+def test_unqualified_design_depends_on_stays_unqualified(install):
+    """No stage is ever introduced by a rename — the tail is carried, not filled in."""
+    old_id = install.create("default", "spec", "Old Name", body="x")
+    install.create(
+        "default", "spec", "Downstream", body="x",
+        extra=["--depends-on", "spec/old-name"],
+    )
+
+    proc = install.cli(["record", "rename", old_id, "--title", "New Name"])
+    assert proc.returncode == 0, proc.stderr
+    assert install.sidecar("default", "spec/downstream")["depends-on"] == ["spec/new-name"]
+
+
+def test_design_rename_does_not_touch_the_other_design_kind(install):
+    """The kind prefix is part of the match: renaming an adr leaves spec edges alone."""
+    adr_id = install.create("default", "adr", "Old Name", body="x")
+    install.create(
+        "default", "spec", "Spec Dep", body="x",
+        extra=["--depends-on", "spec/old-name@ready"],
+    )
+    install.create(
+        "default", "spec", "Adr Dep", body="x",
+        extra=["--depends-on", "adr/old-name@active"],
+    )
+
+    proc = install.cli(["record", "rename", adr_id, "--title", "New Name"])
+    assert proc.returncode == 0, proc.stderr
+    assert install.sidecar("default", "spec/spec-dep")["depends-on"] == [
+        "spec/old-name@ready"
+    ]
+    assert install.sidecar("default", "spec/adr-dep")["depends-on"] == [
+        "adr/new-name@active"
+    ]
+
+
+def test_a_record_whose_depends_on_is_unaffected_is_never_written(install):
+    """An untouched referrer keeps its bytes — and so its ``updated-at``/``updated-by``."""
+    old_id = install.create("default", "spec", "Old Name", body="x")
+    install.create(
+        "default", "spec", "Bystander", body="x",
+        extra=["--depends-on", "spec/something-else@ready"],
+    )
+
+    before = install.snapshot()
+    proc = install.cli(["record", "rename", old_id, "--title", "New Name"])
+    assert proc.returncode == 0, proc.stderr
+
+    after = install.snapshot()
+    for key in ("default:spec/bystander.md", "default:spec/bystander.json"):
+        assert after[key] == before[key]
+    assert "spec/bystander" not in proc.stderr
+
+
+# ---------------------------------------------------------------------------
+# Design edge scoping — asserted at each rename path independently
+# ---------------------------------------------------------------------------
+
+
+def _rewrite_set(stderr, action):
+    """The ``(vault, record_id)`` pairs *stderr* reports under *action*."""
+    prefix = f"{action}: "
+    pairs = set()
+    for line in stderr.splitlines():
+        if line.startswith(prefix):
+            vault, record_id = line[len(prefix):].split(": ", 1)
+            pairs.add((vault, record_id))
+    return pairs
+
+
+def _design_referrers(install):
+    """One design referrer in the source vault, one in another configured vault."""
+    old_id = install.create("default", "spec", "Old Name", body="x")
+    install.create(
+        "default", "spec", "Own Dep", body="x",
+        extra=["--depends-on", "spec/old-name@ready"],
+    )
+    install.create(
+        "other", "spec", "Other Dep", body="x",
+        extra=["--depends-on", "spec/old-name@ready"],
+    )
+    return old_id
+
+
+def test_primary_rename_scopes_design_edges_to_the_source_vault(install):
+    """A same-named record in another vault is a different record, so its edge stands."""
+    old_id = _design_referrers(install)
+
+    before = install.snapshot()
+    proc = install.cli(["record", "rename", old_id, "--title", "New Name"])
+    assert proc.returncode == 0, proc.stderr
+
+    assert install.sidecar("default", "spec/own-dep")["depends-on"] == [
+        "spec/new-name@ready"
+    ]
+    after = install.snapshot()
+    for suffix in (".md", ".json"):
+        key = f"other:spec/other-dep{suffix}"
+        assert after[key] == before[key]
+    assert "spec/other-dep" not in proc.stderr
+
+
+def test_dry_run_scopes_design_edges_to_the_source_vault(install):
+    """The preview an operator approves must not promise a cross-vault rewrite."""
+    old_id = _design_referrers(install)
+
+    before = install.snapshot()
+    proc = install.cli(["record", "rename", old_id, "--title", "New Name", "--dry-run"])
+    assert proc.returncode == 0, proc.stderr
+
+    assert install.snapshot() == before
+    assert _rewrite_set(proc.stderr, "would rewrite") == {("default", "spec/own-dep")}
+
+
+def test_resumed_rename_scopes_design_edges_to_the_source_vault(install):
+    """A rename resumed after a crash still scopes the design branch to one vault."""
+    old_id = _design_referrers(install)
+
+    # Emulate a crash after the primary move landed but before the sweep ran.
+    spec_dir = install.roots["default"] / "spec"
+    sidecar = json.loads((spec_dir / "old-name.json").read_text())
+    sidecar["title"] = "New Name"
+    (spec_dir / "new-name.md").write_text((spec_dir / "old-name.md").read_text())
+    (spec_dir / "new-name.json").write_text(json.dumps(sidecar))
+    _strand(install, "default", old_id)
+
+    before = install.snapshot()
+    proc = install.cli(["record", "rename", old_id, "--title", "New Name"])
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.strip() == "spec/new-name"
+
+    assert install.sidecar("default", "spec/own-dep")["depends-on"] == [
+        "spec/new-name@ready"
+    ]
+    after = install.snapshot()
+    for suffix in (".md", ".json"):
+        key = f"other:spec/other-dep{suffix}"
+        assert after[key] == before[key]
+
+
+def test_dry_run_previews_exactly_the_records_the_real_pass_rewrites(install):
+    """Gating the design branch per record must not skew the preview either way."""
+    old_id = install.create("default", "spec", "Old Name", body="x")
+    install.create(
+        "default", "spec", "Own Dep", body="x",
+        extra=["--depends-on", "spec/old-name@ready"],
+    )
+    install.create("default", "spec", "Own Link", body="see [[spec/old-name]]")
+    install.create(
+        "other", "spec", "Other Dep", body="x",
+        extra=["--depends-on", "spec/old-name@ready"],
+    )
+    install.create("other", "spec", "Other Link", body="see [[spec/old-name]]")
+
+    before = install.snapshot()
+    dry = install.cli(["record", "rename", old_id, "--title", "New Name", "--dry-run"])
+    assert dry.returncode == 0, dry.stderr
+    assert install.snapshot() == before
+    previewed = _rewrite_set(dry.stderr, "would rewrite")
+
+    real = install.cli(["record", "rename", old_id, "--title", "New Name"])
+    assert real.returncode == 0, real.stderr
+    rewritten = _rewrite_set(real.stderr, "rewrote")
+
+    assert previewed == rewritten
+    assert previewed == {
+        ("default", "spec/own-dep"),
+        ("default", "spec/own-link"),
+        ("other", "spec/other-link"),
+    }
+
+    # ...and the preview matches what the real pass actually changed on disk.
+    after = install.snapshot()
+    touched = {
+        (key.split(":", 1)[0], key.split(":", 1)[1].rsplit(".", 1)[0])
+        for key in set(before) | set(after)
+        if before.get(key) != after.get(key)
+    }
+    renamed = {("default", "spec/old-name"), ("default", "spec/new-name")}
+    assert touched - renamed == previewed
+
+
+def test_shared_vault_split_still_holds_for_a_design_rename(install):
+    old_id = install.create("default", "spec", "Old Name", body="x")
+    install.create("upstream", "spec", "Shared Link", body="see [[spec/old-name]]")
+    install.create(
+        "upstream", "spec", "Shared Dep", body="x",
+        extra=["--depends-on", "spec/old-name@ready"],
+    )
+
+    proc = install.cli(["record", "rename", old_id, "--title", "New Name"])
+    assert proc.returncode == 0, proc.stderr
+    assert install.body("upstream", "spec/shared-link") == "see [[spec/old-name]]"
+    assert "spec/shared-link" in proc.stderr
+    assert "shared" in proc.stderr
+
+
+def test_include_shared_still_leaves_a_cross_vault_design_edge_alone(install):
+    """Opting into a shared vault buys its wikilinks, never its design edges."""
+    old_id = install.create("default", "spec", "Old Name", body="x")
+    install.create("upstream", "spec", "Shared Link", body="see [[spec/old-name]]")
+    install.create(
+        "upstream", "spec", "Shared Dep", body="x",
+        extra=["--depends-on", "spec/old-name@ready"],
+    )
+
+    proc = install.cli(
+        ["record", "rename", old_id, "--title", "New Name", "--include-shared"]
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert install.body("upstream", "spec/shared-link") == "see [[spec/new-name]]"
+    assert install.sidecar("upstream", "spec/shared-dep")["depends-on"] == [
+        "spec/old-name@ready"
+    ]
+
+
+# ---------------------------------------------------------------------------
 # --vault
 # ---------------------------------------------------------------------------
 
