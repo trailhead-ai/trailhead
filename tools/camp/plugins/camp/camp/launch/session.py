@@ -378,6 +378,26 @@ def launch_session(
 
     scrub_set = set(scrub)
     spawn_env = {k: v for k, v in env.items() if k not in scrub_set}
+
+    def _kill_session_quietly(name: str) -> None:
+        """Best-effort reclaim of a session name after an indeterminate spawn.
+
+        Every outcome is acceptable and none changes the refusal that follows:
+        the session may never have existed, in which case tmux simply reports
+        no such session. The point is only that camp does not leave a session
+        running under a name it is about to tell the operator it could not
+        claim.
+        """
+        try:
+            subprocess.run(
+                ["tmux", "kill-session", "-t", name],
+                capture_output=True,
+                text=True,
+                timeout=_KILL_SESSION_TIMEOUT_SECONDS,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+
     try:
         spawned = subprocess.run(
             argv,
@@ -390,6 +410,13 @@ def launch_session(
             timeout=_SPAWN_TIMEOUT_SECONDS,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
+        # A timeout means the read hung, not that nothing happened: tmux may
+        # already have claimed the name server-side. Reporting failure while
+        # that session runs is the worst of both — the operator is told the
+        # launch failed, and their next attempt refuses as "already running"
+        # for a session they never got. Reclaim the name before giving up.
+        if isinstance(exc, subprocess.TimeoutExpired):
+            _kill_session_quietly(tmux_name)
         raise LaunchError(
             f"camp: refusing to launch — tmux could not start session "
             f"{tmux_name}: {exc}"

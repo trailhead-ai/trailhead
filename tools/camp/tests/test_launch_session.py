@@ -354,6 +354,52 @@ class TestScrubReachesThePane:
 
 
 class TestSpawnShape:
+    def test_a_spawn_timeout_reclaims_the_session_name_before_refusing(self, rig):
+        """A timed-out spawn is indeterminate, so the name is reclaimed.
+
+        Reading tmux's exit status means waiting for it, and a wait that times
+        out proves nothing about whether the session was created — tmux may
+        already have claimed the name. Refusing without reclaiming it leaves
+        the operator told the launch failed while the session runs, and their
+        next attempt refusing as already-running for a session they never got.
+        """
+        import subprocess as subprocess_mod
+
+        killed: list[list[str]] = []
+        rig["enumerate"] = lambda argv, **kwargs: killed.append(list(argv))
+
+        def timing_out_spawn(argv, **kwargs):
+            raise subprocess_mod.TimeoutExpired(cmd=argv, timeout=kwargs.get("timeout"))
+
+        rig["spawn"] = timing_out_spawn
+
+        with pytest.raises(rig["module"].LaunchError):
+            _launch(rig)
+
+        assert killed, "a timed-out spawn left the session name unreclaimed"
+        assert killed[0][:3] == ["tmux", "kill-session", "-t"]
+        assert killed[0][3].startswith("camp-feat-x-")
+
+    def test_a_spawn_that_fails_outright_reclaims_nothing(self, rig):
+        """An OSError means the process never ran, so there is nothing to kill.
+
+        Only an indeterminate outcome earns a reclaim; issuing one for a spawn
+        that provably never started would kill a same-named session belonging
+        to somebody else.
+        """
+        killed: list[list[str]] = []
+        rig["enumerate"] = lambda argv, **kwargs: killed.append(list(argv))
+
+        def failing_spawn(argv, **kwargs):
+            raise OSError("no tmux here")
+
+        rig["spawn"] = failing_spawn
+
+        with pytest.raises(rig["module"].LaunchError):
+            _launch(rig)
+
+        assert killed == []
+
     def test_popen_env_omits_every_scrub_var(self, rig):
         env = {"PATH": "/usr/bin", "KEEP": "yes"}
         for var in SCRUB:
