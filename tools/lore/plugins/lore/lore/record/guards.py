@@ -50,12 +50,17 @@ rejection always names the part that was actually unsafe.
 Design-graph loader: :func:`load_design_sidecars` reads the vault's spec/adr
 sidecars into the ``{"kind/name": sidecar}`` shape :mod:`graph`'s design-side
 functions consume — the read half of the same source-of-truth contract
-:func:`load_task_sidecars` gives the task graph.
+:func:`load_task_sidecars` gives the task graph. Both are warning-dropping
+views of :func:`load_kind_sidecars_with_warnings`, which is public for a
+read-only caller that must REPORT what it could not read rather than degrade
+silently; keeping one implementation is what keeps the kind-directory and
+sidecars-never-bodies invariants from drifting between them.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 
@@ -73,26 +78,74 @@ def body_has_flow_out(body: str) -> bool:
     return bool(_FLOW_OUT_RE.search(body or ""))
 
 
+def load_kind_sidecars_with_warnings(
+    vault_root: str, kind: str
+) -> tuple[dict[str, dict], list[tuple[str, str]]]:
+    """Read every ``<vault_root>/<kind>/*.json`` sidecar → ``({stem: sidecar}, warnings)``.
+
+    The single directory-scoped sidecar read in this codebase — sidecars, never
+    the index, and never the ``.md`` body beside them, so every value returned
+    is one atomically-written file's whole contents rather than a pair that a
+    concurrent vault git-sync could tear apart.
+
+    Nothing here raises. A missing kind directory contributes nothing at all
+    (an absent kind is not a fault). Every other failure — an unlistable
+    directory, an unreadable file, invalid JSON, or JSON that is not an object
+    — contributes one ``(vault_relative_path, message)`` warning and no entry,
+    so a caller that wants to report the loss can, while a caller that only
+    wants the nodes degrades to not seeing that one node.
+
+    A file that vanishes between the directory listing and the open (the torn
+    read a vault git-sync pull produces) surfaces here as an unreadable-file
+    warning, never as an exception out of the loop — one lost file never costs
+    the directory its remaining records.
+
+    The dict-only filter is what makes the returned mapping type-safe for the
+    graph algorithms: a sidecar holding a JSON array or scalar is reported and
+    dropped rather than handed on as a graph node.
+    """
+    kind_dir = Path(vault_root) / kind
+    warnings: list[tuple[str, str]] = []
+    try:
+        names = sorted(
+            entry.name
+            for entry in os.scandir(kind_dir)
+            if entry.name.endswith(".json")
+        )
+    except (FileNotFoundError, NotADirectoryError):
+        return {}, warnings
+    except OSError as exc:
+        warnings.append((f"{kind}/", f"cannot list directory: {exc}"))
+        return {}, warnings
+
+    sidecars: dict[str, dict] = {}
+    for name in names:
+        sidecar_path = kind_dir / name
+        relative = f"{kind}/{name}"
+        try:
+            data = json.loads(sidecar_path.read_text(encoding="utf-8"))
+        except OSError as exc:
+            warnings.append((relative, f"unreadable sidecar: {exc}"))
+            continue
+        except ValueError as exc:
+            warnings.append((relative, f"invalid JSON: {exc}"))
+            continue
+        if not isinstance(data, dict):
+            warnings.append((relative, "sidecar is not a JSON object"))
+            continue
+        sidecars[sidecar_path.stem] = data
+    return sidecars, warnings
+
+
 def _load_kind_sidecars(vault_root: str, kind: str) -> dict[str, dict]:
     """Read every ``<vault_root>/<kind>/*.json`` sidecar → ``{stem: sidecar}``.
 
-    The single directory-scoped read both public loaders below are built from —
-    sidecars, never the index. A missing kind directory contributes nothing, and
-    a malformed or unreadable sidecar is skipped (best-effort: a guard degrades
-    to not seeing that node rather than failing the whole write).
+    The warning-dropping view of :func:`load_kind_sidecars_with_warnings` both
+    public loaders below are built from: a guard degrades to not seeing a
+    malformed node rather than failing the whole write, and has no output
+    channel to report the loss on.
     """
-    kind_dir = Path(vault_root) / kind
-    if not kind_dir.is_dir():
-        return {}
-    sidecars: dict[str, dict] = {}
-    for sidecar_path in kind_dir.glob("*.json"):
-        try:
-            data = json.loads(sidecar_path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            continue
-        if isinstance(data, dict):
-            sidecars[sidecar_path.stem] = data
-    return sidecars
+    return load_kind_sidecars_with_warnings(vault_root, kind)[0]
 
 
 def load_task_sidecars(vault_root: str) -> dict[str, dict]:
