@@ -537,6 +537,32 @@ def test_task_parent_edge_is_rewritten(install):
     assert install.sidecar("default", "task/child")["parent"] == "renamed-parent"
 
 
+def test_task_edges_are_rewritten_in_every_configured_vault(install):
+    """Task edges resolve across the whole install, so the sweep must too.
+
+    The counterpart of the design-edge scoping below, asserted from the other
+    side: a task name is one name for the whole install, so a referrer in
+    another configured vault is a referrer to THIS record and its
+    ``depends-on``/``parent`` are rewritten — unlike a design edge, which
+    resolves vault-locally and stays scoped to the renamed record's own vault.
+    """
+    dep_id = install.create("default", "task", "Dep Task", body="x")
+    install.create(
+        "other", "task", "Other Downstream", body="x",
+        extra=["--depends-on", "dep-task"],
+    )
+    install.create(
+        "other", "task", "Other Child", body="x", extra=["--parent", "dep-task"],
+    )
+
+    proc = install.cli(["record", "rename", dep_id, "--title", "Renamed Dep"])
+    assert proc.returncode == 0, proc.stderr
+    assert install.sidecar("other", "task/other-downstream")["depends-on"] == [
+        "renamed-dep"
+    ]
+    assert install.sidecar("other", "task/other-child")["parent"] == "renamed-dep"
+
+
 # ---------------------------------------------------------------------------
 # Design graph edges
 # ---------------------------------------------------------------------------

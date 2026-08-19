@@ -573,6 +573,26 @@ def test_design_stage_vocabulary_is_the_target_kinds_not_the_writers(tmp_path):
     assert "planned" not in joined.split("valid")[-1]
 
 
+def test_design_nested_name_is_a_blocking_error(tmp_path):
+    """A second ``/`` writes clean but can never resolve — the grammar is one level.
+
+    ``load_design_sidecars`` globs ``<vault>/<kind>/*.json``, non-recursively, so
+    a name carrying its own ``/`` names no reachable sidecar: the edge would be
+    permanently unresolvable rather than merely dangling.
+    """
+    g = _guards()
+    errors, notices = _design_guards(g, tmp_path, sidecar={"depends-on": ["spec/foo/bar"]})
+    assert any("design-edge-form" in e for e in errors)
+    assert any("spec/foo/bar" in e for e in errors)
+    assert notices == []
+
+
+def test_design_nested_name_is_rejected_with_a_stage_tail_too(tmp_path):
+    g = _guards()
+    errors, _ = _design_guards(g, tmp_path, sidecar={"depends-on": ["spec/foo/bar@ready"]})
+    assert any("design-edge-form" in e for e in errors)
+
+
 def test_design_traversal_name_reports_confinement_against_the_name(tmp_path):
     """Ordering: the stage tail is stripped and the kind validated before confinement."""
     g = _guards()

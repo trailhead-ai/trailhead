@@ -243,7 +243,9 @@ FAILURE_STATUSES: frozenset[str] = frozenset({"superseded", "dropped"})
 
 #: Per-kind success chain, derived from :data:`model.STATUS_VOCAB` by dropping
 #: the trailing failure statuses — never hand-listed, so a ``STATUS_VOCAB`` edit
-#: moves the chain automatically. Order is preserved from ``STATUS_VOCAB``.
+#: moves the chain automatically. Order is preserved from ``STATUS_VOCAB``. A
+#: vocabulary of nothing but failure statuses derives an EMPTY chain; the
+#: evaluator handles that degenerately rather than raising.
 SUCCESS_CHAINS: dict[str, tuple[str, ...]] = {
     kind: tuple(status for status in model_mod.STATUS_VOCAB[kind] if status not in FAILURE_STATUSES)
     for kind in DESIGN_KINDS
@@ -329,7 +331,8 @@ class DependencyStatus(NamedTuple):
     ``None`` when ``met`` is ``True`` and otherwise one of ``"missing"``
     (no target at that qualified id), ``"short-of-stage"`` (the target exists
     but its status is earlier on the chain than required, or is not on the
-    chain/failure-set at all — a malformed sidecar reads unmet, conservatively),
+    chain/failure-set at all — a malformed sidecar, or a kind whose derived
+    chain is empty, reads unmet, conservatively),
     or ``"target-failed"`` (the target's status is a failure status, regardless
     of what stage the entry asked for).
     """
@@ -394,8 +397,11 @@ def _evaluate_one(design_graph: dict[str, dict], entry: str) -> DependencyStatus
             f"{qualified_id} is {status}",
             REASON_TARGET_FAILED,
         )
+    # Membership is decided before the chain end is read, so a kind whose chain
+    # derived empty (every status in its vocabulary is a failure status) falls
+    # into the not-on-the-chain branch instead of indexing an empty tuple —
+    # unmet with a reason, never an exception, per the module's purity contract.
     chain = SUCCESS_CHAINS[parsed.kind]
-    required_stage = parsed.stage if parsed.stage is not None else chain[-1]
     if status not in chain:
         return DependencyStatus(
             parsed.kind,
@@ -405,6 +411,7 @@ def _evaluate_one(design_graph: dict[str, dict], entry: str) -> DependencyStatus
             f"{qualified_id} has status {status!r}, which is not on the {parsed.kind} success chain",
             REASON_SHORT_OF_STAGE,
         )
+    required_stage = parsed.stage if parsed.stage is not None else chain[-1]
     if chain.index(status) < chain.index(required_stage):
         return DependencyStatus(
             parsed.kind,

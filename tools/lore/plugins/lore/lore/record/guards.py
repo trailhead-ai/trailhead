@@ -374,11 +374,29 @@ def _design_edge_error(entry: object, vault_root: str) -> str | None:
     entry whose name is traversal-shaped therefore reports a confinement breach
     against that name, never a kind or stage error that would point the operator
     at the wrong half of the value.
+
+    The one-level check runs LAST, after confinement, for the same reason: a
+    name is split off the FIRST ``/``, so a nested name and a traversal both
+    carry a second slash, and a traversal must keep reporting the containment
+    breach it actually is. A name that survives confinement and still carries a
+    ``/`` is rejected here — the documented grammar is ``kind/name[@stage]``,
+    one level, and :func:`load_design_sidecars` globs one level, so a nested
+    name resolves to no sidecar that can ever exist: not a dangling edge (which
+    is valid) but a permanently unresolvable one.
     """
     parsed = graph_mod.parse_dependency(entry)
     if parsed.error is not None:
         return _design_parse_error(entry, parsed)
-    return confine_edge_reference(parsed.name, vault_root, kind=parsed.kind)
+    msg = confine_edge_reference(parsed.name, vault_root, kind=parsed.kind)
+    if msg is not None:
+        return msg
+    if "/" in parsed.name:
+        return graph_mod.format_guard_message(
+            "design-edge-form",
+            f"depends-on entry {entry!r} names {parsed.name!r} — a dependency name is "
+            f"one path segment, so '<kind>/<name>[@<stage>]' carries exactly one '/'",
+        )
+    return None
 
 
 def evaluate_design_guards(
@@ -397,7 +415,8 @@ def evaluate_design_guards(
     :data:`graph.DESIGN_KINDS`:
 
       - ``errors`` block the operation (nothing is written): every ``depends-on``
-        entry that fails the ``kind/name[@stage]`` grammar or the target kind's
+        entry that fails the ``kind/name[@stage]`` grammar (a name carrying its
+        own ``/`` included — the grammar is one level) or the target kind's
         stage vocabulary, an entry whose name breaks vault confinement, and a
         stage-blind dependency cycle over the qualified-id design graph.
       - ``notices`` are non-blocking, printed only on a successful op: the

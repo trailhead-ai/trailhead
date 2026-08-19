@@ -267,6 +267,11 @@ def test_all_guard_tags_share_one_format():
         "dependents",
         "flow-out",
         "edge-reference",
+        "task-edge-form",
+        "design-edge-form",
+        "design-edge-stage",
+        "design-depends-on-cycle",
+        "design-dependents",
     ):
         assert _SHAPE.match(g.format_guard_message(guard, "message", offenders=["x"]))
 
@@ -282,14 +287,46 @@ def test_success_chains_derived_for_spec_and_adr():
     assert g.SUCCESS_CHAINS["adr"] == ("draft", "active")
 
 
-def test_success_chains_move_with_status_vocab_edit(monkeypatch):
-    """A STATUS_VOCAB edit moves the chain — nothing here hand-lists the stages."""
+def test_success_chains_move_with_status_vocab_edit():
+    """A STATUS_VOCAB edit moves the chain — nothing here hand-lists the stages.
+
+    Restored by hand rather than by ``monkeypatch``: the reload derives
+    ``SUCCESS_CHAINS`` by value into the one ``lore.record.graph`` module object
+    every ``from . import graph`` shares, so the vocabulary has to be put back
+    BEFORE the module is re-derived — later than a monkeypatch teardown runs.
+    """
     model = load_script("lore.record.model")
-    monkeypatch.setitem(
-        model.STATUS_VOCAB, "adr", ("draft", "review", "active", "superseded", "dropped")
-    )
-    g = load_script("lore.record.graph")
-    assert g.SUCCESS_CHAINS["adr"] == ("draft", "review", "active")
+    original = model.STATUS_VOCAB["adr"]
+    model.STATUS_VOCAB["adr"] = ("draft", "review", "active", "superseded", "dropped")
+    try:
+        g = load_script("lore.record.graph")
+        assert g.SUCCESS_CHAINS["adr"] == ("draft", "review", "active")
+    finally:
+        model.STATUS_VOCAB["adr"] = original
+        load_script("lore.record.graph")
+
+
+def test_the_vocab_edit_leaves_no_stale_chain_behind():
+    """Pins the teardown above — the shared graph module is back on the real vocab.
+
+    Ordered immediately after the edit on purpose: ``guards`` binds the graph
+    MODULE and reads ``SUCCESS_CHAINS`` off it without reloading, so a chain left
+    derived from a patched vocabulary is what it would see for the rest of the
+    session.
+    """
+    guards = load_script("lore.record.guards")
+    assert guards.graph_mod.SUCCESS_CHAINS["adr"] == ("draft", "active")
+
+
+def test_an_empty_success_chain_reads_unmet_rather_than_raising(monkeypatch):
+    """The never-raises contract holds for a degenerate derived chain too."""
+    g = _graph()
+    monkeypatch.setitem(g.SUCCESS_CHAINS, "spec", ())
+    graph = {"spec/foo": _design("spec", "draft")}
+    (status,) = g.evaluate_dependencies(graph, ["spec/foo"])
+    assert status.met is False
+    assert status.reason
+    assert status.reason_code == g.REASON_SHORT_OF_STAGE
 
 
 def test_failure_statuses_excluded_from_every_success_chain():
