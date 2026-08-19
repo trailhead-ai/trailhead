@@ -424,6 +424,7 @@ def cmd_help(_args: list[str]) -> None:
         "\n"
         "Setup:\n"
         "  camp group <name> [options]       Wire hooks and author a group config\n"
+        "  camp groups [--json]              List every configured group (any cwd)\n"
         "\n"
         "Workspace commands:\n"
         "  camp list [--json]                List all worktrees (alias: ls)\n"
