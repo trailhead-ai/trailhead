@@ -1,10 +1,12 @@
-"""The group command group: ``group`` (author/wire a config) and ``new`` (create a workspace).
+"""The group command group: ``group`` (author/wire a config), ``groups`` (list
+configs), and ``new`` (create a workspace).
 
 ``group`` has three modes (wire hooks for an existing config, author a config
-from ``--member`` flags then wire, or write a ``--scaffold`` stub); ``new`` seeds
-a workspace directory + manifest and spawns the detached background provisioner.
-Both are the *creation* verbs — everything that acts on an already-created
-workspace lives in ``workspace`` / ``lifecycle``.
+from ``--member`` flags then wire, or write a ``--scaffold`` stub); ``groups``
+is a read-only listing of every configured group; ``new`` seeds a workspace
+directory + manifest and spawns the detached background provisioner. All three
+are dispatched groupless, before any group resolves from cwd — everything that
+acts on an already-created workspace lives in ``workspace`` / ``lifecycle``.
 """
 from __future__ import annotations
 
@@ -209,6 +211,58 @@ def _cmd_group_cli(args: list[str]) -> None:
         sys.exit(1)
 
     print(f"camp group: hooks wired for group {group_name!r} ({len(group['members'])} member(s))")
+
+
+def _cmd_groups_cli(args: list[str]) -> None:
+    """camp groups [--json] — list every configured group: name + member names.
+
+    Read-only and fully groupless: reads directly from the group config
+    directory, the same source `load_group` reads, and never resolves a group
+    from cwd or accepts `--group`. Runs from any directory, including outside
+    every configured group's member repos.
+
+    No groups configured (missing or empty groups dir) exits 0 with an empty
+    list — `[]` in --json mode, a plain "no groups configured" line in human
+    mode — never an error.
+
+    A group config that fails to parse degrades that one entry with a stderr
+    notice and is dropped from the listing, rather than failing the whole
+    command (matching the best-effort degrade idiom used elsewhere in camp,
+    e.g. provision.py's pretrust step) — one bad file must not hide every
+    other configured group.
+    """
+    from ..group.config import load_group, GroupConfigError
+    from .common import _groups_dir
+
+    as_json = "--json" in args
+
+    entries: list[dict] = []
+    groups_dir = _groups_dir()
+    if groups_dir.is_dir():
+        for toml_file in sorted(groups_dir.glob("*.toml")):
+            try:
+                config = load_group(toml_file)
+            except GroupConfigError as e:
+                print(f"camp groups: {e} — skipping", file=sys.stderr)
+                continue
+            entries.append(
+                {
+                    "name": config["group"]["name"],
+                    "members": [m["name"] for m in config["members"]],
+                }
+            )
+    entries.sort(key=lambda entry: entry["name"])
+
+    if as_json:
+        print(json.dumps(entries))
+        return
+
+    if not entries:
+        print("no groups configured")
+        return
+
+    for entry in entries:
+        print(f"{entry['name']}: {', '.join(entry['members'])}")
 
 
 def _cmd_new_group_cli(

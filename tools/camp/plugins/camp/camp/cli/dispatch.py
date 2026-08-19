@@ -229,6 +229,15 @@ def main() -> None:
         _cmd_group_cli(argv[1:])
         return
 
+    # 'groups' is a read-only listing, dispatched here — before group
+    # resolution is even attempted — so it never requires a resolved group
+    # and never fails outright on a sibling group's malformed config (it
+    # degrades that one entry instead; see _cmd_groups_cli).
+    if first == "groups":
+        from .group import _cmd_groups_cli
+        _cmd_groups_cli(argv[1:])
+        return
+
     if first == "init":
         from ..spine import cmd_legacy_redirect
         cmd_legacy_redirect("init", "group")
