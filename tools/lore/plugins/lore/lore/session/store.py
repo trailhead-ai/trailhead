@@ -73,6 +73,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .. import locking
+from ..record import sidecar as sidecar_format
 from ..record import store as record_store_mod
 from ..search import index as index_store_mod
 
@@ -287,9 +288,7 @@ def capture_candidate(
             sidecar["updated-by"] = committer
         else:
             sidecar = _new_sidecar(key, committer, now)
-        record_store_mod.write_temp_then_rename(
-            sidecar_path, json.dumps(sidecar, sort_keys=True, separators=(",", ":"))
-        )
+        record_store_mod.write_temp_then_rename(sidecar_path, sidecar_format.dumps(sidecar))
 
         # Body: lazy-create header on first use, then append the entry.
         if not body_path.exists():
@@ -385,9 +384,7 @@ def flush_session(
         sidecar["annotations"] = annotations
         sidecar["updated-at"] = now
         sidecar["updated-by"] = committer
-        record_store_mod.write_temp_then_rename(
-            sidecar_path, json.dumps(sidecar, sort_keys=True, separators=(",", ":"))
-        )
+        record_store_mod.write_temp_then_rename(sidecar_path, sidecar_format.dumps(sidecar))
 
         body = body_path.read_text() if body_path.exists() else ""
         conn = open_index()
@@ -449,9 +446,7 @@ def revert_flush(
         # itself the most recent real mutation of the record.
         sidecar["updated-at"] = now
         sidecar["updated-by"] = committer
-        record_store_mod.write_temp_then_rename(
-            sidecar_path, json.dumps(sidecar, sort_keys=True, separators=(",", ":"))
-        )
+        record_store_mod.write_temp_then_rename(sidecar_path, sidecar_format.dumps(sidecar))
         body = body_path.read_text() if body_path.exists() else ""
         conn = open_index()
         try:
@@ -521,9 +516,7 @@ def capture_referenced(
             sidecar["annotations"] = annotations
             sidecar["updated-at"] = now
             sidecar["updated-by"] = committer
-            record_store_mod.write_temp_then_rename(
-                sidecar_path, json.dumps(sidecar, sort_keys=True, separators=(",", ":"))
-            )
+            record_store_mod.write_temp_then_rename(sidecar_path, sidecar_format.dumps(sidecar))
             body = body_path.read_text()
             conn = open_index()
             try:

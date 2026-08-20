@@ -228,7 +228,7 @@ class TestFlushSearch:
         side_a = _sidecar(vault, SID_A)
         side_a["updated-at"] = "2000-01-01T00:00:00Z"
         (vault / "session" / f"{SID_A}.json").write_text(
-            json.dumps(side_a, sort_keys=True, separators=(",", ":"))
+            load_script("lore.record.sidecar").dumps(side_a)
         )
         assert _run(["reindex"], vault=vault, state_dir=state).returncode == 0
 
