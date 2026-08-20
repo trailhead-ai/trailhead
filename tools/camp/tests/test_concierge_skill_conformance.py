@@ -226,12 +226,33 @@ def test_groupless_reads_are_documented_without_a_group_flag(skill_text: str) ->
 
 def test_group_scoped_verbs_are_documented_with_a_group(skill_text: str) -> None:
     """The skill is driven from a session that resolves no group, so every
-    group-scoped invocation has to name one explicitly."""
+    group-scoped invocation has to name one explicitly.
+
+    With one exception, and the dispatcher is asked what it is rather than told:
+    a ref-addressed launch (`camp launch --resume <ref>`) is routed before group
+    resolution, because a session that started in a camp workspace names its own
+    group through the root recorded in its transcript. Requiring `--group` there
+    would make the document contradict the CLI.
+    """
+    from camp.cli.dispatch import _is_ref_addressed_launch
     from camp.workspace.verb_taxonomy import NEEDS_GROUP_VERBS
 
     for tokens in _camp_invocations(skill_text):
-        if tokens[1] in NEEDS_GROUP_VERBS:
-            assert _GROUP_FLAG in _flags(tokens), " ".join(tokens)
+        if tokens[1] not in NEEDS_GROUP_VERBS:
+            continue
+        if _is_ref_addressed_launch(tokens[1], tokens[2:]):
+            continue
+        assert _GROUP_FLAG in _flags(tokens), " ".join(tokens)
+
+
+def test_the_groupless_launch_exemption_is_narrow() -> None:
+    """The exemption above covers ref-addressed launches and nothing else."""
+    from camp.cli.dispatch import _is_ref_addressed_launch
+
+    assert _is_ref_addressed_launch("launch", ["--resume", "camp-foo"])
+    assert not _is_ref_addressed_launch("launch", ["--dir", "/srv/work"])
+    assert not _is_ref_addressed_launch("launch", ["myslug"])
+    assert not _is_ref_addressed_launch("sessions", ["--resume", "camp-foo"])
 
 
 # ---------------------------------------------------------------------------
@@ -246,7 +267,6 @@ REQUIRED_ANCHORS: dict[str, str] = {
     "one mutating call": "exactly one mutating camp call",
     "group mismatch refusal": "never silently adopt",
     "derived name is not rebuilt": "never reconstructed",
-    "blocked flows have an answer": "## Not yet",
     # The reuse path refuses by exiting non-zero with nothing on stdout, so a
     # reader who expects JSON on every outcome misses the failure entirely.
     "reuse-path refusal carries no JSON": "prints nothing at all on stdout",
@@ -255,11 +275,23 @@ REQUIRED_ANCHORS: dict[str, str] = {
     # The report requires provisioning state, so the document has to sanction a
     # read that yields it.
     "provisioning state is obtainable": "camp status --name <slug> --group <name> --json",
-    # Recovery is not a shipped capability; promising it strands the operator.
-    # Scoped to a dead session on purpose: while the session is alive the same
-    # facts are still queryable, so an unscoped claim would be false.
-    "a lost report is not recoverable": (
-        "once the session is dead, what the report carried cannot be recovered from here"
+    # Recovery rediscovers a dead session from the harness's own transcript, so
+    # the operator keeps nothing. Telling them to hold on to the report would
+    # invent an obligation camp does not impose.
+    "a lost report strands nothing": (
+        "camp rediscovers a dead session from the harness's own transcript"
+    ),
+    # `--resume` is the second camp read whose nonzero exit carries information
+    # rather than failure, and it is the one an agent is most likely to
+    # misreport: an ambiguous ref is a pick-list, not a broken command.
+    "the ambiguity exit code is information": "Exit 2 is not a failure",
+    "ambiguity goes back to the operator": (
+        "relay them and ask the operator which one they mean"
+    ),
+    # A torn-down root is listed so it can be seen, and refused so it is not
+    # offered as if it would work.
+    "a vanished root is not offered": (
+        "camp refuses to resume one rather than recreating the directory"
     ),
     # The create path never waits for provisioning, so the status read is
     # nonzero in the ordinary case. An agent applying the usual "nonzero means
@@ -311,6 +343,9 @@ _EMITTERS: dict[str, tuple[str, str]] = {
     # — not the argument parser that calls it — is where the shape now lives.
     "camp launch --json": ("camp/cli/session.py", "_report_launched"),
     "camp groups --json": ("camp/cli/group.py", "_cmd_groups_cli"),
+    # The candidate ROW shape, shared by the recoverable listing and by the rows
+    # an ambiguous `--resume` prints — the document quotes it once for both.
+    "camp sessions --recoverable --json": ("camp/cli/session.py", "_candidate_payload"),
 }
 
 _JSON_OBJECT_RE = re.compile(r"\{[^{}]*\}")
