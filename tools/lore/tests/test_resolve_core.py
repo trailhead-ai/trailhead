@@ -214,6 +214,40 @@ def test_a_field_removed_on_one_side_only_takes_the_removal(resolve):
     assert "keywords" not in merged, "a one-side removal is a one-side move"
 
 
+def test_a_key_deleted_on_one_side_and_edited_on_the_other_is_reported_absent(resolve):
+    """A deletion is a side of its own — never a ``None`` value.
+
+    Collapsing "this side removed the key" into ``None`` leaves an agent no way
+    to express the removal: taking that side would write a literal null, which
+    the record write path refuses outright.
+    """
+    base = {"kind": "task", "labels": {"a": "1"}}
+    remote = {"kind": "task", "labels": {"a": "2"}}
+    local = {"kind": "task"}
+
+    merged, conflicts = resolve.merge_sidecars(base, remote, local)
+
+    assert [c["slot"] for c in conflicts] == ["labels"]
+    assert conflicts[0]["local-absent"] is True, "local deleted the key"
+    assert conflicts[0]["remote-absent"] is False
+    assert conflicts[0]["remote"] == {"a": "2"}
+    assert "labels" not in merged
+
+
+def test_the_report_carries_absent_distinctly_from_a_null_value(resolve):
+    """``value: null`` alone reads as "the value is null" — the schema must say more."""
+    conflicts = [{
+        "record-id": "task/a", "kind": "task", "slot": "labels",
+        "local": {"sha": "aaa", "date": "d", "value": None, "absent": True},
+        "remote": {"sha": "bbb", "date": "d", "value": {"a": "2"}, "absent": False},
+    }]
+
+    payload = resolve.render_json("default", conflicts, [], shared=False)
+
+    assert payload["conflicts"][0]["local"]["absent"] is True
+    assert payload["conflicts"][0]["remote"]["absent"] is False
+
+
 # ── two-device auto-merge (end to end) ─────────────────────────────────────
 
 
@@ -585,6 +619,24 @@ def test_no_conflict_pending_json_is_still_the_pinned_schema(tmp_path):
     r = fx.cli(["resolve", "default", "--json"])
     assert r.returncode == 0, r.stderr
     assert json.loads(r.stdout) == {"vault": "default", "conflicts": [], "files": []}
+
+
+def test_json_on_the_finish_path_emits_only_the_json_document(tmp_path):
+    """``--json`` is a document, not a document with a prose preamble.
+
+    The auto-merge-and-finish path is the feature's headline: everything merged
+    without judgment, the rebase completed, and the caller reads "settled" off an
+    empty ``conflicts``/``files`` pair. The finish tail's own progress lines are
+    operator prose and belong on stderr, or the report does not parse at all.
+    """
+    fx = _Fixture(tmp_path)
+    _diverge_on_disjoint_fields(fx)
+
+    r = fx.cli(["resolve", "default", "--json"])
+
+    assert r.returncode == 0, r.stderr
+    assert json.loads(r.stdout) == {"vault": "default", "conflicts": [], "files": []}
+    assert "Rebase complete." in r.stderr, "the finish prose still reaches the operator"
 
 
 def test_an_unknown_vault_is_refused(tmp_path):

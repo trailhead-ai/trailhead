@@ -101,6 +101,38 @@ def test_take_remote_lands_the_remote_side(tmp_path):
     assert fx.sidecar(record_id)["status"] == "done"
 
 
+def test_take_local_on_a_key_this_side_deleted_removes_the_key(tmp_path):
+    """An unset-vs-edit slot is settleable in BOTH directions.
+
+    One device deletes a sidecar key while the other edits it. Taking the
+    deleting side must remove the key — writing a literal ``null`` in its place
+    is not a value any sidecar may carry, so it would fail validation and leave
+    ``--remote`` (silently discarding the deletion) as the only move.
+    """
+    fx = _Fixture(tmp_path)
+    record_id = fx.create("task", "A Task")
+    fx.cli(["record", "update", record_id, "--label", "a=1"], stdin_text="")
+    fx.publish()
+    fx.clone_device_b()
+
+    fx.cli_b(["record", "update", record_id, "--label", "a=2"], stdin_text="")
+    fx.push_device_b()
+
+    fx.cli(["record", "update", record_id, "--unset-label", "a"], stdin_text="")
+    _commit(fx.vault, "device A edit")
+
+    report = fx.cli(["resolve", "default", "--json"])
+    assert report.returncode == 0, report.stderr
+    entry = next(c for c in json.loads(report.stdout)["conflicts"]
+                 if c["slot"] == "labels")
+    assert entry["local"]["absent"] is True, "the report says absent, not null"
+
+    r = fx.cli(["resolve", "take", record_id, "--slot", "labels", "--local"])
+
+    assert r.returncode == 0, r.stderr
+    assert "labels" not in fx.sidecar(record_id), "the deletion landed as a deletion"
+
+
 def test_take_slot_body_reads_the_synthesized_body_from_stdin(tmp_path):
     fx = _Fixture(tmp_path)
     record_id = _diverge_on_status_and_body(fx)
@@ -261,6 +293,23 @@ def test_a_sites_path_outside_the_free_write_zone_is_refused(tmp_path):
     assert r.returncode == 1
     assert "free-write" in r.stderr
     assert (fx.vault / ".git" / "rebase-merge").exists(), "the resolution is untouched"
+
+
+def test_a_sites_directory_nested_inside_the_free_write_zone_is_settleable(tmp_path):
+    """The zone is rooted at top-level ``sites/`` — it is not a ban on the name.
+
+    A site may legitimately hold its own ``sites`` directory. Refusing it leaves
+    that conflict with no settlement path at all but ``--abort``.
+    """
+    fx = _Fixture(tmp_path)
+    rel = "sites/board/sites/index.html"
+    _diverge_on_a_file(fx, rel)
+    assert fx.cli(["resolve", "default"]).returncode == 0
+
+    r = fx.cli(["resolve", "take-file", rel, "--local"])
+
+    assert r.returncode == 0, r.stderr
+    assert (fx.vault / rel).read_text() == "<p>local</p>\n"
 
 
 def test_an_unknown_take_file_path_is_a_hard_error(tmp_path):

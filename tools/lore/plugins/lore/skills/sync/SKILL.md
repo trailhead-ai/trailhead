@@ -81,8 +81,8 @@ never reported — what lands in the report is only what genuinely needs judgmen
   "vault": "trailhead",
   "conflicts": [
     {"record_id": "task/ship-the-thing", "kind": "task", "slot": "status",
-     "local":  {"sha": "…", "date": "…", "value": "ready"},
-     "remote": {"sha": "…", "date": "…", "value": "complete"}}
+     "local":  {"sha": "…", "date": "…", "value": "ready", "absent": false},
+     "remote": {"sha": "…", "date": "…", "value": "complete", "absent": false}}
   ],
   "files": [{"path": "sites/report/index.html",
              "local": {"sha": "…", "date": "…"},
@@ -96,6 +96,9 @@ never reported — what lands in the report is only what genuinely needs judgmen
   never auto-merged).
 - `files` — conflicts under the vault's top-level `sites/` tree. Those are not
   records, so they settle whole-file.
+- `absent` — `true` means that device **deleted** the key. It is not the same as
+  `"value": null`: taking an absent side removes the key from the record, which
+  is how a deliberate removal survives a rebase instead of being discarded.
 - An empty `conflicts` **and** empty `files` means the vault is settled — the
   rebase finished, the index was rebuilt, and the push (if any) has run.
 
