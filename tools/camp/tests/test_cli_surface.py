@@ -705,9 +705,10 @@ def test_help_reads_exit_two_as_candidates_rather_than_failure(help_text: str) -
 def _launch_exit_code_contract(help_text: str) -> dict[int, str]:
     """The exit codes `camp help` documents for `camp launch`, code → its prose.
 
-    Shared by the help assertions here and by the drive-each-code test in
-    test_session_cli.py, which re-derives it from the same emitter so the codes
-    it drives are the codes the document actually names.
+    Read out of the emitter rather than compared against a literal, so an added
+    or dropped code changes what these assertions see. test_session_cli.py reads
+    the same block for itself and drives every code it finds there, which is
+    what ties the documented contract to the one the binary honors.
     """
     heading = re.search(r"^Exit codes \(camp launch\):$", help_text, re.MULTILINE)
     assert heading, f"no launch exit-code contract in:\n{help_text}"
