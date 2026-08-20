@@ -34,7 +34,10 @@ Covers:
   - reports a fully-synced vault as synced
 
 ``lore flush``:
-  - names vaults still holding unsynced work after the session commit
+  - the sync tail: the full commit → pull → push flow over every writable vault
+  - a tail conflict exits 0 and names `lore resolve <vault>`; offline stays soft
+  - shared vaults are outside the tail (the shared-vault write gate)
+  - ``--no-sync`` opts out: session-record commit only, and names what it left
 """
 
 from __future__ import annotations
@@ -847,21 +850,27 @@ def test_status_survives_a_malformed_config(tmp_path):
     assert "unreadable" in r.stderr.lower()
 
 
-# ── lore flush: names what its own commit does not cover ───────────────────
+# ── lore flush --no-sync: names what its own commit does not cover ─────────
+#
+# Only the opted-out form names unsynced vaults; the default form SYNCS them
+# (see the sync-tail section below), which is why these two drive `--no-sync`.
 
 
-def test_flush_names_vaults_still_holding_unsynced_work(tmp_path):
-    """`lore flush` commits the session record only — it must say what it left."""
-    config_home, state_dir, _ = _three_vaults(tmp_path)
+def test_flush_no_sync_names_vaults_still_holding_unsynced_work(tmp_path):
+    """`lore flush --no-sync` commits the session record only — it must say what
+    it left, per vault, since no tail is going to cover it."""
+    config_home, state_dir, vaults = _three_vaults(tmp_path)
 
-    r = run_cli(["flush"], config_home=config_home, state_dir=state_dir)
+    r = run_cli(["flush", "--no-sync"], config_home=config_home, state_dir=state_dir)
     # No session exists here; the notice is about VAULT state, so it fires anyway —
     # a clean/absent session says nothing about whether the vaults are committed.
     assert "run `lore sync`" in r.stdout
     assert "trailhead:" in r.stdout
+    for name, vault in vaults.items():
+        assert _commit_count(vault) == 1, f"{name} must not have been committed"
 
 
-def test_flush_is_silent_when_nothing_is_sync_fixable(tmp_path):
+def test_flush_no_sync_is_silent_when_nothing_is_sync_fixable(tmp_path):
     """A remote-less but fully committed vault must NOT trigger the flush notice.
 
     "No origin remote" is a legitimate deliberate configuration that `lore sync`
@@ -875,7 +884,7 @@ def test_flush_is_silent_when_nothing_is_sync_fixable(tmp_path):
     remoteless = _make_vault(tmp_path / "v-remoteless", dirty=False)
     write_vault_config(config_home, [("default", "default", remoteless)])
 
-    r = run_cli(["flush"], config_home=config_home, state_dir=state_dir)
+    r = run_cli(["flush", "--no-sync"], config_home=config_home, state_dir=state_dir)
     assert "run `lore sync`" not in r.stdout, (
         f"flush must stay silent when sync cannot help; stdout={r.stdout!r}"
     )
@@ -904,3 +913,149 @@ def test_status_remedy_for_a_missing_vault_directory_is_not_lore_sync(tmp_path):
     assert "directory does not exist" in ghost_line
     assert "lore sync" not in ghost_line, f"unactionable remedy offered: {ghost_line!r}"
     assert "config.json" in ghost_line
+
+
+# ── lore flush: the sync tail ──────────────────────────────────────────────
+#
+# `lore flush` ends by running the full sync flow (commit → pull → push) over
+# every WRITABLE vault, superseding — for that tail only — flush's own
+# explicit-paths commit scope. `--no-sync` opts out and preserves the
+# commit-the-session-paths-and-name-the-rest behavior exactly. Shared vaults
+# stay outside the tail: the shared-vault write gate is what keeps untrusted
+# multi-user content from actuating a commit + push under this operator's git
+# identity, and a sync tail is a write.
+
+
+def _mark_shared(config_home: Path, name: str) -> None:
+    """Flip an already-written config entry to ``shared: true``."""
+    import json
+
+    path = config_home / "lore" / "config.json"
+    cfg = json.loads(path.read_text())
+    for entry in cfg["vaults"]:
+        if entry["name"] == name:
+            entry["shared"] = True
+    path.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+
+
+def test_flush_sync_tail_commits_and_pushes_unrelated_dirty_files(tmp_path):
+    """The tail is a full sync: dirty vault files the flush did not stage land too."""
+    config_home = tmp_path / "config"
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(parents=True)
+    default = _make_vault(tmp_path / "v-default", dirty=False)
+    remote = _make_bare_remote(tmp_path / "remote.git")
+    _wire_remote(default, remote)
+    (default / "stray.md").write_text("# not staged by the flush\n")
+    write_vault_config(config_home, [("default", "default", default)])
+
+    r = run_cli(["flush"], config_home=config_home, state_dir=state_dir)
+    assert r.returncode == 0, r.stderr
+    assert _git(default, "status", "--porcelain").stdout.strip() == "", (
+        f"the sync tail must leave the vault committed; stdout={r.stdout!r}"
+    )
+    assert "stray.md" in _git(
+        default, "show", "--name-only", "--pretty=format:", "HEAD"
+    ).stdout
+    assert _commit_count(Path(remote)) == _commit_count(default), (
+        "the sync tail must push what it committed"
+    )
+
+
+def test_flush_no_sync_preserves_the_explicit_paths_behavior(tmp_path):
+    """`--no-sync` opts out: nothing but the session record is committed, and the
+    vaults still holding uncommitted work are NAMED with the `lore sync` remedy."""
+    config_home = tmp_path / "config"
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(parents=True)
+    default = _make_vault(tmp_path / "v-default", dirty=False)
+    remote = _make_bare_remote(tmp_path / "remote.git")
+    _wire_remote(default, remote)
+    (default / "stray.md").write_text("# not staged by the flush\n")
+    write_vault_config(config_home, [("default", "default", default)])
+    before = _commit_count(default)
+
+    r = run_cli(["flush", "--no-sync"], config_home=config_home, state_dir=state_dir)
+    assert r.returncode == 0, r.stderr
+    assert _commit_count(default) == before, "--no-sync must not commit the vault"
+    assert "stray.md" in _git(default, "status", "--porcelain").stdout
+    assert "run `lore sync`" in r.stdout, (
+        f"--no-sync must still name what it left behind; stdout={r.stdout!r}"
+    )
+
+
+def test_flush_sync_tail_conflict_exits_zero_and_names_lore_resolve(tmp_path):
+    """A conflict in the tail never fails the flush — it reports the resolve remedy."""
+    config_home = tmp_path / "config"
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(parents=True)
+    default = _make_vault(tmp_path / "v-default", dirty=False)
+    remote = _make_bare_remote(tmp_path / "remote.git")
+    _wire_remote(default, remote)
+
+    other = _clone_as_second_device(remote, tmp_path / "device-b")
+    (other / "README.md").write_text("edited on device B\n")
+    _git(other, "add", "-A")
+    _git(other, "commit", "-m", "device B edit")
+    _git(other, "push", "origin")
+
+    (default / "README.md").write_text("edited on device A\n")
+    write_vault_config(config_home, [("default", "default", default)])
+
+    r = run_cli(["flush"], config_home=config_home, state_dir=state_dir)
+    assert r.returncode == 0, (
+        f"the flush itself succeeded — a tail conflict must not fail it; "
+        f"stderr={r.stderr!r}"
+    )
+    assert "lore resolve v-default" in r.stderr, (
+        f"the conflict must name its remedy; stderr={r.stderr!r}"
+    )
+    # The vault is left consistent: the abort is verified, not assumed.
+    assert not (default / ".git" / "rebase-merge").exists()
+    assert not (default / ".git" / "rebase-apply").exists()
+    assert (default / "README.md").read_text() == "edited on device A\n"
+
+
+def test_flush_sync_tail_offline_is_soft(tmp_path):
+    """Offline: exit 0, the work is committed locally, and the notice says so."""
+    config_home = tmp_path / "config"
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(parents=True)
+    default = _make_vault(tmp_path / "v-default", dirty=False)
+    remote = _make_bare_remote(tmp_path / "remote.git")
+    _wire_remote(default, remote)
+    _git(default, "remote", "set-url", "origin", str(tmp_path / "gone.git"))
+    (default / "stray.md").write_text("# not staged by the flush\n")
+    write_vault_config(config_home, [("default", "default", default)])
+    before = _commit_count(default)
+
+    r = run_cli(["flush"], config_home=config_home, state_dir=state_dir)
+    assert r.returncode == 0, f"a network failure stays soft; stderr={r.stderr!r}"
+    assert _commit_count(default) == before + 1, "the tail's commit must still land"
+    assert "fetch failed" in r.stderr
+
+
+def test_flush_sync_tail_never_touches_a_shared_vault(tmp_path):
+    """The shared-vault write gate holds for the tail: untrusted content is not
+    committed or pushed under this operator's identity."""
+    config_home = tmp_path / "config"
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(parents=True)
+    default = _make_vault(tmp_path / "v-default", dirty=False)
+    shared = _make_vault(tmp_path / "v-shared", dirty=False)
+    (default / "stray.md").write_text("# mine\n")
+    (shared / "planted.md").write_text("# someone else's\n")
+    write_vault_config(
+        config_home,
+        [("default", "default", default), ("teamvault", "product", shared)],
+    )
+    _mark_shared(config_home, "teamvault")
+    shared_before = _commit_count(shared)
+
+    r = run_cli(["flush"], config_home=config_home, state_dir=state_dir)
+    assert r.returncode == 0, r.stderr
+    assert _git(default, "status", "--porcelain").stdout.strip() == "", (
+        "the writable vault must still be synced"
+    )
+    assert _commit_count(shared) == shared_before, "the shared vault must not be committed"
+    assert "planted.md" in _git(shared, "status", "--porcelain").stdout

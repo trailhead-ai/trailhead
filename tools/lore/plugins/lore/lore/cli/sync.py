@@ -698,6 +698,15 @@ def cmd_sync(args) -> int:
     the end (it is global across vaults, so per-vault rebuilds would be wasted
     work). A reindex failure is soft: the pulled text is already on disk and
     wins, and ``lore search`` reports its own staleness until `lore reindex`.
+
+    **This is also the flow ``lore flush``'s sync tail reuses.** Every input is
+    read off *args* with ``getattr`` — ``vault``, ``message``, ``pull_only`` —
+    and nothing here touches the parser, so the tail calls this function directly
+    with a small namespace object, once per writable vault (``cli.flush``'s
+    ``_flush_sync_tail``; per-vault, because a bare run would cover ``shared:
+    true`` vaults too and a shared vault must never be committed or pushed by an
+    agent-actuated write). Keep it that way: coupling this function to argparse,
+    or making any of those three attributes mandatory, breaks that caller.
     """
     targets, rc = _select_targets(getattr(args, "vault", None))
     if rc != 0:
