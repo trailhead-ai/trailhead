@@ -66,6 +66,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -1974,3 +1975,51 @@ def test_bare_camp_new_output_is_unchanged(cli_env) -> None:
         '  tip: run eval "$(trailhead shellenv)" so `camp new` cd\'s you in '
         "automatically\n"
     )
+
+
+# ---------------------------------------------------------------------------
+# The exit-code contract in `camp help` against the codes the binary returns.
+#
+# A help text that documents a contract the binary does not honor is worse than
+# no help text: it teaches a reader to trust a number that means something else.
+# So the codes come out of the emitter rather than out of a literal here, and
+# each one is then provoked for real.
+# ---------------------------------------------------------------------------
+
+
+def _documented_launch_exit_codes(cli_env) -> set[int]:
+    """The exit codes `camp help` documents for `camp launch`.
+
+    Read out of the emitter, so a code added to (or dropped from) the help
+    changes what this test drives instead of silently disagreeing with it. The
+    same block's prose is asserted in test_cli_surface.py.
+    """
+    result = _camp(cli_env, "help")
+    assert result.returncode == 0, result.stderr
+    block = result.stdout.split("Exit codes (camp launch):\n", 1)
+    assert len(block) == 2, result.stdout
+    body = block[1].split("\nFlags:", 1)[0]
+    return {
+        int(match.group(1))
+        for match in re.finditer(r"^ {2}(\d+) {2,}", body, re.MULTILINE)
+    }
+
+
+def test_camp_launch_returns_each_exit_code_its_help_documents(cli_env) -> None:
+    """0 launched, 1 refused, 2 ambiguous ref — driven, not restated."""
+    documented = _documented_launch_exit_codes(cli_env)
+    assert documented == {0, 1, 2}, documented
+
+    launched = _workspace_launch_dir(cli_env, "feat-codes")
+    _seed_transcript(cli_env, _UUID_A, launched, age_seconds=30.0)
+    _seed_transcript(cli_env, _UUID_B, _workspace_launch_dir(cli_env, "feat-codes-two"))
+
+    observed = {
+        # 0 — a launch that happened.
+        _camp(cli_env, "launch", "feat-codes", "--group", "mygroup").returncode,
+        # 1 — a launch refused before anything started.
+        _camp(cli_env, "launch", "--dir", str(launched)).returncode,
+        # 2 — a ref that matched more than one session.
+        _camp(cli_env, "launch", "--resume", "camp-feat-codes", cwd=cli_env["tmp_path"]).returncode,
+    }
+    assert observed == documented, observed
