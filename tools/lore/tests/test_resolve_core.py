@@ -698,3 +698,26 @@ def test_record_delete_refuses_at_a_mid_rebase_vault(tmp_path):
     assert r.returncode == 1
     assert "lore resolve vault" in r.stderr
     assert (fx.vault / f"{record_id}.md").exists(), "a refused delete writes nothing"
+
+
+# ── delete/modify refuses on the body too, not only the sidecar ────────────
+
+
+def test_a_body_only_delete_modify_refuses_instead_of_landing_an_empty_body(tmp_path):
+    """The sidecar is identical on both sides, so only the ``.md`` is unmerged."""
+    fx = _Fixture(tmp_path)
+    record_id = fx.create("task", "A Task")
+    fx.publish()
+    fx.clone_device_b()
+
+    (fx.other / f"{record_id}.md").unlink()
+    fx.push_device_b("device B removed the body")
+
+    (fx.vault / f"{record_id}.md").write_text("local prose\n", encoding="utf-8")
+    _commit(fx.vault, "device A edit")
+
+    r = fx.cli(["resolve", "default"])
+
+    assert r.returncode == 1
+    assert "deleted on one device and edited on the other" in r.stderr
+    assert record_id in r.stderr

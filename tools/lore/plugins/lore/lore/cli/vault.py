@@ -363,12 +363,6 @@ def _cmd_vault_config(args) -> int:
     return 0
 
 
-#: Top-level vault directories that are not record trees. ``sites/`` is the
-#: static-site free-write zone (see the outpost publish contract) — its JSON is
-#: site payload, not sidecars, and reformatting it would corrupt a published site.
-_NON_RECORD_DIRS = {"sites"}
-
-
 def _reformat_one(vault_root: Path) -> tuple[int, int, int]:
     """Rewrite every sidecar under *vault_root* into canonical form.
 
@@ -383,20 +377,25 @@ def _reformat_one(vault_root: Path) -> tuple[int, int, int]:
     posture as every other tree-mutating path (``validate_and_write``, sync's
     stage+commit).
 
+    **Only the closed kind set is walked.** Every other top-level directory —
+    the ``sites/`` free-write zone, or whatever else an adopter keeps beside the
+    record trees — holds JSON that is not a sidecar and is not this verb's to
+    rewrite.
+
     **The index is untouched, deliberately.** Reformatting changes bytes, not
     parsed content, and the index's drift columns (``src_mtime``/``src_size``) are
     stat'd from the markdown *body*, not the sidecar — so no index row goes stale.
     """
     from .. import locking
+    from ..record import model as record_model
     from ..record import sidecar as sidecar_format
     from ..record import store as record_store_mod
 
     rewritten = already = skipped = 0
     with locking.vault_write_lock(vault_root):
-        for kind_dir in sorted(vault_root.iterdir()):
-            if not kind_dir.is_dir() or kind_dir.name.startswith("."):
-                continue
-            if kind_dir.name in _NON_RECORD_DIRS:
+        for kind in sorted(record_model.KINDS):
+            kind_dir = vault_root / kind
+            if not kind_dir.is_dir():
                 continue
             for path in sorted(kind_dir.glob("*.json")):
                 try:

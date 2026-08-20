@@ -460,3 +460,30 @@ def test_a_vault_named_like_nothing_still_routes_to_the_vault_form(tmp_path):
     assert json.loads(by_name.stdout) == {"vault": "default", "conflicts": [],
                                           "files": []}
     assert json.loads(by_directory.stdout) == json.loads(by_name.stdout)
+
+
+def test_a_record_shaped_path_under_an_unknown_kind_is_not_free_write(tmp_path):
+    """A newer lore's kind must not land as a raw blob around the write path."""
+    fx = _Fixture(tmp_path)
+    rel = "oracle/a-prophecy.json"
+    _diverge_on_a_file(fx, rel)
+    assert fx.cli(["resolve", "default"]).returncode == 0
+
+    r = fx.cli(["resolve", "take-file", rel, "--local"])
+
+    assert r.returncode == 1
+    assert "free-write" in r.stderr
+    assert (fx.vault / ".git" / "rebase-merge").exists(), "the resolution is untouched"
+
+
+def test_take_file_settles_a_non_ascii_sites_path(tmp_path):
+    """``git ls-files -u`` quotes non-ASCII names unless read NUL-delimited."""
+    fx = _Fixture(tmp_path)
+    rel = "sites/board/café-ünïcode.html"
+    _diverge_on_a_file(fx, rel)
+    assert fx.cli(["resolve", "default"]).returncode == 0
+
+    r = fx.cli(["resolve", "take-file", rel, "--local"])
+
+    assert r.returncode == 0, r.stderr
+    assert (fx.vault / rel).read_text() == "<p>local</p>\n"

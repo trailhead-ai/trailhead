@@ -413,3 +413,18 @@ def test_reformat_waits_for_a_concurrent_writer_and_never_loses_its_write(tmp_pa
     raw = landed.read_text()
     assert json.loads(raw)["title"] == "Landed Mid Reformat"
     assert raw == sidecar_mod.dumps(json.loads(raw))
+
+
+def test_reformat_leaves_json_outside_the_kind_directories_alone(tmp_path):
+    """Reformat owns sidecars — not whatever else an adopter keeps in the vault."""
+    vault, state = _seeded_vault(tmp_path)
+    _compact_all(vault)
+    foreign = vault / "attachments" / "payload.json"
+    foreign.parent.mkdir(parents=True, exist_ok=True)
+    raw = '{"b":1,"a":2}'
+    foreign.write_text(raw)
+
+    r = run_cli(["vault", "reformat"], vault=vault, state_dir=state)
+
+    assert r.returncode == 0, r.stderr
+    assert foreign.read_text() == raw, "a non-record JSON file is not lore's to rewrite"

@@ -172,12 +172,15 @@ def _merge_volatile(base: dict | None, remote: dict, local: dict) -> dict:
 
 def _conflicted_paths(vault: Path) -> list[str]:
     """Return the vault-relative paths git reports as unmerged, in stable order."""
-    rc, out, err = _git(vault, "ls-files", "-u")
+    rc, out, err = _git(vault, "ls-files", "-u", "-z")
     if rc != 0:
         raise ResolveError(f"could not read the conflict state: {err}")
     seen: list[str] = []
-    for line in out.splitlines():
-        _, _, path = line.partition("\t")
+    # NUL-delimited: git's default `core.quotePath` would otherwise hand back a
+    # non-ASCII name C-quoted, and every follow-up `git show :N:<path>` on that
+    # quoted spelling would miss.
+    for entry in out.split("\0"):
+        _, _, path = entry.partition("\t")
         if path and path not in seen:
             seen.append(path)
     return seen
@@ -306,12 +309,25 @@ def _resolve_one_record(
 
     if flags["body"]:
         body = None
+        remote_body = _stage_text(vault, 2, body_path)
+        local_body = _stage_text(vault, 3, body_path)
+        if remote_body is None or local_body is None:
+            # One side has no body at this stage — a delete/modify conflict whose
+            # sidecar happened to be identical on both sides, so only the `.md`
+            # ever became unmerged. An absent stage is NOT an empty body: parking
+            # it as one would let `take` land a deliberate-looking empty body.
+            missing = "remote" if remote_body is None else "local"
+            raise ResolveError(
+                f"{body_path}: the {missing} side has no body — the record was "
+                "deleted on one device and edited on the other. Settle this record "
+                "by hand before re-running."
+            )
         conflicts.append({
             "record-id": record_id,
             "kind": kind,
             "slot": "body",
-            "local": {**local_label, "value": _stage_text(vault, 3, body_path) or ""},
-            "remote": {**remote_label, "value": _stage_text(vault, 2, body_path) or ""},
+            "local": {**local_label, "value": local_body},
+            "remote": {**remote_label, "value": remote_body},
         })
     else:
         target = vault / body_path
@@ -984,11 +1000,12 @@ def _assert_free_write_zone(path: str) -> None:
     parts = Path(path).parts
     if not parts or Path(path).is_absolute() or ".." in parts:
         raise ResolveError(f"{path!r} is not a vault-relative path")
-    if SITES_DIRNAME in parts[1:]:
+    if parts[0] != SITES_DIRNAME or SITES_DIRNAME in parts[1:]:
         raise ResolveError(
             f"{path}: only a vault's top-level `{SITES_DIRNAME}/` tree is a free-write "
-            f"zone — a `{SITES_DIRNAME}/` directory inside a record tree is record "
-            "content and stays CLI-only. Settle this path by hand."
+            f"zone — everything else, including a record-shaped path under a kind this "
+            f"build does not know and a `{SITES_DIRNAME}/` directory inside a record "
+            "tree, is record content and stays CLI-only. Settle this path by hand."
         )
 
 
