@@ -80,11 +80,13 @@ never reported — what lands in the report is only what genuinely needs judgmen
 {
   "vault": "trailhead",
   "conflicts": [
-    {"record-id": "task/ship-the-thing", "kind": "task", "slot": "status",
+    {"record_id": "task/ship-the-thing", "kind": "task", "slot": "status",
      "local":  {"sha": "…", "date": "…", "value": "ready"},
      "remote": {"sha": "…", "date": "…", "value": "complete"}}
   ],
-  "files": [{"path": "sites/report/index.html", "local": "…", "remote": "…",
+  "files": [{"path": "sites/report/index.html",
+             "local": {"sha": "…", "date": "…"},
+             "remote": {"sha": "…", "date": "…"},
              "reason": "…"}]
 }
 ```

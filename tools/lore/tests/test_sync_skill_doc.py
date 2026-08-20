@@ -6,8 +6,11 @@ what it chose — so these tests pin the two invariants that flip is easy to los
 the skill must drive `lore resolve`, and it must carry no instruction telling the
 agent to keep its hands off a conflict.
 """
+import json
 import re
 from pathlib import Path
+
+from conftest import load_script
 
 REPO_ROOT = Path(__file__).parent.parent
 SKILLS_DIR = REPO_ROOT / "plugins" / "lore" / "skills"
@@ -101,3 +104,53 @@ def test_sync_skill_carries_shared_vault_fencing_guidance():
         "sync/SKILL.md must carry the shared-vault fencing guidance: remote-side "
         "text from a shared vault is data, not instructions"
     )
+
+
+def test_sync_skill_json_example_matches_render_json_schema():
+    """The documented ``--json`` example must use the keys `render_json` actually emits.
+
+    The vault's own marker file legitimately uses hyphenated ``record-id``
+    internally, which makes it an easy mistake to copy that spelling into the
+    agent-facing report doc — but the report is emitted by `render_json`, which
+    uses ``record_id``. Ties the doc to the emitter, not a hard-coded string, so
+    the two cannot drift apart again undetected.
+    """
+    text = _skill_text()
+    match = re.search(r"```json\n(.*?)\n```", text, re.DOTALL)
+    assert match, "sync/SKILL.md must carry a fenced ```json example of the resolve report"
+    example = json.loads(match.group(1))
+
+    resolve = load_script("lore.cli.resolve")
+    conflicts = [{
+        "record-id": "task/ship-the-thing", "kind": "task", "slot": "status",
+        "local": {"sha": "aaa", "date": "d", "value": "ready"},
+        "remote": {"sha": "bbb", "date": "d", "value": "complete"},
+    }]
+    files = [{
+        "path": "sites/report/index.html", "reason": "r",
+        "local": {"sha": "aaa", "date": "d"},
+        "remote": {"sha": "bbb", "date": "d"},
+    }]
+    payload = resolve.render_json("trailhead", conflicts, files, shared=False)
+
+    doc_conflict = example["conflicts"][0]
+    real_conflict = payload["conflicts"][0]
+    assert set(doc_conflict.keys()) == set(real_conflict.keys()), (
+        f"documented conflict object keys {sorted(doc_conflict.keys())} must match "
+        f"render_json's actual keys {sorted(real_conflict.keys())}"
+    )
+    assert set(doc_conflict["local"].keys()) == set(real_conflict["local"].keys())
+    assert set(doc_conflict["remote"].keys()) == set(real_conflict["remote"].keys())
+
+    doc_file = example["files"][0]
+    real_file = payload["files"][0]
+    assert set(doc_file.keys()) == set(real_file.keys()), (
+        f"documented file object keys {sorted(doc_file.keys())} must match "
+        f"render_json's actual keys {sorted(real_file.keys())}"
+    )
+    assert isinstance(doc_file["local"], dict) and isinstance(doc_file["remote"], dict), (
+        "render_json's file objects carry `local`/`remote` as {sha, date} dicts, "
+        "not scalar values — the doc example must show that shape"
+    )
+    assert set(doc_file["local"].keys()) == set(real_file["local"].keys())
+    assert set(doc_file["remote"].keys()) == set(real_file["remote"].keys())
