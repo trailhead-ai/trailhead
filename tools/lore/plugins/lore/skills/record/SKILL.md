@@ -1,6 +1,6 @@
 ---
 name: record
-description: Capture ONE specific item now — a single deliberate capture you already have in mind. Orients you to the two capture surfaces and helps you pick: a `lore session candidate` (the default, for findings that arise during work — promoted to a durable record at flush) versus a direct `lore record` write (the exception, for deliberately authored artifacts or an explicit "pin this one now"). Use for /lore:record, "record this", "capture this one thing", "log this decision now", "save this lesson". For a batch promotion of the session's pending items, use /lore:flush.
+description: Capture ONE specific item now — a single deliberate capture you already have in mind. Orients you to the two capture surfaces and helps you pick: a `lore session candidate` (the default, for findings that arise during work — promoted to a durable record at flush) versus a direct `lore record` write (the exception, for deliberately authored artifacts or an explicit "pin this one now"). Use for /lore:record, "record this", "capture this one thing", "log this decision now", "save this lesson", "import this transcript", "here is the transcript of the call/meeting/interview". For a batch promotion of the session's pending items, use /lore:flush.
 ---
 
 # /lore:record — Capture one deliberate item now
@@ -121,7 +121,7 @@ neither one carries this label.
 date first:
 
 ```bash
-lore search 'kind:blob has:label.transcript' "<YYYY-MM-DD>"
+lore search 'kind:blob has:label.transcript <YYYY-MM-DD>'
 ```
 
 On a hit, update that record rather than creating a second one: `lore record

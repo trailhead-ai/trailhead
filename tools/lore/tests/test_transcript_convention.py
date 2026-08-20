@@ -19,6 +19,11 @@ documented command:
     search then returns both
   - ``lore record delete`` removes the labeled blob from disk and from
     ``has:label.transcript`` results
+  - the search-before-create command documented in ``record/SKILL.md`` is
+    lifted verbatim out of that file and executed, so a form the CLI would
+    reject cannot be documented
+  - ``lore record update`` replaces a record's whole body, read back through
+    ``lore record show``
 
 Tests run the CLI as a subprocess via ``conftest.run_cli`` — never the real
 vault. XDG_STATE_HOME / XDG_CONFIG_HOME are pinned to ``tmp_path``-scoped
@@ -27,6 +32,7 @@ dirs by the harness.
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -42,8 +48,25 @@ from conftest import make_vault as _make_vault, run_cli as _run
 _TRANSCRIPT_TITLE = "2026-08-20 — sync call"
 
 
-def _create_blob(vault, state):
-    """Create a transcript-labeled blob via the CLI; return its RECORD_ID."""
+_TRANSCRIPT_KEYWORD = "roadmap"
+_TRANSCRIPT_AREA = "lore"
+
+_TRANSCRIPT_BODY = (
+    "**Date:** 2026-08-20\n"
+    "**Participants:** Ada, Grace\n"
+    "\n"
+    "raw transcript text\n"
+)
+
+
+def _create_blob(vault, state, *, body=_TRANSCRIPT_BODY):
+    """Create a transcript-labeled blob via the CLI; return its RECORD_ID.
+
+    Runs the *full* documented import recipe — label, topic ``--keyword``, and
+    the ``--related area=<name>`` edge — so the command an agent actually
+    copies out of ``record/SKILL.md`` is what every mechanic below is pinned
+    against, not a reduced form of it.
+    """
     r = _run(
         [
             "record",
@@ -54,10 +77,14 @@ def _create_blob(vault, state):
             _TRANSCRIPT_TITLE,
             "--label",
             "transcript=true",
+            "--keyword",
+            _TRANSCRIPT_KEYWORD,
+            "--related",
+            f"area={_TRANSCRIPT_AREA}",
         ],
         vault=vault,
         state_dir=state,
-        stdin_text="raw transcript text\n",
+        stdin_text=body,
     )
     assert r.returncode == 0, r.stderr
     return r.stdout.strip()
@@ -238,9 +265,13 @@ def test_duplicate_title_date_scoped_search_returns_two_records(tmp_path):
     _create_blob(vault, state)
     _create_blob(vault, state)
 
-    out = _search(vault, state, "kind:blob has:label.transcript 2026-08-20")
-    lines = [line for line in out.splitlines() if line.strip()]
-    assert len([line for line in lines if "2026-08-20" in line]) == 2
+    r = _run(
+        ["search", "kind:blob has:label.transcript 2026-08-20", "--json"],
+        vault=vault,
+        state_dir=state,
+    )
+    assert r.returncode == 0, r.stderr
+    assert json.loads(r.stdout)["total"] == 2
 
 
 # ---------------------------------------------------------------------------
@@ -299,11 +330,26 @@ _RECORD_SKILL = (
 )
 
 
-def test_skill_routes_a_supplied_transcript_into_the_capture_flow():
+def _skill_section(heading: str) -> str:
+    """The normalized text of one ``## `` section of the record skill."""
     text = _normalized(_RECORD_SKILL)
-    assert "transcript of a call, meeting, or interview" in text
-    assert "--kind blob" in text
-    assert "--label transcript=true" in text
+    start = text.find(f"## {heading}")
+    assert start != -1, f"section not found: {heading}"
+    tail = text[start + len(heading) + 3 :]
+    end = tail.find("## ")
+    return tail if end == -1 else tail[:end]
+
+
+def test_skill_routes_a_supplied_transcript_into_the_capture_flow():
+    """The routing rule must live *in the capture flow* — the list an agent
+    walks when deciding where a capture goes — not merely somewhere in the
+    file. Scoped to that section so deleting the routing bullet fails this
+    pin even though the standalone recipe section repeats the same phrases.
+    """
+    flow = _skill_section("Choosing the surface")
+    assert "transcript of a call, meeting, or interview" in flow
+    assert "--kind blob" in flow
+    assert "--label transcript=true" in flow
 
 
 def test_skill_defines_a_transcript_and_names_the_exclusions():
@@ -415,7 +461,9 @@ _README = Path(__file__).parent.parent / "README.md"
 def test_readme_names_the_transcript_label_and_query_facets():
     text = _normalized(_README)
     assert "transcript" in text
-    assert "has:label.transcript" in text
+    # Anchored so the targetable form is pinned independently of the negated
+    # one — a bare ``in`` check is satisfied by ``-has:label.transcript``.
+    assert re.search(r"(?<![-\w.])has:label\.transcript", text)
     assert "-has:label.transcript" in text
 
 
@@ -452,3 +500,88 @@ def test_readme_does_not_duplicate_the_import_recipe():
     text = _normalized(_README)
     assert 'lore record create --kind blob --title "<YYYY-MM-DD> — <topic>"' not in text
     assert "**Participants:**" not in text
+
+
+# ---------------------------------------------------------------------------
+# lore record update is a destructive whole-body overwrite, read back through
+# lore record show.
+# ---------------------------------------------------------------------------
+
+
+def test_update_replaces_the_whole_body_and_show_reads_it_back(tmp_path):
+    """Binds the semantics the prose warns about: piping a delta to
+    ``lore record update`` does not append — the prior text is gone, which is
+    exactly why the documented flow reads the record back first."""
+    vault, state = _make_vault(tmp_path)
+    record_id = _create_blob(vault, state)
+
+    before = _run(["record", "show", record_id], vault=vault, state_dir=state)
+    assert before.returncode == 0, before.stderr
+    assert "**Participants:** Ada, Grace" in before.stdout
+    assert "raw transcript text" in before.stdout
+
+    delta = "**Date:** 2026-08-20\n**Participants:** Ada, Grace\n\ncorrected tail\n"
+    upd = _run(
+        ["record", "update", record_id],
+        vault=vault,
+        state_dir=state,
+        stdin_text=delta,
+    )
+    assert upd.returncode == 0, upd.stderr
+
+    after = _run(["record", "show", record_id], vault=vault, state_dir=state)
+    assert after.returncode == 0, after.stderr
+    assert "corrected tail" in after.stdout
+    assert "raw transcript text" not in after.stdout
+
+
+# ---------------------------------------------------------------------------
+# The documented search-before-create command is executable as written.
+# ---------------------------------------------------------------------------
+
+_DOCUMENTED_SEARCH_RE = re.compile(r"^lore search '([^']*)'$", re.MULTILINE)
+
+
+def _documented_search_query() -> str:
+    """The single query string of the search-before-create command, lifted
+    verbatim from ``record/SKILL.md``."""
+    raw = _RECORD_SKILL.read_text(encoding="utf-8")
+    matches = [
+        m.group(1)
+        for m in _DOCUMENTED_SEARCH_RE.finditer(raw)
+        if "has:label.transcript" in m.group(1)
+    ]
+    assert len(matches) == 1, matches
+    return matches[0]
+
+
+def test_documented_search_before_create_command_is_one_positional_query():
+    """``lore search`` takes exactly one query positional. A second positional
+    — the date passed outside the quotes — exits 2. Pinning the documented
+    string keeps the date folded into the one query."""
+    assert _documented_search_query() == "kind:blob has:label.transcript <YYYY-MM-DD>"
+
+
+def test_documented_search_before_create_command_runs_clean(tmp_path):
+    vault, state = _make_vault(tmp_path)
+    record_id = _create_blob(vault, state)
+
+    query = _documented_search_query().replace("<YYYY-MM-DD>", "2026-08-20")
+    r = _run(["search", query, "--json"], vault=vault, state_dir=state)
+    assert r.returncode == 0, r.stderr
+    payload = json.loads(r.stdout)
+    assert payload["total"] == 1
+    assert payload["hits"][0]["id"].endswith(record_id)
+
+
+def test_a_second_search_positional_is_rejected_by_the_cli(tmp_path):
+    """The failure mode the pin above exists to prevent."""
+    vault, state = _make_vault(tmp_path)
+    _create_blob(vault, state)
+    r = _run(
+        ["search", "kind:blob has:label.transcript", "2026-08-20"],
+        vault=vault,
+        state_dir=state,
+    )
+    assert r.returncode == 2
+    assert "unrecognized arguments" in r.stderr
