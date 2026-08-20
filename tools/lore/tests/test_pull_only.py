@@ -28,7 +28,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from conftest import write_vault_config
+from conftest import load_script, write_vault_config
 
 REPO_ROOT = Path(__file__).parent.parent
 PLUGIN_ROOT = REPO_ROOT / "plugins" / "lore"
@@ -378,3 +378,18 @@ def test_flush_pulls_implicitly(tmp_path):
     )
     assert r.returncode == 0, r.stderr
     assert (vault / "theirs.md").exists(), "flush must pull before writing"
+
+
+def test_implicit_pull_never_raises_even_when_the_freshness_check_itself_fails():
+    """The advisory contract holds for the WHOLE function, not just the pull.
+
+    ``fetch_stamp_path`` confines its candidate under the stamp root via
+    ``layers.assert_within_root`` and raises ``LayerConfinementError`` — not
+    ``OSError`` — when it doesn't fit. A vault root whose basename resolves
+    outside the stamp root (``"/foo/.."`` -> basename ``".."``) triggers that
+    raise from inside the freshness check, before any pull is attempted. A
+    write path calling ``implicit_pull`` must never see that exception either.
+    """
+    sync = load_script("lore.cli.sync")
+
+    sync.implicit_pull("/foo/..")

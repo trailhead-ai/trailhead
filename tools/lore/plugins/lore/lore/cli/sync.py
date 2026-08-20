@@ -598,15 +598,14 @@ def implicit_pull(vault_root: str | Path) -> None:
     critical section.
     """
     vault = Path(vault_root)
-    if _fetch_is_fresh(vault):
-        return
-
     name = vault.name
 
     def say(text: str) -> None:
         print(f"  lore: {name}: {text}", file=sys.stderr)
 
     try:
+        if _fetch_is_fresh(vault):
+            return
         _stamp_fetch_attempt(vault)
         state, pulled = _pull_only_one(vault, say, say)
     except Exception as exc:  # noqa: BLE001 — advisory: a write must not fail on this
