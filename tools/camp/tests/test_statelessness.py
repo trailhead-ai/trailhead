@@ -41,25 +41,35 @@ trust writes into a temporary home rather than the developer's own.
 
 from __future__ import annotations
 
+import importlib.util
 import os
 import sys
 from pathlib import Path
 
-_TESTS_DIR = Path(__file__).resolve().parent
-if str(_TESTS_DIR) not in sys.path:
-    sys.path.insert(0, str(_TESTS_DIR))
+#: The CLI-surface module, loaded BY PATH under a name of its own.
+#:
+#: Not `import test_session_cli`: `tools/lore/tests/` ships a module of that
+#: exact name, and which of the two a bare import resolves to depends on the
+#: collection order of whatever suite happens to be running. Addressing the file
+#: directly makes the reuse unambiguous under any invocation, from this one test
+#: file to the whole repo.
+_SOURCE = Path(__file__).resolve().parent / "test_session_cli.py"
+_spec = importlib.util.spec_from_file_location("camp_tests_session_cli", _SOURCE)
+assert _spec and _spec.loader, _SOURCE
+_cli = importlib.util.module_from_spec(_spec)
+sys.modules[_spec.name] = _cli
+_spec.loader.exec_module(_cli)
 
-from test_session_cli import (  # noqa: E402
-    _camp,
-    _init_git_repo,
-    _new_workspace,
-    _register_live,
-    _seed_transcript,
-    _set_harness_binary,
-    _set_launch_roots,
-    _workspace_launch_dir,
-    cli_env,  # noqa: F401 — re-exported so the fixture resolves in this module
-)
+_camp = _cli._camp
+_init_git_repo = _cli._init_git_repo
+_new_workspace = _cli._new_workspace
+_register_live = _cli._register_live
+_seed_transcript = _cli._seed_transcript
+_set_harness_binary = _cli._set_harness_binary
+_set_launch_roots = _cli._set_launch_roots
+_workspace_launch_dir = _cli._workspace_launch_dir
+#: Re-bound so pytest resolves the fixture from this module.
+cli_env = _cli.cli_env
 
 #: Distinct, well-formed session ids — one per flow that addresses a session, so
 #: no flow inherits the liveness a previous flow's successful resume created.
@@ -122,7 +132,7 @@ def _diff(before: dict, after: dict) -> str:
     return f"added={added} removed={removed} changed={changed}"
 
 
-def test_no_new_launch_flow_writes_anything_under_the_state_dir(cli_env) -> None:  # noqa: F811
+def test_no_new_launch_flow_writes_anything_under_the_state_dir(cli_env) -> None:
     """The whole surface, success and refusal alike, against one snapshot."""
     tmp_path: Path = cli_env["tmp_path"]
     state_dir: Path = Path(cli_env["state_dir"])
