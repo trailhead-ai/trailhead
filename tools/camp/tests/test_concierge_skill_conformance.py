@@ -307,7 +307,9 @@ def test_anchor_check_reports_a_deleted_guarantee(label: str, skill_text: str) -
 # a renamed key fails here instead of becoming a lookup that returns nothing.
 _EMITTERS: dict[str, tuple[str, str]] = {
     "camp new --launch --json": ("camp/cli/group.py", "_cmd_new_group_cli"),
-    "camp launch --json": ("camp/cli/session.py", "_cmd_launch_group_cli"),
+    # Every launch flavor reports success through one emitter, so that function
+    # — not the argument parser that calls it — is where the shape now lives.
+    "camp launch --json": ("camp/cli/session.py", "_report_launched"),
     "camp groups --json": ("camp/cli/group.py", "_cmd_groups_cli"),
 }
 

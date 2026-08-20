@@ -26,6 +26,16 @@ Test contract:
   Every refusal — a slug or --resume alongside it, a missing explicit --group, a
   path that is not an existing directory, an ineligible directory — leaves stdout
   empty, spawns nothing, and writes nothing under CAMP_STATE_DIR.
+- camp launch --resume: a session addressed by full id, id prefix, or derived-name
+  prefix reaches the identical spawn, rooted where its transcript records it
+  started. A workspace-rooted resume takes no --group; every other root demands
+  one and then clears the eligibility gate against CURRENT config. Each refusal is
+  its own situation and its own wording — already running, directory unknowable,
+  directory gone, root ineligible, ref matched nothing (against a populated store
+  vs. an empty one), harness cannot enumerate or re-enter — and an ambiguous ref
+  is exit 2 with the candidates on stdout. Nothing is written under CAMP_STATE_DIR
+  on any of them, and `camp resume` (the bookmark verb) still answers about
+  bookmarks.
 - camp sessions: empty → empty stdout, exit 0; degraded (enumeration error /
   missing enumerate binary / unknown harness) → stderr notice, empty stdout list,
   exit 0; --json carries only normalized SessionRecord fields.
@@ -44,6 +54,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -76,6 +87,16 @@ class FakeHarness(ClaudeCodeHarness):
 
     def session_launch_env_unset(self):
         return []
+
+    def session_transcripts(self, workspace=None, *, env=None):
+        if os.environ.get("CAMP_FAKE_TRANSCRIPTS") == "none":
+            return None
+        return super().session_transcripts(workspace, env=env)
+
+    def session_resume(self, session_id):
+        if os.environ.get("CAMP_FAKE_RESUME") == "none":
+            return None
+        return ["fake-resume", session_id]
 
     def session_enumerate(self, workspace=None):
         mode = os.environ.get("CAMP_FAKE_ENUMERATE", "ok")
@@ -198,6 +219,7 @@ def cli_env(tmp_path: Path):
     env["CAMP_CONFIG_DIR"] = str(config_dir)
     env["CAMP_STATE_DIR"] = str(state_dir)
     env["CAMP_FAKE_SESSIONS_FILE"] = str(sessions_file)
+    env["TRAILHEAD_CLAUDE_DIR"] = str(tmp_path / "claude")
     env["CAMP_FAKE_TMUX_ARGV_FILE"] = str(tmux_argv_file)
     env["PATH"] = f"{bin_dir}{os.pathsep}{env.get('PATH', '')}"
     env["PYTHONPATH"] = os.pathsep.join(
@@ -337,6 +359,24 @@ def _state_tree(cli_env) -> list[str]:
     """
     root = cli_env["state_dir"]
     return sorted(str(p.relative_to(root)) for p in root.rglob("*"))
+
+
+def _settled_state_tree(cli_env, *, quiet_for: float = 0.3, timeout: float = 20.0) -> list[str]:
+    """`_state_tree` once `camp new`'s background provisioner has stopped writing.
+
+    Workspace creation provisions in the background, so a snapshot taken right
+    after it is still moving — and a statelessness assertion against a moving
+    baseline reports the provisioner's writes as the command-under-test's.
+    """
+    deadline = time.monotonic() + timeout
+    previous = _state_tree(cli_env)
+    while time.monotonic() < deadline:
+        time.sleep(quiet_for)
+        current = _state_tree(cli_env)
+        if current == previous:
+            return current
+        previous = current
+    return previous
 
 
 def _tmux_new_session_argv(cli_env) -> list[list[str]]:
@@ -599,6 +639,526 @@ def test_camp_launch_dir_at_a_credential_store_refuses_on_the_credential_rule(cl
     assert cli_env["sessions_file"].read_text() == ""
     assert _tmux_new_session_argv(cli_env) == []
     assert _state_tree(cli_env) == before
+
+
+# ---------------------------------------------------------------------------
+# camp launch --resume
+# ---------------------------------------------------------------------------
+
+#: Two distinct, well-formed session ids. Real uuids, because the 8-character
+#: prefix form is part of the addressing contract and a short id would let a
+#: prefix test pass without exercising it.
+_UUID_A = "aaaaaaaa-1111-4111-8111-111111111111"
+_UUID_B = "bbbbbbbb-2222-4222-8222-222222222222"
+
+
+def _seed_transcript(
+    cli_env, session_id: str, cwd: Path | None, *, age_seconds: float = 60.0
+) -> Path:
+    """Author one harness transcript in the hermetic TRAILHEAD_CLAUDE_DIR store.
+
+    `cwd=None` authors the uuid-only case the seam degrades to: a transcript
+    carrying no extractable start directory at all.
+    """
+    projects = Path(cli_env["env"]["TRAILHEAD_CLAUDE_DIR"]) / "projects"
+    if cwd is None:
+        munged = f"-unreadable-{session_id[:8]}"
+        body: dict = {"type": "user"}
+    else:
+        munged = str(cwd).replace("/", "-").replace(".", "-")
+        body = {"type": "user", "cwd": str(cwd)}
+    directory = projects / munged
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / f"{session_id}.jsonl"
+    path.write_text(json.dumps(body) + "\n", encoding="utf-8")
+    stamp = time.time() - age_seconds
+    os.utime(path, (stamp, stamp))
+    return path
+
+
+def _register_live(cli_env, session_id: str, cwd: Path) -> None:
+    """Add a row to the file the fake harness enumerates as live sessions."""
+    with cli_env["sessions_file"].open("a", encoding="utf-8") as handle:
+        handle.write(f"{session_id}\t{cwd}\n")
+
+
+def _tmux_argv(cli_env) -> list[list[str]]:
+    """The argv of every tmux invocation camp made, in order."""
+    lines = cli_env["tmux_argv_file"].read_text(encoding="utf-8").splitlines()
+    return [line.split("\t") for line in lines if line]
+
+
+def _workspace_launch_dir(cli_env, slug: str) -> Path:
+    """The directory a slug launch resolves to — the transcript's recorded cwd."""
+    return Path(_new_workspace(cli_env, slug)).resolve()
+
+
+def test_camp_launch_resume_reenters_a_workspace_session_without_a_group_flag(
+    cli_env,
+) -> None:
+    """The whole point of the workspace flavor: a ref, from anywhere, no flag.
+
+    Run from a directory no group resolves from, so nothing but the ref and the
+    transcript decides where the session comes back up.
+    """
+    launch_dir = _workspace_launch_dir(cli_env, "feat-resume")
+    _seed_transcript(cli_env, _UUID_A, launch_dir)
+    before = _settled_state_tree(cli_env)
+
+    result = _camp(cli_env, "launch", "--resume", _UUID_A, cwd=cli_env["tmp_path"])
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == f"{_UUID_A}\n"
+    spawned = _tmux_new_session_argv(cli_env)
+    assert len(spawned) == 1
+    assert _flag_value(spawned[0], "-s") == f"camp-feat-resume-{_UUID_A[:8]}"
+    assert _flag_value(spawned[0], "-c") == str(launch_dir)
+    assert _state_tree(cli_env) == before
+
+
+def test_camp_launch_resume_by_uuid_prefix_reaches_the_identical_spawn(cli_env) -> None:
+    launch_dir = _workspace_launch_dir(cli_env, "feat-resume")
+    _seed_transcript(cli_env, _UUID_A, launch_dir)
+    before = _settled_state_tree(cli_env)
+
+    result = _camp(cli_env, "launch", "--resume", _UUID_A[:8], cwd=cli_env["tmp_path"])
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == f"{_UUID_A}\n"
+    spawned = _tmux_new_session_argv(cli_env)
+    assert _flag_value(spawned[0], "-s") == f"camp-feat-resume-{_UUID_A[:8]}"
+    assert _flag_value(spawned[0], "-c") == str(launch_dir)
+    assert _state_tree(cli_env) == before
+
+
+def test_camp_launch_resume_by_derived_name_prefix_reaches_the_identical_spawn(
+    cli_env,
+) -> None:
+    launch_dir = _workspace_launch_dir(cli_env, "feat-resume")
+    _seed_transcript(cli_env, _UUID_A, launch_dir)
+    before = _settled_state_tree(cli_env)
+
+    result = _camp(cli_env, "launch", "--resume", "camp-feat-resume-", cwd=cli_env["tmp_path"])
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == f"{_UUID_A}\n"
+    spawned = _tmux_new_session_argv(cli_env)
+    assert _flag_value(spawned[0], "-s") == f"camp-feat-resume-{_UUID_A[:8]}"
+    assert _flag_value(spawned[0], "-c") == str(launch_dir)
+    assert _state_tree(cli_env) == before
+
+
+def test_camp_launch_resume_json_key_set_matches_a_slug_launch_exactly(cli_env) -> None:
+    _new_workspace(cli_env, "feat-json")
+    slug_launch = _camp(cli_env, "launch", "feat-json", "--group", "mygroup", "--json")
+    assert slug_launch.returncode == 0, slug_launch.stderr
+
+    launch_dir = _workspace_launch_dir(cli_env, "feat-resume")
+    _seed_transcript(cli_env, _UUID_A, launch_dir)
+    before = _settled_state_tree(cli_env)
+
+    result = _camp(
+        cli_env, "launch", "--resume", _UUID_A, "--json", cwd=cli_env["tmp_path"]
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert set(payload) == set(json.loads(slug_launch.stdout))
+    assert payload["session_id"] == _UUID_A
+    assert payload["tmux_name"] == f"camp-feat-resume-{_UUID_A[:8]}"
+    assert payload["workspace"] == str(launch_dir)
+    assert _state_tree(cli_env) == before
+
+
+def test_camp_launch_resume_at_a_non_workspace_root_resumes_with_an_explicit_group(
+    cli_env,
+) -> None:
+    """A dotted basename is ordinary input, and the name it yields must address."""
+    target = cli_env["tmp_path"] / "roots" / "my.project"
+    target.mkdir(parents=True)
+    _set_launch_roots(cli_env, cli_env["tmp_path"] / "roots")
+    _seed_transcript(cli_env, _UUID_A, target)
+    before = _settled_state_tree(cli_env)
+
+    result = _camp(
+        cli_env, "launch", "--resume", _UUID_A, "--group", "mygroup",
+        cwd=cli_env["tmp_path"],
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == f"{_UUID_A}\n"
+    spawned = _tmux_new_session_argv(cli_env)
+    assert _flag_value(spawned[0], "-s") == f"camp-my-project-{_UUID_A[:8]}"
+    assert _flag_value(spawned[0], "-c") == str(target.resolve())
+    assert _state_tree(cli_env) == before
+
+
+def test_camp_launch_resume_at_a_non_workspace_root_without_a_group_refuses(
+    cli_env,
+) -> None:
+    """The allowlist fences this root, so the group must be named, never inferred."""
+    target = cli_env["tmp_path"] / "roots" / "myproject"
+    target.mkdir(parents=True)
+    _set_launch_roots(cli_env, cli_env["tmp_path"] / "roots")
+    _seed_transcript(cli_env, _UUID_A, target)
+    before = _settled_state_tree(cli_env)
+
+    result = _camp(cli_env, "launch", "--resume", _UUID_A, cwd=cli_env["tmp_path"])
+
+    _assert_clean_refusal(result, needle="--group")
+    assert _tmux_new_session_argv(cli_env) == []
+    assert _state_tree(cli_env) == before
+
+
+def test_camp_launch_resume_inside_a_group_still_requires_an_explicit_group(
+    cli_env,
+) -> None:
+    """A resolvable cwd is not consent: the boundary may never move with the caller."""
+    workspace = Path(_new_workspace(cli_env, "feat-standing"))
+    target = cli_env["tmp_path"] / "roots" / "myproject"
+    target.mkdir(parents=True)
+    _set_launch_roots(cli_env, cli_env["tmp_path"] / "roots")
+    _seed_transcript(cli_env, _UUID_A, target)
+    before = _settled_state_tree(cli_env)
+
+    result = _camp(cli_env, "launch", "--resume", _UUID_A, cwd=workspace)
+
+    _assert_clean_refusal(result, needle="--group")
+    assert _tmux_new_session_argv(cli_env) == []
+    assert _state_tree(cli_env) == before
+
+
+def test_camp_launch_resume_at_a_root_outside_the_allowlist_refuses_naming_it(
+    cli_env,
+) -> None:
+    """The gate is re-checked against CURRENT config, not the config at launch time."""
+    allowed = cli_env["tmp_path"] / "roots"
+    allowed.mkdir()
+    target = cli_env["tmp_path"] / "elsewhere"
+    target.mkdir()
+    _set_launch_roots(cli_env, allowed)
+    _seed_transcript(cli_env, _UUID_A, target)
+    before = _settled_state_tree(cli_env)
+
+    result = _camp(
+        cli_env, "launch", "--resume", _UUID_A, "--group", "mygroup",
+        cwd=cli_env["tmp_path"],
+    )
+
+    _assert_clean_refusal(result, needle="[launch] roots")
+    assert str(target.resolve()) in result.stderr
+    assert _tmux_new_session_argv(cli_env) == []
+    assert _state_tree(cli_env) == before
+
+
+def test_camp_launch_resume_at_a_credential_store_refuses_on_the_credential_rule(
+    cli_env,
+) -> None:
+    """`roots = ["~"]` cannot launder a session rooted at ~/.ssh back to life."""
+    home = cli_env["tmp_path"] / "fakehome"
+    ssh = home / ".ssh"
+    ssh.mkdir(parents=True)
+    _set_launch_roots(cli_env, "~")
+    _seed_transcript(cli_env, _UUID_A, ssh)
+    before = _settled_state_tree(cli_env)
+
+    result = _camp(
+        cli_env, "launch", "--resume", _UUID_A, "--group", "mygroup",
+        cwd=cli_env["tmp_path"], extra_env={"HOME": str(home)},
+    )
+
+    _assert_clean_refusal(result, needle="credential store")
+    assert "[launch] roots" not in result.stderr
+    assert _tmux_new_session_argv(cli_env) == []
+    assert _state_tree(cli_env) == before
+
+
+def test_camp_launch_resume_with_a_missing_root_refuses_without_recreating_it(
+    cli_env,
+) -> None:
+    target = cli_env["tmp_path"] / "roots" / "torn-down"
+    _set_launch_roots(cli_env, cli_env["tmp_path"] / "roots")
+    _seed_transcript(cli_env, _UUID_A, target)
+    before = _settled_state_tree(cli_env)
+
+    result = _camp(
+        cli_env, "launch", "--resume", _UUID_A, "--group", "mygroup",
+        cwd=cli_env["tmp_path"],
+    )
+
+    _assert_clean_refusal(result, needle=str(target))
+    assert not target.exists()
+    assert _tmux_new_session_argv(cli_env) == []
+    assert _state_tree(cli_env) == before
+
+
+def test_camp_launch_resume_of_an_unreadable_candidate_carries_no_sentinel(
+    cli_env,
+) -> None:
+    """The concierge relays this line to a phone verbatim; it must read as English.
+
+    A uuid-only candidate has no directory to name at all, which is a different
+    situation from a directory that is named and gone — so it gets its own
+    wording, and that wording may never leak the internal absence marker.
+    """
+    torn_down = cli_env["tmp_path"] / "roots" / "torn-down"
+    _set_launch_roots(cli_env, cli_env["tmp_path"] / "roots")
+    _seed_transcript(cli_env, _UUID_B, torn_down)
+    _seed_transcript(cli_env, _UUID_A, None)
+    before = _settled_state_tree(cli_env)
+
+    unreadable = _camp(
+        cli_env, "launch", "--resume", _UUID_A, "--group", "mygroup",
+        cwd=cli_env["tmp_path"],
+    )
+    missing_root = _camp(
+        cli_env, "launch", "--resume", _UUID_B, "--group", "mygroup",
+        cwd=cli_env["tmp_path"],
+    )
+
+    _assert_clean_refusal(unreadable, needle=_UUID_A)
+    assert unreadable.stderr != missing_root.stderr
+    assert "None" not in unreadable.stderr
+    assert "''" not in unreadable.stderr
+    assert '""' not in unreadable.stderr
+    assert "``" not in unreadable.stderr
+    assert _tmux_new_session_argv(cli_env) == []
+    assert _state_tree(cli_env) == before
+
+
+def test_camp_launch_resume_of_a_live_session_says_already_running(cli_env) -> None:
+    launch_dir = _workspace_launch_dir(cli_env, "feat-live")
+    _seed_transcript(cli_env, _UUID_A, launch_dir)
+    _register_live(cli_env, _UUID_A, launch_dir)
+    before = _settled_state_tree(cli_env)
+
+    result = _camp(cli_env, "launch", "--resume", _UUID_A, cwd=cli_env["tmp_path"])
+
+    _assert_clean_refusal(result, needle="already running")
+    assert f"camp-feat-live-{_UUID_A[:8]}" in result.stderr
+    assert "no candidate matched" not in result.stderr
+    assert _tmux_new_session_argv(cli_env) == []
+    assert _state_tree(cli_env) == before
+
+
+def test_camp_launch_resume_of_a_live_session_with_no_transcript_says_already_running(
+    cli_env,
+) -> None:
+    """The union is what makes this answerable — transcripts alone say "not found"."""
+    launch_dir = _workspace_launch_dir(cli_env, "feat-live")
+    _register_live(cli_env, _UUID_A, launch_dir)
+    before = _settled_state_tree(cli_env)
+
+    result = _camp(cli_env, "launch", "--resume", _UUID_A, cwd=cli_env["tmp_path"])
+
+    _assert_clean_refusal(result, needle="already running")
+    assert "no candidate matched" not in result.stderr
+    assert _tmux_new_session_argv(cli_env) == []
+    assert _state_tree(cli_env) == before
+
+
+def test_camp_launch_resume_with_an_ambiguous_ref_exits_two_and_lists_candidates(
+    cli_env,
+) -> None:
+    """Ambiguity is information, not failure — and camp never guesses between them."""
+    first = _workspace_launch_dir(cli_env, "feat-one")
+    second = _workspace_launch_dir(cli_env, "feat-two")
+    _seed_transcript(cli_env, _UUID_A, first, age_seconds=30.0)
+    _seed_transcript(cli_env, _UUID_B, second, age_seconds=90.0)
+    before = _settled_state_tree(cli_env)
+
+    result = _camp(cli_env, "launch", "--resume", "camp-feat-", cwd=cli_env["tmp_path"])
+
+    assert result.returncode == 2, result.stderr
+    rows = [line for line in result.stdout.splitlines() if line.strip()]
+    assert len(rows) == 2, result.stdout
+    assert f"camp-feat-one-{_UUID_A[:8]}" in rows[0]
+    assert _UUID_A in rows[0]
+    assert str(first) in rows[0]
+    assert f"camp-feat-two-{_UUID_B[:8]}" in rows[1]
+    stderr_lines = [line for line in result.stderr.strip().splitlines() if line.strip()]
+    assert len(stderr_lines) == 1, result.stderr
+    assert stderr_lines[0].startswith("camp launch: ")
+    assert "camp-feat-" in stderr_lines[0]
+    assert _tmux_new_session_argv(cli_env) == []
+    assert _state_tree(cli_env) == before
+
+
+def test_camp_launch_resume_ambiguous_json_rows_carry_the_candidate_key_set(
+    cli_env,
+) -> None:
+    first = _workspace_launch_dir(cli_env, "feat-one")
+    second = _workspace_launch_dir(cli_env, "feat-two")
+    _seed_transcript(cli_env, _UUID_A, first, age_seconds=30.0)
+    _seed_transcript(cli_env, _UUID_B, second, age_seconds=90.0)
+    before = _settled_state_tree(cli_env)
+
+    result = _camp(
+        cli_env, "launch", "--resume", "camp-feat-", "--json", cwd=cli_env["tmp_path"]
+    )
+
+    assert result.returncode == 2, result.stderr
+    payload = json.loads(result.stdout)
+    assert [row["session_id"] for row in payload] == [_UUID_A, _UUID_B]
+    for row in payload:
+        assert set(row) == {
+            "session_id",
+            "tmux_name",
+            "root",
+            "age_seconds",
+            "root_missing",
+            "unreadable",
+        }
+    assert payload[0]["tmux_name"] == f"camp-feat-one-{_UUID_A[:8]}"
+    assert payload[0]["root"] == str(first)
+    assert payload[0]["root_missing"] is False
+    assert payload[0]["unreadable"] is False
+    assert _state_tree(cli_env) == before
+
+
+def test_camp_launch_resume_zero_match_messages_differ_by_whether_the_pool_is_empty(
+    cli_env,
+) -> None:
+    """The two "nothing matched" situations are not the same problem to the operator.
+
+    An empty store means the transcript aged out; a non-empty one means the ref
+    was wrong. Naming retention for a mistyped ref sends the operator looking for
+    a session that is sitting right there.
+    """
+    empty_store = _camp(
+        cli_env, "launch", "--resume", "deadbeef", "--group", "mygroup",
+        cwd=cli_env["tmp_path"],
+    )
+
+    _seed_transcript(cli_env, _UUID_A, _workspace_launch_dir(cli_env, "feat-one"))
+    before = _settled_state_tree(cli_env)
+    populated_store = _camp(
+        cli_env, "launch", "--resume", "deadbeef", "--group", "mygroup",
+        cwd=cli_env["tmp_path"],
+    )
+
+    _assert_clean_refusal(empty_store, needle="retention")
+    assert "no candidate matched" not in empty_store.stderr
+
+    _assert_clean_refusal(populated_store, needle="no candidate matched")
+    assert "`deadbeef`" in populated_store.stderr
+    assert "camp sessions --recoverable" in populated_store.stderr
+    assert "retention" not in populated_store.stderr
+
+    assert empty_store.stderr != populated_store.stderr
+    assert _tmux_new_session_argv(cli_env) == []
+    assert _state_tree(cli_env) == before
+
+
+def test_camp_launch_resume_with_a_positional_slug_refuses(cli_env) -> None:
+    _seed_transcript(cli_env, _UUID_A, _workspace_launch_dir(cli_env, "feat-one"))
+    before = _settled_state_tree(cli_env)
+
+    result = _camp(
+        cli_env, "launch", "feat-one", "--resume", _UUID_A, "--group", "mygroup",
+        cwd=cli_env["tmp_path"],
+    )
+
+    _assert_clean_refusal(result, needle="--resume")
+    assert "slug" in result.stderr
+    assert _tmux_new_session_argv(cli_env) == []
+    assert _state_tree(cli_env) == before
+
+
+def test_camp_launch_resume_with_no_value_refuses(cli_env) -> None:
+    before = _settled_state_tree(cli_env)
+
+    result = _camp(cli_env, "launch", "--resume", "--group", "mygroup")
+
+    _assert_clean_refusal(result, needle="--resume")
+    assert _tmux_new_session_argv(cli_env) == []
+    assert _state_tree(cli_env) == before
+
+
+def test_camp_launch_resume_with_a_flag_shaped_ref_refuses_on_the_flag(cli_env) -> None:
+    """An unconsumed flag swallowed as the ref must report the flag, not a miss."""
+    before = _settled_state_tree(cli_env)
+
+    result = _camp(cli_env, "launch", "--resume", "--json", "--group", "mygroup")
+
+    _assert_clean_refusal(result, needle="--resume")
+    assert "no candidate matched" not in result.stderr
+    assert _tmux_new_session_argv(cli_env) == []
+    assert _state_tree(cli_env) == before
+
+
+def test_camp_launch_resume_on_a_harness_without_transcripts_refuses_naming_it(
+    cli_env,
+) -> None:
+    before = _settled_state_tree(cli_env)
+
+    result = _camp(
+        cli_env, "launch", "--resume", _UUID_A, "--group", "mygroup",
+        cwd=cli_env["tmp_path"], extra_env={"CAMP_FAKE_TRANSCRIPTS": "none"},
+    )
+
+    _assert_clean_refusal(result, needle="fakeharness")
+    assert "Traceback" not in result.stderr
+    assert _tmux_new_session_argv(cli_env) == []
+    assert _state_tree(cli_env) == before
+
+
+def test_camp_launch_resume_on_a_harness_that_cannot_reenter_refuses_naming_it(
+    cli_env,
+) -> None:
+    _seed_transcript(cli_env, _UUID_A, _workspace_launch_dir(cli_env, "feat-one"))
+    before = _settled_state_tree(cli_env)
+
+    result = _camp(
+        cli_env, "launch", "--resume", _UUID_A,
+        cwd=cli_env["tmp_path"], extra_env={"CAMP_FAKE_RESUME": "none"},
+    )
+
+    _assert_clean_refusal(result, needle="fakeharness")
+    assert _tmux_new_session_argv(cli_env) == []
+    assert _state_tree(cli_env) == before
+
+
+def test_camp_launch_resume_that_never_confirms_is_killed_by_its_exact_name(
+    cli_env,
+) -> None:
+    _seed_transcript(cli_env, _UUID_A, _workspace_launch_dir(cli_env, "feat-one"))
+    before = _settled_state_tree(cli_env)
+
+    result = _camp(
+        cli_env, "launch", "--resume", _UUID_A,
+        cwd=cli_env["tmp_path"], extra_env={"CAMP_FAKE_TMUX_NO_REGISTER": "1"},
+    )
+
+    assert result.returncode != 0
+    assert result.stdout == ""
+    assert "could not be confirmed" in result.stderr
+    tmux_name = f"camp-feat-one-{_UUID_A[:8]}"
+    kills = [argv for argv in _tmux_argv(cli_env) if argv[0] == "kill-session"]
+    assert kills == [["kill-session", "-t", tmux_name]]
+    assert _state_tree(cli_env) == before
+
+
+def test_camp_resume_the_bookmark_verb_is_untouched_by_the_launch_flavor(
+    cli_env,
+) -> None:
+    """`camp resume` addresses BOOKMARKS. A transcript is not a bookmark.
+
+    Seeded so a session reference that `camp launch --resume` would resolve is
+    sitting in the store while `camp resume` is asked for it — and the bookmark
+    verb must still answer about bookmarks.
+    """
+    _seed_transcript(cli_env, _UUID_A, _workspace_launch_dir(cli_env, "feat-one"))
+
+    result = _camp(
+        cli_env, "resume", "camp-feat-one-", cwd=cli_env["tmp_path"],
+        extra_env={"CAMP_SHELL_INTEGRATION": "1"},
+    )
+
+    assert result.returncode != 0
+    assert result.stdout == ""
+    assert "camp resume: no bookmark named 'camp-feat-one-'" in result.stderr
+    assert "camp bookmark ls" in result.stderr
 
 
 # ---------------------------------------------------------------------------

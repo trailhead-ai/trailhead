@@ -187,7 +187,10 @@ class SessionCandidate:
     """One addressable session, from a transcript, a live record, or both.
 
     ``derived_name`` is the tmux-shaped name `camp-<component>-<uuid8>`, and is
-    the second thing a ref is matched against. When ``unreadable``, there is no
+    the second thing a ref is matched against. Its component is folded by
+    :func:`sanitize_name_component`, so the name a listing offers is the name the
+    launch engine composes and tmux accepts back — a candidate named by a string
+    tmux cannot address is a candidate nobody can attach, kill, or resume. When ``unreadable``, there is no
     component to put in it and it degrades to `camp-<uuid8>` — a name that is
     still addressable and still true, rather than a guessed location.
 
@@ -264,7 +267,8 @@ def _build_candidate(
     if root is None:
         derived_name = f"camp-{session_id[:8]}"
     else:
-        derived_name = f"camp-{_name_component(root.resolve(), containers)}-{session_id[:8]}"
+        component = sanitize_name_component(_name_component(root.resolve(), containers))
+        derived_name = f"camp-{component}-{session_id[:8]}"
 
     age_seconds = None
     if transcript is not None:

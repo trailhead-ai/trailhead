@@ -248,12 +248,16 @@ def _report_live_sessions(harness, launch_dir: Path, env: dict[str, str]) -> Non
         )
 
 
-def _already_running(session_id: str, tmux_name: str) -> LaunchError:
+def already_running_error(session_id: str, tmux_name: str) -> LaunchError:
     """The one wording for "that session is already running".
 
-    Both detectors raise it — the pre-spawn lookup below and tmux refusing the
-    session name at the spawn — so the operator reads one message about one
-    condition, and reads it as "already running" rather than as a failure.
+    Every detector raises it — the pre-spawn lookup below, tmux refusing the
+    session name at the spawn, and the CLI's own pre-resolution liveness gate —
+    so the operator reads one message about one condition, and reads it as
+    "already running" rather than as a failure. Public precisely because the
+    third of those lives outside this module: a second wording for the same
+    condition is a second condition as far as anyone reading the terminal is
+    concerned.
     """
     return LaunchError(
         f"camp: refusing to launch — session {session_id} is already running as "
@@ -278,7 +282,7 @@ def _refuse_if_already_live(
     except Exception:  # noqa: BLE001 — same posture as the advisory probe
         return
     if any(record.session_id == session_id for record in records or ()):
-        raise _already_running(session_id, tmux_name)
+        raise already_running_error(session_id, tmux_name)
 
 
 def launch_session(
@@ -428,7 +432,7 @@ def launch_session(
     if spawned.returncode != 0:
         stderr = (spawned.stderr or "").strip()
         if _DUPLICATE_SESSION_MARKER in stderr:
-            raise _already_running(session_id, tmux_name)
+            raise already_running_error(session_id, tmux_name)
         detail = stderr or f"exit status {spawned.returncode}"
         raise LaunchError(
             f"camp: refusing to launch — tmux could not start session "

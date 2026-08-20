@@ -161,6 +161,22 @@ def _slug_from_args_or_cwd(
     return slug
 
 
+def _is_ref_addressed_launch(verb: str, rest: list[str]) -> bool:
+    """Is this a `camp launch --resume <ref>` — the one groupless launch flavor?
+
+    Classified from the raw argv, before any group is resolved, because the whole
+    point of the flavor is that it resolves without one. Reads the flag name from
+    the handler that parses it, so the router and the parser cannot disagree about
+    what spells a resume.
+    """
+    from .session import RESUME_FLAG
+
+    canonical, kind = _resolve_verb(verb)
+    if canonical != "launch" or kind != "live":
+        return False
+    return any(arg == RESUME_FLAG or arg.startswith(f"{RESUME_FLAG}=") for arg in rest)
+
+
 def main() -> None:
     global _TRAILHEAD_PATHS_OK
     argv = sys.argv[1:]
@@ -278,6 +294,19 @@ def main() -> None:
             sys.exit(1)
         if group is not None:
             _dispatch_group_command(first, argv[1:], group, group_env, dry_run)
+            return
+        # `camp launch --resume <ref>` is ref-addressed like the bookmark verbs
+        # above: the reference names the session, and the session's own recorded
+        # root names the group. A resume into a camp workspace must therefore
+        # answer from a plain shell outside every group directory, so it is
+        # dispatched here rather than falling through to the needs-group refusal
+        # — which would demand a flag the workspace flavor is defined not to need.
+        # The handler still requires an explicit --group for any root that is NOT
+        # a workspace; that boundary is its call to make, not this router's.
+        if _is_ref_addressed_launch(first, argv[1:]):
+            from .session import _cmd_launch_group_cli
+
+            _cmd_launch_group_cli(argv[1:], None, None)
             return
 
     # Delegate everything else to the spine dispatcher (fallback / non-group cmds).

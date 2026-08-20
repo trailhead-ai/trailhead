@@ -775,6 +775,29 @@ class TestNameComponentIsAddressable:
 
         assert derive_name_component(dotted, [_group("alpha")], env=_env(state)) == "my-project"
 
+    def test_a_candidates_derived_name_is_folded_too(self, tmp_path: Path) -> None:
+        """The listing's name and the engine's tmux name are the same string.
+
+        A candidate whose name carries a character tmux reads as a target
+        separator can be offered for recovery and then never addressed again.
+        """
+        from camp.launch.recovery import Resolved, resolve_session_ref
+
+        state = tmp_path / "state"
+        dotted = tmp_path / "code" / "my.project"
+        dotted.mkdir(parents=True)
+
+        result = resolve_session_ref(
+            _UUID_A,
+            transcripts=[_transcript(_UUID_A, dotted)],
+            live_records=[],
+            groups=[_group("alpha")],
+            env=_env(state),
+        )
+
+        assert isinstance(result, Resolved)
+        assert result.candidate.derived_name == f"camp-my-project-{_UUID_A[:8]}"
+
     def test_a_dotted_workspace_slug_is_folded_too(self, tmp_path: Path) -> None:
         from camp.launch.recovery import derive_name_component
 
