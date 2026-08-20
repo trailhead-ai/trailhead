@@ -1,7 +1,7 @@
 """Resolution-session state — the machine-local marker for an in-progress ``lore resolve``.
 
 ``lore resolve`` re-runs an aborted vault rebase step by step, and each step is a
-separate CLI subprocess. The marker at ``state_dir("lore")/resolve/<vault>.json``
+separate CLI subprocess. The marker at ``state_dir("lore")/resolve/<vault>-<digest>.json``
 is what carries a resolution across those steps: the ownership token ``lore
 resolve`` mints when it starts, and the judgment conflicts it parks for
 ``lore resolve take`` to settle.
@@ -30,7 +30,7 @@ import datetime as dt
 from pathlib import Path
 
 from ..vault import layers as layers_mod
-from .common import _resolve_lore_state_dir, _vault_mid_rebase
+from .common import _resolve_lore_state_dir, _vault_mid_rebase, machine_state_key
 
 #: Marker directory under ``state_dir("lore")``.
 RESOLVE_DIRNAME = "resolve"
@@ -44,17 +44,19 @@ def resolve_state_root() -> Path:
 def marker_path(vault_root: str | Path) -> Path:
     """Return the marker path for *vault_root*, confined to the marker root.
 
-    Keyed on ``Path(vault_root).name``, matching how ``locking.lock_root_for_vault``
-    already keys machine-local per-vault state. The resolved path is confined with
-    ``layers.assert_within_root`` — the same guard ``vault delete --remove-from-disk``
-    applies before it touches a configured path — so a symlink planted at the
-    marker's name cannot redirect a write outside the marker root.
+    Keyed on ``common.machine_state_key`` — the vault's basename plus a digest of
+    its resolved absolute path — so two configured vaults sharing a final path
+    component keep separate markers instead of overwriting each other's parked
+    conflicts. The resulting path is confined with ``layers.assert_within_root``,
+    the same guard ``vault delete --remove-from-disk`` applies before it touches a
+    configured path, so a symlink planted at the marker's name cannot redirect a
+    write outside the marker root.
 
     Raises:
         layers.LayerConfinementError: if the marker path escapes the marker root.
     """
     root = resolve_state_root()
-    candidate = root / f"{Path(vault_root).name}.json"
+    candidate = root / f"{machine_state_key(vault_root)}.json"
     layers_mod.assert_within_root(candidate, root)
     return candidate
 

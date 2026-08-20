@@ -116,7 +116,30 @@ def test_marker_lives_under_the_lore_state_dir(tmp_path, resolve_state, monkeypa
     state = tmp_path / "state"
     monkeypatch.setenv("XDG_STATE_HOME", str(state))
     vault = _init_vault(tmp_path / "vault")
-    assert resolve_state.marker_path(vault) == state / "lore" / "resolve" / "vault.json"
+    root = state / "lore" / "resolve"
+    assert resolve_state.marker_path(vault).parent == root
+    assert resolve_state.marker_path(vault).name.endswith(".json")
+
+
+def test_marker_path_distinguishes_vaults_sharing_a_basename(tmp_path, resolve_state, monkeypatch):
+    """Two configured vaults can share a final path component — the key must not.
+
+    Keyed on the basename alone, ``…/a/vault`` and ``…/b/vault`` write the same
+    marker: one resolution's parked conflicts silently overwrite the other's, and
+    a later ``lore resolve take`` reads the wrong vault's map.
+    """
+    state = tmp_path / "state"
+    monkeypatch.setenv("XDG_STATE_HOME", str(state))
+    first = _init_vault(tmp_path / "a" / "vault")
+    second = _init_vault(tmp_path / "b" / "vault")
+
+    assert resolve_state.marker_path(first) != resolve_state.marker_path(second)
+    # The basename survives in the name, so an operator can still read the file.
+    assert resolve_state.marker_path(first).name.startswith("vault-")
+    # And the key is stable across calls and spellings of the same vault.
+    assert resolve_state.marker_path(first) == resolve_state.marker_path(
+        tmp_path / "a" / "." / "vault"
+    )
 
 
 def test_marker_path_refuses_a_symlink_escape(tmp_path, resolve_state, monkeypatch):
@@ -130,7 +153,7 @@ def test_marker_path_refuses_a_symlink_escape(tmp_path, resolve_state, monkeypat
     root.mkdir(parents=True)
     outside = tmp_path / "elsewhere.json"
     outside.write_text("{}")
-    (root / "vault.json").symlink_to(outside)
+    (root / resolve_state.marker_path(vault).name).symlink_to(outside)
 
     with pytest.raises(layers_mod.LayerConfinementError):
         resolve_state.marker_path(vault)

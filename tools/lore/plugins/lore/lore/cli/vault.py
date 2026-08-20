@@ -426,7 +426,16 @@ def _cmd_vault_reformat(args) -> int:
     Refuses on an unreadable config rather than reformatting a partial vault set
     (same posture as ``sync``/``flush``). Exit 0 otherwise — a skipped malformed
     sidecar is reported, not a failure.
+
+    A vault mid-``lore resolve`` is skipped, not reformatted: rewriting clean
+    sidecars underneath an in-progress rebase drops uncommitted churn into a tree
+    the operator is still settling conflicts in. The fence is per vault rather
+    than whole-command — reformat is inherently multi-vault, and one stuck vault
+    must not hold the migration of every other one hostage — and it reuses
+    ``resolve_state``'s refusal wording so it reads identically to the fence on
+    ``record create`` / ``record update`` / ``flush``.
     """
+    from . import resolve_state as resolve_state_mod
     from .common import _resolve_all_vaults_strict
 
     targets = _resolve_all_vaults_strict("reformat")
@@ -436,6 +445,10 @@ def _cmd_vault_reformat(args) -> int:
     for name, path in targets:
         if not path.is_dir():
             print(f"{name}: vault directory not found ({path}) — skipped")
+            continue
+        if resolve_state_mod.vault_is_resolving(path):
+            print(resolve_state_mod.refusal_notice(path, "reformat"), file=sys.stderr)
+            print(f"{name}: mid-resolution — skipped")
             continue
         rewritten, already, skipped = _reformat_one(path)
         line = f"{name}: {rewritten} rewritten, {already} already canonical"

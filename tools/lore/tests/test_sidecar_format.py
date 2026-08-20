@@ -26,7 +26,7 @@ import sys
 import time
 from pathlib import Path
 
-from conftest import load_script, make_vault, run_cli
+from conftest import load_script, make_vault, run_cli, write_vault_config
 
 REPO_ROOT = Path(__file__).parent.parent
 SESSION_ID = "3f2504e0-4f89-11d3-9a0c-0305e82c3301"
@@ -349,6 +349,89 @@ def test_reformat_leaves_the_sites_tree_alone(tmp_path):
 
     assert run_cli(["vault", "reformat"], vault=vault, state_dir=state).returncode == 0
     assert (site / "data.json").read_text() == payload
+
+
+def _strand_mid_rebase(vault: Path) -> None:
+    """Leave *vault* genuinely stopped mid-rebase on a README conflict."""
+    def git(*args):
+        return subprocess.run(
+            ["git", "-C", str(vault), *args], capture_output=True, text=True
+        )
+
+    subprocess.run(["git", "init", str(vault)], check=True, capture_output=True)
+    for key, val in (("user.email", "t@e.st"), ("user.name", "Test"),
+                     ("commit.gpgsign", "false")):
+        git("config", key, val)
+    (vault / "README.md").write_text("base\n")
+    git("add", "-A")
+    git("commit", "-m", "init")
+    base = git("rev-parse", "HEAD").stdout.strip()
+    upstream = git("rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
+    (vault / "README.md").write_text("upstream\n")
+    git("add", "-A")
+    git("commit", "-m", "upstream")
+    git("checkout", "-b", "local", base)
+    (vault / "README.md").write_text("local\n")
+    git("add", "-A")
+    git("commit", "-m", "local")
+    rc = git("rebase", upstream)
+    assert rc.returncode != 0, "the fixture must actually conflict"
+    assert _mid_rebase(vault), "the vault must be stranded mid-rebase"
+
+
+def _mid_rebase(vault: Path) -> bool:
+    return (vault / ".git" / "rebase-merge").exists() or (
+        vault / ".git" / "rebase-apply"
+    ).exists()
+
+
+def test_reformat_refuses_a_mid_resolution_vault(tmp_path):
+    """Reformat is a tree mutation and must respect the resolution fence.
+
+    Rewriting already-clean sidecars mid-``lore resolve`` drops uncommitted,
+    unstaged churn into a tree the operator is still settling conflicts in — the
+    exact hazard ``record create``/``record update``/``flush`` refuse for.
+    """
+    vault, state = _seeded_vault(tmp_path)
+    _compact_all(vault)
+    before = {p: p.read_bytes() for p in vault.glob("*/*.json")}
+    _strand_mid_rebase(vault)
+
+    r = run_cli(["vault", "reformat"], vault=vault, state_dir=state)
+    assert r.returncode == 0, r.stderr
+    assert "mid-resolution" in r.stderr, r.stderr
+    assert f"lore resolve {vault.name}" in r.stderr, r.stderr
+    for path, raw in before.items():
+        assert path.read_bytes() == raw, f"{path} was rewritten mid-resolution"
+    assert _mid_rebase(vault), "reformat must not disturb the in-progress rebase"
+
+
+def test_reformat_still_reformats_the_vaults_that_are_not_resolving(tmp_path):
+    """The fence is per vault: reformat is inherently multi-vault, so a stuck
+    vault is skipped with a notice while every other vault is still migrated."""
+    sidecar_mod = _sidecar_mod()
+    stuck, state = _seeded_vault(tmp_path / "stuck-side")
+    _compact_all(stuck)
+    _strand_mid_rebase(stuck)
+    stuck_before = {p: p.read_bytes() for p in stuck.glob("*/*.json")}
+    healthy, _ = _seeded_vault(tmp_path / "healthy-side")
+    _compact_all(healthy)
+
+    config_home = tmp_path / "config"
+    write_vault_config(
+        config_home, [("stuck", "product", stuck), ("default", "default", healthy)]
+    )
+    r = run_cli(
+        ["vault", "reformat"], vault=healthy, state_dir=state,
+        env_extra={"XDG_CONFIG_HOME": str(config_home)},
+    )
+    assert r.returncode == 0, r.stderr
+    assert "mid-resolution" in r.stderr, r.stderr
+    for path in healthy.glob("*/*.json"):
+        raw = path.read_text()
+        assert raw == sidecar_mod.dumps(json.loads(raw)), path
+    for path, raw in stuck_before.items():
+        assert path.read_bytes() == raw, f"{path} was rewritten mid-resolution"
 
 
 # ---------------------------------------------------------------------------

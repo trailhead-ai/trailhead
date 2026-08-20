@@ -28,12 +28,24 @@ not every collision: ``status`` and ``title`` serialize onto adjacent lines, so
 two disjoint field edits still conflict as *text*. The field-wise merge is
 exactly what makes that class silent.
 
-**Every byte this module lands is written through the record write path** —
+**Every record this module settles is written through the record write path** —
 ``record.store.validate_stamp_neutralize`` plus the graph guards — never staged
 from a raw ``git show :N:`` blob. Content arriving over git is untrusted input:
 a fence token in a remote body must be neutralized identically to a local
 ``record update`` of the same text, and a sidecar that would not validate must
 not become a commit just because it arrived through a rebase.
+
+**That guarantee covers the CONFLICTING subset, not the whole rebase.** The only
+paths this module ever sees are the ones ``git ls-files -u`` reports — those git
+could not auto-merge. A record touched on ONE side only, which is the common
+case, is landed by ``git rebase``'s own merge machinery: its bytes reach the tree
+and the commit without passing through ``validate_stamp_neutralize`` or the graph
+guards at all. Read the paragraph above as scoped to conflicts, never as "every
+byte a resolution commits was validated on this device" — closing that gap means
+neutralizing the whole rebased tree, which nothing here does. ``lore resolve
+take-file`` is the second, deliberate exception: a ``sites/`` file is not a
+record, so it is settled by writing the chosen side's raw blob into place, fenced
+to that one tree by ``_assert_free_write_zone``.
 
 **A body conflict is never auto-merged.** Prose is judgment by definition, so a
 conflicted ``.md`` parks as slot ``body``. Conflicts under the vault's top-level

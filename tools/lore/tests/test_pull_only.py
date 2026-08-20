@@ -126,7 +126,24 @@ def _one_vault(tmp_path: Path, *, dirty: bool = False):
 
 
 def _fetch_stamp(state_dir: Path, vault: Path) -> Path:
-    return state_dir / "lore" / "fetch" / vault.name
+    common = load_script("lore.cli.common")
+    return state_dir / "lore" / "fetch" / common.machine_state_key(vault)
+
+
+def test_fetch_stamp_distinguishes_vaults_sharing_a_basename(tmp_path, monkeypatch):
+    """Two configured vaults can share a final path component — the stamp must not.
+
+    Keyed on the basename alone, ``…/a/vault`` and ``…/b/vault`` share one stamp:
+    a fetch against either suppresses the implicit pull of the other for the whole
+    freshness window, so one vault silently stops pulling.
+    """
+    sync = load_script("lore.cli.sync")
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    first = tmp_path / "a" / "vault"
+    second = tmp_path / "b" / "vault"
+
+    assert sync.fetch_stamp_path(first) != sync.fetch_stamp_path(second)
+    assert sync.fetch_stamp_path(first).name.startswith("vault-")
 
 
 # ── lore sync --pull-only ──────────────────────────────────────────────────
@@ -384,11 +401,12 @@ def test_implicit_pull_never_raises_even_when_the_freshness_check_itself_fails()
     """The advisory contract holds for the WHOLE function, not just the pull.
 
     ``fetch_stamp_path`` confines its candidate under the stamp root via
-    ``layers.assert_within_root`` and raises ``LayerConfinementError`` — not
-    ``OSError`` — when it doesn't fit. A vault root whose basename resolves
-    outside the stamp root (``"/foo/.."`` -> basename ``".."``) triggers that
-    raise from inside the freshness check, before any pull is attempted. A
-    write path calling ``implicit_pull`` must never see that exception either.
+    ``layers.assert_within_root``, which raises ``LayerConfinementError`` — not
+    ``OSError`` — when it doesn't fit, and it does so from inside the freshness
+    check, before any pull is attempted. A nonsensical vault root such as
+    ``"/foo/.."`` exercises that whole prelude on a path that does not exist. A
+    write path calling ``implicit_pull`` must come back quietly regardless — no
+    exception of any class escapes, whatever the freshness check hits.
     """
     sync = load_script("lore.cli.sync")
 

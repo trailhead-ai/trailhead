@@ -105,6 +105,7 @@ from .common import (
     _vault_mid_rebase,
     _vault_unpushed,
     _vault_upstream_ref,
+    machine_state_key,
 )
 
 DEFAULT_SYNC_MSG = "lore: sync vault"
@@ -523,10 +524,12 @@ def fetch_stamp_root() -> Path:
 def fetch_stamp_path(vault_root: str | Path) -> Path:
     """Return the freshness stamp for *vault_root*, confined to the stamp root.
 
-    Keyed on ``Path(vault_root).name`` and confined with
+    Keyed on ``common.machine_state_key`` and confined with
     ``layers.assert_within_root`` — the same shape ``cli.resolve_state.marker_path``
-    uses for its own machine-local per-vault file, so a symlink planted at the
-    stamp's name cannot redirect the write outside the stamp root.
+    uses for its own machine-local per-vault file. The digest keeps two vaults
+    sharing a basename on separate stamps, so a fetch against one never suppresses
+    the other's implicit pull; the confinement check keeps a symlink planted at the
+    stamp's name from redirecting the write outside the stamp root.
 
     Raises:
         layers.LayerConfinementError: if the stamp path escapes the stamp root.
@@ -534,7 +537,7 @@ def fetch_stamp_path(vault_root: str | Path) -> Path:
     from ..vault import layers as layers_mod
 
     root = fetch_stamp_root()
-    candidate = root / Path(vault_root).name
+    candidate = root / machine_state_key(vault_root)
     layers_mod.assert_within_root(candidate, root)
     return candidate
 

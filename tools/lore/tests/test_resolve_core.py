@@ -128,6 +128,12 @@ class _Fixture:
         os.environ["XDG_STATE_HOME"] = str(self.state)
         return state.read_marker(self.vault)
 
+    def marker_file(self) -> Path:
+        """The marker's path on disk, keyed exactly as the CLI keys it."""
+        state = load_script("lore.cli.resolve_state")
+        os.environ["XDG_STATE_HOME"] = str(self.state)
+        return state.marker_path(self.vault)
+
 
 @pytest.fixture
 def resolve():

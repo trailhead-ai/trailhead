@@ -8,6 +8,8 @@ the command modules stay free of cross-imports for generic plumbing:
   - the config/state path resolvers (``_resolve_config_path`` and friends), which
     lazy-import ``_bootstrap`` + ``trailhead.paths`` and fall back to the XDG
     default so the CLI works in a vanilla checkout;
+  - ``machine_state_key`` — the collision-free filename stem every machine-local
+    per-vault file under that state dir is keyed on;
   - ``_load_vault_config`` — the single gate for config-driven behavior;
   - ``_resolve_all_vaults`` — the whole-install vault enumeration used by ``sync``
     and ``status``, as opposed to ``resolve_active_vault``'s ``default``-only view,
@@ -22,6 +24,7 @@ the command modules stay free of cross-imports for generic plumbing:
 """
 from __future__ import annotations
 
+import hashlib
 import os
 import select
 import subprocess
@@ -113,6 +116,33 @@ def _resolve_vaults_root() -> Path:
     return _resolve_xdg_dir(
         kind="state", xdg_var="XDG_STATE_HOME", fallback_base=(".local", "state"), suffix=("vaults",)
     )
+
+
+#: Hex digits of the resolved-path digest carried in a machine-local state
+#: filename. Twelve is far more than enough to separate the handful of vaults one
+#: machine configures, while keeping the name short enough to read.
+_STATE_KEY_DIGEST_LEN = 12
+
+
+def machine_state_key(vault_root: str | Path) -> str:
+    """Return the filename stem keying machine-local per-vault state on *vault_root*.
+
+    ``<basename>-<digest>``, where the digest is a truncated SHA-256 of the
+    vault's RESOLVED absolute path. The basename alone is not unique: two
+    configured vaults whose directories share a final component (``…/a/vault``
+    and ``…/b/vault``, two clones each named ``team-notes``) would key the same
+    file and silently overwrite each other's state. The basename survives as the
+    human-readable half so an operator can still tell whose file is whose; the
+    digest supplies the uniqueness.
+
+    Resolving first also makes the key stable across equivalent spellings of the
+    same vault, and leaves nothing path-like in the stem — but confinement is
+    still the caller's job via ``layers.assert_within_root``, which is what
+    catches a symlink planted at the resulting name.
+    """
+    resolved = Path(vault_root).expanduser().resolve()
+    digest = hashlib.sha256(str(resolved).encode("utf-8")).hexdigest()
+    return f"{resolved.name or 'vault'}-{digest[:_STATE_KEY_DIGEST_LEN]}"
 
 
 def _resolve_lore_state_dir() -> Path:

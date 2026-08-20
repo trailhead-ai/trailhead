@@ -404,7 +404,7 @@ def test_a_crash_between_steps_re_derives_the_same_pending_conflicts(tmp_path):
 
     # The crash: the process died after `rebase --continue` stopped at step two,
     # before anything recorded it.
-    state = fx.state / "lore" / "resolve" / f"{fx.vault.name}.json"
+    state = fx.marker_file()
     assert state.exists()
     state.unlink()
 
