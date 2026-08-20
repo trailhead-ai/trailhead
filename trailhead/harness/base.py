@@ -357,12 +357,27 @@ class Harness(ABC):
     # together or not at all. A half-implemented harness is worse than an
     # unimplemented one: it advertises a capability it cannot actually honor.
 
-    def session_launch(self, workspace: Path, session_id: str) -> list[str] | None:
+    def session_launch(
+        self,
+        workspace: Path,
+        session_id: str,
+        *,
+        session_name: str | None = None,
+    ) -> list[str] | None:
         """DIVERGES: raises :class:`HarnessError` on a malformed ``session_id``, where
         ``session_resume`` returns ``None`` for the same input.
 
         Returns the argv that starts a brand-new session, or ``None`` if the
         harness cannot launch sessions at all.
+
+        ``session_name`` is the caller's requested human-visible name for the
+        session — the label a harness's own client surfaces (a companion app,
+        a web UI) display for it. It is a hint: a harness with no nameable
+        sessions ignores it, and ``None`` means the caller has no preference,
+        leaving the harness's own default naming in effect. A concrete
+        override that honors it must validate it as an inert argv token with
+        the same rigor as ``session_id`` and raise :class:`HarnessError` on a
+        malformed value rather than passing it through.
 
         The divergence above is from the ``None``-on-malformed-input
         convention used elsewhere in this module. A consumer who learned "check for ``None``, else
