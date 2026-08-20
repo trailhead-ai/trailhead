@@ -446,8 +446,26 @@ def test_readme_states_one_record_per_meeting_and_the_redaction_gate():
 
 
 def test_readme_points_at_lore_record_for_the_full_recipe():
+    """Scoped to the transcript sub-bullets this slice introduced, not the
+    whole file — the README already points at /lore:record elsewhere for
+    unrelated skills, so an unscoped search would pass even if the
+    transcript prose dropped its own pointer."""
     text = _readme_text()
-    assert "/lore:record" in text
+    window = 300
+
+    what_lore_captures = text.find("meeting or call transcript")
+    assert what_lore_captures != -1
+    assert (
+        "/lore:record"
+        in text[what_lore_captures : what_lore_captures + window]
+    )
+
+    blob_kind_bullet = text.find("meeting/call transcript")
+    assert blob_kind_bullet != -1
+    assert (
+        "/lore:record"
+        in text[blob_kind_bullet : blob_kind_bullet + window]
+    )
 
 
 def test_readme_does_not_duplicate_the_import_recipe():
