@@ -7,8 +7,9 @@ camp's own code:
 - a `FakeHarness` registered into trailhead's harness registry from a
   `sitecustomize.py` on PYTHONPATH, selected by `[harness] binary = "fakeharness"`
   in the group config. Its `session_launch` argv ends in the session id and its
-  `session_enumerate` argv `cat`s a file, so enumeration is a real subprocess
-  reading real state.
+  `session_enumerate` argv filters a file by the scope it was handed, so
+  enumeration is a real subprocess reading real state and honoring the seam's
+  subtree scoping.
 - a `tmux` stub earlier on PATH that appends the launched session id to that same
   file — so a launch really does become visible to a really-executed enumeration,
   and suppressing the append (CAMP_FAKE_TMUX_NO_REGISTER) reproduces the
@@ -38,7 +39,20 @@ Test contract:
   bookmarks.
 - camp sessions: empty → empty stdout, exit 0; degraded (enumeration error /
   missing enumerate binary / unknown harness) → stderr notice, empty stdout list,
-  exit 0; --json carries only normalized SessionRecord fields.
+  exit 0; --json carries only normalized SessionRecord fields. The default and
+  slug-scoped forms are pinned byte-for-byte, so widening the verb cannot
+  perturb what an existing caller parses. `--dir <path>` scopes the live listing
+  to a directory subtree.
+- camp sessions --recoverable: dead = enumerated transcripts − live, scoped by
+  the same argument on both sides (a session in a SUBDIRECTORY of the scope is
+  in scope). An undeterminable live set degrades to a notice and an EMPTY list,
+  never an unsubtracted pool. A torn-down root is listed and marked, and a
+  transcript with no extractable cwd is listed as a uuid-and-age row. Capped at
+  the newest 20 with the total named; --limit/--all widen it and an unusable
+  --limit refuses. An empty result names itself, distinctly from the refusal a
+  harness that keeps no transcripts gets. --json rows carry EXACTLY six keys,
+  never the live form's harness-native `name`. Ordering is newest-first with a
+  uuid tiebreak, and the scan's cost does not grow with transcript size.
 - camp new --launch: stdout is the workspace path alone on BOTH success and
   launch failure, exit 0 in both; --json replaces that with
   {"workspace", "session_id", "tmux_name"} /
@@ -66,12 +80,35 @@ _CLI_CAMP = _PLUGIN_DIR / "cli" / "camp"
 _SITECUSTOMIZE = '''
 """Registers a fake harness so a camp CLI subprocess can launch and enumerate."""
 import os
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 import trailhead.harness as _registry
 from trailhead.harness.base import SessionRecord
 from trailhead.harness.claude_code import ClaudeCodeHarness
+
+#: The enumeration subprocess. Prints the registered session rows, honoring the
+#: seam's subtree scoping (a row is in scope when its cwd is EQUAL TO or UNDER
+#: the scope path, on resolved paths) so the fake answers a scoped enumeration
+#: the way the contract says a harness must.
+_ENUMERATE_FILTER = """
+import sys
+from pathlib import Path
+
+rows_path = sys.argv[1]
+scope = sys.argv[2]
+scope_path = Path(scope).resolve() if scope else None
+for line in Path(rows_path).read_text().splitlines():
+    if not line.strip():
+        continue
+    session_id, cwd = line.split("\\t", 1)
+    if scope_path is not None:
+        resolved = Path(cwd).resolve()
+        if resolved != scope_path and scope_path not in resolved.parents:
+            continue
+    print(line)
+"""
 
 
 class FakeHarness(ClaudeCodeHarness):
@@ -106,7 +143,13 @@ class FakeHarness(ClaudeCodeHarness):
             return ["false"]
         if mode == "missing":
             return ["camp-fake-absent-binary"]
-        return ["cat", os.environ["CAMP_FAKE_SESSIONS_FILE"]]
+        return [
+            sys.executable,
+            "-c",
+            _ENUMERATE_FILTER,
+            os.environ["CAMP_FAKE_SESSIONS_FILE"],
+            str(workspace) if workspace is not None else "",
+        ]
 
     def parse_session_list(self, output):
         records = []
@@ -1166,6 +1209,38 @@ def test_camp_resume_the_bookmark_verb_is_untouched_by_the_launch_flavor(
 # ---------------------------------------------------------------------------
 
 
+def test_camp_sessions_default_output_is_byte_identical(cli_env) -> None:
+    """Regression pin: the live listing's bytes, global form.
+
+    Written against the surface as it stands so that widening `camp sessions`
+    with new flags cannot perturb the answer an existing caller already parses.
+    """
+    launch_dir = _workspace_launch_dir(cli_env, "feat-pin")
+    launched = _camp(cli_env, "launch", "feat-pin", "--group", "mygroup")
+    assert launched.returncode == 0, launched.stderr
+    session_id = launched.stdout.strip()
+
+    result = _camp(cli_env, "sessions", "--group", "mygroup")
+
+    assert result.returncode == 0
+    assert result.stdout == f"{session_id}  agent  {launch_dir}\n"
+    assert result.stderr == ""
+
+
+def test_camp_sessions_slug_scoped_output_is_byte_identical(cli_env) -> None:
+    """Regression pin: the live listing's bytes, workspace-scoped form."""
+    launch_dir = _workspace_launch_dir(cli_env, "feat-pin")
+    launched = _camp(cli_env, "launch", "feat-pin", "--group", "mygroup")
+    assert launched.returncode == 0, launched.stderr
+    session_id = launched.stdout.strip()
+
+    result = _camp(cli_env, "sessions", "feat-pin", "--group", "mygroup")
+
+    assert result.returncode == 0
+    assert result.stdout == f"{session_id}  agent  {launch_dir}\n"
+    assert result.stderr == ""
+
+
 def test_camp_sessions_empty_prints_nothing_and_exits_zero(cli_env) -> None:
     result = _camp(cli_env, "sessions", "--group", "mygroup")
 
@@ -1238,6 +1313,569 @@ def test_camp_sessions_unknown_harness_degrades(cli_env) -> None:
     assert result.returncode == 0, result.stderr
     assert result.stdout == ""
     assert "camp sessions: could not determine" in result.stderr
+
+
+# ---------------------------------------------------------------------------
+# camp sessions --recoverable / --dir
+# ---------------------------------------------------------------------------
+
+#: The six keys a recoverable `--json` row carries, and the whole of them. Held
+#: as a literal set so a key that is added, dropped, or renamed fails the
+#: comparison — a listing whose invocation still works while its output shape
+#: has drifted is exactly the failure a verb-and-flag check does not catch.
+_RECOVERABLE_ROW_KEYS = {
+    "session_id",
+    "tmux_name",
+    "root",
+    "age_seconds",
+    "root_missing",
+    "unreadable",
+}
+
+
+def _assert_recoverable_row_keys(row: dict) -> None:
+    """Assert *row* carries EXACTLY the recoverable row keys, and no more."""
+    assert set(row) == _RECOVERABLE_ROW_KEYS, sorted(row)
+
+
+def _rows(result) -> list[str]:
+    """The non-blank stdout lines of a listing."""
+    return [line for line in result.stdout.splitlines() if line.strip()]
+
+
+def _recoverable(cli_env, *args, extra_env=None, cwd=None):
+    """Run `camp sessions --recoverable` in the group under test."""
+    return _camp(
+        cli_env,
+        "sessions",
+        "--recoverable",
+        *args,
+        "--group",
+        "mygroup",
+        extra_env=extra_env,
+        cwd=cwd if cwd is not None else cli_env["tmp_path"],
+    )
+
+
+def _assert_sessions_refusal(result, *, needle: str) -> None:
+    """One `camp sessions: ` stderr line, empty stdout, non-zero exit."""
+    assert result.returncode != 0, result.stdout
+    assert result.stdout == ""
+    lines = [line for line in result.stderr.strip().splitlines() if line.strip()]
+    assert len(lines) == 1, result.stderr
+    assert lines[0].startswith("camp sessions: "), lines[0]
+    assert needle in lines[0], lines[0]
+
+
+def test_camp_sessions_recoverable_lists_the_dead_ones_newest_first(cli_env) -> None:
+    """dead = enumerated − live, and the live one is the one that is missing."""
+    third = "cccccccc-3333-4333-8333-333333333333"
+    roots = {}
+    for session_id, age in ((_UUID_A, 30.0), (_UUID_B, 90.0), (third, 60.0)):
+        root = cli_env["tmp_path"] / f"proj-{session_id[:8]}"
+        root.mkdir()
+        roots[session_id] = root
+        _seed_transcript(cli_env, session_id, root, age_seconds=age)
+    _register_live(cli_env, third, roots[third])
+    before = _state_tree(cli_env)
+
+    result = _recoverable(cli_env)
+
+    assert result.returncode == 0, result.stderr
+    rows = _rows(result)
+    assert len(rows) == 2, result.stdout
+    assert _UUID_A in rows[0]
+    assert _UUID_B in rows[1]
+    assert third not in result.stdout
+    assert _state_tree(cli_env) == before
+
+
+def test_camp_sessions_recoverable_omits_a_live_session_absent_from_the_store(
+    cli_env,
+) -> None:
+    """The other half of the subtraction: a live id with no transcript is not dead."""
+    root = cli_env["tmp_path"] / "proj-a"
+    root.mkdir()
+    _seed_transcript(cli_env, _UUID_A, root)
+    _register_live(cli_env, _UUID_B, root)
+    before = _state_tree(cli_env)
+
+    result = _recoverable(cli_env)
+
+    assert result.returncode == 0, result.stderr
+    assert len(_rows(result)) == 1
+    assert _UUID_A in result.stdout
+    assert _UUID_B not in result.stdout
+    assert _state_tree(cli_env) == before
+
+
+def test_camp_sessions_recoverable_scopes_to_the_workspace_subtree(cli_env) -> None:
+    """Subtree, not exact: a session in a SUBDIRECTORY of the workspace is in scope.
+
+    This is the pin that stops the two halves of the subtraction disagreeing —
+    an exact-match scope on one side and a prefix scope on the other would list
+    a live session as dead.
+    """
+    workspace = _workspace_launch_dir(cli_env, "feat-scope")
+    nested = workspace / "member" / "src"
+    nested.mkdir(parents=True)
+    outside = cli_env["tmp_path"] / "elsewhere"
+    outside.mkdir()
+    _seed_transcript(cli_env, _UUID_A, nested, age_seconds=30.0)
+    _seed_transcript(cli_env, _UUID_B, outside, age_seconds=60.0)
+    before = _settled_state_tree(cli_env)
+
+    result = _camp(
+        cli_env, "sessions", "--recoverable", "feat-scope", "--group", "mygroup",
+        cwd=cli_env["tmp_path"],
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert len(_rows(result)) == 1, result.stdout
+    assert _UUID_A in result.stdout
+    assert _UUID_B not in result.stdout
+    assert _state_tree(cli_env) == before
+
+
+def test_camp_sessions_recoverable_dir_scopes_the_same_way(cli_env) -> None:
+    scope = cli_env["tmp_path"] / "scoped"
+    nested = scope / "deep" / "deeper"
+    nested.mkdir(parents=True)
+    outside = cli_env["tmp_path"] / "unscoped"
+    outside.mkdir()
+    _seed_transcript(cli_env, _UUID_A, nested, age_seconds=30.0)
+    _seed_transcript(cli_env, _UUID_B, outside, age_seconds=60.0)
+    before = _state_tree(cli_env)
+
+    result = _recoverable(cli_env, "--dir", str(scope))
+
+    assert result.returncode == 0, result.stderr
+    assert len(_rows(result)) == 1, result.stdout
+    assert _UUID_A in result.stdout
+    assert _UUID_B not in result.stdout
+    assert _state_tree(cli_env) == before
+
+
+def test_camp_sessions_dir_scopes_the_live_listing(cli_env) -> None:
+    """`--dir` on the LIVE form scopes it the same way, so both halves agree."""
+    scope = cli_env["tmp_path"] / "livescope"
+    nested = scope / "member"
+    nested.mkdir(parents=True)
+    outside = cli_env["tmp_path"] / "liveelsewhere"
+    outside.mkdir()
+    _register_live(cli_env, _UUID_A, nested)
+    _register_live(cli_env, _UUID_B, outside)
+    before = _state_tree(cli_env)
+
+    result = _camp(
+        cli_env, "sessions", "--dir", str(scope), "--group", "mygroup",
+        cwd=cli_env["tmp_path"],
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert len(_rows(result)) == 1, result.stdout
+    assert _UUID_A in result.stdout
+    assert _UUID_B not in result.stdout
+    assert _state_tree(cli_env) == before
+
+
+def test_camp_sessions_recoverable_undeterminable_live_set_degrades_to_empty(
+    cli_env,
+) -> None:
+    """Never an unsubtracted pool presented as dead — a notice and nothing else."""
+    root = cli_env["tmp_path"] / "proj-a"
+    root.mkdir()
+    _seed_transcript(cli_env, _UUID_A, root)
+    _seed_transcript(cli_env, _UUID_B, root)
+    before = _state_tree(cli_env)
+
+    result = _recoverable(cli_env, extra_env={"CAMP_FAKE_ENUMERATE": "fail"})
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == ""
+    assert _UUID_A not in result.stdout
+    assert _UUID_B not in result.stdout
+    assert "camp sessions: could not determine" in result.stderr
+    assert "no recoverable sessions" not in result.stderr
+    assert _state_tree(cli_env) == before
+
+
+def test_camp_sessions_recoverable_degraded_json_is_an_empty_list(cli_env) -> None:
+    root = cli_env["tmp_path"] / "proj-a"
+    root.mkdir()
+    _seed_transcript(cli_env, _UUID_A, root)
+    before = _state_tree(cli_env)
+
+    result = _recoverable(cli_env, "--json", extra_env={"CAMP_FAKE_ENUMERATE": "fail"})
+
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == []
+    assert "camp sessions: could not determine" in result.stderr
+    assert _state_tree(cli_env) == before
+
+
+def test_camp_sessions_recoverable_marks_a_root_that_no_longer_exists(cli_env) -> None:
+    """A torn-down root is listed and MARKED, never hidden."""
+    gone = cli_env["tmp_path"] / "torn-down"
+    _seed_transcript(cli_env, _UUID_A, gone)
+    before = _state_tree(cli_env)
+
+    human = _recoverable(cli_env)
+    payload = json.loads(_recoverable(cli_env, "--json").stdout)
+
+    assert human.returncode == 0, human.stderr
+    rows = _rows(human)
+    assert len(rows) == 1
+    assert str(gone) in rows[0]
+    assert "(gone)" in rows[0]
+    assert len(payload) == 1
+    assert payload[0]["root"] == str(gone)
+    assert payload[0]["root_missing"] is True
+    assert payload[0]["unreadable"] is False
+    assert _state_tree(cli_env) == before
+
+
+def test_camp_sessions_recoverable_lists_an_unreadable_transcript(cli_env) -> None:
+    """No extractable cwd: a uuid-and-age row, never a guessed location."""
+    _seed_transcript(cli_env, _UUID_A, None, age_seconds=120.0)
+    before = _state_tree(cli_env)
+
+    human = _recoverable(cli_env)
+    payload = json.loads(_recoverable(cli_env, "--json").stdout)
+
+    assert human.returncode == 0, human.stderr
+    rows = _rows(human)
+    assert len(rows) == 1
+    assert _UUID_A in rows[0]
+    assert "2m" in rows[0]
+    assert len(payload) == 1
+    assert payload[0]["unreadable"] is True
+    assert payload[0]["root"] is None
+    assert payload[0]["root_missing"] is False
+    assert payload[0]["tmux_name"] == f"camp-{_UUID_A[:8]}"
+    assert _state_tree(cli_env) == before
+
+
+def _seed_many(cli_env, count: int) -> list[str]:
+    """Seed *count* transcripts, newest first; return their ids in that order."""
+    ids = []
+    for index in range(count):
+        session_id = f"{index:08d}-1111-4111-8111-111111111111"
+        root = cli_env["tmp_path"] / "many" / f"p{index}"
+        root.mkdir(parents=True)
+        _seed_transcript(cli_env, session_id, root, age_seconds=60.0 + index)
+        ids.append(session_id)
+    return ids
+
+
+def test_camp_sessions_recoverable_caps_at_twenty_and_names_the_total(cli_env) -> None:
+    ids = _seed_many(cli_env, 25)
+    before = _state_tree(cli_env)
+
+    result = _recoverable(cli_env)
+
+    assert result.returncode == 0, result.stderr
+    rows = _rows(result)
+    assert len(rows) == 20
+    assert [row.split()[1] for row in rows] == ids[:20]
+    assert "25" in result.stderr
+    assert "--all" in result.stderr
+    assert _state_tree(cli_env) == before
+
+
+def test_camp_sessions_recoverable_limit_narrows_the_listing(cli_env) -> None:
+    ids = _seed_many(cli_env, 25)
+    before = _state_tree(cli_env)
+
+    result = _recoverable(cli_env, "--limit", "5")
+
+    assert result.returncode == 0, result.stderr
+    rows = _rows(result)
+    assert len(rows) == 5
+    assert [row.split()[1] for row in rows] == ids[:5]
+    assert _state_tree(cli_env) == before
+
+
+def test_camp_sessions_recoverable_all_lists_every_candidate(cli_env) -> None:
+    ids = _seed_many(cli_env, 25)
+    before = _state_tree(cli_env)
+
+    result = _recoverable(cli_env, "--all")
+
+    assert result.returncode == 0, result.stderr
+    rows = _rows(result)
+    assert len(rows) == 25
+    assert [row.split()[1] for row in rows] == ids
+    assert _state_tree(cli_env) == before
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "notanumber"])
+def test_camp_sessions_recoverable_unusable_limit_is_a_clean_refusal(
+    cli_env, value: str
+) -> None:
+    """A limit that cannot mean anything is a refusal, never a silently empty list."""
+    _seed_many(cli_env, 3)
+    before = _state_tree(cli_env)
+
+    result = _recoverable(cli_env, "--limit", value)
+
+    _assert_sessions_refusal(result, needle="--limit")
+    assert _state_tree(cli_env) == before
+
+
+def test_camp_sessions_recoverable_limit_and_all_together_refuse(cli_env) -> None:
+    before = _state_tree(cli_env)
+
+    result = _recoverable(cli_env, "--limit", "5", "--all")
+
+    _assert_sessions_refusal(result, needle="mutually exclusive")
+    assert _state_tree(cli_env) == before
+
+
+@pytest.mark.parametrize("flags", [("--limit", "5"), ("--all",)])
+def test_camp_sessions_cap_flags_without_recoverable_refuse(cli_env, flags) -> None:
+    """The cap belongs to the recoverable listing; the live form has no cap to widen."""
+    before = _state_tree(cli_env)
+
+    result = _camp(
+        cli_env, "sessions", *flags, "--group", "mygroup", cwd=cli_env["tmp_path"]
+    )
+
+    _assert_sessions_refusal(result, needle="--recoverable")
+    assert _state_tree(cli_env) == before
+
+
+def test_camp_sessions_recoverable_empty_names_itself_and_exits_zero(cli_env) -> None:
+    before = _state_tree(cli_env)
+
+    result = _recoverable(cli_env)
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == ""
+    assert "no recoverable sessions" in result.stderr
+    assert "keeps no session transcripts" not in result.stderr
+    assert _state_tree(cli_env) == before
+
+
+def test_camp_sessions_recoverable_json_with_no_rows_is_an_empty_list(cli_env) -> None:
+    before = _state_tree(cli_env)
+
+    result = _recoverable(cli_env, "--json")
+
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == []
+    assert _state_tree(cli_env) == before
+
+
+def test_camp_sessions_recoverable_refuses_when_the_harness_keeps_no_transcripts(
+    cli_env,
+) -> None:
+    """The one non-degrading path on a question verb, and it names the harness."""
+    before = _state_tree(cli_env)
+
+    unsupported = _recoverable(cli_env, extra_env={"CAMP_FAKE_TRANSCRIPTS": "none"})
+    empty = _recoverable(cli_env)
+
+    _assert_sessions_refusal(unsupported, needle="fakeharness")
+    assert "no recoverable sessions" not in unsupported.stderr
+    assert unsupported.stderr != empty.stderr
+    assert _state_tree(cli_env) == before
+
+
+def test_camp_sessions_recoverable_json_rows_carry_exactly_the_pinned_keys(
+    cli_env,
+) -> None:
+    root = cli_env["tmp_path"] / "proj-a"
+    root.mkdir()
+    _seed_transcript(cli_env, _UUID_A, root, age_seconds=45.0)
+    before = _state_tree(cli_env)
+
+    result = _recoverable(cli_env, "--json")
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert len(payload) == 1
+    _assert_recoverable_row_keys(payload[0])
+    # The live form's harness-native display name never reaches a caller here.
+    assert "name" not in payload[0]
+    assert payload[0]["session_id"] == _UUID_A
+    assert payload[0]["tmux_name"] == f"camp-proj-a-{_UUID_A[:8]}"
+    assert payload[0]["root"] == str(root)
+    assert payload[0]["age_seconds"] == 45
+    assert _state_tree(cli_env) == before
+
+
+def test_the_row_key_assertion_fails_on_a_renamed_key() -> None:
+    """The shape check above is only worth having if a renamed key breaks it."""
+    renamed = {key: None for key in _RECOVERABLE_ROW_KEYS}
+    renamed["name"] = renamed.pop("tmux_name")
+
+    with pytest.raises(AssertionError):
+        _assert_recoverable_row_keys(renamed)
+
+    added = {key: None for key in _RECOVERABLE_ROW_KEYS}
+    added["kind"] = "agent"
+
+    with pytest.raises(AssertionError):
+        _assert_recoverable_row_keys(added)
+
+
+def test_camp_sessions_recoverable_breaks_an_mtime_tie_by_uuid(cli_env) -> None:
+    """Two transcripts written at the same instant still order deterministically."""
+    root = cli_env["tmp_path"] / "tied"
+    root.mkdir()
+    seeded = [
+        _seed_transcript(cli_env, _UUID_B, root, age_seconds=300.0),
+        _seed_transcript(cli_env, _UUID_A, root, age_seconds=300.0),
+    ]
+    # Stamped from ONE clock reading, so the tiebreak is genuinely exercised —
+    # two `time.time()` calls differ by microseconds and would order themselves.
+    stamp = time.time() - 300.0
+    for path in seeded:
+        os.utime(path, (stamp, stamp))
+    before = _state_tree(cli_env)
+
+    result = _recoverable(cli_env, "--json")
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert [row["session_id"] for row in payload] == [_UUID_A, _UUID_B]
+    assert payload[0]["age_seconds"] == payload[1]["age_seconds"]
+    assert _state_tree(cli_env) == before
+
+
+def test_camp_sessions_recoverable_ages_are_compact_durations(cli_env) -> None:
+    """`2d`, `4h`, `9m` — readable at a glance on a phone, not raw seconds."""
+    root = cli_env["tmp_path"] / "aged"
+    root.mkdir()
+    expected = {}
+    for session_id, age, rendered in (
+        ("11111111-1111-4111-8111-111111111111", 9 * 60.0, "9m"),
+        ("22222222-2222-4222-8222-222222222222", 4 * 3600.0, "4h"),
+        ("33333333-3333-4333-8333-333333333333", 2 * 86400.0, "2d"),
+    ):
+        _seed_transcript(cli_env, session_id, root, age_seconds=age)
+        expected[session_id] = rendered
+    before = _state_tree(cli_env)
+
+    result = _recoverable(cli_env)
+
+    assert result.returncode == 0, result.stderr
+    rows = _rows(result)
+    assert len(rows) == 3
+    for row in rows:
+        session_id = row.split()[1]
+        assert row.split()[-1] == expected[session_id], row
+    assert _state_tree(cli_env) == before
+
+
+#: Transcripts in the synthetic store the scan budget is measured against.
+_SCAN_BUDGET_TRANSCRIPTS = 500
+
+#: Body lines appended to each transcript in the store's FAT form. Real
+#: transcripts run to hundreds of megabytes of short records; this many short
+#: lines reproduces that shape at roughly 400KB apiece.
+_SCAN_BUDGET_BODY_LINES = 3000
+
+#: How much longer the FAT store's listing may take than the LEAN store's. The
+#: two runs differ in exactly one thing — bytes of transcript body — so a
+#: head scan bounded to a fixed number of leading records is near-invariant
+#: across them (measured: ~10ms over ~200MB of added body) while a scan that
+#: runs to end-of-file is not (measured: ~1.7s). The allowance sits between
+#: those two by a wide margin in both directions, and because it compares two
+#: runs on the SAME machine seconds apart, a slow or loaded machine moves both
+#: halves together instead of tripping it.
+_SCAN_BODY_ALLOWANCE_SECONDS = 0.75
+
+#: Absolute ceiling on the fat-store listing, interpreter start-up included.
+#: Many times the measured cost, so it catches a gross slowdown without ever
+#: being reachable by ordinary machine variance.
+_SCAN_CEILING_SECONDS = 10.0
+
+
+def _build_scan_store(cli_env, *, body: str) -> None:
+    """Author the synthetic scan store, each transcript carrying *body* after its head.
+
+    HALF the transcripts record a `cwd` in their head and half record none. The
+    cwd-less half is the load-bearing one: a scan that finds a cwd stops there
+    whatever follows it, so only a transcript with NO cwd to find can show
+    whether the search gives up after a bounded number of records or reads to
+    end-of-file. Both halves are equally common in a real store.
+
+    A nested `<uuid>/subagents/` transcript sits beside each one, so a recursive
+    glob would double the row count.
+    """
+    projects = Path(cli_env["env"]["TRAILHEAD_CLAUDE_DIR"]) / "projects"
+    for index in range(_SCAN_BUDGET_TRANSCRIPTS):
+        session_id = f"{index:08d}-4444-4444-8444-444444444444"
+        cwd = cli_env["tmp_path"] / "bulk" / f"p{index}"
+        directory = projects / str(cwd).replace("/", "-").replace(".", "-")
+        directory.mkdir(parents=True, exist_ok=True)
+        second = (
+            {"type": "user", "cwd": str(cwd)}
+            if index % 2 == 0
+            else {"type": "user", "text": "this record carries no cwd"}
+        )
+        (directory / f"{session_id}.jsonl").write_text(
+            json.dumps({"type": "summary"}) + "\n" + json.dumps(second) + "\n" + body,
+            encoding="utf-8",
+        )
+        nested = directory / session_id / "subagents"
+        nested.mkdir(parents=True, exist_ok=True)
+        (nested / f"{index:08d}-5555-4555-8555-555555555555.jsonl").write_text(
+            json.dumps({"type": "user", "cwd": str(cwd)}) + "\n", encoding="utf-8"
+        )
+
+
+def _time_scan(cli_env) -> float:
+    """The best of two global recoverable listings, in seconds.
+
+    Best-of-two rather than a single reading: one scheduling hiccup during a
+    single run would otherwise be indistinguishable from a real regression.
+    """
+    best = None
+    for _ in range(2):
+        started = time.monotonic()
+        result = _recoverable(cli_env, "--all", "--json")
+        elapsed = time.monotonic() - started
+        assert result.returncode == 0, result.stderr
+        assert len(json.loads(result.stdout)) == _SCAN_BUDGET_TRANSCRIPTS, result.stdout
+        best = elapsed if best is None else min(best, elapsed)
+    return best
+
+
+def test_camp_sessions_recoverable_scan_stays_within_its_budget(cli_env) -> None:
+    """A silent 10x slowdown is otherwise invisible until it is felt on a phone.
+
+    Two regressions are in scope, and each has its own assertion:
+
+    * A RECURSIVE glob would sweep in the nested subagent transcripts every real
+      store is full of. Caught by the row count, with no clock involved.
+    * SEARCHING A WHOLE TRANSCRIPT for its cwd, rather than a bounded head of
+      it, would make the scan scale with transcript size. Caught by running the
+      identical listing over the identical 500 transcripts twice — once with
+      empty bodies, once with large ones — and requiring the difference to stay
+      small. The comparison is against the same machine seconds earlier, so it
+      measures the scan's dependence on body size rather than the machine's
+      speed.
+    """
+    _build_scan_store(cli_env, body="")
+    lean = _time_scan(cli_env)
+
+    body = (
+        "\n".join(
+            json.dumps({"type": "assistant", "text": "x" * 100})
+            for _ in range(_SCAN_BUDGET_BODY_LINES)
+        )
+        + "\n"
+    )
+    _build_scan_store(cli_env, body=body)
+    fat = _time_scan(cli_env)
+
+    assert fat < _SCAN_CEILING_SECONDS, f"took {fat:.2f}s"
+    assert fat - lean < _SCAN_BODY_ALLOWANCE_SECONDS, (
+        f"lean {lean:.2f}s, fat {fat:.2f}s — the scan is reading transcript bodies"
+    )
 
 
 # ---------------------------------------------------------------------------

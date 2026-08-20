@@ -805,3 +805,139 @@ class TestNameComponentIsAddressable:
         ws = _workspace(state, "alpha", "feat.x")
 
         assert derive_name_component(ws, [_group("alpha")], env=_env(state)) == "feat-x"
+
+
+# ---------------------------------------------------------------------------
+# The recoverable row builder
+# ---------------------------------------------------------------------------
+
+
+class TestRecoverableCandidates:
+    """dead = enumerated − live, as a pure function of the two pools.
+
+    The subtraction is keyed by session id and nothing else. Both pools must
+    already be scoped the same way by whoever gathered them — this function
+    cannot tell a pool that was scoped from one that was not, which is exactly
+    why it does no scoping of its own.
+    """
+
+    def test_a_live_session_is_subtracted_from_the_enumerated_pool(
+        self, tmp_path: Path
+    ) -> None:
+        from camp.launch.recovery import recoverable_candidates
+
+        state = tmp_path / "state"
+        root = tmp_path / "proj"
+        root.mkdir()
+
+        result = recoverable_candidates(
+            transcripts=[_transcript(_UUID_A, root), _transcript(_UUID_B, root)],
+            live_records=[_record(_UUID_B, root)],
+            groups=[],
+            env=_env(state),
+            now=_NOW,
+        )
+
+        assert [c.session_id for c in result] == [_UUID_A]
+        assert result[0].live is False
+
+    def test_a_live_session_with_no_transcript_is_not_a_dead_row(
+        self, tmp_path: Path
+    ) -> None:
+        """The pool is the ENUMERATED transcripts; live records only subtract."""
+        from camp.launch.recovery import recoverable_candidates
+
+        state = tmp_path / "state"
+        root = tmp_path / "proj"
+        root.mkdir()
+
+        result = recoverable_candidates(
+            transcripts=[],
+            live_records=[_record(_UUID_A, root)],
+            groups=[],
+            env=_env(state),
+            now=_NOW,
+        )
+
+        assert result == ()
+
+    def test_rows_are_newest_first_with_a_uuid_tiebreak(self, tmp_path: Path) -> None:
+        from camp.launch.recovery import recoverable_candidates
+
+        state = tmp_path / "state"
+        root = tmp_path / "proj"
+        root.mkdir()
+        tied_b = _transcript(_UUID_B, root, age_seconds=300.0)
+        tied_a = _transcript(_UUID_A, root, age_seconds=300.0)
+        newest = _transcript("00000000-0000-4000-8000-000000000000", root, age_seconds=10.0)
+
+        result = recoverable_candidates(
+            transcripts=[tied_b, tied_a, newest],
+            live_records=[],
+            groups=[],
+            env=_env(state),
+            now=_NOW,
+        )
+
+        assert [c.session_id for c in result] == [newest.session_id, _UUID_A, _UUID_B]
+
+    def test_a_session_id_seen_twice_yields_one_row(self, tmp_path: Path) -> None:
+        """Two harnesses reporting the same store must not double a row."""
+        from camp.launch.recovery import recoverable_candidates
+
+        state = tmp_path / "state"
+        root = tmp_path / "proj"
+        root.mkdir()
+
+        result = recoverable_candidates(
+            transcripts=[_transcript(_UUID_A, root), _transcript(_UUID_A, root)],
+            live_records=[],
+            groups=[],
+            env=_env(state),
+            now=_NOW,
+        )
+
+        assert [c.session_id for c in result] == [_UUID_A]
+
+    def test_a_torn_down_root_is_marked_and_an_unreadable_one_is_kept(
+        self, tmp_path: Path
+    ) -> None:
+        """Neither is ever hidden — a row the operator cannot resume is still news."""
+        from camp.launch.recovery import recoverable_candidates
+
+        state = tmp_path / "state"
+        gone = tmp_path / "torn-down"
+
+        result = recoverable_candidates(
+            transcripts=[
+                _transcript(_UUID_A, gone, age_seconds=10.0),
+                _transcript(_UUID_B, None, age_seconds=20.0),
+            ],
+            live_records=[],
+            groups=[],
+            env=_env(state),
+            now=_NOW,
+        )
+
+        assert [c.session_id for c in result] == [_UUID_A, _UUID_B]
+        assert (result[0].root_missing, result[0].unreadable) == (True, False)
+        assert (result[1].root_missing, result[1].unreadable) == (False, True)
+        assert result[1].root is None
+        assert result[1].derived_name == f"camp-{_UUID_B[:8]}"
+
+    def test_the_workspace_name_rule_applies_to_a_row(self, tmp_path: Path) -> None:
+        """A row's name is the same name a launch into that directory would mint."""
+        from camp.launch.recovery import recoverable_candidates
+
+        state = tmp_path / "state"
+        ws = _workspace(state, "alpha", "feat-x")
+
+        result = recoverable_candidates(
+            transcripts=[_transcript(_UUID_A, ws / "member")],
+            live_records=[],
+            groups=[_group("alpha")],
+            env=_env(state),
+            now=_NOW,
+        )
+
+        assert result[0].derived_name == f"camp-feat-x-{_UUID_A[:8]}"

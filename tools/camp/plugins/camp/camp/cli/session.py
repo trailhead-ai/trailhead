@@ -27,6 +27,14 @@ and lives in ``camp.launch.recovery``; everything the operator SEES about it —
 the candidate rows, the exit codes, the wording of each refusal — is here,
 because a question answered on a terminal cannot also be answered identically
 from a test or a listing.
+
+``sessions --recoverable`` is the discovery half of that flavor, and the same
+division applies: the subtraction that produces the dead sessions is pure and
+lives beside the resolver, while the cap, the row rendering, the empty-state
+line and the harness-unsupported refusal are here. Its one hard rule is that
+BOTH halves of the subtraction are scoped by the same argument — the transcript
+enumeration and the live enumeration alike — because scoping only one of them
+reports running sessions as recoverable.
 """
 
 from __future__ import annotations
@@ -55,6 +63,13 @@ RESUME_FLAG = "--resume"
 #: solvable, one-more-character problem as a failure.
 _AMBIGUOUS_EXIT_CODE = 2
 
+#: How many recoverable rows `camp sessions --recoverable` prints before it
+#: starts saying "and N more". A real transcript store is mostly sessions that
+#: have nothing to do with camp, so an uncapped global listing is unreadable on
+#: the phone this listing exists to be read from. The total is always printed
+#: alongside, and `--limit <n>` / `--all` widen it.
+_RECOVERABLE_DEFAULT_LIMIT = 20
+
 
 def _refusal(exc: Exception) -> str:
     """Re-prefix an engine refusal as a `camp launch:` line.
@@ -70,17 +85,22 @@ def _refusal(exc: Exception) -> str:
     return f"camp launch: {message}"
 
 
-def _consume_json_flag(args: list[str]) -> bool:
-    """Remove every ``--json`` from *args* in place, reporting whether one was there.
+def _consume_flag(args: list[str], flag: str) -> bool:
+    """Remove every *flag* from *args* in place, reporting whether one was there.
 
     Removal matters as much as detection: the remaining args are what slug
-    resolution reads positionally, and a leftover ``--json`` sitting at args[0]
-    would be resolved as a slug.
+    resolution reads positionally, and a leftover flag sitting at args[0] would
+    be resolved as a slug and die naming the wrong problem.
     """
-    present = "--json" in args
-    while "--json" in args:
-        args.remove("--json")
+    present = flag in args
+    while flag in args:
+        args.remove(flag)
     return present
+
+
+def _consume_json_flag(args: list[str]) -> bool:
+    """Remove every ``--json`` from *args* in place; True when one was there."""
+    return _consume_flag(args, "--json")
 
 
 def launch_and_confirm(
@@ -194,23 +214,57 @@ def _candidate_payload(candidate) -> dict:
     unchanged. ``root`` and ``age_seconds`` are ``null`` rather than absent when
     the harness could not tell camp them: a missing key and a known-absent value
     are different facts, and only the second is answerable.
+
+    ``age_seconds`` is a whole number of seconds. The sub-second component is an
+    artifact of when the listing happened to run, not a fact about the session,
+    and emitting it would make two rows written in the same instant compare
+    unequal for every consumer that reads this field.
     """
     return {
         "session_id": candidate.session_id,
         "tmux_name": candidate.derived_name,
         "root": str(candidate.root) if candidate.root is not None else None,
-        "age_seconds": candidate.age_seconds,
+        "age_seconds": (
+            int(candidate.age_seconds) if candidate.age_seconds is not None else None
+        ),
         "root_missing": candidate.root_missing,
         "unreadable": candidate.unreadable,
     }
 
 
+def _format_age(seconds: float | None) -> str:
+    """A candidate's age as one compact, coarse duration — ``2d``, ``4h``, ``9m``.
+
+    Coarse on purpose. These rows are read on a phone to answer "which of these
+    is the one I was in", and a single unit at the largest scale that still has
+    a whole number answers that in fewer characters than a precise duration
+    would. ``None`` means there is no transcript to be aged — a session known
+    only from the live enumeration — and reads as ``live``.
+    """
+    if seconds is None:
+        return "live"
+    total = max(int(seconds), 0)
+    if total < 60:
+        return f"{total}s"
+    if total < 3600:
+        return f"{total // 60}m"
+    if total < 86400:
+        return f"{total // 3600}h"
+    return f"{total // 86400}d"
+
+
 def _candidate_line(candidate) -> str:
     """One candidate as an operator-facing row: name, id, where, how old.
 
-    The three things that distinguish two candidates the same ref matched — a
-    directory, its state, and an age — are all here, because the operator picks
-    between them by reading this line and nothing else.
+    The three things that distinguish two candidates — a directory, its state,
+    and an age — are all here, because the operator picks between them by
+    reading this line and nothing else. One row shape serves both listings that
+    print candidates, so a consumer that learned it from the recoverable listing
+    reads an ambiguity listing unchanged.
+
+    A candidate with no extractable root says so rather than naming a location:
+    "somewhere camp cannot name" and "a directory that was torn down" are
+    different facts, and only the second has a path to print.
     """
     if candidate.root is None:
         where = "directory unknown"
@@ -218,8 +272,10 @@ def _candidate_line(candidate) -> str:
         where = f"{candidate.root} (gone)"
     else:
         where = str(candidate.root)
-    age = f"{int(candidate.age_seconds)}s" if candidate.age_seconds is not None else "live"
-    return f"{candidate.derived_name}  {candidate.session_id}  {where}  {age}"
+    return (
+        f"{candidate.derived_name}  {candidate.session_id}  {where}  "
+        f"{_format_age(candidate.age_seconds)}"
+    )
 
 
 def _print_candidates(candidates, *, as_json: bool) -> None:
@@ -682,46 +738,237 @@ def _enumerate_sessions(group: dict, workspace: Path | None, env: dict[str, str]
         return None
 
 
+def _list_recoverable(
+    scope: Path | None,
+    *,
+    env: dict[str, str] | None,
+    as_json: bool,
+    limit: int | None,
+    where: str,
+) -> None:
+    """Print the DEAD sessions in *scope* — enumerated transcripts minus the live set.
+
+    BOTH HALVES OF THE SUBTRACTION ARE SCOPED BY THE SAME ARGUMENT. *scope* goes
+    to the transcript enumeration and to the live enumeration unchanged, and the
+    seam defines both as "cwd equal to or under this path, on resolved paths".
+    Scoping one half and not the other would report live sessions as recoverable
+    — the one answer this listing must never give.
+
+    The pool spans every harness camp can name, not just the invoking group's:
+    what is recoverable is a property of the sessions that exist, and standing
+    in one group does not make another group's dead sessions disappear.
+
+    Three outcomes, deliberately distinct on the operator's terminal:
+
+    * NO harness keeps transcripts camp can read → a REFUSAL naming them. This is
+      the one non-degrading path on a question verb, because the answer is "camp
+      cannot do this here", not "nothing is recoverable", and an operator who
+      reads the second for the first stops looking for their session.
+    * The live set is UNDETERMINABLE → the live listing's own notice and an empty
+      list, exit 0. The unsubtracted pool is never printed: every row in it might
+      be a session running right now.
+    * Nothing is recoverable → an explicit line saying so, worded so it cannot be
+      mistaken for the refusal above.
+
+    Rows go to stdout and every notice to stderr, so a caller parsing stdout gets
+    rows and nothing else — including the empty JSON list, which is an answer.
+    """
+    from ..group.config import load_all_groups
+    from ..launch.recovery import recoverable_candidates
+    from ..launch.session import enumerate_records
+    from ..spine import _die
+    from .common import _groups_dir
+
+    resolved_env = dict(env) if env is not None else dict(os.environ)
+    groups = load_all_groups(_groups_dir())
+    harnesses = _addressable_harnesses(groups)
+    if not harnesses:
+        _die(
+            "camp sessions: camp cannot name a harness for any configured group, "
+            "so it cannot tell which sessions are recoverable"
+        )
+
+    transcripts: list = []
+    live: list = []
+    answered: list = []
+    live_known = True
+    for harness in harnesses:
+        try:
+            rows = harness.session_transcripts(scope, env=resolved_env)
+        except Exception:  # noqa: BLE001 — a harness camp cannot read contributes nothing
+            rows = None
+        if rows is None:
+            continue
+        answered.append(harness)
+        transcripts.extend(rows)
+        try:
+            records = enumerate_records(harness, scope, resolved_env)
+        except Exception:  # noqa: BLE001 — an unanswerable probe is undeterminable, not empty
+            records = None
+        if records is None:
+            live_known = False
+        else:
+            live.extend(records)
+
+    if not answered:
+        names = ", ".join(_harness_display_name(harness) for harness in harnesses)
+        _die(
+            f"camp sessions: harness {names} keeps no session transcripts camp can "
+            "read, so camp cannot tell which of its sessions are recoverable"
+        )
+
+    candidates: tuple = ()
+    if live_known:
+        candidates = recoverable_candidates(
+            transcripts=transcripts,
+            live_records=live,
+            groups=groups,
+            env=resolved_env,
+        )
+
+    shown = candidates if limit is None else candidates[:limit]
+    if as_json:
+        print(json.dumps([_candidate_payload(candidate) for candidate in shown]))
+    else:
+        for candidate in shown:
+            print(_candidate_line(candidate))
+
+    if not live_known:
+        print(
+            f"camp sessions: could not determine the live sessions{where} — "
+            "reporting none",
+            file=sys.stderr,
+        )
+    elif not candidates:
+        print(f"camp sessions: no recoverable sessions{where}", file=sys.stderr)
+    elif len(shown) < len(candidates):
+        print(
+            f"camp sessions: showing the {len(shown)} newest of {len(candidates)} "
+            f"recoverable sessions{where} — re-run with --limit <n> or --all "
+            "for the rest",
+            file=sys.stderr,
+        )
+
+
 def _cmd_sessions_group_cli(
     args: list[str],
     group: dict,
     env: dict[str, str] | None,
 ) -> None:
-    """camp sessions [<slug>] [--json] — list the harness sessions camp can see.
+    """camp sessions [<slug>] [--dir <path>] [--recoverable [--limit <n>|--all]] [--json].
 
-    Scope is the workspace when a slug is given or resolves from cwd, and the
-    whole harness otherwise (the seam's `workspace=None`). Always exits 0: this is
-    a question, and "I could not tell" degrades to a stderr notice plus an empty
-    list rather than a failure a script has to special-case.
+    Two listings behind one verb, over the same scope. The LIVE listing answers
+    what is running; `--recoverable` answers what is dead and could be brought
+    back. Scope is the workspace when a slug is given or resolves from cwd, the
+    directory named by `--dir`, and everything otherwise — and it reaches both
+    listings by the same argument, so the subtraction that produces the
+    recoverable rows covers the same set on both sides.
+
+    `--dir` is NOT eligibility-gated. The allowlist fences launching, not
+    looking, and a listing that refused to describe a directory would tell the
+    operator nothing they could not learn by looking at it. The path need not
+    exist either: a torn-down root is precisely the scope a recovery listing is
+    asked about.
+
+    Always exits 0 with ONE exception each side of the split. This is a question,
+    so "I could not tell" degrades to a stderr notice plus an empty list rather
+    than a failure a script has to special-case — but malformed input (a `--limit`
+    that cannot mean anything) and a harness that keeps no transcripts at all are
+    refusals, because neither has an empty listing as its honest answer.
     """
     from ..group.manifest import workspace_dir
-    from ..spine import _consume_flag_value
+    from ..spine import _consume_flag_value, _die
     from .dispatch import _slug_from_args_or_cwd
 
     rest = list(args)
     _consume_flag_value(rest, "--group")  # already resolved upstream; drop it
     as_json = _consume_json_flag(rest)
+    recoverable = _consume_flag(rest, "--recoverable")
+    show_all = _consume_flag(rest, "--all")
+    directory = _consume_flag_value(rest, "--dir")
+    limit_raw = _consume_flag_value(rest, "--limit")
 
-    slug = _slug_from_args_or_cwd(
-        rest, group, verb="sessions", consume_positional=True, allow_none=True, env=env
-    )
-    workspace = None
-    if slug:
-        workspace = workspace_dir(group["group"]["name"], slug, env=env)
+    if directory is None and "--dir" in rest:
+        _die("camp sessions: --dir requires a directory path")
+    if limit_raw is None and "--limit" in rest:
+        _die("camp sessions: --limit requires a count")
+
+    if not recoverable and (show_all or limit_raw is not None):
+        _die(
+            "camp sessions: --limit and --all widen the --recoverable listing; "
+            "the live listing is not capped, so there is nothing for them to widen"
+        )
+    if show_all and limit_raw is not None:
+        _die(
+            "camp sessions: --limit and --all are mutually exclusive — a listing "
+            "is capped at a count or not capped at all, never both"
+        )
+
+    limit = _RECOVERABLE_DEFAULT_LIMIT
+    if limit_raw is not None:
         try:
-            # Mirror the launch engine's resolution (`_resolve_launch_dir`): a
-            # symlinked workspace dir must scope enumeration by the same
-            # resolved path a just-launched session registered under, or a
-            # slug-scoped query never finds it.
-            workspace = workspace.resolve(strict=True)
-        except OSError:
-            pass
+            limit = int(limit_raw)
+        except ValueError:
+            _die(f"camp sessions: --limit expects a whole number, not {limit_raw!r}")
+        if limit < 1:
+            _die(f"camp sessions: --limit expects a count of at least 1, not {limit}")
 
-    records = _enumerate_sessions(group, workspace, env)
+    slug: str | None = None
+    scope: Path | None = None
+    if directory is not None:
+        if not directory.strip():
+            _die("camp sessions: --dir requires a directory path")
+        if rest:
+            _die(
+                "camp sessions: --dir and a workspace slug are mutually exclusive "
+                "— a listing is scoped to a named directory or to a workspace, "
+                "never both"
+            )
+        # Non-strict: a directory that no longer exists is a scope worth asking
+        # about, and is the whole reason the recoverable listing marks rows
+        # root-missing rather than hiding them.
+        scope = Path(directory).expanduser().resolve()
+    else:
+        slug = _slug_from_args_or_cwd(
+            rest, group, verb="sessions", consume_positional=True, allow_none=True, env=env
+        )
+        if slug:
+            scope = workspace_dir(group["group"]["name"], slug, env=env)
+            try:
+                # Mirror the launch engine's resolution (`_resolve_launch_dir`): a
+                # symlinked workspace dir must scope enumeration by the same
+                # resolved path a just-launched session registered under, or a
+                # slug-scoped query never finds it.
+                scope = scope.resolve(strict=True)
+            except OSError:
+                pass
+
+    if recoverable:
+        if slug:
+            where = f" in workspace {slug!r}"
+        elif directory is not None:
+            where = f" under {scope}"
+        else:
+            where = ""
+        _list_recoverable(
+            scope,
+            env=env,
+            as_json=as_json,
+            limit=None if show_all else limit,
+            where=where,
+        )
+        return
+
+    records = _enumerate_sessions(group, scope, env)
     if records is None:
-        scope = f"workspace {slug!r}" if slug else f"group {group['group']['name']!r}"
+        if slug:
+            described = f"workspace {slug!r}"
+        elif directory is not None:
+            described = f"directory {str(scope)!r}"
+        else:
+            described = f"group {group['group']['name']!r}"
         print(
-            f"camp sessions: could not determine the live sessions for {scope} — "
+            f"camp sessions: could not determine the live sessions for {described} — "
             "reporting none",
             file=sys.stderr,
         )

@@ -44,6 +44,13 @@ resumed. A harness's own display name for a session is never matched against —
 it is the harness's string, not camp's, and camp cannot guarantee it is unique
 or stable.
 
+THE RECOVERABLE LISTING IS A SUBTRACTION. :func:`recoverable_candidates` maps
+the same two pools to the sessions that are DEAD — enumerated transcripts minus
+the live set — and takes both pools already scoped by the caller. It scopes
+nothing itself, because scoping belongs to the seam each pool came from and
+this module cannot tell a scoped pool from an unscoped one; the failure that
+guards against is a live session listed as recoverable.
+
 The outcome is one of exactly three shapes — :class:`Resolved`,
 :class:`Ambiguous`, :class:`NoMatch` — and a caller is expected to handle all
 three. :class:`NoMatch` carries the size of the pool it searched because "there
@@ -283,6 +290,54 @@ def _build_candidate(
         root_missing=root is not None and not root.exists(),
         unreadable=root is None,
     )
+
+
+def recoverable_candidates(
+    *,
+    transcripts: Iterable[Any],
+    live_records: Iterable[Any],
+    groups: Iterable[dict[str, Any]],
+    env: Mapping[str, str],
+    now: datetime | None = None,
+) -> tuple[SessionCandidate, ...]:
+    """The DEAD sessions: enumerated *transcripts* minus the live *live_records*.
+
+    The subtraction is keyed by session id and by nothing else. A live session
+    is not recoverable — there is nothing to bring back up — so it is removed
+    rather than marked, and a live record with no transcript subtracts nothing
+    because it was never in the enumerated pool to begin with.
+
+    BOTH POOLS MUST ALREADY BE SCOPED THE SAME WAY. This function cannot tell a
+    pool that was scoped from one that was not, so a caller that scopes the
+    transcripts and not the live records gets live sessions reported as dead —
+    the one failure this listing must never produce. Scoping is the caller's
+    job precisely because it belongs to the seam that gathered each pool.
+
+    Ordering is NEWEST FIRST by transcript mtime, with the session id ascending
+    as the tiebreak, so two transcripts written in the same instant still list
+    in a fixed order. A session id appearing more than once — two harnesses
+    reading the same store — yields exactly one row.
+
+    *now* is injectable so a row's age is a function of its inputs, and *env* is
+    required so a name is never derived from the wrong machine's state
+    directory.
+    """
+    now = now if now is not None else datetime.now(timezone.utc)
+    containers = _workspace_containers(groups, env)
+    live_ids = {record.session_id for record in live_records}
+
+    dead: dict[str, Any] = {}
+    for transcript in transcripts:
+        if transcript.session_id in live_ids:
+            continue
+        dead.setdefault(transcript.session_id, transcript)
+
+    candidates = [
+        _build_candidate(session_id, transcript, None, containers=containers, now=now)
+        for session_id, transcript in dead.items()
+    ]
+    candidates.sort(key=lambda c: (c.age_seconds, c.session_id))
+    return tuple(candidates)
 
 
 def resolve_session_ref(
