@@ -37,6 +37,18 @@ run: the index is a derived projection of the vault tree, and records written on
 another device have never been projected on this one — without the rebuild,
 ``lore search`` would silently miss exactly the records sync just fetched.
 
+**``--pull-only`` is the non-destructive half of all this.** It fetches and
+integrates origin's commits and does nothing else: no staging, no commit, no
+push. Integration is further gated on a CLEAN working tree — the full sync may
+rebase a dirty vault only because it commits first, and a pull-only run has no
+such commit to rebase onto. A dirty vault is therefore fetched (which touches no
+file) and reported as "N commit(s) behind", never rebased. That is what makes it
+safe to run implicitly, which is exactly what :func:`implicit_pull` does: every
+lore write path calls it first, throttled to one fetch ATTEMPT per vault per
+:data:`FRESHNESS_WINDOW_SECONDS`, reporting on stderr only, and unable to fail
+the write it precedes. See :func:`implicit_pull` for the three properties every
+caller depends on.
+
 **Only the tree-mutating half runs under the vault write lock.** ``git add -A`` →
 ``commit`` and the pull's ``rebase`` / ``reset --hard`` are held under
 :func:`lore.locking.vault_write_lock`, because a concurrent ``move_record`` is a
@@ -78,6 +90,7 @@ this from a hang.
 from __future__ import annotations
 
 import sys
+import time
 from contextlib import ExitStack
 from pathlib import Path
 
@@ -85,6 +98,7 @@ from .. import locking
 from .common import (
     _git,
     _resolve_all_vaults,
+    _resolve_lore_state_dir,
     _vault_has_upstream,
     _vault_head_branch,
     _vault_is_git_toplevel,
@@ -139,8 +153,108 @@ PULL_OFFLINE = "offline"
 PULL_FAILED = "failed"
 
 
-def _pull_one(vault: Path, say, say_err) -> tuple[str, int]:
+def _fetch_origin(vault: Path, say_err, *, pull_only: bool = False) -> bool:
+    """Fetch ``origin``. Returns ``True`` on success, reporting on failure.
+
+    A failed fetch is always SOFT — the network is not the vault. The notice
+    differs only in what it promises about the rest of the run: the full sync
+    also skips the push (it just proved the remote unreachable), while a
+    pull-only run has no push to skip and reports the consequence that actually
+    matters to its caller — the vault may be stale.
+    """
+    rc_fetch, _, stderr_fetch = _git(vault, "fetch", "origin")
+    if rc_fetch == 0:
+        return True
+    if pull_only:
+        say_err("notice: fetch failed — the vault may be stale; nothing was integrated")
+    else:
+        say_err("notice: fetch failed — skipping pull and push; records stay committed locally")
+    say_err(f"  fetch error: {stderr_fetch}")
+    say_err("  re-run `lore sync` when online")
+    return False
+
+
+def _vault_is_dirty(vault: Path) -> bool:
+    """Return ``True`` iff ``vault``'s working tree has changes to commit.
+
+    Excludes the write-lock sidecar for the same reason
+    :func:`_stage_and_commit_one` does: merely taking the lock create-or-opens
+    ``.lore.lock``, so counting it would make every locked vault read as dirty.
+    """
+    rc, out, _ = _git(
+        vault, "status", "--porcelain", "--", ".", f":(exclude){locking.VAULT_LOCK_NAME}"
+    )
+    return rc != 0 or bool(out.strip())
+
+
+def _upstream_ref(vault: Path) -> "str | None":
+    """Return the ref ``vault``'s HEAD should be measured against, or ``None``.
+
+    Mirrors :func:`_pull_one`'s own upstream resolution — ``@{u}`` when the
+    branch tracks one, else ``origin/<branch>`` when the remote already has that
+    branch — minus the unborn-branch adoption path, which is an integration
+    decision rather than a measurement.
+    """
+    if _vault_has_upstream(vault):
+        return "@{u}"
+    branch = _vault_head_branch(vault)
+    if branch is None:
+        return None
+    rc, _, _ = _git(vault, "rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{branch}")
+    return f"origin/{branch}" if rc == 0 else None
+
+
+def _commits_behind(vault: Path) -> int:
+    """Return how many commits ``vault``'s upstream has that HEAD does not."""
+    ref = _upstream_ref(vault)
+    if ref is None:
+        return 0
+    rc, out, _ = _git(vault, "rev-list", "--count", f"HEAD..{ref}")
+    return int(out) if rc == 0 and out.isdigit() else 0
+
+
+def _pull_only_one(vault: Path, say, say_err) -> tuple[str, int]:
+    """Fetch ``vault`` and integrate ONLY if that costs the working tree nothing.
+
+    The non-destructive half of :func:`_pull_and_push_one`: no staging, no
+    commit, no push. Integration is delegated to :func:`_pull_one` (so the
+    rebase, its abort, and the ``lore resolve`` remedy all have exactly one
+    implementation) but is gated on a CLEAN tree.
+
+    **A dirty tree is reported, never rebased.** The full sync can rebase a dirty
+    vault because it commits first; a pull-only run has no such commit to rebase
+    onto, and ``git rebase`` against uncommitted changes either refuses or
+    (worse, for a caller that asked for nothing destructive) stashes them. So the
+    fetch still runs — it touches no file — and the operator is told how far
+    behind the vault is, which is the whole actionable content of the pull they
+    did not get.
+    """
+    rc_remote, remote_url, _ = _git(vault, "remote", "get-url", "origin")
+    if rc_remote != 0 or not remote_url:
+        return PULL_OK, 0
+
+    if not _fetch_origin(vault, say_err, pull_only=True):
+        return PULL_OFFLINE, 0
+
+    if _vault_is_dirty(vault):
+        behind = _commits_behind(vault)
+        if behind:
+            say_err(
+                f"notice: {behind} commit(s) behind origin — the working tree is not "
+                "clean, so nothing was integrated; run `lore sync` to commit and pull"
+            )
+        return PULL_OK, 0
+
+    return _pull_one(vault, say, say_err, already_fetched=True)
+
+
+def _pull_one(vault: Path, say, say_err, *, already_fetched: bool = False) -> tuple[str, int]:
     """Fetch ``vault`` and integrate origin's commits. Returns ``(state, commits_pulled)``.
+
+    ``already_fetched`` skips the fetch for a caller that has already run one this
+    invocation (:func:`_pull_only_one`, which must fetch BEFORE it knows whether
+    the tree is clean enough to integrate) — a second fetch would be a wasted
+    network round-trip against a ref database that cannot have moved since.
 
     Quiet no-ops: no origin remote (push reports it), detached HEAD (push
     reports it), a remote that does not have this branch yet (the first push
@@ -174,11 +288,7 @@ def _pull_one(vault: Path, say, say_err) -> tuple[str, int]:
     if rc_remote != 0 or not remote_url:
         return PULL_OK, 0
 
-    rc_fetch, _, stderr_fetch = _git(vault, "fetch", "origin")
-    if rc_fetch != 0:
-        say_err("notice: fetch failed — skipping pull and push; records stay committed locally")
-        say_err(f"  fetch error: {stderr_fetch}")
-        say_err("  re-run `lore sync` when online")
+    if not already_fetched and not _fetch_origin(vault, say_err):
         return PULL_OFFLINE, 0
 
     if _vault_has_upstream(vault):
@@ -407,6 +517,118 @@ def _pull_and_push_one(
     return _push_one(vault, say, say_err, committed=committed), pulled
 
 
+# ---------------------------------------------------------------------------
+# The implicit pull — freshness-window-throttled, stderr-only, never fatal
+# ---------------------------------------------------------------------------
+
+#: How long a vault stays "fresh enough" after a fetch ATTEMPT. Every write path
+#: pulls implicitly, and a write is not a network operation the operator asked
+#: for — five minutes keeps a multi-device vault current within a working
+#: rhythm while capping the cost of a burst of writes at one fetch per vault.
+FRESHNESS_WINDOW_SECONDS = 300
+
+#: Freshness-stamp directory under ``state_dir("lore")``.
+FETCH_STAMP_DIRNAME = "fetch"
+
+
+def fetch_stamp_root() -> Path:
+    """Return ``state_dir("lore")/fetch`` — the freshness-stamp directory."""
+    return _resolve_lore_state_dir() / FETCH_STAMP_DIRNAME
+
+
+def fetch_stamp_path(vault_root: str | Path) -> Path:
+    """Return the freshness stamp for *vault_root*, confined to the stamp root.
+
+    Keyed on ``Path(vault_root).name`` and confined with
+    ``layers.assert_within_root`` — the same shape ``cli.resolve_state.marker_path``
+    uses for its own machine-local per-vault file, so a symlink planted at the
+    stamp's name cannot redirect the write outside the stamp root.
+
+    Raises:
+        layers.LayerConfinementError: if the stamp path escapes the stamp root.
+    """
+    from ..vault import layers as layers_mod
+
+    root = fetch_stamp_root()
+    candidate = root / Path(vault_root).name
+    layers_mod.assert_within_root(candidate, root)
+    return candidate
+
+
+def _fetch_is_fresh(vault_root: str | Path) -> bool:
+    """Return ``True`` iff a fetch was ATTEMPTED against *vault_root* recently.
+
+    Attempted, not succeeded: an offline session must pay one network timeout
+    per window, not one per write. The stamp is therefore written before the
+    fetch runs and never rolled back on failure.
+    """
+    try:
+        age = time.time() - fetch_stamp_path(vault_root).stat().st_mtime
+    except OSError:
+        return False
+    return 0 <= age < FRESHNESS_WINDOW_SECONDS
+
+
+def _stamp_fetch_attempt(vault_root: str | Path) -> None:
+    """Record that a fetch is being attempted against *vault_root*, now."""
+    path = fetch_stamp_path(vault_root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.touch()
+
+
+def implicit_pull(vault_root: str | Path) -> None:
+    """Run a throttled, stderr-only ``--pull-only`` for a vault about to be written.
+
+    The cadence half of sync: every write path calls this so a multi-device vault
+    converges on write instead of only when someone remembers to sync, WITHOUT a
+    write ever becoming a network operation the caller has to reason about.
+    Three properties make that safe, and every caller depends on all three:
+
+    - **Advisory.** Nothing here can fail the write. A conflict, an unreachable
+      remote, a broken git state — all are reported and stepped over; the pull is
+      an optimization, and the write's own success is unrelated to it.
+    - **Silent on stdout.** All output goes to stderr, because ``record create``'s
+      stdout is exactly one ``RECORD_ID`` line that callers parse.
+    - **Throttled on ATTEMPT.** See :func:`_fetch_is_fresh` — an offline session
+      pays one timeout per window per vault, not one per write.
+
+    MUST be called before the caller takes any vault write lock or opens an index
+    transaction: this fetches (network, unbounded) and may reindex (which takes
+    every configured vault's lock), neither of which belongs inside a write's own
+    critical section.
+    """
+    vault = Path(vault_root)
+    if _fetch_is_fresh(vault):
+        return
+
+    name = vault.name
+
+    def say(text: str) -> None:
+        print(f"  lore: {name}: {text}", file=sys.stderr)
+
+    try:
+        _stamp_fetch_attempt(vault)
+        state, pulled = _pull_only_one(vault, say, say)
+    except Exception as exc:  # noqa: BLE001 — advisory: a write must not fail on this
+        print(f"  lore: {name}: notice: implicit pull skipped ({exc})", file=sys.stderr)
+        return
+
+    if state != PULL_OK or not pulled:
+        return
+
+    from .areas import run_reindex
+
+    count, error = run_reindex()
+    if error is not None:
+        print(
+            f"  lore: {name}: notice: search reindex failed after pull — "
+            f"run `lore reindex` ({error})",
+            file=sys.stderr,
+        )
+    else:
+        print(f"  lore: {name}: Reindexed {count} record(s) after pull.", file=sys.stderr)
+
+
 def _select_targets(vault_filter: str | None) -> tuple[list, int]:
     """Resolve the vaults to sync. Returns ``(targets, exit_code)``.
 
@@ -483,6 +705,7 @@ def cmd_sync(args) -> int:
         return rc
 
     message = getattr(args, "message", None) or DEFAULT_SYNC_MSG
+    pull_only = bool(getattr(args, "pull_only", False))
     width = max(len(name) for name, _ in targets) + 1  # + ':'
 
     say_map = {name: _make_emitters(name, width) for name, _ in targets}
@@ -519,6 +742,12 @@ def cmd_sync(args) -> int:
     # order ``vault_write_locks`` itself uses, so this still can't deadlock
     # against a cross-vault ``move_record``.
     sorted_targets = sorted(valid_targets, key=lambda t: locking.vault_lock_sort_key(t[1]))
+    if pull_only:
+        # Nothing to stage, nothing to commit — so nothing here needs a lock.
+        # ``_pull_only_one`` still takes the write lock around its own rebase.
+        for name, _vault_path in sorted_targets:
+            commit_rc[name] = 0
+        sorted_targets = []
     try:
         with ExitStack() as stack:
             locked: list[tuple[str, Path]] = []
@@ -558,9 +787,13 @@ def cmd_sync(args) -> int:
         # that closure's `state["first"]` here would print an unlabeled
         # continuation instead of a new labeled block (see `_make_emitters`).
         say, say_err = _make_emitters(name, width)
-        rc_one, pulled = _pull_and_push_one(
-            Path(vault), say, say_err, committed=committed_map.get(name, False)
-        )
+        if pull_only:
+            state, pulled = _pull_only_one(Path(vault), say, say_err)
+            rc_one = 1 if state == PULL_FAILED else 0
+        else:
+            rc_one, pulled = _pull_and_push_one(
+                Path(vault), say, say_err, committed=committed_map.get(name, False)
+            )
         total_pulled += pulled
         if rc_one != 0:
             failed.append(name)
@@ -599,5 +832,9 @@ def add_sync_subparser(sub) -> None:
     p_sync.add_argument(
         "--vault", default=None,
         help="Sync only this vault (default: every configured vault)",
+    )
+    p_sync.add_argument(
+        "--pull-only", action="store_true",
+        help="Fetch and integrate origin only — never stage, commit, or push",
     )
     p_sync.set_defaults(func=cmd_sync)

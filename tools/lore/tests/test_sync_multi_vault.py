@@ -26,6 +26,8 @@ Covers:
   - an unborn (`git init` + `remote add`) vault adopts the remote branch
   - an unborn vault with no matching remote branch is reported, not silent
   - a pulled record becomes visible to `lore search` (reindex is not vacuous)
+  - `--pull-only` covers every vault without committing or pushing any of them
+  - `--pull-only --vault <name>` narrows to one, same as a full sync
 
 ``lore status``:
   - flags never-committed / uncommitted / remote-less vaults, per vault
@@ -645,6 +647,43 @@ def test_sync_reindexes_after_a_pull_and_only_after_a_pull(tmp_path):
     assert "from-b" in s.stdout, (
         f"the pulled record must be searchable; stdout={s.stdout!r}"
     )
+
+
+def test_pull_only_covers_every_vault_without_committing_any(tmp_path):
+    """``--pull-only`` keeps sync's whole-install coverage and drops its write half."""
+    config_home, state_dir, vaults = _three_vaults(tmp_path)
+
+    r = run_cli(["sync", "--pull-only"], config_home=config_home, state_dir=state_dir)
+    assert r.returncode == 0, r.stderr
+    for name, vault in vaults.items():
+        assert _commit_count(vault) == 1, f"{name} must not have been committed"
+        assert _git(vault, "status", "--porcelain").stdout.strip(), (
+            f"{name}'s uncommitted changes must be left exactly where they were"
+        )
+
+
+def test_pull_only_vault_filter_narrows_to_one(tmp_path):
+    """The filter means the same thing under ``--pull-only`` as under a full sync."""
+    config_home, state_dir, vaults = _three_vaults(tmp_path)
+    remote = _make_bare_remote(tmp_path / "remote.git")
+    target = vaults["trailhead"]
+    _git(target, "add", "-A")
+    _git(target, "commit", "-m", "local")
+    _wire_remote(target, remote)
+    other = _clone_as_second_device(remote, tmp_path / "device-b")
+    (other / "theirs.md").write_text("# device B\n")
+    _git(other, "add", "-A")
+    _git(other, "commit", "-m", "device B record")
+    _git(other, "push", "origin")
+
+    r = run_cli(
+        ["sync", "--pull-only", "--vault", "trailhead"],
+        config_home=config_home, state_dir=state_dir,
+    )
+    assert r.returncode == 0, r.stderr
+    assert (target / "theirs.md").exists(), "the named vault must have been pulled"
+    for name in ("default", "home-manager"):
+        assert _commit_count(vaults[name]) == 1, f"{name} should have been left alone"
 
 
 def test_sync_conflicting_vault_does_not_strand_the_others(tmp_path):

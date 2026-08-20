@@ -322,6 +322,14 @@ def _cmd_session_candidate(args) -> int:
             resolve_state_mod.warning_notice(vault_root, "session candidate"),
             file=sys.stderr,
         )
+    else:
+        # Converge on the other devices' records before writing — throttled,
+        # stderr-only, and unable to fail the capture. Skipped outright on a
+        # mid-resolution vault: its tree is already the subject of a rebase
+        # ``lore resolve`` owns, so there is nothing a pull could safely add.
+        from . import sync as sync_mod
+
+        sync_mod.implicit_pull(vault_root)
 
     key, rc = _resolve_session_key(args)
     if key is None:

@@ -695,6 +695,7 @@ def _cmd_record_create(args) -> int:
     from ..vault import config as vault_config_mod
     from ..vault import resolve as vault_resolve_mod
     from . import resolve_state as resolve_state_mod
+    from . import sync as sync_mod
 
     # --kind is required.
     kind = getattr(args, "kind", None)
@@ -830,6 +831,14 @@ def _cmd_record_create(args) -> int:
     if resolve_state_mod.vault_is_resolving(vault_root):
         print(resolve_state_mod.refusal_notice(vault_root, "record create"), file=sys.stderr)
         return 1
+
+    # Converge on the other devices' records before writing — throttled to one
+    # fetch attempt per vault per freshness window, reported on stderr only (this
+    # command's stdout is exactly one RECORD_ID line), and unable to fail the
+    # create. Runs BEFORE the lock and the index transaction below: it fetches
+    # over the network and may reindex, neither of which belongs inside the
+    # create's critical section.
+    sync_mod.implicit_pull(vault_root)
 
     guard_notices: list[str] = []
     try:
@@ -1176,6 +1185,26 @@ def _cmd_record_update(args) -> int:
         print(f"lore: {exc}", file=sys.stderr)
         return 1
     has_stdin = stdin_text != ""
+
+    # Converge on the other devices' records before writing — same throttled,
+    # stderr-only, non-fatal implicit pull ``record create`` runs. It has to
+    # happen HERE, before the index transaction and the write lock open below:
+    # the pull fetches over the network and may reindex, and neither belongs
+    # inside the read-modify-write's critical section. That means locating the
+    # record twice — once now, unlocked, only to name the vault to pull, and
+    # again authoritatively under the transaction. A record this device has
+    # never seen simply gets no pull; the update then fails not-found as it
+    # always did.
+    pull_target = Path(named_vault.path) if named_vault is not None else None
+    if pull_target is None:
+        try:
+            pull_target = Path(_find_current_record_location(record_id).vault_root)
+        except Exception:  # noqa: BLE001 — advisory: the real locate runs below
+            pull_target = None
+    if pull_target is not None and not resolve_state_mod.vault_is_resolving(pull_target):
+        from . import sync as sync_mod
+
+        sync_mod.implicit_pull(pull_target)
 
     guard_notices: list[str] = []
     notice_shown: set[str] = set()

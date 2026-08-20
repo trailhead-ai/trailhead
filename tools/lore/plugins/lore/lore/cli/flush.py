@@ -306,6 +306,18 @@ def _flush_current_session(args) -> int:
     return worst
 
 
+def _implicit_pull(vault: Path) -> None:
+    """Run ``sync``'s throttled, stderr-only implicit pull for *vault*.
+
+    A one-line wrapper so both flush paths — single-session and batch — reach the
+    same call site. ``cli.sync`` is imported at call time, matching how the other
+    write paths reach it, so neither module has to sit at the other's import top.
+    """
+    from . import sync as sync_mod
+
+    sync_mod.implicit_pull(vault)
+
+
 def _flush_one_session(vault: Path, key: str, committer: str) -> int:
     """Flush `session/<key>` in ONE vault: flip + commit as a unit, then push.
 
@@ -329,6 +341,11 @@ def _flush_one_session(vault: Path, key: str, committer: str) -> int:
     if vault_is_resolving(vault):
         print(refusal_notice(vault, "flush"), file=sys.stderr)
         return 1
+
+    # Converge on the other devices' records before the flip + commit —
+    # throttled, stderr-only, and unable to fail the flush. Runs before the
+    # session-key lock below: the pull fetches over the network and may reindex.
+    _implicit_pull(vault)
 
     # The flip and the commit are ONE unit under the session-key lock: a
     # `session candidate` that landed between them would flip the sidecar back to
@@ -563,6 +580,12 @@ def _flush_batch(args, *, query: str, scope_label: str) -> int:
         if vault_is_resolving(batch_vault):
             print(refusal_notice(batch_vault, "flush"), file=sys.stderr)
             return 1
+
+    # Same implicit pull as the single-session path, once per distinct vault in
+    # the batch (the freshness window would collapse repeats anyway) and before
+    # the first flip — a batch must not start converging halfway through.
+    for batch_vault in {str(v): v for v, _ in discovered}.values():
+        _implicit_pull(batch_vault)
 
     flushed: list[str] = []
     # Insertion-ordered so the end-of-batch pushes run in discovery order; keyed by
