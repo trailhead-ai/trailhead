@@ -323,6 +323,9 @@ def _resolve_one_record(
         "body-path": body_path,
         "sidecar": merged,
         "body": body,
+        # Slots this resolution has already been given judgment for. Empty at
+        # derivation; `take` appends to it, and a re-derivation reads it back.
+        "settled": [],
     }
     return pending, conflicts
 
@@ -470,8 +473,15 @@ def render_json(
     }
 
 
-def _render_prose(say, vault_name: str, conflicts: list[dict], files: list[dict]) -> None:
-    """Print the report in sync's labeled per-vault block style."""
+def _render_prose(say, vault_name: str, conflicts: list[dict], files: list[dict],
+                  *, shared: bool) -> None:
+    """Print the report in sync's labeled per-vault block style.
+
+    Remote-side values from a ``shared: true`` vault are fenced exactly as
+    :func:`render_json` fences them. Both forms are read by an agent, and the
+    settle verbs route their post-take report through THIS one — so an unfenced
+    prose path would be the ordinary path, not a rare one.
+    """
     total = len(conflicts) + len(files)
     say(f"{total} conflict(s) need judgment before this vault can sync.")
     for c in conflicts:
@@ -479,8 +489,10 @@ def _render_prose(say, vault_name: str, conflicts: list[dict], files: list[dict]
         for side in ("local", "remote"):
             label = c[side]
             sha = (label.get("sha") or "")[:7]
-            say(f"  --{side:<6} {sha} {label.get('date', '')}: "
-                f"{_one_line(label.get('value'))}")
+            text = _one_line(label.get("value"))
+            if shared and side == "remote":
+                text = " ".join(xml_escape.wrap_shared(vault_name, [text]))
+            say(f"  --{side:<6} {sha} {label.get('date', '')}: {text}")
     for f in files:
         say(f"{f['path']} — {f['reason']}")
     say(f"Settle each, then re-run `lore resolve {vault_name}`.")
@@ -507,14 +519,49 @@ def _park(vault: Path, conflicts: list[dict], files: list[dict], pending: dict) 
     resolve_state.write_marker(vault, marker)
 
 
+def _carry_settled(prior_entry: dict | None, pending: dict,
+                   conflicts: list[dict]) -> list[dict]:
+    """Fold judgment already supplied for this record back into its fresh merge.
+
+    Re-derivation is what makes a resolution resumable: a record with any open
+    slot is deliberately left unstaged, so the next run re-reads the same stages
+    and re-reports the same state. But the values an agent supplied through
+    ``take`` live only in the marker — re-deriving on top of them would
+    resurrect the settled slots and discard the judgment, which is the most
+    expensive thing in the whole flow. Each settled slot is moved back into
+    *pending* and dropped from *conflicts*; a record left with nothing open is
+    then written by the caller, exactly as the settling ``take`` would have.
+
+    With nothing settled this is the identity, which is what keeps a re-run of
+    an untouched resolution reporting identically.
+    """
+    settled = (prior_entry or {}).get("settled") or []
+    still_open: list[dict] = []
+    for conflict in conflicts:
+        slot = conflict["slot"]
+        if slot not in settled:
+            still_open.append(conflict)
+            continue
+        if slot == "body":
+            pending["body"] = prior_entry.get("body")
+        else:
+            pending["sidecar"][slot] = prior_entry["sidecar"][slot]
+        pending["settled"].append(slot)
+    return still_open
+
+
 def _resolve_step(
-    vault: Path, paths: list[str]
+    vault: Path, paths: list[str], carried: dict
 ) -> tuple[list[dict], list[dict], dict]:
     """Merge every conflicted path of ONE rebase step.
 
     Returns ``(conflicts, files, pending)``. Records that came out fully settled
     are written and staged here; a record with any open slot is left unstaged, so
     re-running resolve re-reads the same stages and re-reports the same state.
+
+    ``carried`` is the live marker's pending merges, and each record consumes its
+    own entry at most once: the judgment it holds belongs to the step that parked
+    it, and must not be applied again to a later step's fresh stages.
     """
     records, file_paths = _group_by_record(paths)
     local_label, remote_label = _side_labels(vault)
@@ -524,6 +571,9 @@ def _resolve_step(
     for record_id, flags in records.items():
         record_pending, record_conflicts = _resolve_one_record(
             vault, record_id, flags, local_label, remote_label
+        )
+        record_conflicts = _carry_settled(
+            carried.pop(record_id, None), record_pending, record_conflicts
         )
         if record_conflicts:
             conflicts.extend(record_conflicts)
@@ -661,7 +711,7 @@ def _report_or_finish(
         if as_json:
             print(json.dumps(render_json(name, conflicts, files, shared=shared), indent=2))
         else:
-            _render_prose(say, name, conflicts, files)
+            _render_prose(say, name, conflicts, files, shared=shared)
         return 0
 
     rc_finish = _finish(vault, name, say, say_err, shared=shared,
@@ -705,12 +755,13 @@ def _start_rebase(vault: Path, say_err) -> bool | None:
 
 def _drive(vault: Path) -> tuple[list[dict], list[dict], dict]:
     """Walk the rebase to completion or to the first step needing judgment."""
+    carried = dict((resolve_state.read_marker(vault) or {}).get("auto") or {})
     for _ in range(_MAX_STEPS):
         if not _vault_mid_rebase(vault):
             return [], [], {}
         paths = _conflicted_paths(vault)
         if paths:
-            conflicts, files, pending = _resolve_step(vault, paths)
+            conflicts, files, pending = _resolve_step(vault, paths, carried)
             if conflicts or files:
                 return conflicts, files, pending
         rc, still_mid = _rebase_continue(vault)
@@ -883,6 +934,7 @@ def _apply_take(vault: Path, marker: dict, record_id: str, targets: list[dict],
             auto["body"] = value
         else:
             auto["sidecar"][entry["slot"]] = value
+        auto.setdefault("settled", []).append(entry["slot"])
 
     settled = {(c["record-id"], c["slot"]) for c in targets}
     marker["conflicts"] = [
