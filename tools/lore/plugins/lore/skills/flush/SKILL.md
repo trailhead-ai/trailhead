@@ -1,6 +1,6 @@
 ---
 name: flush
-description: "Evaluate outstanding session candidates into vault records, then flip the session clean. Runnable at any time — not just at session end. Clean session → nothing to flush. Dirty session → read the candidate log, apply agent judgment to evaluate each outstanding candidate (those after the flushed-at watermark) into a record via `lore record create`, then call `lore flush` to stamp clean + commit. Use for /lore:flush, \"flush the session\", \"evaluate candidates\", \"finalize the session\", \"I'm done\", \"wrap up\", \"close this out\"."
+description: "Evaluate outstanding session candidates into vault records, then flip the session clean. Runnable at any time — not just at session end. Clean session → nothing to flush. Dirty session → read the candidate log, apply agent judgment to evaluate each outstanding candidate (those after the flushed-at watermark) into a record via `lore record create`, then call `lore flush` to stamp clean, commit, and sync every writable vault. Use for /lore:flush, \"flush the session\", \"evaluate candidates\", \"finalize the session\", \"I'm done\", \"wrap up\", \"close this out\"."
 ---
 
 # /lore:flush — Evaluate candidates and flip the session clean
@@ -19,18 +19,18 @@ discards the noise). The flow:
 3. Apply agent judgment to evaluate each outstanding candidate into a durable vault
    record via `lore record create`.
 4. Call `lore flush` (the CLI verb) to flip the session `clean`, stamp the new
-   `flushed-at` watermark, and commit.
-5. Call `lore sync` to commit the records step 3 created.
+   `flushed-at` watermark, commit, and — in its **sync tail** — commit, pull, and
+   push every writable vault.
 
 The **CLI** (`lore flush`) carries the mechanical flip; this **skill** carries the
 judgment (candidate evaluation).
 
-**Step 5 is not optional.** `lore flush` commits the session record's own paths and
-nothing else, so the records step 3 created are still uncommitted when it returns —
-and they routinely live in a *different vault*, since `lore record create` routes by
-scope while the session record lives in `default`. `lore flush` ends by naming any
-vault still holding unsynced work; `lore sync` (which covers every configured
-vault) is what actually commits it.
+**No separate sync step.** The records step 3 created routinely live in a
+*different vault* from the session record, since `lore record create` routes by
+scope. `lore flush` handles that itself: its own commit stages the session
+record's paths, and the sync tail that follows saves everything else — every
+writable vault, committed, pulled, and pushed. Shared (`shared: true`) vaults are
+never touched by the tail.
 
 ## Scoping
 
@@ -127,8 +127,8 @@ For each outstanding candidate, apply agent judgment:
   conversation context is available for judgment.
 
 If no outstanding candidates exist (all already evaluated), proceed directly
-to Step 4. Still run Step 5 — a clean session says nothing about whether the
-vaults themselves are committed.
+to Step 4 — a clean session says nothing about whether the vaults themselves are
+committed, and the flush's sync tail is what settles that.
 
 ### Step 4 — Flip the session clean
 
@@ -137,36 +137,40 @@ lore flush
 ```
 
 This stamps `status: clean`, records the new `flushed-at` watermark in
-`annotations`, and commits the **session record's own paths only**. Relay any
+`annotations`, and commits the session record's own explicit paths (that commit,
+and only that commit, is scoped to those paths — never `git add -A`). Relay any
 notices it prints (e.g. non-git vault, push failure).
 
-It ends by naming any vault still holding unsynced work:
+It then runs the **sync tail**: the full commit → pull → push flow over every
+writable vault, which is what saves the records Step 3 created. Its per-vault
+output is `lore sync`'s own — relay it, especially any vault reporting "No origin
+remote", whose records exist only on this disk.
+
+**`--no-sync` is the opt-out**, for offline work or when the vaults must not move
+yet:
+
+```bash
+lore flush --no-sync
+```
+
+That form commits the session record(s) only — nothing else — and ends by naming
+what it left behind:
 
 ```
 notice: vault(s) still holding unsynced work — run `lore sync`:
   trailhead: 12 uncommitted change(s); no origin remote — nothing is backed up off-disk
 ```
 
-### Step 5 — Sync the records this flush created
+Only that notice-and-stop shape needs a follow-up sync; a default flush has
+already done it.
 
-```bash
-lore sync
-```
-
-The records created in Step 3 are NOT committed by `lore flush` — it stages the
-session record's explicit paths and nothing else, and those records usually live in
-a different, scope-routed vault. `lore sync` covers every configured vault.
-
-Relay its per-vault outcomes, especially any vault reporting "No origin remote" —
-those records exist only on this disk.
-
-### Step 6 — Report to the user
+### Step 5 — Report to the user
 
 ```
 Flushed session `<key>` (status: clean).
 
 Evaluated N candidate(s) → M record(s) created, K discarded.
-Synced: <per-vault outcomes>.
+Synced: <per-vault outcomes from the sync tail>.
 ```
 
 ## Edge cases
@@ -180,6 +184,18 @@ Synced: <per-vault outcomes>.
   outstanding (conservative — never drop candidates silently).
 - **Non-git vault.** `lore flush` stamps the sidecar but skips the commit,
   printing a notice on stderr. Relay it.
+- **The sync tail hit a rebase conflict.** Flush still exits **0** — its commits
+  are durable — and the signal is a stderr notice naming the remedy:
+  ``the flush is committed locally, but syncing vault 'x' did not complete — to
+  settle it, run `lore resolve <vault-dir>` `` (the vault *directory* name, e.g.
+  `v-default`). Do not re-run `lore sync`; it would abort straight back out of
+  the same conflict. Run the resolve flow in `/lore:sync` instead. Because the
+  exit code is 0, this notice is the only thing that tells you — read the tail's
+  output rather than trusting the exit code.
+- **The sync tail could not reach the network.** Soft, same as `lore sync`: the
+  notice says the flush is committed locally and to re-run `lore sync` later.
+- **A vault already mid-resolution** is skipped by the tail rather than synced —
+  syncing would throw away an in-progress `lore resolve`.
 - **`lore flush all` or `lore flush <search>`.** The same evaluation loop applies
   per session. Each session is flushed atomically; a mid-batch failure names the
   failed session and states that already-flushed sessions are clean — a re-run

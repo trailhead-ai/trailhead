@@ -147,7 +147,7 @@ def _make_emitters(name: str, width: int):
 #: clean integration; ``PULL_OFFLINE`` means the fetch never reached the remote
 #: (soft — and the push is skipped, the network already failed once this run);
 #: ``PULL_FAILED`` means the integration failed (hard — most commonly a rebase
-#: conflict, which only manual resolution can settle).
+#: conflict, which ``lore resolve <vault>`` settles).
 PULL_OK = "ok"
 PULL_OFFLINE = "offline"
 PULL_FAILED = "failed"
