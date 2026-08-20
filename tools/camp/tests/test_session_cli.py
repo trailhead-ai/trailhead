@@ -1701,7 +1701,12 @@ def test_camp_sessions_recoverable_json_rows_carry_exactly_the_pinned_keys(
     assert payload[0]["session_id"] == _UUID_A
     assert payload[0]["tmux_name"] == f"camp-proj-a-{_UUID_A[:8]}"
     assert payload[0]["root"] == str(root)
-    assert payload[0]["age_seconds"] == 45
+    # Whole seconds, and the transcript's own age rather than a constant — but
+    # not pinned to the exact integer: the clock keeps running between seeding
+    # the transcript and the CLI reading it, so an equality check here fails
+    # whenever start-up straddles a second boundary.
+    assert isinstance(payload[0]["age_seconds"], int)
+    assert 45 <= payload[0]["age_seconds"] <= 75
     assert _state_tree(cli_env) == before
 
 
