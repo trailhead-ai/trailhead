@@ -1,11 +1,12 @@
 """The one gate camp asks before rooting a session at an operator-named directory.
 
 A workspace-rooted launch is fenced by construction: camp computed the directory
-itself, from a manifest it wrote. A launch rooted at a directory the operator
-names has no such fence, so this module supplies it — and it is the *only* place
-that answers the question, for every flavor of launch that takes a directory
-rather than a workspace slug. A second answer somewhere else is a second
-boundary, and boundaries that disagree are holes.
+itself, from a manifest it wrote — whether it was addressed by slug or by a path
+inside that workspace. A launch rooted at a directory the operator names has no
+such fence, so this module supplies it — and it is the *only* place that answers
+the question, for every launch rooted anywhere camp did not compute itself. A
+second answer somewhere else is a second boundary, and boundaries that disagree
+are holes.
 
 THE ORDER OF THE THREE CHECKS IS PART OF THE CONTRACT.
 

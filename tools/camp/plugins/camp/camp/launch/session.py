@@ -14,13 +14,16 @@ as the launch cwd, the trust target, and the enumeration scope. Three names for
 the same directory is how a session gets launched somewhere it is never found
 again, so they are computed once and never re-derived downstream.
 
-Containment. A slug launch is fenced by construction — camp computed the
-directory. A named root has no such fence, so the eligibility gate supplies one,
-and it must answer BEFORE the trust pre-seed: the pre-seed's own confinement check
-compares the launch directory against the declared trust scope, which for a named
-root IS that same directory, so it can never be the boundary there. Sameness, not
-containment, is this module's guarantee — a group that opts out of the pre-seed
-launches wherever its `[harness] cwd` template resolves to.
+Containment. What fences a launch is WHO CHOSE the directory, not how it was
+addressed. A directory camp computed itself is fenced by construction — a slug's
+workspace, and equally a root inside that workspace, which is where a resumed
+session's recorded cwd lands. A directory the OPERATOR named has no such fence,
+so the eligibility gate supplies one, and it must answer BEFORE the trust
+pre-seed: the pre-seed's own confinement check compares the launch directory
+against the declared trust scope, which for an explicitly rooted launch IS that
+same directory, so it can never be the boundary there. Sameness, not containment,
+is this module's guarantee — a group that opts out of the pre-seed launches
+wherever its `[harness] cwd` template resolves to.
 
 The seam boundary. camp core spells exactly two things: `tmux` and `env -u`.
 Every harness literal — the binary, its flags, the names of the variables to
@@ -137,20 +140,33 @@ def _resolve_launch_dir(profile, slug: str, ws_dir: Path) -> Path:
     return resolved
 
 
-def _resolve_named_root(root: Path, group: dict, env: dict[str, str]) -> Path:
-    """Gate and resolve a caller-named launch root.
+def _resolve_named_root(
+    root: Path, group: dict, env: dict[str, str], *, camp_managed: bool
+) -> Path:
+    """Gate and resolve an explicitly-rooted launch.
 
     Eligibility answers first and existence second, so a directory the allowlist
     rejects is refused on that ground whether or not it exists. The existence
     check is not a formality: `tmux new-session -c` silently falls back to the
     invoking environment's home directory rather than failing, so an absent root
     would otherwise root the session somewhere nobody named and nothing fenced.
+
+    *camp_managed* is the caller's claim that *root* sits inside a workspace camp
+    itself provisioned for *group* — the same fence the slug flavor is launched
+    behind, which is why the gate has nothing to add there. The claim is
+    VERIFIED, not trusted: it opens the gate only when the name rule agrees the
+    directory really is that group's workspace, so it can never launder an
+    operator-named directory past the allowlist.
     """
     # Imported here rather than at module scope: the gate raises LaunchError and
     # therefore imports it from this module.
     from .eligibility import assert_launch_eligible
+    from .recovery import is_workspace_root
 
-    resolved = assert_launch_eligible(root, group=group, env=env)
+    if camp_managed and is_workspace_root(root, [group], env=env):
+        resolved = Path(root).resolve()
+    else:
+        resolved = assert_launch_eligible(root, group=group, env=env)
     if not resolved.is_dir():
         raise LaunchError(
             f"camp: cannot launch — launch directory {resolved} is not a directory"
@@ -294,6 +310,7 @@ def launch_session(
     name_component: str | None = None,
     trust_scope: Path | None = None,
     resume_session_id: str | None = None,
+    camp_managed_root: bool = False,
 ) -> LaunchedSession:
     """Spawn a detached, tmux-hosted harness session; return its handles.
 
@@ -301,6 +318,11 @@ def launch_session(
     launch directory, the tmux name component and the trust scope from the group
     manifest — or by an explicit *root* with its own *name_component* and
     *trust_scope*. Exactly one of the two, or :class:`ValueError` before any work.
+
+    *camp_managed_root* rides on the *root* flavor and says the directory came
+    from camp's own workspace layout rather than from an operator naming it, which
+    is what the eligibility gate exists to fence. It is verified against the name
+    rule before it can open that gate (see :func:`_resolve_named_root`).
 
     *resume_session_id* rides on either flavor: given, the session runs under that
     id and the pane runs the harness's re-entry argv instead of a fresh-session
@@ -327,7 +349,7 @@ def launch_session(
         launch_dir = _resolve_launch_dir(profile, slug, trust_root)
         name_component = slug
     else:
-        launch_dir = _resolve_named_root(root, group, env)
+        launch_dir = _resolve_named_root(root, group, env, camp_managed=camp_managed_root)
         trust_root = trust_scope
 
     harness = harness_for(group)

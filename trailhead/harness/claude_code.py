@@ -62,6 +62,7 @@ import os
 import re
 import subprocess
 import tempfile
+from collections.abc import Iterator
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import BinaryIO
@@ -173,6 +174,21 @@ def _extract_transcript_cwd(path: Path) -> Path | None:
     except OSError:
         return None
     return None
+
+
+def _iter_transcript_paths(projects_dir: Path) -> Iterator[Path]:
+    """Yield ``<projects>/*/*.jsonl``, stopping quietly at an unreadable tree.
+
+    The walk itself can fail — a project directory whose permissions deny a
+    listing raises mid-iteration, not at the call — and the transcript seam's
+    contract is that it never raises for an unreadable store. Stopping yields
+    the rows found so far, which is strictly more than the empty listing an
+    all-or-nothing guard would produce and never less than one.
+    """
+    try:
+        yield from projects_dir.glob("*/*.jsonl")
+    except OSError:
+        return
 
 
 #: Cap on the raw-output excerpt embedded in a ``parse_session_list``
@@ -633,7 +649,7 @@ class ClaudeCodeHarness(Harness):
         resolved_workspace = Path(workspace).resolve() if workspace is not None else None
 
         rows: list[SessionTranscript] = []
-        for candidate in projects_dir.glob("*/*.jsonl"):
+        for candidate in _iter_transcript_paths(projects_dir):
             if not candidate.is_file():
                 continue
             session_id = candidate.stem

@@ -1294,6 +1294,32 @@ class TestClaudeCodeSessionTranscripts:
         assert by_id["sess-b"].cwd == ws_b.resolve()
         assert by_id["sess-a"].cwd != decoy_source.resolve()
 
+    def test_a_walk_that_fails_midway_yields_what_it_found_rather_than_raising(
+        self, tmp_path, monkeypatch
+    ):
+        """The store walk is where an unreadable store actually bites.
+
+        A project directory whose permissions deny a listing raises DURING the
+        walk, after earlier entries have already come back — not at the call. The
+        base contract says this seam never raises for a missing or unreadable
+        store, so the rows found before that point are the answer; an exception
+        escaping here surfaces to an operator as a stack trace from a command
+        whose whole job is to answer in one line.
+        """
+        claude_dir = tmp_path / ".claude"
+        readable = self._write(
+            claude_dir, "some-project", "sess-a", [json.dumps({"cwd": str(tmp_path)})]
+        )
+
+        def _failing_walk(self, pattern):
+            yield readable
+            raise PermissionError(13, "Permission denied")
+
+        monkeypatch.setattr(Path, "glob", _failing_walk)
+
+        rows = ClaudeCodeHarness().session_transcripts(env=self._env(claude_dir))
+        assert [r.session_id for r in rows] == ["sess-a"]
+
     def test_nested_subagent_and_tool_result_transcripts_are_not_enumerated(self, tmp_path):
         claude_dir = tmp_path / ".claude"
         proj = claude_dir / "projects" / "some-project"

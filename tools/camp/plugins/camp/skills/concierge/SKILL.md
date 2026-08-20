@@ -201,14 +201,18 @@ that camp's bookmark resume is a different thing and never the one to reach for
 here: it re-enters a bookmarked session by replacing a terminal's foreground
 process, which a remote-controlled session does not have.
 
-Discovery is a read, so it is unlimited:
+Discovery is a read, so it needs no confirmation:
 
 ```bash
 camp sessions --recoverable <slug> --group <name> --json
 ```
 
-Every session the harness kept a transcript for, minus the ones running now,
-newest first. A row is `{"session_id": …, "tmux_name": …, "root": …,
+The sessions the harness kept a transcript for, minus the ones running now,
+newest first — capped at the **20 newest**. The cap is invisible on stdout: when
+more matched, camp names the total on stderr, and `--limit <n>` or `--all`
+widens the listing. Read that stderr line before describing the result — a
+listing is everything the operator has only when it came back under the cap or
+was asked for with `--all`. A row is `{"session_id": …, "tmux_name": …, "root": …,
 "age_seconds": …, "root_missing": …, "unreadable": …}`, where `root_missing`
 marks a session whose directory has since been torn down — camp refuses to
 resume one rather than recreating the directory, so say so instead of offering

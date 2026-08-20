@@ -127,8 +127,13 @@ class FakeHarness(ClaudeCodeHarness):
         return []
 
     def session_transcripts(self, workspace=None, *, env=None):
-        if os.environ.get("CAMP_FAKE_TRANSCRIPTS") == "none":
+        mode = os.environ.get("CAMP_FAKE_TRANSCRIPTS")
+        if mode == "none":
             return None
+        if mode == "raise":
+            # The seam contract forbids this, which is exactly why camp is
+            # tested against a harness that does it anyway.
+            raise OSError("transcript store is unreadable")
         return super().session_transcripts(workspace, env=env)
 
     def session_resume(self, session_id):
@@ -690,6 +695,56 @@ def test_camp_launch_dir_at_a_credential_store_refuses_on_the_credential_rule(cl
     assert _state_tree(cli_env) == before
 
 
+def test_camp_launch_dir_expands_a_leading_tilde(cli_env) -> None:
+    """A quoted `--dir '~/proj'` arrives unexpanded and must not resolve against cwd.
+
+    The listing side already expands it, and the two reading the same argument
+    two different ways is how an operator ends up refused while camp names a
+    path that exists nowhere.
+    """
+    home = cli_env["tmp_path"] / "tildehome"
+    target = home / "proj"
+    target.mkdir(parents=True)
+    _set_launch_roots(cli_env, home)
+
+    result = _camp(
+        cli_env, "launch", "--dir", "~/proj", "--group", "mygroup",
+        extra_env={"HOME": str(home)},
+    )
+
+    assert result.returncode == 0, result.stderr
+    spawned = _tmux_new_session_argv(cli_env)
+    assert len(spawned) == 1
+    assert _flag_value(spawned[0], "-c") == str(target.resolve())
+
+
+def test_camp_launch_dir_inside_a_workspace_takes_the_workspace_slug_as_its_name(
+    cli_env,
+) -> None:
+    """One session, one name — the name `--dir` mints is the one `--resume` rebuilds.
+
+    A resume reconstructs the derived name from the transcript's recorded cwd
+    through the name rule, which yields the workspace SLUG for any directory at
+    or under a workspace. A launch that named the same directory by its own
+    basename would give one session two names, and the tmux duplicate-name claim
+    — the race-proof backstop against resuming a session twice — could then never
+    fire for it.
+    """
+    workspace = Path(_new_workspace(cli_env, "feat-slugname")).resolve()
+    nested = workspace / "member"
+    nested.mkdir(exist_ok=True)
+    _set_launch_roots(cli_env, cli_env["state_dir"])
+
+    result = _camp(cli_env, "launch", "--dir", str(nested), "--group", "mygroup")
+
+    assert result.returncode == 0, result.stderr
+    session_id = result.stdout.strip()
+    spawned = _tmux_new_session_argv(cli_env)
+    assert len(spawned) == 1
+    assert _flag_value(spawned[0], "-s") == f"camp-feat-slugname-{session_id[:8]}"
+    assert _flag_value(spawned[0], "-c") == str(nested)
+
+
 # ---------------------------------------------------------------------------
 # camp launch --resume
 # ---------------------------------------------------------------------------
@@ -788,6 +843,35 @@ def test_camp_launch_resume_by_derived_name_prefix_reaches_the_identical_spawn(
     spawned = _tmux_new_session_argv(cli_env)
     assert _flag_value(spawned[0], "-s") == f"camp-feat-resume-{_UUID_A[:8]}"
     assert _flag_value(spawned[0], "-c") == str(launch_dir)
+    assert _state_tree(cli_env) == before
+
+
+def test_camp_launch_resume_roots_at_the_recorded_cwd_below_the_workspace(
+    cli_env,
+) -> None:
+    """The transcript's cwd IS the resumed root, not a re-derivation from config.
+
+    A group's `[harness] cwd` routinely roots a launch BELOW the workspace, so a
+    resume that recomputed the launch directory from the group config instead of
+    honoring what the transcript recorded would bring the session back up in the
+    wrong directory — and report success while doing it. The derived name stays
+    the workspace slug, because that is the name the original launch minted and
+    the tmux-name claim is what makes a duplicate resume collide.
+    """
+    workspace = _workspace_launch_dir(cli_env, "feat-nested")
+    nested = workspace / "member" / "src"
+    nested.mkdir(parents=True)
+    _seed_transcript(cli_env, _UUID_A, nested)
+    before = _settled_state_tree(cli_env)
+
+    result = _camp(cli_env, "launch", "--resume", _UUID_A, cwd=cli_env["tmp_path"])
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == f"{_UUID_A}\n"
+    spawned = _tmux_new_session_argv(cli_env)
+    assert len(spawned) == 1
+    assert _flag_value(spawned[0], "-c") == str(nested)
+    assert _flag_value(spawned[0], "-s") == f"camp-feat-nested-{_UUID_A[:8]}"
     assert _state_tree(cli_env) == before
 
 
@@ -1142,6 +1226,29 @@ def test_camp_launch_resume_on_a_harness_without_transcripts_refuses_naming_it(
 
     _assert_clean_refusal(result, needle="fakeharness")
     assert "Traceback" not in result.stderr
+    assert _tmux_new_session_argv(cli_env) == []
+    assert _state_tree(cli_env) == before
+
+
+def test_camp_launch_resume_on_a_harness_whose_store_raises_refuses_naming_it(
+    cli_env,
+) -> None:
+    """A store the harness cannot read is a refusal, not a traceback.
+
+    The seam contract says an override must never raise for an unreadable store,
+    but camp cannot enforce that on a harness it did not write — and a raised
+    exception here reaches the operator as a stack trace on the one command that
+    is supposed to answer in one line.
+    """
+    _seed_transcript(cli_env, _UUID_A, _workspace_launch_dir(cli_env, "feat-raiser"))
+    before = _settled_state_tree(cli_env)
+
+    result = _camp(
+        cli_env, "launch", "--resume", _UUID_A,
+        cwd=cli_env["tmp_path"], extra_env={"CAMP_FAKE_TRANSCRIPTS": "raise"},
+    )
+
+    _assert_clean_refusal(result, needle="fakeharness")
     assert _tmux_new_session_argv(cli_env) == []
     assert _state_tree(cli_env) == before
 

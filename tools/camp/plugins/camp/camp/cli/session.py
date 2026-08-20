@@ -107,15 +107,16 @@ def launch_and_confirm(
     name_component: str | None = None,
     trust_scope: Path | None = None,
     resume_session_id: str | None = None,
+    camp_managed_root: bool = False,
 ):
     """Spawn a session — by workspace *slug* or at a named *root* — and confirm it.
 
     The addressing arguments are the engine's own, forwarded whole: exactly one of
     *slug* or the (*root*, *name_component*, *trust_scope*) triple, which the
-    engine enforces. *resume_session_id* rides on either, re-entering a session
-    the harness already holds. Everything after the spawn is identical for all
-    three flavors, so they report the same three stderr lines and return the same
-    :class:`LaunchedSession`.
+    engine enforces. *camp_managed_root* and *resume_session_id* ride on that
+    triple and on either flavor respectively. Everything after the spawn is
+    identical for all three flavors, so they report the same three stderr lines
+    and return the same :class:`LaunchedSession`.
 
     Raises :class:`LaunchError` on refusal — including a spawn that never
     confirmed, which the engine has already killed.
@@ -131,6 +132,7 @@ def launch_and_confirm(
         name_component=name_component,
         trust_scope=trust_scope,
         resume_session_id=resume_session_id,
+        camp_managed_root=camp_managed_root,
     )
     print(
         f"camp launch: launched session {launched.session_id} in {launched.launch_dir}\n"
@@ -351,9 +353,11 @@ def _resolve_session_reference(ref: str, *, env: dict[str, str], as_json: bool):
     a second time would let the name rule's two applications drift apart.
 
     The pool is every addressable harness's on-disk transcripts UNION its live
-    sessions. A harness with no transcript concept contributes no transcripts,
-    and if NONE of them has one the reference is unanswerable and camp refuses
-    naming them: an unanswerable seam is a refusal, never a permissive default.
+    sessions. A harness with no transcript concept — or one whose store camp
+    cannot read at all, which the seam contract forbids but a third-party harness
+    may still do — contributes no transcripts, and if NONE of them has one the
+    reference is unanswerable and camp refuses naming them: an unanswerable seam
+    is a refusal, never a permissive default, and never a traceback.
     The live probe is the opposite posture — it only ever ADDS candidates, so a
     probe that fails narrows what camp can offer without being able to make camp
     resume the wrong thing.
@@ -390,7 +394,10 @@ def _resolve_session_reference(ref: str, *, env: dict[str, str], as_json: bool):
             live.extend(enumerate_records(harness, None, env) or [])
         except Exception:  # noqa: BLE001 — a failed live probe narrows the pool, never fails the command
             pass
-        rows = harness.session_transcripts(env=env)
+        try:
+            rows = harness.session_transcripts(env=env)
+        except Exception:  # noqa: BLE001 — a harness camp cannot read contributes nothing
+            rows = None
         if rows is not None:
             answered.append(harness)
             transcripts.extend(rows)
@@ -428,31 +435,23 @@ def _resolve_session_reference(ref: str, *, env: dict[str, str], as_json: bool):
     )
 
 
-def _workspace_owner(root: Path, slug: str, groups, *, env: dict[str, str]) -> dict | None:
-    """The group whose workspace *slug* holds *root*, or ``None`` for anywhere else.
+def _workspace_owner(root: Path, groups, *, env: dict[str, str]) -> dict | None:
+    """The group whose workspace holds *root*, or ``None`` for anywhere else.
 
     The one question the resume flavor asks beyond the name rule. A session rooted
     in a camp workspace belongs to the group camp provisioned that workspace for —
     not to whichever group the operator happens to be standing in — so the answer
     is read off the path, and a resume needs no ``--group`` to find it.
 
-    Built on :func:`workspace_dir`, camp's single source of a workspace's path,
-    rather than on a second reading of the layout, so it cannot drift from the
-    name rule that produced *slug*. ``None`` means *root* is not a camp workspace
-    at all, which is exactly the case the eligibility gate exists to fence.
+    Asked one group at a time through :func:`is_workspace_root`, the boolean half
+    of the very rule that names the session, so the two can never disagree about
+    what counts as a workspace. ``None`` means *root* is not a camp workspace at
+    all, which is exactly the case the eligibility gate exists to fence.
     """
-    from ..group.manifest import workspace_dir
-    from ..group.resolve import GroupConfinementError
+    from ..launch.recovery import is_workspace_root
 
     for config in groups:
-        name = (config.get("group") or {}).get("name")
-        if not name:
-            continue
-        try:
-            workspace = workspace_dir(name, slug, env=env).resolve()
-        except (GroupConfinementError, OSError):
-            continue
-        if root == workspace or workspace in root.parents:
+        if is_workspace_root(root, [config], env=env):
             return config
     return None
 
@@ -522,7 +521,7 @@ def _launch_resume(
         )
 
     component = derive_name_component(root, groups, env=resolved_env)
-    owner = _workspace_owner(root, component, groups, env=resolved_env)
+    owner = _workspace_owner(root, groups, env=resolved_env)
 
     if owner is None:
         # Anywhere but a camp workspace, the allowlist is the containment
@@ -538,22 +537,22 @@ def _launch_resume(
             _die(f"camp launch: no camp group named {explicit_group!r} is configured")
 
     try:
-        if owner is not None:
-            # The slug flavor carrying a session id: camp computed this directory
-            # from a manifest it wrote, so it is fenced by construction and the
-            # eligibility gate has nothing to add.
-            launched = launch_and_confirm(
-                owner, component, env=env, resume_session_id=candidate.session_id
-            )
-        else:
-            launched = launch_and_confirm(
-                group,
-                env=env,
-                root=root,
-                name_component=component,
-                trust_scope=root,
-                resume_session_id=candidate.session_id,
-            )
+        # The recorded root IS the launch directory, for a workspace session as
+        # much as for any other: a harness routinely starts BELOW the workspace
+        # root, and re-deriving the directory from the group's configuration would
+        # bring the session back up somewhere it never ran while still reporting
+        # success. Only two things differ between the branches — which group
+        # supplies the harness profile, and whether the eligibility gate has
+        # anything to fence, since camp built the workspace itself.
+        launched = launch_and_confirm(
+            group if owner is None else owner,
+            env=env,
+            root=root,
+            name_component=component,
+            trust_scope=root,
+            resume_session_id=candidate.session_id,
+            camp_managed_root=owner is not None,
+        )
     except LaunchError as exc:
         _die(_refusal(exc))
         return
@@ -600,8 +599,11 @@ def _cmd_launch_group_cli(
     exception: an ambiguous `--resume` ref prints its candidate rows to stdout and
     exits `2`, because there the rows are the answer.
     """
+    from ..group.config import load_all_groups
+    from ..launch.recovery import derive_name_component
     from ..launch.session import LaunchError
     from ..spine import _consume_flag_value, _die
+    from .common import _groups_dir
     from .dispatch import _slug_from_args_or_cwd
 
     rest = list(args)
@@ -669,13 +671,25 @@ def _cmd_launch_group_cli(
                 "launch, so it must never depend on the directory camp was invoked "
                 "from"
             )
-        root = Path(directory)
-        # The name component comes from the RESOLVED path so that `--dir .` and a
-        # trailing slash name the directory the session actually runs in. The trust
-        # scope is that same directory: a named root is its own confinement, which
-        # is exactly why the eligibility gate — not the trust pre-seed — is the
-        # boundary here.
-        name_component = root.resolve().name
+        # `~` expands here for the same reason it does in `camp sessions --dir`:
+        # a quoted `--dir '~/code'` reaches camp unexpanded, and resolving it
+        # against the current directory would refuse while naming a path that
+        # exists nowhere.
+        root = Path(directory).expanduser()
+        # The name component comes from the one name rule every flavor derives
+        # through, over the RESOLVED path — so `--dir .` and a trailing slash name
+        # the directory the session actually runs in, and a directory inside a camp
+        # workspace is named by its slug exactly as a later `--resume` of that same
+        # session reconstructs it. Two names for one session would mean the tmux
+        # duplicate-name claim could never fire for it, and that claim is the
+        # race-proof backstop. The trust scope is that same directory: a named root
+        # is its own confinement, which is exactly why the eligibility gate — not
+        # the trust pre-seed — is the boundary here.
+        name_component = derive_name_component(
+            root,
+            load_all_groups(_groups_dir()),
+            env=dict(env) if env is not None else dict(os.environ),
+        )
         trust_scope = root
     else:
         slug = _slug_from_args_or_cwd(

@@ -763,6 +763,34 @@ class TestDirectoryRootedLaunch:
         assert rig["pretrust_calls"] == []
         assert rig["spawn"].calls == []
 
+    def test_a_camp_managed_claim_cannot_launder_an_ineligible_root(self, rig, tmp_path):
+        """`camp_managed_root` opens the gate only where the name rule agrees.
+
+        The claim says the directory came out of camp's own workspace layout
+        rather than out of an operator's argument, and that is the whole
+        difference between a fence and no fence. So it is VERIFIED here: a caller
+        that claims it for a directory the name rule does not recognize as a
+        workspace is gated exactly as if it had claimed nothing, and one wrong
+        argument at one call site can never be the whole containment boundary.
+        """
+        root = tmp_path / "proj"
+        root.mkdir()
+        group = _dir_group(tmp_path, roots=[str(tmp_path / "elsewhere")])
+
+        with pytest.raises(rig["module"].LaunchError) as excinfo:
+            rig["module"].launch_session(
+                group,
+                root=root,
+                name_component="odd-handle",
+                trust_scope=root,
+                env=_dir_env(tmp_path),
+                camp_managed_root=True,
+            )
+
+        assert str(root) in str(excinfo.value)
+        assert rig["pretrust_calls"] == []
+        assert rig["spawn"].calls == []
+
     def test_a_root_that_is_not_an_existing_directory_refuses(self, rig, tmp_path):
         """An eligible-but-absent directory must not reach tmux: `new-session -c`
         falls back to the invoking environment's home rather than failing, which
