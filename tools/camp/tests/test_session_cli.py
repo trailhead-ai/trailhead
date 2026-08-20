@@ -423,23 +423,28 @@ def _settled_state_tree(cli_env, *, quiet_for: float = 0.3, timeout: float = 20.
     return previous
 
 
+def _tmux_argv(cli_env) -> list[list[str]]:
+    """The argv of every tmux invocation camp made, in order."""
+    lines = cli_env["tmux_argv_file"].read_text(encoding="utf-8").splitlines()
+    return [line.split("\t") for line in lines if line]
+
+
 def _tmux_new_session_argv(cli_env) -> list[list[str]]:
     """The argv of every `tmux new-session` camp actually spawned."""
-    lines = cli_env["tmux_argv_file"].read_text(encoding="utf-8").splitlines()
-    return [line.split("\t") for line in lines if line.startswith("new-session\t")]
+    return [argv for argv in _tmux_argv(cli_env) if argv[0] == "new-session"]
 
 
 def _flag_value(argv: list[str], flag: str) -> str:
     return argv[argv.index(flag) + 1]
 
 
-def _assert_clean_refusal(result, *, needle: str) -> None:
-    """One `camp launch: ` stderr line, empty stdout, non-zero exit."""
+def _assert_clean_refusal(result, *, needle: str, verb: str = "launch") -> None:
+    """One `camp <verb>: ` stderr line, empty stdout, non-zero exit."""
     assert result.returncode != 0, result.stdout
     assert result.stdout == ""
     lines = [line for line in result.stderr.strip().splitlines() if line.strip()]
     assert len(lines) == 1, result.stderr
-    assert lines[0].startswith("camp launch: "), lines[0]
+    assert lines[0].startswith(f"camp {verb}: "), lines[0]
     assert needle in lines[0], lines[0]
 
 
@@ -724,12 +729,6 @@ def _register_live(cli_env, session_id: str, cwd: Path) -> None:
     """Add a row to the file the fake harness enumerates as live sessions."""
     with cli_env["sessions_file"].open("a", encoding="utf-8") as handle:
         handle.write(f"{session_id}\t{cwd}\n")
-
-
-def _tmux_argv(cli_env) -> list[list[str]]:
-    """The argv of every tmux invocation camp made, in order."""
-    lines = cli_env["tmux_argv_file"].read_text(encoding="utf-8").splitlines()
-    return [line.split("\t") for line in lines if line]
 
 
 def _workspace_launch_dir(cli_env, slug: str) -> Path:
@@ -1358,16 +1357,6 @@ def _recoverable(cli_env, *args, extra_env=None, cwd=None):
     )
 
 
-def _assert_sessions_refusal(result, *, needle: str) -> None:
-    """One `camp sessions: ` stderr line, empty stdout, non-zero exit."""
-    assert result.returncode != 0, result.stdout
-    assert result.stdout == ""
-    lines = [line for line in result.stderr.strip().splitlines() if line.strip()]
-    assert len(lines) == 1, result.stderr
-    assert lines[0].startswith("camp sessions: "), lines[0]
-    assert needle in lines[0], lines[0]
-
-
 def test_camp_sessions_recoverable_lists_the_dead_ones_newest_first(cli_env) -> None:
     """dead = enumerated − live, and the live one is the one that is missing."""
     third = "cccccccc-3333-4333-8333-333333333333"
@@ -1620,7 +1609,7 @@ def test_camp_sessions_recoverable_unusable_limit_is_a_clean_refusal(
 
     result = _recoverable(cli_env, "--limit", value)
 
-    _assert_sessions_refusal(result, needle="--limit")
+    _assert_clean_refusal(result, needle="--limit", verb="sessions")
     assert _state_tree(cli_env) == before
 
 
@@ -1629,7 +1618,7 @@ def test_camp_sessions_recoverable_limit_and_all_together_refuse(cli_env) -> Non
 
     result = _recoverable(cli_env, "--limit", "5", "--all")
 
-    _assert_sessions_refusal(result, needle="mutually exclusive")
+    _assert_clean_refusal(result, needle="mutually exclusive", verb="sessions")
     assert _state_tree(cli_env) == before
 
 
@@ -1642,7 +1631,7 @@ def test_camp_sessions_cap_flags_without_recoverable_refuse(cli_env, flags) -> N
         cli_env, "sessions", *flags, "--group", "mygroup", cwd=cli_env["tmp_path"]
     )
 
-    _assert_sessions_refusal(result, needle="--recoverable")
+    _assert_clean_refusal(result, needle="--recoverable", verb="sessions")
     assert _state_tree(cli_env) == before
 
 
@@ -1677,7 +1666,7 @@ def test_camp_sessions_recoverable_refuses_when_the_harness_keeps_no_transcripts
     unsupported = _recoverable(cli_env, extra_env={"CAMP_FAKE_TRANSCRIPTS": "none"})
     empty = _recoverable(cli_env)
 
-    _assert_sessions_refusal(unsupported, needle="fakeharness")
+    _assert_clean_refusal(unsupported, needle="fakeharness", verb="sessions")
     assert "no recoverable sessions" not in unsupported.stderr
     assert unsupported.stderr != empty.stderr
     assert _state_tree(cli_env) == before

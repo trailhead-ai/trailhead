@@ -98,11 +98,6 @@ def _consume_flag(args: list[str], flag: str) -> bool:
     return present
 
 
-def _consume_json_flag(args: list[str]) -> bool:
-    """Remove every ``--json`` from *args* in place; True when one was there."""
-    return _consume_flag(args, "--json")
-
-
 def launch_and_confirm(
     group: dict,
     slug: str | None = None,
@@ -279,12 +274,17 @@ def _candidate_line(candidate) -> str:
 
 
 def _print_candidates(candidates, *, as_json: bool) -> None:
-    """Print candidate rows on STDOUT.
+    """Print candidate rows on STDOUT — the one print site both listings use.
 
     On stdout even when the exit code is non-zero: the rows ARE the answer to
     what was asked, and a caller capturing stdout must get them. The one-line
-    explanation of why camp stopped goes to stderr alongside, keeping the split
-    every other camp verb uses.
+    explanation of why camp stopped — or the notice naming what was capped —
+    goes to stderr alongside, keeping the split every other camp verb uses.
+
+    Shared by the ambiguity listing and the recoverable listing so the two emit
+    the identical bytes for the identical candidate: a consumer that learned the
+    shape from one reads the other unchanged, which two print sites cannot
+    guarantee.
     """
     if as_json:
         print(json.dumps([_candidate_payload(candidate) for candidate in candidates]))
@@ -608,7 +608,7 @@ def _cmd_launch_group_cli(
     explicit_group = _consume_flag_value(rest, "--group")
     resume_ref = _consume_flag_value(rest, RESUME_FLAG)
     directory = _consume_flag_value(rest, "--dir")
-    as_json = _consume_json_flag(rest)
+    as_json = _consume_flag(rest, "--json")
 
     if directory is None and "--dir" in rest:
         # `--dir` with nothing after it: consumed by neither branch above.
@@ -827,11 +827,7 @@ def _list_recoverable(
         )
 
     shown = candidates if limit is None else candidates[:limit]
-    if as_json:
-        print(json.dumps([_candidate_payload(candidate) for candidate in shown]))
-    else:
-        for candidate in shown:
-            print(_candidate_line(candidate))
+    _print_candidates(shown, as_json=as_json)
 
     if not live_known:
         print(
@@ -882,7 +878,7 @@ def _cmd_sessions_group_cli(
 
     rest = list(args)
     _consume_flag_value(rest, "--group")  # already resolved upstream; drop it
-    as_json = _consume_json_flag(rest)
+    as_json = _consume_flag(rest, "--json")
     recoverable = _consume_flag(rest, "--recoverable")
     show_all = _consume_flag(rest, "--all")
     directory = _consume_flag_value(rest, "--dir")
