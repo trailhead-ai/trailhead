@@ -13,9 +13,10 @@ the command modules stay free of cross-imports for generic plumbing:
     and ``status``, as opposed to ``resolve_active_vault``'s ``default``-only view,
     plus ``_partition_writable_vaults`` — the ``shared: true`` exclusion every
     WRITE/PUSH fan-out over that enumeration applies;
-  - the git primitives (``_git`` / ``_vault_is_git_toplevel``) shared by ``sync``
-    and ``flush``, plus ``_vault_drift`` — the "is this vault actually backed up?"
-    probe shared by ``status`` and ``flush``;
+  - the git primitives (``_git`` / ``_vault_is_git_toplevel`` /
+    ``_vault_mid_rebase``) shared by ``sync``, ``flush`` and ``resolve_state``,
+    plus ``_vault_drift`` — the "is this vault actually backed up?" probe shared
+    by ``status`` and ``flush``;
   - the shared ``--session-id`` / ``--worktree`` subparser selectors;
   - the shared stdin read (``_read_stdin_body``).
 """
@@ -366,6 +367,25 @@ def _vault_is_git_toplevel(vault: Path) -> bool:
         return False
 
 
+def _vault_mid_rebase(vault: Path) -> bool:
+    """Return ``True`` iff a rebase is in progress — state git itself tracks.
+
+    Probed via ``rev-parse --git-path`` rather than a hand-built ``.git/...``
+    path, because in a linked worktree ``.git`` is a file and the state dirs
+    live elsewhere.
+
+    The single liveness authority for a resolution session (``cli.resolve_state``)
+    as well as ``sync``'s abort verification: a stopped rebase leaves its state
+    directory behind, and only its disappearance means the rebase is over.
+    """
+    for state_dir in ("rebase-merge", "rebase-apply"):
+        rc, out, _ = _git(vault, "rev-parse", "--git-path", state_dir)
+        # `--git-path` output is relative to the vault when not absolute.
+        if rc == 0 and out and (vault / out).exists():
+            return True
+    return False
+
+
 #: Drift codes returned by :func:`_vault_drift`. Callers branch on these STABLE
 #: tokens, never on the human phrasing beside them — the prose is free to be
 #: reworded without silently changing which remedy a caller prints.
@@ -376,12 +396,16 @@ DRIFT_UNCOMMITTED = "uncommitted"
 DRIFT_NO_REMOTE = "no-remote"
 DRIFT_NO_UPSTREAM = "no-upstream"
 DRIFT_UNPUSHED = "unpushed"
+DRIFT_RESOLVING = "resolving"
 
 #: The drift codes ``lore sync`` can actually resolve. A caller that offers
 #: "run `lore sync`" as its remedy MUST filter on this set: proposing it for a
 #: condition sync cannot fix (no remote, a missing directory) trains the operator
 #: to ignore the notice, which is the failure this drift reporting exists to
 #: prevent.
+#: ``DRIFT_RESOLVING`` is deliberately absent: a vault stopped mid-rebase is
+#: not something ``lore sync`` can settle — sync would abort the rebase and throw
+#: the resolution away. Its remedy is ``lore resolve`` and nothing else.
 DRIFT_SYNC_FIXABLE = frozenset(
     {DRIFT_NEVER_COMMITTED, DRIFT_UNCOMMITTED, DRIFT_NO_UPSTREAM, DRIFT_UNPUSHED}
 )
@@ -434,8 +458,9 @@ def _vault_drift(vault: Path) -> list:
     human phrase for them to print.
 
     Ordered most- to least-severe, and **short-circuiting**: a vault that is
-    absent or not a git repo has no meaningful commit/remote state to report, so
-    that finding is returned alone rather than followed by derivative noise.
+    absent, not a git repo, or stopped mid-rebase has no meaningful commit/remote
+    state to report, so that finding is returned alone rather than followed by
+    derivative noise.
 
     ``DRIFT_NO_UPSTREAM`` is kept distinct from ``DRIFT_UNPUSHED`` because the two
     do not resolve the same way — an ahead-of-upstream branch is fixed by a plain
@@ -451,6 +476,12 @@ def _vault_drift(vault: Path) -> list:
         return [
             (DRIFT_NOT_GIT, "not a git repo (or not its own toplevel) — records have no history")
         ]
+
+    if _vault_mid_rebase(vault):
+        # Returned ALONE, like the absent/not-git findings above: a conflicted
+        # tree would otherwise read as ``DRIFT_UNCOMMITTED`` and draw a
+        # `lore sync` remedy that aborts the resolution in progress.
+        return [(DRIFT_RESOLVING, "mid-resolution — a vault rebase is in progress")]
 
     findings = []
     if not _vault_has_commits(vault):

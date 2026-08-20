@@ -9,6 +9,7 @@ from .common import (
     DRIFT_MISSING,
     DRIFT_NOT_GIT,
     DRIFT_NO_REMOTE,
+    DRIFT_RESOLVING,
     DRIFT_SYNC_FIXABLE,
     _resolve_all_vaults,
     _resolve_config_path,
@@ -335,12 +336,18 @@ def _drift_remedy(name: str, codes: set) -> str:
     Keyed on the stable ``DRIFT_*`` tokens, never on the human phrasing, so
     rewording a finding cannot silently mis-route its remedy.
 
+    ``DRIFT_RESOLVING`` outranks everything: while a rebase is stopped mid-flight
+    no other remedy is even safe to attempt, and ``lore sync`` would abort the
+    resolution rather than finish it.
+
     Ordered by what actually unblocks the operator: if ANY finding is one
     ``lore sync`` resolves, that is the remedy even when a standing condition
     (no remote) sits beside it — committing the records is the step that reduces
     the exposure. Only when nothing is sync-fixable does the standing condition
     become the ask, and a remedy is never offered that would simply fail.
     """
+    if DRIFT_RESOLVING in codes:
+        return f"run `lore resolve {name}`"
     if codes & DRIFT_SYNC_FIXABLE:
         return f"run `lore sync --vault {name}`"
     if DRIFT_MISSING in codes:

@@ -17,6 +17,7 @@ from .common import (
     _vault_drift,
     _vault_is_git_toplevel,
 )
+from .resolve_state import refusal_notice, vault_is_resolving
 from .session import _open_session_index, _resolve_session_key
 
 
@@ -322,6 +323,13 @@ def _flush_one_session(vault: Path, key: str, committer: str) -> int:
     """
     from ..session import store as session_store_mod
 
+    # A vault mid-rebase is being resolved: a flush would flip the sidecar and
+    # commit into a tree `lore resolve` is still settling. Refused before the
+    # lock, so the session stays dirty and nothing is written.
+    if vault_is_resolving(vault):
+        print(refusal_notice(vault, "flush"), file=sys.stderr)
+        return 1
+
     # The flip and the commit are ONE unit under the session-key lock: a
     # `session candidate` that landed between them would flip the sidecar back to
     # `dirty` and be staged into the flush commit. The lock is reentrant, so
@@ -546,6 +554,15 @@ def _flush_batch(args, *, query: str, scope_label: str) -> int:
     if not discovered:
         print(f"notice: no dirty sessions match {scope_label} — nothing to flush.")
         return 0
+
+    # The same mid-resolution fence as the single-session path, applied to the
+    # whole batch BEFORE the first flip: refusing partway through would leave
+    # earlier sessions flushed, which is exactly the split state a resolution
+    # in progress must not acquire.
+    for batch_vault in {str(v): v for v, _ in discovered}.values():
+        if vault_is_resolving(batch_vault):
+            print(refusal_notice(batch_vault, "flush"), file=sys.stderr)
+            return 1
 
     flushed: list[str] = []
     # Insertion-ordered so the end-of-batch pushes run in discovery order; keyed by

@@ -291,11 +291,18 @@ def _cmd_session_candidate(args) -> int:
     ``lore: <msg>`` + nonzero before any session-key resolution or write.
     Omitting ``--vault`` preserves the existing active-vault-resolution
     behavior unchanged.
+
+    **A vault mid-resolution warns but still captures.** ``record create`` and
+    ``flush`` refuse outright at a vault stopped mid-rebase; a candidate does
+    not, because a finding lost to an in-progress resolution is worse than one
+    captured into a tree ``lore resolve`` has yet to settle. The notice names
+    ``lore resolve <vault>``; the exit code stays 0.
     """
     from ..record import store as record_store_mod
     from ..session import store as session_store_mod
     from ..vault import config as vault_config_mod
     from ..vault import vault as vault_mod
+    from . import resolve_state as resolve_state_mod
 
     vault_name = getattr(args, "vault", None)
     if vault_name:
@@ -305,6 +312,16 @@ def _cmd_session_candidate(args) -> int:
         vault_root = str(named_vault.path)
     else:
         vault_root = str(vault_config_mod.resolve_active_vault())
+
+    # A candidate capture is NOT fenced off a mid-resolution vault the way
+    # ``record create`` is: losing a finding is worse than capturing it into a
+    # tree ``lore resolve`` is still settling. The operator is told, and the
+    # write goes ahead.
+    if resolve_state_mod.vault_is_resolving(vault_root):
+        print(
+            resolve_state_mod.warning_notice(vault_root, "session candidate"),
+            file=sys.stderr,
+        )
 
     key, rc = _resolve_session_key(args)
     if key is None:

@@ -86,6 +86,7 @@ from .common import (
     _vault_has_upstream,
     _vault_head_branch,
     _vault_is_git_toplevel,
+    _vault_mid_rebase,
     _vault_unpushed,
 )
 
@@ -134,21 +135,6 @@ def _make_emitters(name: str, width: int):
 PULL_OK = "ok"
 PULL_OFFLINE = "offline"
 PULL_FAILED = "failed"
-
-
-def _vault_mid_rebase(vault: Path) -> bool:
-    """Return ``True`` iff a rebase is in progress — state git itself tracks.
-
-    Probed via ``rev-parse --git-path`` rather than a hand-built ``.git/...``
-    path, because in a linked worktree ``.git`` is a file and the state dirs
-    live elsewhere.
-    """
-    for state_dir in ("rebase-merge", "rebase-apply"):
-        rc, out, _ = _git(vault, "rev-parse", "--git-path", state_dir)
-        # `--git-path` output is relative to the vault when not absolute.
-        if rc == 0 and out and (vault / out).exists():
-            return True
-    return False
 
 
 def _pull_one(vault: Path, say, say_err) -> tuple[str, int]:

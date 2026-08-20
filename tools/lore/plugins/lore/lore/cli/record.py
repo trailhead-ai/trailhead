@@ -685,6 +685,7 @@ def _cmd_record_create(args) -> int:
     from ..record import store as record_store_mod
     from ..vault import config as vault_config_mod
     from ..vault import resolve as vault_resolve_mod
+    from . import resolve_state as resolve_state_mod
 
     # --kind is required.
     kind = getattr(args, "kind", None)
@@ -813,6 +814,13 @@ def _cmd_record_create(args) -> int:
         )
         or None
     )
+
+    # A vault stopped mid-rebase is being resolved: writing into it would land
+    # records in a tree `lore resolve` is about to rewrite. Checked before the
+    # lock so a refused create never even creates a lock sidecar.
+    if resolve_state_mod.vault_is_resolving(vault_root):
+        print(resolve_state_mod.refusal_notice(vault_root, "record create"), file=sys.stderr)
+        return 1
 
     guard_notices: list[str] = []
     try:
@@ -1129,6 +1137,7 @@ def _cmd_record_update(args) -> int:
     from ..record import fields as fields_mod
     from ..record import guards as guards_mod
     from ..record import store as record_store_mod
+    from . import resolve_state as resolve_state_mod
 
     record_id = _require_record_id(args)
     if record_id is None:
@@ -1184,6 +1193,16 @@ def _cmd_record_update(args) -> int:
             # read); the write path's own acquisition is a reentrant depth bump, and
             # the lock is released after ``conn.commit()`` below because the
             # ExitStack is entered inside the transaction.
+            # Same fence as ``record create``: a vault mid-rebase is being
+            # resolved, and an update landing in it would be rewritten by the
+            # resolution. Refused before the lock, so nothing is written.
+            if resolve_state_mod.vault_is_resolving(location.vault_root):
+                print(
+                    resolve_state_mod.refusal_notice(location.vault_root, "record update"),
+                    file=sys.stderr,
+                )
+                raise _UpdateAborted()
+
             locks.enter_context(locking_mod.vault_write_lock(location.vault_root))
 
             def read_apply_and_guard() -> tuple[dict, str, list[str]]:
