@@ -1059,3 +1059,92 @@ def test_flush_sync_tail_never_touches_a_shared_vault(tmp_path):
     )
     assert _commit_count(shared) == shared_before, "the shared vault must not be committed"
     assert "planted.md" in _git(shared, "status", "--porcelain").stdout
+
+
+def test_flush_default_names_unsynced_work_in_a_shared_vault(tmp_path):
+    """The tail structurally never touches a `shared: true` vault — so a default
+    flush must still say one is holding unsynced work, scoped to shared vaults
+    only (the notice `--no-sync` prints over its own, unpartitioned, set)."""
+    config_home = tmp_path / "config"
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(parents=True)
+    default = _make_vault(tmp_path / "v-default", dirty=False)
+    shared = _make_vault(tmp_path / "v-shared", dirty=False)
+    (shared / "planted.md").write_text("# someone else's\n")
+    write_vault_config(
+        config_home,
+        [("default", "default", default), ("teamvault", "product", shared)],
+    )
+    _mark_shared(config_home, "teamvault")
+
+    r = run_cli(["flush"], config_home=config_home, state_dir=state_dir)
+    assert r.returncode == 0, r.stderr
+    assert "teamvault" in r.stderr, (
+        f"a default flush must name the shared vault holding unsynced work; "
+        f"stderr={r.stderr!r}"
+    )
+    assert "run `lore sync`" in r.stderr
+
+
+def _strand_mid_rebase(vault: Path, tmp_path: Path) -> Path:
+    """Leave ``vault`` genuinely stopped mid-rebase on a README conflict."""
+    remote = _make_bare_remote(tmp_path / f"{vault.name}-remote.git")
+    _wire_remote(vault, remote)
+
+    other = _clone_as_second_device(remote, tmp_path / f"{vault.name}-device-b")
+    (other / "README.md").write_text("edited on device B\n")
+    _git(other, "add", "-A")
+    _git(other, "commit", "-m", "device B edit")
+    _git(other, "push", "origin")
+
+    (vault / "README.md").write_text("edited on device A\n")
+    _git(vault, "add", "-A")
+    _git(vault, "commit", "-m", "device A edit")
+    _git(vault, "fetch", "origin")
+    branch = _git(vault, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
+    rc = _git(vault, "rebase", f"origin/{branch}")
+    assert rc.returncode != 0, "the fixture must actually conflict"
+    assert (vault / ".git" / "rebase-merge").exists(), "the vault must be stranded mid-rebase"
+    return vault
+
+
+def test_flush_sync_tail_skips_a_mid_resolution_vault_without_aborting_it(tmp_path):
+    """A vault mid-resolution must be skipped, not synced — syncing it would abort
+    the very rebase `lore resolve` is in the middle of settling, throwing away
+    in-progress judgment work. The remedy is still named, and the vault holding
+    the flushed session is unaffected."""
+    config_home = tmp_path / "config"
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(parents=True)
+    default = _make_vault(tmp_path / "v-default", dirty=False)
+    stuck = _make_vault(tmp_path / "v-stuck", dirty=False)
+    write_vault_config(
+        config_home,
+        [("default", "default", default), ("stuck", "product", stuck)],
+    )
+    _strand_mid_rebase(stuck, tmp_path)
+    stuck_commits_before = _commit_count(stuck)
+
+    r = run_cli(["flush"], config_home=config_home, state_dir=state_dir)
+    assert r.returncode == 0, r.stderr
+    assert _git(default, "status", "--porcelain").stdout.strip() == "", (
+        "the unaffected vault must still be synced"
+    )
+    # No sync attempt of any kind must have touched the stuck vault — not even
+    # a "successful" commit of the still-conflicted tree, which `cmd_sync`
+    # would otherwise make since it never checks resolution state itself.
+    assert _commit_count(stuck) == stuck_commits_before, (
+        "a mid-resolution vault must not be synced at all"
+    )
+    # The rebase must survive exactly as the fixture left it — `lore sync` would
+    # have aborted it.
+    assert (stuck / ".git" / "rebase-merge").exists(), (
+        "syncing a mid-resolution vault must not abort its rebase"
+    )
+    conflicted = stuck.joinpath("README.md").read_text()
+    assert "<<<<<<<" in conflicted and "edited on device A" in conflicted, (
+        "the conflict markers `lore resolve` is working through must survive"
+    )
+    assert "stuck" in r.stderr and "mid-resolution" in r.stderr
+    # The remedy names the vault's DIRECTORY, per `resolve_state.resolve_remedy`.
+    assert "lore resolve v-stuck" in r.stderr

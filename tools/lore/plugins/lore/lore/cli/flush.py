@@ -155,15 +155,26 @@ def _flush_push(vault: Path) -> int:
     return 0
 
 
-def _report_unsynced_vaults() -> None:
-    """Print a notice naming every configured vault left holding uncommitted work.
+def _report_unsynced_vaults(
+    vaults: "list[tuple[str, Path]] | None" = None, *, file=None
+) -> None:
+    """Print a notice naming every vault in *vaults* left holding uncommitted work.
 
-    **The `--no-sync` path's report, and only that path's.** A default flush ends
-    with :func:`_flush_sync_tail`, which SYNCS those vaults instead of naming
-    them — leaving nothing for this notice to report and no useful remedy to
-    print (the `lore sync` it would prescribe is the one that just ran). Under
-    `--no-sync` the old shape is preserved exactly, and this notice is what makes
-    it honest.
+    **Two callers, two scopes, both preserved exactly.** `--no-sync` calls this
+    with no arguments: *vaults* resolves to EVERY configured vault (the old,
+    unpartitioned shape, still printed to stdout) — the full report that
+    substitutes for the sync tail it opted out of.
+
+    A default flush ends with :func:`_flush_sync_tail`, which SYNCS every
+    writable vault instead of naming it — leaving nothing for that half of the
+    report. But the tail structurally never touches a `shared: true` vault (the
+    shared-vault write gate — see :func:`_flush_sync_tail`), so a shared vault
+    left holding unsynced work is never mentioned by anything on the default
+    path either, unless this notice runs a second time, scoped to shared vaults
+    ONLY, after the tail (`cmd_flush` passes `file=sys.stderr` there, matching
+    every other post-tail notice). The two scopes never overlap — the tail's
+    writable partition and this call's shared partition are exactly
+    complementary — so calling both is not double-reporting the same vault.
 
     `_flush_commit` stages the flushed session record's EXPLICIT paths and nothing
     else — deliberately, so unrelated dirty files are never swept into a session
@@ -176,8 +187,9 @@ def _report_unsynced_vaults() -> None:
 
     Reporting rather than committing is what `--no-sync` MEANS: that flush still
     touches only what it staged, and the operator gets the one command that covers
-    the rest. (A default flush covers it instead of naming it —
-    :func:`_flush_sync_tail`.)
+    the rest. (A default flush covers its writable vaults instead of naming them —
+    :func:`_flush_sync_tail` — and can only ever NAME its shared ones, since it
+    must never write to them.)
 
     **Only ``DRIFT_SYNC_FIXABLE`` findings are reported**, because the notice's
     whole payload is "run `lore sync`". A standing condition sync cannot fix — a
@@ -187,10 +199,11 @@ def _report_unsynced_vaults() -> None:
     ``lore status`` is the surface that reports standing conditions, with the
     remedy that actually applies. Silent when nothing is sync-fixable.
     """
-    vaults, error = _resolve_all_vaults()
-    if error is not None:
-        print(f"notice: cannot check vault sync state — {error}", file=sys.stderr)
-        return
+    if vaults is None:
+        vaults, error = _resolve_all_vaults()
+        if error is not None:
+            print(f"notice: cannot check vault sync state — {error}", file=sys.stderr)
+            return
 
     drifted = []
     for name, path in vaults:
@@ -202,9 +215,10 @@ def _report_unsynced_vaults() -> None:
     if not drifted:
         return
 
-    print("notice: vault(s) still holding unsynced work — run `lore sync`:")
+    out = file or sys.stdout
+    print("notice: vault(s) still holding unsynced work — run `lore sync`:", file=out)
     for name, descriptions in drifted:
-        print(f"  {name}: {'; '.join(descriptions)}")
+        print(f"  {name}: {'; '.join(descriptions)}", file=out)
 
 
 def _vault_diverged(vault: Path) -> bool:
@@ -344,11 +358,18 @@ def cmd_flush(args) -> int:
     a session status is only ever `dirty` / `clean`.
 
     Every scope ends with the SYNC TAIL (:func:`_flush_sync_tail`): the full
-    commit → pull → push flow over every writable vault, which is what makes a
+    commit → pull → push flow over every WRITABLE vault, which is what makes a
     flush leave the whole install saved rather than only the session record.
-    `--no-sync` opts out, and that path ends instead with
-    `_report_unsynced_vaults` — the notice that NAMES what such a flush leaves
-    uncommitted. Exactly one of the two runs.
+    `--no-sync` opts out, and that path ends instead with `_report_unsynced_vaults`
+    over every configured vault — the notice that NAMES what such a flush leaves
+    uncommitted. Exactly one of the two governs the writable vaults.
+
+    The tail structurally never touches a `shared: true` vault (the shared-vault
+    write gate), so a default flush follows the tail with `_report_unsynced_vaults`
+    a second time, scoped to shared vaults ONLY, on stderr — the one thing nothing
+    else on the default path would otherwise say. This does not compete with the
+    tail: the tail's writable partition and this call's shared partition are
+    exactly complementary, so a vault is only ever covered by one of the two.
 
     Either ending runs on the failure path too: a flush that exits non-zero is
     exactly when the sessions that DID commit most need pushing and the operator
@@ -371,6 +392,11 @@ def cmd_flush(args) -> int:
 
     if sync_tail:
         _flush_sync_tail()
+        vaults, error = _resolve_all_vaults()
+        if error is None:
+            _, shared = _partition_writable_vaults(vaults)
+            if shared:
+                _report_unsynced_vaults(shared, file=sys.stderr)
     else:
         _report_unsynced_vaults()
     return rc
