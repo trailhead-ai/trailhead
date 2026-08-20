@@ -25,10 +25,12 @@ uncommitted — that is the same silent-data-loss shape this module exists to cl
 
 **Network failures stay soft** (exit 0 with a notice): a failed fetch or push
 leaves the commit durable locally, and a later ``lore sync`` retries both. A
-**failed rebase is hard** (exit 1) — most commonly a genuine conflict, where only
-manual resolution decides which text wins. The rebase is aborted before
-reporting, and the abort is verified: if the vault somehow remains mid-rebase,
-the notice says so instead of promising a clean state that does not exist.
+**failed rebase is hard** (exit 1) — most commonly a genuine conflict, which
+``lore resolve <vault>`` exists to settle and which the notice names as the
+remedy. The rebase is aborted before reporting, and the abort is verified: if the
+vault somehow remains mid-rebase, the notice says so instead of promising a clean
+state that does not exist (``lore resolve`` picks the vault up from either state,
+so the remedy is the same one).
 
 **A pull that landed commits triggers a search-index rebuild** at the end of the
 run: the index is a derived projection of the vault tree, and records written on
@@ -235,16 +237,13 @@ def _pull_one(vault: Path, say, say_err) -> tuple[str, int]:
     if rc_rebase != 0:
         say_err("error: rebase onto origin failed — pull skipped")
         say_err(f"  rebase error: {stderr_rebase or stdout_rebase}")
+        from . import resolve_state as resolve_state_mod
+
+        remedy = resolve_state_mod.resolve_remedy(vault)
         if _vault_mid_rebase(vault):
-            say_err(
-                f"  the vault is STILL mid-rebase; run: cd {vault} && git rebase --abort, "
-                "then re-run `lore sync`"
-            )
+            say_err(f"  the vault is STILL mid-rebase; to settle it, {remedy}")
         else:
-            say_err(
-                f"  resolve manually: cd {vault} && git pull --rebase, "
-                "fix the conflicts, then re-run `lore sync`"
-            )
+            say_err(f"  to settle the conflict, {remedy}")
         return PULL_FAILED, 0
 
     say(f"Pulled {behind} commit(s) from origin.")

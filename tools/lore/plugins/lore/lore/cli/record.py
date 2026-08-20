@@ -445,6 +445,7 @@ def _cmd_record_delete(args) -> int:
     from .. import locking as locking_mod
     from ..record import guards as guards_mod
     from ..record import store as record_store_mod
+    from . import resolve_state as resolve_state_mod
 
     record_id = _require_record_id(args)
     if record_id is None:
@@ -471,6 +472,14 @@ def _cmd_record_delete(args) -> int:
         # from config resolves to the default floor and surfaces a clean
         # RecordNotFoundError below rather than acting on an orphaned target.
         vault_root = _resolve_record_op_vault(record_id, args)
+
+    # Same fence as ``record create`` / ``record update``: a vault stopped
+    # mid-rebase is being resolved, and a delete landing in it would be replayed
+    # over — or silently swept into — the resolution's own commit. Checked before
+    # the lock so a refused delete never even creates a lock sidecar.
+    if resolve_state_mod.vault_is_resolving(Path(vault_root)):
+        print(resolve_state_mod.refusal_notice(vault_root, "record delete"), file=sys.stderr)
+        return 1
 
     # Dependent-warning: deleting a task or design record that others depend-on
     # is allowed (delete is never blocked) but warns, listing the dependents.

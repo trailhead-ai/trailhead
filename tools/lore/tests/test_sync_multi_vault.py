@@ -20,7 +20,7 @@ Covers:
   - a clean, in-sync vault is not pushed (no needless round-trip)
   - commits landed on the remote by another device are pulled down (rebase)
   - a diverged vault is rebased onto origin and then pushed
-  - a rebase conflict aborts cleanly: no mid-rebase state, exit 1, remedy printed
+  - a rebase conflict aborts cleanly: no mid-rebase state, exit 1, `lore resolve` named
   - a conflicted vault does not strand the others (per-vault isolation holds)
   - an unreachable remote makes fetch soft: notice, exit 0, commit still lands
   - an unborn (`git init` + `remote add`) vault adopts the remote branch
@@ -516,7 +516,8 @@ def test_sync_rebase_conflict_aborts_cleanly_and_fails_hard(tmp_path):
     r = run_cli(["sync"], config_home=config_home, state_dir=state_dir)
     assert r.returncode == 1, "an unresolved conflict must surface in the exit code"
     assert "conflict" in r.stderr.lower()
-    assert "git pull --rebase" in r.stderr, "the remedy must be actionable"
+    assert "lore resolve" in r.stderr, "the remedy must be actionable"
+    assert "git pull --rebase" not in r.stderr, "conflicts are settled through the CLI"
 
     # The vault is NOT left mid-rebase: no rebase state dir, tree is clean, and
     # the local commit survives intact for the manual resolution.
