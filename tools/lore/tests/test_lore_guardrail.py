@@ -898,13 +898,23 @@ class TestSettingsWriterPermissionDeny:
         settings = tmp_path / ".claude" / "settings.json"
         settings.parent.mkdir(parents=True)
         settings.write_text(
-            json.dumps({"permissions": {"deny": ["Bash(rm:*)"], "allow": ["Read(*)"]}})
+            json.dumps(
+                {
+                    "permissions": {"deny": ["Bash(rm:*)"], "allow": ["Read(*)"]},
+                    "env": {"SOME_VAR": "1"},
+                    "hooks": {"PreToolUse": [{"matcher": "Edit", "hooks": []}]},
+                }
+            )
         )
         sw.upsert_permission_allow(settings, "Bash(lore:*)")
         data = json.loads(settings.read_text())
         assert data["permissions"]["deny"] == ["Bash(rm:*)"]
         assert "Read(*)" in data["permissions"]["allow"]
         assert "Bash(lore:*)" in data["permissions"]["allow"]
+        assert data["env"] == {"SOME_VAR": "1"}, "unrelated top-level key not preserved"
+        assert data["hooks"] == {"PreToolUse": [{"matcher": "Edit", "hooks": []}]}, (
+            "unrelated top-level key not preserved"
+        )
 
     def test_upsert_permission_allow_raises_on_corrupt_settings(self, tmp_path):
         sw = self._sw()
@@ -1116,7 +1126,11 @@ class TestInitInstallsGuardrail:
 
     def test_init_adds_bash_lore_permission_allow(self, tmp_path):
         """The install is symmetric: the CLI the deny rules force every write
-        through must itself be sanctioned, via a fixed blanket allow rule."""
+        through must itself be sanctioned, via a fixed blanket allow rule —
+        and adding it leaves permissions.deny exactly what a fresh install's
+        generated deny list would be on its own, independently derived here
+        from the record model's kinds rather than read back from the same
+        install run."""
         state, config, home = _dirs(tmp_path)
         res = _run_init(["init"], state=state, config=config, home=home)
         assert res.returncode == 0, res.stderr
@@ -1126,6 +1140,20 @@ class TestInitInstallsGuardrail:
         assert "Bash(lore:*)" in allow, f"expected Bash(lore:*) allow rule, got {allow!r}"
         deny = data.get("permissions", {}).get("deny", [])
         assert "Bash(lore:*)" not in deny
+
+        vaults = state / "lore" / "vaults"
+        prefix = f"//{str(vaults).lstrip('/')}"
+        kinds = load_script("lore.record.model").KINDS
+        lock_name = load_script("lore.locking").VAULT_LOCK_NAME
+        expected_deny = (
+            {f"Edit({prefix}/*/{kind}/**)" for kind in kinds}
+            | {f"Edit({prefix}/*/.git/**)"}
+            | {f"Edit({prefix}/*/{name})" for name in (".gitignore", lock_name)}
+        )
+        assert set(deny) == expected_deny, (
+            f"unexpected extra or missing deny rules after adding the allow "
+            f"rule: {sorted(set(deny) ^ expected_deny)!r}"
+        )
 
     def test_init_removes_legacy_blanket_denies(self, tmp_path):
         """The two blanket rules an earlier install could leave behind are
