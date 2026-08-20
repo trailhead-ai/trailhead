@@ -13,10 +13,8 @@ documented command:
   - a record created with ``--related blob=<name>`` is returned by
     ``related-blob:"<name>"`` after ``lore reindex`` — parametrized over
     decision/task/spec
-  - the descendant query, and whether the transcript itself shows up in
-    the *bare* ``related-blob:"<name>"`` facet — resolved here by writing
-    the expectation down first, running it once, and reporting the
-    observed result rather than iterating the assertion.
+  - the descendant query, and that the transcript itself does *not* show up
+    in the *bare* ``related-blob:"<name>"`` facet
   - duplicate-title create forks a ``-2``-suffixed name; a date-scoped
     search then returns both
   - ``lore record delete`` removes the labeled blob from disk and from
@@ -28,6 +26,9 @@ dirs by the harness.
 """
 
 from __future__ import annotations
+
+import re
+from pathlib import Path
 
 import pytest
 
@@ -41,7 +42,7 @@ from conftest import make_vault as _make_vault, run_cli as _run
 _TRANSCRIPT_TITLE = "2026-08-20 — sync call"
 
 
-def _create_blob(vault, state, *, title=_TRANSCRIPT_TITLE):
+def _create_blob(vault, state):
     """Create a transcript-labeled blob via the CLI; return its RECORD_ID."""
     r = _run(
         [
@@ -50,7 +51,7 @@ def _create_blob(vault, state, *, title=_TRANSCRIPT_TITLE):
             "--kind",
             "blob",
             "--title",
-            title,
+            _TRANSCRIPT_TITLE,
             "--label",
             "transcript=true",
         ],
@@ -60,6 +61,36 @@ def _create_blob(vault, state, *, title=_TRANSCRIPT_TITLE):
     )
     assert r.returncode == 0, r.stderr
     return r.stdout.strip()
+
+
+def _create_derived(vault, state, blob_name, *, kind, title):
+    """Create a record carrying the forward ``related: blob=<name>`` edge back
+    to ``blob_name``; return the new record's bare name."""
+    r = _run(
+        [
+            "record",
+            "create",
+            "--kind",
+            kind,
+            "--title",
+            title,
+            "--related",
+            f"blob={blob_name}",
+        ],
+        vault=vault,
+        state_dir=state,
+        stdin_text="derived record body\n",
+    )
+    assert r.returncode == 0, r.stderr
+    return r.stdout.strip().split("/", 1)[1]
+
+
+def _normalized(path) -> str:
+    """A doc file's text with shell line-continuations joined and whitespace
+    collapsed, so a pinned phrase survives markdown wrapping (the precedent is
+    ``_normalize()`` in ``test_reserved_label_docs.py``)."""
+    raw = path.read_text(encoding="utf-8").replace("\\\n", "")
+    return re.sub(r"\s+", " ", raw)
 
 
 def _search(vault, state, query):
@@ -117,24 +148,13 @@ def test_related_blob_validates_and_is_returned_by_facet(tmp_path, derived_kind)
     blob_id = _create_blob(vault, state)
     blob_name = blob_id.split("/", 1)[1]
 
-    r = _run(
-        [
-            "record",
-            "create",
-            "--kind",
-            derived_kind,
-            "--title",
-            f"Derived from transcript ({derived_kind})",
-            "--related",
-            f"blob={blob_name}",
-        ],
-        vault=vault,
-        state_dir=state,
-        stdin_text="derived record body\n",
+    derived_name = _create_derived(
+        vault,
+        state,
+        blob_name,
+        kind=derived_kind,
+        title=f"Derived from transcript ({derived_kind})",
     )
-    assert r.returncode == 0, r.stderr
-    derived_id = r.stdout.strip()
-    derived_name = derived_id.split("/", 1)[1]
 
     _reindex(vault, state)
 
@@ -146,12 +166,12 @@ def test_related_blob_validates_and_is_returned_by_facet(tmp_path, derived_kind)
 # Descendant query, plus whether the transcript itself is a member of the
 # bare related-blob facet.
 #
-# Stated expectation (written BEFORE running): a "related-blob" facet is
-# populated by the REVERSE of a forward `related: blob=<name>` edge a
-# derived record declares pointing at the blob. The transcript blob itself
-# declares no such edge (it has no `related.blob` entry pointing at
-# itself), so it should NOT be a member of the bare `related-blob:"<name>"`
-# facet — only records that declare `--related blob=<name>` should appear.
+# A `related-blob` facet is populated by the REVERSE of a forward
+# `related: blob=<name>` edge that a derived record declares pointing at the
+# blob. The transcript blob declares no such edge (it has no `related.blob`
+# entry pointing at itself), so it is NOT a member of the bare
+# `related-blob:"<name>"` facet — only records that declare
+# `--related blob=<name>` appear.
 # ---------------------------------------------------------------------------
 
 
@@ -160,23 +180,9 @@ def test_descendant_query_filters_to_derived_record_only(tmp_path):
     blob_id = _create_blob(vault, state)
     blob_name = blob_id.split("/", 1)[1]
 
-    r = _run(
-        [
-            "record",
-            "create",
-            "--kind",
-            "decision",
-            "--title",
-            "Derived decision",
-            "--related",
-            f"blob={blob_name}",
-        ],
-        vault=vault,
-        state_dir=state,
-        stdin_text="derived decision body\n",
+    derived_name = _create_derived(
+        vault, state, blob_name, kind="decision", title="Derived decision"
     )
-    assert r.returncode == 0, r.stderr
-    derived_name = r.stdout.strip().split("/", 1)[1]
 
     _reindex(vault, state)
 
@@ -186,33 +192,22 @@ def test_descendant_query_filters_to_derived_record_only(tmp_path):
 
 
 def test_bare_related_blob_facet_does_not_include_the_transcript_itself(tmp_path):
-    """Pins whether the transcript blob is a member of its own bare facet.
+    """Pins that the transcript blob is not a member of its own bare facet.
 
-    OBSERVED (this test run): the bare ``related-blob:"<name>"`` facet
-    returns only the derived record — the transcript blob is NOT a member
-    of its own bare facet. This confirms the stated expectation above.
+    The bare ``related-blob:"<name>"`` facet returns only the derived record,
+    which is what licenses the prose never to claim otherwise.
     """
     vault, state = _make_vault(tmp_path)
     blob_id = _create_blob(vault, state)
     blob_name = blob_id.split("/", 1)[1]
 
-    r = _run(
-        [
-            "record",
-            "create",
-            "--kind",
-            "decision",
-            "--title",
-            "Derived decision for bare-facet check",
-            "--related",
-            f"blob={blob_name}",
-        ],
-        vault=vault,
-        state_dir=state,
-        stdin_text="derived decision body\n",
+    derived_name = _create_derived(
+        vault,
+        state,
+        blob_name,
+        kind="decision",
+        title="Derived decision for bare-facet check",
     )
-    assert r.returncode == 0, r.stderr
-    derived_name = r.stdout.strip().split("/", 1)[1]
 
     _reindex(vault, state)
 
@@ -294,9 +289,6 @@ def test_delete_removes_labeled_blob_from_search_results(tmp_path):
 # ``_normalize()`` in ``test_reserved_label_docs.py``).
 # ---------------------------------------------------------------------------
 
-import re
-from pathlib import Path
-
 _RECORD_SKILL = (
     Path(__file__).parent.parent
     / "plugins"
@@ -307,29 +299,22 @@ _RECORD_SKILL = (
 )
 
 
-def _skill_text() -> str:
-    """The skill file with shell line-continuations joined and whitespace
-    collapsed, so a pinned phrase survives markdown wrapping."""
-    raw = _RECORD_SKILL.read_text(encoding="utf-8").replace("\\\n", "")
-    return re.sub(r"\s+", " ", raw)
-
-
 def test_skill_routes_a_supplied_transcript_into_the_capture_flow():
-    text = _skill_text()
+    text = _normalized(_RECORD_SKILL)
     assert "transcript of a call, meeting, or interview" in text
     assert "--kind blob" in text
     assert "--label transcript=true" in text
 
 
 def test_skill_defines_a_transcript_and_names_the_exclusions():
-    text = _skill_text()
+    text = _normalized(_RECORD_SKILL)
     assert "verbatim imported source material from a conversation between people" in text
     assert "An agent or harness session transcript is not a transcript here" in text
     assert "human-authored notes" in text
 
 
 def test_skill_carries_the_import_title_and_body_shape():
-    text = _skill_text()
+    text = _normalized(_RECORD_SKILL)
     assert 'lore record create --kind blob --title "<YYYY-MM-DD> — <topic>"' in text
     assert "Title leads with the meeting date" in text
     assert "**Date:** YYYY-MM-DD" in text
@@ -337,7 +322,7 @@ def test_skill_carries_the_import_title_and_body_shape():
 
 
 def test_skill_states_search_before_create():
-    text = _skill_text()
+    text = _normalized(_RECORD_SKILL)
     assert "Search before you create" in text
     assert "One record per meeting" in text
     assert "silently suffixes a colliding slug (`-2`) and forks the meeting" in text
@@ -346,7 +331,7 @@ def test_skill_states_search_before_create():
 def test_skill_requires_counting_the_date_scoped_hits_and_reconciling_a_fork():
     """A label-presence check passes just as cleanly on a forked pair — the
     verification step must count, and must name the reconcile obligation."""
-    text = _skill_text()
+    text = _normalized(_RECORD_SKILL)
     assert "search the meeting's date and count what comes back" in text
     assert "Exactly one hit is correct" in text
     assert (
@@ -356,7 +341,7 @@ def test_skill_requires_counting_the_date_scoped_hits_and_reconciling_a_fork():
 
 
 def test_skill_warns_that_update_replaces_the_whole_body():
-    text = _skill_text()
+    text = _normalized(_RECORD_SKILL)
     assert "destructive overwrite" in text
     assert "piping a delta silently destroys the prior body" in text
     assert "Read the record back first with `lore record show`" in text
@@ -366,7 +351,7 @@ def test_skill_warns_that_update_replaces_the_whole_body():
 def test_skill_puts_the_git_retention_caveat_adjacent_to_the_delete_exit():
     """The mis-import exit and the caveat that git history keeps the bytes must
     be in the same breath — not left to the data-handling paragraph."""
-    text = _skill_text()
+    text = _normalized(_RECORD_SKILL)
     marker = "imported in error comes out with `lore record delete`"
     assert marker in text
     tail = text.split(marker, 1)[1][:400]
@@ -375,7 +360,7 @@ def test_skill_puts_the_git_retention_caveat_adjacent_to_the_delete_exit():
 
 
 def test_skill_states_the_provenance_edge_name_stability_and_descendant_query():
-    text = _skill_text()
+    text = _normalized(_RECORD_SKILL)
     assert "carries the edge `related: blob=<name>`" in text
     assert "at creation time — mandatory" in text
     assert "fixed at first import and is never renamed" in text
@@ -390,12 +375,12 @@ def test_skill_states_the_provenance_edge_name_stability_and_descendant_query():
 def test_skill_does_not_claim_the_bare_facet_matches_the_transcript_itself():
     """Pinned by the mechanics above: the bare facet returns only records
     carrying the forward edge."""
-    text = _skill_text()
+    text = _normalized(_RECORD_SKILL)
     assert "also matches the transcript itself" not in text
 
 
 def test_skill_requires_a_topic_keyword_an_area_edge_and_participants_in_the_body():
-    text = _skill_text()
+    text = _normalized(_RECORD_SKILL)
     assert "at least one topic `--keyword`" in text
     assert "`related: area=<name>` edge for the area the meeting concerns" in text
     assert (
@@ -405,7 +390,7 @@ def test_skill_requires_a_topic_keyword_an_area_edge_and_participants_in_the_bod
 
 
 def test_skill_carries_the_data_handling_rule():
-    text = _skill_text()
+    text = _normalized(_RECORD_SKILL)
     assert "Redact before piping" in text
     assert "secrets or regulated PII" in text
     assert "never quote sensitive passages verbatim" in text
@@ -427,30 +412,25 @@ def test_skill_carries_the_data_handling_rule():
 _README = Path(__file__).parent.parent / "README.md"
 
 
-def _readme_text() -> str:
-    raw = _README.read_text(encoding="utf-8").replace("\\\n", "")
-    return re.sub(r"\s+", " ", raw)
-
-
 def test_readme_names_the_transcript_label_and_query_facets():
-    text = _readme_text()
+    text = _normalized(_README)
     assert "transcript" in text
     assert "has:label.transcript" in text
     assert "-has:label.transcript" in text
 
 
 def test_readme_states_one_record_per_meeting_and_the_redaction_gate():
-    text = _readme_text()
+    text = _normalized(_README)
     assert "one record per meeting" in text.lower()
     assert "redact" in text.lower()
 
 
 def test_readme_points_at_lore_record_for_the_full_recipe():
-    """Scoped to the transcript sub-bullets this slice introduced, not the
-    whole file — the README already points at /lore:record elsewhere for
-    unrelated skills, so an unscoped search would pass even if the
-    transcript prose dropped its own pointer."""
-    text = _readme_text()
+    """Scoped to the transcript sub-bullets, not the whole file — the README
+    already points at /lore:record elsewhere for unrelated skills, so an
+    unscoped search would pass even if the transcript prose dropped its own
+    pointer."""
+    text = _normalized(_README)
     window = 300
 
     what_lore_captures = text.find("meeting or call transcript")
@@ -469,6 +449,6 @@ def test_readme_points_at_lore_record_for_the_full_recipe():
 
 
 def test_readme_does_not_duplicate_the_import_recipe():
-    text = _readme_text()
+    text = _normalized(_README)
     assert 'lore record create --kind blob --title "<YYYY-MM-DD> — <topic>"' not in text
     assert "**Participants:**" not in text
