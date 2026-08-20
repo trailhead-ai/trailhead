@@ -29,9 +29,15 @@ Schema:
   [branch]
   pattern = "worktree-{slug}"            # optional; default "worktree-{slug}"
 
-  [launch]                               # optional; off by default
+  [launch]                               # optional; ABSENT MEANS OFF — with no
+                                         # [launch] block no directory is
+                                         # eligible, and camp refuses rather
+                                         # than falling back to a default root
   roots = ["~/code", "/srv/work"]        # allowlist of directories a launch may
-                                         # root at; entries stored unexpanded
+                                         # root at (equal-or-under; "~/code"
+                                         # never allowlists "~"); entries stored
+                                         # unexpanded, so "~" resolves against
+                                         # the environment the launch runs under
 
   [dev_env]                              # optional; warn-and-continue (deferred)
   ...
@@ -43,6 +49,13 @@ Schema:
 Task steps, bootstrap, and hook commands are author-trusted local input. camp
 runs them list-mode (subprocess, shell=False). Sharing group configs from
 untrusted authors is explicitly out of scope.
+
+`[launch] roots` is an allowlist, not the whole boundary. camp also carries a
+fixed credential-store deny list (`camp.launch.eligibility.CREDENTIAL_DENY_ENTRIES`)
+that is checked after the allowlist and OVERRIDES IT UNCONDITIONALLY: no value of
+`roots` can make `~/.ssh` — or any directory at, under, or above a deny entry —
+an eligible launch root. That list lives in code precisely so it is not a config
+key; changing it is a change to a security boundary.
 
 Activation hook kinds:
   "dep-install"   Run a dependency installation command in the worktree.
