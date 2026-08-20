@@ -150,6 +150,12 @@ def _install_guardrail(settings_path: Path, vaults_root: Path) -> None:
          MultiEdit/NotebookEdit); a ``Write(path)`` rule never matches and makes
          Claude Code warn at startup. Note the ``//`` double-slash absolute-path
          grammar (single ``/`` is project-root-relative — a silent footgun).
+      5. A blanket ``permissions.allow`` ``Bash(lore:*)`` rule. The install is
+         symmetric: the deny rules above force every vault write through the
+         ``lore`` CLI, so that CLI itself must be a sanctioned command, or
+         every invocation — including unattended ones with nothing to answer a
+         prompt — stalls on a permission check. A fixed literal, not derived
+         from ``vaults_root`` like the deny rules.
 
     A record kind added to the model reaches the deny list on the next
     ``lore init``; until then the hook is its only settings-independent cover.
@@ -196,6 +202,8 @@ def _install_guardrail(settings_path: Path, vaults_root: Path) -> None:
         settings_writer_mod.upsert_permission_deny(
             settings_path, f"Edit({vaults_prefix}/*/{name})"
         )
+
+    settings_writer_mod.upsert_permission_allow(settings_path, "Bash(lore:*)")
 
 
 def cmd_init(args) -> int:

@@ -877,6 +877,73 @@ class TestSettingsWriterPermissionDeny:
         sw.remove_permission_deny(settings, "Write(//abs/vaults/**)")
         assert not settings.exists(), "removal created a settings file"
 
+    def test_upsert_permission_allow_adds_rule(self, tmp_path):
+        sw = self._sw()
+        settings = tmp_path / ".claude" / "settings.json"
+        sw.upsert_permission_allow(settings, "Bash(lore:*)")
+        data = json.loads(settings.read_text())
+        assert "Bash(lore:*)" in data["permissions"]["allow"]
+
+    def test_upsert_permission_allow_is_idempotent(self, tmp_path):
+        sw = self._sw()
+        settings = tmp_path / ".claude" / "settings.json"
+        sw.upsert_permission_allow(settings, "Bash(lore:*)")
+        sw.upsert_permission_allow(settings, "Bash(lore:*)")
+        data = json.loads(settings.read_text())
+        allow = data["permissions"]["allow"]
+        assert allow.count("Bash(lore:*)") == 1
+
+    def test_upsert_permission_allow_preserves_existing_rules(self, tmp_path):
+        sw = self._sw()
+        settings = tmp_path / ".claude" / "settings.json"
+        settings.parent.mkdir(parents=True)
+        settings.write_text(
+            json.dumps({"permissions": {"deny": ["Bash(rm:*)"], "allow": ["Read(*)"]}})
+        )
+        sw.upsert_permission_allow(settings, "Bash(lore:*)")
+        data = json.loads(settings.read_text())
+        assert data["permissions"]["deny"] == ["Bash(rm:*)"]
+        assert "Read(*)" in data["permissions"]["allow"]
+        assert "Bash(lore:*)" in data["permissions"]["allow"]
+
+    def test_upsert_permission_allow_raises_on_corrupt_settings(self, tmp_path):
+        sw = self._sw()
+        settings = tmp_path / ".claude" / "settings.json"
+        settings.parent.mkdir(parents=True)
+        corrupt = "{ not json ]"
+        settings.write_text(corrupt)
+        with pytest.raises(ValueError):
+            sw.upsert_permission_allow(settings, "Bash(lore:*)")
+        assert settings.read_text() == corrupt, "corrupt settings clobbered"
+
+    def test_remove_permission_allow_removes_rule(self, tmp_path):
+        sw = self._sw()
+        settings = tmp_path / ".claude" / "settings.json"
+        settings.parent.mkdir(parents=True)
+        settings.write_text(
+            json.dumps(
+                {"permissions": {"allow": ["Bash(lore:*)", "Read(*)"]}}
+            )
+        )
+        sw.remove_permission_allow(settings, "Bash(lore:*)")
+        data = json.loads(settings.read_text())
+        assert data["permissions"]["allow"] == ["Read(*)"]
+
+    def test_remove_permission_allow_noop_when_absent(self, tmp_path):
+        sw = self._sw()
+        settings = tmp_path / ".claude" / "settings.json"
+        settings.parent.mkdir(parents=True)
+        before = json.dumps({"permissions": {"allow": ["Read(*)"]}})
+        settings.write_text(before)
+        sw.remove_permission_allow(settings, "Bash(lore:*)")
+        assert settings.read_text() == before, "no-op removal rewrote the file"
+
+    def test_remove_permission_allow_noop_when_file_missing(self, tmp_path):
+        sw = self._sw()
+        settings = tmp_path / ".claude" / "settings.json"
+        sw.remove_permission_allow(settings, "Bash(lore:*)")
+        assert not settings.exists(), "removal created a settings file"
+
     def test_set_env_var_sets_and_preserves(self, tmp_path):
         sw = self._sw()
         settings = tmp_path / ".claude" / "settings.json"
@@ -1047,6 +1114,19 @@ class TestInitInstallsGuardrail:
         assert edit_rules, f"missing Edit(//…vaults/**) static deny: {deny!r}"
         assert not write_rules, f"unmatched Write(//…) rule present: {deny!r}"
 
+    def test_init_adds_bash_lore_permission_allow(self, tmp_path):
+        """The install is symmetric: the CLI the deny rules force every write
+        through must itself be sanctioned, via a fixed blanket allow rule."""
+        state, config, home = _dirs(tmp_path)
+        res = _run_init(["init"], state=state, config=config, home=home)
+        assert res.returncode == 0, res.stderr
+
+        _, data = self._read_user_settings(home)
+        allow = data.get("permissions", {}).get("allow", [])
+        assert "Bash(lore:*)" in allow, f"expected Bash(lore:*) allow rule, got {allow!r}"
+        deny = data.get("permissions", {}).get("deny", [])
+        assert "Bash(lore:*)" not in deny
+
     def test_init_removes_legacy_blanket_denies(self, tmp_path):
         """The two blanket rules an earlier install could leave behind are
         removed on re-init.
@@ -1096,6 +1176,10 @@ class TestInitInstallsGuardrail:
         assert vault_denies == [
             r for r in first["permissions"]["deny"] if "vaults" in r
         ], f"re-run changed the deny rules: {vault_denies!r}"
+        allow = data.get("permissions", {}).get("allow", [])
+        assert allow.count("Bash(lore:*)") == 1, (
+            f"re-run duplicated the allow rule: {allow!r}"
+        )
 
     def test_init_preserves_unrelated_settings(self, tmp_path):
         """An existing unrelated hook + permission rule survive the guardrail install."""
