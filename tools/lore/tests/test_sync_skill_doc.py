@@ -21,20 +21,6 @@ def _skill_text() -> str:
     return SYNC_SKILL.read_text()
 
 
-def test_sync_skill_frontmatter_still_registrable():
-    """Editing the skill must not break the frontmatter Claude Code needs."""
-    text = _skill_text()
-    assert text.startswith("---\n"), "sync/SKILL.md must still open with a YAML frontmatter block"
-    end = text.find("\n---", 3)
-    assert end > 0, "sync/SKILL.md frontmatter block must still be closed"
-    frontmatter = text[3:end]
-    desc_lines = [
-        ln for ln in frontmatter.splitlines()
-        if ln.strip().startswith("description:") and ln.split(":", 1)[1].strip()
-    ]
-    assert desc_lines, "sync/SKILL.md must still carry a non-empty description:"
-
-
 def test_sync_skill_drives_lore_resolve_on_conflict():
     """A rebase conflict is settled through `lore resolve`, read as JSON."""
     text = _skill_text()

@@ -104,6 +104,7 @@ from .common import (
     _vault_is_git_toplevel,
     _vault_mid_rebase,
     _vault_unpushed,
+    _vault_upstream_ref,
 )
 
 DEFAULT_SYNC_MSG = "lore: sync vault"
@@ -187,26 +188,9 @@ def _vault_is_dirty(vault: Path) -> bool:
     return rc != 0 or bool(out.strip())
 
 
-def _upstream_ref(vault: Path) -> "str | None":
-    """Return the ref ``vault``'s HEAD should be measured against, or ``None``.
-
-    Mirrors :func:`_pull_one`'s own upstream resolution — ``@{u}`` when the
-    branch tracks one, else ``origin/<branch>`` when the remote already has that
-    branch — minus the unborn-branch adoption path, which is an integration
-    decision rather than a measurement.
-    """
-    if _vault_has_upstream(vault):
-        return "@{u}"
-    branch = _vault_head_branch(vault)
-    if branch is None:
-        return None
-    rc, _, _ = _git(vault, "rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{branch}")
-    return f"origin/{branch}" if rc == 0 else None
-
-
 def _commits_behind(vault: Path) -> int:
     """Return how many commits ``vault``'s upstream has that HEAD does not."""
-    ref = _upstream_ref(vault)
+    ref = _vault_upstream_ref(vault)
     if ref is None:
         return 0
     rc, out, _ = _git(vault, "rev-list", "--count", f"HEAD..{ref}")

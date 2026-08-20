@@ -752,19 +752,24 @@ def _flush_batch(args, *, query: str, scope_label: str, push: bool) -> int:
         print(f"notice: no dirty sessions match {scope_label} — nothing to flush.")
         return 0
 
+    # Distinct vaults in discovery order, keyed by resolved path so a vault
+    # holding several matching sessions is fenced and pulled exactly once.
+    batch_vaults = list({str(v): v for v, _ in discovered}.values())
+
     # The same mid-resolution fence as the single-session path, applied to the
     # whole batch BEFORE the first flip: refusing partway through would leave
     # earlier sessions flushed, which is exactly the split state a resolution
     # in progress must not acquire.
-    for batch_vault in {str(v): v for v, _ in discovered}.values():
+    for batch_vault in batch_vaults:
         if vault_is_resolving(batch_vault):
             print(refusal_notice(batch_vault, "flush"), file=sys.stderr)
             return 1
 
-    # Same implicit pull as the single-session path, once per distinct vault in
-    # the batch (the freshness window would collapse repeats anyway) and before
-    # the first flip — a batch must not start converging halfway through.
-    for batch_vault in {str(v): v for v, _ in discovered}.values():
+    # Same implicit pull as the single-session path, and only once the fence
+    # above has cleared EVERY vault — a refused batch must not have pulled.
+    # Before the first flip, too: a batch must not start converging halfway
+    # through.
+    for batch_vault in batch_vaults:
         _implicit_pull(batch_vault)
 
     flushed: list[str] = []

@@ -14,9 +14,9 @@ the command modules stay free of cross-imports for generic plumbing:
     plus ``_partition_writable_vaults`` — the ``shared: true`` exclusion every
     WRITE/PUSH fan-out over that enumeration applies;
   - the git primitives (``_git`` / ``_vault_is_git_toplevel`` /
-    ``_vault_mid_rebase``) shared by ``sync``, ``flush`` and ``resolve_state``,
-    plus ``_vault_drift`` — the "is this vault actually backed up?" probe shared
-    by ``status`` and ``flush``;
+    ``_vault_mid_rebase`` / ``_vault_upstream_ref``) shared by ``sync``, ``flush``,
+    ``resolve`` and ``resolve_state``, plus ``_vault_drift`` — the "is this vault
+    actually backed up?" probe shared by ``status`` and ``flush``;
   - the shared ``--session-id`` / ``--worktree`` subparser selectors;
   - the shared stdin read (``_read_stdin_body``).
 """
@@ -428,6 +428,27 @@ def _vault_has_upstream(vault: Path) -> bool:
     """Return ``True`` iff the current branch has a configured upstream."""
     rc, _, _ = _git(vault, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
     return rc == 0
+
+
+def _vault_upstream_ref(vault: Path) -> "str | None":
+    """Return the ref ``vault``'s HEAD is measured and rebased against, or ``None``.
+
+    ``@{u}`` when the branch tracks an upstream, else ``origin/<branch>`` when the
+    remote already carries a branch of the same name — the case where two devices
+    are both at their first push and neither has an upstream recorded yet. Nothing
+    here contacts the remote; it reads the local ref database only.
+
+    Deliberately excludes the unborn-branch adoption ``sync._pull_one`` performs:
+    adopting ``origin/<branch>`` onto a vault with no commits is an integration
+    decision, not the measurement this returns.
+    """
+    if _vault_has_upstream(vault):
+        return "@{u}"
+    branch = _vault_head_branch(vault)
+    if branch is None:
+        return None
+    rc, _, _ = _git(vault, "rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{branch}")
+    return f"origin/{branch}" if rc == 0 else None
 
 
 def _vault_unpushed(vault: Path) -> bool:

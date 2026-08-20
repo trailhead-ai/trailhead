@@ -73,10 +73,9 @@ from .common import (
     _git,
     _resolve_all_vaults,
     _shared_vault_paths,
-    _vault_has_upstream,
-    _vault_head_branch,
     _vault_is_git_toplevel,
     _vault_mid_rebase,
+    _vault_upstream_ref,
 )
 from .sync import _make_emitters, _push_one
 
@@ -84,9 +83,10 @@ from .sync import _make_emitters, _push_one
 #: value, which is a value a sidecar may legitimately carry.
 _ABSENT = object()
 
-#: The provenance pair every write re-stamps. Merged by newest-wins rather than
-#: reported: a divergence here records nothing but which device wrote last.
-_VOLATILE = ("updated-at", "updated-by")
+#: The provenance pair every write re-stamps — the same pair the canonical
+#: serializer emits last. Merged by newest-wins rather than reported: a
+#: divergence here records nothing but which device wrote last.
+_VOLATILE = sidecar_format.VOLATILE_KEYS
 
 #: The vault-relative tree that holds static sites, not records. Conflicts under
 #: it are settled by path (``take-file``), never by record id.
@@ -422,18 +422,6 @@ def _rebase_continue(vault: Path) -> tuple[int, bool]:
     return proc.returncode, _vault_mid_rebase(vault)
 
 
-def _upstream_ref(vault: Path) -> str | None:
-    """Return the ref this vault rebases onto, or ``None`` when there is none."""
-    if _vault_has_upstream(vault):
-        return "@{u}"
-    branch = _vault_head_branch(vault)
-    if branch is None:
-        return None
-    rc, _, _ = _git(vault, "rev-parse", "--verify", "--quiet",
-                    f"refs/remotes/origin/{branch}")
-    return f"origin/{branch}" if rc == 0 else None
-
-
 # ---------------------------------------------------------------------------
 # report rendering
 # ---------------------------------------------------------------------------
@@ -701,7 +689,7 @@ def _start_rebase(vault: Path, say_err) -> bool | None:
     Called under the vault write lock — every step here mutates the tree. The
     fetch that refreshes ``origin/*`` is the caller's, and runs before the lock.
     """
-    upstream = _upstream_ref(vault)
+    upstream = _vault_upstream_ref(vault)
     if upstream is None:
         return None
     rc, count, _ = _git(vault, "rev-list", "--count", f"HEAD..{upstream}")
@@ -731,8 +719,6 @@ def _drive(vault: Path) -> tuple[list[dict], list[dict], dict]:
         if rc != 0 and still_mid:
             raise ResolveError("`git rebase --continue` failed with no conflict to settle")
     raise ResolveError(f"the rebase did not finish within {_MAX_STEPS} steps")
-
-
 
 
 def _abort(vault: Path, name: str, say, say_err) -> int:
