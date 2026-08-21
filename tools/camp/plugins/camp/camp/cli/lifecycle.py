@@ -213,6 +213,7 @@ def _cmd_remove_group_cli(
     # actually be blocked. Cleanup of the entries happens only after a REAL
     # teardown succeeds (below); dry-run never reaches that far.
     group_name = group["group"]["name"]
+    resolved_env = dict(env) if env is not None else dict(os.environ)
     if not force:
         try:
             blocking = bookmark_guard.blocking_bookmarks(group_name, slug, env=env)
@@ -222,6 +223,37 @@ def _cmd_remove_group_cli(
             _die(str(e))
         if blocking:
             print(bookmark_guard.render_block(slug, blocking), file=sys.stderr)
+            sys.exit(1)
+
+        # Derived session guard, in the same pre-teardown slot and for the same
+        # reason: a workspace that still holds a resumable session is a
+        # conversation this removal would destroy irreversibly. Nothing is
+        # stored — the answer is recomputed from the harness's own two seams
+        # each time — and an enumeration camp could not complete is a REFUSAL,
+        # never an empty answer.
+        from ..launch import teardown_guard
+        from .session import _addressable_harnesses, _parsable_groups
+
+        session_groups = _parsable_groups()
+        try:
+            transcripts, live = teardown_guard.gather_pool(
+                _addressable_harnesses(session_groups), env=resolved_env
+            )
+            holding = teardown_guard.blocking_sessions(
+                ws_dir,
+                transcripts=transcripts,
+                live_records=live,
+                groups=session_groups,
+                env=resolved_env,
+            )
+        except teardown_guard.EnumerationUnavailable as e:
+            _die(
+                f"camp remove: {e} — removal is irreversible, so camp refuses "
+                "rather than assume the workspace is empty; re-run with --force "
+                "to remove it anyway"
+            )
+        if holding:
+            print(teardown_guard.render_block(slug, holding), file=sys.stderr)
             sys.exit(1)
 
     if dry_run:

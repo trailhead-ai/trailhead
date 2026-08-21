@@ -105,6 +105,19 @@ def _wait_provisioned(manifest_path: Path, members: list[str], timeout: float = 
     )
 
 
+#: A `claude` stand-in: the only subcommand camp reaches for on this surface is
+#: the live-session enumeration, whose answer each test writes into a file.
+_CLAUDE_STUB = """#!/usr/bin/env python3
+import os, sys
+
+if sys.argv[1:3] == ["agents", "--json"]:
+    path = os.environ.get("CAMP_FAKE_AGENTS_FILE")
+    sys.stdout.write(open(path).read() if path else "[]")
+    sys.exit(0)
+sys.exit(0)
+"""
+
+
 @pytest.fixture()
 def remove_env(tmp_path: Path):
     """CLI environment with two real git repos + a provisioned workspace.
@@ -126,6 +139,19 @@ def remove_env(tmp_path: Path):
     env = {**os.environ}
     env["CAMP_CONFIG_DIR"] = str(config_dir)
     env["CAMP_STATE_DIR"] = str(state_dir)
+    # Pin BOTH harness seams the derived teardown guard reads — the transcript
+    # store and the live-session probe — so no test can answer from a real
+    # ~/.claude or a real `claude` on the developer's PATH.
+    env["TRAILHEAD_CLAUDE_DIR"] = str(tmp_path / "claude")
+    agents_file = tmp_path / "agents.json"
+    agents_file.write_text("[]", encoding="utf-8")
+    bin_dir = tmp_path / "fakebin"
+    bin_dir.mkdir()
+    stub = bin_dir / "claude"
+    stub.write_text(_CLAUDE_STUB, encoding="utf-8")
+    stub.chmod(0o755)
+    env["CAMP_FAKE_AGENTS_FILE"] = str(agents_file)
+    env["PATH"] = f"{bin_dir}{os.pathsep}{env.get('PATH', '')}"
 
     # Author group via real CLI
     r = subprocess.run(
@@ -169,6 +195,7 @@ def remove_env(tmp_path: Path):
         "repo_b": repo_b,
         "ws_dir": ws_dir,
         "tmp_path": tmp_path,
+        "agents_file": agents_file,
     }
 
 
@@ -464,7 +491,13 @@ def _make_group_config(name, members, *, branch_pattern="worktree-{slug}"):
 def _camp_state_env(tmp_path: Path) -> dict[str, str]:
     state_root = tmp_path / "camp-state"
     state_root.mkdir(parents=True, exist_ok=True)
-    return {"CAMP_STATE_DIR": str(state_root)}
+    # The derived teardown guard reads the harness's transcript store, so the
+    # store has to be hermetic here too: without this the guard would answer
+    # from the developer's real ~/.claude.
+    return {
+        "CAMP_STATE_DIR": str(state_root),
+        "TRAILHEAD_CLAUDE_DIR": str(tmp_path / "claude"),
+    }
 
 
 @pytest.fixture()
@@ -1207,3 +1240,142 @@ class TestCampRemoveBookmarkGuard:
         r = _camp(remove_env, "rm", "ws-slug", "--group", "rmgroup")
         assert r.returncode == 0, f"an unrelated bookmark must not block: {r.stderr}"
         assert self._get(remove_env, "other") is not None
+
+
+# ===========================================================================
+# The derived session teardown guard, end to end through the real CLI
+# ===========================================================================
+
+
+_GUARD_UUID = "cccccccc-3333-4333-8333-333333333333"
+_GUARD_UUID_B = "dddddddd-4444-4444-8444-444444444444"
+
+
+class TestCampRemoveSessionGuard:
+    """`camp rm` refuses to destroy a workspace that still holds a resumable
+    session — derived each time from the harness's own two seams, never stored."""
+
+    def _seed_transcript(self, remove_env, session_id, cwd: Path):
+        projects = Path(remove_env["env"]["TRAILHEAD_CLAUDE_DIR"]) / "projects"
+        directory = projects / str(cwd).replace("/", "-").replace(".", "-")
+        directory.mkdir(parents=True, exist_ok=True)
+        path = directory / f"{session_id}.jsonl"
+        path.write_text(json.dumps({"type": "user", "cwd": str(cwd)}) + "\n", encoding="utf-8")
+        return path
+
+    def _seed_live(self, remove_env, session_id, cwd: Path):
+        remove_env["agents_file"].write_text(
+            json.dumps(
+                [{"sessionId": session_id, "cwd": str(cwd), "kind": "agent", "name": ""}]
+            ),
+            encoding="utf-8",
+        )
+
+    def test_a_live_session_rooted_in_the_workspace_is_refused(self, remove_env):
+        self._seed_live(remove_env, _GUARD_UUID, remove_env["ws_dir"])
+        r = _camp(remove_env, "rm", "ws-slug", "--group", "rmgroup")
+        assert r.returncode != 0, f"a live session must block removal: {r.stderr}"
+        assert f"camp-ws-slug-{_GUARD_UUID[:8]}" in r.stderr, r.stderr
+        assert str(remove_env["ws_dir"]) in r.stderr, r.stderr
+        assert "running" in r.stderr, r.stderr
+        assert "--force" in r.stderr, r.stderr
+        assert r.stdout == "", "a refused removal must print no return path"
+
+    def test_a_parked_session_rooted_in_the_workspace_is_refused(self, remove_env):
+        """Not live, still recoverable — exactly the case this guard exists for."""
+        self._seed_transcript(remove_env, _GUARD_UUID, remove_env["ws_dir"])
+        r = _camp(remove_env, "rm", "ws-slug", "--group", "rmgroup")
+        assert r.returncode != 0, f"a parked session must block removal: {r.stderr}"
+        assert f"camp-ws-slug-{_GUARD_UUID[:8]}" in r.stderr, r.stderr
+        assert "parked" in r.stderr, r.stderr
+
+    def test_a_session_rooted_below_the_workspace_is_refused(self, remove_env):
+        """The subtree rule: a group's harness cwd routinely roots at a member
+        repo, so an equality test would miss the common case."""
+        member = remove_env["ws_dir"] / "repo_a"
+        self._seed_transcript(remove_env, _GUARD_UUID, member)
+        r = _camp(remove_env, "rm", "ws-slug", "--group", "rmgroup")
+        assert r.returncode != 0, f"a session rooted below must block: {r.stderr}"
+        assert str(member) in r.stderr, r.stderr
+
+    def test_a_refused_removal_tears_down_nothing(self, remove_env):
+        self._seed_transcript(remove_env, _GUARD_UUID, remove_env["ws_dir"])
+        _camp(remove_env, "rm", "ws-slug", "--group", "rmgroup")
+        assert _manifest_path(remove_env).is_file(), "the guard must fire before teardown"
+        assert remove_env["ws_dir"].is_dir()
+
+    def test_a_refused_dry_run_promises_nothing(self, remove_env):
+        """A dry run that would be refused must say so, not promise a removal
+        that would actually be blocked."""
+        self._seed_transcript(remove_env, _GUARD_UUID, remove_env["ws_dir"])
+        r = _camp(remove_env, "rm", "ws-slug", "--group", "rmgroup", "--dry-run")
+        assert r.returncode != 0, r.stderr
+        assert "would remove" not in r.stderr, r.stderr
+        assert f"camp-ws-slug-{_GUARD_UUID[:8]}" in r.stderr, r.stderr
+        assert _manifest_path(remove_env).is_file()
+
+    def test_a_session_rooted_elsewhere_removes_normally(self, remove_env):
+        elsewhere = remove_env["tmp_path"] / "elsewhere"
+        elsewhere.mkdir()
+        self._seed_transcript(remove_env, _GUARD_UUID, elsewhere)
+        r = _camp(remove_env, "rm", "ws-slug", "--group", "rmgroup")
+        assert r.returncode == 0, f"an unrelated session must not block: {r.stderr}"
+        assert not _manifest_path(remove_env).exists()
+
+    def test_force_skips_the_guard(self, remove_env):
+        self._seed_transcript(remove_env, _GUARD_UUID, remove_env["ws_dir"])
+        self._seed_live(remove_env, _GUARD_UUID_B, remove_env["ws_dir"])
+        r = _camp(remove_env, "rm", "--force", "ws-slug", "--group", "rmgroup")
+        assert r.returncode == 0, f"--force must skip the session guard: {r.stderr}"
+        assert not _manifest_path(remove_env).exists()
+
+    def test_the_guard_is_stronger_than_the_bookmark_guard_it_replaces(self, remove_env):
+        """A workspace that was NEVER bookmarked but holds a resumable session
+        is refused — `blocking_bookmarks` would have permitted it."""
+        from camp.bookmark.store import store_path
+
+        self._seed_transcript(remove_env, _GUARD_UUID, remove_env["ws_dir"])
+        assert not store_path(env=remove_env["env"]).exists(), (
+            "precondition: nothing is bookmarked, so the bookmark guard permits this"
+        )
+
+        r = _camp(remove_env, "rm", "ws-slug", "--group", "rmgroup")
+        assert r.returncode != 0, (
+            f"the derived guard must refuse what the bookmark guard permits: {r.stderr}"
+        )
+
+    def test_an_unenumerable_harness_fails_closed(self, remove_env):
+        """Removal is destructive and irreversible: "camp cannot tell" is a
+        refusal, never a permissive default."""
+        remove_env["agents_file"].write_text("not json at all", encoding="utf-8")
+        r = _camp(remove_env, "rm", "ws-slug", "--group", "rmgroup")
+        assert r.returncode != 0, (
+            f"an unanswerable enumeration must refuse removal: {r.stderr}"
+        )
+        assert "--force" in r.stderr, r.stderr
+        assert _manifest_path(remove_env).is_file(), "nothing may be torn down"
+
+    def test_the_guard_writes_nothing(self, remove_env):
+        """`camp rm` is not among the flows the statelessness guard enumerates,
+        and this guard must not make it need to be."""
+        self._seed_transcript(remove_env, _GUARD_UUID, remove_env["ws_dir"])
+        first = _camp(remove_env, "rm", "ws-slug", "--group", "rmgroup")
+        assert first.returncode != 0
+        before = _state_tree(remove_env["state_dir"])
+        second = _camp(remove_env, "rm", "ws-slug", "--group", "rmgroup")
+        assert second.returncode != 0
+        assert _state_tree(remove_env["state_dir"]) == before, (
+            "a derived guard accumulates nothing across refusals"
+        )
+        assert not any(
+            _GUARD_UUID in path or _GUARD_UUID.encode() in body
+            for path, body in before.items()
+        ), "the guard must not record the sessions it derived"
+
+
+def _state_tree(root: Path) -> dict[str, bytes]:
+    return {
+        str(path.relative_to(root)): path.read_bytes()
+        for path in sorted(root.rglob("*"))
+        if path.is_file()
+    }
