@@ -83,7 +83,7 @@ import os
 import re
 import subprocess
 import tempfile
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import BinaryIO
@@ -265,6 +265,7 @@ _LAUNCH_ENV_UNSET = [
 #: that sets how many days a session transcript is kept before cleanup.  Claude
 #: Code's own default when the key is absent is 30 days (minimum accepted: 1).
 _SETTINGS_FILENAME = "settings.json"
+_CONFIG_FILENAME = ".claude.json"
 _CLEANUP_PERIOD_KEY = "cleanupPeriodDays"
 _DEFAULT_CLEANUP_PERIOD_DAYS = 30
 
@@ -327,6 +328,29 @@ def _claude_dir(env: dict[str, str]) -> Path:
     home = env.get("HOME") or env.get("USERPROFILE")
     base = Path(home) if home else Path.home()
     return base / ".claude"
+
+
+def claude_config_file(env: Mapping[str, str] | None) -> Path:
+    """Resolve Claude Code's global config *file* (``~/.claude.json``) from *env*.
+
+    Precedence is ``CLAUDE_CONFIG_DIR`` then ``HOME``/``USERPROFILE``, falling back
+    to the real home — and deliberately **not** ``TRAILHEAD_CLAUDE_DIR``. That seam
+    is a trailhead-only test redirect Claude Code has never heard of: it relocates
+    the config *directory*, and a file resolved through it would be a path Claude
+    Code never reads, so a trust write there would be dead while the suite that set
+    the seam passed green over it.
+
+    Exported (see ``trailhead.harness.__all__``) because camp's launch-time trust
+    pre-seed writes this same file and must agree on the path — one implementation
+    rather than two copies kept in step by a parity test.
+    """
+    env = env or {}
+    config_dir = env.get("CLAUDE_CONFIG_DIR")
+    if config_dir:
+        return Path(config_dir) / _CONFIG_FILENAME
+    home = env.get("HOME") or env.get("USERPROFILE")
+    base = Path(home) if home else Path.home()
+    return base / _CONFIG_FILENAME
 
 
 class ClaudeCodeHarness(Harness):

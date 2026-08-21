@@ -13,13 +13,14 @@ from __future__ import annotations
 import os
 
 from trailhead.harness.base import Harness, HarnessError, SessionTranscript
-from trailhead.harness.claude_code import ClaudeCodeHarness
+from trailhead.harness.claude_code import ClaudeCodeHarness, claude_config_file
 
 __all__ = [
     "Harness",
     "HarnessError",
     "SessionTranscript",
     "ClaudeCodeHarness",
+    "claude_config_file",
     "canonical_name",
     "get_harness",
     "detect_harnesses",

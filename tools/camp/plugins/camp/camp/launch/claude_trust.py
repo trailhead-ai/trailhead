@@ -1,4 +1,4 @@
-"""Pre-seed the Claude Code per-directory trust flag in ~/.claude.json.
+"""Pre-seed the Claude Code per-directory trust flag in its global config file.
 
 This is camp's launch-time analog of trailhead/harness/claude_code.py — harness-
 specific code that lives in the camp plugin alongside the existing claude-specific
@@ -17,13 +17,16 @@ Code's trust dialog for a fresh directory.  The project key is the **realpath**
 No companion keys are written alongside hasTrustDialogAccepted.
 
 Design notes:
-- The tmp file lives in HOME (not a .claude/ subdir).  Do NOT "fix" this by
-  copying hooks_writer._save_settings — that helper writes into the workspace
-  dir; our target is ~/.claude.json at the root of HOME.
-- HOME is resolved from the injected env dict (env["HOME"] or env["USERPROFILE"]),
-  falling back to Path.home() — mirrors claude_code.py:detect().  Every test
-  passes env={"HOME": str(tmp_path)} and never touches the real ~/.claude.json
-  (Axiom 6 — the harness CLI is not isolated by the trailhead env).
+- The tmp file lives beside the target file.  Do NOT "fix" this by copying
+  hooks_writer._save_settings — that helper writes into the workspace dir; our
+  target is the Claude global config file.
+- The target is resolved from the injected env dict by trailhead's exported
+  `claude_config_file`: <CLAUDE_CONFIG_DIR>/.claude.json, else
+  $HOME/.claude.json.  `TRAILHEAD_CLAUDE_DIR` deliberately does NOT move it —
+  that seam relocates the config *directory* only, and a file resolved through
+  it is one Claude Code never reads.  Every test passes env={"HOME": str(tmp_path)}
+  and never touches the real ~/.claude.json (Axiom 6 — the harness CLI is not
+  isolated by the trailhead env).
 - Silent-miss limitation: a write that claude silently ignores (e.g. because
   Claude changed the file schema) produces no error signal here.  If the dialog
   reappears after bring-up, re-run the manual interactive check to validate the
@@ -52,13 +55,18 @@ import tempfile
 from pathlib import Path
 
 
-def _home_from_env(env: dict[str, str] | None) -> Path:
-    """Resolve HOME from the injected env dict, falling back to Path.home()."""
-    if env:
-        for key in ("HOME", "USERPROFILE"):
-            if key in env:
-                return Path(env[key])
-    return Path.home()
+def _config_file(env: dict[str, str] | None) -> Path:
+    """Resolve the Claude global config file the launched session will read.
+
+    Delegates to trailhead's exported ``claude_config_file`` — the same resolver
+    trailhead itself uses — so a session relocated with ``CLAUDE_CONFIG_DIR``
+    receives its trust key instead of stalling at a prompt with no TTY. The import
+    is deferred: camp ships as a standalone CLI, so a camp installed without
+    trailhead must fail inside the caller's guard rather than at module import.
+    """
+    from trailhead.harness import claude_config_file
+
+    return claude_config_file(env)
 
 
 def _is_mergeable(data: object, project_key: str) -> bool:
@@ -87,13 +95,15 @@ def pretrust_workspace(
     workspace_root: Path | str,
     env: dict[str, str] | None = None,
 ) -> bool:
-    """Merge `hasTrustDialogAccepted: true` into ~/.claude.json for launch_dir.
+    """Merge `hasTrustDialogAccepted: true` into the Claude config file for launch_dir.
 
     launch_dir   — the directory the harness will be launched in (the trust target).
     workspace_root — the workspace root; launch_dir must equal or be under this
                     (confinement).
-    env          — optional environment dict; HOME is resolved from it so tests
-                   can sandbox under tmp_path without touching the real ~/.claude.json.
+    env          — optional environment dict; the Claude config file is resolved
+                   from it (CLAUDE_CONFIG_DIR, else HOME) so a relocated session is
+                   trusted in the file it reads, and so tests can sandbox under
+                   tmp_path without touching the real ~/.claude.json.
 
     Idempotent: if the entry already exists and is true, no write is performed.
 
@@ -121,8 +131,7 @@ def pretrust_workspace(
         )
         return False
 
-    home = _home_from_env(env)
-    claude_json_path = home / ".claude.json"
+    claude_json_path = _config_file(env)
 
     # Load existing file, or start from scratch when absent. Exception-based
     # detection (no pre-check exists() stat): a missing file is the create case;
@@ -177,12 +186,16 @@ def pretrust_workspace(
     project_entry = projects.setdefault(project_key, {})
     project_entry["hasTrustDialogAccepted"] = True
 
-    # Atomic write: tmp file in HOME (not in a .claude/ subdir), then os.replace.
+    # Atomic write: tmp file beside the target (a relocated config dir may sit on
+    # another filesystem, where a temp file under HOME could not be renamed onto
+    # it), then os.replace.
     # The file lands 0o600 unconditionally — tempfile.mkstemp creates the tmp file
     # 0o600 by construction and we never widen it. This is deliberate: ~/.claude.json
     # holds OAuth secrets, so we always enforce owner-only perms rather than
     # preserving a (possibly looser) pre-existing mode (security).
-    fd, tmp_path_str = tempfile.mkstemp(dir=str(home), prefix=".claude-", suffix=".tmp")
+    target_dir = claude_json_path.parent
+    target_dir.mkdir(parents=True, exist_ok=True)
+    fd, tmp_path_str = tempfile.mkstemp(dir=str(target_dir), prefix=".claude-", suffix=".tmp")
     try:
         with os.fdopen(fd, "w") as fh:
             json.dump(data, fh, indent=2)
