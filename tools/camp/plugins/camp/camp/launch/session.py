@@ -366,12 +366,28 @@ def launch_session(
             "registered"
         )
 
+    session_id = str(uuid.uuid4()) if resume_session_id is None else resume_session_id
+
+    # One handle everywhere: the tmux session, and — for a harness whose clients
+    # display session names — the name those clients render. Composed at this
+    # single point, before anything is told what the session is called, so the
+    # two can never name the same session differently.
+    #
+    # Both halves are folded here because both can carry a tmux target separator:
+    # a caller-supplied component is a directory basename, which routinely holds
+    # a dot, and a resumed id arrives as a transcript filename. A name carrying
+    # one is created without complaint and then cannot be addressed again.
+    tmux_name = (
+        f"camp-{sanitize_name_component(name_component)}-"
+        f"{sanitize_name_component(session_id[:8])}"
+    )
+
     if resume_session_id is None:
-        session_id = str(uuid.uuid4())
-        harness_argv = harness.session_launch(launch_dir, session_id)
+        harness_argv = harness.session_launch(
+            launch_dir, session_id, session_name=tmux_name
+        )
         unsupported = "cannot launch sessions"
     else:
-        session_id = resume_session_id
         harness_argv = harness.session_resume(session_id)
         unsupported = "cannot re-enter sessions"
     if harness_argv is None:
@@ -399,13 +415,6 @@ def launch_session(
     # request and the new pane inherits the SERVER's environment, not this
     # process's. Only the pane-level `env -u` holds in both cases — fresh server
     # and pre-existing one alike. Both scrubs are applied; neither is redundant.
-    # Folded at the single point every flavor's name is composed, so the handle
-    # camp prints is one tmux will accept back. A caller-supplied component is
-    # a directory basename, which routinely carries a dot.
-    tmux_name = (
-        f"camp-{sanitize_name_component(name_component)}-"
-        f"{sanitize_name_component(session_id[:8])}"
-    )
     argv = ["tmux", "new-session", "-d", "-s", tmux_name, "-c", str(launch_dir), "env"]
     for name in scrub:
         argv += ["-u", name]

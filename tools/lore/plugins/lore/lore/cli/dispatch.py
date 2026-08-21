@@ -10,7 +10,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from . import areas, flush, init, record, search, session, sync, task, vault
+from . import areas, flush, init, pipeline, record, resolve, search, session, sync, task, vault
 from ..argparse_util import find_subparsers_action
 
 
@@ -39,14 +39,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     # Registration order determines the ``--help`` subcommand listing; it mirrors
     # the historical single-file ``build_parser`` (init, status, sync, flush,
-    # areas, reindex, search, record, task, vault, session).
+    # resolve, areas, reindex, search, record, task, vault, session).
     init.add_init_subparsers(sub)
     sync.add_sync_subparser(sub)
     flush.add_flush_subparser(sub)
+    resolve.add_resolve_subparser(sub)
     areas.add_areas_subparsers(sub)
     search.add_search_subparser(sub)
     record.add_record_subparser(sub)
     task.add_task_subparser(sub)
+    pipeline.add_pipeline_subparser(sub)
     vault.add_vault_subparser(sub)
     session.add_session_subparser(sub)
 

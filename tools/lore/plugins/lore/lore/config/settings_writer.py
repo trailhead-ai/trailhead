@@ -22,6 +22,14 @@ upsert_permission_deny(settings_path, rule)
     callers build up a deny LIST rather than passing one blanket rule.
     Idempotent; preserves unrelated permission rules and keys.
 
+upsert_permission_allow(settings_path, rule)
+    Ensure *rule* appears exactly once in ``permissions.allow``. Idempotent;
+    preserves unrelated permission rules and keys.
+
+remove_permission_allow(settings_path, rule)
+    Remove *rule* from ``permissions.allow`` if present. No-op (no write) when
+    the rule — or the file — is absent. Idempotent.
+
 set_env_var(settings_path, name, value)
     Set ``env[name] = value`` in the settings file. Used to give the vault-guard
     hook its ``LORE_VAULT_GUARD_ROOT``. Idempotent (no write when unchanged);
@@ -216,6 +224,47 @@ def remove_permission_deny(settings_path: Path, rule: str) -> None:
         return
 
     deny[:] = [r for r in deny if r != rule]
+    _save(settings_path, data)
+
+
+def upsert_permission_allow(settings_path: Path, rule: str) -> None:
+    """Ensure *rule* appears exactly once in ``permissions.allow``.
+
+    If the rule is already present, leave it untouched. Preserves all unrelated
+    keys and permission rules. Writes atomically.
+
+    Args:
+        settings_path: Path to the settings.json (or settings.local.json) file.
+        rule:          The permission rule string (e.g. ``"Bash(lore:*)"``).
+    """
+    data = _load(settings_path)
+    permissions = data.setdefault("permissions", {})
+    allow = permissions.setdefault("allow", [])
+
+    if rule in allow:
+        return
+
+    allow.append(rule)
+    _save(settings_path, data)
+
+
+def remove_permission_allow(settings_path: Path, rule: str) -> None:
+    """Remove *rule* from ``permissions.allow`` if present.
+
+    No-op (no file write) when the rule — or the file — is absent. Preserves
+    all unrelated keys and permission rules. Writes atomically.
+
+    Args:
+        settings_path: Path to the settings.json (or settings.local.json) file.
+        rule:          The exact permission rule string to remove.
+    """
+    data = _load(settings_path)
+    allow = data.get("permissions", {}).get("allow", [])
+
+    if rule not in allow:
+        return
+
+    allow[:] = [r for r in allow if r != rule]
     _save(settings_path, data)
 
 

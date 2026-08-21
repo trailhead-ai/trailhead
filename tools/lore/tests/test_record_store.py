@@ -47,6 +47,11 @@ import pytest
 from conftest import load_script
 
 
+def _sidecar_format():
+    """The canonical sidecar serializer — the one authority on the byte shape."""
+    return load_script("lore.record.sidecar")
+
+
 @pytest.fixture()
 def rs():
     return load_script("lore.record.store")
@@ -250,7 +255,7 @@ def test_resolve_committer_email_follows_matching_includeif_gitdir(rs, monkeypat
 
 
 def test_validate_and_write_round_trip(rs, conn, tmp_path):
-    """Body verbatim .md + compact sorted-key .json + matching index row."""
+    """Body verbatim .md + canonical sorted-key .json + matching index row."""
     vault = tmp_path / "vault"
     vault.mkdir()
     loc = rs.place_record("My Spec", "spec", None, str(vault))
@@ -267,8 +272,8 @@ def test_validate_and_write_round_trip(rs, conn, tmp_path):
     raw = js.read_text()
     parsed = json.loads(raw)
     assert parsed["title"] == "My Spec"
-    # Compact single-line, sorted keys, no trailing newline.
-    assert raw == json.dumps(parsed, sort_keys=True, separators=(",", ":"))
+    # Canonical: pretty-printed, sorted keys, trailing newline.
+    assert raw == _sidecar_format().dumps(parsed)
 
     row = conn.execute(
         "SELECT records.title, record_fts.body FROM records "
@@ -280,8 +285,8 @@ def test_validate_and_write_round_trip(rs, conn, tmp_path):
     assert row[1] == body
 
 
-def test_validate_and_write_sidecar_compact_json(rs, conn, tmp_path):
-    """Sidecar is single-line compact JSON, keys sorted, no trailing newline."""
+def test_validate_and_write_sidecar_canonical_json(rs, conn, tmp_path):
+    """Sidecar is canonical JSON: pretty-printed, keys sorted, trailing newline."""
     vault = tmp_path / "vault"
     vault.mkdir()
     loc = rs.place_record("My Spec", "spec", None, str(vault))
@@ -289,11 +294,11 @@ def test_validate_and_write_sidecar_compact_json(rs, conn, tmp_path):
     conn.commit()
 
     raw = (vault / "spec" / "my-spec.json").read_text()
-    # Single-line compact: no embedded newlines, no trailing newline.
-    assert "\n" not in raw
+    # Pretty-printed and newline-terminated (the git-mergeable shape).
+    assert "\n" in raw and raw.endswith("\n")
     # Parseable and round-trips stably.
     parsed = json.loads(raw)
-    assert raw == json.dumps(parsed, sort_keys=True, separators=(",", ":"))
+    assert raw == _sidecar_format().dumps(parsed)
 
 
 def test_validate_and_write_stamps_provenance(rs, conn, tmp_path, monkeypatch):
@@ -704,7 +709,7 @@ def test_delete_record_missing_id_raises_not_found(rs, conn, tmp_path):
 
 
 def test_labels_round_trip_byte_stable_sorted_inner_keys(rs, conn, tmp_path):
-    """labels map written compact with inner keys sorted; round-trips byte-stable."""
+    """labels map written canonically with inner keys sorted; round-trips byte-stable."""
     vault = tmp_path / "vault"
     vault.mkdir()
     loc = rs.place_record("Label Test", "spec", None, str(vault))
@@ -717,12 +722,12 @@ def test_labels_round_trip_byte_stable_sorted_inner_keys(rs, conn, tmp_path):
     parsed = json.loads(raw)
     assert "labels" in parsed
     assert parsed["labels"] == {"claude-code/model": "x", "worktree": "s5"}
-    # Compact single-line and byte-stable.
-    assert raw == json.dumps(parsed, sort_keys=True, separators=(",", ":"))
+    # Canonical and byte-stable.
+    assert raw == _sidecar_format().dumps(parsed)
 
 
 def test_annotations_round_trip_byte_stable(rs, conn, tmp_path):
-    """annotations map written compact; round-trips byte-stable."""
+    """annotations map written canonically; round-trips byte-stable."""
     vault = tmp_path / "vault"
     vault.mkdir()
     loc = rs.place_record("Annot Test", "spec", None, str(vault))
@@ -734,7 +739,7 @@ def test_annotations_round_trip_byte_stable(rs, conn, tmp_path):
     raw = (vault / "spec" / "annot-test.json").read_text()
     parsed = json.loads(raw)
     assert "annotations" in parsed
-    assert raw == json.dumps(parsed, sort_keys=True, separators=(",", ":"))
+    assert raw == _sidecar_format().dumps(parsed)
 
 
 def test_labels_absent_not_written_to_sidecar(rs, conn, tmp_path):

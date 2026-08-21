@@ -15,8 +15,11 @@ from .common import (
     _resolve_all_vaults,
     _resolve_all_vaults_strict,
     _vault_drift,
+    _vault_has_upstream,
     _vault_is_git_toplevel,
+    _vault_mid_rebase,
 )
+from .resolve_state import refusal_notice, resolve_remedy, vault_is_resolving
 from .session import _open_session_index, _resolve_session_key
 
 
@@ -24,9 +27,19 @@ def _flush_commit(vault: Path, key: str, *, push: bool = True) -> int:
     """Stage the flushed session record's EXPLICIT path(s) + commit in ONE commit.
 
     Never `git add -A` — only `session/<key>.json` (the flipped sidecar) and its
-    `.md` body are staged, so unrelated dirty vault files are never swept in.
-    The staged-index gate (`git diff --cached --quiet`) makes an already-clean
-    flush a no-op rather than a failed empty commit. Returns exit code.
+    `.md` body are staged, so unrelated dirty vault files are never swept into
+    *this* commit. The staged-index gate (`git diff --cached --quiet`) makes an
+    already-clean flush a no-op rather than a failed empty commit. Returns exit
+    code.
+
+    **Scope of that guarantee: this commit, not the command.** A default `lore
+    flush` ends with :func:`_flush_sync_tail`, a full `lore sync` that DOES
+    `git add -A` every writable vault — so the unrelated dirty files this commit
+    refuses to sweep are committed by the tail, in their own separate sync
+    commit. What survives is the property the guarantee exists for: the session
+    commit is a clean, reviewable unit holding exactly the flushed record.
+    `lore flush --no-sync` runs no tail, and is the form under which the flush
+    command as a whole still touches nothing but the session record.
 
     The per-session *commit* is the deliberate atomicity unit and always runs here,
     under the session-key lock (see :func:`_stage_and_commit_session`). The *push*
@@ -60,7 +73,9 @@ def _stage_and_commit_session(vault: Path, key: str) -> tuple[int, bool]:
     session-scoped: ``lore sync`` holds the vault lock across its own ``git add
     -A`` → ``commit``, and without this lock that ``add -A`` could land between
     this function's ``add`` and its ``commit`` and sweep the whole dirty tree into
-    the flush commit — breaking the explicit-paths-only contract above. The
+    the flush commit — which is the session commit's own scope guarantee (see
+    :func:`_flush_commit`), not the command's: flush's sync tail commits the rest
+    deliberately, in a commit of its own, never inside this one. The
     acquisition order is fixed **session-key → vault**; no lore path takes them
     the other way round, so the pair cannot deadlock.
 
@@ -120,6 +135,12 @@ def _flush_push(vault: Path) -> int:
     fails (offline), is a soft outcome (exit 0): every flush is already committed
     locally and `lore sync` — or the next successful flush — re-pushes when online.
     Returns exit code (always 0; a push failure does not fail the flush).
+
+    **Only the `--no-sync` path calls this.** A default flush ends with
+    :func:`_flush_sync_tail`, whose per-vault `lore sync` already pushes; running
+    both would be two round-trips for one outcome. Both flush paths therefore
+    take their `push` flag from the tail's own opt-out, so exactly one of the two
+    pushes on any given run.
     """
     rc_remote, remote_url, _ = _git(vault, "remote", "get-url", "origin")
     if rc_remote != 0 or not remote_url:
@@ -134,8 +155,26 @@ def _flush_push(vault: Path) -> int:
     return 0
 
 
-def _report_unsynced_vaults() -> None:
-    """Print a notice naming every configured vault left holding uncommitted work.
+def _report_unsynced_vaults(
+    vaults: "list[tuple[str, Path]] | None" = None, *, file=None
+) -> None:
+    """Print a notice naming every vault in *vaults* left holding uncommitted work.
+
+    **Two callers, two scopes, both preserved exactly.** `--no-sync` calls this
+    with no arguments: *vaults* resolves to EVERY configured vault (the old,
+    unpartitioned shape, still printed to stdout) — the full report that
+    substitutes for the sync tail it opted out of.
+
+    A default flush ends with :func:`_flush_sync_tail`, which SYNCS every
+    writable vault instead of naming it — leaving nothing for that half of the
+    report. But the tail structurally never touches a `shared: true` vault (the
+    shared-vault write gate — see :func:`_flush_sync_tail`), so a shared vault
+    left holding unsynced work is never mentioned by anything on the default
+    path either, unless this notice runs a second time, scoped to shared vaults
+    ONLY, after the tail (`cmd_flush` passes `file=sys.stderr` there, matching
+    every other post-tail notice). The two scopes never overlap — the tail's
+    writable partition and this call's shared partition are exactly
+    complementary — so calling both is not double-reporting the same vault.
 
     `_flush_commit` stages the flushed session record's EXPLICIT paths and nothing
     else — deliberately, so unrelated dirty files are never swept into a session
@@ -146,9 +185,11 @@ def _report_unsynced_vaults() -> None:
     therefore read as "everything is saved" while the records it existed to durably
     capture sat untracked.
 
-    Reporting rather than committing keeps the explicit-paths guarantee intact: the
-    flush still touches only what it staged, and the operator gets the one command
-    that covers the rest.
+    Reporting rather than committing is what `--no-sync` MEANS: that flush still
+    touches only what it staged, and the operator gets the one command that covers
+    the rest. (A default flush covers its writable vaults instead of naming them —
+    :func:`_flush_sync_tail` — and can only ever NAME its shared ones, since it
+    must never write to them.)
 
     **Only ``DRIFT_SYNC_FIXABLE`` findings are reported**, because the notice's
     whole payload is "run `lore sync`". A standing condition sync cannot fix — a
@@ -158,10 +199,11 @@ def _report_unsynced_vaults() -> None:
     ``lore status`` is the surface that reports standing conditions, with the
     remedy that actually applies. Silent when nothing is sync-fixable.
     """
-    vaults, error = _resolve_all_vaults()
-    if error is not None:
-        print(f"notice: cannot check vault sync state — {error}", file=sys.stderr)
-        return
+    if vaults is None:
+        vaults, error = _resolve_all_vaults()
+        if error is not None:
+            print(f"notice: cannot check vault sync state — {error}", file=sys.stderr)
+            return
 
     drifted = []
     for name, path in vaults:
@@ -173,9 +215,113 @@ def _report_unsynced_vaults() -> None:
     if not drifted:
         return
 
-    print("notice: vault(s) still holding unsynced work — run `lore sync`:")
+    out = file or sys.stdout
+    print("notice: vault(s) still holding unsynced work — run `lore sync`:", file=out)
     for name, descriptions in drifted:
-        print(f"  {name}: {'; '.join(descriptions)}")
+        print(f"  {name}: {'; '.join(descriptions)}", file=out)
+
+
+def _vault_diverged(vault: Path) -> bool:
+    """Return ``True`` iff *vault* holds local commits AND is behind its upstream.
+
+    Read purely from the local ref database, and only ever consulted right after
+    a sync attempt on *vault* has already fetched: at that moment "still ahead
+    and still behind" means the rebase did not integrate, which is the rebase
+    conflict :func:`_sync_tail_notice` needs to distinguish from every other way
+    a sync can fail. A commit failure, a missing directory, or a broken lock
+    leaves the vault un-fetched and un-diverged, so none of them answer ``True``
+    here and none of them are offered the ``lore resolve`` remedy.
+    """
+    if not _vault_has_upstream(vault):
+        return False
+    rc_a, ahead, _ = _git(vault, "rev-list", "--count", "@{u}..HEAD")
+    rc_b, behind, _ = _git(vault, "rev-list", "--count", "HEAD..@{u}")
+    if rc_a != 0 or rc_b != 0:
+        return False
+    return ahead not in ("", "0") and behind not in ("", "0")
+
+
+def _sync_tail_notice(name: str, vault: Path) -> None:
+    """Report a vault the sync tail could not finish — soft, and never fatal.
+
+    The flush itself already succeeded and its commits are durable locally, so
+    the tail's exit code is deliberately dropped (see :func:`_flush_sync_tail`);
+    what must not be dropped is WHICH remedy applies. A vault left mid-rebase, or
+    left diverged by a rebase that aborted, is settled by ``lore resolve`` and by
+    nothing else — prescribing ``lore sync`` there would send the operator back
+    into the command that just refused. Everything else the tail can fail on
+    (a missing vault directory, a lock it could not take, a commit that failed)
+    is retried by a later ``lore sync``.
+    """
+    if _vault_mid_rebase(vault) or _vault_diverged(vault):
+        remedy = resolve_remedy(vault)
+    else:
+        remedy = "re-run `lore sync`"
+    print(
+        f"notice: the flush is committed locally, but syncing vault {name!r} did "
+        f"not complete — to settle it, {remedy}.",
+        file=sys.stderr,
+    )
+
+
+def _flush_sync_tail() -> None:
+    """Close the flush with the FULL sync flow — commit, pull, push — per vault.
+
+    Flush's own commit covers the session record alone, which is the right scope
+    for that commit and the wrong scope for the command: the records a flush
+    exists to durably capture are written by `lore record create`, route by
+    scope, and therefore land in vaults the session commit never touches. Naming
+    them (the pre-tail behavior, kept for `--no-sync`) told the operator what was
+    still unsaved; the tail saves it, and pulls the other devices' work down in
+    the same pass — the convergence half `implicit_pull` cannot deliver, because
+    a flush runs against a vault made dirty by the session note it is about to
+    commit and pull-only never integrates a dirty tree.
+
+    **One ``cmd_sync`` call per WRITABLE vault, not one whole-install run.** A
+    bare `lore sync` covers every configured vault including `shared: true`
+    ones, and a shared vault must never be committed or pushed under this
+    operator's git identity by an agent-actuated write — the same gate that
+    excludes it from the flush itself (`_partition_writable_vaults`). Iterating
+    the writable vaults and passing each as ``--vault`` is what keeps that gate
+    intact while still reusing ``cmd_sync`` unchanged as the flow.
+
+    **The tail holds no lock.** Both flush paths release the session-key lock
+    (and the vault lock nested in it) before returning to :func:`cmd_flush`, so
+    by the time this runs the thread owns nothing and each ``cmd_sync`` is an
+    ordinary second sync invocation, taking its own locks in sync's own order.
+    Moving this call inside any lock span would put a network round-trip under a
+    blocking, timeout-less flock — do not.
+
+    **Failure is soft, always.** The flush succeeded and is committed; a tail
+    that cannot sync reports the applicable remedy (:func:`_sync_tail_notice`)
+    and leaves the exit code alone. A vault already mid-resolution is skipped
+    outright rather than synced: ``lore sync`` would abort the rebase `lore
+    resolve` is mid-way through and throw that resolution away.
+    """
+    from types import SimpleNamespace
+
+    from . import sync as sync_mod
+
+    vaults, error = _resolve_all_vaults()
+    if error is not None:
+        print(f"notice: cannot sync after flush — {error}", file=sys.stderr)
+        return
+
+    writable, _shared = _partition_writable_vaults(vaults)
+    for name, path in writable:
+        vault = Path(path)
+        if vault_is_resolving(vault):
+            print(
+                f"notice: vault {name!r} is mid-resolution — not synced after the "
+                f"flush; to finish the resolution, {resolve_remedy(vault)}.",
+                file=sys.stderr,
+            )
+            continue
+        rc = sync_mod.cmd_sync(
+            SimpleNamespace(vault=name, message=None, pull_only=False)
+        )
+        if rc != 0:
+            _sync_tail_notice(name, vault)
 
 
 # The literal reserved scope token. It is unambiguous against a KQL
@@ -211,24 +357,52 @@ def cmd_flush(args) -> int:
     No code path writes `status: complete` / `active` — that vocab was retired;
     a session status is only ever `dirty` / `clean`.
 
-    Every scope ends with `_report_unsynced_vaults`, which names the vaults the
-    flush's own commit does not cover. It runs on the failure path too: a flush
-    that exits non-zero is exactly when knowing what is still uncommitted matters,
-    and the notice never changes the exit code.
+    Every scope ends with the SYNC TAIL (:func:`_flush_sync_tail`): the full
+    commit → pull → push flow over every WRITABLE vault, which is what makes a
+    flush leave the whole install saved rather than only the session record.
+    `--no-sync` opts out, and that path ends instead with `_report_unsynced_vaults`
+    over every configured vault — the notice that NAMES what such a flush leaves
+    uncommitted. Exactly one of the two governs the writable vaults.
+
+    The tail structurally never touches a `shared: true` vault (the shared-vault
+    write gate), so a default flush follows the tail with `_report_unsynced_vaults`
+    a second time, scoped to shared vaults ONLY, on stderr — the one thing nothing
+    else on the default path would otherwise say. This does not compete with the
+    tail: the tail's writable partition and this call's shared partition are
+    exactly complementary, so a vault is only ever covered by one of the two.
+
+    Either ending runs on the failure path too: a flush that exits non-zero is
+    exactly when the sessions that DID commit most need pushing and the operator
+    most needs to know what is still uncommitted. Neither changes the exit code.
+
+    A flush that syncs must not also push on its own (`_flush_push`), so the
+    per-session/per-batch push is enabled only when the tail is opted out of.
     """
     scope = getattr(args, "scope", None)
+    sync_tail = not getattr(args, "no_sync", False)
+    push = not sync_tail
     if scope == FLUSH_SCOPE_ALL:
-        rc = _flush_batch(args, query=_FLUSH_ALL_QUERY, scope_label="all")
+        rc = _flush_batch(args, query=_FLUSH_ALL_QUERY, scope_label="all", push=push)
     elif scope:
-        rc = _flush_batch(args, query=scope, scope_label=f"<search> {scope!r}")
+        rc = _flush_batch(
+            args, query=scope, scope_label=f"<search> {scope!r}", push=push
+        )
     else:
-        rc = _flush_current_session(args)
+        rc = _flush_current_session(args, push=push)
 
-    _report_unsynced_vaults()
+    if sync_tail:
+        _flush_sync_tail()
+        vaults, error = _resolve_all_vaults()
+        if error is None:
+            _, shared = _partition_writable_vaults(vaults)
+            if shared:
+                _report_unsynced_vaults(shared, file=sys.stderr)
+    else:
+        _report_unsynced_vaults()
     return rc
 
 
-def _flush_current_session(args) -> int:
+def _flush_current_session(args, *, push: bool) -> int:
     """Flush the CURRENT session record: dirty → clean + commit, else no-op.
 
     Reads `session/<key>.json` for the resolved current-session key, in EVERY
@@ -241,6 +415,8 @@ def _flush_current_session(args) -> int:
       - `dirty` → flip `status` to `clean`, stamp `annotations[flushed-at]` (the
         pinned key/ISO-UTC format), reindex the one record, then commit the
         record's EXPLICIT paths only (the `.json` + `.md`; never `git add -A`).
+        Anything else dirty in the vault is committed by the sync tail
+        afterwards, in its own commit — see :func:`_flush_sync_tail`.
 
     **All vaults, not just the active one.** `lore session candidate --vault NAME`
     writes the session record into the ELECTED vault, so pinning the flush to the
@@ -299,14 +475,30 @@ def _flush_current_session(args) -> int:
 
     worst = 0
     for vault in holders:
-        rc = _flush_one_session(vault, key, committer)
+        rc = _flush_one_session(vault, key, committer, push=push)
         if rc != 0:
             worst = rc
     return worst
 
 
-def _flush_one_session(vault: Path, key: str, committer: str) -> int:
+def _implicit_pull(vault: Path) -> None:
+    """Run ``sync``'s throttled, stderr-only implicit pull for *vault*.
+
+    A one-line wrapper so both flush paths — single-session and batch — reach the
+    same call site. ``cli.sync`` is imported at call time, matching how the other
+    write paths reach it, so neither module has to sit at the other's import top.
+    """
+    from . import sync as sync_mod
+
+    sync_mod.implicit_pull(vault)
+
+
+def _flush_one_session(vault: Path, key: str, committer: str, *, push: bool) -> int:
     """Flush `session/<key>` in ONE vault: flip + commit as a unit, then push.
+
+    *push* is ``False`` whenever the sync tail will run — the tail's own
+    `lore sync` pushes this vault, and pushing here as well would spend a second
+    network round-trip for the same commits.
 
     The per-vault primitive behind the current-session path — extracted so a key
     held by several vaults is flushed once per vault, each with its own atomic
@@ -321,6 +513,18 @@ def _flush_one_session(vault: Path, key: str, committer: str) -> int:
     ``FLUSH_NO_SESSION`` verdict is handled below.
     """
     from ..session import store as session_store_mod
+
+    # A vault mid-rebase is being resolved: a flush would flip the sidecar and
+    # commit into a tree `lore resolve` is still settling. Refused before the
+    # lock, so the session stays dirty and nothing is written.
+    if vault_is_resolving(vault):
+        print(refusal_notice(vault, "flush"), file=sys.stderr)
+        return 1
+
+    # Converge on the other devices' records before the flip + commit —
+    # throttled, stderr-only, and unable to fail the flush. Runs before the
+    # session-key lock below: the pull fetches over the network and may reindex.
+    _implicit_pull(vault)
 
     # The flip and the commit are ONE unit under the session-key lock: a
     # `session candidate` that landed between them would flip the sidecar back to
@@ -351,7 +555,7 @@ def _flush_one_session(vault: Path, key: str, committer: str) -> int:
         # Push OUTSIDE the lock (network never runs under a no-timeout flock).
         # Only when the vault is a git toplevel — otherwise the commit was
         # skipped with a notice and there is nothing to push.
-        if _vault_is_git_toplevel(vault):
+        if push and _vault_is_git_toplevel(vault):
             _flush_push(vault)
     else:
         _revert_flip(vault, key, committer)
@@ -489,7 +693,7 @@ def _keep_writable_hits(
     return kept
 
 
-def _flush_batch(args, *, query: str, scope_label: str) -> int:
+def _flush_batch(args, *, query: str, scope_label: str, push: bool) -> int:
     """Flush every DIRTY session matching *query*, one atomic unit at a time.
 
     Discovers keys via :func:`_discover_dirty_session_keys` (the facade), then for
@@ -497,7 +701,8 @@ def _flush_batch(args, *, query: str, scope_label: str) -> int:
     (`flush_session` + `_flush_commit`) so every session is record-flip + commit as
     its own unit. The git *push*, however, is hoisted OUT of the loop: each commit
     runs with `push=False` and the batch pushes ONCE at the end (`_flush_push`),
-    replacing N network round-trips with one. A mid-batch failure stops the batch
+    replacing N network round-trips with one — and not at all when the sync tail
+    is going to push the same vaults itself (*push* is ``False``). A mid-batch failure stops the batch
     (and never reaches the final push), prints the per-session summary so far, NAMES
     the failed session, states already-flushed sessions are `clean` and that a re-run
     safely retries (idempotent by design — the committed-but-unpushed sessions are
@@ -546,6 +751,26 @@ def _flush_batch(args, *, query: str, scope_label: str) -> int:
     if not discovered:
         print(f"notice: no dirty sessions match {scope_label} — nothing to flush.")
         return 0
+
+    # Distinct vaults in discovery order, keyed by resolved path so a vault
+    # holding several matching sessions is fenced and pulled exactly once.
+    batch_vaults = list({str(v): v for v, _ in discovered}.values())
+
+    # The same mid-resolution fence as the single-session path, applied to the
+    # whole batch BEFORE the first flip: refusing partway through would leave
+    # earlier sessions flushed, which is exactly the split state a resolution
+    # in progress must not acquire.
+    for batch_vault in batch_vaults:
+        if vault_is_resolving(batch_vault):
+            print(refusal_notice(batch_vault, "flush"), file=sys.stderr)
+            return 1
+
+    # Same implicit pull as the single-session path, and only once the fence
+    # above has cleared EVERY vault — a refused batch must not have pulled.
+    # Before the first flip, too: a batch must not start converging halfway
+    # through.
+    for batch_vault in batch_vaults:
+        _implicit_pull(batch_vault)
 
     flushed: list[str] = []
     # Insertion-ordered so the end-of-batch pushes run in discovery order; keyed by
@@ -601,8 +826,9 @@ def _flush_batch(args, *, query: str, scope_label: str) -> int:
     # locally above; push them together rather than once per session. A vault the
     # batch never committed to is never probed — an all-raced-clean batch (every
     # verdict != FLUSH_FLUSHED) touches nothing and pushes nothing.
-    for vault in touched_vaults.values():
-        _flush_push(vault)
+    if push:
+        for vault in touched_vaults.values():
+            _flush_push(vault)
     return 0
 
 
@@ -620,6 +846,14 @@ def add_flush_subparser(sub) -> None:
             "Flush scope: omit = current session; the reserved token "
             "`all` = every dirty session; any other value = a KQL query "
             "(intersected with dirty)"
+        ),
+    )
+    p_flush.add_argument(
+        "--no-sync",
+        action="store_true",
+        help=(
+            "Skip the closing `lore sync` of every writable vault: commit the "
+            "session record(s) only and name what is left uncommitted"
         ),
     )
     _add_session_selectors(p_flush)

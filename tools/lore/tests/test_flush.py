@@ -4,8 +4,10 @@
     - a ``clean`` session → exit 0, a notice that DISTINGUISHES "clean — nothing
       to flush" from "no session exists", and NO commit.
     - a ``dirty`` session → status becomes ``clean``, ``annotations['flushed-at']``
-      is stamped in the pinned key/format, the one record is reindexed, and exactly
-      ONE commit is made — staging EXPLICIT paths only (never ``git add -A``).
+      is stamped in the pinned key/format, the one record is reindexed, and the
+      session commit stages EXPLICIT paths only (never ``git add -A``).
+    - the sync tail (the default) commits the vault's OTHER dirty files, in its
+      own commit; ``--no-sync`` opts out and leaves them exactly where they were.
     - re-flush of a now-``clean`` session is an idempotent no-op (no second commit).
     - NO code path ever writes ``status: complete`` / ``status: active`` — the
       sidecar status is only ever ``dirty`` / ``clean``.
@@ -142,7 +144,7 @@ class TestFlushDirtySession:
         committed = _committed_files_at_head(vault)
         assert f"session/{SID}.json" in committed
 
-    def test_flush_does_not_sweep_unrelated_dirty_file(self, tmp_path):
+    def _vault_with_a_stray_file(self, tmp_path):
         vault, state = _make_vault(tmp_path)
         _git_init(vault)
         decisions = vault / "decisions"
@@ -150,12 +152,64 @@ class TestFlushDirtySession:
         (decisions / ".keep").write_text("")
         assert _candidate(vault, state).returncode == 0
         _commit_baseline(vault)
-        stray = decisions / "unrelated-scratch.md"
-        stray.write_text("scratch work, not part of the flush\n")
+        (decisions / "unrelated-scratch.md").write_text(
+            "scratch work, not part of the flush\n"
+        )
+        return vault, state
+
+    def test_the_session_commit_does_not_sweep_an_unrelated_dirty_file(self, tmp_path):
+        """The SESSION commit stays explicit-paths: the stray file is not in it.
+
+        The sync tail commits that file afterwards (see the test below) — but in a
+        commit of its own, so the session commit remains a clean, reviewable unit
+        holding exactly the flushed record.
+        """
+        vault, state = self._vault_with_a_stray_file(tmp_path)
 
         r = _flush(vault, state)
         assert r.returncode == 0, r.stderr
 
+        session_sha = subprocess.run(
+            ["git", "-C", str(vault), "rev-list", "-1", "--grep",
+             f"session: flush {SID}", "HEAD"],
+            capture_output=True, text=True,
+        ).stdout.strip()
+        assert session_sha, "the flush must have landed its session commit"
+        in_session_commit = subprocess.run(
+            ["git", "-C", str(vault), "show", "--name-only", "--pretty=format:",
+             session_sha],
+            capture_output=True, text=True,
+        ).stdout
+        assert "unrelated-scratch.md" not in in_session_commit
+        assert f"session/{SID}.json" in in_session_commit
+
+    def test_the_sync_tail_commits_the_unrelated_dirty_file(self, tmp_path):
+        """A default flush ends with the full sync flow, so nothing is left dirty."""
+        vault, state = self._vault_with_a_stray_file(tmp_path)
+
+        r = _flush(vault, state)
+        assert r.returncode == 0, r.stderr
+
+        status = subprocess.run(
+            ["git", "-C", str(vault), "status", "--porcelain"],
+            capture_output=True, text=True,
+        ).stdout
+        assert "unrelated-scratch.md" not in status, (
+            f"the sync tail must commit it; status={status!r}"
+        )
+        assert "unrelated-scratch.md" in _committed_files_at_head(vault)
+
+    def test_no_sync_leaves_the_unrelated_dirty_file_untracked(self, tmp_path):
+        """`--no-sync` is the opt-out: the flush touches ONLY the session record."""
+        vault, state = self._vault_with_a_stray_file(tmp_path)
+        before = _commit_count(vault)
+
+        r = _run(["flush", "--session-id", SID, "--no-sync"], vault=vault,
+                 state_dir=state,
+                 env_extra={"CLAUDE_CODE_SESSION_ID": "", "CLAUDE_SESSION_ID": ""})
+        assert r.returncode == 0, r.stderr
+
+        assert _commit_count(vault) == before + 1, "only the session commit"
         assert "unrelated-scratch.md" not in _committed_files_at_head(vault)
         status = subprocess.run(
             ["git", "-C", str(vault), "status", "--porcelain"],
@@ -198,10 +252,18 @@ class TestFlushCleanNoop:
         assert "no session" in combined, (
             "a missing session must be reported distinctly from a clean one"
         )
-        assert "clean" not in combined, (
-            "a missing session must NOT be reported as 'clean'"
+        # Only the SESSION lines are the subject: the sync tail legitimately
+        # reports the VAULT as clean, which says nothing about the session.
+        session_lines = [ln for ln in combined.splitlines() if "session" in ln]
+        assert not any("clean" in ln for ln in session_lines), (
+            f"a missing session must NOT be reported as 'clean': {session_lines!r}"
         )
-        assert _commit_count(vault) == 0, "no commit when there is no session"
+        # No session commit — the sync tail may still commit the vault's own
+        # dirty state, but nothing was flushed, so no flush commit exists.
+        assert not subprocess.run(
+            ["git", "-C", str(vault), "log", "--oneline", "--grep", "session: flush"],
+            capture_output=True, text=True,
+        ).stdout.strip(), "no session commit when there is no session"
 
 
 # ---------------------------------------------------------------------------

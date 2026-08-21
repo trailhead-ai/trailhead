@@ -16,7 +16,10 @@ and the one place lore serializes globally:
      under the **vault** lock, so a concurrent ``sync``'s ``git add -A`` cannot
      land between the flush's own ``add`` and its ``commit`` and be swept into
      it. The acquisition order is fixed session-key → vault; nothing in lore
-     takes them the other way round.
+     takes them the other way round. Flush's closing **sync tail** runs after
+     BOTH are released, holding no lock at all — it is an ordinary second sync
+     invocation, and it must stay that way: a network round-trip under lore's
+     blocking, timeout-less flock could starve every local writer.
   2b. **The record-delete index commit** lands inside the vault lock, like the
      create path's — a commit after the release would publish the row drop to a
      writer that already holds the lock.
@@ -1254,9 +1257,11 @@ class TestFlushCommitLockGranularity:
         The session-key lock is the flip-and-commit atomicity unit. The vault lock
         is what keeps a concurrent ``lore sync`` — which holds the vault lock
         across its ``git add -A`` → ``commit`` — from staging the whole dirty tree
-        between this commit's ``add`` and its ``commit``, which would break the
-        flush's explicit-paths-only contract. The order is fixed session-key →
-        vault so the two can never be taken in opposition.
+        between this commit's ``add`` and its ``commit``, which would make the
+        session commit something other than the flushed record. (Flush's own sync
+        tail commits the rest deliberately, afterwards, in a commit of its own.)
+        The order is fixed session-key → vault so the two can never be taken in
+        opposition.
         """
         flush = load_script("lore.cli.flush")
         locking = _locking()
@@ -1318,6 +1323,83 @@ class TestFlushCommitLockGranularity:
             assert vault_span[0] < events.index(f"git:{op}") < vault_span[1], (
                 f"git {op} ran outside the vault lock: {events}"
             )
+
+
+class TestFlushSyncTailHoldsNoLock:
+    def test_the_sync_tail_runs_after_every_flush_lock_is_released(
+        self, tmp_path, monkeypatch
+    ):
+        """The tail is a plain second ``cmd_sync`` — no lock is held when it runs.
+
+        Both flush paths release the session-key lock (and the vault lock nested
+        in it) before returning to ``cmd_flush``, so the tail can take sync's own
+        locks in sync's own order without any chance of opposition. Lore's locks
+        are REENTRANT per thread, so a single acquire/release pair is not what
+        this asserts: the spies track DEPTH, and the tail must observe depth zero
+        on both locks — the outermost release, not merely some release.
+        """
+        from lore.cli import dispatch, sync
+
+        locking = _locking()
+        vault = _git_vault(tmp_path / "vault")
+        state = tmp_path / "state"
+        state.mkdir()
+        config_home = state / "_xdg_config"
+        write_default_config(config_home, vault)
+
+        r = run_cli(
+            ["session", "candidate", "--session-id", SID,
+             "--kind", "spec", "--phase", "Plan"],
+            vault=vault, state_dir=state, stdin_text="a candidate\n",
+        )
+        assert r.returncode == 0, r.stderr
+        _git(vault, "add", "-A")
+        _git(vault, "commit", "-m", "baseline")
+
+        depth = {"session": 0, "vault": 0}
+        observed: list[tuple[int, int]] = []
+        real_session = locking.session_write_lock
+        real_vault = locking.vault_write_lock
+
+        @contextmanager
+        def spy_session(root, key, **kwargs):
+            with real_session(root, key, **kwargs):
+                depth["session"] += 1
+                try:
+                    yield
+                finally:
+                    depth["session"] -= 1
+
+        @contextmanager
+        def spy_vault(root, **kwargs):
+            with real_vault(root, **kwargs):
+                depth["vault"] += 1
+                try:
+                    yield
+                finally:
+                    depth["vault"] -= 1
+
+        def spy_sync(args):
+            observed.append((depth["session"], depth["vault"]))
+            return 0
+
+        monkeypatch.setenv("XDG_STATE_HOME", str(state))
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(config_home))
+        monkeypatch.setenv("LORE_EMAIL", "tester@example.com")
+        monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "")
+        monkeypatch.setenv("CLAUDE_SESSION_ID", "")
+        monkeypatch.setattr(locking, "session_write_lock", spy_session)
+        monkeypatch.setattr(locking, "vault_write_lock", spy_vault)
+        monkeypatch.setattr(sync, "cmd_sync", spy_sync)
+
+        args = dispatch.build_parser().parse_args(["flush", "--session-id", SID])
+        rc = args.func(args)
+
+        assert rc == 0
+        assert observed, "the sync tail never ran"
+        assert all(pair == (0, 0) for pair in observed), (
+            f"the sync tail ran holding a lock: {observed}"
+        )
 
 
 class TestFlushVsCaptureRace:

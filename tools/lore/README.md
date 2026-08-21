@@ -26,6 +26,11 @@ over a **closed set of nine kinds**:
 | `blob` | Freeform capture that doesn't fit another kind |
 | `session` | One note per working session — the running log |
 
+A meeting or call transcript is a `blob` labeled `transcript=true` — one
+record per meeting, redacted before import, targeted with
+`has:label.transcript` (excluded with `-has:label.transcript`). See
+`/lore:record` for the full import recipe.
+
 Session lifecycle is automatic: capture-worthy items are logged as session
 candidates mid-session, and `/lore:flush` evaluates them into durable records
 and wraps the session (`status: dirty → clean`). `/lore:sync` commits and pushes
@@ -67,7 +72,7 @@ The `lore` CLI handles the deterministic operations skills delegate to it.
 <!-- Intentionally untagged (no sh/bash): this is a reference listing, not a runnable snippet. -->
 ```
 lore init                 Scaffold the default vault
-lore flush                Evaluate session candidates and wrap the session (dirty → clean), then commit
+lore flush                Evaluate session candidates and wrap the session (dirty → clean), commit, and sync every writable vault (--no-sync to skip)
 lore sync                 Stage, commit, pull, and push every configured vault (--vault <name> for one)
 lore status               Report ruleset drift and any vault holding unsynced records
 lore search <query>       Query all records (KQL-subset: field:value, full-text, and/or/not)
@@ -128,6 +133,10 @@ The kind set is closed — nine kinds:
 - `collaboration` — working-style preferences
 - `spec` — specification artifacts
 - `blob` — freeform captures that don't fit another kind
+  - a meeting/call transcript is a `blob` labeled `transcript=true`, one
+    record per meeting, redacted before import; target with
+    `has:label.transcript` / exclude with `-has:label.transcript` — full
+    recipe at `/lore:record`
 
 ## Searching the vault
 

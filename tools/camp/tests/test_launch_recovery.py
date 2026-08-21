@@ -227,7 +227,7 @@ class _FakeHarness:
 
     name = "fakeharness"
 
-    def session_launch(self, workspace, session_id):
+    def session_launch(self, workspace, session_id, *, session_name=None):
         return ["fakeharness", "--sid", session_id]
 
     def session_launch_env_unset(self):

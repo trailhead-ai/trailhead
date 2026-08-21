@@ -117,7 +117,7 @@ class FakeHarness(ClaudeCodeHarness):
 
     name = "fakeharness"
 
-    def session_launch(self, workspace, session_id):
+    def session_launch(self, workspace, session_id, *, session_name=None):
         return ["fake-launch", session_id]
 
     def session_launch_modality(self):

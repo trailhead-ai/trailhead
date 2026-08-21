@@ -588,6 +588,29 @@ class TestClaudeCodeSessionLaunch:
         with pytest.raises(HarnessError):
             ClaudeCodeHarness().session_launch(tmp_path, "--dangerously-skip-permissions")
 
+    def test_session_name_appends_the_name_flag(self, tmp_path):
+        assert ClaudeCodeHarness().session_launch(
+            tmp_path, "sess-1", session_name="camp-feat-x-abcd1234"
+        ) == [
+            "claude",
+            "--remote-control",
+            "--session-id",
+            "sess-1",
+            "--name",
+            "camp-feat-x-abcd1234",
+        ]
+
+    def test_no_session_name_means_no_name_flag(self, tmp_path):
+        assert "--name" not in ClaudeCodeHarness().session_launch(tmp_path, "sess-1")
+
+    def test_malformed_session_name_raises_like_a_malformed_id(self, tmp_path):
+        """The name lands in the same argv as the id, so it is held to the same
+        inert-token predicate — including the leading-dash flag-injection case."""
+        bads = ("", "a b", "a;rm -rf /", "$(whoami)", "../escape", "a/b", "-x", "--dangerously-skip-permissions")
+        for bad in bads:
+            with pytest.raises(HarnessError):
+                ClaudeCodeHarness().session_launch(tmp_path, "sess-1", session_name=bad)
+
     def test_no_filesystem_validation_of_workspace(self, tmp_path):
         missing = tmp_path / "does-not-exist"
         assert ClaudeCodeHarness().session_launch(missing, "sess-1") == [
