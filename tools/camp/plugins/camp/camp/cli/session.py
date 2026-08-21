@@ -121,7 +121,7 @@ def launch_and_confirm(
     Raises :class:`LaunchError` on refusal — including a spawn that never
     confirmed, which the engine has already killed.
     """
-    from ..bookmark import harness_for
+    from ..launch.profile import harness_for
     from ..launch.session import confirm_session, launch_session
 
     launched = launch_session(
@@ -340,7 +340,7 @@ def _addressable_harnesses(groups) -> list:
     sessions unaddressable. With no groups configured at all, camp's default
     harness profile is the one thing left to ask.
     """
-    from ..bookmark import harness_for
+    from ..launch.profile import harness_for
 
     found: dict[str, object] = {}
     for config in groups or [{}]:
@@ -745,7 +745,7 @@ def _enumerate_sessions(group: dict, workspace: Path | None, env: dict[str, str]
     equally honest "nothing is running": the caller prints a notice for the first
     and stays silent for the second.
     """
-    from ..bookmark import harness_for
+    from ..launch.profile import harness_for
     from ..launch.session import enumerate_records
 
     harness = harness_for(group)

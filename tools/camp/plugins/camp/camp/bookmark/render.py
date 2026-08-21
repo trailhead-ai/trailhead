@@ -139,7 +139,8 @@ def retention_days_for_group(
     only drives an advisory marker: a listing must never fail over one.
     """
     try:
-        from . import group_config_for, harness_for
+        from ..launch.profile import harness_for
+        from . import group_config_for
 
         harness = harness_for(group_config_for(group_name, env=env) or {})
         return harness.session_retention_days(env=env) if harness else None

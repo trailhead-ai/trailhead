@@ -17,6 +17,12 @@ into a frozen HarnessProfile (doc_files + inject + pretrust + cwd); callers read
 fields off it directly. camp does not launch the harness; activation is a
 separate seam.
 
+resolve_harness_profile answers what the CONFIG says; harness_for takes the next
+step and turns that configured binary name into the trailhead harness object whose
+seam answers transcript, resume, enumeration, and retention questions. Every camp
+surface that needs a harness — launch confirmation, session enumeration, resume —
+starts there.
+
 `_CLAUDE_DEFAULT["binary"]` / HarnessProfile.binary:
 should_pretrust() → is_claude_launch() reads its basename to detect a `claude`
 binary and scope the trust pre-seed. It is a single binary NAME (no argv: nothing
@@ -27,7 +33,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:  # pragma: no cover - typing only; trailhead may not be installed
+    from trailhead.harness.base import Harness
 
 # Baked-in claude default (applied when no [harness] block is configured). Only
 # the binary name is load-bearing now — is_claude_launch() reads its basename to
@@ -128,3 +137,24 @@ def resolve_harness_profile(group: dict[str, Any]) -> HarnessProfile:
         inject=inject,
         pretrust=harness.get("pretrust", True),
     )
+
+
+def harness_for(group: dict) -> Harness | None:
+    """Return the trailhead harness backing *group*, or None if unrecognized.
+
+    ``None`` means camp cannot name a harness for this group at all. Callers
+    degrade on it exactly as they degrade on a harness that answers ``None`` from
+    the seam itself — a user cannot act on the difference, and neither outcome
+    yields the transcript, argv, or retention window that was asked for.
+
+    Both imports are deferred: camp ships as a standalone CLI, so a caller that
+    runs without trailhead installed must fail inside a caller's own guard rather
+    than at module import.
+    """
+    from trailhead.harness import HarnessError, get_harness
+
+    binary = Path(resolve_harness_profile(group).binary).name
+    try:
+        return get_harness(binary)
+    except HarnessError:
+        return None

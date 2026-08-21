@@ -49,11 +49,6 @@ _REF_MAX_LEN = 64
 #: every other printable character, including non-ASCII, passes through.
 _CONTROL_CHAR_RE = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 
-#: Where the harness publishes the id of the running session. camp resolves it
-#: generically here (rather than in a harness module) because it is read from the
-#: environment camp itself is running in — there is no harness object to ask.
-_SESSION_ID_ENV_VARS = ("CLAUDE_CODE_SESSION_ID",)
-
 _USAGE = "usage: camp bookmark [--ref <ref>] [--note <text>]"
 
 
@@ -96,15 +91,13 @@ def _resolve_workspace(group: dict, env: dict[str, str] | None) -> tuple[str, Pa
 
 def _resolve_session_id(env: dict[str, str] | None) -> str:
     """Return the running session's id, or refuse naming the variable to export."""
-    import os
+    from ..launch.identity import SESSION_ID_ENV_VARS, current_session_id
 
-    source = env if env is not None else os.environ
-    for name in _SESSION_ID_ENV_VARS:
-        value = source.get(name)
-        if value:
-            return value
+    session_id = current_session_id(env)
+    if session_id:
+        return session_id
     raise BookmarkError(
-        f"camp bookmark: {_SESSION_ID_ENV_VARS[0]} is not set — "
+        f"camp bookmark: {SESSION_ID_ENV_VARS[0]} is not set — "
         "there is no harness session to bookmark from this shell"
     )
 
@@ -120,7 +113,7 @@ def _resolve_transcript(
     answering None) has no transcript layout camp can ask about at all — the same
     unresolvable outcome.
     """
-    from . import harness_for
+    from ..launch.profile import harness_for
 
     harness = harness_for(group)
     resolved = (

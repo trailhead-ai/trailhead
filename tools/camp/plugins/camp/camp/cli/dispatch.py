@@ -278,7 +278,7 @@ def main() -> None:
     # elsewhere in the config dir can't abort a command that never needed any
     # group's config in the first place.
     if first == "bookmark":
-        from ..bookmark import groupless_subverb
+        from .groupless import groupless_subverb
 
         groupless = groupless_subverb(argv[1:])
         if groupless is not None:
@@ -381,9 +381,9 @@ def _dispatch_group_command(
         handler(rest, group, group_env)
         return
     if cmd == "bookmark":
-        from ..bookmark import groupless_subverb
         from ..bookmark.capture import cmd_bookmark
         from ..spine import _consume_flag_value
+        from .groupless import groupless_subverb
 
         # ls/rm address the global store and take no group; bare capture is
         # cwd-scoped. The same classifier runs on the spine path, so the two entry

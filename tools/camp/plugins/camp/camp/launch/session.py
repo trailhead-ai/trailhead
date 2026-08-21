@@ -65,9 +65,9 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..bookmark import harness_for
 from ..group.manifest import workspace_dir
 from .claude_trust import pretrust_workspace
+from .profile import harness_for
 from .recovery import printable_path, sanitize_name_component
 from .profile import resolve_harness_profile
 

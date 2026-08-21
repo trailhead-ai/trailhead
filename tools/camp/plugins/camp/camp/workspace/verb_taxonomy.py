@@ -87,7 +87,7 @@ LEGACY_REDIRECTS: dict[str, str] = {
 # thing you look up without knowing its group, so spine serves it directly. So are
 # the `bookmark ls`/`bookmark rm` subverbs — `bookmark` is listed here only for
 # BARE capture, which bookmarks the workspace the shell is standing in and so has
-# nothing to act on without one (see bookmark.groupless_subverb, the single
+# nothing to act on without one (see cli.groupless.groupless_subverb, the single
 # classifier both dispatchers consult).
 NEEDS_GROUP_VERBS = frozenset(
     {"new", "remove", "pwd", "activate", "setup", "bookmark", "launch", "sessions"}

@@ -1129,7 +1129,7 @@ def cmd_bookmark_no_group(rest: list[str]) -> None:
     handlers. Bare capture is the only cwd-scoped spelling, so it alone falls
     through to the standard needs-group refusal.
     """
-    from .bookmark import groupless_subverb
+    from .cli.groupless import groupless_subverb
 
     groupless = groupless_subverb(list(rest))
     if groupless is None:
