@@ -380,7 +380,13 @@ def _parsable_groups() -> list[dict]:
     return configs
 
 
-def _session_pool(groups, *, verb: str, env: dict[str, str]) -> tuple[list, list, list]:
+def _session_pool(
+    groups,
+    *,
+    verb: str,
+    env: dict[str, str],
+    live_required: bool = False,
+) -> tuple[list, list, list]:
     """The addressable pool: (transcripts, live records, harnesses that answered).
 
     Every addressable harness's on-disk transcripts UNION its live sessions. A
@@ -390,9 +396,16 @@ def _session_pool(groups, *, verb: str, env: dict[str, str]) -> tuple[list, list
     unanswerable and camp refuses naming them: an unanswerable seam is a
     refusal, never a permissive default, and never a traceback.
 
-    The live probe is the opposite posture — it only ever ADDS candidates, so a
-    probe that fails narrows what camp can offer without being able to make camp
-    address the wrong thing.
+    The live probe is the opposite posture BY DEFAULT — it only ever ADDS
+    candidates, so a probe that fails narrows what camp can offer without being
+    able to make camp address the wrong thing.
+
+    *live_required* flips that, and a DESTRUCTIVE caller must set it. A failed
+    probe does not say "nothing is live", it says nothing at all, and a caller
+    whose decision turns on liveness would read the silence as "not live": the
+    stop path's already-down oracle would then report a running session, still
+    holding its memory, as reclaimed. On that path an unanswerable probe is a
+    refusal, the same posture the teardown guard takes for the same reason.
 
     *verb* is the name to put in either refusal, because both are read verbatim
     off a relayed stderr line and have to name the command the operator typed.
@@ -412,9 +425,21 @@ def _session_pool(groups, *, verb: str, env: dict[str, str]) -> tuple[list, list
     answered: list = []
     for harness in harnesses:
         try:
-            live.extend(enumerate_records(harness, None, env) or [])
-        except Exception:  # noqa: BLE001 — a failed live probe narrows the pool, never fails the command
-            pass
+            records = enumerate_records(harness, None, env)
+        except Exception as exc:  # noqa: BLE001 — posture below, never a traceback
+            records = None
+            detail = str(exc)
+        else:
+            detail = "the enumeration could not be answered"
+        if records is None and live_required:
+            _die(
+                f"camp {verb}: camp could not ask harness "
+                f"{_harness_display_name(harness)} which of its sessions are "
+                f"live ({detail}), so it cannot tell whether this session is "
+                "already down or still holding its memory — re-run once the "
+                "harness answers"
+            )
+        live.extend(records or [])
         try:
             rows = harness.session_transcripts(env=env)
         except Exception:  # noqa: BLE001 — a harness camp cannot read contributes nothing
@@ -1210,8 +1235,12 @@ def _cmd_kill_cli(args: list[str], env: dict[str, str] | None = None) -> None:
     session and the session names everything else, so this answers from a plain
     shell outside every group directory. It is also the verb an operator reaches
     for when something is already broken, so the group configs are read
-    tolerantly — a sibling group's malformed toml costs that group's workspaces
-    a nicer derived name and nothing more.
+    tolerantly rather than aborting the verb: a group camp cannot parse is
+    skipped, and its workspaces lose the slug component of their derived name.
+    That is a real cost, not a free one — a session whose name camp can no
+    longer derive is a session this verb can no longer address — but it is
+    borne by the unparsable group alone, and the alternative is a sibling
+    group's broken toml taking down the surface that reclaims memory.
 
     All of the decision-making — resolution, the ownership check, the anchor and
     self gates, the already-down oracle, and the re-poll for absence — lives in
@@ -1255,7 +1284,9 @@ def _cmd_kill_cli(args: list[str], env: dict[str, str] | None = None) -> None:
 
     resolved_env = dict(env) if env is not None else dict(os.environ)
     groups = _parsable_groups()
-    transcripts, live, answered = _session_pool(groups, verb="kill", env=resolved_env)
+    transcripts, live, answered = _session_pool(
+        groups, verb="kill", env=resolved_env, live_required=True
+    )
 
     outcome = stop_session(
         ref,

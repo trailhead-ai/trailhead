@@ -167,6 +167,25 @@ def test_a_session_rooted_elsewhere_does_not_block(tmp_path: Path) -> None:
     assert blocking == ()
 
 
+def test_a_session_inside_the_workspace_blocks_even_if_no_group_names_it(
+    tmp_path: Path,
+) -> None:
+    """Containment is the whole test. The workspace being removed IS the
+    container, so a session rooted inside it is lost when it goes — whether or
+    not the group list camp managed to parse still names that workspace's group.
+    A narrower group list must not turn this guard permissive."""
+    env = _env(tmp_path)
+    ws = _workspace(tmp_path, "g", "ws")
+    blocking = _blocking(
+        ws,
+        transcripts=[_transcript(_UUID_A, ws)],
+        live_records=[],
+        groups=[_group("unrelated")],
+        env=env,
+    )
+    assert [c.session_id for c in blocking] == [_UUID_A]
+
+
 def test_an_empty_pool_blocks_nothing(tmp_path: Path) -> None:
     env = _env(tmp_path)
     ws = _workspace(tmp_path, "g", "ws")

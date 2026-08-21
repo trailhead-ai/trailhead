@@ -11,11 +11,17 @@ sessions — merged by :func:`recovery.session_candidates` into the one pool eve
 session surface shares, then filtered to the workspace subtree. A guard with
 state of its own would be a second answer that can disagree with the first.
 
-The subtree rule is :func:`recovery.is_workspace_root`, named deliberately: camp
-already carries several incompatible readings of "does this workspace exist",
-and this guard adds none. A session rooted BELOW the workspace blocks it, because
-a group's `[harness] cwd` routinely roots a launch at a member repo and that
-session is every bit as lost when the workspace goes.
+The subtree rule is CONTAINMENT in the workspace being removed, and nothing
+else: that workspace is the container by construction, so a session rooted at or
+under it is destroyed with it. A session rooted BELOW the workspace blocks it
+too, because a group's `[harness] cwd` routinely roots a launch at a member repo
+and that session is every bit as lost when the workspace goes.
+
+Deliberately NOT also asking whether the root is camp-managed. That question is
+answered from the group list camp managed to parse, and a narrower list — one
+malformed group config — would answer "not camp-managed" for a session sitting
+inside the very workspace being torn down, which is this module's one way to be
+permissive when it cannot tell. Containment needs no group list to be right.
 
 FAIL CLOSED. If camp cannot enumerate one of the two halves, it does not know
 whether anything is rooted there, and :class:`EnumerationUnavailable` is raised
@@ -58,7 +64,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
-from .recovery import SessionCandidate, is_workspace_root, printable_path, session_candidates
+from .recovery import SessionCandidate, printable_path, session_candidates
 
 #: The live probe's ceiling. A harness that has not answered by now has not
 #: answered at all, and a `camp rm` that hangs on the question is its own
@@ -186,21 +192,14 @@ def blocking_sessions(
             env=env,
             now=now,
         )
-        if _rooted_in(candidate, root, groups, env)
+        if _rooted_in(candidate, root)
     )
 
 
-def _rooted_in(
-    candidate: SessionCandidate,
-    workspace: Path,
-    groups: Iterable[dict[str, Any]],
-    env: Mapping[str, str],
-) -> bool:
+def _rooted_in(candidate: SessionCandidate, workspace: Path) -> bool:
     if candidate.root is None or candidate.root_missing:
         return False
     resolved = candidate.root.resolve()
-    if not is_workspace_root(resolved, groups, env=env):
-        return False
     return resolved == workspace or resolved.is_relative_to(workspace)
 
 

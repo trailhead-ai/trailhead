@@ -2308,6 +2308,34 @@ def test_camp_kill_of_an_already_down_session_is_success(cli_env) -> None:
     assert _tmux_calls(cli_env, "kill-session") == []
 
 
+def test_camp_kill_will_not_call_a_session_already_down_when_it_cannot_see_live_ones(
+    cli_env,
+) -> None:
+    """The already-down oracle needs BOTH halves of the answer: not live AND no
+    tmux session. A live enumeration that failed does not say "not live" — it
+    says nothing — and folding it into an empty live set would report a running
+    session, still holding its memory, as reclaimed."""
+    launch_dir = _workspace_launch_dir(cli_env, "feat-blind")
+    _seed_transcript(cli_env, _UUID_A, launch_dir)
+
+    result = _camp(
+        cli_env,
+        "kill",
+        _UUID_A,
+        cwd=cli_env["tmp_path"],
+        extra_env={"CAMP_FAKE_ENUMERATE": "fail"},
+    )
+
+    assert result.returncode != 0
+    assert result.stdout == ""
+    assert "was already down" not in result.stderr
+    lines = result.stderr.strip().splitlines()
+    assert len(lines) == 1
+    assert lines[0].startswith("camp kill: ")
+    assert "live" in lines[0]
+    assert _tmux_calls(cli_env, "kill-session") == []
+
+
 def test_camp_kill_with_an_ambiguous_ref_exits_two_and_lists_candidates(cli_env) -> None:
     first = _workspace_launch_dir(cli_env, "feat-one")
     second = _workspace_launch_dir(cli_env, "feat-two")

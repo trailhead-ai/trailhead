@@ -50,7 +50,10 @@ name the resume path leans on as its collision backstop.
 
 Success is absence, not issuance. Both existing kill sites in camp discard
 their result without re-polling; this one polls the name until it is gone and
-reports a distinct failure if it never is.
+reports a distinct failure if it never is. The whole verb is bounded in wall
+clock: every tmux call carries `TMUX_TIMEOUT_SECONDS` and the re-poll carries
+`POLL_TIMEOUT_SECONDS` on a monotonic clock, so the worst case an operator
+waits is a handful of seconds — a few calls, plus the budget, and no more.
 """
 
 from __future__ import annotations
@@ -72,6 +75,11 @@ TMUX_TIMEOUT_SECONDS = 5.0
 #: How long to keep re-polling for the name's absence after the kill, and how
 #: often. tmux tears the session down server-side as the call returns, so this
 #: is a small budget for a busy server rather than a wait for a process to die.
+#:
+#: The budget is WALL CLOCK, measured on a monotonic clock rather than summed
+#: from the sleeps: each re-poll asks tmux a question that may itself take up to
+#: `TMUX_TIMEOUT_SECONDS` to answer, so counting only the sleeps would bound the
+#: idle time and leave the time an operator actually waits unbounded.
 POLL_TIMEOUT_SECONDS = 5.0
 POLL_INTERVAL_SECONDS = 0.1
 
@@ -97,6 +105,21 @@ REFUSED_TMUX_UNANSWERED = "tmux-unanswered"
 #: of the pinned oracle. Distinct from a foreign pane holding the name, because
 #: the operator's next move differs: there is nothing here for camp to signal.
 REFUSED_LIVE_WITHOUT_SESSION = "live-without-session"
+
+
+class _Unanswered:
+    """The sentinel a tmux question comes back with when tmux did not answer.
+
+    Distinct from ``None``, which is an ANSWER — "there is no such pane". A
+    question that came back with nothing known must never share a branch with
+    one that came back with a fact.
+    """
+
+    def __repr__(self) -> str:  # pragma: no cover - debugging aid
+        return "UNANSWERED"
+
+
+UNANSWERED = _Unanswered()
 
 
 @dataclass(frozen=True)
@@ -166,12 +189,22 @@ class Tmux:
             return None
         return done.returncode == 0
 
-    def pane_command(self, name: str) -> str | None:
-        """The session's first pane's originating command, or None."""
+    def pane_command(self, name: str) -> str | None | _Unanswered:
+        """The session's first pane's originating command.
+
+        Tri-state, for the same reason :meth:`has_session` is: ``None`` means
+        tmux answered and there is no pane command to read, while
+        :data:`UNANSWERED` means tmux never answered at all. Folding the second
+        into the first would report a tmux that went quiet between the two
+        questions as a foreign pane holding the name, sending the operator
+        hunting a squatter that does not exist.
+        """
         done = self._run(
             ["list-panes", "-t", f"={name}", "-F", "#{pane_start_command}"]
         )
-        if done is None or done.returncode != 0:
+        if done is None:
+            return UNANSWERED
+        if done.returncode != 0:
             return None
         first = done.stdout.splitlines()
         return first[0] if first else None
@@ -212,8 +245,15 @@ def _owning_commands(harness, candidate: SessionCandidate) -> tuple[tuple[str, .
     workspace argument is the candidate's own root; a harness that roots a
     launch on it gets the truth, and one that ignores it (Claude Code does) is
     unaffected either way.
+
+    Every call here is into third-party code, so every one of them is guarded:
+    a harness that raises contributes no shape, and no shape means the pane is
+    refused rather than the verb blowing up with a traceback.
     """
-    scrub = harness.session_launch_env_unset() or ()
+    try:
+        scrub = harness.session_launch_env_unset() or ()
+    except Exception:  # noqa: BLE001 — a harness that cannot say owns nothing
+        return ()
     prefix = ["env"]
     for name in scrub:
         prefix += ["-u", name]
@@ -235,7 +275,9 @@ def _owning_commands(harness, candidate: SessionCandidate) -> tuple[tuple[str, .
     return tuple(shapes)
 
 
-def _is_camp_launched(harness, candidate: SessionCandidate, pane_command: str | None) -> bool:
+def _is_camp_launched(
+    harness, candidate: SessionCandidate, pane_command: str | None
+) -> bool:
     if not pane_command:
         return False
     try:
@@ -256,6 +298,7 @@ def stop_session(
     tmux: Any | None = None,
     now=None,
     sleep: Callable[[float], None] = time.sleep,
+    monotonic: Callable[[], float] = time.monotonic,
     poll_timeout: float = POLL_TIMEOUT_SECONDS,
     poll_interval: float = POLL_INTERVAL_SECONDS,
 ) -> Resolution | StopOutcome:
@@ -297,19 +340,25 @@ def stop_session(
             return Refused(candidate, REFUSED_LIVE_WITHOUT_SESSION)
         return AlreadyDown(candidate)
 
-    if not _is_camp_launched(harness, candidate, tmux.pane_command(name)):
+    pane = tmux.pane_command(name)
+    if isinstance(pane, _Unanswered):
+        return Refused(candidate, REFUSED_TMUX_UNANSWERED)
+    if not _is_camp_launched(harness, candidate, pane):
         return Refused(candidate, REFUSED_NOT_CAMP_LAUNCHED)
 
     tmux.kill_session(name)
 
-    waited = 0.0
+    # The budget is spent by the polling, not just by the waiting between
+    # polls: a busy tmux can take a full TMUX_TIMEOUT_SECONDS to answer each
+    # question. Measuring elapsed time on a monotonic clock makes the asserted
+    # bound the one the operator actually experiences.
+    deadline = monotonic() + poll_timeout
     while True:
         present = tmux.has_session(name)
         if present is None:
             return Refused(candidate, REFUSED_TMUX_UNANSWERED)
         if not present:
             return Stopped(candidate)
-        if waited >= poll_timeout:
+        if monotonic() >= deadline:
             return StillPresent(candidate)
         sleep(poll_interval)
-        waited += poll_interval

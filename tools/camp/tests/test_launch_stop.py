@@ -586,3 +586,136 @@ def test_every_tmux_wait_is_bounded_by_a_phone_usable_budget() -> None:
     assert 0 < stop.TMUX_TIMEOUT_SECONDS <= 10
     assert 0 < stop.POLL_TIMEOUT_SECONDS <= 10
     assert 0 < stop.POLL_INTERVAL_SECONDS <= stop.POLL_TIMEOUT_SECONDS
+
+
+def test_the_re_poll_is_bounded_in_wall_clock_not_in_sleep_time(tmp_path: Path) -> None:
+    """The budget an operator experiences is WALL CLOCK, and the re-poll's own
+    calls are what spend it: every `has_session` may itself burn a full
+    `TMUX_TIMEOUT_SECONDS` before answering. Counting only the sleeps would let
+    a busy tmux stretch a 5-second budget into minutes with no output.
+
+    The clock here is driven by the engine's own calls, so it measures the
+    thing: the whole re-poll finishes inside the budget plus at most the one
+    tmux call that was in flight when it expired.
+    """
+    from camp.launch import stop
+
+    state, ws, env, harness, derived, _tmux = _fixture(tmp_path)
+    clock = {"now": 0.0}
+
+    class _SlowToAnswer(_FakeTmux):
+        """Answers, but each answer costs a full tmux timeout."""
+
+        def has_session(self, name: str) -> bool:
+            clock["now"] += stop.TMUX_TIMEOUT_SECONDS
+            return True
+
+    tmux = _SlowToAnswer({derived: _launched_pane(harness, _UUID_A, derived, ws)})
+
+    def _sleep(seconds: float) -> None:
+        clock["now"] += seconds
+
+    outcome = stop.stop_session(
+        _UUID_A[:8],
+        harness=harness,
+        transcripts=[_transcript(_UUID_A, ws)],
+        live_records=[_record(_UUID_A, ws)],
+        groups=[_group("g")],
+        env=env,
+        tmux=tmux,
+        now=_NOW,
+        sleep=_sleep,
+        monotonic=lambda: clock["now"],
+    )
+
+    assert isinstance(outcome, stop.StillPresent)
+    # The pre-kill existence probe, plus the re-poll: its budget plus the one
+    # call that was in flight when the budget ran out.
+    assert clock["now"] <= (
+        stop.POLL_TIMEOUT_SECONDS + 2 * stop.TMUX_TIMEOUT_SECONDS
+    )
+
+
+# ---------------------------------------------------------------------------
+# An unanswerable pane question is its own reason, never a foreign pane
+# ---------------------------------------------------------------------------
+
+
+def test_a_pane_question_tmux_never_answered_is_refused_as_unanswered(
+    tmp_path: Path,
+) -> None:
+    """tmux answered `has-session` and then went quiet. Nothing is known about
+    what holds the name, and reporting a squatter would send the operator
+    hunting a pane that does not exist."""
+    from camp.launch import stop
+
+    state, ws, env, harness, derived, _tmux = _fixture(tmp_path)
+
+    class _QuietPane(_FakeTmux):
+        def pane_command(self, name: str):
+            return stop.UNANSWERED
+
+    tmux = _QuietPane({derived: _launched_pane(harness, _UUID_A, derived, ws)})
+
+    outcome = _stop(
+        _UUID_A[:8],
+        tmux=tmux,
+        transcripts=[_transcript(_UUID_A, ws)],
+        live_records=[_record(_UUID_A, ws)],
+        env=env,
+        harness=harness,
+    )
+
+    assert isinstance(outcome, stop.Refused)
+    assert outcome.reason == stop.REFUSED_TMUX_UNANSWERED
+    assert tmux.killed == []
+
+
+def test_the_real_tmux_seam_separates_an_unanswered_pane_from_an_absent_one(
+    monkeypatch,
+) -> None:
+    """The tri-state lives in the seam: a call that never returned is
+    UNANSWERED, and a session with no pane is None."""
+    import subprocess as _subprocess
+
+    from camp.launch import stop
+
+    def _timeout(*args, **kwargs):
+        raise _subprocess.TimeoutExpired(cmd="tmux", timeout=1)
+
+    monkeypatch.setattr(stop.subprocess, "run", _timeout)
+    assert stop.Tmux().pane_command("camp-x") is stop.UNANSWERED
+
+    def _empty(*args, **kwargs):
+        return _subprocess.CompletedProcess(args=["tmux"], returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(stop.subprocess, "run", _empty)
+    assert stop.Tmux().pane_command("camp-x") is None
+
+
+def test_a_harness_that_raises_composing_the_scrub_refuses_rather_than_raising(
+    tmp_path: Path,
+) -> None:
+    """Every harness call the ownership check makes is a third-party call. One
+    that raises is a refusal — an ACTION verb's contract is one `camp kill:`
+    line, not a traceback."""
+    from camp.launch import stop
+
+    state, ws, env, harness, derived, tmux = _fixture(tmp_path)
+
+    class _BrokenScrub(_FakeHarness):
+        def session_launch_env_unset(self):
+            raise RuntimeError("third-party harness blew up")
+
+    outcome = _stop(
+        _UUID_A[:8],
+        tmux=tmux,
+        transcripts=[_transcript(_UUID_A, ws)],
+        live_records=[_record(_UUID_A, ws)],
+        env=env,
+        harness=_BrokenScrub(),
+    )
+
+    assert isinstance(outcome, stop.Refused)
+    assert outcome.reason == stop.REFUSED_NOT_CAMP_LAUNCHED
+    assert tmux.killed == []

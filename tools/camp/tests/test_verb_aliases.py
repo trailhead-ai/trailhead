@@ -102,6 +102,8 @@ def test_legacy_redirects_point_directly_at_canonicals() -> None:
         "init": "group",
         "ai": "new",
         "enter": "activate",
+        "resume": "launch --resume",
+        "bookmark": "launch --resume",
     }
 
 
@@ -109,8 +111,9 @@ def test_legacy_redirects_never_chain() -> None:
     """No redirect target is itself a removed verb (no chained redirect)."""
     from camp.workspace.verb_taxonomy import LEGACY_REDIRECTS
 
-    removed_verbs = {"ai", "rm", "enter", "open", "break", "init"}
-    for old, new in LEGACY_REDIRECTS.items():
+    removed_verbs = {"ai", "rm", "enter", "open", "break", "init", "resume", "bookmark"}
+    for old, target in LEGACY_REDIRECTS.items():
+        new = target.split()[0]
         assert new not in removed_verbs, (
             f"{old!r} redirects to {new!r}, a removed verb — the dispatcher does "
             "not support chained redirects; point it at the live canonical."
@@ -206,6 +209,8 @@ def test_reserved_membership_is_pinned() -> None:
             "foreach",
             "doctor",
             "kill",
+            "resume",
+            "bookmark",
             "help",
             "version",
             "which",
@@ -230,7 +235,7 @@ def test_reserved_superset_of_taxonomy_tokens() -> None:
         set(VERB_ALIASES)
         | set(VERB_ALIASES.values())
         | set(LEGACY_REDIRECTS)
-        | set(LEGACY_REDIRECTS.values())
+        | {target.split()[0] for target in LEGACY_REDIRECTS.values()}
         | set(DISABLED_VERBS)
         | set(NEEDS_GROUP_VERBS)
     )

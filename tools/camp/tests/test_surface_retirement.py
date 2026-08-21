@@ -8,8 +8,9 @@ all gone, and the free-text note they carried has no replacement.
 Test contract:
 - `camp.bookmark` and `camp.cli.groupless` no longer import, and the bookmark
   skill directory is gone — the package cannot be reintroduced by accident.
-- `bookmark` and `resume` are absent from `spine.RESERVED` and from `camp help`,
-  and each spelling reaches the CLI's bare-slug refusal.
+- `bookmark` and `resume` are absent from `camp help` and from every live verb
+  table; each spelling lands on a legacy redirect naming `camp launch --resume`,
+  the replacement an operator who typed the retired verb yesterday needs.
 - The launch, sessions, and resume paths each still resolve the same harness for
   the same group — the specific regression the deletion risks.
 """
@@ -66,12 +67,18 @@ def test_the_bookmark_skill_directory_is_gone() -> None:
     assert not (_PLUGIN_DIR / "skills" / "bookmark").exists()
 
 
-def test_neither_verb_is_reserved() -> None:
-    """RESERVED is camp's one verb surface, so a retired verb must leave it."""
-    from camp.spine import RESERVED
+def test_neither_verb_is_a_live_verb() -> None:
+    """Retired, not renamed-away: neither spelling resolves to a live verb.
 
-    assert "bookmark" not in RESERVED
-    assert "resume" not in RESERVED
+    Both stay RESERVED — a redirect key has to be, or bare-slug validation would
+    claim the token before the redirect could name its replacement.
+    """
+    from camp.spine import RESERVED
+    from camp.workspace.verb_taxonomy import resolve_verb
+
+    for verb in ("bookmark", "resume"):
+        assert verb in RESERVED
+        assert resolve_verb(verb) == (verb, "legacy")
 
 
 def test_neither_verb_appears_in_help() -> None:
@@ -81,16 +88,22 @@ def test_neither_verb_appears_in_help() -> None:
     assert "camp resume" not in result.stdout
 
 
-def test_camp_bookmark_is_refused_as_an_unknown_verb(tmp_path: Path) -> None:
+def test_camp_bookmark_points_at_the_replacement_verb(tmp_path: Path) -> None:
+    """The operator typed a verb, not a slug — so the answer names the verb that
+    replaced it, not the bare-slug rule, which describes something else."""
     result = _run(["bookmark"], env={"CAMP_CONFIG_DIR": str(tmp_path)})
+    combined = result.stdout + result.stderr
     assert result.returncode != 0, result.stdout
-    assert "bare slug dispatch is no longer supported" in result.stdout + result.stderr
+    assert "camp launch --resume" in combined
+    assert "bare slug dispatch is no longer supported" not in combined
 
 
-def test_camp_resume_is_refused_as_an_unknown_verb(tmp_path: Path) -> None:
+def test_camp_resume_points_at_the_replacement_verb(tmp_path: Path) -> None:
     result = _run(["resume", "some-ref"], env={"CAMP_CONFIG_DIR": str(tmp_path)})
+    combined = result.stdout + result.stderr
     assert result.returncode != 0, result.stdout
-    assert "bare slug dispatch is no longer supported" in result.stdout + result.stderr
+    assert "camp launch --resume" in combined
+    assert "bare slug dispatch is no longer supported" not in combined
 
 
 # ---------------------------------------------------------------------------
