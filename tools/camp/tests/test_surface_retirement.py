@@ -130,7 +130,7 @@ def test_launch_path_resolves_the_group_harness(monkeypatch) -> None:
     monkeypatch.setattr("camp.launch.session.launch_session", lambda *a, **k: launched)
     monkeypatch.setattr(
         "camp.launch.session.confirm_session",
-        lambda h, l, env=None: confirmed.append(h),
+        lambda harness, _launched, env=None: confirmed.append(harness),
     )
 
     group = {"group": {"name": "g"}}
