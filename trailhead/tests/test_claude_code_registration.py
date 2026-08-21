@@ -96,7 +96,7 @@ class TestGenerateManifest:
         assert len(data["plugins"]) == 3
         assert {p["name"] for p in data["plugins"]} == {"lore", "camp", "craft"}
 
-    def test_claude_plugin_dir_created_automatically(self, composed_root, claude_dir):
+    def test_claude_plugin_dir_created_automatically(self, composed_root):
         claude_dir = composed_root / ".claude-plugin"
         assert not claude_dir.exists()
         _harness().generate_manifest(["lore"], composed_root)

@@ -18,7 +18,6 @@ These tests pin that split:
 """
 
 import os
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -26,13 +25,11 @@ import pytest
 from trailhead.doctor import run_doctor
 from trailhead.harness.claude_code import ClaudeCodeHarness
 
+from .test_doctor import _claude_dir, _fake_py, _make_tree
+
 
 def _env(claude_dir: Path) -> dict[str, str]:
     return {**os.environ, "TRAILHEAD_CLAUDE_DIR": str(claude_dir)}
-
-
-def _fake_py(cmd):
-    return subprocess.CompletedProcess(cmd, 0, stdout="Python 3.11.4\n", stderr="")
 
 
 @pytest.fixture()
@@ -164,8 +161,6 @@ class TestDoctorReadsTheConfigDir:
         )
 
     def test_reports_absent_for_a_config_dir_with_no_plugin_state(self, tmp_path):
-        from .test_doctor import _make_tree
-
         _make_tree(tmp_path, "claude_code", ["lore", "camp"])
 
         r = self._run(tmp_path, tmp_path / "never-created")
@@ -175,11 +170,9 @@ class TestDoctorReadsTheConfigDir:
         assert r.exit_code == 0
 
     def test_reports_present_for_the_config_dir_that_was_installed_into(self, tmp_path):
-        from .test_doctor import _make_tree
-
         _make_tree(tmp_path, "claude_code", ["lore", "camp"])
 
-        r = self._run(tmp_path, tmp_path / "claude")
+        r = self._run(tmp_path, _claude_dir(tmp_path))
         info = r.data["harnesses"]["claude_code"]
         assert info["registered"] is True
         assert set(info["installed"]) == {"lore", "camp"}

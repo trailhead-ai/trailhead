@@ -16,6 +16,11 @@ from trailhead.pathint import repo_root
 from trailhead.uninstall import run_uninstall
 
 
+def _claude_dir(tmp_path: Path) -> Path:
+    """The Claude config dir `_env` pins — registration state lives here."""
+    return tmp_path / "claude-dir"
+
+
 def _env(tmp_path: Path) -> dict[str, str]:
     home = tmp_path / "home"
     home.mkdir(exist_ok=True)
@@ -25,7 +30,7 @@ def _env(tmp_path: Path) -> dict[str, str]:
         "HOME": str(home),
         # Pinned, not inherited: TRAILHEAD_CLAUDE_DIR outranks CLAUDE_CONFIG_DIR,
         # so a developer with a relocated Claude dir still can't be written to.
-        "TRAILHEAD_CLAUDE_DIR": str(tmp_path / "claude-dir"),
+        "TRAILHEAD_CLAUDE_DIR": str(_claude_dir(tmp_path)),
     }
 
 
@@ -34,7 +39,7 @@ def _make_harness_tree(tmp_path: Path, hname: str, tools: list[str], *, register
     (root / "plugins").mkdir(parents=True)
     # Registration and per-tool install state belong to the config dir `_env`
     # pins, not to the shared composed tree.
-    claude_dir = tmp_path / "claude-dir"
+    claude_dir = _claude_dir(tmp_path)
     claude_dir.mkdir(parents=True, exist_ok=True)
     if registered:
         (claude_dir / ".trailhead-registered").write_text("{}")

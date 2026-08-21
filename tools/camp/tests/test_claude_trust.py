@@ -683,7 +683,7 @@ class TestRelocation:
         cfg.mkdir()
         seam = tmp_path / "seam"
         seam.mkdir()
-        return home, [
+        return [
             ({"HOME": str(home)}, home / ".claude.json"),
             ({"HOME": str(home), "CLAUDE_CONFIG_DIR": str(cfg)}, cfg / ".claude.json"),
             ({"HOME": str(home), "TRAILHEAD_CLAUDE_DIR": str(seam)}, home / ".claude.json"),
@@ -700,7 +700,7 @@ class TestRelocation:
     def test_the_trust_key_lands_in_the_resolved_config_file(self, tmp_path):
         from camp.launch.claude_trust import pretrust_workspace
 
-        _, table = self._envs(tmp_path)
+        table = self._envs(tmp_path)
         for i, (env, expected) in enumerate(table):
             launch_dir = tmp_path / f"ws{i}"
             launch_dir.mkdir()
@@ -709,7 +709,7 @@ class TestRelocation:
             assert data["projects"][str(launch_dir.resolve())]["hasTrustDialogAccepted"] is True
 
     def test_the_table_matches_the_exported_harness_resolver(self, tmp_path):
-        _, table = self._envs(tmp_path)
+        table = self._envs(tmp_path)
         for env, expected in table:
             assert _target_for(env) == expected
 
