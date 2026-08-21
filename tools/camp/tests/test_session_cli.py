@@ -1,4 +1,4 @@
-"""CLI surface: camp launch, camp sessions, camp new --launch.
+"""CLI surface: camp launch, camp kill, camp sessions, camp new --launch.
 
 Exercised end-to-end through the REAL `cli/camp` binary (house convention), with
 the harness seam and tmux replaced by stand-ins rather than by monkeypatching
@@ -53,6 +53,18 @@ Test contract:
   harness that keeps no transcripts gets. --json rows carry EXACTLY six keys,
   never the live form's harness-native `name`. Ordering is newest-first with a
   uuid tiebreak, and the scan's cost does not grow with transcript size.
+- camp kill: a launched session is signalled under its exact derived name and
+  confirmed gone (exit 0, session id on stdout); an already-down one is exit 0
+  saying so; an ambiguous ref is exit 2 with candidates on stdout. Every other
+  outcome is one `camp kill: …` stderr line with empty stdout and a non-zero
+  exit — a zero-match ref, a live session owning no tmux session, a foreign pane
+  holding the name, a session still there after the kill, and a tmux that will
+  not answer, each with its own wording. `--json` distinguishes the two exit-0
+  outcomes. It routes with no group resolvable, past a malformed sibling config,
+  and writes nothing under CAMP_STATE_DIR.
+- camp launch --resume reports a resume that restored NO prior history as its
+  own outcome, on stderr and in `--json`, without widening the key set an
+  ordinary resume prints.
 - camp new --launch: stdout is the workspace path alone on BOTH success and
   launch failure, exit 0 in both; --json replaces that with
   {"workspace", "session_id", "tmux_name"} /
@@ -181,22 +193,95 @@ _registry._HARNESSES[FakeHarness.name] = FakeHarness
 '''
 
 _TMUX_STUB = '''#!/usr/bin/env python3
-"""tmux stand-in: registers a new-session's session id for enumeration."""
+"""tmux stand-in: a tiny session table backed by two files.
+
+`new-session` registers the session id for harness enumeration AND records the
+pane's start command under the tmux name, so the ownership check `camp kill`
+performs reads a command a real launch actually composed. `has-session`,
+`list-panes`, and `kill-session` answer from that same table, which is what
+lets a launch/kill pair be exercised end to end without a real tmux.
+
+Three failure modes are reachable by environment variable, each reproducing one
+thing a real tmux does: never registering a launch (CAMP_FAKE_TMUX_NO_REGISTER),
+surviving its own kill (CAMP_FAKE_TMUX_UNDEAD), and not answering at all
+(CAMP_FAKE_TMUX_HANG, which sleeps past every caller's timeout).
+"""
+import json
 import os
 import sys
+import time
 
 args = sys.argv[1:]
 argv_log = os.environ.get("CAMP_FAKE_TMUX_ARGV_FILE")
 if argv_log:
     with open(argv_log, "a") as handle:
         handle.write("\\t".join(args) + "\\n")
+
+if os.environ.get("CAMP_FAKE_TMUX_HANG") and args and args[0] != "new-session":
+    time.sleep(float(os.environ["CAMP_FAKE_TMUX_HANG"]))
+    sys.exit(0)
+
+_TABLE = os.environ.get("CAMP_FAKE_TMUX_TABLE_FILE")
+
+
+def _table():
+    if not _TABLE or not os.path.exists(_TABLE):
+        return {}
+    with open(_TABLE) as handle:
+        return json.load(handle)
+
+
+def _write(table):
+    with open(_TABLE, "w") as handle:
+        json.dump(table, handle)
+
+
+def _target():
+    for i, arg in enumerate(args):
+        if arg == "-t" and i + 1 < len(args):
+            return args[i + 1].lstrip("=")
+    return None
+
+
 if args and args[0] == "new-session" and not os.environ.get("CAMP_FAKE_TMUX_NO_REGISTER"):
     launch_dir = ""
+    name = ""
+    pane_at = len(args)
     for i, arg in enumerate(args):
         if arg == "-c" and i + 1 < len(args):
             launch_dir = args[i + 1]
+            pane_at = i + 2
+        if arg == "-s" and i + 1 < len(args):
+            name = args[i + 1]
     with open(os.environ["CAMP_FAKE_SESSIONS_FILE"], "a") as handle:
         handle.write(f"{args[-1]}\\t{launch_dir}\\n")
+    if _TABLE:
+        table = _table()
+        table[name] = " ".join(args[pane_at:])
+        _write(table)
+elif args and args[0] == "has-session":
+    sys.exit(0 if _target() in _table() else 1)
+elif args and args[0] == "list-panes":
+    table = _table()
+    name = _target()
+    if name not in table:
+        sys.exit(1)
+    print(table[name])
+elif args and args[0] == "kill-session":
+    table = _table()
+    if not os.environ.get("CAMP_FAKE_TMUX_UNDEAD"):
+        pane = table.pop(_target(), None)
+        _write(table)
+        # Killing the tmux session hangs up the pane, so the harness process it
+        # was running stops enumerating too. The pane command ends in the
+        # session id, which is what ties the two files together.
+        if pane:
+            dead = pane.split()[-1]
+            rows_path = os.environ["CAMP_FAKE_SESSIONS_FILE"]
+            with open(rows_path) as handle:
+                rows = [r for r in handle.read().splitlines() if r.split("\\t")[0] != dead]
+            with open(rows_path, "w") as handle:
+                handle.write("".join(f"{r}\\n" for r in rows))
 '''
 
 
@@ -263,6 +348,8 @@ def cli_env(tmp_path: Path):
     sessions_file.write_text("", encoding="utf-8")
     tmux_argv_file = tmp_path / "tmux-argv.tsv"
     tmux_argv_file.write_text("", encoding="utf-8")
+    tmux_table_file = tmp_path / "tmux-table.json"
+    tmux_table_file.write_text("{}", encoding="utf-8")
 
     env = {**os.environ}
     env["CAMP_CONFIG_DIR"] = str(config_dir)
@@ -270,6 +357,7 @@ def cli_env(tmp_path: Path):
     env["CAMP_FAKE_SESSIONS_FILE"] = str(sessions_file)
     env["TRAILHEAD_CLAUDE_DIR"] = str(tmp_path / "claude")
     env["CAMP_FAKE_TMUX_ARGV_FILE"] = str(tmux_argv_file)
+    env["CAMP_FAKE_TMUX_TABLE_FILE"] = str(tmux_table_file)
     env["PATH"] = f"{bin_dir}{os.pathsep}{env.get('PATH', '')}"
     env["PYTHONPATH"] = os.pathsep.join(
         [str(shim_dir), str(_REPO_ROOT), env.get("PYTHONPATH", "")]
@@ -295,6 +383,7 @@ def cli_env(tmp_path: Path):
         "sessions_file": sessions_file,
         "state_dir": state_dir,
         "tmux_argv_file": tmux_argv_file,
+        "tmux_table_file": tmux_table_file,
         "tmp_path": tmp_path,
     }
 
@@ -2176,3 +2265,304 @@ def test_camp_launch_returns_each_exit_code_its_help_documents(cli_env) -> None:
         _camp(cli_env, "launch", "--resume", "camp-feat-codes", cwd=cli_env["tmp_path"]).returncode,
     }
     assert observed == documented, observed
+
+
+# ---------------------------------------------------------------------------
+# camp kill
+# ---------------------------------------------------------------------------
+
+
+def _tmux_calls(cli_env, verb: str) -> list[list[str]]:
+    """Every tmux invocation of *verb* camp made, as argv lists."""
+    return [
+        line.split("\t")
+        for line in cli_env["tmux_argv_file"].read_text(encoding="utf-8").splitlines()
+        if line.split("\t")[:1] == [verb]
+    ]
+
+
+def _launched_session(cli_env, slug: str = "feat-kill") -> str:
+    """Create a workspace, launch into it, and return the live session id."""
+    _new_workspace(cli_env, slug)
+    result = _camp(cli_env, "launch", slug, "--group", "mygroup")
+    assert result.returncode == 0, result.stderr
+    return result.stdout.strip()
+
+
+def test_camp_kill_stops_a_launched_session(cli_env) -> None:
+    """The whole verb: a ref camp launched is signalled and confirmed gone."""
+    session_id = _launched_session(cli_env)
+
+    result = _camp(cli_env, "kill", session_id[:8], cwd=cli_env["tmp_path"])
+
+    assert result.returncode == 0, result.stderr
+    assert _tmux_calls(cli_env, "kill-session") == [
+        ["kill-session", "-t", f"=camp-feat-kill-{session_id[:8]}"]
+    ]
+    assert session_id in result.stderr
+    assert "stopped" in result.stderr
+    assert result.stdout == f"{session_id}\n"  # stdout is the session id alone
+
+
+def test_camp_kill_is_reachable_with_no_group_resolvable(cli_env) -> None:
+    """Run from a directory no group resolves from, alongside a group config
+    camp cannot parse — the phone-side situation this verb exists for. A
+    sibling group's broken toml must not take the stop surface down with it."""
+    session_id = _launched_session(cli_env)
+    (cli_env["config_dir"] / "groups" / "brokengroup.toml").write_text(
+        "this is not = valid = toml\n", encoding="utf-8"
+    )
+
+    result = _camp(cli_env, "kill", session_id[:8], cwd=cli_env["tmp_path"])
+
+    assert result.returncode == 0, result.stderr
+    assert "config error" not in result.stderr
+
+
+def test_camp_kill_of_an_already_down_session_is_success(cli_env) -> None:
+    """Idempotence: re-running a stop after a dropped connection is not an error."""
+    launch_dir = _workspace_launch_dir(cli_env, "feat-down")
+    _seed_transcript(cli_env, _UUID_A, launch_dir)
+
+    result = _camp(cli_env, "kill", _UUID_A, cwd=cli_env["tmp_path"])
+
+    assert result.returncode == 0, result.stderr
+    assert "already down" in result.stderr
+    assert _tmux_calls(cli_env, "kill-session") == []
+
+
+def test_camp_kill_with_an_ambiguous_ref_exits_two_and_lists_candidates(cli_env) -> None:
+    first = _workspace_launch_dir(cli_env, "feat-one")
+    second = _workspace_launch_dir(cli_env, "feat-two")
+    _seed_transcript(cli_env, _UUID_A, first)
+    _seed_transcript(cli_env, _UUID_B, second)
+
+    result = _camp(cli_env, "kill", "camp-feat-", cwd=cli_env["tmp_path"])
+
+    assert result.returncode == 2
+    rows = result.stdout.strip().splitlines()
+    assert len(rows) == 2
+    assert {row.split()[1] for row in rows} == {_UUID_A, _UUID_B}
+    assert result.stderr.strip().splitlines() == [
+        "camp kill: 'camp-feat-' matches 2 sessions (listed above) — re-run with "
+        "a longer prefix naming exactly one"
+    ]
+    assert _tmux_calls(cli_env, "kill-session") == []
+
+
+def test_camp_kill_of_a_session_still_present_after_the_kill_fails(cli_env) -> None:
+    """The memory was not reclaimed, so the command failed and says so — never a
+    success with a caveat."""
+    session_id = _launched_session(cli_env)
+
+    result = _camp(
+        cli_env,
+        "kill",
+        session_id[:8],
+        cwd=cli_env["tmp_path"],
+        extra_env={"CAMP_FAKE_TMUX_UNDEAD": "1"},
+    )
+
+    assert result.returncode != 0
+    assert result.stdout == ""
+    assert result.stderr.strip().splitlines() == [
+        f"camp kill: session {session_id} is still running as "
+        f"camp-feat-kill-{session_id[:8]} after the stop — its memory was not "
+        "reclaimed"
+    ]
+
+
+def test_camp_kill_of_a_ref_matching_nothing_is_not_already_down(cli_env) -> None:
+    """A zero-match ref is a ref problem and gets its own wording; reporting it
+    as already-down would tell the operator their session is gone."""
+    _seed_transcript(cli_env, _UUID_A, _workspace_launch_dir(cli_env, "feat-one"))
+
+    result = _camp(cli_env, "kill", "no-such-ref", cwd=cli_env["tmp_path"])
+
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert "already down" not in result.stderr
+    assert result.stderr.strip().splitlines() == [
+        "camp kill: no candidate matched `no-such-ref`; run "
+        "`camp sessions --recoverable` to see what camp can address"
+    ]
+
+
+def test_camp_kill_of_a_live_session_with_no_tmux_session_is_its_own_refusal(
+    cli_env,
+) -> None:
+    """Live but holding no tmux session: there is nothing here for camp to
+    signal, which is a different situation — and a different next move — from a
+    foreign pane sitting on the name."""
+    launch_dir = _workspace_launch_dir(cli_env, "feat-orphan")
+    _seed_transcript(cli_env, _UUID_A, launch_dir)
+    _register_live(cli_env, _UUID_A, launch_dir)
+
+    result = _camp(cli_env, "kill", _UUID_A, cwd=cli_env["tmp_path"])
+
+    assert result.returncode == 1
+    assert result.stdout == ""
+    lines = result.stderr.strip().splitlines()
+    assert len(lines) == 1
+    assert "no tmux session" in lines[0]
+    assert "did not launch" not in lines[0]
+
+
+def test_camp_kill_of_a_foreign_pane_says_the_name_is_held_by_something_else(
+    cli_env,
+) -> None:
+    """A name match is not ownership. The copy names the pane, not the session,
+    because the operator's next move is to look at what is holding the name."""
+    launch_dir = _workspace_launch_dir(cli_env, "feat-squat")
+    _seed_transcript(cli_env, _UUID_A, launch_dir)
+    _register_live(cli_env, _UUID_A, launch_dir)
+    cli_env["tmux_table_file"].write_text(
+        json.dumps({f"camp-feat-squat-{_UUID_A[:8]}": "sleep 9999"}), encoding="utf-8"
+    )
+
+    result = _camp(cli_env, "kill", _UUID_A, cwd=cli_env["tmp_path"])
+
+    assert result.returncode == 1
+    assert result.stdout == ""
+    lines = result.stderr.strip().splitlines()
+    assert len(lines) == 1
+    assert "camp did not launch" in lines[0]
+    assert _tmux_calls(cli_env, "kill-session") == []
+
+
+def test_camp_kill_against_an_unanswering_tmux_fails_distinctly_and_promptly(
+    cli_env,
+) -> None:
+    """A tmux that hangs must not read as either a slow-but-working stop or a
+    completed one: camp bounds the wait, then says it could not tell."""
+    session_id = _launched_session(cli_env)
+
+    started = time.monotonic()
+    result = _camp(
+        cli_env,
+        "kill",
+        session_id[:8],
+        cwd=cli_env["tmp_path"],
+        extra_env={"CAMP_FAKE_TMUX_HANG": "120"},
+    )
+    elapsed = time.monotonic() - started
+
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert elapsed < 60  # bounded: nowhere near the 120s tmux was told to sleep
+    lines = result.stderr.strip().splitlines()
+    assert len(lines) == 1
+    assert "tmux did not answer" in lines[0]
+
+
+def test_camp_kill_json_distinguishes_stopped_from_already_down(cli_env) -> None:
+    """The two outcomes share exit 0, so the payload is what tells them apart."""
+    launch_dir = _workspace_launch_dir(cli_env, "feat-kill")
+    launched = _camp(cli_env, "launch", "feat-kill", "--group", "mygroup")
+    assert launched.returncode == 0, launched.stderr
+    session_id = launched.stdout.strip()
+    # The transcript is what keeps the session addressable once it is down —
+    # without it the second stop would have no candidate to answer about.
+    _seed_transcript(cli_env, session_id, launch_dir)
+
+    stopped = _camp(cli_env, "kill", session_id[:8], "--json", cwd=cli_env["tmp_path"])
+    assert stopped.returncode == 0, stopped.stderr
+
+    down = _camp(cli_env, "kill", session_id[:8], "--json", cwd=cli_env["tmp_path"])
+    assert down.returncode == 0, down.stderr
+
+    first = json.loads(stopped.stdout)
+    second = json.loads(down.stdout)
+    assert set(first) == set(second)
+    assert first["outcome"] == "stopped"
+    assert second["outcome"] == "already-down"
+    assert first["session_id"] == second["session_id"] == session_id
+    assert first["tmux_name"] == f"camp-feat-kill-{session_id[:8]}"
+
+
+def test_camp_kill_without_a_reference_refuses_on_one_line(cli_env) -> None:
+    result = _camp(cli_env, "kill", cwd=cli_env["tmp_path"])
+
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert len(result.stderr.strip().splitlines()) == 1
+    assert result.stderr.startswith("camp kill: ")
+
+
+def test_camp_kill_writes_nothing_under_camp_state_dir(cli_env) -> None:
+    session_id = _launched_session(cli_env)
+    before = _settled_state_tree(cli_env)
+
+    result = _camp(cli_env, "kill", session_id[:8], cwd=cli_env["tmp_path"])
+
+    assert result.returncode == 0, result.stderr
+    assert _state_tree(cli_env) == before
+
+
+# ---------------------------------------------------------------------------
+# camp launch --resume: a resume that restored no prior history
+# ---------------------------------------------------------------------------
+
+
+def _orphan_transcript(cli_env, session_id: str, cwd: Path) -> None:
+    """Author a transcript camp can ENUMERATE but the harness cannot REPLAY.
+
+    The two lookups genuinely disagree: enumeration walks the whole store and
+    reads each transcript's recorded cwd out of its content, while a resume
+    resolves the one file under the project directory that cwd munges to. A
+    transcript whose recorded cwd points elsewhere — or one retention has
+    already removed from the replay location — is addressable and empty on the
+    way back, which is the outcome this signal exists to name.
+    """
+    projects = Path(cli_env["env"]["TRAILHEAD_CLAUDE_DIR"]) / "projects"
+    directory = projects / f"-elsewhere-{session_id[:8]}"
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / f"{session_id}.jsonl").write_text(
+        json.dumps({"type": "user", "cwd": str(cwd)}) + "\n", encoding="utf-8"
+    )
+
+
+def test_camp_launch_resume_with_no_replayable_transcript_says_history_is_gone(
+    cli_env,
+) -> None:
+    """A resume that opens a blank session exits 0 like any other. Saying so is
+    the only thing separating it from a real one."""
+    launch_dir = _workspace_launch_dir(cli_env, "feat-empty")
+    _orphan_transcript(cli_env, _UUID_A, launch_dir)
+
+    result = _camp(cli_env, "launch", "--resume", _UUID_A, cwd=cli_env["tmp_path"])
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == f"{_UUID_A}\n"
+    assert "NO PRIOR HISTORY" in result.stderr
+
+
+def test_camp_launch_resume_with_no_replayable_transcript_marks_it_in_json(
+    cli_env,
+) -> None:
+    launch_dir = _workspace_launch_dir(cli_env, "feat-empty")
+    _orphan_transcript(cli_env, _UUID_A, launch_dir)
+
+    result = _camp(
+        cli_env, "launch", "--resume", _UUID_A, "--json", cwd=cli_env["tmp_path"]
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["history_restored"] is False
+
+
+def test_camp_launch_resume_with_history_does_not_claim_history_was_lost(
+    cli_env,
+) -> None:
+    """The signal is exceptional: an ordinary resume neither says it nor widens
+    the key set a caller already parses."""
+    launch_dir = _workspace_launch_dir(cli_env, "feat-full")
+    _seed_transcript(cli_env, _UUID_A, launch_dir)
+
+    result = _camp(
+        cli_env, "launch", "--resume", _UUID_A, "--json", cwd=cli_env["tmp_path"]
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "NO PRIOR HISTORY" not in result.stderr
+    assert "history_restored" not in json.loads(result.stdout)

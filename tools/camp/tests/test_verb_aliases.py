@@ -209,6 +209,7 @@ def test_reserved_membership_is_pinned() -> None:
             "foreach",
             "doctor",
             "resume",
+            "kill",
             "help",
             "version",
             "which",

@@ -76,6 +76,10 @@ _STATIC_RESERVED = frozenset(
         # Ref-addressed: served on BOTH paths, so it is a real verb the taxonomy's
         # needs-group table does not model.
         "resume",
+        # Ref-addressed and fully groupless: a stop names its session, and the
+        # session names everything else. Reserved so a workspace slug called
+        # "kill" can never shadow the verb.
+        "kill",
         # Meta verbs.
         "help",
         "version",
@@ -462,6 +466,14 @@ def cmd_help(_args: list[str]) -> None:
         "                                    A slug, --dir, and --resume are\n"
         "                                    mutually exclusive: one launch is\n"
         "                                    rooted one way, never two\n"
+        "  camp kill <ref> [--json]          Stop one session and reclaim its memory,\n"
+        "                                    from any cwd. The workspace, worktree,\n"
+        "                                    and working tree are untouched, and\n"
+        "                                    camp launch --resume <ref> brings the\n"
+        "                                    session back under the same reference.\n"
+        "                                    Stopping one that is already down is\n"
+        "                                    success; a ref matching more than one\n"
+        "                                    session lists them on stdout and exits 2\n"
         "  camp sessions [<slug>] [--dir <path>] [--json]\n"
         "                                    List the LIVE harness sessions camp can\n"
         "                                    see, scoped to a workspace or to a\n"
@@ -495,6 +507,14 @@ def cmd_help(_args: list[str]) -> None:
         "                   camp's reason is on stderr\n"
         "  2                The --resume ref matched more than one session — the\n"
         "                   candidates are on stdout to choose between, not a failure\n"
+        "\n"
+        "Exit codes (camp kill):\n"
+        "  0                Stopped, or already down — stdout is the session id\n"
+        "  1                Failed — stdout is empty and camp's reason is on stderr.\n"
+        "                   This INCLUDES a session still running after the stop:\n"
+        "                   the memory was not reclaimed, so the command failed\n"
+        "  2                The ref matched more than one session — the candidates\n"
+        "                   are on stdout to choose between, not a failure\n"
         "\n"
         "Flags:\n"
         "  --name <slug>    Target a specific worktree from any cwd\n"
@@ -1210,6 +1230,13 @@ def main() -> None:
         from .bookmark.resume import cmd_resume
 
         cmd_resume(rest)
+    # A stop is ref-addressed for the same reason: it names a session, not a
+    # group, so it must answer from any cwd — including one where no group
+    # resolves at all, which is the situation it exists to be usable in.
+    elif first == "kill":
+        from .cli.session import _cmd_kill_cli
+
+        _cmd_kill_cli(rest)
     elif first == "bookmark":
         cmd_bookmark_no_group(rest)
     # Canonical verb surface — these need a resolved group; reaching spine

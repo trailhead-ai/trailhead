@@ -267,6 +267,11 @@ def main() -> None:
         "foreach", "path", "which",
         "--version", "version",
         "resume",  # fully groupless: spine's cmd_resume(rest) handles it unconditionally
+        # Fully groupless too, and for a stronger reason than convenience: a stop
+        # is what an operator reaches for when something is already wrong, so
+        # resolving a group first would let a sibling group's malformed config
+        # abort the verb that reclaims the memory.
+        "kill",
     })
     # `camp bookmark ls`/`rm` are also fully groupless (global-store, ref-
     # addressed), but bare `camp bookmark` (capture) still needs a group

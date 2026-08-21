@@ -351,6 +351,86 @@ def _addressable_harnesses(groups) -> list:
     return list(found.values())
 
 
+def _parsable_groups() -> list[dict]:
+    """Every group config camp can PARSE — a malformed sibling contributes nothing.
+
+    A session reference names a session, not a group, so one unreadable toml
+    elsewhere in the config directory must not make every session unaddressable.
+    That is precisely the situation a stop is reached for from a phone: something
+    is already broken, and the verb that reclaims memory has to still answer.
+
+    Deliberately not the loader every group-resolved verb uses. Those verbs act
+    ON a group and must refuse rather than act against a config camp misread;
+    this pool only supplies the name rule with the containers it knows about, and
+    a missing container costs a nicer derived name, never correctness.
+    """
+    from ..group.config import load_group
+    from .common import _groups_dir
+
+    directory = _groups_dir()
+    if not directory.is_dir():
+        return []
+    configs: list[dict] = []
+    for path in sorted(directory.glob("*.toml")):
+        try:
+            configs.append(load_group(path))
+        except Exception:  # noqa: BLE001 — one broken config never hides the rest
+            continue
+    return configs
+
+
+def _session_pool(groups, *, verb: str, env: dict[str, str]) -> tuple[list, list, list]:
+    """The addressable pool: (transcripts, live records, harnesses that answered).
+
+    Every addressable harness's on-disk transcripts UNION its live sessions. A
+    harness with no transcript concept — or one whose store camp cannot read at
+    all, which the seam contract forbids but a third-party harness may still do
+    — contributes no transcripts, and if NONE of them has one the reference is
+    unanswerable and camp refuses naming them: an unanswerable seam is a
+    refusal, never a permissive default, and never a traceback.
+
+    The live probe is the opposite posture — it only ever ADDS candidates, so a
+    probe that fails narrows what camp can offer without being able to make camp
+    address the wrong thing.
+
+    *verb* is the name to put in either refusal, because both are read verbatim
+    off a relayed stderr line and have to name the command the operator typed.
+    """
+    from ..launch.session import enumerate_records
+    from ..spine import _die
+
+    harnesses = _addressable_harnesses(groups)
+    if not harnesses:
+        _die(
+            f"camp {verb}: camp cannot name a harness for any configured group, so "
+            "it cannot look up the session this reference addresses"
+        )
+
+    transcripts: list = []
+    live: list = []
+    answered: list = []
+    for harness in harnesses:
+        try:
+            live.extend(enumerate_records(harness, None, env) or [])
+        except Exception:  # noqa: BLE001 — a failed live probe narrows the pool, never fails the command
+            pass
+        try:
+            rows = harness.session_transcripts(env=env)
+        except Exception:  # noqa: BLE001 — a harness camp cannot read contributes nothing
+            rows = None
+        if rows is not None:
+            answered.append(harness)
+            transcripts.extend(rows)
+
+    if not answered:
+        names = ", ".join(_harness_display_name(harness) for harness in harnesses)
+        _die(
+            f"camp {verb}: harness {names} keeps no session transcripts camp can "
+            "read, so its sessions cannot be addressed by reference"
+        )
+    return transcripts, live, answered
+
+
 def _resolve_session_reference(ref: str, *, env: dict[str, str], as_json: bool):
     """Resolve *ref* to one addressable session; return it with the group configs.
 
@@ -379,40 +459,11 @@ def _resolve_session_reference(ref: str, *, env: dict[str, str], as_json: bool):
     """
     from ..group.config import load_all_groups
     from ..launch.recovery import Ambiguous, NoMatch, Resolved, resolve_session_ref
-    from ..launch.session import enumerate_records
     from ..spine import _die
     from .common import _groups_dir
 
     groups = load_all_groups(_groups_dir())
-    harnesses = _addressable_harnesses(groups)
-    if not harnesses:
-        _die(
-            "camp launch: camp cannot name a harness for any configured group, so "
-            "it cannot look up the session this reference addresses"
-        )
-
-    transcripts: list = []
-    live: list = []
-    answered: list = []
-    for harness in harnesses:
-        try:
-            live.extend(enumerate_records(harness, None, env) or [])
-        except Exception:  # noqa: BLE001 — a failed live probe narrows the pool, never fails the command
-            pass
-        try:
-            rows = harness.session_transcripts(env=env)
-        except Exception:  # noqa: BLE001 — a harness camp cannot read contributes nothing
-            rows = None
-        if rows is not None:
-            answered.append(harness)
-            transcripts.extend(rows)
-
-    if not answered:
-        names = ", ".join(_harness_display_name(harness) for harness in harnesses)
-        _die(
-            f"camp launch: harness {names} keeps no session transcripts camp can "
-            "read, so its sessions cannot be addressed by reference"
-        )
+    transcripts, live, answered = _session_pool(groups, verb="launch", env=env)
 
     outcome = resolve_session_ref(
         ref, transcripts=transcripts, live_records=live, groups=groups, env=env
@@ -461,20 +512,60 @@ def _workspace_owner(root: Path, groups, *, env: dict[str, str]) -> dict | None:
     return None
 
 
-def _report_launched(launched, *, as_json: bool) -> None:
-    """The success report, identical for every launch flavor."""
+def _report_launched(launched, *, as_json: bool, extra: dict | None = None) -> None:
+    """The success report, identical for every launch flavor.
+
+    *extra* is merged into the JSON object for a flavor that has something more
+    to say about the launch it just made. It is deliberately absent from an
+    ordinary launch rather than present-and-null: the key set a caller already
+    parses stays exactly what it was, and a key that appears at all is a fact
+    worth reading. Only the resume flavor uses it today.
+    """
     if as_json:
-        print(
-            json.dumps(
-                {
-                    "workspace": str(launched.launch_dir),
-                    "session_id": launched.session_id,
-                    "tmux_name": launched.tmux_name,
-                }
-            )
-        )
+        payload = {
+            "workspace": str(launched.launch_dir),
+            "session_id": launched.session_id,
+            "tmux_name": launched.tmux_name,
+        }
+        payload.update(extra or {})
+        print(json.dumps(payload))
         return
     print(launched.session_id)
+
+
+def _history_restored(config, session_id: str, root: Path, env: dict[str, str]) -> bool:
+    """Will the resume about to run bring the conversation back with it?
+
+    False is the outcome a resume must never report as an ordinary success:
+    past the harness's retention window — or for a transcript that was never
+    resumable — the session comes back EMPTY and exits 0 doing it, which is
+    indistinguishable from a restored one and is exactly the silent degradation
+    a stop-and-resume cycle exists to prevent.
+
+    Read BEFORE the spawn, off the only thing that can answer it: the transcript
+    the harness would replay. An absent transcript and a zero-length one are the
+    same answer here — there is nothing to replay either way.
+
+    True whenever camp cannot tell. A harness camp cannot name, or a store it
+    cannot stat, knows nothing about retention either, and warning on every
+    resume it cannot answer for would train the operator to ignore the one
+    warning that matters.
+    """
+    from ..launch.profile import harness_for
+
+    harness = harness_for(config)
+    if harness is None:
+        return True
+    try:
+        path = harness.session_transcript_path(session_id, root, env=env)
+    except Exception:  # noqa: BLE001 — an advisory signal is never worth a traceback
+        return True
+    if path is None:
+        return False
+    try:
+        return path.stat().st_size > 0
+    except OSError:
+        return True
 
 
 def _launch_resume(
@@ -543,6 +634,9 @@ def _launch_resume(
         if group is None:
             _die(f"camp launch: no camp group named {explicit_group!r} is configured")
 
+    config = group if owner is None else owner
+    restored = _history_restored(config, candidate.session_id, root, resolved_env)
+
     try:
         # The recorded root IS the launch directory, for a workspace session as
         # much as for any other: a harness routinely starts BELOW the workspace
@@ -552,7 +646,7 @@ def _launch_resume(
         # supplies the harness profile, and whether the eligibility gate has
         # anything to fence, since camp built the workspace itself.
         launched = launch_and_confirm(
-            group if owner is None else owner,
+            config,
             env=env,
             root=root,
             name_component=component,
@@ -564,7 +658,16 @@ def _launch_resume(
         _die(_refusal(exc))
         return
 
-    _report_launched(launched, as_json=as_json)
+    if not restored:
+        print(
+            f"camp launch: session {candidate.session_id} came back with NO PRIOR "
+            "HISTORY — its transcript is gone, so this is a fresh, empty session "
+            "under the old reference and the conversation did not come back",
+            file=sys.stderr,
+        )
+    _report_launched(
+        launched, as_json=as_json, extra=None if restored else {"history_restored": False}
+    )
 
 
 def _cmd_launch_group_cli(
@@ -999,3 +1102,206 @@ def _cmd_sessions_group_cli(
     for record in records:
         label = f" ({record.name})" if record.name else ""
         print(f"{record.session_id}  {record.kind}  {printable_path(record.cwd)}{label}")
+
+
+# ---------------------------------------------------------------------------
+# camp kill — stop one addressed session
+# ---------------------------------------------------------------------------
+
+def _report_stop(candidate, *, outcome: str, as_json: bool) -> None:
+    """The success report for a stop — one dict literal, one row shape.
+
+    ``outcome`` is what tells the two SUCCESSES apart. Both exit 0, so an exit
+    code cannot carry the difference, and a caller that has to know whether it
+    reclaimed anything reads it here rather than parsing prose off stderr.
+    """
+    if as_json:
+        print(
+            json.dumps(
+                {
+                    "session_id": candidate.session_id,
+                    "tmux_name": candidate.derived_name,
+                    "outcome": outcome,
+                }
+            )
+        )
+        return
+    print(candidate.session_id)
+
+
+def _stop_refusal(candidate, reason: str) -> str:
+    """The one `camp kill: …` line for a refusal, chosen by *reason*.
+
+    Every reason gets its own sentence because the operator's next move differs
+    for each, and a shared "camp will not stop this" would leave them with
+    nothing to act on. The two that are easiest to collapse are deliberately
+    apart: a session that is live while owning no tmux session has nothing for
+    camp to signal at all, while a foreign pane holding the name has something
+    running that camp did not start — the first is a session to investigate,
+    the second is a name to investigate.
+    """
+    from ..launch.stop import (
+        REFUSED_ANCHOR,
+        REFUSED_LIVE_WITHOUT_SESSION,
+        REFUSED_NOT_CAMP_LAUNCHED,
+        REFUSED_SELF,
+        REFUSED_TMUX_UNANSWERED,
+    )
+
+    session_id = candidate.session_id
+    name = candidate.derived_name
+    if reason == REFUSED_ANCHOR:
+        return (
+            f"camp kill: session {session_id} is the concierge anchor — stopping it "
+            "would take away the entry point every other session is started from"
+        )
+    if reason == REFUSED_SELF:
+        return (
+            f"camp kill: session {session_id} is the session camp is running in — a "
+            "session cannot stop itself; run this from another session"
+        )
+    if reason == REFUSED_LIVE_WITHOUT_SESSION:
+        return (
+            f"camp kill: session {session_id} is still running but owns no tmux "
+            f"session named {name}, so there is nothing here for camp to signal — "
+            "its memory cannot be reclaimed by stopping a session that is not there"
+        )
+    if reason == REFUSED_NOT_CAMP_LAUNCHED:
+        return (
+            f"camp kill: the tmux session {name} is held by a pane camp did not "
+            "launch, so camp will not signal it — a name match is not proof of "
+            "ownership"
+        )
+    if reason == REFUSED_TMUX_UNANSWERED:
+        return (
+            f"camp kill: tmux did not answer, so camp cannot tell whether session "
+            f"{session_id} was stopped — assume its memory was not reclaimed and "
+            "re-run once tmux responds"
+        )
+    return f"camp kill: camp will not stop session {session_id}"
+
+
+def _cmd_kill_cli(args: list[str], env: dict[str, str] | None = None) -> None:
+    """camp kill <ref> [--json].
+
+    Stop ONE session and reclaim its memory, leaving its workspace, worktree,
+    and working tree completely untouched — nothing is removed, cleaned, or
+    marked, and camp persists nothing.
+
+    Fully groupless, like `camp launch --resume`: the reference names the
+    session and the session names everything else, so this answers from a plain
+    shell outside every group directory. It is also the verb an operator reaches
+    for when something is already broken, so the group configs are read
+    tolerantly — a sibling group's malformed toml costs that group's workspaces
+    a nicer derived name and nothing more.
+
+    All of the decision-making — resolution, the ownership check, the anchor and
+    self gates, the already-down oracle, and the re-poll for absence — lives in
+    `camp.launch.stop`. This handler owns the CLI's four jobs: parsing, the
+    stdout/stderr split, the exit code, and the wording.
+
+    Posture: kill is an ACTION, matching `camp launch`. Every failure is exactly
+    one `camp kill: …` line on stderr with empty stdout and a non-zero exit —
+    INCLUDING a session still present after the kill, which is a failure and not
+    a success with a caveat: the memory was not reclaimed. The single deliberate
+    exception is an ambiguous ref, which prints its candidates on stdout and
+    exits 2, because there the rows are the answer.
+    """
+    from ..launch.recovery import Ambiguous, NoMatch
+    from ..launch.stop import AlreadyDown, Refused, StillPresent, stop_session
+    from ..spine import _consume_flag_value, _die
+
+    rest = list(args)
+    _consume_flag_value(rest, "--group")  # a ref names the session; no group needed
+    as_json = _consume_flag(rest, "--json")
+
+    if not rest:
+        _die(
+            "camp kill: requires a session reference — an unambiguous prefix of a "
+            "session's name or id, as `camp sessions` and `camp launch --resume` "
+            "use"
+        )
+    if len(rest) > 1:
+        _die(
+            f"camp kill: one session reference, not {len(rest)} — a stop addresses "
+            "exactly one session"
+        )
+    ref = rest[0]
+    if not ref.strip():
+        _die("camp kill: requires a session reference")
+    if ref.startswith("-"):
+        _die(
+            f"camp kill: {ref!r} looks like a flag, not a session reference — a "
+            "reference may not start with a dash"
+        )
+
+    resolved_env = dict(env) if env is not None else dict(os.environ)
+    groups = _parsable_groups()
+    transcripts, live, answered = _session_pool(groups, verb="kill", env=resolved_env)
+
+    outcome = stop_session(
+        ref,
+        # The ownership check asks a harness which pane commands IT composes, so
+        # it needs one harness rather than the pool. Groups routinely share a
+        # harness and `_addressable_harnesses` already deduplicates, so this is
+        # the only one on all but a mixed-harness machine — where a foreign
+        # harness's session is REFUSED rather than mis-signalled, which is the
+        # direction this check is supposed to fail in.
+        harness=answered[0],
+        transcripts=transcripts,
+        live_records=live,
+        groups=groups,
+        env=resolved_env,
+    )
+
+    if isinstance(outcome, Ambiguous):
+        _print_candidates(outcome.candidates, as_json=as_json)
+        _die(
+            f"camp kill: {ref!r} matches {len(outcome.candidates)} sessions "
+            "(listed above) — re-run with a longer prefix naming exactly one",
+            code=_AMBIGUOUS_EXIT_CODE,
+        )
+
+    if isinstance(outcome, NoMatch):
+        if not outcome.pool_size:
+            _die(
+                f"camp kill: harness {_harness_display_name(answered[0])} reports no "
+                f"sessions at all — {_retention_hint(answered[0], resolved_env)}"
+            )
+        _die(
+            f"camp kill: no candidate matched `{ref}`; run "
+            "`camp sessions --recoverable` to see what camp can address"
+        )
+
+    candidate = outcome.candidate
+
+    if isinstance(outcome, Refused):
+        _die(_stop_refusal(candidate, outcome.reason))
+
+    if isinstance(outcome, StillPresent):
+        _die(
+            f"camp kill: session {candidate.session_id} is still running as "
+            f"{candidate.derived_name} after the stop — its memory was not reclaimed"
+        )
+
+    if isinstance(outcome, AlreadyDown):
+        print(
+            f"camp kill: session {candidate.session_id} ({candidate.derived_name}) "
+            "was already down — nothing to stop",
+            file=sys.stderr,
+        )
+        _report_stop(candidate, outcome="already-down", as_json=as_json)
+        return
+
+    # The reference does not change across a stop: the harness preserves the
+    # session id through a resume, so the transcript, the derived name, and the
+    # ref an operator holds are all stable over arbitrarily many cycles. Saying
+    # so here is what makes a stop read as recoverable rather than final.
+    print(
+        f"camp kill: stopped session {candidate.session_id} "
+        f"({candidate.derived_name}) — its memory is reclaimed; "
+        f"`camp launch --resume {candidate.session_id}` brings it back under "
+        "this same reference",
+        file=sys.stderr,
+    )
+    _report_stop(candidate, outcome="stopped", as_json=as_json)

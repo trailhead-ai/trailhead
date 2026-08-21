@@ -86,6 +86,13 @@ ANCHOR_SESSION_ID_FILENAME = "session_id"
 REFUSED_ANCHOR = "anchor"
 REFUSED_SELF = "self"
 REFUSED_NOT_CAMP_LAUNCHED = "not-camp-launched"
+#: tmux itself did not answer — a timed-out or unlaunchable call. Absence of
+#: the name is the ONLY evidence this engine accepts for a stop, so a question
+#: that came back with no answer can never be read as absence: that would turn
+#: a hung tmux into a reported success. Distinct from every other reason
+#: because nothing about the SESSION is known here, only about tmux.
+REFUSED_TMUX_UNANSWERED = "tmux-unanswered"
+
 #: Live, but owning no tmux session under its derived name — the second branch
 #: of the pinned oracle. Distinct from a foreign pane holding the name, because
 #: the operator's next move differs: there is nothing here for camp to signal.
@@ -143,12 +150,21 @@ class Tmux:
         except (OSError, subprocess.TimeoutExpired):
             return None
 
-    def has_session(self, name: str) -> bool:
-        """Exact-name existence. `=` is not decoration: without it tmux
-        prefix-matches, and a prefix match would answer for a different
-        session — the one thing this question must never do."""
+    def has_session(self, name: str) -> bool | None:
+        """Exact-name existence, or ``None`` when tmux did not answer.
+
+        `=` is not decoration: without it tmux prefix-matches, and a prefix
+        match would answer for a different session — the one thing this
+        question must never do.
+
+        The tri-state is load-bearing. A call that timed out or could not be
+        launched knows nothing about the session, and folding that into
+        ``False`` would report a hung tmux as a completed stop.
+        """
         done = self._run(["has-session", "-t", f"={name}"])
-        return done is not None and done.returncode == 0
+        if done is None:
+            return None
+        return done.returncode == 0
 
     def pane_command(self, name: str) -> str | None:
         """The session's first pane's originating command, or None."""
@@ -270,7 +286,10 @@ def stop_session(
         return Refused(candidate, REFUSED_SELF)
 
     name = candidate.derived_name
-    if not tmux.has_session(name):
+    present = tmux.has_session(name)
+    if present is None:
+        return Refused(candidate, REFUSED_TMUX_UNANSWERED)
+    if not present:
         # The pinned oracle: absent tmux session AND not live is already-down;
         # absent tmux session while still live is a session camp did not launch
         # and must not be reported as reclaimed.
@@ -285,7 +304,10 @@ def stop_session(
 
     waited = 0.0
     while True:
-        if not tmux.has_session(name):
+        present = tmux.has_session(name)
+        if present is None:
+            return Refused(candidate, REFUSED_TMUX_UNANSWERED)
+        if not present:
             return Stopped(candidate)
         if waited >= poll_timeout:
             return StillPresent(candidate)

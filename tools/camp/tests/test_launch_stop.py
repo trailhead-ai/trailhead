@@ -24,6 +24,9 @@ Test contract:
   already-down; live with no tmux session is refused, under its own reason,
   as one camp did not launch; a tmux session that is not live is killed anyway to release the name.
 - A second stop of the same ref is success (already-down), not an error.
+- A tmux that does not answer is its own refusal, never a stop: absence of the
+  name is the only evidence of success, and an unanswered question is not
+  absence. Every wait the engine takes is bounded.
 
 Nothing here shells out: the harness is a stand-in and tmux is an in-memory
 fake, so the engine is exercised on a machine with no tmux and no harness.
@@ -498,3 +501,88 @@ def test_a_second_stop_of_the_same_ref_is_success(tmp_path: Path) -> None:
     )
 
     assert isinstance(second, AlreadyDown)
+
+
+# ---------------------------------------------------------------------------
+# A tmux that will not answer
+# ---------------------------------------------------------------------------
+
+
+class _MuteTmux(_FakeTmux):
+    """tmux as an unanswering process: every existence question times out.
+
+    `Tmux.has_session` degrades a timed-out or unlaunchable call to ``None``,
+    and this fake reproduces that at the seam rather than by shelling out.
+    """
+
+    def has_session(self, name: str) -> bool | None:
+        return None
+
+
+def test_a_tmux_that_never_answers_is_refused_rather_than_reported_stopped(
+    tmp_path: Path,
+) -> None:
+    """The one outcome a hung tmux must never produce is a success.
+
+    `has_session` cannot answer, and absence is the ONLY evidence of a stop —
+    so an unanswered question is its own refusal, distinct from both
+    already-down and still-present.
+    """
+    from camp.launch.stop import REFUSED_TMUX_UNANSWERED, Refused
+
+    state, ws, env, harness, derived, _tmux = _fixture(tmp_path)
+    tmux = _MuteTmux({derived: _launched_pane(harness, _UUID_A, derived, ws)})
+
+    outcome = _stop(
+        _UUID_A[:8],
+        tmux=tmux,
+        transcripts=[_transcript(_UUID_A, ws)],
+        live_records=[_record(_UUID_A, ws)],
+        env=env,
+        harness=harness,
+    )
+
+    assert isinstance(outcome, Refused)
+    assert outcome.reason == REFUSED_TMUX_UNANSWERED
+    assert tmux.killed == []
+
+
+def test_a_tmux_that_stops_answering_after_the_kill_is_refused_not_stopped(
+    tmp_path: Path,
+) -> None:
+    """The kill went out and then tmux went quiet: camp does not know."""
+    from camp.launch.stop import REFUSED_TMUX_UNANSWERED, Refused
+
+    state, ws, env, harness, derived, _tmux = _fixture(tmp_path)
+
+    class _GoesQuiet(_FakeTmux):
+        def has_session(self, name):
+            if self.killed:
+                return None
+            return super().has_session(name)
+
+    tmux = _GoesQuiet({derived: _launched_pane(harness, _UUID_A, derived, ws)})
+
+    outcome = _stop(
+        _UUID_A[:8],
+        tmux=tmux,
+        transcripts=[_transcript(_UUID_A, ws)],
+        live_records=[_record(_UUID_A, ws)],
+        env=env,
+        harness=harness,
+    )
+
+    assert isinstance(outcome, Refused)
+    assert outcome.reason == REFUSED_TMUX_UNANSWERED
+    assert tmux.killed == [derived]
+
+
+def test_every_tmux_wait_is_bounded_by_a_phone_usable_budget() -> None:
+    """A stop is run from a phone. Every wait in the engine is bounded, and the
+    whole worst case stays inside a handful of seconds — an unbounded wait with
+    no output is indistinguishable from a hang."""
+    from camp.launch import stop
+
+    assert 0 < stop.TMUX_TIMEOUT_SECONDS <= 10
+    assert 0 < stop.POLL_TIMEOUT_SECONDS <= 10
+    assert 0 < stop.POLL_INTERVAL_SECONDS <= stop.POLL_TIMEOUT_SECONDS
