@@ -1277,3 +1277,102 @@ cmd = ["echo", "hi"]
     cfg = load_group(f)
     task_names = [t["name"] for t in cfg["members"][0]["tasks"]]
     assert task_names == ["bootstrap", "graphify"]
+
+
+# ---------------------------------------------------------------------------
+# [launch] block — the directory-launch roots allowlist
+# ---------------------------------------------------------------------------
+
+
+def test_no_launch_block_omits_launch_key(tmp_path: Path) -> None:
+    """No [launch] block → no 'launch' key at all (absence, not an empty default).
+
+    Directory-rooted launch is off by default, and the eligibility gate keys off
+    the key being absent — an empty dict would read as "configured, but empty".
+    """
+    cfg = _write_and_load(tmp_path, "[branch]\npattern = 'worktree-{slug}'\n")
+    assert "launch" not in cfg
+
+
+def test_launch_roots_parsed_unexpanded(tmp_path: Path) -> None:
+    """roots entries are stored exactly as written — '~' is expanded at check
+    time against the injected environment, not at config-load time."""
+    cfg = _write_and_load(tmp_path, '[launch]\nroots = ["~/code", "/srv/work"]\n')
+    assert cfg["launch"]["roots"] == ["~/code", "/srv/work"]
+
+
+@pytest.mark.parametrize(
+    "roots_line",
+    [
+        "roots = []",
+        'roots = "x"',
+        "roots = [1]",
+        'roots = ["", "  "]',
+    ],
+)
+def test_launch_roots_invalid_raises(tmp_path: Path, roots_line: str) -> None:
+    """An empty list, a non-list, a non-string entry, or a blank entry each
+    raise GroupConfigError naming launch.roots."""
+    from camp.group.config import GroupConfigError
+
+    with pytest.raises(GroupConfigError) as exc_info:
+        _write_and_load(tmp_path, f"[launch]\n{roots_line}\n")
+    assert "launch.roots" in str(exc_info.value)
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        "code",
+        "./code",
+        "../code",
+        "~user/code",
+    ],
+)
+def test_launch_roots_rejects_entries_without_a_fixed_anchor(tmp_path: Path, entry: str) -> None:
+    """A roots entry must name a fixed location, not one relative to the caller.
+
+    A relative entry is resolved against whatever directory camp runs from, so
+    one config fences differently per invocation — and an unexpected working
+    directory widens the boundary rather than narrowing it. '~user' is rejected
+    alongside them: it reads as anchored but expands nowhere, leaving a literal
+    relative path with the same defect.
+    """
+    from camp.group.config import GroupConfigError
+
+    with pytest.raises(GroupConfigError) as exc_info:
+        _write_and_load(tmp_path, f'[launch]\nroots = ["{entry}"]\n')
+    assert "launch.roots" in str(exc_info.value)
+
+
+def test_launch_roots_accepts_absolute_and_home_anchored_entries(tmp_path: Path) -> None:
+    """The two anchored spellings both load: absolute, and '~'-anchored."""
+    cfg = _write_and_load(tmp_path, '[launch]\nroots = ["/srv/work", "~/code", "~"]\n')
+    assert cfg["launch"]["roots"] == ["/srv/work", "~/code", "~"]
+
+
+def test_launch_unknown_key_raises(tmp_path: Path) -> None:
+    """An unrecognized key inside [launch] fails closed — [launch] configures a
+    containment boundary, so a typo must never be silently ignored."""
+    from camp.group.config import GroupConfigError
+
+    with pytest.raises(GroupConfigError) as exc_info:
+        _write_and_load(tmp_path, '[launch]\nrootz = ["~/code"]\n')
+    msg = str(exc_info.value)
+    assert "launch" in msg
+    assert "rootz" in msg
+
+
+def test_launch_not_a_table_raises(tmp_path: Path) -> None:
+    """A scalar 'launch' key is a malformed config, not a table."""
+    from camp.group.config import GroupConfigError, load_group
+
+    f = tmp_path / "testgroup.toml"
+    f.write_text(
+        "launch = 'x'\n\n"
+        "[group]\nname = 'testgroup'\n\n"
+        "[[members]]\nname = 'myrepo'\nrepo_root = '/tmp/myrepo'\n"
+    )
+    with pytest.raises(GroupConfigError) as exc_info:
+        load_group(f)
+    assert "launch" in str(exc_info.value)

@@ -1,6 +1,6 @@
 ---
 name: concierge
-description: Create or reuse a camp workspace for a group and launch a detached harness session into it, reported so it reads on a phone. Use for /camp:concierge, "make me a workspace for <group>", "spin up a workspace and put a session in it", "give me another session in <workspace>", "start a session for <group>".
+description: Create or reuse a camp workspace for a group and launch a detached harness session into it — or bring a dead one back — reported so it reads on a phone. Use for /camp:concierge, "make me a workspace for <group>", "spin up a workspace and put a session in it", "give me another session in <workspace>", "start a session for <group>", "that session died, bring it back", "what sessions can I recover", "start a session in <directory>".
 ---
 
 # /camp:concierge — make a workspace and put a session in it
@@ -168,12 +168,12 @@ and the path camp reported. Everything else follows as detail:
 
 `tmux_name` and the session id are read from camp's output — the derived name
 `camp-<slug>-<uuid8>` is never reconstructed. Present that name as the handle
-for referring to this session while it is alive, and be equally plain about its
-limit: once the session is dead, what the report carried cannot be recovered
-from here. While it is alive `camp sessions <slug> --group <name> --json` still
-lists what is running in a workspace — each session's name, id, and working
-directory — but picking one of those back up is not something this flow can do
-until camp's session-resume surface lands (`## Not yet`).
+for referring to this session, and say plainly that losing the report strands
+nothing: camp rediscovers a dead session from the harness's own transcript, so
+there is no uuid for the operator to keep. While the session is alive
+`camp sessions <slug> --group <name> --json` lists what is running in a
+workspace — each session's name, id, and working directory. Once it is dead it
+moves to the recoverable listing instead (`## Recovering a dead session`).
 
 Because the launch does not wait for provisioning, members may still be coming
 up when the session is already alive, and the state you just read is a snapshot.
@@ -192,17 +192,69 @@ A re-invocation that races a still-running create for the same slug resolves to
 camp's outcome — an existing workspace is the reuse path, and partial state is
 camp's refusal to relay. Do not add locking or bookkeeping here to paper over it.
 
-## Not yet
+## Recovering a dead session
 
-Three things operators ask for that this skill does not do. Give this answer
-rather than improvising one:
+A session that died is brought back with its conversation intact, from the same
+anchor and with nothing remembered. Every part of that is camp's: the skill
+still holds no state, matches no names, and enumerates nothing of its own. Note
+that camp's bookmark resume is a different thing and never the one to reach for
+here: it re-enters a bookmarked session by replacing a terminal's foreground
+process, which a remote-controlled session does not have.
 
-- **Recovering or resuming a dead session.** Camp's bookmark resume is a
-  different thing — it re-enters a bookmarked session by replacing a terminal's
-  foreground process, which a remote-controlled session does not have.
-- **Launching into a named directory** instead of a group workspace.
-- **Referring to a session by a prefix of its name.**
+Discovery is a read, so it needs no confirmation:
 
-All three wait on camp's session-resume surface. Until it lands, the honest
-answer is that the conversation in a dead session cannot be picked back up from
-here, and the available move is a new session by the flow above.
+```bash
+camp sessions --recoverable <slug> --group <name> --json
+```
+
+The sessions the harness kept a transcript for, minus the ones running now,
+newest first — capped at the **20 newest**. The cap is invisible on stdout: when
+more matched, camp names the total on stderr, and `--limit <n>` or `--all`
+widens the listing. Read that stderr line before describing the result — a
+listing is everything the operator has only when it came back under the cap or
+was asked for with `--all`. A row is `{"session_id": …, "tmux_name": …, "root": …,
+"age_seconds": …, "root_missing": …, "unreadable": …}`, where `root_missing`
+marks a session whose directory has since been torn down — camp refuses to
+resume one rather than recreating the directory, so say so instead of offering
+it. Drop the slug to search every workspace, or scope to a directory with
+`--dir <path>`.
+
+When the listing comes back empty, name the scope that was searched, say plainly
+that nothing was found there, and offer a new session by the flow above rather
+than widening the search unasked.
+
+Bringing one back is a state-changing call, so it takes an explicit confirmation
+like any other launch:
+
+```bash
+camp launch --resume <ref> --json
+```
+
+`<ref>` is any unambiguous prefix of a row's `tmux_name` or `session_id`, passed
+to camp exactly as the operator gave it. A session that started inside a camp
+workspace needs no group; one that started anywhere else is named as
+`camp launch --resume <ref> --group <name> --json`, and camp refuses when that
+group's configuration does not cover where the session lived. Success prints the
+same object the reuse path prints.
+
+**Exit 2 is not a failure.** A reference matching more than one session exits 2
+and prints the candidate rows on stdout, in the same shape as the listing above.
+That is camp answering with the candidates rather than guessing, so the move is
+to relay them and ask the operator which one they mean — never to report a
+command that broke, and never to pick one. Exit 1 is the real refusal: stdout is
+empty and camp's reason is on stderr, relayed as written.
+
+## Launching into a named directory
+
+An operator may name a directory instead of a group workspace. It is the same
+one mutating call under a different flag:
+
+```bash
+camp launch --dir <path> --group <name> --json
+```
+
+The group is named explicitly because its configured allowlist is what decides
+whether that directory may be launched at all — so a directory the operator
+expects to work can still be refused, and that refusal is camp's to state and
+yours to relay. Validate nothing about the path yourself; camp resolves it,
+fences it, and reports it back the way every other launch does.

@@ -1,30 +1,53 @@
 """camp's detached session launch engine — the one place camp execs a harness.
 
-`launch_session(group, slug)` spawns a detached, tmux-hosted harness session
-rooted at the workspace's resolved launch directory, under a session id camp
-mints and therefore already knows.
+`launch_session` spawns a detached, tmux-hosted harness session and hands back
+the handles for it. A launch is addressed one of two ways and the caller picks
+exactly one: by workspace SLUG, where camp resolves the directory, the tmux name
+component and the trust scope itself from a manifest it wrote; or by an explicit
+ROOT, where the caller supplies all three. Both reach the same spawn — there is
+no second engine — and a `resume_session_id` rides on either, re-entering a
+session the harness already holds instead of starting a fresh one.
 
-ONE resolved directory. `HarnessProfile.resolved_cwd(...)` substituted, then
-`Path.resolve()`, yields a single path that serves as the launch cwd, the trust
-target, and the enumeration scope. Three names for the same directory is how a
-session gets launched somewhere it is never found again, so they are computed
-once here and never re-derived downstream. Sameness is the guarantee here, not
-containment: the workspace-confinement check lives in `pretrust_workspace` and
-therefore covers only the pre-seeded path, so a group config that opts out of
-the pre-seed launches wherever its `[harness] cwd` template resolves to.
+ONE resolved directory. Substituted from `HarnessProfile.resolved_cwd(...)` for a
+slug, or handed in as a root, the directory is resolved once here and then serves
+as the launch cwd, the trust target, and the enumeration scope. Three names for
+the same directory is how a session gets launched somewhere it is never found
+again, so they are computed once and never re-derived downstream.
+
+Containment. What fences a launch is WHO CHOSE the directory, not how it was
+addressed. A directory camp computed itself is fenced by construction — a slug's
+workspace, and equally a root inside that workspace, which is where a resumed
+session's recorded cwd lands. A directory the OPERATOR named has no such fence,
+so the eligibility gate supplies one, and it must answer BEFORE the trust
+pre-seed: the pre-seed's own confinement check compares the launch directory
+against the declared trust scope, which for an explicitly rooted launch IS that
+same directory, so it can never be the boundary there. Sameness, not containment,
+is this module's guarantee — a group that opts out of the pre-seed launches
+wherever its `[harness] cwd` template resolves to.
 
 The seam boundary. camp core spells exactly two things: `tmux` and `env -u`.
 Every harness literal — the binary, its flags, the names of the variables to
-scrub — comes from the trailhead harness seam (`harness_for` →
-`session_launch` / `session_launch_env_unset` / `session_enumerate`) and is
-placed into argv whole. `tools/camp/tests/test_seam_removal.py` enforces this.
+scrub — comes from the trailhead harness seam (`harness_for` → `session_launch` /
+`session_resume` / `session_launch_env_unset` / `session_enumerate`) and is placed
+into argv whole. `tools/camp/tests/test_seam_removal.py` enforces this.
 
 Refusal posture. A refusal raises :class:`LaunchError` and guarantees no process
-was started: an unresolvable launch directory, a harness camp cannot name or that
-cannot launch sessions, a missing `tmux`, or a trust pre-seed that reported
-failure. The CLI layer turns that into camp's one-line stderr refusal. Sessions
-already live in the workspace are the deliberate NON-refusal — they are reported
-on stderr and the launch proceeds.
+was started: an unresolvable or ineligible launch directory, a harness camp cannot
+name or that cannot start or re-enter sessions, a missing `tmux`, a trust pre-seed
+that reported failure, or a tmux that refused the spawn. The CLI layer turns that
+into camp's one-line stderr refusal.
+
+Sessions already live in the launch directory are the deliberate NON-refusal for a
+fresh launch — reported on stderr, and the launch proceeds. For a re-entry they are
+the opposite: running a session that is already running would double it. Two
+independent things can notice — the pre-spawn lookup, and tmux refusing a session
+name that is already taken — and they raise the identical message, because which
+one noticed is camp's business and not the operator's. The name claim is the
+guarantee: it happens AT the spawn, so nothing can race between the look and the
+launch.
+
+Calling with neither addressing form, with both, or with an incomplete root triple
+is a programming error in the caller — :class:`ValueError`, raised before any work.
 
 This module ends at a successful detached spawn. Confirming the session actually
 registered is a separate concern with its own bounded wait — :func:`confirm_session`
@@ -45,11 +68,24 @@ from pathlib import Path
 from ..bookmark import harness_for
 from ..group.manifest import workspace_dir
 from .claude_trust import pretrust_workspace
+from .recovery import printable_path, sanitize_name_component
 from .profile import resolve_harness_profile
 
 #: Seconds to wait on the pre-spawn enumeration probe. It is advisory output
 #: only, so it must never be able to hold up a launch.
 _ENUMERATE_TIMEOUT_SECONDS = 10
+
+#: Bound on the tmux spawn itself. `tmux new-session -d` returns as soon as the
+#: session is created (~10ms warm, ~22ms when it must start the server first) —
+#: camp waits for it because tmux's exit status IS the session-name claim, and
+#: that claim is what makes a doubled session impossible.
+_SPAWN_TIMEOUT_SECONDS = 30
+
+#: The fragment tmux's stderr carries when the requested session name is taken.
+#: Matching it is what separates "that session is already running" from every
+#: other reason a spawn can fail; a misdiagnosed failure is worse than a generic
+#: one, so any other non-zero exit is reported as itself.
+_DUPLICATE_SESSION_MARKER = "duplicate session"
 
 #: Poll interval and bound for :func:`confirm_session`, pinned from measured
 #: cold `claude --remote-control` start-to-enumeration latency (min 1.35s /
@@ -72,7 +108,8 @@ class LaunchError(Exception):
 class LaunchedSession:
     """A successfully spawned detached session.
 
-    `session_id` is the id camp minted and handed to the harness — the handle for
+    `session_id` is the id the session runs under — minted by camp for a fresh
+    launch, or the re-entered session's own id — and is the handle for
     programmatic follow-up. `tmux_name` is the operator's attach handle; they are
     deliberately different strings and both are reported.
     """
@@ -98,7 +135,48 @@ def _resolve_launch_dir(profile, slug: str, ws_dir: Path) -> Path:
         ) from exc
     if not resolved.is_dir():
         raise LaunchError(
-            f"camp: cannot launch — launch directory {resolved} is not a directory"
+            f"camp: cannot launch — launch directory {printable_path(resolved)} is not a directory"
+        )
+    return resolved
+
+
+def _resolve_named_root(
+    root: Path, group: dict, env: dict[str, str], *, camp_managed: bool
+) -> Path:
+    """Gate and resolve an explicitly-rooted launch.
+
+    Eligibility answers first and existence second, so a directory the allowlist
+    rejects is refused on that ground whether or not it exists. The existence
+    check is not a formality: `tmux new-session -c` silently falls back to the
+    invoking environment's home directory rather than failing, so an absent root
+    would otherwise root the session somewhere nobody named and nothing fenced.
+
+    *camp_managed* is the caller's claim that *root* sits inside a workspace camp
+    itself provisioned for *group* — the same fence the slug flavor is launched
+    behind, which is why the ALLOWLIST has nothing to add there. The claim is
+    checked, not trusted: it waives that allowlist only when the name rule agrees
+    the directory lies inside that group's own workspace tree, so it cannot
+    launder an arbitrary operator-named directory past the gate.
+
+    What it never waives is the credential rule, which runs on both branches.
+    The allowlist asks who chose this directory; the credential rule asks what is
+    IN it, and that answer does not change with the asker. Keeping it outside the
+    branch is what keeps "no group configuration can permit it" true of every
+    launch rather than of most of them.
+    """
+    # Imported here rather than at module scope: the gate raises LaunchError and
+    # therefore imports it from this module.
+    from .eligibility import assert_launch_eligible, assert_not_a_credential_store
+    from .recovery import is_workspace_root
+
+    if camp_managed and is_workspace_root(root, [group], env=env):
+        resolved = Path(root).resolve()
+        assert_not_a_credential_store(resolved, env=env)
+    else:
+        resolved = assert_launch_eligible(root, group=group, env=env)
+    if not resolved.is_dir():
+        raise LaunchError(
+            f"camp: cannot launch — launch directory {printable_path(resolved)} is not a directory"
         )
     return resolved
 
@@ -193,21 +271,93 @@ def _report_live_sessions(harness, launch_dir: Path, env: dict[str, str]) -> Non
         )
 
 
+def already_running_error(session_id: str, tmux_name: str) -> LaunchError:
+    """The one wording for "that session is already running".
+
+    Every detector raises it — the pre-spawn lookup below, tmux refusing the
+    session name at the spawn, and the CLI's own pre-resolution liveness gate —
+    so the operator reads one message about one condition, and reads it as
+    "already running" rather than as a failure. Public precisely because the
+    third of those lives outside this module: a second wording for the same
+    condition is a second condition as far as anyone reading the terminal is
+    concerned.
+    """
+    return LaunchError(
+        f"camp: refusing to launch — session {session_id} is already running as "
+        f"tmux session {tmux_name}; attach it with `tmux attach -t {tmux_name}`"
+    )
+
+
+def _refuse_if_already_live(
+    harness, session_id: str, tmux_name: str, launch_dir: Path, env: dict[str, str]
+) -> None:
+    """Refuse re-entry of a session still live under *launch_dir*.
+
+    The mirror image of :func:`_report_live_sessions`: a live neighbour is a
+    notice when starting a new session and a refusal when re-entering an existing
+    one. Every failure degrades to silence here for the same reason it does
+    there — this lookup produces the legible refusal, it is not the guarantee.
+    The guarantee is tmux's claim on the session name, which cannot be raced
+    because it happens at the spawn itself.
+    """
+    try:
+        records = enumerate_records(harness, launch_dir, env, cwd=launch_dir)
+    except Exception:  # noqa: BLE001 — same posture as the advisory probe
+        return
+    if any(record.session_id == session_id for record in records or ()):
+        raise already_running_error(session_id, tmux_name)
+
+
 def launch_session(
     group: dict,
-    slug: str,
+    slug: str | None = None,
     *,
     env: dict[str, str] | None = None,
+    root: Path | None = None,
+    name_component: str | None = None,
+    trust_scope: Path | None = None,
+    resume_session_id: str | None = None,
+    camp_managed_root: bool = False,
 ) -> LaunchedSession:
-    """Spawn a detached, tmux-hosted harness session for (*group*, *slug*).
+    """Spawn a detached, tmux-hosted harness session; return its handles.
 
-    Returns the minted session id and the tmux name to attach with. Raises
+    Addressed either by *slug* — the workspace flavor, where camp derives the
+    launch directory, the tmux name component and the trust scope from the group
+    manifest — or by an explicit *root* with its own *name_component* and
+    *trust_scope*. Exactly one of the two, or :class:`ValueError` before any work.
+
+    *camp_managed_root* rides on the *root* flavor and says the directory came
+    from camp's own workspace layout rather than from an operator naming it, which
+    is what the eligibility gate exists to fence. It is verified against the name
+    rule before it can open that gate (see :func:`_resolve_named_root`).
+
+    *resume_session_id* rides on either flavor: given, the session runs under that
+    id and the pane runs the harness's re-entry argv instead of a fresh-session
+    one, so the session reclaims the very tmux name its first launch used.
+
+    Returns the session id and the tmux name to attach with. Raises
     :class:`LaunchError` — with no process started — on any refusal path.
     """
+    if (slug is None) == (root is None):
+        raise ValueError(
+            "launch_session takes exactly one of slug or root — never both, "
+            "never neither"
+        )
+    if root is not None and (name_component is None or trust_scope is None):
+        raise ValueError(
+            "a launch rooted at a named directory requires both name_component "
+            "and trust_scope"
+        )
+
     env = dict(env if env is not None else os.environ)
     profile = resolve_harness_profile(group)
-    ws_dir = workspace_dir(group["group"]["name"], slug, env=env)
-    launch_dir = _resolve_launch_dir(profile, slug, ws_dir)
+    if root is None:
+        trust_root = workspace_dir(group["group"]["name"], slug, env=env)
+        launch_dir = _resolve_launch_dir(profile, slug, trust_root)
+        name_component = slug
+    else:
+        launch_dir = _resolve_named_root(root, group, env, camp_managed=camp_managed_root)
+        trust_root = trust_scope
 
     harness = harness_for(group)
     if harness is None:
@@ -216,21 +366,40 @@ def launch_session(
             "registered"
         )
 
-    session_id = str(uuid.uuid4())
-    # One handle everywhere: the tmux session, and — for a harness whose
-    # clients display session names — the name those clients render.
-    tmux_name = f"camp-{slug}-{session_id[:8]}"
-    harness_argv = harness.session_launch(launch_dir, session_id, session_name=tmux_name)
+    session_id = str(uuid.uuid4()) if resume_session_id is None else resume_session_id
+
+    # One handle everywhere: the tmux session, and — for a harness whose clients
+    # display session names — the name those clients render. Composed at this
+    # single point, before anything is told what the session is called, so the
+    # two can never name the same session differently.
+    #
+    # Both halves are folded here because both can carry a tmux target separator:
+    # a caller-supplied component is a directory basename, which routinely holds
+    # a dot, and a resumed id arrives as a transcript filename. A name carrying
+    # one is created without complaint and then cannot be addressed again.
+    tmux_name = (
+        f"camp-{sanitize_name_component(name_component)}-"
+        f"{sanitize_name_component(session_id[:8])}"
+    )
+
+    if resume_session_id is None:
+        harness_argv = harness.session_launch(
+            launch_dir, session_id, session_name=tmux_name
+        )
+        unsupported = "cannot launch sessions"
+    else:
+        harness_argv = harness.session_resume(session_id)
+        unsupported = "cannot re-enter sessions"
     if harness_argv is None:
         raise LaunchError(
             f"camp: refusing to launch — harness {harness.name or profile.binary!r} "
-            f"(configured binary {profile.binary!r}) cannot launch sessions"
+            f"(configured binary {profile.binary!r}) {unsupported}"
         )
 
     if shutil.which("tmux") is None:
         raise LaunchError("camp: refusing to launch — tmux is not on PATH")
 
-    _assert_trust(profile, launch_dir, ws_dir, env)
+    _assert_trust(profile, launch_dir, trust_root, env)
 
     scrub = harness.session_launch_env_unset()
     if scrub is None:
@@ -240,8 +409,8 @@ def launch_session(
         )
 
     # The scrub rides INSIDE the pane command, as `env -u` operands sitting
-    # between tmux's own options and the harness argv. Scrubbing camp's Popen
-    # environment alone is not enough and silently does nothing in the common
+    # between tmux's own options and the harness argv. Scrubbing camp's own
+    # spawn environment alone is not enough and silently does nothing in the common
     # case: when a tmux SERVER is already running, `tmux new-session` is a client
     # request and the new pane inherits the SERVER's environment, not this
     # process's. Only the pane-level `env -u` holds in both cases — fresh server
@@ -251,19 +420,65 @@ def launch_session(
         argv += ["-u", name]
     argv += list(harness_argv)
 
-    _report_live_sessions(harness, launch_dir, env)
+    if resume_session_id is None:
+        _report_live_sessions(harness, launch_dir, env)
+    else:
+        _refuse_if_already_live(harness, session_id, tmux_name, launch_dir, env)
 
     scrub_set = set(scrub)
     spawn_env = {k: v for k, v in env.items() if k not in scrub_set}
-    subprocess.Popen(
-        argv,
-        cwd=str(launch_dir),
-        env=spawn_env,
-        start_new_session=True,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+
+    def _kill_session_quietly(name: str) -> None:
+        """Best-effort reclaim of a session name after an indeterminate spawn.
+
+        Every outcome is acceptable and none changes the refusal that follows:
+        the session may never have existed, in which case tmux simply reports
+        no such session. The point is only that camp does not leave a session
+        running under a name it is about to tell the operator it could not
+        claim.
+        """
+        try:
+            subprocess.run(
+                ["tmux", "kill-session", "-t", name],
+                capture_output=True,
+                text=True,
+                timeout=_KILL_SESSION_TIMEOUT_SECONDS,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+
+    try:
+        spawned = subprocess.run(
+            argv,
+            cwd=str(launch_dir),
+            env=spawn_env,
+            start_new_session=True,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=_SPAWN_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        # A timeout means the read hung, not that nothing happened: tmux may
+        # already have claimed the name server-side. Reporting failure while
+        # that session runs is the worst of both — the operator is told the
+        # launch failed, and their next attempt refuses as "already running"
+        # for a session they never got. Reclaim the name before giving up.
+        if isinstance(exc, subprocess.TimeoutExpired):
+            _kill_session_quietly(tmux_name)
+        raise LaunchError(
+            f"camp: refusing to launch — tmux could not start session "
+            f"{tmux_name}: {exc}"
+        ) from exc
+    if spawned.returncode != 0:
+        stderr = (spawned.stderr or "").strip()
+        if _DUPLICATE_SESSION_MARKER in stderr:
+            raise already_running_error(session_id, tmux_name)
+        detail = stderr or f"exit status {spawned.returncode}"
+        raise LaunchError(
+            f"camp: refusing to launch — tmux could not start session "
+            f"{tmux_name}: {detail}"
+        )
 
     return LaunchedSession(session_id=session_id, tmux_name=tmux_name, launch_dir=launch_dir)
 

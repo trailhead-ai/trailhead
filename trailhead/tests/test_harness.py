@@ -2,6 +2,7 @@
 
 import dataclasses
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -12,6 +13,7 @@ from trailhead.harness import (
     ClaudeCodeHarness,
     Harness,
     HarnessError,
+    SessionTranscript,
     canonical_name,
     detect_harnesses,
     get_harness,
@@ -1236,3 +1238,321 @@ class TestClaudeCodeParseSessionListDuplicateIds:
         assert records[1].session_id == "dup"
         assert records[0].pid == 1
         assert records[1].pid == 2
+
+
+class TestSessionTranscript:
+    def test_is_frozen(self, tmp_path):
+        row = SessionTranscript(
+            session_id="sess-1", cwd=tmp_path, modified_at=datetime.now(timezone.utc)
+        )
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            row.session_id = "sess-2"
+
+    def test_accepts_none_for_cwd(self):
+        row = SessionTranscript(
+            session_id="sess-1", cwd=None, modified_at=datetime.now(timezone.utc)
+        )
+        assert row.cwd is None
+
+    def test_requires_the_three_fields(self):
+        with pytest.raises(TypeError):
+            SessionTranscript()
+
+
+class TestSessionTranscriptsBaseDefault:
+    """The store-enumeration seam is CONCRETE with a degrading default: a
+    harness with no recovery concept answers None rather than raising."""
+
+    def test_returns_none(self):
+        assert _BareHarness().session_transcripts() is None
+
+    def test_returns_none_with_workspace_and_env(self, tmp_path):
+        env = {"TRAILHEAD_CLAUDE_DIR": str(tmp_path / "claude")}
+        assert _BareHarness().session_transcripts(tmp_path, env=env) is None
+
+
+class TestClaudeCodeSessionTranscripts:
+    """Claude Code stores one JSONL transcript per session at
+    <config_dir>/projects/<project-dir>/<session-id>.jsonl. ``session_transcripts``
+    enumerates that layout at depth 2 ONLY — a recursive glob would also pick up
+    the per-session subagent/tool-result transcripts nested underneath, which
+    are not top-level sessions."""
+
+    def _write(self, claude_dir, project_dirname, session_id, lines):
+        d = claude_dir / "projects" / project_dirname
+        d.mkdir(parents=True, exist_ok=True)
+        path = d / f"{session_id}.jsonl"
+        path.write_text("\n".join(lines) + "\n")
+        return path
+
+    def _env(self, claude_dir):
+        return {"TRAILHEAD_CLAUDE_DIR": str(claude_dir)}
+
+    def test_missing_projects_dir_returns_empty_list(self, tmp_path):
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        assert ClaudeCodeHarness().session_transcripts(env=self._env(claude_dir)) == []
+
+    def test_global_call_reads_cwd_from_file_content_not_from_dirname(self, tmp_path):
+        """The directory a transcript lives under is named by a LOSSY munge of
+        the launch cwd ('/' and '.' both collapse to '-'); this seam must never
+        try to reverse it. Prove it with a directory name that is the munge of
+        a totally different path than the cwd actually recorded in the file."""
+        claude_dir = tmp_path / ".claude"
+        ws_a = tmp_path / "workspace-a"
+        ws_a.mkdir()
+        ws_b = tmp_path / "workspace-b"
+        ws_b.mkdir()
+
+        decoy_source = Path("/some/other/place")
+        decoy_dirname = str(decoy_source).replace("/", "-").replace(".", "-")
+
+        self._write(claude_dir, decoy_dirname, "sess-a", [json.dumps({"cwd": str(ws_a)})])
+        self._write(claude_dir, "unrelated-project-dir", "sess-b", [json.dumps({"cwd": str(ws_b)})])
+
+        rows = ClaudeCodeHarness().session_transcripts(env=self._env(claude_dir))
+        by_id = {r.session_id: r for r in rows}
+        assert set(by_id) == {"sess-a", "sess-b"}
+        assert by_id["sess-a"].cwd == ws_a.resolve()
+        assert by_id["sess-b"].cwd == ws_b.resolve()
+        assert by_id["sess-a"].cwd != decoy_source.resolve()
+
+    def test_a_walk_that_fails_midway_yields_what_it_found_rather_than_raising(
+        self, tmp_path, monkeypatch
+    ):
+        """The store walk is where an unreadable store actually bites.
+
+        A project directory whose permissions deny a listing raises DURING the
+        walk, after earlier entries have already come back — not at the call. The
+        base contract says this seam never raises for a missing or unreadable
+        store, so the rows found before that point are the answer; an exception
+        escaping here surfaces to an operator as a stack trace from a command
+        whose whole job is to answer in one line.
+        """
+        claude_dir = tmp_path / ".claude"
+        readable = self._write(
+            claude_dir, "some-project", "sess-a", [json.dumps({"cwd": str(tmp_path)})]
+        )
+
+        def _failing_walk(self, pattern):
+            yield readable
+            raise PermissionError(13, "Permission denied")
+
+        monkeypatch.setattr(Path, "glob", _failing_walk)
+
+        rows = ClaudeCodeHarness().session_transcripts(env=self._env(claude_dir))
+        assert [r.session_id for r in rows] == ["sess-a"]
+
+    def test_a_relative_recorded_cwd_is_dropped_rather_than_anchored_at_the_caller(
+        self, tmp_path, monkeypatch
+    ):
+        """A recorded cwd that is not absolute names no directory camp can trust.
+
+        Resolving it would anchor it at whatever directory the CLI happened to
+        be invoked from, making both the reported location and the resumed
+        launch root a function of the caller's cwd. Reporting no root is true;
+        reporting one that moves with the caller is not.
+        """
+        claude_dir = tmp_path / ".claude"
+        self._write(claude_dir, "some-project", "sess-rel", [json.dumps({"cwd": ".ssh"})])
+        monkeypatch.chdir(tmp_path)
+
+        rows = ClaudeCodeHarness().session_transcripts(env=self._env(claude_dir))
+
+        assert [r.session_id for r in rows] == ["sess-rel"]
+        assert rows[0].cwd is None
+
+    def test_nested_subagent_and_tool_result_transcripts_are_not_enumerated(self, tmp_path):
+        claude_dir = tmp_path / ".claude"
+        proj = claude_dir / "projects" / "some-project"
+        proj.mkdir(parents=True)
+        self._write(claude_dir, "some-project", "uuid-1", [json.dumps({"cwd": str(tmp_path)})])
+
+        nested_sub = proj / "uuid-1" / "subagents" / "x.jsonl"
+        nested_sub.parent.mkdir(parents=True)
+        nested_sub.write_text(json.dumps({"cwd": str(tmp_path)}) + "\n")
+
+        nested_tool = proj / "uuid-1" / "tool-results" / "y.jsonl"
+        nested_tool.parent.mkdir(parents=True)
+        nested_tool.write_text(json.dumps({"cwd": str(tmp_path)}) + "\n")
+
+        rows = ClaudeCodeHarness().session_transcripts(env=self._env(claude_dir))
+        assert {r.session_id for r in rows} == {"uuid-1"}
+
+    def test_skips_invalid_stem_non_jsonl_file_and_bare_directory(self, tmp_path):
+        claude_dir = tmp_path / ".claude"
+        proj = claude_dir / "projects" / "some-project"
+        proj.mkdir(parents=True)
+
+        self._write(claude_dir, "some-project", "sess-real", [json.dumps({"cwd": str(tmp_path)})])
+
+        # stem fails the session-id guard: a leading '.' is not a valid first char.
+        (proj / "..jsonl").write_text(json.dumps({"cwd": str(tmp_path)}) + "\n")
+
+        # not a .jsonl file at all
+        (proj / "notes.txt").write_text("hello")
+
+        # a directory, not a file, despite the .jsonl-shaped name
+        (proj / "looks-like-a-file.jsonl").mkdir()
+
+        rows = ClaudeCodeHarness().session_transcripts(env=self._env(claude_dir))
+        assert {r.session_id for r in rows} == {"sess-real"}
+
+    def test_file_directly_under_projects_root_is_not_enumerated(self, tmp_path):
+        """Depth 2 only: a file sitting directly in the projects root, not
+        nested under a per-project directory, is not a transcript this seam
+        reports — matching how Claude Code itself keeps top-level, non-session
+        files (for example a shared 'memory.jsonl') outside any project dir."""
+        claude_dir = tmp_path / ".claude"
+        (claude_dir / "projects").mkdir(parents=True)
+        (claude_dir / "projects" / "memory.jsonl").write_text(
+            json.dumps({"cwd": str(tmp_path)}) + "\n"
+        )
+        assert ClaudeCodeHarness().session_transcripts(env=self._env(claude_dir)) == []
+
+    def test_no_cwd_in_first_12_lines_yields_a_row_with_cwd_none(self, tmp_path):
+        claude_dir = tmp_path / ".claude"
+        lines = [json.dumps({"type": "system", "n": i}) for i in range(12)]
+        self._write(claude_dir, "proj", "sess-nocwd", lines)
+
+        rows = ClaudeCodeHarness().session_transcripts(env=self._env(claude_dir))
+        assert len(rows) == 1
+        assert rows[0].session_id == "sess-nocwd"
+        assert rows[0].cwd is None
+
+    def test_cwd_found_despite_an_oversized_earlier_line(self, tmp_path):
+        """A line over the byte cap is skipped WITHOUT being decoded — proven by
+        embedding a decoy cwd inside the oversized line: if it were decoded, its
+        cwd would win (first match wins) instead of the real one on the next
+        line."""
+        claude_dir = tmp_path / ".claude"
+        ws = tmp_path / "real-workspace"
+        ws.mkdir()
+        huge_line = json.dumps({"cwd": "/decoy/should/not/be/used", "junk": "x" * 2_000_000})
+        real_line = json.dumps({"cwd": str(ws)})
+        self._write(claude_dir, "proj", "sess-huge", [huge_line, real_line])
+
+        rows = ClaudeCodeHarness().session_transcripts(env=self._env(claude_dir))
+        assert rows[0].cwd == ws.resolve()
+
+    def test_no_single_read_exceeds_the_byte_cap(self, tmp_path, monkeypatch):
+        """The byte cap bounds the READ, not merely the decode.
+
+        Checking a line's length after reading it is not a bound at all: the
+        whole record is already in memory by then, so one corrupt transcript
+        with no newline in it would cost its full size. Transcripts reach
+        hundreds of megabytes, so this records the largest single read and
+        holds it to the cap.
+        """
+        from trailhead.harness import claude_code as cc
+
+        claude_dir = tmp_path / ".claude"
+        ws = tmp_path / "ws-after-a-corrupt-record"
+        ws.mkdir()
+        # One 8MB record carrying no newline at all, then a plain cwd line.
+        no_newline_blob = "x" * 8_000_000
+        self._write(claude_dir, "proj", "sess-corrupt", [no_newline_blob, json.dumps({"cwd": str(ws)})])
+
+        reads: list[int] = []
+        real_open = Path.open
+
+        def recording_open(self, *args, **kwargs):
+            handle = real_open(self, *args, **kwargs)
+            real_readline = handle.readline
+
+            def readline(*a, **k):
+                chunk = real_readline(*a, **k)
+                reads.append(len(chunk))
+                return chunk
+
+            handle.readline = readline
+            return handle
+
+        monkeypatch.setattr(Path, "open", recording_open)
+        rows = ClaudeCodeHarness().session_transcripts(env=self._env(claude_dir))
+
+        assert reads, "the scan never read anything"
+        assert max(reads) <= cc._CWD_SCAN_MAX_LINE_BYTES + 1, (
+            f"a single read took {max(reads)} bytes, over the "
+            f"{cc._CWD_SCAN_MAX_LINE_BYTES} cap — the cap is not bounding the read"
+        )
+        # Stepping over the corrupt record must not cost the line after it.
+        assert rows[0].cwd == ws.resolve()
+
+    def test_cwd_past_the_scan_bound_is_not_found(self, tmp_path):
+        """Pins the 12-line bound as CONTRACT: a cwd sitting on line 13 must not
+        be found, even though nothing about it is malformed."""
+        claude_dir = tmp_path / ".claude"
+        ws = tmp_path / "late-workspace"
+        ws.mkdir()
+        filler = [json.dumps({"type": "system", "n": i}) for i in range(12)]
+        sentinel = json.dumps({"cwd": str(ws)})
+        self._write(claude_dir, "proj", "sess-late", filler + [sentinel])
+
+        rows = ClaudeCodeHarness().session_transcripts(env=self._env(claude_dir))
+        assert rows[0].cwd is None
+
+    def test_invalid_json_on_every_line_yields_cwd_none_no_raise(self, tmp_path):
+        claude_dir = tmp_path / ".claude"
+        self._write(claude_dir, "proj", "sess-badjson", ["not json {{{", "also not json", ""])
+
+        rows = ClaudeCodeHarness().session_transcripts(env=self._env(claude_dir))
+        assert len(rows) == 1
+        assert rows[0].cwd is None
+
+    def test_workspace_scoping_is_a_subtree_test_and_excludes_a_sibling(self, tmp_path):
+        claude_dir = tmp_path / ".claude"
+        root = tmp_path / "root"
+        inside = root / "sub"
+        inside.mkdir(parents=True)
+        sibling = tmp_path / "sibling"
+        sibling.mkdir()
+
+        self._write(claude_dir, "proj-a", "sess-inside", [json.dumps({"cwd": str(inside)})])
+        self._write(claude_dir, "proj-a", "sess-at-root", [json.dumps({"cwd": str(root)})])
+        self._write(claude_dir, "proj-b", "sess-sibling", [json.dumps({"cwd": str(sibling)})])
+
+        rows = ClaudeCodeHarness().session_transcripts(root, env=self._env(claude_dir))
+        assert {r.session_id for r in rows} == {"sess-inside", "sess-at-root"}
+
+    def test_a_row_with_no_cwd_is_excluded_from_a_scoped_call(self, tmp_path):
+        claude_dir = tmp_path / ".claude"
+        root = tmp_path / "root"
+        root.mkdir()
+        self._write(claude_dir, "proj", "sess-nocwd", [json.dumps({"n": 1})])
+
+        rows = ClaudeCodeHarness().session_transcripts(root, env=self._env(claude_dir))
+        assert rows == []
+
+    def test_a_row_with_no_cwd_is_included_in_an_unscoped_call(self, tmp_path):
+        claude_dir = tmp_path / ".claude"
+        self._write(claude_dir, "proj", "sess-nocwd", [json.dumps({"n": 1})])
+
+        rows = ClaudeCodeHarness().session_transcripts(env=self._env(claude_dir))
+        assert {r.session_id for r in rows} == {"sess-nocwd"}
+
+    def test_symlinked_workspace_scope_resolves_the_same_as_the_real_path(self, tmp_path):
+        claude_dir = tmp_path / ".claude"
+        real_root = tmp_path / "real-root"
+        real_root.mkdir()
+        link_root = tmp_path / "link-root"
+        link_root.symlink_to(real_root)
+
+        self._write(claude_dir, "proj", "sess-under", [json.dumps({"cwd": str(real_root)})])
+
+        via_real = ClaudeCodeHarness().session_transcripts(real_root, env=self._env(claude_dir))
+        via_link = ClaudeCodeHarness().session_transcripts(link_root, env=self._env(claude_dir))
+        assert {r.session_id for r in via_real} == {"sess-under"}
+        assert {r.session_id for r in via_link} == {"sess-under"}
+
+    def test_modified_at_is_tz_aware_utc_from_file_mtime(self, tmp_path):
+        claude_dir = tmp_path / ".claude"
+        path = self._write(
+            claude_dir, "proj", "sess-mtime", [json.dumps({"cwd": str(tmp_path)})]
+        )
+        expected = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+        os.utime(path, (expected.timestamp(), expected.timestamp()))
+
+        rows = ClaudeCodeHarness().session_transcripts(env=self._env(claude_dir))
+        assert rows[0].modified_at.tzinfo is not None
+        assert rows[0].modified_at == expected

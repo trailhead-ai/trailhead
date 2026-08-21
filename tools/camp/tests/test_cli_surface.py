@@ -17,6 +17,7 @@ Contract (post-rename surface):
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -633,3 +634,94 @@ def test_bookmark_capture_still_surfaces_the_corrupt_sibling_group_toml(
     # succeeds for testgrp and capture proceeds to its own refusal — either
     # way this must not silently skip past group resolution the way ls/rm now do.
     assert "bare slug dispatch is no longer supported" not in combined
+
+
+# ---------------------------------------------------------------------------
+# camp help — the launch surface's addressing forms and exit-code contract.
+#
+# The help menu is the operator's index of what camp can do, and `camp launch`
+# now has three mutually exclusive addressing forms rather than one. These
+# assert against `cmd_help`'s own output (via the real binary) rather than
+# against a copy of the block, so editing the emitter is what moves them.
+#
+# The exit-code contract gets its own pin because `camp launch` grew a non-zero
+# that carries information: an ambiguous `--resume` ref exits 2 with the
+# candidates on stdout. A reader applying the ordinary "non-zero means it
+# broke" heuristic would report a resolvable ambiguity as a hard failure, so
+# the contract has to be stated where it is read. That the CLI actually returns
+# the codes named here is driven separately, in test_session_cli.py.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def help_text() -> str:
+    result = _run(["help"])
+    assert result.returncode == 0, result.stderr
+    return result.stdout
+
+
+def test_help_names_every_camp_launch_addressing_form(help_text: str) -> None:
+    """A slug, a directory, and a session reference — all three discoverable."""
+    assert "camp launch <slug>" in help_text
+    assert "camp launch --dir <path> --group <name>" in help_text
+    assert "camp launch --resume <ref>" in help_text
+
+
+def test_help_names_the_launch_addressing_forms_as_mutually_exclusive(
+    help_text: str,
+) -> None:
+    """One launch roots one way; the help has to say so, not imply it."""
+    assert "mutually exclusive" in help_text
+    launch_block = help_text.split("camp launch <slug>", 1)[1].split("camp sessions", 1)[0]
+    assert "mutually exclusive" in launch_block, launch_block
+
+
+def test_help_names_the_recoverable_listing_and_its_flags(help_text: str) -> None:
+    """`camp sessions` grew a second listing; every flag that widens it is named."""
+    sessions_block = help_text.split("camp sessions", 1)[1].split("camp remove", 1)[0]
+    for flag in ("--recoverable", "--dir <path>", "--limit <n>", "--all"):
+        assert flag in sessions_block, f"{flag!r} missing from:\n{sessions_block}"
+
+
+def test_help_names_the_live_sessions_dir_scope(help_text: str) -> None:
+    """`--dir` scopes the LIVE listing too, not only the recoverable one."""
+    live_line = "camp sessions [<slug>] [--dir <path>] [--json]"
+    assert live_line in help_text
+
+
+def test_help_states_the_launch_exit_code_contract(help_text: str) -> None:
+    """All three codes, named as codes — not left to be inferred from prose."""
+    contract = _launch_exit_code_contract(help_text)
+    assert set(contract) == {0, 1, 2}, contract
+
+
+def test_help_reads_exit_two_as_candidates_rather_than_failure(help_text: str) -> None:
+    """The one code a reader would otherwise mistake for a broken command."""
+    contract = _launch_exit_code_contract(help_text)
+    assert "candidates" in contract[2].lower(), contract[2]
+    assert "not a failure" in contract[2].lower(), contract[2]
+
+
+def _launch_exit_code_contract(help_text: str) -> dict[int, str]:
+    """The exit codes `camp help` documents for `camp launch`, code → its prose.
+
+    Read out of the emitter rather than compared against a literal, so an added
+    or dropped code changes what these assertions see. test_session_cli.py reads
+    the same block for itself and drives every code it finds there, which is
+    what ties the documented contract to the one the binary honors.
+    """
+    heading = re.search(r"^Exit codes \(camp launch\):$", help_text, re.MULTILINE)
+    assert heading, f"no launch exit-code contract in:\n{help_text}"
+    block = help_text[heading.end() :]
+    block = block.split("\nFlags:", 1)[0]
+
+    contract: dict[int, str] = {}
+    current: int | None = None
+    for line in block.splitlines():
+        match = re.match(r"^\s{2}(\d+)\s{2,}(.*)$", line)
+        if match:
+            current = int(match.group(1))
+            contract[current] = match.group(2).strip()
+        elif current is not None and line.strip():
+            contract[current] += " " + line.strip()
+    return contract

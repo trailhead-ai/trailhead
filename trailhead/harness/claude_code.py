@@ -62,8 +62,10 @@ import os
 import re
 import subprocess
 import tempfile
+from collections.abc import Iterator
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import BinaryIO
 
 from trailhead.harness.base import (
     MODALITY_TTY_REQUIRED,
@@ -71,6 +73,7 @@ from trailhead.harness.base import (
     HarnessError,
     Modality,
     SessionRecord,
+    SessionTranscript,
 )
 
 _REGISTERED_MARKER = ".trailhead-registered"
@@ -102,6 +105,90 @@ def _is_session_id(session_id: object) -> bool:
     a session id this harness recognizes at all.
     """
     return isinstance(session_id, str) and _SESSION_ID_RE.match(session_id) is not None
+
+
+#: Bounded head-scan limits for extracting a session's start cwd out of a
+#: transcript (see :func:`_extract_transcript_cwd`). Real transcripts run to
+#: hundreds of megabytes, so this seam must never read one in full:
+#: ``_CWD_SCAN_MAX_LINES`` bounds how many leading records are inspected, and
+#: ``_CWD_SCAN_MAX_LINE_BYTES`` skips any single record too large to be a
+#: plausible cwd-bearing header line rather than paying to decode it.
+_CWD_SCAN_MAX_LINES = 12
+_CWD_SCAN_MAX_LINE_BYTES = 1_000_000
+
+
+def _skip_rest_of_overlong_line(f: BinaryIO) -> None:
+    """Step past the tail of a line that exceeded the byte cap.
+
+    Reads in cap-sized chunks and holds none of them, so stepping over a
+    malformed record costs bounded memory no matter how long the record is.
+    The scan continues from the next line rather than abandoning the file: a
+    huge early record must not hide a plain cwd-bearing one behind it.
+    """
+    while True:
+        chunk = f.readline(_CWD_SCAN_MAX_LINE_BYTES)
+        if not chunk or chunk.endswith(b"\n"):
+            return
+
+
+def _extract_transcript_cwd(path: Path) -> Path | None:
+    """Bounded head-scan for the cwd recorded near the start of a transcript.
+
+    Reads at most ``_CWD_SCAN_MAX_LINES`` lines, JSON-decoding each in turn,
+    and returns the first decoded dict's string ``cwd``. A line longer than
+    ``_CWD_SCAN_MAX_LINE_BYTES`` is skipped without being decoded, so a huge
+    early line can never win over a plain one further down within the window.
+
+    The cap bounds the READ, not just the decode: no single call takes more
+    than ``_CWD_SCAN_MAX_LINE_BYTES + 1`` bytes, so a corrupt transcript
+    carrying no newline at all costs bounded memory instead of its full size.
+
+    Returns ``None`` — never raises — when the file cannot be opened, no line
+    within the window decodes to a JSON object, or no decoded object carries a
+    non-empty string ``cwd``. This is the seam's only source of an
+    "unreadable/undecodable transcript" outcome; the caller turns that into a
+    row with ``cwd=None`` rather than dropping the row.
+    """
+    try:
+        with path.open("rb") as f:
+            for _ in range(_CWD_SCAN_MAX_LINES):
+                # Read WITH the cap, not merely check it afterwards: an
+                # unbounded readline() materializes the whole record first, so
+                # one malformed line with no newline would pull an entire
+                # multi-hundred-megabyte transcript into memory.
+                line = f.readline(_CWD_SCAN_MAX_LINE_BYTES + 1)
+                if not line:
+                    break
+                if len(line) > _CWD_SCAN_MAX_LINE_BYTES:
+                    if not line.endswith(b"\n"):
+                        _skip_rest_of_overlong_line(f)
+                    continue
+                try:
+                    record = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(record, dict):
+                    cwd = record.get("cwd")
+                    if isinstance(cwd, str) and cwd:
+                        return Path(cwd)
+    except OSError:
+        return None
+    return None
+
+
+def _iter_transcript_paths(projects_dir: Path) -> Iterator[Path]:
+    """Yield ``<projects>/*/*.jsonl``, stopping quietly at an unreadable tree.
+
+    The walk itself can fail — a project directory whose permissions deny a
+    listing raises mid-iteration, not at the call — and the transcript seam's
+    contract is that it never raises for an unreadable store. Stopping yields
+    the rows found so far, which is strictly more than the empty listing an
+    all-or-nothing guard would produce and never less than one.
+    """
+    try:
+        yield from projects_dir.glob("*/*.jsonl")
+    except OSError:
+        return
 
 
 #: Cap on the raw-output excerpt embedded in a ``parse_session_list``
@@ -528,6 +615,78 @@ class ClaudeCodeHarness(Harness):
         if not _is_session_id(session_id):
             return None
         return ["claude", "--resume", session_id]
+
+    # -- session transcript enumeration ----------------------------------------
+    #
+    # Enumerates <claude-dir>/projects/*/*.jsonl — DEPTH 2 ONLY. Claude Code
+    # nests per-session subagent and tool-result transcripts under
+    # <session-id>/subagents/ and <session-id>/tool-results/; a recursive glob
+    # would return those too, and on a real store they vastly outnumber genuine
+    # top-level transcripts. Depth-2 is therefore not an optimization — it is
+    # what makes "session transcripts" here mean the same top-level sessions
+    # :meth:`session_resume` can actually re-enter.
+    #
+    # A project directory's NAME is not consulted for anything but locating the
+    # file: it is a lossy munge of a launch cwd ('/' and '.' both collapse to
+    # '-'), so it cannot be reversed into a real path. The cwd this method
+    # returns always comes from :func:`_extract_transcript_cwd` reading the
+    # transcript's own content, never from the directory name.
+
+    def session_transcripts(
+        self, workspace: Path | None = None, *, env: dict[str, str] | None = None
+    ) -> list[SessionTranscript]:
+        """Enumerate top-level transcripts under ``<claude-dir>/projects/``.
+
+        See the base contract for the full semantics. Never raises: a missing
+        projects dir yields ``[]``, and a transcript this harness cannot open,
+        decode, or find a cwd inside still yields a row, with ``cwd=None``.
+        """
+        _env = env if env is not None else dict(os.environ)
+        projects_dir = _claude_dir(_env) / _PROJECTS_SUBDIR
+        if not projects_dir.is_dir():
+            return []
+
+        resolved_workspace = Path(workspace).resolve() if workspace is not None else None
+
+        rows: list[SessionTranscript] = []
+        for candidate in _iter_transcript_paths(projects_dir):
+            if not candidate.is_file():
+                continue
+            session_id = candidate.stem
+            if not _is_session_id(session_id):
+                continue
+            try:
+                mtime = candidate.stat().st_mtime
+            except OSError:
+                continue
+
+            raw_cwd = _extract_transcript_cwd(candidate)
+            # A relative recorded cwd is dropped rather than resolved. Resolving
+            # one anchors it at whatever directory camp happened to be invoked
+            # from, which would make both the reported location and the launch
+            # root a function of the caller's cwd — the very property that
+            # disqualifies a relative entry from the launch allowlist. Reporting
+            # no root is true; reporting a root that moves with the caller is not.
+            cwd = (
+                raw_cwd.resolve()
+                if raw_cwd is not None and raw_cwd.is_absolute()
+                else None
+            )
+
+            if resolved_workspace is not None and (
+                cwd is None or not cwd.is_relative_to(resolved_workspace)
+            ):
+                continue
+
+            rows.append(
+                SessionTranscript(
+                    session_id=session_id,
+                    cwd=cwd,
+                    modified_at=datetime.fromtimestamp(mtime, tz=timezone.utc),
+                )
+            )
+
+        return rows
 
     # -- session retention ----------------------------------------------------
     #
