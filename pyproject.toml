@@ -24,6 +24,9 @@ testpaths = [
     "tools/outpost/tests",
     "tools/ranger/tests",
 ]
+markers = [
+    "real_home: the test genuinely means the developer's real home; opts out of the Path.home() guard",
+]
 
 [tool.ruff]
 # PEP 8 style enforcement. PEP 8 explicitly allows teams to relax the 79-column

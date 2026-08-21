@@ -31,9 +31,11 @@ class TestPrecedence:
     def test_userprofile_stands_in_for_home(self, tmp_path):
         assert claude_config_file({"USERPROFILE": str(tmp_path)}) == tmp_path / ".claude.json"
 
+    @pytest.mark.real_home
     def test_empty_env_falls_back_to_the_real_home(self):
         assert claude_config_file({}) == Path.home() / ".claude.json"
 
+    @pytest.mark.real_home
     def test_none_env_falls_back_to_the_real_home(self):
         assert claude_config_file(None) == Path.home() / ".claude.json"
 

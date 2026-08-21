@@ -1088,6 +1088,7 @@ class TestClaudeCodeParseSessionListControllable:
         assert records[0].controllable is False
 
 
+@pytest.mark.real_home  # the error excerpt redacts the real home, so it must resolve it
 class TestClaudeCodeParseSessionListFailures:
     def test_non_json_stdout_raises_with_offending_field_named(self):
         with pytest.raises(HarnessError, match="decode"):
@@ -1243,6 +1244,7 @@ class TestClaudeCodeParseSessionListOptionalFields:
         assert rec.started_at is None
 
 
+@pytest.mark.real_home  # the error excerpt redacts the real home, so it must resolve it
 class TestClaudeCodeParseSessionListErrorExcerpt:
     def test_error_message_is_bounded_and_truncates_path_bearing_fields(self, tmp_path):
         long_cwd = str(tmp_path / ("x" * 5000))
