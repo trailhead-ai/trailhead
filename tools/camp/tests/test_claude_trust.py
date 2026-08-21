@@ -826,3 +826,38 @@ class TestDeferredImport:
                     )
         finally:
             importlib.reload(mod)
+
+
+class TestRelativeOverrideIsRefused:
+    """A relative CLAUDE_CONFIG_DIR is refused rather than resolved against camp's cwd.
+
+    camp's cwd is not the launched session's, so a relative override would put the
+    trust key somewhere Claude never looks — and `mkdir(parents=True)` would happily
+    build that tree and report success. Same posture as the concierge's own
+    `_absolute_override`: overrides must be absolute.
+    """
+
+    def test_a_relative_override_aborts_without_writing(self, tmp_path, capsys, monkeypatch):
+        from camp.launch.claude_trust import pretrust_workspace
+
+        monkeypatch.chdir(tmp_path)
+        launch_dir = tmp_path / "ws"
+        launch_dir.mkdir()
+        env = {"HOME": str(tmp_path / "home"), "CLAUDE_CONFIG_DIR": "relative-claude"}
+
+        assert pretrust_workspace(launch_dir, workspace_root=launch_dir, env=env) is False
+
+        err = capsys.readouterr().err
+        assert "is relative; override paths must be absolute" in err
+        assert not (tmp_path / "relative-claude").exists()
+
+    def test_an_absolute_override_is_still_honoured(self, tmp_path):
+        from camp.launch.claude_trust import pretrust_workspace
+
+        cfg = tmp_path / "abs-claude"
+        launch_dir = tmp_path / "ws"
+        launch_dir.mkdir()
+        env = {"HOME": str(tmp_path / "home"), "CLAUDE_CONFIG_DIR": str(cfg)}
+
+        assert pretrust_workspace(launch_dir, workspace_root=launch_dir, env=env) is True
+        assert (cfg / ".claude.json").exists()

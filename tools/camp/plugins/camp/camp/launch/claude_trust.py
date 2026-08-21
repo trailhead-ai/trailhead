@@ -32,8 +32,8 @@ Design notes:
   reappears after bring-up, re-run the manual interactive check to validate the
   current entry shape.
 
-Failure posture: every *expected* abort (out-of-confinement, malformed /
-unreadable / structurally-wrong existing file) emits a single `camp: …` line on
+Failure posture: every *expected* abort (out-of-confinement, relative
+CLAUDE_CONFIG_DIR, malformed / unreadable / structurally-wrong existing file) emits a single `camp: …` line on
 stderr and returns without raising.  An *unexpected* failure of the atomic write
 itself (after the merged payload is built) unlinks the temp file and propagates —
 the best-effort caller (bring_up_workspace) catches it, logs `camp: pretrust
@@ -109,7 +109,7 @@ def pretrust_workspace(
 
     Returns True when trust is in place (a fresh write, or the already-trusted
     idempotent no-op). Returns False on every abort path below (out-of-confinement,
-    unreadable / malformed / structurally-wrong existing file) — each still emits
+    relative CLAUDE_CONFIG_DIR, unreadable / malformed / structurally-wrong existing file) — each still emits
     its camp: stderr line and does not raise.
 
     Failure posture: malformed / unreadable existing file → emit camp: stderr, return False.
@@ -127,6 +127,20 @@ def pretrust_workspace(
         print(
             f"camp: pretrust skipped — {launch_dir} is not under workspace_root "
             f"{workspace_root} (confinement check)",
+            file=sys.stderr,
+        )
+        return False
+
+    # A relative CLAUDE_CONFIG_DIR would resolve against camp's cwd rather than
+    # the launched session's, and the write below creates its parent tree — so a
+    # mistyped override would build an arbitrary directory and report success on
+    # a trust key Claude never reads. Refused, matching the concierge's own
+    # absolute-override rule.
+    override = (env or {}).get("CLAUDE_CONFIG_DIR", "").strip()
+    if override and not Path(override).is_absolute():
+        print(
+            f"camp: pretrust skipped — CLAUDE_CONFIG_DIR={override!r} is relative; "
+            "override paths must be absolute",
             file=sys.stderr,
         )
         return False
