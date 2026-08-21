@@ -1,6 +1,7 @@
 """Tests for trailhead/harness/ — the harness interface, factory, and detection."""
 
 import dataclasses
+import inspect
 import json
 import os
 from datetime import datetime, timezone
@@ -212,29 +213,65 @@ class _BareHarness(Harness):
     def generate_manifest(self, tools, composed_root):
         raise NotImplementedError
 
-    def is_registered(self, composed_root):
+    def is_registered(self, composed_root, *, env=None):
         raise NotImplementedError
 
-    def is_installed(self, tool, composed_root):
+    def is_installed(self, tool, composed_root, *, env=None):
         raise NotImplementedError
 
-    def installed_tools(self, composed_root):
+    def installed_tools(self, composed_root, *, env=None):
         raise NotImplementedError
 
-    def register(self, composed_root, *, runner=None):
+    def register(self, composed_root, *, runner=None, env=None):
         raise NotImplementedError
 
-    def install_tool(self, tool, composed_root, *, runner=None):
+    def install_tool(self, tool, composed_root, *, runner=None, env=None):
         raise NotImplementedError
 
-    def rewire_tool(self, tool, composed_root, *, runner=None):
+    def rewire_tool(self, tool, composed_root, *, runner=None, env=None):
         raise NotImplementedError
 
-    def unregister_tool(self, tool, composed_root, *, runner=None):
+    def unregister_tool(self, tool, composed_root, *, runner=None, env=None):
         raise NotImplementedError
 
-    def unregister_marketplace(self, composed_root, *, runner=None):
+    def unregister_marketplace(self, composed_root, *, runner=None, env=None):
         raise NotImplementedError
+
+
+class TestBareHarnessTracksTheSeam:
+    """The exemplar harness must be callable exactly the way the core calls it.
+
+    ``_BareHarness`` is this repo's only worked example of implementing the
+    ``Harness`` seam, so a new harness gets written from it. An ABC does not
+    check signatures, so a stale parameter list here raises ``TypeError`` in the
+    field — on the first real ``wire()`` run — rather than at definition time.
+    This pins the exemplar to the seam so it cannot drift silently.
+    """
+
+    def test_every_seam_method_takes_the_seam_parameters(self):
+        for name in sorted(Harness.__abstractmethods__):
+            declared = inspect.signature(getattr(Harness, name))
+            implemented = inspect.signature(getattr(_BareHarness, name))
+            assert list(implemented.parameters) == list(declared.parameters), name
+            for pname, param in declared.parameters.items():
+                assert implemented.parameters[pname].kind == param.kind, f"{name}.{pname}"
+
+    def test_the_core_can_call_every_seam_method_with_env(self):
+        """The calls ``wire()`` makes, with the keywords it actually passes."""
+        h = _BareHarness()
+        env: dict[str, str] = {}
+        for call in (
+            lambda: h.is_registered(Path("x"), env=env),
+            lambda: h.is_installed("lore", Path("x"), env=env),
+            lambda: h.installed_tools(Path("x"), env=env),
+            lambda: h.register(Path("x"), runner=None, env=env),
+            lambda: h.install_tool("lore", Path("x"), runner=None, env=env),
+            lambda: h.rewire_tool("lore", Path("x"), runner=None, env=env),
+            lambda: h.unregister_tool("lore", Path("x"), runner=None, env=env),
+            lambda: h.unregister_marketplace(Path("x"), runner=None, env=env),
+        ):
+            with pytest.raises(NotImplementedError):
+                call()
 
 
 class TestUserRulesetBaseDefault:
