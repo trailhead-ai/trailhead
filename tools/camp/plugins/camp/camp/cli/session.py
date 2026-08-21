@@ -44,6 +44,7 @@ import os
 import sys
 import time
 from pathlib import Path
+from typing import NoReturn
 
 #: Bounds for `camp new --launch`'s provisioning wait. Provisioning clones and
 #: sets up every member repo, so the ceiling is generous; the floor is that this
@@ -431,21 +432,16 @@ def _session_pool(groups, *, verb: str, env: dict[str, str]) -> tuple[list, list
     return transcripts, live, answered
 
 
-def _resolve_session_reference(ref: str, *, env: dict[str, str], as_json: bool):
-    """Resolve *ref* to one addressable session; return it with the group configs.
-
-    Both halves come back because the caller needs both, and loading the configs
-    a second time would let the name rule's two applications drift apart.
-
-    The pool is every addressable harness's on-disk transcripts UNION its live
-    sessions. A harness with no transcript concept — or one whose store camp
-    cannot read at all, which the seam contract forbids but a third-party harness
-    may still do — contributes no transcripts, and if NONE of them has one the
-    reference is unanswerable and camp refuses naming them: an unanswerable seam
-    is a refusal, never a permissive default, and never a traceback.
-    The live probe is the opposite posture — it only ever ADDS candidates, so a
-    probe that fails narrows what camp can offer without being able to make camp
-    resume the wrong thing.
+def _die_unresolved(
+    outcome,
+    ref: str,
+    *,
+    verb: str,
+    harness,
+    env: dict[str, str],
+    as_json: bool,
+) -> NoReturn:
+    """Refuse a *ref* that did not address exactly one session, in *verb*'s terms.
 
     Three outcomes end in a refusal, and the wording of each is the whole point:
 
@@ -456,10 +452,46 @@ def _resolve_session_reference(ref: str, *, env: dict[str, str], as_json: bool):
     * NO match against an EMPTY pool is not a ref problem at all, and says so —
       naming the harness's retention window instead of implying the operator
       mistyped something.
+
+    Every ref-addressed verb refuses through here, so an operator who mistypes
+    the same reference at two of them is told the same thing and only the
+    command name differs. *verb* is that name, and *harness* is the one whose
+    retention window explains an empty pool.
+    """
+    from ..launch.recovery import Ambiguous, NoMatch
+    from ..spine import _die
+
+    if isinstance(outcome, Ambiguous):
+        _print_candidates(outcome.candidates, as_json=as_json)
+        _die(
+            f"camp {verb}: {ref!r} matches {len(outcome.candidates)} sessions "
+            "(listed above) — re-run with a longer prefix naming exactly one",
+            code=_AMBIGUOUS_EXIT_CODE,
+        )
+
+    if isinstance(outcome, NoMatch) and outcome.pool_size:
+        _die(
+            f"camp {verb}: no candidate matched `{ref}`; run "
+            "`camp sessions --recoverable` to see what camp can address"
+        )
+    _die(
+        f"camp {verb}: harness {_harness_display_name(harness)} reports no "
+        f"sessions at all — {_retention_hint(harness, env)}"
+    )
+
+
+def _resolve_session_reference(ref: str, *, env: dict[str, str], as_json: bool):
+    """Resolve *ref* to one addressable session; return it with the group configs.
+
+    Both halves come back because the caller needs both, and loading the configs
+    a second time would let the name rule's two applications drift apart.
+
+    The pool is :func:`_session_pool`'s, and a ref that does not address exactly
+    one session refuses through :func:`_die_unresolved`, so resume and stop
+    answer a mistyped reference identically.
     """
     from ..group.config import load_all_groups
-    from ..launch.recovery import Ambiguous, NoMatch, Resolved, resolve_session_ref
-    from ..spine import _die
+    from ..launch.recovery import Resolved, resolve_session_ref
     from .common import _groups_dir
 
     groups = load_all_groups(_groups_dir())
@@ -472,22 +504,8 @@ def _resolve_session_reference(ref: str, *, env: dict[str, str], as_json: bool):
     if isinstance(outcome, Resolved):
         return outcome.candidate, groups
 
-    if isinstance(outcome, Ambiguous):
-        _print_candidates(outcome.candidates, as_json=as_json)
-        _die(
-            f"camp launch: {ref!r} matches {len(outcome.candidates)} sessions "
-            "(listed above) — re-run with a longer prefix naming exactly one",
-            code=_AMBIGUOUS_EXIT_CODE,
-        )
-
-    if isinstance(outcome, NoMatch) and outcome.pool_size:
-        _die(
-            f"camp launch: no candidate matched `{ref}`; run "
-            "`camp sessions --recoverable` to see what camp can address"
-        )
-    _die(
-        f"camp launch: harness {_harness_display_name(answered[0])} reports no "
-        f"sessions at all — {_retention_hint(answered[0], env)}"
+    _die_unresolved(
+        outcome, ref, verb="launch", harness=answered[0], env=env, as_json=as_json
     )
 
 
@@ -1254,23 +1272,14 @@ def _cmd_kill_cli(args: list[str], env: dict[str, str] | None = None) -> None:
         env=resolved_env,
     )
 
-    if isinstance(outcome, Ambiguous):
-        _print_candidates(outcome.candidates, as_json=as_json)
-        _die(
-            f"camp kill: {ref!r} matches {len(outcome.candidates)} sessions "
-            "(listed above) — re-run with a longer prefix naming exactly one",
-            code=_AMBIGUOUS_EXIT_CODE,
-        )
-
-    if isinstance(outcome, NoMatch):
-        if not outcome.pool_size:
-            _die(
-                f"camp kill: harness {_harness_display_name(answered[0])} reports no "
-                f"sessions at all — {_retention_hint(answered[0], resolved_env)}"
-            )
-        _die(
-            f"camp kill: no candidate matched `{ref}`; run "
-            "`camp sessions --recoverable` to see what camp can address"
+    if isinstance(outcome, (Ambiguous, NoMatch)):
+        _die_unresolved(
+            outcome,
+            ref,
+            verb="kill",
+            harness=answered[0],
+            env=resolved_env,
+            as_json=as_json,
         )
 
     candidate = outcome.candidate
