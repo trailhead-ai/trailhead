@@ -1,6 +1,6 @@
 ---
 name: concierge
-description: Create or reuse a camp workspace for a group and launch a detached harness session into it — or bring a dead one back — reported so it reads on a phone. Use for /camp:concierge, "make me a workspace for <group>", "spin up a workspace and put a session in it", "give me another session in <workspace>", "start a session for <group>", "that session died, bring it back", "what sessions can I recover", "start a session in <directory>".
+description: Create or reuse a camp workspace for a group and launch a detached harness session into it — or bring a dead one back — reported so it reads on a phone. Use for /camp:concierge, "make me a workspace for <group>", "spin up a workspace and put a session in it", "give me another session in <workspace>", "start a session for <group>", "that session died, bring it back", "stop that session", "kill the session", "free up some memory", "what sessions can I recover", "start a session in <directory>".
 ---
 
 # /camp:concierge — make a workspace and put a session in it
@@ -192,6 +192,60 @@ A re-invocation that races a still-running create for the same slug resolves to
 camp's outcome — an existing workspace is the reuse path, and partial state is
 camp's refusal to relay. Do not add locking or bookkeeping here to paper over it.
 
+## Stopping a session
+
+An idle session costs the same memory as a working one, and stopping it is the only
+way to get that memory back. It is a state-changing call, so it takes an explicit
+confirmation like any other mutating action, and it is the one mutating call for
+that operator action:
+
+```bash
+camp kill <ref> --json
+```
+
+`<ref>` is any unambiguous prefix of a session's name or id — the same vocabulary
+`camp launch --resume` uses, passed to camp exactly as the operator gave it. No
+group is needed: the reference names the session and the session names everything
+else. The workspace, its worktree, and its working tree are left completely
+untouched; nothing is removed, cleaned, or marked.
+
+Say plainly that a stop is not the end of the conversation. The harness keeps the
+transcript, and a resume preserves the session id, so the reference does not change
+across a stop and a later resume — an operator who has the ref can keep using it
+for as many cycles as they like. Bringing it back is
+`camp launch --resume <ref> --json`, the flow in the next section.
+
+**Both successes exit 0, and the `outcome` field is what tells the two apart.**
+Success prints `{"session_id": …, "tmux_name": …, "outcome": …}` — `"stopped"` when
+camp confirmed the session is gone and its memory reclaimed, `"already-down"` when
+there was nothing running to stop. Report which one happened; an exit code alone
+cannot say, and claiming a reclaim that did not occur is the error to avoid here.
+Stopping a session that was already down is success, exit 0, with camp's line on
+stderr saying so — re-running a stop after a dropped connection is ordinary, not a
+mistake, so never report it as a failure.
+
+Everything else is exit 1 and a failure: stdout is empty, camp's single reason
+line is on stderr, and it is relayed as written. **A session still running after
+the stop is a failure, not a success with a caveat** — that outcome exits 1 like
+any other, because the memory was not reclaimed, so it is never softened into
+"stopped, but". The same
+applies to a ref that matched nothing, to a name held by a pane camp did not
+launch, and to a tmux that did not answer.
+
+A ref matching more than one session is the one exception, and it reads exactly
+like the ambiguous `--resume` below: exit 2 with the candidate rows on stdout, to
+relay and ask about rather than to guess between.
+
+Two sessions are refused outright, and both refusals are camp's to make and yours
+to relay. A session may not stop itself, and **camp refuses to stop the session this
+skill is running in** — the anchor this whole skill is driven from, whose loss would
+be an unrecoverable lockout with no phone-side way back. Never work around either
+refusal.
+
+Choosing what to stop is the operator's call, not yours. Camp surfaces no memory or
+idleness figure, so there is nothing here to rank sessions by — list what is live
+with `camp sessions <slug> --group <name> --json` and let them pick.
+
 ## Recovering a dead session
 
 A session that died is brought back with its conversation intact, from the same
@@ -236,6 +290,13 @@ workspace needs no group; one that started anywhere else is named as
 `camp launch --resume <ref> --group <name> --json`, and camp refuses when that
 group's configuration does not cover where the session lived. Success prints the
 same object the reuse path prints.
+
+A resume past the harness's retention window comes back empty and still exits 0,
+so the object carries one extra key, `history_restored`, set to false when there
+was no conversation left to replay. It appears only on that degraded outcome — an
+ordinary resume prints exactly the shape above — and camp says the same thing on
+stderr. Relay it: the session is running under the same reference, but the thread
+it held is gone.
 
 **Exit 2 is not a failure.** A reference matching more than one session exits 2
 and prints the candidate rows on stdout, in the same shape as the listing above.
