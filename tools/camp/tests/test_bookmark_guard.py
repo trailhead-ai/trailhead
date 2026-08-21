@@ -15,6 +15,7 @@ touched.
 
 from __future__ import annotations
 
+import importlib.util
 import sys
 from pathlib import Path
 from typing import Any
@@ -28,13 +29,24 @@ if str(_PLUGIN_DIR) not in sys.path:
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+#: The hermetic harness stand-ins, addressed by path (same pattern as
+#: test_statelessness.py). `camp rm` now asks the harness which sessions are
+#: rooted in the workspace and refuses when it cannot get an answer, so these
+#: bookmark-guard tests have to pin that seam even though they are not about it.
+_STUB_SOURCE = Path(__file__).resolve().parent / "_harness_stub.py"
+_stub_spec = importlib.util.spec_from_file_location("camp_tests_harness_stub", _STUB_SOURCE)
+assert _stub_spec and _stub_spec.loader, _STUB_SOURCE
+_stub = importlib.util.module_from_spec(_stub_spec)
+sys.modules[_stub_spec.name] = _stub
+_stub_spec.loader.exec_module(_stub)
+
 GROUP_NAME = "demo"
 SLUG = "ws-slug"
 
 
 @pytest.fixture()
 def env(tmp_path: Path) -> dict[str, str]:
-    return {"CAMP_STATE_DIR": str(tmp_path / "state")}
+    return {"CAMP_STATE_DIR": str(tmp_path / "state"), **_stub.harness_env(tmp_path)}
 
 
 @pytest.fixture()

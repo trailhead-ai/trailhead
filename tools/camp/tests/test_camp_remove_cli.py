@@ -27,6 +27,7 @@ Pattern: fake-git + tmp_path + CAMP_STATE_DIR/CAMP_CONFIG_DIR (no real
 from __future__ import annotations
 
 import importlib
+import importlib.util
 import inspect
 import json
 import os
@@ -44,6 +45,15 @@ _CLI_CAMP = _PLUGIN_DIR / "cli" / "camp"
 
 if str(_PLUGIN_DIR) not in sys.path:
     sys.path.insert(0, str(_PLUGIN_DIR))
+
+#: The hermetic harness stand-ins, addressed by path so the reuse is
+#: unambiguous under any invocation (same pattern as test_statelessness.py).
+_STUB_SOURCE = Path(__file__).resolve().parent / "_harness_stub.py"
+_stub_spec = importlib.util.spec_from_file_location("camp_tests_harness_stub", _STUB_SOURCE)
+assert _stub_spec and _stub_spec.loader, _STUB_SOURCE
+_stub = importlib.util.module_from_spec(_stub_spec)
+sys.modules[_stub_spec.name] = _stub
+_stub_spec.loader.exec_module(_stub)
 
 
 def _load_cli_module():
@@ -105,19 +115,6 @@ def _wait_provisioned(manifest_path: Path, members: list[str], timeout: float = 
     )
 
 
-#: A `claude` stand-in: the only subcommand camp reaches for on this surface is
-#: the live-session enumeration, whose answer each test writes into a file.
-_CLAUDE_STUB = """#!/usr/bin/env python3
-import os, sys
-
-if sys.argv[1:3] == ["agents", "--json"]:
-    path = os.environ.get("CAMP_FAKE_AGENTS_FILE")
-    sys.stdout.write(open(path).read() if path else "[]")
-    sys.exit(0)
-sys.exit(0)
-"""
-
-
 @pytest.fixture()
 def remove_env(tmp_path: Path):
     """CLI environment with two real git repos + a provisioned workspace.
@@ -142,16 +139,8 @@ def remove_env(tmp_path: Path):
     # Pin BOTH harness seams the derived teardown guard reads — the transcript
     # store and the live-session probe — so no test can answer from a real
     # ~/.claude or a real `claude` on the developer's PATH.
-    env["TRAILHEAD_CLAUDE_DIR"] = str(tmp_path / "claude")
-    agents_file = tmp_path / "agents.json"
-    agents_file.write_text("[]", encoding="utf-8")
-    bin_dir = tmp_path / "fakebin"
-    bin_dir.mkdir()
-    stub = bin_dir / "claude"
-    stub.write_text(_CLAUDE_STUB, encoding="utf-8")
-    stub.chmod(0o755)
-    env["CAMP_FAKE_AGENTS_FILE"] = str(agents_file)
-    env["PATH"] = f"{bin_dir}{os.pathsep}{env.get('PATH', '')}"
+    env.update(_stub.harness_env(tmp_path, path=env.get("PATH", "")))
+    agents_file = _stub.fake_agents_file(tmp_path)
 
     # Author group via real CLI
     r = subprocess.run(
@@ -491,13 +480,11 @@ def _make_group_config(name, members, *, branch_pattern="worktree-{slug}"):
 def _camp_state_env(tmp_path: Path) -> dict[str, str]:
     state_root = tmp_path / "camp-state"
     state_root.mkdir(parents=True, exist_ok=True)
-    # The derived teardown guard reads the harness's transcript store, so the
-    # store has to be hermetic here too: without this the guard would answer
-    # from the developer's real ~/.claude.
-    return {
-        "CAMP_STATE_DIR": str(state_root),
-        "TRAILHEAD_CLAUDE_DIR": str(tmp_path / "claude"),
-    }
+    # The derived teardown guard reads BOTH harness seams, so both have to be
+    # hermetic here too — and the live probe has no permissive branch, so an
+    # environment with no `claude` on PATH would refuse every removal rather
+    # than answer. Give it the same stand-in the subprocess fixture uses.
+    return {"CAMP_STATE_DIR": str(state_root), **_stub.harness_env(tmp_path)}
 
 
 @pytest.fixture()
@@ -1351,6 +1338,24 @@ class TestCampRemoveSessionGuard:
         r = _camp(remove_env, "rm", "ws-slug", "--group", "rmgroup")
         assert r.returncode != 0, (
             f"an unanswerable enumeration must refuse removal: {r.stderr}"
+        )
+        assert "--force" in r.stderr, r.stderr
+        assert _manifest_path(remove_env).is_file(), "nothing may be torn down"
+
+    def test_a_harness_that_exited_nonzero_fails_closed(self, remove_env):
+        """A failed probe is not an empty one. The enumeration is a general
+        listing command with no exit-code contract, so a transient failure must
+        not read as "no sessions here" on an irreversible operation."""
+        r = _camp(
+            remove_env,
+            "rm",
+            "ws-slug",
+            "--group",
+            "rmgroup",
+            extra_env={"CAMP_FAKE_AGENTS_FAIL": "1"},
+        )
+        assert r.returncode != 0, (
+            f"a probe that failed must refuse removal: {r.stderr}"
         )
         assert "--force" in r.stderr, r.stderr
         assert _manifest_path(remove_env).is_file(), "nothing may be torn down"

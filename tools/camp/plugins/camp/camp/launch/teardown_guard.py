@@ -24,12 +24,31 @@ blocks" would turn a failure into a reported success on a destructive,
 irreversible surface. `--force` remains the operator's override — the guard is
 here so the destruction is chosen, not so it is impossible.
 
-The live probe is tri-state at its own seam, for the same reason the stop
-engine's is: a probe that could not run at all knows nothing, while a probe that
-RAN and answered — even by exiting nonzero, the way a dead `tmux` server reports
-itself — has answered. The one exception is a binary that is not installed:
-nothing can be running under a harness that is not on the machine, so that is an
-answer of zero live sessions rather than an unanswerable seam.
+The live probe has NO permissive branch, and the two that were considered are
+recorded here because both are tempting and both are wrong:
+
+- A NONZERO EXIT is not "no sessions". `claude agents --json` is a general
+  listing command with no documented exit-code contract, so its nonzero exit is
+  as consistent with a transient auth failure, a config error, or a crash as it
+  is with an empty list. The analogy to the stop engine's tri-state
+  `Tmux.has_session` does not carry: `tmux has-session -t =<name>` is an
+  EXISTENCE QUERY whose nonzero exit specifically means the name does not
+  exist. Camp already reads this seam the strict way everywhere else —
+  :func:`launch.session.enumerate_records` returns ``None`` for "the
+  enumeration command failed" — and a guard that dissented on a shared seam
+  would be the one surface where a failed probe means "go ahead".
+
+- A BINARY THAT IS NOT INSTALLED is not "nothing can be running" either. What
+  the probe actually establishes is that the binary is not on PATH *in this
+  process's environment*, which is a claim about the caller's environment and
+  not about the machine: a session launched from a login shell, from a
+  different user's profile, or from a partially-provisioned or PATH-scoped
+  invocation runs perfectly well while `camp rm` cannot find the binary to ask
+  about it. Camp's own in-process callers pass deliberately stripped
+  environments, which is exactly the shape that would read as "empty".
+
+So every way the probe can fail to produce a parsed listing is
+:class:`EnumerationUnavailable`, and `--force` stays the operator's override.
 """
 
 from __future__ import annotations
@@ -108,17 +127,16 @@ def _probe_live(harness, env: Mapping[str, str]) -> list:
             env=dict(env),
             timeout=PROBE_TIMEOUT_SECONDS,
         )
-    except FileNotFoundError:
-        # Nothing can be running under a binary that is not installed.
-        return []
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise EnumerationUnavailable(
             f"camp could not ask harness {_display_name(harness)} which sessions "
             f"are live: {exc}"
         ) from exc
     if completed.returncode != 0:
-        # The probe ran and reported no sessions the only way it can.
-        return []
+        raise EnumerationUnavailable(
+            f"harness {_display_name(harness)}'s live session listing exited "
+            f"{completed.returncode}, so camp does not know what is running here"
+        )
     try:
         return list(harness.parse_session_list(completed.stdout))
     except Exception as exc:  # noqa: BLE001 — an unparsable answer is no answer

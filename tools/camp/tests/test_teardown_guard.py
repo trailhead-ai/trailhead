@@ -13,10 +13,13 @@ Test contract:
   unanswerable seam is never a permissive default.
 - The refusal names every blocking session by derived name and by root, so the
   operator can stop it, resume it, or re-run with `--force`.
-- The live probe is tri-state at its own seam: a harness with no enumeration
-  concept, or one whose probe times out, is UNKNOWN and fails closed; a probe
-  that ran and answered — including one whose binary is not installed, under
-  which nothing can be running — is an answer.
+- The live probe has NO permissive branch. A harness with no enumeration
+  concept, a probe that times out, a probe whose binary is not installed, a
+  probe that exits nonzero, and an answer camp cannot parse are all UNKNOWN and
+  all fail closed. The nonzero exit and the missing binary get their own tests
+  because both are tempting to read as "no sessions" and neither is: this probe
+  is a general listing command with no exit-code contract, and PATH describes
+  the caller's environment rather than the machine.
 - The module stays pure data-to-data: no printing, no exiting, no `os.environ`.
 
 Every path comes from ``tmp_path`` and every group state dir from an injected
@@ -318,27 +321,31 @@ def test_a_probe_camp_cannot_parse_fails_closed(tmp_path: Path, monkeypatch) -> 
         _gather([_Unparsable()], _env(tmp_path), monkeypatch, run=_ok())
 
 
-def test_an_uninstalled_harness_binary_is_an_answer(tmp_path: Path, monkeypatch) -> None:
-    """Nothing can be running under a binary that is not installed — that is an
-    answer of zero live sessions, not an unanswerable seam."""
+def test_an_uninstalled_harness_binary_fails_closed(tmp_path: Path, monkeypatch) -> None:
+    """A binary missing from PATH is a fact about the CALLER'S ENVIRONMENT, not
+    about the machine: a session launched from a login shell runs perfectly well
+    while a stripped-PATH `camp rm` cannot find the binary to ask about it."""
+    from camp.launch.teardown_guard import EnumerationUnavailable
 
     def run(argv, **kwargs):
         raise FileNotFoundError(argv[0])
 
-    transcripts, live = _gather([_Harness()], _env(tmp_path), monkeypatch, run=run)
-    assert live == []
+    with pytest.raises(EnumerationUnavailable):
+        _gather([_Harness()], _env(tmp_path), monkeypatch, run=run)
 
 
-def test_a_probe_that_answered_nonzero_is_an_answer(tmp_path: Path, monkeypatch) -> None:
-    """A probe that ran and reported "no sessions" the only way it can — a
-    nonzero exit, the way `tmux list-sessions` reports a dead server — has
-    answered. Camp read the exit status; it is not guessing."""
+def test_a_probe_that_exited_nonzero_fails_closed(tmp_path: Path, monkeypatch) -> None:
+    """The enumeration is a general listing command with no documented
+    exit-code contract, so a nonzero exit is as consistent with a transient
+    auth failure or a crash as with an empty list — and camp reads this same
+    seam as "could not tell" everywhere else."""
+    from camp.launch.teardown_guard import EnumerationUnavailable
 
     def run(argv, **kwargs):
-        return subprocess.CompletedProcess(argv, 1, "", "no server running")
+        return subprocess.CompletedProcess(argv, 1, "", "not logged in")
 
-    transcripts, live = _gather([_Harness()], _env(tmp_path), monkeypatch, run=run)
-    assert live == []
+    with pytest.raises(EnumerationUnavailable):
+        _gather([_Harness()], _env(tmp_path), monkeypatch, run=run)
 
 
 # ---------------------------------------------------------------------------
