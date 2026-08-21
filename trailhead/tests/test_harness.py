@@ -1320,6 +1320,25 @@ class TestClaudeCodeSessionTranscripts:
         rows = ClaudeCodeHarness().session_transcripts(env=self._env(claude_dir))
         assert [r.session_id for r in rows] == ["sess-a"]
 
+    def test_a_relative_recorded_cwd_is_dropped_rather_than_anchored_at_the_caller(
+        self, tmp_path, monkeypatch
+    ):
+        """A recorded cwd that is not absolute names no directory camp can trust.
+
+        Resolving it would anchor it at whatever directory the CLI happened to
+        be invoked from, making both the reported location and the resumed
+        launch root a function of the caller's cwd. Reporting no root is true;
+        reporting one that moves with the caller is not.
+        """
+        claude_dir = tmp_path / ".claude"
+        self._write(claude_dir, "some-project", "sess-rel", [json.dumps({"cwd": ".ssh"})])
+        monkeypatch.chdir(tmp_path)
+
+        rows = ClaudeCodeHarness().session_transcripts(env=self._env(claude_dir))
+
+        assert [r.session_id for r in rows] == ["sess-rel"]
+        assert rows[0].cwd is None
+
     def test_nested_subagent_and_tool_result_transcripts_are_not_enumerated(self, tmp_path):
         claude_dir = tmp_path / ".claude"
         proj = claude_dir / "projects" / "some-project"

@@ -79,16 +79,32 @@ def _workspace_containers(
     sessions resolves each group's state directory once rather than once per
     row.
 
-    A group whose config carries no name is skipped rather than raising: the
-    name rule's contract is to answer, and one malformed entry must not be able
-    to stop a listing from naming every other session.
+    A group whose config carries no name is skipped rather than raising, as is
+    one whose name camp refuses to resolve a state directory for: the name
+    rule's contract is to answer, and one malformed entry must not be able to
+    stop a listing from naming every other session.
+
+    A `worktrees` that resolves anywhere but where camp would have created it is
+    skipped too, and that skip is load-bearing rather than tidy. This container
+    is what the whole answer is measured against, so a symlink standing in its
+    place redefines "camp-managed" for every question asked afterwards — pointed
+    at a root, it would make every directory on the machine answer as a camp
+    workspace, and the eligibility gate is skipped for exactly those. camp
+    created this directory or it did not; a link claiming to be it is neither.
     """
     containers = []
     for group in groups:
         name = (group.get("group") or {}).get("name")
         if not name:
             continue
-        containers.append((central_state_dir(name, env=dict(env)) / "worktrees").resolve())
+        try:
+            base = central_state_dir(name, env=dict(env)).resolve()
+        except Exception:
+            continue
+        container = (base / "worktrees").resolve()
+        if container != base / "worktrees":
+            continue
+        containers.append(container)
     return tuple(containers)
 
 
@@ -271,11 +287,17 @@ def _build_candidate(
     if root is None and record is not None:
         root = record.cwd
 
+    # Both halves are folded, and by the same rule the launch engine composes the
+    # tmux name with. The id half is not a formality: an id reaches camp as a
+    # transcript FILENAME, so it carries whatever the filesystem allowed, and a
+    # dot inside the first eight characters reads to tmux as a window/pane
+    # separator — a name it will create and then refuse to address.
+    short_id = sanitize_name_component(session_id[:8])
     if root is None:
-        derived_name = f"camp-{session_id[:8]}"
+        derived_name = f"camp-{short_id}"
     else:
         component = sanitize_name_component(_name_component(root.resolve(), containers))
-        derived_name = f"camp-{component}-{session_id[:8]}"
+        derived_name = f"camp-{component}-{short_id}"
 
     age_seconds = None
     if transcript is not None:

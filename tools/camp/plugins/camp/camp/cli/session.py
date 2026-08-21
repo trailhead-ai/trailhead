@@ -250,6 +250,26 @@ def _format_age(seconds: float | None) -> str:
     return f"{total // 86400}d"
 
 
+def _printable(root) -> str:
+    """A transcript-supplied path rendered so it cannot forge the listing.
+
+    The path comes out of a JSONL file the harness wrote, and camp does not get
+    to assume it holds one. A raw control character here is not cosmetic: an
+    embedded newline emits a second row indistinguishable from a real one, and
+    a carriage return plus an erase sequence rewrites the row already printed —
+    either of which advertises a session that does not exist and steers the
+    operator into resuming a reference somebody else chose. Escaping is enough
+    to make the row true; refusing to print it would lose the operator the one
+    fact that tells two candidates apart.
+
+    The JSON listing needs no equivalent: `json.dumps` escapes these already.
+    """
+    text = str(root)
+    return text.translate({c: f"\\x{c:02x}" for c in range(0x20)}).replace(
+        "\x7f", "\\x7f"
+    )
+
+
 def _candidate_line(candidate) -> str:
     """One candidate as an operator-facing row: name, id, where, how old.
 
@@ -266,9 +286,9 @@ def _candidate_line(candidate) -> str:
     if candidate.root is None:
         where = "directory unknown"
     elif candidate.root_missing:
-        where = f"{candidate.root} (gone)"
+        where = f"{_printable(candidate.root)} (gone)"
     else:
-        where = str(candidate.root)
+        where = _printable(candidate.root)
     return (
         f"{candidate.derived_name}  {candidate.session_id}  {where}  "
         f"{_format_age(candidate.age_seconds)}"
@@ -303,7 +323,10 @@ def _retention_hint(harness, env: dict[str, str]) -> str:
     merely failed to match would send an operator hunting for a session that is
     sitting right there under a different reference.
     """
-    days = harness.session_retention_days(env=env)
+    try:
+        days = harness.session_retention_days(env=env)
+    except Exception:  # noqa: BLE001 — a hint is never worth a traceback
+        days = None
     if days is None:
         return (
             "a transcript that has aged out of the harness's retention window is "
@@ -527,7 +550,7 @@ def _launch_resume(
         # Anywhere but a camp workspace, the allowlist is the containment
         # boundary — so the group supplying it is named explicitly, exactly as
         # `--dir` requires, and never inferred from where camp was invoked.
-        if explicit_group is None:
+        if not explicit_group:
             _die(
                 f"camp launch: session {candidate.session_id} was started in {root}, "
                 "which is not a camp workspace — re-run with an explicit --group "
@@ -664,7 +687,7 @@ def _cmd_launch_group_cli(
             )
         if not directory.strip():
             _die("camp launch: --dir requires a directory path")
-        if explicit_group is None:
+        if not explicit_group:
             _die(
                 "camp launch: --dir requires an explicit --group <name> — the "
                 "group's [launch] roots allowlist is what fences a directory-rooted "

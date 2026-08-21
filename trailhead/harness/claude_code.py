@@ -661,7 +661,17 @@ class ClaudeCodeHarness(Harness):
                 continue
 
             raw_cwd = _extract_transcript_cwd(candidate)
-            cwd = raw_cwd.resolve() if raw_cwd is not None else None
+            # A relative recorded cwd is dropped rather than resolved. Resolving
+            # one anchors it at whatever directory camp happened to be invoked
+            # from, which would make both the reported location and the launch
+            # root a function of the caller's cwd — the very property that
+            # disqualifies a relative entry from the launch allowlist. Reporting
+            # no root is true; reporting a root that moves with the caller is not.
+            cwd = (
+                raw_cwd.resolve()
+                if raw_cwd is not None and raw_cwd.is_absolute()
+                else None
+            )
 
             if resolved_workspace is not None and (
                 cwd is None or not cwd.is_relative_to(resolved_workspace)

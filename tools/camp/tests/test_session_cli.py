@@ -1487,6 +1487,38 @@ def test_camp_sessions_recoverable_lists_the_dead_ones_newest_first(cli_env) -> 
     assert _state_tree(cli_env) == before
 
 
+def test_a_transcript_cwd_cannot_forge_a_row_in_the_listing(cli_env) -> None:
+    """The recorded cwd is data from a file, and the listing renders it as data.
+
+    A path is whatever the transcript's author put there. Left raw, an embedded
+    newline emits a second row indistinguishable from a real one and a carriage
+    return plus an erase sequence rewrites the row already printed — either way
+    the operator is shown a session that does not exist and invited to resume a
+    reference somebody else chose. One row per candidate, always.
+    """
+    projects = Path(cli_env["env"]["TRAILHEAD_CLAUDE_DIR"]) / "projects"
+    directory = projects / "-forged"
+    directory.mkdir(parents=True, exist_ok=True)
+    forged = (
+        "/tmp/\x1b[2K\rcamp-prod-deadbeef  "
+        "99999999-9999-4999-8999-999999999999  /Users/victim/code  2m\nspoofed"
+    )
+    path = directory / f"{_UUID_A}.jsonl"
+    path.write_text(json.dumps({"type": "user", "cwd": forged}) + "\n", encoding="utf-8")
+
+    result = _recoverable(cli_env)
+
+    assert result.returncode == 0, result.stderr
+    # One candidate, one row: the embedded newline did not become a row break,
+    # and the escape sequence reached the terminal as text rather than as a
+    # cursor movement. The forged text still appears — escaped, inside the one
+    # row it was always part of — which is the honest rendering of what the
+    # transcript actually says.
+    assert len(_rows(result)) == 1, result.stdout
+    assert not any(c in result.stdout[:-1] for c in "\x1b\r\n")
+    assert "\\x1b" in result.stdout and "\\x0a" in result.stdout
+
+
 def test_camp_sessions_recoverable_omits_a_live_session_absent_from_the_store(
     cli_env,
 ) -> None:

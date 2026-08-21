@@ -1395,3 +1395,90 @@ class TestConfirmSession:
         sig = inspect.signature(session.confirm_session)
         assert sig.parameters["interval"].default == session._CONFIRM_POLL_INTERVAL_SECONDS
         assert sig.parameters["timeout"].default == session._CONFIRM_POLL_TIMEOUT_SECONDS
+
+
+class TestCampManagedClaimBoundary:
+    """What the camp-managed waiver does and does not buy.
+
+    The waiver exists because a directory camp computed from its own layout has
+    already answered the question the allowlist asks. These tests pin the two
+    halves of that: the waiver must not be obtainable for a directory camp did
+    not create, and it must not extend to the one rule that never depended on
+    who chose the directory.
+    """
+
+    def test_a_symlinked_worktrees_container_confers_nothing(self, rig, tmp_path):
+        """A link standing in for the container cannot redefine camp-managed.
+
+        The container is what every camp-managed answer is measured against, so
+        a symlink in its place pointed at a root would make every directory on
+        the machine answer as a workspace — and the waiver is granted for
+        exactly those. camp created the directory or it did not.
+        """
+        state = tmp_path / "state"
+        (state / "testgroup").mkdir(parents=True)
+        (state / "testgroup" / "worktrees").symlink_to(tmp_path)
+        target = tmp_path / "not-a-workspace"
+        target.mkdir()
+        env = _dir_env(tmp_path) | {"CAMP_STATE_DIR": str(state)}
+
+        with pytest.raises(rig["module"].LaunchError) as excinfo:
+            rig["module"].launch_session(
+                _dir_group(tmp_path, roots=[str(tmp_path / "elsewhere")]),
+                root=target,
+                name_component="odd-handle",
+                trust_scope=target,
+                env=env,
+                camp_managed_root=True,
+            )
+
+        assert "[launch] roots" in str(excinfo.value)
+        assert rig["spawn"].calls == []
+
+    def test_the_credential_rule_still_answers_inside_a_real_workspace(
+        self, rig, tmp_path
+    ):
+        """The waiver covers the allowlist, never the credential rule.
+
+        The allowlist asks who chose this directory and the waiver answers it.
+        The credential rule asks what is IN the directory, and that answer does
+        not change with the asker — so a workspace that happens to sit on a
+        credential store is refused exactly as a named one would be.
+        """
+        home = tmp_path / "home"
+        state = home / ".claude" / "state"
+        workspace = state / "testgroup" / "worktrees" / "feat-x"
+        workspace.mkdir(parents=True)
+        env = _dir_env(tmp_path) | {"CAMP_STATE_DIR": str(state)}
+
+        with pytest.raises(rig["module"].LaunchError) as excinfo:
+            rig["module"].launch_session(
+                _dir_group(tmp_path),
+                root=workspace,
+                name_component="feat-x",
+                trust_scope=workspace,
+                env=env,
+                camp_managed_root=True,
+            )
+
+        assert "credential store" in str(excinfo.value)
+        assert rig["spawn"].calls == []
+
+    def test_a_dotted_session_id_cannot_produce_an_unaddressable_tmux_name(
+        self, rig, tmp_path
+    ):
+        """Both halves of the tmux name are folded, not just the component.
+
+        An id reaches camp as a transcript FILENAME, so it carries whatever the
+        filesystem allowed. tmux reads a dot as a window/pane separator: it
+        creates such a session happily and then cannot address it, so the
+        confirm-timeout kill silently fails and leaves running the very process
+        camp just told the operator it had cleaned up.
+        """
+        root = tmp_path / "proj"
+        root.mkdir()
+
+        launched = _launch_at(rig, tmp_path, root, resume="aa.bb.cc.dd")
+
+        assert launched.tmux_name == "camp-odd-handle-aa-bb-cc"
+        assert "." not in launched.tmux_name

@@ -775,6 +775,44 @@ class TestNameComponentIsAddressable:
 
         assert derive_name_component(dotted, [_group("alpha")], env=_env(state)) == "my-project"
 
+    def test_a_group_camp_cannot_resolve_a_state_dir_for_is_skipped(
+        self, tmp_path: Path
+    ) -> None:
+        """One malformed sibling config must not take the whole answer down.
+
+        A group name outside the charset camp confines state directories to is
+        loadable but unresolvable, and the rule's contract is to answer. Skipping
+        it costs the listing nothing but that group's workspaces; raising costs
+        the operator every other session on the machine.
+        """
+        from camp.launch.recovery import derive_name_component
+
+        state = tmp_path / "state"
+        target = tmp_path / "code" / "proj"
+        target.mkdir(parents=True)
+        groups = [_group("../escape"), _group("alpha")]
+
+        assert derive_name_component(target, groups, env=_env(state)) == "proj"
+
+    def test_a_symlinked_worktrees_container_names_nothing(self, tmp_path: Path) -> None:
+        """A link in the container's place cannot make the world a workspace.
+
+        Every camp-managed answer is measured against this container, so a
+        symlink standing in for it and pointed at a root would have the rule
+        report an arbitrary directory as living in some group's workspace — and
+        the launch gate waives its allowlist for exactly those.
+        """
+        from camp.launch.recovery import derive_name_component, is_workspace_root
+
+        state = tmp_path / "state"
+        (state / "alpha").mkdir(parents=True)
+        (state / "alpha" / "worktrees").symlink_to(tmp_path)
+        target = tmp_path / "code" / "proj"
+        target.mkdir(parents=True)
+
+        assert derive_name_component(target, [_group("alpha")], env=_env(state)) == "proj"
+        assert is_workspace_root(target, [_group("alpha")], env=_env(state)) is False
+
     def test_a_candidates_derived_name_is_folded_too(self, tmp_path: Path) -> None:
         """The listing's name and the engine's tmux name are the same string.
 

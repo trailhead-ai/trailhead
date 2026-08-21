@@ -153,18 +153,25 @@ def _resolve_named_root(
 
     *camp_managed* is the caller's claim that *root* sits inside a workspace camp
     itself provisioned for *group* — the same fence the slug flavor is launched
-    behind, which is why the gate has nothing to add there. The claim is
-    VERIFIED, not trusted: it opens the gate only when the name rule agrees the
-    directory really is that group's workspace, so it can never launder an
-    operator-named directory past the allowlist.
+    behind, which is why the ALLOWLIST has nothing to add there. The claim is
+    checked, not trusted: it waives that allowlist only when the name rule agrees
+    the directory lies inside that group's own workspace tree, so it cannot
+    launder an arbitrary operator-named directory past the gate.
+
+    What it never waives is the credential rule, which runs on both branches.
+    The allowlist asks who chose this directory; the credential rule asks what is
+    IN it, and that answer does not change with the asker. Keeping it outside the
+    branch is what keeps "no group configuration can permit it" true of every
+    launch rather than of most of them.
     """
     # Imported here rather than at module scope: the gate raises LaunchError and
     # therefore imports it from this module.
-    from .eligibility import assert_launch_eligible
+    from .eligibility import assert_launch_eligible, assert_not_a_credential_store
     from .recovery import is_workspace_root
 
     if camp_managed and is_workspace_root(root, [group], env=env):
         resolved = Path(root).resolve()
+        assert_not_a_credential_store(resolved, env=env)
     else:
         resolved = assert_launch_eligible(root, group=group, env=env)
     if not resolved.is_dir():
@@ -395,7 +402,10 @@ def launch_session(
     # Folded at the single point every flavor's name is composed, so the handle
     # camp prints is one tmux will accept back. A caller-supplied component is
     # a directory basename, which routinely carries a dot.
-    tmux_name = f"camp-{sanitize_name_component(name_component)}-{session_id[:8]}"
+    tmux_name = (
+        f"camp-{sanitize_name_component(name_component)}-"
+        f"{sanitize_name_component(session_id[:8])}"
+    )
     argv = ["tmux", "new-session", "-d", "-s", tmux_name, "-c", str(launch_dir), "env"]
     for name in scrub:
         argv += ["-u", name]

@@ -45,6 +45,15 @@ _EXPECTED_DENY_ENTRIES = (
     "~/.npmrc",
     "~/.pypirc",
     "~/.git-credentials",
+    "~/.claude",
+    "~/.claude.json",
+    "~/Library/Keychains",
+    "~/.password-store",
+    "~/.local/share/keyrings",
+    "~/.config/op",
+    "~/.terraform.d",
+    "~/.cargo/credentials",
+    "~/.gem/credentials",
 )
 
 

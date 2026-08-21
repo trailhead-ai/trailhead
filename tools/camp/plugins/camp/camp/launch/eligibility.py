@@ -79,6 +79,19 @@ CREDENTIAL_DENY_ENTRIES: tuple[str, ...] = (
     "~/.npmrc",
     "~/.pypirc",
     "~/.git-credentials",
+    # The harness's own OAuth store. camp scrubs the live session token out of
+    # the pane environment on every launch for exactly this reason; the same
+    # material sits on disk here, so rooting a session at it would hand back
+    # what the scrub just took away.
+    "~/.claude",
+    "~/.claude.json",
+    "~/Library/Keychains",
+    "~/.password-store",
+    "~/.local/share/keyrings",
+    "~/.config/op",
+    "~/.terraform.d",
+    "~/.cargo/credentials",
+    "~/.gem/credentials",
 )
 
 
@@ -157,6 +170,23 @@ def assert_launch_eligible(
             f"{', '.join(roots)}"
         )
 
+    assert_not_a_credential_store(resolved, env=env)
+
+    return resolved
+
+
+def assert_not_a_credential_store(resolved: Path, *, env: Mapping[str, str] | None) -> None:
+    """Refuse an already-resolved launch root that touches a credential store.
+
+    Split out of :func:`assert_launch_eligible` because this rule alone is
+    UNCONDITIONAL. The allowlist answers a question about a directory the
+    operator named, and a directory camp computed itself never had to answer it;
+    this rule answers a question about the directory itself, which is the same
+    question no matter who chose it. Every caller that roots a session anywhere
+    calls this, whether or not it calls the gate above — a branch that skips it
+    is a branch where "no group configuration can permit it" stops being true.
+    """
+    home = _home_from_env(env)
     for entry in CREDENTIAL_DENY_ENTRIES:
         denied = _expand(entry, home)
         if matches_deny_entry(resolved, denied):
@@ -166,5 +196,3 @@ def assert_launch_eligible(
                 "root a session at. This rule is fixed in camp and no group "
                 "configuration can permit it."
             )
-
-    return resolved
