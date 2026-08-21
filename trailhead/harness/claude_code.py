@@ -78,6 +78,7 @@ may redirect this with the ``TRAILHEAD_CLAUDE_DIR`` env override.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -98,6 +99,11 @@ from trailhead.harness.base import (
 )
 
 _REGISTERED_MARKER = ".trailhead-registered"
+#: Ledger dir inside the composed tree holding one file per Claude config dir
+#: currently registered against it — the reference count that keeps a teardown
+#: run under one config dir from deleting the tree another one still sources
+#: its plugins from.
+_REGISTRATIONS_SUBDIR = ".trailhead-registrations"
 _INSTALLED_MARKER_PREFIX = ".trailhead-installed-"
 
 #: Subdir under the Claude dir holding user-level rulesets (``~/.claude/rules/``).
@@ -463,6 +469,31 @@ class ClaudeCodeHarness(Harness):
         marker_dir.mkdir(parents=True, exist_ok=True)
         (marker_dir / name).write_text("{}")
 
+    def _registration_entry(self, composed_root: Path, env: dict[str, str] | None) -> Path:
+        """Path of this config dir's ledger entry inside *composed_root*.
+
+        Named by a digest of the config-dir path so any absolute path becomes a
+        safe single filename; the path itself is the file's content.
+        """
+        config_dir = str(self._marker_dir(env))
+        digest = hashlib.sha256(config_dir.encode()).hexdigest()[:32]
+        return composed_root / _REGISTRATIONS_SUBDIR / digest
+
+    def composed_tree_in_use_elsewhere(
+        self, composed_root: Path, *, env: dict[str, str] | None = None
+    ) -> bool:
+        """True if a config dir OTHER than the one *env* names is registered here.
+
+        Only registrations trailhead itself recorded are visible: a config dir
+        registered before this ledger existed does not hold the tree until its
+        next ``trailhead install`` re-records it.
+        """
+        ledger = composed_root / _REGISTRATIONS_SUBDIR
+        if not ledger.is_dir():
+            return False
+        own = self._registration_entry(composed_root, env).name
+        return any(f.is_file() and f.name != own for f in ledger.iterdir())
+
     def _cli_env(self, env: dict[str, str] | None) -> dict[str, str]:
         """Environment for a ``claude plugin …`` subprocess, config dir pinned.
 
@@ -471,6 +502,14 @@ class ClaudeCodeHarness(Harness):
         explicitly rather than inherited from the ambient process environment —
         otherwise an install meant for one account lands in whichever dir the
         caller happened to be running under.
+
+        The dir named is ``_marker_dir``'s — the same one the markers are written
+        to, ``TRAILHEAD_CLAUDE_DIR`` included. That seam relocates the config
+        *directory*, which is a directory Claude Code does read when named through
+        ``CLAUDE_CONFIG_DIR``, so following it keeps trailhead's markers and the
+        CLI's own state in one place instead of splitting them across two dirs.
+        (Contrast ``claude_config_file``, which must NOT follow the seam: a config
+        *file* resolved through it is a path Claude Code never reads.)
         """
         base = dict(env) if env is not None else dict(os.environ)
         base["CLAUDE_CONFIG_DIR"] = str(self._marker_dir(env))
@@ -487,7 +526,9 @@ class ClaudeCodeHarness(Harness):
         (idempotent) against the config dir *env* resolves, and writes that
         dir's ``.trailhead-registered`` marker only after the CLI call succeeds.
         The marketplace source is the global composed tree; the registration it
-        creates belongs to one config dir.
+        creates belongs to one config dir.  That pairing is also recorded in the
+        composed tree's registration ledger, so a teardown run under a different
+        config dir can see this one still sourcing its plugins from here.
         """
         _run = runner or _default_runner
         _run(
@@ -495,6 +536,9 @@ class ClaudeCodeHarness(Harness):
             env=self._cli_env(env),
         )
         self._write_marker(_REGISTERED_MARKER, env)
+        entry = self._registration_entry(composed_root, env)
+        entry.parent.mkdir(parents=True, exist_ok=True)
+        entry.write_text(f"{self._marker_dir(env)}\n")
 
     def install_tool(
         self, tool: str, composed_root: Path, *, runner=None, env: dict[str, str] | None = None
@@ -504,6 +548,10 @@ class ClaudeCodeHarness(Harness):
         Shells ``claude plugin install <tool>@trailhead --scope user`` against
         the config dir *env* resolves, and writes that dir's per-tool
         ``.trailhead-installed-<tool>`` marker only after success.
+
+        Safe to run against a config dir that already has the plugin — the CLI
+        reports "already installed" and exits 0 — which is what lets a config dir
+        with no marker yet take this branch instead of the uninstall/install pair.
         """
         _validate_tool(tool)
         _run = runner or _default_runner
@@ -587,7 +635,9 @@ class ClaudeCodeHarness(Harness):
         since a single marketplace is shared across all tools.  Shells
         ``claude plugin marketplace remove trailhead --scope user`` and clears the
         global marker in ``finally`` so a half-removed state never reads as
-        registered.
+        registered.  The config dir's entry in the composed tree's registration
+        ledger is dropped there too — it no longer sources plugins from the tree,
+        so it no longer holds it against deletion.
         """
         _run = runner or _default_runner
         try:
@@ -597,6 +647,7 @@ class ClaudeCodeHarness(Harness):
             )
         finally:
             (self._marker_dir(env) / _REGISTERED_MARKER).unlink(missing_ok=True)
+            self._registration_entry(composed_root, env).unlink(missing_ok=True)
 
     # -- user-level rulesets --------------------------------------------------
     #

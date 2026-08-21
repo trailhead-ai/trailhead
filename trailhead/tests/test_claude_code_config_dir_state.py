@@ -176,3 +176,47 @@ class TestDoctorReadsTheConfigDir:
         info = r.data["harnesses"]["claude_code"]
         assert info["registered"] is True
         assert set(info["installed"]) == {"lore", "camp"}
+
+
+class TestComposedTreeSharing:
+    """The composed tree is shared; deleting it is only safe once nobody points at it.
+
+    Registration is per config dir but the marketplace source it registers is the
+    one global composed tree, so a teardown run under one config dir must not
+    delete the tree the *other* config dir is still registered against — that
+    would leave the other account with plugins whose source is gone and markers
+    claiming they are installed.
+    """
+
+    def test_registering_records_the_config_dir_against_the_tree(
+        self, composed_root, personal
+    ):
+        h = ClaudeCodeHarness()
+        assert h.composed_tree_in_use_elsewhere(composed_root, env=_env(personal)) is False
+
+        h.register(composed_root, runner=lambda args, **kw: None, env=_env(personal))
+
+        # Its own registration is not "elsewhere".
+        assert h.composed_tree_in_use_elsewhere(composed_root, env=_env(personal)) is False
+
+    def test_another_config_dirs_registration_holds_the_tree(
+        self, composed_root, personal, second
+    ):
+        h = ClaudeCodeHarness()
+        for d in (personal, second):
+            h.register(composed_root, runner=lambda args, **kw: None, env=_env(d))
+
+        assert h.composed_tree_in_use_elsewhere(composed_root, env=_env(personal)) is True
+        assert h.composed_tree_in_use_elsewhere(composed_root, env=_env(second)) is True
+
+    def test_the_hold_is_released_when_the_other_dir_unregisters(
+        self, composed_root, personal, second
+    ):
+        h = ClaudeCodeHarness()
+        for d in (personal, second):
+            h.register(composed_root, runner=lambda args, **kw: None, env=_env(d))
+
+        h.unregister_marketplace(composed_root, runner=lambda args, **kw: None, env=_env(second))
+
+        assert h.composed_tree_in_use_elsewhere(composed_root, env=_env(personal)) is False
+        assert h.composed_tree_in_use_elsewhere(composed_root, env=_env(second)) is True

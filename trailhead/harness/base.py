@@ -191,6 +191,20 @@ class Harness(ABC):
         rather than re-deriving the harness's on-disk marker scheme themselves.
         """
 
+    def composed_tree_in_use_elsewhere(
+        self, composed_root: Path, *, env: dict[str, str] | None = None
+    ) -> bool:
+        """True if a configuration OTHER than the one ``env`` names still sources
+        its plugins from ``composed_root``.
+
+        ``uninstall`` consults this before deleting the composed tree: the tree is
+        global, so tearing down one configuration must not pull the plugin source
+        out from under another. The default is False — the right answer for a
+        harness whose install state really is global, where the run tearing down
+        is by definition the only consumer.
+        """
+        return False
+
     def manifest_name(self, composed_root: Path) -> str | None:
         """Display name of the harness manifest under ``composed_root``, or ``None``.
 

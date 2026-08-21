@@ -15,7 +15,9 @@ Teardown steps:
   1. Discover harness composed trees + their installed tools.
   2. Confirm on a TTY (unless --yes).
   3. Per harness (under the wire lock): unregister each installed tool, unregister
-     the marketplace, then delete the harness composed tree.
+     the marketplace, then delete the harness composed tree — unless another of
+     that harness's configurations is still registered against it, in which case
+     the shared tree is kept and a warning is emitted.
   4. Remove PATH integration (rc block + shim dir).
   5. Delete trailhead's leftover state (empty composed/ dir).
 
@@ -135,7 +137,18 @@ def run_uninstall(
                         except Exception as exc:
                             warnings.append(f"{hname}: marketplace de-registration warning: {exc}")
 
-                if composed_root.exists():
+                # The composed tree is the plugin SOURCE and is shared by every
+                # configuration of the harness; deleting it while another one is
+                # still registered would leave that configuration with plugins
+                # whose source is gone.
+                if harness is not None and harness.composed_tree_in_use_elsewhere(
+                    composed_root, env=_env
+                ):
+                    warnings.append(
+                        f"{hname}: composed tree kept — another Claude config dir is "
+                        f"still registered against {composed_root}"
+                    )
+                elif composed_root.exists():
                     shutil.rmtree(composed_root, ignore_errors=True)
                 removed[hname] = tools
     except LockError as exc:
