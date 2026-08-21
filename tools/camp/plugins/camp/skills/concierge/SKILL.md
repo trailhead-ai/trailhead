@@ -250,10 +250,7 @@ with `camp sessions <slug> --group <name> --json` and let them pick.
 
 A session that died is brought back with its conversation intact, from the same
 anchor and with nothing remembered. Every part of that is camp's: the skill
-still holds no state, matches no names, and enumerates nothing of its own. Note
-that camp's bookmark resume is a different thing and never the one to reach for
-here: it re-enters a bookmarked session by replacing a terminal's foreground
-process, which a remote-controlled session does not have.
+still holds no state, matches no names, and enumerates nothing of its own.
 
 Discovery is a read, so it needs no confirmation:
 

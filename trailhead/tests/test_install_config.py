@@ -287,9 +287,9 @@ class TestSelectionBridge:
         sel = cfg.harnesses[0].selection()
         assert "camp" in sel
         subagents, skills = sel["camp"]
-        # A bare plugin name expands to camp's whole discovered inventory: both
-        # skills, selected with no override path, and no subagents.
-        assert skills == {"bookmark": None, "concierge": None}
+        # A bare plugin name expands to camp's whole discovered inventory: its
+        # skill, selected with no override path, and no subagents.
+        assert skills == {"concierge": None}
         assert subagents == {}
 
 

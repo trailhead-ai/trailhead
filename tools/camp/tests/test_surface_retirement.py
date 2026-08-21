@@ -1,22 +1,28 @@
-"""The three symbols camp depends on no longer live under `camp/bookmark/`.
+"""The bookmark surface is retired; the resume path it fronted still works.
 
-`harness_for` (harness-seam resolution), `groupless_subverb` (groupless subverb
-classification), and the "who am I" session-id read are each imported from a home
-named for what they are, so the bookmark package can be deleted without breaking
-anything camp still needs.
+Re-entering a session is `camp launch --resume <ref>`, addressed by unambiguous
+prefix of the derived name or session id. The `camp bookmark` verb family, the
+`camp resume` verb, the bookmark package, its skill, and its `camp rm` guard are
+all gone, and the free-text note they carried has no replacement.
 
 Test contract:
-- `camp.bookmark` exports neither `harness_for` nor `groupless_subverb`, and
-  `camp.bookmark.capture` no longer carries the session-id env-var read — a later
-  re-import cannot quietly reintroduce the dependency.
+- `camp.bookmark` and `camp.cli.groupless` no longer import, and the bookmark
+  skill directory is gone — the package cannot be reintroduced by accident.
+- `bookmark` and `resume` are absent from `spine.RESERVED` and from `camp help`,
+  and each spelling reaches the CLI's bare-slug refusal.
 - The launch, sessions, and resume paths each still resolve the same harness for
-  the same group, since those three consumers are what motivated the move.
+  the same group — the specific regression the deletion risks.
 """
 
 from __future__ import annotations
 
+import importlib
+import os
+import subprocess
 import sys
 from pathlib import Path
+
+import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
@@ -24,55 +30,67 @@ if str(_PLUGIN_DIR) not in sys.path:
     sys.path.insert(0, str(_PLUGIN_DIR))
 
 
+def _run(args: list[str], *, env: dict | None = None) -> subprocess.CompletedProcess:
+    base_env = {**os.environ}
+    if env:
+        base_env.update(env)
+    return subprocess.run(
+        [sys.executable, str(_PLUGIN_DIR / "cli" / "camp"), *args],
+        capture_output=True,
+        text=True,
+        env=base_env,
+    )
+
+
 class _FakeHarness:
     name = "fake"
 
 
 # ---------------------------------------------------------------------------
-# bookmark no longer owns them
+# the bookmark surface is gone
 # ---------------------------------------------------------------------------
 
 
-def test_bookmark_package_does_not_export_harness_for() -> None:
-    import camp.bookmark as bookmark
-
-    assert not hasattr(bookmark, "harness_for")
-
-
-def test_bookmark_package_does_not_export_groupless_subverb() -> None:
-    import camp.bookmark as bookmark
-
-    assert not hasattr(bookmark, "groupless_subverb")
+def test_the_bookmark_package_no_longer_imports() -> None:
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module("camp.bookmark")
 
 
-def test_bookmark_capture_does_not_own_the_session_id_read() -> None:
-    import camp.bookmark.capture as capture
-
-    assert not hasattr(capture, "_SESSION_ID_ENV_VARS")
-
-
-# ---------------------------------------------------------------------------
-# the new homes
-# ---------------------------------------------------------------------------
+def test_the_groupless_subverb_classifier_no_longer_imports() -> None:
+    """It classified `bookmark ls`/`rm`; with those gone it had no other caller."""
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module("camp.cli.groupless")
 
 
-def test_harness_for_lives_with_the_harness_profile() -> None:
-    from camp.launch.profile import harness_for
-
-    assert callable(harness_for)
+def test_the_bookmark_skill_directory_is_gone() -> None:
+    assert not (_PLUGIN_DIR / "skills" / "bookmark").exists()
 
 
-def test_groupless_subverb_lives_with_the_dispatchers() -> None:
-    from camp.cli.groupless import groupless_subverb
+def test_neither_verb_is_reserved() -> None:
+    """RESERVED is camp's one verb surface, so a retired verb must leave it."""
+    from camp.spine import RESERVED
 
-    assert groupless_subverb([]) is None
+    assert "bookmark" not in RESERVED
+    assert "resume" not in RESERVED
 
 
-def test_current_session_id_lives_with_launch_identity() -> None:
-    from camp.launch.identity import SESSION_ID_ENV_VARS, current_session_id
+def test_neither_verb_appears_in_help() -> None:
+    result = _run(["help"])
+    assert result.returncode == 0, result.stderr
+    assert "camp bookmark" not in result.stdout
+    assert "camp resume" not in result.stdout
 
-    assert current_session_id({SESSION_ID_ENV_VARS[0]: "sess-1"}) == "sess-1"
-    assert current_session_id({}) is None
+
+def test_camp_bookmark_is_refused_as_an_unknown_verb(tmp_path: Path) -> None:
+    result = _run(["bookmark"], env={"CAMP_CONFIG_DIR": str(tmp_path)})
+    assert result.returncode != 0, result.stdout
+    assert "bare slug dispatch is no longer supported" in result.stdout + result.stderr
+
+
+def test_camp_resume_is_refused_as_an_unknown_verb(tmp_path: Path) -> None:
+    result = _run(["resume", "some-ref"], env={"CAMP_CONFIG_DIR": str(tmp_path)})
+    assert result.returncode != 0, result.stdout
+    assert "bare slug dispatch is no longer supported" in result.stdout + result.stderr
 
 
 # ---------------------------------------------------------------------------

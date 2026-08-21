@@ -694,8 +694,8 @@ class ClaudeCodeHarness(Harness):
     # ``cleanupPeriodDays`` settings key (minimum 1); when the key is unset its
     # own default is 30 days.  The key may also appear in project, local, and
     # managed settings, which override the user file — but those are per-project
-    # and this seam is asked machine-globally (doctor and `camp bookmark ls` both
-    # span every workspace), so the USER settings file is the one source read
+    # and this seam is asked machine-globally (`camp sessions --recoverable` spans
+    # every workspace), so the USER settings file is the one source read
     # here.  A project that shortens its own window is therefore reported
     # optimistically; the warning is advisory, and over-warning every project
     # from one project's setting would be worse.

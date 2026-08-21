@@ -34,9 +34,8 @@ Test contract:
   its own situation and its own wording — already running, directory unknowable,
   directory gone, root ineligible, ref matched nothing (against a populated store
   vs. an empty one), harness cannot enumerate or re-enter — and an ambiguous ref
-  is exit 2 with the candidates on stdout. Nothing is written under CAMP_STATE_DIR
-  on any of them, and `camp resume` (the bookmark verb) still answers about
-  bookmarks.
+  is exit 2 with the candidates on stdout. Nothing is written under
+  CAMP_STATE_DIR on any of them.
 - camp sessions: empty → empty stdout, exit 0; degraded (enumeration error /
   missing enumerate binary / unknown harness) → stderr notice, empty stdout list,
   exit 0; --json carries only normalized SessionRecord fields. The default and
@@ -1376,28 +1375,6 @@ def test_camp_launch_resume_that_never_confirms_is_killed_by_its_exact_name(
     kills = [argv for argv in _tmux_argv(cli_env) if argv[0] == "kill-session"]
     assert kills == [["kill-session", "-t", tmux_name]]
     assert _state_tree(cli_env) == before
-
-
-def test_camp_resume_the_bookmark_verb_is_untouched_by_the_launch_flavor(
-    cli_env,
-) -> None:
-    """`camp resume` addresses BOOKMARKS. A transcript is not a bookmark.
-
-    Seeded so a session reference that `camp launch --resume` would resolve is
-    sitting in the store while `camp resume` is asked for it — and the bookmark
-    verb must still answer about bookmarks.
-    """
-    _seed_transcript(cli_env, _UUID_A, _workspace_launch_dir(cli_env, "feat-one"))
-
-    result = _camp(
-        cli_env, "resume", "camp-feat-one-", cwd=cli_env["tmp_path"],
-        extra_env={"CAMP_SHELL_INTEGRATION": "1"},
-    )
-
-    assert result.returncode != 0
-    assert result.stdout == ""
-    assert "camp resume: no bookmark named 'camp-feat-one-'" in result.stderr
-    assert "camp bookmark ls" in result.stderr
 
 
 # ---------------------------------------------------------------------------

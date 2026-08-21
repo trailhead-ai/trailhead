@@ -23,18 +23,15 @@ so tests never shell out.
 
 from __future__ import annotations
 
-import json
 import os
 import shutil
 import subprocess
-import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
 
 from trailhead.capabilities import ConfineError, ManifestError, cli_bearing_manifests
 from trailhead.harness import HarnessError, get_harness
-from trailhead.harness.base import SESSION_RETENTION_WARNING_FRACTION
 from trailhead.pathint import resolve_shim_dir, trailhead_bin_executable
 from trailhead.paths import state_dir
 from trailhead.wire import default_manifest_paths
@@ -110,92 +107,6 @@ def _discover_harnesses(composed_base: Path) -> dict[str, dict]:
     return out
 
 
-#: camp's global bookmark store, relative to camp's state dir. doctor READS it —
-#: never writes, never repairs — because a bookmark is a long-lived pointer at a
-#: harness transcript, and only a report spanning both can notice that the harness
-#: is about to delete what the bookmark points at. Anything unreadable is treated
-#: as "no bookmarks": doctor's contract is to always exit 0.
-_BOOKMARK_STORE_RELPATH = "bookmarks.json"
-
-
-def _load_bookmarks(env: dict[str, str]) -> list[dict]:
-    """Return camp's bookmark records; an absent or unreadable store reads empty."""
-    path = state_dir("camp", env=env) / _BOOKMARK_STORE_RELPATH
-    try:
-        data = json.loads(path.read_text())
-    except (OSError, ValueError):
-        return []
-    if not isinstance(data, dict) or not isinstance(data.get("bookmarks"), dict):
-        return []
-    return [record for record in data["bookmarks"].values() if isinstance(record, dict)]
-
-
-def _retention_window(harness_names: list[str], env: dict[str, str]) -> tuple[int, str | None] | None:
-    """Return (days, setting-name) for the installed harnesses, or None.
-
-    Every installed harness is asked through the seam; the SHORTEST reported
-    window wins, since that is the deadline a user actually has. A harness that
-    reports nothing (the seam's degrading default) contributes nothing, and when
-    none of them report, the caller must skip its warning entirely rather than
-    assume a window.
-    """
-    windows: list[tuple[int, str | None]] = []
-    for name in harness_names:
-        try:
-            harness = get_harness(name)
-        except HarnessError:
-            continue
-        days = harness.session_retention_days(env=env)
-        if isinstance(days, int) and days > 0:
-            windows.append((days, harness.session_retention_setting()))
-    # Key on the days alone: two harnesses tying on days would otherwise compare
-    # their setting names, and one of those may be None.
-    return min(windows, key=lambda window: window[0]) if windows else None
-
-
-def _bookmark_retention_warnings(harness_names: list[str], env: dict[str, str]) -> list[str]:
-    """Warn about bookmarks whose transcript is nearing the harness's cleanup.
-
-    Age is taken from the transcript file's mtime — the same clock the harness's
-    own cleanup runs on — so the warning lines up with the deletion it predicts. A
-    bookmark whose transcript is ALREADY gone is not warned about here: there is
-    nothing left to save, and `camp bookmark ls` already marks it stale.
-    """
-    window = _retention_window(harness_names, env)
-    if window is None:
-        return []
-    days, setting = window
-    threshold = days * SESSION_RETENTION_WARNING_FRACTION
-
-    now = time.time()
-    at_risk: list[tuple[float, str]] = []
-    for record in _load_bookmarks(env):
-        transcript = record.get("transcript_path")
-        ref = record.get("ref")
-        if not transcript or not ref:
-            continue
-        try:
-            age_days = (now - os.stat(transcript).st_mtime) / 86400
-        except OSError:
-            continue
-        if age_days >= threshold:
-            at_risk.append((age_days, ref))
-    if not at_risk:
-        return []
-
-    at_risk.sort(reverse=True)
-    named = ", ".join(f"{ref} ({int(age)}d old)" for age, ref in at_risk)
-    remedy = (
-        f" — resume or re-capture them, or raise {setting} in your harness settings"
-        if setting
-        else " — resume or re-capture them before they are cleaned up"
-    )
-    return [
-        f"camp bookmarks nearing the {days}-day session-transcript retention "
-        f"window: {named}{remedy}"
-    ]
-
-
 def _trailhead_field(resolved: Optional[str]) -> dict:
     """Build the `trailhead` report field from a bare `which("trailhead")` hit.
 
@@ -257,7 +168,6 @@ def run_doctor(
         "clis": clis,
         "trailhead": _trailhead_field(_which("trailhead")),
         "python3_version": _python_version(_pyrunner),
-        "warnings": _bookmark_retention_warnings(list(harnesses), _env),
     }
 
     return DoctorResult(data=data, human_output=_build_human(data), exit_code=0)
@@ -313,14 +223,5 @@ def _build_human(data: dict) -> str:
         f"  shim dir: {data['shim_dir']} ({'present' if data['shim_dir_present'] else 'absent'})"
     )
     lines.append(f"  python3: {data['python3_version']}")
-
-    # Warnings render only when there are any: a permanently-present "warnings:
-    # (none)" section trains a reader to skip the one place that ever matters.
-    warnings = data.get("warnings") or []
-    if warnings:
-        lines.append("")
-        lines.append("  warnings:")
-        for warning in warnings:
-            lines.append(f"    {warning}")
 
     return "\n".join(lines)

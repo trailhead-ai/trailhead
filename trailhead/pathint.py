@@ -234,28 +234,14 @@ def _shim_content(name: str, bin_path: Path, trailhead_root: str) -> str:
 #     CLI. Each such command prints a cd target as its ONLY stdout line (or, for
 #     remove outside the workspace / any failure, nothing — empty capture means
 #     no cd, so the shell stays put).
-#   - resume is a SEPARATE intercepted branch with a two-line machine contract:
-#     line 1 is the bare, unquoted absolute workspace root to cd into; line 2 is
-#     a POSIX-shlex-quoted command to run there. The POSIX dialect `eval`s line 2
-#     directly — safe because line 2 is already POSIX-shlex-quoted and eval is
-#     one more parse pass through the SAME grammar, so `$( … )`, backticks, `$var`,
-#     and quotes inside a quoted token stay literal. The fish dialect must NEVER
-#     eval line 2 natively — fish-active syntax (`( … )`, `$var`) would be
-#     reinterpreted before the POSIX quoting is honored — so it hands line 2 to
-#     `sh -c` instead, keeping POSIX-shlex quoting authoritative in both dialects.
 #   - The CAMP_SHELL_INTEGRATION marker is exported ONLY around the intercepted
-#     camp INVOCATION (new|remove|rm and resume) so the handlers suppress their
-#     bare-binary shellenv nudges; every other verb passes through with NO marker,
-#     and — crucially — the resumed harness on line 2 runs WITHOUT it. Were it to
-#     leak into that process, a nested `camp resume` inside the resumed session
-#     would pass the integration guard with no wrapper listening and print its
-#     inert machine lines as though they had worked.
+#     camp INVOCATION (new|remove|rm) so the handlers suppress their bare-binary
+#     shellenv nudges; every other verb passes through with NO marker.
 #   - bash gets that scoping free from its `VAR=val cmd` prefix assignment. fish
 #     cannot use `env VAR=val command camp` (env would try to exec a binary
 #     literally named `command`), and a bare `set -lx` in the case body would stay
-#     exported for the REST of the function, including the `sh -c` on line 2 — so
-#     fish wraps just the invocation in a `begin … end` block and scopes the
-#     `set -lx` to that block.
+#     exported for the REST of the function — so fish wraps just the invocation in
+#     a `begin … end` block and scopes the `set -lx` to that block.
 #
 # These are LITERAL shell snippets: never let Python interpolate $ / {} here.
 
@@ -268,14 +254,6 @@ camp() {
             if [ -n "$p" ]; then
                 cd -- "$p" || return $?
             fi
-            ;;
-        resume)
-            local out p cmd
-            out="$(CAMP_SHELL_INTEGRATION=1 command camp "$@")" || return $?
-            p="$(printf '%s\\n' "$out" | sed -n '1p')"
-            cmd="$(printf '%s\\n' "$out" | sed -n '2p')"
-            cd -- "$p" || return $?
-            eval "$cmd"
             ;;
         *)
             command camp "$@"
@@ -300,21 +278,6 @@ function camp
             if test -n "$p"
                 cd -- $p
             end
-        case resume
-            set -l lines
-            begin
-                set -lx CAMP_SHELL_INTEGRATION 1
-                set lines (command camp $argv)
-            end
-            set -l rc $status
-            if test $rc -ne 0
-                return $rc
-            end
-            cd -- $lines[1]
-            if test $status -ne 0
-                return $status
-            end
-            sh -c $lines[2]
         case '*'
             command camp $argv
     end

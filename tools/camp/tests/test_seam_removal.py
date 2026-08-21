@@ -9,8 +9,8 @@ The harness surface is `harness_profile.py` — its profile-config surface
 - no stray references: no production module imports session_lock/session_identity
   or names a `harness_launch` module; no bare `os.execvp(` literal appears.
 - no argv composition or exec in core: camp neither builds the harness command
-  line nor runs it. `camp resume` prints what a shell wrapper should exec, and
-  takes the argv itself from the harness seam whole. `--resume` / `--session-id`
+  line nor runs it — it hands tmux an argv it took from the harness seam whole.
+  `--resume` / `--session-id`
   are forbidden only where they appear as an element of an argv list/tuple
   literal under construction — legal everywhere else, including a `==`
   comparison against a parsed CLI arg, a help string, or a docstring.
@@ -149,11 +149,11 @@ class TestSeamAbsence:
     def test_no_module_composes_or_runs_a_command(self):
         """camp core neither BUILDS a command line nor RUNS one for the harness.
 
-        `camp resume` prints what a shell wrapper should exec; the argv itself
-        comes from the harness seam whole, and the exec belongs to the wrapper.
-        Both halves are easy to quietly re-absorb into core — a `["claude", …]`
-        literal here, an `execv` there, a `--resume`/`--session-id` flag folded
-        into an argv list — so all three are pinned.
+        The harness half of every command line comes from the seam whole, and
+        running it belongs to tmux. Both halves are easy to quietly re-absorb
+        into core — a `["claude", …]` literal here, an `execv` there, a
+        `--resume`/`--session-id` flag folded into an argv list — so all three
+        are pinned.
 
         This scans the camp package sources ONLY. The harness seam
         (`trailhead/harness/claude_code.py`) is deliberately outside it: composing
@@ -167,16 +167,6 @@ class TestSeamAbsence:
                 offenders[p.name] = hits
         assert offenders == {}, f"argv-composition/exec surface in camp core: {offenders}"
 
-    def test_resume_takes_its_argv_from_the_seam(self):
-        """`camp resume` asks the harness for the command; it does not build one.
-
-        A future edit that inlines the flag spelling here — rather than widening
-        the seam — is exactly the regression the boundary exists to prevent, and
-        it would not trip the literal scans above if the harness were renamed.
-        """
-        source = (_CAMP_PKG_DIR / "bookmark" / "resume.py").read_text()
-        assert "harness.session_resume(" in source
-
     def test_launch_session_has_no_argv_list_literal(self):
         """launch/session.py builds no harness argv list/tuple literal.
 
@@ -189,10 +179,10 @@ class TestSeamAbsence:
     def test_launch_session_takes_its_resume_argv_from_the_seam(self):
         """The launch engine asks the harness for a resume command line.
 
-        The mirror of the `bookmark/resume.py` pin above, and the half the
-        literal scans structurally cannot carry: an engine that spelled the
-        resume flag itself — or grew the argv element by element — would still
-        pass every negative scan if the harness were simply never asked.
+        The half the literal scans structurally cannot carry: an engine that
+        spelled the resume flag itself — or grew the argv element by element —
+        would still pass every negative scan if the harness were simply never
+        asked.
         """
         source = (_CAMP_PKG_DIR / "launch" / "session.py").read_text()
         assert "harness.session_resume(" in source

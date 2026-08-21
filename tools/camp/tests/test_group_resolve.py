@@ -476,7 +476,7 @@ def test_resolve_derives_state_dir_from_env(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# workspace_dir slug confinement — a stored bookmark's slug is untrusted input
+# workspace_dir slug confinement — a slug from a stored record is untrusted input
 # ---------------------------------------------------------------------------
 
 
@@ -494,9 +494,9 @@ def test_resolve_derives_state_dir_from_env(tmp_path: Path) -> None:
     ],
 )
 def test_workspace_dir_rejects_traversal_slug(tmp_path: Path, bad_slug: str) -> None:
-    """A slug re-derived from a hand-edited stored record (a bookmark, not a
-    freshly-validated CLI argument) must not be able to walk `workspace_dir`'s
-    result outside the group's worktrees root."""
+    """A slug re-derived from a hand-edited stored record (not a freshly-
+    validated CLI argument) must not be able to walk `workspace_dir`'s result
+    outside the group's worktrees root."""
     from camp.group.manifest import workspace_dir
     from camp.group.resolve import GroupConfinementError
 
@@ -511,8 +511,8 @@ def test_workspace_dir_rejects_traversal_slug(tmp_path: Path, bad_slug: str) -> 
         "alpha",
         "a-b-c",
         # A stored slug may already carry the wider metacharacter set spine
-        # forbids at capture time (pre-existing bookmarks, or a harness that
-        # wrote one before validation tightened) — workspace_dir only guards
+        # forbids at capture time (a record written before validation
+        # tightened) — workspace_dir only guards
         # path confinement, not the full capture-time charset.
         "a b",
         "a;touch pwned",

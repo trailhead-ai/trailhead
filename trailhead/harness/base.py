@@ -53,12 +53,6 @@ UNSUPPORTED_RULESET_NOTICE = (
     "trailhead: this harness has no user-level ruleset support; nothing was installed."
 )
 
-#: Fraction of a harness's transcript-retention window after which a session is
-#: "approaching expiry".  Lives here, beside ``session_retention_days``, because
-#: two independent surfaces warn off it — ``trailhead doctor`` and
-#: ``camp bookmark ls`` — and a user reading both must see the same cutoff.
-SESSION_RETENTION_WARNING_FRACTION = 0.8
-
 #: Closed modality vocabulary for how a launched session can be reached again.
 #: Callers compare against these constants, never against their own literal —
 #: the string values are caller-visible wire-ish vocabulary and are pinned by
@@ -337,10 +331,10 @@ class Harness(ABC):
     # -- session retention ----------------------------------------------------
     #
     # Harnesses delete their own session transcripts on a schedule.  A caller
-    # holding a long-lived pointer at a transcript (camp's bookmarks) wants to
-    # warn BEFORE that deletion, which needs the window — expressed here in days
-    # and read from wherever the harness configures it (that location, and the
-    # setting's name, are harness knowledge and stay in the harness module).
+    # that offers to bring a dead session back needs the window to say why one is
+    # no longer there — expressed here in days and read from wherever the harness
+    # configures it (that location, and the setting's name, are harness knowledge
+    # and stay in the harness module).
     #
     # Same degrading default as the two seams above: ``None`` means "this harness
     # has no retention window to report".  A caller must then skip its warning
