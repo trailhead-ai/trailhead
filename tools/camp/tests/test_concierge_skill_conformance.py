@@ -116,6 +116,7 @@ _VERB_HANDLERS: dict[str, tuple[str, str]] = {
     "group": ("camp/cli/group.py", "_parse_init_args"),
     "new": ("camp/cli/group.py", "_cmd_new_group_cli"),
     "launch": ("camp/cli/session.py", "_cmd_launch_group_cli"),
+    "kill": ("camp/cli/session.py", "_cmd_kill_cli"),
     "sessions": ("camp/cli/session.py", "_cmd_sessions_group_cli"),
     "list": ("camp/cli/workspace.py", "_cmd_ls_group_cli"),
     "status": ("camp/cli/status.py", "_cmd_status_group_cli"),
@@ -302,6 +303,30 @@ REQUIRED_ANCHORS: dict[str, str] = {
     # A group-scoped listing only ever reports the group it was asked about, so
     # the mismatch refusal has to name a read that can surface a different one.
     "the group-mismatch read is executable": "one listing per group",
+    # A stop that did not stop anything is the one outcome an agent is most
+    # likely to soften into a success, because the memory claim is invisible
+    # from the outside. It is a failure and the document has to say so — the
+    # "exit N is not a failure" reading must never reach this code.
+    "a session still running after a stop is a failure": (
+        "still running after the stop is a failure, not a success with a caveat"
+    ),
+    # Idempotence: re-running a stop after a dropped connection is the ordinary
+    # phone case, and reading it as an error would send the operator hunting.
+    "stopping an already-down session is success": "already down is success, exit 0",
+    # The two exit-0 outcomes are distinguished only in the JSON, so an agent
+    # that reports "stopped" off the exit code alone reports a reclaim that may
+    # not have happened.
+    "the two stop successes are told apart in the payload": (
+        "`outcome` field is what tells the two apart"
+    ),
+    # Park is only recoverable if the operator can still address the session
+    # afterwards, and the ref is what they hold.
+    "a ref survives a stop": "the reference does not change",
+    # The anchor gate is live in this skill specifically: the caller here IS the
+    # supervising session.
+    "the anchor cannot stop itself": (
+        "camp refuses to stop the session this skill is running in"
+    ),
 }
 
 
@@ -346,6 +371,10 @@ _EMITTERS: dict[str, tuple[str, str]] = {
     # The candidate ROW shape, shared by the recoverable listing and by the rows
     # an ambiguous `--resume` prints — the document quotes it once for both.
     "camp sessions --recoverable --json": ("camp/cli/session.py", "_candidate_payload"),
+    # A stop reports through one emitter, and `outcome` is the only thing that
+    # tells its two exit-0 results apart — so the document has to quote a shape
+    # that carries it.
+    "camp kill --json": ("camp/cli/session.py", "_report_stop"),
 }
 
 _JSON_OBJECT_RE = re.compile(r"\{[^{}]*\}")

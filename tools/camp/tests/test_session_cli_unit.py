@@ -9,6 +9,9 @@ seams that are awkward to exercise through the real CLI binary:
 - `camp sessions <slug>` scoping enumeration by the same resolved workspace
   directory the launch engine spawns into, so a symlinked workspace root
   doesn't make a just-launched session invisible to a slug-scoped query.
+- `_session_pool`'s two postures on a live probe that fails: the stop path needs
+  the answer (an unanswerable probe is a refusal), and the resume path does not
+  (a narrowed pool costs a candidate and nothing more).
 - `camp launch --json` emitting the launch engine's own `tmux_name` verbatim.
   A sentinel name the derivation could never produce is the only way to tell
   reading it apart from rebuilding `camp-<slug>-<uuid8>` at the print site,
@@ -131,3 +134,44 @@ class TestLaunchJsonCarriesTheEngineReportedTmuxName:
             "re-derivation of camp-<slug>-<uuid8> at the print site"
         )
         assert payload["session_id"] == "11111111-2222-3333-4444-555555555555"
+
+
+class TestSessionPoolLiveProbePosture:
+    """A live probe that failed says NOTHING. Which branch that lands on is the
+    caller's posture, and the two callers differ."""
+
+    @staticmethod
+    def _harness():
+        class _Harness:
+            name = "probefail"
+
+            def session_transcripts(self, workspace=None, *, env=None):
+                return []
+
+        return _Harness()
+
+    def _pool(self, monkeypatch, **kwargs):
+        import camp.cli.session as cli_session
+        import camp.launch.session as launch_session
+
+        harness = self._harness()
+        monkeypatch.setattr(cli_session, "_addressable_harnesses", lambda groups: [harness])
+        # The enumeration could not be answered — the seam's documented `None`.
+        monkeypatch.setattr(launch_session, "enumerate_records", lambda *a, **k: None)
+        return cli_session._session_pool([], env={}, **kwargs)
+
+    def test_the_resume_path_degrades_to_a_narrower_pool(self, monkeypatch):
+        transcripts, live, answered = self._pool(monkeypatch, verb="launch")
+        assert live == []
+        assert len(answered) == 1
+
+    def test_the_stop_path_refuses_because_it_needs_the_answer(self, monkeypatch, capsys):
+        import pytest
+
+        with pytest.raises(SystemExit) as exit_info:
+            self._pool(monkeypatch, verb="kill", live_required=True)
+
+        assert exit_info.value.code != 0
+        message = capsys.readouterr().err.strip()
+        assert message.startswith("camp kill: ")
+        assert "live" in message

@@ -284,7 +284,8 @@ def workspace_dir(group: str, slug: str, *, env: dict[str, str] | None = None) -
         GroupConfinementError: If group or slug fails path-confinement
             validation — slug is validated here (not just at the CLI layer)
             because callers routinely re-derive it from a STORED record
-            (e.g. a bookmark) rather than a slug this process just captured.
+            (e.g. a session transcript) rather than a slug this process just
+            captured.
     """
     from .resolve import central_state_dir, validate_workspace_slug
 

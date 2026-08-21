@@ -387,6 +387,43 @@ def recoverable_candidates(
     return tuple(candidates)
 
 
+def session_candidates(
+    *,
+    transcripts: Iterable[Any],
+    live_records: Iterable[Any],
+    groups: Iterable[dict[str, Any]],
+    env: Mapping[str, str],
+    now: datetime | None = None,
+) -> tuple[SessionCandidate, ...]:
+    """The addressable pool: enumerated *transcripts* UNION the live *live_records*.
+
+    Keyed by session id and by nothing else, so a session present in both halves
+    yields exactly ONE candidate, marked live. This is the pool every surface
+    that asks "which sessions are there" reads — the ref resolver above it and
+    the teardown guard beside it — so no surface gets to derive a different
+    answer from the same two seams.
+
+    Ordering is FRESHEST FIRST, with the age-less (live-only) candidates after
+    them, so a caller listing candidates gets a stable order it did not impose.
+    """
+    now = now if now is not None else datetime.now(timezone.utc)
+    containers = _workspace_containers(groups, env)
+
+    merged: dict[str, tuple[Any, Any]] = {}
+    for transcript in transcripts:
+        merged[transcript.session_id] = (transcript, None)
+    for record in live_records:
+        transcript, _ = merged.get(record.session_id, (None, None))
+        merged[record.session_id] = (transcript, record)
+
+    candidates = [
+        _build_candidate(session_id, transcript, record, containers=containers, now=now)
+        for session_id, (transcript, record) in merged.items()
+    ]
+    candidates.sort(key=lambda c: (c.age_seconds is None, c.age_seconds or 0.0, c.session_id))
+    return tuple(candidates)
+
+
 def resolve_session_ref(
     ref: str,
     *,
@@ -411,23 +448,13 @@ def resolve_session_ref(
     happens to exist right now" would make the same command mean different
     things on different days.
     """
-    now = now if now is not None else datetime.now(timezone.utc)
-    containers = _workspace_containers(groups, env)
-
-    merged: dict[str, tuple[Any, Any]] = {}
-    for transcript in transcripts:
-        merged[transcript.session_id] = (transcript, None)
-    for record in live_records:
-        transcript, _ = merged.get(record.session_id, (None, None))
-        merged[record.session_id] = (transcript, record)
-
-    candidates = [
-        _build_candidate(session_id, transcript, record, containers=containers, now=now)
-        for session_id, (transcript, record) in merged.items()
-    ]
-    # Freshest first, with the age-less (live-only) candidates after them, so a
-    # caller listing candidates gets a stable order it did not have to impose.
-    candidates.sort(key=lambda c: (c.age_seconds is None, c.age_seconds or 0.0, c.session_id))
+    candidates = session_candidates(
+        transcripts=transcripts,
+        live_records=live_records,
+        groups=groups,
+        env=env,
+        now=now,
+    )
 
     matches = [
         candidate

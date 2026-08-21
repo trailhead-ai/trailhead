@@ -114,6 +114,7 @@ _SMOKE_INVOCATIONS = [
     ["init"],
     ["ai"],
     ["enter"],
+    ["kill"],
     ["bogusverb"],
 ]
 
@@ -261,3 +262,15 @@ def test_legacy_redirect_group_path_names_replacement(stub_group_env, tmp_path) 
     assert "camp new" in result.stderr, (
         f"legacy 'ai' must name its replacement 'camp new'.\nstderr: {result.stderr}"
     )
+
+
+def test_kill_is_routed_without_resolving_a_group(isolated_env, tmp_path) -> None:
+    """`camp kill` is ref-addressed, so it must answer from a cwd where no group
+    resolves — the situation it exists to be usable in. Reaching the needs-a-group
+    refusal or the bare-slug error would mean it never got routed at all."""
+    result = _run(["kill", "some-ref"], env=isolated_env, cwd=tmp_path)
+
+    combined = result.stdout + result.stderr
+    assert _TRACEBACK_MARKER not in combined
+    assert "camp kill: " in combined
+    assert "--group" not in combined

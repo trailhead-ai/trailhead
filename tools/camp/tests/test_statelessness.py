@@ -1,10 +1,20 @@
 """camp's launch surface persists nothing: one snapshot over every new flow.
 
-`camp launch --dir`, `camp launch --resume`, and `camp sessions --recoverable`
-are stateless by contract — they read the harness's own transcript store and
-camp's group config, and they write nothing camp owns. Every session they can
-name already exists somewhere else, so there is no camp-side record to keep and
-none to go stale.
+`camp launch --dir`, `camp launch --resume`, `camp sessions --recoverable`, and
+`camp kill` are stateless by contract — they read the harness's own transcript
+store and camp's group config, and they write nothing camp owns. Every session
+they can name already exists somewhere else, so there is no camp-side record to
+keep and none to go stale.
+
+`camp kill` is the sharpest case, and the reason this guard covers it. Stopping
+a session is exactly the moment a design would be tempted to leave a marker
+behind — a "parked" flag set on the stop and cleared on the resume — and the
+whole recoverability story depends on there being no such marker: a stopped
+session stays addressable by the same ref because the transcript the harness
+already keeps is the only record, and a flag camp wrote could go stale against
+it. Nothing is set on a stop and nothing is cleared on a resume, so the walk
+below drives a full stop-then-resume round trip and holds it to the same
+byte-level snapshot as every other flow.
 
 The per-flow tests in `test_session_cli.py` each assert that for the one command
 they drive. That is not the same guarantee. A per-flow assertion passes as long
@@ -28,7 +38,11 @@ Two things keep the walk honest:
 - The walk asserts what it actually provoked — that it drove a launch that
   happened (exit 0), a launch that was refused (exit 1), and an ambiguous
   reference (exit 2). A walk in which every step failed early for some unrelated
-  reason would otherwise "prove" statelessness by never reaching the code.
+  reason would otherwise "prove" statelessness by never reaching the code. The
+  stop flows are held to the same rule, and two of them need more than an exit
+  code to satisfy it: a stop that reclaimed memory and a stop that found the
+  session already down are both successes, so the outcome line is what says
+  which of the two early-return branches actually ran.
 
 The world — a fake harness, a tmux stand-in, and the hermetic transcript store —
 is the one `test_session_cli.py` builds, imported rather than rebuilt. The point
@@ -214,14 +228,25 @@ def test_no_new_launch_flow_writes_anything_under_the_state_dir(cli_env) -> None
          ["sessions", "--recoverable", "--limit", "1", "--all", "--group", "mygroup"], None),
         ("--limit without --recoverable", ["sessions", "--limit", "1", "--group", "mygroup"], None),
         ("live listing under a directory", ["sessions", "--dir", str(roots), "--group", "mygroup"], None),
+        # --- camp kill: every outcome, ending on a park/resume round trip ---
+        # Ordered deliberately, and after the resume successes above: the stop
+        # needs a pane camp itself launched, and the already-down branch needs
+        # the name that stop just released.
+        ("kill a session camp launched", ["kill", _ID_ROOTED], tmp_path),
+        ("kill a session already down", ["kill", _ID_ROOTED], tmp_path),
+        ("kill a live session owning no tmux session", ["kill", _ID_LIVE], tmp_path),
+        ("kill an ambiguous ref", ["kill", "camp-feat-amb-"], tmp_path),
+        ("resume the stopped session", ["launch", "--resume", _ID_ROOTED, "--group", "mygroup"], tmp_path),
     ]
 
     baseline = _settled_snapshot(state_dir)
     codes: dict[str, int] = {}
+    errors: dict[str, str] = {}
 
     for label, argv, cwd in flows:
         result = _camp(cli_env, *argv, extra_env=hermetic, cwd=cwd)
         codes[label] = result.returncode
+        errors[label] = result.stderr
         assert _snapshot(state_dir) == baseline, (
             f"{label} wrote under CAMP_STATE_DIR: {_diff(baseline, _snapshot(state_dir))}\n"
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
@@ -243,6 +268,7 @@ def test_no_new_launch_flow_writes_anything_under_the_state_dir(cli_env) -> None
     for label, argv, extra in degradations:
         result = _camp(cli_env, *argv, extra_env={**hermetic, **extra}, cwd=tmp_path)
         codes[label] = result.returncode
+        errors[label] = result.stderr
         assert _snapshot(state_dir) == baseline, (
             f"{label} wrote under CAMP_STATE_DIR: {_diff(baseline, _snapshot(state_dir))}\n"
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
@@ -255,5 +281,16 @@ def test_no_new_launch_flow_writes_anything_under_the_state_dir(cli_env) -> None
     assert codes["--resume an allowlisted root"] == 0, codes
     assert codes["--resume an ambiguous ref"] == 2, codes
     assert set(codes.values()) == {0, 1, 2}, codes
+
+    # The stop flows, same rule. Two of them share exit 0, so for those the
+    # exit code alone cannot say which branch ran and the outcome line is what
+    # separates a stop that reclaimed memory from one that found nothing to do.
+    assert codes["kill a session camp launched"] == 0, errors["kill a session camp launched"]
+    assert "stopped session" in errors["kill a session camp launched"]
+    assert codes["kill a session already down"] == 0, errors["kill a session already down"]
+    assert "already down" in errors["kill a session already down"]
+    assert codes["kill a live session owning no tmux session"] == 1, codes
+    assert codes["kill an ambiguous ref"] == 2, codes
+    assert codes["resume the stopped session"] == 0, errors["resume the stopped session"]
     refusals = [label for label, code in codes.items() if code == 1]
     assert len(refusals) >= 15, refusals

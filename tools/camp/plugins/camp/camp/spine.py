@@ -54,7 +54,7 @@ _TAXONOMY_RESERVED = (
     set(VERB_ALIASES)  # alias keys: rm, ls
     | set(LEGACY_REDIRECTS)  # legacy keys: open, break, init, ai, enter
     | set(DISABLED_VERBS)  # restock, sweep, code, fire
-    | set(NEEDS_GROUP_VERBS)  # new, remove, pwd, activate, setup, bookmark
+    | set(NEEDS_GROUP_VERBS)  # new, remove, pwd, activate, setup
 )
 
 _STATIC_RESERVED = frozenset(
@@ -73,9 +73,10 @@ _STATIC_RESERVED = frozenset(
         "path",
         "foreach",
         "doctor",
-        # Ref-addressed: served on BOTH paths, so it is a real verb the taxonomy's
-        # needs-group table does not model.
-        "resume",
+        # Ref-addressed and fully groupless: a stop names its session, and the
+        # session names everything else. Reserved so a workspace slug called
+        # "kill" can never shadow the verb.
+        "kill",
         # Meta verbs.
         "help",
         "version",
@@ -404,10 +405,6 @@ def cmd_ls(args: list[str]) -> None:
     surface is identical regardless of cwd. `group` is None here (the
     standalone registry is not group-scoped).
 
-    `bookmark_count` is therefore a constant 0, not a lookup: every bookmark
-    records the group it was captured in, so no bookmark can match a groupless
-    row. Querying anyway would take the store lock and materialize the camp state
-    dir on a read-only listing, to compute an answer already known.
     """
     from .provision.lifecycle import render_workspace_list
 
@@ -419,7 +416,6 @@ def cmd_ls(args: list[str]) -> None:
             "branch": manifest.get("branch", ""),
             "workspace_path": str(wt_path),
             "group": None,
-            "bookmark_count": 0,
         }
         for wt_path, manifest in _list_manifests(workspace_root)
     ]
@@ -462,6 +458,14 @@ def cmd_help(_args: list[str]) -> None:
         "                                    A slug, --dir, and --resume are\n"
         "                                    mutually exclusive: one launch is\n"
         "                                    rooted one way, never two\n"
+        "  camp kill <ref> [--json]          Stop one session and reclaim its memory,\n"
+        "                                    from any cwd. The workspace, worktree,\n"
+        "                                    and working tree are untouched, and\n"
+        "                                    camp launch --resume <ref> brings the\n"
+        "                                    session back under the same reference.\n"
+        "                                    Stopping one that is already down is\n"
+        "                                    success; a ref matching more than one\n"
+        "                                    session lists them on stdout and exits 2\n"
         "  camp sessions [<slug>] [--dir <path>] [--json]\n"
         "                                    List the LIVE harness sessions camp can\n"
         "                                    see, scoped to a workspace or to a\n"
@@ -479,12 +483,6 @@ def cmd_help(_args: list[str]) -> None:
         "  camp sync [--force]               Fast-forward canonical siblings to origin/main\n"
         "  camp rebase [--onto <branch>]     Rebase worktree branches onto origin/main\n"
         "  camp foreach [--fail-fast] <cmd>  Run a command in each member worktree\n"
-        "  camp bookmark [--ref <ref>] [--note <text>]\n"
-        "                                    Bookmark this workspace's harness session\n"
-        "  camp bookmark ls                  List every bookmark (any cwd)\n"
-        "  camp bookmark rm <ref>            Drop a bookmark (any cwd)\n"
-        "  camp resume <ref>                 Re-enter a bookmarked session (any cwd;\n"
-        "                                    needs the shell integration)\n"
         "\n"
         "Health:\n"
         "  camp doctor [--json]              Read-only workspace health check\n"
@@ -495,6 +493,14 @@ def cmd_help(_args: list[str]) -> None:
         "                   camp's reason is on stderr\n"
         "  2                The --resume ref matched more than one session — the\n"
         "                   candidates are on stdout to choose between, not a failure\n"
+        "\n"
+        "Exit codes (camp kill):\n"
+        "  0                Stopped, or already down — stdout is the session id\n"
+        "  1                Failed — stdout is empty and camp's reason is on stderr.\n"
+        "                   This INCLUDES a session still running after the stop:\n"
+        "                   the memory was not reclaimed, so the command failed\n"
+        "  2                The ref matched more than one session — the candidates\n"
+        "                   are on stdout to choose between, not a failure\n"
         "\n"
         "Flags:\n"
         "  --name <slug>    Target a specific worktree from any cwd\n"
@@ -1121,24 +1127,6 @@ def cmd_needs_group(verb: str) -> None:
     _die(needs_group_message(verb))
 
 
-def cmd_bookmark_no_group(rest: list[str]) -> None:
-    """Spine fallback for `camp bookmark` when no group resolved from cwd.
-
-    The ref-addressed subverbs (`ls`, `rm`) address the GLOBAL store and are served
-    here exactly as they are on the group-aware path — same classifier, same
-    handlers. Bare capture is the only cwd-scoped spelling, so it alone falls
-    through to the standard needs-group refusal.
-    """
-    from .bookmark import groupless_subverb
-
-    groupless = groupless_subverb(list(rest))
-    if groupless is None:
-        cmd_needs_group("bookmark")
-        return
-    handler, args = groupless
-    handler(args, None)
-
-
 def cmd_disabled(verb: str) -> None:
     """Print the standard disabled message and exit non-zero."""
     print(
@@ -1202,16 +1190,14 @@ def main() -> None:
         cmd_path(rest, dry_run=dry_run)
     elif first in ("help", "--help", "-h"):
         cmd_help(rest)
-    # Ref-addressed bookmark commands. A ref is looked up WITHOUT knowing its
-    # group, so these must answer from a plain shell outside every group dir —
-    # they read the group off the stored record instead of from cwd. Handled
-    # before the needs-group fallback below, which would otherwise refuse them.
-    elif first == "resume":
-        from .bookmark.resume import cmd_resume
+    # A stop is ref-addressed: it names a session, not a group, so it must answer
+    # from any cwd — including one where no group resolves at all, which is the
+    # situation it exists to be usable in. Handled before the needs-group
+    # fallback below, which would otherwise refuse it.
+    elif first == "kill":
+        from .cli.session import _cmd_kill_cli
 
-        cmd_resume(rest)
-    elif first == "bookmark":
-        cmd_bookmark_no_group(rest)
+        _cmd_kill_cli(rest)
     # Canonical verb surface — these need a resolved group; reaching spine
     # means none resolved (single NEEDS_GROUP_VERBS source of truth).
     elif first in NEEDS_GROUP_VERBS:

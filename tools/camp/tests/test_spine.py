@@ -297,3 +297,30 @@ def test_trailhead_paths_guard_succeeds_when_importable() -> None:
 
     result = _check_trailhead_paths_importable()
     assert result is True
+
+
+# ---------------------------------------------------------------------------
+# camp kill — the reserved token
+# ---------------------------------------------------------------------------
+
+
+def test_kill_is_a_reserved_token_so_a_slug_cannot_shadow_it() -> None:
+    """camp has one verb registry, `spine.RESERVED`, and it is what stops a bare
+    argument from being dispatched as a workspace slug. A workspace called
+    "kill" must therefore never take the verb's place."""
+    from camp.spine import RESERVED
+
+    assert "kill" in RESERVED
+
+
+def test_help_states_the_kill_exit_code_for_a_session_that_did_not_stop(capsys) -> None:
+    """A session still running after the stop is a FAILURE — the memory was not
+    reclaimed — so the help that documents kill's codes has to say so rather
+    than leave a reader to assume any non-zero exit is a broken command."""
+    from camp.spine import cmd_help
+
+    cmd_help([])
+    text = capsys.readouterr().out
+
+    assert "Exit codes (camp kill):" in text
+    assert "still running after the stop" in text

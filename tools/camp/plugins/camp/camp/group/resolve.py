@@ -95,8 +95,8 @@ def validate_group_name(name: str) -> None:
 # workspace-slug confinement
 # ---------------------------------------------------------------------------
 
-# A slug consumed from a STORED record (e.g. a bookmark) is untrusted in a way a
-# freshly-captured slug is not: spine._resolve_slug validates the tighter
+# A slug consumed from a STORED record (e.g. a session transcript) is untrusted
+# in a way a freshly-captured slug is not: spine._resolve_slug validates the tighter
 # capture-time charset once, at write time, but a hand-edited or otherwise
 # corrupted record bypasses that check entirely and is read back here as plain
 # text. This guard only needs to keep the joined path confined under the
@@ -110,11 +110,10 @@ _SLUG_PATH_ESCAPE_RE = re.compile(r"[/\\\x00]")
 def validate_workspace_slug(slug: str) -> None:
     """Validate that `slug` is safe to join as a single path segment.
 
-    Guards `workspace_dir`'s slug argument, which every consumer — resume,
-    the bookmark listing, the bookmark rm guard — re-derives from a STORED
-    record rather than a slug this process just validated. Rejecting here,
-    at the single place all of them call through, protects every current and
-    future reader without each one re-implementing the check.
+    Guards `workspace_dir`'s slug argument, which callers re-derive from a
+    STORED record rather than from a slug this process just validated. Rejecting
+    here, at the single place all of them call through, protects every current
+    and future reader without each one re-implementing the check.
 
     Raises:
         GroupConfinementError: if slug is empty, contains a path separator or

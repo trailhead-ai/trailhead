@@ -148,19 +148,16 @@ def test_capabilities_toml_loads_and_validates() -> None:
 
 
 def test_capabilities_toml_skills() -> None:
-    # camp ships a CLI (bin) + hooks and no always-on base. Two selectable
-    # skills: `bookmark` wraps the bookmark/resume verbs, and `concierge` wraps
-    # the create-or-reuse-a-workspace-and-launch-a-session flow for a caller
-    # with no terminal. Worktree orchestration itself stays operator-facing
-    # (README), since the workspace exists before the harness opens.
+    # camp ships a CLI (bin) + hooks and no always-on base. One selectable
+    # skill: `concierge` wraps the create-or-reuse-a-workspace-and-launch-a-
+    # session flow for a caller with no terminal. Worktree orchestration itself
+    # stays operator-facing (README), since the workspace exists before the
+    # harness opens.
     from trailhead.capabilities import load_manifest
 
     manifest = load_manifest(_CAPABILITIES_TOML)
     assert manifest.base == []
-    assert manifest.skills == {
-        "bookmark": "skills/bookmark",
-        "concierge": "skills/concierge",
-    }
+    assert manifest.skills == {"concierge": "skills/concierge"}
 
 
 # ---------------------------------------------------------------------------

@@ -181,8 +181,6 @@ def _cmd_remove_group_cli(
     (including partial removal) stdout is EMPTY and the exit is nonzero — the
     wrapper stays put.
     """
-    from ..bookmark import guard as bookmark_guard
-    from ..bookmark.store import BookmarkStoreError
     from ..group.manifest import workspace_dir
     from ..provision.reconcile import reconcile_break
     from ..spine import _consume_flag_value, _die
@@ -205,23 +203,42 @@ def _cmd_remove_group_cli(
     except OSError:
         cwd_inside_ws = False
 
-    # Bookmark guard: refuse BEFORE teardown (and before the dry-run early
+    # Session guard: refuse BEFORE teardown (and before the dry-run early
     # return) so a rejected removal — real or previewed — has torn down
     # nothing. Reporting a refusal is not a mutation, so checking it ahead of
     # the dry-run return keeps dry-run non-mutating while making a would-be
     # refusal visible instead of silently promising a removal that would
-    # actually be blocked. Cleanup of the entries happens only after a REAL
-    # teardown succeeds (below); dry-run never reaches that far.
-    group_name = group["group"]["name"]
+    # actually be blocked.
+    #
+    # A workspace that still holds a resumable session is a conversation this
+    # removal would destroy irreversibly. Nothing is stored — the answer is
+    # recomputed from the harness's own two seams each time — and an
+    # enumeration camp could not complete is a REFUSAL, never an empty answer.
+    resolved_env = dict(env) if env is not None else dict(os.environ)
     if not force:
+        from ..launch import teardown_guard
+        from .session import _addressable_harnesses, _parsable_groups
+
+        session_groups = _parsable_groups()
         try:
-            blocking = bookmark_guard.blocking_bookmarks(group_name, slug, env=env)
-        except BookmarkStoreError as e:
-            # BookmarkStoreError messages already open with "camp: " — re-prefixing
-            # would read "camp remove: camp: the bookmark store …".
-            _die(str(e))
-        if blocking:
-            print(bookmark_guard.render_block(slug, blocking), file=sys.stderr)
+            transcripts, live = teardown_guard.gather_pool(
+                _addressable_harnesses(session_groups), env=resolved_env
+            )
+            holding = teardown_guard.blocking_sessions(
+                ws_dir,
+                transcripts=transcripts,
+                live_records=live,
+                groups=session_groups,
+                env=resolved_env,
+            )
+        except teardown_guard.EnumerationUnavailable as e:
+            _die(
+                f"camp remove: {e} — removal is irreversible, so camp refuses "
+                "rather than assume the workspace is empty; re-run with --force "
+                "to remove it anyway"
+            )
+        if holding:
+            print(teardown_guard.render_block(slug, holding), file=sys.stderr)
             sys.exit(1)
 
     if dry_run:
@@ -259,18 +276,6 @@ def _cmd_remove_group_cli(
         f"camp remove: removed worktree {slug!r} ({', '.join(removed)})",
         file=sys.stderr,
     )
-
-    # Teardown succeeded — only now is it safe to drop the workspace's bookmarks.
-    # A store failure here must not turn a completed removal into a nonzero exit:
-    # the workspace really is gone, and a surviving entry renders as
-    # `workspace gone` in `camp bookmark ls`, which is recoverable by hand.
-    try:
-        cleared = bookmark_guard.clear_workspace_bookmarks(group_name, slug, env=env)
-    except BookmarkStoreError as e:
-        print(f"camp remove: could not clear bookmarks for {slug!r}: {e}", file=sys.stderr)
-        cleared = []
-    for ref in cleared:
-        print(f"  removed bookmark {ref!r}", file=sys.stderr)
 
     # The caller's shell is now sitting in a deleted directory — hand it the
     # first member's repo_root as the ONLY stdout line so the shellenv wrapper

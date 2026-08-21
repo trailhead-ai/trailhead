@@ -13,10 +13,13 @@ Tables:
                      message and exit non-zero. Dispatch is intercepted before
                      any command body runs, so these verbs have no handler in
                      spine — this set is the sole thing that governs them.
-  LEGACY_REDIRECTS  — renamed verbs → their live canonical replacement (old → new).
-                     All targets must be live canonical verbs; the dispatcher does
-                     not support chained redirects, so no target may itself be a
-                     removed verb.
+  LEGACY_REDIRECTS  — retired verbs → the live replacement to point the operator
+                     at (old → new). A target's first token must be a live
+                     canonical verb; the dispatcher does not support chained
+                     redirects, so no target may itself be a removed verb. A
+                     target may carry the flags that make it the actual
+                     replacement (`launch --resume`), because what the operator
+                     needs is the command to type, not the verb it lives under.
   NEEDS_GROUP_VERBS — verbs whose real behavior lives on the group-aware path in
                       cli/camp; reaching them via spine.main means no group
                       resolved, so spine emits a "configure / pass --group" error.
@@ -66,15 +69,23 @@ def resolve_verb(raw: str) -> tuple[str, str]:
     return canonical, "live"
 
 
-# Renamed verbs: old verb → live canonical replacement.
-# All targets are live canonical verbs; the dispatcher does not support chained
-# redirects, so no target may be a removed verb (e.g. ai/rm/enter are removed).
+# Retired verbs: old verb → the live command that replaced it.
+# Every target's first token is a live canonical verb; the dispatcher does not
+# support chained redirects, so no target may be a removed verb (e.g.
+# ai/rm/enter are removed).
+#
+# `resume` and `bookmark` are retirements, not renames, and they land here for
+# the same reason the renames do: an operator who typed one of them yesterday
+# typed a VERB, and the bare-slug refusal answers a question about slugs. The
+# replacement carries a flag because that is what there is to type.
 LEGACY_REDIRECTS: dict[str, str] = {
     "open": "new",
     "break": "remove",
     "init": "group",
     "ai": "new",
     "enter": "activate",
+    "resume": "launch --resume",
+    "bookmark": "launch --resume",
 }
 
 # Verbs whose real implementation requires a resolved group (the group-aware path
@@ -83,14 +94,10 @@ LEGACY_REDIRECTS: dict[str, str] = {
 # wording: "new"/"setup" point the user at configuring a group; the rest emit the
 # standard "pass --group" error.
 #
-# `resume` is deliberately ABSENT: it addresses a session by ref, and a ref is the
-# thing you look up without knowing its group, so spine serves it directly. So are
-# the `bookmark ls`/`bookmark rm` subverbs — `bookmark` is listed here only for
-# BARE capture, which bookmarks the workspace the shell is standing in and so has
-# nothing to act on without one (see bookmark.groupless_subverb, the single
-# classifier both dispatchers consult).
+# `kill` is deliberately ABSENT: it addresses a session by ref, and a ref is the
+# thing you look up without knowing its group, so spine serves it directly.
 NEEDS_GROUP_VERBS = frozenset(
-    {"new", "remove", "pwd", "activate", "setup", "bookmark", "launch", "sessions"}
+    {"new", "remove", "pwd", "activate", "setup", "launch", "sessions"}
 )
 
 _NEEDS_GROUP_CONFIGURE = frozenset({"new", "setup"})

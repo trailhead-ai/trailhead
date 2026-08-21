@@ -123,27 +123,6 @@ def cmd_status_group(
     return {"worktrees": worktrees}
 
 
-def _bookmark_count(group_name: str, slug: str, *, env: dict[str, str] | None) -> int:
-    """Return the number of bookmarks pointing at workspace (group_name, slug).
-
-    A workspace holds at most one bookmark (store.find_by_workspace's own
-    invariant), so this is always 0 or 1 — but callers deal in a count, not a
-    bool, since the render surface is `[N bookmarks]`.
-
-    An unreadable store answers 0. The count is an ANNOTATION on a listing that
-    predates bookmarks entirely: degrading to the bare `slug path` line keeps
-    `camp list` — the command a user reaches for to find their workspaces —
-    working, where raising would take the whole listing down over a side note.
-    """
-    from ..bookmark import store as bookmark_store
-
-    try:
-        found = bookmark_store.find_by_workspace(group_name, slug, env=env)
-    except bookmark_store.BookmarkStoreError:
-        return 0
-    return 1 if found is not None else 0
-
-
 def cmd_ls_group(
     group: dict[str, Any],
     *,
@@ -159,12 +138,10 @@ def cmd_ls_group(
                 "manifest_path": str,
                 "group": str,
                 "workspace_path": str,  # absolute path; same as workspace_dir(group, slug)
-                "bookmark_count": int,  # 0 or 1; see _bookmark_count
             },
             ...
         ]
     """
-    group_name = group["group"]["name"]
     pairs = _list_group_worktrees(group, env=env)
     entries = []
     for slug_name, mpath in pairs:
@@ -180,7 +157,6 @@ def cmd_ls_group(
                     # workspace dir — no need to recompute workspace_dir() (which
                     # re-runs central_state_dir) per row.
                     "workspace_path": str(mpath.parent),
-                    "bookmark_count": _bookmark_count(group_name, slug_name, env=env),
                 }
             )
         except ManifestError:
@@ -190,7 +166,7 @@ def cmd_ls_group(
 
 # Fixed JSON schema for `camp list --json`, emitted identically by BOTH entry
 # points so a parser never KeyErrors switching between them.
-_LIST_JSON_KEYS = ("slug", "branch", "workspace_path", "group", "bookmark_count")
+_LIST_JSON_KEYS = ("slug", "branch", "workspace_path", "group")
 
 
 def render_workspace_list(entries: list[dict[str, Any]], *, as_json: bool) -> None:
@@ -198,15 +174,11 @@ def render_workspace_list(entries: list[dict[str, Any]], *, as_json: bool) -> No
     (cli/camp's group-aware `_cmd_ls_group_cli` and spine.main's no-group `cmd_ls`)
     so the human + --json surface is identical regardless of cwd.
 
-    Each entry must carry `slug` and `workspace_path`; `branch`, `group`, and
-    `bookmark_count` are optional (group is None for the standalone fallback;
-    bookmark_count defaults to 0). Output:
-      - human: one `slug workspace_path` line per entry, with a trailing
-        ` [N bookmark]`/` [N bookmarks]` suffix (singular/plural agreement)
-        when bookmark_count > 0 (omitted entirely at N=0, preserving the bare
-        `slug workspace_path` line); empty → no stdout.
-      - --json: a list of {slug, branch, workspace_path, group, bookmark_count}
-        dicts (the fixed _LIST_JSON_KEYS schema); empty → `[]`.
+    Each entry must carry `slug` and `workspace_path`; `branch` and `group` are
+    optional (group is None for the standalone fallback). Output:
+      - human: one `slug workspace_path` line per entry; empty → no stdout.
+      - --json: a list of {slug, branch, workspace_path, group} dicts (the fixed
+        _LIST_JSON_KEYS schema); empty → `[]`.
 
     The renderer PROJECTS each entry onto the fixed schema (ignoring any
     source-specific extras like manifest_path), so the two data models — group
@@ -221,7 +193,6 @@ def render_workspace_list(entries: list[dict[str, Any]], *, as_json: bool) -> No
                 "branch": e.get("branch", ""),
                 "workspace_path": e["workspace_path"],
                 "group": e.get("group"),
-                "bookmark_count": e.get("bookmark_count", 0),
             }
             for e in entries
         ]
@@ -229,10 +200,7 @@ def render_workspace_list(entries: list[dict[str, Any]], *, as_json: bool) -> No
         return
 
     for e in entries:
-        count = e.get("bookmark_count", 0)
-        noun = "bookmark" if count == 1 else "bookmarks"
-        suffix = f" [{count} {noun}]" if count > 0 else ""
-        print(f"{e['slug']} {e['workspace_path']}{suffix}")
+        print(f"{e['slug']} {e['workspace_path']}")
 
 
 def _provision_member_and_flip(
