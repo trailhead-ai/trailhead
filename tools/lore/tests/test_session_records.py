@@ -291,9 +291,8 @@ class TestCleanToDirty:
         # would re-dirty; instead assert via the next candidate). Write the clean
         # sidecar atomically through the record store helper to mirror real writes.
         record_store = load_script("lore.record.store")
-        record_store.write_temp_then_rename(
-            js, json.dumps(side, sort_keys=True, separators=(",", ":"))
-        )
+        sidecar_format = load_script("lore.record.sidecar")
+        record_store.write_temp_then_rename(js, sidecar_format.dumps(side))
 
         # Next candidate must flip status back to dirty (sidecar + index).
         r = _candidate(vault, state, SID, body="second candidate\n",
@@ -335,9 +334,8 @@ class TestReferenced:
         side["status"] = "clean"
         side.pop("last-referenced-at", None)
         record_store = load_script("lore.record.store")
-        record_store.write_temp_then_rename(
-            js, json.dumps(side, sort_keys=True, separators=(",", ":"))
-        )
+        sidecar_format = load_script("lore.record.sidecar")
+        record_store.write_temp_then_rename(js, sidecar_format.dumps(side))
 
         r = _run(
             ["session", "referenced", "spec/lore-search", "--session-id", SID],

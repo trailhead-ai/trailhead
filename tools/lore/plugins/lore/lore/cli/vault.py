@@ -28,10 +28,12 @@ def cmd_vault(args) -> int:
         return _cmd_vault_config(args)
     if action == "resolve":
         return _cmd_vault_resolve(args)
+    if action == "reformat":
+        return _cmd_vault_reformat(args)
     print(
         f"lore vault: unknown action {action!r}. "
         f"Use 'lore vault add', 'lore vault delete', 'lore vault ls', "
-        f"'lore vault config', or 'lore vault resolve'.",
+        f"'lore vault config', 'lore vault resolve', or 'lore vault reformat'.",
         file=sys.stderr,
     )
     return 1
@@ -361,6 +363,102 @@ def _cmd_vault_config(args) -> int:
     return 0
 
 
+def _reformat_one(vault_root: Path) -> tuple[int, int, int]:
+    """Rewrite every sidecar under *vault_root* into canonical form.
+
+    Returns ``(rewritten, already_canonical, skipped)``. A sidecar that will not
+    parse is skipped and counted — reformat is a maintenance verb over a tree that
+    may already be damaged, and refusing the whole vault over one bad file would
+    make it useless exactly when it is needed.
+
+    **Lock scope.** The whole rewrite pass runs under this vault's
+    ``vault_write_lock``, because it IS a tree mutation: read-then-rewrite against
+    a concurrently-written sidecar would clobber the concurrent write. Same
+    posture as every other tree-mutating path (``validate_and_write``, sync's
+    stage+commit).
+
+    **Only the closed kind set is walked.** Every other top-level directory —
+    the ``sites/`` free-write zone, or whatever else an adopter keeps beside the
+    record trees — holds JSON that is not a sidecar and is not this verb's to
+    rewrite.
+
+    **The index is untouched, deliberately.** Reformatting changes bytes, not
+    parsed content, and the index's drift columns (``src_mtime``/``src_size``) are
+    stat'd from the markdown *body*, not the sidecar — so no index row goes stale.
+    """
+    from .. import locking
+    from ..record import model as record_model
+    from ..record import sidecar as sidecar_format
+    from ..record import store as record_store_mod
+
+    rewritten = already = skipped = 0
+    with locking.vault_write_lock(vault_root):
+        for kind in sorted(record_model.KINDS):
+            kind_dir = vault_root / kind
+            if not kind_dir.is_dir():
+                continue
+            for path in sorted(kind_dir.glob("*.json")):
+                try:
+                    text = path.read_text(encoding="utf-8")
+                    canonical = sidecar_format.dumps(json.loads(text))
+                except (OSError, ValueError):
+                    skipped += 1
+                    continue
+                if canonical == text:
+                    already += 1
+                    continue
+                record_store_mod.write_temp_then_rename(path, canonical)
+                rewritten += 1
+    return rewritten, already, skipped
+
+
+def _cmd_vault_reformat(args) -> int:
+    """``lore vault reformat`` — rewrite every sidecar into canonical form.
+
+    The one-time migration behind the canonical sidecar serializer
+    (``record/sidecar.py``): pretty-printed, keys sorted, ``updated-at``/
+    ``updated-by`` last, trailing newline — the git-mergeable shape
+    ``adr/record-storage-text-is-truth-the-index-is-derived`` calls load-bearing.
+    Every vault in the config is rewritten in place; the operator reviews the
+    result with ``git diff`` and commits it via the next ``lore sync``, one
+    vault-wide reformat commit per vault.
+
+    Refuses on an unreadable config rather than reformatting a partial vault set
+    (same posture as ``sync``/``flush``). Exit 0 otherwise — a skipped malformed
+    sidecar is reported, not a failure.
+
+    A vault mid-``lore resolve`` is skipped, not reformatted: rewriting clean
+    sidecars underneath an in-progress rebase drops uncommitted churn into a tree
+    the operator is still settling conflicts in. The fence is per vault rather
+    than whole-command — reformat is inherently multi-vault, and one stuck vault
+    must not hold the migration of every other one hostage — and it reuses
+    ``resolve_state``'s refusal wording so it reads identically to the fence on
+    ``record create`` / ``record update`` / ``flush``.
+    """
+    from . import resolve_state as resolve_state_mod
+    from .common import _resolve_all_vaults_strict
+
+    targets = _resolve_all_vaults_strict("reformat")
+    if targets is None:
+        return 1
+
+    for name, path in targets:
+        if not path.is_dir():
+            print(f"{name}: vault directory not found ({path}) — skipped")
+            continue
+        if resolve_state_mod.vault_is_resolving(path):
+            print(resolve_state_mod.refusal_notice(path, "reformat"), file=sys.stderr)
+            print(f"{name}: mid-resolution — skipped")
+            continue
+        rewritten, already, skipped = _reformat_one(path)
+        line = f"{name}: {rewritten} rewritten, {already} already canonical"
+        if skipped:
+            line += f", {skipped} skipped (unparseable)"
+        print(line)
+    print("Review with 'git diff' in each vault; the next 'lore sync' commits it.")
+    return 0
+
+
 def _print_vault_resolution(result: dict, *, as_json: bool) -> None:
     """Print *result* as JSON, or as the one-line human rendering."""
     if as_json:
@@ -528,3 +626,9 @@ def add_vault_subparser(sub) -> None:
         help="Emit the fixed-key resolution object as JSON",
     )
     p_vault_resolve.set_defaults(func=cmd_vault)
+
+    p_vault_reformat = p_vault_sub.add_parser(
+        "reformat",
+        help="Rewrite every sidecar in every configured vault into canonical form",
+    )
+    p_vault_reformat.set_defaults(func=cmd_vault)

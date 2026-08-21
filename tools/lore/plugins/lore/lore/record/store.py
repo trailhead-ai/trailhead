@@ -71,6 +71,7 @@ from .. import locking
 from ..search import index as index_store
 from ..vault import vault as vault_mod
 from . import model as record_model
+from . import sidecar as sidecar_format
 
 # ---------------------------------------------------------------------------
 # Types
@@ -786,9 +787,7 @@ def validate_and_write(
     # needs the preceding ``place_record`` inside it) is not blocked by itself.
     with locking.vault_write_lock(location.vault_root):
         # 5 — durable text first (atomic). Body before sidecar; both atomic.
-        # Compact format: single-line, sorted keys, no trailing newline — stable bytes for
-        # diff/grep and round-trip asserts.
-        sidecar_text = json.dumps(stamped, sort_keys=True, separators=(",", ":"))
+        sidecar_text = sidecar_format.dumps(stamped)
         write_temp_then_rename(location.body_path, safe_body)
         write_temp_then_rename(location.sidecar_path, sidecar_text)
 
@@ -885,7 +884,7 @@ def move_record(
         body = old_body_path.read_text(encoding="utf-8") if old_body_path.exists() else ""
     if new_sidecar is not None:
         sidecar = new_sidecar
-        sidecar_text = json.dumps(sidecar, sort_keys=True, separators=(",", ":"))
+        sidecar_text = sidecar_format.dumps(sidecar)
     else:
         sidecar_text = (
             old_sidecar_path.read_text(encoding="utf-8") if old_sidecar_path.exists() else "{}"

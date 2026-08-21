@@ -850,8 +850,8 @@ def test_create_label_two_entries_both_stored(tmp_path):
     assert sidecar.get("labels") == {"worktree": "s5", "claude-code/model": "x"}
 
 
-def test_create_label_validates_compact_serialization(tmp_path):
-    """sidecar with labels is compact (single-line JSON, sorted keys)."""
+def test_create_label_validates_canonical_serialization(tmp_path):
+    """sidecar with labels is canonical (pretty-printed, sorted keys, trailing newline)."""
     vault, state = _make_vault(tmp_path)
     r = _run(
         _BASE_ARGS + ["--label", "worktree=s5"],
@@ -862,11 +862,12 @@ def test_create_label_validates_compact_serialization(tmp_path):
     record_id = r.stdout.strip()
     kind, name = record_id.split("/", 1)
     raw = (vault / kind / f"{name}.json").read_text(encoding="utf-8")
-    # Compact: no newlines inside the JSON, and round-trips cleanly.
+    # Canonical: the sidecar serializer's own rendering, and round-trips cleanly.
     import json as _json
 
-    assert "\n" not in raw
+    sidecar_format = load_script("lore.record.sidecar")
     parsed = _json.loads(raw)
+    assert raw == sidecar_format.dumps(parsed)
     assert parsed["labels"] == {"worktree": "s5"}
 
 

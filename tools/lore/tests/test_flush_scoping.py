@@ -228,7 +228,7 @@ class TestFlushSearch:
         side_a = _sidecar(vault, SID_A)
         side_a["updated-at"] = "2000-01-01T00:00:00Z"
         (vault / "session" / f"{SID_A}.json").write_text(
-            json.dumps(side_a, sort_keys=True, separators=(",", ":"))
+            load_script("lore.record.sidecar").dumps(side_a)
         )
         assert _run(["reindex"], vault=vault, state_dir=state).returncode == 0
 
@@ -363,7 +363,7 @@ class TestMidBatchFaultInjection:
 # ---------------------------------------------------------------------------
 
 class TestBatchPushesOnce:
-    """A batch flush pushes ONCE for the whole batch, not once per session.
+    """A `--no-sync` batch flush pushes ONCE for the whole batch, not per session.
 
     Each per-session commit is still its own atomicity unit; only the network
     push is hoisted out of the loop (`_flush_commit(push=False)` + a single
@@ -371,9 +371,14 @@ class TestBatchPushesOnce:
     to (a) report a fake origin remote — the test vault has none — so the push
     path is actually reached, and (b) count pushes while letting add/diff/commit
     run for real, proving N commits but exactly one push.
+
+    `--no-sync` is the form under test because it is the only one that pushes
+    here at all: a default flush ends with the sync tail, whose own `lore sync`
+    pushes every writable vault, and `_flush_push` stands down for it (pinned by
+    :meth:`test_the_sync_tail_owns_the_push_when_it_runs`).
     """
 
-    def _run_counting_pushes(self, state):
+    def _run_counting_pushes(self, state, *, extra_args=("--no-sync",)):
         import contextlib
         import io
         import os
@@ -411,7 +416,7 @@ class TestBatchPushesOnce:
         buf_out, buf_err = io.StringIO(), io.StringIO()
         code = None
         try:
-            args = dispatch.build_parser().parse_args(["flush", "all"])
+            args = dispatch.build_parser().parse_args(["flush", "all", *extra_args])
             with contextlib.redirect_stdout(buf_out), contextlib.redirect_stderr(buf_err):
                 code = args.func(args)
         finally:
@@ -419,6 +424,26 @@ class TestBatchPushesOnce:
             os.environ.clear()
             os.environ.update(old_environ)
         return code, pushes["n"], buf_out.getvalue(), buf_err.getvalue()
+
+    def test_the_sync_tail_owns_the_push_when_it_runs(self, tmp_path):
+        """A default (tail-running) batch must not ALSO push via `_flush_push`.
+
+        Two pushes for one set of commits is the parallel-tail shape this slice
+        exists to remove: the tail's `lore sync` is the push.
+        """
+        vault, state = _make_vault(tmp_path)
+        _git_init(vault)
+        for sid in (SID_A, SID_B):
+            assert _candidate(vault, state, sid).returncode == 0
+        _commit_baseline(vault)
+
+        code, pushes, out, err = self._run_counting_pushes(state, extra_args=())
+        assert code == 0, err
+        for sid in (SID_A, SID_B):
+            assert _sidecar(vault, sid)["status"] == "clean"
+        assert pushes == 0, (
+            f"the sync tail pushes; `_flush_push` must stand down, got {pushes}"
+        )
 
     def test_batch_of_n_sessions_pushes_exactly_once(self, tmp_path):
         vault, state = _make_vault(tmp_path)

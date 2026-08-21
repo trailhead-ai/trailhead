@@ -8,19 +8,23 @@ the command modules stay free of cross-imports for generic plumbing:
   - the config/state path resolvers (``_resolve_config_path`` and friends), which
     lazy-import ``_bootstrap`` + ``trailhead.paths`` and fall back to the XDG
     default so the CLI works in a vanilla checkout;
+  - ``machine_state_key`` — the collision-free filename stem every machine-local
+    per-vault file under that state dir is keyed on;
   - ``_load_vault_config`` — the single gate for config-driven behavior;
   - ``_resolve_all_vaults`` — the whole-install vault enumeration used by ``sync``
     and ``status``, as opposed to ``resolve_active_vault``'s ``default``-only view,
     plus ``_partition_writable_vaults`` — the ``shared: true`` exclusion every
     WRITE/PUSH fan-out over that enumeration applies;
-  - the git primitives (``_git`` / ``_vault_is_git_toplevel``) shared by ``sync``
-    and ``flush``, plus ``_vault_drift`` — the "is this vault actually backed up?"
-    probe shared by ``status`` and ``flush``;
+  - the git primitives (``_git`` / ``_vault_is_git_toplevel`` /
+    ``_vault_mid_rebase`` / ``_vault_upstream_ref``) shared by ``sync``, ``flush``,
+    ``resolve`` and ``resolve_state``, plus ``_vault_drift`` — the "is this vault
+    actually backed up?" probe shared by ``status`` and ``flush``;
   - the shared ``--session-id`` / ``--worktree`` subparser selectors;
   - the shared stdin read (``_read_stdin_body``).
 """
 from __future__ import annotations
 
+import hashlib
 import os
 import select
 import subprocess
@@ -112,6 +116,33 @@ def _resolve_vaults_root() -> Path:
     return _resolve_xdg_dir(
         kind="state", xdg_var="XDG_STATE_HOME", fallback_base=(".local", "state"), suffix=("vaults",)
     )
+
+
+#: Hex digits of the resolved-path digest carried in a machine-local state
+#: filename. Twelve is far more than enough to separate the handful of vaults one
+#: machine configures, while keeping the name short enough to read.
+_STATE_KEY_DIGEST_LEN = 12
+
+
+def machine_state_key(vault_root: str | Path) -> str:
+    """Return the filename stem keying machine-local per-vault state on *vault_root*.
+
+    ``<basename>-<digest>``, where the digest is a truncated SHA-256 of the
+    vault's RESOLVED absolute path. The basename alone is not unique: two
+    configured vaults whose directories share a final component (``…/a/vault``
+    and ``…/b/vault``, two clones each named ``team-notes``) would key the same
+    file and silently overwrite each other's state. The basename survives as the
+    human-readable half so an operator can still tell whose file is whose; the
+    digest supplies the uniqueness.
+
+    Resolving first also makes the key stable across equivalent spellings of the
+    same vault, and leaves nothing path-like in the stem — but confinement is
+    still the caller's job via ``layers.assert_within_root``, which is what
+    catches a symlink planted at the resulting name.
+    """
+    resolved = Path(vault_root).expanduser().resolve()
+    digest = hashlib.sha256(str(resolved).encode("utf-8")).hexdigest()
+    return f"{resolved.name or 'vault'}-{digest[:_STATE_KEY_DIGEST_LEN]}"
 
 
 def _resolve_lore_state_dir() -> Path:
@@ -366,6 +397,25 @@ def _vault_is_git_toplevel(vault: Path) -> bool:
         return False
 
 
+def _vault_mid_rebase(vault: Path) -> bool:
+    """Return ``True`` iff a rebase is in progress — state git itself tracks.
+
+    Probed via ``rev-parse --git-path`` rather than a hand-built ``.git/...``
+    path, because in a linked worktree ``.git`` is a file and the state dirs
+    live elsewhere.
+
+    The single liveness authority for a resolution session (``cli.resolve_state``)
+    as well as ``sync``'s abort verification: a stopped rebase leaves its state
+    directory behind, and only its disappearance means the rebase is over.
+    """
+    for state_dir in ("rebase-merge", "rebase-apply"):
+        rc, out, _ = _git(vault, "rev-parse", "--git-path", state_dir)
+        # `--git-path` output is relative to the vault when not absolute.
+        if rc == 0 and out and (vault / out).exists():
+            return True
+    return False
+
+
 #: Drift codes returned by :func:`_vault_drift`. Callers branch on these STABLE
 #: tokens, never on the human phrasing beside them — the prose is free to be
 #: reworded without silently changing which remedy a caller prints.
@@ -376,12 +426,16 @@ DRIFT_UNCOMMITTED = "uncommitted"
 DRIFT_NO_REMOTE = "no-remote"
 DRIFT_NO_UPSTREAM = "no-upstream"
 DRIFT_UNPUSHED = "unpushed"
+DRIFT_RESOLVING = "resolving"
 
 #: The drift codes ``lore sync`` can actually resolve. A caller that offers
 #: "run `lore sync`" as its remedy MUST filter on this set: proposing it for a
 #: condition sync cannot fix (no remote, a missing directory) trains the operator
 #: to ignore the notice, which is the failure this drift reporting exists to
 #: prevent.
+#: ``DRIFT_RESOLVING`` is deliberately absent: a vault stopped mid-rebase is
+#: not something ``lore sync`` can settle — sync would abort the rebase and throw
+#: the resolution away. Its remedy is ``lore resolve`` and nothing else.
 DRIFT_SYNC_FIXABLE = frozenset(
     {DRIFT_NEVER_COMMITTED, DRIFT_UNCOMMITTED, DRIFT_NO_UPSTREAM, DRIFT_UNPUSHED}
 )
@@ -404,6 +458,27 @@ def _vault_has_upstream(vault: Path) -> bool:
     """Return ``True`` iff the current branch has a configured upstream."""
     rc, _, _ = _git(vault, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
     return rc == 0
+
+
+def _vault_upstream_ref(vault: Path) -> "str | None":
+    """Return the ref ``vault``'s HEAD is measured and rebased against, or ``None``.
+
+    ``@{u}`` when the branch tracks an upstream, else ``origin/<branch>`` when the
+    remote already carries a branch of the same name — the case where two devices
+    are both at their first push and neither has an upstream recorded yet. Nothing
+    here contacts the remote; it reads the local ref database only.
+
+    Deliberately excludes the unborn-branch adoption ``sync._pull_one`` performs:
+    adopting ``origin/<branch>`` onto a vault with no commits is an integration
+    decision, not the measurement this returns.
+    """
+    if _vault_has_upstream(vault):
+        return "@{u}"
+    branch = _vault_head_branch(vault)
+    if branch is None:
+        return None
+    rc, _, _ = _git(vault, "rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{branch}")
+    return f"origin/{branch}" if rc == 0 else None
 
 
 def _vault_unpushed(vault: Path) -> bool:
@@ -434,8 +509,9 @@ def _vault_drift(vault: Path) -> list:
     human phrase for them to print.
 
     Ordered most- to least-severe, and **short-circuiting**: a vault that is
-    absent or not a git repo has no meaningful commit/remote state to report, so
-    that finding is returned alone rather than followed by derivative noise.
+    absent, not a git repo, or stopped mid-rebase has no meaningful commit/remote
+    state to report, so that finding is returned alone rather than followed by
+    derivative noise.
 
     ``DRIFT_NO_UPSTREAM`` is kept distinct from ``DRIFT_UNPUSHED`` because the two
     do not resolve the same way — an ahead-of-upstream branch is fixed by a plain
@@ -451,6 +527,12 @@ def _vault_drift(vault: Path) -> list:
         return [
             (DRIFT_NOT_GIT, "not a git repo (or not its own toplevel) — records have no history")
         ]
+
+    if _vault_mid_rebase(vault):
+        # Returned ALONE, like the absent/not-git findings above: a conflicted
+        # tree would otherwise read as ``DRIFT_UNCOMMITTED`` and draw a
+        # `lore sync` remedy that aborts the resolution in progress.
+        return [(DRIFT_RESOLVING, "mid-resolution — a vault rebase is in progress")]
 
     findings = []
     if not _vault_has_commits(vault):
