@@ -117,6 +117,15 @@ is never invoked in tests.  `doctor`/`uninstall` likewise read registration stat
 through the seam (`is_registered` / `installed_tools` / `manifest_name`), never by
 re-deriving the marker scheme.
 
+The composed tree is global, but a harness's install state need not be: every
+seam method that reads or writes it takes an `env` mapping naming *which*
+configuration of the harness is meant.  Claude Code keeps registration and
+per-tool install state per config dir — the `claude plugin` CLI writes it into
+whichever dir `CLAUDE_CONFIG_DIR` selects — so a machine running two Claude
+accounts has two independent install states over one shared composed tree, and
+every `claude plugin …` invocation names its target dir explicitly.  A harness
+whose state really is global ignores `env`.
+
 ## What is NOT here (installer layer)
 
 The following are explicitly handled by the installer layer, not this module:

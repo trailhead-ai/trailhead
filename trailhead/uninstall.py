@@ -113,19 +113,25 @@ def run_uninstall(
 
                 # Installed tools are read through the harness seam; an unknown
                 # harness can't be introspected, so it tears down with no tool list.
-                tools = harness.installed_tools(composed_root) if harness is not None else []
+                tools = (
+                    harness.installed_tools(composed_root, env=_env) if harness is not None else []
+                )
                 if not quiet and not as_json:
                     print(f"removing {hname}: {', '.join(tools) or '(no tools)'}…")
 
                 if harness is not None:
                     for tool in tools:
                         try:
-                            harness.unregister_tool(tool, composed_root, runner=runner)
+                            harness.unregister_tool(
+                                tool, composed_root, runner=runner, env=_env
+                            )
                         except Exception as exc:
                             warnings.append(f"{hname}/{tool}: de-registration warning: {exc}")
-                    if harness.is_registered(composed_root):
+                    if harness.is_registered(composed_root, env=_env):
                         try:
-                            harness.unregister_marketplace(composed_root, runner=runner)
+                            harness.unregister_marketplace(
+                                composed_root, runner=runner, env=_env
+                            )
                         except Exception as exc:
                             warnings.append(f"{hname}: marketplace de-registration warning: {exc}")
 

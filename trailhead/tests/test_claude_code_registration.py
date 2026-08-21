@@ -96,7 +96,7 @@ class TestGenerateManifest:
         assert len(data["plugins"]) == 3
         assert {p["name"] for p in data["plugins"]} == {"lore", "camp", "craft"}
 
-    def test_claude_plugin_dir_created_automatically(self, composed_root):
+    def test_claude_plugin_dir_created_automatically(self, composed_root, claude_dir):
         claude_dir = composed_root / ".claude-plugin"
         assert not claude_dir.exists()
         _harness().generate_manifest(["lore"], composed_root)
@@ -176,17 +176,17 @@ class TestRegister:
         for call_args in calls_seen:
             assert call_args[call_args.index("--scope") + 1] == "user"
 
-    def test_writes_global_marker_on_success(self, composed_root):
+    def test_writes_global_marker_on_success(self, composed_root, claude_dir):
         _harness().register(composed_root, runner=lambda args, **kw: None)
-        assert (composed_root / ".trailhead-registered").exists()
+        assert (claude_dir / ".trailhead-registered").exists()
 
-    def test_no_marker_when_runner_raises(self, composed_root):
+    def test_no_marker_when_runner_raises(self, composed_root, claude_dir):
         def failing_runner(args, **kw):
             raise RuntimeError("marketplace add failed")
 
         with pytest.raises(RuntimeError):
             _harness().register(composed_root, runner=failing_runner)
-        assert not (composed_root / ".trailhead-registered").exists()
+        assert not (claude_dir / ".trailhead-registered").exists()
 
     def test_args_are_list(self, composed_root):
         runner, calls_seen = capturing_runner()
@@ -225,23 +225,23 @@ class TestInstallTool:
         for call_args in calls_seen:
             assert call_args[call_args.index("--scope") + 1] == "user"
 
-    def test_writes_per_tool_marker_on_success(self, composed_root):
+    def test_writes_per_tool_marker_on_success(self, composed_root, claude_dir):
         _harness().install_tool("lore", composed_root, runner=lambda args, **kw: None)
-        assert (composed_root / ".trailhead-installed-lore").exists()
+        assert (claude_dir / ".trailhead-installed-lore").exists()
 
-    def test_no_marker_when_runner_raises(self, composed_root):
+    def test_no_marker_when_runner_raises(self, composed_root, claude_dir):
         def failing_runner(args, **kw):
             raise RuntimeError("install failed")
 
         with pytest.raises(RuntimeError):
             _harness().install_tool("lore", composed_root, runner=failing_runner)
-        assert not (composed_root / ".trailhead-installed-lore").exists()
+        assert not (claude_dir / ".trailhead-installed-lore").exists()
 
-    def test_per_tool_markers_are_distinct(self, composed_root):
+    def test_per_tool_markers_are_distinct(self, composed_root, claude_dir):
         _harness().install_tool("lore", composed_root, runner=lambda args, **kw: None)
         _harness().install_tool("camp", composed_root, runner=lambda args, **kw: None)
-        assert (composed_root / ".trailhead-installed-lore").exists()
-        assert (composed_root / ".trailhead-installed-camp").exists()
+        assert (claude_dir / ".trailhead-installed-lore").exists()
+        assert (claude_dir / ".trailhead-installed-camp").exists()
 
     def test_args_are_list(self, composed_root):
         runner, calls_seen = capturing_runner()
@@ -297,8 +297,8 @@ class TestRewireTool:
         _harness().rewire_tool("lore", composed_root, runner=stub_runner)
         assert len(install_calls) == 1
 
-    def test_clears_per_tool_marker_before_pair(self, composed_root):
-        marker = composed_root / ".trailhead-installed-lore"
+    def test_clears_per_tool_marker_before_pair(self, composed_root, claude_dir):
+        marker = claude_dir / ".trailhead-installed-lore"
         marker.write_text("{}")
         marker_state_at_call_time = []
         _harness().rewire_tool(
@@ -308,12 +308,12 @@ class TestRewireTool:
         )
         assert all(not present for present in marker_state_at_call_time)
 
-    def test_rewrites_per_tool_marker_after_install(self, composed_root):
+    def test_rewrites_per_tool_marker_after_install(self, composed_root, claude_dir):
         _harness().rewire_tool("lore", composed_root, runner=lambda args, **kw: None)
-        assert (composed_root / ".trailhead-installed-lore").exists()
+        assert (claude_dir / ".trailhead-installed-lore").exists()
 
-    def test_no_marker_when_install_raises(self, composed_root):
-        marker = composed_root / ".trailhead-installed-lore"
+    def test_no_marker_when_install_raises(self, composed_root, claude_dir):
+        marker = claude_dir / ".trailhead-installed-lore"
         marker.write_text("{}")
 
         def failing_on_install(args, **kw):
@@ -380,14 +380,14 @@ class TestUnregisterTool:
         for call in calls_seen:
             assert not ("marketplace" in call and "remove" in call)
 
-    def test_clears_per_tool_marker(self, composed_root):
-        marker = composed_root / ".trailhead-installed-lore"
+    def test_clears_per_tool_marker(self, composed_root, claude_dir):
+        marker = claude_dir / ".trailhead-installed-lore"
         marker.write_text("{}")
         _harness().unregister_tool("lore", composed_root, runner=lambda args, **kw: None)
         assert not marker.exists()
 
-    def test_clears_per_tool_marker_even_if_runner_raises(self, composed_root):
-        marker = composed_root / ".trailhead-installed-lore"
+    def test_clears_per_tool_marker_even_if_runner_raises(self, composed_root, claude_dir):
+        marker = claude_dir / ".trailhead-installed-lore"
         marker.write_text("{}")
 
         def failing(args, **kw):
@@ -412,14 +412,14 @@ class TestUnregisterMarketplace:
         assert call[call.index("--scope") + 1] == "user"
         assert "trailhead-lore" not in call
 
-    def test_clears_global_marker(self, composed_root):
-        marker = composed_root / ".trailhead-registered"
+    def test_clears_global_marker(self, composed_root, claude_dir):
+        marker = claude_dir / ".trailhead-registered"
         marker.write_text("{}")
         _harness().unregister_marketplace(composed_root, runner=lambda args, **kw: None)
         assert not marker.exists()
 
-    def test_clears_global_marker_even_if_runner_raises(self, composed_root):
-        marker = composed_root / ".trailhead-registered"
+    def test_clears_global_marker_even_if_runner_raises(self, composed_root, claude_dir):
+        marker = claude_dir / ".trailhead-registered"
         marker.write_text("{}")
 
         def failing(args, **kw):

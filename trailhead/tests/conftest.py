@@ -44,3 +44,16 @@ def capturing_runner():
         calls_seen.append(list(args))
 
     return runner, calls_seen
+
+
+@pytest.fixture()
+def claude_dir(tmp_path: Path) -> Path:
+    """The Claude config dir this suite's ambient environment resolves to.
+
+    Registration and per-tool install markers are per config dir, so a test that
+    lets the harness resolve its own env finds them here — the same location
+    `_redirect_claude_dir` pins `TRAILHEAD_CLAUDE_DIR` to.
+    """
+    d = tmp_path / "ambient-claude"
+    d.mkdir(parents=True, exist_ok=True)
+    return d

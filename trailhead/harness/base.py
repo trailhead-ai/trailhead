@@ -164,20 +164,30 @@ class Harness(ABC):
 
     # -- registration state (on-disk truth) -----------------------------------
 
+    # ``env`` is how the caller names WHICH of a harness's configurations it
+    # means. A composed tree is global — shared by every configuration of the
+    # harness on the machine — but a harness may keep its install state per
+    # configuration (Claude Code does: one state per config dir). A harness whose
+    # state really is global simply ignores ``env``.
+
     @abstractmethod
-    def is_registered(self, composed_root: Path) -> bool:
+    def is_registered(self, composed_root: Path, *, env: dict[str, str] | None = None) -> bool:
         """Return True if the marketplace/registry step has already run."""
 
     @abstractmethod
-    def is_installed(self, tool: str, composed_root: Path) -> bool:
+    def is_installed(
+        self, tool: str, composed_root: Path, *, env: dict[str, str] | None = None
+    ) -> bool:
         """Return True if ``tool`` is currently installed (per-tool marker present)."""
 
     @abstractmethod
-    def installed_tools(self, composed_root: Path) -> list[str]:
-        """Return the sorted tool names currently installed under ``composed_root``.
+    def installed_tools(
+        self, composed_root: Path, *, env: dict[str, str] | None = None
+    ) -> list[str]:
+        """Return the sorted tool names currently installed for ``composed_root``.
 
         The enumeration counterpart to :meth:`is_installed`: ``doctor`` and
-        ``uninstall`` discover which tools a composed tree holds through this method
+        ``uninstall`` discover which tools are installed through this method
         rather than re-deriving the harness's on-disk marker scheme themselves.
         """
 
@@ -204,23 +214,33 @@ class Harness(ABC):
     # -- install / uninstall --------------------------------------------------
 
     @abstractmethod
-    def register(self, composed_root: Path, *, runner=None) -> None:
-        """Register the composed tree with the harness (once per composed_root)."""
+    def register(
+        self, composed_root: Path, *, runner=None, env: dict[str, str] | None = None
+    ) -> None:
+        """Register the composed tree with the harness configuration ``env`` names."""
 
     @abstractmethod
-    def install_tool(self, tool: str, composed_root: Path, *, runner=None) -> None:
+    def install_tool(
+        self, tool: str, composed_root: Path, *, runner=None, env: dict[str, str] | None = None
+    ) -> None:
         """Install ``tool`` into the harness from the composed tree."""
 
     @abstractmethod
-    def rewire_tool(self, tool: str, composed_root: Path, *, runner=None) -> None:
+    def rewire_tool(
+        self, tool: str, composed_root: Path, *, runner=None, env: dict[str, str] | None = None
+    ) -> None:
         """Refresh an already-installed ``tool`` after recomposition."""
 
     @abstractmethod
-    def unregister_tool(self, tool: str, composed_root: Path, *, runner=None) -> None:
+    def unregister_tool(
+        self, tool: str, composed_root: Path, *, runner=None, env: dict[str, str] | None = None
+    ) -> None:
         """Uninstall one ``tool`` from the harness (keeping the user's data)."""
 
     @abstractmethod
-    def unregister_marketplace(self, composed_root: Path, *, runner=None) -> None:
+    def unregister_marketplace(
+        self, composed_root: Path, *, runner=None, env: dict[str, str] | None = None
+    ) -> None:
         """Remove the harness registration for the composed tree (once, after all tools)."""
 
     # -- user-level rulesets --------------------------------------------------

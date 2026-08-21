@@ -12,8 +12,17 @@ from trailhead.doctor import run_doctor
 from trailhead.wire import default_manifest_paths
 
 
+def _claude_dir(tmp_path: Path) -> Path:
+    """The Claude config dir this suite's fake install is registered into."""
+    return tmp_path / "claude"
+
+
 def _env(tmp_path: Path) -> dict[str, str]:
-    return {**os.environ, "TRAILHEAD_STATE_DIR": str(tmp_path)}
+    return {
+        **os.environ,
+        "TRAILHEAD_STATE_DIR": str(tmp_path),
+        "TRAILHEAD_CLAUDE_DIR": str(_claude_dir(tmp_path)),
+    }
 
 
 def _make_tree(tmp_path: Path, hname: str, tools: list[str], *, registered=True, mkt="trailhead"):
@@ -23,10 +32,14 @@ def _make_tree(tmp_path: Path, hname: str, tools: list[str], *, registered=True,
         import json
 
         (root / ".claude-plugin" / "marketplace.json").write_text(json.dumps({"name": mkt}))
+    # Registration and per-tool install state belong to the config dir the CLI
+    # wrote them into, not to the shared composed tree.
+    claude_dir = _claude_dir(tmp_path)
+    claude_dir.mkdir(parents=True, exist_ok=True)
     if registered:
-        (root / ".trailhead-registered").write_text("{}")
+        (claude_dir / ".trailhead-registered").write_text("{}")
     for t in tools:
-        (root / f".trailhead-installed-{t}").write_text("{}")
+        (claude_dir / f".trailhead-installed-{t}").write_text("{}")
 
 
 def _fake_py(cmd):
@@ -128,7 +141,8 @@ class TestMalformedManifest:
         root = tmp_path / "composed" / "claude_code"
         (root / ".claude-plugin").mkdir(parents=True)
         (root / ".claude-plugin" / "marketplace.json").write_text("{not json")
-        (root / ".trailhead-registered").write_text("{}")
+        _claude_dir(tmp_path).mkdir(parents=True, exist_ok=True)
+        (_claude_dir(tmp_path) / ".trailhead-registered").write_text("{}")
         r = run_doctor(
             env=_env(tmp_path), which_runner=lambda n: None, python_version_runner=_fake_py
         )

@@ -32,12 +32,16 @@ def _env(tmp_path: Path) -> dict[str, str]:
 def _make_harness_tree(tmp_path: Path, hname: str, tools: list[str], *, registered=True):
     root = tmp_path / "composed" / hname
     (root / "plugins").mkdir(parents=True)
+    # Registration and per-tool install state belong to the config dir `_env`
+    # pins, not to the shared composed tree.
+    claude_dir = tmp_path / "claude-dir"
+    claude_dir.mkdir(parents=True, exist_ok=True)
     if registered:
-        (root / ".trailhead-registered").write_text("{}")
+        (claude_dir / ".trailhead-registered").write_text("{}")
     for t in tools:
         (root / "plugins" / t / ".claude-plugin").mkdir(parents=True)
         (root / "plugins" / t / ".claude-plugin" / "plugin.json").write_text("{}")
-        (root / f".trailhead-installed-{t}").write_text("{}")
+        (claude_dir / f".trailhead-installed-{t}").write_text("{}")
     return root
 
 

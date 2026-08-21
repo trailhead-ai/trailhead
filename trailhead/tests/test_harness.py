@@ -94,37 +94,47 @@ class TestComposedRoot:
 
 
 class TestMarkers:
-    def test_is_registered_reads_marker(self, tmp_path):
+    """Markers are read from the config dir `env` resolves, not the composed tree."""
+
+    def test_is_registered_reads_marker(self, tmp_path, claude_dir):
         h = ClaudeCodeHarness()
         assert h.is_registered(tmp_path) is False
-        (tmp_path / ".trailhead-registered").write_text("{}")
+        (claude_dir / ".trailhead-registered").write_text("{}")
         assert h.is_registered(tmp_path) is True
 
-    def test_is_installed_reads_per_tool_marker(self, tmp_path):
+    def test_is_installed_reads_per_tool_marker(self, tmp_path, claude_dir):
         h = ClaudeCodeHarness()
         assert h.is_installed("lore", tmp_path) is False
-        (tmp_path / ".trailhead-installed-lore").write_text("{}")
+        (claude_dir / ".trailhead-installed-lore").write_text("{}")
         assert h.is_installed("lore", tmp_path) is True
+
+    def test_a_marker_in_the_composed_tree_is_not_registration(self, tmp_path, claude_dir):
+        h = ClaudeCodeHarness()
+        (tmp_path / ".trailhead-registered").write_text("{}")
+        (tmp_path / ".trailhead-installed-lore").write_text("{}")
+        assert h.is_registered(tmp_path) is False
+        assert h.is_installed("lore", tmp_path) is False
 
 
 class TestInstalledTools:
-    """installed_tools enumerates the per-tool markers under composed_root."""
+    """installed_tools enumerates the per-tool markers in the resolved config dir."""
 
-    def test_empty_when_no_markers(self, tmp_path):
+    def test_empty_when_no_markers(self, tmp_path, claude_dir):
         assert ClaudeCodeHarness().installed_tools(tmp_path) == []
 
-    def test_empty_when_root_absent(self, tmp_path):
-        assert ClaudeCodeHarness().installed_tools(tmp_path / "nope") == []
+    def test_empty_when_config_dir_absent(self, tmp_path):
+        env = {"TRAILHEAD_CLAUDE_DIR": str(tmp_path / "nope")}
+        assert ClaudeCodeHarness().installed_tools(tmp_path, env=env) == []
 
-    def test_enumerates_markers_sorted(self, tmp_path):
-        (tmp_path / ".trailhead-installed-lore").write_text("{}")
-        (tmp_path / ".trailhead-installed-camp").write_text("{}")
+    def test_enumerates_markers_sorted(self, tmp_path, claude_dir):
+        (claude_dir / ".trailhead-installed-lore").write_text("{}")
+        (claude_dir / ".trailhead-installed-camp").write_text("{}")
         assert ClaudeCodeHarness().installed_tools(tmp_path) == ["camp", "lore"]
 
-    def test_ignores_non_install_markers(self, tmp_path):
-        (tmp_path / ".trailhead-registered").write_text("{}")
-        (tmp_path / ".claude-plugin").mkdir()
-        (tmp_path / ".trailhead-installed-lore").write_text("{}")
+    def test_ignores_non_install_markers(self, tmp_path, claude_dir):
+        (claude_dir / ".trailhead-registered").write_text("{}")
+        (claude_dir / ".claude-plugin").mkdir()
+        (claude_dir / ".trailhead-installed-lore").write_text("{}")
         assert ClaudeCodeHarness().installed_tools(tmp_path) == ["lore"]
 
 
