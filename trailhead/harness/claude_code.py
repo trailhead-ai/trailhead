@@ -74,6 +74,15 @@ share one marketplace root (``composed_root``); plugin trees live at
 
 Detection: Claude Code is considered present when ``~/.claude`` exists.  Tests
 may redirect this with the ``TRAILHEAD_CLAUDE_DIR`` env override.
+
+Conflicting overrides
+---------------------
+``TRAILHEAD_CLAUDE_DIR`` is trailhead's own seam; ``CLAUDE_CONFIG_DIR`` is the
+variable Claude Code honors.  Set to the same directory they agree.  Set to
+different directories they cannot both be honored — the plugin state would land
+in one dir while the session reads the other — so every path that reaches a live
+subprocess or reports installed state refuses instead of guessing
+(:func:`_refuse_conflicting_config_dirs`, enforced at :meth:`_marker_dir`).
 """
 
 from __future__ import annotations
@@ -336,6 +345,36 @@ def _claude_dir(env: dict[str, str]) -> Path:
     return base / ".claude"
 
 
+def _refuse_conflicting_config_dirs(env: Mapping[str, str]) -> None:
+    """Raise when the test seam and Claude Code's own relocation disagree.
+
+    ``TRAILHEAD_CLAUDE_DIR`` is a trailhead-only seam; ``CLAUDE_CONFIG_DIR`` is the
+    variable Claude Code itself honors.  When both name the same directory that is
+    one consistent statement of intent and nothing is refused.  When they name
+    DIFFERENT directories there is no reading that serves the user: the plugin
+    state and the registration markers would land in the seam's dir while the
+    launched session reads the other one, producing a session that starts, is
+    trusted, and carries none of trailhead's plugins.  Refusing loudly is the only
+    honest outcome.
+    """
+    seam = (env.get("TRAILHEAD_CLAUDE_DIR") or "").strip()
+    relocation = (env.get("CLAUDE_CONFIG_DIR") or "").strip()
+    if not seam or not relocation:
+        return
+    if Path(seam) == Path(relocation):
+        return
+    if os.path.realpath(seam) == os.path.realpath(relocation):
+        return
+    raise HarnessError(
+        "TRAILHEAD_CLAUDE_DIR and CLAUDE_CONFIG_DIR name different Claude config "
+        f"directories: TRAILHEAD_CLAUDE_DIR={seam} CLAUDE_CONFIG_DIR={relocation}. "
+        "Plugin state and trailhead's registration markers must live in the same "
+        "directory the launched session reads, so trailhead will not guess which "
+        "one you meant. Unset TRAILHEAD_CLAUDE_DIR (it is a test-only override) or "
+        "set both to the same directory."
+    )
+
+
 def claude_config_file(env: Mapping[str, str] | None) -> Path:
     """Resolve Claude Code's global config *file* (``~/.claude.json``) from *env*.
 
@@ -440,8 +479,16 @@ class ClaudeCodeHarness(Harness):
         CLI into one config dir, so the markers that mirror that state must be
         keyed the same way — never by the composed tree, which is global and
         shared by every config dir on the machine.
+
+        This is the single choke point for every method that shells the ``claude``
+        CLI or reports installed state, so the conflicting-override refusal lives
+        here: it covers ``register``, ``install_tool``, ``rewire_tool``,
+        ``unregister_tool``, ``unregister_marketplace``, and the state readers
+        ``doctor`` reads, in one place instead of five.
         """
-        return _claude_dir(env if env is not None else dict(os.environ))
+        resolved = env if env is not None else dict(os.environ)
+        _refuse_conflicting_config_dirs(resolved)
+        return _claude_dir(resolved)
 
     def is_registered(self, composed_root: Path, *, env: dict[str, str] | None = None) -> bool:
         return (self._marker_dir(env) / _REGISTERED_MARKER).exists()
@@ -488,10 +535,10 @@ class ClaudeCodeHarness(Harness):
         registered before this ledger existed does not hold the tree until its
         next ``trailhead install`` re-records it.
         """
+        own = self._registration_entry(composed_root, env).name
         ledger = composed_root / _REGISTRATIONS_SUBDIR
         if not ledger.is_dir():
             return False
-        own = self._registration_entry(composed_root, env).name
         return any(f.is_file() and f.name != own for f in ledger.iterdir())
 
     def _cli_env(self, env: dict[str, str] | None) -> dict[str, str]:
@@ -510,6 +557,11 @@ class ClaudeCodeHarness(Harness):
         CLI's own state in one place instead of splitting them across two dirs.
         (Contrast ``claude_config_file``, which must NOT follow the seam: a config
         *file* resolved through it is a path Claude Code never reads.)
+
+        Because following the seam here pins a LIVE subprocess, an environment that
+        sets both the seam and ``CLAUDE_CONFIG_DIR`` to different directories is
+        refused by ``_marker_dir`` rather than silently resolved — see
+        :func:`_refuse_conflicting_config_dirs`.
         """
         base = dict(env) if env is not None else dict(os.environ)
         base["CLAUDE_CONFIG_DIR"] = str(self._marker_dir(env))
