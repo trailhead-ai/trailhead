@@ -68,7 +68,7 @@ from pathlib import Path
 from ..bookmark import harness_for
 from ..group.manifest import workspace_dir
 from .claude_trust import pretrust_workspace
-from .recovery import sanitize_name_component
+from .recovery import printable_path, sanitize_name_component
 from .profile import resolve_harness_profile
 
 #: Seconds to wait on the pre-spawn enumeration probe. It is advisory output
@@ -135,7 +135,7 @@ def _resolve_launch_dir(profile, slug: str, ws_dir: Path) -> Path:
         ) from exc
     if not resolved.is_dir():
         raise LaunchError(
-            f"camp: cannot launch — launch directory {resolved} is not a directory"
+            f"camp: cannot launch — launch directory {printable_path(resolved)} is not a directory"
         )
     return resolved
 
@@ -176,7 +176,7 @@ def _resolve_named_root(
         resolved = assert_launch_eligible(root, group=group, env=env)
     if not resolved.is_dir():
         raise LaunchError(
-            f"camp: cannot launch — launch directory {resolved} is not a directory"
+            f"camp: cannot launch — launch directory {printable_path(resolved)} is not a directory"
         )
     return resolved
 

@@ -1519,6 +1519,31 @@ def test_a_transcript_cwd_cannot_forge_a_row_in_the_listing(cli_env) -> None:
     assert "\\x1b" in result.stdout and "\\x0a" in result.stdout
 
 
+def test_a_transcript_cwd_cannot_forge_a_second_refusal_line(cli_env) -> None:
+    """One refusal, one line — including when the path in it came from a file.
+
+    A refusal naming a transcript-supplied directory is the other place that
+    path reaches a terminal, and this one is routinely read verbatim off a
+    relayed stderr line. An embedded newline there appends a second sentence
+    camp never wrote to a message the operator trusts precisely because camp
+    wrote it.
+    """
+    projects = Path(cli_env["env"]["TRAILHEAD_CLAUDE_DIR"]) / "projects"
+    directory = projects / "-forged-refusal"
+    directory.mkdir(parents=True, exist_ok=True)
+    forged = "/tmp/gone\ncamp launch: launched session deadbeef in /Users/victim"
+    path = directory / f"{_UUID_A}.jsonl"
+    path.write_text(json.dumps({"type": "user", "cwd": forged}) + "\n", encoding="utf-8")
+
+    result = _camp(cli_env, "launch", "--resume", _UUID_A, cwd=cli_env["tmp_path"])
+
+    # One line, with the newline rendered as text inside it. The forged sentence
+    # still appears — visibly part of the path camp is refusing, which is what
+    # the transcript actually says — rather than as a line of its own.
+    _assert_clean_refusal(result, needle="no longer exists")
+    assert "\\x0a" in result.stderr
+
+
 def test_camp_sessions_recoverable_omits_a_live_session_absent_from_the_store(
     cli_env,
 ) -> None:

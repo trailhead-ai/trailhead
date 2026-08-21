@@ -205,6 +205,31 @@ def is_workspace_root(
     return _slug_at_or_under(Path(cwd).resolve(), containers) is not None
 
 
+def printable_path(path) -> str:
+    """A path from outside camp, rendered so it cannot forge camp's own output.
+
+    Paths reach camp from a transcript the harness wrote and from the harness's
+    own listing output, and camp does not get to assume either holds a plain
+    path. A raw control character here is not cosmetic: an embedded newline
+    turns one row into two, or one refusal line into two, and a carriage return
+    plus an erase sequence rewrites what was already printed. Either way the
+    operator reads something camp never said — a session that does not exist,
+    or a reason camp did not give.
+
+    Escaping rather than refusing, because the path is the one fact that tells
+    two candidates apart; a row that will not name a directory is not safer, it
+    is just useless. C1 and the bidi overrides go too: the first is invisible
+    under UTF-8 and the second visually reorders a path without changing it.
+
+    The JSON output needs no equivalent — `json.dumps` escapes these already.
+    """
+    escaped = {c: f"\\x{c:02x}" for c in range(0x20)}
+    escaped[0x7F] = "\\x7f"
+    escaped.update({c: f"\\x{c:02x}" for c in range(0x80, 0xA0)})
+    escaped.update({c: f"\\u{c:04x}" for c in (0x202A, 0x202B, 0x202D, 0x202E, 0x2066, 0x2067, 0x2068, 0x2069)})
+    return str(path).translate(escaped)
+
+
 @dataclass(frozen=True)
 class SessionCandidate:
     """One addressable session, from a transcript, a live record, or both.

@@ -61,6 +61,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from .recovery import printable_path
 from .session import LaunchError
 
 #: Credential stores that are never an eligible launch root, regardless of what
@@ -165,7 +166,8 @@ def assert_launch_eligible(
         for root in (_expand(entry, home) for entry in roots)
     ):
         raise LaunchError(
-            f"camp: cannot launch — directory {resolved} is not at or under the "
+            f"camp: cannot launch — directory {printable_path(resolved)} is not "
+            f"at or under the "
             f"[launch] roots allowlist for group {group_name!r}: "
             f"{', '.join(roots)}"
         )
@@ -191,7 +193,8 @@ def assert_not_a_credential_store(resolved: Path, *, env: Mapping[str, str] | No
         denied = _expand(entry, home)
         if matches_deny_entry(resolved, denied):
             raise LaunchError(
-                f"camp: cannot launch — directory {resolved} is at, under, or "
+                f"camp: cannot launch — directory {printable_path(resolved)} is at, "
+                f"under, or "
                 f"above the credential store {denied}, which camp will never "
                 "root a session at. This rule is fixed in camp and no group "
                 "configuration can permit it."

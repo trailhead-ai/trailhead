@@ -250,26 +250,6 @@ def _format_age(seconds: float | None) -> str:
     return f"{total // 86400}d"
 
 
-def _printable(root) -> str:
-    """A transcript-supplied path rendered so it cannot forge the listing.
-
-    The path comes out of a JSONL file the harness wrote, and camp does not get
-    to assume it holds one. A raw control character here is not cosmetic: an
-    embedded newline emits a second row indistinguishable from a real one, and
-    a carriage return plus an erase sequence rewrites the row already printed —
-    either of which advertises a session that does not exist and steers the
-    operator into resuming a reference somebody else chose. Escaping is enough
-    to make the row true; refusing to print it would lose the operator the one
-    fact that tells two candidates apart.
-
-    The JSON listing needs no equivalent: `json.dumps` escapes these already.
-    """
-    text = str(root)
-    return text.translate({c: f"\\x{c:02x}" for c in range(0x20)}).replace(
-        "\x7f", "\\x7f"
-    )
-
-
 def _candidate_line(candidate) -> str:
     """One candidate as an operator-facing row: name, id, where, how old.
 
@@ -283,12 +263,14 @@ def _candidate_line(candidate) -> str:
     "somewhere camp cannot name" and "a directory that was torn down" are
     different facts, and only the second has a path to print.
     """
+    from ..launch.recovery import printable_path
+
     if candidate.root is None:
         where = "directory unknown"
     elif candidate.root_missing:
-        where = f"{_printable(candidate.root)} (gone)"
+        where = f"{printable_path(candidate.root)} (gone)"
     else:
-        where = _printable(candidate.root)
+        where = printable_path(candidate.root)
     return (
         f"{candidate.derived_name}  {candidate.session_id}  {where}  "
         f"{_format_age(candidate.age_seconds)}"
@@ -516,7 +498,7 @@ def _launch_resume(
     A resume restores the CONVERSATION. Nothing here claims the work in flight
     when the session died comes back with it.
     """
-    from ..launch.recovery import derive_name_component
+    from ..launch.recovery import derive_name_component, printable_path
     from ..launch.session import LaunchError, already_running_error
     from ..spine import _die
 
@@ -538,7 +520,8 @@ def _launch_resume(
     root = Path(candidate.root).resolve()
     if candidate.root_missing:
         _die(
-            f"camp launch: session {candidate.session_id} was started in {root}, "
+            f"camp launch: session {candidate.session_id} was started in "
+            f"{printable_path(root)}, "
             "which no longer exists — camp will not recreate a torn-down directory "
             "to resume into it"
         )
@@ -552,7 +535,8 @@ def _launch_resume(
         # `--dir` requires, and never inferred from where camp was invoked.
         if not explicit_group:
             _die(
-                f"camp launch: session {candidate.session_id} was started in {root}, "
+                f"camp launch: session {candidate.session_id} was started in "
+                f"{printable_path(root)}, "
                 "which is not a camp workspace — re-run with an explicit --group "
                 "<name> whose [launch] roots allowlist covers it"
             )
@@ -1010,6 +994,8 @@ def _cmd_sessions_group_cli(
     if as_json:
         print(json.dumps([_session_payload(record) for record in records]))
         return
+    from ..launch.recovery import printable_path
+
     for record in records:
         label = f" ({record.name})" if record.name else ""
-        print(f"{record.session_id}  {record.kind}  {record.cwd}{label}")
+        print(f"{record.session_id}  {record.kind}  {printable_path(record.cwd)}{label}")
