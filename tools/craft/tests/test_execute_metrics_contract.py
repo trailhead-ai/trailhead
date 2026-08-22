@@ -43,9 +43,18 @@ def _phase6_section() -> str:
 
 
 def _pin_in(section_text: str, path_label: str, phrase: str, why: str) -> None:
-    """Assert *phrase* appears inside a single physical line of *section_text*."""
-    if any(phrase in line for line in section_text.splitlines()):
+    """Assert *phrase* appears inside a single physical line of *section_text*,
+    and that it occurs exactly once so the pin cannot pass on the wrong
+    occurrence."""
+    matching_lines = [line for line in section_text.splitlines() if phrase in line]
+    if len(matching_lines) == 1:
         return
+    if len(matching_lines) > 1:
+        pytest.fail(
+            f"{path_label}: the pinned span {phrase!r} occurs {len(matching_lines)} "
+            f"times in this section — reword the incidental occurrence so the pin "
+            f"guards exactly one line. {why}"
+        )
     if phrase in " ".join(section_text.split()):
         pytest.fail(
             f"{path_label}: the pinned span {phrase!r} is present but straddles a "
