@@ -1,0 +1,1 @@
+a CLI error is treated exactly as zero hits, and absence is only real after the ladder terminates
