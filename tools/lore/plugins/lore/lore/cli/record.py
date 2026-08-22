@@ -1582,7 +1582,7 @@ def add_record_subparser(sub) -> None:
     p_record_update.add_argument(
         "--vault", dest="vault", default=None, metavar="NAME",
         help="Look for the record only in this configured vault, instead of "
-             "scanning every vault in config order.",
+             "scanning every vault in config order; it never re-routes.",
     )
     # Scope flags: dual field-setter +
     # routing on update too. Each writes its namesake sidecar field AND re-resolves

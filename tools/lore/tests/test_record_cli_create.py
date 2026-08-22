@@ -1896,3 +1896,20 @@ def test_record_help_still_lists_every_long_option(leaf, monkeypatch):
     help_text = _render_leaf_help(leaf, monkeypatch)
     missing = [opt for opt in _VISIBLE_LONG_OPTIONS[leaf] if opt not in help_text]
     assert not missing, f"lore {leaf} --help no longer lists: {missing}"
+
+
+def test_record_update_vault_help_disclaims_re_routing(monkeypatch):
+    """``update --vault`` must say it targets the record where it already is.
+
+    The scope flags re-route and auto-move a record; ``--vault`` does not. With
+    that contrast stated only on the scope-flag side, a reader has no reason not
+    to read ``--vault NAME`` as "put the record in NAME" — the one reading that
+    silently writes to the wrong vault.
+    """
+    import re
+
+    help_text = re.sub(r"\s+", " ", _render_leaf_help("record update", monkeypatch))
+    assert "never re-routes" in help_text, (
+        "update --vault help must disclaim re-routing, to contrast with the "
+        "scope flags that do re-route and auto-move"
+    )
