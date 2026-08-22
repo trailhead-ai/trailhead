@@ -11,6 +11,7 @@ description: |
   - Anything other than one already-derived task record id with a provisioned workspace
   - Work that needs a decision made now — park the question on the record and return `BLOCKED`; that is what the escalation contract is for
 model: sonnet
+effort: medium
 tools: Read, Write, Edit, Grep, Glob, Bash
 ---
 

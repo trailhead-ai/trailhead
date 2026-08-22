@@ -776,7 +776,7 @@ def test_an_unrecognized_extra_operand_is_still_not_camp_launched(tmp_path: Path
     pane = f"env {scrub} SOMETHING_ELSE=/tmp " + " ".join(argv)
     tmux = _FakeTmux({derived: pane})
 
-    outcome = _stop(
+    _stop(
         _UUID_A[:8],
         tmux=tmux,
         transcripts=[_transcript(_UUID_A, ws)],
@@ -800,7 +800,7 @@ def test_a_relative_config_dir_operand_is_not_camp_launched(tmp_path: Path) -> N
         }
     )
 
-    outcome = _stop(
+    _stop(
         _UUID_A[:8],
         tmux=tmux,
         transcripts=[_transcript(_UUID_A, ws)],

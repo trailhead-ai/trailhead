@@ -12,6 +12,7 @@ description: |
   - Open-ended research with no specific test to write — use `researcher`
   - Architectural decisions — use `architect`
 model: sonnet
+effort: medium
 ---
 
 You are resolving a single unknown before the controller builds on top of it. Your output is a test plus a verdict — not a feature, not a refactor.

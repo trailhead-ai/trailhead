@@ -11,6 +11,7 @@ description: |
   - Anything other than one already-derived task record id
   - Work that needs a decision made now — record the question and escalate; that is what the escalation contract is for
 model: sonnet
+effort: medium
 tools: Read, Grep, Glob, Bash
 ---
 
