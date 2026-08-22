@@ -181,3 +181,13 @@ def test_phase5_pins_pointer_only_citation_discipline():
         "Lesson bodies must follow pointer-only citation discipline, never "
         "inline-quoting executor output.",
     )
+
+
+def test_phase5_pins_lesson_body_is_piped_on_stdin():
+    _pin_in(
+        _phase5_section(),
+        "execute.md#phase5",
+        "piping the body in on stdin",
+        "`lore record create` has no body flag — prose that omits this "
+        "prescribes a command an agent cannot actually run.",
+    )
