@@ -125,6 +125,45 @@ class TestUnknownCommandHint:
         assert "Run 'lore --help'" in result.stderr
 
 
+class TestNearestMatchSuggestion:
+    """Nearest-match "did you mean" on an unrecognized verb, at every level.
+
+    The redirect table alone only ever reached top-level tokens; the verbs that
+    actually get mistyped are nested (``vault list``, ``task tree``). A close
+    match is suggested; a distant one is not — a suggestion that fires on a
+    string nothing resembles is worse than silence.
+    """
+
+    def test_nested_vault_list_suggests_ls(self, tmp_path):
+        result = _run(["vault", "list"], tmp_path)
+        assert result.returncode != 0
+        assert "did you mean 'ls'" in result.stderr
+
+    def test_nested_task_tree_suggests_graph(self, tmp_path):
+        result = _run(["task", "tree"], tmp_path)
+        assert result.returncode != 0
+        assert "did you mean 'graph'" in result.stderr
+
+    def test_top_level_vaults_suggests_vault(self, tmp_path):
+        result = _run(["vaults"], tmp_path)
+        assert result.returncode != 0
+        assert "did you mean 'vault'" in result.stderr
+
+    def test_open_choice_token_is_not_called_unrecognized(self, tmp_path):
+        """``lore resolve`` accepts any vault name — no token of its is unrecognized."""
+        result = _run(["resolve", "some-vault", "--bogus-flag"], tmp_path)
+        assert result.returncode != 0
+        assert "unrecognized action" not in result.stderr
+        assert "did you mean" not in result.stderr
+
+    def test_distant_nested_token_suggests_nothing(self, tmp_path):
+        """``session status`` has no near match among candidate/referenced/show."""
+        result = _run(["session", "status"], tmp_path)
+        assert result.returncode != 0
+        assert "did you mean" not in result.stderr
+        assert "Run 'lore --help'" in result.stderr
+
+
 class TestArgparseErrorPathPerGroup:
     """argparse's own invalid-choice / missing-required exit(2) path, per group.
 
@@ -162,6 +201,9 @@ class TestArgparseErrorPathPerGroup:
         assert result.returncode == 2
         assert "required" in result.stderr
         assert "unknown command" not in result.stderr
+        # A valid command failing on a sub-argument is not an unrecognized verb
+        # and must not attract a nearest-match suggestion.
+        assert "did you mean" not in result.stderr
 
     def test_no_command_exits_two(self, tmp_path):
         """A bare ``lore`` with no subcommand exits 2 (top-level required)."""

@@ -114,56 +114,43 @@ def _add_record_field_flags(parser) -> None:
     )
     parser.add_argument(
         "--keyword", dest="keyword", action="append", default=[], metavar="VALUE",
-        help="Append a keyword (repeatable). Use --unset-keyword VALUE to remove one entry.",
+        help="Append a keyword.",
     )
     parser.add_argument(
         "--unset-keyword", dest="unset_keyword", action="append", default=[], metavar="VALUE",
-        help="Remove one keyword entry (repeatable). Absent value is a silent no-op.",
     )
     parser.add_argument(
         "--related-file", dest="related_file", action="append", default=[], metavar="VALUE",
-        help="Append a related file/folder (repeatable). Use --unset-related-file VALUE "
-             "to remove one entry.",
+        help="Append a related file/folder.",
     )
     parser.add_argument(
         "--unset-related-file", dest="unset_related_file", action="append", default=[],
         metavar="VALUE",
-        help="Remove one related file/folder entry (repeatable). Absent value is a no-op.",
     )
     parser.add_argument(
         "--related-url", dest="related_url", action="append", default=[], metavar="VALUE",
-        help="Append a related URL (repeatable). Use --unset-related-url VALUE to remove "
-             "one entry.",
+        help="Append a related URL.",
     )
     parser.add_argument(
         "--unset-related-url", dest="unset_related_url", action="append", default=[],
         metavar="VALUE",
-        help="Remove one related URL entry (repeatable). Absent value is a silent no-op.",
     )
     parser.add_argument(
         "--related-phase", dest="related_phase", action="append", default=[], metavar="VALUE",
-        help="Append a related phase (repeatable). Use --unset-related-phase VALUE to "
-             "remove one entry.",
+        help="Append a related phase.",
     )
     parser.add_argument(
         "--unset-related-phase", dest="unset_related_phase", action="append", default=[],
         metavar="VALUE",
-        help="Remove one related phase entry (repeatable). Absent value is a no-op.",
     )
     parser.add_argument(
         "--related", dest="related_pairs", action="append", default=[], metavar="KIND=NAME",
-        help="Append NAME to the related[KIND] list (repeatable). Split on the first '='; "
-             "KIND must be a valid record kind and both KIND and NAME must be non-empty.",
+        help="Append NAME to related[KIND]; split on the first '=', both parts required "
+             "and KIND must be a valid record kind.",
     )
     parser.add_argument(
         "--unset-related", dest="unset_related_pairs", action="append", default=[],
         metavar="KIND=NAME",
-        help="Remove matching NAME(s) from the related[KIND] list (repeatable). Split on "
-             "the first '='; both KIND and NAME must be non-empty. Removes every "
-             "occurrence of NAME (--related appends without dedupe, so a name can occur "
-             "more than once). Dropping the last name in a kind removes that kind; "
-             "dropping the last kind omits related entirely. A pair not present is a "
-             "silent no-op.",
     )
     # depends-on: a bare TASK name on a task record, or a qualified
     # KIND/NAME[@STAGE] target (kind spec or adr) on a spec/adr record.
@@ -171,24 +158,19 @@ def _add_record_field_flags(parser) -> None:
     parser.add_argument(
         "--depends-on", dest="depends_on", action="append", default=[],
         metavar="TASK|KIND/NAME[@STAGE]",
-        help="Append a dependency (repeatable): a bare TASK name on a task record, "
-             "or a qualified KIND/NAME[@STAGE] target (kind spec or adr) on a "
-             "spec/adr record. Use --unset-depends-on to remove one entry.",
+        help="Append a dependency: a bare TASK on a task record, or a qualified "
+             "KIND/NAME[@STAGE] target (kind spec or adr) on a spec/adr record.",
     )
     parser.add_argument(
         "--unset-depends-on", dest="unset_depends_on", action="append", default=[],
         metavar="TASK|KIND/NAME[@STAGE]",
-        help="Remove one depends-on entry (repeatable), matched against the stored "
-             "value byte-for-byte — an unqualified TASK or KIND/NAME entry does not "
-             "match a staged KIND/NAME@STAGE one. Absent value is a silent no-op.",
     )
     parser.add_argument(
         "--parent", dest="parent", default=None, metavar="TASK",
-        help="Set this task's parent task (task-only). Use --unset-parent to clear it.",
+        help="Set this task's parent task (task-only).",
     )
     parser.add_argument(
         "--unset-parent", dest="unset_parent", action="store_true", default=False,
-        help="Clear this task's parent field.",
     )
 
 
@@ -204,23 +186,21 @@ def _add_map_field_flags(parser) -> None:
     parser.add_argument(
         "--label", dest="label_pairs", action="append", default=[],
         metavar="KEY=VALUE",
-        help="Set a label (repeatable, upsert). Split on first '=' so "
-             "'namespace/name=value' works unescaped.",
+        help="Set a label (upsert); split on the first '=' so 'namespace/name=value' "
+             "works unescaped.",
     )
     parser.add_argument(
         "--annotation", dest="annotation_pairs", action="append", default=[],
         metavar="KEY=VALUE",
-        help="Set an annotation (repeatable, upsert). Split on first '='.",
+        help="Set an annotation (upsert); split on the first '='.",
     )
     parser.add_argument(
         "--unset-label", dest="unset_labels", action="append", default=[],
         metavar="KEY",
-        help="Remove a label key (repeatable). Absent key is a silent no-op.",
     )
     parser.add_argument(
         "--unset-annotation", dest="unset_annotations", action="append", default=[],
         metavar="KEY",
-        help="Remove an annotation key (repeatable). Absent key is a silent no-op.",
     )
 
 
@@ -1498,6 +1478,19 @@ def _cmd_record_update(args) -> int:
     return 0
 
 
+# Stated once per parser description instead of restated in every --unset-<field>
+# help string: the removers are a mechanical family, and repeating the same
+# sentence a dozen times is what made these two help outputs the most expensive
+# in the CLI.
+_UNSET_PAIRING_RULE = (
+    "Every repeatable flag has an --unset-<field> remover taking the same value: "
+    "it drops one entry, a value that is not present is a silent no-op. Two read "
+    "specially — --unset-related KIND=NAME drops every occurrence of NAME (and the "
+    "kind, once empty), and --unset-depends-on matches the stored value "
+    "byte-for-byte, so an unqualified entry never matches a staged KIND/NAME@STAGE "
+    "one."
+)
+
 # Shared by both ``record create`` and ``record update`` --help epilogs: the two
 # verbs accept the same --label/--related/--annotation flags, and an agent that
 # reaches for ``update`` (the most common verb for writing labels) must see the
@@ -1528,41 +1521,35 @@ def add_record_subparser(sub) -> None:
 
     p_record_create = p_record_sub.add_parser(
         "create", help="Create a new vault record",
+        # The full argparse-generated usage banner listed all 27 options over a
+        # dozen lines before the option table said the same thing again; the
+        # compact form names the required arguments and defers the rest.
+        usage="lore record create --kind KIND --title TITLE [OPTION ...]",
+        description="Create a new vault record; the body is read from stdin. "
+                    "--repo/--product/--suite/--team are routing scopes: each "
+                    "picks the destination vault and stamps its namesake sidecar "
+                    "field. " + _UNSET_PAIRING_RULE,
         epilog=_LABELS_FLAG_MECHANISM_RULE,
     )
     p_record_create.add_argument(
         "--kind", required=True,
-        help="Record kind (one of: adr, area, blob, collaboration, decision, "
-             "lesson, session, spec, task)",
+        help="adr, area, blob, collaboration, decision, lesson, session, spec, "
+             "or task.",
     )
     p_record_create.add_argument(
         "--title", required=True,
-        help="Human-readable title (used to derive the record name slug)",
+        help="Human-readable title (the record name slug is derived from it).",
     )
     # Routing flags: passed to place_record as scope. These influence vault
     # selection; their sidecar-write semantics are owned by the record-write layer.
-    p_record_create.add_argument(
-        "--repo", default=None,
-        help="Routing scope: restrict to this repo's vault",
-    )
-    p_record_create.add_argument(
-        "--product", default=None,
-        help="Routing scope: restrict to this product's vault",
-    )
-    p_record_create.add_argument(
-        "--suite", default=None,
-        help="Routing scope: restrict to this suite's vault",
-    )
-    p_record_create.add_argument(
-        "--team", default=None,
-        help="Routing scope: restrict to this team's vault",
-    )
+    p_record_create.add_argument("--repo", default=None, help="Repo routing scope.")
+    p_record_create.add_argument("--product", default=None, help="Product routing scope.")
+    p_record_create.add_argument("--suite", default=None, help="Suite routing scope.")
+    p_record_create.add_argument("--team", default=None, help="Team routing scope.")
     p_record_create.add_argument(
         "--vault", dest="vault", default=None, metavar="NAME",
-        help="Create the record in exactly this configured vault by name, "
-             "bypassing scope-based routing entirely. Combine with "
-             "--repo/--product/--suite/--team to still stamp their sidecar "
-             "fields.",
+        help="Write to exactly this configured vault, bypassing routing (the "
+             "scope flags still stamp their sidecar fields).",
     )
     _add_record_field_flags(p_record_create)
     # Map flags (labels/annotations): dedicated branch.
@@ -1572,6 +1559,12 @@ def add_record_subparser(sub) -> None:
     # ``lore record update RECORD_ID``.
     p_record_update = p_record_sub.add_parser(
         "update", help="Update an existing vault record (full-body / --diff / metadata-only)",
+        usage="lore record update RECORD_ID [OPTION ...]",
+        description="Update a vault record; a piped body replaces the existing one "
+                    "and no stdin leaves it untouched. --repo/--product/--suite/"
+                    "--team each set their namesake scope field, re-route the "
+                    "record, and auto-move it when the destination vault changes. "
+                    + _UNSET_PAIRING_RULE,
         epilog="Group-default scope routing applies to 'create' only; "
                "update (and delete) are unaffected and never seed scopes from a camp group. "
                + _LABELS_FLAG_MECHANISM_RULE,
@@ -1579,46 +1572,31 @@ def add_record_subparser(sub) -> None:
     p_record_update.add_argument(
         "record_id",
         metavar="RECORD_ID",
-        help="The vault-relative record ID to update (<kind>/<name>)",
+        help="The vault-relative record ID to update (<kind>/<name>).",
     )
     p_record_update.add_argument(
         "--diff", action="store_true",
-        help="Treat piped stdin as a unified diff applied to the existing body. "
-             "On any non-applying hunk the record is left byte-for-byte "
-             "unmodified and the rejected hunks print to stderr.",
+        help="Treat piped stdin as a unified diff. Any non-applying hunk leaves "
+             "the record unmodified and prints the rejects to stderr.",
     )
     p_record_update.add_argument(
         "--vault", dest="vault", default=None, metavar="NAME",
-        help="Locate the record in exactly this configured vault by name, "
-             "instead of scanning every vault in config order. Current-location "
-             "targeting only — combine with --repo/--product/--suite/--team to "
-             "also re-route the record's destination.",
+        help="Look for the record only in this configured vault, instead of "
+             "scanning every vault in config order.",
     )
     # Scope flags: dual field-setter +
     # routing on update too. Each writes its namesake sidecar field AND re-resolves
     # the destination vault from the merged scope; when the destination differs from
     # the record's current vault the record is auto-moved (no manual --move-to).
-    p_record_update.add_argument(
-        "--repo", default=None,
-        help="Set the repo scope; re-routes + auto-moves the record on a change.",
-    )
-    p_record_update.add_argument(
-        "--product", default=None,
-        help="Set the product scope; re-routes + auto-moves the record on a change.",
-    )
-    p_record_update.add_argument(
-        "--suite", default=None,
-        help="Set the suite scope; re-routes + auto-moves the record on a change.",
-    )
-    p_record_update.add_argument(
-        "--team", default=None,
-        help="Set the team scope; re-routes + auto-moves the record on a change.",
-    )
+    p_record_update.add_argument("--repo", default=None, help="Repo scope.")
+    p_record_update.add_argument("--product", default=None, help="Product scope.")
+    p_record_update.add_argument("--suite", default=None, help="Suite scope.")
+    p_record_update.add_argument("--team", default=None, help="Team scope.")
     # ``--title`` is an optional setter on update (it is the required positional
     # on create); the rest of the per-field flags are shared.
     p_record_update.add_argument(
         "--title", default=None,
-        help="Overwrite the record's title (optional on update).",
+        help="Overwrite the record's title.",
     )
     _add_record_field_flags(p_record_update)
     # Map flags (labels/annotations): dedicated branch.
