@@ -27,7 +27,7 @@ repo_root = "/path/to/trailhead"
 bootstrap = []
 # Build a code-review-graph knowledge graph in each new worktree (see the
 # [tasks.code-review-graph] block below). Referenced by name; opt-in per member.
-tasks = ["code-review-graph", "mcp-config"]
+tasks = ["mcp-config", "code-review-graph"]
 
 [[members]]
 name = "trailhead-ai.github.io"
@@ -81,13 +81,26 @@ cmd = ["code-review-graph", "build", "--repo", "{worktree}"]
 # Copy, don't regenerate: `code-review-graph install` emits a `uvx`-based
 # command that never completes the MCP stdio handshake. The repo-root
 # `.mcp.json` already points at the resolved binary.
+#
+# Not a plain `cp`: an operator's repo root may have no local `.mcp.json` at
+# all (it's gitignored and optional), and `cp` exits nonzero on a missing
+# source — which would mark this optional task "failed" forever, since only
+# an "ok" state is skipped on later runs. This python3 one-liner no-ops
+# instead of failing when the source is absent, so a missing `.mcp.json`
+# never produces the permanent `camp status` warning `cp` would.
 [tasks.mcp-config]
 phase = "provision"
 required = false
 
 [[tasks.mcp-config.steps]]
 name = "copy"
-cmd = ["cp", "{repo_root}/.mcp.json", "{worktree}/.mcp.json"]
+cmd = [
+    "python3",
+    "-c",
+    "import pathlib, shutil, sys\nsrc = pathlib.Path(sys.argv[1])\nif src.is_file():\n    shutil.copy(src, sys.argv[2])\n",
+    "{repo_root}/.mcp.json",
+    "{worktree}/.mcp.json",
+]
 
 # [harness] — optional harness-profile config (doc surfacing, injection, trust).
 #

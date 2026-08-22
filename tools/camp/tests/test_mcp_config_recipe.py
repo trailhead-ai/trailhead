@@ -45,7 +45,16 @@ def test_example_config_recipe_is_single_copy_step() -> None:
     assert task["steps"] == [
         {
             "name": "copy",
-            "cmd": ["cp", "{repo_root}/.mcp.json", "{worktree}/.mcp.json"],
+            "cmd": [
+                "python3",
+                "-c",
+                "import pathlib, shutil, sys\n"
+                "src = pathlib.Path(sys.argv[1])\n"
+                "if src.is_file():\n"
+                "    shutil.copy(src, sys.argv[2])\n",
+                "{repo_root}/.mcp.json",
+                "{worktree}/.mcp.json",
+            ],
         }
     ]
 
@@ -57,3 +66,16 @@ def test_trailhead_member_references_mcp_config_task() -> None:
     member = next(m for m in cfg["members"] if m["name"] == "trailhead")
 
     assert any(t["name"] == _TASK_NAME for t in member["tasks"])
+
+
+def test_mcp_config_task_runs_before_code_review_graph_task() -> None:
+    """mcp-config's ~1s copy must not sit behind code-review-graph's
+    1800s-budgeted build in the member's serial task list — a re-author
+    reordering the list back would silently reintroduce that gate."""
+    from camp.group.config import load_group
+
+    cfg = load_group(_GROUPS_EXAMPLE_DIR / "trailhead.toml")
+    member = next(m for m in cfg["members"] if m["name"] == "trailhead")
+    names = [t["name"] for t in member["tasks"]]
+
+    assert names.index("mcp-config") < names.index("code-review-graph")

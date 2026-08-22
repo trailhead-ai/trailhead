@@ -112,7 +112,7 @@ def _member_wt(group_name: str, slug: str, member: str, env: dict[str, str]) -> 
 
 def _mcp_config_task() -> dict:
     """The mcp-config recipe shape (from trailhead.toml), unstubbed — a real
-    `cp` invocation so the copy behavior itself is exercised end-to-end."""
+    `python3` invocation so the copy behavior itself is exercised end-to-end."""
     return {
         "name": "mcp-config",
         "phase": "provision",
@@ -121,7 +121,16 @@ def _mcp_config_task() -> dict:
         "steps": [
             {
                 "name": "copy",
-                "cmd": ["cp", "{repo_root}/.mcp.json", "{worktree}/.mcp.json"],
+                "cmd": [
+                    "python3",
+                    "-c",
+                    "import pathlib, shutil, sys\n"
+                    "src = pathlib.Path(sys.argv[1])\n"
+                    "if src.is_file():\n"
+                    "    shutil.copy(src, sys.argv[2])\n",
+                    "{repo_root}/.mcp.json",
+                    "{worktree}/.mcp.json",
+                ],
             }
         ],
     }
@@ -133,6 +142,7 @@ def test_mcp_config_task_copies_mcp_json_into_worktree(tmp_path):
     (`.mcp.json` is gitignored) arrives via the provision task instead."""
     from camp.provision.provision import seed_pending_workspace
     from camp.provision.lifecycle import cmd_setup_group
+    from camp.group.manifest import read_central_manifest
 
     repo = tmp_path / "repo"
     _init_git_repo(repo)
@@ -158,12 +168,20 @@ def test_mcp_config_task_copies_mcp_json_into_worktree(tmp_path):
     wt_mcp_json = _member_wt("mcpg", "s", "repo", env) / ".mcp.json"
     assert wt_mcp_json.read_text() == mcp_json.read_text()
 
+    data = read_central_manifest(_manifest_path("mcpg", "s", env))
+    entry = data["members"][0]
+    assert entry["tasks"]["mcp-config"]["state"] == "ok"
+
 
 def test_mcp_config_task_missing_source_does_not_fail_provisioning(tmp_path):
-    """A repo root with no `.mcp.json` fails the copy step (`cp` exits
-    non-zero) without failing provisioning — the task is optional."""
+    """A repo root with no `.mcp.json` no-ops the copy step instead of
+    failing it, so provisioning succeeds AND the task itself is recorded
+    "ok" rather than "failed" — the point of the no-op is to avoid the
+    permanent `camp status` warning a persistently-"failed" optional task
+    would otherwise print on every SessionStart reconcile."""
     from camp.provision.provision import seed_pending_workspace
     from camp.provision.lifecycle import cmd_setup_group
+    from camp.group.manifest import read_central_manifest
 
     repo = tmp_path / "repo"
     _init_git_repo(repo)
@@ -186,6 +204,10 @@ def test_mcp_config_task_missing_source_does_not_fail_provisioning(tmp_path):
     assert result["members"]["repo"]["provision_state"] == "ready"
     wt_mcp_json = _member_wt("mcpg2", "s", "repo", env) / ".mcp.json"
     assert not wt_mcp_json.exists()
+
+    data = read_central_manifest(_manifest_path("mcpg2", "s", env))
+    entry = data["members"][0]
+    assert entry["tasks"]["mcp-config"]["state"] == "ok"
 
 
 def test_optional_task_failure_member_ready_recorded_and_warned(tmp_path, capsys):
