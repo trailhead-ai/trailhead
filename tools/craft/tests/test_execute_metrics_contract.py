@@ -231,3 +231,38 @@ def test_phase6_run_total_row_carries_the_lesson_write_outcome():
         "A lost lesson write must render differently from 'nothing to teach' — "
         "the run-total row is the slot the postmortem flags it into.",
     )
+
+
+# --- lessons consumed is traceable and survives a resume ----------------------
+
+
+def test_phase6_defines_lessons_consumed_as_the_loaded_count():
+    _pin_in(
+        _phase6_section(),
+        "execute.md#phase6",
+        "consumed is the claim-time loaded count this row's `Retrieval` column carries",
+        "The completion report promises a consumed count that no recorded slot "
+        "supplies — define it against the slot that exists, or the number is "
+        "invented at report time.",
+    )
+
+
+def test_phase6_completion_report_line_surfaces_the_error_outcome():
+    _pin_in(
+        _phase6_section(),
+        "execute.md#phase6",
+        "rendered as `error` when the query errored rather than as a zero",
+        "A permanently malformed query otherwise reads as '0 lessons consumed' "
+        "exactly where the operator looks.",
+    )
+
+
+def test_phase6_run_total_reads_the_carried_forward_note():
+    _pin_in(
+        _phase6_section(),
+        "execute.md#phase6",
+        "both taken from the `## End Phases` carry-forward note",
+        "The lesson-write outcome and the retrieval outcome are recorded in "
+        "Phase 5; the close write must read them from the carry-forward note so "
+        "a resume between the phases does not lose them.",
+    )

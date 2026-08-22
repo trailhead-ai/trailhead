@@ -21,6 +21,7 @@ CRAFT = Path(__file__).parent.parent / "plugins" / "craft"
 SHARED_EXECUTE = CRAFT / "skills" / "_shared" / "execute.md"
 SCHEMA_FIXTURE = Path(__file__).parent / "fixtures" / "run_metrics_schema.txt"
 LESSON_CONTRACT_FIXTURE = Path(__file__).parent / "fixtures" / "dispatch_lesson_contract.txt"
+RUN_TOTAL_FIXTURE = Path(__file__).parent / "fixtures" / "run_total_row_schema.txt"
 
 PHASE5_HEADING = "### Phase 5: Flow-out"
 PHASE6_HEADING = "### Phase 6: Close and completion report"
@@ -52,6 +53,13 @@ def _pin_in(section_text: str, path_label: str, phrase: str, why: str) -> None:
             f"line wrap — keep it on one physical line. {why}"
         )
     pytest.fail(f"{path_label}: missing the pinned span {phrase!r}. {why}")
+
+
+def _run_total_column(name: str) -> str:
+    """Return the run-total column token named *name*, read from the canonical fixture."""
+    columns = [c.strip() for c in RUN_TOTAL_FIXTURE.read_text().strip().strip("|").split("|")]
+    assert name in columns, f"{name!r} is not a run-total column: {columns}"
+    return name
 
 
 # --- postmortem is named and reads the metrics block --------------------------
@@ -155,7 +163,7 @@ def test_phase5_pins_write_failure_flags_loss_on_the_run_total_row():
     _pin_in(
         _phase5_section(),
         "execute.md#phase5",
-        "flags the loss in the `## Run Metrics` block's run-total `Lessons` column",
+        f"flags the loss in the `## Run Metrics` block's run-total `{_run_total_column('Lessons')}` column",
         "A failed lesson write must land in a slot that actually exists — the "
         "run-total row's `Lessons` column — so a lost write cannot render "
         "identically to 'nothing to teach'.",
@@ -225,4 +233,40 @@ def test_phase5_lesson_contract_is_byte_identical_to_fixture():
         "The kind + label contract that closes the loop must be stated from the "
         "canonical fixture on the write side, so renaming it cannot leave the "
         "producer and the consumer independently green.",
+    )
+
+
+# --- the lesson write lands in the elected vault ----------------------------
+
+
+def test_phase5_pins_lesson_write_names_the_elected_vault():
+    _pin_in(
+        _phase5_section(),
+        "execute.md#phase5",
+        "--kind lesson --vault <elected-vault>",
+        "An unqualified `lore record create` resolves to the default vault, so "
+        "the lesson lands where the claim-time query — which is scoped to the "
+        "elected vault — will never find it.",
+    )
+
+
+def test_phase5_pins_absent_subsystem_label_branch_on_the_write():
+    _pin_in(
+        _phase5_section(),
+        "execute.md#phase5",
+        "the write omits that label and the claim-time query drops its matching term",
+        "Nothing writes `craft/subsystems` on a standalone run, so the write "
+        "needs a stated branch for the absent case — otherwise it stamps an "
+        "invented value or writes nothing retrievable.",
+    )
+
+
+def test_phase5_pins_flag_and_retrieval_outcome_are_carried_to_the_close_write():
+    _pin_in(
+        _phase5_section(),
+        "execute.md#phase5",
+        "carried forward to the close write as a note in `## End Phases`",
+        "The run-total row does not exist until Phase 6, so a crash between the "
+        "phases resumes at the first unticked phase with the write-failed flag "
+        "and the retrieval outcome gone.",
     )

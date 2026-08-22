@@ -26,6 +26,7 @@ INJECTION_FIXTURE = Path(__file__).parent / "fixtures" / "injection_defense_cano
 ZERO_RESULT_FIXTURE = Path(__file__).parent / "fixtures" / "zero_result_protocol.txt"
 LESSON_CONTRACT_FIXTURE = Path(__file__).parent / "fixtures" / "dispatch_lesson_contract.txt"
 
+STATUS_WALK_MARKER = "**Status walk.**"
 RESUME_HEADING = "### Resuming a run"
 CLAIM_HEADING = "### Claiming the run at first dispatch"
 STEP1_HEADING = "### 1. Does this slice have an unresolved unknown?"
@@ -37,6 +38,11 @@ def _section(text: str, start_heading: str, end_heading: str) -> str:
     start = text.index(start_heading)
     end = text.index(end_heading, start)
     return text[start:end]
+
+
+def _standalone_status_walk_section() -> str:
+    text = SHARED_EXECUTE.read_text()
+    return _section(text, STATUS_WALK_MARKER, RESUME_HEADING)
 
 
 def _resume_section() -> str:
@@ -288,4 +294,51 @@ def test_step3_pins_framing_travels_with_the_forwarded_text():
         "travel with the forwarded text into the executor's prompt",
         "Nothing otherwise requires the treat-as-data framing to cross the "
         "dispatch boundary alongside the text it guards.",
+    )
+
+
+# --- absent subsystem label, standalone claim, and forwarding carve-outs -------
+
+
+def test_claim_pins_absent_subsystem_label_branch_on_the_query():
+    _pin_in(
+        _claim_section(),
+        "execute.md#claim",
+        "drop the `label.craft.subsystems:` term and run the query as "
+        "`kind:lesson label.craft.dispatch-lesson:executor`",
+        "`craft/subsystems` is written only conditionally by planning and never "
+        "by refine, so on a standalone run there is no value to substitute and "
+        "the query silently matches nothing.",
+    )
+
+
+def test_standalone_status_walk_loads_dispatch_lessons():
+    _pin_in(
+        _standalone_status_walk_section(),
+        "execute.md#standalone-status-walk",
+        "A standalone run also loads dispatch lessons",
+        "The standalone walk paraphrases the claim as status-and-branch only — "
+        "the same paraphrase that let the resume path skip the lesson load.",
+    )
+
+
+def test_step3_pins_lesson_body_read_vault_carve_out_is_stated():
+    _pin_in(
+        _step3_section(),
+        "execute.md#step3",
+        "That read names no `--vault` deliberately",
+        "The document states a universal that every literal `record show` names "
+        "`--vault`; the sanctioned lesson-body read omits it, so the exception "
+        "must be stated where the agent reads it.",
+    )
+
+
+def test_step3_pins_personal_vault_fencing_is_deliberate():
+    _pin_in(
+        _step3_section(),
+        "execute.md#step3",
+        "Personal-vault lessons are fenced `layer=\"shared\"` too — deliberately conservative",
+        "The retrieval section calls unfenced personal-vault hits the trusted "
+        "channel while step 3 fences everything; without a note the two trust "
+        "framings read as drift.",
     )
