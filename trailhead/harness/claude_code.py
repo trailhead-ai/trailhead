@@ -375,6 +375,46 @@ def _refuse_conflicting_config_dirs(env: Mapping[str, str]) -> None:
     )
 
 
+def _default_account_dir(env: Mapping[str, str]) -> Path:
+    """Resolve Claude Code's DEFAULT account base dir from *env*.
+
+    Reads only ``HOME``/``USERPROFILE``, falling back to the real home — the same
+    home resolution ``claude_config_file`` uses, so the two agree by construction.
+
+    Two variables are deliberately NOT consulted. ``CLAUDE_CONFIG_DIR`` is the
+    value being decided: reading it would inherit the ambient account instead of
+    resolving the default one, which is the whole failure this resolver exists to
+    remove. ``TRAILHEAD_CLAUDE_DIR`` is a trailhead-only seam Claude Code has
+    never heard of, so a session launched into it would read a directory nothing
+    wrote.
+    """
+    home = env.get("HOME") or env.get("USERPROFILE")
+    return Path(home) if home else Path.home()
+
+
+def _account_dir(account: str, env: Mapping[str, str]) -> Path:
+    """Resolve a declared *account* to an absolute base dir, or raise.
+
+    A leading ``~`` expands against *env*'s home rather than the machine's, so a
+    caller's declaration never resolves through the running user's password-db
+    entry. Every other form must already be absolute: a relative value resolves
+    against whichever working directory the launching process happens to have,
+    and the directory it names is one Claude Code would then create and read as
+    an empty, unauthenticated account.
+    """
+    expanded = account
+    if account == "~" or account.startswith("~/"):
+        expanded = str(_default_account_dir(env)) + account[1:]
+    path = Path(expanded)
+    if not path.is_absolute():
+        raise HarnessError(
+            f"session_launch_env_set: account {account!r} is not an absolute path. "
+            "An account names a directory the launched session reads, so it must "
+            "resolve identically from any working directory."
+        )
+    return path
+
+
 def claude_config_file(env: Mapping[str, str] | None) -> Path:
     """Resolve Claude Code's global config *file* (``~/.claude.json``) from *env*.
 
@@ -1000,6 +1040,36 @@ class ClaudeCodeHarness(Harness):
         See :data:`_LAUNCH_ENV_UNSET` for why each name is here.
         """
         return list(_LAUNCH_ENV_UNSET)
+
+    def session_launch_env_set(
+        self, account: str | None, *, env: dict[str, str] | None = None
+    ) -> dict[str, str]:
+        """Bind a launched session to *account* by naming its config dir.
+
+        Claude Code expresses an account as the directory its credentials and
+        global config live in, relocated by ``CLAUDE_CONFIG_DIR`` — so the whole
+        binding is that one assignment, and this is the only place on the launch
+        path that knows its spelling.
+
+        The returned value is a BASE directory, matching what
+        :func:`claude_config_file` appends ``.claude.json`` to and what
+        :func:`_claude_dir` appends ``.claude`` to — not either of those results.
+
+        ``account=None`` resolves the default base dir from *env* and returns it
+        anyway. Any ``CLAUDE_CONFIG_DIR`` already in *env* is ignored in both
+        branches: it is the ambient value being replaced, not an input.
+
+        Raises :class:`HarnessError` on a relative ``account``, and on one that
+        disagrees with a ``TRAILHEAD_CLAUDE_DIR`` set in *env* — the resolution
+        goes through :func:`_refuse_conflicting_config_dirs` rather than around
+        it, so this method cannot become a fourth config-dir answer that skips
+        the choke point.
+        """
+        source = env if env is not None else dict(os.environ)
+        base = _default_account_dir(source) if account is None else _account_dir(account, source)
+        config_dir = str(base)
+        _refuse_conflicting_config_dirs({**source, "CLAUDE_CONFIG_DIR": config_dir})
+        return {"CLAUDE_CONFIG_DIR": config_dir}
 
     def session_enumerate(self, workspace: Path | None = None) -> list[str]:
         """Return ``["claude", "agents", "--json"]``, plus ``--cwd <workspace>``.
