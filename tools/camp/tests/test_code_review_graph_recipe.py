@@ -66,6 +66,15 @@ def test_example_config_recipe_is_single_build_step() -> None:
     ]
 
 
+def test_example_config_recipe_timeout_is_at_least_900_seconds() -> None:
+    """A full build of this worktree measured 914s on an otherwise-idle box —
+    5x the prior 180s budget. 900s leaves ~2x headroom under provisioning
+    contention; a regression back toward 180 must fail this test."""
+    task = _resolved_recipe()
+
+    assert task["timeout_seconds"] >= 900
+
+
 def test_example_config_recipe_has_no_seed_step() -> None:
     """Guard against a seed/rsync step creeping back into the recipe."""
     task = _resolved_recipe()
