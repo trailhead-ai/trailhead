@@ -24,7 +24,9 @@ CRAFT = Path(__file__).parent.parent / "plugins" / "craft"
 SHARED_EXECUTE = CRAFT / "skills" / "_shared" / "execute.md"
 INJECTION_FIXTURE = Path(__file__).parent / "fixtures" / "injection_defense_canonical.txt"
 ZERO_RESULT_FIXTURE = Path(__file__).parent / "fixtures" / "zero_result_protocol.txt"
+LESSON_CONTRACT_FIXTURE = Path(__file__).parent / "fixtures" / "dispatch_lesson_contract.txt"
 
+RESUME_HEADING = "### Resuming a run"
 CLAIM_HEADING = "### Claiming the run at first dispatch"
 STEP1_HEADING = "### 1. Does this slice have an unresolved unknown?"
 STEP3_HEADING = "### 3. Dispatch `executor`"
@@ -35,6 +37,11 @@ def _section(text: str, start_heading: str, end_heading: str) -> str:
     start = text.index(start_heading)
     end = text.index(end_heading, start)
     return text[start:end]
+
+
+def _resume_section() -> str:
+    text = SHARED_EXECUTE.read_text()
+    return _section(text, RESUME_HEADING, CLAIM_HEADING)
 
 
 def _claim_section() -> str:
@@ -177,9 +184,9 @@ def test_step3_pins_verbatim_forwarding():
     _pin_in(
         _step3_section(),
         "execute.md#step3",
-        "forwarded verbatim from the `lore search` output, never paraphrased",
-        "Forwarded lesson text must stay verbatim from the search output — "
-        "paraphrasing strips the fencing.",
+        "forwarded verbatim, never paraphrased",
+        "Forwarded lesson text must stay verbatim — paraphrasing strips the "
+        "fencing.",
     )
 
 
@@ -211,4 +218,74 @@ def test_step3_pins_specify_the_what_instruction_intact():
         "don't over-specify the *how*. Specify the *what*.",
         "The existing 'specify the what, not the how' instruction must survive "
         "the edit intact.",
+    )
+
+
+def test_fixtures_ship_lesson_contract():
+    assert LESSON_CONTRACT_FIXTURE.exists()
+
+
+def test_claim_lesson_contract_is_byte_identical_to_fixture():
+    contract = LESSON_CONTRACT_FIXTURE.read_text().strip()
+    _pin_in(
+        _claim_section(),
+        "execute.md#claim",
+        contract,
+        "The read side must state the kind + label contract from the same "
+        "canonical fixture the write side does, so a rename cannot leave both "
+        "suites green while the ritual silently learns nothing.",
+    )
+
+
+def test_claim_pins_subsystem_name_resolution():
+    _pin_in(
+        _claim_section(),
+        "execute.md#claim",
+        "`<name>` is the parent task's own `craft/subsystems` label value",
+        "With no stated resolution an agent may substitute a repo or area "
+        "name, producing a permanently empty conjunction indistinguishable "
+        "from genuine absence.",
+    )
+
+
+def test_resume_path_loads_dispatch_lessons():
+    _pin_in(
+        _resume_section(),
+        "execute.md#resume",
+        "A resumed run still loads dispatch lessons",
+        "The intact-workspace resume path never routes through the claim, and "
+        "the already-`in-progress` redirect sends runs here — without this, "
+        "every resumed run dispatches executors with no lessons loaded.",
+    )
+
+
+def test_step3_pins_full_body_read_is_sanctioned():
+    _pin_in(
+        _step3_section(),
+        "execute.md#step3",
+        "`lore record show lesson/<name>`",
+        "`lore search` renders bodies as a truncated, whitespace-collapsed "
+        "preview, so forwarding the search output alone forwards a fragment — "
+        "the full-body read has to be sanctioned somewhere.",
+    )
+
+
+def test_step3_pins_fence_travels_into_the_payload():
+    _pin_in(
+        _step3_section(),
+        "execute.md#step3",
+        'enclosed in an `<external-memory layer="shared" source="lesson/<name>">` fence',
+        "The council's injection-defense Critical is only closed if the fencing "
+        "reaches the full-tool executor's prompt — the controller's own "
+        "procedure is never loaded by the executor.",
+    )
+
+
+def test_step3_pins_framing_travels_with_the_forwarded_text():
+    _pin_in(
+        _step3_section(),
+        "execute.md#step3",
+        "travel with the forwarded text into the executor's prompt",
+        "Nothing otherwise requires the treat-as-data framing to cross the "
+        "dispatch boundary alongside the text it guards.",
     )

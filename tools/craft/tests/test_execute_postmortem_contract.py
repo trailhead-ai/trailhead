@@ -20,6 +20,7 @@ import pytest
 CRAFT = Path(__file__).parent.parent / "plugins" / "craft"
 SHARED_EXECUTE = CRAFT / "skills" / "_shared" / "execute.md"
 SCHEMA_FIXTURE = Path(__file__).parent / "fixtures" / "run_metrics_schema.txt"
+LESSON_CONTRACT_FIXTURE = Path(__file__).parent / "fixtures" / "dispatch_lesson_contract.txt"
 
 PHASE5_HEADING = "### Phase 5: Flow-out"
 PHASE6_HEADING = "### Phase 6: Close and completion report"
@@ -150,13 +151,14 @@ def test_phase5_pins_write_failure_logs_and_continues():
     )
 
 
-def test_phase5_pins_write_failure_flags_loss_in_metrics_block():
+def test_phase5_pins_write_failure_flags_loss_on_the_run_total_row():
     _pin_in(
         _phase5_section(),
         "execute.md#phase5",
-        "flags the loss in the `## Run Metrics` block",
-        "A failed lesson write must be recorded as a flag in the metrics block "
-        "so it surfaces in the completion report.",
+        "flags the loss in the `## Run Metrics` block's run-total `Lessons` column",
+        "A failed lesson write must land in a slot that actually exists — the "
+        "run-total row's `Lessons` column — so a lost write cannot render "
+        "identically to 'nothing to teach'.",
     )
 
 
@@ -190,4 +192,37 @@ def test_phase5_pins_lesson_body_is_piped_on_stdin():
         "piping the body in on stdin",
         "`lore record create` has no body flag — prose that omits this "
         "prescribes a command an agent cannot actually run.",
+    )
+
+
+def test_phase5_pins_title_flag_on_the_lesson_write():
+    _pin_in(
+        _phase5_section(),
+        "execute.md#phase5",
+        "--title '<short imperative summary>'",
+        "`lore record create` REQUIRES --title and hard-fails at argparse "
+        "without it, so the prescribed command as written could never run and "
+        "the producing half of the loop would never fire.",
+    )
+
+
+def test_phase5_pins_title_is_required():
+    _pin_in(
+        _phase5_section(),
+        "execute.md#phase5",
+        "`--title` is required and the command hard-fails without it",
+        "Name why --title is present, the same way the bullet already names "
+        "stdin as the body channel.",
+    )
+
+
+def test_phase5_lesson_contract_is_byte_identical_to_fixture():
+    contract = LESSON_CONTRACT_FIXTURE.read_text().strip()
+    _pin_in(
+        _phase5_section(),
+        "execute.md#phase5",
+        contract,
+        "The kind + label contract that closes the loop must be stated from the "
+        "canonical fixture on the write side, so renaming it cannot leave the "
+        "producer and the consumer independently green.",
     )

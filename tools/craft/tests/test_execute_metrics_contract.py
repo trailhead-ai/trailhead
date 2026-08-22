@@ -19,6 +19,7 @@ import pytest
 CRAFT = Path(__file__).parent.parent / "plugins" / "craft"
 SHARED_EXECUTE = CRAFT / "skills" / "_shared" / "execute.md"
 SCHEMA_FIXTURE = Path(__file__).parent / "fixtures" / "run_metrics_schema.txt"
+RUN_TOTAL_FIXTURE = Path(__file__).parent / "fixtures" / "run_total_row_schema.txt"
 
 STEP5_HEADING = "### 5. Update the task graph"
 STEP6_HEADING = "### 6. Next task"
@@ -68,6 +69,10 @@ def _pin_in(section_text: str, path_label: str, phrase: str, why: str) -> None:
 
 def test_schema_fixture_ships():
     assert SCHEMA_FIXTURE.exists(), f"Expected the canonical Run Metrics schema fixture at {SCHEMA_FIXTURE}"
+
+
+def test_run_total_row_fixture_ships():
+    assert RUN_TOTAL_FIXTURE.exists(), f"Expected the canonical run-total row fixture at {RUN_TOTAL_FIXTURE}"
 
 
 # --- Step 5: metrics row ------------------------------------------------------
@@ -170,4 +175,59 @@ def test_phase6_run_total_row_carries_the_retrieval_outcome():
         "The claim-time retrieval distinguishes an empty result from a caught "
         "error; the run-total row is where that distinction is recorded, so a "
         "malformed query cannot degrade forever into a silent 'no lessons'.",
+    )
+
+
+def test_step5_pins_block_is_created_on_the_first_slice():
+    _pin_in(
+        _step5_section(),
+        "execute.md#5",
+        "appending the block itself on the first slice if it is not there yet",
+        "Nothing else in the document prescribes creating the `## Run Metrics` "
+        "block, so 'append one row to the block' would assume a block that does "
+        "not exist on the first slice.",
+    )
+
+
+def test_step5_pins_non_completing_slices_still_emit_a_row():
+    _pin_in(
+        _step5_section(),
+        "execute.md#5",
+        "a slice that ends `NEEDS_CONTEXT` or `BLOCKED` emits its row too",
+        "Step 5 is headed 'after each child task completes' while the status "
+        "column enumerates non-completing statuses — say which it is, or the "
+        "rows the postmortem most needs are the ones never written.",
+    )
+
+
+def test_step5_pins_parent_body_write_uses_the_diff_append_form():
+    _pin_in(
+        _step5_section(),
+        "execute.md#5",
+        "piping a unified diff that **appends** the lines",
+        "Step 5's per-slice parent-body write must name the `--diff` append "
+        "form: a bare `lore record update` stdin write is a full-body REPLACE "
+        "and destroys the record, as two other sections of this document warn.",
+    )
+
+
+def test_phase6_run_total_row_schema_is_byte_identical_to_fixture():
+    schema = RUN_TOTAL_FIXTURE.read_text().strip()
+    _pin_in(
+        _phase6_section(),
+        "execute.md#phase6",
+        schema,
+        "The run-total row is a different shape from the per-slice columns, so "
+        "'total the rows into a final run-total row' needs its own stated "
+        "column set rather than borrowing one that does not fit.",
+    )
+
+
+def test_phase6_run_total_row_carries_the_lesson_write_outcome():
+    _pin_in(
+        _phase6_section(),
+        "execute.md#phase6",
+        "lessons written this run (or `write-failed` when the postmortem lost a write)",
+        "A lost lesson write must render differently from 'nothing to teach' — "
+        "the run-total row is the slot the postmortem flags it into.",
     )
