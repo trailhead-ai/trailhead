@@ -129,7 +129,12 @@ def test_step5_pins_drift_not_counted_as_redispatch():
 
 
 def test_phase6_pins_run_metrics_totals():
-    for field in ["slices", "total dispatches", "dispatches-per-slice", "end-to-end wall clock"]:
+    for field in [
+        "final run-total row: slices",
+        "total dispatches",
+        "dispatches-per-slice",
+        "end-to-end wall clock",
+    ]:
         _pin_in(
             _phase6_section(),
             "execute.md#phase6",
