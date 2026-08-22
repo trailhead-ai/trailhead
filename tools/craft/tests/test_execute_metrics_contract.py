@@ -151,3 +151,14 @@ def test_phase6_pins_lessons_written_and_consumed():
         "The completion report's metrics line must name any dispatch lesson "
         "written and any consumed this run.",
     )
+
+
+def test_phase6_run_total_row_carries_the_retrieval_outcome():
+    _pin_in(
+        _phase6_section(),
+        "execute.md#phase6",
+        "the retrieval outcome (lessons loaded, `empty`, or `error`)",
+        "The claim-time retrieval distinguishes an empty result from a caught "
+        "error; the run-total row is where that distinction is recorded, so a "
+        "malformed query cannot degrade forever into a silent 'no lessons'.",
+    )
