@@ -1,7 +1,7 @@
 ---
 name: researcher
 description: |
-  Deep investigation specialist for open-ended "how does X work", "why was Y built this way", or "what are the tradeoffs of Z" questions that span multiple files, systems, or external docs. Use when you need thorough understanding before acting, not a quick lookup. Runs on Opus with xhigh effort in an isolated context so research dumps don't pollute the main conversation. Caller may pass `model: sonnet` for narrower investigations where Opus/xhigh is overkill.
+  Deep investigation specialist for open-ended "how does X work", "why was Y built this way", or "what are the tradeoffs of Z" questions that span multiple files, systems, or external docs. Use when you need thorough understanding before acting, not a quick lookup. Runs on Sonnet with high effort in an isolated context so research dumps don't pollute the main conversation. Caller may pass `model: opus` for genuinely deep synthesis where the extra reasoning earns its cost.
 
   Good fits:
   - "How does the request-routing layer actually work end-to-end?"
@@ -14,8 +14,8 @@ description: |
   - "Is there a test for bar" — grep directly
   - "Where is the API for library X documented" — use `doc-finder`
   - Locating code across many files for a known target — dispatch `Explore` instead; researcher is for synthesis, not pure search
-model: opus
-effort: xhigh
+model: sonnet
+effort: high
 tools: Read, Grep, Glob, WebFetch, WebSearch, Bash, Agent
 ---
 
