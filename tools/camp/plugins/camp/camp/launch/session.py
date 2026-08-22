@@ -417,6 +417,16 @@ def launch_session(
     argv = ["tmux", "new-session", "-d", "-s", tmux_name, "-c", str(launch_dir), "env"]
     for name in scrub:
         argv += ["-u", name]
+    # The config dir rides the same pane-level `env` invocation, and for the same
+    # reason the scrub does: a pre-existing tmux SERVER's environment, not camp's,
+    # is what a new pane inherits, so a server started under a different Claude
+    # account would otherwise place every session on that account. A relative
+    # value is dropped rather than passed — it would resolve against the pane's
+    # cwd (the launch dir), pointing the session at a config dir inside the
+    # workspace; the trust pre-seed refuses one for the same reason.
+    config_dir = (env or {}).get("CLAUDE_CONFIG_DIR", "").strip()
+    if config_dir and os.path.isabs(config_dir):
+        argv += [f"CLAUDE_CONFIG_DIR={config_dir}"]
     argv += list(harness_argv)
 
     if resume_session_id is None:

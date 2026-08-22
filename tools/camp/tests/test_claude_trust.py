@@ -14,6 +14,9 @@ Test contract (all with env={"HOME": str(tmp_path)} — never touch real ~/.clau
   launch_dir outside workspace_root → refused with camp: stderr, no write.
 - Stderr copy distinguishes unreadable/parse-error from permission-denied from
   out-of-confinement.
+- The write follows the resolved Claude config file: CLAUDE_CONFIG_DIR relocates it,
+  TRAILHEAD_CLAUDE_DIR never does, and the atomic-write temp file lands beside the target.
+- trailhead is imported lazily, so camp still loads without it.
 - HarnessProfile.resolved_cwd returns the substituted cwd.
 - HarnessProfile.is_claude_launch true for claude, false for codex/other.
 """
@@ -650,3 +653,211 @@ class TestShouldPretrust:
         )
         assert p.is_claude_launch() is False
         assert p.should_pretrust() is True
+
+
+# ---------------------------------------------------------------------------
+# Relocation: the pretrust write follows CLAUDE_CONFIG_DIR
+# ---------------------------------------------------------------------------
+
+
+def _target_for(env: dict[str, str]) -> Path:
+    """The file the harness's exported resolver says Claude Code will read."""
+    from trailhead.harness import claude_config_file
+
+    return claude_config_file(env)
+
+
+class TestRelocation:
+    """Camp writes trust to the file the launched session will actually read.
+
+    The environment table below is the contract shared with the harness resolver
+    (and, by hand, with the concierge's `claude_config_path` in the dotfiles repo,
+    which cannot import it): CLAUDE_CONFIG_DIR relocates the file, TRAILHEAD_CLAUDE_DIR
+    never does.
+    """
+
+    def _envs(self, tmp_path):
+        home = tmp_path / "home"
+        home.mkdir()
+        cfg = tmp_path / "claude-levr"
+        cfg.mkdir()
+        seam = tmp_path / "seam"
+        seam.mkdir()
+        return [
+            ({"HOME": str(home)}, home / ".claude.json"),
+            ({"HOME": str(home), "CLAUDE_CONFIG_DIR": str(cfg)}, cfg / ".claude.json"),
+            ({"HOME": str(home), "TRAILHEAD_CLAUDE_DIR": str(seam)}, home / ".claude.json"),
+            (
+                {
+                    "HOME": str(home),
+                    "TRAILHEAD_CLAUDE_DIR": str(seam),
+                    "CLAUDE_CONFIG_DIR": str(cfg),
+                },
+                cfg / ".claude.json",
+            ),
+        ]
+
+    def test_the_trust_key_lands_in_the_resolved_config_file(self, tmp_path):
+        from camp.launch.claude_trust import pretrust_workspace
+
+        table = self._envs(tmp_path)
+        for i, (env, expected) in enumerate(table):
+            launch_dir = tmp_path / f"ws{i}"
+            launch_dir.mkdir()
+            assert pretrust_workspace(launch_dir, workspace_root=launch_dir, env=env) is True
+            data = json.loads(expected.read_text())
+            assert data["projects"][str(launch_dir.resolve())]["hasTrustDialogAccepted"] is True
+
+    def test_the_table_matches_the_exported_harness_resolver(self, tmp_path):
+        table = self._envs(tmp_path)
+        for env, expected in table:
+            assert _target_for(env) == expected
+
+    def test_a_relocated_write_leaves_the_home_file_untouched(self, tmp_path):
+        from camp.launch.claude_trust import pretrust_workspace
+
+        home = tmp_path / "home"
+        home.mkdir()
+        cfg = tmp_path / "claude-levr"
+        cfg.mkdir()
+        launch_dir = tmp_path / "ws"
+        launch_dir.mkdir()
+
+        pretrust_workspace(
+            launch_dir,
+            workspace_root=launch_dir,
+            env={"HOME": str(home), "CLAUDE_CONFIG_DIR": str(cfg)},
+        )
+        assert not (home / ".claude.json").exists()
+
+    def test_the_trailhead_seam_alone_does_not_move_the_write(self, tmp_path):
+        """Mutation guard: wire the seam into the file path and this fails."""
+        from camp.launch.claude_trust import pretrust_workspace
+
+        home = tmp_path / "home"
+        home.mkdir()
+        seam = tmp_path / "seam"
+        seam.mkdir()
+        launch_dir = tmp_path / "ws"
+        launch_dir.mkdir()
+
+        pretrust_workspace(
+            launch_dir,
+            workspace_root=launch_dir,
+            env={"HOME": str(home), "TRAILHEAD_CLAUDE_DIR": str(seam)},
+        )
+        assert (home / ".claude.json").exists()
+        assert not (seam / ".claude.json").exists()
+
+    def test_the_temp_file_is_created_beside_its_target(self, tmp_path):
+        """The rename must stay within one filesystem — and one directory."""
+        import tempfile as _tempfile
+
+        from camp.launch.claude_trust import pretrust_workspace
+
+        home = tmp_path / "home"
+        home.mkdir()
+        cfg = tmp_path / "claude-levr"
+        cfg.mkdir()
+        launch_dir = tmp_path / "ws"
+        launch_dir.mkdir()
+
+        seen = {}
+        real_mkstemp = _tempfile.mkstemp
+
+        def spy(*args, **kwargs):
+            seen["dir"] = kwargs.get("dir")
+            return real_mkstemp(*args, **kwargs)
+
+        with patch("camp.launch.claude_trust.tempfile.mkstemp", side_effect=spy):
+            pretrust_workspace(
+                launch_dir,
+                workspace_root=launch_dir,
+                env={"HOME": str(home), "CLAUDE_CONFIG_DIR": str(cfg)},
+            )
+
+        assert seen["dir"] == str(cfg)
+
+    def test_the_config_dir_is_created_when_absent(self, tmp_path):
+        from camp.launch.claude_trust import pretrust_workspace
+
+        home = tmp_path / "home"
+        home.mkdir()
+        cfg = tmp_path / "not-yet"
+        launch_dir = tmp_path / "ws"
+        launch_dir.mkdir()
+
+        assert (
+            pretrust_workspace(
+                launch_dir,
+                workspace_root=launch_dir,
+                env={"HOME": str(home), "CLAUDE_CONFIG_DIR": str(cfg)},
+            )
+            is True
+        )
+        assert (cfg / ".claude.json").exists()
+
+
+class TestDeferredImport:
+    def test_the_module_imports_without_trailhead_and_fails_in_the_caller(self, tmp_path):
+        """Camp ships standalone: a missing trailhead must surface at call time."""
+        import builtins
+        import importlib
+
+        import camp.launch.claude_trust as mod
+
+        real_import = builtins.__import__
+
+        def blocked(name, *args, **kwargs):
+            if name.startswith("trailhead"):
+                raise ImportError("no trailhead here")
+            return real_import(name, *args, **kwargs)
+
+        launch_dir = tmp_path / "ws"
+        launch_dir.mkdir()
+        try:
+            with patch.object(builtins, "__import__", blocked):
+                importlib.reload(mod)  # module import must survive
+                with pytest.raises(ImportError):
+                    mod.pretrust_workspace(
+                        launch_dir,
+                        workspace_root=launch_dir,
+                        env={"HOME": str(tmp_path)},
+                    )
+        finally:
+            importlib.reload(mod)
+
+
+class TestRelativeOverrideIsRefused:
+    """A relative CLAUDE_CONFIG_DIR is refused rather than resolved against camp's cwd.
+
+    camp's cwd is not the launched session's, so a relative override would put the
+    trust key somewhere Claude never looks — and `mkdir(parents=True)` would happily
+    build that tree and report success. Same posture as the concierge's own
+    `_absolute_override`: overrides must be absolute.
+    """
+
+    def test_a_relative_override_aborts_without_writing(self, tmp_path, capsys, monkeypatch):
+        from camp.launch.claude_trust import pretrust_workspace
+
+        monkeypatch.chdir(tmp_path)
+        launch_dir = tmp_path / "ws"
+        launch_dir.mkdir()
+        env = {"HOME": str(tmp_path / "home"), "CLAUDE_CONFIG_DIR": "relative-claude"}
+
+        assert pretrust_workspace(launch_dir, workspace_root=launch_dir, env=env) is False
+
+        err = capsys.readouterr().err
+        assert "is relative; override paths must be absolute" in err
+        assert not (tmp_path / "relative-claude").exists()
+
+    def test_an_absolute_override_is_still_honoured(self, tmp_path):
+        from camp.launch.claude_trust import pretrust_workspace
+
+        cfg = tmp_path / "abs-claude"
+        launch_dir = tmp_path / "ws"
+        launch_dir.mkdir()
+        env = {"HOME": str(tmp_path / "home"), "CLAUDE_CONFIG_DIR": str(cfg)}
+
+        assert pretrust_workspace(launch_dir, workspace_root=launch_dir, env=env) is True
+        assert (cfg / ".claude.json").exists()

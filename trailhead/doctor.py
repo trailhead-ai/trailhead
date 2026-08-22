@@ -72,7 +72,7 @@ def _default_python_version_runner(cmd: list[str]) -> subprocess.CompletedProces
     return subprocess.run(cmd, capture_output=True, text=True)
 
 
-def _discover_harnesses(composed_base: Path) -> dict[str, dict]:
+def _discover_harnesses(composed_base: Path, env: dict[str, str]) -> dict[str, dict]:
     """Report each composed harness tree's registration state via the harness seam.
 
     Registration state is read through the :class:`~trailhead.harness.base.Harness`
@@ -80,6 +80,12 @@ def _discover_harnesses(composed_base: Path) -> dict[str, dict]:
     re-deriving the harness's on-disk marker scheme here.  An unknown harness dir
     (no registered implementation) is still reported present, but its scheme can't
     be introspected through the seam, so its state reads as empty.
+
+    ``env`` is passed to the seam so a harness that keeps its state per
+    configuration reports the configuration this run resolves — Claude Code
+    installs into one config dir at a time, and a report that read only the
+    global composed tree would call a config dir with no plugin state fully
+    installed.
 
     ``manifest_name`` returns ``None`` both when the manifest is absent and when
     it's present but unparseable; ``marketplace_malformed`` disambiguates the two
@@ -99,8 +105,8 @@ def _discover_harnesses(composed_base: Path) -> dict[str, dict]:
             continue
         marketplace = harness.manifest_name(hdir)
         out[hdir.name] = {
-            "registered": harness.is_registered(hdir),
-            "installed": harness.installed_tools(hdir),
+            "registered": harness.is_registered(hdir, env=env),
+            "installed": harness.installed_tools(hdir, env=env),
             "marketplace": marketplace,
             "marketplace_malformed": marketplace is None and harness.manifest_exists(hdir),
         }
@@ -156,7 +162,7 @@ def run_doctor(
     _pyrunner = python_version_runner or _default_python_version_runner
 
     composed_base = state_dir("trailhead", env=_env) / "composed"
-    harnesses = _discover_harnesses(composed_base)
+    harnesses = _discover_harnesses(composed_base, _env)
 
     shim_dir = resolve_shim_dir(env=_env)
     clis = {name: _which(name) for name in _discover_cli_names(manifest_paths)}

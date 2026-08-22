@@ -1,6 +1,7 @@
 """Tests for trailhead/harness/ — the harness interface, factory, and detection."""
 
 import dataclasses
+import inspect
 import json
 import os
 from datetime import datetime, timezone
@@ -94,37 +95,47 @@ class TestComposedRoot:
 
 
 class TestMarkers:
-    def test_is_registered_reads_marker(self, tmp_path):
+    """Markers are read from the config dir `env` resolves, not the composed tree."""
+
+    def test_is_registered_reads_marker(self, tmp_path, claude_dir):
         h = ClaudeCodeHarness()
         assert h.is_registered(tmp_path) is False
-        (tmp_path / ".trailhead-registered").write_text("{}")
+        (claude_dir / ".trailhead-registered").write_text("{}")
         assert h.is_registered(tmp_path) is True
 
-    def test_is_installed_reads_per_tool_marker(self, tmp_path):
+    def test_is_installed_reads_per_tool_marker(self, tmp_path, claude_dir):
         h = ClaudeCodeHarness()
         assert h.is_installed("lore", tmp_path) is False
-        (tmp_path / ".trailhead-installed-lore").write_text("{}")
+        (claude_dir / ".trailhead-installed-lore").write_text("{}")
         assert h.is_installed("lore", tmp_path) is True
+
+    def test_a_marker_in_the_composed_tree_is_not_registration(self, tmp_path, claude_dir):
+        h = ClaudeCodeHarness()
+        (tmp_path / ".trailhead-registered").write_text("{}")
+        (tmp_path / ".trailhead-installed-lore").write_text("{}")
+        assert h.is_registered(tmp_path) is False
+        assert h.is_installed("lore", tmp_path) is False
 
 
 class TestInstalledTools:
-    """installed_tools enumerates the per-tool markers under composed_root."""
+    """installed_tools enumerates the per-tool markers in the resolved config dir."""
 
-    def test_empty_when_no_markers(self, tmp_path):
+    def test_empty_when_no_markers(self, tmp_path, claude_dir):
         assert ClaudeCodeHarness().installed_tools(tmp_path) == []
 
-    def test_empty_when_root_absent(self, tmp_path):
-        assert ClaudeCodeHarness().installed_tools(tmp_path / "nope") == []
+    def test_empty_when_config_dir_absent(self, tmp_path):
+        env = {"TRAILHEAD_CLAUDE_DIR": str(tmp_path / "nope")}
+        assert ClaudeCodeHarness().installed_tools(tmp_path, env=env) == []
 
-    def test_enumerates_markers_sorted(self, tmp_path):
-        (tmp_path / ".trailhead-installed-lore").write_text("{}")
-        (tmp_path / ".trailhead-installed-camp").write_text("{}")
+    def test_enumerates_markers_sorted(self, tmp_path, claude_dir):
+        (claude_dir / ".trailhead-installed-lore").write_text("{}")
+        (claude_dir / ".trailhead-installed-camp").write_text("{}")
         assert ClaudeCodeHarness().installed_tools(tmp_path) == ["camp", "lore"]
 
-    def test_ignores_non_install_markers(self, tmp_path):
-        (tmp_path / ".trailhead-registered").write_text("{}")
-        (tmp_path / ".claude-plugin").mkdir()
-        (tmp_path / ".trailhead-installed-lore").write_text("{}")
+    def test_ignores_non_install_markers(self, tmp_path, claude_dir):
+        (claude_dir / ".trailhead-registered").write_text("{}")
+        (claude_dir / ".claude-plugin").mkdir()
+        (claude_dir / ".trailhead-installed-lore").write_text("{}")
         assert ClaudeCodeHarness().installed_tools(tmp_path) == ["lore"]
 
 
@@ -202,29 +213,65 @@ class _BareHarness(Harness):
     def generate_manifest(self, tools, composed_root):
         raise NotImplementedError
 
-    def is_registered(self, composed_root):
+    def is_registered(self, composed_root, *, env=None):
         raise NotImplementedError
 
-    def is_installed(self, tool, composed_root):
+    def is_installed(self, tool, composed_root, *, env=None):
         raise NotImplementedError
 
-    def installed_tools(self, composed_root):
+    def installed_tools(self, composed_root, *, env=None):
         raise NotImplementedError
 
-    def register(self, composed_root, *, runner=None):
+    def register(self, composed_root, *, runner=None, env=None):
         raise NotImplementedError
 
-    def install_tool(self, tool, composed_root, *, runner=None):
+    def install_tool(self, tool, composed_root, *, runner=None, env=None):
         raise NotImplementedError
 
-    def rewire_tool(self, tool, composed_root, *, runner=None):
+    def rewire_tool(self, tool, composed_root, *, runner=None, env=None):
         raise NotImplementedError
 
-    def unregister_tool(self, tool, composed_root, *, runner=None):
+    def unregister_tool(self, tool, composed_root, *, runner=None, env=None):
         raise NotImplementedError
 
-    def unregister_marketplace(self, composed_root, *, runner=None):
+    def unregister_marketplace(self, composed_root, *, runner=None, env=None):
         raise NotImplementedError
+
+
+class TestBareHarnessTracksTheSeam:
+    """The exemplar harness must be callable exactly the way the core calls it.
+
+    ``_BareHarness`` is this repo's only worked example of implementing the
+    ``Harness`` seam, so a new harness gets written from it. An ABC does not
+    check signatures, so a stale parameter list here raises ``TypeError`` in the
+    field — on the first real ``wire()`` run — rather than at definition time.
+    This pins the exemplar to the seam so it cannot drift silently.
+    """
+
+    def test_every_seam_method_takes_the_seam_parameters(self):
+        for name in sorted(Harness.__abstractmethods__):
+            declared = inspect.signature(getattr(Harness, name))
+            implemented = inspect.signature(getattr(_BareHarness, name))
+            assert list(implemented.parameters) == list(declared.parameters), name
+            for pname, param in declared.parameters.items():
+                assert implemented.parameters[pname].kind == param.kind, f"{name}.{pname}"
+
+    def test_the_core_can_call_every_seam_method_with_env(self):
+        """The calls ``wire()`` makes, with the keywords it actually passes."""
+        h = _BareHarness()
+        env: dict[str, str] = {}
+        for call in (
+            lambda: h.is_registered(Path("x"), env=env),
+            lambda: h.is_installed("lore", Path("x"), env=env),
+            lambda: h.installed_tools(Path("x"), env=env),
+            lambda: h.register(Path("x"), runner=None, env=env),
+            lambda: h.install_tool("lore", Path("x"), runner=None, env=env),
+            lambda: h.rewire_tool("lore", Path("x"), runner=None, env=env),
+            lambda: h.unregister_tool("lore", Path("x"), runner=None, env=env),
+            lambda: h.unregister_marketplace(Path("x"), runner=None, env=env),
+        ):
+            with pytest.raises(NotImplementedError):
+                call()
 
 
 class TestUserRulesetBaseDefault:
@@ -1041,6 +1088,7 @@ class TestClaudeCodeParseSessionListControllable:
         assert records[0].controllable is False
 
 
+@pytest.mark.real_home  # the error excerpt redacts the real home, so it must resolve it
 class TestClaudeCodeParseSessionListFailures:
     def test_non_json_stdout_raises_with_offending_field_named(self):
         with pytest.raises(HarnessError, match="decode"):
@@ -1196,6 +1244,7 @@ class TestClaudeCodeParseSessionListOptionalFields:
         assert rec.started_at is None
 
 
+@pytest.mark.real_home  # the error excerpt redacts the real home, so it must resolve it
 class TestClaudeCodeParseSessionListErrorExcerpt:
     def test_error_message_is_bounded_and_truncates_path_bearing_fields(self, tmp_path):
         long_cwd = str(tmp_path / ("x" * 5000))

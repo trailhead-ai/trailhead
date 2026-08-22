@@ -209,16 +209,16 @@ def wire(
 
     # Register ONCE (gated on the harness's own registration marker; the call is
     # idempotent regardless).
-    if not harness.is_registered(composed_root):
-        harness.register(composed_root, runner=runner)
+    if not harness.is_registered(composed_root, env=_environ):
+        harness.register(composed_root, runner=runner, env=_environ)
 
     # Per-tool install (not yet installed) or rewire (installed — self-heal).
     for tool in promoted:
         try:
-            if harness.is_installed(tool, composed_root):
-                harness.rewire_tool(tool, composed_root, runner=runner)
+            if harness.is_installed(tool, composed_root, env=_environ):
+                harness.rewire_tool(tool, composed_root, runner=runner, env=_environ)
             else:
-                harness.install_tool(tool, composed_root, runner=runner)
+                harness.install_tool(tool, composed_root, runner=runner, env=_environ)
         except BaseException as exc:
             raise WireError(tool=tool, stage="register", cause=exc) from exc
 

@@ -7,17 +7,35 @@ Claude-Code-specific lives outside this file (Axiom 1) — the shared
 install/compose/wire/doctor/uninstall path talks to it only through the generic
 :class:`~trailhead.harness.base.Harness` interface.
 
+Global source, per-config-dir state
+-----------------------------------
+The composed plugin tree is global: one ``composed_root``, shared by every
+Claude config dir on the machine.  The install state is NOT.  ``claude plugin
+marketplace add`` / ``claude plugin install`` write marketplace registration and
+plugin content into the config dir ``CLAUDE_CONFIG_DIR`` selects, so a second
+config dir starts with none of it even though it reads the same composed tree
+and the same ``settings.json``.  Declaring a marketplace in settings does not
+register it.
+
 Registration markers (single source of truth)
 ----------------------------------------------
-Markers live in ``composed_root`` (NOT inside ``plugins/<tool>/``, which the
-atomic promote ``rmtree``s on every re-wire).  They are this harness's on-disk
-truth, written only AFTER the corresponding CLI step succeeds:
+Markers therefore live in the **resolved config dir** (see :func:`_claude_dir`),
+one set per config dir, and every method that reads or writes them takes an
+``env`` mapping so the caller names which dir it means.  They are this harness's
+on-disk truth, written only AFTER the corresponding CLI step succeeds:
 
-- global ``.trailhead-registered`` — the marketplace has been added.  A
-  skip-optimisation for :meth:`register` (the call itself is idempotent).
-- per-tool ``.trailhead-installed-<tool>`` — the tool has been installed.  A
-  self-heal signal for the ``wire()`` loop: a missing marker means
-  :meth:`install_tool` should run; a present marker means :meth:`rewire_tool`.
+- ``.trailhead-registered`` — the marketplace has been added *to this config
+  dir*.  A skip-optimisation for :meth:`register` (the call itself is
+  idempotent).
+- per-tool ``.trailhead-installed-<tool>`` — the tool has been installed *into
+  this config dir*.  A self-heal signal for the ``wire()`` loop: a missing
+  marker means :meth:`install_tool` should run; a present marker means
+  :meth:`rewire_tool`.
+
+They are not kept under ``composed_root``: a marker there is global, so once
+written for one config dir it gates every config dir — registration is skipped
+for a dir that never had it, and ``doctor`` reports a config dir with no plugin
+state at all as fully installed.
 
 ``_REGISTERED_MARKER`` / ``_INSTALLED_MARKER_PREFIX`` are defined here ONCE; the
 rest of trailhead reads registration state via :meth:`is_registered`,
@@ -38,10 +56,13 @@ Hermeticity contract
 Each CLI invocation is injectable via a ``runner=`` keyword argument.  Tests
 ALWAYS pass a stub runner and NEVER invoke the real ``claude plugin`` CLI against
 the user's harness.  The default runner is ``subprocess.run`` with ``check=True``;
-it is only exercised in live-session dogfood runs.  This harness NEVER writes to
-``~/.claude/plugins/`` directly — the CLI manages ``known_marketplaces.json`` and
-the plugin cache; this harness only generates ``marketplace.json`` under the
-``state_dir``-rooted ``composed_root``.
+it is only exercised in live-session dogfood runs.  Every invocation carries an
+explicit ``CLAUDE_CONFIG_DIR`` so it lands in the config dir the caller named
+rather than whichever one the ambient environment selects.  This harness NEVER
+writes to ``<config-dir>/plugins/`` directly — the CLI manages
+``known_marketplaces.json`` and the plugin cache; this harness generates
+``marketplace.json`` under the ``state_dir``-rooted ``composed_root`` and writes
+its own registration markers at the top of the config dir.
 
 Shape-A marketplace.json
 -------------------------
@@ -53,16 +74,26 @@ share one marketplace root (``composed_root``); plugin trees live at
 
 Detection: Claude Code is considered present when ``~/.claude`` exists.  Tests
 may redirect this with the ``TRAILHEAD_CLAUDE_DIR`` env override.
+
+Conflicting overrides
+---------------------
+``TRAILHEAD_CLAUDE_DIR`` is trailhead's own seam; ``CLAUDE_CONFIG_DIR`` is the
+variable Claude Code honors.  Set to the same directory they agree.  Set to
+different directories they cannot both be honored — the plugin state would land
+in one dir while the session reads the other — so every path that reaches a live
+subprocess or reports installed state refuses instead of guessing
+(:func:`_refuse_conflicting_config_dirs`, enforced at :meth:`_marker_dir`).
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
 import subprocess
 import tempfile
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import BinaryIO
@@ -77,6 +108,11 @@ from trailhead.harness.base import (
 )
 
 _REGISTERED_MARKER = ".trailhead-registered"
+#: Ledger dir inside the composed tree holding one file per Claude config dir
+#: currently registered against it — the reference count that keeps a teardown
+#: run under one config dir from deleting the tree another one still sources
+#: its plugins from.
+_REGISTRATIONS_SUBDIR = ".trailhead-registrations"
 _INSTALLED_MARKER_PREFIX = ".trailhead-installed-"
 
 #: Subdir under the Claude dir holding user-level rulesets (``~/.claude/rules/``).
@@ -244,6 +280,7 @@ _LAUNCH_ENV_UNSET = [
 #: that sets how many days a session transcript is kept before cleanup.  Claude
 #: Code's own default when the key is absent is 30 days (minimum accepted: 1).
 _SETTINGS_FILENAME = "settings.json"
+_CONFIG_FILENAME = ".claude.json"
 _CLEANUP_PERIOD_KEY = "cleanupPeriodDays"
 _DEFAULT_CLEANUP_PERIOD_DAYS = 30
 
@@ -306,6 +343,59 @@ def _claude_dir(env: dict[str, str]) -> Path:
     home = env.get("HOME") or env.get("USERPROFILE")
     base = Path(home) if home else Path.home()
     return base / ".claude"
+
+
+def _refuse_conflicting_config_dirs(env: Mapping[str, str]) -> None:
+    """Raise when the test seam and Claude Code's own relocation disagree.
+
+    ``TRAILHEAD_CLAUDE_DIR`` is a trailhead-only seam; ``CLAUDE_CONFIG_DIR`` is the
+    variable Claude Code itself honors.  When both name the same directory that is
+    one consistent statement of intent and nothing is refused.  When they name
+    DIFFERENT directories there is no reading that serves the user: the plugin
+    state and the registration markers would land in the seam's dir while the
+    launched session reads the other one, producing a session that starts, is
+    trusted, and carries none of trailhead's plugins.  Refusing loudly is the only
+    honest outcome.
+    """
+    seam = (env.get("TRAILHEAD_CLAUDE_DIR") or "").strip()
+    relocation = (env.get("CLAUDE_CONFIG_DIR") or "").strip()
+    if not seam or not relocation:
+        return
+    if Path(seam) == Path(relocation):
+        return
+    if os.path.realpath(seam) == os.path.realpath(relocation):
+        return
+    raise HarnessError(
+        "TRAILHEAD_CLAUDE_DIR and CLAUDE_CONFIG_DIR name different Claude config "
+        f"directories: TRAILHEAD_CLAUDE_DIR={seam} CLAUDE_CONFIG_DIR={relocation}. "
+        "Plugin state and trailhead's registration markers must live in the same "
+        "directory the launched session reads, so trailhead will not guess which "
+        "one you meant. Unset TRAILHEAD_CLAUDE_DIR (it is a test-only override) or "
+        "set both to the same directory."
+    )
+
+
+def claude_config_file(env: Mapping[str, str] | None) -> Path:
+    """Resolve Claude Code's global config *file* (``~/.claude.json``) from *env*.
+
+    Precedence is ``CLAUDE_CONFIG_DIR`` then ``HOME``/``USERPROFILE``, falling back
+    to the real home — and deliberately **not** ``TRAILHEAD_CLAUDE_DIR``. That seam
+    is a trailhead-only test redirect Claude Code has never heard of: it relocates
+    the config *directory*, and a file resolved through it would be a path Claude
+    Code never reads, so a trust write there would be dead while the suite that set
+    the seam passed green over it.
+
+    Exported (see ``trailhead.harness.__all__``) because camp's launch-time trust
+    pre-seed writes this same file and must agree on the path — one implementation
+    rather than two copies kept in step by a parity test.
+    """
+    env = env or {}
+    config_dir = env.get("CLAUDE_CONFIG_DIR")
+    if config_dir:
+        return Path(config_dir) / _CONFIG_FILENAME
+    home = env.get("HOME") or env.get("USERPROFILE")
+    base = Path(home) if home else Path.home()
+    return base / _CONFIG_FILENAME
 
 
 class ClaudeCodeHarness(Harness):
@@ -382,49 +472,150 @@ class ClaudeCodeHarness(Harness):
 
     # -- registration state (on-disk truth) -----------------------------------
 
-    def is_registered(self, composed_root: Path) -> bool:
-        return (composed_root / _REGISTERED_MARKER).exists()
+    def _marker_dir(self, env: dict[str, str] | None) -> Path:
+        """Resolve the config dir the markers for this call belong to.
 
-    def is_installed(self, tool: str, composed_root: Path) -> bool:
-        return (composed_root / f"{_INSTALLED_MARKER_PREFIX}{tool}").exists()
+        Registration and per-tool install state are written by the ``claude``
+        CLI into one config dir, so the markers that mirror that state must be
+        keyed the same way — never by the composed tree, which is global and
+        shared by every config dir on the machine.
 
-    def installed_tools(self, composed_root: Path) -> list[str]:
-        """Return the sorted tool names recorded installed under composed_root."""
-        if not composed_root.is_dir():
+        This is the single choke point for every method that shells the ``claude``
+        CLI or reports installed state, so the conflicting-override refusal lives
+        here: it covers ``register``, ``install_tool``, ``rewire_tool``,
+        ``unregister_tool``, ``unregister_marketplace``, and the state readers
+        ``doctor`` reads, in one place instead of five.
+        """
+        resolved = env if env is not None else dict(os.environ)
+        _refuse_conflicting_config_dirs(resolved)
+        return _claude_dir(resolved)
+
+    def is_registered(self, composed_root: Path, *, env: dict[str, str] | None = None) -> bool:
+        return (self._marker_dir(env) / _REGISTERED_MARKER).exists()
+
+    def is_installed(
+        self, tool: str, composed_root: Path, *, env: dict[str, str] | None = None
+    ) -> bool:
+        return (self._marker_dir(env) / f"{_INSTALLED_MARKER_PREFIX}{tool}").exists()
+
+    def installed_tools(
+        self, composed_root: Path, *, env: dict[str, str] | None = None
+    ) -> list[str]:
+        """Return the sorted tool names recorded installed in this config dir."""
+        marker_dir = self._marker_dir(env)
+        if not marker_dir.is_dir():
             return []
         return sorted(
             f.name[len(_INSTALLED_MARKER_PREFIX) :]
-            for f in composed_root.iterdir()
+            for f in marker_dir.iterdir()
             if f.is_file() and f.name.startswith(_INSTALLED_MARKER_PREFIX)
         )
 
+    def _write_marker(self, name: str, env: dict[str, str] | None) -> None:
+        marker_dir = self._marker_dir(env)
+        marker_dir.mkdir(parents=True, exist_ok=True)
+        (marker_dir / name).write_text("{}")
+
+    def _registration_entry(self, composed_root: Path, env: dict[str, str] | None) -> Path:
+        """Path of this config dir's ledger entry inside *composed_root*.
+
+        Named by a digest of the config-dir path so any absolute path becomes a
+        safe single filename; the path itself is the file's content.
+        """
+        config_dir = str(self._marker_dir(env))
+        digest = hashlib.sha256(config_dir.encode()).hexdigest()[:32]
+        return composed_root / _REGISTRATIONS_SUBDIR / digest
+
+    def composed_tree_in_use_elsewhere(
+        self, composed_root: Path, *, env: dict[str, str] | None = None
+    ) -> bool:
+        """True if a config dir OTHER than the one *env* names is registered here.
+
+        Only registrations trailhead itself recorded are visible: a config dir
+        registered before this ledger existed does not hold the tree until its
+        next ``trailhead install`` re-records it.
+        """
+        own = self._registration_entry(composed_root, env).name
+        ledger = composed_root / _REGISTRATIONS_SUBDIR
+        if not ledger.is_dir():
+            return False
+        return any(f.is_file() and f.name != own for f in ledger.iterdir())
+
+    def _cli_env(self, env: dict[str, str] | None) -> dict[str, str]:
+        """Environment for a ``claude plugin …`` subprocess, config dir pinned.
+
+        The CLI writes marketplace registration and plugin content into the
+        config dir ``CLAUDE_CONFIG_DIR`` selects, so the target is named
+        explicitly rather than inherited from the ambient process environment —
+        otherwise an install meant for one account lands in whichever dir the
+        caller happened to be running under.
+
+        The dir named is ``_marker_dir``'s — the same one the markers are written
+        to, ``TRAILHEAD_CLAUDE_DIR`` included. That seam relocates the config
+        *directory*, which is a directory Claude Code does read when named through
+        ``CLAUDE_CONFIG_DIR``, so following it keeps trailhead's markers and the
+        CLI's own state in one place instead of splitting them across two dirs.
+        (Contrast ``claude_config_file``, which must NOT follow the seam: a config
+        *file* resolved through it is a path Claude Code never reads.)
+
+        Because following the seam here pins a LIVE subprocess, an environment that
+        sets both the seam and ``CLAUDE_CONFIG_DIR`` to different directories is
+        refused by ``_marker_dir`` rather than silently resolved — see
+        :func:`_refuse_conflicting_config_dirs`.
+        """
+        base = dict(env) if env is not None else dict(os.environ)
+        base["CLAUDE_CONFIG_DIR"] = str(self._marker_dir(env))
+        return base
+
     # -- install / uninstall --------------------------------------------------
 
-    def register(self, composed_root: Path, *, runner=None) -> None:
+    def register(
+        self, composed_root: Path, *, runner=None, env: dict[str, str] | None = None
+    ) -> None:
         """Register the consolidated trailhead marketplace via the harness CLI.
 
         Shells ``claude plugin marketplace add --scope user <composed_root>``
-        (idempotent) and writes the global ``.trailhead-registered`` marker only
-        after the CLI call succeeds.
+        (idempotent) against the config dir *env* resolves, and writes that
+        dir's ``.trailhead-registered`` marker only after the CLI call succeeds.
+        The marketplace source is the global composed tree; the registration it
+        creates belongs to one config dir.  That pairing is also recorded in the
+        composed tree's registration ledger, so a teardown run under a different
+        config dir can see this one still sourcing its plugins from here.
         """
         _run = runner or _default_runner
         _run(
-            ["claude", "plugin", "marketplace", "add", "--scope", "user", str(composed_root)]
+            ["claude", "plugin", "marketplace", "add", "--scope", "user", str(composed_root)],
+            env=self._cli_env(env),
         )
-        (composed_root / _REGISTERED_MARKER).write_text("{}")
+        self._write_marker(_REGISTERED_MARKER, env)
+        entry = self._registration_entry(composed_root, env)
+        entry.parent.mkdir(parents=True, exist_ok=True)
+        entry.write_text(f"{self._marker_dir(env)}\n")
 
-    def install_tool(self, tool: str, composed_root: Path, *, runner=None) -> None:
+    def install_tool(
+        self, tool: str, composed_root: Path, *, runner=None, env: dict[str, str] | None = None
+    ) -> None:
         """Install a tool from the consolidated trailhead marketplace.
 
-        Shells ``claude plugin install <tool>@trailhead --scope user`` and writes
-        the per-tool ``.trailhead-installed-<tool>`` marker only after success.
+        Shells ``claude plugin install <tool>@trailhead --scope user`` against
+        the config dir *env* resolves, and writes that dir's per-tool
+        ``.trailhead-installed-<tool>`` marker only after success.
+
+        Safe to run against a config dir that already has the plugin — the CLI
+        reports "already installed" and exits 0 — which is what lets a config dir
+        with no marker yet take this branch instead of the uninstall/install pair.
         """
         _validate_tool(tool)
         _run = runner or _default_runner
-        _run(["claude", "plugin", "install", f"{tool}@trailhead", "--scope", "user"])
-        (composed_root / f"{_INSTALLED_MARKER_PREFIX}{tool}").write_text("{}")
+        _run(
+            ["claude", "plugin", "install", f"{tool}@trailhead", "--scope", "user"],
+            env=self._cli_env(env),
+        )
+        self._write_marker(f"{_INSTALLED_MARKER_PREFIX}{tool}", env)
 
-    def rewire_tool(self, tool: str, composed_root: Path, *, runner=None) -> None:
+    def rewire_tool(
+        self, tool: str, composed_root: Path, *, runner=None, env: dict[str, str] | None = None
+    ) -> None:
         """Refresh an already-installed tool after recomposition.
 
         Sequence: **uninstall THEN install** (NOT ``plugin update``, which is
@@ -437,18 +628,27 @@ class ClaudeCodeHarness(Harness):
         _validate_tool(tool)
         _run = runner or _default_runner
 
-        marker = composed_root / f"{_INSTALLED_MARKER_PREFIX}{tool}"
+        marker = self._marker_dir(env) / f"{_INSTALLED_MARKER_PREFIX}{tool}"
         marker.unlink(missing_ok=True)
 
+        cli_env = self._cli_env(env)
         try:
-            _run(["claude", "plugin", "uninstall", f"{tool}@trailhead", "--scope", "user"])
+            _run(
+                ["claude", "plugin", "uninstall", f"{tool}@trailhead", "--scope", "user"],
+                env=cli_env,
+            )
         except Exception:
             pass
 
-        _run(["claude", "plugin", "install", f"{tool}@trailhead", "--scope", "user"])
-        marker.write_text("{}")
+        _run(
+            ["claude", "plugin", "install", f"{tool}@trailhead", "--scope", "user"],
+            env=cli_env,
+        )
+        self._write_marker(f"{_INSTALLED_MARKER_PREFIX}{tool}", env)
 
-    def unregister_tool(self, tool: str, composed_root: Path, *, runner=None) -> None:
+    def unregister_tool(
+        self, tool: str, composed_root: Path, *, runner=None, env: dict[str, str] | None = None
+    ) -> None:
         """Uninstall ONE tool from the consolidated trailhead marketplace.
 
         Shells ``claude plugin uninstall <tool>@trailhead --scope user --keep-data
@@ -472,27 +672,34 @@ class ClaudeCodeHarness(Harness):
                     "user",
                     "--keep-data",
                     "--yes",
-                ]
+                ],
+                env=self._cli_env(env),
             )
         finally:
-            (composed_root / f"{_INSTALLED_MARKER_PREFIX}{tool}").unlink(missing_ok=True)
+            (self._marker_dir(env) / f"{_INSTALLED_MARKER_PREFIX}{tool}").unlink(missing_ok=True)
 
-    def unregister_marketplace(self, composed_root: Path, *, runner=None) -> None:
+    def unregister_marketplace(
+        self, composed_root: Path, *, runner=None, env: dict[str, str] | None = None
+    ) -> None:
         """Remove the shared ``trailhead`` marketplace (inverse of :meth:`register`).
 
         Called **once** after every tool has been uninstalled — NEVER per-tool,
         since a single marketplace is shared across all tools.  Shells
         ``claude plugin marketplace remove trailhead --scope user`` and clears the
         global marker in ``finally`` so a half-removed state never reads as
-        registered.
+        registered.  The config dir's entry in the composed tree's registration
+        ledger is dropped there too — it no longer sources plugins from the tree,
+        so it no longer holds it against deletion.
         """
         _run = runner or _default_runner
         try:
             _run(
-                ["claude", "plugin", "marketplace", "remove", "trailhead", "--scope", "user"]
+                ["claude", "plugin", "marketplace", "remove", "trailhead", "--scope", "user"],
+                env=self._cli_env(env),
             )
         finally:
-            (composed_root / _REGISTERED_MARKER).unlink(missing_ok=True)
+            (self._marker_dir(env) / _REGISTERED_MARKER).unlink(missing_ok=True)
+            self._registration_entry(composed_root, env).unlink(missing_ok=True)
 
     # -- user-level rulesets --------------------------------------------------
     #

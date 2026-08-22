@@ -16,6 +16,11 @@ from trailhead.pathint import repo_root
 from trailhead.uninstall import run_uninstall
 
 
+def _claude_dir(tmp_path: Path) -> Path:
+    """The Claude config dir `_env` pins — registration state lives here."""
+    return tmp_path / "claude-dir"
+
+
 def _env(tmp_path: Path) -> dict[str, str]:
     home = tmp_path / "home"
     home.mkdir(exist_ok=True)
@@ -25,19 +30,23 @@ def _env(tmp_path: Path) -> dict[str, str]:
         "HOME": str(home),
         # Pinned, not inherited: TRAILHEAD_CLAUDE_DIR outranks CLAUDE_CONFIG_DIR,
         # so a developer with a relocated Claude dir still can't be written to.
-        "TRAILHEAD_CLAUDE_DIR": str(tmp_path / "claude-dir"),
+        "TRAILHEAD_CLAUDE_DIR": str(_claude_dir(tmp_path)),
     }
 
 
 def _make_harness_tree(tmp_path: Path, hname: str, tools: list[str], *, registered=True):
     root = tmp_path / "composed" / hname
     (root / "plugins").mkdir(parents=True)
+    # Registration and per-tool install state belong to the config dir `_env`
+    # pins, not to the shared composed tree.
+    claude_dir = _claude_dir(tmp_path)
+    claude_dir.mkdir(parents=True, exist_ok=True)
     if registered:
-        (root / ".trailhead-registered").write_text("{}")
+        (claude_dir / ".trailhead-registered").write_text("{}")
     for t in tools:
         (root / "plugins" / t / ".claude-plugin").mkdir(parents=True)
         (root / "plugins" / t / ".claude-plugin" / "plugin.json").write_text("{}")
-        (root / f".trailhead-installed-{t}").write_text("{}")
+        (claude_dir / f".trailhead-installed-{t}").write_text("{}")
     return root
 
 
@@ -206,3 +215,43 @@ class TestHumanSummary:
         assert "bin/trailhead install" in out
         assert "<checkout>" not in out
         assert str(repo_root()) in out
+
+
+class TestComposedTreeBlastRadius:
+    """Teardown is per config dir; the composed tree it shares is not."""
+
+    def _register_other(self, tmp_path: Path, root: Path) -> Path:
+        """Register a SECOND Claude config dir against the same composed tree."""
+        from trailhead.harness.claude_code import ClaudeCodeHarness
+
+        other = tmp_path / "other-claude"
+        other.mkdir()
+        ClaudeCodeHarness().register(
+            root,
+            runner=lambda args, **kw: None,
+            env={**_env(tmp_path), "TRAILHEAD_CLAUDE_DIR": str(other)},
+        )
+        return other
+
+    def test_composed_tree_survives_while_another_config_dir_is_registered(
+        self, tmp_path, capsys
+    ):
+        root = _make_harness_tree(tmp_path, "claude_code", ["lore"])
+        other = self._register_other(tmp_path, root)
+
+        with _recording() as (calls, runner, _):
+            rc = run_uninstall(env=_env(tmp_path), assume_yes=True, runner=runner)
+
+        assert rc == 0
+        assert root.exists(), "another config dir still points at this composed tree"
+        assert (other / ".trailhead-registered").exists()
+        assert "another Claude config dir" in capsys.readouterr().err
+
+    def test_composed_tree_is_removed_once_nobody_else_points_at_it(self, tmp_path):
+        root = _make_harness_tree(tmp_path, "claude_code", ["lore"])
+
+        with _recording() as (calls, runner, _):
+            rc = run_uninstall(env=_env(tmp_path), assume_yes=True, runner=runner)
+
+        assert rc == 0
+        assert not root.exists()

@@ -16,9 +16,13 @@ def _redirect_claude_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Non
     Code under test falls back to `os.environ` whenever `env` is None, and any
     env dict built from `os.environ` inherits a developer's real
     `CLAUDE_CONFIG_DIR`/`HOME`. Pinning `TRAILHEAD_CLAUDE_DIR` — the override
-    that wins over both — makes it impossible for a test to write into the live
-    `~/.claude` (Axiom 6). Tests that need their own location still pass an
-    explicit `env`, which takes precedence over this.
+    that wins over both — keeps everything resolving through `_claude_dir` out of
+    the live `~/.claude` (Axiom 6). Tests that need their own location still pass
+    an explicit `env`, which takes precedence over this.
+
+    It protects `_claude_dir` and nothing else. `claude_config_file` ignores this
+    seam deliberately, and an explicit `env` that omits `HOME` bypasses it too;
+    `_forbid_real_home` below is what covers those.
     """
     monkeypatch.setenv("TRAILHEAD_CLAUDE_DIR", str(tmp_path / "ambient-claude"))
 
@@ -44,3 +48,46 @@ def capturing_runner():
         calls_seen.append(list(args))
 
     return runner, calls_seen
+
+
+@pytest.fixture()
+def claude_dir(tmp_path: Path) -> Path:
+    """The Claude config dir this suite's ambient environment resolves to.
+
+    Registration and per-tool install markers are per config dir, so a test that
+    lets the harness resolve its own env finds them here — the same location
+    `_redirect_claude_dir` pins `TRAILHEAD_CLAUDE_DIR` to.
+    """
+    d = tmp_path / "ambient-claude"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+@pytest.fixture(autouse=True)
+def _forbid_real_home(request, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make any fall-through to the developer's real home a loud failure.
+
+    `Path.home()` is the last resort of every resolver here, and the one this
+    suite's other guards cannot cover: `claude_config_file` ignores the
+    `TRAILHEAD_CLAUDE_DIR` seam by design, so an `env` of `None` — or one with no
+    `HOME` — lands on the operator's real `~/.claude.json`, which carries OAuth
+    secrets. Poisoning `Path.home` turns "the test forgot to inject `HOME`" into
+    an immediate error instead of a silent write to live state (Axiom 6).
+
+    A test that genuinely means the real home (asserting the fall-back path, or
+    exercising home-path redaction) declares `@pytest.mark.real_home`.
+    """
+    if "real_home" in request.keywords:
+        return
+    real_home = Path.home()
+
+    def _refuse() -> Path:
+        raise AssertionError(
+            "Path.home() reached in a test: something resolved a path from the "
+            f"developer's real home ({real_home}) instead of an injected HOME. "
+            "Pass env={'HOME': str(tmp_path)} (or CLAUDE_CONFIG_DIR under tmp_path) "
+            "so the write lands in the sandbox. If the real home is genuinely the "
+            "subject, mark the test @pytest.mark.real_home."
+        )
+
+    monkeypatch.setattr(Path, "home", staticmethod(_refuse))

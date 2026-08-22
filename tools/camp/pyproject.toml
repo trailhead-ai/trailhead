@@ -9,3 +9,6 @@ requires-python = ">=3.11"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "real_home: the test genuinely means the developer's real home; opts out of the Path.home() guard",
+]

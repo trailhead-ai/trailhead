@@ -719,3 +719,94 @@ def test_a_harness_that_raises_composing_the_scrub_refuses_rather_than_raising(
     assert isinstance(outcome, stop.Refused)
     assert outcome.reason == stop.REFUSED_NOT_CAMP_LAUNCHED
     assert tmux.killed == []
+
+
+# ---------------------------------------------------------------------------
+# ownership survives the config-dir assignment in the pane command
+# ---------------------------------------------------------------------------
+
+
+def _launched_pane_with_config_dir(
+    harness, session_id: str, derived_name: str, workspace: Path, config_dir: str
+) -> str:
+    """The pane command camp composes when a config dir is carried into the pane."""
+    scrub = " ".join(f"-u {name}" for name in harness.session_launch_env_unset())
+    argv = harness.session_launch(workspace, session_id, session_name=derived_name)
+    return f"env {scrub} CLAUDE_CONFIG_DIR={config_dir} " + " ".join(argv)
+
+
+def test_a_pane_carrying_the_config_dir_assignment_is_still_camp_launched(
+    tmp_path: Path,
+) -> None:
+    """camp must recognize its own pane after the launch engine started carrying
+    the config dir into it. The kill-time environment is NOT consulted: a session
+    launched under one account is routinely stopped from a shell running under
+    another, and ownership cannot depend on the two agreeing."""
+    from camp.launch.stop import Stopped
+
+    state, ws, env, harness, derived, _tmux = _fixture(tmp_path)
+    tmux = _FakeTmux(
+        {
+            derived: _launched_pane_with_config_dir(
+                harness, _UUID_A, derived, ws, "/home/someone/.claude-other"
+            )
+        }
+    )
+
+    outcome = _stop(
+        _UUID_A[:8],
+        tmux=tmux,
+        transcripts=[_transcript(_UUID_A, ws)],
+        live_records=[_record(_UUID_A, ws)],
+        env=env,
+        harness=harness,
+    )
+
+    assert isinstance(outcome, Stopped)
+    assert tmux.killed == [derived]
+
+
+def test_an_unrecognized_extra_operand_is_still_not_camp_launched(tmp_path: Path) -> None:
+    """The tolerance is exactly one CLAUDE_CONFIG_DIR assignment — it must not
+    widen into accepting any extra operand, which would let camp reclaim a pane
+    it never composed."""
+    state, ws, env, harness, derived, _tmux = _fixture(tmp_path)
+    scrub = " ".join(f"-u {n}" for n in harness.session_launch_env_unset())
+    argv = harness.session_launch(ws, _UUID_A, session_name=derived)
+    pane = f"env {scrub} SOMETHING_ELSE=/tmp " + " ".join(argv)
+    tmux = _FakeTmux({derived: pane})
+
+    outcome = _stop(
+        _UUID_A[:8],
+        tmux=tmux,
+        transcripts=[_transcript(_UUID_A, ws)],
+        live_records=[_record(_UUID_A, ws)],
+        env=env,
+        harness=harness,
+    )
+
+    assert tmux.killed == []
+
+
+def test_a_relative_config_dir_operand_is_not_camp_launched(tmp_path: Path) -> None:
+    """The launch engine only ever composes an absolute value, so a relative one
+    is not a shape camp could have produced."""
+    state, ws, env, harness, derived, _tmux = _fixture(tmp_path)
+    tmux = _FakeTmux(
+        {
+            derived: _launched_pane_with_config_dir(
+                harness, _UUID_A, derived, ws, "relative/.claude"
+            )
+        }
+    )
+
+    outcome = _stop(
+        _UUID_A[:8],
+        tmux=tmux,
+        transcripts=[_transcript(_UUID_A, ws)],
+        live_records=[_record(_UUID_A, ws)],
+        env=env,
+        harness=harness,
+    )
+
+    assert tmux.killed == []

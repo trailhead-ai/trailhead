@@ -12,7 +12,7 @@ Per-harness layout:
   - ONE marketplace.json at composed_root/.claude-plugin/marketplace.json,
     name == "trailhead", plugins[] = the tools that promoted SUCCESSFULLY
     this run (on-disk truth).
-  - Split markers in composed_root: a global .trailhead-registered plus
+  - Split markers in the target Claude config dir: a .trailhead-registered plus
     per-tool .trailhead-installed-<tool>.
   - Registration sequencing lives in the wire() loop, NOT in _compose_tool:
     after the compose loop, generate_manifest once, register once, then
@@ -114,9 +114,18 @@ def _fail_first_copy(msg: str):
         yield
 
 
+def _claude_dir(tmp_path: Path) -> Path:
+    """The Claude config dir `_env` installs into — registration state lives here."""
+    return tmp_path / "claude-dir"
+
+
 def _env(tmp_path: Path) -> dict[str, str]:
-    """Return an env dict that redirects TRAILHEAD_STATE_DIR to tmp_path."""
-    return {**os.environ, "TRAILHEAD_STATE_DIR": str(tmp_path)}
+    """Return an env dict redirecting both the state dir and the Claude config dir."""
+    return {
+        **os.environ,
+        "TRAILHEAD_STATE_DIR": str(tmp_path),
+        "TRAILHEAD_CLAUDE_DIR": str(_claude_dir(tmp_path)),
+    }
 
 
 def _manifest_paths() -> dict[str, Path]:
@@ -1019,7 +1028,7 @@ class TestWireErrorIsolation:
 
 
 # ---------------------------------------------------------------------------
-# Split markers — global register marker + per-tool install marker;
+# Split markers — a register marker + per-tool install markers, per config dir;
 #        install-vs-rewire keyed on the per-tool marker.
 # ---------------------------------------------------------------------------
 
@@ -1036,11 +1045,11 @@ class TestSplitMarkers:
             env=_env(tmp_path),
             runner=_noop_runner,
         )
-        composed_root = _composed_root(tmp_path)
-        assert (composed_root / ".trailhead-registered").exists(), (
-            "global .trailhead-registered marker absent after successful wire"
+        claude_dir = _claude_dir(tmp_path)
+        assert (claude_dir / ".trailhead-registered").exists(), (
+            ".trailhead-registered marker absent from the config dir after successful wire"
         )
-        assert (composed_root / ".trailhead-installed-lore").exists(), (
+        assert (claude_dir / ".trailhead-installed-lore").exists(), (
             "per-tool .trailhead-installed-lore marker absent after successful wire"
         )
 
@@ -1061,8 +1070,7 @@ class TestSplitMarkers:
                 runner=failing_on_install,
             )
 
-        composed_root = _composed_root(tmp_path)
-        assert not (composed_root / ".trailhead-installed-lore").exists(), (
+        assert not (_claude_dir(tmp_path) / ".trailhead-installed-lore").exists(), (
             "per-tool install marker written despite install failure"
         )
 
@@ -1083,7 +1091,7 @@ class TestSplitMarkers:
             runner=recording_runner,
         )
         # Wipe the per-tool marker to simulate promote-succeeded-but-install-failed.
-        marker = _composed_root(tmp_path) / ".trailhead-installed-lore"
+        marker = _claude_dir(tmp_path) / ".trailhead-installed-lore"
         marker.unlink()
         calls.clear()
 

@@ -1505,3 +1505,56 @@ class TestCampManagedClaimBoundary:
 
         assert launched.tmux_name == "camp-odd-handle-aa-bb-cc"
         assert "." not in launched.tmux_name
+
+
+# ---------------------------------------------------------------------------
+# the config dir reaches the pane
+# ---------------------------------------------------------------------------
+
+
+class TestConfigDirReachesThePane:
+    """`CLAUDE_CONFIG_DIR` is carried into the pane as an `env` assignment.
+
+    `tmux new-session` against an already-running server is a client request, so
+    the pane inherits the SERVER's environment rather than camp's. A server
+    started under a different Claude account therefore places every session on
+    that account, whatever camp's own environment says. The assignment rides the
+    same pane-level `env` invocation the scrub already uses, which is the one
+    mechanism that holds for a fresh server and a pre-existing one alike.
+    """
+
+    def test_config_dir_is_an_env_assignment_in_the_pane_command(self, rig):
+        _launch(rig, env={"PATH": "/usr/bin", "CLAUDE_CONFIG_DIR": "/somewhere/.claude-levr"})
+
+        pane = _pane_command(rig["spawn"].argv)
+        harness_start = pane.index("fakeharness")
+        assert "CLAUDE_CONFIG_DIR=/somewhere/.claude-levr" in pane[1:harness_start]
+
+    def test_assignment_follows_the_scrub_operands_and_precedes_the_harness(self, rig):
+        _launch(rig, env={"PATH": "/usr/bin", "CLAUDE_CONFIG_DIR": "/somewhere/.claude-levr"})
+
+        pane = _pane_command(rig["spawn"].argv)
+        assert pane[0] == "env"
+        harness_start = pane.index("fakeharness")
+        operands = pane[1:harness_start]
+        assert operands == [tok for var in SCRUB for tok in ("-u", var)] + [
+            "CLAUDE_CONFIG_DIR=/somewhere/.claude-levr"
+        ]
+
+    def test_no_assignment_when_the_variable_is_unset(self, rig):
+        _launch(rig, env={"PATH": "/usr/bin"})
+
+        pane = _pane_command(rig["spawn"].argv)
+        harness_start = pane.index("fakeharness")
+        assert pane[1:harness_start] == [tok for var in SCRUB for tok in ("-u", var)]
+
+    def test_a_relative_config_dir_is_not_carried_into_the_pane(self, rig):
+        """A relative value resolves against the pane's cwd — the launch dir —
+        rather than the operator's, which would silently point the session at a
+        config dir inside the workspace. The trust pre-seed refuses a relative
+        value for the same reason; the pane must not disagree with it."""
+        _launch(rig, env={"PATH": "/usr/bin", "CLAUDE_CONFIG_DIR": "relative/.claude"})
+
+        pane = _pane_command(rig["spawn"].argv)
+        harness_start = pane.index("fakeharness")
+        assert pane[1:harness_start] == [tok for var in SCRUB for tok in ("-u", var)]

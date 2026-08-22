@@ -275,6 +275,31 @@ def _owning_commands(harness, candidate: SessionCandidate) -> tuple[tuple[str, .
     return tuple(shapes)
 
 
+def _without_config_dir(observed: tuple[str, ...]) -> tuple[str, ...]:
+    """*observed* with the launch engine's config-dir assignment removed.
+
+    The engine carries ``CLAUDE_CONFIG_DIR`` into the pane as an ``env``
+    assignment, so a pane camp composed no longer equals the scrub-only shape.
+    Removing it here rather than composing it into the owning shapes is
+    deliberate: the value came from the environment at LAUNCH time, and a
+    session is routinely stopped from a shell running under a different account,
+    so an owning shape built from the stop-time environment would refuse camp's
+    own pane whenever the two disagree.
+
+    Exactly one token is removed, and only one matching the shape the engine can
+    actually compose — an absolute value. Anything else is left in place, so it
+    still fails the exact match and the pane is refused: the tolerance cannot
+    widen into reclaiming a pane camp never composed.
+    """
+    for index, token in enumerate(observed):
+        if token.startswith("CLAUDE_CONFIG_DIR="):
+            value = token[len("CLAUDE_CONFIG_DIR=") :]
+            if value.startswith("/"):
+                return observed[:index] + observed[index + 1 :]
+            return observed
+    return observed
+
+
 def _is_camp_launched(
     harness, candidate: SessionCandidate, pane_command: str | None
 ) -> bool:
@@ -284,7 +309,7 @@ def _is_camp_launched(
         observed = tuple(shlex.split(pane_command))
     except ValueError:
         return False
-    return observed in _owning_commands(harness, candidate)
+    return _without_config_dir(observed) in _owning_commands(harness, candidate)
 
 
 def stop_session(
