@@ -129,6 +129,21 @@ to something permissive.
 boundary, so which group supplies it must never depend on the directory camp
 happened to be invoked from.
 
+### Declaring a group's account
+
+`[launch]` also accepts an optional `account` key:
+
+```toml
+[launch]
+account = "~/.claude-levr"
+```
+
+The value is opaque to camp — it is stored exactly as written and passed through
+to the harness seam uncritically. camp does not expand `~`, does not validate it
+as a path, and does not know which environment variable the harness turns it
+into; the harness owns that interpretation. A group with no `account` declared
+leaves the harness to resolve its own default.
+
 **A credential deny list overrides the allowlist unconditionally.** `~/.ssh`,
 `~/.gnupg`, `~/.aws`, `~/.azure`, `~/.kube`, `~/.docker`, `~/.config/gcloud`,
 `~/.netrc`, `~/.config/gh`, `~/.npmrc`, `~/.pypirc`, and `~/.git-credentials`

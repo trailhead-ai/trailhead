@@ -563,9 +563,10 @@ def _parse_harness(raw: Any, path: Path) -> dict[str, Any] | None:
 # ---------------------------------------------------------------------------
 
 # Keys recognized inside [launch]. Anything else is a misconfiguration and is
-# rejected at load: [launch] configures a containment boundary, so a typo must
-# fail loudly rather than silently leaving the boundary at its default.
-_LAUNCH_KEYS = frozenset({"roots"})
+# rejected at load, so a typo fails loudly rather than being silently ignored.
+# `roots` configures a containment boundary; `account` is an opaque
+# harness-interpreted value camp passes through without inspecting it.
+_LAUNCH_KEYS = frozenset({"roots", "account"})
 
 
 def _parse_launch(raw: Any, path: Path) -> dict[str, Any] | None:
@@ -615,6 +616,12 @@ def _parse_launch(raw: Any, path: Path) -> dict[str, Any] | None:
                     "directory camp is invoked from"
                 )
         result["roots"] = roots
+
+    if "account" in raw:
+        account = raw["account"]
+        if not isinstance(account, str) or not account.strip():
+            raise GroupConfigError(f"{path}: launch.account must be a non-empty string")
+        result["account"] = account
 
     return result
 
