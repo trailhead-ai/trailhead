@@ -21,6 +21,9 @@ Schema:
   phase = "provision"                   # optional; "provision" (default) | "activate"
   required = false                      # optional; default false
   timeout_seconds = 30                  # optional; positive int; per-task subprocess timeout
+  cleanup = ["make", "clean"]           # optional; single argv list, same shape as a
+                                         # step's cmd; retry-cleanup run before the task
+                                         # re-runs; absent means None, not "run nothing"
 
   [[tasks.graphify.steps]]
   name = "seed"                         # required; legible label (status/failure reasons)
@@ -68,6 +71,25 @@ by ANY group is appended to it, so an account directory is never an eligible
 launch root for any group — not just for the group that declared it. Nothing in
 any group config subtracts from the floor.
 
+Phase contract: a task's `phase` picks which of the two moments its steps run
+in, and the two phases carry opposite obligations.
+
+  "provision"   What a session needs to EXIST and behave correctly. Required
+                to be cheap — provision-phase tasks are on the path a session
+                start (or a blocking `camp new --launch`) waits on, so a slow
+                or hanging step there is felt as the tool being unresponsive.
+
+  "activate"    What a session needs to DO WORK. Never blocks a session start
+                — activate-phase tasks run through the detached provisioner,
+                off the path anything waits on synchronously. This is where
+                expensive setup (dependency installs, index builds, and the
+                like) belongs.
+
+A task's phase is a declaration honored by its caller, not enforced by this
+module — `load_group` validates the value and normalizes the task; it is the
+task runner's job to run "provision" tasks on the blocking path and "activate"
+tasks off it.
+
 Activation hook kinds:
   "dep-install"   Run a dependency installation command in the worktree.
 
@@ -80,7 +102,10 @@ dict — every consumer downstream of load_group sees exactly one resolved,
 ordered `tasks` list per member (implicit legacy tasks first, then tasks
 referenced by name via the member's `tasks` field). A member cannot both
 produce an implicit legacy task and separately reference a task of the same
-name — that is a name collision, rejected at load.
+name — that is a name collision, rejected at load. A legacy-normalized task
+carries no `cleanup` key at all (not even None) — the shorthands have no
+syntax to declare one, so a consumer must use `.get("cleanup")` rather than
+assume the key is always present.
 
 lore_scopes invariants: scope in {repo, product, suite, team} ("default" is
 rejected — it is the unconditional floor in vault_resolve, not a routing target);
@@ -166,6 +191,7 @@ def load_group(path: Path) -> dict[str, Any]:
             "name": str, "repo_root": str, "base": str,
             "tasks": [{"name": str, "phase": "provision"|"activate",
                        "required": bool, "timeout_seconds": int | None,
+                       "cleanup": list[str] | None,
                        "steps": [{"name": str, "cmd": list[str]}]}],
         }],
         "branch_pattern": str,
@@ -660,10 +686,18 @@ def _parse_tasks(raw: Any, path: Path) -> dict[str, dict[str, Any]]:
 
     Returns a dict keyed by task name; each value is a normalized task dict:
       {"name": str, "phase": "provision"|"activate", "required": bool,
-       "timeout_seconds": int | None, "steps": [{"name": str, "cmd": [str, ...]}]}
+       "timeout_seconds": int | None, "cleanup": list[str] | None,
+       "steps": [{"name": str, "cmd": [str, ...]}]}
 
-    Placeholder validation in step argv reuses _reject_unknown_placeholders
-    against _TASK_PLACEHOLDERS — no parallel implementation.
+    `cleanup` is an optional single argv list — validated in the same shape as
+    a step's `cmd` (non-empty list of strings, same placeholder set) — run to
+    retry-clean a task's prior attempt before it re-runs. Absent means None,
+    not an empty list: the two read differently downstream ("nothing declared"
+    versus "run nothing").
+
+    Placeholder validation in step argv (and in `cleanup`) reuses
+    _reject_unknown_placeholders against _TASK_PLACEHOLDERS — no parallel
+    implementation.
     """
     if raw is None:
         return {}
@@ -699,6 +733,19 @@ def _parse_tasks(raw: Any, path: Path) -> dict[str, dict[str, Any]]:
                 f"{path}: tasks.{task_name}.timeout_seconds must be a positive integer, "
                 f"got {timeout_seconds!r}"
             )
+
+        cleanup_raw = task_tbl.get("cleanup")
+        if cleanup_raw is None:
+            cleanup: list[str] | None = None
+        else:
+            cleanup_where = f"tasks.{task_name}.cleanup"
+            cleanup = _validate_string_list_field(
+                cleanup_raw, path=path, where=cleanup_where, allow_empty_list=False
+            )
+            for token in cleanup:
+                _reject_unknown_placeholders(
+                    token, path=path, where=cleanup_where, known=_TASK_PLACEHOLDERS
+                )
 
         steps_raw = task_tbl.get("steps")
         if not isinstance(steps_raw, list) or len(steps_raw) == 0:
@@ -740,6 +787,7 @@ def _parse_tasks(raw: Any, path: Path) -> dict[str, dict[str, Any]]:
             "phase": phase,
             "required": required,
             "timeout_seconds": timeout_seconds,
+            "cleanup": cleanup,
             "steps": steps,
         }
 
