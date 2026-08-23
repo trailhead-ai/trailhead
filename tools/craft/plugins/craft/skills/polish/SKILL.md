@@ -146,7 +146,7 @@ One dispatch per brief (per working directory). Use the `Agent` tool with `subag
 - **assumption-prover tests to clean up** — `None`
 - **working directory** — absolute path to the worktree for this brief
 
-Default model is Sonnet (the agent's frontmatter default). Override to Opus only if a follow-up is integration-heavy (3+ files, cross-module). Most follow-ups stay on Sonnet — that's the whole point.
+Default model is Sonnet (the agent's frontmatter default). Escalate to Opus only after a Sonnet attempt on that follow-up has failed — how many files a follow-up touches is not evidence that reasoning capacity is the constraint. Most follow-ups stay on Sonnet — that's the whole point.
 
 If you have multiple briefs (multi-repo), dispatch them **serially**, not in parallel — even though they touch different repos, dispatching serially lets you stop early if one fails and lets the user see incremental progress.
 
