@@ -138,11 +138,22 @@ happened to be invoked from.
 account = "~/.claude-levr"
 ```
 
-The value is opaque to camp — it is stored exactly as written and passed through
-to the harness seam uncritically. camp does not expand `~`, does not validate it
-as a path, and does not know which environment variable the harness turns it
-into; the harness owns that interpretation. A group with no `account` declared
-leaves the harness to resolve its own default.
+The value is stored exactly as written and passed through to the harness seam,
+which owns its interpretation: camp does not expand `~` and does not know which
+environment variable the harness turns the value into. The only thing camp
+checks at load is that it is a non-empty string carrying no control characters,
+since the value becomes a path something resolves and an operand of a process
+spawn. A group with no `account` declared leaves the harness to resolve its own
+default.
+
+The **deny list** below is the one place camp does read the value as a path.
+Every group's `account` is denied as a launch root — including to groups that
+declared none — but only when it is absolute or `~`-anchored. A relative
+`account` names no fixed location, so it contributes no deny entry at all: it is
+skipped rather than resolved against whatever directory camp happens to be
+invoked from. The harness refuses to bind a session to a relative account in the
+first place, so such a value is a misconfiguration to fix, not a protection to
+rely on.
 
 **A credential deny list overrides the allowlist unconditionally.** `~/.ssh`,
 `~/.gnupg`, `~/.aws`, `~/.azure`, `~/.kube`, `~/.docker`, `~/.config/gcloud`,

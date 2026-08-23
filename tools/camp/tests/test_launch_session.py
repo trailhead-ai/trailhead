@@ -678,8 +678,13 @@ class TestParseSessionListNoneIsTolerated:
 
         assert len(rig["spawn"].calls) == 1
         assert result.session_id
-        # The account report is the only line: the probe itself stays silent.
-        assert "already live" not in capsys.readouterr().err
+        # The account report is the only line camp writes here, pinned exactly:
+        # asserting merely that the probe's own wording is absent lets any other
+        # stray line through, which is the whole thing this test is watching for.
+        assert capsys.readouterr().err == (
+            "camp: binding session to the harness default (no account declared) "
+            f"— {ACCOUNT_KEY}={FAKE_DEFAULT_HOME}\n"
+        )
 
     def test_confirm_poll_treats_a_none_answer_as_not_yet_found(self, confirm_rig, monkeypatch):
         session = confirm_rig["module"]

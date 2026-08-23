@@ -91,3 +91,17 @@ def test_the_readme_documents_that_declared_accounts_extend_the_deny_list() -> N
     assert "account" in text and re.search(
         r"account[^.]{0,400}?(deny|denied|credential)", text, re.IGNORECASE | re.DOTALL
     ), "README does not document that a declared account becomes a deny entry"
+
+
+def test_the_readme_does_not_promise_that_the_account_is_never_read_as_a_path() -> None:
+    """The deny derivation DOES interpret `account` as a path, and contributes no
+    entry at all for one that is neither absolute nor `~`-anchored. Prose saying
+    camp never validates it as a path reads as deny-list protection an operator
+    with a relative value does not have."""
+    text = README.read_text()
+    assert "does not validate it as a path" not in text
+    assert re.search(
+        r"relative[^.]{0,200}?(no deny entry|contributes no|no entry)",
+        text,
+        re.IGNORECASE | re.DOTALL,
+    ), "README does not say that a relative account contributes no deny entry"
