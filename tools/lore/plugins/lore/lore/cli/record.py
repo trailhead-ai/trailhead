@@ -399,6 +399,22 @@ def _cmd_record_show(args) -> int:
     ``lore: <msg>`` + nonzero — the same explicit-targeting convention
     ``update`` uses. Omitting ``--vault`` preserves
     :func:`_resolve_record_op_vault`'s scan exactly as before.
+
+    **Repeat-fetch dedupe.** The first show of a record in a session returns the
+    body unchanged and records it in that session's machine-local shown-set
+    (:mod:`cli.shown_state`); a later show of the same record in the same session
+    returns :func:`_emit_deduped` — identity, status, ``updated-at``, and a
+    sentence naming ``--full`` — instead of a second copy of a body already in
+    the agent's context. Dedupe is applied HERE and never in
+    :func:`_render_record`, so ``lore session show``, which shares that renderer,
+    is byte-for-byte unchanged.
+
+    Every branch where "already shown" cannot be established about content the
+    agent actually saw fails OPEN into the full body: ``--full`` (which consults
+    nothing), no resolvable session id, and a body whose digest no longer matches
+    what was shown. The worktree-name fallback key is deliberately not consulted
+    — it is stable across different sessions in one worktree, so it would
+    withhold a first-ever show.
     """
     record_id = _require_record_id(args)
     if record_id is None:
@@ -410,12 +426,100 @@ def _cmd_record_show(args) -> int:
         named_vault = _resolve_named_vault(vault_name)
         if named_vault is None:
             return 1
-        return _render_record(
-            record_id, str(named_vault.path), as_json, error_prefix="lore: "
-        )
+        vault_root = str(named_vault.path)
+        error_prefix = "lore: "
+    else:
+        vault_root = _resolve_record_op_vault(record_id, args)
+        error_prefix = "error: "
 
-    vault_root = _resolve_record_op_vault(record_id, args)
-    return _render_record(record_id, vault_root, as_json)
+    if not bool(getattr(args, "full", False)):
+        deduped = _dedupe_record_show(record_id, vault_root, as_json)
+        if deduped is not None:
+            return deduped
+
+    return _render_record(record_id, vault_root, as_json, error_prefix=error_prefix)
+
+
+#: ``record show`` carries no session selectors of its own, so the shared
+#: resolver is handed an empty namespace and falls through to the environment.
+_NO_SESSION_ARGS = argparse.Namespace(session_id=None)
+
+#: Named inside the compact response itself, so an agent whose context was
+#: compacted away can recover the body without knowing anything special.
+_DEDUPE_HINT = (
+    "The full body of this record was already returned earlier in this session. "
+    "Re-run with --full to get it again (e.g. after a context compaction)."
+)
+
+
+def _dedupe_record_show(record_id: str, vault_root: str, as_json: bool) -> "int | None":
+    """Apply repeat-fetch dedupe for ``record show``; ``None`` means render fully.
+
+    Returns an exit code only when the compact acknowledgement was printed. Every
+    other outcome — no session id, an unlocatable or unreadable record, a first
+    show, a body whose digest has moved — returns ``None`` so the caller renders
+    the record through the untouched shared path. Locating the record here costs
+    a second small read on the full-render path and buys a single error-reporting
+    site: a broken record id is diagnosed by :func:`_render_record` alone, in its
+    caller's error convention.
+    """
+    from ..record import store as record_store_mod
+    from . import shown_state as shown_state_mod
+    from .session import _session_id_from_args_or_env
+
+    session_id = _session_id_from_args_or_env(_NO_SESSION_ARGS)
+    if not session_id:
+        return None
+
+    try:
+        loc = record_store_mod.locate_record(record_id, vault_root=vault_root)
+        body = loc.body_path.read_text(encoding="utf-8") if loc.body_path.exists() else ""
+    except Exception:
+        return None
+
+    digest = shown_state_mod.body_digest(body)
+    if not shown_state_mod.already_shown(session_id, record_id, digest):
+        shown_state_mod.mark_shown(session_id, record_id, digest)
+        return None
+
+    sidecar: dict[str, Any] = {}
+    if loc.sidecar_path.exists():
+        try:
+            sidecar = json.loads(loc.sidecar_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            sidecar = {}
+    return _emit_deduped(record_id, loc, sidecar, as_json)
+
+
+
+def _emit_deduped(record_id: str, loc, sidecar: dict, as_json: bool) -> int:
+    """Print the compact acknowledgement for an already-shown record.
+
+    Plain: one identity line (id, kind, status, ``updated-at``) plus the hint.
+    ``--json``: the existing envelope keys — ``record_id``, ``kind``, ``name``,
+    ``sidecar`` — with ``body`` replaced by ``null`` and ``deduped: true`` plus
+    ``hint`` added, so a JSON consumer detects the compact form structurally
+    rather than by parsing prose.
+    """
+    if as_json:
+        print(json.dumps({
+            "record_id": record_id,
+            "kind": loc.kind,
+            "name": loc.name,
+            "sidecar": sidecar,
+            "body": None,
+            "deduped": True,
+            "hint": _DEDUPE_HINT,
+        }, indent=2, sort_keys=True))
+        return 0
+
+    status = sidecar.get("status") or "unknown"
+    updated = sidecar.get("updated-at") or "unknown"
+    print(
+        f"{record_id} — kind: {loc.kind} · status: {status} · "
+        f"updated-at: {updated}\n\n{_DEDUPE_HINT}"
+    )
+    return 0
 
 
 def _cmd_record_delete(args) -> int:
@@ -1696,6 +1800,15 @@ def add_record_subparser(sub) -> None:
         action="store_true",
         default=False,
         help="Emit {record_id, kind, name, sidecar, body} as JSON",
+    )
+    p_record_show.add_argument(
+        "--full",
+        action="store_true",
+        default=False,
+        help="Return the whole record with no repeat-fetch dedupe applied. A "
+             "repeat show of the same record in one session returns a compact "
+             "acknowledgement instead of a second copy of the body; --full is "
+             "the unconditional escape from that.",
     )
     p_record_show.add_argument(
         "--vault", dest="vault", default=None, metavar="NAME",
