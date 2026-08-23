@@ -84,7 +84,7 @@ def test_keyword_appends_to_existing_list():
     assert result["keywords"] == ["a", "b", "c"]
 
 
-def test_unset_list_item_removes_one_matching_entry():
+def test_unset_list_item_removes_every_matching_entry():
     f = _fields()
     result, errors = f.apply_record_fields(
         {"keywords": ["a", "b"]}, _args(unset_keyword=["a"])

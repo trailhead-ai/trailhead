@@ -16,7 +16,7 @@ Dedicated per-field flags replaced the generic ``--set``/``--unset``
 patch idiom. This file now exercises:
   - ``--status`` (scalar) sets the field; off-vocab status → non-zero, vocab named.
   - list flags ``--keyword`` / ``--related-file`` / ``--related-url`` /
-    ``--related-phase`` append; ``--unset-<field> VALUE`` removes one item.
+    ``--related-phase`` append; ``--unset-<field> VALUE`` removes every match.
   - ``--related <kind>=<name>`` appends to that kind's list; empty kind/name and a
     bad kind are rejected.
   - ``keywords`` is optional: create with no ``--keyword`` succeeds.
@@ -328,7 +328,7 @@ def test_status_off_vocab_nonzero_names_vocab(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# repeatable list flags append; --unset-<field> VALUE removes one
+# repeatable list flags append; --unset-<field> VALUE removes every match
 # ---------------------------------------------------------------------------
 
 
@@ -383,7 +383,7 @@ def test_unset_keyword_removes_single_item(tmp_path):
 
 
 def test_related_url_flag_appends_and_unsets(tmp_path):
-    """--related-url appends to related-urls; --unset-related-url removes one."""
+    """--related-url appends to related-urls; --unset-related-url removes every match."""
     vault, state = _make_vault(tmp_path)
     r = _run(
         _BASE_ARGS
@@ -404,7 +404,7 @@ def test_related_url_flag_appends_and_unsets(tmp_path):
 
 
 def test_unset_related_flag_removes_one_name_via_update(tmp_path):
-    """--unset-related KIND=NAME removes one name from related[KIND] on update."""
+    """--unset-related KIND=NAME removes every occurrence of NAME from related[KIND]."""
     vault, state = _make_vault(tmp_path)
     r = _run(
         _BASE_ARGS + ["--related", "task=alpha", "--related", "task=beta"],

@@ -303,7 +303,7 @@ def test_update_status_sets_field(tmp_path):
 
 
 def test_update_keyword_appends_and_unsets(tmp_path):
-    """--keyword appends to the existing list; --unset-keyword removes one item."""
+    """--keyword appends to the existing list; --unset-keyword removes every match."""
     vault, state = _make_vault(tmp_path)
     record_id = _create(vault, state)  # keywords == ["foo"]
 
@@ -1677,7 +1677,7 @@ def _mk_task(vault, state, title, *, extra=None, body="body\n"):
 
 
 def test_unset_depends_on_and_parent_round_trip(tmp_path):
-    """--unset-depends-on removes one dep; --unset-parent clears the parent scalar."""
+    """--unset-depends-on removes a matching dep; --unset-parent clears the parent scalar."""
     vault, state = _make_vault(tmp_path)
     rid = _mk_task(vault, state, "a", extra=["--depends-on", "x", "--depends-on", "y", "--parent", "p"])
     before = _find_sidecar(vault, rid)
