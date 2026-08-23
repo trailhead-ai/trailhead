@@ -270,3 +270,23 @@ def test_phase5_pins_flag_and_retrieval_outcome_are_carried_to_the_close_write()
         "phases resumes at the first unticked phase with the write-failed flag "
         "and the retrieval outcome gone.",
     )
+
+
+def test_phase5_pins_untrusted_interpolation_at_the_write():
+    _pin_in(
+        _phase5_section(),
+        "execute.md#phase5",
+        "both interpolate untrusted text into a literal shell command",
+        "`<name>` is vault-sourced and the title is generated prose crafted "
+        "repo content can influence; both reach a shell the controller runs.",
+    )
+
+
+def test_phase5_pins_title_sanitization_before_quoting():
+    _pin_in(
+        _phase5_section(),
+        "execute.md#phase5",
+        "the title is stripped of single quotes, newlines, backticks, and `$` before it is quoted",
+        "A single quote in the title breaks out of the quoted argument and "
+        "injects a command into the controller's shell.",
+    )
