@@ -146,12 +146,19 @@ leaves the harness to resolve its own default.
 
 **A credential deny list overrides the allowlist unconditionally.** `~/.ssh`,
 `~/.gnupg`, `~/.aws`, `~/.azure`, `~/.kube`, `~/.docker`, `~/.config/gcloud`,
-`~/.netrc`, `~/.config/gh`, `~/.npmrc`, `~/.pypirc`, and `~/.git-credentials`
-are fixed in camp's code. No group config can permit one, and the rule denies a
-target that is at, under, **or above** any entry — so `roots = ["~"]` cannot
-launder a home directory full of credential stores past the gate in one line.
-The refusal names the credential rule and never mentions the allowlist, because
-editing the allowlist is not the fix.
+`~/.netrc`, `~/.config/gh`, `~/.npmrc`, `~/.pypirc`, `~/.git-credentials`, and
+the harness's own credential stores `~/.claude` and `~/.claude.json` are fixed
+in camp's code as a floor. The rule denies a target that is at, under, **or
+above** any entry — so `roots = ["~"]` cannot launder a home directory full of
+credential stores past the gate in one line. The refusal names the credential
+rule and never mentions the allowlist, because editing the allowlist is not the
+fix.
+
+**Every `account` any group declares is added to that deny list**, so a second
+account's credential directory is protected exactly like the first — including
+from a *different* group, whose `roots` would otherwise reach it. The derivation
+is additive only: a group config can extend the floor and can never remove,
+narrow, or shadow an entry, so no group config can permit a denied path.
 
 ### Bringing a dead session back
 
