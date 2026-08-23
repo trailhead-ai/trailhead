@@ -1284,3 +1284,16 @@ class TestManifestAPI:
         manifest_path = tmp_path / "nonexistent.json"
         remove_central_manifest(manifest_path)  # should not raise
 
+    def test_work_state_for_member_defaults_to_pending_when_key_absent(self):
+        """A member entry lacking "work_state" (every manifest written before
+        this key existed) reads as not-yet-work-ready rather than raising."""
+        from camp.group.manifest import work_state_for_member
+
+        assert work_state_for_member({"name": "repo"}) == "pending"
+
+    def test_work_state_for_member_returns_stored_value(self):
+        """A member entry carrying "work_state" reports it verbatim."""
+        from camp.group.manifest import work_state_for_member
+
+        assert work_state_for_member({"name": "repo", "work_state": "ready"}) == "ready"
+

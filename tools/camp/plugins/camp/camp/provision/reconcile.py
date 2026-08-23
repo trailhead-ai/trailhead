@@ -348,6 +348,23 @@ def _has_provision_tasks(member: dict[str, Any]) -> bool:
     )
 
 
+# Mirrors activation.ACTIVATE_PHASE, duplicated locally (not imported) so this
+# module's only cross-module task-phase dependency stays the same shape as the
+# PROVISION_PHASE constant immediately above.
+_ACTIVATE_PHASE = "activate"
+
+
+def _has_activate_tasks(member: dict[str, Any]) -> bool:
+    """True if the member declares any activate-phase task in config.
+
+    Used to compute the manifest's work_state fact: a member with no
+    activate-phase task at all has nothing to become work-ready FOR, so it
+    reports manifest.WORK_STATE_NOT_APPLICABLE rather than sitting at
+    "pending" forever waiting for work that will never run.
+    """
+    return any(t.get("phase", PROVISION_PHASE) == _ACTIVATE_PHASE for t in member.get("tasks") or [])
+
+
 def _has_outstanding_provision_tasks(
     member: dict[str, Any], tasks_map: dict[str, Any] | None
 ) -> bool:
@@ -381,17 +398,38 @@ def _adapt_task_steps(tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return adapted
 
 
-def _completed_from_tasks_map(tasks_map: dict[str, Any] | None) -> dict[str, str]:
+def _completed_from_tasks_map(
+    tasks_map: dict[str, Any] | None, *, over_budget_as_ok: bool = False
+) -> dict[str, str]:
     """Project a manifest `tasks` map ({name: {"state": ...}}) onto the runner's
-    `completed` shape ({name: state}) so an "ok" task is skipped (run-once)."""
-    return {name: info.get("state", "") for name, info in (tasks_map or {}).items()}
+    `completed` shape ({name: state}) so an "ok" task is skipped (run-once).
+
+    `over_budget_as_ok`, when True, also treats a persisted "over-budget" state
+    as skip-worthy — the boot-budget-constrained SessionStart hook path
+    (reconcile_worktree) must not retry a task that already blew its budget
+    within the same tight window. The default (False) leaves "over-budget" as
+    its own literal, non-"ok" state, so `camp setup`'s retry path
+    (_provision_member_and_flip) re-runs it. Deliberately two directions from
+    one persisted fact rather than one shared projection: collapsing them
+    would either retry an over-budget task inside the boot budget, or make
+    `camp setup` unable to ever retry one.
+    """
+    out: dict[str, str] = {}
+    for name, info in (tasks_map or {}).items():
+        state = info.get("state", "")
+        if over_budget_as_ok and state == "over-budget":
+            state = "ok"
+        out[name] = state
+    return out
 
 
 def _tasks_map_from_results(results: list[TaskResult]) -> dict[str, Any]:
     """Project a run's TaskResults onto the persisted manifest `tasks` map.
 
     A skipped task carries forward its "ok" state (it only skips when already
-    ok); a failed task persists its (capped) stderr excerpt as the reason.
+    ok); a failed task persists its (capped) stderr excerpt as the reason; an
+    over-budget task persists verbatim — normalizing it to "ok" would make it
+    indistinguishable from success and it would never be retried anywhere.
     """
     out: dict[str, Any] = {}
     for result in results:
@@ -400,6 +438,8 @@ def _tasks_map_from_results(results: list[TaskResult]) -> dict[str, Any]:
             if result.stderr_excerpt:
                 entry["reason"] = result.stderr_excerpt
             out[result.name] = entry
+        elif result.state == "over-budget":
+            out[result.name] = {"state": "over-budget"}
         else:  # "ok" or "skipped" (skipped means already ok)
             out[result.name] = {"state": "ok"}
     return out
@@ -558,10 +598,12 @@ def reconcile_worktree(
             # Prior per-member task states (run-once): a task recorded "ok" in a
             # prior manifest is skipped this run. Absent on the first reconcile.
             #
-            # prior_state carries forward provision_state/activated/reason set by
-            # cmd_setup_group/activation.py — reconcile_worktree never sets these
-            # itself, so this is a pure carry-forward (not a merge with new
-            # values). A member with no prior entry gets no key, same as today.
+            # prior_state carries forward provision_state/activated/reason/
+            # work_state set by cmd_setup_group/activation.py — reconcile_worktree
+            # never sets provision_state/activated/reason itself (it does set
+            # work_state — see the not-applicable default below), so this is a
+            # pure carry-forward (not a merge with new values) for the other
+            # three. A member with no prior entry gets no key, same as today.
             prior_tasks: dict[str, dict[str, Any]] = {}
             prior_state: dict[str, dict[str, Any]] = {}
             if mpath.is_file():
@@ -570,7 +612,7 @@ def reconcile_worktree(
                         prior_tasks[m["name"]] = m.get("tasks") or {}
                         prior_state[m["name"]] = {
                             key: m[key]
-                            for key in ("provision_state", "activated", "reason")
+                            for key in ("provision_state", "activated", "reason", "work_state")
                             if key in m
                         }
                 except ManifestError:
@@ -578,6 +620,17 @@ def reconcile_worktree(
                     prior_state = {}
 
             # -- Phase 2: Run provision-phase tasks per member in parallel.
+            #
+            # A task this member's prior manifest recorded "over-budget" is
+            # filtered out of the submitted list entirely (skip-worthy on this
+            # boot-budget-constrained hook path) rather than left for
+            # run_member_tasks's own "ok" skip to handle: that path returns a
+            # "skipped" TaskResult, and _tasks_map_from_results always persists
+            # "skipped" as "ok" — which would silently erase the over-budget
+            # record. Pre-filtering means no TaskResult is produced for it at
+            # all, so the merge below leaves the prior "over-budget" entry
+            # untouched. `camp setup`'s retry path (_provision_member_and_flip)
+            # takes no such filter — over-budget stays retry-worthy there.
             task_results: dict[str, list[TaskResult]] = {}
             required_failure: Exception | None = None
             if any(_has_provision_tasks(m) for m in members):
@@ -590,12 +643,20 @@ def reconcile_worktree(
                             slug=slug,
                             member_name=member["name"],
                         )
+                        completed = _completed_from_tasks_map(
+                            prior_tasks.get(member["name"]), over_budget_as_ok=True
+                        )
+                        runnable_tasks = [
+                            t
+                            for t in _adapt_task_steps(member.get("tasks") or [])
+                            if completed.get(t["name"]) != "ok"
+                        ]
                         fut = executor.submit(
                             run_member_tasks,
-                            _adapt_task_steps(member.get("tasks") or []),
+                            runnable_tasks,
                             PROVISION_PHASE,
                             context,
-                            _completed_from_tasks_map(prior_tasks.get(member["name"])),
+                            completed,
                         )
                         futures[fut] = member["name"]
 
@@ -627,6 +688,13 @@ def reconcile_worktree(
                 if merged:
                     mr["tasks"] = merged
                 mr.update(prior_state.get(member["name"], {}))
+                # A member with no activate-phase task declared has no work to
+                # ever become work-ready FOR — set that explicitly rather than
+                # leaving work_state absent (which reads as "pending" forever,
+                # per manifest.work_state_for_member). A prior work_state
+                # already carried forward above takes precedence.
+                if "work_state" not in mr and not _has_activate_tasks(member):
+                    mr["work_state"] = "not-applicable"
 
             # -- Phase 3: Write central manifest atomically (only after all succeed)
             manifest_data: dict[str, Any] = {
