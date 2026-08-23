@@ -1755,13 +1755,13 @@ class TestConfirmFailureReport:
         monkeypatch.setattr(
             session.subprocess,
             "run",
-            _confirm_run_fake([], pane_stdout="Do you trust the files?\n  1. Yes\n\n\n"),
+            _confirm_run_fake([], pane_stdout="Installing dependencies...\n  1. Yes\n\n\n"),
         )
 
         message = self._timeout(session, confirm_rig["launched"])
 
         verified = message[message.index("verified:") : message.index("inferred:")]
-        assert "Do you trust the files?" in verified
+        assert "Installing dependencies..." in verified
         assert "1. Yes" in verified
 
     def test_trailing_blank_padding_is_stripped_from_the_excerpt(
@@ -1933,14 +1933,14 @@ class TestConfirmFailureReport:
             "run",
             _confirm_run_fake(
                 [],
-                pane_stdout="Do you trust the files?\n",
+                pane_stdout="Installing dependencies...\n",
                 kill_raises=subprocess.TimeoutExpired(cmd=["tmux"], timeout=10),
             ),
         )
 
         message = self._timeout(session, confirm_rig["launched"])
 
-        assert "Do you trust the files?" in message
+        assert "Installing dependencies..." in message
         assert message.index("verified:") < message.index("inferred:")
 
     def test_the_nonzero_kill_path_carries_the_same_report(
@@ -1951,13 +1951,13 @@ class TestConfirmFailureReport:
             session.subprocess,
             "run",
             _confirm_run_fake(
-                [], pane_stdout="Do you trust the files?\n", kill_returncode=1
+                [], pane_stdout="Installing dependencies...\n", kill_returncode=1
             ),
         )
 
         message = self._timeout(session, confirm_rig["launched"])
 
-        assert "Do you trust the files?" in message
+        assert "Installing dependencies..." in message
         assert message.index("verified:") < message.index("inferred:")
 
     def test_a_confirmed_session_captures_nothing(self, confirm_rig, monkeypatch):
@@ -1978,6 +1978,158 @@ class TestConfirmFailureReport:
         )
 
         assert [c for c in calls if c[0] == "tmux"] == []
+
+
+class TestConfirmPollTimeoutBudget:
+    """The confirmation budget tolerates a cold boot under load, not just the
+    measured median — the failure it exists to absorb is machine contention."""
+
+    def test_budget_exceeds_the_old_ten_second_window(self, confirm_rig):
+        session = confirm_rig["module"]
+        assert session._CONFIRM_POLL_TIMEOUT_SECONDS > 10.0
+
+    def test_a_confirmation_past_the_old_budget_still_succeeds_within_the_new_one(
+        self, confirm_rig
+    ):
+        session = confirm_rig["module"]
+        harness = SequencedHarness([[], [], [], ["target-id"]])
+
+        session.confirm_session(
+            harness,
+            confirm_rig["launched"],
+            interval=0.5,
+            timeout=session._CONFIRM_POLL_TIMEOUT_SECONDS,
+            sleep=lambda s: None,
+            clock=FakeClock(5.0),
+        )
+
+
+class TestConfirmationDiagnosisEvidence:
+    """Which cause the refusal names is driven by what camp captured, not a
+    hardcoded guess: a pane that shows a trust prompt is VERIFIED, a starved
+    poll count against a pane that shows anything else — or nothing at all —
+    is INFERRED as a slow boot under load, and a pane that plainly contradicts
+    a trust prompt never lets one be asserted in either category."""
+
+    def _timeout(self, session, launched, *, interval, timeout, clock, env=None):
+        harness = SequencedHarness([[]])
+        with pytest.raises(session.LaunchError) as excinfo:
+            session.confirm_session(
+                harness,
+                launched,
+                env=env,
+                interval=interval,
+                timeout=timeout,
+                sleep=lambda s: None,
+                clock=clock,
+            )
+        return str(excinfo.value)
+
+    def _not_starved(self, session, launched, *, env=None):
+        # poll_count == elapsed / interval — the poll cadence a healthy,
+        # uncontended machine would produce.
+        return self._timeout(
+            session, launched, interval=0.5, timeout=1.0, clock=FakeClock(0.5), env=env
+        )
+
+    def _starved(self, session, launched, *, env=None):
+        # Each poll costs 9s of wall clock against a 0.5s interval — the
+        # cadence a saturated machine produces when sleep() overruns.
+        return self._timeout(
+            session, launched, interval=0.5, timeout=30.0, clock=FakeClock(9.0), env=env
+        )
+
+    def test_a_trust_prompt_pane_is_verified_not_inferred(
+        self, confirm_rig, monkeypatch
+    ):
+        session = confirm_rig["module"]
+        monkeypatch.setattr(
+            session.subprocess,
+            "run",
+            _confirm_run_fake(
+                [], pane_stdout="Do you trust the files in this folder?\n"
+            ),
+        )
+
+        message = self._not_starved(session, confirm_rig["launched"])
+
+        assert "verified:" in message
+        assert "trust prompt" in message
+        assert "inferred:" not in message
+
+    def test_a_booting_harness_pane_with_a_starved_poll_count_infers_slow_boot(
+        self, confirm_rig, monkeypatch
+    ):
+        session = confirm_rig["module"]
+        monkeypatch.setattr(
+            session.subprocess,
+            "run",
+            _confirm_run_fake([], pane_stdout="Booting harness, please wait...\n"),
+        )
+
+        message = self._starved(session, confirm_rig["launched"])
+
+        inferred = message[message.index("inferred:") :]
+        assert "slow" in inferred and "load" in inferred
+        assert "trust prompt" not in inferred
+
+    def test_an_uncapturable_pane_with_a_starved_poll_count_infers_slow_boot(
+        self, confirm_rig, monkeypatch
+    ):
+        session = confirm_rig["module"]
+        monkeypatch.setattr(
+            session.subprocess, "run", _confirm_run_fake([], pane_returncode=1)
+        )
+
+        message = self._starved(session, confirm_rig["launched"])
+
+        inferred = message[message.index("inferred:") :]
+        assert "slow" in inferred and "load" in inferred
+        assert "trust prompt" not in inferred
+
+    def test_a_pane_that_contradicts_a_trust_prompt_never_asserts_one(
+        self, confirm_rig, monkeypatch
+    ):
+        session = confirm_rig["module"]
+        monkeypatch.setattr(
+            session.subprocess,
+            "run",
+            _confirm_run_fake([], pane_stdout="$ npm run dev\nStarting...\n"),
+        )
+
+        message = self._not_starved(session, confirm_rig["launched"])
+
+        assert "trust prompt" not in message
+
+    def test_an_empty_pane_without_a_starved_poll_count_still_infers_trust_prompt(
+        self, confirm_rig, monkeypatch
+    ):
+        """The pre-existing default: no pane evidence and no starvation evidence
+        leaves the trust prompt as the likeliest cause, unchanged."""
+        session = confirm_rig["module"]
+        monkeypatch.setattr(session.subprocess, "run", _confirm_run_fake([]))
+
+        message = self._not_starved(session, confirm_rig["launched"])
+
+        inferred = message[message.index("inferred:") :]
+        assert "trust prompt" in inferred
+
+    def test_the_poll_count_elapsed_and_trust_seed_fact_stay_in_verified(
+        self, confirm_rig, monkeypatch
+    ):
+        session = confirm_rig["module"]
+        monkeypatch.setattr(
+            session.subprocess,
+            "run",
+            _confirm_run_fake(
+                [], pane_stdout="Do you trust the files in this folder?\n"
+            ),
+        )
+
+        message = self._not_starved(session, confirm_rig["launched"])
+
+        assert "poll" in message
+        assert "camp seeds trust into" in message
 
 
 class TestCampManagedClaimBoundary:
