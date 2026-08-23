@@ -280,7 +280,7 @@ def _owning_commands(harness, candidate: SessionCandidate) -> tuple[tuple[str, .
 _KEY_PROBE_ACCOUNT = "/"
 
 
-def _account_binding_keys(harness, env: Mapping[str, str]) -> tuple[str, ...]:
+def _account_binding_keys(harness) -> tuple[str, ...]:
     """The variable NAMES the launch engine composes into a pane as assignments.
 
     Asked of the harness rather than spelled here: only the harness knows which
@@ -295,6 +295,14 @@ def _account_binding_keys(harness, env: Mapping[str, str]) -> tuple[str, ...]:
     would learn no keys from such a harness, and every pane camp launched for a
     group that DID declare an account would stop being recognized as camp's own.
 
+    The probe carries NO environment. Only the keys are wanted, and they are
+    constant for a harness, while a harness may legitimately REFUSE to compose a
+    binding against an environment that already states a config dir of its own.
+    Handing it the stop-time environment would make that launch-time refusal a
+    stop-time hazard: both probes raise, no keys are learned, and every pane camp
+    launched with an account assignment is refused as not camp's own — decided by
+    whichever shell the operator happened to run `camp stop` from.
+
     Every failure degrades to no keys, which refuses the pane rather than
     reclaiming one camp never composed: a third-party call that raises is the
     stop engine's refusal, never its traceback.
@@ -302,7 +310,7 @@ def _account_binding_keys(harness, env: Mapping[str, str]) -> tuple[str, ...]:
     keys: list[str] = []
     for account in (None, _KEY_PROBE_ACCOUNT):
         try:
-            binding = harness.session_launch_env_set(account, env=dict(env))
+            binding = harness.session_launch_env_set(account, env={})
         except Exception:  # noqa: BLE001 — third-party call; a refusal, not a traceback
             continue
         for key in binding or ():
@@ -340,7 +348,7 @@ def _without_account_binding(
 
 
 def _is_camp_launched(
-    harness, candidate: SessionCandidate, pane_command: str | None, env: Mapping[str, str]
+    harness, candidate: SessionCandidate, pane_command: str | None
 ) -> bool:
     if not pane_command:
         return False
@@ -348,7 +356,7 @@ def _is_camp_launched(
         observed = tuple(shlex.split(pane_command))
     except ValueError:
         return False
-    keys = _account_binding_keys(harness, env)
+    keys = _account_binding_keys(harness)
     return _without_account_binding(observed, keys) in _owning_commands(harness, candidate)
 
 
@@ -408,7 +416,7 @@ def stop_session(
     pane = tmux.pane_command(name)
     if isinstance(pane, _Unanswered):
         return Refused(candidate, REFUSED_TMUX_UNANSWERED)
-    if not _is_camp_launched(harness, candidate, pane, env):
+    if not _is_camp_launched(harness, candidate, pane):
         return Refused(candidate, REFUSED_NOT_CAMP_LAUNCHED)
 
     tmux.kill_session(name)

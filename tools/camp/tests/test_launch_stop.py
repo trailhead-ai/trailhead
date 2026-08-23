@@ -892,6 +892,54 @@ def test_a_declared_account_pane_is_owned_even_when_the_default_states_nothing(
     assert tmux.killed == [derived]
 
 
+def test_a_stop_time_environment_cannot_cost_the_probe_its_keys(
+    tmp_path: Path,
+) -> None:
+    """Key learning must not depend on the shell `camp stop` runs in.
+
+    A real harness refuses to compose a binding when the environment it is
+    handed already states a conflicting config dir of its own — a legitimate
+    refusal at launch, where the operator is choosing an account. Handing that
+    same environment to the KEY probe turns it into a stop-time hazard: both
+    probes raise, no keys are learned, and every camp-launched pane carrying an
+    account assignment is refused as not-camp-launched. The probe asks only what
+    the harness NAMES its assignments, so it must ask with an environment that
+    can carry no conflict.
+    """
+    from camp.launch.stop import Stopped
+
+    state, ws, env, _harness, derived, _tmux = _fixture(tmp_path)
+
+    class _RefusesAConflictingEnv(_FakeHarness):
+        def session_launch_env_set(self, account, *, env=None):
+            if (env or {}).get("CONFLICTING_SEAM"):
+                raise RuntimeError("the environment already states a config dir")
+            return {ACCOUNT_KEY: account or "/fake-home"}
+
+    harness = _RefusesAConflictingEnv()
+    tmux = _FakeTmux(
+        {
+            derived: _launched_pane_with_account(
+                harness, _UUID_A, derived, ws, "/home/someone/.account-other"
+            )
+        }
+    )
+    stop_time_env = dict(env)
+    stop_time_env["CONFLICTING_SEAM"] = str(tmp_path / "some-other-config-dir")
+
+    outcome = _stop(
+        _UUID_A[:8],
+        tmux=tmux,
+        transcripts=[_transcript(_UUID_A, ws)],
+        live_records=[_record(_UUID_A, ws)],
+        env=stop_time_env,
+        harness=harness,
+    )
+
+    assert isinstance(outcome, Stopped)
+    assert tmux.killed == [derived]
+
+
 def test_a_harness_that_raises_composing_the_binding_refuses_rather_than_raising(
     tmp_path: Path,
 ) -> None:
