@@ -21,7 +21,10 @@ Test contract:
 
 from __future__ import annotations
 
+import json
+import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -1313,7 +1316,7 @@ class TestConfirmSession:
                 clock=FakeClock(0.5),
             )
 
-        kill_calls = [c for c in confirm_rig["calls"] if c[0] == "tmux"]
+        kill_calls = [c for c in confirm_rig["calls"] if c[:2] == ["tmux", "kill-session"]]
         assert len(kill_calls) == 1
         assert kill_calls[0] == ["tmux", "kill-session", "-t", "camp-feat-x-abcd1234"]
         assert "trust" in str(excinfo.value).lower()
@@ -1343,7 +1346,7 @@ class TestConfirmSession:
                 clock=FakeClock(0.5),
             )
 
-        kill_calls = [c for c in confirm_rig["calls"] if c[0] == "tmux"]
+        kill_calls = [c for c in confirm_rig["calls"] if c[:2] == ["tmux", "kill-session"]]
         assert kill_calls == [["tmux", "kill-session", "-t", tmux_name]]
         assert RESUME_ID in str(excinfo.value)
 
@@ -1377,7 +1380,7 @@ class TestConfirmSession:
 
         err = capsys.readouterr().err
         assert "camp-feat-x-abcd1234" in err
-        assert len([c for c in calls if c[0] == "tmux"]) == 1
+        assert len([c for c in calls if c[:2] == ["tmux", "kill-session"]]) == 1
 
     def test_kill_session_call_carries_a_timeout(self, confirm_rig, monkeypatch):
         """A wedged tmux must not hang the refusal — the kill call itself needs
@@ -1387,7 +1390,7 @@ class TestConfirmSession:
         captured_kwargs = {}
 
         def fake_run(argv, **kwargs):
-            if argv[0] == "tmux":
+            if argv[:2] == ["tmux", "kill-session"]:
                 captured_kwargs.update(kwargs)
             return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
 
@@ -1417,7 +1420,7 @@ class TestConfirmSession:
         harness = SequencedHarness([[]])
 
         def fake_run(argv, **kwargs):
-            if argv[0] == "tmux":
+            if argv[:2] == ["tmux", "kill-session"]:
                 raise subprocess_mod.TimeoutExpired(cmd=argv, timeout=kwargs.get("timeout"))
             return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
 
@@ -1472,6 +1475,429 @@ class TestConfirmSession:
         sig = inspect.signature(session.confirm_session)
         assert sig.parameters["interval"].default == session._CONFIRM_POLL_INTERVAL_SECONDS
         assert sig.parameters["timeout"].default == session._CONFIRM_POLL_TIMEOUT_SECONDS
+
+
+
+def _confirm_run_fake(
+    calls,
+    *,
+    pane_stdout="",
+    pane_returncode=0,
+    pane_raises=None,
+    pane_sleeps=False,
+    pane_fails_after_kill=False,
+    kill_returncode=0,
+    kill_raises=None,
+):
+    """A `subprocess.run` stand-in that scripts the two tmux calls confirm makes.
+
+    Everything that is not tmux is the harness enumeration, which the scripted
+    harness answers from its own list rather than from this output.
+    """
+    import time as time_mod
+
+    def fake_run(argv, **kwargs):
+        calls.append(argv)
+        if argv[:2] == ["tmux", "capture-pane"]:
+            if pane_raises is not None:
+                raise pane_raises
+            if pane_sleeps:
+                time_mod.sleep(kwargs["timeout"])
+                raise subprocess.TimeoutExpired(cmd=argv, timeout=kwargs["timeout"])
+            if pane_fails_after_kill and ["tmux", "kill-session"] in [
+                c[:2] for c in calls
+            ]:
+                return type(
+                    "R",
+                    (),
+                    {"returncode": 1, "stdout": "", "stderr": "can't find pane"},
+                )()
+            return type(
+                "R",
+                (),
+                {"returncode": pane_returncode, "stdout": pane_stdout, "stderr": ""},
+            )()
+        if argv[:2] == ["tmux", "kill-session"]:
+            if kill_raises is not None:
+                raise kill_raises
+            return type(
+                "R", (), {"returncode": kill_returncode, "stdout": "", "stderr": "no such session"}
+            )()
+        return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+
+    return fake_run
+
+
+class TestConfirmFailureReport:
+    """What the timed-out confirmation tells the operator.
+
+    The message separates what camp VERIFIED from what it INFERS, and the
+    verified half comes first — a reader triaging from a phone stops at the
+    first confident-sounding clause, so that clause has to be a checked fact.
+    """
+
+    def _timeout(self, session, launched, *, env=None):
+        harness = SequencedHarness([[]])
+        with pytest.raises(session.LaunchError) as excinfo:
+            session.confirm_session(
+                harness,
+                launched,
+                env=env,
+                interval=0.5,
+                timeout=1.0,
+                sleep=lambda s: None,
+                clock=FakeClock(0.5),
+            )
+        return str(excinfo.value)
+
+    def test_the_pane_is_captured_before_the_session_is_killed(
+        self, confirm_rig, monkeypatch
+    ):
+        session = confirm_rig["module"]
+        calls: list[list[str]] = []
+        monkeypatch.setattr(session.subprocess, "run", _confirm_run_fake(calls))
+
+        self._timeout(session, confirm_rig["launched"])
+
+        tmux = [c[:2] for c in calls if c[0] == "tmux"]
+        assert ["tmux", "capture-pane"] in tmux
+        assert ["tmux", "kill-session"] in tmux
+        assert tmux.index(["tmux", "capture-pane"]) < tmux.index(["tmux", "kill-session"])
+
+    def test_the_capture_targets_the_exact_tmux_name(self, confirm_rig, monkeypatch):
+        session = confirm_rig["module"]
+        calls: list[list[str]] = []
+        monkeypatch.setattr(session.subprocess, "run", _confirm_run_fake(calls))
+
+        self._timeout(session, confirm_rig["launched"])
+
+        capture = [c for c in calls if c[:2] == ["tmux", "capture-pane"]]
+        assert capture == [["tmux", "capture-pane", "-p", "-t", "camp-feat-x-abcd1234"]]
+
+    def test_a_pane_readable_only_before_the_kill_still_reaches_the_message(
+        self, confirm_rig, monkeypatch
+    ):
+        """Pins the ordering by consequence, not by call index: this fake answers
+        `can't find pane` once the kill has run, exactly as tmux does, so a
+        capture moved after the kill loses the excerpt entirely."""
+        session = confirm_rig["module"]
+        calls: list[list[str]] = []
+        monkeypatch.setattr(
+            session.subprocess,
+            "run",
+            _confirm_run_fake(
+                calls, pane_stdout="Do you trust the files in this folder?\n", pane_fails_after_kill=True
+            ),
+        )
+
+        message = self._timeout(session, confirm_rig["launched"])
+
+        assert "Do you trust the files in this folder?" in message
+
+    def test_the_verified_facts_precede_the_inferred_cause(
+        self, confirm_rig, monkeypatch
+    ):
+        session = confirm_rig["module"]
+        monkeypatch.setattr(session.subprocess, "run", _confirm_run_fake([]))
+
+        message = self._timeout(session, confirm_rig["launched"])
+
+        assert "verified:" in message
+        assert "inferred:" in message
+        assert message.index("verified:") < message.index("inferred:")
+
+    def test_the_inferred_cause_still_names_the_trust_prompt_and_is_labelled(
+        self, confirm_rig, monkeypatch
+    ):
+        session = confirm_rig["module"]
+        monkeypatch.setattr(session.subprocess, "run", _confirm_run_fake([]))
+
+        message = self._timeout(session, confirm_rig["launched"])
+
+        inferred = message[message.index("inferred:") :]
+        assert "trust prompt" in inferred
+
+    def test_the_verified_block_names_the_enumeration_camp_actually_ran(
+        self, confirm_rig, monkeypatch
+    ):
+        session = confirm_rig["module"]
+        monkeypatch.setattr(session.subprocess, "run", _confirm_run_fake([]))
+
+        message = self._timeout(session, confirm_rig["launched"])
+
+        verified = message[message.index("verified:") : message.index("inferred:")]
+        assert "target-id" in verified
+        assert "poll" in verified
+        assert str(confirm_rig["launched"].launch_dir) in verified
+
+    def test_the_message_names_the_seeded_config_file_and_reports_trust_present(
+        self, confirm_rig, monkeypatch, tmp_path
+    ):
+        session = confirm_rig["module"]
+        monkeypatch.setattr(session.subprocess, "run", _confirm_run_fake([]))
+        home = tmp_path / "acct-home"
+        home.mkdir()
+        launch_dir = confirm_rig["launched"].launch_dir
+        (home / ".claude.json").write_text(
+            json.dumps(
+                {"projects": {str(launch_dir): {"hasTrustDialogAccepted": True}}}
+            )
+        )
+
+        message = self._timeout(
+            session, confirm_rig["launched"], env={"HOME": str(home)}
+        )
+
+        verified = message[message.index("verified:") : message.index("inferred:")]
+        assert str(home / ".claude.json") in verified
+        assert "carries the trust key" in verified
+
+    def test_a_seeded_config_without_the_trust_key_is_reported_as_absent(
+        self, confirm_rig, monkeypatch, tmp_path
+    ):
+        session = confirm_rig["module"]
+        monkeypatch.setattr(session.subprocess, "run", _confirm_run_fake([]))
+        home = tmp_path / "acct-home"
+        home.mkdir()
+        (home / ".claude.json").write_text(json.dumps({"projects": {}}))
+
+        message = self._timeout(
+            session, confirm_rig["launched"], env={"HOME": str(home)}
+        )
+
+        assert str(home / ".claude.json") in message
+        assert "no trust key" in message
+
+    def test_the_seeded_path_follows_the_account_binding_not_the_ambient_env(
+        self, confirm_rig, monkeypatch, tmp_path
+    ):
+        """The reported path must be the one the session actually reads, which is
+        the account binding's, not the ambient environment's."""
+        session = confirm_rig["module"]
+        monkeypatch.setattr(session.subprocess, "run", _confirm_run_fake([]))
+        ambient_home = tmp_path / "ambient"
+        ambient_home.mkdir()
+        account_dir = tmp_path / "account"
+        account_dir.mkdir()
+        launched = session.LaunchedSession(
+            session_id="target-id",
+            tmux_name="camp-feat-x-abcd1234",
+            launch_dir=confirm_rig["launched"].launch_dir,
+            account=str(account_dir),
+            account_binding={"CLAUDE_CONFIG_DIR": str(account_dir)},
+        )
+
+        message = self._timeout(session, launched, env={"HOME": str(ambient_home)})
+
+        assert str(account_dir / ".claude.json") in message
+        assert str(ambient_home / ".claude.json") not in message
+
+    def test_the_message_reports_what_the_pane_showed(self, confirm_rig, monkeypatch):
+        session = confirm_rig["module"]
+        monkeypatch.setattr(
+            session.subprocess,
+            "run",
+            _confirm_run_fake([], pane_stdout="Do you trust the files?\n  1. Yes\n\n\n"),
+        )
+
+        message = self._timeout(session, confirm_rig["launched"])
+
+        verified = message[message.index("verified:") : message.index("inferred:")]
+        assert "Do you trust the files?" in verified
+        assert "1. Yes" in verified
+
+    def test_trailing_blank_padding_is_stripped_from_the_excerpt(
+        self, confirm_rig, monkeypatch
+    ):
+        session = confirm_rig["module"]
+        monkeypatch.setattr(
+            session.subprocess,
+            "run",
+            _confirm_run_fake([], pane_stdout="the only line\n" + "\n" * 40),
+        )
+
+        message = self._timeout(session, confirm_rig["launched"])
+
+        assert message.count("the only line") == 1
+        assert "\n\n\n" not in message
+
+    def test_a_very_long_pane_is_truncated(self, confirm_rig, monkeypatch):
+        session = confirm_rig["module"]
+        pane = "".join(f"line-{n}\n" for n in range(500))
+        monkeypatch.setattr(
+            session.subprocess, "run", _confirm_run_fake([], pane_stdout=pane)
+        )
+
+        message = self._timeout(session, confirm_rig["launched"])
+
+        kept = [line for line in message.split("\n") if "| line-" in line]
+        assert len(kept) == session._PANE_EXCERPT_MAX_LINES
+        assert kept[-1].endswith("| line-499")
+        assert not any(line.endswith("| line-0") for line in kept)
+        assert "480 earlier line(s) not shown" in message
+
+    def test_a_very_long_single_line_is_truncated(self, confirm_rig, monkeypatch):
+        session = confirm_rig["module"]
+        monkeypatch.setattr(
+            session.subprocess,
+            "run",
+            _confirm_run_fake([], pane_stdout="x" * 5000 + "\n"),
+        )
+
+        message = self._timeout(session, confirm_rig["launched"])
+
+        assert "x" * 40 in message
+        assert "x" * 5000 not in message
+        assert len(max(message.split("\n"), key=len)) < 500
+
+    def test_ansi_and_control_sequences_are_stripped_from_the_excerpt(
+        self, confirm_rig, monkeypatch
+    ):
+        session = confirm_rig["module"]
+        pane = "\x1b[1;31mDo you trust\x1b[0m\x07 the files?\x1b]0;title\x07\n"
+        monkeypatch.setattr(
+            session.subprocess, "run", _confirm_run_fake([], pane_stdout=pane)
+        )
+
+        message = self._timeout(session, confirm_rig["launched"])
+
+        assert "Do you trust the files?" in message
+        assert "\x1b" not in message
+        assert "\x07" not in message
+
+    def test_a_failing_capture_degrades_to_unavailable_and_still_refuses(
+        self, confirm_rig, monkeypatch
+    ):
+        session = confirm_rig["module"]
+        calls: list[list[str]] = []
+        monkeypatch.setattr(
+            session.subprocess, "run", _confirm_run_fake(calls, pane_returncode=1)
+        )
+
+        message = self._timeout(session, confirm_rig["launched"])
+
+        assert "pane capture unavailable" in message
+        assert "inferred:" in message
+        assert [c for c in calls if c[:2] == ["tmux", "kill-session"]]
+
+    def test_an_empty_capture_degrades_to_unavailable(self, confirm_rig, monkeypatch):
+        session = confirm_rig["module"]
+        monkeypatch.setattr(
+            session.subprocess, "run", _confirm_run_fake([], pane_stdout="\n\n\n")
+        )
+
+        message = self._timeout(session, confirm_rig["launched"])
+
+        assert "pane capture unavailable" in message
+
+    def test_a_capture_that_raises_still_kills_the_session(
+        self, confirm_rig, monkeypatch
+    ):
+        session = confirm_rig["module"]
+        calls: list[list[str]] = []
+        monkeypatch.setattr(
+            session.subprocess,
+            "run",
+            _confirm_run_fake(calls, pane_raises=RuntimeError("capture blew up")),
+        )
+
+        message = self._timeout(session, confirm_rig["launched"])
+
+        assert [c for c in calls if c[:2] == ["tmux", "kill-session"]]
+        assert "pane capture unavailable" in message
+        assert "capture blew up" not in message
+
+    def test_the_capture_call_carries_a_short_timeout(self, confirm_rig, monkeypatch):
+        session = confirm_rig["module"]
+        captured = {}
+
+        def fake_run(argv, **kwargs):
+            if argv[:2] == ["tmux", "capture-pane"]:
+                captured.update(kwargs)
+            return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+
+        monkeypatch.setattr(session.subprocess, "run", fake_run)
+
+        self._timeout(session, confirm_rig["launched"])
+
+        assert captured.get("timeout") == session._PANE_CAPTURE_TIMEOUT_SECONDS
+        assert 0 < session._PANE_CAPTURE_TIMEOUT_SECONDS <= 5
+
+    def test_a_hanging_capture_does_not_delay_the_kill(self, confirm_rig, monkeypatch):
+        """The capture is best-effort: a `capture-pane` that blocks rather than
+        erroring must not hold the teardown open. Driven by a fake that sleeps
+        for exactly as long as the bound it was handed, the way the real call
+        behaves when it hangs."""
+        session = confirm_rig["module"]
+        calls: list[list[str]] = []
+        monkeypatch.setattr(
+            session.subprocess, "run", _confirm_run_fake(calls, pane_sleeps=True)
+        )
+
+        started = time.monotonic()
+        message = self._timeout(session, confirm_rig["launched"])
+        elapsed = time.monotonic() - started
+
+        assert [c for c in calls if c[:2] == ["tmux", "kill-session"]]
+        assert elapsed < session._PANE_CAPTURE_TIMEOUT_SECONDS + 5
+        assert "pane capture unavailable" in message
+
+    def test_the_kill_failure_path_carries_the_same_report(
+        self, confirm_rig, monkeypatch
+    ):
+        """Both exits from the timeout — a kill that errors and a kill that
+        reports non-zero — emit the identical treatment; neither is the fixed one."""
+        session = confirm_rig["module"]
+        monkeypatch.setattr(
+            session.subprocess,
+            "run",
+            _confirm_run_fake(
+                [],
+                pane_stdout="Do you trust the files?\n",
+                kill_raises=subprocess.TimeoutExpired(cmd=["tmux"], timeout=10),
+            ),
+        )
+
+        message = self._timeout(session, confirm_rig["launched"])
+
+        assert "Do you trust the files?" in message
+        assert message.index("verified:") < message.index("inferred:")
+
+    def test_the_nonzero_kill_path_carries_the_same_report(
+        self, confirm_rig, monkeypatch
+    ):
+        session = confirm_rig["module"]
+        monkeypatch.setattr(
+            session.subprocess,
+            "run",
+            _confirm_run_fake(
+                [], pane_stdout="Do you trust the files?\n", kill_returncode=1
+            ),
+        )
+
+        message = self._timeout(session, confirm_rig["launched"])
+
+        assert "Do you trust the files?" in message
+        assert message.index("verified:") < message.index("inferred:")
+
+    def test_a_confirmed_session_captures_nothing(self, confirm_rig, monkeypatch):
+        """The capture belongs to the failure path only — a session that
+        confirms is never read and never killed."""
+        session = confirm_rig["module"]
+        calls: list[list[str]] = []
+        monkeypatch.setattr(session.subprocess, "run", _confirm_run_fake(calls))
+        harness = SequencedHarness([["target-id"]])
+
+        session.confirm_session(
+            harness,
+            confirm_rig["launched"],
+            interval=0.5,
+            timeout=10.0,
+            sleep=lambda s: None,
+            clock=FakeClock(0.5),
+        )
+
+        assert [c for c in calls if c[0] == "tmux"] == []
 
 
 class TestCampManagedClaimBoundary:

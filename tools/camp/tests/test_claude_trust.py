@@ -862,3 +862,127 @@ class TestRelativeOverrideIsRefused:
 
         assert pretrust_workspace(launch_dir, workspace_root=launch_dir, env=env) is True
         assert (cfg / ".claude.json").exists()
+
+
+class TestTrustStatus:
+    """The read-only companion to the pre-seed.
+
+    It answers what a failure report needs: which file the launched session
+    reads, and whether that file grants this directory trust. Anything it cannot
+    determine is `None` — "camp does not know" is a reportable answer and a
+    guess is not.
+    """
+
+    def test_reports_the_file_and_true_when_the_key_is_present(self, tmp_path):
+        from camp.launch.claude_trust import trust_status
+
+        home = tmp_path / "home"
+        home.mkdir()
+        launch_dir = tmp_path / "ws"
+        launch_dir.mkdir()
+        (home / ".claude.json").write_text(
+            json.dumps({"projects": {str(launch_dir): {"hasTrustDialogAccepted": True}}})
+        )
+
+        path, trusted = trust_status(launch_dir, env={"HOME": str(home)})
+
+        assert path == home / ".claude.json"
+        assert trusted is True
+
+    def test_reports_false_when_the_file_is_readable_but_carries_no_entry(self, tmp_path):
+        from camp.launch.claude_trust import trust_status
+
+        home = tmp_path / "home"
+        home.mkdir()
+        launch_dir = tmp_path / "ws"
+        launch_dir.mkdir()
+        (home / ".claude.json").write_text(json.dumps({"projects": {}}))
+
+        _, trusted = trust_status(launch_dir, env={"HOME": str(home)})
+
+        assert trusted is False
+
+    def test_reports_false_when_the_entry_exists_but_is_not_accepted(self, tmp_path):
+        from camp.launch.claude_trust import trust_status
+
+        home = tmp_path / "home"
+        home.mkdir()
+        launch_dir = tmp_path / "ws"
+        launch_dir.mkdir()
+        (home / ".claude.json").write_text(
+            json.dumps({"projects": {str(launch_dir): {"hasTrustDialogAccepted": False}}})
+        )
+
+        _, trusted = trust_status(launch_dir, env={"HOME": str(home)})
+
+        assert trusted is False
+
+    def test_reports_none_when_the_file_is_absent(self, tmp_path):
+        from camp.launch.claude_trust import trust_status
+
+        home = tmp_path / "home"
+        home.mkdir()
+
+        path, trusted = trust_status(tmp_path / "ws", env={"HOME": str(home)})
+
+        assert path == home / ".claude.json"
+        assert trusted is None
+
+    def test_reports_none_when_the_file_is_malformed(self, tmp_path):
+        from camp.launch.claude_trust import trust_status
+
+        home = tmp_path / "home"
+        home.mkdir()
+        (home / ".claude.json").write_text("{not json")
+
+        _, trusted = trust_status(tmp_path / "ws", env={"HOME": str(home)})
+
+        assert trusted is None
+
+    def test_reports_none_when_the_structure_is_unexpected(self, tmp_path):
+        from camp.launch.claude_trust import trust_status
+
+        home = tmp_path / "home"
+        home.mkdir()
+        (home / ".claude.json").write_text(json.dumps({"projects": ["not", "a", "map"]}))
+
+        _, trusted = trust_status(tmp_path / "ws", env={"HOME": str(home)})
+
+        assert trusted is None
+
+    def test_follows_the_same_relocation_the_pre_seed_writes_through(self, tmp_path):
+        """The reported file has to be the one the seed targets, or a failure
+        report names a file the session never reads."""
+        from camp.launch.claude_trust import pretrust_workspace, trust_status
+
+        home = tmp_path / "home"
+        home.mkdir()
+        account = tmp_path / "account"
+        launch_dir = tmp_path / "ws"
+        launch_dir.mkdir()
+        env = {"HOME": str(home), "CLAUDE_CONFIG_DIR": str(account)}
+
+        assert pretrust_workspace(launch_dir, workspace_root=launch_dir, env=env) is True
+        path, trusted = trust_status(launch_dir, env=env)
+
+        assert path == account / ".claude.json"
+        assert trusted is True
+
+    def test_the_launch_dir_is_resolved_before_it_is_looked_up(self, tmp_path):
+        """The seed keys on the resolved directory, so a symlinked spelling must
+        find the same entry rather than reporting a false absence."""
+        from camp.launch.claude_trust import trust_status
+
+        home = tmp_path / "home"
+        home.mkdir()
+        real = tmp_path / "real"
+        real.mkdir()
+        link = tmp_path / "link"
+        link.symlink_to(real)
+        (home / ".claude.json").write_text(
+            json.dumps({"projects": {str(real.resolve()): {"hasTrustDialogAccepted": True}}})
+        )
+
+        _, trusted = trust_status(link, env={"HOME": str(home)})
+
+        assert trusted is True

@@ -57,6 +57,7 @@ below.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -66,7 +67,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..group.manifest import workspace_dir
-from .claude_trust import config_file, pretrust_workspace
+from .claude_trust import config_file, pretrust_workspace, trust_status
 from .profile import harness_for, resolve_harness_profile
 from .recovery import printable_path, sanitize_name_component
 
@@ -97,6 +98,28 @@ _CONFIRM_POLL_TIMEOUT_SECONDS = 10.0
 #: failure was already reported by the time this runs, so a wedged or vanished
 #: tmux must not be able to hang — or crash — the refusal that follows it.
 _KILL_SESSION_TIMEOUT_SECONDS = 10
+
+#: Bound on the `tmux capture-pane` :func:`confirm_session` runs before the kill.
+#: A measured capture costs ~3ms, so this is headroom rather than a budget — its
+#: whole job is to make a capture that HANGS, rather than erroring, unable to
+#: hold the teardown open.
+_PANE_CAPTURE_TIMEOUT_SECONDS = 2
+
+#: How much of the pane reaches the failure report. A pane is bottom-anchored, so
+#: the last lines are the ones carrying whatever the session is sitting on; a
+#: runaway process filling the scrollback must not be able to flood a report the
+#: operator may be reading on a phone.
+_PANE_EXCERPT_MAX_LINES = 20
+_PANE_EXCERPT_MAX_LINE_CHARS = 200
+
+#: Escape sequences a captured pane can carry. `capture-pane -p` without `-e`
+#: already drops SGR attributes, but the pane's own program may have written
+#: bytes tmux passes through, and an excerpt is quoted into an error message
+#: rather than rendered by a terminal.
+_ESCAPE_SEQUENCE = re.compile(
+    r"\x1b(?:\[[0-9;?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)|[@-Z\\-_])"
+)
+_CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 
 
 class LaunchError(Exception):
@@ -621,6 +644,119 @@ def _poll_enumerated(
     return any(record.session_id == session_id for record in records or ())
 
 
+def _sanitize_pane_excerpt(text: str) -> str:
+    """Strip escapes and control bytes from captured pane text, then bound it.
+
+    Trailing blank lines go first: a capture returns the full pane height, which
+    for a prompt occupying a few lines is mostly padding. What survives is the
+    bottom of the pane, where a program that is waiting for input has left its
+    prompt. Returns "" when nothing legible is left.
+    """
+    lines = [
+        _CONTROL_CHARS.sub("", _ESCAPE_SEQUENCE.sub("", line)).rstrip()
+        for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    ]
+    while lines and not lines[-1]:
+        lines.pop()
+    dropped = max(0, len(lines) - _PANE_EXCERPT_MAX_LINES)
+    lines = lines[len(lines) - _PANE_EXCERPT_MAX_LINES :] if dropped else lines
+    lines = [
+        line
+        if len(line) <= _PANE_EXCERPT_MAX_LINE_CHARS
+        else line[:_PANE_EXCERPT_MAX_LINE_CHARS] + " …"
+        for line in lines
+    ]
+    if not lines:
+        return ""
+    if dropped:
+        lines.insert(0, f"… {dropped} earlier line(s) not shown")
+    return "\n".join(lines)
+
+
+def _capture_pane(tmux_name: str) -> str | None:
+    """What the pane is showing — read while the session still exists.
+
+    Best-effort and bounded. Every failure returns None rather than raising: the
+    caller is already on its way to refusing a launch, and an excerpt camp could
+    not obtain must not be able to change that refusal, delay the kill that
+    follows, or replace the failure being reported. A capture against a session
+    that is already gone exits non-zero, which lands here as None like any other
+    unavailability.
+    """
+    try:
+        captured = subprocess.run(
+            ["tmux", "capture-pane", "-p", "-t", tmux_name],
+            capture_output=True,
+            text=True,
+            timeout=_PANE_CAPTURE_TIMEOUT_SECONDS,
+        )
+    except Exception:  # noqa: BLE001 — best-effort probe, never blocks the kill
+        return None
+    if captured.returncode != 0:
+        return None
+    return _sanitize_pane_excerpt(captured.stdout or "") or None
+
+
+def _seeded_trust_fact(launched: LaunchedSession, env: dict[str, str]) -> str:
+    """One verified line about the config file the launched session reads.
+
+    Resolved through the account binding, not the ambient environment, so the
+    path named is the one the session actually reads. On the original failure
+    this single fact would have ended the investigation.
+    """
+    try:
+        path, trusted = trust_status(
+            launched.launch_dir, env={**env, **launched.account_binding}
+        )
+    except Exception:  # noqa: BLE001 — advisory probe, never blocks the refusal
+        return "camp could not resolve the harness config file it seeds trust into"
+    if trusted is True:
+        state = "carries the trust key for this directory"
+    elif trusted is False:
+        state = "has no trust key for this directory"
+    else:
+        state = "camp could not read back (absent, unreadable, or malformed)"
+    return f"camp seeds trust into {path}, which {state}"
+
+
+def _confirmation_failure_message(
+    launched: LaunchedSession,
+    *,
+    env: dict[str, str],
+    poll_count: int,
+    elapsed: float,
+    pane: str | None,
+) -> str:
+    """The refusal text: what camp checked, then — separately — what it guesses.
+
+    The verified lines come FIRST and the inference is labelled, because the
+    previous wording asserted an inferred cause in its opening clause and was
+    discounted for it — correctly, since nothing backed it. A reader triaging
+    from a phone stops at the first confident-sounding clause, so that clause
+    has to be something camp looked at.
+    """
+    verified = [
+        f"verified: session {launched.session_id} was absent from all "
+        f"{poll_count} harness enumeration poll(s) of {launched.launch_dir} "
+        f"over {elapsed:.2f}s",
+        f"verified: {_seeded_trust_fact(launched, env)}",
+    ]
+    if pane is None:
+        verified.append(
+            "verified: pane capture unavailable — camp has no record of what was "
+            "on screen"
+        )
+    else:
+        indented = "\n".join(f"    | {line}" for line in pane.split("\n"))
+        verified.append(f"verified: the pane was showing:\n{indented}")
+    return (
+        f"camp: launch of session {launched.session_id} could not be confirmed\n"
+        + "\n".join(f"  {line}" for line in verified)
+        + "\n  inferred: most likely stalled at an unaccepted trust prompt — camp "
+        "did not confirm this"
+    )
+
+
 def confirm_session(
     harness,
     launched: LaunchedSession,
@@ -648,13 +784,16 @@ def confirm_session(
     Confirmed → returns normally: the process exists and is enumerable, no claim
     of usability beyond that.
 
-    Timed out → kills the tmux session by the exact name camp chose and raises
-    :class:`LaunchError`. A session absent from enumeration is, empirically, most
-    often one stalled at an unaccepted trust prompt — even a successful pretrust
-    still leaves some launches stalled there — so the failure message names that
-    as the probable cause. A failing kill is reported on stderr naming the tmux
-    session; it is never left silent, even though the launch is refused either
-    way.
+    Timed out → captures the pane, THEN kills the tmux session by the exact name
+    camp chose, and raises :class:`LaunchError`. That order is the point: the kill
+    destroys the only evidence of what the session was sitting on. The refusal
+    reports what camp verified — the enumeration it ran, the config file it seeds
+    trust into and whether that key is there, the pane text it actually read —
+    before, and separately from, the one thing it infers: that the session is most
+    likely stalled at an unaccepted trust prompt. That remains the likeliest cause
+    even after a successful pretrust, but camp does not check it, so it is labelled.
+    A failing kill is reported on stderr naming the tmux session; it is never left
+    silent, even though the launch is refused either way.
     """
     from trailhead.harness import HarnessError
 
@@ -680,6 +819,13 @@ def confirm_session(
         f"{launched.tmux_name}",
         file=sys.stderr,
     )
+    # Before the kill, and bounded so it cannot delay one: the kill is what
+    # destroys the pane, so a capture that ran after it would report nothing on
+    # every launch that ever stalls.
+    pane = _capture_pane(launched.tmux_name)
+    message = _confirmation_failure_message(
+        launched, env=env, poll_count=poll_count, elapsed=elapsed, pane=pane
+    )
     try:
         kill = subprocess.run(
             ["tmux", "kill-session", "-t", launched.tmux_name],
@@ -692,17 +838,11 @@ def confirm_session(
             f"camp: failed to kill tmux session {launched.tmux_name}: {exc}",
             file=sys.stderr,
         )
-        raise LaunchError(
-            f"camp: launch of session {launched.session_id} could not be confirmed — "
-            f"likely stalled at an unaccepted trust prompt in {launched.launch_dir}"
-        ) from exc
+        raise LaunchError(message) from exc
     if kill.returncode != 0:
         print(
             f"camp: failed to kill tmux session {launched.tmux_name}: "
             f"{(kill.stderr or '').strip() or kill.returncode}",
             file=sys.stderr,
         )
-    raise LaunchError(
-        f"camp: launch of session {launched.session_id} could not be confirmed — "
-        f"likely stalled at an unaccepted trust prompt in {launched.launch_dir}"
-    )
+    raise LaunchError(message)

@@ -69,6 +69,39 @@ def config_file(env: dict[str, str] | None) -> Path:
     return claude_config_file(env)
 
 
+def trust_status(
+    launch_dir: Path | str, *, env: dict[str, str] | None = None
+) -> tuple[Path, bool | None]:
+    """The config file a launched session reads, and whether it trusts *launch_dir*.
+
+    The read-only companion to :func:`pretrust_workspace`, sharing its resolver
+    and its notion of where the key lives, so a report about the seed cannot
+    name a different file or a different key than the write used.
+
+    Returns ``(path, True | False | None)``. ``None`` means camp could not tell —
+    the file is absent, unreadable, or not shaped the way the seed expects — and
+    is a reportable answer in its own right. ``False`` is the positive finding
+    that a readable, well-shaped file grants this directory nothing.
+    """
+    path = config_file(env)
+    try:
+        with open(str(path), "r") as fh:
+            data = json.loads(fh.read())
+    except (OSError, json.JSONDecodeError):
+        return path, None
+    if not isinstance(data, dict):
+        return path, None
+    projects = data.get("projects")
+    if projects is None:
+        return path, False
+    if not isinstance(projects, dict):
+        return path, None
+    entry = projects.get(str(Path(launch_dir).resolve()))
+    if not isinstance(entry, dict):
+        return path, False
+    return path, entry.get("hasTrustDialogAccepted") is True
+
+
 def _is_mergeable(data: object, project_key: str) -> bool:
     """True if `data` is shaped so the trust flag can be merged without raising.
 
