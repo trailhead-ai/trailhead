@@ -412,7 +412,9 @@ class TestCampSetupActivatePhaseRetry:
             "import sys; open(sys.argv[1], 'a').write('step\\n')",
             "{worktree}/log.txt",
         ]
-        toml = f"""\
+
+        def build_toml(step_cmd):
+            return f"""\
 [group]
 name = "{group_name}"
 
@@ -430,7 +432,8 @@ cleanup = {json.dumps(cleanup_cmd)}
 name = "install"
 cmd = {json.dumps(step_cmd)}
 """
-        (groups_dir / f"{group_name}.toml").write_text(toml)
+
+        (groups_dir / f"{group_name}.toml").write_text(build_toml(step_cmd))
 
         env = {**os.environ}
         env["CAMP_CONFIG_DIR"] = str(config_dir)
@@ -443,6 +446,8 @@ cmd = {json.dumps(step_cmd)}
             "state_dir": state_dir,
             "repo_a": repo_a,
             "tmp_path": tmp_path,
+            "toml_path": groups_dir / f"{group_name}.toml",
+            "build_toml": build_toml,
         }
 
     def _camp(self, activate_cli_env, *args, extra_env=None):
@@ -558,14 +563,21 @@ cmd = {json.dumps(step_cmd)}
         assert data["members"][0]["provision_state"] == "ready"
 
         # Swap the step for a long-running one so there is a real window to
-        # race a concurrent `camp rm` against.
-        toml_path = activate_cli_env["config_dir"] / "groups" / f"{activate_cli_env['group_name']}.toml"
-        text = toml_path.read_text()
-        text = text.replace(
-            "import sys; open(sys.argv[1], 'a').write('step\\n')",
+        # race a concurrent `camp rm` against. Built directly into the TOML
+        # (rather than patched in after the fact via string replace) so a
+        # mismatched search string can't silently leave the step fast.
+        slow_step_cmd = [
+            sys.executable,
+            "-c",
             "import sys, time; open(sys.argv[1], 'a').write('step\\n'); time.sleep(3)",
+            "{worktree}/log.txt",
+        ]
+        toml_path = activate_cli_env["toml_path"]
+        toml_text = activate_cli_env["build_toml"](slow_step_cmd)
+        toml_path.write_text(toml_text)
+        assert "time.sleep(3)" in toml_path.read_text(), (
+            "the slow step must actually land in the written TOML"
         )
-        toml_path.write_text(text)
 
         self._mark_task_failed(activate_cli_env, slug)
 
