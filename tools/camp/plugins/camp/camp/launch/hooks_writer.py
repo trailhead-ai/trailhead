@@ -128,9 +128,19 @@ def write_workspace_hooks(workspace_dir: Path, camp_bin: str) -> None:
 def write_workspace_inject_hook(workspace_dir: Path, camp_bin: str) -> None:
     """Write/update the workspace-dir PostToolUse → `camp inject --drain` hook.
 
-    Installed only when the resolved inject strategy is "claude-hook": a Bash-matched
-    PostToolUse hook drains the workspace inject queue (the member doc enqueued by
-    `camp activate`) into the session via additionalContext on the next tool call.
+    Installed only when the resolved inject strategy is "claude-hook": a
+    PostToolUse hook with NO matcher drains the workspace inject queue (member
+    docs from `camp activate`, and settlement/failure notices from the
+    activate-phase provisioner) into the session via additionalContext on the
+    NEXT tool call, whatever that tool is. Omitting the matcher key is the
+    documented, canonical way to fire a hook on every occurrence of its event
+    (equivalent to `"*"`/`""`, per Claude Code's hook matcher semantics) — a
+    Bash-only matcher would miss a session that is following the capability
+    report's own advice to prefer Grep/Glob over Bash while work is
+    outstanding, which is exactly the session a settlement/failure notice
+    needs to reach. The drain is cheap on an empty queue (exits 0, no output),
+    so firing on every tool call costs a process spawn against a
+    missing-directory check.
 
     Idempotent: re-running adds NO duplicate entries. Existing unrelated keys
     (including the SessionStart hook) are preserved.
@@ -143,7 +153,7 @@ def write_workspace_inject_hook(workspace_dir: Path, camp_bin: str) -> None:
     data = _load_settings(settings_path)
 
     drain_cmd = _workspace_inject_drain_command(camp_bin)
-    _upsert_hook(data, "PostToolUse", drain_cmd, matcher="Bash")
+    _upsert_hook(data, "PostToolUse", drain_cmd)
 
     _save_settings(settings_path, data)
 

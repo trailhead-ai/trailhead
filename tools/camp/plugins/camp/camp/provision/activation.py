@@ -211,6 +211,32 @@ def reap_member_guard_unlocked(ws_dir: Path, member_names: list[str]) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Provisioning notices — camp-authored, templated fields only.
+#
+# The inject queue is concatenated verbatim into a live agent's context
+# through the additionalContext contract, and TaskResult.stderr_excerpt is
+# captured unfiltered — so a dependency whose install script prints
+# attacker-chosen text to stderr must never reach a notice body. Every notice
+# enqueued here is built by build_notice_body from plain strings this module
+# controls (member name, phase, failing task name, a canned consequence); no
+# TaskResult field is ever passed through.
+# ---------------------------------------------------------------------------
+
+
+def _enqueue_settlement_notice(
+    ws_dir: Path, member_name: str, *, task: str | None, consequence: str
+) -> None:
+    """Enqueue one camp-authored notice for a member reaching a terminal
+    activate-phase state (settled ready, or a required task's failure)."""
+    from ..launch.inject import build_notice_body, enqueue_notice
+
+    body = build_notice_body(
+        member=member_name, phase=ACTIVATE_PHASE, task=task, consequence=consequence
+    )
+    enqueue_notice(ws_dir, body)
+
+
+# ---------------------------------------------------------------------------
 # Detached-run task execution (the `camp activate <member> --background` body).
 # ---------------------------------------------------------------------------
 
@@ -295,11 +321,30 @@ def run_activate_tasks_in_background(
             _persist_activation_result(
                 mpath, member_name, tasks=_tasks_map_from_results(e.results), work_state="failed"
             )
+            failing_task = e.results[-1].name if e.results else None
+            _enqueue_settlement_notice(
+                ws_dir,
+                member_name,
+                task=failing_task,
+                consequence=(
+                    f"Activate-phase work failed for `{member_name}` — run `camp status` "
+                    f"to see which task failed and why."
+                ),
+            )
             return
 
         _warn_optional_task_failures(results, member_name)
         _persist_activation_result(
             mpath, member_name, tasks=_tasks_map_from_results(results), work_state="ready"
+        )
+        _enqueue_settlement_notice(
+            ws_dir,
+            member_name,
+            task=None,
+            consequence=(
+                f"Activate-phase work finished for `{member_name}` — its dependencies "
+                f"and tools are now available."
+            ),
         )
     finally:
         _release_member_guard(fd)

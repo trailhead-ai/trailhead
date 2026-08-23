@@ -486,8 +486,11 @@ class TestWorkspaceInjectHook:
         expected = f"${{CAMP_BIN:-{camp_bin}}} inject --drain"
         assert expected in commands, f"Expected {expected!r} in PostToolUse, got: {commands}"
 
-    def test_inject_hook_matcher_is_bash(self, tmp_path: Path):
-        """The PostToolUse inject hook uses the Bash matcher."""
+    def test_inject_hook_matcher_is_omitted_so_it_fires_on_every_tool(self, tmp_path: Path):
+        """The PostToolUse inject hook registers with NO matcher, so it fires
+        after every tool call — not just Bash. A session following the
+        capability report's advice to prefer Grep/Glob over Bash must still
+        receive a queued notice on its next tool call, whatever that tool is."""
         from camp.launch.hooks_writer import write_workspace_inject_hook
 
         ws_dir = tmp_path / "workspace"
@@ -495,7 +498,13 @@ class TestWorkspaceInjectHook:
         write_workspace_inject_hook(ws_dir, "/usr/local/bin/camp")
 
         data = json.loads((ws_dir / ".claude" / "settings.json").read_text())
-        assert "Bash" in self._matchers(data, "PostToolUse")
+        post_tool_use = data.get("hooks", {}).get("PostToolUse", [])
+        entry = next(
+            e
+            for e in post_tool_use
+            if any("inject --drain" in h.get("command", "") for h in e.get("hooks", []))
+        )
+        assert "matcher" not in entry, f"expected no matcher key, got: {entry}"
 
     def test_inject_hook_idempotent(self, tmp_path: Path):
         """Re-running write_workspace_inject_hook adds NO duplicate entries."""
