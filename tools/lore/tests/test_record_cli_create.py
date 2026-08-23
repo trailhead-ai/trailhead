@@ -1913,3 +1913,28 @@ def test_record_update_vault_help_disclaims_re_routing(monkeypatch):
         "update --vault help must disclaim re-routing, to contrast with the "
         "scope flags that do re-route and auto-move"
     )
+
+
+@pytest.mark.parametrize("leaf", sorted(_HELP_BYTE_BUDGETS), ids=lambda s: s.replace(" ", "-"))
+def test_unset_pairing_rule_does_not_claim_a_uniform_value_shape(leaf, monkeypatch):
+    """The shared --unset-* rule must not promise every remover takes the same value.
+
+    Three removers do not: ``--unset-label``/``--unset-annotation`` take a bare
+    KEY where their setters take KEY=VALUE, and ``--unset-parent`` is a flag
+    taking no value at all. Those three carry no help string of their own after
+    the trim, so this shared sentence is the only thing describing them — and an
+    agent applying it literally writes ``--unset-parent TASK`` and fails. Each
+    remover's real shape is already rendered as its metavar; the rule must send
+    the reader there rather than assert a shape that is wrong for three flags.
+    """
+    import re
+
+    help_text = re.sub(r"\s+", " ", _render_leaf_help(leaf, monkeypatch))
+
+    assert "remover taking the same value" not in help_text, (
+        "the shared --unset-* rule claims a uniform value shape, but "
+        "--unset-label takes KEY and --unset-parent takes no value"
+    )
+    # The metavars that make the rule's redirect truthful must actually render.
+    assert "--unset-label KEY" in help_text
+    assert "--unset-annotation KEY" in help_text

@@ -1483,7 +1483,8 @@ def _cmd_record_update(args) -> int:
 # sentence a dozen times is what made these two help outputs the most expensive
 # in the CLI.
 _UNSET_PAIRING_RULE = (
-    "Every repeatable flag has an --unset-<field> remover taking the same value: "
+    "Every repeatable flag has an --unset-<field> remover taking the value shown "
+    "beside it: "
     "it drops one entry, a value that is not present is a silent no-op. Two read "
     "specially — --unset-related KIND=NAME drops every occurrence of NAME (and the "
     "kind, once empty), and --unset-depends-on matches the stored value "
