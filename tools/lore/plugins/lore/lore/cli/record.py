@@ -171,6 +171,7 @@ def _add_record_field_flags(parser) -> None:
     )
     parser.add_argument(
         "--unset-parent", dest="unset_parent", action="store_true", default=False,
+        help="Clear this task's parent.",
     )
 
 
@@ -1483,13 +1484,12 @@ def _cmd_record_update(args) -> int:
 # sentence a dozen times is what made these two help outputs the most expensive
 # in the CLI.
 _UNSET_PAIRING_RULE = (
-    "Every repeatable flag has an --unset-<field> remover taking the value shown "
-    "beside it: "
-    "it drops one entry, a value that is not present is a silent no-op. Two read "
-    "specially — --unset-related KIND=NAME drops every occurrence of NAME (and the "
-    "kind, once empty), and --unset-depends-on matches the stored value "
-    "byte-for-byte, so an unqualified entry never matches a staged KIND/NAME@STAGE "
-    "one."
+    "The --keyword/--related*/--depends-on/--label/--annotation setters repeat; "
+    "each has an --unset-<field> remover taking the value shown "
+    "beside it: it drops every matching entry, and a value that is not present "
+    "is a silent no-op. --unset-depends-on reads specially — it matches the "
+    "stored value byte-for-byte, so an unqualified entry never matches a staged "
+    "KIND/NAME@STAGE one."
 )
 
 # Shared by both ``record create`` and ``record update`` --help epilogs: the two

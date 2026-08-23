@@ -48,7 +48,7 @@ def apply_record_fields(
         builds it from the required positional) overwrite the scalar key.
       - repeatable list flags (``--keyword`` / ``--related-file`` /
         ``--related-url`` / ``--related-phase``) **append** to their list key;
-        each ``--unset-<field> VALUE`` removes one matching item (a value not
+        each ``--unset-<field> VALUE`` removes every matching item (a value not
         present is a tolerated no-op).
       - ``--related <kind>=<name>`` (repeatable) splits on the FIRST ``=`` and
         appends ``name`` to ``related[kind]``. An empty kind (``=foo``) or empty
@@ -99,7 +99,7 @@ def apply_record_fields(
                 current = []
             result[key] = current + list(values)
 
-    # --- repeatable list-flag removals (remove one matching item) ----------
+    # --- repeatable list-flag removals (remove every matching item) -------
     for dest, key in _LIST_FIELD_FLAGS.items():
         removals = getattr(args, f"unset_{dest}", None) or []
         for value in removals:

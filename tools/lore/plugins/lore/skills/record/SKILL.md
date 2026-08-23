@@ -61,9 +61,9 @@ lore record create --kind <kind> --title "<title>"
 
 Set sidecar metadata with the dedicated per-field flags — `--status` (scalar),
 the repeatable list flags `--keyword` / `--related-file` / `--related-url` /
-`--related-phase` (each with a matching `--unset-<field> VALUE` to remove one
-entry), and `--related KIND=NAME` (with `--unset-related KIND=NAME` to remove
-it) — and route to a specific vault with the
+`--related-phase` (each with a matching `--unset-<field> VALUE` that removes
+every matching entry), and `--related KIND=NAME` (with `--unset-related
+KIND=NAME` to remove it) — and route to a specific vault with the
 routing flags (`--repo`, `--product`, `--suite`, `--team`):
 
 ```bash

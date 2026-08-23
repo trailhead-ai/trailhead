@@ -161,7 +161,37 @@ class TestNearestMatchSuggestion:
         result = _run(["session", "status"], tmp_path)
         assert result.returncode != 0
         assert "did you mean" not in result.stderr
-        assert "Run 'lore --help'" in result.stderr
+        assert "Run 'lore session --help'" in result.stderr
+
+    @pytest.mark.parametrize(
+        "args",
+        [
+            ["record", "remove"],
+            ["vault", "remove"],
+            ["record", "read"],
+            ["start"],
+            ["end"],
+        ],
+        ids=["record-remove", "vault-remove", "record-read", "start", "end"],
+    )
+    def test_plausible_but_distant_token_suggests_nothing(self, args, tmp_path):
+        """A confidently wrong suggestion is worse than silence.
+
+        Each of these is a plausible thing to type whose nearest neighbour by
+        raw string distance is unrelated (``remove``→``resolve``,
+        ``start``→``status``, ``end``→``reindex``). They must fall
+        through to the generic fallback instead.
+        """
+        result = _run(args, tmp_path)
+        assert result.returncode != 0
+        assert "did you mean" not in result.stderr
+
+    def test_nested_miss_points_at_the_subcommand_help(self, tmp_path):
+        """A nested miss must point at its own subcommand's help, not the root dump."""
+        result = _run(["task", "children"], tmp_path)
+        assert result.returncode != 0
+        assert "unrecognized action 'children'" in result.stderr
+        assert "Run 'lore task --help'" in result.stderr
 
 
 class TestArgparseErrorPathPerGroup:

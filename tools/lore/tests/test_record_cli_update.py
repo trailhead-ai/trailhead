@@ -324,6 +324,33 @@ def test_update_keyword_appends_and_unsets(tmp_path):
     assert _find_sidecar(vault, record_id)["keywords"] == ["bar"]
 
 
+def test_update_unset_keyword_removes_every_occurrence(tmp_path):
+    """--unset-keyword clears every matching entry, not just the first.
+
+    ``--keyword`` appends without dedupe, so a list can hold the same value
+    twice; the remover filters the whole list. This pins the contract the shared
+    --unset-* help rule states.
+    """
+    vault, state = _make_vault(tmp_path)
+    record_id = _create(vault, state)  # keywords == ["foo"]
+
+    r = _run(
+        ["record", "update", record_id, "--keyword", "dup", "--keyword", "dup"],
+        vault=vault,
+        state_dir=state,
+    )
+    assert r.returncode == 0, r.stderr
+    assert _find_sidecar(vault, record_id)["keywords"] == ["foo", "dup", "dup"]
+
+    r2 = _run(
+        ["record", "update", record_id, "--unset-keyword", "dup"],
+        vault=vault,
+        state_dir=state,
+    )
+    assert r2.returncode == 0, r2.stderr
+    assert _find_sidecar(vault, record_id)["keywords"] == ["foo"]
+
+
 def test_update_set_flag_is_unrecognized(tmp_path):
     """--set is removed from update: argparse rejects it (unrecognized argument)."""
     vault, state = _make_vault(tmp_path)

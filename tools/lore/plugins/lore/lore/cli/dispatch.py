@@ -34,10 +34,32 @@ _ACTION_HINTS: dict[tuple[str, str], str] = {
 }
 
 # Minimum similarity for a nearest-match suggestion. A suggestion that fires on
-# a string nothing resembles (``lore session status`` has no near neighbour
-# among candidate/referenced/show) is worse than silence, so the bar is set
-# above the noise floor rather than at difflib's permissive default.
-_SUGGESTION_CUTOFF = 0.6
+# a string nothing resembles is worse than silence, and difflib's ratio is
+# generous with words that merely share a prefix: ``remove``/``resolve`` scores
+# 0.77, ``start``/``status`` 0.73, ``remove``/``rename`` 0.67. The bar sits
+# above that whole band so only a near-identical token suggests anything.
+_SUGGESTION_CUTOFF = 0.8
+
+# Below the cutoff, one relation still reads as a typo rather than a coincidence:
+# an abbreviation or an expansion, where one string's letters appear in the other
+# in order (``ls``/``list``, ``index``/``reindex``). Too short a token makes even
+# that meaningless — ``end`` is a subsequence of ``reindex`` — so it takes a
+# token of at least this many characters to qualify.
+_MIN_SUBSEQUENCE_LEN = 4
+
+
+def _is_subsequence(short: str, long: str) -> bool:
+    """Return True when every character of *short* appears in *long*, in order."""
+    it = iter(long)
+    return all(char in it for char in short)
+
+
+def _reads_as_abbreviation(token: str, candidate: str) -> bool:
+    """Return True when *token* and *candidate* are an abbreviation/expansion pair."""
+    if len(token) < _MIN_SUBSEQUENCE_LEN:
+        return False
+    short, long = sorted((token, candidate), key=len)
+    return _is_subsequence(short, long)
 
 
 def _choice_names(action: "argparse._SubParsersAction") -> list[str]:
@@ -52,7 +74,10 @@ def _choice_names(action: "argparse._SubParsersAction") -> list[str]:
 def _nearest_choice(token: str, choices: list[str]) -> str:
     """Return the closest of *choices* to *token*, or an empty string."""
     matches = difflib.get_close_matches(token, choices, n=1, cutoff=_SUGGESTION_CUTOFF)
-    return matches[0] if matches else ""
+    if matches:
+        return matches[0]
+    abbreviations = [c for c in choices if _reads_as_abbreviation(token, c)]
+    return abbreviations[0] if len(abbreviations) == 1 else ""
 
 
 def _unknown_command_hint(command: str, choices: list[str]) -> str:
@@ -147,9 +172,15 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 hint = _unknown_action_hint(prog, token, choices)
                 label = f"{prog}: unrecognized action {token!r}."
-            # Without a hint, point at the command list so agents can tell a
-            # typo from a real error.
-            tail = hint or "Run 'lore --help' for a list of subcommands."
+            # Without a hint, point at the help for the level the token missed
+            # at — the root dump is the largest help in the CLI, and a nested
+            # miss only ever needed its own subcommand's list.
+            if hint:
+                tail = hint
+            elif prog == parser.prog:
+                tail = "Run 'lore --help' for a list of subcommands."
+            else:
+                tail = f"Run '{prog} --help' for a list of actions."
             print(f"{label} {tail}", file=sys.stderr)
         raise
     return args.func(args)

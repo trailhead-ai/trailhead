@@ -1892,9 +1892,23 @@ def test_record_help_stays_within_byte_budget(leaf, monkeypatch):
 
 @pytest.mark.parametrize("leaf", sorted(_VISIBLE_LONG_OPTIONS), ids=lambda s: s.replace(" ", "-"))
 def test_record_help_still_lists_every_long_option(leaf, monkeypatch):
-    """No flag may be hidden (argparse.SUPPRESS) to buy the byte reduction."""
+    """No flag may be hidden (argparse.SUPPRESS) to buy the byte reduction.
+
+    Matched against the rendered option line — argparse indents each by exactly
+    two spaces, ahead of any short alias — not by containment anywhere in the
+    text. These names nest (``--related`` inside ``--related-file``) and several
+    are also named in the description and epilog prose, so a containment check
+    would report a deleted flag as still listed.
+    """
+    import re
+
     help_text = _render_leaf_help(leaf, monkeypatch)
-    missing = [opt for opt in _VISIBLE_LONG_OPTIONS[leaf] if opt not in help_text]
+    missing = [
+        opt for opt in _VISIBLE_LONG_OPTIONS[leaf]
+        if not re.search(
+            rf"^  (?:-\S+, )*{re.escape(opt)}(?![\w-])", help_text, re.MULTILINE
+        )
+    ]
     assert not missing, f"lore {leaf} --help no longer lists: {missing}"
 
 
@@ -1913,6 +1927,53 @@ def test_record_update_vault_help_disclaims_re_routing(monkeypatch):
         "update --vault help must disclaim re-routing, to contrast with the "
         "scope flags that do re-route and auto-move"
     )
+
+
+@pytest.mark.parametrize("leaf", sorted(_HELP_BYTE_BUDGETS), ids=lambda s: s.replace(" ", "-"))
+def test_unset_pairing_rule_does_not_promise_single_entry_removal(leaf, monkeypatch):
+    """The shared --unset-* rule must not say a remover drops one entry.
+
+    ``apply_record_fields`` filters the whole list (``[v for v in current if v
+    != value]``), so every matching entry goes. Prose that promises one leaves
+    an agent expecting a duplicate to survive a removal that in fact clears it.
+    """
+    import re
+
+    help_text = re.sub(r"\s+", " ", _render_leaf_help(leaf, monkeypatch))
+
+    assert "drops one entry" not in help_text, (
+        "the shared --unset-* rule promises single-entry removal, but the list "
+        "removers drop every matching entry"
+    )
+    assert "drops every matching entry" in help_text
+
+
+@pytest.mark.parametrize("leaf", sorted(_HELP_BYTE_BUDGETS), ids=lambda s: s.replace(" ", "-"))
+def test_help_says_which_setters_repeat(leaf, monkeypatch):
+    """The help must still signal that the list/map setters accept many values.
+
+    Per-flag "(repeatable)" was what said so before the trim; with the per-flag
+    prose gone, the shared rule has to name the repeating family, or --label and
+    --keyword read as single-use and an agent writes one call per value.
+    """
+    import re
+
+    help_text = re.sub(r"\s+", " ", _render_leaf_help(leaf, monkeypatch))
+    assert "--keyword/--related*/--depends-on/--label/--annotation setters repeat" in help_text
+
+
+@pytest.mark.parametrize("leaf", sorted(_HELP_BYTE_BUDGETS), ids=lambda s: s.replace(" ", "-"))
+def test_unset_parent_carries_its_own_help_string(leaf, monkeypatch):
+    """``--unset-parent`` is outside the repeatable-flag rule, so it needs its own line.
+
+    The shared rule scopes itself to the repeatable flags; ``--unset-parent`` is
+    neither repeatable nor value-taking, leaving it the one flag on either verb
+    with no description anywhere.
+    """
+    import re
+
+    help_text = re.sub(r"\s+", " ", _render_leaf_help(leaf, monkeypatch))
+    assert "--unset-parent Clear this task's parent." in help_text
 
 
 @pytest.mark.parametrize("leaf", sorted(_HELP_BYTE_BUDGETS), ids=lambda s: s.replace(" ", "-"))
