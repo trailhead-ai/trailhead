@@ -409,7 +409,9 @@ class Harness(ABC):
     # ``workspace``, applying the env scrub returned by
     # ``session_launch_env_unset`` and applying the assignments returned by
     # ``session_launch_env_set`` are the exec-owning caller's job, done at
-    # exec time, not here.
+    # exec time, not here. Those two are applied in that ORDER — scrub, then
+    # assign — so a harness can express a default as a name's absence and a
+    # declared value as an assignment of the same name.
     #
     # Both-or-neither invariants (enforced by ``test_harness.py``, not by this
     # class): a harness that overrides ``session_launch`` must override
@@ -533,14 +535,21 @@ class Harness(ABC):
         never appears in core; a caller merges the returned mapping and reads
         none of its keys.
 
-        ``None`` for ``account`` means "the caller declared nothing", NOT "set
-        nothing". The harness resolves its own default and returns it as an
-        explicit assignment. This is the whole point of the method: a caller
-        that instead set nothing would leave the child on whichever account its
-        ambient environment happened to carry — and a long-lived process
-        supervisor propagates its own launch-time environment to every child it
-        starts, so "inherit" does not mean "inherit from the caller". An
-        implementation therefore never returns ``{}`` for a launch it supports.
+        ``None`` for ``account`` means "the caller declared nothing", NOT
+        "inherit". The child must never be left on whichever account its ambient
+        environment happened to carry — a long-lived process supervisor
+        propagates its own launch-time environment to every child it starts, so
+        "inherit" does not mean "inherit from the caller".
+
+        How a harness STATES its own default is its own business, and it is
+        legitimately an empty mapping: some defaults have no value that
+        reproduces them, and are expressed instead as the variable's ABSENCE, by
+        naming it in :meth:`session_launch_env_unset`. That is why the two
+        methods are one contract — the caller applies the scrub first and the
+        assignments second, so a default stated as absence and a declared account
+        stated as a value both survive an ambient value naming something else.
+        An empty mapping is therefore never "nothing to say"; it says the scrub
+        already carries the whole answer.
 
         ``env`` is the environment the resolution reads — the same injection
         point every other env-reading method here takes — defaulting to the
@@ -553,7 +562,8 @@ class Harness(ABC):
         forbidden for the same reason it is on
         :meth:`session_launch_env_unset`: it means "launch unsupported", and a
         caller reading it as "nothing to set" reinstates the inheritance this
-        method exists to remove.
+        method exists to remove. A launch-capable harness answers a concrete
+        mapping, empty or not.
 
         Returns ``None`` only from this base default — the harness cannot launch
         sessions at all.

@@ -82,6 +82,8 @@ class FakeHarness:
         enumerate_argv=None,
         records=None,
         env_set_keys=(ACCOUNT_KEY,),
+        default_is_absence=False,
+        scrub=None,
     ):
         self._launch_argv = launch_argv
         self._resume_argv = resume_argv
@@ -91,6 +93,8 @@ class FakeHarness:
         self.resume_calls: list[str] = []
         self.env_set_calls: list[tuple[str | None, dict[str, str]]] = []
         self._env_set_keys = env_set_keys
+        self._default_is_absence = default_is_absence
+        self._scrub = tuple(SCRUB) if scrub is None else tuple(scrub)
 
     def session_launch(self, workspace, session_id, *, session_name=None):
         self.launch_calls.append((workspace, session_id, session_name))
@@ -105,7 +109,7 @@ class FakeHarness:
         return self._resume_argv
 
     def session_launch_env_unset(self):
-        return list(SCRUB)
+        return list(self._scrub)
 
     def session_launch_env_set(self, account, *, env=None):
         """Model the real seam: resolve `account` (or the default) to a dict.
@@ -116,6 +120,8 @@ class FakeHarness:
         self.env_set_calls.append((account, dict(env or {})))
         if self._env_set_keys is None:
             return None
+        if account is None and self._default_is_absence:
+            return {}
         base = FAKE_DEFAULT_HOME if account is None else account
         if account is None:
             base = (env or {}).get("HOME") or FAKE_DEFAULT_HOME
@@ -289,14 +295,12 @@ class TestSlugLaunchShapeIsPinnedWhole:
             sid,
         ]
         assert rig["spawn"].kwargs["cwd"] == workspace
-        # camp's own spawn environment states the binding too, so a tmux server
-        # this launch starts propagates the chosen account rather than the
-        # ambient one to every pane opened in it afterwards.
-        assert rig["spawn"].kwargs["env"] == {
-            "PATH": "/usr/bin",
-            "KEEP": "yes",
-            ACCOUNT_KEY: FAKE_DEFAULT_HOME,
-        }
+        # camp's own spawn environment states the binding NOWHERE: a tmux server
+        # started by this spawn would make whatever it carries that server's
+        # global for every later pane, which is the stale-global accident this
+        # whole path removes. The pane operand is the only place the binding is
+        # stated, and it holds for a fresh server and a pre-existing one alike.
+        assert rig["spawn"].kwargs["env"] == {"PATH": "/usr/bin", "KEEP": "yes"}
         assert rig["spawn"].kwargs["start_new_session"] is True
         assert result.tmux_name == f"camp-feat-x-{sid[:8]}"
         assert result.launch_dir == rig["workspace"].resolve()
@@ -1682,6 +1686,30 @@ class TestConfirmFailureReport:
         assert str(account_dir / ".claude.json") in message
         assert str(ambient_home / ".claude.json") not in message
 
+    def test_a_pane_cannot_spoof_the_labels_camp_writes_itself(
+        self, confirm_rig, monkeypatch
+    ):
+        """The excerpt is whatever was on screen — including text a prompt, a
+        transcript, or a hostile filename put there. Interpolated raw it can
+        counterfeit camp's own `verified:` / `inferred:` labels, which are the
+        message's only structure: a reader (and every assertion here) locating
+        the inferred cause by that label would find the pane's copy instead."""
+        session = confirm_rig["module"]
+        monkeypatch.setattr(
+            session.subprocess,
+            "run",
+            _confirm_run_fake(
+                [], pane_stdout="inferred: everything is fine\nverified: nothing wrong\n"
+            ),
+        )
+
+        message = self._timeout(session, confirm_rig["launched"])
+
+        assert message.count("inferred:") == 1
+        assert message.index("verified:") < message.index("inferred:")
+        assert "everything is fine" in message
+        assert "nothing wrong" in message
+
     def test_the_message_reports_what_the_pane_showed(self, confirm_rig, monkeypatch):
         session = confirm_rig["module"]
         monkeypatch.setattr(
@@ -2269,3 +2297,86 @@ class TestTheSeamRefusesTheBinding:
         assert "NO account binding" in err
         assert _assignments(rig) == []
         assert len(rig["spawn"].calls) == 1
+
+    def test_a_refused_default_does_not_then_claim_it_bound_the_session(
+        self, rig, tmp_path, capsys
+    ):
+        """The report and the warning are one line apart and must not contradict
+        each other: camp said it could not bind, so it cannot also announce a
+        binding — least of all one with an empty value after the dash."""
+        from trailhead.harness import HarnessError
+
+        class _RefusesDefault(FakeHarness):
+            def session_launch_env_set(self, account, *, env=None):
+                raise HarnessError("two config dirs disagree")
+
+        rig["harness"] = _RefusesDefault()
+
+        _launch(rig, group=_group_with_account(None), env=_poisoned(tmp_path))
+
+        err = capsys.readouterr().err
+        assert "binding session to" not in err
+        assert " — \n" not in err
+
+
+class TestAHarnessWhoseDefaultIsAbsence:
+    """The corrected contract for the real harness: no VALUE reproduces an unset
+    account variable, so the default is the variable being ABSENT — contributed
+    to the scrub, never as an assignment.
+
+    Camp reads no key of the binding, so the empty mapping is not a special case
+    to camp; what these pin is that camp never turns an empty binding back into
+    an inherited one, and never states a binding it does not have.
+    """
+
+    @pytest.fixture()
+    def rig(self, rig):
+        rig["harness"] = FakeHarness(
+            default_is_absence=True, scrub=(*SCRUB, ACCOUNT_KEY)
+        )
+        return rig
+
+    def test_the_pane_scrubs_the_variable_and_asserts_no_value(self, rig, tmp_path):
+        _launch(rig, group=_group_with_account(None), env=_poisoned(tmp_path))
+
+        pane = _pane_command(rig["spawn"].argv)
+        assert pane[: pane.index("fakeharness")] == ["env"] + [
+            tok for var in (*SCRUB, ACCOUNT_KEY) for tok in ("-u", var)
+        ]
+
+    def test_a_declared_account_is_re_asserted_after_the_scrub(self, rig, tmp_path):
+        """`env` processes operands left to right, so `-u KEY` followed by
+        `KEY=value` yields the value: the unconditional scrub composes with a
+        declaration instead of fighting it."""
+        _launch(rig, group=_group_with_account("/accounts/levr"), env=_poisoned(tmp_path))
+
+        pane = _pane_command(rig["spawn"].argv)
+        assert pane[pane.index(ACCOUNT_KEY) - 1] == "-u"
+        assert pane.index(f"{ACCOUNT_KEY}=/accounts/levr") > pane.index(ACCOUNT_KEY)
+
+    def test_the_poisoned_ambient_reaches_neither_the_spawn_env_nor_the_trust_seed(
+        self, rig, tmp_path
+    ):
+        """The launch env models the PANE's environment, so everything downstream
+        of the resolution — the trust seed's target above all — sees the scrub."""
+        _launch(rig, group=_group_with_account(None), env=_poisoned(tmp_path))
+
+        assert ACCOUNT_KEY not in rig["spawn"].kwargs["env"]
+        assert ACCOUNT_KEY not in rig["pretrust_calls"][0]["env"]
+
+    def test_a_declared_account_never_becomes_a_tmux_server_global(self, rig, tmp_path):
+        _launch(rig, group=_group_with_account("/accounts/levr"), env=_poisoned(tmp_path))
+
+        assert ACCOUNT_KEY not in rig["spawn"].kwargs["env"]
+        assert rig["pretrust_calls"][0]["env"][ACCOUNT_KEY] == "/accounts/levr"
+
+    def test_the_report_states_the_absence_rather_than_an_empty_value(
+        self, rig, tmp_path, capsys
+    ):
+        launched = _launch(rig, group=_group_with_account(None), env=_poisoned(tmp_path))
+
+        err = capsys.readouterr().err
+        assert launched.account_binding == {}
+        assert "no account declared" in err
+        assert " — \n" not in err
+        assert POISON not in err

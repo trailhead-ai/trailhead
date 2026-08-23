@@ -677,6 +677,11 @@ class TestClaudeCodeSessionLaunchModality:
 
 
 class TestClaudeCodeSessionLaunchEnvUnset:
+    def test_the_account_variable_is_scrubbed_so_the_default_is_absence(self):
+        """The undeclared-account default is the variable being ABSENT, which only
+        a caller-applied scrub can express — see ``session_launch_env_set``."""
+        assert "CLAUDE_CONFIG_DIR" in ClaudeCodeHarness().session_launch_env_unset()
+
     def test_contains_the_documented_leaking_vars(self):
         unset = ClaudeCodeHarness().session_launch_env_unset()
         for var in (

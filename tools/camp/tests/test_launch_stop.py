@@ -852,6 +852,46 @@ def test_a_relative_account_operand_is_not_camp_launched(tmp_path: Path) -> None
     assert tmux.killed == []
 
 
+def test_a_declared_account_pane_is_owned_even_when_the_default_states_nothing(
+    tmp_path: Path,
+) -> None:
+    """A harness whose DEFAULT is the variable's absence answers `None` with an
+    empty mapping — so probing with `None` learns no keys, and every pane camp
+    launched for a group that DID declare an account stops being recognized as
+    camp's own. The keys must be learned from a binding the harness actually
+    composes."""
+    from camp.launch.stop import Stopped
+
+    state, ws, env, _harness, derived, _tmux = _fixture(tmp_path)
+
+    class _AbsentDefault(_FakeHarness):
+        def session_launch_env_set(self, account, *, env=None):
+            if account is None:
+                return {}
+            return {ACCOUNT_KEY: account}
+
+    harness = _AbsentDefault()
+    tmux = _FakeTmux(
+        {
+            derived: _launched_pane_with_account(
+                harness, _UUID_A, derived, ws, "/home/someone/.account-other"
+            )
+        }
+    )
+
+    outcome = _stop(
+        _UUID_A[:8],
+        tmux=tmux,
+        transcripts=[_transcript(_UUID_A, ws)],
+        live_records=[_record(_UUID_A, ws)],
+        env=env,
+        harness=harness,
+    )
+
+    assert isinstance(outcome, Stopped)
+    assert tmux.killed == [derived]
+
+
 def test_a_harness_that_raises_composing_the_binding_refuses_rather_than_raising(
     tmp_path: Path,
 ) -> None:
