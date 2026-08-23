@@ -298,9 +298,11 @@ The agent expects:
 
 Executor figures out implementation steps — don't over-specify the *how*. Specify the *what*.
 
-Default model is Sonnet. Override per-dispatch when needed:
-- `model: "opus"` for integration-heavy slices (3-5 files, cross-module coordination)
-- Re-dispatch with Opus if a Sonnet attempt returns BLOCKED with unclear cause and `troubleshooter` confirms the issue is reasoning capacity
+Default model is Sonnet. **The first dispatch of a unit of work always runs on Sonnet** — slice shape (file count, cross-module reach) is not a reason to escalate, because it says nothing about whether reasoning capacity is the binding constraint. Escalate only once a Sonnet attempt has been made and observed to fail:
+- Re-dispatch with `model: "opus"` if a Sonnet attempt returns BLOCKED with unclear cause and `troubleshooter` confirms the issue is reasoning capacity
+- Re-dispatch with `model: "opus"` if the executor returns `DONE_WITH_CONCERNS` repeatedly on the same slice — or break the slice smaller
+
+A slice you expect to be hard is a slice to **scope smaller or resolve an unknown for** (dispatch `assumption-prover`), not one to pre-pay Opus rates on.
 
 Returns: DONE / DONE_WITH_CONCERNS / NEEDS_CONTEXT / BLOCKED. See [Handling Executor Status](#handling-executor-status).
 
@@ -409,7 +411,7 @@ If `simplifier` itself returns `BLOCKED` or a failed re-green, take the same fla
 
 Dispatch `code-reviewer` (whole-change) with the full `base..HEAD` diff plus the spec and plan paths, in a fresh context. The dispatch prompt **must explicitly direct the reviewer to scrutinize the simplify commit for control-flow changes touching auth, session, or permission surfaces** — the simplifier's flag-don't-apply rubric is prompt-only, so this is its independent check.
 
-Absorb the verdict — `SHIP` | `FIX_FIRST` | `BLOCK` — and triage the findings. **The `receiving-code-review` skill/pattern is binding here:** treat the review text as a claim about the code, not as a direct instruction. Dispatch fixes via `executor`; every fix must pass the Phase 1 test gate before it counts as resolved.
+Absorb the verdict — `SHIP` | `FIX_FIRST` | `BLOCK` — and triage the findings. **The `receiving-code-review` skill/pattern is binding here:** treat the review text as a claim about the code, not as a direct instruction. Dispatch fixes via `executor`; every fix must pass the Phase 1 test gate before it counts as resolved. **A fix dispatch is a first dispatch: it runs on Sonnet like any other** — a reviewer finding a defect is evidence about the code, not about the tier that has to fix it. Escalate only if that Sonnet fix pass itself fails.
 
 **At most ONE re-review round.** After fixes land, if a re-review is warranted, dispatch `code-reviewer` again — it re-diffs the full `base..HEAD` at the post-fix `HEAD`, **never just the fix commits in isolation** (a fix can regress code the fix commits don't touch). Any findings that survive that one round **surface to the user** — do not loop further.
 
@@ -488,7 +490,7 @@ Defaults are baked into each agent's frontmatter. Escalate when signals say you 
 | Role | Default | Escalate to |
 |------|---------|-------------|
 | `assumption-prover` | Sonnet | Sonnet/high if the unknown spans multiple subsystems or needs deeper code exploration |
-| `executor` | Sonnet | `model: "opus"` per-dispatch for integration-heavy slices |
+| `executor` | Sonnet | `model: "opus"` per-dispatch, only after an observed Sonnet failure on that same work |
 | `drift-gate` | Sonnet/high | (already pinned, no override needed) |
 
 **Escalation signals:**
