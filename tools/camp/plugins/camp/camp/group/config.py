@@ -24,6 +24,10 @@ Schema:
   cleanup = ["make", "clean"]           # optional; single argv list, same shape as a
                                          # step's cmd; retry-cleanup run before the task
                                          # re-runs; absent means None, not "run nothing"
+  capability = "..."                    # optional; single string, stated as a capability
+                                         # consequence for an agent still waiting on this
+                                         # task; absent means None, not ""; the SessionStart
+                                         # capability report uses it verbatim when declared
 
   [[tasks.graphify.steps]]
   name = "seed"                         # required; legible label (status/failure reasons)
@@ -687,13 +691,21 @@ def _parse_tasks(raw: Any, path: Path) -> dict[str, dict[str, Any]]:
     Returns a dict keyed by task name; each value is a normalized task dict:
       {"name": str, "phase": "provision"|"activate", "required": bool,
        "timeout_seconds": int | None, "cleanup": list[str] | None,
-       "steps": [{"name": str, "cmd": [str, ...]}]}
+       "capability": str | None, "steps": [{"name": str, "cmd": [str, ...]}]}
 
     `cleanup` is an optional single argv list — validated in the same shape as
     a step's `cmd` (non-empty list of strings, same placeholder set) — run to
     retry-clean a task's prior attempt before it re-runs. Absent means None,
     not an empty list: the two read differently downstream ("nothing declared"
     versus "run nothing").
+
+    `capability` is an optional plain string naming the capability consequence
+    of this task still being outstanding (e.g. "the code-review-graph MCP
+    server has no graph yet — prefer Grep/Glob until told otherwise"),
+    validated the same way as other single-string fields (non-blank string or
+    a config error naming the task). Absent means None, not "". The
+    SessionStart capability report uses it verbatim in place of its generic
+    line when declared.
 
     Placeholder validation in step argv (and in `cleanup`) reuses
     _reject_unknown_placeholders against _TASK_PLACEHOLDERS — no parallel
@@ -747,6 +759,17 @@ def _parse_tasks(raw: Any, path: Path) -> dict[str, dict[str, Any]]:
                     token, path=path, where=cleanup_where, known=_TASK_PLACEHOLDERS
                 )
 
+        capability_raw = task_tbl.get("capability")
+        if capability_raw is None:
+            capability: str | None = None
+        elif not isinstance(capability_raw, str) or not capability_raw.strip():
+            raise GroupConfigError(
+                f"{path}: tasks.{task_name}.capability must be a non-empty string, "
+                f"got {capability_raw!r}"
+            )
+        else:
+            capability = capability_raw
+
         steps_raw = task_tbl.get("steps")
         if not isinstance(steps_raw, list) or len(steps_raw) == 0:
             raise GroupConfigError(
@@ -788,6 +811,7 @@ def _parse_tasks(raw: Any, path: Path) -> dict[str, dict[str, Any]]:
             "required": required,
             "timeout_seconds": timeout_seconds,
             "cleanup": cleanup,
+            "capability": capability,
             "steps": steps,
         }
 

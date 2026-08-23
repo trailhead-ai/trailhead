@@ -914,6 +914,7 @@ def test_task_valid_config_parses_to_normalized_shape(tmp_path: Path) -> None:
             "required": True,
             "timeout_seconds": 30,
             "cleanup": None,
+            "capability": None,
             "steps": [
                 {
                     "name": "seed",
@@ -960,6 +961,7 @@ cmd = ["echo", "hi"]
     assert task["required"] is False
     assert task["timeout_seconds"] is None
     assert task["cleanup"] is None
+    assert task["capability"] is None
 
 
 def test_task_step_unknown_placeholder_raises(tmp_path: Path) -> None:
@@ -1474,6 +1476,133 @@ cmd = ["npm", "install"]
     assert task["required"] is True
     assert task["timeout_seconds"] is None
     assert "cleanup" not in task
+
+
+# ---------------------------------------------------------------------------
+# [tasks.<name>].capability — optional capability-consequence string
+# ---------------------------------------------------------------------------
+
+
+def test_task_capability_string_resolves(tmp_path: Path) -> None:
+    """A [tasks.<name>] block with capability = "..." resolves to a task
+    carrying that string verbatim."""
+    from camp.group.config import load_group
+
+    toml = """\
+[group]
+name = "testgroup"
+
+[[members]]
+name = "myrepo"
+repo_root = "/tmp/myrepo"
+tasks = ["mytask"]
+
+[tasks.mytask]
+capability = "the code-review-graph MCP server has no graph yet — prefer Grep/Glob until told otherwise"
+[[tasks.mytask.steps]]
+name = "step1"
+cmd = ["echo", "hi"]
+"""
+    f = tmp_path / "testgroup.toml"
+    f.write_text(toml)
+    cfg = load_group(f)
+    task = cfg["members"][0]["tasks"][0]
+    assert task["capability"] == (
+        "the code-review-graph MCP server has no graph yet — prefer Grep/Glob until told "
+        "otherwise"
+    )
+
+
+def test_task_no_capability_key_resolves_to_none_not_empty_string(tmp_path: Path) -> None:
+    """A task with no capability key resolves with capability absent/None —
+    never an empty string."""
+    from camp.group.config import load_group
+
+    toml = """\
+[group]
+name = "testgroup"
+
+[[members]]
+name = "myrepo"
+repo_root = "/tmp/myrepo"
+tasks = ["mytask"]
+
+[tasks.mytask]
+[[tasks.mytask.steps]]
+name = "step1"
+cmd = ["echo", "hi"]
+"""
+    f = tmp_path / "testgroup.toml"
+    f.write_text(toml)
+    cfg = load_group(f)
+    task = cfg["members"][0]["tasks"][0]
+    assert task["capability"] is None
+
+
+def test_task_capability_non_string_raises(tmp_path: Path) -> None:
+    """capability declared as a non-string value is a config error naming the
+    task."""
+    from camp.group.config import GroupConfigError, load_group
+
+    toml = """\
+[group]
+name = "testgroup"
+
+[[members]]
+name = "myrepo"
+repo_root = "/tmp/myrepo"
+tasks = ["mytask"]
+
+[tasks.mytask]
+capability = 42
+[[tasks.mytask.steps]]
+name = "step1"
+cmd = ["echo", "hi"]
+"""
+    f = tmp_path / "testgroup.toml"
+    f.write_text(toml)
+    with pytest.raises(GroupConfigError) as exc_info:
+        load_group(f)
+    msg = str(exc_info.value)
+    assert str(f) in msg or "testgroup.toml" in msg
+    assert "capability" in msg
+    assert "mytask" in msg
+
+
+def test_legacy_bootstrap_task_carries_no_capability_key(tmp_path: Path) -> None:
+    """The bootstrap = [...] shorthand emits no capability key by
+    construction — capability is impossible on a legacy-normalized task."""
+    from camp.group.config import load_group
+
+    f = tmp_path / "testgroup.toml"
+    f.write_text(_VALID_TOML)
+    cfg = load_group(f)
+    task = cfg["members"][0]["tasks"][0]
+    assert "capability" not in task
+
+
+def test_legacy_hooks_task_carries_no_capability_key(tmp_path: Path) -> None:
+    """The [[members.hooks]] kind="dep-install" shorthand emits no capability
+    key by construction."""
+    from camp.group.config import load_group
+
+    toml = """\
+[group]
+name = "testgroup"
+
+[[members]]
+name = "myrepo"
+repo_root = "/tmp/myrepo"
+
+[[members.hooks]]
+kind = "dep-install"
+cmd = ["npm", "install"]
+"""
+    f = tmp_path / "testgroup.toml"
+    f.write_text(toml)
+    cfg = load_group(f)
+    task = cfg["members"][0]["tasks"][0]
+    assert "capability" not in task
 
 
 # ---------------------------------------------------------------------------

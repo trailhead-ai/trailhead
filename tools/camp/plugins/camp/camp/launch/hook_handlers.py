@@ -120,6 +120,17 @@ def _activate_task_names(member_config: dict) -> list[str]:
     ]
 
 
+def _activate_task_capability(member_config: dict, task_name: str) -> str | None:
+    """The declared `capability` string for one member's activate-phase task,
+    or None when the task declares none — the trigger for the generic
+    fallback line in _member_capability_lines.
+    """
+    for task in member_config.get("tasks", []):
+        if task.get("name") == task_name:
+            return task.get("capability")
+    return None
+
+
 def _member_capability_lines(
     name: str, member_config: dict, report_member: dict, slug: str
 ) -> list[str]:
@@ -128,6 +139,13 @@ def _member_capability_lines(
     instead, never as the raw task state, and never carrying the task's raw
     stdout/stderr (which may hold credentials on failure) — only where to
     read it.
+
+    An outstanding task with a config-declared `capability` string uses that
+    text verbatim in place of the generic line — the config author states the
+    concrete consequence ("the code-review-graph MCP server has no graph yet
+    — prefer Grep/Glob until told otherwise") rather than the agent having to
+    infer it from a task name. A task with no `capability` declared falls
+    back to the generic state-based line.
     """
     tasks = report_member.get("tasks") or {}
     failed: list[str] = []
@@ -147,11 +165,15 @@ def _member_capability_lines(
             f"--name {slug} --json` for why before debugging your own code."
         )
     for task_name in outstanding:
-        lines.append(
-            f"{name}: the work-enabling task '{task_name}' has not finished yet — commands "
-            f"or tools that depend on it may fail or behave as unset until it completes; "
-            f"check `camp status --name {slug} --json` before treating that as a code problem."
-        )
+        capability = _activate_task_capability(member_config, task_name)
+        if capability:
+            lines.append(f"{name}: {capability}")
+        else:
+            lines.append(
+                f"{name}: the work-enabling task '{task_name}' has not finished yet — commands "
+                f"or tools that depend on it may fail or behave as unset until it completes; "
+                f"check `camp status --name {slug} --json` before treating that as a code problem."
+            )
     return lines
 
 

@@ -984,15 +984,20 @@ cmd = ["true"]
 # ---------------------------------------------------------------------------
 
 
-def _activate_task(name: str, *, required: bool = False) -> dict[str, Any]:
+def _activate_task(
+    name: str, *, required: bool = False, capability: str | None = None
+) -> dict[str, Any]:
     """Build a member activate-phase task in the config-resolved shape."""
-    return {
+    task: dict[str, Any] = {
         "name": name,
         "phase": "activate",
         "required": required,
         "timeout_seconds": None,
         "steps": [{"name": name, "cmd": ["true"]}],
     }
+    if capability is not None:
+        task["capability"] = capability
+    return task
 
 
 def _capability_manifest(
@@ -1016,18 +1021,31 @@ class TestCapabilityReport:
     report text (or "" when nothing is outstanding/failed).
     """
 
-    def test_outstanding_activate_task_produces_actionable_capability_line(
+    def test_outstanding_activate_task_with_declared_capability_uses_it_verbatim(
         self, tmp_path: Path
     ):
-        """An activate-phase task that never ran (not recorded 'ok') produces a
-        line stating the capability consequence, not the bare task state."""
+        """An activate-phase task that never ran (not recorded 'ok') and
+        declares a `capability` string produces a line stating that exact
+        consequence — not the generic task-name-plus-boilerplate fallback. An
+        agent that reverts to the generic-only line for a task with a
+        declared capability must fail this assertion."""
         from camp.launch.hook_handlers import capability_report
         from camp.group.manifest import manifest_path_for, write_central_manifest
 
         env = {"CAMP_STATE_DIR": str(tmp_path / "state")}
+        capability_text = (
+            "dependencies are still installing — test and build commands will fail "
+            "until they finish"
+        )
         group = _make_group_config(
             "capgroup",
-            [{"name": "repo_a", "repo_root": "/x", "tasks": [_activate_task("dep-install")]}],
+            [
+                {
+                    "name": "repo_a",
+                    "repo_root": "/x",
+                    "tasks": [_activate_task("dep-install", capability=capability_text)],
+                }
+            ],
         )
         mpath = manifest_path_for("capgroup", "feat-cap", env=env)
         write_central_manifest(
@@ -1050,12 +1068,50 @@ class TestCapabilityReport:
 
         report = capability_report(group, "feat-cap", env=env)
 
+        assert capability_text in report, "declared capability text must appear verbatim"
+        assert "has not finished yet" not in report, (
+            "a declared capability must replace the generic boilerplate line, not "
+            "merely be appended alongside it"
+        )
+
+    def test_outstanding_activate_task_without_capability_falls_back_to_generic_line(
+        self, tmp_path: Path
+    ):
+        """An activate-phase task that never ran and declares no `capability`
+        string still produces today's generic line — the fallback stays."""
+        from camp.launch.hook_handlers import capability_report
+        from camp.group.manifest import manifest_path_for, write_central_manifest
+
+        env = {"CAMP_STATE_DIR": str(tmp_path / "state")}
+        group = _make_group_config(
+            "capgroup",
+            [{"name": "repo_a", "repo_root": "/x", "tasks": [_activate_task("dep-install")]}],
+        )
+        mpath = manifest_path_for("capgroup", "feat-cap-fallback", env=env)
+        write_central_manifest(
+            mpath,
+            _capability_manifest(
+                group_name="capgroup",
+                slug="feat-cap-fallback",
+                members=[
+                    {
+                        "name": "repo_a",
+                        "repo_root": "/x",
+                        "worktree_path": "/x",
+                        "provision_state": "ready",
+                        "work_state": "pending",
+                        "tasks": {},
+                    }
+                ],
+            ),
+        )
+
+        report = capability_report(group, "feat-cap-fallback", env=env)
+
         assert report, "expected a non-empty capability report"
         assert "dep-install" in report
-        # Not just the raw state token standing alone as the whole message —
-        # an actionable consequence for the agent to act on.
         assert report.strip() not in ("pending", "repo_a: pending", "dep-install: pending")
-        assert "fail" in report.lower() or "may" in report.lower()
+        assert "has not finished yet" in report
 
     def test_every_member_ready_emits_nothing(self, tmp_path: Path):
         """With every member boot-ready and work-ready, nothing is emitted —
