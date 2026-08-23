@@ -207,6 +207,77 @@ def wait_for_provisioning(group: dict, slug: str, *, env: dict[str, str] | None 
     return False
 
 
+def trigger_activate_phase_work(
+    group: dict, slug: str, *, env: dict[str, str] | None = None, wait: bool = True
+) -> None:
+    """`camp new --activate`'s trigger step: hand every member's activate-phase
+    work to the detached provisioner — the non-blocking part is that this never
+    waits for that work itself (the possibly-expensive `npm ci` or graph
+    build), matching "triggers ... and returns without waiting for it". This is
+    the non-interactive path to the same work `camp activate <member>` triggers
+    interactively — the way a consumer that never calls `camp activate`
+    (ranger's execute drain, any other automation that puts an agent straight
+    into a worktree) gets its work-enabling tasks run.
+
+    An activate-phase task runs inside the member's worktree, which does not
+    exist until the member reaches boot-readiness — so by default (wait=True)
+    this first waits, bounded, for boot-readiness (the identical poll
+    `wait_for_provisioning` uses) before spawning anything; a workspace that
+    never reaches boot-readiness triggers nothing, same as `--launch` refusing
+    rather than racing it. Blocking on boot-readiness is acceptable because
+    cheapness is a requirement of that phase — only the activate-phase work
+    itself never blocks. wait=False (`--no-wait`) skips even that: it spawns
+    immediately, racing the still-running provisioner exactly as
+    `--launch --no-wait` races the harness launch, the same accepted risk on
+    the same flag.
+
+    A member declaring no activate-phase task is skipped entirely — no
+    subprocess is spawned for it — so a group with no activate-phase tasks
+    anywhere is a clean no-op.
+    """
+    from ..group.manifest import ManifestError, workspace_dir
+    from ..provision.activation import _member_has_activate_tasks
+    from ..provision.lifecycle import wait_for_provisioning_ready
+    from ..provision.provision import _CAMP_BIN, spawn_detached_provisioner
+
+    if wait:
+        try:
+            outcome, _report = wait_for_provisioning_ready(
+                group,
+                slug,
+                env=env,
+                interval=_PROVISION_POLL_INTERVAL_SECONDS,
+                timeout=_PROVISION_POLL_TIMEOUT_SECONDS,
+                sleep=time.sleep,
+            )
+        except ManifestError:
+            return
+        if outcome != "ready":
+            return
+
+    group_name = group["group"]["name"]
+    ws_dir = workspace_dir(group_name, slug, env=env)
+    for member in group["members"]:
+        if not _member_has_activate_tasks(member):
+            continue
+        member_name = member["name"]
+        spawn_detached_provisioner(
+            group_name=group_name,
+            slug=slug,
+            logfile_path=str(ws_dir / f"activate-{member_name}.log"),
+            _argv=[
+                str(_CAMP_BIN),
+                "activate",
+                member_name,
+                "--name",
+                slug,
+                "--group",
+                group_name,
+                "--background",
+            ],
+        )
+
+
 def _candidate_payload(candidate) -> dict:
     """One resolver candidate as JSON-ready data.
 

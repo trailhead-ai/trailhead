@@ -299,7 +299,8 @@ def _cmd_new_group_cli(
     env: dict[str, str] | None,
     dry_run: bool,
 ) -> None:
-    """camp new <slug> [--launch [--no-wait]] [--json] — create or re-enter a workspace.
+    """camp new <slug> [--launch [--no-wait]] [--activate] [--json] — create or
+    re-enter a workspace.
 
     NEW slug: bring_up_workspace — synchronous seed (workspace dir + manifest with
     each member pending) + a DETACHED provisioner (camp setup --background) that runs
@@ -329,6 +330,23 @@ def _cmd_new_group_cli(
     null>}` — the single stdout shape a machine caller parses on both outcomes.
     `tmux_name` is the launch engine's own derived name (never reconstructed
     here), mirroring what `camp launch --json` already reports on the reuse path.
+
+    `--activate` triggers every member's activate-phase work at creation time —
+    the non-interactive path to what `camp activate <member>` triggers
+    interactively. Like `--launch`, it waits (bounded) for boot-readiness first
+    — an activate-phase task runs inside a member's worktree, which does not
+    exist before boot-readiness — but it never waits for the activate-phase
+    work itself, which is what makes it non-blocking: `--activate`'s own wait
+    is capped at the same cheap boot budget, never at the potentially-expensive
+    work `camp activate` would otherwise trigger. It never changes the exit
+    code or the stdout path. A member declaring no activate-phase task is a
+    clean no-op. Without `--activate`, `camp new` triggers no activate-phase
+    work at all — only provision-phase tasks run at creation, which is what
+    keeps an expensive activate-phase task (e.g. a knowledge-graph build) from
+    firing for every member of every new workspace. `--activate` and
+    `--no-wait` compose: `--no-wait` skips BOTH waits — `--launch`'s and
+    `--activate`'s — independently, so passing one flag never disables what
+    the other does.
     """
     from ..spine import _resolve_slug, _consume_flag_value, _die
     from ..provision.provision import bring_up_workspace
@@ -339,8 +357,9 @@ def _cmd_new_group_cli(
 
     launch = "--launch" in rest
     no_wait = "--no-wait" in rest
+    activate = "--activate" in rest
     as_json = "--json" in rest
-    rest = [arg for arg in rest if arg not in ("--launch", "--no-wait", "--json")]
+    rest = [arg for arg in rest if arg not in ("--launch", "--no-wait", "--activate", "--json")]
 
     # --json only has a defined meaning alongside --launch: it exists to carry the
     # session id next to the path. Refusing it outright beats inventing a second
@@ -420,6 +439,11 @@ def _cmd_new_group_cli(
             ready = wait_for_provisioning(group, slug, env=env)
         if ready:
             launched_session = launch_for_new(group, slug, env=env)
+
+    if activate:
+        from .session import trigger_activate_phase_work
+
+        trigger_activate_phase_work(group, slug, env=env, wait=not no_wait)
 
     if as_json:
         print(

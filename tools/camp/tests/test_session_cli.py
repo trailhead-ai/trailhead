@@ -2234,6 +2234,132 @@ def test_bare_camp_new_output_is_unchanged(cli_env) -> None:
 
 
 # ---------------------------------------------------------------------------
+# camp new --activate
+# ---------------------------------------------------------------------------
+
+
+def _author_activate_group(cli_env, group_name: str, member_name: str = "member") -> None:
+    """Author a fresh single-member group whose member declares one
+    activate-phase task ("mark") — a plain marker-file write so the test can
+    observe whether the task actually ran, without needing a real dependency
+    install. A dedicated repo keeps this out of the no-overlap constraint the
+    fixture's mygroup/badgroup repos are already under."""
+    repo = cli_env["tmp_path"] / f"repo_{group_name}"
+    _init_git_repo(repo)
+    config_dir = cli_env["config_dir"]
+    path = config_dir / "groups" / f"{group_name}.toml"
+    path.write_text(
+        f'[group]\nname = "{group_name}"\n\n'
+        f"[[members]]\n"
+        f'name = "{member_name}"\n'
+        f"repo_root = {json.dumps(str(repo))}\n"
+        f"bootstrap = []\n"
+        f'tasks = ["mark"]\n\n'
+        f"[branch]\npattern = \"worktree-{{slug}}\"\n\n"
+        f"[tasks.mark]\n"
+        f'phase = "activate"\n'
+        f"required = true\n\n"
+        f"[[tasks.mark.steps]]\n"
+        f'name = "run"\n'
+        f'cmd = ["python3", "-c", "import pathlib; pathlib.Path(\\"{{worktree}}/marker\\").write_text(\\"done\\")"]\n\n'
+        f"[harness]\n"
+        f'binary = "fakeharness"\n',
+        encoding="utf-8",
+    )
+
+
+def _status_json(cli_env, slug: str, *, group: str) -> dict:
+    result = _camp(cli_env, "status", "--name", slug, "--group", group, "--json")
+    assert result.returncode in (0, 2, 3), result.stderr
+    return json.loads(result.stdout)
+
+
+def _member_work_state(report: dict, member_name: str) -> str:
+    (member,) = [m for m in report["members"] if m["name"] == member_name]
+    return member["work_state"]
+
+
+def _poll_until_work_ready(
+    cli_env, slug: str, member_name: str, *, group: str, timeout: float = 15.0
+) -> dict:
+    deadline = time.monotonic() + timeout
+    report = _status_json(cli_env, slug, group=group)
+    while _member_work_state(report, member_name) == "pending" and time.monotonic() < deadline:
+        time.sleep(0.2)
+        report = _status_json(cli_env, slug, group=group)
+    return report
+
+
+def test_camp_new_activate_triggers_activate_phase_work_for_a_declaring_member(cli_env) -> None:
+    _author_activate_group(cli_env, "actgroup")
+
+    result = _camp(cli_env, "new", "feat-act", "--group", "actgroup", "--activate")
+
+    assert result.returncode == 0, result.stderr
+    report = _poll_until_work_ready(cli_env, "feat-act", "member", group="actgroup")
+    assert _member_work_state(report, "member") == "ready", report
+    ws_dir = Path(cli_env["state_dir"]) / "actgroup" / "worktrees" / "feat-act" / "member"
+    _wait_for(lambda: (ws_dir / "marker").is_file())
+    assert (ws_dir / "marker").read_text() == "done"
+
+
+def test_camp_new_without_activate_never_triggers_activate_phase_work(cli_env) -> None:
+    """The criterion that keeps an expensive activate-phase task from firing
+    for every member of every new workspace: no --activate, no activate-phase
+    task execution, even once the member reaches boot-readiness."""
+    _author_activate_group(cli_env, "actgroup2")
+
+    result = _camp(cli_env, "new", "feat-noact", "--group", "actgroup2", "--launch")
+
+    assert result.returncode == 0, result.stderr
+    assert "camp launch: confirmed session" in result.stderr
+    report = _status_json(cli_env, "feat-noact", group="actgroup2")
+    assert report["members"][0]["provision_state"] == "ready", report
+    assert _member_work_state(report, "member") == "pending", (
+        "a member's activate-phase task must not run at creation without --activate",
+        report,
+    )
+    ws_dir = Path(cli_env["state_dir"]) / "actgroup2" / "worktrees" / "feat-noact" / "member"
+    assert not (ws_dir / "marker").is_file()
+
+
+def test_camp_new_launch_proceeds_once_boot_ready_with_activate_work_still_outstanding(
+    cli_env,
+) -> None:
+    """--launch waits on boot-readiness only, never on work-readiness: it must
+    proceed even for a workspace whose member declares outstanding
+    activate-phase work that nothing has triggered yet."""
+    _author_activate_group(cli_env, "actgroup3")
+
+    result = _camp(cli_env, "new", "feat-lo", "--group", "actgroup3", "--launch")
+
+    assert result.returncode == 0, result.stderr
+    assert "camp launch: confirmed session" in result.stderr
+
+
+def test_camp_new_activate_on_a_group_with_no_activate_tasks_is_a_clean_no_op(cli_env) -> None:
+    result = _camp(cli_env, "new", "feat-noop", "--group", "mygroup", "--activate")
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip().endswith("/feat-noop")
+
+
+def test_camp_new_activate_composes_with_no_wait(cli_env) -> None:
+    result = _camp(
+        cli_env, "new", "feat-anw", "--group", "mygroup", "--launch", "--no-wait", "--activate"
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "camp new: --no-wait" in result.stderr
+
+
+def _wait_for(predicate, *, timeout: float = 15.0, interval: float = 0.2) -> None:
+    deadline = time.monotonic() + timeout
+    while not predicate() and time.monotonic() < deadline:
+        time.sleep(interval)
+
+
+# ---------------------------------------------------------------------------
 # The exit-code contract in `camp help` against the codes the binary returns.
 #
 # A help text that documents a contract the binary does not honor is worse than
