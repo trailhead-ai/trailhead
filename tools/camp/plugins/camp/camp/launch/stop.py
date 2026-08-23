@@ -275,24 +275,40 @@ def _owning_commands(harness, candidate: SessionCandidate) -> tuple[tuple[str, .
     return tuple(shapes)
 
 
+#: A placeholder account for the key probe below. Absolute, because that is the
+#: only shape a harness can be asked to honor without knowing what it names.
+_KEY_PROBE_ACCOUNT = "/"
+
+
 def _account_binding_keys(harness, env: Mapping[str, str]) -> tuple[str, ...]:
     """The variable NAMES the launch engine composes into a pane as assignments.
 
     Asked of the harness rather than spelled here: only the harness knows which
     variables express an account, and a name hardcoded in camp is the ambient
-    leak this whole path removes. ``None`` is passed as the account for the same
-    reason the VALUES are ignored below — the keys are constant for a harness,
-    the values are not.
+    leak this whole path removes. The VALUES are ignored — they were resolved at
+    LAUNCH time from the launching group's declaration — but the keys are
+    constant for a harness, so any binding it composes reveals them.
+
+    BOTH an undeclared and a declared account are probed, because a harness may
+    answer the undeclared one with an empty mapping: a default that no value
+    expresses is stated as the variable's ABSENCE instead. Probing only that one
+    would learn no keys from such a harness, and every pane camp launched for a
+    group that DID declare an account would stop being recognized as camp's own.
 
     Every failure degrades to no keys, which refuses the pane rather than
     reclaiming one camp never composed: a third-party call that raises is the
     stop engine's refusal, never its traceback.
     """
-    try:
-        binding = harness.session_launch_env_set(None, env=dict(env))
-    except Exception:  # noqa: BLE001 — third-party call; a refusal, not a traceback
-        return ()
-    return tuple(binding or ())
+    keys: list[str] = []
+    for account in (None, _KEY_PROBE_ACCOUNT):
+        try:
+            binding = harness.session_launch_env_set(account, env=dict(env))
+        except Exception:  # noqa: BLE001 — third-party call; a refusal, not a traceback
+            continue
+        for key in binding or ():
+            if key not in keys:
+                keys.append(key)
+    return tuple(keys)
 
 
 def _without_account_binding(

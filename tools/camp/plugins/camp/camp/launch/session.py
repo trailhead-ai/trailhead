@@ -137,7 +137,9 @@ class LaunchedSession:
 
     `account` is the group's declared account, or None when it declared none.
     `account_binding` is the environment the harness resolved that declaration
-    into — the assignments the pane carries and the trust pre-seed followed.
+    into — the assignments the pane carries and the trust pre-seed followed. It
+    is empty when the harness states its answer through the scrub instead, which
+    is how a default with no value that expresses it is stated.
     """
 
     session_id: str
@@ -314,8 +316,14 @@ def _resolve_account_binding(harness, profile, group: dict, env: dict[str, str])
     warned about rather than refused. The refusal there is about a contradiction
     already present in *env* — one camp neither created nor was asked to take a
     side in — and every launch in such an environment would otherwise be blocked
-    on a condition no group declaration can clear. Camp says so loudly and lets
-    the session inherit, which is the state that environment was already in.
+    on a condition no group declaration can clear. Camp says so loudly and
+    launches with no assignment of its own, which is the state that environment
+    was already in.
+
+    An EMPTY mapping is a legitimate answer, not a failure to answer: a harness
+    whose default has no value that expresses it states the default as the
+    variable's absence and puts the name in its scrub instead. Camp treats the
+    two the same way — scrub, then assign — and reads no key of either.
     """
     from trailhead.harness import HarnessError
 
@@ -332,8 +340,7 @@ def _resolve_account_binding(harness, profile, group: dict, env: dict[str, str])
         print(
             f"camp: no account declared and harness "
             f"{harness.name or profile.binary!r} will not resolve a default here: "
-            f"{exc} — launching with NO account binding; the session inherits "
-            f"whichever account its environment carries",
+            f"{exc} — launching with NO account binding",
             file=sys.stderr,
         )
         return None, {}
@@ -342,21 +349,68 @@ def _resolve_account_binding(harness, profile, group: dict, env: dict[str, str])
     return account, dict(binding)
 
 
+def resolve_launch_environment(
+    harness, profile, group: dict, env: dict[str, str]
+) -> tuple[str | None, dict[str, str], tuple[str, ...], dict[str, str]]:
+    """The account, the binding, the scrub, and the environment a pane will carry.
+
+    The ONE resolution, shared by every surface that must agree about which
+    account a group's session runs on: the launch engine, and workspace bring-up,
+    whose trust pre-seed writes into that account's config file. A second,
+    independent read is two answers that can disagree, and the disagreement is
+    invisible until a workspace is trusted in one account's file and started
+    under another's.
+
+    The returned environment is the PANE's, not camp's: the scrub is applied
+    before the assignments, in that order, because a harness may state a default
+    as a name's ABSENCE and a declared account as an assignment of that same
+    name. Merging the binding over the raw *env* would leave an ambient value in
+    place exactly when the harness meant it removed.
+    """
+    account, binding = _resolve_account_binding(harness, profile, group, env)
+    scrub = harness.session_launch_env_unset()
+    if scrub is None:
+        raise _unsupported_harness(harness, profile, "cannot launch sessions")
+    scrub_set = set(scrub)
+    launch_env = {k: v for k, v in env.items() if k not in scrub_set}
+    launch_env.update(binding)
+    return account, binding, tuple(scrub), launch_env
+
+
 def _report_account(account: str | None, binding: dict[str, str]) -> None:
     """Name the account this launch chose, declared or defaulted.
 
-    A defaulted launch is reported as loudly as a declared one: camp sets the
-    harness's default explicitly rather than inheriting it, and an operator
+    A defaulted launch is reported as loudly as a declared one: an operator
     reading the terminal must be able to tell which account a session landed on
     without knowing whether their group declared anything.
+
+    An empty binding gets its own wording rather than the assignment wording with
+    nothing after the dash. Announcing a binding camp does not have contradicts
+    the scrub line it sits beside and reads, to someone skimming, as the launch
+    having chosen an account named by the empty string.
     """
-    where = " ".join(f"{key}={value}" for key, value in sorted(binding.items()))
-    source = (
-        f"declared account {account}"
-        if account is not None
-        else "the harness default (no account declared)"
+    if binding:
+        where = " ".join(f"{key}={value}" for key, value in sorted(binding.items()))
+        source = (
+            f"declared account {account}"
+            if account is not None
+            else "the harness default (no account declared)"
+        )
+        print(f"camp: binding session to {source} — {where}", file=sys.stderr)
+        return
+    if account is not None:
+        print(
+            f"camp: declared account {account} — the harness states it with no "
+            f"assignment of its own",
+            file=sys.stderr,
+        )
+        return
+    print(
+        "camp: no account declared — the launch states no account assignment; "
+        "the pane scrubs whatever the environment carried, so the harness's own "
+        "default applies",
+        file=sys.stderr,
     )
-    print(f"camp: binding session to {source} — {where}", file=sys.stderr)
 
 
 def _warn_if_account_has_no_config(account: str | None, launch_env: dict[str, str]) -> None:
@@ -535,18 +589,15 @@ def launch_session(
     if shutil.which("tmux") is None:
         raise LaunchError("camp: refusing to launch — tmux is not on PATH")
 
-    account, account_binding = _resolve_account_binding(harness, profile, group, env)
     # The ONE resolution. Everything downstream that must agree about which
     # account this session runs on reads `launch_env`, never `env`.
-    launch_env = {**env, **account_binding}
+    account, account_binding, scrub, launch_env = resolve_launch_environment(
+        harness, profile, group, env
+    )
     _report_account(account, account_binding)
     _warn_if_account_has_no_config(account, launch_env)
 
     _assert_trust(profile, launch_dir, trust_root, launch_env)
-
-    scrub = harness.session_launch_env_unset()
-    if scrub is None:
-        raise _unsupported_harness(harness, profile, "cannot launch sessions")
 
     # The scrub rides INSIDE the pane command, as `env -u` operands sitting
     # between tmux's own options and the harness argv. Scrubbing camp's own
@@ -572,8 +623,13 @@ def launch_session(
     else:
         _refuse_if_already_live(harness, session_id, tmux_name, launch_dir, launch_env)
 
-    scrub_set = set(scrub)
-    spawn_env = {k: v for k, v in launch_env.items() if k not in scrub_set}
+    # camp's own spawn environment states the binding NOWHERE. `tmux
+    # new-session` starts a SERVER when none is running, and that server's
+    # environment becomes the global every later pane inherits — so a value
+    # carried here would outlive this launch and place unrelated sessions on
+    # this group's account. The pane operand is the only statement, and it holds
+    # for a fresh server and a pre-existing one alike.
+    spawn_env = {k: v for k, v in launch_env.items() if k not in account_binding}
 
     def _kill_session_quietly(name: str) -> None:
         """Best-effort reclaim of a session name after an indeterminate spawn.
@@ -724,6 +780,26 @@ def _seeded_trust_fact(launched: LaunchedSession, env: dict[str, str]) -> str:
     return f"camp seeds trust into {path}, which {state}"
 
 
+#: The labels the failure message uses to separate what camp checked from what it
+#: guesses. Named once so the excerpt neutralizer and the message that writes
+#: them cannot drift apart.
+_REPORT_LABELS = ("verified:", "inferred:")
+
+
+def _neutralize_labels(pane: str) -> str:
+    """*pane* with camp's own report labels defused.
+
+    The excerpt is whatever was on screen, and nothing constrains it: a prompt,
+    a transcript, a filename. Interpolated raw it can counterfeit the labels that
+    are the message's only structure, so a reader — and anything locating the
+    inferred cause by that label — finds the pane's copy first. A space before
+    the colon leaves the text legible and stops it matching.
+    """
+    for label in _REPORT_LABELS:
+        pane = pane.replace(label, f"{label[:-1]} :")
+    return pane
+
+
 def _confirmation_failure_message(
     launched: LaunchedSession,
     *,
@@ -752,7 +828,9 @@ def _confirmation_failure_message(
             "on screen"
         )
     else:
-        indented = "\n".join(f"    | {line}" for line in pane.split("\n"))
+        indented = "\n".join(
+            f"    | {line}" for line in _neutralize_labels(pane).split("\n")
+        )
         verified.append(f"verified: the pane was showing:\n{indented}")
     return (
         f"camp: launch of session {launched.session_id} could not be confirmed\n"
