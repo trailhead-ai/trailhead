@@ -125,6 +125,75 @@ class TestUnknownCommandHint:
         assert "Run 'lore --help'" in result.stderr
 
 
+class TestNearestMatchSuggestion:
+    """Nearest-match "did you mean" on an unrecognized verb, at every level.
+
+    The redirect table alone only ever reached top-level tokens; the verbs that
+    actually get mistyped are nested (``vault list``, ``task tree``). A close
+    match is suggested; a distant one is not — a suggestion that fires on a
+    string nothing resembles is worse than silence.
+    """
+
+    def test_nested_vault_list_suggests_ls(self, tmp_path):
+        result = _run(["vault", "list"], tmp_path)
+        assert result.returncode != 0
+        assert "did you mean 'ls'" in result.stderr
+
+    def test_nested_task_tree_suggests_graph(self, tmp_path):
+        result = _run(["task", "tree"], tmp_path)
+        assert result.returncode != 0
+        assert "did you mean 'graph'" in result.stderr
+
+    def test_top_level_vaults_suggests_vault(self, tmp_path):
+        result = _run(["vaults"], tmp_path)
+        assert result.returncode != 0
+        assert "did you mean 'vault'" in result.stderr
+
+    def test_open_choice_token_is_not_called_unrecognized(self, tmp_path):
+        """``lore resolve`` accepts any vault name — no token of its is unrecognized."""
+        result = _run(["resolve", "some-vault", "--bogus-flag"], tmp_path)
+        assert result.returncode != 0
+        assert "unrecognized action" not in result.stderr
+        assert "did you mean" not in result.stderr
+
+    def test_distant_nested_token_suggests_nothing(self, tmp_path):
+        """``session status`` has no near match among candidate/referenced/show."""
+        result = _run(["session", "status"], tmp_path)
+        assert result.returncode != 0
+        assert "did you mean" not in result.stderr
+        assert "Run 'lore session --help'" in result.stderr
+
+    @pytest.mark.parametrize(
+        "args",
+        [
+            ["record", "remove"],
+            ["vault", "remove"],
+            ["record", "read"],
+            ["start"],
+            ["end"],
+        ],
+        ids=["record-remove", "vault-remove", "record-read", "start", "end"],
+    )
+    def test_plausible_but_distant_token_suggests_nothing(self, args, tmp_path):
+        """A confidently wrong suggestion is worse than silence.
+
+        Each of these is a plausible thing to type whose nearest neighbour by
+        raw string distance is unrelated (``remove``→``resolve``,
+        ``start``→``status``, ``end``→``reindex``). They must fall
+        through to the generic fallback instead.
+        """
+        result = _run(args, tmp_path)
+        assert result.returncode != 0
+        assert "did you mean" not in result.stderr
+
+    def test_nested_miss_points_at_the_subcommand_help(self, tmp_path):
+        """A nested miss must point at its own subcommand's help, not the root dump."""
+        result = _run(["task", "children"], tmp_path)
+        assert result.returncode != 0
+        assert "unrecognized action 'children'" in result.stderr
+        assert "Run 'lore task --help'" in result.stderr
+
+
 class TestArgparseErrorPathPerGroup:
     """argparse's own invalid-choice / missing-required exit(2) path, per group.
 
@@ -162,8 +231,39 @@ class TestArgparseErrorPathPerGroup:
         assert result.returncode == 2
         assert "required" in result.stderr
         assert "unknown command" not in result.stderr
+        # A valid command failing on a sub-argument is not an unrecognized verb
+        # and must not attract a nearest-match suggestion.
+        assert "did you mean" not in result.stderr
 
     def test_no_command_exits_two(self, tmp_path):
         """A bare ``lore`` with no subcommand exits 2 (top-level required)."""
         result = _run([], tmp_path)
         assert result.returncode == 2
+
+
+class TestAbbreviationEscapeIsBounded:
+    """The abbreviation escape must not claim a very short choice as any token's.
+
+    ``_reads_as_abbreviation`` lets a subsequence pair through below the distance
+    cutoff so ``list``->``ls`` survives. Length-gating only the *typed* token
+    leaves the two-character ``ls`` free to be read as the abbreviation of every
+    longer word containing an 'l' before an 's' — ``flush``, ``logs``, ``labels``.
+    Those are confidently wrong, which the whole feature exists to avoid.
+    """
+
+    @pytest.mark.parametrize(
+        "args",
+        [
+            ["vault", "flush"],
+            ["vault", "logs"],
+            ["vault", "labels"],
+            ["vault", "candidate"],
+        ],
+        ids=["flush", "logs", "labels", "candidate"],
+    )
+    def test_distant_pair_with_a_wide_length_gap_suggests_nothing(self, args, tmp_path):
+        result = _run(args, tmp_path)
+        assert result.returncode != 0
+        assert "did you mean" not in result.stderr, (
+            f"lore {' '.join(args)} offered a suggestion: {result.stderr}"
+        )

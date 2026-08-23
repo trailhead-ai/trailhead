@@ -303,7 +303,7 @@ def test_update_status_sets_field(tmp_path):
 
 
 def test_update_keyword_appends_and_unsets(tmp_path):
-    """--keyword appends to the existing list; --unset-keyword removes one item."""
+    """--keyword appends to the existing list; --unset-keyword removes every match."""
     vault, state = _make_vault(tmp_path)
     record_id = _create(vault, state)  # keywords == ["foo"]
 
@@ -322,6 +322,33 @@ def test_update_keyword_appends_and_unsets(tmp_path):
     )
     assert r2.returncode == 0, r2.stderr
     assert _find_sidecar(vault, record_id)["keywords"] == ["bar"]
+
+
+def test_update_unset_keyword_removes_every_occurrence(tmp_path):
+    """--unset-keyword clears every matching entry, not just the first.
+
+    ``--keyword`` appends without dedupe, so a list can hold the same value
+    twice; the remover filters the whole list. This pins the contract the shared
+    --unset-* help rule states.
+    """
+    vault, state = _make_vault(tmp_path)
+    record_id = _create(vault, state)  # keywords == ["foo"]
+
+    r = _run(
+        ["record", "update", record_id, "--keyword", "dup", "--keyword", "dup"],
+        vault=vault,
+        state_dir=state,
+    )
+    assert r.returncode == 0, r.stderr
+    assert _find_sidecar(vault, record_id)["keywords"] == ["foo", "dup", "dup"]
+
+    r2 = _run(
+        ["record", "update", record_id, "--unset-keyword", "dup"],
+        vault=vault,
+        state_dir=state,
+    )
+    assert r2.returncode == 0, r2.stderr
+    assert _find_sidecar(vault, record_id)["keywords"] == ["foo"]
 
 
 def test_update_set_flag_is_unrecognized(tmp_path):
@@ -1650,7 +1677,7 @@ def _mk_task(vault, state, title, *, extra=None, body="body\n"):
 
 
 def test_unset_depends_on_and_parent_round_trip(tmp_path):
-    """--unset-depends-on removes one dep; --unset-parent clears the parent scalar."""
+    """--unset-depends-on removes a matching dep; --unset-parent clears the parent scalar."""
     vault, state = _make_vault(tmp_path)
     rid = _mk_task(vault, state, "a", extra=["--depends-on", "x", "--depends-on", "y", "--parent", "p"])
     before = _find_sidecar(vault, rid)

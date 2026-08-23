@@ -8,6 +8,7 @@ does not restate it, so the two can't drift.
 from __future__ import annotations
 
 import argparse
+import difflib
 import sys
 
 from . import areas, flush, init, pipeline, record, resolve, search, session, sync, task, vault
@@ -25,12 +26,55 @@ _DISPATCH_HINTS: dict[str, str] = {
 }
 
 
-def _unknown_command_hint(command: str) -> str:
-    """Return a 'did you mean …?' hint for an unrecognized command, or an empty string."""
+# Nested synonym redirects, keyed by (parent prog, typed token). String
+# distance cannot reach these — ``tree``/``graph`` share almost no characters,
+# and ``list``/``ls`` scores 0.67, below the cutoff and indistinguishable from
+# ``logs``/``ls`` by any generic rule — so, like the top-level rename table,
+# they are named explicitly.
+_ACTION_HINTS: dict[tuple[str, str], str] = {
+    ("lore task", "tree"): "graph",
+    ("lore vault", "list"): "ls",
+}
+
+# Minimum similarity for a nearest-match suggestion. A suggestion that fires on
+# a string nothing resembles is worse than silence, and difflib's ratio is
+# generous with words that merely share a prefix: ``remove``/``resolve`` scores
+# 0.77, ``start``/``status`` 0.73, ``remove``/``rename`` 0.67. The bar sits
+# above that whole band so only a near-identical token suggests anything.
+_SUGGESTION_CUTOFF = 0.8
+
+
+def _choice_names(action: "argparse._SubParsersAction") -> list[str]:
+    """Return *action*'s subcommand names, or [] when its choices aren't enumerable."""
+    try:
+        return list(action.choices)
+    except TypeError:
+        # ``lore resolve`` accepts any token via a custom choices object.
+        return []
+
+
+def _nearest_choice(token: str, choices: list[str]) -> str:
+    """Return the closest of *choices* to *token*, or an empty string."""
+    matches = difflib.get_close_matches(token, choices, n=1, cutoff=_SUGGESTION_CUTOFF)
+    return matches[0] if matches else ""
+
+
+def _unknown_command_hint(command: str, choices: list[str]) -> str:
+    """Return a 'did you mean …?' hint for an unrecognized top-level command.
+
+    The rename table wins over string distance: ``recall``→``search`` and
+    ``set-status``→``record update --status`` are renames no edit distance finds.
+    """
     if command in _DISPATCH_HINTS:
-        replacement = _DISPATCH_HINTS[command]
-        return f"did you mean 'lore {replacement}'?"
-    return ""
+        return f"did you mean 'lore {_DISPATCH_HINTS[command]}'?"
+    nearest = _nearest_choice(command, choices)
+    return f"did you mean '{nearest}'?" if nearest else ""
+
+
+def _unknown_action_hint(prog: str, action_name: str, choices: list[str]) -> str:
+    """Return a 'did you mean …?' hint for an unrecognized nested action."""
+    replacement = _ACTION_HINTS.get((prog, action_name)) or _nearest_choice(action_name, choices)
+    return f"did you mean '{replacement}'?" if replacement else ""
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -55,16 +99,38 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _known_commands(parser: argparse.ArgumentParser) -> frozenset[str]:
-    """Return the set of registered top-level subcommand names.
+def _find_unrecognized_token(
+    parser: argparse.ArgumentParser, raw: list[str]
+) -> "tuple[str, str, list[str]] | None":
+    """Locate the first subcommand token *raw* fails to resolve against *parser*.
 
-    Introspects the parser's ``_SubParsersAction`` so the unknown-command hint
-    can tell a genuinely unrecognized command from a *valid* command
-    that merely failed on a sub-argument (e.g. ``record create`` missing
-    ``--kind``) — the latter must NOT be mislabelled "unknown command".
+    Returns ``(parent prog, token, sibling choices)``, or None when every
+    subcommand token resolves. Walking the whole subparser chain — rather than
+    looking only at ``raw[0]`` — is what lets the hint reach nested verbs, which
+    are where mistyped commands actually land. Returning None for a resolvable
+    chain is what keeps a *valid* command that merely failed on a sub-argument
+    (``record create`` without ``--kind``) from being labelled unrecognized.
     """
-    action = find_subparsers_action(parser)
-    return frozenset(action.choices) if action is not None else frozenset()
+    current = parser
+    prog = parser.prog
+    for token in raw:
+        if token.startswith("-"):
+            # An option ends the subcommand chain; the rest belongs to *current*.
+            return None
+        action = find_subparsers_action(current)
+        if action is None:
+            return None
+        choices = _choice_names(action)
+        if not choices:
+            # An open-ended choices object (``lore resolve <vault>``) accepts
+            # any token, so nothing here is unrecognized.
+            return None
+        if token in choices:
+            current = action.choices[token]
+            prog = f"{prog} {token}"
+            continue
+        return (prog, token, choices)
+    return None
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -76,22 +142,24 @@ def main(argv: list[str] | None = None) -> int:
     try:
         args = parser.parse_args(list(raw))
     except SystemExit as exc:
-        cmd = raw[0] if raw else ""
-        # Only treat this as an unknown command when the first token is not a
-        # flag and not a registered subcommand. A valid command that fails on a
-        # sub-argument re-raises argparse's own error untouched (do
-        # not swallow / mislabel legitimate argparse errors).
-        if exc.code == 2 and cmd and not cmd.startswith("-") and cmd not in _known_commands(parser):
-            hint = _unknown_command_hint(cmd)
-            if hint:
-                print(f"lore: unknown command {cmd!r}. {hint}", file=sys.stderr)
+        unrecognized = _find_unrecognized_token(parser, list(raw)) if exc.code == 2 else None
+        if unrecognized is not None:
+            prog, token, choices = unrecognized
+            if prog == parser.prog:
+                hint = _unknown_command_hint(token, choices)
+                label = f"{prog}: unknown command {token!r}."
             else:
-                # For any unrecognized command, print a generic prompt so agents
-                # can distinguish a typo from a real error.
-                print(
-                    f"lore: unknown command {cmd!r}. "
-                    f"Run 'lore --help' for a list of subcommands.",
-                    file=sys.stderr,
-                )
+                hint = _unknown_action_hint(prog, token, choices)
+                label = f"{prog}: unrecognized action {token!r}."
+            # Without a hint, point at the help for the level the token missed
+            # at — the root dump is the largest help in the CLI, and a nested
+            # miss only ever needed its own subcommand's list.
+            if hint:
+                tail = hint
+            elif prog == parser.prog:
+                tail = "Run 'lore --help' for a list of subcommands."
+            else:
+                tail = f"Run '{prog} --help' for a list of actions."
+            print(f"{label} {tail}", file=sys.stderr)
         raise
     return args.func(args)

@@ -16,7 +16,7 @@ Dedicated per-field flags replaced the generic ``--set``/``--unset``
 patch idiom. This file now exercises:
   - ``--status`` (scalar) sets the field; off-vocab status → non-zero, vocab named.
   - list flags ``--keyword`` / ``--related-file`` / ``--related-url`` /
-    ``--related-phase`` append; ``--unset-<field> VALUE`` removes one item.
+    ``--related-phase`` append; ``--unset-<field> VALUE`` removes every match.
   - ``--related <kind>=<name>`` appends to that kind's list; empty kind/name and a
     bad kind are rejected.
   - ``keywords`` is optional: create with no ``--keyword`` succeeds.
@@ -328,7 +328,7 @@ def test_status_off_vocab_nonzero_names_vocab(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# repeatable list flags append; --unset-<field> VALUE removes one
+# repeatable list flags append; --unset-<field> VALUE removes every match
 # ---------------------------------------------------------------------------
 
 
@@ -383,7 +383,7 @@ def test_unset_keyword_removes_single_item(tmp_path):
 
 
 def test_related_url_flag_appends_and_unsets(tmp_path):
-    """--related-url appends to related-urls; --unset-related-url removes one."""
+    """--related-url appends to related-urls; --unset-related-url removes every match."""
     vault, state = _make_vault(tmp_path)
     r = _run(
         _BASE_ARGS
@@ -404,7 +404,7 @@ def test_related_url_flag_appends_and_unsets(tmp_path):
 
 
 def test_unset_related_flag_removes_one_name_via_update(tmp_path):
-    """--unset-related KIND=NAME removes one name from related[KIND] on update."""
+    """--unset-related KIND=NAME removes every occurrence of NAME from related[KIND]."""
     vault, state = _make_vault(tmp_path)
     r = _run(
         _BASE_ARGS + ["--related", "task=alpha", "--related", "task=beta"],
@@ -1831,3 +1831,171 @@ def test_existing_numbered_adr_record_remains_readable_and_updatable(tmp_path):
     assert update.returncode == 0, update.stderr
     sidecar = _find_sidecar(vault, "adr/adr-001-legacy-decision")
     assert sidecar["status"] == "superseded"
+
+
+# ---------------------------------------------------------------------------
+# --help size + flag-visibility pins for ``record create`` / ``record update``
+# ---------------------------------------------------------------------------
+#
+# These two verbs are the most flag-heavy surfaces in the CLI, and agents pay
+# the full rendered help on every lookup. The byte budgets below are the
+# acceptance gate for the trim; the flag-visibility pin is what keeps the budget
+# from being met by hiding flags (``argparse.SUPPRESS``) rather than by writing
+# the prose once.
+
+_HELP_BYTE_BUDGETS = {"record create": 3200, "record update": 3550}
+
+# Every long option rendered in each verb's ``--help`` today. A trim may
+# reword a help string but may not remove a flag from the listing.
+_VISIBLE_LONG_OPTIONS = {
+    "record create": (
+        "--annotation", "--depends-on", "--help", "--keyword", "--kind",
+        "--label", "--parent", "--product", "--related", "--related-file",
+        "--related-phase", "--related-url", "--repo", "--status", "--suite",
+        "--team", "--title", "--unset-annotation", "--unset-depends-on",
+        "--unset-keyword", "--unset-label", "--unset-parent", "--unset-related",
+        "--unset-related-file", "--unset-related-phase", "--unset-related-url",
+        "--vault",
+    ),
+    "record update": (
+        "--annotation", "--depends-on", "--diff", "--help", "--keyword",
+        "--label", "--parent", "--product", "--related", "--related-file",
+        "--related-phase", "--related-url", "--repo", "--status", "--suite",
+        "--team", "--title", "--unset-annotation", "--unset-depends-on",
+        "--unset-keyword", "--unset-label", "--unset-parent", "--unset-related",
+        "--unset-related-file", "--unset-related-phase", "--unset-related-url",
+        "--vault",
+    ),
+}
+
+
+def _render_leaf_help(leaf_name, monkeypatch):
+    """Render one leaf parser's ``--help`` at a pinned 80-column width.
+
+    argparse wraps to the ambient terminal width, so the byte budgets are only
+    meaningful against a fixed width.
+    """
+    from lore.argparse_util import _leaf_parsers
+    from lore.cli.dispatch import build_parser
+
+    monkeypatch.setenv("COLUMNS", "80")
+    return _leaf_parsers(build_parser())[leaf_name].format_help()
+
+
+@pytest.mark.parametrize("leaf", sorted(_HELP_BYTE_BUDGETS), ids=lambda s: s.replace(" ", "-"))
+def test_record_help_stays_within_byte_budget(leaf, monkeypatch):
+    """``record create``/``record update`` --help stay at or under their budgets."""
+    size = len(_render_leaf_help(leaf, monkeypatch).encode("utf-8"))
+    budget = _HELP_BYTE_BUDGETS[leaf]
+    assert size <= budget, f"lore {leaf} --help is {size} bytes, budget is {budget}"
+
+
+@pytest.mark.parametrize("leaf", sorted(_VISIBLE_LONG_OPTIONS), ids=lambda s: s.replace(" ", "-"))
+def test_record_help_still_lists_every_long_option(leaf, monkeypatch):
+    """No flag may be hidden (argparse.SUPPRESS) to buy the byte reduction.
+
+    Matched against the rendered option line — argparse indents each by exactly
+    two spaces, ahead of any short alias — not by containment anywhere in the
+    text. These names nest (``--related`` inside ``--related-file``) and several
+    are also named in the description and epilog prose, so a containment check
+    would report a deleted flag as still listed.
+    """
+    import re
+
+    help_text = _render_leaf_help(leaf, monkeypatch)
+    missing = [
+        opt for opt in _VISIBLE_LONG_OPTIONS[leaf]
+        if not re.search(
+            rf"^  (?:-\S+, )*{re.escape(opt)}(?![\w-])", help_text, re.MULTILINE
+        )
+    ]
+    assert not missing, f"lore {leaf} --help no longer lists: {missing}"
+
+
+def test_record_update_vault_help_disclaims_re_routing(monkeypatch):
+    """``update --vault`` must say it targets the record where it already is.
+
+    The scope flags re-route and auto-move a record; ``--vault`` does not. With
+    that contrast stated only on the scope-flag side, a reader has no reason not
+    to read ``--vault NAME`` as "put the record in NAME" — the one reading that
+    silently writes to the wrong vault.
+    """
+    import re
+
+    help_text = re.sub(r"\s+", " ", _render_leaf_help("record update", monkeypatch))
+    assert "never re-routes" in help_text, (
+        "update --vault help must disclaim re-routing, to contrast with the "
+        "scope flags that do re-route and auto-move"
+    )
+
+
+@pytest.mark.parametrize("leaf", sorted(_HELP_BYTE_BUDGETS), ids=lambda s: s.replace(" ", "-"))
+def test_unset_pairing_rule_does_not_promise_single_entry_removal(leaf, monkeypatch):
+    """The shared --unset-* rule must not say a remover drops one entry.
+
+    ``apply_record_fields`` filters the whole list (``[v for v in current if v
+    != value]``), so every matching entry goes. Prose that promises one leaves
+    an agent expecting a duplicate to survive a removal that in fact clears it.
+    """
+    import re
+
+    help_text = re.sub(r"\s+", " ", _render_leaf_help(leaf, monkeypatch))
+
+    assert "drops one entry" not in help_text, (
+        "the shared --unset-* rule promises single-entry removal, but the list "
+        "removers drop every matching entry"
+    )
+    assert "drops every matching entry" in help_text
+
+
+@pytest.mark.parametrize("leaf", sorted(_HELP_BYTE_BUDGETS), ids=lambda s: s.replace(" ", "-"))
+def test_help_says_which_setters_repeat(leaf, monkeypatch):
+    """The help must still signal that the list/map setters accept many values.
+
+    Per-flag "(repeatable)" was what said so before the trim; with the per-flag
+    prose gone, the shared rule has to name the repeating family, or --label and
+    --keyword read as single-use and an agent writes one call per value.
+    """
+    import re
+
+    help_text = re.sub(r"\s+", " ", _render_leaf_help(leaf, monkeypatch))
+    assert "--keyword/--related*/--depends-on/--label/--annotation setters repeat" in help_text
+
+
+@pytest.mark.parametrize("leaf", sorted(_HELP_BYTE_BUDGETS), ids=lambda s: s.replace(" ", "-"))
+def test_unset_parent_carries_its_own_help_string(leaf, monkeypatch):
+    """``--unset-parent`` is outside the repeatable-flag rule, so it needs its own line.
+
+    The shared rule scopes itself to the repeatable flags; ``--unset-parent`` is
+    neither repeatable nor value-taking, leaving it the one flag on either verb
+    with no description anywhere.
+    """
+    import re
+
+    help_text = re.sub(r"\s+", " ", _render_leaf_help(leaf, monkeypatch))
+    assert "--unset-parent Clear this task's parent." in help_text
+
+
+@pytest.mark.parametrize("leaf", sorted(_HELP_BYTE_BUDGETS), ids=lambda s: s.replace(" ", "-"))
+def test_unset_pairing_rule_does_not_claim_a_uniform_value_shape(leaf, monkeypatch):
+    """The shared --unset-* rule must not promise every remover takes the same value.
+
+    Three removers do not: ``--unset-label``/``--unset-annotation`` take a bare
+    KEY where their setters take KEY=VALUE, and ``--unset-parent`` is a flag
+    taking no value at all. Those three carry no help string of their own after
+    the trim, so this shared sentence is the only thing describing them — and an
+    agent applying it literally writes ``--unset-parent TASK`` and fails. Each
+    remover's real shape is already rendered as its metavar; the rule must send
+    the reader there rather than assert a shape that is wrong for three flags.
+    """
+    import re
+
+    help_text = re.sub(r"\s+", " ", _render_leaf_help(leaf, monkeypatch))
+
+    assert "remover taking the same value" not in help_text, (
+        "the shared --unset-* rule claims a uniform value shape, but "
+        "--unset-label takes KEY and --unset-parent takes no value"
+    )
+    # The metavars that make the rule's redirect truthful must actually render.
+    assert "--unset-label KEY" in help_text
+    assert "--unset-annotation KEY" in help_text
