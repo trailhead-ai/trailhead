@@ -45,12 +45,14 @@ invocation shape. The resolver's env= injection is used for all state paths.
 from __future__ import annotations
 
 import json
+import signal
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -1494,3 +1496,346 @@ class TestStatusTwoFacts:
         _code, report = provision_status_code(g["group"], "wf9", env=g["env"])
         assert status_header(report) == "failed"
 
+
+
+# ---------------------------------------------------------------------------
+# camp setup: activate-phase retry that does not hold the reconcile lock.
+#
+# Test contract:
+# - camp setup retries a member's FAILED activate-phase task, running its
+#   cleanup first.
+# - An activate-phase task recorded "ok" is not re-run.
+# - Lock-scope: while camp setup runs a long activate-phase task, a concurrent
+#   reconcile on the same slug is not blocked for the task's duration.
+# - The manifest mutation itself still happens under .reconcile.lock.
+# - A crash mid-task leaves no lock held and the member retryable.
+# - camp setup --status stays strictly read-only.
+# ---------------------------------------------------------------------------
+
+
+def _activate_task(
+    name: str, cmds: list[list[str]], *, required: bool = True, cleanup: list[str] | None = None
+) -> dict[str, Any]:
+    """Build a member activate-phase task in the config-resolved shape."""
+    task: dict[str, Any] = {
+        "name": name,
+        "phase": "activate",
+        "required": required,
+        "timeout_seconds": None,
+        "steps": [{"name": name, "cmd": cmd} for cmd in cmds],
+    }
+    if cleanup is not None:
+        task["cleanup"] = cleanup
+    return task
+
+
+def _seed_ready_member_with_activate_task(
+    tmp_path: Path,
+    group_name: str,
+    slug: str,
+    member_name: str,
+    *,
+    task_state: str,
+    env: dict[str, str],
+) -> Path:
+    """Seed a manifest with one member: provision_state ready, activated,
+    and a single activate-phase task recorded at `task_state` (or absent
+    entirely when task_state is None). Returns the member's worktree dir."""
+    from camp.group.manifest import manifest_path_for, write_central_manifest
+
+    mpath = manifest_path_for(group_name, slug, env=env)
+    mpath.parent.mkdir(parents=True, exist_ok=True)
+    wt_path = mpath.parent / member_name
+    wt_path.mkdir(parents=True, exist_ok=True)
+
+    member_entry: dict[str, Any] = {
+        "name": member_name,
+        "repo_root": "/tmp/fake-repo",
+        "worktree_path": str(wt_path),
+        "provision_state": "ready",
+        "activated": True,
+    }
+    if task_state is not None:
+        member_entry["tasks"] = {"npm-ci": {"state": task_state}}
+
+    write_central_manifest(
+        mpath,
+        {
+            "schema_version": 1,
+            "group": group_name,
+            "slug": slug,
+            "branch": f"worktree-{slug}",
+            "members": [member_entry],
+        },
+    )
+    return wt_path
+
+
+class TestSetupActivatePhaseRetry:
+    def test_retries_failed_activate_task_with_cleanup_first(self, tmp_path):
+        """camp setup retries a FAILED activate-phase task, running cleanup
+        first — reusing the same body camp activate's detached run executes."""
+        from camp.provision.lifecycle import cmd_setup_group
+
+        group_name = "actgroup"
+        member_name = "repo_a"
+        slug = "act-retry"
+        env = _camp_state_env(tmp_path)
+
+        _seed_ready_member_with_activate_task(
+            tmp_path, group_name, slug, member_name, task_state="failed", env=env
+        )
+
+        task = _activate_task(
+            "npm-ci", [["npm", "ci"]], cleanup=["rm", "-rf", "node_modules"]
+        )
+        group = _make_group_config(group_name, [{"name": member_name, "repo_root": "/tmp/fake-repo", "tasks": [task]}])
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            cmd_setup_group(group, slug, env=env)
+
+        assert mock_run.call_count == 2
+        assert mock_run.call_args_list[0][0][0] == ["rm", "-rf", "node_modules"]
+        assert mock_run.call_args_list[1][0][0] == ["npm", "ci"]
+
+        from camp.group.manifest import manifest_path_for, read_central_manifest
+
+        mpath = manifest_path_for(group_name, slug, env=env)
+        data = read_central_manifest(mpath)
+        assert data["members"][0]["tasks"]["npm-ci"]["state"] == "ok"
+
+    def test_does_not_rerun_activate_task_recorded_ok(self, tmp_path):
+        """A task recorded 'ok' is not re-run by camp setup."""
+        from camp.provision.lifecycle import cmd_setup_group
+
+        group_name = "actgroup"
+        member_name = "repo_a"
+        slug = "act-noop"
+        env = _camp_state_env(tmp_path)
+
+        _seed_ready_member_with_activate_task(
+            tmp_path, group_name, slug, member_name, task_state="ok", env=env
+        )
+
+        task = _activate_task("npm-ci", [["npm", "ci"]])
+        group = _make_group_config(group_name, [{"name": member_name, "repo_root": "/tmp/fake-repo", "tasks": [task]}])
+
+        with patch("subprocess.run") as mock_run:
+            cmd_setup_group(group, slug, env=env)
+
+        mock_run.assert_not_called()
+
+    def test_activate_retry_does_not_hold_reconcile_lock_across_task_subprocess(self, tmp_path):
+        """The point of the slice: while camp setup runs a long activate-phase
+        task, a concurrent reconcile on the same slug must not stall for the
+        task's duration."""
+        import fcntl
+
+        from camp.group.manifest import lock_path_for
+        from camp.provision.lifecycle import cmd_setup_group
+
+        group_name = "actgroup"
+        member_name = "repo_a"
+        slug = "act-lock-scope"
+        env = _camp_state_env(tmp_path)
+
+        _seed_ready_member_with_activate_task(
+            tmp_path, group_name, slug, member_name, task_state="failed", env=env
+        )
+
+        task = _activate_task("npm-ci", [["npm", "ci"]])
+        group = _make_group_config(group_name, [{"name": member_name, "repo_root": "/tmp/fake-repo", "tasks": [task]}])
+
+        task_started = threading.Event()
+
+        def slow_run(*args, **kwargs):
+            task_started.set()
+            time.sleep(1.5)
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        errors: list[Exception] = []
+
+        def run_setup():
+            try:
+                with patch("subprocess.run", side_effect=slow_run):
+                    cmd_setup_group(group, slug, env=env)
+            except Exception as e:  # pragma: no cover - surfaced via assert below
+                errors.append(e)
+
+        t = threading.Thread(target=run_setup)
+        t.start()
+        try:
+            assert task_started.wait(timeout=5.0), "activate task never started"
+
+            from camp.group.resolve import central_state_dir
+
+            ws_dir = central_state_dir(group_name, env=env) / "worktrees" / slug
+            lock_path = lock_path_for(ws_dir)
+
+            start = time.monotonic()
+            probe_fd = open(str(lock_path), "w")
+            fcntl.flock(probe_fd.fileno(), fcntl.LOCK_EX)
+            elapsed = time.monotonic() - start
+            fcntl.flock(probe_fd.fileno(), fcntl.LOCK_UN)
+            probe_fd.close()
+
+            assert elapsed < 0.5, (
+                f"acquiring .reconcile.lock took {elapsed:.2f}s while the activate "
+                "task was running — the lock must not be held across the task subprocess"
+            )
+        finally:
+            t.join(timeout=10.0)
+        assert not errors, errors
+
+    def test_activate_retry_manifest_write_happens_under_reconcile_lock(self, tmp_path):
+        """Narrowing lock scope must not drop the lock from the write it
+        protects: the manifest persist still happens while .reconcile.lock is
+        held."""
+        import fcntl
+
+        import camp.group.manifest as manifest_mod
+        from camp.provision.lifecycle import cmd_setup_group
+
+        group_name = "actgroup"
+        member_name = "repo_a"
+        slug = "act-write-locked"
+        env = _camp_state_env(tmp_path)
+
+        _seed_ready_member_with_activate_task(
+            tmp_path, group_name, slug, member_name, task_state="failed", env=env
+        )
+
+        task = _activate_task("npm-ci", [["npm", "ci"]])
+        group = _make_group_config(group_name, [{"name": member_name, "repo_root": "/tmp/fake-repo", "tasks": [task]}])
+
+        from camp.group.resolve import central_state_dir
+
+        ws_dir = central_state_dir(group_name, env=env) / "worktrees" / slug
+        lock_path = manifest_mod.lock_path_for(ws_dir)
+
+        observed = {"locked_during_write": None}
+        original_write = manifest_mod.write_central_manifest
+
+        def spy_write(path, data):
+            probe_fd = open(str(lock_path), "w")
+            try:
+                fcntl.flock(probe_fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                observed["locked_during_write"] = False
+                fcntl.flock(probe_fd.fileno(), fcntl.LOCK_UN)
+            except OSError:
+                observed["locked_during_write"] = True
+            finally:
+                probe_fd.close()
+            return original_write(path, data)
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            with patch.object(manifest_mod, "write_central_manifest", side_effect=spy_write):
+                cmd_setup_group(group, slug, env=env)
+
+        assert observed["locked_during_write"] is True, (
+            "the manifest write must happen while .reconcile.lock is held"
+        )
+
+    def test_activate_retry_crash_mid_task_leaves_no_lock_held_and_member_retryable(
+        self, tmp_path
+    ):
+        """Killing camp setup while it's mid-way through an activate-phase
+        task's subprocess must leave BOTH .reconcile.lock and the member's
+        activate guard free, and the member's failed state intact for a
+        later retry."""
+        import fcntl
+        import json as _json
+
+        from camp.group.manifest import lock_path_for, manifest_path_for, read_central_manifest
+        from camp.provision.activation import member_guard_lock_path
+        from camp.provision.lifecycle import cmd_setup_group
+
+        group_name = "actgroup"
+        member_name = "repo_a"
+        slug = "act-crash"
+        env = _camp_state_env(tmp_path)
+
+        _seed_ready_member_with_activate_task(
+            tmp_path, group_name, slug, member_name, task_state="failed", env=env
+        )
+
+        task = {
+            "name": "npm-ci",
+            "phase": "activate",
+            "required": True,
+            "timeout_seconds": None,
+            "steps": [{"cmd": [sys.executable, "-c", "import time; time.sleep(5)"]}],
+        }
+        group = {
+            "group": {"name": group_name},
+            "members": [{"name": member_name, "repo_root": "/tmp/fake-repo", "tasks": [task]}],
+            "branch_pattern": "worktree-{slug}",
+        }
+
+        script = (
+            "import sys, json\n"
+            f"sys.path.insert(0, {str(_PLUGIN_DIR)!r})\n"
+            "from camp.provision.lifecycle import cmd_setup_group\n"
+            f"group = json.loads({_json.dumps(group)!r})\n"
+            f"env = json.loads({_json.dumps(env)!r})\n"
+            f"cmd_setup_group(group, {slug!r}, env=env)\n"
+        )
+        proc = subprocess.Popen([sys.executable, "-c", script])
+        try:
+            time.sleep(1.0)
+            proc.send_signal(signal.SIGKILL)
+            proc.wait(timeout=10)
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait(timeout=10)
+
+        from camp.group.resolve import central_state_dir
+
+        ws_dir = central_state_dir(group_name, env=env) / "worktrees" / slug
+
+        reconcile_lock_path = lock_path_for(ws_dir)
+        probe_fd = open(str(reconcile_lock_path), "w")
+        fcntl.flock(probe_fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        fcntl.flock(probe_fd.fileno(), fcntl.LOCK_UN)
+        probe_fd.close()
+
+        guard_path = member_guard_lock_path(ws_dir, member_name)
+        guard_fd = open(str(guard_path), "w")
+        fcntl.flock(guard_fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        fcntl.flock(guard_fd.fileno(), fcntl.LOCK_UN)
+        guard_fd.close()
+
+        mpath = manifest_path_for(group_name, slug, env=env)
+        data = read_central_manifest(mpath)
+        assert data["members"][0]["tasks"]["npm-ci"]["state"] == "failed", (
+            "a crashed retry must not corrupt the persisted task state"
+        )
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            cmd_setup_group(group, slug, env=env)
+
+        mock_run.assert_called_once()
+        data = read_central_manifest(mpath)
+        assert data["members"][0]["tasks"]["npm-ci"]["state"] == "ok"
+
+    def test_setup_status_never_calls_cmd_setup_group(self, tmp_path, monkeypatch):
+        """camp setup --status stays strictly read-only: no reconcile, no
+        worktree add, no manifest write."""
+        from camp.cli.lifecycle import _cmd_setup_group_cli
+        import camp.provision.lifecycle as lifecycle_mod
+
+        def boom(*args, **kwargs):
+            raise AssertionError("cmd_setup_group must not be called for --status")
+
+        monkeypatch.setattr(lifecycle_mod, "cmd_setup_group", boom)
+
+        group = _make_group_config("actgroup", [{"name": "repo_a", "repo_root": "/tmp/fake-repo", "tasks": []}])
+        env = _camp_state_env(tmp_path)
+
+        _cmd_setup_group_cli(
+            ["--status", "--name", "nonexistent-slug"], group, env, dry_run=False
+        )

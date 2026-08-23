@@ -329,9 +329,26 @@ def cmd_setup_group(
                         only ever be chasing an optional task here.
     Pending/failed members provisioned normally do NOT carry a `retry` field.
 
+    Activate-phase retry (execution mode: SYNCHRONOUS — `camp setup` waits for
+    it, unlike `camp activate`'s handoff to a detached process). After the
+    provision-phase pass above releases `.reconcile.lock`, every boot-ready
+    member carrying an activate-phase task recorded "failed" has that task
+    retried in a SECOND pass, by calling `run_activate_tasks_in_background`
+    (provision/activation.py) in-process — the same body `camp activate`'s
+    detached run executes, cleanup-first, against the manifest's persisted
+    per-task state. That function itself takes `.reconcile.lock` only for its
+    brief closing manifest persist, never across the task subprocess, so this
+    retry never holds the lock for the retried task's duration: a concurrent
+    `camp rm`, `camp activate`, or another slug's reconcile is never blocked
+    by it. This second pass runs OUTSIDE (after) the `with reconcile_lock`
+    block above rather than nested inside it — `.reconcile.lock` is not
+    reentrant, so nesting would deadlock the moment the retry tried to persist
+    its own result.
+
     Returns {"slug", "members": {name: {"provision_state", "reason"?, "retry"?}}}.
     """
-    from .reconcile import _has_outstanding_provision_tasks
+    from .activation import run_activate_tasks_in_background
+    from .reconcile import _has_outstanding_activate_tasks, _has_outstanding_provision_tasks
 
     group_name = group["group"]["name"]
     mpath = manifest_path_for(group_name, slug, env=env)
@@ -369,6 +386,17 @@ def cmd_setup_group(
 
             result, _ = _provision_member_and_flip(group, slug, member, entry, mpath, env=env)
             results[name] = result
+
+    # Second pass: activate-phase retry, deliberately outside the lock above.
+    data = read_central_manifest(mpath)
+    for entry in data.get("members", []):
+        name = entry["name"]
+        member = member_by_name.get(name)
+        if member is None or entry.get("provision_state") != "ready":
+            continue
+        if not _has_outstanding_activate_tasks(member, entry.get("tasks")):
+            continue
+        run_activate_tasks_in_background(group, slug, name, env=env)
 
     return {"slug": slug, "members": results}
 

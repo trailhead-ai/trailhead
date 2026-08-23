@@ -33,6 +33,12 @@ def _cmd_setup_group_cli(
       - `retry=none`          already ready, all tasks ok — nothing re-run
       - `retry=fixed`         outstanding tasks re-run and now all ok
       - `retry=still-failing` re-run but a task is still failed
+
+    `camp setup` is also the documented recovery path for a FAILED
+    activate-phase task (`npm ci`, a graph build, ...). That retry runs
+    SYNCHRONOUSLY — this call waits for it — but never holds .reconcile.lock
+    across the retried task's subprocess: see cmd_setup_group's docstring for
+    the lock-scope contract.
     """
     import json as _json
     from ..provision.lifecycle import cmd_setup_group

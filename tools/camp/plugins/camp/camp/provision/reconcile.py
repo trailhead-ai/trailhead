@@ -402,6 +402,26 @@ def _has_outstanding_provision_tasks(
     return False
 
 
+def _has_outstanding_activate_tasks(
+    member: dict[str, Any], tasks_map: dict[str, Any] | None
+) -> bool:
+    """True if the member has an activate-phase task recorded "failed".
+
+    Scoped to FAILED only — unlike `_has_outstanding_provision_tasks` (which
+    also treats a never-run task as outstanding), `camp setup` is a repair path
+    for activate-phase work already attempted at least once via `camp
+    activate`; it never spontaneously starts a member's activate-phase work
+    that `camp activate` has not yet initiated.
+    """
+    tasks_map = tasks_map or {}
+    for task in member.get("tasks") or []:
+        if task.get("phase", PROVISION_PHASE) != _ACTIVATE_PHASE:
+            continue
+        if (tasks_map.get(task["name"]) or {}).get("state") == "failed":
+            return True
+    return False
+
+
 def _adapt_task_steps(tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Adapt config-resolved tasks to the runner's shape.
 
