@@ -62,11 +62,11 @@ import subprocess
 import sys
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..group.manifest import workspace_dir
-from .claude_trust import pretrust_workspace
+from .claude_trust import config_file, pretrust_workspace
 from .profile import harness_for, resolve_harness_profile
 from .recovery import printable_path, sanitize_name_component
 
@@ -111,11 +111,17 @@ class LaunchedSession:
     launch, or the re-entered session's own id — and is the handle for
     programmatic follow-up. `tmux_name` is the operator's attach handle; they are
     deliberately different strings and both are reported.
+
+    `account` is the group's declared account, or None when it declared none.
+    `account_binding` is the environment the harness resolved that declaration
+    into — the assignments the pane carries and the trust pre-seed followed.
     """
 
     session_id: str
     tmux_name: str
     launch_dir: Path
+    account: str | None = None
+    account_binding: dict[str, str] = field(default_factory=dict)
 
 
 def _resolve_launch_dir(profile, slug: str, ws_dir: Path) -> Path:
@@ -251,6 +257,100 @@ def enumerate_records(
     return harness.parse_session_list(completed.stdout)
 
 
+def _resolve_account_binding(harness, profile, group: dict, env: dict[str, str]):
+    """The group's declared account and the environment the harness binds it to.
+
+    Resolved ONCE per launch and used twice — for the trust pre-seed's target and
+    for the pane's own assignments. Two reads of the same declaration are two
+    answers that can disagree, and the disagreement is invisible until a session
+    is trusted in one account's config file and started under another's.
+
+    Camp reads no key of the returned mapping: only the harness knows which
+    variables express an account, and a declared value is opaque here — every
+    check on it belongs to the harness that will honor it.
+
+    A harness that refuses a DECLARED account refuses the launch: camp was given
+    an instruction it cannot honor, and starting the session anyway would put it
+    on an account contradicting the group's own statement of intent.
+
+    A harness that refuses to resolve its DEFAULT is a different case, and is
+    warned about rather than refused. The refusal there is about a contradiction
+    already present in *env* — one camp neither created nor was asked to take a
+    side in — and every launch in such an environment would otherwise be blocked
+    on a condition no group declaration can clear. Camp says so loudly and lets
+    the session inherit, which is the state that environment was already in.
+    """
+    from trailhead.harness import HarnessError
+
+    account = (group.get("launch") or {}).get("account")
+    try:
+        binding = harness.session_launch_env_set(account, env=env)
+    except HarnessError as exc:
+        if account is not None:
+            raise LaunchError(
+                f"camp: refusing to launch — harness "
+                f"{harness.name or profile.binary!r} will not bind this session to "
+                f"the declared account {account}: {exc}"
+            ) from exc
+        print(
+            f"camp: no account declared and harness "
+            f"{harness.name or profile.binary!r} will not resolve a default here: "
+            f"{exc} — launching with NO account binding; the session inherits "
+            f"whichever account its environment carries",
+            file=sys.stderr,
+        )
+        return None, {}
+    if binding is None:
+        raise LaunchError(
+            f"camp: refusing to launch — harness {harness.name or profile.binary!r} "
+            f"(configured binary {profile.binary!r}) cannot launch sessions"
+        )
+    return account, dict(binding)
+
+
+def _report_account(account: str | None, binding: dict[str, str]) -> None:
+    """Name the account this launch chose, declared or defaulted.
+
+    A defaulted launch is reported as loudly as a declared one: camp sets the
+    harness's default explicitly rather than inheriting it, and an operator
+    reading the terminal must be able to tell which account a session landed on
+    without knowing whether their group declared anything.
+    """
+    where = " ".join(f"{key}={value}" for key, value in sorted(binding.items()))
+    source = (
+        f"declared account {account}"
+        if account is not None
+        else "the harness default (no account declared)"
+    )
+    print(f"camp: binding session to {source} — {where}", file=sys.stderr)
+
+
+def _warn_if_account_has_no_config(account: str | None, launch_env: dict[str, str]) -> None:
+    """Warn when a declared account has no harness config file yet.
+
+    Advisory, not a refusal: the directory may legitimately not exist before the
+    account is first signed into. But a typo'd declaration otherwise produces a
+    launch that stalls for reasons indistinguishable from every other cause, and
+    naming the path camp actually resolved is what makes the typo visible.
+
+    Every failure degrades to silence, the same posture as the other advisory
+    probes here — a launch must not hinge on camp's ability to describe it.
+    """
+    if account is None:
+        return
+    try:
+        target = config_file(launch_env)
+        missing = not target.exists()
+    except Exception:  # noqa: BLE001 — advisory probe, never blocks a launch
+        return
+    if missing:
+        print(
+            f"camp: declared account {account} has no harness config file at "
+            f"{target} — the session may land unauthenticated; check for a typo",
+            file=sys.stderr,
+        )
+
+
 def _report_live_sessions(harness, launch_dir: Path, env: dict[str, str]) -> None:
     """Best-effort notice about sessions already rooted under *launch_dir*.
 
@@ -334,8 +434,14 @@ def launch_session(
     id and the pane runs the harness's re-entry argv instead of a fresh-session
     one, so the session reclaims the very tmux name its first launch used.
 
-    Returns the session id and the tmux name to attach with. Raises
-    :class:`LaunchError` — with no process started — on any refusal path.
+    The group's ``[launch] account`` is resolved through the harness ONCE and the
+    result steers both halves of the launch that must agree about it: the trust
+    pre-seed's target file and the pane's own environment. Nothing here reads the
+    ambient environment for that answer.
+
+    Returns the session id, the tmux name to attach with, and the account binding
+    the session was started under. Raises :class:`LaunchError` — with no process
+    started — on any refusal path.
     """
     if (slug is None) == (root is None):
         raise ValueError(
@@ -398,7 +504,14 @@ def launch_session(
     if shutil.which("tmux") is None:
         raise LaunchError("camp: refusing to launch — tmux is not on PATH")
 
-    _assert_trust(profile, launch_dir, trust_root, env)
+    account, account_binding = _resolve_account_binding(harness, profile, group, env)
+    # The ONE resolution. Everything downstream that must agree about which
+    # account this session runs on reads `launch_env`, never `env`.
+    launch_env = {**env, **account_binding}
+    _report_account(account, account_binding)
+    _warn_if_account_has_no_config(account, launch_env)
+
+    _assert_trust(profile, launch_dir, trust_root, launch_env)
 
     scrub = harness.session_launch_env_unset()
     if scrub is None:
@@ -417,25 +530,22 @@ def launch_session(
     argv = ["tmux", "new-session", "-d", "-s", tmux_name, "-c", str(launch_dir), "env"]
     for name in scrub:
         argv += ["-u", name]
-    # The config dir rides the same pane-level `env` invocation, and for the same
-    # reason the scrub does: a pre-existing tmux SERVER's environment, not camp's,
-    # is what a new pane inherits, so a server started under a different Claude
-    # account would otherwise place every session on that account. A relative
-    # value is dropped rather than passed — it would resolve against the pane's
-    # cwd (the launch dir), pointing the session at a config dir inside the
-    # workspace; the trust pre-seed refuses one for the same reason.
-    config_dir = (env or {}).get("CLAUDE_CONFIG_DIR", "").strip()
-    if config_dir and os.path.isabs(config_dir):
-        argv += [f"CLAUDE_CONFIG_DIR={config_dir}"]
+    # The account binding rides the same pane-level `env` invocation, and for the
+    # same reason the scrub does: a pre-existing tmux SERVER's environment, not
+    # camp's, is what a new pane inherits, so a server started under a different
+    # account would otherwise place every session on that account. Sorted so the
+    # pane a stop reads back is the same string every time.
+    for key, value in sorted(account_binding.items()):
+        argv += [f"{key}={value}"]
     argv += list(harness_argv)
 
     if resume_session_id is None:
-        _report_live_sessions(harness, launch_dir, env)
+        _report_live_sessions(harness, launch_dir, launch_env)
     else:
-        _refuse_if_already_live(harness, session_id, tmux_name, launch_dir, env)
+        _refuse_if_already_live(harness, session_id, tmux_name, launch_dir, launch_env)
 
     scrub_set = set(scrub)
-    spawn_env = {k: v for k, v in env.items() if k not in scrub_set}
+    spawn_env = {k: v for k, v in launch_env.items() if k not in scrub_set}
 
     def _kill_session_quietly(name: str) -> None:
         """Best-effort reclaim of a session name after an indeterminate spawn.
@@ -489,7 +599,13 @@ def launch_session(
             f"{tmux_name}: {detail}"
         )
 
-    return LaunchedSession(session_id=session_id, tmux_name=tmux_name, launch_dir=launch_dir)
+    return LaunchedSession(
+        session_id=session_id,
+        tmux_name=tmux_name,
+        launch_dir=launch_dir,
+        account=account,
+        account_binding=account_binding,
+    )
 
 
 def _poll_enumerated(

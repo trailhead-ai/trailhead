@@ -283,3 +283,94 @@ class TestPretrustSurvivesStrip:
         group = {"group": {"name": "g"}, "members": [{"name": "r", "repo_root": "/tmp/r"}]}
         profile = resolve_harness_profile(group)
         assert profile.should_pretrust() is True
+
+
+# ---------------------------------------------------------------------------
+# camp core names no harness environment variable
+# ---------------------------------------------------------------------------
+
+
+#: The variable Claude Code binds an account with. It is the harness's word, and
+#: camp core must never spell it: camp asks `session_launch_env_set` for a
+#: mapping and merges it without reading a key.
+_HARNESS_ACCOUNT_VAR = "CLAUDE_CONFIG_DIR"
+
+
+def _docstring_nodes(tree: ast.Module) -> set[int]:
+    """`id()` of every Constant node that is a module/class/function docstring."""
+    ids: set[int] = set()
+    for node in ast.walk(tree):
+        if not isinstance(
+            node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
+        ):
+            continue
+        body = getattr(node, "body", None)
+        if not body:
+            continue
+        first = body[0]
+        if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant):
+            if isinstance(first.value.value, str):
+                ids.add(id(first.value))
+    return ids
+
+
+def _harness_var_offenders(source: str, needle: str) -> list[str]:
+    """Live code in *source* that spells *needle*.
+
+    AST-scoped, not grepped, so prose about the boundary is not a crossing of
+    it: docstrings are exempt (a module explaining which variable the harness
+    owns is documentation, not a dependency on the name) and comments never
+    reach the tree at all. Everything else counts — a string constant, an
+    identifier, an attribute, a keyword argument.
+    """
+    tree = ast.parse(source)
+    exempt = _docstring_nodes(tree)
+    hits: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            if id(node) not in exempt and needle in node.value:
+                hits.append(f"string literal at line {node.lineno}")
+        for attr in ("id", "attr", "arg", "name"):
+            value = getattr(node, attr, None)
+            if isinstance(value, str) and needle in value:
+                hits.append(f"identifier {value!r} at line {getattr(node, 'lineno', '?')}")
+    return sorted(set(hits))
+
+
+class TestNoHarnessEnvVarInCampCore:
+    """No camp production source spells the harness's account variable.
+
+    Camp asks the harness what to set and iterates the answer. Every place that
+    would otherwise hardcode the name — the pane composer, the trust pre-seed,
+    the stop engine's pane recognizer — reaches the same knowledge through the
+    seam instead. There is deliberately NO exemption for `launch/stop.py`: its
+    recognizer hardcoding the prefix is the exact failure this guard exists to
+    catch, and exempting it would silently reinstate the leak.
+    """
+
+    def test_no_production_source_names_the_harness_account_variable(self):
+        offenders: dict[str, list[str]] = {}
+        for p in _production_sources():
+            hits = _harness_var_offenders(p.read_text(), _HARNESS_ACCOUNT_VAR)
+            if hits:
+                offenders[p.name] = hits
+        assert offenders == {}, (
+            f"camp core names a harness environment variable: {offenders}"
+        )
+
+    def test_the_guard_sees_a_literal_outside_a_docstring(self):
+        """The guard's own teeth: a string constant in live code is a hit."""
+        source = f'def f():\n    """doc {_HARNESS_ACCOUNT_VAR}."""\n    return "{_HARNESS_ACCOUNT_VAR}"\n'
+        assert _harness_var_offenders(source, _HARNESS_ACCOUNT_VAR) == [
+            "string literal at line 3"
+        ]
+
+    def test_the_guard_exempts_docstrings_and_comments(self):
+        source = (
+            f'"""Module doc naming {_HARNESS_ACCOUNT_VAR}."""\n'
+            f"# comment naming {_HARNESS_ACCOUNT_VAR}\n"
+            "def f():\n"
+            f'    """Function doc naming {_HARNESS_ACCOUNT_VAR}."""\n'
+            "    return 1\n"
+        )
+        assert _harness_var_offenders(source, _HARNESS_ACCOUNT_VAR) == []

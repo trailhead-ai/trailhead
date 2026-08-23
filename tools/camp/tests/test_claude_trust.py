@@ -848,7 +848,8 @@ class TestRelativeOverrideIsRefused:
         assert pretrust_workspace(launch_dir, workspace_root=launch_dir, env=env) is False
 
         err = capsys.readouterr().err
-        assert "is relative; override paths must be absolute" in err
+        assert "override paths must be absolute" in err
+        assert "relative-claude/.claude.json" in err
         assert not (tmp_path / "relative-claude").exists()
 
     def test_an_absolute_override_is_still_honoured(self, tmp_path):

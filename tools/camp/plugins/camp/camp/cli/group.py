@@ -428,6 +428,10 @@ def _cmd_new_group_cli(
                     "workspace": str(ws_dir),
                     "session_id": launched_session.session_id if launched_session else None,
                     "tmux_name": launched_session.tmux_name if launched_session else None,
+                    "account": launched_session.account if launched_session else None,
+                    "account_binding": (
+                        dict(launched_session.account_binding) if launched_session else None
+                    ),
                 }
             )
         )

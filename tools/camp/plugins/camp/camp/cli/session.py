@@ -569,6 +569,8 @@ def _report_launched(launched, *, as_json: bool, extra: dict | None = None) -> N
             "workspace": str(launched.launch_dir),
             "session_id": launched.session_id,
             "tmux_name": launched.tmux_name,
+            "account": launched.account,
+            "account_binding": dict(launched.account_binding),
         }
         payload.update(extra or {})
         print(json.dumps(payload))

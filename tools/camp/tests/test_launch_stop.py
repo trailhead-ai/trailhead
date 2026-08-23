@@ -51,6 +51,10 @@ _UUID_A = "aaaaaaaa-1111-4111-8111-111111111111"
 _UUID_B = "bbbbbbbb-2222-4222-8222-222222222222"
 _UUID_ANCHOR = "cccccccc-3333-4333-8333-333333333333"
 
+#: The variable the stand-in harness binds an account with. Not Claude Code's
+#: own name, so a recognizer matching a hardcoded prefix cannot pass.
+ACCOUNT_KEY = "FAKE_ACCOUNT_DIR"
+
 
 def _env(state_root: Path, **extra: str) -> dict[str, str]:
     return {
@@ -111,6 +115,15 @@ class _FakeHarness:
 
     def session_launch_env_unset(self):
         return ["FAKE_TOKEN", "FAKE_SOCKET"]
+
+    def session_launch_env_set(self, account, *, env=None):
+        """The account binding the launch engine composes into a pane.
+
+        The key is deliberately NOT Claude Code's: a recognizer that hardcodes a
+        variable name instead of asking the harness fails every test built on
+        this stand-in.
+        """
+        return {ACCOUNT_KEY: str((env or {}).get("HOME", "/fake-home"))}
 
 
 class _FakeTmux:
@@ -726,29 +739,56 @@ def test_a_harness_that_raises_composing_the_scrub_refuses_rather_than_raising(
 # ---------------------------------------------------------------------------
 
 
-def _launched_pane_with_config_dir(
-    harness, session_id: str, derived_name: str, workspace: Path, config_dir: str
+def _launched_pane_with_account(
+    harness, session_id: str, derived_name: str, workspace: Path, account_dir: str
 ) -> str:
-    """The pane command camp composes when a config dir is carried into the pane."""
+    """The pane command camp composes when an account binding rides the pane."""
     scrub = " ".join(f"-u {name}" for name in harness.session_launch_env_unset())
     argv = harness.session_launch(workspace, session_id, session_name=derived_name)
-    return f"env {scrub} CLAUDE_CONFIG_DIR={config_dir} " + " ".join(argv)
+    return f"env {scrub} {ACCOUNT_KEY}={account_dir} " + " ".join(argv)
 
 
-def test_a_pane_carrying_the_config_dir_assignment_is_still_camp_launched(
+def test_a_pane_carrying_the_account_binding_is_still_camp_launched(
     tmp_path: Path,
 ) -> None:
-    """camp must recognize its own pane after the launch engine started carrying
-    the config dir into it. The kill-time environment is NOT consulted: a session
-    launched under one account is routinely stopped from a shell running under
-    another, and ownership cannot depend on the two agreeing."""
+    """camp must recognize its own pane, and must learn the assignment's KEY from
+    the harness rather than naming one itself. The kill-time environment supplies
+    no VALUE: a session launched under one account is routinely stopped from a
+    shell running under another, and ownership cannot depend on the two agreeing."""
     from camp.launch.stop import Stopped
 
     state, ws, env, harness, derived, _tmux = _fixture(tmp_path)
     tmux = _FakeTmux(
         {
-            derived: _launched_pane_with_config_dir(
-                harness, _UUID_A, derived, ws, "/home/someone/.claude-other"
+            derived: _launched_pane_with_account(
+                harness, _UUID_A, derived, ws, "/home/someone/.account-other"
+            )
+        }
+    )
+
+    outcome = _stop(
+        _UUID_A[:8],
+        tmux=tmux,
+        transcripts=[_transcript(_UUID_A, ws)],
+        live_records=[_record(_UUID_A, ws)],
+        env=env,
+        harness=harness,
+    )
+
+    assert isinstance(outcome, Stopped)
+    assert tmux.killed == [derived]
+
+
+def test_a_defaulted_pane_is_recognized_too(tmp_path: Path) -> None:
+    """The defaulted launch composes the same shape with the harness's own
+    default value — it is not a pane with no assignment at all."""
+    from camp.launch.stop import Stopped
+
+    state, ws, env, harness, derived, _tmux = _fixture(tmp_path)
+    tmux = _FakeTmux(
+        {
+            derived: _launched_pane_with_account(
+                harness, _UUID_A, derived, ws, env["HOME"]
             )
         }
     )
@@ -767,9 +807,9 @@ def test_a_pane_carrying_the_config_dir_assignment_is_still_camp_launched(
 
 
 def test_an_unrecognized_extra_operand_is_still_not_camp_launched(tmp_path: Path) -> None:
-    """The tolerance is exactly one CLAUDE_CONFIG_DIR assignment — it must not
-    widen into accepting any extra operand, which would let camp reclaim a pane
-    it never composed."""
+    """The tolerance is exactly the keys the harness names — it must not widen
+    into accepting any extra operand, which would let camp reclaim a pane it
+    never composed."""
     state, ws, env, harness, derived, _tmux = _fixture(tmp_path)
     scrub = " ".join(f"-u {n}" for n in harness.session_launch_env_unset())
     argv = harness.session_launch(ws, _UUID_A, session_name=derived)
@@ -788,14 +828,14 @@ def test_an_unrecognized_extra_operand_is_still_not_camp_launched(tmp_path: Path
     assert tmux.killed == []
 
 
-def test_a_relative_config_dir_operand_is_not_camp_launched(tmp_path: Path) -> None:
+def test_a_relative_account_operand_is_not_camp_launched(tmp_path: Path) -> None:
     """The launch engine only ever composes an absolute value, so a relative one
     is not a shape camp could have produced."""
     state, ws, env, harness, derived, _tmux = _fixture(tmp_path)
     tmux = _FakeTmux(
         {
-            derived: _launched_pane_with_config_dir(
-                harness, _UUID_A, derived, ws, "relative/.claude"
+            derived: _launched_pane_with_account(
+                harness, _UUID_A, derived, ws, "relative/.account"
             )
         }
     )
@@ -809,4 +849,36 @@ def test_a_relative_config_dir_operand_is_not_camp_launched(tmp_path: Path) -> N
         harness=harness,
     )
 
+    assert tmux.killed == []
+
+
+def test_a_harness_that_raises_composing_the_binding_refuses_rather_than_raising(
+    tmp_path: Path,
+) -> None:
+    """Asking the harness for its keys is a third-party call like every other the
+    ownership check makes: one that raises is a refusal, not a traceback."""
+    from camp.launch import stop
+
+    state, ws, env, harness, derived, _tmux = _fixture(tmp_path)
+
+    class _BrokenBinding(_FakeHarness):
+        def session_launch_env_set(self, account, *, env=None):
+            raise RuntimeError("third-party harness blew up")
+
+    broken = _BrokenBinding()
+    tmux = _FakeTmux(
+        {derived: _launched_pane_with_account(broken, _UUID_A, derived, ws, env["HOME"])}
+    )
+
+    outcome = _stop(
+        _UUID_A[:8],
+        tmux=tmux,
+        transcripts=[_transcript(_UUID_A, ws)],
+        live_records=[_record(_UUID_A, ws)],
+        env=env,
+        harness=broken,
+    )
+
+    assert isinstance(outcome, stop.Refused)
+    assert outcome.reason == stop.REFUSED_NOT_CAMP_LAUNCHED
     assert tmux.killed == []

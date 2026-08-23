@@ -275,33 +275,56 @@ def _owning_commands(harness, candidate: SessionCandidate) -> tuple[tuple[str, .
     return tuple(shapes)
 
 
-def _without_config_dir(observed: tuple[str, ...]) -> tuple[str, ...]:
-    """*observed* with the launch engine's config-dir assignment removed.
+def _account_binding_keys(harness, env: Mapping[str, str]) -> tuple[str, ...]:
+    """The variable NAMES the launch engine composes into a pane as assignments.
 
-    The engine carries ``CLAUDE_CONFIG_DIR`` into the pane as an ``env``
-    assignment, so a pane camp composed no longer equals the scrub-only shape.
-    Removing it here rather than composing it into the owning shapes is
-    deliberate: the value came from the environment at LAUNCH time, and a
-    session is routinely stopped from a shell running under a different account,
-    so an owning shape built from the stop-time environment would refuse camp's
-    own pane whenever the two disagree.
+    Asked of the harness rather than spelled here: only the harness knows which
+    variables express an account, and a name hardcoded in camp is the ambient
+    leak this whole path removes. ``None`` is passed as the account for the same
+    reason the VALUES are ignored below — the keys are constant for a harness,
+    the values are not.
 
-    Exactly one token is removed, and only one matching the shape the engine can
-    actually compose — an absolute value. Anything else is left in place, so it
-    still fails the exact match and the pane is refused: the tolerance cannot
-    widen into reclaiming a pane camp never composed.
+    Every failure degrades to no keys, which refuses the pane rather than
+    reclaiming one camp never composed: a third-party call that raises is the
+    stop engine's refusal, never its traceback.
     """
-    for index, token in enumerate(observed):
-        if token.startswith("CLAUDE_CONFIG_DIR="):
-            value = token[len("CLAUDE_CONFIG_DIR=") :]
-            if value.startswith("/"):
-                return observed[:index] + observed[index + 1 :]
-            return observed
+    try:
+        binding = harness.session_launch_env_set(None, env=dict(env))
+    except Exception:  # noqa: BLE001 — third-party call; a refusal, not a traceback
+        return ()
+    return tuple(binding or ())
+
+
+def _without_account_binding(
+    observed: tuple[str, ...], keys: tuple[str, ...]
+) -> tuple[str, ...]:
+    """*observed* with the launch engine's account assignments removed.
+
+    The engine carries an account binding into the pane as ``env`` assignments,
+    so a pane camp composed no longer equals the scrub-only shape. Removing them
+    here rather than composing them into the owning shapes is deliberate: the
+    VALUE was resolved at LAUNCH time from the launching group's declaration, and
+    a session is routinely stopped from a shell — and a group — that would
+    resolve a different one, so an owning shape built at stop time would refuse
+    camp's own pane whenever the two disagree.
+
+    At most one token per key is removed, and only one matching the shape the
+    engine can actually compose — an absolute value. Anything else is left in
+    place, so it still fails the exact match and the pane is refused: the
+    tolerance cannot widen into reclaiming a pane camp never composed.
+    """
+    for key in keys:
+        prefix = f"{key}="
+        for index, token in enumerate(observed):
+            if token.startswith(prefix):
+                if token[len(prefix) :].startswith("/"):
+                    observed = observed[:index] + observed[index + 1 :]
+                break
     return observed
 
 
 def _is_camp_launched(
-    harness, candidate: SessionCandidate, pane_command: str | None
+    harness, candidate: SessionCandidate, pane_command: str | None, env: Mapping[str, str]
 ) -> bool:
     if not pane_command:
         return False
@@ -309,7 +332,8 @@ def _is_camp_launched(
         observed = tuple(shlex.split(pane_command))
     except ValueError:
         return False
-    return _without_config_dir(observed) in _owning_commands(harness, candidate)
+    keys = _account_binding_keys(harness, env)
+    return _without_account_binding(observed, keys) in _owning_commands(harness, candidate)
 
 
 def stop_session(
@@ -368,7 +392,7 @@ def stop_session(
     pane = tmux.pane_command(name)
     if isinstance(pane, _Unanswered):
         return Refused(candidate, REFUSED_TMUX_UNANSWERED)
-    if not _is_camp_launched(harness, candidate, pane):
+    if not _is_camp_launched(harness, candidate, pane, env):
         return Refused(candidate, REFUSED_NOT_CAMP_LAUNCHED)
 
     tmux.kill_session(name)

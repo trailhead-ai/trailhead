@@ -35,6 +35,15 @@ if str(_PLUGIN_DIR) not in sys.path:
 
 SCRUB = ["FAKE_CHILD_SESSION", "FAKECODE", "FAKE_SESSION_TOKEN"]
 
+#: The variable the stand-in harness expresses an account binding with. Spelled
+#: as Claude Code's real one in the tests that assert on the trust seed, because
+#: the seed's resolver (trailhead's `claude_config_file`) reads exactly this name
+#: — the coupling is between the harness and its own resolver, not camp's.
+ACCOUNT_KEY = "CLAUDE_CONFIG_DIR"
+
+#: What the stand-in harness resolves as its default when the env carries no HOME.
+FAKE_DEFAULT_HOME = "/fake-default-home"
+
 #: A resumed session id, spelled once so the tests that assert on its first
 #: eight characters cannot drift from the id actually handed to the engine.
 RESUME_ID = "11111111-2222-3333-4444-666677778888"
@@ -63,7 +72,13 @@ class FakeHarness:
     name = "fakeharness"
 
     def __init__(
-        self, *, launch_argv=..., resume_argv=..., enumerate_argv=None, records=None
+        self,
+        *,
+        launch_argv=...,
+        resume_argv=...,
+        enumerate_argv=None,
+        records=None,
+        env_set_keys=(ACCOUNT_KEY,),
     ):
         self._launch_argv = launch_argv
         self._resume_argv = resume_argv
@@ -71,6 +86,8 @@ class FakeHarness:
         self._records = records or []
         self.launch_calls: list[tuple[Path, str, str | None]] = []
         self.resume_calls: list[str] = []
+        self.env_set_calls: list[tuple[str | None, dict[str, str]]] = []
+        self._env_set_keys = env_set_keys
 
     def session_launch(self, workspace, session_id, *, session_name=None):
         self.launch_calls.append((workspace, session_id, session_name))
@@ -86,6 +103,22 @@ class FakeHarness:
 
     def session_launch_env_unset(self):
         return list(SCRUB)
+
+    def session_launch_env_set(self, account, *, env=None):
+        """Model the real seam: resolve `account` (or the default) to a dict.
+
+        The key is a knob so a test can prove camp iterates whatever the seam
+        returns rather than reaching for a Claude-specific variable name.
+        """
+        self.env_set_calls.append((account, dict(env or {})))
+        if self._env_set_keys is None:
+            return None
+        base = FAKE_DEFAULT_HOME if account is None else account
+        if account is None:
+            base = (env or {}).get("HOME") or FAKE_DEFAULT_HOME
+        elif account.startswith("~/"):
+            base = str(Path((env or {}).get("HOME", FAKE_DEFAULT_HOME)) / account[2:])
+        return {key: str(base) for key in self._env_set_keys}
 
     def session_enumerate(self, workspace=None):
         return self._enumerate_argv
@@ -143,7 +176,11 @@ def rig(monkeypatch, tmp_path):
 
     def fake_pretrust(launch_dir, *, workspace_root, env=None):
         state["pretrust_calls"].append(
-            {"launch_dir": launch_dir, "workspace_root": workspace_root}
+            {
+                "launch_dir": launch_dir,
+                "workspace_root": workspace_root,
+                "env": dict(env or {}),
+            }
         )
         return state["pretrust"]
 
@@ -242,17 +279,28 @@ class TestSlugLaunchShapeIsPinnedWhole:
             "FAKECODE",
             "-u",
             "FAKE_SESSION_TOKEN",
+            f"{ACCOUNT_KEY}={FAKE_DEFAULT_HOME}",
             "fakeharness",
             "--rc",
             "--sid",
             sid,
         ]
         assert rig["spawn"].kwargs["cwd"] == workspace
-        assert rig["spawn"].kwargs["env"] == {"PATH": "/usr/bin", "KEEP": "yes"}
+        # camp's own spawn environment states the binding too, so a tmux server
+        # this launch starts propagates the chosen account rather than the
+        # ambient one to every pane opened in it afterwards.
+        assert rig["spawn"].kwargs["env"] == {
+            "PATH": "/usr/bin",
+            "KEEP": "yes",
+            ACCOUNT_KEY: FAKE_DEFAULT_HOME,
+        }
         assert rig["spawn"].kwargs["start_new_session"] is True
         assert result.tmux_name == f"camp-feat-x-{sid[:8]}"
         assert result.launch_dir == rig["workspace"].resolve()
-        assert capsys.readouterr().err == ""
+        assert capsys.readouterr().err == (
+            "camp: binding session to the harness default (no account declared) "
+            f"— {ACCOUNT_KEY}={FAKE_DEFAULT_HOME}\n"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -323,7 +371,9 @@ class TestScrubReachesThePane:
         # Everything between `env` and the harness argv is `-u VAR` pairs.
         harness_start = pane.index("fakeharness")
         operands = pane[1:harness_start]
-        assert operands == [tok for var in SCRUB for tok in ("-u", var)]
+        # The account assignments follow the scrub; TestOneResolutionFeedsBoth
+        # pins those.
+        assert operands[: 2 * len(SCRUB)] == [tok for var in SCRUB for tok in ("-u", var)]
 
     def test_env_sits_after_tmux_options_immediately_before_the_harness_argv(self, rig):
         _launch(rig)
@@ -335,7 +385,7 @@ class TestScrubReachesThePane:
         assert env_at > 1
         # Every tmux option precedes it, and the harness argv follows the operands.
         assert "-c" in argv[:env_at] and "-s" in argv[:env_at]
-        assert argv[env_at + 1 + 2 * len(SCRUB)] == "fakeharness"
+        assert argv[env_at + 2 + 2 * len(SCRUB)] == "fakeharness"
 
     def test_pane_command_is_exactly_env_scrub_then_the_seam_argv(self, rig):
         _launch(rig)
@@ -344,6 +394,7 @@ class TestScrubReachesThePane:
         expected = ["env"]
         for var in SCRUB:
             expected += ["-u", var]
+        expected += [f"{ACCOUNT_KEY}={FAKE_DEFAULT_HOME}"]
         expected += ["fakeharness", "--rc", "--sid", session_id]
         assert _pane_command(rig["spawn"].argv) == expected
 
@@ -593,7 +644,8 @@ class TestRefusals:
 
         pane = _pane_command(rig["spawn"].argv)
         assert pane[0] == "env"
-        assert pane[1] == "fakeharness"
+        assert pane[1] == f"{ACCOUNT_KEY}={FAKE_DEFAULT_HOME}"
+        assert pane[2] == "fakeharness"
 
 
 # ---------------------------------------------------------------------------
@@ -619,7 +671,8 @@ class TestParseSessionListNoneIsTolerated:
 
         assert len(rig["spawn"].calls) == 1
         assert result.session_id
-        assert capsys.readouterr().err == ""
+        # The account report is the only line: the probe itself stays silent.
+        assert "already live" not in capsys.readouterr().err
 
     def test_confirm_poll_treats_a_none_answer_as_not_yet_found(self, confirm_rig, monkeypatch):
         session = confirm_rig["module"]
@@ -762,9 +815,9 @@ class TestDirectoryRootedLaunch:
         assert result.launch_dir == root
         assert result.tmux_name == f"camp-odd-handle-{result.session_id[:8]}"
         assert argv[argv.index("-s") + 1] == result.tmux_name
-        assert rig["pretrust_calls"] == [
-            {"launch_dir": root, "workspace_root": root}
-        ]
+        call = rig["pretrust_calls"][0]
+        assert len(rig["pretrust_calls"]) == 1
+        assert (call["launch_dir"], call["workspace_root"]) == (root, root)
 
     def test_an_ineligible_root_refuses_before_the_trust_preseed_runs(
         self, rig, tmp_path
@@ -867,6 +920,7 @@ class TestResumeFlavor:
         assert _pane_command(rig["spawn"].argv) == (
             ["env"]
             + [tok for var in SCRUB for tok in ("-u", var)]
+            + [f"{ACCOUNT_KEY}={tmp_path / 'home'}"]
             + ["fakeharness", "--reattach", RESUME_ID]
         )
         assert rig["harness"].resume_calls == [RESUME_ID]
@@ -1508,53 +1562,294 @@ class TestCampManagedClaimBoundary:
 
 
 # ---------------------------------------------------------------------------
-# the config dir reaches the pane
+# one account resolution feeds both the trust seed and the pane
 # ---------------------------------------------------------------------------
 
 
-class TestConfigDirReachesThePane:
-    """`CLAUDE_CONFIG_DIR` is carried into the pane as an `env` assignment.
+#: An ambient value naming an account NOBODY asked for. Every test below runs
+#: against it: a launch that lands on the right account only because the
+#: environment was clean has proven nothing (see the plan's Lessons block).
+POISON = "/poison/.claude-wrong"
+
+
+def _poisoned(tmp_path: Path, **extra: str) -> dict[str, str]:
+    return {
+        "PATH": "/usr/bin",
+        "HOME": str(tmp_path / "home"),
+        "CLAUDE_CONFIG_DIR": POISON,
+        **extra,
+    }
+
+
+def _group_with_account(account: str | None) -> dict[str, Any]:
+    group: dict[str, Any] = {"group": {"name": "testgroup"}}
+    if account is not None:
+        group["launch"] = {"account": account}
+    return group
+
+
+def _assignments(rig) -> list[str]:
+    """The pane's `KEY=VALUE` operands — everything after the scrub, before argv."""
+    pane = _pane_command(rig["spawn"].argv)
+    return pane[1 + 2 * len(SCRUB) : pane.index("fakeharness")]
+
+
+def _use_real_pretrust(rig, monkeypatch):
+    from camp.launch.claude_trust import pretrust_workspace
+
+    monkeypatch.setattr(rig["module"], "pretrust_workspace", pretrust_workspace)
+
+
+class TestTheDeclaredAccountBeatsTheAmbient:
+    """The group's declaration decides the pane, whatever the ambient carries.
 
     `tmux new-session` against an already-running server is a client request, so
-    the pane inherits the SERVER's environment rather than camp's. A server
-    started under a different Claude account therefore places every session on
-    that account, whatever camp's own environment says. The assignment rides the
-    same pane-level `env` invocation the scrub already uses, which is the one
-    mechanism that holds for a fresh server and a pre-existing one alike.
+    the pane inherits the SERVER's environment. A server started under a
+    different account otherwise places every session on that account. The
+    assignment rides the same pane-level `env` invocation the scrub uses — the
+    one mechanism that holds for a fresh server and a pre-existing one alike.
     """
 
-    def test_config_dir_is_an_env_assignment_in_the_pane_command(self, rig):
-        _launch(rig, env={"PATH": "/usr/bin", "CLAUDE_CONFIG_DIR": "/somewhere/.claude-levr"})
+    def test_a_declared_account_wins_over_a_poisoned_ambient(self, rig, tmp_path):
+        _launch(rig, group=_group_with_account("/accounts/levr"), env=_poisoned(tmp_path))
 
-        pane = _pane_command(rig["spawn"].argv)
-        harness_start = pane.index("fakeharness")
-        assert "CLAUDE_CONFIG_DIR=/somewhere/.claude-levr" in pane[1:harness_start]
+        assert _assignments(rig) == [f"{ACCOUNT_KEY}=/accounts/levr"]
 
-    def test_assignment_follows_the_scrub_operands_and_precedes_the_harness(self, rig):
-        _launch(rig, env={"PATH": "/usr/bin", "CLAUDE_CONFIG_DIR": "/somewhere/.claude-levr"})
+    def test_a_declared_account_is_set_even_with_no_ambient_to_beat(self, rig, tmp_path):
+        """Setting must beat inheritance in both directions: an absent ambient
+        is not licence to leave the child on whatever the server carries."""
+        env = _poisoned(tmp_path)
+        env.pop("CLAUDE_CONFIG_DIR")
+
+        _launch(rig, group=_group_with_account("/accounts/levr"), env=env)
+
+        assert _assignments(rig) == [f"{ACCOUNT_KEY}=/accounts/levr"]
+
+    def test_no_declaration_carries_the_harness_default_over_the_poison(
+        self, rig, tmp_path
+    ):
+        """The trailhead-group regression: a group declaring nothing landed on
+        whatever the tmux server carried. The default is now SET, not inherited."""
+        _launch(rig, group=_group_with_account(None), env=_poisoned(tmp_path))
+
+        assert _assignments(rig) == [f"{ACCOUNT_KEY}={tmp_path / 'home'}"]
+
+    def test_the_assignments_follow_the_scrub_and_precede_the_harness_argv(
+        self, rig, tmp_path
+    ):
+        _launch(rig, group=_group_with_account("/accounts/levr"), env=_poisoned(tmp_path))
 
         pane = _pane_command(rig["spawn"].argv)
         assert pane[0] == "env"
-        harness_start = pane.index("fakeharness")
-        operands = pane[1:harness_start]
-        assert operands == [tok for var in SCRUB for tok in ("-u", var)] + [
-            "CLAUDE_CONFIG_DIR=/somewhere/.claude-levr"
+        assert pane[1 : pane.index("fakeharness")] == [
+            tok for var in SCRUB for tok in ("-u", var)
+        ] + [f"{ACCOUNT_KEY}=/accounts/levr"]
+
+    def test_camp_iterates_the_seam_dict_rather_than_naming_a_variable(
+        self, rig, tmp_path
+    ):
+        """A harness expressing its account with two non-Claude variables gets
+        both carried. Camp reads no key of the mapping it merges."""
+        rig["harness"] = FakeHarness(env_set_keys=("FAKE_ACCOUNT_DIR", "FAKE_ACCOUNT_ALT"))
+
+        _launch(rig, group=_group_with_account("/accounts/levr"), env=_poisoned(tmp_path))
+
+        assert _assignments(rig) == [
+            "FAKE_ACCOUNT_ALT=/accounts/levr",
+            "FAKE_ACCOUNT_DIR=/accounts/levr",
         ]
 
-    def test_no_assignment_when_the_variable_is_unset(self, rig):
-        _launch(rig, env={"PATH": "/usr/bin"})
+    def test_the_ambient_value_is_never_carried_on_its_own(self, rig, tmp_path):
+        """The deleted passthrough, pinned: no operand may carry the poison."""
+        rig["harness"] = FakeHarness(env_set_keys=("FAKE_ACCOUNT_DIR",))
 
-        pane = _pane_command(rig["spawn"].argv)
-        harness_start = pane.index("fakeharness")
-        assert pane[1:harness_start] == [tok for var in SCRUB for tok in ("-u", var)]
+        _launch(rig, group=_group_with_account(None), env=_poisoned(tmp_path))
 
-    def test_a_relative_config_dir_is_not_carried_into_the_pane(self, rig):
-        """A relative value resolves against the pane's cwd — the launch dir —
-        rather than the operator's, which would silently point the session at a
-        config dir inside the workspace. The trust pre-seed refuses a relative
-        value for the same reason; the pane must not disagree with it."""
-        _launch(rig, env={"PATH": "/usr/bin", "CLAUDE_CONFIG_DIR": "relative/.claude"})
+        assert POISON not in " ".join(rig["spawn"].argv)
 
-        pane = _pane_command(rig["spawn"].argv)
-        harness_start = pane.index("fakeharness")
-        assert pane[1:harness_start] == [tok for var in SCRUB for tok in ("-u", var)]
+
+class TestTheSeedFollowsTheSameResolution:
+    """The trust pre-seed lands in the file the launched session will read."""
+
+    def test_the_seed_lands_in_the_declared_account_not_the_ambient_one(
+        self, rig, tmp_path, monkeypatch
+    ):
+        _use_real_pretrust(rig, monkeypatch)
+        declared = tmp_path / "accounts" / "levr"
+        poison_dir = tmp_path / "poison"
+
+        _launch(
+            rig,
+            group=_group_with_account(str(declared)),
+            env=_poisoned(tmp_path, CLAUDE_CONFIG_DIR=str(poison_dir)),
+        )
+
+        assert (declared / ".claude.json").exists()
+        assert not (poison_dir / ".claude.json").exists()
+        assert not (tmp_path / "home" / ".claude.json").exists()
+
+    def test_the_seed_follows_the_harness_default_under_a_poisoned_ambient(
+        self, rig, tmp_path, monkeypatch
+    ):
+        _use_real_pretrust(rig, monkeypatch)
+        poison_dir = tmp_path / "poison"
+
+        _launch(
+            rig,
+            group=_group_with_account(None),
+            env=_poisoned(tmp_path, CLAUDE_CONFIG_DIR=str(poison_dir)),
+        )
+
+        assert (tmp_path / "home" / ".claude.json").exists()
+        assert not (poison_dir / ".claude.json").exists()
+
+    def test_two_groups_under_one_poisoned_ambient_land_apart(
+        self, rig, tmp_path, monkeypatch
+    ):
+        """The acceptance case: a trailhead-shaped group and a levr-shaped one,
+        launched against the SAME poisoned ambient, diverge in both consumers."""
+        _use_real_pretrust(rig, monkeypatch)
+        levr = tmp_path / "home" / ".claude-levr"
+        env = _poisoned(tmp_path, CLAUDE_CONFIG_DIR=str(tmp_path / "poison"))
+
+        _launch(rig, group=_group_with_account(None), env=env)
+        trailhead_pane = _assignments(rig)
+
+        rig["spawn"] = Recorder()
+        _launch(rig, group=_group_with_account("~/.claude-levr"), env=env)
+        levr_pane = _assignments(rig)
+
+        assert trailhead_pane == [f"{ACCOUNT_KEY}={tmp_path / 'home'}"]
+        assert levr_pane == [f"{ACCOUNT_KEY}={levr}"]
+        assert (tmp_path / "home" / ".claude.json").exists()
+        assert (levr / ".claude.json").exists()
+        assert not (tmp_path / "poison" / ".claude.json").exists()
+
+    def test_the_seed_and_the_pane_come_from_ONE_seam_call(self, rig, tmp_path):
+        """A future refactor reintroducing a second resolution fails here rather
+        than silently in production, where the two answers can disagree."""
+        _launch(rig, group=_group_with_account("/accounts/levr"), env=_poisoned(tmp_path))
+
+        assert len(rig["harness"].env_set_calls) == 1
+        seed_env = rig["pretrust_calls"][0]["env"]
+        assert seed_env[ACCOUNT_KEY] == "/accounts/levr"
+        assert _assignments(rig) == [f"{ACCOUNT_KEY}=/accounts/levr"]
+
+    def test_an_undeclared_account_forwards_None_to_the_seam(self, rig, tmp_path):
+        """Absence must reach the seam as `None` — the value that means "resolve
+        your own default" — not be silently skipped or spelled some other way."""
+        _launch(rig, group=_group_with_account(None), env=_poisoned(tmp_path))
+
+        assert [account for account, _env in rig["harness"].env_set_calls] == [None]
+
+    def test_the_seam_reads_the_launch_env(self, rig, tmp_path):
+        _launch(rig, group=_group_with_account(None), env=_poisoned(tmp_path))
+
+        _account, seen = rig["harness"].env_set_calls[0]
+        assert seen["HOME"] == str(tmp_path / "home")
+
+
+class TestTheChosenAccountIsReported:
+    def test_a_declared_account_is_named_on_stderr(self, rig, tmp_path, capsys):
+        launched = _launch(
+            rig, group=_group_with_account("/accounts/levr"), env=_poisoned(tmp_path)
+        )
+
+        err = capsys.readouterr().err
+        assert "/accounts/levr" in err
+        assert "declared" in err
+        assert launched.account == "/accounts/levr"
+        assert launched.account_binding == {ACCOUNT_KEY: "/accounts/levr"}
+
+    def test_a_defaulted_account_is_named_too_rather_than_passing_silently(
+        self, rig, tmp_path, capsys
+    ):
+        launched = _launch(rig, group=_group_with_account(None), env=_poisoned(tmp_path))
+
+        err = capsys.readouterr().err
+        assert str(tmp_path / "home") in err
+        assert "default" in err
+        assert launched.account is None
+        assert launched.account_binding == {ACCOUNT_KEY: str(tmp_path / "home")}
+
+
+class TestAnAccountWithNoConfigFile:
+    def test_a_declared_account_with_no_config_file_warns_and_still_launches(
+        self, rig, tmp_path, capsys
+    ):
+        """A typo'd account otherwise produces a stalled launch indistinguishable
+        from every other cause. The directory may legitimately not exist yet, so
+        this is a warning, not a refusal."""
+        declared = tmp_path / "accounts" / "typoo"
+
+        _launch(rig, group=_group_with_account(str(declared)), env=_poisoned(tmp_path))
+
+        err = capsys.readouterr().err
+        assert str(declared) in err
+        assert "no harness config file" in err
+        assert len(rig["spawn"].calls) == 1
+
+    def test_no_warning_when_the_declared_account_has_a_config_file(
+        self, rig, tmp_path, capsys
+    ):
+        declared = tmp_path / "accounts" / "levr"
+        declared.mkdir(parents=True)
+        (declared / ".claude.json").write_text("{}\n")
+
+        _launch(rig, group=_group_with_account(str(declared)), env=_poisoned(tmp_path))
+
+        assert "no harness config file" not in capsys.readouterr().err
+
+
+class TestTheSeamRefusesTheBinding:
+    def test_a_harness_refusal_is_a_launch_refusal_with_no_process_spawned(
+        self, rig, tmp_path, monkeypatch
+    ):
+        """`session_launch_env_set` raises on an account it cannot honor — a
+        relative value, or one contradicting a config dir already stated in the
+        env. There is no honest fallback: proceeding would launch on an account
+        that contradicts a statement of intent, which is the defect this whole
+        path removes."""
+        from trailhead.harness import HarnessError
+
+        def boom(account, *, env=None):
+            raise HarnessError("two config dirs disagree")
+
+        monkeypatch.setattr(rig["harness"], "session_launch_env_set", boom)
+
+        with pytest.raises(rig["module"].LaunchError) as excinfo:
+            _launch(rig, group=_group_with_account("/accounts/levr"), env=_poisoned(tmp_path))
+
+        assert "two config dirs disagree" in str(excinfo.value)
+        assert rig["spawn"].calls == []
+        assert rig["pretrust_calls"] == []
+
+    def test_none_from_the_seam_means_launch_unsupported(self, rig, tmp_path):
+        rig["harness"] = FakeHarness(env_set_keys=None)
+
+        with pytest.raises(rig["module"].LaunchError) as excinfo:
+            _launch(rig, group=_group_with_account(None), env=_poisoned(tmp_path))
+
+        assert "cannot launch sessions" in str(excinfo.value)
+        assert rig["spawn"].calls == []
+
+    def test_a_refused_default_warns_and_launches_unbound(self, rig, tmp_path, capsys):
+        """A group that declared nothing cannot clear a contradiction already in
+        the environment, and every launch there would otherwise be blocked on a
+        condition no declaration can fix. Camp says so and lets the session
+        inherit — the state that environment was already in."""
+        from trailhead.harness import HarnessError
+
+        class _RefusesDefault(FakeHarness):
+            def session_launch_env_set(self, account, *, env=None):
+                raise HarnessError("two config dirs disagree")
+
+        rig["harness"] = _RefusesDefault()
+
+        _launch(rig, group=_group_with_account(None), env=_poisoned(tmp_path))
+
+        err = capsys.readouterr().err
+        assert "two config dirs disagree" in err
+        assert "NO account binding" in err
+        assert _assignments(rig) == []
+        assert len(rig["spawn"].calls) == 1

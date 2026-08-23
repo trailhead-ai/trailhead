@@ -233,6 +233,9 @@ class _FakeHarness:
     def session_launch_env_unset(self):
         return ["FAKE_TOKEN"]
 
+    def session_launch_env_set(self, account, *, env=None):
+        return {"FAKE_ACCOUNT_DIR": str((env or {}).get("HOME", "/fake-home"))}
+
     def session_enumerate(self, workspace=None):
         return None
 
