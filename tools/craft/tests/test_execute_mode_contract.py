@@ -22,9 +22,9 @@ Pinned here, using the wrap-aware `_pin` helper mirrored from ranger's
   - Every `--vault`-capable `lore` invocation in the shared procedure carries
     `--vault` — a dispatched agent's cwd is not the operator's, so an unqualified
     write lands in the wrong vault and an unqualified read answers from a
-    different vault's same-named record. The commands that offer no `--vault`
-    flag (`lore task graph`, `lore record create`, `lore session candidate`) are
-    carved out in prose rather than mandated into a rejected flag.
+    different vault's same-named record. `lore task graph`, `lore record create`,
+    and `lore session candidate` accept `--vault NAME` too; the procedure mandates
+    it in prose on the two write commands and leaves the graph render unpinned.
   - `status-ownership.md` carries both pre-authorized carve-outs: the loop session
     as sole task-status writer (the dispatched executor never writes status), and
     the PR decision pre-authorized only into the portage tail.
@@ -167,9 +167,9 @@ def test_shared_execute_writes_the_park_section_as_a_diff_append():
 
 #: The `lore` subcommands that accept `--vault`. Every literal invocation of one
 #: in the shared procedure must name it. `lore task graph`, `lore record create`,
-#: and `lore session candidate` are deliberately absent — they offer no `--vault`
-#: flag, so mandating one would put a rejected flag in an unattended run's hands
-#: (the procedure says so in prose instead).
+#: and `lore session candidate` accept `--vault` too, but their literal call sites
+#: do not fit this regex's `<name>`-first shape, so the procedure mandates them in
+#: prose instead (see the two pins below).
 _VAULT_CAPABLE_LORE_CALLS = ("lore record update", "lore record show")
 
 
@@ -192,13 +192,22 @@ def test_every_vault_capable_lore_call_carries_vault(command):
     )
 
 
-def test_shared_execute_says_what_to_do_where_vault_is_not_offered():
+def test_shared_execute_states_the_remaining_commands_accept_vault():
     _pin(
         SHARED_EXECUTE,
-        "take no `--vault` flag — do not invent",
-        "`lore task graph`, `lore record create`, and `lore session candidate` accept no "
-        "`--vault`; a mandate that did not carve them out would put a rejected flag in an "
-        "unattended run's hands, and the run stops on it.",
+        "each accept `--vault NAME`",
+        "`lore task graph`, `lore record create`, and `lore session candidate` all accept "
+        "`--vault NAME` against the current CLI; prose claiming otherwise is why the "
+        "lesson write went to the default vault.",
+    )
+
+
+def test_shared_execute_mandates_vault_on_the_remaining_writes():
+    _pin(
+        SHARED_EXECUTE,
+        "Name `<elected-vault>` on every `lore record create` and `lore session candidate`",
+        "An unqualified write resolves to the default vault, not the elected one — which "
+        "is exactly how a lesson lands where the claim-time query cannot find it.",
     )
 
 
