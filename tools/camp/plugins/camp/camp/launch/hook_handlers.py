@@ -10,6 +10,18 @@ session-bootstrap is silent-exit-0 in all no-op cases (cold start, not a member,
 malformed config, slug=None) because it fires at EVERY SessionStart in EVERY repo
 — including ones that never ran camp init. All no-op cases exit 0 with empty
 stderr so they don't pollute session start for the common case of a non-camp repo.
+
+session-bootstrap calls reconcile_worktree synchronously, which bounds each
+member's provision-phase TASKS by a tight boot budget
+(provision.reconcile.BOOT_TASK_BUDGET_SECONDS) — git fetch and `worktree add`
+keep their own, larger timeouts and are outside that budget. A task that
+exceeds it comes back state="over-budget" rather than raising, so this handler
+still exits 0; reconcile_worktree prints one actionable stderr line the first
+time a task goes over budget (naming the task and the provision-phase
+contract it violates) and never again for that task, since a task already
+recorded over-budget is skip-worthy on every later reconcile_worktree call —
+"once" is backed by that persisted manifest state, not anything this process
+remembers. `camp setup` still retries an over-budget task.
 """
 
 from __future__ import annotations

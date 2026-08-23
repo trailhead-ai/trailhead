@@ -1194,3 +1194,341 @@ class TestStatusPerTaskSurfacing:
         report = json.loads(capsys.readouterr().out)
         by_name = {m["name"]: m for m in report["members"]}
         assert by_name["repo_a"]["tasks"] == {"seed": {"state": "ok"}}
+
+
+# ===========================================================================
+# Test 8: boot-path budget + misclassification report
+# ===========================================================================
+
+
+def _step(name: str, cmd: list[str]) -> dict:
+    return {"name": name, "cmd": cmd}
+
+
+def _sleep_cmd(seconds: float) -> list[str]:
+    return [_VENV_PYTHON, "-c", f"import time; time.sleep({seconds})"]
+
+
+def _provision_task(name: str, steps: list[dict], *, required: bool = False) -> dict:
+    return {
+        "name": name,
+        "phase": "provision",
+        "required": required,
+        "timeout_seconds": None,
+        "steps": steps,
+    }
+
+
+class TestBootPathBudget:
+    """The SessionStart hook path (reconcile_worktree) bounds provision-phase
+    TASKS by a tight boot budget — git fetch / worktree add keep their own
+    timeouts and are untouched by this budget."""
+
+    def test_task_exceeding_boot_budget_is_recorded_over_budget_quickly(
+        self, tmp_path, monkeypatch
+    ):
+        """A provision-phase task whose steps outlast the (tiny, patched) boot
+        budget is recorded over-budget, and reconcile_worktree returns before
+        running the task's later (would-be-slow) steps — proving the hook
+        returns within its budget rather than waiting out every step."""
+        import camp.provision.reconcile as reconcile
+        from camp.group.manifest import read_central_manifest
+
+        monkeypatch.setattr(reconcile, "BOOT_TASK_BUDGET_SECONDS", 0.05)
+
+        repo = tmp_path / "repo"
+        _init_git_repo(repo)
+        env = _camp_state_env(tmp_path)
+        group = _make_group_config(
+            "bootbudgetg",
+            [
+                {
+                    "name": "repo",
+                    "repo_root": str(repo),
+                    "base": "origin/main",
+                    "tasks": [
+                        _provision_task(
+                            "slow",
+                            [
+                                _step("first", _sleep_cmd(0.15)),
+                                _step("second", _sleep_cmd(5)),
+                            ],
+                        )
+                    ],
+                }
+            ],
+        )
+
+        started = time.monotonic()
+        reconcile.reconcile_worktree(group, "s", env=env)
+        elapsed = time.monotonic() - started
+
+        assert elapsed < 2, f"reconcile_worktree took {elapsed}s — boot budget not enforced"
+
+        mpath = _workspace_dir("bootbudgetg", "s", env) / "manifest.json"
+        entry = read_central_manifest(mpath)["members"][0]
+        assert entry["tasks"]["slow"]["state"] == "over-budget"
+
+    def test_over_budget_task_is_not_reexecuted_on_next_reconcile(self, tmp_path, monkeypatch):
+        """Once a task is recorded over-budget, a later reconcile_worktree
+        call (the next SessionStart) does not re-run it."""
+        import camp.provision.reconcile as reconcile
+        from camp.group.manifest import read_central_manifest
+
+        monkeypatch.setattr(reconcile, "BOOT_TASK_BUDGET_SECONDS", 0.05)
+
+        repo = tmp_path / "repo"
+        _init_git_repo(repo)
+        env = _camp_state_env(tmp_path)
+        runs = tmp_path / "runs"
+        group = _make_group_config(
+            "bootbudgetrerung",
+            [
+                {
+                    "name": "repo",
+                    "repo_root": str(repo),
+                    "base": "origin/main",
+                    "tasks": [
+                        _provision_task(
+                            "slow",
+                            [
+                                _step("mark", [_VENV_PYTHON, "-c", f"open({str(runs)!r}, 'a').write('x')"]),
+                                _step("second", _sleep_cmd(5)),
+                            ],
+                        )
+                    ],
+                }
+            ],
+        )
+
+        reconcile.reconcile_worktree(group, "s", env=env)
+        assert runs.read_text().count("x") == 1
+
+        reconcile.reconcile_worktree(group, "s", env=env)
+        assert runs.read_text().count("x") == 1, "over-budget task must not re-run"
+
+        mpath = _workspace_dir("bootbudgetrerung", "s", env) / "manifest.json"
+        entry = read_central_manifest(mpath)["members"][0]
+        assert entry["tasks"]["slow"]["state"] == "over-budget"
+
+    def test_camp_setup_retries_an_over_budget_task(self, tmp_path):
+        """`camp setup` treats an over-budget task as retry-worthy, unlike the
+        hook path — asserting both halves of the split, since one shared skip
+        predicate collapsing them is the failure mode this slice exists to
+        avoid."""
+        from camp.provision.provision import seed_pending_workspace
+        from camp.provision.lifecycle import cmd_setup_group
+        from camp.group.manifest import read_central_manifest, write_central_manifest
+
+        repo = tmp_path / "repo"
+        _init_git_repo(repo)
+        env = _camp_state_env(tmp_path)
+        runs = tmp_path / "runs"
+        group = _make_group_config(
+            "setupretrybudgetg",
+            [
+                {
+                    "name": "repo",
+                    "repo_root": str(repo),
+                    "base": "origin/main",
+                    "tasks": [
+                        _provision_task(
+                            "slow",
+                            [_step("mark", [_VENV_PYTHON, "-c", f"open({str(runs)!r}, 'a').write('x')"])],
+                        )
+                    ],
+                }
+            ],
+        )
+
+        seed_pending_workspace(group, "s", env=env)
+        mpath = _workspace_dir("setupretrybudgetg", "s", env) / "manifest.json"
+        data = read_central_manifest(mpath)
+        data["members"][0]["provision_state"] = "ready"
+        data["members"][0]["tasks"] = {"slow": {"state": "over-budget"}}
+        write_central_manifest(mpath, data)
+
+        cmd_setup_group(group, "s", env=env)
+
+        assert runs.read_text().count("x") == 1, "camp setup must retry an over-budget task"
+        entry = read_central_manifest(mpath)["members"][0]
+        assert entry["tasks"]["slow"]["state"] == "ok"
+
+    def test_failed_or_overrunning_task_does_not_block_later_provision_tasks(
+        self, tmp_path, monkeypatch
+    ):
+        """A provision-phase task that overruns its boot budget does not
+        prevent LATER provision-phase tasks (declared after it) from
+        running."""
+        import camp.provision.reconcile as reconcile
+        from camp.group.manifest import read_central_manifest
+
+        monkeypatch.setattr(reconcile, "BOOT_TASK_BUDGET_SECONDS", 0.05)
+
+        repo = tmp_path / "repo"
+        _init_git_repo(repo)
+        env = _camp_state_env(tmp_path)
+        marker = tmp_path / "later_marker"
+        group = _make_group_config(
+            "bootbudgetlaterg",
+            [
+                {
+                    "name": "repo",
+                    "repo_root": str(repo),
+                    "base": "origin/main",
+                    "tasks": [
+                        _provision_task(
+                            "slow",
+                            [
+                                _step("first", _sleep_cmd(0.15)),
+                                _step("second", _sleep_cmd(5)),
+                            ],
+                        ),
+                        _provision_task(
+                            "later",
+                            [_step("touch", [_VENV_PYTHON, "-c", f"open({str(marker)!r}, 'w').close()"])],
+                        ),
+                    ],
+                }
+            ],
+        )
+
+        reconcile.reconcile_worktree(group, "s", env=env)
+
+        assert marker.exists(), "a later provision-phase task must still run"
+        mpath = _workspace_dir("bootbudgetlaterg", "s", env) / "manifest.json"
+        entry = read_central_manifest(mpath)["members"][0]
+        assert entry["tasks"]["slow"]["state"] == "over-budget"
+        assert entry["tasks"]["later"]["state"] == "ok"
+
+    def test_misclassification_message_names_task_and_phase_contract(self, tmp_path, monkeypatch, capsys):
+        """When a task first goes over budget, reconcile_worktree reports an
+        actionable message naming the task and the phase contract it
+        violates."""
+        import camp.provision.reconcile as reconcile
+
+        monkeypatch.setattr(reconcile, "BOOT_TASK_BUDGET_SECONDS", 0.05)
+
+        repo = tmp_path / "repo"
+        _init_git_repo(repo)
+        env = _camp_state_env(tmp_path)
+        group = _make_group_config(
+            "bootbudgetmsgg",
+            [
+                {
+                    "name": "repo",
+                    "repo_root": str(repo),
+                    "base": "origin/main",
+                    "tasks": [
+                        _provision_task(
+                            "graph-build",
+                            [
+                                _step("first", _sleep_cmd(0.15)),
+                                _step("second", _sleep_cmd(5)),
+                            ],
+                        )
+                    ],
+                }
+            ],
+        )
+
+        reconcile.reconcile_worktree(group, "s", env=env)
+
+        stderr = capsys.readouterr().err
+        assert "graph-build" in stderr
+        assert "repo" in stderr
+        assert "provision" in stderr.lower()
+        assert "camp setup" in stderr
+
+    def test_misclassification_message_not_re_emitted_on_a_fresh_process(
+        self, tmp_path, monkeypatch
+    ):
+        """The over-budget message is emitted once, backed by durable
+        (manifest) state rather than in-process memory: a genuinely fresh
+        `camp session-bootstrap` process, hitting a task already recorded
+        over-budget by some prior (now-dead) process, stays quiet. The fact
+        remains discoverable afterwards through `camp status`."""
+        import camp.provision.reconcile as reconcile
+        from camp.group.manifest import read_central_manifest
+        from camp.group.resolve import central_state_dir
+
+        monkeypatch.setattr(reconcile, "BOOT_TASK_BUDGET_SECONDS", 0.05)
+
+        repo = tmp_path / "repo"
+        _init_git_repo(repo)
+        env = _camp_state_env(tmp_path)
+        group_dict = _make_group_config(
+            "freshprocmsgg",
+            [
+                {
+                    "name": "repo",
+                    "repo_root": str(repo),
+                    "base": "origin/main",
+                    "tasks": [
+                        _provision_task(
+                            "graph-build",
+                            [
+                                _step("first", _sleep_cmd(0.15)),
+                                _step("second", _sleep_cmd(5)),
+                            ],
+                        )
+                    ],
+                }
+            ],
+        )
+
+        # First run (in-process, budget patched tiny so the test stays fast):
+        # the task genuinely goes over budget and the manifest records it.
+        reconcile.reconcile_worktree(group_dict, "s", env=env)
+
+        mpath = central_state_dir("freshprocmsgg", env=env) / "worktrees" / "s" / "manifest.json"
+        entry = read_central_manifest(mpath)["members"][0]
+        assert entry["tasks"]["graph-build"]["state"] == "over-budget"
+
+        # Second run: a GENUINELY FRESH PROCESS against the on-disk config +
+        # manifest — a purely in-process "already warned" flag could never
+        # survive here, so silence proves the skip is disk-state-backed.
+        camp_config_dir = tmp_path / "camp-config"
+        groups_dir = camp_config_dir / "groups"
+        groups_dir.mkdir(parents=True, exist_ok=True)
+        toml_content = f"""
+[group]
+name = "freshprocmsgg"
+
+[[members]]
+name = "repo"
+repo_root = "{repo!s}"
+base = "origin/main"
+tasks = ["graph-build"]
+
+[tasks.graph-build]
+phase = "provision"
+
+[[tasks.graph-build.steps]]
+name = "first"
+cmd = ["{_VENV_PYTHON}", "-c", "import time; time.sleep(0.15)"]
+
+[[tasks.graph-build.steps]]
+name = "second"
+cmd = ["{_VENV_PYTHON}", "-c", "import time; time.sleep(5)"]
+"""
+        (groups_dir / "freshprocmsgg.toml").write_text(toml_content)
+
+        member_wt = central_state_dir("freshprocmsgg", env=env) / "worktrees" / "s" / "repo"
+        subproc_env = {**os.environ, **env, "CAMP_CONFIG_DIR": str(camp_config_dir)}
+        result = subprocess.run(
+            [str(_PLUGIN_DIR / "bin" / "camp"), "session-bootstrap"],
+            cwd=str(member_wt),
+            capture_output=True,
+            text=True,
+            env=subproc_env,
+        )
+        assert result.returncode == 0
+        assert result.stderr == "", f"fresh process must stay quiet, got: {result.stderr!r}"
+
+        # Discoverable afterwards through `camp status`.
+        from camp.provision.lifecycle import provision_status_code
+
+        _code, report = provision_status_code(group_dict, "s", env=env)
+        by_name = {m["name"]: m for m in report["members"]}
+        assert by_name["repo"]["tasks"]["graph-build"]["state"] == "over-budget"

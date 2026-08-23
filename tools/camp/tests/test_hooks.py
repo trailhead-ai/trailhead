@@ -899,6 +899,87 @@ bootstrap = ["false"]
 
 
 # ---------------------------------------------------------------------------
+# Boot-path budget: a task already recorded over-budget by a prior run stays
+# quiet and unexecuted on this (genuinely fresh-process) hook invocation.
+# ---------------------------------------------------------------------------
+
+
+class TestSessionBootstrapOverBudgetSkip:
+    def test_hook_stays_silent_and_exits_0_for_a_task_already_over_budget(
+        self, tmp_path: Path
+    ):
+        """A task a prior run recorded over-budget is skip-worthy on the hook
+        path: this fresh `camp session-bootstrap` process neither re-runs it
+        nor re-emits the misclassification message. Exit 0, empty stderr —
+        the "no-op" contract holds for this path too."""
+        from camp.group.manifest import manifest_path_for, read_central_manifest, write_central_manifest
+
+        camp_config_dir = tmp_path / "camp-config"
+        groups_dir = camp_config_dir / "groups"
+        groups_dir.mkdir(parents=True, exist_ok=True)
+
+        member_repo = tmp_path / "member_repo"
+        _init_git_repo(member_repo)
+
+        toml_content = f"""
+[group]
+name = "overbudgetskipg"
+
+[[members]]
+name = "member"
+repo_root = "{member_repo!s}"
+bootstrap = []
+tasks = ["graph-build"]
+
+[tasks.graph-build]
+phase = "provision"
+
+[[tasks.graph-build.steps]]
+name = "seed"
+cmd = ["true"]
+"""
+        (groups_dir / "overbudgetskipg.toml").write_text(toml_content)
+
+        state_dir = tmp_path / "state"
+        wt_path = state_dir / "overbudgetskipg" / "worktrees" / "feat-budget" / "member"
+        wt_path.mkdir(parents=True, exist_ok=True)
+
+        env = {
+            "CAMP_STATE_DIR": str(state_dir),
+            "CAMP_CONFIG_DIR": str(camp_config_dir),
+        }
+
+        mpath = manifest_path_for("overbudgetskipg", "feat-budget", env=env)
+        write_central_manifest(
+            mpath,
+            {
+                "schema_version": 1,
+                "group": "overbudgetskipg",
+                "slug": "feat-budget",
+                "branch": "worktree-feat-budget",
+                "members": [
+                    {
+                        "name": "member",
+                        "repo_root": str(member_repo),
+                        "worktree_path": str(wt_path),
+                        "tasks": {"graph-build": {"state": "over-budget"}},
+                    }
+                ],
+            },
+        )
+
+        result = _run_session_bootstrap(cwd=str(wt_path), extra_env=env)
+
+        assert result.returncode == 0, f"Expected exit 0, got {result.returncode}: {result.stderr}"
+        assert result.stderr == "", f"Expected silence, got: {result.stderr!r}"
+
+        entry = read_central_manifest(mpath)["members"][0]
+        assert entry["tasks"]["graph-build"]["state"] == "over-budget", (
+            "the over-budget state must survive verbatim, not be re-run or normalized"
+        )
+
+
+# ---------------------------------------------------------------------------
 # camp --help lists group (renamed from init)
 # ---------------------------------------------------------------------------
 

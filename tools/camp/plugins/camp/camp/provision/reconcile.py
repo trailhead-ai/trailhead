@@ -96,6 +96,17 @@ DEFAULT_BASE = "origin/main"
 # unreachable remote fails that member instead of hanging the whole bring-up.
 FETCH_TIMEOUT_SECONDS = 120
 
+# Wall-clock budget (seconds) reconcile_worktree passes as `task_deadline_seconds`
+# to run_member_tasks for provision-phase tasks ONLY — the SessionStart hook
+# path. Git fetch and `git worktree add` (phase 1, above) keep their own
+# existing timeouts and are untouched by this budget: a truncated
+# materialization can never reach boot-readiness, so killing it mid-way would
+# only trade one unrecoverable state for another. Deliberately tight (order of
+# 10s), per operator decision — provision-phase tasks are declared cheap and
+# boot-facing by the phase contract (group/config.py), so a task that needs
+# longer belongs in the activate phase, not a larger budget here.
+BOOT_TASK_BUDGET_SECONDS = 15
+
 # Consecutive path segments that mark the retired per-repo worktree layout
 # (<repo_root>/.claude/worktrees/<slug>). The unified workspace layout never has
 # ".claude" immediately followed by "worktrees", so this pair only appears in an
@@ -451,6 +462,31 @@ def _tasks_map_from_results(results: list[TaskResult]) -> dict[str, Any]:
     return out
 
 
+def _warn_over_budget_tasks(results: list[TaskResult], member_name: str) -> None:
+    """Print a one-line, actionable stderr message for each task that just went
+    over its boot budget in THIS run's `results`.
+
+    This is the misclassification report: it names the task and states the
+    phase contract it violates (provision-phase tasks must be cheap and
+    boot-facing) so a human knows which task to move to the activate phase.
+    It fires "once" without any in-process bookkeeping — a task recorded
+    over-budget in a prior manifest is pre-filtered out of `runnable_tasks`
+    before this function's caller ever sees it again (see the Phase 2 comment
+    above), so it can never reappear here on a later run. The skip is backed
+    by the persisted manifest, not by anything this process remembers.
+    """
+    for result in results:
+        if result.state == "over-budget":
+            print(
+                f"camp: provision-phase task {result.name!r} for member {member_name!r} "
+                f"exceeded the {BOOT_TASK_BUDGET_SECONDS}s boot budget and was recorded "
+                "over-budget — the provision phase must stay cheap and boot-facing; move "
+                f"{result.name!r} to the activate phase, or run `camp setup` to retry it "
+                "as-is.",
+                file=sys.stderr,
+            )
+
+
 def _warn_optional_task_failures(results: list[TaskResult], member_name: str) -> None:
     """Print a one-line stderr warning for each optional task that failed.
 
@@ -663,6 +699,7 @@ def reconcile_worktree(
                             PROVISION_PHASE,
                             context,
                             completed,
+                            task_deadline_seconds=BOOT_TASK_BUDGET_SECONDS,
                         )
                         futures[fut] = member["name"]
 
@@ -689,6 +726,7 @@ def reconcile_worktree(
             for member, mr in zip(members, member_results):
                 results = task_results.get(member["name"], [])
                 _warn_optional_task_failures(results, member["name"])
+                _warn_over_budget_tasks(results, member["name"])
                 merged = dict(prior_tasks.get(member["name"]) or {})
                 merged.update(_tasks_map_from_results(results))
                 if merged:
