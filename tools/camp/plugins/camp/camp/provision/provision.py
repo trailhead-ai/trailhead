@@ -164,8 +164,8 @@ def seed_pending_workspace(
 
 
 def _account_env(
-    group: dict[str, Any], profile: Any, env: dict[str, str]
-) -> dict[str, str]:
+    group: dict[str, Any], profile: Any, env: dict[str, str] | None
+) -> dict[str, str] | None:
     """*env* as the group's launched session will actually carry it.
 
     Returns *env* unchanged when camp can name no harness for the group — there

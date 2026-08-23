@@ -30,6 +30,7 @@ no real claude exec, no ~/.claude.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import textwrap
@@ -474,6 +475,33 @@ class TestPretrustWiring:
         key = str(ws_dir.resolve())
         assert _read_trust(Path(env["HOME"]))["projects"][key]["hasTrustDialogAccepted"] is True
         assert not (poison / ".claude.json").exists()
+
+    def test_the_production_entry_point_with_no_env_still_seeds_trust(
+        self, two_member_group, monkeypatch, capsys
+    ):
+        """`camp new` calls bring_up_workspace with NO env argument, so the
+        account resolution has to accept the absence and default it the way the
+        launch engine does. Every other test here hands in an explicit dict,
+        which is exactly the path a break in the default cannot reach: the seed
+        is best-effort, so its failure is swallowed into a warning and the
+        workspace still comes up — with the trust key never written and every
+        session it prepares stalling on the dialog the seed exists to suppress."""
+        import camp.provision.provision as provision
+        from camp.provision.provision import bring_up_workspace
+
+        g = two_member_group
+        monkeypatch.setenv("CAMP_STATE_DIR", g["env"]["CAMP_STATE_DIR"])
+        monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+        monkeypatch.setattr(provision, "spawn_detached_provisioner", lambda **kw: None)
+
+        bring_up_workspace(g["group"], "feat-envnone")
+
+        ambient = dict(os.environ)
+        ws_dir = _workspace_dir("testgroup", "feat-envnone", ambient)
+        key = str(ws_dir.resolve())
+        trust = _read_trust(Path(ambient["HOME"]))
+        assert trust["projects"][key]["hasTrustDialogAccepted"] is True
+        assert "pretrust failed" not in capsys.readouterr().err
 
     def test_pretrust_false_writes_nothing(self, two_member_group, monkeypatch):
         import camp.provision.provision as provision

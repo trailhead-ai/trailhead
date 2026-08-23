@@ -350,7 +350,7 @@ def _resolve_account_binding(harness, profile, group: dict, env: dict[str, str])
 
 
 def resolve_launch_environment(
-    harness, profile, group: dict, env: dict[str, str]
+    harness, profile, group: dict, env: dict[str, str] | None = None
 ) -> tuple[str | None, dict[str, str], tuple[str, ...], dict[str, str]]:
     """The account, the binding, the scrub, and the environment a pane will carry.
 
@@ -366,7 +366,15 @@ def resolve_launch_environment(
     as a name's ABSENCE and a declared account as an assignment of that same
     name. Merging the binding over the raw *env* would leave an ambient value in
     place exactly when the harness meant it removed.
+
+    *env* defaults to the process environment, the way :func:`launch_session`
+    does, because this is a public entry point and its callers reach it with the
+    same optional env their own signatures carry. Defaulting here rather than at
+    each call site is what keeps a caller that forwards its own ``None`` from
+    turning into an attribute error deep inside a best-effort step that swallows
+    it — a silently skipped trust seed rather than a refusal.
     """
+    env = dict(env if env is not None else os.environ)
     account, binding = _resolve_account_binding(harness, profile, group, env)
     scrub = harness.session_launch_env_unset()
     if scrub is None:
