@@ -239,3 +239,31 @@ class TestArgparseErrorPathPerGroup:
         """A bare ``lore`` with no subcommand exits 2 (top-level required)."""
         result = _run([], tmp_path)
         assert result.returncode == 2
+
+
+class TestAbbreviationEscapeIsBounded:
+    """The abbreviation escape must not claim a very short choice as any token's.
+
+    ``_reads_as_abbreviation`` lets a subsequence pair through below the distance
+    cutoff so ``list``->``ls`` survives. Length-gating only the *typed* token
+    leaves the two-character ``ls`` free to be read as the abbreviation of every
+    longer word containing an 'l' before an 's' — ``flush``, ``logs``, ``labels``.
+    Those are confidently wrong, which the whole feature exists to avoid.
+    """
+
+    @pytest.mark.parametrize(
+        "args",
+        [
+            ["vault", "flush"],
+            ["vault", "logs"],
+            ["vault", "labels"],
+            ["vault", "candidate"],
+        ],
+        ids=["flush", "logs", "labels", "candidate"],
+    )
+    def test_distant_pair_with_a_wide_length_gap_suggests_nothing(self, args, tmp_path):
+        result = _run(args, tmp_path)
+        assert result.returncode != 0
+        assert "did you mean" not in result.stderr, (
+            f"lore {' '.join(args)} offered a suggestion: {result.stderr}"
+        )

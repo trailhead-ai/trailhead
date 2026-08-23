@@ -27,10 +27,13 @@ _DISPATCH_HINTS: dict[str, str] = {
 
 
 # Nested synonym redirects, keyed by (parent prog, typed token). String
-# distance cannot reach these — ``tree`` and ``graph`` share almost no
-# characters — so, like the top-level rename table, they are named explicitly.
+# distance cannot reach these — ``tree``/``graph`` share almost no characters,
+# and ``list``/``ls`` scores 0.67, below the cutoff and indistinguishable from
+# ``logs``/``ls`` by any generic rule — so, like the top-level rename table,
+# they are named explicitly.
 _ACTION_HINTS: dict[tuple[str, str], str] = {
     ("lore task", "tree"): "graph",
+    ("lore vault", "list"): "ls",
 }
 
 # Minimum similarity for a nearest-match suggestion. A suggestion that fires on
@@ -39,27 +42,6 @@ _ACTION_HINTS: dict[tuple[str, str], str] = {
 # 0.77, ``start``/``status`` 0.73, ``remove``/``rename`` 0.67. The bar sits
 # above that whole band so only a near-identical token suggests anything.
 _SUGGESTION_CUTOFF = 0.8
-
-# Below the cutoff, one relation still reads as a typo rather than a coincidence:
-# an abbreviation or an expansion, where one string's letters appear in the other
-# in order (``ls``/``list``, ``index``/``reindex``). Too short a token makes even
-# that meaningless — ``end`` is a subsequence of ``reindex`` — so it takes a
-# token of at least this many characters to qualify.
-_MIN_SUBSEQUENCE_LEN = 4
-
-
-def _is_subsequence(short: str, long: str) -> bool:
-    """Return True when every character of *short* appears in *long*, in order."""
-    it = iter(long)
-    return all(char in it for char in short)
-
-
-def _reads_as_abbreviation(token: str, candidate: str) -> bool:
-    """Return True when *token* and *candidate* are an abbreviation/expansion pair."""
-    if len(token) < _MIN_SUBSEQUENCE_LEN:
-        return False
-    short, long = sorted((token, candidate), key=len)
-    return _is_subsequence(short, long)
 
 
 def _choice_names(action: "argparse._SubParsersAction") -> list[str]:
@@ -74,10 +56,7 @@ def _choice_names(action: "argparse._SubParsersAction") -> list[str]:
 def _nearest_choice(token: str, choices: list[str]) -> str:
     """Return the closest of *choices* to *token*, or an empty string."""
     matches = difflib.get_close_matches(token, choices, n=1, cutoff=_SUGGESTION_CUTOFF)
-    if matches:
-        return matches[0]
-    abbreviations = [c for c in choices if _reads_as_abbreviation(token, c)]
-    return abbreviations[0] if len(abbreviations) == 1 else ""
+    return matches[0] if matches else ""
 
 
 def _unknown_command_hint(command: str, choices: list[str]) -> str:
