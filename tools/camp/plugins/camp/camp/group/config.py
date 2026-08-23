@@ -89,6 +89,7 @@ name is a non-empty string; no duplicate scope within one group's list.
 
 from __future__ import annotations
 
+import re
 import sys
 import tomllib
 from pathlib import Path
@@ -579,6 +580,17 @@ def _parse_harness(raw: Any, path: Path) -> dict[str, Any] | None:
 # harness-interpreted value camp passes through without inspecting it.
 _LAUNCH_KEYS = frozenset({"roots", "account"})
 
+#: Characters an account value may never carry: the C0 controls (NUL among
+#: them), DEL, and the C1 controls. camp does not interpret an account, but the
+#: value does become a path something resolves and an operand of a process
+#: spawn, and both answer a NUL by RAISING rather than refusing — a raw traceback
+#: out of a launch that may belong to an entirely different group, since the deny
+#: derivation pools every group's declaration. Refusing here, where the value is
+#: declared, keeps the failure a named misconfiguration in one named file.
+#: Nothing outside this range is touched: a home directory may be spelled in any
+#: script.
+_ACCOUNT_FORBIDDEN_CHARS = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+
 
 def _parse_launch(raw: Any, path: Path) -> dict[str, Any] | None:
     """Parse + validate the optional [launch] block. Returns None when absent.
@@ -632,6 +644,12 @@ def _parse_launch(raw: Any, path: Path) -> dict[str, Any] | None:
         account = raw["account"]
         if not isinstance(account, str) or not account.strip():
             raise GroupConfigError(f"{path}: launch.account must be a non-empty string")
+        found = _ACCOUNT_FORBIDDEN_CHARS.search(account)
+        if found:
+            raise GroupConfigError(
+                f"{path}: launch.account contains the control character "
+                f"{found.group()!r}, which no path or process operand can carry"
+            )
         result["account"] = account
 
     return result

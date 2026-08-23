@@ -132,6 +132,13 @@ def _expand(entry: str, home: Path) -> Path:
     Deliberately not :meth:`Path.expanduser`, which consults the process's own
     environment and password database and would make the boundary depend on who
     happens to be running camp rather than on the launch environment.
+
+    An entry the filesystem refuses to resolve at all — an embedded NUL is the
+    reachable case, since the deny list pools the account every group declared —
+    is a :class:`LaunchError`, the same refusal an unreadable group config gets.
+    Fail CLOSED: an entry camp cannot resolve is an entry it cannot rule out, and
+    letting the error escape would take down every directory-rooted launch, for
+    every group, with a traceback naming none of them.
     """
     if entry == "~":
         candidate = home
@@ -139,7 +146,13 @@ def _expand(entry: str, home: Path) -> Path:
         candidate = home / entry[2:]
     else:
         candidate = Path(entry)
-    return candidate.resolve()
+    try:
+        return candidate.resolve()
+    except (ValueError, OSError) as exc:
+        raise LaunchError(
+            "camp: cannot launch — camp cannot resolve the credential store "
+            f"{entry!r}, so it cannot tell whether this directory is one: {exc}"
+        ) from exc
 
 
 def _declared_account_entries(env: Mapping[str, str] | None) -> tuple[str, ...]:

@@ -384,6 +384,11 @@ def _refuse_conflicting_config_dirs(env: Mapping[str, str]) -> None:
     )
 
 
+#: Characters an account value may never carry: the C0 controls (NUL among
+#: them), DEL, and the C1 controls.
+_ACCOUNT_FORBIDDEN_CHARS = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+
+
 def _account_home(env: Mapping[str, str]) -> Path:
     """The home a declared account's leading ``~`` expands against.
 
@@ -409,7 +414,20 @@ def _account_dir(account: str, env: Mapping[str, str]) -> Path:
     against whichever working directory the launching process happens to have,
     and the directory it names is one Claude Code would then create and read as
     an empty, unauthenticated account.
+
+    A control character is refused before either check. The value becomes a path
+    the caller resolves and an operand of a process spawn, and both answer a NUL
+    by RAISING — so without this the seam's promised fail-closed refusal is a raw
+    :class:`ValueError` from somewhere with no idea what an account is. Only that
+    range is refused: an account directory may be spelled in any script.
     """
+    found = _ACCOUNT_FORBIDDEN_CHARS.search(account)
+    if found:
+        raise HarnessError(
+            f"session_launch_env_set: account {account!r} contains the control "
+            f"character {found.group()!r}. An account names a directory a session "
+            "reads and a value a process is spawned with, and neither can carry one."
+        )
     expanded = account
     if account == "~" or account.startswith("~/"):
         expanded = str(_account_home(env)) + account[1:]

@@ -134,6 +134,35 @@ class TestARelativeAccountIsRefused:
         assert repr("~someone/.claude") in str(exc_info.value)
 
 
+class TestASyscallHostileAccountIsRefused:
+    """The value becomes an operand of a process spawn and a path the launching
+    caller resolves. A NUL — and the other characters no syscall accepts — must
+    be REFUSED here, where the seam's contract promises a clean fail-closed
+    refusal, rather than raising out of `subprocess` or `Path.resolve` as a raw
+    traceback from somewhere with no idea what an account is."""
+
+    @pytest.mark.parametrize(
+        "account",
+        [
+            "/accounts/\x00levr",
+            "/accounts/\x07levr",
+            "/accounts/\x1blevr",
+            "/accounts/\x9blevr",
+            "~/accounts/\x00levr",
+        ],
+    )
+    def test_it_raises_a_harness_error_naming_the_value(self, harness, account, tmp_path):
+        with pytest.raises(HarnessError) as exc_info:
+            harness.session_launch_env_set(account, env={"HOME": str(tmp_path)})
+        assert repr(account) in str(exc_info.value)
+
+    def test_an_ordinary_non_ascii_account_is_still_accepted(self, harness, tmp_path):
+        account = str(tmp_path / "Comptes" / "café" / ".claude")
+        assert harness.session_launch_env_set(account, env={"HOME": str(tmp_path)}) == {
+            CONFIG_DIR: account
+        }
+
+
 class TestConflictWithTheTrailheadSeam:
     """The account must not become a fourth config-dir resolution that walks
     around ``_refuse_conflicting_config_dirs``."""

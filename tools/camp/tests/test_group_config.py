@@ -1417,6 +1417,32 @@ def test_launch_account_invalid_raises(tmp_path: Path, account_line: str) -> Non
     assert str(tmp_path) in msg or "testgroup.toml" in msg
 
 
+@pytest.mark.parametrize(
+    "escape",
+    ["\\u0000", "\\u0007", "\\u001b", "\\u009b", "\\u007f"],
+)
+def test_launch_account_with_a_syscall_hostile_character_raises(
+    tmp_path: Path, escape: str
+) -> None:
+    """An account value becomes a path camp resolves and an operand handed to a
+    process spawn, and both reject a NUL by raising rather than refusing. The
+    value must be refused where it is declared, so the failure is a named
+    misconfiguration in one file instead of a raw traceback out of an unrelated
+    group's launch."""
+    from camp.group.config import GroupConfigError
+
+    with pytest.raises(GroupConfigError) as exc_info:
+        _write_and_load(tmp_path, f'[launch]\naccount = "/accounts/{escape}levr"\n')
+    assert "launch.account" in str(exc_info.value)
+
+
+def test_launch_account_keeps_ordinary_non_ascii(tmp_path: Path) -> None:
+    """The refusal is aimed at control characters, not at anything non-ASCII: a
+    home directory can legitimately be spelled in any script."""
+    cfg = _write_and_load(tmp_path, '[launch]\naccount = "~/Comptes/café/.claude"\n')
+    assert cfg["launch"]["account"] == "~/Comptes/café/.claude"
+
+
 def test_launch_unknown_key_still_raises_with_account_known(tmp_path: Path) -> None:
     """Regression on _LAUNCH_KEYS: an unrelated unknown key still fails closed
     now that 'account' is a recognized key too."""

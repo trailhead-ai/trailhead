@@ -494,6 +494,70 @@ def test_group_configs_that_cannot_be_read_refuse_the_launch(home: Path) -> None
     assert "group config" in str(exc_info.value)
 
 
+#: A TOML escape for an embedded NUL. Written as an escape because a raw control
+#: byte is not legal inside a basic string, and decoded by tomllib into the real
+#: character — so the parser downstream sees exactly what an operator's typo, or
+#: a hostile config, would put there.
+_NUL_ESCAPE = "\\u0000"
+
+
+def test_another_groups_malformed_account_refuses_rather_than_raising(
+    home: Path,
+) -> None:
+    """THE cross-group blast radius. The deny list pools the accounts of EVERY
+    group, so one group's unresolvable value is reached while deriving the
+    boundary for a launch that has nothing to do with it. Resolving it raises
+    ValueError, which escapes the launch as a raw traceback and takes every
+    directory-rooted launch, for every group, down with it. Fail CLOSED: the same
+    refusal an unreadable config gets."""
+    from camp.launch.session import LaunchError
+
+    env = _install_group_configs(
+        home, {"levr": f"~/accounts/{_NUL_ESCAPE}levr", "trailhead": None}
+    )
+    target = home / "code"
+    target.mkdir()
+
+    with pytest.raises(LaunchError):
+        _check(target, _group([str(target)], name="trailhead"), home, env=env)
+
+
+def test_a_groups_own_malformed_account_refuses_rather_than_raising(
+    home: Path,
+) -> None:
+    """The own-group case: the launching group is the one that declared it."""
+    from camp.launch.session import LaunchError
+
+    env = _install_group_configs(home, {"levr": f"/accounts/{_NUL_ESCAPE}levr"})
+    target = home / "code"
+    target.mkdir()
+
+    with pytest.raises(LaunchError):
+        _check(target, _group([str(target)], name="levr"), home, env=env)
+
+
+def test_a_deny_entry_that_cannot_be_resolved_refuses_the_launch(
+    home: Path, monkeypatch
+) -> None:
+    """Fail closed at the resolve step itself, not only where the entries are
+    read. An entry the filesystem refuses to resolve is an entry camp cannot rule
+    out, and answering with a shorter deny list would turn it into a widened
+    boundary."""
+    from camp.launch import eligibility
+    from camp.launch.session import LaunchError
+
+    monkeypatch.setattr(
+        eligibility,
+        "credential_deny_entries",
+        lambda *, env: ("/accounts/\x00levr",),
+    )
+    target = home / "code"
+    target.mkdir()
+
+    with pytest.raises(LaunchError):
+        _check(target, _group([str(target)]), home)
+
+
 def test_a_groups_directory_that_was_never_created_yields_the_floor(home: Path) -> None:
     """No groups directory means no group declares an account, so there is
     nothing to derive and nothing to miss — the hardcoded floor answers alone,
