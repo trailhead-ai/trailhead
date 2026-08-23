@@ -1297,3 +1297,200 @@ class TestManifestAPI:
 
         assert work_state_for_member({"name": "repo", "work_state": "ready"}) == "ready"
 
+
+# ---------------------------------------------------------------------------
+# Test: provision_status_code reports two independent facts; status_header
+# derives the workspace header from both without the exit code ever
+# depending on work-readiness.
+# ---------------------------------------------------------------------------
+
+
+class TestStatusTwoFacts:
+    def _seed(self, group, slug, env, members):
+        """Seed a workspace then overwrite each named member's entry with the
+        given fields (e.g. {"provision_state": "ready", "work_state": "pending"}).
+        """
+        from camp.provision.provision import seed_pending_workspace
+        from camp.group.manifest import (
+            manifest_path_for,
+            read_central_manifest,
+            write_central_manifest,
+            reconcile_lock,
+        )
+
+        seed_pending_workspace(group, slug, env=env)
+        mpath = manifest_path_for(group["group"]["name"], slug, env=env)
+        with reconcile_lock(mpath.parent):
+            data = read_central_manifest(mpath)
+            for m in data["members"]:
+                if m["name"] in members:
+                    m.update(members[m["name"]])
+            write_central_manifest(mpath, data)
+        return mpath
+
+    def test_report_carries_work_state_per_member(self, two_member_group):
+        from camp.provision.lifecycle import provision_status_code
+
+        g = two_member_group
+        self._seed(
+            g["group"],
+            "wf1",
+            g["env"],
+            {
+                "repo_a": {"provision_state": "ready", "work_state": "ready"},
+                "repo_b": {"provision_state": "ready", "work_state": "pending"},
+            },
+        )
+        _code, report = provision_status_code(g["group"], "wf1", env=g["env"])
+        by_name = {m["name"]: m["work_state"] for m in report["members"]}
+        assert by_name == {"repo_a": "ready", "repo_b": "pending"}
+
+    def test_work_code_rollup_ready_when_all_ready_or_not_applicable(self, two_member_group):
+        from camp.provision.lifecycle import provision_status_code
+
+        g = two_member_group
+        self._seed(
+            g["group"],
+            "wf2",
+            g["env"],
+            {
+                "repo_a": {"provision_state": "ready", "work_state": "ready"},
+                "repo_b": {"provision_state": "ready", "work_state": "not-applicable"},
+            },
+        )
+        _code, report = provision_status_code(g["group"], "wf2", env=g["env"])
+        assert report["work_code"] == 0
+
+    def test_work_code_rollup_pending(self, two_member_group):
+        from camp.provision.lifecycle import provision_status_code
+
+        g = two_member_group
+        self._seed(
+            g["group"],
+            "wf3",
+            g["env"],
+            {
+                "repo_a": {"provision_state": "ready", "work_state": "ready"},
+                "repo_b": {"provision_state": "ready", "work_state": "pending"},
+            },
+        )
+        _code, report = provision_status_code(g["group"], "wf3", env=g["env"])
+        assert report["work_code"] == 2
+
+    def test_work_code_rollup_failed(self, two_member_group):
+        from camp.provision.lifecycle import provision_status_code
+
+        g = two_member_group
+        self._seed(
+            g["group"],
+            "wf4",
+            g["env"],
+            {
+                "repo_a": {"provision_state": "ready", "work_state": "ready"},
+                "repo_b": {"provision_state": "ready", "work_state": "failed"},
+            },
+        )
+        _code, report = provision_status_code(g["group"], "wf4", env=g["env"])
+        assert report["work_code"] == 3
+
+    def test_exit_code_derives_from_boot_readiness_alone(self, two_member_group):
+        """A member whose work_state is failed must not push the process exit
+        code to 3 while every member is boot-ready — the exit code carries
+        boot-readiness only, never work-readiness."""
+        from camp.provision.lifecycle import provision_status_code
+
+        g = two_member_group
+        self._seed(
+            g["group"],
+            "wf5",
+            g["env"],
+            {
+                "repo_a": {"provision_state": "ready", "work_state": "ready"},
+                "repo_b": {"provision_state": "ready", "work_state": "failed"},
+            },
+        )
+        code, report = provision_status_code(g["group"], "wf5", env=g["env"])
+        assert code == 0
+        assert report["code"] == 0
+        assert report["work_code"] == 3
+
+    def test_json_key_set_conformance(self, two_member_group):
+        """The keys read by the concierge skill and five sibling specs — slug,
+        code, members[].provision_state, members[].tasks, members[].reason —
+        are still present with unchanged meaning. A future rename of any of
+        these must fail HERE, not silently in a downstream consumer."""
+        from camp.provision.lifecycle import provision_status_code
+
+        g = two_member_group
+        self._seed(
+            g["group"],
+            "wf6",
+            g["env"],
+            {
+                "repo_a": {"provision_state": "ready", "work_state": "ready"},
+                "repo_b": {
+                    "provision_state": "failed",
+                    "work_state": "pending",
+                    "reason": "boom",
+                },
+            },
+        )
+        _code, report = provision_status_code(g["group"], "wf6", env=g["env"])
+
+        assert {"slug", "code", "members"} <= set(report.keys())
+        for m in report["members"]:
+            assert {"name", "provision_state", "tasks"} <= set(m.keys())
+        by_name = {m["name"]: m for m in report["members"]}
+        assert by_name["repo_b"]["reason"] == "boom"
+
+    def test_status_header_all_ready(self, two_member_group):
+        from camp.provision.lifecycle import provision_status_code, status_header
+
+        g = two_member_group
+        self._seed(
+            g["group"],
+            "wf7",
+            g["env"],
+            {
+                "repo_a": {"provision_state": "ready", "work_state": "ready"},
+                "repo_b": {"provision_state": "ready", "work_state": "not-applicable"},
+            },
+        )
+        _code, report = provision_status_code(g["group"], "wf7", env=g["env"])
+        assert status_header(report) == "ready"
+
+    def test_status_header_mixed_boot_ready_work_pending(self, two_member_group):
+        """The headline behavior change: a workspace whose members are all
+        boot-ready but still installing dependencies gets a header that says
+        so, distinct from both "ready" and the old hardcoded "provisioning"."""
+        from camp.provision.lifecycle import provision_status_code, status_header
+
+        g = two_member_group
+        self._seed(
+            g["group"],
+            "wf8",
+            g["env"],
+            {
+                "repo_a": {"provision_state": "ready", "work_state": "ready"},
+                "repo_b": {"provision_state": "ready", "work_state": "pending"},
+            },
+        )
+        _code, report = provision_status_code(g["group"], "wf8", env=g["env"])
+        assert status_header(report) == "ready, work pending"
+
+    def test_status_header_failed_takes_precedence(self, two_member_group):
+        from camp.provision.lifecycle import provision_status_code, status_header
+
+        g = two_member_group
+        self._seed(
+            g["group"],
+            "wf9",
+            g["env"],
+            {
+                "repo_a": {"provision_state": "failed", "work_state": "pending"},
+                "repo_b": {"provision_state": "ready", "work_state": "ready"},
+            },
+        )
+        _code, report = provision_status_code(g["group"], "wf9", env=g["env"])
+        assert status_header(report) == "failed"
+

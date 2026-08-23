@@ -1161,11 +1161,13 @@ class TestStatusPerTaskSurfacing:
         assert exc.value.code == 0
 
         lines = capsys.readouterr().out.splitlines()
-        assert "  repo_a: ready" in lines
+        # A member seeded via flip_member_state_unlocked carries no work_state
+        # key, which reads as "pending" per manifest.work_state_for_member.
+        assert "  repo_a: ready / work: pending" in lines
         assert "    seed: ok" in lines
         assert "    graphify: failed" in lines
         # Insertion order preserved and sub-lines sit under their member line.
-        i_member = lines.index("  repo_a: ready")
+        i_member = lines.index("  repo_a: ready / work: pending")
         i_seed = lines.index("    seed: ok")
         i_graphify = lines.index("    graphify: failed")
         assert i_member < i_seed < i_graphify

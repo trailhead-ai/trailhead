@@ -220,3 +220,164 @@ class TestCampStatusExitCodes:
         assert report["code"] == 2
         by_name = {m["name"]: m["provision_state"] for m in report["members"]}
         assert by_name == {"repo_a": "ready", "repo_b": "pending"}
+
+
+class TestCampStatusTwoFacts:
+    """`camp status` reports boot-readiness and work-readiness as two
+    independent facts, and derives its header + rollup from both while the
+    process exit code continues to derive from boot-readiness alone."""
+
+    def _seed_two_facts(self, cli_env, slug, members):
+        """members: {name: {"provision_state": ..., "work_state": ..., "reason"?: ...}}"""
+        from camp.group.resolve import central_state_dir
+        from camp.provision.provision import seed_pending_workspace
+        from camp.group.manifest import (
+            read_central_manifest,
+            write_central_manifest,
+            reconcile_lock,
+        )
+        from camp.group.config import load_group
+
+        group = load_group(cli_env["config_dir"] / "groups" / "mygroup.toml")
+        env = {"CAMP_STATE_DIR": str(cli_env["state_dir"])}
+        seed_pending_workspace(group, slug, env=env)
+        mpath = central_state_dir("mygroup", env=env) / "worktrees" / slug / "manifest.json"
+        with reconcile_lock(mpath.parent):
+            data = read_central_manifest(mpath)
+            for m in data["members"]:
+                if m["name"] in members:
+                    m.update(members[m["name"]])
+            write_central_manifest(mpath, data)
+
+    def test_boot_ready_work_pending_exits_0(self, cli_env):
+        """The headline behavior change: a workspace whose members are
+        boot-ready but still installing dependencies now exits 0, not 2."""
+        self._seed_two_facts(
+            cli_env,
+            "twf0",
+            {
+                "repo_a": {"provision_state": "ready", "work_state": "ready"},
+                "repo_b": {"provision_state": "ready", "work_state": "pending"},
+            },
+        )
+        r = _camp(cli_env, "status", "--group", "mygroup", "--name", "twf0")
+        assert r.returncode == 0, f"expected 0, got {r.returncode}: {r.stderr}"
+
+    def test_exit_code_unaffected_by_failed_work_state(self, cli_env):
+        """A failed work_state must never push the exit code to 3 while boot
+        readiness is all-ready."""
+        self._seed_two_facts(
+            cli_env,
+            "twf1",
+            {
+                "repo_a": {"provision_state": "ready", "work_state": "ready"},
+                "repo_b": {"provision_state": "ready", "work_state": "failed"},
+            },
+        )
+        r = _camp(cli_env, "status", "--group", "mygroup", "--name", "twf1")
+        assert r.returncode == 0, f"expected 0, got {r.returncode}: {r.stderr}"
+
+    def test_json_carries_work_rollup_independent_of_exit_code(self, cli_env):
+        self._seed_two_facts(
+            cli_env,
+            "twf2",
+            {
+                "repo_a": {"provision_state": "ready", "work_state": "ready"},
+                "repo_b": {"provision_state": "ready", "work_state": "failed"},
+            },
+        )
+        r = _camp(cli_env, "status", "--group", "mygroup", "--name", "twf2", "--json")
+        assert r.returncode == 0, f"expected 0, got {r.returncode}: {r.stderr}"
+        report = json.loads(r.stdout)
+        assert report["code"] == 0
+        assert report["work_code"] == 3
+
+    def test_header_all_ready(self, cli_env):
+        self._seed_two_facts(
+            cli_env,
+            "twf3",
+            {
+                "repo_a": {"provision_state": "ready", "work_state": "ready"},
+                "repo_b": {"provision_state": "ready", "work_state": "not-applicable"},
+            },
+        )
+        r = _camp(cli_env, "status", "--group", "mygroup", "--name", "twf3")
+        assert r.stdout.splitlines()[0] == "camp status: twf3 — ready"
+
+    def test_header_mixed_boot_ready_work_pending(self, cli_env):
+        self._seed_two_facts(
+            cli_env,
+            "twf4",
+            {
+                "repo_a": {"provision_state": "ready", "work_state": "ready"},
+                "repo_b": {"provision_state": "ready", "work_state": "pending"},
+            },
+        )
+        r = _camp(cli_env, "status", "--group", "mygroup", "--name", "twf4")
+        assert r.stdout.splitlines()[0] == "camp status: twf4 — ready, work pending"
+
+    def test_header_failed(self, cli_env):
+        self._seed_two_facts(
+            cli_env,
+            "twf5",
+            {
+                "repo_a": {"provision_state": "failed", "work_state": "pending"},
+                "repo_b": {"provision_state": "ready", "work_state": "ready"},
+            },
+        )
+        r = _camp(cli_env, "status", "--group", "mygroup", "--name", "twf5")
+        assert r.stdout.splitlines()[0] == "camp status: twf5 — failed"
+
+    def test_per_member_line_carries_both_facts(self, cli_env):
+        self._seed_two_facts(
+            cli_env,
+            "twf6",
+            {
+                "repo_a": {"provision_state": "ready", "work_state": "pending"},
+                "repo_b": {"provision_state": "ready", "work_state": "ready"},
+            },
+        )
+        r = _camp(cli_env, "status", "--group", "mygroup", "--name", "twf6")
+        lines = r.stdout.splitlines()
+        assert "  repo_a: ready / work: pending" in lines
+        assert "  repo_b: ready / work: ready" in lines
+
+    def test_per_task_sub_lines_keep_indentation_and_insertion_order(self, cli_env):
+        """Regression guard: per-task sub-lines are documented as stable for
+        agent parsing — two-space member indent, four-space task indent,
+        manifest insertion order preserved."""
+        self._seed_two_facts(
+            cli_env,
+            "twf7",
+            {
+                "repo_a": {
+                    "provision_state": "ready",
+                    "work_state": "ready",
+                    "tasks": {
+                        "seed": {"state": "ok"},
+                        "graphify": {"state": "failed"},
+                    },
+                },
+            },
+        )
+        r = _camp(cli_env, "status", "--group", "mygroup", "--name", "twf7")
+        lines = r.stdout.splitlines()
+        i_member = lines.index("  repo_a: ready / work: ready")
+        i_seed = lines.index("    seed: ok")
+        i_graphify = lines.index("    graphify: failed")
+        assert i_member < i_seed < i_graphify
+
+    def test_rollup_precedes_per_member_output(self, cli_env):
+        self._seed_two_facts(
+            cli_env,
+            "twf8",
+            {
+                "repo_a": {"provision_state": "ready", "work_state": "ready"},
+                "repo_b": {"provision_state": "ready", "work_state": "ready"},
+            },
+        )
+        r = _camp(cli_env, "status", "--group", "mygroup", "--name", "twf8")
+        lines = r.stdout.splitlines()
+        i_header = lines.index("camp status: twf8 — ready")
+        i_member = next(i for i, l in enumerate(lines) if l.startswith("  repo_a"))
+        assert i_header < i_member

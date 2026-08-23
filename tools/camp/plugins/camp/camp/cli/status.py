@@ -66,13 +66,23 @@ def _cmd_status_group_cli(
 
     Scoped (a slug resolvable via --name or cwd): emit the per-member
     provision-state report with STRUCTURED EXIT CODES so the in-session agent can
-    branch programmatically — 0=all ready, 2=some pending, 3=some failed. --json
-    prints the stable report shape on stdout.
+    branch programmatically — 0=all ready, 2=some pending, 3=some failed. These
+    codes are driven by boot-readiness (provision_state) ALONE, never by
+    work-readiness — a workspace whose members are boot-ready but still
+    installing dependencies exits 0. --json prints the stable report shape on
+    stdout, which additionally carries `work_code` — the same 0/2/3-style
+    rollup over work-readiness, exposed for a consumer that reads only the
+    exit code and wants that fact too without it ever changing the exit code.
 
-    Text output is line-oriented and STABLE for agent parsing:
-        camp status: <slug> — provisioning
-          <member>: <provision_state>[ (<reason>)]
+    Text output is line-oriented and STABLE for agent parsing, workspace
+    rollup first, then per-member, then per-task detail:
+        camp status: <slug> — <header>
+          <member>: <provision_state> / work: <work_state>[ (<reason>)]
             <task-name>: <state>          # one per task, manifest insertion order
+
+    <header> is derived from both facts (see provision.lifecycle.status_header):
+    "ready", "ready, work pending", "ready, work failed", "provisioning", or
+    "failed" — never the old hardcoded "provisioning" regardless of state.
 
     Each member line is indented two spaces; its per-task sub-lines are indented
     four spaces and appear in the member's manifest task-insertion order. A
@@ -84,7 +94,7 @@ def _cmd_status_group_cli(
     Fleet view (no slug): the git-status table across all worktrees (exit 0).
     """
     import json as _json
-    from ..provision.lifecycle import cmd_status_group, provision_status_code
+    from ..provision.lifecycle import cmd_status_group, provision_status_code, status_header
 
     as_json = "--json" in args
     filtered = [a for a in args if a != "--json"]
@@ -102,9 +112,9 @@ def _cmd_status_group_cli(
         if as_json:
             print(_json.dumps(report))
         else:
-            print(f"camp status: {slug} — provisioning")
+            print(f"camp status: {slug} — {status_header(report)}")
             for m in report["members"]:
-                line = f"  {m['name']}: {m['provision_state']}"
+                line = f"  {m['name']}: {m['provision_state']} / work: {m['work_state']}"
                 if m.get("reason"):
                     line += f" ({m['reason']})"
                 print(line)
