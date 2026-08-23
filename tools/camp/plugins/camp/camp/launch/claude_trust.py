@@ -32,8 +32,8 @@ Design notes:
   reappears after bring-up, re-run the manual interactive check to validate the
   current entry shape.
 
-Failure posture: every *expected* abort (out-of-confinement, relative
-CLAUDE_CONFIG_DIR, malformed / unreadable / structurally-wrong existing file) emits a single `camp: …` line on
+Failure posture: every *expected* abort (out-of-confinement, a config file that
+resolves to a relative path, malformed / unreadable / structurally-wrong existing file) emits a single `camp: …` line on
 stderr and returns without raising.  An *unexpected* failure of the atomic write
 itself (after the merged payload is built) unlinks the temp file and propagates —
 the best-effort caller (bring_up_workspace) catches it, logs `camp: pretrust
@@ -55,7 +55,7 @@ import tempfile
 from pathlib import Path
 
 
-def _config_file(env: dict[str, str] | None) -> Path:
+def config_file(env: dict[str, str] | None) -> Path:
     """Resolve the Claude global config file the launched session will read.
 
     Delegates to trailhead's exported ``claude_config_file`` — the same resolver
@@ -67,6 +67,39 @@ def _config_file(env: dict[str, str] | None) -> Path:
     from trailhead.harness import claude_config_file
 
     return claude_config_file(env)
+
+
+def trust_status(
+    launch_dir: Path | str, *, env: dict[str, str] | None = None
+) -> tuple[Path, bool | None]:
+    """The config file a launched session reads, and whether it trusts *launch_dir*.
+
+    The read-only companion to :func:`pretrust_workspace`, sharing its resolver
+    and its notion of where the key lives, so a report about the seed cannot
+    name a different file or a different key than the write used.
+
+    Returns ``(path, True | False | None)``. ``None`` means camp could not tell —
+    the file is absent, unreadable, or not shaped the way the seed expects — and
+    is a reportable answer in its own right. ``False`` is the positive finding
+    that a readable, well-shaped file grants this directory nothing.
+    """
+    path = config_file(env)
+    try:
+        with open(str(path), "r") as fh:
+            data = json.loads(fh.read())
+    except (OSError, json.JSONDecodeError):
+        return path, None
+    if not isinstance(data, dict):
+        return path, None
+    projects = data.get("projects")
+    if projects is None:
+        return path, False
+    if not isinstance(projects, dict):
+        return path, None
+    entry = projects.get(str(Path(launch_dir).resolve()))
+    if not isinstance(entry, dict):
+        return path, False
+    return path, entry.get("hasTrustDialogAccepted") is True
 
 
 def _is_mergeable(data: object, project_key: str) -> bool:
@@ -101,7 +134,8 @@ def pretrust_workspace(
     workspace_root — the workspace root; launch_dir must equal or be under this
                     (confinement).
     env          — optional environment dict; the Claude config file is resolved
-                   from it (CLAUDE_CONFIG_DIR, else HOME) so a relocated session is
+                   from it (the harness relocation variable, else HOME) so a
+                   relocated session is
                    trusted in the file it reads, and so tests can sandbox under
                    tmp_path without touching the real ~/.claude.json.
 
@@ -109,8 +143,9 @@ def pretrust_workspace(
 
     Returns True when trust is in place (a fresh write, or the already-trusted
     idempotent no-op). Returns False on every abort path below (out-of-confinement,
-    relative CLAUDE_CONFIG_DIR, unreadable / malformed / structurally-wrong existing file) — each still emits
-    its camp: stderr line and does not raise.
+    a config file resolving to a relative path, unreadable / malformed /
+    structurally-wrong existing file) — each still emits its camp: stderr line
+    and does not raise.
 
     Failure posture: malformed / unreadable existing file → emit camp: stderr, return False.
     Out-of-confinement launch_dir → emit camp: stderr, return False. No exception raised
@@ -131,21 +166,21 @@ def pretrust_workspace(
         )
         return False
 
-    # A relative CLAUDE_CONFIG_DIR would resolve against camp's cwd rather than
-    # the launched session's, and the write below creates its parent tree — so a
-    # mistyped override would build an arbitrary directory and report success on
-    # a trust key Claude never reads. Refused, matching the concierge's own
-    # absolute-override rule.
-    override = (env or {}).get("CLAUDE_CONFIG_DIR", "").strip()
-    if override and not Path(override).is_absolute():
+    claude_json_path = config_file(env)
+
+    # A relative config file resolves against camp's cwd rather than the launched
+    # session's, and the write below creates its parent tree — so a relocation
+    # override that is not absolute would build an arbitrary directory and report
+    # success on a trust key Claude never reads. Refused, matching the concierge's
+    # own absolute-override rule. The resolved path is what is checked, not the
+    # variable behind it: only the harness knows which variable that is.
+    if not claude_json_path.is_absolute():
         print(
-            f"camp: pretrust skipped — CLAUDE_CONFIG_DIR={override!r} is relative; "
-            "override paths must be absolute",
+            f"camp: pretrust skipped — the harness config file resolves to "
+            f"{str(claude_json_path)!r}; override paths must be absolute",
             file=sys.stderr,
         )
         return False
-
-    claude_json_path = _config_file(env)
 
     # Load existing file, or start from scratch when absent. Exception-based
     # detection (no pre-check exists() stat): a missing file is the create case;

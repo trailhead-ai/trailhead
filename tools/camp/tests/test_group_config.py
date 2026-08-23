@@ -1376,3 +1376,80 @@ def test_launch_not_a_table_raises(tmp_path: Path) -> None:
     with pytest.raises(GroupConfigError) as exc_info:
         load_group(f)
     assert "launch" in str(exc_info.value)
+
+
+def test_launch_account_parsed_unexpanded(tmp_path: Path) -> None:
+    """account is stored exactly as written — camp does not interpret it as a
+    path; expansion and validation belong to the harness seam."""
+    cfg = _write_and_load(tmp_path, '[launch]\naccount = "~/.claude-levr"\n')
+    assert cfg["launch"]["account"] == "~/.claude-levr"
+
+
+def test_launch_account_absent_is_none_with_no_launch_block(tmp_path: Path) -> None:
+    cfg = _write_and_load(tmp_path, "[branch]\npattern = 'worktree-{slug}'\n")
+    assert "launch" not in cfg
+
+
+def test_launch_account_absent_with_roots_present_is_none(tmp_path: Path) -> None:
+    """roots keeps working unchanged when account is not declared."""
+    cfg = _write_and_load(tmp_path, '[launch]\nroots = ["~/code"]\n')
+    assert cfg["launch"]["roots"] == ["~/code"]
+    assert "account" not in cfg["launch"]
+
+
+@pytest.mark.parametrize(
+    "account_line",
+    [
+        "account = 42",
+        'account = ""',
+        'account = "   "',
+    ],
+)
+def test_launch_account_invalid_raises(tmp_path: Path, account_line: str) -> None:
+    """A non-string, empty, or whitespace-only account raises GroupConfigError
+    naming launch.account and the config file path."""
+    from camp.group.config import GroupConfigError
+
+    with pytest.raises(GroupConfigError) as exc_info:
+        _write_and_load(tmp_path, f"[launch]\n{account_line}\n")
+    msg = str(exc_info.value)
+    assert "launch.account" in msg
+    assert str(tmp_path) in msg or "testgroup.toml" in msg
+
+
+@pytest.mark.parametrize(
+    "escape",
+    ["\\u0000", "\\u0007", "\\u001b", "\\u009b", "\\u007f"],
+)
+def test_launch_account_with_a_syscall_hostile_character_raises(
+    tmp_path: Path, escape: str
+) -> None:
+    """An account value becomes a path camp resolves and an operand handed to a
+    process spawn, and both reject a NUL by raising rather than refusing. The
+    value must be refused where it is declared, so the failure is a named
+    misconfiguration in one file instead of a raw traceback out of an unrelated
+    group's launch."""
+    from camp.group.config import GroupConfigError
+
+    with pytest.raises(GroupConfigError) as exc_info:
+        _write_and_load(tmp_path, f'[launch]\naccount = "/accounts/{escape}levr"\n')
+    assert "launch.account" in str(exc_info.value)
+
+
+def test_launch_account_keeps_ordinary_non_ascii(tmp_path: Path) -> None:
+    """The refusal is aimed at control characters, not at anything non-ASCII: a
+    home directory can legitimately be spelled in any script."""
+    cfg = _write_and_load(tmp_path, '[launch]\naccount = "~/Comptes/café/.claude"\n')
+    assert cfg["launch"]["account"] == "~/Comptes/café/.claude"
+
+
+def test_launch_unknown_key_still_raises_with_account_known(tmp_path: Path) -> None:
+    """Regression on _LAUNCH_KEYS: an unrelated unknown key still fails closed
+    now that 'account' is a recognized key too."""
+    from camp.group.config import GroupConfigError
+
+    with pytest.raises(GroupConfigError) as exc_info:
+        _write_and_load(tmp_path, '[launch]\naccount = "~/.claude-levr"\nbogus = "x"\n')
+    msg = str(exc_info.value)
+    assert "launch" in msg
+    assert "bogus" in msg

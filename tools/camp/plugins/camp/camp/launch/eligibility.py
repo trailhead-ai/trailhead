@@ -23,10 +23,24 @@ THE ORDER OF THE THREE CHECKS IS PART OF THE CONTRACT.
    where it points).
 
 3. **The credential-directory deny list, checked last and winning regardless of
-   configuration.** :data:`CREDENTIAL_DENY_ENTRIES` is fixed in code. It is not a
-   default, not a suggestion, and no group config can relax it. It is checked
-   AFTER the allowlist precisely so that its refusal can be worded as its own
-   rule: an operator who reads "not under the allowlist" reasonably concludes
+   configuration.** :data:`CREDENTIAL_DENY_ENTRIES` is the FLOOR, fixed in code,
+   and :func:`credential_deny_entries` is the list actually checked: the floor
+   plus one entry per account declared under ``[launch] account`` by ANY group
+   camp knows about. Derivation is STRICTLY ADDITIVE — config can only append,
+   and no value of any key removes, narrows, shadows, or reorders a floor entry.
+   That is the sense in which no group config can relax the rule; it is not a
+   default and not a suggestion, and there is no key that turns an entry off.
+
+   The union spans every group, not the launching one. An account is a
+   credential store no matter which group declared it, and scoping the
+   derivation to the group being launched would leave a group with wide
+   ``roots`` free to root a session at another group's OAuth store — the case
+   the rule exists for. Camp cannot enumerate those declarations without reading
+   the group configs, so a group config it cannot read is a refusal, not a
+   smaller deny list.
+
+   It is checked AFTER the allowlist precisely so that its refusal can be worded
+   as its own rule: an operator who reads "not under the allowlist" reasonably concludes
    they can fix it by editing the allowlist, and for a credential directory that
    conclusion must never be available. The deny refusal therefore names the
    credential rule and says nothing about the allowlist at all.
@@ -64,9 +78,11 @@ from typing import Any
 from .recovery import printable_path
 from .session import LaunchError
 
-#: Credential stores that are never an eligible launch root, regardless of what
-#: any group config says. Fixed in code on purpose — extending or trimming this
-#: list is a change to a security boundary, not an implementation detail.
+#: The floor of credential stores that are never an eligible launch root,
+#: regardless of what any group config says. Fixed in code on purpose — editing
+#: this list is a change to a security boundary, not an implementation detail.
+#: :func:`credential_deny_entries` appends the accounts groups declare; nothing
+#: appended can subtract from what is here.
 CREDENTIAL_DENY_ENTRIES: tuple[str, ...] = (
     "~/.ssh",
     "~/.gnupg",
@@ -116,6 +132,13 @@ def _expand(entry: str, home: Path) -> Path:
     Deliberately not :meth:`Path.expanduser`, which consults the process's own
     environment and password database and would make the boundary depend on who
     happens to be running camp rather than on the launch environment.
+
+    An entry the filesystem refuses to resolve at all — an embedded NUL is the
+    reachable case, since the deny list pools the account every group declared —
+    is a :class:`LaunchError`, the same refusal an unreadable group config gets.
+    Fail CLOSED: an entry camp cannot resolve is an entry it cannot rule out, and
+    letting the error escape would take down every directory-rooted launch, for
+    every group, with a traceback naming none of them.
     """
     if entry == "~":
         candidate = home
@@ -123,7 +146,72 @@ def _expand(entry: str, home: Path) -> Path:
         candidate = home / entry[2:]
     else:
         candidate = Path(entry)
-    return candidate.resolve()
+    try:
+        return candidate.resolve()
+    except (ValueError, OSError) as exc:
+        raise LaunchError(
+            "camp: cannot launch — camp cannot resolve the credential store "
+            f"{entry!r}, so it cannot tell whether this directory is one: {exc}"
+        ) from exc
+
+
+def _declared_account_entries(env: Mapping[str, str] | None) -> tuple[str, ...]:
+    """Every ``[launch] account`` declared by any group camp knows about.
+
+    The group configs are located through the SAME environment the rest of the
+    boundary reads, so a test — and an operator with a redirected config dir —
+    gets the accounts of the camp they are actually running.
+
+    An account that is neither absolute nor ``~``-anchored is skipped rather
+    than resolved: a cwd-relative entry would make the boundary move with the
+    directory camp happens to be invoked from, and no harness will bind a
+    session to one, so it names no reachable store.
+
+    A group config camp cannot read or parse is a refusal: an unreadable
+    declaration is an account camp cannot rule out, and answering with a shorter
+    deny list would turn a broken config into a widened boundary.
+
+    A groups directory that does not exist is not that case and does not refuse.
+    It yields no entries, leaving the hardcoded floor to answer alone — camp
+    knows of no groups at all, so no group declares an account and there is
+    nothing the shorter list could be missing.
+    """
+    from ..group.config import load_all_groups
+
+    try:
+        import trailhead.paths as _paths
+
+        groups_dir = _paths.config_dir("camp", env=dict(env) if env is not None else None)
+        configs = load_all_groups(groups_dir / "groups")
+    except Exception as exc:
+        raise LaunchError(
+            "camp: cannot launch — camp cannot read the group configs, so it "
+            "cannot tell which account directories are credential stores: "
+            f"{exc}"
+        ) from exc
+
+    entries: list[str] = []
+    for config in configs:
+        account = (config.get("launch") or {}).get("account")
+        if not isinstance(account, str):
+            continue
+        if account == "~" or account.startswith(("~/", "/")):
+            entries.append(account)
+    return tuple(entries)
+
+
+def credential_deny_entries(*, env: Mapping[str, str] | None) -> tuple[str, ...]:
+    """The deny list this launch is judged against: the floor, then the accounts.
+
+    :data:`CREDENTIAL_DENY_ENTRIES` comes first and comes through whole, in its
+    own order, so the additions are visibly additions.
+    """
+    derived = tuple(
+        entry
+        for entry in _declared_account_entries(env)
+        if entry not in CREDENTIAL_DENY_ENTRIES
+    )
+    return CREDENTIAL_DENY_ENTRIES + tuple(dict.fromkeys(derived))
 
 
 def matches_deny_entry(target: Path, entry: Path) -> bool:
@@ -180,6 +268,10 @@ def assert_launch_eligible(
 def assert_not_a_credential_store(resolved: Path, *, env: Mapping[str, str] | None) -> None:
     """Refuse an already-resolved launch root that touches a credential store.
 
+    The list is :func:`credential_deny_entries` — the fixed floor plus every
+    account any group declares — so a store belonging to a group other than the
+    one launching is refused on the same terms as one of the floor entries.
+
     Split out of :func:`assert_launch_eligible` because this rule alone is
     UNCONDITIONAL. The allowlist answers a question about a directory the
     operator named, and a directory camp computed itself never had to answer it;
@@ -189,7 +281,7 @@ def assert_not_a_credential_store(resolved: Path, *, env: Mapping[str, str] | No
     is a branch where "no group configuration can permit it" stops being true.
     """
     home = _home_from_env(env)
-    for entry in CREDENTIAL_DENY_ENTRIES:
+    for entry in credential_deny_entries(env=env):
         denied = _expand(entry, home)
         if matches_deny_entry(resolved, denied):
             raise LaunchError(

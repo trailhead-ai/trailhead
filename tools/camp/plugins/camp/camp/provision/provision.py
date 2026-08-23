@@ -163,6 +163,29 @@ def seed_pending_workspace(
     return mpath
 
 
+def _account_env(
+    group: dict[str, Any], profile: Any, env: dict[str, str] | None
+) -> dict[str, str] | None:
+    """*env* as the group's launched session will actually carry it.
+
+    Returns *env* unchanged when camp can name no harness for the group — there
+    is nothing to ask. A harness that REFUSES propagates, and the best-effort
+    caller turns it into the same warning every other pretrust failure gets:
+    bring-up is not where that refusal belongs, and the launch makes the same
+    call and refuses there, where an operator is waiting on the answer.
+    """
+    from ..launch.profile import harness_for
+    from ..launch.session import resolve_launch_environment
+
+    harness = harness_for(group)
+    if harness is None:
+        return env
+    _account, _binding, _scrub, launch_env = resolve_launch_environment(
+        harness, profile, group, env
+    )
+    return launch_env
+
+
 def bring_up_workspace(
     group: dict[str, Any],
     slug: str,
@@ -208,6 +231,13 @@ def bring_up_workspace(
     # the harness does not stall on the trust dialog. Best-effort — the ENTIRE
     # step (gate decision, import, and write) is wrapped so any failure is warned
     # and NON-FATAL: bring-up (manifest seed + detached spawn) still completes.
+    #
+    # The seed's target file belongs to an ACCOUNT, so it is resolved through the
+    # same single resolution the launch uses rather than from the ambient
+    # environment. Seeding through the raw environment writes the workspace's
+    # trust key into whichever account the shell happened to carry, leaving the
+    # session this bring-up is preparing to stall on the very dialog the seed
+    # exists to suppress.
     try:
         if profile.should_pretrust():
             from ..launch import claude_trust
@@ -215,7 +245,7 @@ def bring_up_workspace(
             claude_trust.pretrust_workspace(
                 profile.resolved_cwd(slug=slug, workspace=ws_dir),
                 workspace_root=ws_dir,
-                env=env,
+                env=_account_env(group, profile, env),
             )
     except Exception as exc:  # noqa: BLE001 — best-effort, never blocks bring-up
         print(f"camp: pretrust failed (continuing): {exc}", file=sys.stderr)

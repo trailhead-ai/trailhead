@@ -30,6 +30,7 @@ no real claude exec, no ~/.claude.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import textwrap
@@ -425,6 +426,82 @@ class TestPretrustWiring:
         subpath = str((ws_dir / "app").resolve())
         assert trust["projects"][subpath]["hasTrustDialogAccepted"] is True
         assert str(ws_dir.resolve()) not in trust.get("projects", {})
+
+    def test_trust_lands_in_the_declared_account_not_the_ambient_one(
+        self, two_member_group, monkeypatch
+    ):
+        """Bring-up resolves the account exactly as the launch does. Seeding
+        through the raw ambient environment instead writes the workspace's trust
+        key into whichever account the shell happened to carry, so `camp new
+        --group levr` trusts the directory in the WRONG account's config file and
+        the levr session it is preparing still stalls on the trust dialog."""
+        import camp.provision.provision as provision
+        from camp.provision.provision import bring_up_workspace
+
+        g = two_member_group
+        env = self._env(g)
+        declared = g["tmp_path"] / "accounts" / "levr"
+        declared.mkdir(parents=True)
+        group = dict(g["group"])
+        group["launch"] = {"account": str(declared)}
+        monkeypatch.setattr(provision, "spawn_detached_provisioner", lambda **kw: None)
+
+        bring_up_workspace(group, "feat-acct", env=env)
+
+        ws_dir = _workspace_dir("testgroup", "feat-acct", env)
+        key = str(ws_dir.resolve())
+        assert _read_trust(declared)["projects"][key]["hasTrustDialogAccepted"] is True
+        assert key not in _read_trust(Path(env["HOME"])).get("projects", {})
+
+    def test_a_poisoned_ambient_account_does_not_steer_the_seed(
+        self, two_member_group, monkeypatch
+    ):
+        """The undeclared case is the same single resolution: the launch scrubs
+        the ambient account variable, so bring-up must seed the account the
+        session will actually read, not the one the shell was carrying."""
+        import camp.provision.provision as provision
+        from camp.provision.provision import bring_up_workspace
+
+        g = two_member_group
+        env = self._env(g)
+        poison = g["tmp_path"] / "poison"
+        poison.mkdir()
+        env["CLAUDE_CONFIG_DIR"] = str(poison)
+        monkeypatch.setattr(provision, "spawn_detached_provisioner", lambda **kw: None)
+
+        bring_up_workspace(g["group"], "feat-poison", env=env)
+
+        ws_dir = _workspace_dir("testgroup", "feat-poison", env)
+        key = str(ws_dir.resolve())
+        assert _read_trust(Path(env["HOME"]))["projects"][key]["hasTrustDialogAccepted"] is True
+        assert not (poison / ".claude.json").exists()
+
+    def test_the_production_entry_point_with_no_env_still_seeds_trust(
+        self, two_member_group, monkeypatch, capsys
+    ):
+        """`camp new` calls bring_up_workspace with NO env argument, so the
+        account resolution has to accept the absence and default it the way the
+        launch engine does. Every other test here hands in an explicit dict,
+        which is exactly the path a break in the default cannot reach: the seed
+        is best-effort, so its failure is swallowed into a warning and the
+        workspace still comes up — with the trust key never written and every
+        session it prepares stalling on the dialog the seed exists to suppress."""
+        import camp.provision.provision as provision
+        from camp.provision.provision import bring_up_workspace
+
+        g = two_member_group
+        monkeypatch.setenv("CAMP_STATE_DIR", g["env"]["CAMP_STATE_DIR"])
+        monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+        monkeypatch.setattr(provision, "spawn_detached_provisioner", lambda **kw: None)
+
+        bring_up_workspace(g["group"], "feat-envnone")
+
+        ambient = dict(os.environ)
+        ws_dir = _workspace_dir("testgroup", "feat-envnone", ambient)
+        key = str(ws_dir.resolve())
+        trust = _read_trust(Path(ambient["HOME"]))
+        assert trust["projects"][key]["hasTrustDialogAccepted"] is True
+        assert "pretrust failed" not in capsys.readouterr().err
 
     def test_pretrust_false_writes_nothing(self, two_member_group, monkeypatch):
         import camp.provision.provision as provision

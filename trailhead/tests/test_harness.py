@@ -677,6 +677,11 @@ class TestClaudeCodeSessionLaunchModality:
 
 
 class TestClaudeCodeSessionLaunchEnvUnset:
+    def test_the_account_variable_is_scrubbed_so_the_default_is_absence(self):
+        """The undeclared-account default is the variable being ABSENT, which only
+        a caller-applied scrub can express — see ``session_launch_env_set``."""
+        assert "CLAUDE_CONFIG_DIR" in ClaudeCodeHarness().session_launch_env_unset()
+
     def test_contains_the_documented_leaking_vars(self):
         unset = ClaudeCodeHarness().session_launch_env_unset()
         for var in (
@@ -770,7 +775,7 @@ class TestSessionRetentionSetting:
 
 class TestLaunchEnumerationBaseDefaults:
     """The launch/enumeration seam is CONCRETE with degrading defaults: a harness
-    with no launch or enumeration concept answers None for all five, never
+    with no launch or enumeration concept answers None for all six, never
     raises, and never requires implementing anything to instantiate."""
 
     def test_session_launch_returns_none(self, tmp_path):
@@ -782,6 +787,12 @@ class TestLaunchEnumerationBaseDefaults:
     def test_session_launch_env_unset_returns_none(self):
         assert _BareHarness().session_launch_env_unset() is None
 
+    def test_session_launch_env_set_returns_none(self):
+        assert _BareHarness().session_launch_env_set(None) is None
+
+    def test_session_launch_env_set_returns_none_for_a_declared_account(self):
+        assert _BareHarness().session_launch_env_set("/somewhere") is None
+
     def test_session_enumerate_returns_none(self, tmp_path):
         assert _BareHarness().session_enumerate(tmp_path) is None
 
@@ -791,13 +802,14 @@ class TestLaunchEnumerationBaseDefaults:
     def test_parse_session_list_returns_none(self):
         assert _BareHarness().parse_session_list("anything") is None
 
-    def test_bare_harness_instantiates_without_implementing_any_of_the_five(self, tmp_path):
-        """All five are non-abstract: subclassing Harness without overriding them
+    def test_bare_harness_instantiates_without_implementing_any_of_the_six(self, tmp_path):
+        """All six are non-abstract: subclassing Harness without overriding them
         must not raise TypeError at instantiation."""
         h = _BareHarness()
         assert h.session_launch(tmp_path, "sess-1") is None
         assert h.session_launch_modality() is None
         assert h.session_launch_env_unset() is None
+        assert h.session_launch_env_set(None) is None
         assert h.session_enumerate() is None
         assert h.parse_session_list("x") is None
 
@@ -823,7 +835,7 @@ class _LaunchOnlyBrokenHarness(_BareHarness):
 
 
 class _BadModalityHarness(_BareHarness):
-    """Implements the full launch trio, but the modality is spelled outside
+    """Implements the full launch quartet, but the modality is spelled outside
     MODALITIES — the membership assertion, not just non-None, must catch it."""
 
     name = "bad-modality"
@@ -837,9 +849,12 @@ class _BadModalityHarness(_BareHarness):
     def session_launch_env_unset(self):
         return []
 
+    def session_launch_env_set(self, account, *, env=None):
+        return {"FAKE_ACCOUNT_DIR": account or "/default"}
+
 
 class _NoScrubListHarness(_BareHarness):
-    """Overrides the whole launch trio but answers None for the scrub list —
+    """Overrides the whole launch quartet but answers None for the scrub list —
     so override-detection alone passes it. The value assertion must catch it:
     a launch-capable harness with nothing to scrub returns [], and None here
     would make a caller skip the credential scrub."""
@@ -855,6 +870,31 @@ class _NoScrubListHarness(_BareHarness):
     def session_launch_env_unset(self):
         return None
 
+    def session_launch_env_set(self, account, *, env=None):
+        return {"FAKE_ACCOUNT_DIR": account or "/default"}
+
+
+class _NoLaunchEnvSetHarness(_BareHarness):
+    """Overrides the whole launch quartet but answers None for the account
+    binding — override-detection alone passes it. The value assertion must
+    catch it: None there means 'launch unsupported', so a caller reading it as
+    'nothing to set' would let the child inherit whichever account the ambient
+    environment carried, which is precisely the defect this seam removes."""
+
+    name = "no-launch-env-set"
+
+    def session_launch(self, workspace, session_id):
+        return ["fake", "argv"]
+
+    def session_launch_modality(self):
+        return MODALITY_TTY_REQUIRED
+
+    def session_launch_env_unset(self):
+        return []
+
+    def session_launch_env_set(self, account, *, env=None):
+        return None
+
 
 class _EnumerateOnlyBrokenHarness(_BareHarness):
     """Implements session_enumerate but not parse_session_list — the base
@@ -867,12 +907,13 @@ class _EnumerateOnlyBrokenHarness(_BareHarness):
 
 
 class TestBothOrNeitherInvariants:
-    """Both-or-neither contracts on the launch trio and the enumeration pair.
+    """Both-or-neither contracts on the launch quartet and the enumeration pair.
 
-    (a) session_launch / session_launch_modality / session_launch_env_unset must
-    be non-None together or None together, and a non-None modality must be a
-    MEMBER of MODALITIES — not merely non-None. (b) session_enumerate and
-    parse_session_list must likewise be non-None together or None together.
+    (a) session_launch / session_launch_modality / session_launch_env_unset /
+    session_launch_env_set must be non-None together or None together, and a
+    non-None modality must be a MEMBER of MODALITIES — not merely non-None.
+    (b) session_enumerate and parse_session_list must likewise be non-None
+    together or None together.
 
     ``test_every_registered_harness_satisfies_both_invariants`` iterates the
     real registry (``_HARNESSES``), which holds exactly ONE entry
@@ -885,7 +926,7 @@ class TestBothOrNeitherInvariants:
     """
 
     @staticmethod
-    def _assert_launch_triple(harness: Harness) -> None:
+    def _assert_launch_quartet(harness: Harness, *, env: dict[str, str] | None = None) -> None:
         # Detects implementation by OVERRIDE, not by probing with a fixed
         # session_id/workspace: a real harness's id guard may reject
         # "sess-1" outright (raising HarnessError, not returning None),
@@ -896,11 +937,12 @@ class TestBothOrNeitherInvariants:
             cls.session_launch is not Harness.session_launch,
             cls.session_launch_modality is not Harness.session_launch_modality,
             cls.session_launch_env_unset is not Harness.session_launch_env_unset,
+            cls.session_launch_env_set is not Harness.session_launch_env_set,
         )
         assert all(overrides) or not any(overrides), (
             f"{type(harness).__name__}: session_launch/session_launch_modality/"
-            f"session_launch_env_unset must be overridden together or not at "
-            f"all, got {overrides!r}"
+            f"session_launch_env_unset/session_launch_env_set must be overridden "
+            f"together or not at all, got {overrides!r}"
         )
         if any(overrides):
             modality = harness.session_launch_modality()
@@ -917,6 +959,15 @@ class TestBothOrNeitherInvariants:
                 f"{type(harness).__name__}: advertises launch but "
                 f"session_launch_env_unset() returned None; a harness with "
                 f"nothing to scrub must return [], since None means "
+                f"'launch unsupported'"
+            )
+            # The same VALUE half for the account binding. `env` is injected so
+            # a real harness resolves its default inside the sandbox rather than
+            # from the developer's own environment (Axiom 6).
+            assert harness.session_launch_env_set(None, env=env) is not None, (
+                f"{type(harness).__name__}: advertises launch but "
+                f"session_launch_env_set() returned None; a launch-capable "
+                f"harness always answers a concrete mapping, since None means "
                 f"'launch unsupported'"
             )
 
@@ -937,33 +988,39 @@ class TestBothOrNeitherInvariants:
             f"must be overridden together or not at all, got {overrides!r}"
         )
 
-    def test_launch_only_broken_harness_fails_the_triple_invariant(self):
+    def test_launch_only_broken_harness_fails_the_quartet_invariant(self):
         with pytest.raises(AssertionError):
-            self._assert_launch_triple(_LaunchOnlyBrokenHarness())
+            self._assert_launch_quartet(_LaunchOnlyBrokenHarness())
 
     def test_modality_outside_vocabulary_fails_the_membership_assertion(self):
         with pytest.raises(AssertionError):
-            self._assert_launch_triple(_BadModalityHarness())
+            self._assert_launch_quartet(_BadModalityHarness())
 
-    def test_no_scrub_list_harness_fails_the_triple_invariant(self):
+    def test_no_scrub_list_harness_fails_the_quartet_invariant(self):
         """Override detection alone would pass this one — the value half is what
         catches it, and the credential scrub is what's at stake."""
         with pytest.raises(AssertionError):
-            self._assert_launch_triple(_NoScrubListHarness())
+            self._assert_launch_quartet(_NoScrubListHarness())
+
+    def test_no_launch_env_set_harness_fails_the_quartet_invariant(self):
+        """Override detection alone would pass this one too — what catches it is
+        the value half, and an inherited account is what's at stake."""
+        with pytest.raises(AssertionError):
+            self._assert_launch_quartet(_NoLaunchEnvSetHarness())
 
     def test_enumerate_only_broken_harness_fails_the_pair_invariant(self):
         with pytest.raises(AssertionError):
             self._assert_enumeration_pair(_EnumerateOnlyBrokenHarness())
 
     def test_bare_harness_with_neither_concept_passes_both_invariants(self):
-        self._assert_launch_triple(_BareHarness())
+        self._assert_launch_quartet(_BareHarness())
         self._assert_enumeration_pair(_BareHarness())
 
-    def test_every_registered_harness_satisfies_both_invariants(self):
+    def test_every_registered_harness_satisfies_both_invariants(self, tmp_path):
         assert len(_HARNESSES) >= 1
         for cls in _HARNESSES.values():
             harness = cls()
-            self._assert_launch_triple(harness)
+            self._assert_launch_quartet(harness, env={"HOME": str(tmp_path)})
             self._assert_enumeration_pair(harness)
 
 

@@ -36,6 +36,9 @@ Test contract:
   vs. an empty one), harness cannot enumerate or re-enter — and an ambiguous ref
   is exit 2 with the candidates on stdout. Nothing is written under
   CAMP_STATE_DIR on any of them.
+- camp launch --json: alongside the workspace/session/tmux keys, the account the
+  session was bound to and the environment that binding resolved to — so a
+  defaulted launch is traceable rather than silent.
 - camp sessions: empty → empty stdout, exit 0; degraded (enumeration error /
   missing enumerate binary / unknown harness) → stderr notice, empty stdout list,
   exit 0; --json carries only normalized SessionRecord fields. The default and
@@ -593,7 +596,13 @@ def test_camp_launch_dir_json_key_set_matches_a_slug_launch_exactly(cli_env) -> 
     assert result.returncode == 0, result.stderr
     assert _state_tree(cli_env) == before
     payload = json.loads(result.stdout)
-    assert set(payload) == {"workspace", "session_id", "tmux_name"}
+    assert set(payload) == {
+        "workspace",
+        "session_id",
+        "tmux_name",
+        "account",
+        "account_binding",
+    }
     assert set(payload) == set(json.loads(slug_launch.stdout))
     assert payload["workspace"] == str(target.resolve())
     assert payload["tmux_name"] == f"camp-myproject-{payload['session_id'][:8]}"
@@ -2127,12 +2136,34 @@ def test_camp_new_launch_failure_keeps_the_path_and_exit_zero(cli_env) -> None:
     assert "camp launch: refusing to launch" in result.stderr
 
 
+def test_camp_launch_json_names_the_account_it_chose(cli_env) -> None:
+    """A defaulted launch is traceable rather than silent: the machine-readable
+    surface says which account the session was bound to, and that no group
+    declaration chose it."""
+    _new_workspace(cli_env, "feat-account-json")
+
+    result = _camp(
+        cli_env, "launch", "feat-account-json", "--group", "mygroup", "--json"
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["account"] is None
+    assert isinstance(payload["account_binding"], dict)
+
+
 def test_camp_new_launch_json_emits_workspace_and_session_id(cli_env) -> None:
     result = _camp(cli_env, "new", "feat-j", "--group", "mygroup", "--launch", "--json")
 
     assert result.returncode == 0, result.stderr
     payload = json.loads(result.stdout)
-    assert set(payload) == {"workspace", "session_id", "tmux_name"}
+    assert set(payload) == {
+        "workspace",
+        "session_id",
+        "tmux_name",
+        "account",
+        "account_binding",
+    }
     assert payload["workspace"].endswith("/feat-j")
     assert payload["session_id"]
     # Same rule as the reuse path: the emitted name is the one the launch
@@ -2146,7 +2177,13 @@ def test_camp_new_launch_json_failure_nulls_the_session_id(cli_env) -> None:
 
     assert result.returncode == 0, result.stderr
     payload = json.loads(result.stdout)
-    assert set(payload) == {"workspace", "session_id", "tmux_name"}
+    assert set(payload) == {
+        "workspace",
+        "session_id",
+        "tmux_name",
+        "account",
+        "account_binding",
+    }
     assert payload["session_id"] is None
     assert payload["tmux_name"] is None
     assert payload["workspace"].endswith("/feat-k")

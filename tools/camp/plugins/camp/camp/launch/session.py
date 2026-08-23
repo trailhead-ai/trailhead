@@ -57,16 +57,17 @@ below.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import sys
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..group.manifest import workspace_dir
-from .claude_trust import pretrust_workspace
+from .claude_trust import config_file, pretrust_workspace, trust_status
 from .profile import harness_for, resolve_harness_profile
 from .recovery import printable_path, sanitize_name_component
 
@@ -98,6 +99,36 @@ _CONFIRM_POLL_TIMEOUT_SECONDS = 10.0
 #: tmux must not be able to hang — or crash — the refusal that follows it.
 _KILL_SESSION_TIMEOUT_SECONDS = 10
 
+#: Bound on the `tmux capture-pane` :func:`confirm_session` runs before the kill.
+#: A measured capture costs ~3ms, so this is headroom rather than a budget — its
+#: whole job is to make a capture that HANGS, rather than erroring, unable to
+#: hold the teardown open.
+_PANE_CAPTURE_TIMEOUT_SECONDS = 2
+
+#: How much of the pane reaches the failure report. A pane is bottom-anchored, so
+#: the last lines are the ones carrying whatever the session is sitting on; a
+#: runaway process filling the scrollback must not be able to flood a report the
+#: operator may be reading on a phone.
+_PANE_EXCERPT_MAX_LINES = 20
+_PANE_EXCERPT_MAX_LINE_CHARS = 200
+
+#: Escape sequences a captured pane can carry. `capture-pane -p` without `-e`
+#: already drops SGR attributes, but the pane's own program may have written
+#: bytes tmux passes through, and an excerpt is quoted into an error message
+#: rather than rendered by a terminal.
+#: Both spellings of every introducer are recognized. The C1 controls are the
+#: SINGLE-character forms of the same sequences: U+009B is CSI, U+009D is OSC,
+#: U+009C is ST, and a terminal acts on them exactly as it acts on the two-byte
+#: `ESC [` / `ESC ]` / `ESC \` spellings. Matching only the ESC-introduced forms
+#: leaves the 8-bit ones intact and passes control sequences straight through to
+#: the operator's terminal and into whatever durable record the report becomes.
+_ESCAPE_SEQUENCE = re.compile(
+    r"(?:\x1b\[|\x9b)[0-9;?]*[ -/]*[@-~]"
+    r"|(?:\x1b\]|\x9d)[^\x07\x1b\x9c]*(?:\x07|\x1b\\|\x9c)"
+    r"|\x1b[@-Z\\-_]"
+)
+_CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
+
 
 class LaunchError(Exception):
     """A launch camp refused. Guarantees no process was started."""
@@ -111,11 +142,27 @@ class LaunchedSession:
     launch, or the re-entered session's own id — and is the handle for
     programmatic follow-up. `tmux_name` is the operator's attach handle; they are
     deliberately different strings and both are reported.
+
+    `account` is the group's declared account, or None when it declared none.
+    `account_binding` is the environment the harness resolved that declaration
+    into — the assignments the pane carries and the trust pre-seed followed. It
+    is empty when the harness states its answer through the scrub instead, which
+    is how a default with no value that expresses it is stated.
+
+    `pane_env` is the environment the pane was actually given — the launch
+    environment with the scrub applied and the binding merged over it. It is
+    carried rather than reconstructed because the binding alone cannot reproduce
+    it: a harness stating its default as the account variable's ABSENCE leaves an
+    empty binding, and merging that over an ambient environment restores exactly
+    the value the scrub removed. Empty means no environment was recorded.
     """
 
     session_id: str
     tmux_name: str
     launch_dir: Path
+    account: str | None = None
+    account_binding: dict[str, str] = field(default_factory=dict)
+    pane_env: dict[str, str] = field(default_factory=dict)
 
 
 def _resolve_launch_dir(profile, slug: str, ws_dir: Path) -> Path:
@@ -251,6 +298,171 @@ def enumerate_records(
     return harness.parse_session_list(completed.stdout)
 
 
+def _unsupported_harness(harness, profile, what: str) -> LaunchError:
+    """The refusal for a launch seam that answered ``None``.
+
+    Three seams on this path each answer ``None`` to mean the same thing — this
+    harness does not launch (or does not re-enter) sessions — and one wording
+    for all of them is what keeps the three from reading as three different
+    problems to an operator.
+    """
+    return LaunchError(
+        f"camp: refusing to launch — harness {harness.name or profile.binary!r} "
+        f"(configured binary {profile.binary!r}) {what}"
+    )
+
+
+def _resolve_account_binding(harness, profile, group: dict, env: dict[str, str]):
+    """The group's declared account and the environment the harness binds it to.
+
+    Resolved ONCE per launch and used twice — for the trust pre-seed's target and
+    for the pane's own assignments. Two reads of the same declaration are two
+    answers that can disagree, and the disagreement is invisible until a session
+    is trusted in one account's config file and started under another's.
+
+    Camp reads no key of the returned mapping: only the harness knows which
+    variables express an account, and a declared value is opaque here — every
+    check on it belongs to the harness that will honor it.
+
+    A harness that refuses a DECLARED account refuses the launch: camp was given
+    an instruction it cannot honor, and starting the session anyway would put it
+    on an account contradicting the group's own statement of intent.
+
+    A harness that refuses to resolve its DEFAULT is a different case, and is
+    warned about rather than refused. The refusal there is about a contradiction
+    already present in *env* — one camp neither created nor was asked to take a
+    side in — and every launch in such an environment would otherwise be blocked
+    on a condition no group declaration can clear. Camp says so loudly and
+    launches with no assignment of its own, which is the state that environment
+    was already in.
+
+    An EMPTY mapping is a legitimate answer, not a failure to answer: a harness
+    whose default has no value that expresses it states the default as the
+    variable's absence and puts the name in its scrub instead. Camp treats the
+    two the same way — scrub, then assign — and reads no key of either.
+    """
+    from trailhead.harness import HarnessError
+
+    account = (group.get("launch") or {}).get("account")
+    try:
+        binding = harness.session_launch_env_set(account, env=env)
+    except HarnessError as exc:
+        if account is not None:
+            raise LaunchError(
+                f"camp: refusing to launch — harness "
+                f"{harness.name or profile.binary!r} will not bind this session to "
+                f"the declared account {account}: {exc}"
+            ) from exc
+        print(
+            f"camp: no account declared and harness "
+            f"{harness.name or profile.binary!r} will not resolve a default here: "
+            f"{exc} — launching with NO account binding",
+            file=sys.stderr,
+        )
+        return None, {}
+    if binding is None:
+        raise _unsupported_harness(harness, profile, "cannot launch sessions")
+    return account, dict(binding)
+
+
+def resolve_launch_environment(
+    harness, profile, group: dict, env: dict[str, str] | None = None
+) -> tuple[str | None, dict[str, str], tuple[str, ...], dict[str, str]]:
+    """The account, the binding, the scrub, and the environment a pane will carry.
+
+    The ONE resolution, shared by every surface that must agree about which
+    account a group's session runs on: the launch engine, and workspace bring-up,
+    whose trust pre-seed writes into that account's config file. A second,
+    independent read is two answers that can disagree, and the disagreement is
+    invisible until a workspace is trusted in one account's file and started
+    under another's.
+
+    The returned environment is the PANE's, not camp's: the scrub is applied
+    before the assignments, in that order, because a harness may state a default
+    as a name's ABSENCE and a declared account as an assignment of that same
+    name. Merging the binding over the raw *env* would leave an ambient value in
+    place exactly when the harness meant it removed.
+
+    *env* defaults to the process environment, the way :func:`launch_session`
+    does, because this is a public entry point and its callers reach it with the
+    same optional env their own signatures carry. Defaulting here rather than at
+    each call site is what keeps a caller that forwards its own ``None`` from
+    turning into an attribute error deep inside a best-effort step that swallows
+    it — a silently skipped trust seed rather than a refusal.
+    """
+    env = dict(env if env is not None else os.environ)
+    account, binding = _resolve_account_binding(harness, profile, group, env)
+    scrub = harness.session_launch_env_unset()
+    if scrub is None:
+        raise _unsupported_harness(harness, profile, "cannot launch sessions")
+    scrub_set = set(scrub)
+    launch_env = {k: v for k, v in env.items() if k not in scrub_set}
+    launch_env.update(binding)
+    return account, binding, tuple(scrub), launch_env
+
+
+def _report_account(account: str | None, binding: dict[str, str]) -> None:
+    """Name the account this launch chose, declared or defaulted.
+
+    A defaulted launch is reported as loudly as a declared one: an operator
+    reading the terminal must be able to tell which account a session landed on
+    without knowing whether their group declared anything.
+
+    An empty binding gets its own wording rather than the assignment wording with
+    nothing after the dash. Announcing a binding camp does not have contradicts
+    the scrub line it sits beside and reads, to someone skimming, as the launch
+    having chosen an account named by the empty string.
+    """
+    if binding:
+        where = " ".join(f"{key}={value}" for key, value in sorted(binding.items()))
+        source = (
+            f"declared account {account}"
+            if account is not None
+            else "the harness default (no account declared)"
+        )
+        print(f"camp: binding session to {source} — {where}", file=sys.stderr)
+        return
+    if account is not None:
+        print(
+            f"camp: declared account {account} — the harness states it with no "
+            f"assignment of its own",
+            file=sys.stderr,
+        )
+        return
+    print(
+        "camp: no account declared — the launch states no account assignment; "
+        "the pane scrubs whatever the environment carried, so the harness's own "
+        "default applies",
+        file=sys.stderr,
+    )
+
+
+def _warn_if_account_has_no_config(account: str | None, launch_env: dict[str, str]) -> None:
+    """Warn when a declared account has no harness config file yet.
+
+    Advisory, not a refusal: the directory may legitimately not exist before the
+    account is first signed into. But a typo'd declaration otherwise produces a
+    launch that stalls for reasons indistinguishable from every other cause, and
+    naming the path camp actually resolved is what makes the typo visible.
+
+    Every failure degrades to silence, the same posture as the other advisory
+    probes here — a launch must not hinge on camp's ability to describe it.
+    """
+    if account is None:
+        return
+    try:
+        target = config_file(launch_env)
+        missing = not target.exists()
+    except Exception:  # noqa: BLE001 — advisory probe, never blocks a launch
+        return
+    if missing:
+        print(
+            f"camp: declared account {account} has no harness config file at "
+            f"{target} — the session may land unauthenticated; check for a typo",
+            file=sys.stderr,
+        )
+
+
 def _report_live_sessions(harness, launch_dir: Path, env: dict[str, str]) -> None:
     """Best-effort notice about sessions already rooted under *launch_dir*.
 
@@ -334,8 +546,14 @@ def launch_session(
     id and the pane runs the harness's re-entry argv instead of a fresh-session
     one, so the session reclaims the very tmux name its first launch used.
 
-    Returns the session id and the tmux name to attach with. Raises
-    :class:`LaunchError` — with no process started — on any refusal path.
+    The group's ``[launch] account`` is resolved through the harness ONCE and the
+    result steers both halves of the launch that must agree about it: the trust
+    pre-seed's target file and the pane's own environment. Nothing here reads the
+    ambient environment for that answer.
+
+    Returns the session id, the tmux name to attach with, and the account binding
+    the session was started under. Raises :class:`LaunchError` — with no process
+    started — on any refusal path.
     """
     if (slug is None) == (root is None):
         raise ValueError(
@@ -390,22 +608,20 @@ def launch_session(
         harness_argv = harness.session_resume(session_id)
         unsupported = "cannot re-enter sessions"
     if harness_argv is None:
-        raise LaunchError(
-            f"camp: refusing to launch — harness {harness.name or profile.binary!r} "
-            f"(configured binary {profile.binary!r}) {unsupported}"
-        )
+        raise _unsupported_harness(harness, profile, unsupported)
 
     if shutil.which("tmux") is None:
         raise LaunchError("camp: refusing to launch — tmux is not on PATH")
 
-    _assert_trust(profile, launch_dir, trust_root, env)
+    # The ONE resolution. Everything downstream that must agree about which
+    # account this session runs on reads `launch_env`, never `env`.
+    account, account_binding, scrub, launch_env = resolve_launch_environment(
+        harness, profile, group, env
+    )
+    _report_account(account, account_binding)
+    _warn_if_account_has_no_config(account, launch_env)
 
-    scrub = harness.session_launch_env_unset()
-    if scrub is None:
-        raise LaunchError(
-            f"camp: refusing to launch — harness {harness.name or profile.binary!r} "
-            f"(configured binary {profile.binary!r}) cannot launch sessions"
-        )
+    _assert_trust(profile, launch_dir, trust_root, launch_env)
 
     # The scrub rides INSIDE the pane command, as `env -u` operands sitting
     # between tmux's own options and the harness argv. Scrubbing camp's own
@@ -417,25 +633,27 @@ def launch_session(
     argv = ["tmux", "new-session", "-d", "-s", tmux_name, "-c", str(launch_dir), "env"]
     for name in scrub:
         argv += ["-u", name]
-    # The config dir rides the same pane-level `env` invocation, and for the same
-    # reason the scrub does: a pre-existing tmux SERVER's environment, not camp's,
-    # is what a new pane inherits, so a server started under a different Claude
-    # account would otherwise place every session on that account. A relative
-    # value is dropped rather than passed — it would resolve against the pane's
-    # cwd (the launch dir), pointing the session at a config dir inside the
-    # workspace; the trust pre-seed refuses one for the same reason.
-    config_dir = (env or {}).get("CLAUDE_CONFIG_DIR", "").strip()
-    if config_dir and os.path.isabs(config_dir):
-        argv += [f"CLAUDE_CONFIG_DIR={config_dir}"]
+    # The account binding rides the same pane-level `env` invocation, and for the
+    # same reason the scrub does: a pre-existing tmux SERVER's environment, not
+    # camp's, is what a new pane inherits, so a server started under a different
+    # account would otherwise place every session on that account. Sorted so the
+    # pane a stop reads back is the same string every time.
+    for key, value in sorted(account_binding.items()):
+        argv += [f"{key}={value}"]
     argv += list(harness_argv)
 
     if resume_session_id is None:
-        _report_live_sessions(harness, launch_dir, env)
+        _report_live_sessions(harness, launch_dir, launch_env)
     else:
-        _refuse_if_already_live(harness, session_id, tmux_name, launch_dir, env)
+        _refuse_if_already_live(harness, session_id, tmux_name, launch_dir, launch_env)
 
-    scrub_set = set(scrub)
-    spawn_env = {k: v for k, v in env.items() if k not in scrub_set}
+    # camp's own spawn environment states the binding NOWHERE. `tmux
+    # new-session` starts a SERVER when none is running, and that server's
+    # environment becomes the global every later pane inherits — so a value
+    # carried here would outlive this launch and place unrelated sessions on
+    # this group's account. The pane operand is the only statement, and it holds
+    # for a fresh server and a pre-existing one alike.
+    spawn_env = {k: v for k, v in launch_env.items() if k not in account_binding}
 
     def _kill_session_quietly(name: str) -> None:
         """Best-effort reclaim of a session name after an indeterminate spawn.
@@ -489,7 +707,14 @@ def launch_session(
             f"{tmux_name}: {detail}"
         )
 
-    return LaunchedSession(session_id=session_id, tmux_name=tmux_name, launch_dir=launch_dir)
+    return LaunchedSession(
+        session_id=session_id,
+        tmux_name=tmux_name,
+        launch_dir=launch_dir,
+        account=account,
+        account_binding=account_binding,
+        pane_env=dict(launch_env),
+    )
 
 
 def _poll_enumerated(
@@ -503,6 +728,146 @@ def _poll_enumerated(
     """
     records = enumerate_records(harness, launch_dir, env, cwd=launch_dir)
     return any(record.session_id == session_id for record in records or ())
+
+
+def _sanitize_pane_excerpt(text: str) -> str:
+    """Strip escapes and control bytes from captured pane text, then bound it.
+
+    Trailing blank lines go first: a capture returns the full pane height, which
+    for a prompt occupying a few lines is mostly padding. What survives is the
+    bottom of the pane, where a program that is waiting for input has left its
+    prompt. Returns "" when nothing legible is left.
+    """
+    lines = [
+        _CONTROL_CHARS.sub("", _ESCAPE_SEQUENCE.sub("", line)).rstrip()
+        for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    ]
+    while lines and not lines[-1]:
+        lines.pop()
+    dropped = max(0, len(lines) - _PANE_EXCERPT_MAX_LINES)
+    lines = lines[-_PANE_EXCERPT_MAX_LINES:]
+    lines = [
+        line
+        if len(line) <= _PANE_EXCERPT_MAX_LINE_CHARS
+        else line[:_PANE_EXCERPT_MAX_LINE_CHARS] + " …"
+        for line in lines
+    ]
+    if not lines:
+        return ""
+    if dropped:
+        lines.insert(0, f"… {dropped} earlier line(s) not shown")
+    return "\n".join(lines)
+
+
+def _capture_pane(tmux_name: str) -> str | None:
+    """What the pane is showing — read while the session still exists.
+
+    Best-effort and bounded. Every failure returns None rather than raising: the
+    caller is already on its way to refusing a launch, and an excerpt camp could
+    not obtain must not be able to change that refusal, delay the kill that
+    follows, or replace the failure being reported. A capture against a session
+    that is already gone exits non-zero, which lands here as None like any other
+    unavailability.
+    """
+    try:
+        captured = subprocess.run(
+            ["tmux", "capture-pane", "-p", "-t", tmux_name],
+            capture_output=True,
+            text=True,
+            timeout=_PANE_CAPTURE_TIMEOUT_SECONDS,
+        )
+    except Exception:  # noqa: BLE001 — best-effort probe, never blocks the kill
+        return None
+    if captured.returncode != 0:
+        return None
+    return _sanitize_pane_excerpt(captured.stdout or "") or None
+
+
+def _seeded_trust_fact(launched: LaunchedSession, env: dict[str, str]) -> str:
+    """One verified line about the config file the launched session reads.
+
+    Resolved through the PANE's own environment, so the path named is the one the
+    session actually reads. The binding alone is not that environment: a harness
+    whose default is the account variable's ABSENCE binds nothing, and merging an
+    empty binding over the ambient environment hands the resolver back the very
+    value the pane's scrub removed — naming a config file the session never opens
+    under a label that says camp verified it. *env* answers only for a session
+    that recorded no environment of its own.
+
+    On the original failure this single fact would have ended the investigation.
+    """
+    pane_env = launched.pane_env or {**env, **launched.account_binding}
+    try:
+        path, trusted = trust_status(launched.launch_dir, env=pane_env)
+    except Exception:  # noqa: BLE001 — advisory probe, never blocks the refusal
+        return "camp could not resolve the harness config file it seeds trust into"
+    if trusted is True:
+        state = "carries the trust key for this directory"
+    elif trusted is False:
+        state = "has no trust key for this directory"
+    else:
+        state = "camp could not read back (absent, unreadable, or malformed)"
+    return f"camp seeds trust into {path}, which {state}"
+
+
+#: The labels the failure message uses to separate what camp checked from what it
+#: guesses. Named once so the excerpt neutralizer and the message that writes
+#: them cannot drift apart.
+_REPORT_LABELS = ("verified:", "inferred:")
+
+
+def _neutralize_labels(pane: str) -> str:
+    """*pane* with camp's own report labels defused.
+
+    The excerpt is whatever was on screen, and nothing constrains it: a prompt,
+    a transcript, a filename. Interpolated raw it can counterfeit the labels that
+    are the message's only structure, so a reader — and anything locating the
+    inferred cause by that label — finds the pane's copy first. A space before
+    the colon leaves the text legible and stops it matching.
+    """
+    for label in _REPORT_LABELS:
+        pane = pane.replace(label, f"{label[:-1]} :")
+    return pane
+
+
+def _confirmation_failure_message(
+    launched: LaunchedSession,
+    *,
+    env: dict[str, str],
+    poll_count: int,
+    elapsed: float,
+    pane: str | None,
+) -> str:
+    """The refusal text: what camp checked, then — separately — what it guesses.
+
+    The verified lines come FIRST and the inference is labelled, because the
+    previous wording asserted an inferred cause in its opening clause and was
+    discounted for it — correctly, since nothing backed it. A reader triaging
+    from a phone stops at the first confident-sounding clause, so that clause
+    has to be something camp looked at.
+    """
+    verified = [
+        f"verified: session {launched.session_id} was absent from all "
+        f"{poll_count} harness enumeration poll(s) of {launched.launch_dir} "
+        f"over {elapsed:.2f}s",
+        f"verified: {_seeded_trust_fact(launched, env)}",
+    ]
+    if pane is None:
+        verified.append(
+            "verified: pane capture unavailable — camp has no record of what was "
+            "on screen"
+        )
+    else:
+        indented = "\n".join(
+            f"    | {line}" for line in _neutralize_labels(pane).split("\n")
+        )
+        verified.append(f"verified: the pane was showing:\n{indented}")
+    return (
+        f"camp: launch of session {launched.session_id} could not be confirmed\n"
+        + "\n".join(f"  {line}" for line in verified)
+        + "\n  inferred: most likely stalled at an unaccepted trust prompt — camp "
+        "did not confirm this"
+    )
 
 
 def confirm_session(
@@ -532,13 +897,16 @@ def confirm_session(
     Confirmed → returns normally: the process exists and is enumerable, no claim
     of usability beyond that.
 
-    Timed out → kills the tmux session by the exact name camp chose and raises
-    :class:`LaunchError`. A session absent from enumeration is, empirically, most
-    often one stalled at an unaccepted trust prompt — even a successful pretrust
-    still leaves some launches stalled there — so the failure message names that
-    as the probable cause. A failing kill is reported on stderr naming the tmux
-    session; it is never left silent, even though the launch is refused either
-    way.
+    Timed out → captures the pane, THEN kills the tmux session by the exact name
+    camp chose, and raises :class:`LaunchError`. That order is the point: the kill
+    destroys the only evidence of what the session was sitting on. The refusal
+    reports what camp verified — the enumeration it ran, the config file it seeds
+    trust into and whether that key is there, the pane text it actually read —
+    before, and separately from, the one thing it infers: that the session is most
+    likely stalled at an unaccepted trust prompt. That remains the likeliest cause
+    even after a successful pretrust, but camp does not check it, so it is labelled.
+    A failing kill is reported on stderr naming the tmux session; it is never left
+    silent, even though the launch is refused either way.
     """
     from trailhead.harness import HarnessError
 
@@ -564,6 +932,13 @@ def confirm_session(
         f"{launched.tmux_name}",
         file=sys.stderr,
     )
+    # Before the kill, and bounded so it cannot delay one: the kill is what
+    # destroys the pane, so a capture that ran after it would report nothing on
+    # every launch that ever stalls.
+    pane = _capture_pane(launched.tmux_name)
+    message = _confirmation_failure_message(
+        launched, env=env, poll_count=poll_count, elapsed=elapsed, pane=pane
+    )
     try:
         kill = subprocess.run(
             ["tmux", "kill-session", "-t", launched.tmux_name],
@@ -576,17 +951,11 @@ def confirm_session(
             f"camp: failed to kill tmux session {launched.tmux_name}: {exc}",
             file=sys.stderr,
         )
-        raise LaunchError(
-            f"camp: launch of session {launched.session_id} could not be confirmed — "
-            f"likely stalled at an unaccepted trust prompt in {launched.launch_dir}"
-        ) from exc
+        raise LaunchError(message) from exc
     if kill.returncode != 0:
         print(
             f"camp: failed to kill tmux session {launched.tmux_name}: "
             f"{(kill.stderr or '').strip() or kill.returncode}",
             file=sys.stderr,
         )
-    raise LaunchError(
-        f"camp: launch of session {launched.session_id} could not be confirmed — "
-        f"likely stalled at an unaccepted trust prompt in {launched.launch_dir}"
-    )
+    raise LaunchError(message)

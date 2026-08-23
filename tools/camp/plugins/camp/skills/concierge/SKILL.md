@@ -128,7 +128,10 @@ camp launch <slug> --group <name> --json
 ```
 
 On success both print the same object, `{"workspace": …, "session_id": …,
-"tmux_name": …}`. They part company when the launch does not happen, and the two
+"tmux_name": …, "account": …, "account_binding": …}` — `account` is the account
+the group declared (null when it declared none) and `account_binding` is the
+environment the harness resolved that into, so a defaulted launch says which
+account it landed on rather than passing silently. They part company when the launch does not happen, and the two
 refusals are read differently:
 
 - The create path holds the workspace to be the deliverable. A launch that never

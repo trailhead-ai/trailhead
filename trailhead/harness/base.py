@@ -406,15 +406,19 @@ class Harness(ABC):
     # docstring for that deliberate divergence).
     #
     # The seam never execs and never sets a child's cwd: rooting the child at
-    # ``workspace`` and applying the env scrub returned by
-    # ``session_launch_env_unset`` are the exec-owning caller's job, done at
-    # exec time, not here.
+    # ``workspace``, applying the env scrub returned by
+    # ``session_launch_env_unset`` and applying the assignments returned by
+    # ``session_launch_env_set`` are the exec-owning caller's job, done at
+    # exec time, not here. Those two are applied in that ORDER — scrub, then
+    # assign — so a harness can express a default as a name's absence and a
+    # declared value as an assignment of the same name.
     #
     # Both-or-neither invariants (enforced by ``test_harness.py``, not by this
     # class): a harness that overrides ``session_launch`` must override
-    # ``session_launch_modality`` and ``session_launch_env_unset`` too — all
-    # three non-``None`` together, or all three left at the base ``None``
-    # together, never a partial trio. A non-``None`` modality must additionally
+    # ``session_launch_modality``, ``session_launch_env_unset`` and
+    # ``session_launch_env_set`` too — all four non-``None`` together, or all
+    # four left at the base ``None`` together, never a partial quartet. A
+    # non-``None`` modality must additionally
     # be a member of :data:`MODALITIES`, not merely non-``None``. Likewise,
     # ``session_enumerate`` and ``parse_session_list`` must be overridden
     # together or not at all. A half-implemented harness is worse than an
@@ -512,6 +516,57 @@ class Harness(ABC):
         launch-capable harness with nothing to scrub returns ``[]``, per the
         both-or-neither invariant above — ``None`` here means "launch
         unsupported", never "nothing to scrub".
+        """
+        return None
+
+    def session_launch_env_set(
+        self, account: str | None, *, env: dict[str, str] | None = None
+    ) -> dict[str, str] | None:
+        """Env assignments binding a launched session to *account*, or ``None``.
+
+        The companion to :meth:`session_launch_env_unset`: that one names what a
+        caller must REMOVE from the child's environment, this one names what it
+        must ADD. Both are applied by the exec-owning caller at spawn time; the
+        seam itself never mutates an environment.
+
+        ``account`` is an OPAQUE, harness-neutral string — whatever a caller's
+        own configuration declares. Only the harness knows what an account is
+        named on disk and which variable expresses it, so the variable NAME
+        never appears in core; a caller merges the returned mapping and reads
+        none of its keys.
+
+        ``None`` for ``account`` means "the caller declared nothing", NOT
+        "inherit". The child must never be left on whichever account its ambient
+        environment happened to carry — a long-lived process supervisor
+        propagates its own launch-time environment to every child it starts, so
+        "inherit" does not mean "inherit from the caller".
+
+        How a harness STATES its own default is its own business, and it is
+        legitimately an empty mapping: some defaults have no value that
+        reproduces them, and are expressed instead as the variable's ABSENCE, by
+        naming it in :meth:`session_launch_env_unset`. That is why the two
+        methods are one contract — the caller applies the scrub first and the
+        assignments second, so a default stated as absence and a declared account
+        stated as a value both survive an ambient value naming something else.
+        An empty mapping is therefore never "nothing to say"; it says the scrub
+        already carries the whole answer.
+
+        ``env`` is the environment the resolution reads — the same injection
+        point every other env-reading method here takes — defaulting to the
+        process environment when ``None``. It is READ, never written.
+
+        Implementations RAISE :class:`HarnessError` — they do not return
+        ``None`` — for an ``account`` they cannot honor, naming the offending
+        value, and for an ``account`` that contradicts another statement of
+        intent already present in ``env``. ``None`` from a concrete override is
+        forbidden for the same reason it is on
+        :meth:`session_launch_env_unset`: it means "launch unsupported", and a
+        caller reading it as "nothing to set" reinstates the inheritance this
+        method exists to remove. A launch-capable harness answers a concrete
+        mapping, empty or not.
+
+        Returns ``None`` only from this base default — the harness cannot launch
+        sessions at all.
         """
         return None
 

@@ -275,28 +275,75 @@ def _owning_commands(harness, candidate: SessionCandidate) -> tuple[tuple[str, .
     return tuple(shapes)
 
 
-def _without_config_dir(observed: tuple[str, ...]) -> tuple[str, ...]:
-    """*observed* with the launch engine's config-dir assignment removed.
+#: A placeholder account for the key probe below. Absolute, because that is the
+#: only shape a harness can be asked to honor without knowing what it names.
+_KEY_PROBE_ACCOUNT = "/"
 
-    The engine carries ``CLAUDE_CONFIG_DIR`` into the pane as an ``env``
-    assignment, so a pane camp composed no longer equals the scrub-only shape.
-    Removing it here rather than composing it into the owning shapes is
-    deliberate: the value came from the environment at LAUNCH time, and a
-    session is routinely stopped from a shell running under a different account,
-    so an owning shape built from the stop-time environment would refuse camp's
-    own pane whenever the two disagree.
 
-    Exactly one token is removed, and only one matching the shape the engine can
-    actually compose — an absolute value. Anything else is left in place, so it
-    still fails the exact match and the pane is refused: the tolerance cannot
-    widen into reclaiming a pane camp never composed.
+def _account_binding_keys(harness) -> tuple[str, ...]:
+    """The variable NAMES the launch engine composes into a pane as assignments.
+
+    Asked of the harness rather than spelled here: only the harness knows which
+    variables express an account, and a name hardcoded in camp is the ambient
+    leak this whole path removes. The VALUES are ignored — they were resolved at
+    LAUNCH time from the launching group's declaration — but the keys are
+    constant for a harness, so any binding it composes reveals them.
+
+    BOTH an undeclared and a declared account are probed, because a harness may
+    answer the undeclared one with an empty mapping: a default that no value
+    expresses is stated as the variable's ABSENCE instead. Probing only that one
+    would learn no keys from such a harness, and every pane camp launched for a
+    group that DID declare an account would stop being recognized as camp's own.
+
+    The probe carries NO environment. Only the keys are wanted, and they are
+    constant for a harness, while a harness may legitimately REFUSE to compose a
+    binding against an environment that already states a config dir of its own.
+    Handing it the stop-time environment would make that launch-time refusal a
+    stop-time hazard: both probes raise, no keys are learned, and every pane camp
+    launched with an account assignment is refused as not camp's own — decided by
+    whichever shell the operator happened to run `camp stop` from.
+
+    Every failure degrades to no keys, which refuses the pane rather than
+    reclaiming one camp never composed: a third-party call that raises is the
+    stop engine's refusal, never its traceback.
     """
-    for index, token in enumerate(observed):
-        if token.startswith("CLAUDE_CONFIG_DIR="):
-            value = token[len("CLAUDE_CONFIG_DIR=") :]
-            if value.startswith("/"):
-                return observed[:index] + observed[index + 1 :]
-            return observed
+    keys: list[str] = []
+    for account in (None, _KEY_PROBE_ACCOUNT):
+        try:
+            binding = harness.session_launch_env_set(account, env={})
+        except Exception:  # noqa: BLE001 — third-party call; a refusal, not a traceback
+            continue
+        for key in binding or ():
+            if key not in keys:
+                keys.append(key)
+    return tuple(keys)
+
+
+def _without_account_binding(
+    observed: tuple[str, ...], keys: tuple[str, ...]
+) -> tuple[str, ...]:
+    """*observed* with the launch engine's account assignments removed.
+
+    The engine carries an account binding into the pane as ``env`` assignments,
+    so a pane camp composed no longer equals the scrub-only shape. Removing them
+    here rather than composing them into the owning shapes is deliberate: the
+    VALUE was resolved at LAUNCH time from the launching group's declaration, and
+    a session is routinely stopped from a shell — and a group — that would
+    resolve a different one, so an owning shape built at stop time would refuse
+    camp's own pane whenever the two disagree.
+
+    At most one token per key is removed, and only one matching the shape the
+    engine can actually compose — an absolute value. Anything else is left in
+    place, so it still fails the exact match and the pane is refused: the
+    tolerance cannot widen into reclaiming a pane camp never composed.
+    """
+    for key in keys:
+        prefix = f"{key}="
+        for index, token in enumerate(observed):
+            if token.startswith(prefix):
+                if token[len(prefix) :].startswith("/"):
+                    observed = observed[:index] + observed[index + 1 :]
+                break
     return observed
 
 
@@ -309,7 +356,8 @@ def _is_camp_launched(
         observed = tuple(shlex.split(pane_command))
     except ValueError:
         return False
-    return _without_config_dir(observed) in _owning_commands(harness, candidate)
+    keys = _account_binding_keys(harness)
+    return _without_account_binding(observed, keys) in _owning_commands(harness, candidate)
 
 
 def stop_session(

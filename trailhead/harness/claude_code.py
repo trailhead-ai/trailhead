@@ -259,14 +259,22 @@ def _excerpt(output: str) -> str:
     return flat
 
 
-#: Env markers Claude Code sets for its own child sessions.  Verified twice
-#: (v2.1.229 / v2.1.232) that a session launched with ``CLAUDE_CODE_CHILD_SESSION``
-#: inherited runs and connects remote-control but NEVER appears in
-#: ``claude agents --json`` — and the leaked env also carries the parent's live
-#: session access token, so scrubbing this list is a credential-hygiene
-#: requirement, not merely an enumeration fix.  This is a FLOOR, not an
-#: exhaustive guarantee (see the base contract).  Applying the scrub is the
-#: exec-owning caller's job, done at spawn time — this seam only names them.
+#: Env markers Claude Code sets for its own child sessions, plus the account
+#: variable.  Verified twice (v2.1.229 / v2.1.232) that a session launched with
+#: ``CLAUDE_CODE_CHILD_SESSION`` inherited runs and connects remote-control but
+#: NEVER appears in ``claude agents --json`` — and the leaked env also carries
+#: the parent's live session access token, so scrubbing those names is a
+#: credential-hygiene requirement, not merely an enumeration fix.
+#:
+#: ``CLAUDE_CONFIG_DIR`` is here for a different reason: it is how
+#: :meth:`ClaudeCodeHarness.session_launch_env_set` states the DEFAULT account,
+#: which is the variable being absent (see that method).  The scrub is
+#: unconditional and a declared account is re-asserted after it — ``env -u KEY
+#: KEY=value`` yields the value, since ``env`` reads its operands left to right.
+#:
+#: This is a FLOOR, not an exhaustive guarantee (see the base contract).
+#: Applying the scrub is the exec-owning caller's job, done at spawn time — this
+#: seam only names them.
 _LAUNCH_ENV_UNSET = [
     "CLAUDE_CODE_CHILD_SESSION",
     "CLAUDECODE",
@@ -274,6 +282,7 @@ _LAUNCH_ENV_UNSET = [
     "CLAUDE_CODE_SESSION_ACCESS_TOKEN",
     "CLAUDE_CODE_MESSAGING_SOCKET",
     "CLAUDE_CODE_MESSAGING_TOKEN",
+    "CLAUDE_CONFIG_DIR",
 ]
 
 #: The user-level settings file under the Claude dir, and the top-level key in it
@@ -373,6 +382,63 @@ def _refuse_conflicting_config_dirs(env: Mapping[str, str]) -> None:
         "one you meant. Unset TRAILHEAD_CLAUDE_DIR (it is a test-only override) or "
         "set both to the same directory."
     )
+
+
+#: Characters an account value may never carry: the C0 controls (NUL among
+#: them), DEL, and the C1 controls.
+_ACCOUNT_FORBIDDEN_CHARS = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+
+
+def _account_home(env: Mapping[str, str]) -> Path:
+    """The home a declared account's leading ``~`` expands against.
+
+    Reads only ``HOME``/``USERPROFILE``, falling back to the real home — the same
+    home resolution ``claude_config_file`` uses, so the two agree by construction.
+
+    Two variables are deliberately NOT consulted. ``CLAUDE_CONFIG_DIR`` is an
+    account statement, not a home, and reading it would let the ambient account
+    steer where a declared one resolves. ``TRAILHEAD_CLAUDE_DIR`` is a
+    trailhead-only seam Claude Code has never heard of, so a session launched
+    into a path derived from it would read a directory nothing wrote.
+    """
+    home = env.get("HOME") or env.get("USERPROFILE")
+    return Path(home) if home else Path.home()
+
+
+def _account_dir(account: str, env: Mapping[str, str]) -> Path:
+    """Resolve a declared *account* to an absolute config dir, or raise.
+
+    A leading ``~`` expands against *env*'s home rather than the machine's, so a
+    caller's declaration never resolves through the running user's password-db
+    entry. Every other form must already be absolute: a relative value resolves
+    against whichever working directory the launching process happens to have,
+    and the directory it names is one Claude Code would then create and read as
+    an empty, unauthenticated account.
+
+    A control character is refused before either check. The value becomes a path
+    the caller resolves and an operand of a process spawn, and both answer a NUL
+    by RAISING — so without this the seam's promised fail-closed refusal is a raw
+    :class:`ValueError` from somewhere with no idea what an account is. Only that
+    range is refused: an account directory may be spelled in any script.
+    """
+    found = _ACCOUNT_FORBIDDEN_CHARS.search(account)
+    if found:
+        raise HarnessError(
+            f"session_launch_env_set: account {account!r} contains the control "
+            f"character {found.group()!r}. An account names a directory a session "
+            "reads and a value a process is spawned with, and neither can carry one."
+        )
+    expanded = account
+    if account == "~" or account.startswith("~/"):
+        expanded = str(_account_home(env)) + account[1:]
+    path = Path(expanded)
+    if not path.is_absolute():
+        raise HarnessError(
+            f"session_launch_env_set: account {account!r} is not an absolute path. "
+            "An account names a directory the launched session reads, so it must "
+            "resolve identically from any working directory."
+        )
+    return path
 
 
 def claude_config_file(env: Mapping[str, str] | None) -> Path:
@@ -1000,6 +1066,50 @@ class ClaudeCodeHarness(Harness):
         See :data:`_LAUNCH_ENV_UNSET` for why each name is here.
         """
         return list(_LAUNCH_ENV_UNSET)
+
+    def session_launch_env_set(
+        self, account: str | None, *, env: dict[str, str] | None = None
+    ) -> dict[str, str]:
+        """Bind a launched session to *account* by naming its config dir.
+
+        Claude Code expresses an account as the directory holding its
+        credentials, ``settings.json``, ``plugins/`` and ``.claude.json``, named
+        by ``CLAUDE_CONFIG_DIR`` — so the whole binding is that one assignment,
+        and this is the only place on the launch path that knows its spelling.
+
+        The returned value IS that directory, verbatim: ``CLAUDE_CONFIG_DIR``
+        names the config dir itself, not a base some suffix hangs off. It is what
+        :func:`_claude_dir` answers and what :func:`claude_config_file` appends
+        ``.claude.json`` to.
+
+        ``account=None`` — the caller declared nothing — contributes NO
+        assignment, because no VALUE reproduces the state Claude Code starts from
+        when the variable is unset. Unset, it reads the config dir ``~/.claude``
+        AND the config file ``~/.claude.json``; ``$HOME`` names the wrong config
+        dir; ``$HOME/.claude`` names the right one but moves the config file to
+        ``~/.claude/.claude.json``, orphaning the real one. The default is
+        therefore stated as the variable's ABSENCE, and the name is in
+        :data:`_LAUNCH_ENV_UNSET` so a launching caller scrubs it. The two halves
+        are one contract: an empty mapping alone would let an ambient value
+        survive, which is the failure this seam exists to remove.
+
+        Any ``CLAUDE_CONFIG_DIR`` already in *env* is ignored in both branches: it
+        is the ambient value being replaced, not an input.
+
+        Raises :class:`HarnessError` on a relative ``account``, and on one that
+        disagrees with a ``TRAILHEAD_CLAUDE_DIR`` set in *env* — the resolution
+        goes through :func:`_refuse_conflicting_config_dirs` rather than around
+        it, so this method cannot become a fourth config-dir answer that skips
+        the choke point. The default branch asserts no value and so contradicts
+        nothing; refusing there would block every undeclared launch on a
+        condition no group declaration could clear.
+        """
+        if account is None:
+            return {}
+        source = env if env is not None else dict(os.environ)
+        config_dir = str(_account_dir(account, source))
+        _refuse_conflicting_config_dirs({**source, "CLAUDE_CONFIG_DIR": config_dir})
+        return {"CLAUDE_CONFIG_DIR": config_dir}
 
     def session_enumerate(self, workspace: Path | None = None) -> list[str]:
         """Return ``["claude", "agents", "--json"]``, plus ``--cwd <workspace>``.

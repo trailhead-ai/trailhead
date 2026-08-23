@@ -140,7 +140,10 @@ def launch_and_confirm(
         f"  attach: tmux attach -t {launched.tmux_name}",
         file=sys.stderr,
     )
-    confirm_session(harness_for(group), launched, env=env)
+    # The pane's own environment, not this process's: the confirmation reports
+    # which config file the session reads, and the ambient one the CLI was
+    # invoked with is exactly what the launch scrubbed.
+    confirm_session(harness_for(group), launched, env=launched.pane_env)
     print(f"camp launch: confirmed session {launched.session_id}", file=sys.stderr)
     return launched
 
@@ -569,6 +572,8 @@ def _report_launched(launched, *, as_json: bool, extra: dict | None = None) -> N
             "workspace": str(launched.launch_dir),
             "session_id": launched.session_id,
             "tmux_name": launched.tmux_name,
+            "account": launched.account,
+            "account_binding": dict(launched.account_binding),
         }
         payload.update(extra or {})
         print(json.dumps(payload))

@@ -38,6 +38,11 @@ Schema:
                                          # never allowlists "~"); entries stored
                                          # unexpanded, so "~" resolves against
                                          # the environment the launch runs under
+  account = "~/.claude-levr"             # optional; opaque harness-interpreted
+                                         # account binding for launched
+                                         # sessions. Also denied as a launch
+                                         # root, for every group, by the
+                                         # credential rule below
 
   [dev_env]                              # optional; warn-and-continue (deferred)
   ...
@@ -51,11 +56,17 @@ runs them list-mode (subprocess, shell=False). Sharing group configs from
 untrusted authors is explicitly out of scope.
 
 `[launch] roots` is an allowlist, not the whole boundary. camp also carries a
-fixed credential-store deny list (`camp.launch.eligibility.CREDENTIAL_DENY_ENTRIES`)
+credential-store deny list (`camp.launch.eligibility.credential_deny_entries`)
 that is checked after the allowlist and OVERRIDES IT UNCONDITIONALLY: no value of
 `roots` can make `~/.ssh` — or any directory at, under, or above a deny entry —
-an eligible launch root. That list lives in code precisely so it is not a config
-key; changing it is a change to a security boundary.
+an eligible launch root. Its floor
+(`camp.launch.eligibility.CREDENTIAL_DENY_ENTRIES`) lives in code precisely so it
+is not a config key; editing it is a change to a security boundary.
+
+Config feeds that list in one direction only: every `[launch] account` declared
+by ANY group is appended to it, so an account directory is never an eligible
+launch root for any group — not just for the group that declared it. Nothing in
+any group config subtracts from the floor.
 
 Activation hook kinds:
   "dep-install"   Run a dependency installation command in the worktree.
@@ -78,6 +89,7 @@ name is a non-empty string; no duplicate scope within one group's list.
 
 from __future__ import annotations
 
+import re
 import sys
 import tomllib
 from pathlib import Path
@@ -563,9 +575,21 @@ def _parse_harness(raw: Any, path: Path) -> dict[str, Any] | None:
 # ---------------------------------------------------------------------------
 
 # Keys recognized inside [launch]. Anything else is a misconfiguration and is
-# rejected at load: [launch] configures a containment boundary, so a typo must
-# fail loudly rather than silently leaving the boundary at its default.
-_LAUNCH_KEYS = frozenset({"roots"})
+# rejected at load, so a typo fails loudly rather than being silently ignored.
+# `roots` configures a containment boundary; `account` is an opaque
+# harness-interpreted value camp passes through without inspecting it.
+_LAUNCH_KEYS = frozenset({"roots", "account"})
+
+#: Characters an account value may never carry: the C0 controls (NUL among
+#: them), DEL, and the C1 controls. camp does not interpret an account, but the
+#: value does become a path something resolves and an operand of a process
+#: spawn, and both answer a NUL by RAISING rather than refusing — a raw traceback
+#: out of a launch that may belong to an entirely different group, since the deny
+#: derivation pools every group's declaration. Refusing here, where the value is
+#: declared, keeps the failure a named misconfiguration in one named file.
+#: Nothing outside this range is touched: a home directory may be spelled in any
+#: script.
+_ACCOUNT_FORBIDDEN_CHARS = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 
 
 def _parse_launch(raw: Any, path: Path) -> dict[str, Any] | None:
@@ -615,6 +639,18 @@ def _parse_launch(raw: Any, path: Path) -> dict[str, Any] | None:
                     "directory camp is invoked from"
                 )
         result["roots"] = roots
+
+    if "account" in raw:
+        account = raw["account"]
+        if not isinstance(account, str) or not account.strip():
+            raise GroupConfigError(f"{path}: launch.account must be a non-empty string")
+        found = _ACCOUNT_FORBIDDEN_CHARS.search(account)
+        if found:
+            raise GroupConfigError(
+                f"{path}: launch.account contains the control character "
+                f"{found.group()!r}, which no path or process operand can carry"
+            )
+        result["account"] = account
 
     return result
 

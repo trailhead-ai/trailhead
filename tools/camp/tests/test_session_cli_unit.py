@@ -136,6 +136,45 @@ class TestLaunchJsonCarriesTheEngineReportedTmuxName:
         assert payload["session_id"] == "11111111-2222-3333-4444-555555555555"
 
 
+class TestConfirmationReadsThePaneEnvironment:
+    """The confirmation reports which config file the launched session reads.
+
+    Handing it the CLI's own ambient environment makes that report answer from
+    the shell camp was invoked in — which is precisely what the launch scrubbed
+    off the pane. The pane's recorded environment is the only one that can name
+    the file the session actually opens.
+    """
+
+    def test_confirm_session_is_handed_the_pane_environment_not_the_ambient_one(
+        self, monkeypatch, capsys
+    ):
+        import camp.cli.session as cli_session
+        from camp.launch.session import LaunchedSession
+
+        pane_env = {"PATH": "/usr/bin", "HOME": "/home/pane"}
+        launched = LaunchedSession(
+            session_id="sess-1",
+            tmux_name="camp-feat-x-abcd1234",
+            launch_dir=Path("/tmp/ws"),
+            pane_env=pane_env,
+        )
+        seen: list[dict] = []
+        monkeypatch.setattr("camp.launch.profile.harness_for", lambda group: object())
+        monkeypatch.setattr(
+            "camp.launch.session.launch_session", lambda *a, **k: launched
+        )
+        monkeypatch.setattr(
+            "camp.launch.session.confirm_session",
+            lambda harness, _launched, env=None: seen.append(env),
+        )
+
+        cli_session.launch_and_confirm(
+            GROUP, "feat-x", env={"PATH": "/usr/bin", "HOME": "/home/ambient"}
+        )
+
+        assert seen == [pane_env]
+
+
 class TestSessionPoolLiveProbePosture:
     """A live probe that failed says NOTHING. Which branch that lands on is the
     caller's posture, and the two callers differ."""
