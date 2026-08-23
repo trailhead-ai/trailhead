@@ -140,6 +140,13 @@ class LaunchedSession:
     into — the assignments the pane carries and the trust pre-seed followed. It
     is empty when the harness states its answer through the scrub instead, which
     is how a default with no value that expresses it is stated.
+
+    `pane_env` is the environment the pane was actually given — the launch
+    environment with the scrub applied and the binding merged over it. It is
+    carried rather than reconstructed because the binding alone cannot reproduce
+    it: a harness stating its default as the account variable's ABSENCE leaves an
+    empty binding, and merging that over an ambient environment restores exactly
+    the value the scrub removed. Empty means no environment was recorded.
     """
 
     session_id: str
@@ -147,6 +154,7 @@ class LaunchedSession:
     launch_dir: Path
     account: str | None = None
     account_binding: dict[str, str] = field(default_factory=dict)
+    pane_env: dict[str, str] = field(default_factory=dict)
 
 
 def _resolve_launch_dir(profile, slug: str, ws_dir: Path) -> Path:
@@ -697,6 +705,7 @@ def launch_session(
         launch_dir=launch_dir,
         account=account,
         account_binding=account_binding,
+        pane_env=dict(launch_env),
     )
 
 
@@ -769,14 +778,19 @@ def _capture_pane(tmux_name: str) -> str | None:
 def _seeded_trust_fact(launched: LaunchedSession, env: dict[str, str]) -> str:
     """One verified line about the config file the launched session reads.
 
-    Resolved through the account binding, not the ambient environment, so the
-    path named is the one the session actually reads. On the original failure
-    this single fact would have ended the investigation.
+    Resolved through the PANE's own environment, so the path named is the one the
+    session actually reads. The binding alone is not that environment: a harness
+    whose default is the account variable's ABSENCE binds nothing, and merging an
+    empty binding over the ambient environment hands the resolver back the very
+    value the pane's scrub removed — naming a config file the session never opens
+    under a label that says camp verified it. *env* answers only for a session
+    that recorded no environment of its own.
+
+    On the original failure this single fact would have ended the investigation.
     """
+    pane_env = launched.pane_env or {**env, **launched.account_binding}
     try:
-        path, trusted = trust_status(
-            launched.launch_dir, env={**env, **launched.account_binding}
-        )
+        path, trusted = trust_status(launched.launch_dir, env=pane_env)
     except Exception:  # noqa: BLE001 — advisory probe, never blocks the refusal
         return "camp could not resolve the harness config file it seeds trust into"
     if trusted is True:

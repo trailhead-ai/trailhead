@@ -1686,6 +1686,41 @@ class TestConfirmFailureReport:
         assert str(account_dir / ".claude.json") in message
         assert str(ambient_home / ".claude.json") not in message
 
+    def test_an_undeclared_account_reports_the_pane_config_not_a_poisoned_ambient(
+        self, rig, monkeypatch, tmp_path
+    ):
+        """THE undeclared case, against a poisoned ambient environment.
+
+        A harness may state its default as the account variable's ABSENCE: the
+        binding is empty and the name lives only in the SCRUB. Merging the empty
+        binding over the ambient environment therefore reproduces nothing the
+        launch did, so an ambient value the pane never carried decides which
+        config file the `verified:` line names — an unverified fact reported as
+        verified, and the exact contamination this launch path removes.
+        """
+        session = rig["module"]
+        poison = tmp_path / "poisoned-account"
+        poison.mkdir()
+        account_home = tmp_path / "real-home"
+        account_home.mkdir()
+        ambient = {
+            "PATH": "/usr/bin",
+            "HOME": str(account_home),
+            ACCOUNT_KEY: str(poison),
+        }
+        rig["harness"] = FakeHarness(default_is_absence=True, scrub=[*SCRUB, ACCOUNT_KEY])
+
+        launched = _launch(rig, env=ambient)
+        assert launched.account_binding == {}
+
+        monkeypatch.setattr(session.subprocess, "run", _confirm_run_fake([]))
+        message = TestConfirmFailureReport()._timeout(
+            session, launched, env=ambient
+        )
+
+        assert str(account_home / ".claude.json") in message
+        assert str(poison) not in message
+
     def test_a_pane_cannot_spoof_the_labels_camp_writes_itself(
         self, confirm_rig, monkeypatch
     ):

@@ -125,6 +125,7 @@ def test_launch_path_resolves_the_group_harness(monkeypatch) -> None:
 
     launched = type("LaunchedSession", (), {
         "session_id": "sess-1", "launch_dir": "/tmp/ws", "tmux_name": "camp-ws-abc",
+        "pane_env": {},
     })()
     monkeypatch.setattr("camp.launch.profile.harness_for", fake_harness_for)
     monkeypatch.setattr("camp.launch.session.launch_session", lambda *a, **k: launched)
