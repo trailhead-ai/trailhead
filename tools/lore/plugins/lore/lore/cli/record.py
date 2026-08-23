@@ -320,6 +320,21 @@ def cmd_record(args) -> int:
     return 1
 
 
+def _load_sidecar(loc) -> dict[str, Any]:
+    """Return the sidecar dict for a located record, ``{}`` if absent or unreadable.
+
+    The read paths surface the sidecar to callers verbatim, so an absent,
+    unreadable, or malformed sidecar degrades to "no annotations" rather than
+    failing a read that has a perfectly good body to return.
+    """
+    if not loc.sidecar_path.exists():
+        return {}
+    try:
+        return json.loads(loc.sidecar_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
 def _render_record(
     record_id: str, vault_root: str, as_json: bool, *, error_prefix: str = "error: "
 ) -> int:
@@ -357,17 +372,11 @@ def _render_record(
     )
 
     if as_json:
-        sidecar: dict[str, Any] = {}
-        if loc.sidecar_path.exists():
-            try:
-                sidecar = json.loads(loc.sidecar_path.read_text(encoding="utf-8"))
-            except (OSError, ValueError):
-                sidecar = {}
         payload = {
             "record_id": record_id,
             "kind": loc.kind,
             "name": loc.name,
-            "sidecar": sidecar,
+            "sidecar": _load_sidecar(loc),
             "body": body,
         }
         print(json.dumps(payload, indent=2, sort_keys=True))
@@ -433,16 +442,12 @@ def _cmd_record_show(args) -> int:
         error_prefix = "error: "
 
     if not bool(getattr(args, "full", False)):
-        deduped = _dedupe_record_show(record_id, vault_root, as_json)
+        deduped = _dedupe_record_show(args, record_id, vault_root, as_json)
         if deduped is not None:
             return deduped
 
     return _render_record(record_id, vault_root, as_json, error_prefix=error_prefix)
 
-
-#: ``record show`` carries no session selectors of its own, so the shared
-#: resolver is handed an empty namespace and falls through to the environment.
-_NO_SESSION_ARGS = argparse.Namespace(session_id=None)
 
 #: Named inside the compact response itself, so an agent whose context was
 #: compacted away can recover the body without knowing anything special.
@@ -452,7 +457,7 @@ _DEDUPE_HINT = (
 )
 
 
-def _dedupe_record_show(record_id: str, vault_root: str, as_json: bool) -> "int | None":
+def _dedupe_record_show(args, record_id: str, vault_root: str, as_json: bool) -> "int | None":
     """Apply repeat-fetch dedupe for ``record show``; ``None`` means render fully.
 
     Returns an exit code only when the compact acknowledgement was printed. Every
@@ -462,12 +467,17 @@ def _dedupe_record_show(record_id: str, vault_root: str, as_json: bool) -> "int 
     a second small read on the full-render path and buys a single error-reporting
     site: a broken record id is diagnosed by :func:`_render_record` alone, in its
     caller's error convention.
+
+    The session id comes from the shared resolver, which reads an explicit
+    ``--session-id`` if the namespace carries one and otherwise falls through to
+    the environment — ``record show`` declares no session selector, so it is the
+    environment that answers.
     """
     from ..record import store as record_store_mod
     from . import shown_state as shown_state_mod
     from .session import _session_id_from_args_or_env
 
-    session_id = _session_id_from_args_or_env(_NO_SESSION_ARGS)
+    session_id = _session_id_from_args_or_env(args)
     if not session_id:
         return None
 
@@ -482,17 +492,10 @@ def _dedupe_record_show(record_id: str, vault_root: str, as_json: bool) -> "int 
         shown_state_mod.mark_shown(session_id, record_id, digest)
         return None
 
-    sidecar: dict[str, Any] = {}
-    if loc.sidecar_path.exists():
-        try:
-            sidecar = json.loads(loc.sidecar_path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            sidecar = {}
-    return _emit_deduped(record_id, loc, sidecar, as_json)
+    return _emit_deduped(record_id, loc, as_json)
 
 
-
-def _emit_deduped(record_id: str, loc, sidecar: dict, as_json: bool) -> int:
+def _emit_deduped(record_id: str, loc, as_json: bool) -> int:
     """Print the compact acknowledgement for an already-shown record.
 
     Plain: one identity line (id, kind, status, ``updated-at``) plus the hint.
@@ -501,6 +504,7 @@ def _emit_deduped(record_id: str, loc, sidecar: dict, as_json: bool) -> int:
     ``hint`` added, so a JSON consumer detects the compact form structurally
     rather than by parsing prose.
     """
+    sidecar = _load_sidecar(loc)
     if as_json:
         print(json.dumps({
             "record_id": record_id,
