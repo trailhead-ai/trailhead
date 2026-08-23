@@ -1507,23 +1507,13 @@ def _confirm_run_fake(
             if pane_fails_after_kill and ["tmux", "kill-session"] in [
                 c[:2] for c in calls
             ]:
-                return type(
-                    "R",
-                    (),
-                    {"returncode": 1, "stdout": "", "stderr": "can't find pane"},
-                )()
-            return type(
-                "R",
-                (),
-                {"returncode": pane_returncode, "stdout": pane_stdout, "stderr": ""},
-            )()
+                return _completed(returncode=1, stderr="can't find pane")
+            return _completed(returncode=pane_returncode, stdout=pane_stdout)
         if argv[:2] == ["tmux", "kill-session"]:
             if kill_raises is not None:
                 raise kill_raises
-            return type(
-                "R", (), {"returncode": kill_returncode, "stdout": "", "stderr": "no such session"}
-            )()
-        return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+            return _completed(returncode=kill_returncode, stderr="no such session")
+        return _completed()
 
     return fake_run
 
@@ -1814,7 +1804,7 @@ class TestConfirmFailureReport:
         def fake_run(argv, **kwargs):
             if argv[:2] == ["tmux", "capture-pane"]:
                 captured.update(kwargs)
-            return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+            return _completed()
 
         monkeypatch.setattr(session.subprocess, "run", fake_run)
 

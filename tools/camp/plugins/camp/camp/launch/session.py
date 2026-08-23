@@ -280,6 +280,20 @@ def enumerate_records(
     return harness.parse_session_list(completed.stdout)
 
 
+def _unsupported_harness(harness, profile, what: str) -> LaunchError:
+    """The refusal for a launch seam that answered ``None``.
+
+    Three seams on this path each answer ``None`` to mean the same thing — this
+    harness does not launch (or does not re-enter) sessions — and one wording
+    for all of them is what keeps the three from reading as three different
+    problems to an operator.
+    """
+    return LaunchError(
+        f"camp: refusing to launch — harness {harness.name or profile.binary!r} "
+        f"(configured binary {profile.binary!r}) {what}"
+    )
+
+
 def _resolve_account_binding(harness, profile, group: dict, env: dict[str, str]):
     """The group's declared account and the environment the harness binds it to.
 
@@ -324,10 +338,7 @@ def _resolve_account_binding(harness, profile, group: dict, env: dict[str, str])
         )
         return None, {}
     if binding is None:
-        raise LaunchError(
-            f"camp: refusing to launch — harness {harness.name or profile.binary!r} "
-            f"(configured binary {profile.binary!r}) cannot launch sessions"
-        )
+        raise _unsupported_harness(harness, profile, "cannot launch sessions")
     return account, dict(binding)
 
 
@@ -519,10 +530,7 @@ def launch_session(
         harness_argv = harness.session_resume(session_id)
         unsupported = "cannot re-enter sessions"
     if harness_argv is None:
-        raise LaunchError(
-            f"camp: refusing to launch — harness {harness.name or profile.binary!r} "
-            f"(configured binary {profile.binary!r}) {unsupported}"
-        )
+        raise _unsupported_harness(harness, profile, unsupported)
 
     if shutil.which("tmux") is None:
         raise LaunchError("camp: refusing to launch — tmux is not on PATH")
@@ -538,10 +546,7 @@ def launch_session(
 
     scrub = harness.session_launch_env_unset()
     if scrub is None:
-        raise LaunchError(
-            f"camp: refusing to launch — harness {harness.name or profile.binary!r} "
-            f"(configured binary {profile.binary!r}) cannot launch sessions"
-        )
+        raise _unsupported_harness(harness, profile, "cannot launch sessions")
 
     # The scrub rides INSIDE the pane command, as `env -u` operands sitting
     # between tmux's own options and the harness argv. Scrubbing camp's own
@@ -659,7 +664,7 @@ def _sanitize_pane_excerpt(text: str) -> str:
     while lines and not lines[-1]:
         lines.pop()
     dropped = max(0, len(lines) - _PANE_EXCERPT_MAX_LINES)
-    lines = lines[len(lines) - _PANE_EXCERPT_MAX_LINES :] if dropped else lines
+    lines = lines[-_PANE_EXCERPT_MAX_LINES:]
     lines = [
         line
         if len(line) <= _PANE_EXCERPT_MAX_LINE_CHARS
