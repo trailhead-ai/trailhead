@@ -593,12 +593,13 @@ def test_resolution_step_exists():
     _resolution_step(GAUNTLET.read_text())
 
 
-def test_deliverable_is_compact_and_leads_with_a_capped_synthesis():
+def test_deliverable_is_compact_and_leads_with_a_narrative_synthesis():
     """The operator's job here is to decide, not to re-derive the review.
 
-    A finding dump makes them re-open the record to judge each item; a capped
-    synthesis written in the record's own vocabulary is what lets them judge in
-    place.
+    A finding dump makes them re-open the record to judge each item, and so does a
+    table doing the work prose should do: either way the reader reconstructs how
+    the findings relate by reading across rows. The deliverable therefore leads
+    with prose carrying the judgment, and the table supports it.
     """
     step = _flat(_resolution_step(GAUNTLET.read_text()))
     assert "target one terminal screen (~40 lines)" in step, (
@@ -606,13 +607,50 @@ def test_deliverable_is_compact_and_leads_with_a_capped_synthesis():
         "deliverable — without it the step degrades back into the finding dump it "
         "replaced"
     )
-    assert "**Synthesis — at most five sentences.**" in step, (
-        "the deliverable must lead with a hard-capped synthesis; an uncapped one "
-        "grows into the finding list it replaced"
+    assert "**The narrative synthesis**" in step, (
+        "the deliverable must lead with the narrative synthesis — the part that "
+        "carries what the passes found, whether it holds, and what to do about it"
     )
-    assert "in the design's own terms" in step, (
-        "the synthesis must be written in the reviewed design's own terms — a "
-        "per-pass roll-up forces the operator to re-open the record to orient"
+    assert "How the synthesis reads" in step, (
+        "the deliverable's first part must bind to the three-movement shape in "
+        "_shared/council.md rather than restating it, so gauntlet and the other "
+        "human-facing callers cannot drift apart"
+    )
+
+
+def test_synthesis_carries_no_sentence_cap():
+    """A five-sentence cap cannot hold three movements.
+
+    The synthesis has to say what the passes found, whether those findings hold and
+    where they came from, and what to do about them. A hard sentence cap forces two
+    of the three back out into the table — which is the shape being replaced. The
+    one-screen budget is what keeps it honest instead.
+    """
+    step = _flat(_resolution_step(GAUNTLET.read_text()))
+    assert "at most five sentences" not in step, (
+        "the five-sentence cap must be gone — it is too small to carry themes, "
+        "validity judgment, and remedy together, and it is what pushed the "
+        "explanation down into the table"
+    )
+    assert "under-consolidated" in step, (
+        "with the cap gone, the step must say what an over-long synthesis means: "
+        "the finding set was under-consolidated, not the budget too small. Without "
+        "it, dropping the cap reads as a licence to grow"
+    )
+
+
+def test_interpretive_per_pass_reading_is_licensed():
+    """A blanket ban on the per-pass view would forbid the wrong thing.
+
+    What must stay banned is the mechanical roll-up — "premise raised 2, breaker
+    raised 3". What must stay licensed is the adjudicator's interpretive read of
+    which lenses were right and which overreached, which is exactly what the
+    operator needs to judge the findings without re-deriving them.
+    """
+    step = _flat(_resolution_step(GAUNTLET.read_text()))
+    assert "Not a finding count, not a per-pass roll-up" not in step, (
+        "the blanket per-pass prohibition must be gone — it forbids the "
+        "interpretive per-lens account the synthesis is supposed to carry"
     )
 
 
@@ -633,6 +671,11 @@ def test_deliverable_pins_the_route_line_and_the_per_critical_table():
         "no per-Critical table — stated as an unqualified 'exactly four', the "
         "deliverable's own definition is false on the clean-run path"
     )
+    assert "supporting detail, not the explanation" in flat, (
+        "the per-Critical table must be billed as supporting detail — left "
+        "unqualified it re-accumulates the weight the narrative is supposed to "
+        "carry, which is the failure this shape replaced"
+    )
     assert "**The recommended route**, on its own line, by name" in flat, (
         "the route must be its own line, named — a route inferred from prose is a "
         "route the operator accepts without reading"
@@ -645,7 +688,7 @@ def test_deliverable_pins_the_route_line_and_the_per_critical_table():
         "the deliverable's fourth part is the compressed Important/Minor summary"
     )
     assert (
-        flat.index("**Synthesis — at most five sentences.**")
+        flat.index("**The narrative synthesis**")
         < flat.index("**The recommended route**")
         < flat.index("**The per-Critical table**")
         < flat.index("**Important and Minor, compressed**")

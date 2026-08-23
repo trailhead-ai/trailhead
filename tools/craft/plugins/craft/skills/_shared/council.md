@@ -195,13 +195,28 @@ pass, not a lens.
 After all four members return:
 1. **De-duplicate by issue, not by member.** If two members raised the same finding (e.g. Security and Reliability both flag a missing audit log), present it once, grouped by the issue, noting which lenses raised it.
 2. **Auto-downgrade speculative Criticals.** A Critical that is vague ("this could be a problem"), requires guessing about scale / future state / user behavior, or names no concrete failure scenario is reclassified Important. State explicitly which findings were downgraded and why.
-3. **Present the consolidated list**, grouped Critical → Important → Minor, noting the member count behind each multi-lens finding, and writing each finding in the shape below.
+3. **Write the narrative synthesis** — the prose that carries the judgment, in the shape "How the synthesis reads" defines below. This is what the reader reads first.
+4. **Then present the consolidated list**, grouped Critical → Important → Minor, noting the member count behind each multi-lens finding, and writing each finding in the shape "How a finding reads" defines below.
 
 The planning Council Review step adds a disposition gate and persists findings into the plan file; `consult` stops here and hands the synthesized view back to the user.
 
+(The `## Council Review` section `plan` persists into the plan file is a separate, one-line-per-finding record schema for a file rather than for someone reading in session; `plan/SKILL.md` owns its shape, and neither the narrative shape nor this contract governs it. The carve-out is that one persisted section — what `plan` *presents* to the user in session is governed here like any other caller's.)
+
+### How the synthesis reads
+
+The consolidated list is not the deliverable. A list makes the reader reconstruct how the findings relate to each other, which of them matter, and why, by reading across rows — and a table does it no better than a bulleted list does. The narrative is where that reconstruction has already been done for them, so it leads, and the list below it is **supporting detail** rather than the place the explanation lives.
+
+Three movements, one short paragraph each, in this order:
+
+1. **What the passes found** — the themes they collectively landed on, written **in the reviewed record's own terms**: its objectives, its criteria, its named parts. Themes, not a paragraph per finding.
+2. **Whether it holds, and where it came from** — your own read on validity and provenance: which passes were right, which overreached, and which raised something that is an **artifact of the lens rather than a defect** in the record. This is an **interpretive per-pass account, and it is wanted** — it is how the reader judges the findings without re-deriving them. What is forbidden is the **mechanical roll-up** — "premise raised 2, breaker raised 3" — a count wearing a sentence's clothes, which tells the reader nothing they can act on.
+3. **What to do about it** — the remedy stated whole, as one plan, rather than distributed a clause at a time across the rows below.
+
+Someone who wrote the record under review last week should be re-oriented, and should know what you are recommending and why, from these three paragraphs alone. If the three will not fit in three short paragraphs, **the finding set was under-consolidated** — that is a signal to go back to de-duplication, not to spend more of the reader's attention.
+
 ### How a finding reads
 
-Every finding in that consolidated list — the one presented to the user in session — takes this shape. Someone who has not read the document under review should understand the Critical list on the first pass. (The `## Council Review` section `plan` persists into the plan file is a separate, one-line-per-finding record schema; `plan/SKILL.md` owns its shape, and this contract does not govern it.)
+Every finding in that consolidated list — the one presented to the user in session — takes this shape. Someone who has not read the document under review should understand the Critical list on the first pass.
 
 - **Headline first.** One line, everyday words: what goes wrong, and for whom. It comes *before any mechanism* — no setup, no citation, no shorthand.
 - **Then the mechanism.** A short paragraph: what the document says, what reality does, and the concrete worst case, stated as an event ("we delete a workspace with a live session still in it").

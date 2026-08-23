@@ -262,3 +262,83 @@ def test_skills_reference_shared_council():
         assert "_shared/council.md" in skill.read_text(), (
             f"{skill.parent.name}/SKILL.md must reference _shared/council.md"
         )
+
+
+# --- the narrative synthesis: prose leads, the consolidated list supports ---
+#
+# A consolidated list makes the reader reconstruct how the findings relate, which of
+# them matter, and why, by reading across rows. The narrative is where that
+# reconstruction has already been done for them. Like the per-finding shape above,
+# the contract is written once in the shared file so every human-facing caller
+# inherits the same three movements.
+NARRATIVE_ELEMENTS = (
+    # the three movements, in name
+    "What the passes found",
+    "Whether it holds, and where it came from",
+    "What to do about it",
+    # the movement-2 carve-out: the interpretive per-pass read is the point, and it
+    # is what a blanket "no per-pass roll-up" ban would wrongly forbid
+    "interpretive per-pass account, and it is wanted",
+    "mechanical roll-up",
+    # movement 1 is written in the vocabulary of the thing under review
+    "in the reviewed record's own terms",
+    # the demotion itself — the list is supporting detail, not the explanation
+    "supporting detail",
+)
+
+NARRATIVE_CANARIES = (
+    "a count wearing a sentence's clothes",
+    "Whether it holds, and where it came from",
+    "artifact of the lens rather than a defect",
+)
+
+
+def test_narrative_synthesis_contract_in_shared_synthesis_section():
+    section = synthesis_section(SHARED.read_text())
+    for element in NARRATIVE_ELEMENTS:
+        assert element in section, (
+            f"_shared/council.md's Synthesis section must state {element!r} — the "
+            "narrative-synthesis contract for what a human reads first lives here, "
+            "in one copy, alongside the per-finding shape"
+        )
+
+
+def test_narrative_synthesis_not_duplicated_into_callers():
+    for skill in (PLAN, CONSULT, GAUNTLET):
+        text = skill.read_text()
+        for element in NARRATIVE_CANARIES:
+            assert element not in text, (
+                f"{skill.parent.name}/SKILL.md copies the narrative-synthesis contract "
+                f"({element!r}) instead of referencing _shared/council.md — two copies "
+                "are how the wording drifts apart"
+            )
+
+
+def test_human_facing_callers_bind_to_the_synthesis_shape():
+    """Every skill that presents to a human must point at the narrative shape.
+
+    Without the pointer a caller silently reverts to leading with the list, which
+    is the shape this contract exists to replace.
+    """
+    for skill in (PLAN, CONSULT, GAUNTLET):
+        assert "How the synthesis reads" in skill.read_text(), (
+            f"{skill.parent.name}/SKILL.md presents findings to a human but never points "
+            "at 'How the synthesis reads' in _shared/council.md, so it does not inherit "
+            "the narrative shape"
+        )
+
+
+def test_plan_persisted_schema_is_carved_out():
+    """plan's `## Council Review` is a file record, not in-session reading.
+
+    Its one-line-per-finding schema is plan's own. Without an explicit carve-out the
+    narrative contract reads as governing it too, and a future edit expands a
+    persisted record into three paragraphs per council run.
+    """
+    section = synthesis_section(SHARED.read_text())
+    assert "neither the narrative shape nor this contract governs it" in section, (
+        "_shared/council.md's Synthesis section must carve plan's persisted "
+        "`## Council Review` schema out of BOTH the narrative shape and the "
+        "per-finding shape — a carve-out naming only one of them leaves the other "
+        "reading as binding on a file record no human reads in session"
+    )

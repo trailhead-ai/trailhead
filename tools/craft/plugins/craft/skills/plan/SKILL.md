@@ -162,7 +162,7 @@ This step is mandatory on every plan. There is no skip flag — calibration is t
   - Reversibility unnamed: plan deploys something hard to roll back without naming rollback path
   ```
 
-Then synthesize per `_shared/council.md` (de-duplicate by issue, auto-downgrade speculative Criticals, present grouped by severity, writing every finding in the shape "How a finding reads" defines there — that shape governs the list you show the user, not the persisted `## Council Review` schema below, which keeps its own one-line-per-finding form). When auto-downgrading, record the demotion in the persisted `## Council Review` section under Important with a `(downgraded from Critical: <reason>)` parenthetical so calibration audits can detect demote-heavy synthesizers.
+Then synthesize per `_shared/council.md` (de-duplicate by issue, auto-downgrade speculative Criticals, lead with the narrative synthesis in the shape "How the synthesis reads" defines there, then present the list below it grouped by severity, writing every finding in the shape "How a finding reads" defines there — both shapes govern what you show the user in session, not the persisted `## Council Review` schema below, which keeps its own one-line-per-finding form). When auto-downgrading, record the demotion in the persisted `## Council Review` section under Important with a `(downgraded from Critical: <reason>)` parenthetical so calibration audits can detect demote-heavy synthesizers.
 
 **Disposition (required for every Critical):**
 
