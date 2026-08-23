@@ -37,24 +37,48 @@ def _cmd_activate_group_cli(
     group: dict,
     env: dict[str, str] | None,
 ) -> None:
-    """camp activate <member> [--name <slug>] — activate a member for the current session.
+    """camp activate <member> [--name <slug>] [--background]
 
-    Runs the member's activate-phase tasks idempotently, then prints the member's
-    CLAUDE.md to stdout so the calling agent ingests it as context.
+    Marks the member activated and returns WITHOUT waiting for its
+    activate-phase tasks: any outstanding work-enabling work is handed to the
+    detached provisioner (spawn_detached_provisioner) rather than run inline.
+    The operator gets the member's CLAUDE.md right away regardless of whether
+    that work has finished, plus one feedback line naming what camp observed —
+    tasks freshly queued, an activation already in progress, work already
+    complete, a retry of previously failed work, or a member with no
+    activate-phase task declared.
+
+    `--background` is what the detached provisioner itself invokes: it runs
+    only the guarded task execution (run_activate_tasks_in_background) — no
+    doc, no feedback line — and exits.
     """
     from ..spine import _die
-    from ..provision.activation import activate_member, MemberNotReadyError
-    from ..provision.tasks import TaskError
+    from ..provision.activation import (
+        activate_member,
+        run_activate_tasks_in_background,
+        MemberNotReadyError,
+    )
     from ..group.config import GroupConfigError
     from ..launch.profile import resolve_harness_profile
 
-    filtered = list(args)
+    background = "--background" in args
+    filtered = [a for a in args if a != "--background"]
     slug = _slug_from_args_or_cwd(filtered, group, verb="activate", env=env)
 
     if not filtered:
         _die("camp activate: a member name is required\n  usage: camp activate <member>")
 
     member_name = filtered[0]
+
+    if background:
+        try:
+            run_activate_tasks_in_background(group, slug, member_name, env=env)
+        except Exception as e:
+            # Never let a detached run crash to a raw traceback in its
+            # logfile — nobody is waiting on this process's exit code.
+            print(f"camp activate --background: {e}", file=sys.stderr)
+            sys.exit(1)
+        return
 
     profile = resolve_harness_profile(group)
 
@@ -65,11 +89,6 @@ def _cmd_activate_group_cli(
         sys.exit(1)
     except GroupConfigError as e:
         print(f"camp activate: {e}", file=sys.stderr)
-        sys.exit(1)
-    except TaskError as e:
-        # A required activate-phase task failed; the message already names the
-        # member, the task, and the failing step (no raw traceback).
-        print(str(e), file=sys.stderr)
         sys.exit(1)
     except ValueError as e:
         _die(f"camp activate: {e}")

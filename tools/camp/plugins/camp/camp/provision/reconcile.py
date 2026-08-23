@@ -31,7 +31,13 @@ removal). The lockfile lives OUTSIDE the workspace dir at
 teardown rmtree of the workspace dir cannot delete the held lock inode.
 reconcile_break reaps that lockfile (while still holding the flock) once the
 slug is fully torn down; reconcile_lock's inode identity re-check makes the
-reap safe for concurrent waiters.
+reap safe for concurrent waiters. It also reaps each member's activate-phase
+concurrency guard lockfile (provision/activation.py) at the same point — that
+guard is a SEPARATE lock a live `camp activate` run may hold across a long
+task subprocess; reconcile_break never waits on it (an in-flight activate run
+already keeps its slow work outside this module's reconcile_lock, so teardown
+never contends with it) but does clean up its lockfile once free, or leaves it
+for a later reap if a run is still (rarely) live at teardown time.
 """
 
 from __future__ import annotations
@@ -886,6 +892,15 @@ def reconcile_break(
             # blocked on this inode re-validate identity on wake (see
             # reconcile_lock), which is what makes the unlink race-free.
             reap_lock_unlocked(ws_dir)
+            # Also reap each member's activate-phase concurrency guard
+            # lockfile (provision/activation.py). Without this, every removed
+            # workspace that ever ran activate-phase work leaks one lockfile
+            # per member, permanently — that guard lives OUTSIDE ws_dir for
+            # the same reason the slug lock does, so the rmtree above never
+            # touched it.
+            from .activation import reap_member_guard_unlocked
+
+            reap_member_guard_unlocked(ws_dir, [e["name"] for e in member_entries])
             status = "ok"
         else:
             # Some removals failed. Update the manifest to reflect reality:
