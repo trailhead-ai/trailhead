@@ -38,6 +38,11 @@ Schema:
                                          # never allowlists "~"); entries stored
                                          # unexpanded, so "~" resolves against
                                          # the environment the launch runs under
+  account = "~/.claude-levr"             # optional; opaque harness-interpreted
+                                         # account binding for launched
+                                         # sessions. Also denied as a launch
+                                         # root, for every group, by the
+                                         # credential rule below
 
   [dev_env]                              # optional; warn-and-continue (deferred)
   ...
@@ -51,11 +56,17 @@ runs them list-mode (subprocess, shell=False). Sharing group configs from
 untrusted authors is explicitly out of scope.
 
 `[launch] roots` is an allowlist, not the whole boundary. camp also carries a
-fixed credential-store deny list (`camp.launch.eligibility.CREDENTIAL_DENY_ENTRIES`)
+credential-store deny list (`camp.launch.eligibility.credential_deny_entries`)
 that is checked after the allowlist and OVERRIDES IT UNCONDITIONALLY: no value of
 `roots` can make `~/.ssh` — or any directory at, under, or above a deny entry —
-an eligible launch root. That list lives in code precisely so it is not a config
-key; changing it is a change to a security boundary.
+an eligible launch root. Its floor
+(`camp.launch.eligibility.CREDENTIAL_DENY_ENTRIES`) lives in code precisely so it
+is not a config key; editing it is a change to a security boundary.
+
+Config feeds that list in one direction only: every `[launch] account` declared
+by ANY group is appended to it, so an account directory is never an eligible
+launch root for any group — not just for the group that declared it. Nothing in
+any group config subtracts from the floor.
 
 Activation hook kinds:
   "dep-install"   Run a dependency installation command in the worktree.

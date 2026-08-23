@@ -10,6 +10,13 @@ Test contract:
   subdirectory, and matches in the ancestor direction; the list itself is
   pinned against a literal so a silent removal fails the suite.
 - Deny entries that do not exist on disk still deny.
+- Every `[launch] account` declared by ANY group is denied too — equal, under,
+  and ancestor — including to a group that declares no account of its own, which
+  is the cross-group case the derivation exists for.
+- Derivation is additive only: the hardcoded floor comes through whole and in
+  order, and an account equal to, above, or below a floor entry leaves that
+  entry denying exactly as before.
+- Group configs camp cannot read are a refusal, not a shorter deny list.
 - Every refusal is a LaunchError, and the gate writes nothing.
 
 HOME always comes from the injected env, so no test reads or touches the
@@ -77,18 +84,37 @@ def _group(roots: list[str] | None = None, *, name: str = "testgroup") -> dict:
     return cfg
 
 
-def _check(target: Path, group: dict, home: Path) -> Path:
+def _check(target: Path, group: dict, home: Path, *, env: dict | None = None) -> Path:
     from camp.launch.eligibility import assert_launch_eligible
 
-    return assert_launch_eligible(target, group=group, env=_env(home))
+    return assert_launch_eligible(target, group=group, env=env or _env(home))
 
 
-def _refusal(target: Path, group: dict, home: Path) -> str:
+def _refusal(target: Path, group: dict, home: Path, *, env: dict | None = None) -> str:
     from camp.launch.session import LaunchError
 
     with pytest.raises(LaunchError) as exc_info:
-        _check(target, group, home)
+        _check(target, group, home, env=env)
     return str(exc_info.value)
+
+
+_MEMBER_TOML = '[[members]]\nname = "myrepo"\nrepo_root = "/tmp/myrepo"\n'
+
+
+def _install_group_configs(home: Path, groups: dict[str, str | None]) -> dict[str, str]:
+    """Write one group config per entry; return an env pointing camp at them.
+
+    `groups` maps a group name to the account it declares under [launch], or to
+    None for a group that declares none.
+    """
+    groups_dir = home / "camp-config" / "groups"
+    groups_dir.mkdir(parents=True, exist_ok=True)
+    for name, account in groups.items():
+        body = f'[group]\nname = "{name}"\n\n{_MEMBER_TOML}'
+        if account is not None:
+            body += f'\n[launch]\naccount = "{account}"\n'
+        (groups_dir / f"{name}.toml").write_text(body, encoding="utf-8")
+    return {"HOME": str(home), "CAMP_CONFIG_DIR": str(home / "camp-config")}
 
 
 # ---------------------------------------------------------------------------
@@ -323,3 +349,146 @@ def test_gate_writes_nothing(home: Path) -> None:
     _refusal(home / "anywhere", _group(None), home)
 
     assert sorted(str(p) for p in home.rglob("*")) == before
+
+
+# ---------------------------------------------------------------------------
+# Gate 3, continued — the accounts declared by group configs
+# ---------------------------------------------------------------------------
+
+
+def test_a_declared_account_is_denied_even_when_the_allowlist_names_it(
+    home: Path,
+) -> None:
+    """A declared account dir is a credential store; allowlisting it outright
+    does not make it eligible."""
+    env = _install_group_configs(home, {"levr": "~/.claude-levr"})
+    account = home / ".claude-levr"
+    account.mkdir()
+    msg = _refusal(account, _group([str(account)], name="levr"), home, env=env)
+    assert "credential" in msg
+
+
+def test_an_ancestor_of_a_declared_account_is_denied(home: Path) -> None:
+    """The ancestor leg bites for derived entries too — a root that CONTAINS a
+    declared account hands the launched session that account's store."""
+    env = _install_group_configs(home, {"levr": "~/accounts/levr"})
+    (home / "accounts" / "levr").mkdir(parents=True)
+    msg = _refusal(home / "accounts", _group(["~"], name="levr"), home, env=env)
+    assert "credential" in msg
+
+
+def test_a_directory_under_a_declared_account_is_denied(home: Path) -> None:
+    env = _install_group_configs(home, {"levr": "~/.claude-levr"})
+    inside = home / ".claude-levr" / "projects"
+    inside.mkdir(parents=True)
+    msg = _refusal(inside, _group(["~"], name="levr"), home, env=env)
+    assert "credential" in msg
+
+
+def test_an_account_declared_by_another_group_is_denied(home: Path) -> None:
+    """THE cross-group case. The launching group declares no account at all and
+    allowlists the directory explicitly; the account belongs to a DIFFERENT
+    group. A per-group derivation passes every other test here and fails this
+    one, which is the whole finding."""
+    env = _install_group_configs(
+        home, {"trailhead": None, "levr": "~/.claude-levr"}
+    )
+    account = home / ".claude-levr"
+    account.mkdir()
+    launching = _group([str(account)], name="trailhead")
+    assert "account" not in launching["launch"]
+    msg = _refusal(account, launching, home, env=env)
+    assert "credential" in msg
+
+
+def test_a_cross_group_account_refusal_names_only_the_credential_rule(
+    home: Path,
+) -> None:
+    """A derived entry refuses on the same terms as a hardcoded one: an operator
+    must never read a credential refusal as something `roots` could fix."""
+    env = _install_group_configs(
+        home, {"trailhead": None, "levr": "~/.claude-levr"}
+    )
+    account = home / ".claude-levr"
+    account.mkdir()
+    msg = _refusal(account, _group(["~"], name="trailhead"), home, env=env)
+    assert "credential" in msg
+    assert "allowlist" not in msg
+    assert "roots" not in msg
+
+
+def test_an_unrelated_directory_stays_eligible_when_accounts_are_declared(
+    home: Path,
+) -> None:
+    """Derivation adds entries; it does not make everything ineligible."""
+    env = _install_group_configs(
+        home, {"trailhead": None, "levr": "~/.claude-levr"}
+    )
+    target = home / "code" / "project"
+    target.mkdir(parents=True)
+    assert _check(target, _group([str(home / "code")], name="trailhead"), home, env=env) == target
+
+
+def test_a_declared_account_reached_by_symlink_is_denied_where_it_resolves(
+    home: Path,
+) -> None:
+    """Both sides are fully resolved, so an account declared through a symlink
+    denies the directory it actually points at."""
+    real = home / "real-account"
+    real.mkdir()
+    (home / "linked-account").symlink_to(real)
+    env = _install_group_configs(home, {"levr": "~/linked-account"})
+    msg = _refusal(real, _group([str(real)], name="levr"), home, env=env)
+    assert "credential" in msg
+
+
+def test_the_hardcoded_floor_survives_derivation_unchanged(home: Path) -> None:
+    """The hardcoded tuple is an immutable floor: derivation may only append to
+    it, never remove, narrow, or reorder an entry."""
+    from camp.launch.eligibility import CREDENTIAL_DENY_ENTRIES, credential_deny_entries
+
+    env = _install_group_configs(home, {"levr": "~/.claude-levr"})
+    entries = credential_deny_entries(env=env)
+
+    assert set(CREDENTIAL_DENY_ENTRIES) == set(_EXPECTED_DENY_ENTRIES)
+    assert set(CREDENTIAL_DENY_ENTRIES) <= set(entries)
+    assert entries[: len(CREDENTIAL_DENY_ENTRIES)] == CREDENTIAL_DENY_ENTRIES
+    assert "~/.claude-levr" in entries
+
+
+@pytest.mark.parametrize("account", ["~/.claude", "~", "~/.claude/nested"])
+def test_a_declared_account_cannot_shadow_a_hardcoded_entry(
+    home: Path, account: str
+) -> None:
+    """An account equal to, an ancestor of, or a child of a hardcoded entry
+    leaves that entry denying exactly as it did before."""
+    from camp.launch.eligibility import CREDENTIAL_DENY_ENTRIES, credential_deny_entries
+
+    env = _install_group_configs(home, {"levr": account})
+    assert set(CREDENTIAL_DENY_ENTRIES) <= set(credential_deny_entries(env=env))
+    assert "credential" in _refusal(home / ".ssh", _group(["~"]), home, env=env)
+    assert "credential" in _refusal(home / ".claude", _group(["~"]), home, env=env)
+
+
+def test_a_relative_account_contributes_no_entry(home: Path) -> None:
+    """A cwd-relative account names no fixed location — deriving from it would
+    make the boundary move with the directory camp is invoked from, and no
+    harness can honor it in the first place."""
+    from camp.launch.eligibility import credential_deny_entries
+
+    env = _install_group_configs(home, {"levr": "relative-account"})
+    assert not any("relative-account" in entry for entry in credential_deny_entries(env=env))
+
+
+def test_group_configs_that_cannot_be_read_refuse_the_launch(home: Path) -> None:
+    """Fail closed: camp that cannot enumerate the declared accounts cannot know
+    the boundary, and it refuses as a LaunchError like every other refusal."""
+    from camp.launch.session import LaunchError
+
+    env = _install_group_configs(home, {"levr": "~/.claude-levr"})
+    (home / "camp-config" / "groups" / "broken.toml").write_text("not = [toml", encoding="utf-8")
+    target = home / "code"
+    target.mkdir()
+    with pytest.raises(LaunchError) as exc_info:
+        _check(target, _group([str(target)]), home, env=env)
+    assert "group config" in str(exc_info.value)
