@@ -1818,6 +1818,28 @@ class TestConfirmFailureReport:
         assert "\x1b" not in message
         assert "\x07" not in message
 
+    def test_eight_bit_c1_control_sequences_are_stripped_from_the_excerpt(
+        self, confirm_rig, monkeypatch
+    ):
+        """The 8-bit forms of the same introducers. `\x9b` IS CSI, `\x9d` IS OSC
+        and `\x9c` IS ST — a terminal acts on them exactly as it acts on the
+        two-byte `ESC [` / `ESC ]` / `ESC \\` spellings. Stripping only the
+        ESC-introduced forms leaves a pane free to write control sequences
+        straight through camp into the operator's terminal and into the report
+        this message becomes."""
+        session = confirm_rig["module"]
+        pane = "\x9b1;31mDo you trust\x9b0m the files?\x9d0;title\x9c\n"
+        monkeypatch.setattr(
+            session.subprocess, "run", _confirm_run_fake([], pane_stdout=pane)
+        )
+
+        message = self._timeout(session, confirm_rig["launched"])
+
+        assert "Do you trust the files?" in message
+        assert not any("\x80" <= ch <= "\x9f" for ch in message)
+        assert "1;31m" not in message
+        assert "0;title" not in message
+
     def test_a_failing_capture_degrades_to_unavailable_and_still_refuses(
         self, confirm_rig, monkeypatch
     ):

@@ -116,10 +116,18 @@ _PANE_EXCERPT_MAX_LINE_CHARS = 200
 #: already drops SGR attributes, but the pane's own program may have written
 #: bytes tmux passes through, and an excerpt is quoted into an error message
 #: rather than rendered by a terminal.
+#: Both spellings of every introducer are recognized. The C1 controls are the
+#: SINGLE-character forms of the same sequences: U+009B is CSI, U+009D is OSC,
+#: U+009C is ST, and a terminal acts on them exactly as it acts on the two-byte
+#: `ESC [` / `ESC ]` / `ESC \` spellings. Matching only the ESC-introduced forms
+#: leaves the 8-bit ones intact and passes control sequences straight through to
+#: the operator's terminal and into whatever durable record the report becomes.
 _ESCAPE_SEQUENCE = re.compile(
-    r"\x1b(?:\[[0-9;?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)|[@-Z\\-_])"
+    r"(?:\x1b\[|\x9b)[0-9;?]*[ -/]*[@-~]"
+    r"|(?:\x1b\]|\x9d)[^\x07\x1b\x9c]*(?:\x07|\x1b\\|\x9c)"
+    r"|\x1b[@-Z\\-_]"
 )
-_CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+_CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
 
 
 class LaunchError(Exception):
