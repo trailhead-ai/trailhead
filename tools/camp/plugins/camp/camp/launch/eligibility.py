@@ -154,9 +154,14 @@ def _declared_account_entries(env: Mapping[str, str] | None) -> tuple[str, ...]:
     directory camp happens to be invoked from, and no harness will bind a
     session to one, so it names no reachable store.
 
-    Failing to read the group configs is a refusal. An unreadable declaration is
-    an account camp cannot rule out, and answering with a shorter deny list
-    would turn a broken config into a widened boundary.
+    A group config camp cannot read or parse is a refusal: an unreadable
+    declaration is an account camp cannot rule out, and answering with a shorter
+    deny list would turn a broken config into a widened boundary.
+
+    A groups directory that does not exist is not that case and does not refuse.
+    It yields no entries, leaving the hardcoded floor to answer alone — camp
+    knows of no groups at all, so no group declares an account and there is
+    nothing the shorter list could be missing.
     """
     from ..group.config import load_all_groups
 

@@ -492,3 +492,18 @@ def test_group_configs_that_cannot_be_read_refuse_the_launch(home: Path) -> None
     with pytest.raises(LaunchError) as exc_info:
         _check(target, _group([str(target)]), home, env=env)
     assert "group config" in str(exc_info.value)
+
+
+def test_a_groups_directory_that_was_never_created_yields_the_floor(home: Path) -> None:
+    """No groups directory means no group declares an account, so there is
+    nothing to derive and nothing to miss — the hardcoded floor answers alone,
+    and it still refuses."""
+    from camp.launch.eligibility import CREDENTIAL_DENY_ENTRIES, credential_deny_entries
+
+    config_dir = home / "camp-config"
+    config_dir.mkdir()
+    assert not (config_dir / "groups").exists()
+    env = {"HOME": str(home), "CAMP_CONFIG_DIR": str(config_dir)}
+
+    assert credential_deny_entries(env=env) == CREDENTIAL_DENY_ENTRIES
+    assert "credential" in _refusal(home / ".claude", _group(["~"]), home, env=env)
