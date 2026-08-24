@@ -105,17 +105,26 @@ def _snapshot(root: Path) -> dict[str, tuple[str, object]]:
     Directories carry no content, symlinks carry their target unresolved (so a
     retarget is a change even when the destination reads the same), and regular
     files carry their bytes.
+
+    The scan itself isn't atomic against a concurrently-mutating tree (a
+    background provisioner can remove a path between the walk and the read), so
+    a transient `FileNotFoundError` retries the whole scan rather than escaping
+    as if it were suite state.
     """
-    snapshot: dict[str, tuple[str, object]] = {}
-    for path in sorted(root.rglob("*")):
-        key = str(path.relative_to(root))
-        if path.is_symlink():
-            snapshot[key] = ("symlink", os.readlink(path))
-        elif path.is_dir():
-            snapshot[key] = ("dir", None)
-        else:
-            snapshot[key] = ("file", path.read_bytes())
-    return snapshot
+    while True:
+        try:
+            snapshot: dict[str, tuple[str, object]] = {}
+            for path in sorted(root.rglob("*")):
+                key = str(path.relative_to(root))
+                if path.is_symlink():
+                    snapshot[key] = ("symlink", os.readlink(path))
+                elif path.is_dir():
+                    snapshot[key] = ("dir", None)
+                else:
+                    snapshot[key] = ("file", path.read_bytes())
+            return snapshot
+        except FileNotFoundError:
+            continue
 
 
 def _settled_snapshot(root: Path, *, quiet_for: float = 0.3, timeout: float = 30.0) -> dict:

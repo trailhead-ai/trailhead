@@ -675,7 +675,7 @@ def test_camp_launch_dir_inside_a_workspace_still_requires_an_explicit_group(cli
     target = cli_env["tmp_path"] / "roots" / "myproject"
     target.mkdir(parents=True)
     _set_launch_roots(cli_env, cli_env["tmp_path"] / "roots")
-    before = _state_tree(cli_env)
+    before = _settled_state_tree(cli_env)
 
     result = _camp(cli_env, "launch", "--dir", str(target), cwd=workspace)
 
