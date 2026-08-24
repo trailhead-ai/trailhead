@@ -156,10 +156,15 @@ def _member_capability_lines(
         if capability:
             lines.append(f"{name}: {capability}")
         else:
+            # Deliberately does not point at `camp status --name <slug> --json`:
+            # see the identical note above the failed-task line — that surface
+            # carries the task's unredacted stderr_excerpt.
             lines.append(
                 f"{name}: the work-enabling task '{task['name']}' has not finished yet — commands "
                 f"or tools that depend on it may fail or behave as unset until it completes; "
-                f"check `camp status --name {slug} --json` before treating that as a code problem."
+                f"its output isn't available in this context; ask the operator to check `camp "
+                f"status --name {slug}` or re-run `camp setup` before treating that as a code "
+                f"problem."
             )
     return lines
 
@@ -170,9 +175,9 @@ def _summarized_capability_report(count: int, slug: str) -> str:
     must never receive a half-statement about what it cannot do.
     """
     return (
-        f"{count} work-enabling tasks are outstanding or failed across this workspace — run "
-        f"`camp status --name {slug} --json` for the per-member detail before assuming a "
-        "code issue."
+        f"{count} work-enabling tasks are outstanding or failed across this workspace — their "
+        f"output isn't available in this context; ask the operator to check `camp status "
+        f"--name {slug}` or re-run `camp setup` before assuming a code issue."
     )
 
 

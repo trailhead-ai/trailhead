@@ -1417,6 +1417,159 @@ class TestCapabilityReport:
         assert second != first
         assert second == "", f"dependencies arrived — expected silence, got: {second!r}"
 
+    def test_no_line_of_the_report_instructs_fetching_json(self, tmp_path: Path) -> None:
+        """No line of a generated capability report — failed, outstanding,
+        mixed failed+outstanding, or the overflow/summarized path — ever
+        instructs the agent to run `camp status --name <slug> --json`. That
+        surface returns the unredacted manifest `reason` field, which can
+        carry a credential from a private-registry auth failure. A prior fix
+        addressed only the failed-task line; this is a property over the
+        whole report, exercised across every branch that can produce a line,
+        so a sibling line making the same mistake cannot survive unnoticed."""
+        from camp.launch.hook_handlers import capability_report
+        from camp.group.manifest import manifest_path_for, write_central_manifest
+
+        env = {"CAMP_STATE_DIR": str(tmp_path / "state")}
+
+        def _assert_report_has_no_json_pointer(report: str) -> None:
+            assert report, "expected a non-empty report for this scenario"
+            for line in report.splitlines():
+                assert "--json" not in line, (
+                    f"report line instructs fetching the unredacted --json map: {line!r}"
+                )
+
+        # failed only
+        group_failed = _make_group_config(
+            "propgroup-failed",
+            [{"name": "repo_a", "repo_root": "/x", "tasks": [_activate_task("dep-install")]}],
+        )
+        mpath_failed = manifest_path_for("propgroup-failed", "feat-failed", env=env)
+        write_central_manifest(
+            mpath_failed,
+            _capability_manifest(
+                group_name="propgroup-failed",
+                slug="feat-failed",
+                members=[
+                    {
+                        "name": "repo_a",
+                        "repo_root": "/x",
+                        "worktree_path": "/x",
+                        "provision_state": "ready",
+                        "work_state": "failed",
+                        "reason": "npm ci: exit 1",
+                        "tasks": {"dep-install": {"state": "failed", "reason": "exit 1"}},
+                    }
+                ],
+            ),
+        )
+        _assert_report_has_no_json_pointer(
+            capability_report(group_failed, "feat-failed", env=env)
+        )
+
+        # outstanding only
+        group_outstanding = _make_group_config(
+            "propgroup-outstanding",
+            [{"name": "repo_a", "repo_root": "/x", "tasks": [_activate_task("dep-install")]}],
+        )
+        mpath_outstanding = manifest_path_for(
+            "propgroup-outstanding", "feat-outstanding", env=env
+        )
+        write_central_manifest(
+            mpath_outstanding,
+            _capability_manifest(
+                group_name="propgroup-outstanding",
+                slug="feat-outstanding",
+                members=[
+                    {
+                        "name": "repo_a",
+                        "repo_root": "/x",
+                        "worktree_path": "/x",
+                        "provision_state": "ready",
+                        "work_state": "pending",
+                        "tasks": {},
+                    }
+                ],
+            ),
+        )
+        _assert_report_has_no_json_pointer(
+            capability_report(group_outstanding, "feat-outstanding", env=env)
+        )
+
+        # mixed: one member failed, one member outstanding, in the same report
+        group_mixed = _make_group_config(
+            "propgroup-mixed",
+            [
+                {"name": "repo_a", "repo_root": "/x", "tasks": [_activate_task("dep-install")]},
+                {"name": "repo_b", "repo_root": "/y", "tasks": [_activate_task("dep-install")]},
+            ],
+        )
+        mpath_mixed = manifest_path_for("propgroup-mixed", "feat-mixed", env=env)
+        write_central_manifest(
+            mpath_mixed,
+            _capability_manifest(
+                group_name="propgroup-mixed",
+                slug="feat-mixed",
+                members=[
+                    {
+                        "name": "repo_a",
+                        "repo_root": "/x",
+                        "worktree_path": "/x",
+                        "provision_state": "ready",
+                        "work_state": "failed",
+                        "reason": "npm ci: exit 1",
+                        "tasks": {"dep-install": {"state": "failed", "reason": "exit 1"}},
+                    },
+                    {
+                        "name": "repo_b",
+                        "repo_root": "/y",
+                        "worktree_path": "/y",
+                        "provision_state": "ready",
+                        "work_state": "pending",
+                        "tasks": {},
+                    },
+                ],
+            ),
+        )
+        mixed_report = capability_report(group_mixed, "feat-mixed", env=env)
+        _assert_report_has_no_json_pointer(mixed_report)
+        assert "failed" in mixed_report.lower(), "expected the failed-task line in the mix"
+        assert "dep-install" in mixed_report, "expected the outstanding-task line in the mix"
+
+        # overflow/summarized path: many members with outstanding/failed work
+        member_count = 40
+        members_config = [
+            {
+                "name": f"repo_{i}",
+                "repo_root": f"/x{i}",
+                "tasks": [_activate_task(f"dep-install-{i}")],
+            }
+            for i in range(member_count)
+        ]
+        group_overflow = _make_group_config("propgroup-overflow", members_config)
+        manifest_members = [
+            {
+                "name": f"repo_{i}",
+                "repo_root": f"/x{i}",
+                "worktree_path": f"/x{i}",
+                "provision_state": "ready",
+                "work_state": "failed",
+                "tasks": {f"dep-install-{i}": {"state": "failed", "reason": "boom"}},
+            }
+            for i in range(member_count)
+        ]
+        mpath_overflow = manifest_path_for("propgroup-overflow", "feat-overflow", env=env)
+        write_central_manifest(
+            mpath_overflow,
+            _capability_manifest(
+                group_name="propgroup-overflow",
+                slug="feat-overflow",
+                members=manifest_members,
+            ),
+        )
+        _assert_report_has_no_json_pointer(
+            capability_report(group_overflow, "feat-overflow", env=env)
+        )
+
     def test_internal_failure_returns_empty_string_not_a_raised_exception(
         self, tmp_path: Path, monkeypatch
     ):

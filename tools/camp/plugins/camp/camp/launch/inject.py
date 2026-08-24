@@ -17,9 +17,28 @@ target for any process running inside a member's checkout — including a
 malicious transitive dependency's postinstall script — with no provenance
 check standing between "a file showed up in the queue" and "it gets
 concatenated into a live agent's context". Rooting the queue under the central
-state dir instead removes that write path: nothing a task step naturally
-produces or is told about points there. `central_queue_dir` creates the
-directory with owner-only (0700) permissions.
+state dir instead removes that one specific, trivially-discoverable write
+path (`../.camp/inject_queue` off a known cwd); `central_queue_dir` creates
+the directory with owner-only (0700) permissions, which keeps other OS users
+out.
+
+That is NOT confinement against a same-OS-user process. The new location,
+`central_state_dir(group)/inject_queues/<slug>/`, is a sibling of
+`central_state_dir(group)/worktrees/<slug>/` — which is exactly where a task
+step's cwd lives — so its path is derivable from that cwd with pure
+`.parents[...]` arithmetic, no camp internals required. A task step with
+arbitrary code execution as the same OS user as the drain can still write
+directly into the queue at its new location; nothing at this layer can stop
+that, because the attacker and the drain run as the same user. What actually
+holds is `build_notice_body`'s templated-field construction: it protects
+against *unfiltered task output* reaching agent context (a notice body can
+only ever contain camp-authored fields, never task stdout/stderr), and that
+guarantee is independent of where the queue directory lives. The unresolved
+gap — a task step writing a fabricated notice file directly into the queue,
+bypassing `build_notice_body` entirely — is tracked as
+`task/inject-queue-trusts-file-presence-not-provenance-a-task-step-can-write-directly-into-agent-context`;
+a real fix means rendering notices from validated manifest state rather than
+draining free-text files, which is a larger redesign than this module makes.
 
 One file per enqueue, so multiple writes before a drain are never lost. The
 queue has two kinds of entries, and they are NOT treated identically:
@@ -50,9 +69,9 @@ a tool call, so any internal error → exit 0 with no output.
 Pre-existing workspaces may still have a queue at the old, now-abandoned
 `<workspace>/.camp/inject_queue` location. It is never read again — not even
 once, to "drain it out" — because a file sitting there is exactly what the
-attack this module now closes would have planted: reading it, even one last
-time, would still be trusting file presence over provenance. Any such leftover
-file simply sits inert until the workspace itself is torn down.
+trivial-reach write this module removes would have planted: reading it, even
+one last time, would still be trusting file presence over provenance. Any
+such leftover file simply sits inert until the workspace itself is torn down.
 """
 
 from __future__ import annotations
@@ -88,10 +107,11 @@ NOTICE_MAX_AGE_SECONDS = 3600
 # "worktrees" — outside the directory tree any member worktree lives under.
 _INJECT_QUEUES_SEGMENT = "inject_queues"
 
-# central_queue_dir creates its directory owner-only: same-OS-user task steps
-# aren't stopped by this alone (see module docstring — the real defense is
-# relocation, not permissions), but it costs nothing and matches the "removes
-# the write capability" intent for any reader outside the owning user.
+# central_queue_dir creates its directory owner-only: it keeps out other OS
+# users but does nothing against a same-OS-user task step, which is not
+# confined by relocation either (see module docstring) — it costs nothing
+# and matches the "removes the write capability" intent for any reader
+# outside the owning user.
 _OWNER_ONLY_MODE = 0o700
 
 _WORKTREES_SEGMENT = "worktrees"
@@ -116,7 +136,9 @@ def central_queue_dir(
     `central_state_dir(group_name)/inject_queues/<slug>/` — sibling of
     `worktrees/`, so NOT inside the workspace dir any member worktree lives
     under. Created with owner-only (0700) permissions. See the module
-    docstring for why this placement is the fix, not merely a reorganization.
+    docstring for what this placement does and does not defend against — it
+    removes the trivial `../.camp/inject_queue` write path, not same-OS-user
+    confinement.
     """
     from ..group.resolve import central_state_dir
 
