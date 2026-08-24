@@ -168,6 +168,28 @@ _DEFAULT_TASK_PHASE = "provision"
 _LEGACY_BOOTSTRAP_TASK_NAME = "bootstrap"
 _LEGACY_DEP_INSTALL_TASK_NAME = "dep-install"
 
+
+def tasks_in_phase(member: dict[str, Any] | None, phase: str) -> list[dict[str, Any]]:
+    """A resolved member's tasks declared in `phase`, in declaration order.
+
+    The single reader of a member's task phases — every consumer that asks
+    "what does this member run in phase X" (the task runner's phase filter,
+    reconcile's work_state fact, activation's dispatch, the SessionStart
+    capability report) goes through here rather than re-deriving the filter,
+    so the default below is stated once.
+
+    `_parse_tasks` normalizes `phase` onto every task it resolves, but a
+    hand-built member dict may omit it; an absent phase reads as
+    `_DEFAULT_TASK_PHASE`. A `member` of None (no such member in the group
+    config) declares nothing, so the result is empty rather than an error.
+    """
+    return [
+        task
+        for task in (member or {}).get("tasks") or []
+        if task.get("phase", _DEFAULT_TASK_PHASE) == phase
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Valid lore routing scopes
 # ---------------------------------------------------------------------------

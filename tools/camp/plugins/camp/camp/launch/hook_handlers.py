@@ -109,28 +109,6 @@ def _resolve_group_slug_silently(cwd: Path, group_configs: list) -> tuple[dict |
     return group, slug
 
 
-def _activate_task_names(member_config: dict) -> list[str]:
-    """Names of a member's config-declared activate-phase (work-enabling) tasks."""
-    from ..provision.activation import ACTIVATE_PHASE
-
-    return [
-        task["name"]
-        for task in member_config.get("tasks", [])
-        if task.get("phase") == ACTIVATE_PHASE
-    ]
-
-
-def _activate_task_capability(member_config: dict, task_name: str) -> str | None:
-    """The declared `capability` string for one member's activate-phase task,
-    or None when the task declares none — the trigger for the generic
-    fallback line in _member_capability_lines.
-    """
-    for task in member_config.get("tasks", []):
-        if task.get("name") == task_name:
-            return task.get("capability")
-    return None
-
-
 def _member_capability_lines(
     name: str, member_config: dict, report_member: dict, slug: str
 ) -> list[str]:
@@ -147,30 +125,33 @@ def _member_capability_lines(
     infer it from a task name. A task with no `capability` declared falls
     back to the generic state-based line.
     """
-    tasks = report_member.get("tasks") or {}
-    failed: list[str] = []
-    outstanding: list[str] = []
-    for task_name in _activate_task_names(member_config):
-        state = (tasks.get(task_name) or {}).get("state")
+    from ..group.config import tasks_in_phase
+    from ..provision.activation import ACTIVATE_PHASE
+
+    states = report_member.get("tasks") or {}
+    failed: list[dict] = []
+    outstanding: list[dict] = []
+    for task in tasks_in_phase(member_config, ACTIVATE_PHASE):
+        state = (states.get(task["name"]) or {}).get("state")
         if state == "failed":
-            failed.append(task_name)
+            failed.append(task)
         elif state != "ok":
-            outstanding.append(task_name)
+            outstanding.append(task)
 
     lines: list[str] = []
-    for task_name in failed:
+    for task in failed:
         lines.append(
-            f"{name}: the work-enabling task '{task_name}' failed — treat anything that "
+            f"{name}: the work-enabling task '{task['name']}' failed — treat anything that "
             f"depends on it as broken setup, not a bug in your change; read `camp status "
             f"--name {slug} --json` for why before debugging your own code."
         )
-    for task_name in outstanding:
-        capability = _activate_task_capability(member_config, task_name)
+    for task in outstanding:
+        capability = task.get("capability")
         if capability:
             lines.append(f"{name}: {capability}")
         else:
             lines.append(
-                f"{name}: the work-enabling task '{task_name}' has not finished yet — commands "
+                f"{name}: the work-enabling task '{task['name']}' has not finished yet — commands "
                 f"or tools that depend on it may fail or behave as unset until it completes; "
                 f"check `camp status --name {slug} --json` before treating that as a code problem."
             )

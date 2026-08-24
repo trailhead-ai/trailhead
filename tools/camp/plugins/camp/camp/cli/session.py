@@ -235,10 +235,10 @@ def trigger_activate_phase_work(
     subprocess is spawned for it — so a group with no activate-phase tasks
     anywhere is a clean no-op.
     """
-    from ..group.manifest import ManifestError, workspace_dir
-    from ..provision.activation import _member_has_activate_tasks
+    from ..group.config import tasks_in_phase
+    from ..group.manifest import ManifestError
+    from ..provision.activation import ACTIVATE_PHASE, _spawn_background_activation
     from ..provision.lifecycle import wait_for_provisioning_ready
-    from ..provision.provision import _CAMP_BIN, spawn_detached_provisioner
 
     if wait:
         try:
@@ -255,27 +255,10 @@ def trigger_activate_phase_work(
         if outcome != "ready":
             return
 
-    group_name = group["group"]["name"]
-    ws_dir = workspace_dir(group_name, slug, env=env)
     for member in group["members"]:
-        if not _member_has_activate_tasks(member):
+        if not tasks_in_phase(member, ACTIVATE_PHASE):
             continue
-        member_name = member["name"]
-        spawn_detached_provisioner(
-            group_name=group_name,
-            slug=slug,
-            logfile_path=str(ws_dir / f"activate-{member_name}.log"),
-            _argv=[
-                str(_CAMP_BIN),
-                "activate",
-                member_name,
-                "--name",
-                slug,
-                "--group",
-                group_name,
-                "--background",
-            ],
-        )
+        _spawn_background_activation(group, slug, member["name"], env=env)
 
 
 def _candidate_payload(candidate) -> dict:

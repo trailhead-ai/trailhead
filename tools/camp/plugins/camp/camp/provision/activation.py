@@ -37,6 +37,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from ..group.config import tasks_in_phase
+
 # Activate-phase tasks run wherever the retired dep-install activation hooks ran.
 ACTIVATE_PHASE = "activate"
 
@@ -57,14 +59,6 @@ def _find_member_config(group: dict[str, Any], member_name: str) -> dict[str, An
         if m.get("name") == member_name:
             return m
     return None
-
-
-def _member_has_activate_tasks(member_config: dict[str, Any] | None) -> bool:
-    if not member_config:
-        return False
-    return any(
-        t.get("phase", "provision") == ACTIVATE_PHASE for t in member_config.get("tasks") or []
-    )
 
 
 def _mark_activated(mpath: Path, member_name: str) -> None:
@@ -278,7 +272,7 @@ def run_activate_tasks_in_background(
         return
 
     member_config = _find_member_config(group, member_name)
-    if not _member_has_activate_tasks(member_config):
+    if not tasks_in_phase(member_config, ACTIVATE_PHASE):
         return
 
     wt_path = Path(entry["worktree_path"])
@@ -355,6 +349,12 @@ def _spawn_background_activation(
 ) -> None:
     """Hand this member's outstanding activate-phase tasks to a detached run.
 
+    The single spawn site for detached activate-phase work: both the
+    interactive trigger (`camp activate`, via _dispatch_activation) and the
+    non-interactive one (`camp new --activate`, via
+    cli/session.trigger_activate_phase_work) go through here, so the child's
+    argv and logfile naming are stated once.
+
     Reuses spawn_detached_provisioner (provision/provision.py) — the same
     non-blocking spawn `camp setup --background` already uses — rather than
     introducing a second async-execution pattern. The child re-invokes this
@@ -399,7 +399,7 @@ def _dispatch_activation(
     never here."""
     from ..group.manifest import work_state_for_member
 
-    if not _member_has_activate_tasks(member_config):
+    if not tasks_in_phase(member_config, ACTIVATE_PHASE):
         return (
             f"camp activate: {member_name!r} declares no activate-phase task — "
             f"nothing to run."

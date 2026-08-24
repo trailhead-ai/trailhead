@@ -51,7 +51,9 @@ from pathlib import Path
 from typing import Any
 
 from ..gitutil import _git, _git_is_dirty
+from ..group.config import tasks_in_phase
 from ..group.manifest import (
+    WORK_STATE_NOT_APPLICABLE,
     ManifestError,
     manifest_path_for,
     read_central_manifest,
@@ -360,26 +362,13 @@ PROVISION_PHASE = "provision"
 
 def _has_provision_tasks(member: dict[str, Any]) -> bool:
     """True if the member has any provision-phase task to run."""
-    return any(
-        t.get("phase", PROVISION_PHASE) == PROVISION_PHASE for t in member.get("tasks") or []
-    )
+    return bool(tasks_in_phase(member, PROVISION_PHASE))
 
 
-# Mirrors activation.ACTIVATE_PHASE, duplicated locally (not imported) so this
-# module's only cross-module task-phase dependency stays the same shape as the
-# PROVISION_PHASE constant immediately above.
+# Mirrors activation.ACTIVATE_PHASE, spelled locally (not imported) so it keeps
+# the same shape as the PROVISION_PHASE constant immediately above and this
+# module needs no import from provision/activation.py to name a phase.
 _ACTIVATE_PHASE = "activate"
-
-
-def _has_activate_tasks(member: dict[str, Any]) -> bool:
-    """True if the member declares any activate-phase task in config.
-
-    Used to compute the manifest's work_state fact: a member with no
-    activate-phase task at all has nothing to become work-ready FOR, so it
-    reports manifest.WORK_STATE_NOT_APPLICABLE rather than sitting at
-    "pending" forever waiting for work that will never run.
-    """
-    return any(t.get("phase", PROVISION_PHASE) == _ACTIVATE_PHASE for t in member.get("tasks") or [])
 
 
 def _has_outstanding_provision_tasks(
@@ -394,12 +383,10 @@ def _has_outstanding_provision_tasks(
     member is a true no-op and is not re-provisioned.
     """
     tasks_map = tasks_map or {}
-    for task in member.get("tasks") or []:
-        if task.get("phase", PROVISION_PHASE) != PROVISION_PHASE:
-            continue
-        if (tasks_map.get(task["name"]) or {}).get("state") != "ok":
-            return True
-    return False
+    return any(
+        (tasks_map.get(task["name"]) or {}).get("state") != "ok"
+        for task in tasks_in_phase(member, PROVISION_PHASE)
+    )
 
 
 def _has_outstanding_activate_tasks(
@@ -414,12 +401,10 @@ def _has_outstanding_activate_tasks(
     that `camp activate` has not yet initiated.
     """
     tasks_map = tasks_map or {}
-    for task in member.get("tasks") or []:
-        if task.get("phase", PROVISION_PHASE) != _ACTIVATE_PHASE:
-            continue
-        if (tasks_map.get(task["name"]) or {}).get("state") == "failed":
-            return True
-    return False
+    return any(
+        (tasks_map.get(task["name"]) or {}).get("state") == "failed"
+        for task in tasks_in_phase(member, _ACTIVATE_PHASE)
+    )
 
 
 def _adapt_task_steps(tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -757,8 +742,8 @@ def reconcile_worktree(
                 # leaving work_state absent (which reads as "pending" forever,
                 # per manifest.work_state_for_member). A prior work_state
                 # already carried forward above takes precedence.
-                if "work_state" not in mr and not _has_activate_tasks(member):
-                    mr["work_state"] = "not-applicable"
+                if "work_state" not in mr and not tasks_in_phase(member, _ACTIVATE_PHASE):
+                    mr["work_state"] = WORK_STATE_NOT_APPLICABLE
 
             # -- Phase 3: Write central manifest atomically (only after all succeed)
             manifest_data: dict[str, Any] = {
