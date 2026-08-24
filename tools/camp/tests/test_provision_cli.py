@@ -379,7 +379,7 @@ class TestCampStatusTwoFacts:
         r = _camp(cli_env, "status", "--group", "mygroup", "--name", "twf8")
         lines = r.stdout.splitlines()
         i_header = lines.index("camp status: twf8 — ready")
-        i_member = next(i for i, l in enumerate(lines) if l.startswith("  repo_a"))
+        i_member = next(idx for idx, line in enumerate(lines) if line.startswith("  repo_a"))
         assert i_header < i_member
 
 
@@ -464,11 +464,7 @@ cmd = {json.dumps(step_cmd)}
     def _mark_task_failed(self, activate_cli_env, slug):
         """Seed the manifest as if `camp activate` already ran and recorded a
         failed npm-ci task — the state camp setup's retry path repairs."""
-        from camp.group.manifest import (
-            flip_member_state_unlocked,
-            manifest_path_for,
-            reconcile_lock,
-        )
+        from camp.group.manifest import reconcile_lock
         from camp.group.resolve import central_state_dir
 
         env = {"CAMP_STATE_DIR": str(activate_cli_env["state_dir"])}
