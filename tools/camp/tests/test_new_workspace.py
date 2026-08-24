@@ -518,6 +518,63 @@ class TestNewActivateFlag:
         activate_calls = [c for c in calls if c.get("_argv") and c["_argv"][1] == "activate"]
         assert activate_calls == []
 
+    def test_trigger_gives_up_signal_on_stderr_when_boot_never_reaches_ready(
+        self, group_env, monkeypatch, capsys
+    ):
+        """When the bounded boot-readiness wait never reaches "ready",
+        trigger_activate_phase_work must say so on stderr rather than returning
+        silently — a caller (and a human reading `camp new --activate` output)
+        needs to be able to tell "gave up" apart from "queued the work"."""
+        import camp.cli.session as cli_session
+        import camp.provision.lifecycle as lifecycle
+        import camp.provision.provision as provision
+
+        monkeypatch.setattr(
+            lifecycle, "wait_for_provisioning_ready", lambda *a, **k: ("timeout", {})
+        )
+        spawn_calls = []
+        monkeypatch.setattr(
+            provision, "spawn_detached_provisioner", lambda **kw: spawn_calls.append(kw)
+        )
+        g = group_env
+        g["group"]["members"][0]["tasks"] = [_activate_task()]
+
+        cli_session.trigger_activate_phase_work(g["group"], "feat-giveup", env=g["env"], wait=True)
+
+        assert spawn_calls == [], "no work should be triggered when boot never reaches ready"
+        err = capsys.readouterr().err
+        assert err.strip() != "", (
+            "trigger_activate_phase_work must emit a stderr signal when it gives up "
+            "waiting for boot-readiness"
+        )
+        assert "feat-giveup" in err
+
+    def test_trigger_is_silent_on_stderr_when_work_is_actually_queued(
+        self, group_env, monkeypatch, capsys
+    ):
+        """The successful (queued) path is distinguishable from the give-up
+        path: it must not emit the same give-up signal on stderr."""
+        import camp.cli.session as cli_session
+        import camp.provision.lifecycle as lifecycle
+        import camp.provision.provision as provision
+
+        monkeypatch.setattr(
+            lifecycle, "wait_for_provisioning_ready", lambda *a, **k: ("ready", {})
+        )
+        spawn_calls = []
+        monkeypatch.setattr(
+            provision, "spawn_detached_provisioner", lambda **kw: spawn_calls.append(kw)
+        )
+        g = group_env
+        g["group"]["members"][0]["tasks"] = [_activate_task()]
+
+        cli_session.trigger_activate_phase_work(g["group"], "feat-queued", env=g["env"], wait=True)
+
+        activate_calls = [c for c in spawn_calls if c.get("_argv") and c["_argv"][1] == "activate"]
+        assert len(activate_calls) == 1, "work must actually be triggered on the ready path"
+        err = capsys.readouterr().err
+        assert err.strip() == "", f"queued path must not print the give-up signal, got: {err!r}"
+
     def test_activate_composes_with_no_wait(self, camp_cli, group_env, monkeypatch, capsys):
         """--activate and --no-wait compose: --no-wait still skips the launch wait
         and --activate still fires, independent of one another."""

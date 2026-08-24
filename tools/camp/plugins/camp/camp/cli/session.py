@@ -253,6 +253,13 @@ def trigger_activate_phase_work(
         except ManifestError:
             return
         if outcome != "ready":
+            print(
+                f"camp new --activate: gave up waiting for {slug!r} to reach "
+                f"boot-readiness (outcome={outcome!r}); no activate-phase work "
+                "was triggered — re-run `camp activate <member>` once the "
+                "workspace is ready",
+                file=sys.stderr,
+            )
             return
 
     for member in group["members"]:

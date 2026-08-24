@@ -262,6 +262,19 @@ def test_skill_pins_work_readiness_failure_as_a_distinct_failed_reason():
     )
 
 
+def test_skill_pins_the_work_readiness_poll_bound_and_its_expiry_outcome():
+    _pin(
+        SKILL,
+        "FAILED work-readiness poll timed out",
+        "Work-readiness has genuinely never-terminating states (nothing was triggered, "
+        "or a killed detached provisioner left work_code stuck at pending with nothing "
+        "to re-trigger it), so the poll must be bounded and expiry must record a "
+        "terminal outcome distinct from both provisioning failure and work-readiness "
+        "failure — conforming to the FAILED <reason> outcome grammar rather than "
+        "hanging forever or inventing a new token.",
+    )
+
+
 def test_skill_boot_readiness_exit_code_handling_is_unchanged():
     _pin(
         SKILL,

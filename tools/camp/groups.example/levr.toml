@@ -1,0 +1,70 @@
+# camp group config for the levr fleet.
+#
+# The levr group spans three sibling repos worked on together:
+#   - levr-facilitator-mobile
+#   - levr-bridge
+#   - levr-platform
+#
+# This file is an EXAMPLE / template, mirroring the shape of the private
+# chezmoi-managed levr.toml.tmpl (levr has no public repo_root, so that
+# template is the only "live" home for this config) — it gives the
+# dep-install recipe an in-repo counterpart to test against, the way
+# trailhead.toml already does for code-review-graph. Replace each
+# `/path/to/<repo>` with the absolute path to your own clone before copying
+# this into your live config (config_dir("camp")/groups/levr.toml).
+#
+# Each repo must belong to exactly one group (camp enforces no-overlap).
+
+[group]
+name = "levr"
+
+[[members]]
+name = "levr-facilitator-mobile"
+repo_root = "/path/to/levr-facilitator-mobile"
+tasks = ["dep-install"]
+
+[[members]]
+name = "levr-bridge"
+repo_root = "/path/to/levr-bridge"
+# levr-bridge carries no lockfile, so it has nothing to bootstrap.
+bootstrap = []
+
+[[members]]
+name = "levr-platform"
+repo_root = "/path/to/levr-platform"
+tasks = ["dep-install"]
+
+[branch]
+pattern = "worktree-{slug}"
+
+# npm ci moved from the bootstrap = [...] shorthand (which pins
+# phase="provision") to this explicit activate-phase task: a timed-out
+# install used to exhaust the (boot-facing) provision budget and block
+# workspace creation. cleanup deletes a partial node_modules a prior timeout
+# left behind — without it, a retry fails the same way every time with
+# ENOTEMPTY, since npm ci refuses to run against wreckage.
+[tasks.dep-install]
+phase = "activate"
+required = true
+timeout_seconds = 600
+cleanup = ["rm", "-rf", "{worktree}/node_modules"]
+capability = "Dependencies are still installing — `npm test`/`npm run build` will fail until this finishes; check `camp status` before running them."
+
+[[tasks.dep-install.steps]]
+name = "install"
+cmd = ["npm", "ci", "--prefer-offline", "--no-audit", "--no-fund"]
+
+[release]
+# The platform publishes the contracts the clients mirror — error codes, token
+# claims, the OAuth redirect shape — so it lands first. A client merged ahead of
+# it would sit on main asserting a contract the deployed platform does not serve
+# yet. A member absent from this list merges after everything named here.
+merge_order = [
+  "levr-platform",
+  "levr-facilitator-mobile",
+]
+
+# No PR review bot yet, so nothing merges itself: every merge is a person
+# deciding. `portage merge` is fail-closed on this key, so leaving it false
+# keeps the refusal even if a caller asks for an automatic merge.
+auto_merge = false

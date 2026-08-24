@@ -521,6 +521,46 @@ class TestWorkspaceInjectHook:
         expected = f"${{CAMP_BIN:-{camp_bin}}} inject --drain"
         assert commands.count(expected) == 1, f"Duplicate inject hook: {commands}"
 
+    def test_inject_hook_widens_existing_bash_matcher_in_place(self, tmp_path: Path):
+        """An existing workspace whose PostToolUse entry was written with the old
+        matcher: "Bash" scoping must be widened to fire on every tool when
+        write_workspace_inject_hook runs again — not left stuck on Bash forever,
+        and not duplicated into a second entry."""
+        from camp.launch.hooks_writer import write_workspace_inject_hook
+
+        ws_dir = tmp_path / "workspace"
+        ws_dir.mkdir()
+        camp_bin = "/usr/local/bin/camp"
+        settings_path = ws_dir / ".claude"
+        settings_path.mkdir()
+        expected = f"${{CAMP_BIN:-{camp_bin}}} inject --drain"
+        (settings_path / "settings.json").write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "PostToolUse": [
+                            {
+                                "matcher": "Bash",
+                                "hooks": [{"type": "command", "command": expected}],
+                            }
+                        ]
+                    }
+                }
+            )
+        )
+
+        write_workspace_inject_hook(ws_dir, camp_bin)
+
+        data = json.loads((ws_dir / ".claude" / "settings.json").read_text())
+        post_tool_use = data.get("hooks", {}).get("PostToolUse", [])
+        matching = [
+            e
+            for e in post_tool_use
+            if any("inject --drain" in h.get("command", "") for h in e.get("hooks", []))
+        ]
+        assert len(matching) == 1, f"expected exactly one entry, got: {matching}"
+        assert "matcher" not in matching[0], f"expected matcher widened away, got: {matching[0]}"
+
     def test_inject_hook_preserves_session_start(self, tmp_path: Path):
         """Writing the inject hook does not clobber an existing SessionStart hook."""
         from camp.launch.hooks_writer import write_workspace_hooks, write_workspace_inject_hook

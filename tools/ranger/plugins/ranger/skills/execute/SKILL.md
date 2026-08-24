@@ -201,6 +201,16 @@ again; on `work_code == 3` record `FAILED work-readiness failed` and move on. Th
 is distinct from `FAILED camp provisioning failed` so the run report can tell a boot
 failure from a work-enabling failure.
 
+**Bound the `work_code` poll — it can genuinely never terminate on its own.** Unlike
+boot-readiness, work-readiness has states with no path back to 0 or 3: the activate-phase
+trigger can give up on its own bounded wait and trigger nothing, or a detached provisioner
+can be killed mid-run, either way leaving `work_code` stuck at 2 (pending) forever, because
+nothing in this drain ever calls `camp activate` to re-trigger it. Poll for at most 15
+minutes; on expiry, record `FAILED work-readiness poll timed out` and move on. This reason
+is distinct from both `FAILED camp provisioning failed` and `FAILED work-readiness failed`
+so the run report can tell a poll that gave up apart from a poll that got a definite
+answer.
+
 **If `camp new` fails naming a worktree that already exists**, suspect a
 stale worktree registration
 — an abnormally torn-down workspace (an `rm -rf` rather than a `camp remove`) leaves a
