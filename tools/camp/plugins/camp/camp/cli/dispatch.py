@@ -5,9 +5,12 @@ Two orthogonal concerns, kept distinct:
       ``camp`` package and the plugin-root-level ``_bootstrap`` module resolve)
       then calls ``main()`` here.
   (b) ``main`` bootstraps ``trailhead.paths`` via ``_bootstrap`` before any
-      command code that needs it runs — EXCEPT on the hidden inject route, which
-      resolves the workspace from cwd and never touches trailhead.paths, so it
-      stays near-free (no cold-subprocess walk, no spine module-load).
+      command code that needs it runs — EXCEPT on the hidden inject route,
+      which never touches the heavy spine module and, when an explicit
+      ``--workspace`` is given, never touches trailhead.paths either. Without
+      ``--workspace`` the inject route still needs trailhead.paths (to derive
+      the queue's central-state-dir location), so it calls the same cheap
+      ``_bootstrap`` walk itself, lazily, inside ``cli/inject.py``.
 
 Group-aware command routing: ``main`` loads the group config from cwd (or a
 ``--group`` override) and routes lifecycle commands through the central manifest
@@ -182,10 +185,12 @@ def main() -> None:
     argv = sys.argv[1:]
 
     # The hidden `camp inject --drain` PostToolUse hook fires on EVERY Bash tool
-    # call. It resolves the workspace from cwd and never touches spine or
-    # trailhead.paths, so keep it near-free: detect the inject route BEFORE the
-    # cold-subprocess ensure_trailhead_importable() walk and skip it. The bootstrap
-    # still runs unconditionally for every OTHER command (behavior unchanged).
+    # call. It never touches the heavy spine module, so keep IT near-free at
+    # least: detect the inject route BEFORE the cold-subprocess
+    # ensure_trailhead_importable() walk here and skip it — cli/inject.py calls
+    # that walk itself, lazily, only when it actually needs trailhead.paths
+    # (i.e. no explicit --workspace). The bootstrap still runs unconditionally
+    # for every OTHER command (behavior unchanged).
     inject_route = bool(argv) and argv[0] == "inject"
 
     # Bootstrap trailhead.paths before any command code runs. _bootstrap walks up

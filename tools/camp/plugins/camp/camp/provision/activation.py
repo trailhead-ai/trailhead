@@ -222,8 +222,20 @@ def reap_member_guard_unlocked(ws_dir: Path, member_names: list[str]) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _central_queue_root(group_name: str, slug: str, *, env: dict[str, str] | None = None) -> Path:
+    """The (group, slug) inject-queue root — see camp.launch.inject.central_queue_dir.
+
+    Thin wrapper kept here so every activation.py call site derives the queue
+    location the same way, from (group_name, slug) it already has in scope,
+    rather than from a worktree_path the manifest supplies.
+    """
+    from ..launch.inject import central_queue_dir
+
+    return central_queue_dir(group_name, slug, env=env)
+
+
 def _enqueue_settlement_notice(
-    ws_dir: Path, member_name: str, *, task: str | None, consequence: str
+    queue_root: Path, member_name: str, *, task: str | None, consequence: str
 ) -> None:
     """Enqueue one camp-authored notice for a member reaching a terminal
     activate-phase state (settled ready, or a required task's failure)."""
@@ -232,7 +244,7 @@ def _enqueue_settlement_notice(
     body = build_notice_body(
         member=member_name, phase=ACTIVATE_PHASE, task=task, consequence=consequence
     )
-    enqueue_notice(ws_dir, body)
+    enqueue_notice(queue_root, body)
 
 
 # ---------------------------------------------------------------------------
@@ -264,10 +276,23 @@ def run_activate_tasks_in_background(
     if this process is killed mid-run, in which case the manifest simply keeps
     whatever it last held (never a sticky in-progress state) and the next
     activation's guard acquire finds the lockfile free and retries.
+
+    Confinement: `entry["worktree_path"]` is read straight off the on-disk
+    manifest — the same manifest a task step (running as the same OS user,
+    full filesystem access, cwd = the member worktree) could in principle
+    tamper with. Every other destructive consumer of a manifest-supplied
+    worktree path (`reconcile._remove_worktree_for_member`,
+    `reconcile_break`'s pre-check) re-resolves it and confirms it is
+    `is_relative_to` the CANONICAL workspace dir before touching it — this is
+    that same re-check, applied before this member's task steps (including a
+    retry's `cleanup`, e.g. `rm -rf {worktree}/node_modules`) ever run against
+    it. An out-of-confinement path is refused outright, not executed against.
     """
     from ..group.manifest import manifest_path_for, read_central_manifest
+    from ..group.manifest import workspace_dir as canonical_workspace_dir
 
-    mpath = manifest_path_for(group["group"]["name"], slug, env=env)
+    group_name = group["group"]["name"]
+    mpath = manifest_path_for(group_name, slug, env=env)
     try:
         data = read_central_manifest(mpath)
     except Exception:
@@ -283,6 +308,20 @@ def run_activate_tasks_in_background(
 
     wt_path = Path(entry["worktree_path"])
     ws_dir = wt_path.parent
+
+    canonical_ws_dir = canonical_workspace_dir(group_name, slug, env=env)
+    try:
+        wt_path.resolve().relative_to(canonical_ws_dir.resolve())
+    except ValueError:
+        print(
+            f"camp: worktree path {wt_path} resolves outside the workspace dir "
+            f"{canonical_ws_dir} for member {member_name!r} — refusing to run "
+            f"activate-phase tasks",
+            file=sys.stderr,
+        )
+        return
+
+    queue_root = _central_queue_root(group_name, slug, env=env)
 
     fd = _try_acquire_member_guard(ws_dir, member_name)
     if fd is None:
@@ -323,7 +362,7 @@ def run_activate_tasks_in_background(
             )
             failing_task = e.results[-1].name if e.results else None
             _enqueue_settlement_notice(
-                ws_dir,
+                queue_root,
                 member_name,
                 task=failing_task,
                 consequence=(
@@ -348,7 +387,7 @@ def run_activate_tasks_in_background(
         )
         if work_state == "failed":
             _enqueue_settlement_notice(
-                ws_dir,
+                queue_root,
                 member_name,
                 task=failed_result.name,
                 consequence=(
@@ -358,7 +397,7 @@ def run_activate_tasks_in_background(
             )
         else:
             _enqueue_settlement_notice(
-                ws_dir,
+                queue_root,
                 member_name,
                 task=None,
                 consequence=(
@@ -479,17 +518,23 @@ def _surface_member_doc(
     wt_path: Path,
     workspace_dir: Path,
     inject: str,
+    queue_root: Path,
 ) -> None:
     """Surface the member doc via the resolved inject strategy.
 
     "stdout"      → print the full doc to stdout (universal floor, unchanged).
     "claude-hook" → only if the PostToolUse `inject --drain` hook is actually
                     installed in <workspace>/.claude/settings.json: enqueue the full
-                    doc to the workspace inject queue and print a concise stdout
-                    confirmation (the full doc loads on the next turn via the camp
-                    PostToolUse hook — NOT dumped to stdout here). If the drain hook
-                    is ABSENT, fall back to the stdout floor so the content still
+                    doc to `queue_root` (the central, per-(group,slug) inject
+                    queue — NOT inside `workspace_dir`, which a task step's cwd
+                    can reach) and print a concise stdout confirmation (the
+                    full doc loads on the next turn via the camp PostToolUse
+                    hook — NOT dumped to stdout here). If the drain hook is
+                    ABSENT, fall back to the stdout floor so the content still
                     reaches the agent (no false "will load via hook" claim).
+                    `workspace_dir` is still used to check for the hook itself
+                    (<workspace>/.claude/settings.json) — an unrelated,
+                    non-sensitive lookup.
     """
     doc = _member_doc_content(member_name, wt_path)
 
@@ -499,7 +544,7 @@ def _surface_member_doc(
         if has_inject_drain_hook(workspace_dir):
             from ..launch.inject import enqueue_doc
 
-            enqueue_doc(workspace_dir, doc)
+            enqueue_doc(queue_root, doc)
             print(
                 f"Entered `{member_name}`; its CLAUDE.md will load into context on the "
                 f"next turn via the camp PostToolUse hook."
@@ -584,6 +629,10 @@ def activate_member(
     print(feedback, file=sys.stderr)
 
     # The workspace dir is the parent of the member worktree
-    # (<workspace>/<member>) — the inject queue lives at <workspace>/.camp/.
+    # (<workspace>/<member>) — used only for the hook-config lookup
+    # (<workspace>/.claude/settings.json). The inject queue itself lives
+    # under the central state dir, outside anything a task step's cwd can
+    # reach — see _central_queue_root.
     workspace_dir = wt_path.parent
-    _surface_member_doc(member_name, wt_path, workspace_dir, profile.inject)
+    queue_root = _central_queue_root(group["group"]["name"], slug, env=env)
+    _surface_member_doc(member_name, wt_path, workspace_dir, profile.inject, queue_root)

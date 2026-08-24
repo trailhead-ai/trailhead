@@ -140,10 +140,16 @@ def _member_capability_lines(
 
     lines: list[str] = []
     for task in failed:
+        # Deliberately does not point at `camp status --name <slug> --json`:
+        # that surface carries the task's unredacted stderr_excerpt, which is
+        # known to include credentials on failure (e.g. a private-registry
+        # auth failure during `npm ci`). `camp status --name <slug>` (no
+        # --json) still names which task failed, without that raw content.
         lines.append(
             f"{name}: the work-enabling task '{task['name']}' failed — treat anything that "
-            f"depends on it as broken setup, not a bug in your change; read `camp status "
-            f"--name {slug} --json` for why before debugging your own code."
+            f"depends on it as broken setup, not a bug in your change. Its output isn't "
+            f"available in this context; ask the operator to check `camp status "
+            f"--name {slug}` or re-run `camp setup` to retry before assuming a code issue."
         )
     for task in outstanding:
         capability = task.get("capability")

@@ -478,6 +478,49 @@ def test_background_run_records_task_state_and_work_ready(tmp_path: Path) -> Non
     assert member_entry["work_state"] == "ready"
 
 
+def test_background_run_refuses_out_of_confinement_worktree_path(tmp_path: Path) -> None:
+    """FINDING 3 regression: `entry["worktree_path"]` is read straight off the
+    on-disk manifest. If it resolves outside the CANONICAL workspace dir for
+    (group, slug) — e.g. a tampered or stale manifest — camp must refuse to
+    run this member's activate-phase tasks at all, rather than executing a
+    retry `cleanup` (an `rm -rf {worktree}/...`) against whatever that path
+    names. No subprocess may run; nothing gets deleted."""
+    from camp.provision.activation import run_activate_tasks_in_background
+
+    group_name = "mygroup"
+    member_name = "myrepo"
+    slug = "my-slug"
+    # Outside central_state_dir(group)/worktrees/my-slug entirely.
+    escaping_wt_path = tmp_path / "elsewhere" / member_name
+    escaping_wt_path.mkdir(parents=True, exist_ok=True)
+
+    _make_manifest(
+        tmp_path,
+        slug,
+        group_name,
+        [
+            {
+                "name": member_name,
+                "repo_root": "/tmp/fake-repo",
+                "worktree_path": str(escaping_wt_path),
+                "provision_state": "ready",
+                "activated": True,
+                "tasks": {"dep-install": {"state": "failed"}},
+            }
+        ],
+    )
+
+    task = _activate_task("dep-install", [["npm", "ci"]])
+    task["cleanup"] = ["rm", "-rf", "{worktree}/node_modules"]
+    group = _make_group(group_name, member_name, tasks=[task])
+    env = _env(tmp_path)
+
+    with patch("subprocess.run") as mock_run:
+        run_activate_tasks_in_background(group, slug, member_name, env=env)
+
+    mock_run.assert_not_called()
+
+
 def test_background_run_skips_task_recorded_ok(tmp_path: Path) -> None:
     """A task whose persisted state is 'ok' is skipped on re-activation —
     the detached run reads persisted task state, not an empty completed map."""
@@ -646,17 +689,17 @@ def test_background_run_required_failure_marks_work_failed_and_skips_remaining(
 # ---------------------------------------------------------------------------
 
 
-def _drain_notices(ws_dir: Path) -> str:
-    """Drain ws_dir's inject queue and return the additionalContext string
-    ('' if the queue was empty)."""
+def _drain_notices(group_name: str, slug: str, *, env: dict[str, str]) -> str:
+    """Drain (group_name, slug)'s central inject queue and return the
+    additionalContext string ('' if the queue was empty)."""
     import io
     import json
     import contextlib
-    from camp.launch.inject import drain_queue
+    from camp.launch.inject import central_queue_dir, drain_queue
 
     out = io.StringIO()
     with contextlib.redirect_stdout(out):
-        drain_queue(ws_dir)
+        drain_queue(central_queue_dir(group_name, slug, env=env))
     stdout = out.getvalue()
     if not stdout:
         return ""
@@ -699,10 +742,9 @@ def test_background_run_success_enqueues_exactly_one_settle_notice(tmp_path: Pat
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
         run_activate_tasks_in_background(group, slug, member_name, env=env)
 
-    from camp.launch.inject import queue_dir_for
+    from camp.launch.inject import central_queue_dir, queue_dir_for
 
-    ws_dir = wt_path.parent
-    files = list(queue_dir_for(ws_dir).iterdir())
+    files = list(queue_dir_for(central_queue_dir(group_name, slug, env=env)).iterdir())
     assert len(files) == 1, f"expected exactly one queued notice, got: {files}"
 
 
@@ -741,7 +783,7 @@ def test_background_run_success_notice_excludes_task_stderr(tmp_path: Path) -> N
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr=marker)
         run_activate_tasks_in_background(group, slug, member_name, env=env)
 
-    ctx = _drain_notices(wt_path.parent)
+    ctx = _drain_notices(group_name, slug, env=env)
     assert ctx != ""
     assert marker not in ctx
     assert member_name in ctx
@@ -783,13 +825,13 @@ def test_background_run_failure_enqueues_notice_immediately_without_task_output(
         mock_run.return_value = MagicMock(returncode=1, stdout="", stderr=marker)
         run_activate_tasks_in_background(group, slug, member_name, env=env)
 
-    from camp.launch.inject import queue_dir_for
+    from camp.launch.inject import central_queue_dir, queue_dir_for
 
-    ws_dir = wt_path.parent
-    files = list(queue_dir_for(ws_dir).iterdir())
+    qroot = central_queue_dir(group_name, slug, env=env)
+    files = list(queue_dir_for(qroot).iterdir())
     assert len(files) == 1, f"expected exactly one queued notice, got: {files}"
 
-    ctx = _drain_notices(ws_dir)
+    ctx = _drain_notices(group_name, slug, env=env)
     assert ctx != ""
     assert marker not in ctx
     assert member_name in ctx
@@ -830,7 +872,7 @@ def test_background_run_notice_body_matches_the_template_shape(tmp_path: Path) -
         mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="attacker text")
         run_activate_tasks_in_background(group, slug, member_name, env=env)
 
-    ctx = _drain_notices(wt_path.parent)
+    ctx = _drain_notices(group_name, slug, env=env)
     assert ctx.startswith(f"# camp: activate-phase work for `{member_name}`\n")
     assert "Task: dep-install" in ctx
 
@@ -1993,7 +2035,7 @@ def test_activate_claude_hook_enqueues_doc_not_stdout(tmp_path: Path, capsys) ->
     """Under claude-hook WITH the drain hook installed, the full doc is enqueued,
     NOT dumped to stdout."""
     from camp.provision.activation import activate_member
-    from camp.launch.inject import queue_dir_for
+    from camp.launch.inject import central_queue_dir, queue_dir_for
     from camp.launch.hooks_writer import write_workspace_inject_hook
 
     doc = "# Member CLAUDE.md\n\nFULL-DOC-BODY-marker\n"
@@ -2008,8 +2050,8 @@ def test_activate_claude_hook_enqueues_doc_not_stdout(tmp_path: Path, capsys) ->
 
     activate_member(group, slug, member_name, env=env)
 
-    # Full doc must be enqueued.
-    files = list(queue_dir_for(ws_dir).iterdir())
+    # Full doc must be enqueued — under the central queue, NOT the workspace dir.
+    files = list(queue_dir_for(central_queue_dir(group_name, slug, env=env)).iterdir())
     assert len(files) == 1
     assert doc in files[0].read_text()
 
@@ -2046,7 +2088,7 @@ def test_activate_claude_hook_without_drain_hook_falls_back_to_stdout(
     """claude-hook strategy but NO drain hook installed → fall back to printing the
     full doc to stdout; no false 'will load via hook' claim."""
     from camp.provision.activation import activate_member
-    from camp.launch.inject import queue_dir_for
+    from camp.launch.inject import central_queue_dir, queue_dir_for
 
     doc = "# Member CLAUDE.md\n\nFULL-DOC-BODY-marker\n"
     group_name, member_name, slug, ws_dir = _ready_member_setup(tmp_path, doc)
@@ -2063,14 +2105,14 @@ def test_activate_claude_hook_without_drain_hook_falls_back_to_stdout(
     # No false claim that it will load via the hook.
     assert "next turn" not in captured.out.lower()
     # Nothing relied on the (absent) drain — queue must not be the only delivery.
-    qdir = queue_dir_for(ws_dir)
+    qdir = queue_dir_for(central_queue_dir(group_name, slug, env=env))
     assert not qdir.exists() or list(qdir.iterdir()) == []
 
 
 def test_activate_stdout_strategy_prints_full_doc(tmp_path: Path, capsys) -> None:
     """Under the stdout strategy, the full doc is printed to stdout (unchanged)."""
     from camp.provision.activation import activate_member
-    from camp.launch.inject import queue_dir_for
+    from camp.launch.inject import central_queue_dir, queue_dir_for
 
     doc = "# Member CLAUDE.md\n\nFULL-DOC-BODY-marker\n"
     group_name, member_name, slug, ws_dir = _ready_member_setup(tmp_path, doc)
@@ -2084,5 +2126,5 @@ def test_activate_stdout_strategy_prints_full_doc(tmp_path: Path, capsys) -> Non
     assert "FULL-DOC-BODY-marker" in captured.out
 
     # Nothing enqueued under stdout strategy.
-    qdir = queue_dir_for(ws_dir)
+    qdir = queue_dir_for(central_queue_dir(group_name, slug, env=env))
     assert not qdir.exists() or list(qdir.iterdir()) == []

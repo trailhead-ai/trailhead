@@ -1237,6 +1237,46 @@ class TestCapabilityReport:
         assert pending_report != failed_report
         assert "failed" in failed_report.lower()
 
+    def test_failed_task_line_does_not_instruct_fetching_json(self, tmp_path: Path) -> None:
+        """FINDING 2 regression: the failed-task line must never tell the agent
+        to fetch `camp status --json` — that surface carries unredacted
+        `stderr_excerpt`, which is known to include credentials on a failed
+        step (e.g. a private-registry auth failure during `npm ci`). The line
+        must still say the task failed and point at a human/operator or a
+        retry, just never at the raw-stderr-bearing command."""
+        from camp.launch.hook_handlers import capability_report
+        from camp.group.manifest import manifest_path_for, write_central_manifest
+
+        env = {"CAMP_STATE_DIR": str(tmp_path / "state")}
+        group = _make_group_config(
+            "capgroup4b",
+            [{"name": "repo_a", "repo_root": "/x", "tasks": [_activate_task("dep-install")]}],
+        )
+
+        mpath = manifest_path_for("capgroup4b", "feat-failed", env=env)
+        write_central_manifest(
+            mpath,
+            _capability_manifest(
+                group_name="capgroup4b",
+                slug="feat-failed",
+                members=[
+                    {
+                        "name": "repo_a",
+                        "repo_root": "/x",
+                        "worktree_path": "/x",
+                        "provision_state": "ready",
+                        "work_state": "failed",
+                        "reason": "npm ci: exit 1",
+                        "tasks": {"dep-install": {"state": "failed", "reason": "exit 1"}},
+                    }
+                ],
+            ),
+        )
+        report = capability_report(group, "feat-failed", env=env)
+
+        assert report
+        assert "--json" not in report
+
     def test_report_never_contains_raw_task_stderr(self, tmp_path: Path):
         """The report cites where to read task output instead of embedding it —
         task stderr is known to carry credentials on failure."""
