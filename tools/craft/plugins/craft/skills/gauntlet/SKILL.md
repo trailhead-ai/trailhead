@@ -182,12 +182,26 @@ The deliverable is these four parts, in this order — all four whenever there i
 disposition, and the same parts minus the table on a run that produced none ("Zero Criticals is
 still a decision", below):
 
-1. **Synthesis — at most five sentences.** What the findings collectively mean for the design,
-   written in the design's own terms: its objectives, its criteria, its named parts. Not a finding
-   count, not a per-pass roll-up. Someone who wrote this record last week should be re-oriented by
-   these five sentences alone.
+1. **The narrative synthesis** — prose, and the part that carries the deliverable. Three movements,
+   one short paragraph each — what the passes found, whether it holds and where it came from, and
+   what to do about it — written in the shape **"How the synthesis reads"** defines in
+   `_shared/council.md`. Read it there; do not restate it here. Two things about it are worth
+   naming for this caller in particular:
+
+   - **No sentence cap.** Three movements do not fit a fixed sentence count, and a cap tight enough
+     to squeeze them squeezes two of the three down into the table instead — which is the reader
+     reconstructing the explanation from rows again. What holds the length is the one-screen budget
+     above, plus the shared rule that a synthesis which will not fit means the finding set is
+     **under-consolidated**: go back to step 4 rather than spend more of the screen.
+   - **The interpretive per-pass read is the point.** Eight passes attacked this record from lanes
+     that could not see each other, and which of them were right is a judgment only the adjudicator
+     is positioned to make. Making it is movement two's whole job; the shared contract names what
+     stays forbidden.
 2. **The recommended route**, on its own line, by name (below).
-3. **The per-Critical table** — one row per Critical, in `C1`…`Cn` order:
+3. **The per-Critical table** — supporting detail, not the explanation. The synthesis has already
+   said what the findings mean and what you propose doing; the table is the row-level view for
+   checking that against the findings, and the handle the operator names to override. One row per
+   Critical, in `C1`…`Cn` order:
 
    | id | finding | proposed disposition | proposed edit |
    |---|---|---|---|
