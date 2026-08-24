@@ -224,6 +224,59 @@ def test_skill_pins_the_ok_with_warnings_trap():
     )
 
 
+# --- skill: provisioning and work-readiness ------------------------------------
+
+
+def test_skill_pins_activate_at_workspace_creation():
+    _pin(
+        SKILL,
+        "camp new <slug> --activate",
+        "The dispatched executor agent starts no harness session, so no SessionStart "
+        "hook ever fires in its ephemeral workspace — without `--activate` its "
+        "activate-phase tasks (dependency install, the graph build) never run at all.",
+    )
+
+
+def test_skill_pins_the_work_readiness_poll_before_dispatch():
+    _pin(
+        SKILL,
+        "`work_code`",
+        "The drain must wait on the work-readiness rollup, not on the boot-readiness "
+        "exit code alone, before dispatching into a workspace whose dependencies may "
+        "still be installing.",
+    )
+    _pin(
+        SKILL,
+        "work_code == 3",
+        "The loop must check work-readiness failure specifically, distinct from the "
+        "boot-readiness exit code.",
+    )
+
+
+def test_skill_pins_work_readiness_failure_as_a_distinct_failed_reason():
+    _pin(
+        SKILL,
+        "FAILED work-readiness failed",
+        "Work-readiness failure must land in a FAILED bucket with a reason distinct "
+        "from provisioning failure, so the two are distinguishable in the run report.",
+    )
+
+
+def test_skill_boot_readiness_exit_code_handling_is_unchanged():
+    _pin(
+        SKILL,
+        "Exit 0 is ready, 2 is still provisioning (poll again), 3 is failed",
+        "The existing exit-code handling for boot-readiness must stay untouched by the "
+        "work-readiness addition.",
+    )
+    _pin(
+        SKILL,
+        "FAILED camp provisioning failed",
+        "Provisioning failure keeps its own distinct reason, so it never collides with "
+        "the new work-readiness failure reason.",
+    )
+
+
 # --- skill: the resume ritual -------------------------------------------------
 
 
