@@ -899,6 +899,788 @@ bootstrap = ["false"]
 
 
 # ---------------------------------------------------------------------------
+# Boot-path budget: a task already recorded over-budget by a prior run stays
+# quiet and unexecuted on this (genuinely fresh-process) hook invocation.
+# ---------------------------------------------------------------------------
+
+
+class TestSessionBootstrapOverBudgetSkip:
+    def test_hook_stays_silent_and_exits_0_for_a_task_already_over_budget(
+        self, tmp_path: Path
+    ):
+        """A task a prior run recorded over-budget is skip-worthy on the hook
+        path: this fresh `camp session-bootstrap` process neither re-runs it
+        nor re-emits the misclassification message. Exit 0, empty stderr —
+        the "no-op" contract holds for this path too."""
+        from camp.group.manifest import manifest_path_for, read_central_manifest, write_central_manifest
+
+        camp_config_dir = tmp_path / "camp-config"
+        groups_dir = camp_config_dir / "groups"
+        groups_dir.mkdir(parents=True, exist_ok=True)
+
+        member_repo = tmp_path / "member_repo"
+        _init_git_repo(member_repo)
+
+        toml_content = f"""
+[group]
+name = "overbudgetskipg"
+
+[[members]]
+name = "member"
+repo_root = "{member_repo!s}"
+bootstrap = []
+tasks = ["graph-build"]
+
+[tasks.graph-build]
+phase = "provision"
+
+[[tasks.graph-build.steps]]
+name = "seed"
+cmd = ["true"]
+"""
+        (groups_dir / "overbudgetskipg.toml").write_text(toml_content)
+
+        state_dir = tmp_path / "state"
+        wt_path = state_dir / "overbudgetskipg" / "worktrees" / "feat-budget" / "member"
+        wt_path.mkdir(parents=True, exist_ok=True)
+
+        env = {
+            "CAMP_STATE_DIR": str(state_dir),
+            "CAMP_CONFIG_DIR": str(camp_config_dir),
+        }
+
+        mpath = manifest_path_for("overbudgetskipg", "feat-budget", env=env)
+        write_central_manifest(
+            mpath,
+            {
+                "schema_version": 1,
+                "group": "overbudgetskipg",
+                "slug": "feat-budget",
+                "branch": "worktree-feat-budget",
+                "members": [
+                    {
+                        "name": "member",
+                        "repo_root": str(member_repo),
+                        "worktree_path": str(wt_path),
+                        "tasks": {"graph-build": {"state": "over-budget"}},
+                    }
+                ],
+            },
+        )
+
+        result = _run_session_bootstrap(cwd=str(wt_path), extra_env=env)
+
+        assert result.returncode == 0, f"Expected exit 0, got {result.returncode}: {result.stderr}"
+        assert result.stderr == "", f"Expected silence, got: {result.stderr!r}"
+
+        entry = read_central_manifest(mpath)["members"][0]
+        assert entry["tasks"]["graph-build"]["state"] == "over-budget", (
+            "the over-budget state must survive verbatim, not be re-run or normalized"
+        )
+
+
+# ---------------------------------------------------------------------------
+# The SessionStart capability report
+# ---------------------------------------------------------------------------
+
+
+def _activate_task(
+    name: str, *, required: bool = False, capability: str | None = None
+) -> dict[str, Any]:
+    """Build a member activate-phase task in the config-resolved shape."""
+    task: dict[str, Any] = {
+        "name": name,
+        "phase": "activate",
+        "required": required,
+        "timeout_seconds": None,
+        "steps": [{"name": name, "cmd": ["true"]}],
+    }
+    if capability is not None:
+        task["capability"] = capability
+    return task
+
+
+def _capability_manifest(
+    *,
+    group_name: str,
+    slug: str,
+    members: list[dict[str, Any]],
+) -> dict[str, Any]:
+    return {
+        "schema_version": 1,
+        "group": group_name,
+        "slug": slug,
+        "branch": f"worktree-{slug}",
+        "members": members,
+    }
+
+
+class TestCapabilityReport:
+    """Unit tests against camp.launch.hook_handlers.capability_report — the pure
+    function that turns a fresh manifest read into the SessionStart capability
+    report text (or "" when nothing is outstanding/failed).
+    """
+
+    def test_outstanding_activate_task_with_declared_capability_uses_it_verbatim(
+        self, tmp_path: Path
+    ):
+        """An activate-phase task that never ran (not recorded 'ok') and
+        declares a `capability` string produces a line stating that exact
+        consequence — not the generic task-name-plus-boilerplate fallback. An
+        agent that reverts to the generic-only line for a task with a
+        declared capability must fail this assertion."""
+        from camp.launch.hook_handlers import capability_report
+        from camp.group.manifest import manifest_path_for, write_central_manifest
+
+        env = {"CAMP_STATE_DIR": str(tmp_path / "state")}
+        capability_text = (
+            "dependencies are still installing — test and build commands will fail "
+            "until they finish"
+        )
+        group = _make_group_config(
+            "capgroup",
+            [
+                {
+                    "name": "repo_a",
+                    "repo_root": "/x",
+                    "tasks": [_activate_task("dep-install", capability=capability_text)],
+                }
+            ],
+        )
+        mpath = manifest_path_for("capgroup", "feat-cap", env=env)
+        write_central_manifest(
+            mpath,
+            _capability_manifest(
+                group_name="capgroup",
+                slug="feat-cap",
+                members=[
+                    {
+                        "name": "repo_a",
+                        "repo_root": "/x",
+                        "worktree_path": "/x",
+                        "provision_state": "ready",
+                        "work_state": "pending",
+                        "tasks": {},
+                    }
+                ],
+            ),
+        )
+
+        report = capability_report(group, "feat-cap", env=env)
+
+        assert capability_text in report, "declared capability text must appear verbatim"
+        assert "has not finished yet" not in report, (
+            "a declared capability must replace the generic boilerplate line, not "
+            "merely be appended alongside it"
+        )
+
+    def test_outstanding_activate_task_without_capability_falls_back_to_generic_line(
+        self, tmp_path: Path
+    ):
+        """An activate-phase task that never ran and declares no `capability`
+        string still produces today's generic line — the fallback stays."""
+        from camp.launch.hook_handlers import capability_report
+        from camp.group.manifest import manifest_path_for, write_central_manifest
+
+        env = {"CAMP_STATE_DIR": str(tmp_path / "state")}
+        group = _make_group_config(
+            "capgroup",
+            [{"name": "repo_a", "repo_root": "/x", "tasks": [_activate_task("dep-install")]}],
+        )
+        mpath = manifest_path_for("capgroup", "feat-cap-fallback", env=env)
+        write_central_manifest(
+            mpath,
+            _capability_manifest(
+                group_name="capgroup",
+                slug="feat-cap-fallback",
+                members=[
+                    {
+                        "name": "repo_a",
+                        "repo_root": "/x",
+                        "worktree_path": "/x",
+                        "provision_state": "ready",
+                        "work_state": "pending",
+                        "tasks": {},
+                    }
+                ],
+            ),
+        )
+
+        report = capability_report(group, "feat-cap-fallback", env=env)
+
+        assert report, "expected a non-empty capability report"
+        assert "dep-install" in report
+        assert report.strip() not in ("pending", "repo_a: pending", "dep-install: pending")
+        assert "has not finished yet" in report
+
+    def test_every_member_ready_emits_nothing(self, tmp_path: Path):
+        """With every member boot-ready and work-ready, nothing is emitted —
+        no all-clear line."""
+        from camp.launch.hook_handlers import capability_report
+        from camp.group.manifest import manifest_path_for, write_central_manifest
+
+        env = {"CAMP_STATE_DIR": str(tmp_path / "state")}
+        group = _make_group_config(
+            "capgroup2",
+            [{"name": "repo_a", "repo_root": "/x", "tasks": [_activate_task("dep-install")]}],
+        )
+        mpath = manifest_path_for("capgroup2", "feat-ready", env=env)
+        write_central_manifest(
+            mpath,
+            _capability_manifest(
+                group_name="capgroup2",
+                slug="feat-ready",
+                members=[
+                    {
+                        "name": "repo_a",
+                        "repo_root": "/x",
+                        "worktree_path": "/x",
+                        "provision_state": "ready",
+                        "work_state": "ready",
+                        "tasks": {"dep-install": {"state": "ok"}},
+                    }
+                ],
+            ),
+        )
+
+        report = capability_report(group, "feat-ready", env=env)
+
+        assert report == "", f"expected no all-clear, got: {report!r}"
+
+    def test_no_activate_tasks_declared_emits_nothing(self, tmp_path: Path):
+        """A member that declares no activate-phase task never produces a line,
+        even though it has no recorded work_state."""
+        from camp.launch.hook_handlers import capability_report
+        from camp.group.manifest import manifest_path_for, write_central_manifest
+
+        env = {"CAMP_STATE_DIR": str(tmp_path / "state")}
+        group = _make_group_config(
+            "capgroup3",
+            [{"name": "repo_a", "repo_root": "/x", "tasks": []}],
+        )
+        mpath = manifest_path_for("capgroup3", "feat-na", env=env)
+        write_central_manifest(
+            mpath,
+            _capability_manifest(
+                group_name="capgroup3",
+                slug="feat-na",
+                members=[
+                    {
+                        "name": "repo_a",
+                        "repo_root": "/x",
+                        "worktree_path": "/x",
+                        "provision_state": "ready",
+                        "tasks": {},
+                    }
+                ],
+            ),
+        )
+
+        report = capability_report(group, "feat-na", env=env)
+
+        assert report == ""
+
+    def test_failed_task_line_differs_from_outstanding_task_line(self, tmp_path: Path):
+        """A failed work-enabling task produces a different, actionable line
+        from one merely outstanding."""
+        from camp.launch.hook_handlers import capability_report
+        from camp.group.manifest import manifest_path_for, write_central_manifest
+
+        env = {"CAMP_STATE_DIR": str(tmp_path / "state")}
+        group = _make_group_config(
+            "capgroup4",
+            [{"name": "repo_a", "repo_root": "/x", "tasks": [_activate_task("dep-install")]}],
+        )
+
+        mpath_pending = manifest_path_for("capgroup4", "feat-pending", env=env)
+        write_central_manifest(
+            mpath_pending,
+            _capability_manifest(
+                group_name="capgroup4",
+                slug="feat-pending",
+                members=[
+                    {
+                        "name": "repo_a",
+                        "repo_root": "/x",
+                        "worktree_path": "/x",
+                        "provision_state": "ready",
+                        "work_state": "pending",
+                        "tasks": {},
+                    }
+                ],
+            ),
+        )
+        pending_report = capability_report(group, "feat-pending", env=env)
+
+        mpath_failed = manifest_path_for("capgroup4", "feat-failed", env=env)
+        write_central_manifest(
+            mpath_failed,
+            _capability_manifest(
+                group_name="capgroup4",
+                slug="feat-failed",
+                members=[
+                    {
+                        "name": "repo_a",
+                        "repo_root": "/x",
+                        "worktree_path": "/x",
+                        "provision_state": "ready",
+                        "work_state": "failed",
+                        "reason": "npm ci: exit 1",
+                        "tasks": {"dep-install": {"state": "failed", "reason": "exit 1"}},
+                    }
+                ],
+            ),
+        )
+        failed_report = capability_report(group, "feat-failed", env=env)
+
+        assert pending_report and failed_report
+        assert pending_report != failed_report
+        assert "failed" in failed_report.lower()
+
+    def test_failed_task_line_does_not_instruct_fetching_json(self, tmp_path: Path) -> None:
+        """FINDING 2 regression: the failed-task line must never tell the agent
+        to fetch `camp status --json` — that surface carries unredacted
+        `stderr_excerpt`, which is known to include credentials on a failed
+        step (e.g. a private-registry auth failure during `npm ci`). The line
+        must still say the task failed and point at a human/operator or a
+        retry, just never at the raw-stderr-bearing command."""
+        from camp.launch.hook_handlers import capability_report
+        from camp.group.manifest import manifest_path_for, write_central_manifest
+
+        env = {"CAMP_STATE_DIR": str(tmp_path / "state")}
+        group = _make_group_config(
+            "capgroup4b",
+            [{"name": "repo_a", "repo_root": "/x", "tasks": [_activate_task("dep-install")]}],
+        )
+
+        mpath = manifest_path_for("capgroup4b", "feat-failed", env=env)
+        write_central_manifest(
+            mpath,
+            _capability_manifest(
+                group_name="capgroup4b",
+                slug="feat-failed",
+                members=[
+                    {
+                        "name": "repo_a",
+                        "repo_root": "/x",
+                        "worktree_path": "/x",
+                        "provision_state": "ready",
+                        "work_state": "failed",
+                        "reason": "npm ci: exit 1",
+                        "tasks": {"dep-install": {"state": "failed", "reason": "exit 1"}},
+                    }
+                ],
+            ),
+        )
+        report = capability_report(group, "feat-failed", env=env)
+
+        assert report
+        assert "--json" not in report
+
+    def test_report_never_contains_raw_task_stderr(self, tmp_path: Path):
+        """The report cites where to read task output instead of embedding it —
+        task stderr is known to carry credentials on failure."""
+        from camp.launch.hook_handlers import capability_report
+        from camp.group.manifest import manifest_path_for, write_central_manifest
+
+        env = {"CAMP_STATE_DIR": str(tmp_path / "state")}
+        group = _make_group_config(
+            "capgroup5",
+            [{"name": "repo_a", "repo_root": "/x", "tasks": [_activate_task("dep-install")]}],
+        )
+        secret = "SUPER_SECRET_TOKEN_abc123"
+        mpath = manifest_path_for("capgroup5", "feat-secret", env=env)
+        write_central_manifest(
+            mpath,
+            _capability_manifest(
+                group_name="capgroup5",
+                slug="feat-secret",
+                members=[
+                    {
+                        "name": "repo_a",
+                        "repo_root": "/x",
+                        "worktree_path": "/x",
+                        "provision_state": "ready",
+                        "work_state": "failed",
+                        "tasks": {
+                            "dep-install": {
+                                "state": "failed",
+                                "reason": f"auth failed: {secret}",
+                            }
+                        },
+                    }
+                ],
+            ),
+        )
+
+        report = capability_report(group, "feat-secret", env=env)
+
+        assert secret not in report
+        assert "camp status" in report, "report should cite where to read the reason"
+
+    def test_bounded_length_ceiling_is_a_concrete_asserted_value(self):
+        """The report's length ceiling is a concrete constant, so a future edit
+        that grows the report has something to fail against."""
+        from camp.launch import hook_handlers
+
+        assert hook_handlers.CAPABILITY_REPORT_MAX_CHARS == 1000
+
+    def test_overflow_degrades_to_a_summary_not_a_mid_sentence_truncation(
+        self, tmp_path: Path
+    ):
+        """Many members carrying outstanding/failed work stay within the
+        ceiling by summarizing — never a half-sentence about what the agent
+        cannot do."""
+        from camp.launch.hook_handlers import capability_report, CAPABILITY_REPORT_MAX_CHARS
+        from camp.group.manifest import manifest_path_for, write_central_manifest
+
+        env = {"CAMP_STATE_DIR": str(tmp_path / "state")}
+        member_count = 40
+        members_config = [
+            {
+                "name": f"repo_{i}",
+                "repo_root": f"/x{i}",
+                "tasks": [_activate_task(f"dep-install-{i}")],
+            }
+            for i in range(member_count)
+        ]
+        group = _make_group_config("capgroup6", members_config)
+
+        manifest_members = [
+            {
+                "name": f"repo_{i}",
+                "repo_root": f"/x{i}",
+                "worktree_path": f"/x{i}",
+                "provision_state": "ready",
+                "work_state": "failed",
+                "tasks": {f"dep-install-{i}": {"state": "failed", "reason": "boom"}},
+            }
+            for i in range(member_count)
+        ]
+        mpath = manifest_path_for("capgroup6", "feat-overflow", env=env)
+        write_central_manifest(
+            mpath,
+            _capability_manifest(
+                group_name="capgroup6", slug="feat-overflow", members=manifest_members
+            ),
+        )
+
+        report = capability_report(group, "feat-overflow", env=env)
+
+        assert report
+        assert len(report) <= CAPABILITY_REPORT_MAX_CHARS, (
+            f"report exceeded its ceiling: {len(report)} chars"
+        )
+        assert report.rstrip().endswith((".", "!", "?")), (
+            f"report must not end mid-statement: {report!r}"
+        )
+
+    def test_report_reflects_live_state_not_a_cached_snapshot(self, tmp_path: Path):
+        """Change the underlying manifest state between two reads and the
+        report differs — a stale report is worse than none."""
+        from camp.launch.hook_handlers import capability_report
+        from camp.group.manifest import manifest_path_for, write_central_manifest
+
+        env = {"CAMP_STATE_DIR": str(tmp_path / "state")}
+        group = _make_group_config(
+            "capgroup7",
+            [{"name": "repo_a", "repo_root": "/x", "tasks": [_activate_task("dep-install")]}],
+        )
+        mpath = manifest_path_for("capgroup7", "feat-live", env=env)
+
+        def _write(work_state: str, task_state: str) -> None:
+            write_central_manifest(
+                mpath,
+                _capability_manifest(
+                    group_name="capgroup7",
+                    slug="feat-live",
+                    members=[
+                        {
+                            "name": "repo_a",
+                            "repo_root": "/x",
+                            "worktree_path": "/x",
+                            "provision_state": "ready",
+                            "work_state": work_state,
+                            "tasks": {"dep-install": {"state": task_state}},
+                        }
+                    ],
+                ),
+            )
+
+        _write("pending", "pending")
+        first = capability_report(group, "feat-live", env=env)
+        assert first, "expected an outstanding-work report on the first read"
+
+        _write("ready", "ok")
+        second = capability_report(group, "feat-live", env=env)
+
+        assert second != first
+        assert second == "", f"dependencies arrived — expected silence, got: {second!r}"
+
+    def test_no_line_of_the_report_instructs_fetching_json(self, tmp_path: Path) -> None:
+        """No line of a generated capability report — failed, outstanding,
+        mixed failed+outstanding, or the overflow/summarized path — ever
+        instructs the agent to run `camp status --name <slug> --json`. That
+        surface returns the unredacted manifest `reason` field, which can
+        carry a credential from a private-registry auth failure. A prior fix
+        addressed only the failed-task line; this is a property over the
+        whole report, exercised across every branch that can produce a line,
+        so a sibling line making the same mistake cannot survive unnoticed."""
+        from camp.launch.hook_handlers import capability_report
+        from camp.group.manifest import manifest_path_for, write_central_manifest
+
+        env = {"CAMP_STATE_DIR": str(tmp_path / "state")}
+
+        def _assert_report_has_no_json_pointer(report: str) -> None:
+            assert report, "expected a non-empty report for this scenario"
+            for line in report.splitlines():
+                assert "--json" not in line, (
+                    f"report line instructs fetching the unredacted --json map: {line!r}"
+                )
+
+        # failed only
+        group_failed = _make_group_config(
+            "propgroup-failed",
+            [{"name": "repo_a", "repo_root": "/x", "tasks": [_activate_task("dep-install")]}],
+        )
+        mpath_failed = manifest_path_for("propgroup-failed", "feat-failed", env=env)
+        write_central_manifest(
+            mpath_failed,
+            _capability_manifest(
+                group_name="propgroup-failed",
+                slug="feat-failed",
+                members=[
+                    {
+                        "name": "repo_a",
+                        "repo_root": "/x",
+                        "worktree_path": "/x",
+                        "provision_state": "ready",
+                        "work_state": "failed",
+                        "reason": "npm ci: exit 1",
+                        "tasks": {"dep-install": {"state": "failed", "reason": "exit 1"}},
+                    }
+                ],
+            ),
+        )
+        _assert_report_has_no_json_pointer(
+            capability_report(group_failed, "feat-failed", env=env)
+        )
+
+        # outstanding only
+        group_outstanding = _make_group_config(
+            "propgroup-outstanding",
+            [{"name": "repo_a", "repo_root": "/x", "tasks": [_activate_task("dep-install")]}],
+        )
+        mpath_outstanding = manifest_path_for(
+            "propgroup-outstanding", "feat-outstanding", env=env
+        )
+        write_central_manifest(
+            mpath_outstanding,
+            _capability_manifest(
+                group_name="propgroup-outstanding",
+                slug="feat-outstanding",
+                members=[
+                    {
+                        "name": "repo_a",
+                        "repo_root": "/x",
+                        "worktree_path": "/x",
+                        "provision_state": "ready",
+                        "work_state": "pending",
+                        "tasks": {},
+                    }
+                ],
+            ),
+        )
+        _assert_report_has_no_json_pointer(
+            capability_report(group_outstanding, "feat-outstanding", env=env)
+        )
+
+        # mixed: one member failed, one member outstanding, in the same report
+        group_mixed = _make_group_config(
+            "propgroup-mixed",
+            [
+                {"name": "repo_a", "repo_root": "/x", "tasks": [_activate_task("dep-install")]},
+                {"name": "repo_b", "repo_root": "/y", "tasks": [_activate_task("dep-install")]},
+            ],
+        )
+        mpath_mixed = manifest_path_for("propgroup-mixed", "feat-mixed", env=env)
+        write_central_manifest(
+            mpath_mixed,
+            _capability_manifest(
+                group_name="propgroup-mixed",
+                slug="feat-mixed",
+                members=[
+                    {
+                        "name": "repo_a",
+                        "repo_root": "/x",
+                        "worktree_path": "/x",
+                        "provision_state": "ready",
+                        "work_state": "failed",
+                        "reason": "npm ci: exit 1",
+                        "tasks": {"dep-install": {"state": "failed", "reason": "exit 1"}},
+                    },
+                    {
+                        "name": "repo_b",
+                        "repo_root": "/y",
+                        "worktree_path": "/y",
+                        "provision_state": "ready",
+                        "work_state": "pending",
+                        "tasks": {},
+                    },
+                ],
+            ),
+        )
+        mixed_report = capability_report(group_mixed, "feat-mixed", env=env)
+        _assert_report_has_no_json_pointer(mixed_report)
+        assert "failed" in mixed_report.lower(), "expected the failed-task line in the mix"
+        assert "dep-install" in mixed_report, "expected the outstanding-task line in the mix"
+
+        # overflow/summarized path: many members with outstanding/failed work
+        member_count = 40
+        members_config = [
+            {
+                "name": f"repo_{i}",
+                "repo_root": f"/x{i}",
+                "tasks": [_activate_task(f"dep-install-{i}")],
+            }
+            for i in range(member_count)
+        ]
+        group_overflow = _make_group_config("propgroup-overflow", members_config)
+        manifest_members = [
+            {
+                "name": f"repo_{i}",
+                "repo_root": f"/x{i}",
+                "worktree_path": f"/x{i}",
+                "provision_state": "ready",
+                "work_state": "failed",
+                "tasks": {f"dep-install-{i}": {"state": "failed", "reason": "boom"}},
+            }
+            for i in range(member_count)
+        ]
+        mpath_overflow = manifest_path_for("propgroup-overflow", "feat-overflow", env=env)
+        write_central_manifest(
+            mpath_overflow,
+            _capability_manifest(
+                group_name="propgroup-overflow",
+                slug="feat-overflow",
+                members=manifest_members,
+            ),
+        )
+        _assert_report_has_no_json_pointer(
+            capability_report(group_overflow, "feat-overflow", env=env)
+        )
+
+    def test_internal_failure_returns_empty_string_not_a_raised_exception(
+        self, tmp_path: Path, monkeypatch
+    ):
+        """Every failure path inside report generation exits quietly — an
+        internal exception must not propagate and crash session start."""
+        import camp.provision.lifecycle as lifecycle_mod
+        from camp.launch.hook_handlers import capability_report
+
+        def _boom(*args, **kwargs):
+            raise RuntimeError("simulated internal failure")
+
+        monkeypatch.setattr(lifecycle_mod, "provision_status_code", _boom)
+
+        report = capability_report({"group": {"name": "g"}, "members": []}, "slug")
+
+        assert report == ""
+
+
+class TestSessionBootstrapCapabilityReportIntegration:
+    """End-to-end: `camp session-bootstrap` emits the capability report as the
+    SessionStart additionalContext JSON contract when there is outstanding
+    work-enabling work, and nothing when a member is unrelated to any group.
+    """
+
+    def test_hook_emits_additional_context_for_outstanding_activate_task(
+        self, tmp_path: Path
+    ):
+        camp_config_dir = tmp_path / "camp-config"
+        groups_dir = camp_config_dir / "groups"
+        groups_dir.mkdir(parents=True, exist_ok=True)
+
+        member_repo = tmp_path / "member_repo"
+        _init_git_repo(member_repo)
+
+        toml_content = f"""
+[group]
+name = "hookcapgroup"
+
+[[members]]
+name = "member"
+repo_root = "{member_repo!s}"
+bootstrap = []
+tasks = ["dep-install"]
+
+[tasks.dep-install]
+phase = "activate"
+
+[[tasks.dep-install.steps]]
+name = "install"
+cmd = ["true"]
+"""
+        (groups_dir / "hookcapgroup.toml").write_text(toml_content)
+
+        state_dir = tmp_path / "state"
+        env = {
+            "CAMP_STATE_DIR": str(state_dir),
+            "CAMP_CONFIG_DIR": str(camp_config_dir),
+        }
+
+        from camp.group.manifest import manifest_path_for, write_central_manifest
+
+        wt_path = state_dir / "hookcapgroup" / "worktrees" / "feat-hookcap" / "member"
+        wt_path.mkdir(parents=True, exist_ok=True)
+
+        mpath = manifest_path_for("hookcapgroup", "feat-hookcap", env=env)
+        write_central_manifest(
+            mpath,
+            {
+                "schema_version": 1,
+                "group": "hookcapgroup",
+                "slug": "feat-hookcap",
+                "branch": "worktree-feat-hookcap",
+                "members": [
+                    {
+                        "name": "member",
+                        "repo_root": str(member_repo),
+                        "worktree_path": str(wt_path),
+                        "provision_state": "ready",
+                        "work_state": "pending",
+                        "tasks": {},
+                    }
+                ],
+            },
+        )
+
+        result = _run_session_bootstrap(cwd=str(wt_path), extra_env=env)
+
+        assert result.returncode == 0, f"stderr={result.stderr!r}"
+        payload = json.loads(result.stdout)
+        assert payload["hookSpecificOutput"]["hookEventName"] == "SessionStart"
+        assert "dep-install" in payload["hookSpecificOutput"]["additionalContext"]
+
+    def test_unrelated_repo_emits_no_capability_report(self, tmp_path: Path):
+        """A session in a repo that is not a camp member gets nothing — no
+        capability report stdout at all."""
+        unrelated_repo = tmp_path / "unrelated"
+        unrelated_repo.mkdir(parents=True, exist_ok=True)
+
+        result = _run_session_bootstrap(
+            cwd=str(unrelated_repo),
+            extra_env={
+                "CAMP_STATE_DIR": str(tmp_path / "nonexistent-state"),
+                "CAMP_CONFIG_DIR": str(tmp_path / "nonexistent-config"),
+            },
+        )
+
+        assert result.returncode == 0
+        assert result.stdout == "", f"expected no stdout, got: {result.stdout!r}"
+
+
+# ---------------------------------------------------------------------------
 # camp --help lists group (renamed from init)
 # ---------------------------------------------------------------------------
 

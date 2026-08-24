@@ -87,12 +87,20 @@ _SPAWN_TIMEOUT_SECONDS = 30
 #: one, so any other non-zero exit is reported as itself.
 _DUPLICATE_SESSION_MARKER = "duplicate session"
 
-#: Poll interval and bound for :func:`confirm_session`, pinned from measured
-#: cold `claude --remote-control` start-to-enumeration latency (min 1.35s /
-#: median 1.39s / max 2.22s across n=8 live launches) — provisional, subject to
-#: revision if that measurement drifts.
+#: Poll interval for :func:`confirm_session`, pinned from measured cold
+#: `claude --remote-control` start-to-enumeration latency (min 1.35s / median
+#: 1.39s / max 2.22s across n=8 live launches, 2026-08-18) — provisional,
+#: subject to revision if that measurement drifts.
 _CONFIRM_POLL_INTERVAL_SECONDS = 0.5
-_CONFIRM_POLL_TIMEOUT_SECONDS = 10.0
+
+#: Bound for :func:`confirm_session`. The measured cold-boot latency above
+#: tops out at 2.22s, yet even a successful trust pre-seed still left ~25% of
+#: probe launches stalled past the old 10s window — evidence that what this
+#: budget must absorb is a saturated machine, not the median boot. Widened to
+#: a multiple of the measured max so a launch competing for CPU/IO with other
+#: work still confirms, while staying bounded so a genuinely stuck session
+#: does not hang the CLI indefinitely.
+_CONFIRM_POLL_TIMEOUT_SECONDS = 30.0
 
 #: Bound on the cleanup `tmux kill-session` call in :func:`confirm_session`. The
 #: failure was already reported by the time this runs, so a wedged or vanished
@@ -830,12 +838,39 @@ def _neutralize_labels(pane: str) -> str:
     return pane
 
 
+#: The fragment a genuine Claude Code trust dialog writes to the pane. Matching
+#: it is what lets the refusal VERIFY the trust prompt instead of guessing it —
+#: the specific misreport this fixes is asserting the prompt when the pane, had
+#: camp looked, showed something else entirely.
+_TRUST_PROMPT_PANE_MARKER_RE = re.compile(r"trust the files", re.IGNORECASE)
+
+#: How far below the poll count the interval/elapsed math implies counts as
+#: evidence of a starved poll loop rather than merely "no session yet". A
+#: healthy loop lands close to elapsed/interval polls; a machine under enough
+#: contention to stretch `sleep(interval)` well past *interval* lands far
+#: fewer — that gap is what distinguishes "still booting" from "stalled at an
+#: unaccepted prompt", since a stalled-at-prompt session polls on schedule.
+_POLL_STARVATION_RATIO = 0.5
+
+
+def _pane_shows_trust_prompt(pane: str | None) -> bool:
+    return pane is not None and bool(_TRUST_PROMPT_PANE_MARKER_RE.search(pane))
+
+
+def _poll_count_is_starved(*, poll_count: int, elapsed: float, interval: float) -> bool:
+    if interval <= 0:
+        return False
+    implied = elapsed / interval
+    return poll_count < implied * _POLL_STARVATION_RATIO
+
+
 def _confirmation_failure_message(
     launched: LaunchedSession,
     *,
     env: dict[str, str],
     poll_count: int,
     elapsed: float,
+    interval: float,
     pane: str | None,
 ) -> str:
     """The refusal text: what camp checked, then — separately — what it guesses.
@@ -845,6 +880,18 @@ def _confirmation_failure_message(
     discounted for it — correctly, since nothing backed it. A reader triaging
     from a phone stops at the first confident-sounding clause, so that clause
     has to be something camp looked at.
+
+    The diagnosis itself is evidence-driven rather than a hardcoded guess. A
+    pane that shows the trust dialog moves the cause into the VERIFIED block —
+    camp read it, it is no longer an inference. A pane that shows anything
+    else — the harness still booting, a shell prompt, whatever was on
+    screen — proves the session is not sitting at an unaccepted trust prompt,
+    so that cause is never asserted; the likeliest remaining explanation is a
+    slow boot. Absent any pane at all, a poll count far below what the
+    interval and elapsed time imply is the same signal by another route: the
+    poll loop itself was starved by machine contention, not merely running its
+    ordinary cadence while nothing showed up. Only when neither kind of
+    evidence points elsewhere does the trust prompt remain the default guess.
     """
     verified = [
         f"verified: session {launched.session_id} was absent from all "
@@ -862,12 +909,35 @@ def _confirmation_failure_message(
             f"    | {line}" for line in _neutralize_labels(pane).split("\n")
         )
         verified.append(f"verified: the pane was showing:\n{indented}")
-    return (
-        f"camp: launch of session {launched.session_id} could not be confirmed\n"
-        + "\n".join(f"  {line}" for line in verified)
-        + "\n  inferred: most likely stalled at an unaccepted trust prompt — camp "
-        "did not confirm this"
+
+    inferred_line: str | None
+    if _pane_shows_trust_prompt(pane):
+        verified.append("verified: the pane shows an unaccepted trust prompt")
+        inferred_line = None
+    elif pane is not None:
+        inferred_line = (
+            "inferred: most likely stalled on a slow harness boot under load — "
+            "the captured pane shows something other than an unaccepted dialog "
+            "— camp did not confirm this"
+        )
+    elif _poll_count_is_starved(poll_count=poll_count, elapsed=elapsed, interval=interval):
+        inferred_line = (
+            f"inferred: most likely stalled on a slow harness boot under load — "
+            f"only {poll_count} poll(s) landed over {elapsed:.2f}s, far fewer "
+            f"than the {interval}s interval implies — camp did not confirm this"
+        )
+    else:
+        inferred_line = (
+            "inferred: most likely stalled at an unaccepted trust prompt — camp "
+            "did not confirm this"
+        )
+
+    message = f"camp: launch of session {launched.session_id} could not be confirmed\n" + "\n".join(
+        f"  {line}" for line in verified
     )
+    if inferred_line is not None:
+        message += f"\n  {inferred_line}"
+    return message
 
 
 def confirm_session(
@@ -902,11 +972,17 @@ def confirm_session(
     destroys the only evidence of what the session was sitting on. The refusal
     reports what camp verified — the enumeration it ran, the config file it seeds
     trust into and whether that key is there, the pane text it actually read —
-    before, and separately from, the one thing it infers: that the session is most
-    likely stalled at an unaccepted trust prompt. That remains the likeliest cause
-    even after a successful pretrust, but camp does not check it, so it is labelled.
-    A failing kill is reported on stderr naming the tmux session; it is never left
-    silent, even though the launch is refused either way.
+    before, and separately from, whatever cause it infers. The diagnosis is
+    evidence-driven, not hardcoded: a pane that shows the trust dialog verbatim
+    moves the trust-prompt cause into the verified block instead of guessing it;
+    a pane that shows anything else, or a poll count far below what the interval
+    and elapsed time imply, points at a slow harness boot under load instead.
+    Only when neither kind of evidence is available does the trust prompt remain
+    the default guess — that stays the likeliest unverified cause even after a
+    successful pretrust, per the measured stall rate documented at
+    :data:`_CONFIRM_POLL_TIMEOUT_SECONDS`. A failing kill is reported on stderr
+    naming the tmux session; it is never left silent, even though the launch is
+    refused either way.
     """
     from trailhead.harness import HarnessError
 
@@ -937,7 +1013,12 @@ def confirm_session(
     # every launch that ever stalls.
     pane = _capture_pane(launched.tmux_name)
     message = _confirmation_failure_message(
-        launched, env=env, poll_count=poll_count, elapsed=elapsed, pane=pane
+        launched,
+        env=env,
+        poll_count=poll_count,
+        elapsed=elapsed,
+        interval=interval,
+        pane=pane,
     )
     try:
         kill = subprocess.run(

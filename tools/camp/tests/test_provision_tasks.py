@@ -820,6 +820,222 @@ def test_reconcile_carries_provision_state_activated_and_tasks_together(tmp_path
 
 
 # ---------------------------------------------------------------------------
+# reconcile_worktree: work_state (work-readiness) fact
+# ---------------------------------------------------------------------------
+
+
+def test_reconcile_member_with_no_activate_task_reports_not_applicable_work_state(tmp_path):
+    """A member that declares no activate-phase task reports the "not
+    applicable" work value on the very first reconcile, rather than sitting at
+    "pending" forever waiting for activate-phase work that will never come."""
+    from camp.provision.reconcile import reconcile_worktree
+    from camp.group.manifest import read_central_manifest
+
+    repo = tmp_path / "repo"
+    _init_git_repo(repo)
+    env = _camp_state_env(tmp_path)
+    group = _make_group(
+        "noactivateg",
+        [
+            {
+                "name": "repo",
+                "repo_root": str(repo),
+                "base": "origin/main",
+                "tasks": [_provision_task("ok", ["true"])],
+            }
+        ],
+    )
+
+    reconcile_worktree(group, "s", env=env)
+
+    entry = read_central_manifest(_manifest_path("noactivateg", "s", env))["members"][0]
+    assert entry["work_state"] == "not-applicable"
+
+
+def test_reconcile_member_with_activate_task_leaves_work_state_absent_on_first_run(tmp_path):
+    """A member that DOES declare an activate-phase task gets no work_state key
+    on the first reconcile (mirrors provision_state/activated's first-run
+    absence) — reconcile_worktree never runs activate-phase tasks itself, so it
+    has nothing to report yet, and must not raise deciding that."""
+    from camp.provision.reconcile import reconcile_worktree
+    from camp.group.manifest import read_central_manifest
+
+    repo = tmp_path / "repo"
+    _init_git_repo(repo)
+    env = _camp_state_env(tmp_path)
+    group = _make_group(
+        "hasactivateg",
+        [
+            {
+                "name": "repo",
+                "repo_root": str(repo),
+                "base": "origin/main",
+                "tasks": [_provision_task("dep-install", ["true"], phase="activate")],
+            }
+        ],
+    )
+
+    reconcile_worktree(group, "s", env=env)
+
+    entry = read_central_manifest(_manifest_path("hasactivateg", "s", env))["members"][0]
+    assert "work_state" not in entry
+
+
+def test_reconcile_carries_forward_work_state_set_to_ready(tmp_path):
+    """The carry-forward regression test: a work_state set to "ready" (as
+    activation.py would set it) survives a reconcile that doesn't touch
+    work-readiness itself — reconcile rebuilds each member entry from a
+    hardcoded key tuple, and an unlisted field is silently dropped on the next
+    reconcile. This is the exact bug being guarded against."""
+    from camp.provision.reconcile import reconcile_worktree
+    from camp.group.manifest import read_central_manifest, write_central_manifest
+
+    repo = tmp_path / "repo"
+    _init_git_repo(repo)
+    env = _camp_state_env(tmp_path)
+    group = _make_group(
+        "workcarryg",
+        [
+            {
+                "name": "repo",
+                "repo_root": str(repo),
+                "base": "origin/main",
+                "tasks": [_provision_task("dep-install", ["true"], phase="activate")],
+            }
+        ],
+    )
+
+    reconcile_worktree(group, "s", env=env)
+
+    mpath = _manifest_path("workcarryg", "s", env)
+    data = read_central_manifest(mpath)
+    data["members"][0]["work_state"] = "ready"
+    write_central_manifest(mpath, data)
+
+    reconcile_worktree(group, "s", env=env)
+
+    entry = read_central_manifest(mpath)["members"][0]
+    assert entry["work_state"] == "ready"
+
+
+# ---------------------------------------------------------------------------
+# over-budget: persists verbatim through the manifest projection
+# ---------------------------------------------------------------------------
+
+
+def test_tasks_map_from_results_persists_over_budget_verbatim_skipped_still_ok():
+    """_tasks_map_from_results stops collapsing every non-failed result into
+    "ok": an over-budget result must survive verbatim, or a caller can never
+    tell "ran out of time" apart from "succeeded" and the task never gets
+    retried anywhere. A skipped result still persists as "ok" (unchanged)."""
+    from camp.provision.reconcile import _tasks_map_from_results
+    from camp.provision.tasks import TaskResult
+
+    results = [
+        TaskResult(name="graph-build", state="over-budget"),
+        TaskResult(name="mcp-config", state="skipped"),
+    ]
+
+    out = _tasks_map_from_results(results)
+
+    assert out["graph-build"] == {"state": "over-budget"}
+    assert out["mcp-config"] == {"state": "ok"}
+
+
+def test_completed_from_tasks_map_over_budget_direction_flag():
+    """The projection from a persisted `tasks` map back onto the runner's
+    `completed` shape must not silently collapse "over-budget" the same way in
+    both directions: over_budget_as_ok=True (the boot-budget-constrained
+    SessionStart hook path) makes an over-budget task skip-worthy, exactly like
+    "ok"; the default (False — `camp setup`'s retry path) leaves it as its own
+    literal, non-"ok" state, so the task is retry-worthy there."""
+    from camp.provision.reconcile import _completed_from_tasks_map
+
+    tasks_map = {"graph-build": {"state": "over-budget"}}
+
+    assert _completed_from_tasks_map(tasks_map, over_budget_as_ok=True) == {
+        "graph-build": "ok"
+    }
+    assert _completed_from_tasks_map(tasks_map) == {"graph-build": "over-budget"}
+
+
+def test_reconcile_hook_path_skips_over_budget_task_without_reexecuting(tmp_path):
+    """reconcile_worktree (the SessionStart hook path) treats a task recorded
+    over-budget as skip-worthy: it does not re-run it within the tight boot
+    window, and its persisted state survives as "over-budget" rather than
+    being silently normalized to "ok" by the skip itself."""
+    from camp.provision.reconcile import reconcile_worktree
+    from camp.group.manifest import read_central_manifest, write_central_manifest
+
+    repo = tmp_path / "repo"
+    _init_git_repo(repo)
+    env = _camp_state_env(tmp_path)
+    runs = tmp_path / "runs"
+    group = _make_group(
+        "hookskipg",
+        [
+            {
+                "name": "repo",
+                "repo_root": str(repo),
+                "base": "origin/main",
+                "tasks": [_provision_task("graph-build", ["sh", "-c", f"echo x >> {runs}"])],
+            }
+        ],
+    )
+
+    reconcile_worktree(group, "s", env=env)
+    assert runs.read_text().count("x") == 1  # the task's real first run
+
+    mpath = _manifest_path("hookskipg", "s", env)
+    data = read_central_manifest(mpath)
+    data["members"][0]["tasks"] = {"graph-build": {"state": "over-budget"}}
+    write_central_manifest(mpath, data)
+
+    reconcile_worktree(group, "s", env=env)
+
+    assert runs.read_text().count("x") == 1, "hook path must not re-execute an over-budget task"
+    entry = read_central_manifest(mpath)["members"][0]
+    assert entry["tasks"]["graph-build"]["state"] == "over-budget"
+
+
+def test_setup_retries_task_recorded_over_budget(tmp_path):
+    """camp setup treats a task recorded over-budget as retry-worthy — it
+    re-runs (and, on success, clears) rather than skipping it forever."""
+    from camp.provision.provision import seed_pending_workspace
+    from camp.provision.lifecycle import cmd_setup_group
+    from camp.group.manifest import read_central_manifest, write_central_manifest
+
+    repo = tmp_path / "repo"
+    _init_git_repo(repo)
+    env = _camp_state_env(tmp_path)
+    runs = tmp_path / "runs"
+    group = _make_group(
+        "setupretryg",
+        [
+            {
+                "name": "repo",
+                "repo_root": str(repo),
+                "base": "origin/main",
+                "tasks": [_provision_task("graph-build", ["sh", "-c", f"echo x >> {runs}"])],
+            }
+        ],
+    )
+
+    seed_pending_workspace(group, "s", env=env)
+    mpath = _manifest_path("setupretryg", "s", env)
+    data = read_central_manifest(mpath)
+    data["members"][0]["provision_state"] = "ready"
+    data["members"][0]["tasks"] = {"graph-build": {"state": "over-budget"}}
+    write_central_manifest(mpath, data)
+
+    cmd_setup_group(group, "s", env=env)
+
+    assert runs.read_text().count("x") == 1, "camp setup must re-run an over-budget task"
+    entry = read_central_manifest(mpath)["members"][0]
+    assert entry["tasks"]["graph-build"]["state"] == "ok"
+
+
+# ---------------------------------------------------------------------------
 # manifest persistence primitive
 # ---------------------------------------------------------------------------
 

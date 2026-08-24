@@ -31,7 +31,13 @@ removal). The lockfile lives OUTSIDE the workspace dir at
 teardown rmtree of the workspace dir cannot delete the held lock inode.
 reconcile_break reaps that lockfile (while still holding the flock) once the
 slug is fully torn down; reconcile_lock's inode identity re-check makes the
-reap safe for concurrent waiters.
+reap safe for concurrent waiters. It also reaps each member's activate-phase
+concurrency guard lockfile (provision/activation.py) at the same point — that
+guard is a SEPARATE lock a live `camp activate` run may hold across a long
+task subprocess; reconcile_break never waits on it (an in-flight activate run
+already keeps its slow work outside this module's reconcile_lock, so teardown
+never contends with it) but does clean up its lockfile once free, or leaves it
+for a later reap if a run is still (rarely) live at teardown time.
 """
 
 from __future__ import annotations
@@ -45,7 +51,9 @@ from pathlib import Path
 from typing import Any
 
 from ..gitutil import _git, _git_is_dirty
+from ..group.config import tasks_in_phase
 from ..group.manifest import (
+    WORK_STATE_NOT_APPLICABLE,
     ManifestError,
     manifest_path_for,
     read_central_manifest,
@@ -89,6 +97,17 @@ DEFAULT_BASE = "origin/main"
 # Per-member git fetch timeout (seconds) for the async provisioner. An
 # unreachable remote fails that member instead of hanging the whole bring-up.
 FETCH_TIMEOUT_SECONDS = 120
+
+# Wall-clock budget (seconds) reconcile_worktree passes as `task_deadline_seconds`
+# to run_member_tasks for provision-phase tasks ONLY — the SessionStart hook
+# path. Git fetch and `git worktree add` (phase 1, above) keep their own
+# existing timeouts and are untouched by this budget: a truncated
+# materialization can never reach boot-readiness, so killing it mid-way would
+# only trade one unrecoverable state for another. Deliberately tight (order of
+# 10s), per operator decision — provision-phase tasks are declared cheap and
+# boot-facing by the phase contract (group/config.py), so a task that needs
+# longer belongs in the activate phase, not a larger budget here.
+BOOT_TASK_BUDGET_SECONDS = 15
 
 # Consecutive path segments that mark the retired per-repo worktree layout
 # (<repo_root>/.claude/worktrees/<slug>). The unified workspace layout never has
@@ -343,9 +362,13 @@ PROVISION_PHASE = "provision"
 
 def _has_provision_tasks(member: dict[str, Any]) -> bool:
     """True if the member has any provision-phase task to run."""
-    return any(
-        t.get("phase", PROVISION_PHASE) == PROVISION_PHASE for t in member.get("tasks") or []
-    )
+    return bool(tasks_in_phase(member, PROVISION_PHASE))
+
+
+# Mirrors activation.ACTIVATE_PHASE, spelled locally (not imported) so it keeps
+# the same shape as the PROVISION_PHASE constant immediately above and this
+# module needs no import from provision/activation.py to name a phase.
+_ACTIVATE_PHASE = "activate"
 
 
 def _has_outstanding_provision_tasks(
@@ -360,12 +383,28 @@ def _has_outstanding_provision_tasks(
     member is a true no-op and is not re-provisioned.
     """
     tasks_map = tasks_map or {}
-    for task in member.get("tasks") or []:
-        if task.get("phase", PROVISION_PHASE) != PROVISION_PHASE:
-            continue
-        if (tasks_map.get(task["name"]) or {}).get("state") != "ok":
-            return True
-    return False
+    return any(
+        (tasks_map.get(task["name"]) or {}).get("state") != "ok"
+        for task in tasks_in_phase(member, PROVISION_PHASE)
+    )
+
+
+def _has_outstanding_activate_tasks(
+    member: dict[str, Any], tasks_map: dict[str, Any] | None
+) -> bool:
+    """True if the member has an activate-phase task recorded "failed".
+
+    Scoped to FAILED only — unlike `_has_outstanding_provision_tasks` (which
+    also treats a never-run task as outstanding), `camp setup` is a repair path
+    for activate-phase work already attempted at least once via `camp
+    activate`; it never spontaneously starts a member's activate-phase work
+    that `camp activate` has not yet initiated.
+    """
+    tasks_map = tasks_map or {}
+    return any(
+        (tasks_map.get(task["name"]) or {}).get("state") == "failed"
+        for task in tasks_in_phase(member, _ACTIVATE_PHASE)
+    )
 
 
 def _adapt_task_steps(tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -381,17 +420,38 @@ def _adapt_task_steps(tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return adapted
 
 
-def _completed_from_tasks_map(tasks_map: dict[str, Any] | None) -> dict[str, str]:
+def _completed_from_tasks_map(
+    tasks_map: dict[str, Any] | None, *, over_budget_as_ok: bool = False
+) -> dict[str, str]:
     """Project a manifest `tasks` map ({name: {"state": ...}}) onto the runner's
-    `completed` shape ({name: state}) so an "ok" task is skipped (run-once)."""
-    return {name: info.get("state", "") for name, info in (tasks_map or {}).items()}
+    `completed` shape ({name: state}) so an "ok" task is skipped (run-once).
+
+    `over_budget_as_ok`, when True, also treats a persisted "over-budget" state
+    as skip-worthy — the boot-budget-constrained SessionStart hook path
+    (reconcile_worktree) must not retry a task that already blew its budget
+    within the same tight window. The default (False) leaves "over-budget" as
+    its own literal, non-"ok" state, so `camp setup`'s retry path
+    (_provision_member_and_flip) re-runs it. Deliberately two directions from
+    one persisted fact rather than one shared projection: collapsing them
+    would either retry an over-budget task inside the boot budget, or make
+    `camp setup` unable to ever retry one.
+    """
+    out: dict[str, str] = {}
+    for name, info in (tasks_map or {}).items():
+        state = info.get("state", "")
+        if over_budget_as_ok and state == "over-budget":
+            state = "ok"
+        out[name] = state
+    return out
 
 
 def _tasks_map_from_results(results: list[TaskResult]) -> dict[str, Any]:
     """Project a run's TaskResults onto the persisted manifest `tasks` map.
 
     A skipped task carries forward its "ok" state (it only skips when already
-    ok); a failed task persists its (capped) stderr excerpt as the reason.
+    ok); a failed task persists its (capped) stderr excerpt as the reason; an
+    over-budget task persists verbatim — normalizing it to "ok" would make it
+    indistinguishable from success and it would never be retried anywhere.
     """
     out: dict[str, Any] = {}
     for result in results:
@@ -400,9 +460,36 @@ def _tasks_map_from_results(results: list[TaskResult]) -> dict[str, Any]:
             if result.stderr_excerpt:
                 entry["reason"] = result.stderr_excerpt
             out[result.name] = entry
+        elif result.state == "over-budget":
+            out[result.name] = {"state": "over-budget"}
         else:  # "ok" or "skipped" (skipped means already ok)
             out[result.name] = {"state": "ok"}
     return out
+
+
+def _warn_over_budget_tasks(results: list[TaskResult], member_name: str) -> None:
+    """Print a one-line, actionable stderr message for each task that just went
+    over its boot budget in THIS run's `results`.
+
+    This is the misclassification report: it names the task and states the
+    phase contract it violates (provision-phase tasks must be cheap and
+    boot-facing) so a human knows which task to move to the activate phase.
+    It fires "once" without any in-process bookkeeping — a task recorded
+    over-budget in a prior manifest is pre-filtered out of `runnable_tasks`
+    before this function's caller ever sees it again (see the Phase 2 comment
+    above), so it can never reappear here on a later run. The skip is backed
+    by the persisted manifest, not by anything this process remembers.
+    """
+    for result in results:
+        if result.state == "over-budget":
+            print(
+                f"camp: provision-phase task {result.name!r} for member {member_name!r} "
+                f"exceeded the {BOOT_TASK_BUDGET_SECONDS}s boot budget and was recorded "
+                "over-budget — the provision phase must stay cheap and boot-facing; move "
+                f"{result.name!r} to the activate phase, or run `camp setup` to retry it "
+                "as-is.",
+                file=sys.stderr,
+            )
 
 
 def _warn_optional_task_failures(results: list[TaskResult], member_name: str) -> None:
@@ -558,10 +645,12 @@ def reconcile_worktree(
             # Prior per-member task states (run-once): a task recorded "ok" in a
             # prior manifest is skipped this run. Absent on the first reconcile.
             #
-            # prior_state carries forward provision_state/activated/reason set by
-            # cmd_setup_group/activation.py — reconcile_worktree never sets these
-            # itself, so this is a pure carry-forward (not a merge with new
-            # values). A member with no prior entry gets no key, same as today.
+            # prior_state carries forward provision_state/activated/reason/
+            # work_state set by cmd_setup_group/activation.py — reconcile_worktree
+            # never sets provision_state/activated/reason itself (it does set
+            # work_state — see the not-applicable default below), so this is a
+            # pure carry-forward (not a merge with new values) for the other
+            # three. A member with no prior entry gets no key, same as today.
             prior_tasks: dict[str, dict[str, Any]] = {}
             prior_state: dict[str, dict[str, Any]] = {}
             if mpath.is_file():
@@ -570,7 +659,7 @@ def reconcile_worktree(
                         prior_tasks[m["name"]] = m.get("tasks") or {}
                         prior_state[m["name"]] = {
                             key: m[key]
-                            for key in ("provision_state", "activated", "reason")
+                            for key in ("provision_state", "activated", "reason", "work_state")
                             if key in m
                         }
                 except ManifestError:
@@ -578,6 +667,17 @@ def reconcile_worktree(
                     prior_state = {}
 
             # -- Phase 2: Run provision-phase tasks per member in parallel.
+            #
+            # A task this member's prior manifest recorded "over-budget" is
+            # filtered out of the submitted list entirely (skip-worthy on this
+            # boot-budget-constrained hook path) rather than left for
+            # run_member_tasks's own "ok" skip to handle: that path returns a
+            # "skipped" TaskResult, and _tasks_map_from_results always persists
+            # "skipped" as "ok" — which would silently erase the over-budget
+            # record. Pre-filtering means no TaskResult is produced for it at
+            # all, so the merge below leaves the prior "over-budget" entry
+            # untouched. `camp setup`'s retry path (_provision_member_and_flip)
+            # takes no such filter — over-budget stays retry-worthy there.
             task_results: dict[str, list[TaskResult]] = {}
             required_failure: Exception | None = None
             if any(_has_provision_tasks(m) for m in members):
@@ -590,12 +690,21 @@ def reconcile_worktree(
                             slug=slug,
                             member_name=member["name"],
                         )
+                        completed = _completed_from_tasks_map(
+                            prior_tasks.get(member["name"]), over_budget_as_ok=True
+                        )
+                        runnable_tasks = [
+                            t
+                            for t in _adapt_task_steps(member.get("tasks") or [])
+                            if completed.get(t["name"]) != "ok"
+                        ]
                         fut = executor.submit(
                             run_member_tasks,
-                            _adapt_task_steps(member.get("tasks") or []),
+                            runnable_tasks,
                             PROVISION_PHASE,
                             context,
-                            _completed_from_tasks_map(prior_tasks.get(member["name"])),
+                            completed,
+                            task_deadline_seconds=BOOT_TASK_BUDGET_SECONDS,
                         )
                         futures[fut] = member["name"]
 
@@ -622,11 +731,19 @@ def reconcile_worktree(
             for member, mr in zip(members, member_results):
                 results = task_results.get(member["name"], [])
                 _warn_optional_task_failures(results, member["name"])
+                _warn_over_budget_tasks(results, member["name"])
                 merged = dict(prior_tasks.get(member["name"]) or {})
                 merged.update(_tasks_map_from_results(results))
                 if merged:
                     mr["tasks"] = merged
                 mr.update(prior_state.get(member["name"], {}))
+                # A member with no activate-phase task declared has no work to
+                # ever become work-ready FOR — set that explicitly rather than
+                # leaving work_state absent (which reads as "pending" forever,
+                # per manifest.work_state_for_member). A prior work_state
+                # already carried forward above takes precedence.
+                if "work_state" not in mr and not tasks_in_phase(member, _ACTIVATE_PHASE):
+                    mr["work_state"] = WORK_STATE_NOT_APPLICABLE
 
             # -- Phase 3: Write central manifest atomically (only after all succeed)
             manifest_data: dict[str, Any] = {
@@ -818,6 +935,15 @@ def reconcile_break(
             # blocked on this inode re-validate identity on wake (see
             # reconcile_lock), which is what makes the unlink race-free.
             reap_lock_unlocked(ws_dir)
+            # Also reap each member's activate-phase concurrency guard
+            # lockfile (provision/activation.py). Without this, every removed
+            # workspace that ever ran activate-phase work leaks one lockfile
+            # per member, permanently — that guard lives OUTSIDE ws_dir for
+            # the same reason the slug lock does, so the rmtree above never
+            # touched it.
+            from .activation import reap_member_guard_unlocked
+
+            reap_member_guard_unlocked(ws_dir, [e["name"] for e in member_entries])
             status = "ok"
         else:
             # Some removals failed. Update the manifest to reflect reality:

@@ -21,8 +21,18 @@ Schema (v1):
                 "worktree_path": "/abs/.../worktrees/<slug>/<name>",
                 # Async provisioning state: "pending" | "ready" | "failed".
                 # Seeded "pending" by camp ai; flipped by the (foreground or
-                # background) provisioner. A "failed" member also carries "reason".
+                # background) provisioner. Boot-readiness ONLY — whether the
+                # worktree is materialized and cheap provision-phase work is
+                # done. A "failed" member also carries "reason".
                 "provision_state": "pending",
+                # Work-readiness: a sibling fact, added additively alongside
+                # provision_state and never replacing it. Same domain plus
+                # "not-applicable" (a member that declares no activate-phase
+                # task). Absent on a manifest written before this key existed —
+                # read it via manifest.work_state_for_member, which defaults a
+                # missing key to "pending" (not-yet-work-ready) rather than
+                # raising; there is no migration step.
+                "work_state": "pending",
                 "reason": "<failure reason — present only when failed>",
                 # Per-task run-once state, keyed by task name. Written by the
                 # provision/reconcile task runner; a task recorded "ok" is never
@@ -215,6 +225,21 @@ def reap_lock_unlocked(ws_dir: Path) -> None:
     Silently succeeds if the lockfile is already gone.
     """
     lock_path_for(ws_dir).unlink(missing_ok=True)
+
+
+WORK_STATE_NOT_APPLICABLE = "not-applicable"
+
+
+def work_state_for_member(member: dict[str, Any]) -> str:
+    """Return a member's work-readiness fact.
+
+    Domain: "pending" | "ready" | "failed" | WORK_STATE_NOT_APPLICABLE (a
+    member that declares no activate-phase task). A manifest written before
+    this key existed carries no "work_state" entry at all — that reads as
+    "pending" (not-yet-work-ready) rather than raising, so no migration step
+    is required.
+    """
+    return member.get("work_state", "pending")
 
 
 def merge_member_tasks(member: dict[str, Any], tasks: dict[str, Any]) -> None:

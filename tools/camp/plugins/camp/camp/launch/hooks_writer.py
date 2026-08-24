@@ -69,28 +69,40 @@ def _workspace_inject_drain_command(camp_bin: str) -> str:
     return f"${{CAMP_BIN:-{camp_bin}}} inject --drain"
 
 
-def _has_command(hook_list: list, command: str) -> bool:
-    """Return True if `command` already appears in any hook entry in hook_list."""
+def _find_entry(hook_list: list, command: str) -> dict | None:
+    """Return the entry in hook_list whose hooks contain `command`, or None."""
     for entry in hook_list:
         for h in entry.get("hooks", []):
             if h.get("command") == command:
-                return True
-    return False
+                return entry
+    return None
+
+
+def _has_command(hook_list: list, command: str) -> bool:
+    """Return True if `command` already appears in any hook entry in hook_list."""
+    return _find_entry(hook_list, command) is not None
 
 
 def _upsert_hook(data: dict, event: str, command: str, *, matcher: str | None = None) -> None:
-    """Ensure `command` appears exactly once under hooks[event].
+    """Ensure `command` appears exactly once under hooks[event], with `matcher`.
 
-    If an entry with this exact command already exists, leave it untouched.
-    Otherwise, append a new entry { "hooks": [ { "type": "command", "command": <cmd> } ] }.
-    When `matcher` is given (e.g. PostToolUse → "Bash"), it is set on the new
-    entry; idempotency keys on the command string regardless of matcher.
+    If an entry with this exact command already exists, normalize its matcher
+    to `matcher` in place (widening/narrowing an existing workspace's hook
+    rather than leaving it stuck on whatever matcher it was first written
+    with — idempotency keys on the command string, but the matcher is not
+    frozen at first-write). Otherwise, append a new entry
+    { "hooks": [ { "type": "command", "command": <cmd> } ] }.
     """
     hooks = data.setdefault("hooks", {})
     hook_list = hooks.setdefault(event, [])
 
-    if _has_command(hook_list, command):
-        return  # Already present — idempotent
+    existing = _find_entry(hook_list, command)
+    if existing is not None:
+        if matcher is None:
+            existing.pop("matcher", None)
+        else:
+            existing["matcher"] = matcher
+        return
 
     entry: dict = {"hooks": [{"type": "command", "command": command}]}
     if matcher is not None:
@@ -128,9 +140,19 @@ def write_workspace_hooks(workspace_dir: Path, camp_bin: str) -> None:
 def write_workspace_inject_hook(workspace_dir: Path, camp_bin: str) -> None:
     """Write/update the workspace-dir PostToolUse → `camp inject --drain` hook.
 
-    Installed only when the resolved inject strategy is "claude-hook": a Bash-matched
-    PostToolUse hook drains the workspace inject queue (the member doc enqueued by
-    `camp activate`) into the session via additionalContext on the next tool call.
+    Installed only when the resolved inject strategy is "claude-hook": a
+    PostToolUse hook with NO matcher drains the workspace inject queue (member
+    docs from `camp activate`, and settlement/failure notices from the
+    activate-phase provisioner) into the session via additionalContext on the
+    NEXT tool call, whatever that tool is. Omitting the matcher key is the
+    documented, canonical way to fire a hook on every occurrence of its event
+    (equivalent to `"*"`/`""`, per Claude Code's hook matcher semantics) — a
+    Bash-only matcher would miss a session that is following the capability
+    report's own advice to prefer Grep/Glob over Bash while work is
+    outstanding, which is exactly the session a settlement/failure notice
+    needs to reach. The drain is cheap on an empty queue (exits 0, no output),
+    so firing on every tool call costs a process spawn against a
+    missing-directory check.
 
     Idempotent: re-running adds NO duplicate entries. Existing unrelated keys
     (including the SessionStart hook) are preserved.
@@ -143,7 +165,7 @@ def write_workspace_inject_hook(workspace_dir: Path, camp_bin: str) -> None:
     data = _load_settings(settings_path)
 
     drain_cmd = _workspace_inject_drain_command(camp_bin)
-    _upsert_hook(data, "PostToolUse", drain_cmd, matcher="Bash")
+    _upsert_hook(data, "PostToolUse", drain_cmd)
 
     _save_settings(settings_path, data)
 

@@ -201,103 +201,176 @@ def _run_cli(args: list[str], *, env: dict[str, str], cwd: Path) -> subprocess.C
 
 
 # ---------------------------------------------------------------------------
-# BUG 3: workspace-root walk-up (drain locates the workspace, not Path.cwd())
+# resolve_group_slug_from_cwd — pure path arithmetic, no group-config load
 # ---------------------------------------------------------------------------
 
 
-class TestFindWorkspaceRoot:
-    def test_finds_nearest_ancestor_with_camp_dir(self, tmp_path: Path):
-        from camp.launch.inject import find_workspace_root
-
-        ws = tmp_path / "ws"
-        (ws / ".camp").mkdir(parents=True)
-        member_subdir = ws / "member" / "sub" / "dir"
-        member_subdir.mkdir(parents=True)
-
-        assert find_workspace_root(member_subdir) == ws
-
-    def test_returns_start_when_no_camp_ancestor(self, tmp_path: Path):
-        from camp.launch.inject import find_workspace_root
-
-        nowhere = tmp_path / "nowhere" / "deep"
-        nowhere.mkdir(parents=True)
-
-        assert find_workspace_root(nowhere) == nowhere
-
-    def test_returns_self_when_start_is_workspace_root(self, tmp_path: Path):
-        from camp.launch.inject import find_workspace_root
-
-        ws = tmp_path / "ws"
-        (ws / ".camp").mkdir(parents=True)
-
-        assert find_workspace_root(ws) == ws
+def _state_env(state_dir: Path) -> dict[str, str]:
+    return {"CAMP_STATE_DIR": str(state_dir)}
 
 
-class TestInjectCliWalkUp:
-    def test_drain_from_member_subdir_finds_workspace_queue(self, tmp_path: Path):
-        """BUG 3: cwd = <workspace>/<member> still drains <workspace>/.camp queue."""
-        from camp.launch.inject import enqueue_doc
+class TestResolveGroupSlugFromCwd:
+    def test_resolves_group_and_slug_from_member_worktree_cwd(self, tmp_path: Path):
+        from camp.launch.inject import resolve_group_slug_from_cwd
 
-        ws = tmp_path / "ws"
-        ws.mkdir()
-        enqueue_doc(ws, "WALKUP-DOC-marker")
-        member = ws / "member"
-        member.mkdir()
+        state = tmp_path / "state"
+        member_dir = state / "mygroup" / "worktrees" / "my-slug" / "myrepo"
+        member_dir.mkdir(parents=True)
 
-        result = _run_cli(["inject", "--drain"], env={}, cwd=member)
-        assert result.returncode == 0
-        parsed = json.loads(result.stdout)
-        assert "WALKUP-DOC-marker" in parsed["hookSpecificOutput"]["additionalContext"]
+        assert resolve_group_slug_from_cwd(member_dir, state) == ("mygroup", "my-slug")
 
-    def test_drain_from_deep_member_subdir_finds_workspace_queue(self, tmp_path: Path):
-        """BUG 3: cwd = <workspace>/<member>/sub/dir still drains the workspace queue."""
-        from camp.launch.inject import enqueue_doc
+    def test_resolves_from_a_deep_member_subdir(self, tmp_path: Path):
+        from camp.launch.inject import resolve_group_slug_from_cwd
 
-        ws = tmp_path / "ws"
-        ws.mkdir()
-        enqueue_doc(ws, "DEEP-DOC-marker")
-        deep = ws / "member" / "sub" / "dir"
+        state = tmp_path / "state"
+        deep = state / "mygroup" / "worktrees" / "my-slug" / "myrepo" / "sub" / "dir"
         deep.mkdir(parents=True)
 
-        result = _run_cli(["inject", "--drain"], env={}, cwd=deep)
-        assert result.returncode == 0
-        parsed = json.loads(result.stdout)
-        assert "DEEP-DOC-marker" in parsed["hookSpecificOutput"]["additionalContext"]
+        assert resolve_group_slug_from_cwd(deep, state) == ("mygroup", "my-slug")
 
-    def test_drain_from_workspace_root_still_works(self, tmp_path: Path):
-        """BUG 3: cwd = workspace root still drains its own queue."""
-        from camp.launch.inject import enqueue_doc
+    def test_resolves_from_the_workspace_root_itself(self, tmp_path: Path):
+        """No member segment needed — 3 parts (group/worktrees/slug) is enough."""
+        from camp.launch.inject import resolve_group_slug_from_cwd
 
-        ws = tmp_path / "ws"
-        ws.mkdir()
-        enqueue_doc(ws, "ROOT-DOC-marker")
+        state = tmp_path / "state"
+        ws = state / "mygroup" / "worktrees" / "my-slug"
+        ws.mkdir(parents=True)
 
-        result = _run_cli(["inject", "--drain"], env={}, cwd=ws)
-        assert result.returncode == 0
-        parsed = json.loads(result.stdout)
-        assert "ROOT-DOC-marker" in parsed["hookSpecificOutput"]["additionalContext"]
+        assert resolve_group_slug_from_cwd(ws, state) == ("mygroup", "my-slug")
 
-    def test_drain_with_no_camp_ancestor_no_output(self, tmp_path: Path):
-        """BUG 3: cwd nowhere near a .camp → no output, exit 0 (no-op safe)."""
+    def test_returns_none_outside_state_dir(self, tmp_path: Path):
+        from camp.launch.inject import resolve_group_slug_from_cwd
+
+        state = tmp_path / "state"
         nowhere = tmp_path / "nowhere" / "deep"
         nowhere.mkdir(parents=True)
 
-        result = _run_cli(["inject", "--drain"], env={}, cwd=nowhere)
+        assert resolve_group_slug_from_cwd(nowhere, state) is None
+
+    def test_returns_none_when_not_shaped_group_worktrees_slug(self, tmp_path: Path):
+        from camp.launch.inject import resolve_group_slug_from_cwd
+
+        state = tmp_path / "state"
+        stray = state / "mygroup" / "not-worktrees" / "my-slug" / "myrepo"
+        stray.mkdir(parents=True)
+
+        assert resolve_group_slug_from_cwd(stray, state) is None
+
+
+# ---------------------------------------------------------------------------
+# central_queue_dir — the queue root, relocated outside the workspace dir
+# ---------------------------------------------------------------------------
+
+
+class TestCentralQueueDir:
+    def test_central_queue_dir_is_not_inside_the_workspace_dir(self, tmp_path: Path):
+        from camp.launch.inject import central_queue_dir
+
+        state = tmp_path / "state"
+        qdir = central_queue_dir("mygroup", "my-slug", env=_state_env(state))
+        workspace_dir = state / "mygroup" / "worktrees" / "my-slug"
+
+        assert workspace_dir not in qdir.parents
+        assert qdir != workspace_dir
+
+    def test_central_queue_dir_created_owner_only(self, tmp_path: Path):
+        import stat
+
+        from camp.launch.inject import central_queue_dir
+
+        state = tmp_path / "state"
+        qdir = central_queue_dir("mygroup", "my-slug", env=_state_env(state))
+
+        assert stat.S_IMODE(qdir.stat().st_mode) == 0o700
+
+
+# ---------------------------------------------------------------------------
+# CLI drain resolves the queue root from cwd via (group, slug), not a walk-up
+# ---------------------------------------------------------------------------
+
+
+class TestInjectCliCwdResolution:
+    def test_drain_from_member_worktree_cwd_finds_the_central_queue(self, tmp_path: Path):
+        from camp.launch.inject import central_queue_dir, enqueue_doc
+
+        state = tmp_path / "state"
+        member_dir = state / "mygroup" / "worktrees" / "my-slug" / "myrepo"
+        member_dir.mkdir(parents=True)
+        env = _state_env(state)
+        enqueue_doc(central_queue_dir("mygroup", "my-slug", env=env), "CWD-RESOLVE-marker")
+
+        result = _run_cli(["inject", "--drain"], env=env, cwd=member_dir)
+        assert result.returncode == 0
+        parsed = json.loads(result.stdout)
+        assert "CWD-RESOLVE-marker" in parsed["hookSpecificOutput"]["additionalContext"]
+
+    def test_drain_from_deep_member_subdir_finds_the_central_queue(self, tmp_path: Path):
+        from camp.launch.inject import central_queue_dir, enqueue_doc
+
+        state = tmp_path / "state"
+        deep = state / "mygroup" / "worktrees" / "my-slug" / "myrepo" / "sub" / "dir"
+        deep.mkdir(parents=True)
+        env = _state_env(state)
+        enqueue_doc(central_queue_dir("mygroup", "my-slug", env=env), "DEEP-RESOLVE-marker")
+
+        result = _run_cli(["inject", "--drain"], env=env, cwd=deep)
+        assert result.returncode == 0
+        parsed = json.loads(result.stdout)
+        assert "DEEP-RESOLVE-marker" in parsed["hookSpecificOutput"]["additionalContext"]
+
+    def test_drain_clears_the_central_queue(self, tmp_path: Path):
+        from camp.launch.inject import central_queue_dir, enqueue_doc, queue_dir_for
+
+        state = tmp_path / "state"
+        member_dir = state / "mygroup" / "worktrees" / "my-slug" / "myrepo"
+        member_dir.mkdir(parents=True)
+        env = _state_env(state)
+        qroot = central_queue_dir("mygroup", "my-slug", env=env)
+        enqueue_doc(qroot, "doc")
+
+        _run_cli(["inject", "--drain"], env=env, cwd=member_dir)
+        assert list(queue_dir_for(qroot).iterdir()) == []
+
+    def test_drain_with_cwd_outside_any_state_dir_no_output(self, tmp_path: Path):
+        state = tmp_path / "state"
+        nowhere = tmp_path / "nowhere" / "deep"
+        nowhere.mkdir(parents=True)
+
+        result = _run_cli(["inject", "--drain"], env=_state_env(state), cwd=nowhere)
         assert result.returncode == 0
         assert result.stdout == ""
 
-    def test_drain_walkup_clears_workspace_queue(self, tmp_path: Path):
-        """BUG 3: draining from a member subdir clears the workspace queue."""
-        from camp.launch.inject import enqueue_doc, queue_dir_for
 
-        ws = tmp_path / "ws"
-        ws.mkdir()
-        enqueue_doc(ws, "doc")
-        member = ws / "member"
-        member.mkdir()
+# ---------------------------------------------------------------------------
+# FINDING 1 (security): a file planted straight into the OLD, task-reachable
+# location must never be drained into agent context — the queue moved, and
+# the old location is abandoned, not read.
+# ---------------------------------------------------------------------------
 
-        _run_cli(["inject", "--drain"], env={}, cwd=member)
-        assert list(queue_dir_for(ws).iterdir()) == []
+
+class TestOldPredictableSiblingLocationIsNeverDrained:
+    def test_file_planted_at_old_workspace_camp_location_is_not_drained(
+        self, tmp_path: Path
+    ) -> None:
+        """Reproduces the closed bypass: a malicious task step (same OS user,
+        full filesystem access, cwd = the member worktree) writes straight to
+        `<workspace>/.camp/inject_queue/` — reachable from its cwd as simply
+        `../.camp/inject_queue` — bypassing enqueue_doc/enqueue_notice and
+        build_notice_body entirely. That file must never surface in a drain."""
+        state = tmp_path / "state"
+        workspace_dir = state / "mygroup" / "worktrees" / "my-slug"
+        member_dir = workspace_dir / "myrepo"
+        member_dir.mkdir(parents=True)
+
+        old_queue_dir = workspace_dir / ".camp" / "inject_queue"
+        old_queue_dir.mkdir(parents=True)
+        (old_queue_dir / "evil.md").write_text("ATTACKER-INJECTED-marker")
+
+        result = _run_cli(["inject", "--drain"], env=_state_env(state), cwd=member_dir)
+
+        assert result.returncode == 0
+        assert "ATTACKER-INJECTED-marker" not in result.stdout
+        assert result.stdout == ""
 
 
 class TestInjectCli:
@@ -380,4 +453,170 @@ class TestDrainResilience:
         assert result.stdout == "", (
             f"camp inject --drain should produce no stdout with empty/dir-only queue. "
             f"Got: {result.stdout!r}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# build_notice_body — camp-authored, templated-fields-only notice bodies
+# ---------------------------------------------------------------------------
+
+
+class TestBuildNoticeBody:
+    def test_body_contains_templated_fields(self):
+        from camp.launch.inject import build_notice_body
+
+        body = build_notice_body(
+            member="myrepo",
+            phase="activate",
+            task="dep-install",
+            consequence="Run `camp status` for details.",
+        )
+        assert "myrepo" in body
+        assert "activate" in body
+        assert "dep-install" in body
+        assert "Run `camp status` for details." in body
+
+    def test_body_omits_task_line_when_task_is_none(self):
+        from camp.launch.inject import build_notice_body
+
+        body = build_notice_body(
+            member="myrepo",
+            phase="activate",
+            task=None,
+            consequence="All done.",
+        )
+        assert "Task:" not in body
+
+    def test_body_is_assembled_only_from_its_own_arguments(self):
+        """Two calls differing only in `consequence` must differ ONLY in the
+        substring supplied — proving the body is built from the template's
+        fields and not from any other data source (e.g. a task's captured
+        output that happened to be reachable at the call site)."""
+        from camp.launch.inject import build_notice_body
+
+        kwargs = dict(member="myrepo", phase="activate", task="dep-install")
+        body_a = build_notice_body(**kwargs, consequence="AAA-marker")
+        body_b = build_notice_body(**kwargs, consequence="BBB-marker")
+
+        assert "AAA-marker" in body_a and "BBB-marker" not in body_a
+        assert "BBB-marker" in body_b and "AAA-marker" not in body_b
+        assert body_a.replace("AAA-marker", "BBB-marker") == body_b
+
+
+# ---------------------------------------------------------------------------
+# enqueue_notice + staleness guard (notices only — member docs are exempt)
+# ---------------------------------------------------------------------------
+
+
+class TestEnqueueNoticeAndStaleness:
+    def test_enqueue_notice_writes_a_distinct_queue_file(self, tmp_path: Path):
+        from camp.launch.inject import build_notice_body, enqueue_notice, queue_dir_for
+
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        body = build_notice_body(
+            member="myrepo", phase="activate", task=None, consequence="Ready."
+        )
+        enqueue_notice(ws, body)
+
+        files = list(queue_dir_for(ws).iterdir())
+        assert len(files) == 1
+        assert files[0].read_text() == body
+
+    def test_fresh_notice_is_delivered(self, tmp_path: Path):
+        from camp.launch.inject import build_notice_body, enqueue_notice
+
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        body = build_notice_body(
+            member="myrepo", phase="activate", task=None, consequence="FRESH-NOTICE-marker"
+        )
+        enqueue_notice(ws, body)
+
+        stdout, code = _drain(ws)
+        assert code == 0
+        assert "FRESH-NOTICE-marker" in stdout
+
+    def test_stale_notice_is_dropped_not_delivered(self, tmp_path: Path):
+        """A notice whose file mtime is older than the staleness threshold is
+        dropped from the drain output. Backdating the ONE file's mtime (not
+        the process clock) is the safe way to simulate age."""
+        import os
+        from camp.launch.inject import (
+            NOTICE_MAX_AGE_SECONDS,
+            build_notice_body,
+            enqueue_notice,
+        )
+
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        body = build_notice_body(
+            member="myrepo", phase="activate", task=None, consequence="STALE-NOTICE-marker"
+        )
+        qfile = enqueue_notice(ws, body)
+
+        stale_time = qfile.stat().st_mtime - (NOTICE_MAX_AGE_SECONDS + 60)
+        os.utime(qfile, (stale_time, stale_time))
+
+        stdout, code = _drain(ws)
+        assert code == 0
+        assert "STALE-NOTICE-marker" not in stdout
+
+    def test_stale_notice_is_still_cleared_from_queue(self, tmp_path: Path):
+        """A stale notice is dropped as undelivered news, not left to linger."""
+        import os
+        from camp.launch.inject import (
+            NOTICE_MAX_AGE_SECONDS,
+            build_notice_body,
+            enqueue_notice,
+            queue_dir_for,
+        )
+
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        body = build_notice_body(
+            member="myrepo", phase="activate", task=None, consequence="STALE-CLEAR-marker"
+        )
+        qfile = enqueue_notice(ws, body)
+        stale_time = qfile.stat().st_mtime - (NOTICE_MAX_AGE_SECONDS + 60)
+        os.utime(qfile, (stale_time, stale_time))
+
+        _drain(ws)
+
+        assert list(queue_dir_for(ws).iterdir()) == []
+
+    def test_member_doc_never_age_filtered_however_old(self, tmp_path: Path):
+        """The staleness guard applies to notices only — a member doc enqueued
+        by camp activate (enqueue_doc) is delivered however old its mtime."""
+        import os
+        from camp.launch.inject import NOTICE_MAX_AGE_SECONDS, enqueue_doc
+
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        qfile = enqueue_doc(ws, "ANCIENT-MEMBER-DOC-marker")
+
+        ancient_time = qfile.stat().st_mtime - (NOTICE_MAX_AGE_SECONDS * 100)
+        os.utime(qfile, (ancient_time, ancient_time))
+
+        stdout, code = _drain(ws)
+        assert code == 0
+        assert "ANCIENT-MEMBER-DOC-marker" in stdout
+
+    def test_ordering_preserved_across_member_doc_and_notice(self, tmp_path: Path):
+        from camp.launch.inject import build_notice_body, enqueue_doc, enqueue_notice
+
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        enqueue_doc(ws, "MEMBER-DOC-FIRST")
+        body = build_notice_body(
+            member="myrepo", phase="activate", task=None, consequence="NOTICE-SECOND"
+        )
+        enqueue_notice(ws, body)
+        enqueue_doc(ws, "MEMBER-DOC-THIRD")
+
+        stdout, _ = _drain(ws)
+        parsed = json.loads(stdout)
+        ctx = parsed["hookSpecificOutput"]["additionalContext"]
+        assert ctx.index("MEMBER-DOC-FIRST") < ctx.index("NOTICE-SECOND") < ctx.index(
+            "MEMBER-DOC-THIRD"
         )

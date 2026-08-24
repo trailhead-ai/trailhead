@@ -9,9 +9,10 @@ lazy-imports — are importable whether run from the repo or an installed plugin
 unit-testable and the ``bin/camp`` wrapper's exec target stable.
 
 The inject-route lightness (the hidden ``camp inject --drain`` PostToolUse hook
-skips the bootstrap walk and the spine module-load) is handled inside
-``dispatch.main`` — importing ``camp.cli.dispatch`` pulls in only the pure-data
-verb taxonomy, never spine or trailhead.paths.
+skips the spine module-load, and skips the bootstrap walk too when an explicit
+``--workspace`` is given) is handled inside ``dispatch.main`` and
+``camp.cli.inject`` — importing ``camp.cli.dispatch`` pulls in only the
+pure-data verb taxonomy, never spine.
 """
 from __future__ import annotations
 

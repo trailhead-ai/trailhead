@@ -12,6 +12,10 @@ Test contract:
   the manifest (bring_up_workspace not called again).
 - No `claude` exec is attempted (os.execvp never called).
 - Seed/provision failure → nonzero exit + stderr message; stdout empty.
+- `--activate` triggers every member's activate-phase work (non-blocking — the
+  handler returns without waiting for it) and is a clean no-op for a member
+  that declares no activate-phase task. Without `--activate`, no activate-phase
+  work is triggered at all.
 """
 
 from __future__ import annotations
@@ -398,3 +402,206 @@ class TestNoSlug:
         err = capsys.readouterr().err
         assert "camp new" in err
         assert "camp ai" not in err
+
+
+def _activate_task(name: str = "npm-ci") -> dict:
+    """A minimal resolved activate-phase task, config-shaped (not manifest-shaped)."""
+    return {
+        "name": name,
+        "phase": "activate",
+        "required": True,
+        "steps": [{"cmd": ["true"]}],
+    }
+
+
+class TestNewActivateFlag:
+    """`camp new --activate` hands every member's activate-phase work to the
+    detached provisioner and returns without waiting for it — the mechanism a
+    non-interactive consumer (e.g. ranger) uses to get work-enabling tasks run
+    without ever calling `camp activate` interactively."""
+
+    def test_activate_flag_calls_the_trigger_without_waiting(
+        self, camp_cli, group_env, monkeypatch
+    ):
+        import camp.cli.session as cli_session
+
+        calls = []
+        monkeypatch.setattr(
+            cli_session,
+            "trigger_activate_phase_work",
+            lambda group, slug, *, env=None, wait=True: calls.append((group, slug, env, wait)),
+        )
+        g = group_env
+
+        camp_cli._cmd_new_group_cli(["feat-act", "--activate"], g["group"], g["env"], dry_run=False)
+
+        assert len(calls) == 1, "camp new --activate must call the activate-phase trigger exactly once"
+        called_group, called_slug, called_env, called_wait = calls[0]
+        assert called_group is g["group"]
+        assert called_slug == "feat-act"
+        assert called_env == g["env"]
+        assert called_wait is True, "without --no-wait, --activate waits for boot-readiness"
+
+    def test_without_activate_flag_the_trigger_is_never_called(
+        self, camp_cli, group_env, monkeypatch
+    ):
+        import camp.cli.session as cli_session
+
+        calls = []
+        monkeypatch.setattr(
+            cli_session,
+            "trigger_activate_phase_work",
+            lambda *a, **k: calls.append((a, k)),
+        )
+        g = group_env
+
+        camp_cli._cmd_new_group_cli(["feat-noact"], g["group"], g["env"], dry_run=False)
+
+        assert calls == [], (
+            "without --activate, camp new must not trigger activate-phase work — "
+            "this is what keeps an expensive graph build from firing on every new "
+            "workspace for every member"
+        )
+
+    def test_activate_flag_spawns_background_activation_for_a_declaring_member(
+        self, camp_cli, group_env, monkeypatch
+    ):
+        """Real trigger_activate_phase_work (not mocked away): a member declaring
+        an activate-phase task gets a detached `camp activate --background` spawn."""
+        import camp.provision.lifecycle as lifecycle
+        import camp.provision.provision as provision
+
+        # The trigger waits for boot-readiness first; group_env's stubbed
+        # spawn_detached_provisioner never actually provisions anything, so
+        # boot-readiness is faked here rather than left to time out for real.
+        monkeypatch.setattr(
+            lifecycle, "wait_for_provisioning_ready", lambda *a, **k: ("ready", {})
+        )
+        calls = []
+        monkeypatch.setattr(
+            provision,
+            "spawn_detached_provisioner",
+            lambda **kw: calls.append(kw),
+        )
+        g = group_env
+        g["group"]["members"][0]["tasks"] = [_activate_task()]
+
+        camp_cli._cmd_new_group_cli(["feat-act2", "--activate"], g["group"], g["env"], dry_run=False)
+
+        activate_calls = [c for c in calls if c.get("_argv") and c["_argv"][1] == "activate"]
+        assert len(activate_calls) == 1, calls
+        argv = activate_calls[0]["_argv"]
+        assert argv[2] == "repo_a", "the argv must name the declaring member"
+        assert "--background" in argv
+
+    def test_activate_flag_on_a_member_with_no_activate_tasks_spawns_nothing(
+        self, camp_cli, group_env, monkeypatch
+    ):
+        """Clean no-op: a group whose members declare no activate-phase task
+        must not spawn a detached activation run at all."""
+        import camp.provision.lifecycle as lifecycle
+        import camp.provision.provision as provision
+
+        monkeypatch.setattr(
+            lifecycle, "wait_for_provisioning_ready", lambda *a, **k: ("ready", {})
+        )
+        calls = []
+        monkeypatch.setattr(
+            provision,
+            "spawn_detached_provisioner",
+            lambda **kw: calls.append(kw),
+        )
+        g = group_env  # group_env's member carries no "tasks" key
+
+        camp_cli._cmd_new_group_cli(["feat-noop", "--activate"], g["group"], g["env"], dry_run=False)
+
+        activate_calls = [c for c in calls if c.get("_argv") and c["_argv"][1] == "activate"]
+        assert activate_calls == []
+
+    def test_trigger_gives_up_signal_on_stderr_when_boot_never_reaches_ready(
+        self, group_env, monkeypatch, capsys
+    ):
+        """When the bounded boot-readiness wait never reaches "ready",
+        trigger_activate_phase_work must say so on stderr rather than returning
+        silently — a caller (and a human reading `camp new --activate` output)
+        needs to be able to tell "gave up" apart from "queued the work"."""
+        import camp.cli.session as cli_session
+        import camp.provision.lifecycle as lifecycle
+        import camp.provision.provision as provision
+
+        monkeypatch.setattr(
+            lifecycle, "wait_for_provisioning_ready", lambda *a, **k: ("timeout", {})
+        )
+        spawn_calls = []
+        monkeypatch.setattr(
+            provision, "spawn_detached_provisioner", lambda **kw: spawn_calls.append(kw)
+        )
+        g = group_env
+        g["group"]["members"][0]["tasks"] = [_activate_task()]
+
+        cli_session.trigger_activate_phase_work(g["group"], "feat-giveup", env=g["env"], wait=True)
+
+        assert spawn_calls == [], "no work should be triggered when boot never reaches ready"
+        err = capsys.readouterr().err
+        assert err.strip() != "", (
+            "trigger_activate_phase_work must emit a stderr signal when it gives up "
+            "waiting for boot-readiness"
+        )
+        assert "feat-giveup" in err
+
+    def test_trigger_is_silent_on_stderr_when_work_is_actually_queued(
+        self, group_env, monkeypatch, capsys
+    ):
+        """The successful (queued) path is distinguishable from the give-up
+        path: it must not emit the same give-up signal on stderr."""
+        import camp.cli.session as cli_session
+        import camp.provision.lifecycle as lifecycle
+        import camp.provision.provision as provision
+
+        monkeypatch.setattr(
+            lifecycle, "wait_for_provisioning_ready", lambda *a, **k: ("ready", {})
+        )
+        spawn_calls = []
+        monkeypatch.setattr(
+            provision, "spawn_detached_provisioner", lambda **kw: spawn_calls.append(kw)
+        )
+        g = group_env
+        g["group"]["members"][0]["tasks"] = [_activate_task()]
+
+        cli_session.trigger_activate_phase_work(g["group"], "feat-queued", env=g["env"], wait=True)
+
+        activate_calls = [c for c in spawn_calls if c.get("_argv") and c["_argv"][1] == "activate"]
+        assert len(activate_calls) == 1, "work must actually be triggered on the ready path"
+        err = capsys.readouterr().err
+        assert err.strip() == "", f"queued path must not print the give-up signal, got: {err!r}"
+
+    def test_activate_composes_with_no_wait(self, camp_cli, group_env, monkeypatch, capsys):
+        """--activate and --no-wait compose: --no-wait still skips the launch wait
+        and --activate still fires, independent of one another."""
+        import camp.cli.session as cli_session
+
+        wait_calls = []
+        trigger_calls = []
+        monkeypatch.setattr(
+            cli_session,
+            "wait_for_provisioning",
+            lambda *a, **k: wait_calls.append((a, k)) or True,
+        )
+        monkeypatch.setattr(
+            cli_session,
+            "trigger_activate_phase_work",
+            lambda group, slug, *, env=None, wait=True: trigger_calls.append((slug, wait)),
+        )
+        g = group_env
+
+        camp_cli._cmd_new_group_cli(
+            ["feat-both", "--launch", "--no-wait", "--activate"], g["group"], g["env"], dry_run=False
+        )
+
+        err = capsys.readouterr().err
+        assert "camp new: --no-wait" in err
+        assert wait_calls == [], "--no-wait must still skip the bounded wait"
+        assert trigger_calls == [("feat-both", False)], (
+            "--activate must still fire alongside --no-wait, and --no-wait must "
+            "propagate into the activate trigger's own wait too"
+        )

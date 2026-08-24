@@ -329,9 +329,26 @@ def cmd_setup_group(
                         only ever be chasing an optional task here.
     Pending/failed members provisioned normally do NOT carry a `retry` field.
 
+    Activate-phase retry (execution mode: SYNCHRONOUS — `camp setup` waits for
+    it, unlike `camp activate`'s handoff to a detached process). After the
+    provision-phase pass above releases `.reconcile.lock`, every boot-ready
+    member carrying an activate-phase task recorded "failed" has that task
+    retried in a SECOND pass, by calling `run_activate_tasks_in_background`
+    (provision/activation.py) in-process — the same body `camp activate`'s
+    detached run executes, cleanup-first, against the manifest's persisted
+    per-task state. That function itself takes `.reconcile.lock` only for its
+    brief closing manifest persist, never across the task subprocess, so this
+    retry never holds the lock for the retried task's duration: a concurrent
+    `camp rm`, `camp activate`, or another slug's reconcile is never blocked
+    by it. This second pass runs OUTSIDE (after) the `with reconcile_lock`
+    block above rather than nested inside it — `.reconcile.lock` is not
+    reentrant, so nesting would deadlock the moment the retry tried to persist
+    its own result.
+
     Returns {"slug", "members": {name: {"provision_state", "reason"?, "retry"?}}}.
     """
-    from .reconcile import _has_outstanding_provision_tasks
+    from .activation import run_activate_tasks_in_background
+    from .reconcile import _has_outstanding_activate_tasks, _has_outstanding_provision_tasks
 
     group_name = group["group"]["name"]
     mpath = manifest_path_for(group_name, slug, env=env)
@@ -370,6 +387,17 @@ def cmd_setup_group(
             result, _ = _provision_member_and_flip(group, slug, member, entry, mpath, env=env)
             results[name] = result
 
+    # Second pass: activate-phase retry, deliberately outside the lock above.
+    data = read_central_manifest(mpath)
+    for entry in data.get("members", []):
+        name = entry["name"]
+        member = member_by_name.get(name)
+        if member is None or entry.get("provision_state") != "ready":
+            continue
+        if not _has_outstanding_activate_tasks(member, entry.get("tasks")):
+            continue
+        run_activate_tasks_in_background(group, slug, name, env=env)
+
     return {"slug": slug, "members": results}
 
 
@@ -387,17 +415,27 @@ def provision_status_code(
         3  any member failed (failed takes precedence over pending)
 
     Exit codes are driven purely by each member's provision_state, NOT by
-    individual task states: a ready member with a failed OPTIONAL task stays
-    exit 0 (a failed REQUIRED task already flips the member itself to failed).
+    individual task states, and NOT by work_state: a ready member with a
+    failed OPTIONAL task stays exit 0 (a failed REQUIRED task already flips
+    the member itself to failed), and a member whose work-enabling tasks are
+    still installing or have failed never moves the exit code — that fact is
+    surfaced only via the report's `work_code` and each member's `work_state`.
     Each member carries its persisted per-task state map (`tasks`, always
     present — an empty dict when the member has no tasks) so callers can surface
     per-task detail without changing exit-code semantics.
 
     report = {
-        "slug", "code",
-        "members": [{"name", "provision_state", "tasks", "reason"?}],
-    }, where `tasks` is the manifest's {task-name: {"state", "reason"?}} map.
+        "slug", "code", "work_code",
+        "members": [{"name", "provision_state", "work_state", "tasks", "reason"?}],
+    }, where `tasks` is the manifest's {task-name: {"state", "reason"?}} map and
+    `work_code` is a distinct 0/2/3-style rollup over each member's work_state
+    (see manifest.work_state_for_member) — 0 when every member is work-ready or
+    WORK_STATE_NOT_APPLICABLE, 2 when any is pending, 3 when any is failed
+    (failed takes precedence, mirroring `code`). `work_code` never influences
+    `code` or the process exit status.
     """
+    from ..group.manifest import work_state_for_member
+
     group_name = group["group"]["name"]
     mpath = manifest_path_for(group_name, slug, env=env)
     data = read_central_manifest(mpath)
@@ -405,11 +443,15 @@ def provision_status_code(
     members = []
     any_failed = False
     any_pending = False
+    any_work_failed = False
+    any_work_pending = False
     for entry in data.get("members", []):
         state = entry.get("provision_state", "pending")
+        work_state = work_state_for_member(entry)
         m: dict[str, Any] = {
             "name": entry["name"],
             "provision_state": state,
+            "work_state": work_state,
             "tasks": entry.get("tasks") or {},
         }
         if state == "failed":
@@ -418,6 +460,11 @@ def provision_status_code(
                 m["reason"] = entry["reason"]
         elif state != "ready":
             any_pending = True
+
+        if work_state == "failed":
+            any_work_failed = True
+        elif work_state == "pending":
+            any_work_pending = True
         members.append(m)
 
     if any_failed:
@@ -427,7 +474,43 @@ def provision_status_code(
     else:
         code = 0
 
-    return code, {"slug": slug, "code": code, "members": members}
+    if any_work_failed:
+        work_code = 3
+    elif any_work_pending:
+        work_code = 2
+    else:
+        work_code = 0
+
+    return code, {"slug": slug, "code": code, "work_code": work_code, "members": members}
+
+
+def status_header(report: dict[str, Any]) -> str:
+    """Derive `camp status`'s workspace-level header state from a
+    `provision_status_code` report.
+
+    Boot-readiness (`report["code"]`) takes precedence over work-readiness
+    (`report["work_code"]`): work can't even begin until every member
+    materializes, so a workspace that hasn't finished booting reads as
+    "provisioning" or "failed" regardless of work state. Only once every
+    member is boot-ready does the header reflect work-readiness:
+
+        code == 3               -> "failed"
+        code == 2               -> "provisioning"
+        code == 0, work_code 0  -> "ready"
+        code == 0, work_code 2  -> "ready, work pending"
+        code == 0, work_code 3  -> "ready, work failed"
+    """
+    code = report["code"]
+    work_code = report.get("work_code", 0)
+    if code == 3:
+        return "failed"
+    if code == 2:
+        return "provisioning"
+    if work_code == 3:
+        return "ready, work failed"
+    if work_code == 2:
+        return "ready, work pending"
+    return "ready"
 
 
 def wait_for_provisioning_ready(

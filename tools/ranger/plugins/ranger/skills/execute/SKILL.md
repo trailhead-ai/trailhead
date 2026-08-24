@@ -174,18 +174,42 @@ provision, record `SKIPPED <reason>`, and move to the next task.
 ### 4.2 Provision the ephemeral workspace
 
 ```sh
-camp new <slug>
+camp new <slug> --activate
 ```
 
 `<slug>` is the entry's own `slug` from the derivation — never one you compute yourself.
-Provisioning is asynchronous; poll it:
+`--activate` triggers the workspace's activate-phase work — dependency install, the graph
+build — at creation time. This flag is not optional here: the dispatched executor agent
+starts no harness session in its ephemeral workspace, so no `SessionStart` hook ever fires
+to trigger it another way, and without `--activate` those tasks would never run at all
+rather than merely running late. Provisioning is asynchronous; poll it:
 
 ```sh
 camp status <slug> --json
 ```
 
 Exit 0 is ready, 2 is still provisioning (poll again), 3 is failed. On exit 3, record
-`FAILED camp provisioning failed` and move on.
+`FAILED camp provisioning failed` and move on. This exit code reflects boot-readiness
+alone and is unchanged by work-readiness.
+
+**Once boot-ready, wait on work-readiness before dispatching — never dispatch on the exit
+code alone.** The same `camp status <slug> --json` report carries `work_code`, a distinct
+top-level key: its own 0/2/3-style rollup over the workspace's work-enabling tasks,
+separate from the exit code and never influencing it. Keep polling `camp status <slug>
+--json` and reading `work_code`: 0 is work-ready — dispatch; 2 is still installing — poll
+again; on `work_code == 3` record `FAILED work-readiness failed` and move on. This reason
+is distinct from `FAILED camp provisioning failed` so the run report can tell a boot
+failure from a work-enabling failure.
+
+**Bound the `work_code` poll — it can genuinely never terminate on its own.** Unlike
+boot-readiness, work-readiness has states with no path back to 0 or 3: the activate-phase
+trigger can give up on its own bounded wait and trigger nothing, or a detached provisioner
+can be killed mid-run, either way leaving `work_code` stuck at 2 (pending) forever, because
+nothing in this drain ever calls `camp activate` to re-trigger it. Poll for at most 15
+minutes; on expiry, record `FAILED work-readiness poll timed out` and move on. This reason
+is distinct from both `FAILED camp provisioning failed` and `FAILED work-readiness failed`
+so the run report can tell a poll that gave up apart from a poll that got a definite
+answer.
 
 **If `camp new` fails naming a worktree that already exists**, suspect a
 stale worktree registration

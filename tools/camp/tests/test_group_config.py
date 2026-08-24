@@ -913,6 +913,8 @@ def test_task_valid_config_parses_to_normalized_shape(tmp_path: Path) -> None:
             "phase": "provision",
             "required": True,
             "timeout_seconds": 30,
+            "cleanup": None,
+            "capability": None,
             "steps": [
                 {
                     "name": "seed",
@@ -958,6 +960,8 @@ cmd = ["echo", "hi"]
     assert task["phase"] == "provision"
     assert task["required"] is False
     assert task["timeout_seconds"] is None
+    assert task["cleanup"] is None
+    assert task["capability"] is None
 
 
 def test_task_step_unknown_placeholder_raises(tmp_path: Path) -> None:
@@ -1277,6 +1281,328 @@ cmd = ["echo", "hi"]
     cfg = load_group(f)
     task_names = [t["name"] for t in cfg["members"][0]["tasks"]]
     assert task_names == ["bootstrap", "graphify"]
+
+
+# ---------------------------------------------------------------------------
+# [tasks.<name>].cleanup — optional retry-cleanup argv
+# ---------------------------------------------------------------------------
+
+
+def test_task_cleanup_list_resolves_to_argv(tmp_path: Path) -> None:
+    """A [tasks.<name>] block with cleanup = [...] resolves to a task carrying
+    that argv list, validated in the same shape as a step's cmd."""
+    from camp.group.config import load_group
+
+    toml = """\
+[group]
+name = "testgroup"
+
+[[members]]
+name = "myrepo"
+repo_root = "/tmp/myrepo"
+tasks = ["mytask"]
+
+[tasks.mytask]
+cleanup = ["make", "clean"]
+[[tasks.mytask.steps]]
+name = "step1"
+cmd = ["echo", "hi"]
+"""
+    f = tmp_path / "testgroup.toml"
+    f.write_text(toml)
+    cfg = load_group(f)
+    task = cfg["members"][0]["tasks"][0]
+    assert task["cleanup"] == ["make", "clean"]
+
+
+def test_task_no_cleanup_key_resolves_to_none_not_empty_list(tmp_path: Path) -> None:
+    """A task with no cleanup key resolves with cleanup absent/None — not an
+    empty list, which would later read as 'run nothing' rather than 'nothing
+    declared'."""
+    from camp.group.config import load_group
+
+    toml = """\
+[group]
+name = "testgroup"
+
+[[members]]
+name = "myrepo"
+repo_root = "/tmp/myrepo"
+tasks = ["mytask"]
+
+[tasks.mytask]
+[[tasks.mytask.steps]]
+name = "step1"
+cmd = ["echo", "hi"]
+"""
+    f = tmp_path / "testgroup.toml"
+    f.write_text(toml)
+    cfg = load_group(f)
+    task = cfg["members"][0]["tasks"][0]
+    assert task["cleanup"] is None
+
+
+def test_task_cleanup_string_raises(tmp_path: Path) -> None:
+    """cleanup declared as a bare string (not a list) is a config error naming
+    the task, not a silent coercion into a one-element argv."""
+    from camp.group.config import GroupConfigError, load_group
+
+    toml = """\
+[group]
+name = "testgroup"
+
+[[members]]
+name = "myrepo"
+repo_root = "/tmp/myrepo"
+tasks = ["mytask"]
+
+[tasks.mytask]
+cleanup = "make clean"
+[[tasks.mytask.steps]]
+name = "step1"
+cmd = ["echo", "hi"]
+"""
+    f = tmp_path / "testgroup.toml"
+    f.write_text(toml)
+    with pytest.raises(GroupConfigError) as exc_info:
+        load_group(f)
+    msg = str(exc_info.value)
+    assert str(f) in msg or "testgroup.toml" in msg
+    assert "cleanup" in msg
+    assert "mytask" in msg
+
+
+def test_task_cleanup_nested_list_raises(tmp_path: Path) -> None:
+    """cleanup declared as a nested list is a config error naming the task."""
+    from camp.group.config import GroupConfigError, load_group
+
+    toml = """\
+[group]
+name = "testgroup"
+
+[[members]]
+name = "myrepo"
+repo_root = "/tmp/myrepo"
+tasks = ["mytask"]
+
+[tasks.mytask]
+cleanup = [["make", "clean"]]
+[[tasks.mytask.steps]]
+name = "step1"
+cmd = ["echo", "hi"]
+"""
+    f = tmp_path / "testgroup.toml"
+    f.write_text(toml)
+    with pytest.raises(GroupConfigError) as exc_info:
+        load_group(f)
+    msg = str(exc_info.value)
+    assert str(f) in msg or "testgroup.toml" in msg
+    assert "cleanup" in msg
+    assert "mytask" in msg
+
+
+def test_task_cleanup_non_list_scalar_raises(tmp_path: Path) -> None:
+    """cleanup declared as a non-list scalar (e.g. an int) is a config error
+    naming the task."""
+    from camp.group.config import GroupConfigError, load_group
+
+    toml = """\
+[group]
+name = "testgroup"
+
+[[members]]
+name = "myrepo"
+repo_root = "/tmp/myrepo"
+tasks = ["mytask"]
+
+[tasks.mytask]
+cleanup = 42
+[[tasks.mytask.steps]]
+name = "step1"
+cmd = ["echo", "hi"]
+"""
+    f = tmp_path / "testgroup.toml"
+    f.write_text(toml)
+    with pytest.raises(GroupConfigError) as exc_info:
+        load_group(f)
+    msg = str(exc_info.value)
+    assert str(f) in msg or "testgroup.toml" in msg
+    assert "cleanup" in msg
+    assert "mytask" in msg
+
+
+def test_legacy_bootstrap_task_carries_no_cleanup_key(tmp_path: Path) -> None:
+    """The bootstrap = [...] shorthand emits no cleanup key by construction —
+    cleanup is impossible on a legacy-normalized task. Also pins the rest of
+    the normalized shape unchanged: phase="provision", required=True,
+    timeout_seconds=None."""
+    from camp.group.config import load_group
+
+    f = tmp_path / "testgroup.toml"
+    f.write_text(_VALID_TOML)
+    cfg = load_group(f)
+    task = cfg["members"][0]["tasks"][0]
+    assert task["name"] == "bootstrap"
+    assert task["phase"] == "provision"
+    assert task["required"] is True
+    assert task["timeout_seconds"] is None
+    assert "cleanup" not in task
+
+
+def test_legacy_hooks_task_carries_no_cleanup_key(tmp_path: Path) -> None:
+    """The [[members.hooks]] kind="dep-install" shorthand emits no cleanup key
+    by construction. Also pins the rest of the normalized shape unchanged:
+    phase="activate", required=True, timeout_seconds=None."""
+    from camp.group.config import load_group
+
+    toml = """\
+[group]
+name = "testgroup"
+
+[[members]]
+name = "myrepo"
+repo_root = "/tmp/myrepo"
+
+[[members.hooks]]
+kind = "dep-install"
+cmd = ["npm", "install"]
+"""
+    f = tmp_path / "testgroup.toml"
+    f.write_text(toml)
+    cfg = load_group(f)
+    task = cfg["members"][0]["tasks"][0]
+    assert task["name"] == "dep-install"
+    assert task["phase"] == "activate"
+    assert task["required"] is True
+    assert task["timeout_seconds"] is None
+    assert "cleanup" not in task
+
+
+# ---------------------------------------------------------------------------
+# [tasks.<name>].capability — optional capability-consequence string
+# ---------------------------------------------------------------------------
+
+
+def test_task_capability_string_resolves(tmp_path: Path) -> None:
+    """A [tasks.<name>] block with capability = "..." resolves to a task
+    carrying that string verbatim."""
+    from camp.group.config import load_group
+
+    toml = """\
+[group]
+name = "testgroup"
+
+[[members]]
+name = "myrepo"
+repo_root = "/tmp/myrepo"
+tasks = ["mytask"]
+
+[tasks.mytask]
+capability = "the code-review-graph MCP server has no graph yet — prefer Grep/Glob until told otherwise"
+[[tasks.mytask.steps]]
+name = "step1"
+cmd = ["echo", "hi"]
+"""
+    f = tmp_path / "testgroup.toml"
+    f.write_text(toml)
+    cfg = load_group(f)
+    task = cfg["members"][0]["tasks"][0]
+    assert task["capability"] == (
+        "the code-review-graph MCP server has no graph yet — prefer Grep/Glob until told "
+        "otherwise"
+    )
+
+
+def test_task_no_capability_key_resolves_to_none_not_empty_string(tmp_path: Path) -> None:
+    """A task with no capability key resolves with capability absent/None —
+    never an empty string."""
+    from camp.group.config import load_group
+
+    toml = """\
+[group]
+name = "testgroup"
+
+[[members]]
+name = "myrepo"
+repo_root = "/tmp/myrepo"
+tasks = ["mytask"]
+
+[tasks.mytask]
+[[tasks.mytask.steps]]
+name = "step1"
+cmd = ["echo", "hi"]
+"""
+    f = tmp_path / "testgroup.toml"
+    f.write_text(toml)
+    cfg = load_group(f)
+    task = cfg["members"][0]["tasks"][0]
+    assert task["capability"] is None
+
+
+def test_task_capability_non_string_raises(tmp_path: Path) -> None:
+    """capability declared as a non-string value is a config error naming the
+    task."""
+    from camp.group.config import GroupConfigError, load_group
+
+    toml = """\
+[group]
+name = "testgroup"
+
+[[members]]
+name = "myrepo"
+repo_root = "/tmp/myrepo"
+tasks = ["mytask"]
+
+[tasks.mytask]
+capability = 42
+[[tasks.mytask.steps]]
+name = "step1"
+cmd = ["echo", "hi"]
+"""
+    f = tmp_path / "testgroup.toml"
+    f.write_text(toml)
+    with pytest.raises(GroupConfigError) as exc_info:
+        load_group(f)
+    msg = str(exc_info.value)
+    assert str(f) in msg or "testgroup.toml" in msg
+    assert "capability" in msg
+    assert "mytask" in msg
+
+
+def test_legacy_bootstrap_task_carries_no_capability_key(tmp_path: Path) -> None:
+    """The bootstrap = [...] shorthand emits no capability key by
+    construction — capability is impossible on a legacy-normalized task."""
+    from camp.group.config import load_group
+
+    f = tmp_path / "testgroup.toml"
+    f.write_text(_VALID_TOML)
+    cfg = load_group(f)
+    task = cfg["members"][0]["tasks"][0]
+    assert "capability" not in task
+
+
+def test_legacy_hooks_task_carries_no_capability_key(tmp_path: Path) -> None:
+    """The [[members.hooks]] kind="dep-install" shorthand emits no capability
+    key by construction."""
+    from camp.group.config import load_group
+
+    toml = """\
+[group]
+name = "testgroup"
+
+[[members]]
+name = "myrepo"
+repo_root = "/tmp/myrepo"
+
+[[members.hooks]]
+kind = "dep-install"
+cmd = ["npm", "install"]
+"""
+    f = tmp_path / "testgroup.toml"
+    f.write_text(toml)
+    cfg = load_group(f)
+    task = cfg["members"][0]["tasks"][0]
+    assert "capability" not in task
 
 
 # ---------------------------------------------------------------------------

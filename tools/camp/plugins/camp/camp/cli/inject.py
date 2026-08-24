@@ -1,10 +1,13 @@
 """The hidden ``camp inject --drain`` command group.
 
 The PostToolUse hook handler for the claude-hook inject strategy. It fires on
-every Bash tool call, so it must stay near-free — this module imports only
-stdlib at load time and pulls ``camp.launch.inject`` lazily inside the handler,
-and ``dispatch.main`` routes to it BEFORE the bootstrap walk and the heavy spine
-module-load.
+every Bash tool call, so it must stay near the heavy spine module — it never
+imports that, and ``dispatch.main`` routes to it BEFORE the spine module-load.
+It DOES need ``trailhead.paths`` (to derive the central state dir the queue now
+lives under — see ``camp.launch.inject``'s module docstring for why), so when
+no ``--workspace`` is given it lazily calls the same cheap, pure-filesystem-walk
+``_bootstrap.ensure_trailhead_importable()`` every other command uses; an
+explicit ``--workspace`` skips even that.
 """
 from __future__ import annotations
 
@@ -16,13 +19,17 @@ def _cmd_inject_cli(args: list[str]) -> None:
     """camp inject --drain [--workspace <dir>] — drain the inject queue (hidden).
 
     The PostToolUse hook handler for the claude-hook inject strategy. Reads the
-    workspace inject queue and emits the Claude Code additionalContext JSON, then
-    clears the queue; an empty queue emits nothing. Without --workspace, the
-    workspace root is located by walking UP from the cwd to the nearest ancestor
-    containing a `.camp/` dir — Claude Code runs PostToolUse hooks in the session's
-    current cwd, which may be a member worktree (<workspace>/<member>) rather than
-    the workspace root. If no `.camp/` ancestor is found, the cwd is drained as-is
+    queue and emits the Claude Code additionalContext JSON, then clears it; an
+    empty queue emits nothing. Without --workspace, the queue root is located
+    by mapping the session's cwd to (group, slug) — Claude Code runs
+    PostToolUse hooks in the session's current cwd, which is typically a
+    member worktree (`central_state_dir(group)/worktrees/<slug>/<member>`) —
+    via `resolve_group_slug_from_cwd`, then `central_queue_dir(group, slug)`.
+    If cwd doesn't resolve to a (group, slug), there is nothing to drain
     (no-op safe). Resilient: never crashes a tool call — any error → exit 0.
+
+    --workspace, when given, names the queue root directly (bypassing the cwd
+    resolution) — used by tests and any caller that already knows it.
 
     The --workspace parse is inlined here (rather than reusing
     spine._consume_flag_value) so the per-Bash-call drain path never imports the
@@ -37,10 +44,28 @@ def _cmd_inject_cli(args: list[str]) -> None:
             workspace = arg[len("--workspace="):]
             break
 
+    code = 0
     try:
-        from ..launch.inject import drain_queue, find_workspace_root
-        ws_dir = Path(workspace) if workspace else find_workspace_root(Path.cwd())
-        code = drain_queue(ws_dir)
+        from ..launch.inject import central_queue_dir, drain_queue, resolve_group_slug_from_cwd
+
+        if workspace:
+            queue_root: Path | None = Path(workspace)
+        else:
+            from _bootstrap import ensure_trailhead_importable
+
+            ensure_trailhead_importable()
+            import trailhead.paths as _paths
+
+            camp_state_dir = _paths.state_dir("camp")
+            resolved = resolve_group_slug_from_cwd(Path.cwd(), camp_state_dir)
+            if resolved is None:
+                queue_root = None
+            else:
+                group_name, slug = resolved
+                queue_root = central_queue_dir(group_name, slug)
+
+        if queue_root is not None:
+            code = drain_queue(queue_root)
     except Exception:
         # Never crash a tool call.
         code = 0
