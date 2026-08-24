@@ -987,13 +987,20 @@ cmd = ["echo", "installing"]
 
 
 # ---------------------------------------------------------------------------
-# Optional activate-task failure — work_state stays 'ready', warns on stderr.
+# Optional activate-task failure — work_state reflects the actual outcome,
+# not whether the failure happened to raise.
 # ---------------------------------------------------------------------------
 
 
-def test_optional_task_failure_stays_work_ready_and_warns(tmp_path: Path, capsys) -> None:
-    """An optional activate-task failure warns on stderr, records the failed
-    state, and work_state still becomes 'ready' (activation proceeds)."""
+def test_optional_task_failure_marks_work_state_failed_and_warns(
+    tmp_path: Path, capsys
+) -> None:
+    """An optional activate-task's failure warns on stderr, records the
+    failed state, AND marks the member's work_state 'failed' — a failed task
+    means work-failed regardless of whether it was required. Only a
+    required-task's failure raises TaskError, but a caller that derived
+    work_state from "did run_member_tasks raise" would wrongly read this
+    member as work-ready with no node_modules / no build present."""
     from camp.provision.activation import run_activate_tasks_in_background
     from camp.group.manifest import read_central_manifest
 
@@ -1028,13 +1035,65 @@ def test_optional_task_failure_stays_work_ready_and_warns(tmp_path: Path, capsys
 
     data = read_central_manifest(mpath)
     member_entry = next(m for m in data["members"] if m["name"] == member_name)
-    assert member_entry["work_state"] == "ready"
+    assert member_entry["work_state"] == "failed"
     assert member_entry["tasks"]["optional-task"]["state"] == "failed"
 
     captured = capsys.readouterr()
     assert "optional-task" in captured.err
     assert member_name in captured.err
     assert "camp status" in captured.err
+
+
+def test_optional_task_failure_alongside_other_ok_tasks_marks_work_failed(
+    tmp_path: Path,
+) -> None:
+    """A failed optional task still marks work_state 'failed' even when other
+    activate-phase tasks in the same run succeed — the member is not
+    work-ready as long as ANY task's persisted state is failed."""
+    from camp.provision.activation import run_activate_tasks_in_background
+    from camp.group.manifest import read_central_manifest
+
+    group_name = "mygroup"
+    member_name = "myrepo"
+    slug = "my-slug"
+    wt_path = tmp_path / "camp" / group_name / "worktrees" / slug / member_name
+    wt_path.mkdir(parents=True, exist_ok=True)
+
+    mpath = _make_manifest(
+        tmp_path,
+        slug,
+        group_name,
+        [
+            {
+                "name": member_name,
+                "repo_root": "/tmp/fake-repo",
+                "worktree_path": str(wt_path),
+                "provision_state": "ready",
+                "activated": True,
+            }
+        ],
+    )
+
+    tasks = [
+        _activate_task("dep-install", [["npm", "ci"]], required=False),
+        _activate_task("graph-build", [["build"]], required=False),
+    ]
+    group = _make_group(group_name, member_name, tasks=tasks, harness={"inject": "stdout"})
+    env = _env(tmp_path)
+
+    def _fake_run(argv, **kwargs):
+        if argv == ["npm", "ci"]:
+            return MagicMock(returncode=0, stdout="", stderr="")
+        return MagicMock(returncode=1, stdout="", stderr="graph build boom")
+
+    with patch("subprocess.run", side_effect=_fake_run):
+        run_activate_tasks_in_background(group, slug, member_name, env=env)
+
+    data = read_central_manifest(mpath)
+    member_entry = next(m for m in data["members"] if m["name"] == member_name)
+    assert member_entry["tasks"]["dep-install"]["state"] == "ok"
+    assert member_entry["tasks"]["graph-build"]["state"] == "failed"
+    assert member_entry["work_state"] == "failed"
 
 
 # ---------------------------------------------------------------------------
@@ -1152,6 +1211,32 @@ def test_feedback_retrying_previously_failed_work(tmp_path: Path, capsys) -> Non
     assert "retry" in captured.err.lower() or "retrying" in captured.err.lower()
     assert "already work-ready" not in captured.err.lower()
     assert "already in progress" not in captured.err.lower()
+
+
+def test_feedback_retries_a_failed_task_even_with_a_stale_ready_rollup(
+    tmp_path: Path, capsys
+) -> None:
+    """A member whose per-task state records a task 'failed' must be
+    retryable through `camp activate` on its own terms — the early-return
+    "already work-ready" check must not trust a stale/incorrect work_state
+    rollup alone. Here work_state reads 'ready' (as it would have under the
+    old code path, which derived it from whether an exception was raised
+    rather than from the per-task results) while the persisted per-task map
+    still shows a failure: activation must still dispatch a retry, never sit
+    unreachable behind "already work-ready"."""
+    from camp.provision.activation import activate_member
+
+    group, _group_name, member_name, slug, _wt = _ready_member_with_tasks(
+        tmp_path, work_state="ready", tasks_map={"dep-install": {"state": "failed"}}
+    )
+    env = _env(tmp_path)
+
+    with patch("camp.provision.provision.spawn_detached_provisioner") as mock_spawn:
+        activate_member(group, slug, member_name, env=env)
+
+    mock_spawn.assert_called_once()
+    captured = capsys.readouterr()
+    assert "already work-ready" not in captured.err.lower()
 
 
 def test_feedback_no_activate_task_declared(tmp_path: Path, capsys) -> None:

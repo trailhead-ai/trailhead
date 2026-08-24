@@ -9,9 +9,14 @@ camp activate <member>:
       activate-phase tasks have finished. Outstanding work-enabling tasks are
       handed to the existing detached provisioner (spawn_detached_provisioner,
       provision/provision.py) rather than run inline, so `camp activate` never
-      blocks on an `npm ci` or similar. A required activate-task failure is
-      recorded as the member's work_state and does not raise here — activation
-      already succeeded by the time any task could fail.
+      blocks on an `npm ci` or similar. ANY activate-task failure — required
+      or optional — is recorded as the member's work_state "failed" and does
+      not raise here — activation already succeeded by the time any task
+      could fail. work_state is derived from the actual per-task result
+      states, never from whether run_member_tasks happened to raise: a
+      required task's failure raises TaskError, but an optional task's does
+      not, and "ready" must never be persisted for a member with a failed
+      task either way.
   (c) Prints one feedback line naming what camp actually observed: tasks freshly
       queued (first run, or retrying previously failed work), an activation
       already in progress, work already complete, or a member with no
@@ -252,8 +257,9 @@ def run_activate_tasks_in_background(
     run). Otherwise runs the member's activate-phase tasks against the
     manifest's PERSISTED per-task state (run-once-on-success, retried-on-
     failure with cleanup — see provision/tasks.py), then persists the results
-    and the member's work_state ("ready" on a clean run, "failed" when a
-    required task failed) under the reconcile lock. The guard is released only
+    and the member's work_state ("ready" only when every task's result is
+    "ok"/"skipped", "failed" when any task — required or optional — failed)
+    under the reconcile lock. The guard is released only
     after that persist completes — explicitly on a normal return, or by the OS
     if this process is killed mid-run, in which case the manifest simply keeps
     whatever it last held (never a sticky in-progress state) and the next
@@ -328,18 +334,38 @@ def run_activate_tasks_in_background(
             return
 
         _warn_optional_task_failures(results, member_name)
+        # work_state must reflect the actual per-task outcomes, not merely
+        # whether run_member_tasks raised: TaskError is raised only for a
+        # REQUIRED task's failure (handled in the `except TaskError` branch
+        # above), so an optional task's failure lands here, in the
+        # non-raising path. Deriving "ready" from "no exception" would
+        # persist work_state="ready" for a member with, e.g., a failed `npm
+        # ci` — the retry path this whole feature exists to make reachable.
+        failed_result = next((r for r in results if r.state == "failed"), None)
+        work_state = "failed" if failed_result is not None else "ready"
         _persist_activation_result(
-            mpath, member_name, tasks=_tasks_map_from_results(results), work_state="ready"
+            mpath, member_name, tasks=_tasks_map_from_results(results), work_state=work_state
         )
-        _enqueue_settlement_notice(
-            ws_dir,
-            member_name,
-            task=None,
-            consequence=(
-                f"Activate-phase work finished for `{member_name}` — its dependencies "
-                f"and tools are now available."
-            ),
-        )
+        if work_state == "failed":
+            _enqueue_settlement_notice(
+                ws_dir,
+                member_name,
+                task=failed_result.name,
+                consequence=(
+                    f"Activate-phase work failed for `{member_name}` — run `camp status` "
+                    f"to see which task failed and why."
+                ),
+            )
+        else:
+            _enqueue_settlement_notice(
+                ws_dir,
+                member_name,
+                task=None,
+                consequence=(
+                    f"Activate-phase work finished for `{member_name}` — its dependencies "
+                    f"and tools are now available."
+                ),
+            )
     finally:
         _release_member_guard(fd)
 
@@ -398,6 +424,7 @@ def _dispatch_activation(
     task's failure is observed only by a later `camp activate`/`camp status`,
     never here."""
     from ..group.manifest import work_state_for_member
+    from .reconcile import _has_outstanding_activate_tasks
 
     if not tasks_in_phase(member_config, ACTIVATE_PHASE):
         return (
@@ -406,6 +433,15 @@ def _dispatch_activation(
         )
 
     work_state = work_state_for_member(entry)
+    # The "already work-ready" early return must never trust the work_state
+    # rollup alone: gate it on the PERSISTED per-task state too, so a member
+    # with a failed task is always retryable through `camp activate` on its
+    # own terms, even against a manifest whose rollup is stale or wrong (a
+    # manifest written before work_state was corrected to reflect actual
+    # per-task outcomes, for instance). A failed task means "retry", never
+    # "already work-ready", regardless of what work_state itself says.
+    if _has_outstanding_activate_tasks(member_config, entry.get("tasks")):
+        work_state = "failed"
     if work_state == "ready":
         return f"camp activate: {member_name!r} is already work-ready."
 

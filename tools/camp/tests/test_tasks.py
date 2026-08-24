@@ -638,3 +638,33 @@ def test_task_deadline_absent_never_produces_over_budget(tmp_path: Path):
     ]
     results = run_member_tasks(tasks, "provision", _context(tmp_path), completed={})
     assert results == [TaskResult(name="seed", state="ok")]
+
+
+def test_single_long_step_is_clamped_to_the_remaining_budget(tmp_path: Path):
+    """A task shaped like the 914s code-review-graph build — ONE step whose
+    own timeout_seconds vastly exceeds the task deadline — must not be allowed
+    to run to its own timeout before the deadline is ever checked. The
+    deadline check only runs AFTER a step returns, so the step's own
+    effective timeout must be clamped to the remaining budget."""
+    tasks = [
+        {
+            "name": "slow-single-step",
+            "phase": "provision",
+            "steps": [_sleep_step(5)],
+        }
+    ]
+    started = time.monotonic()
+    results = run_member_tasks(
+        tasks,
+        "provision",
+        _context(tmp_path),
+        completed={},
+        task_deadline_seconds=0.1,
+    )
+    elapsed = time.monotonic() - started
+
+    assert elapsed < 2, (
+        f"took {elapsed}s — the single step ran far past the task deadline "
+        "instead of being clamped to it"
+    )
+    assert results == [TaskResult(name="slow-single-step", state="over-budget")]

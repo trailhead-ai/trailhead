@@ -76,11 +76,18 @@ each step completes; if the task's total elapsed time has exceeded the
 deadline, the task stops there (skipping any remaining steps) with
 state="over-budget" — a state distinct from "failed" so a caller (e.g. a
 budget-bound SessionStart hook) can tell "ran out of time" apart from "the
-work itself failed". A single step that exceeds its own `timeout_seconds`
+work itself failed". Because that check only runs between steps, a single
+step whose own `timeout_seconds` outlasts the remaining budget is clamped:
+each step's *effective* timeout is `min(timeout_seconds, remaining_budget)`,
+so one long-running step (e.g. a multi-minute build) can never run past the
+task deadline before the budget is ever evaluated. A step that times out
+because of that clamp is recorded "over-budget", not "failed" — a step that
+exceeds its own `timeout_seconds` while the budget still has room to spare
 still yields "failed" regardless of how much task budget remains — the two
-timeouts are independent. Exceeding the deadline never raises TaskError, even
-for a required task — the intent is a distinguishable, non-fatal outcome the
-caller can retry later, not a hard stop.
+timeouts are independent except at the clamp itself. Exceeding the deadline
+never raises TaskError, even for a required task — the intent is a
+distinguishable, non-fatal outcome the caller can retry later, not a hard
+stop.
 """
 
 from __future__ import annotations
@@ -246,10 +253,31 @@ def run_member_tasks(
         if failing_step is None:
             for step in task.get("steps", []):
                 argv = substitute_step(step, context)
-                ok, excerpt = _run_argv(argv, cwd=worktree, timeout=timeout)
+
+                step_timeout = timeout
+                if task_deadline_seconds is not None:
+                    remaining = task_deadline_seconds - (time.monotonic() - task_start)
+                    if remaining <= 0:
+                        over_budget = True
+                        break
+                    step_timeout = min(timeout, remaining)
+
+                ok, excerpt = _run_argv(argv, cwd=worktree, timeout=step_timeout)
                 if not ok:
-                    failing_step = argv
-                    stderr_excerpt = excerpt
+                    # A clamped step (step_timeout < its own timeout_seconds)
+                    # that actually ran out the clock is a budget overrun, not
+                    # a step failure — a step's own timeout still wins
+                    # "failed" whenever the budget had enough room to let it
+                    # fire on its own terms (step_timeout == timeout).
+                    if (
+                        task_deadline_seconds is not None
+                        and step_timeout < timeout
+                        and (time.monotonic() - task_start) >= task_deadline_seconds
+                    ):
+                        over_budget = True
+                    else:
+                        failing_step = argv
+                        stderr_excerpt = excerpt
                     break
 
                 if (

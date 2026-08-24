@@ -96,6 +96,18 @@ def test_dep_install_task_is_activate_phase_with_timeout_and_cleanup() -> None:
     assert task.get("cleanup"), "a timed-out npm ci must be retryable via cleanup"
 
 
+def test_dep_install_task_is_required() -> None:
+    """The `bootstrap = [...]` shorthand this task replaced pinned
+    required=True unconditionally (camp.group.config's module docstring,
+    group/config.py:766-772) — declaring `required = false` here silently
+    downgrades that invariant. A failed `npm ci` must mark the member's
+    work_state 'failed', not 'ready', or an executor gets dispatched into a
+    tree with no node_modules."""
+    task = _dep_install_task()
+
+    assert task["required"] is True
+
+
 def test_dep_install_cleanup_removes_partial_node_modules() -> None:
     """The concrete failure this plan started from: a timed-out `npm ci`
     leaves a partial `node_modules` that fails every retry with ENOTEMPTY
