@@ -24,7 +24,6 @@ CRAFT = Path(__file__).parent.parent / "plugins" / "craft"
 SHARED_EXECUTE = CRAFT / "skills" / "_shared" / "execute.md"
 INJECTION_FIXTURE = Path(__file__).parent / "fixtures" / "injection_defense_canonical.txt"
 ZERO_RESULT_FIXTURE = Path(__file__).parent / "fixtures" / "zero_result_protocol.txt"
-LESSON_CONTRACT_FIXTURE = Path(__file__).parent / "fixtures" / "dispatch_lesson_contract.txt"
 READ_CONTRACT_FIXTURE = Path(__file__).parent / "fixtures" / "dispatch_lesson_read_contract.txt"
 
 STATUS_WALK_MARKER = "**Status walk.**"
@@ -237,10 +236,6 @@ def test_step3_pins_specify_the_what_instruction_intact():
         "The existing 'specify the what, not the how' instruction must survive "
         "the edit intact.",
     )
-
-
-def test_fixtures_ship_lesson_contract():
-    assert LESSON_CONTRACT_FIXTURE.exists()
 
 
 def test_claim_lesson_contract_is_byte_identical_to_read_fixture():
