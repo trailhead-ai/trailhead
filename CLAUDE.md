@@ -31,6 +31,16 @@ authoritative prose specs per seam (composition, capability manifest, install
 manifest, path integration, VCS provider); read those for how a piece works rather
 than an overview here.
 
+## Dependency Posture
+
+**Posture: no new dependencies.** This repository ships zero third-party runtime
+dependencies — stdlib only, pinned by `dependencies = []` in `pyproject.toml`. This
+is a prescriptive declaration, not an install detail: a prior-art survey run in this
+repository closes the adopt question under this posture and reports external prior
+art as design input rather than adoption candidates. This declaration is scoped to
+this repository only — a vault serving several repositories does not inherit this
+posture for any sibling repository.
+
 ## Commands
 
 Requires **Python 3.11+**, **zero third-party runtime deps** (stdlib only; system
