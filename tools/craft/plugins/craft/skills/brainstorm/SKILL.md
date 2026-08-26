@@ -91,7 +91,7 @@ returns a summary.
   section.
 
 <!-- prior-art-survey:start -->
-**Prior-art survey — mandatory, run now, before Grill:**
+**Prior-art survey — mandatory, run now:**
 
 1. **Read this repository's declared dependency posture** from its agent-instruction file (e.g.
    `CLAUDE.md`) — never inferred from a manifest or lockfile. Scoped to this repository only — a
