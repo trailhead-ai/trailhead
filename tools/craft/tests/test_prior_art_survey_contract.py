@@ -89,8 +89,14 @@ _QUOTED_VARIABLE_CONSTRUCTION = (
     "the command text"
 )
 _SLUG_CHARACTER_RULE = (
-    "`<capability-slug>` used as a label value is lowercase letters, digits, "
-    "and hyphens only"
+    "`<capability-slug>` is lowercase letters, digits, and hyphens only"
+)
+_TITLE_CHARACTER_RULE = (
+    "`<capability>` and `<candidate>` keep only letters, digits, spaces, "
+    "hyphens, and periods"
+)
+_ASSIGNMENT_IS_SHELL_SOURCE = (
+    "The variable assignment is itself shell source"
 )
 _CROSS_LINK_SAME_DISCIPLINE = (
     "Apply the same discipline to the cross-link: assign the sibling's id to a "
@@ -499,6 +505,28 @@ def test_record_recipe_states_slug_character_rule():
     assert _SLUG_CHARACTER_RULE in _normalize_whitespace(_block()), (
         "the record-write recipe must state the slug character rule (lowercase "
         f"letters, digits, hyphens only) verbatim — {_SLUG_CHARACTER_RULE!r}"
+    )
+
+
+def test_character_rule_covers_every_untrusted_value_not_only_the_slug():
+    """The title values are attacker-influenced too, so a rule scoped to the slug
+    alone leaves `--title` carrying raw search-result text."""
+    assert _TITLE_CHARACTER_RULE in _normalize_whitespace(_block()), (
+        "the character rule must cover the capability and candidate values, not "
+        f"only the slug — {_TITLE_CHARACTER_RULE!r}"
+    )
+
+
+def test_character_rule_is_applied_before_assignment_not_after():
+    """A value is parsed as shell the moment it is assigned, so a rule applied
+    after assignment is applied too late to prevent anything."""
+    normalized = _normalize_whitespace(_block())
+    assert _ASSIGNMENT_IS_SHELL_SOURCE in normalized, (
+        "the recipe must say the assignment is itself shell source — "
+        f"{_ASSIGNMENT_IS_SHELL_SOURCE!r}"
+    )
+    assert "before it is assigned, never after" in normalized, (
+        "the recipe must state the rule applies before assignment, not after"
     )
 
 

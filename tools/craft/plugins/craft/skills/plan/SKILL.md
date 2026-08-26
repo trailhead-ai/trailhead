@@ -98,9 +98,12 @@ hits (unfenced, with no `layer=` attribute) are the trusted self-authored channe
    controls. Never paste them directly into a shell command line. Assign each to a shell variable
    first, then reference the variable quoted at the point of use (`--title "$TITLE"`,
    `--label "craft/prior-art=$SLUG"`) — never interpolate the raw value into the command text.
-   **Slug character rule:** `<capability-slug>` used as a label value is lowercase letters, digits,
-   and hyphens only — rewrite anything else (spaces, punctuation, upper case) to that shape before
-   use.
+   **Character rule — applies before any value is assigned.** The variable assignment is itself
+   shell source, so a raw value carrying a quote or `$(` breaks out there just as it would on the
+   command line. Reduce every value to plain text first: `<capability-slug>` is lowercase letters,
+   digits, and hyphens only; `<capability>` and `<candidate>` keep only letters, digits, spaces,
+   hyphens, and periods. Rewrite anything else — quotes, backticks, `$`, `;`, newlines — out of the
+   value before it is assigned, never after.
 
    ```sh
    TITLE="<capability>: <candidate>"
