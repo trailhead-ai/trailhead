@@ -33,8 +33,8 @@ Security-surface: file:line — one-line description
 ```
 
 Rules:
-- `PASS` — the diff delivers the slice's plan section (or, for a standalone leaf, the task's payload), the executor's status claim holds, and nothing blocks the next slice (N/A on a standalone leaf — there is no next slice, so that clause cannot withhold a `PASS`).
-- `DRIFT` — the diff diverges from the plan section — or, for a standalone leaf, the task's payload — or the executor's status claim doesn't hold (e.g. claimed DONE but a delivered item is missing, or a test-contract item isn't actually met). Name what drifted and from what.
+- `PASS` — the diff delivers the slice's plan section (or, for a standalone leaf, the task's payload), the executor's status claim holds, every test-contract item carries mutation evidence, and nothing blocks the next slice (N/A on a standalone leaf — there is no next slice, so that clause cannot withhold a `PASS`).
+- `DRIFT` — the diff diverges from the plan section — or, for a standalone leaf, the task's payload — or the executor's status claim doesn't hold (e.g. claimed DONE but a delivered item is missing, or a test-contract item isn't actually met) — or a test-contract item carries no mutation evidence, regardless of the claimed status. Name what drifted and from what.
 - `BLOCKED` — the divergence is severe enough that building the next slice on this one would be unsafe or nonsensical (e.g. an expected file doesn't exist, or the claimed tests don't actually run). On a standalone leaf, read the same severity bar against the change itself: the work cannot be trusted as delivered, so nothing should be built on top of it.
 - Each finding: `file:line — one-line description`. No code blocks inside findings.
 - Omit the `Findings` section entirely if there are none (never write "none").
@@ -45,7 +45,7 @@ Rules:
 1. **Payload delivery** — read the slice's `**Delivers:**`, `**Test contract:**`, and `**Files:**` from the plan (a standalone leaf carries the same three labels in its own body). Does the diff actually deliver them? Do the tests the test contract describes exist and pass (re-run them if the executor's report doesn't already show a clean run)?
 2. **Status claim** — does the executor's reported status (DONE / DONE_WITH_CONCERNS / NEEDS_CONTEXT / BLOCKED) match what you find in the diff? A DONE claim with a missing delivered item is drift, not a pass with a caveat.
 3. **Next-slice readiness** — does anything in this diff block a subsequent slice from building on it (a missing interface, a broken contract, an inconsistent file layout)? **On a standalone leaf there is no subsequent slice, so this check does not apply** — say so in the report (`next-slice readiness: N/A — standalone leaf`) rather than letting it pass silently, so a reader can tell the check was considered and not just skipped.
-4. **Mutation evidence** — for each test-contract item, does the executor's report show mutation evidence (break, RED, restore, GREEN, empty diff)? A DONE claim on a contract item with no mutation evidence is DRIFT, not a pass with a caveat.
+4. **Mutation evidence** — for each test-contract item, does the executor's report show mutation evidence (break, RED, restore, GREEN, empty diff)? A test-contract item with no mutation evidence is DRIFT regardless of the claimed status — DONE, DONE_WITH_CONCERNS, or otherwise — not a pass with a caveat.
 
 ## What you do NOT check
 

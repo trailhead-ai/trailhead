@@ -336,7 +336,7 @@ Returns: DONE / DONE_WITH_CONCERNS / NEEDS_CONTEXT / BLOCKED. See [Handling Exec
 
 | Change Size | Review Approach |
 |-------------|----------------|
-| **Small** (≤30 lines, 1-2 files) | Skip formal review. Review inline or one quick check. |
+| **Small** (≤30 lines, 1-2 files) | Skip formal review. Review inline or one quick check — confirm mutation evidence was reported for every test-contract item before advancing. |
 | **Medium** (30-200 lines, 3-5 files) | Dispatch `drift-gate` for a conformance pass. |
 | **Large** (200+ lines or 5+ files) | Dispatch `drift-gate` for a conformance pass. Dispatch a second pass only when the first returns saturated/over-length. |
 
