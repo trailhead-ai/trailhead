@@ -1,15 +1,19 @@
-"""EPHEMERAL assumption probe — NOT durable coverage, delete after use.
+"""The ``craft/prior-art`` label key craft's prior-art survey block prescribes.
 
-Resolves the unknown blocking task/prove-the-craft-prior-art-label-key-end-to-end:
-is the label key ``craft/prior-art`` writable, queryable, and legal to name
-literally inside a shipped SKILL.md?
+The survey block shipped in ``skills/brainstorm/SKILL.md`` and ``skills/plan/SKILL.md``
+instructs a session to write ``--label craft/prior-art=<capability-slug>`` and to read
+those calls back with ``lore search 'has:label.craft.prior-art'``. This pins that round
+trip, so a change to lore's write-time reserved-key guard, label handling, or KQL
+parsing fails here rather than silently turning the shipped instruction into a query
+that returns empty — a result the block's zero-result protocol reads as "nothing
+recorded yet", making the breakage invisible at the surface.
 
-Claims 1-3 (write + query round-trip) are probed here against a throwaway
-vault in tmp_path, using the config-env / CLI-subprocess helper pattern from
-tools/lore/tests/conftest.py (never the developer's real vault — Axiom 6).
-Claim 4 (audit legality) is a separate probe run manually via bash against
-tools/lore/tests/test_reserved_label_key_audit.py with a scratch SKILL.md
-edit, reverted before commit — see the assumption-prover's report.
+The round trip runs against a throwaway vault in ``tmp_path`` via the config-env /
+CLI-subprocess helpers in ``tools/lore/tests/conftest.py``, never the developer's real
+vault. Legality of the literal ``--label craft/prior-art=<capability-slug>`` example
+inside a shipped SKILL.md is held separately by
+``tools/lore/tests/test_reserved_label_key_audit.py``, whose scope is every shipped
+``SKILL.md`` and agent definition under ``tools/``.
 """
 
 from __future__ import annotations
@@ -24,7 +28,7 @@ from conftest import make_vault, run_cli  # noqa: E402
 
 
 def test_craft_prior_art_label_round_trips_through_create_and_search(tmp_path):
-    """Claims 1-3 in one round trip:
+    """Three properties in one round trip:
 
     1. `record create --kind decision --label craft/prior-art=<slug>` is
        accepted by the write-time reserved-key guard.
@@ -50,7 +54,7 @@ def test_craft_prior_art_label_round_trips_through_create_and_search(tmp_path):
         state_dir=state,
         stdin_text="body\n",
     )
-    assert create.returncode == 0, create.stderr  # Claim 1: write-time guard accepted it
+    assert create.returncode == 0, create.stderr  # write-time reserved-key guard accepted it
     record_id = create.stdout.strip()
     assert record_id.startswith("decision/"), f"expected decision/<name>, got {record_id!r}"
     name = record_id.split("/", 1)[1]
@@ -61,7 +65,7 @@ def test_craft_prior_art_label_round_trips_through_create_and_search(tmp_path):
         state_dir=state,
     )
     assert exists_search.returncode == 0, exists_search.stderr
-    assert name in exists_search.stdout, (  # Claim 2
+    assert name in exists_search.stdout, (  # existence lookup
         f"expected {name!r} in search output for has:label.craft.prior-art, "
         f"got: {exists_search.stdout!r}"
     )
@@ -72,7 +76,7 @@ def test_craft_prior_art_label_round_trips_through_create_and_search(tmp_path):
         state_dir=state,
     )
     assert eq_search.returncode == 0, eq_search.stderr
-    assert name in eq_search.stdout, (  # Claim 3
+    assert name in eq_search.stdout, (  # exact-value lookup
         f"expected {name!r} in search output for label.craft.prior-art:widget-cache, "
         f"got: {eq_search.stdout!r}"
     )
