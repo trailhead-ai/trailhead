@@ -45,6 +45,7 @@ Rules:
 1. **Payload delivery** — read the slice's `**Delivers:**`, `**Test contract:**`, and `**Files:**` from the plan (a standalone leaf carries the same three labels in its own body). Does the diff actually deliver them? Do the tests the test contract describes exist and pass (re-run them if the executor's report doesn't already show a clean run)?
 2. **Status claim** — does the executor's reported status (DONE / DONE_WITH_CONCERNS / NEEDS_CONTEXT / BLOCKED) match what you find in the diff? A DONE claim with a missing delivered item is drift, not a pass with a caveat.
 3. **Next-slice readiness** — does anything in this diff block a subsequent slice from building on it (a missing interface, a broken contract, an inconsistent file layout)? **On a standalone leaf there is no subsequent slice, so this check does not apply** — say so in the report (`next-slice readiness: N/A — standalone leaf`) rather than letting it pass silently, so a reader can tell the check was considered and not just skipped.
+4. **Mutation evidence** — for each test-contract item, does the executor's report show mutation evidence (break, RED, restore, GREEN, empty diff)? A DONE claim on a contract item with no mutation evidence is DRIFT, not a pass with a caveat.
 
 ## What you do NOT check
 

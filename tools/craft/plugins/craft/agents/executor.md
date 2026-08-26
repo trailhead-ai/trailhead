@@ -136,6 +136,8 @@ Do not power through uncertainty by guessing.
 
 The report has two parts: a **controller-facing head** that you return as your reply, and a **durable tail** that you write to the commit body (Step 8) and is not returned / not echoed to the controller.
 
+For each item in the intent document's `**Test contract:**` (or `## Test contract`), produce mutation evidence before reporting: break the behaviour, observe the test go RED for the stated reason, restore the code exactly, observe GREEN, and verify the restore with a diff that comes back empty. A contract item with no mutation evidence is not DONE — return `DONE_WITH_CONCERNS` or `BLOCKED` naming the unevidenced item instead of claiming DONE.
+
 ### Controller-facing head (return this)
 
 ```
@@ -145,6 +147,7 @@ review: needed | skip
 blocking: <one-liner on anything that stops the next slice, or "none">
 unknowns: <new unknowns discovered during this slice, or "none">
 cleanup: <assumption-prover test files/ranges removed, or "none">
+mutation-evidence: <per test-contract item — mutation applied, RED observed, GREEN observed, empty-diff confirmed — or the unevidenced item forcing a non-DONE status>
 ```
 
 ### Durable tail (write to commit body, not returned)
