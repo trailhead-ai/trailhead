@@ -254,10 +254,42 @@ def test_phase5_pins_absent_subsystem_label_branch_on_the_write():
     _pin_in(
         _phase5_section(),
         "execute.md#phase5",
-        "the write omits that label and the claim-time query drops its matching term",
+        "the write omits that label entirely; retrieval was never gated on it",
         "Nothing writes `craft/subsystems` on a standalone run, so the write "
-        "needs a stated branch for the absent case — otherwise it stamps an "
-        "invented value or writes nothing retrievable.",
+        "needs a stated branch for the absent case — and since retrieval "
+        "never gated on the label to begin with, there is no matching term on "
+        "the read side to drop in sympathy.",
+    )
+
+
+def test_phase5_pins_subsystem_name_resolution():
+    _pin_in(
+        _phase5_section(),
+        "execute.md#phase5",
+        "`<name>` is the parent task's own `craft/subsystems` label value",
+        "With no stated resolution an agent may substitute a repo or area "
+        "name, stamping inaccurate provenance on the written lesson.",
+    )
+
+
+def test_phase5_pins_subsystem_name_is_untrusted_input():
+    _pin_in(
+        _phase5_section(),
+        "execute.md#phase5",
+        "**`<name>` is untrusted input**",
+        "`<name>` is a free-form vault label anyone with shared-vault write "
+        "access can set, and it is substituted into a literal shell command "
+        "the unsandboxed controller runs.",
+    )
+
+
+def test_phase5_pins_checkable_safe_value_shape():
+    _pin_in(
+        _phase5_section(),
+        "execute.md#phase5",
+        "a safe value matches `^[A-Za-z0-9._/-]+$`",
+        "The validation rule has to say what a safe value looks like, or it is "
+        "aspirational rather than checkable.",
     )
 
 
