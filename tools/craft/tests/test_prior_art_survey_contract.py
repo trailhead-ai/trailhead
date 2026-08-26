@@ -23,12 +23,29 @@ from pathlib import Path
 BRAINSTORM = (
     Path(__file__).parent.parent / "plugins" / "craft" / "skills" / "brainstorm" / "SKILL.md"
 )
+PLAN = Path(__file__).parent.parent / "plugins" / "craft" / "skills" / "plan" / "SKILL.md"
 
 BLOCK_START = "<!-- prior-art-survey:start -->"
 BLOCK_END = "<!-- prior-art-survey:end -->"
 
 FRAME_HEADER = "### 1. Frame"
 GRILL_HEADER = "### 2. Grill for Clarity"
+
+APPROACH_HEADER = "### 3. Propose Approaches"
+PLAN_WRITE_HEADER = "### 8. Write the Plan"
+
+# Verbatim strings plan/SKILL.md's own deltas must carry.
+_SINGLE_SURVEY_PER_PLAN = "the single external prior-art survey per plan"
+_ESCALATION_NAMES_BOTH = (
+    "naming both the candidate and the hand-rolled alternative"
+)
+_AMBIGUOUS_ANSWER_RULE = 'treated as "build" and recorded as unresolved'
+_DURABLE_ARTIFACT = "on the parent task record being written"
+_ATTENDED_SYMMETRY = "This holds for the attended path as well as the unattended one."
+_UNATTENDED_RECORD_PROCEED_REPORT = (
+    "records the unresolved candidate on the record it is building, proceeds "
+    "with the hand-rolled path, and reports the deferral in its outcome"
+)
 
 # Verbatim strings the survey block (and brainstorm's own deltas) must carry.
 _ZERO_RESULT_PROTOCOL = (
@@ -57,6 +74,26 @@ def _block() -> str:
     assert BLOCK_END in text, f"brainstorm/SKILL.md must carry the {BLOCK_END!r} marker"
     start = text.index(BLOCK_START)
     end = text.index(BLOCK_END, start)
+    return text[start:end]
+
+
+def _plan_text() -> str:
+    return PLAN.read_text(encoding="utf-8")
+
+
+def _plan_block() -> str:
+    text = _plan_text()
+    assert BLOCK_START in text, f"plan/SKILL.md must carry the {BLOCK_START!r} marker"
+    assert BLOCK_END in text, f"plan/SKILL.md must carry the {BLOCK_END!r} marker"
+    start = text.index(BLOCK_START)
+    end = text.index(BLOCK_END, start) + len(BLOCK_END)
+    return text[start:end]
+
+
+def _brainstorm_block_with_end_marker() -> str:
+    text = _text()
+    start = text.index(BLOCK_START)
+    end = text.index(BLOCK_END, start) + len(BLOCK_END)
     return text[start:end]
 
 
@@ -203,4 +240,66 @@ def test_adopting_existing_solution_is_a_documented_legitimate_outcome():
     assert "legitimate outcome" in text, (
         "brainstorm/SKILL.md must document adopting an existing solution as a "
         "legitimate outcome of the survey, continuing toward an integration-shaped spec"
+    )
+
+
+def test_plan_skill_ships():
+    assert PLAN.exists(), f"Expected plan/SKILL.md at {PLAN}"
+
+
+def test_plan_survey_block_equals_brainstorm_survey_block_byte_for_byte():
+    """The assertion that keeps the two copies from drifting."""
+    assert _plan_block() == _brainstorm_block_with_end_marker(), (
+        "the survey block copied into plan/SKILL.md must be byte-for-byte identical "
+        "to the canonical block in brainstorm/SKILL.md"
+    )
+
+
+def test_plan_survey_block_sits_in_approach_stage_before_plan_is_written():
+    text = _plan_text()
+    assert APPROACH_HEADER in text and PLAN_WRITE_HEADER in text
+    approach_pos = text.index(APPROACH_HEADER)
+    plan_write_pos = text.index(PLAN_WRITE_HEADER)
+    block_pos = text.index(BLOCK_START)
+    assert approach_pos < block_pos < plan_write_pos, (
+        "the survey block must be inlined into the approach-proposal step, "
+        "before the plan body is drafted"
+    )
+
+
+def test_single_survey_per_plan_sentence_is_verbatim():
+    assert _SINGLE_SURVEY_PER_PLAN in _plan_text(), (
+        "plan/SKILL.md must state this is the single external prior-art survey per "
+        f"plan, verbatim — {_SINGLE_SURVEY_PER_PLAN!r}"
+    )
+
+
+def test_escalation_prompt_names_both_candidate_and_hand_rolled_alternative():
+    assert _ESCALATION_NAMES_BOTH in _plan_text(), (
+        "plan/SKILL.md's escalation prompt must name both the candidate and the "
+        f"hand-rolled alternative, verbatim — {_ESCALATION_NAMES_BOTH!r}"
+    )
+
+
+def test_ambiguous_answer_rule_names_durable_artifact_for_attended_and_unattended():
+    text = _plan_text()
+    assert _AMBIGUOUS_ANSWER_RULE in text, (
+        "plan/SKILL.md must state an ambiguous or deferred answer is treated as "
+        f"build and recorded as unresolved, verbatim — {_AMBIGUOUS_ANSWER_RULE!r}"
+    )
+    assert _DURABLE_ARTIFACT in text, (
+        "plan/SKILL.md must name the durable artifact the unresolved answer lands "
+        f"on, verbatim — {_DURABLE_ARTIFACT!r}"
+    )
+    assert _ATTENDED_SYMMETRY in text, (
+        "plan/SKILL.md must state the ambiguous-answer rule applies to the attended "
+        f"path as well as the unattended one, verbatim — {_ATTENDED_SYMMETRY!r}"
+    )
+
+
+def test_unattended_path_states_record_then_proceed_then_report():
+    assert _UNATTENDED_RECORD_PROCEED_REPORT in _plan_text(), (
+        "plan/SKILL.md must state the unattended path records the unresolved "
+        "candidate, proceeds on the hand-rolled path, and reports the deferral, "
+        f"verbatim — {_UNATTENDED_RECORD_PROCEED_REPORT!r}"
     )
