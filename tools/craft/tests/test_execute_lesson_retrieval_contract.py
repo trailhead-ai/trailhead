@@ -363,3 +363,29 @@ def test_step3_has_no_raw_body_read_carve_out():
     )
 
 
+
+
+def test_claim_read_contract_is_not_widened_with_a_subsystem_term():
+    """The stated read contract must not have the subsystem term appended back
+    onto it.
+
+    The byte-identical pin above matches the fixture as a SUBSTRING, so prose
+    that states the read contract and then appends `+ craft/subsystems=<name>`
+    re-creates Defect 2's conjunction while that pin still passes. This asserts
+    on what directly follows the contract, which is where a widening lands.
+    """
+    contract = READ_CONTRACT_FIXTURE.read_text().strip()
+    section = _claim_section()
+    lines = [line for line in section.splitlines() if contract in line]
+    assert len(lines) == 1, (
+        f"execute.md#claim: expected exactly one line stating the read "
+        f"contract, found {len(lines)}."
+    )
+    tail = lines[0].split(contract, 1)[1]
+    assert not tail.lstrip("`").lstrip().startswith("+ craft/subsystems"), (
+        "execute.md#claim: the read contract is widened with a subsystem term "
+        "appended directly onto it. Retrieval must query the dispatch-lesson "
+        "label on its own — re-ANDing subsystem is the precise defect this "
+        "change exists to remove, and it must not creep back in via the "
+        "contract sentence."
+    )

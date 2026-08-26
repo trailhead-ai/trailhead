@@ -105,6 +105,26 @@ def test_step3_foreground_mandate_does_not_say_full_suite():
     )
 
 
+def test_step3_mandate_does_not_direct_the_executor_to_run_the_full_suite():
+    """Negative pin, imperative form.
+
+    The bare `"full suite" not in section` check above misses the hyphenated
+    spelling, and the section legitimately uses that spelling for the
+    CONTROLLER's own Phase 1 gate ("the controller's own full-suite gate").
+    So this bans the imperative form in either spelling rather than the noun
+    phrase, which is what would actually contradict executor.md Step 7.
+    """
+    section = _step3_section()
+    for phrase in ("run the full suite", "run the full-suite", "the full suite here",
+                   "the full-suite gate here"):
+        assert phrase not in section, (
+            f"execute.md#step3: the dispatch mandate must not direct the "
+            f"executor to run the full suite ({phrase!r}) — executor.md Step 7 "
+            f"scopes that agent to the focused suite, and the full gate is the "
+            f"controller's Phase 1 job."
+        )
+
+
 def test_step3_pins_commit_and_report_same_turn():
     _pin_in(
         _step3_section(),
