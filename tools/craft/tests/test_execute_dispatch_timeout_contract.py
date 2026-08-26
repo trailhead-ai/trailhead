@@ -84,9 +84,24 @@ def test_step3_pins_foreground_mandate():
     _pin_in(
         _step3_section(),
         "execute.md#step3",
-        "a requirement that the full suite run in the foreground",
+        "a requirement that the suite run in the foreground",
         "The dispatch payload must require a foreground suite run, not merely "
-        "an explicit timeout — the two are the mandate the stalls fixed.",
+        "an explicit timeout — the two are the mandate the stalls fixed. This "
+        "does not say 'full suite': executor.md's Step 7 scopes the executor "
+        "to the focused suite for its slice, and the full gate is the "
+        "controller's own Phase 1 job — the dispatch mandate governs "
+        "foreground/timeout/commit discipline for whichever suite the "
+        "executor runs, not which suite that is.",
+    )
+
+
+def test_step3_foreground_mandate_does_not_say_full_suite():
+    section = _step3_section()
+    assert "full suite" not in section, (
+        "execute.md#step3: the dispatch mandate must not say 'full suite' — "
+        "that contradicts executor.md Step 7's focused-suite scoping for the "
+        "same agent. The foreground/timeout/commit discipline applies "
+        "regardless of which suite (focused, per executor.md) is run."
     )
 
 
@@ -118,4 +133,37 @@ def test_step3_pins_auto_background_mechanism():
         "The mandate must name the actual mechanism (the Bash tool's "
         "~120s auto-background threshold), not just assert the property "
         "'run in the foreground'.",
+    )
+
+
+def test_step3_pins_obey_it_by_naming_a_timeout():
+    _pin_in(
+        _step3_section(),
+        "execute.md#step3",
+        "Obey it by naming a concrete timeout value above the suite's measured runtime",
+        "The 'never by starting the suite as a background job' clause must "
+        "modify a stated verb ('obey it by …, never by …') rather than "
+        "dangling with nothing to attach to.",
+    )
+
+
+def test_step3_pins_ceiling_fallback():
+    _pin_in(
+        _step3_section(),
+        "execute.md#step3",
+        "the Bash tool's 600000ms ceiling",
+        "A suite whose measured runtime exceeds the Bash tool's own hard "
+        "ceiling has no timeout value that can satisfy the mandate — the "
+        "dispatch must name a degraded path (split the run, or accept a "
+        "scoped suite) rather than leaving an unsatisfiable instruction.",
+    )
+
+
+def test_step3_pins_ceiling_fallback_options():
+    _pin_in(
+        _step3_section(),
+        "execute.md#step3",
+        "split the run into a scoped subset of the suite that fits under the ceiling, or dispatch against a scoped suite",
+        "The ceiling fallback must name concrete degraded paths, not just "
+        "assert that one exists.",
     )

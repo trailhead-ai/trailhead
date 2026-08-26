@@ -244,9 +244,11 @@ def test_phase5_pins_lesson_write_names_the_elected_vault():
         _phase5_section(),
         "execute.md#phase5",
         "--kind lesson --vault <elected-vault>",
-        "An unqualified `lore record create` resolves to the default vault, so "
-        "the lesson lands where the claim-time query — which is scoped to the "
-        "elected vault — will never find it.",
+        "An unqualified `lore record create` resolves to the default vault, "
+        "not the vault the parent task actually came from — a misrouted "
+        "write. (The claim-time `lore search` has no `--vault` flag and reads "
+        "across every configured vault, so this vault pin protects where the "
+        "lesson is written, not whether the later cross-vault read can see it.)",
     )
 
 
@@ -321,4 +323,23 @@ def test_phase5_pins_title_sanitization_before_quoting():
         "the title is stripped of single quotes, newlines, backticks, and `$` before it is quoted",
         "A single quote in the title breaks out of the quoted argument and "
         "injects a command into the controller's shell.",
+    )
+
+
+def test_phase5_pins_omit_on_mismatch_not_escape_on_mismatch():
+    _pin_in(
+        _phase5_section(),
+        "execute.md#phase5",
+        "a value that does not match is never substituted, quoted, or escaped in",
+        "The security posture is refusal, not escaping: an attacker-controlled "
+        "`<name>` that fails the safe-value regex must be omitted from the "
+        "write, never shell-escaped and substituted in — escaping instead of "
+        "omitting inverts the guarantee.",
+    )
+    _pin_in(
+        _phase5_section(),
+        "execute.md#phase5",
+        "`<name>` is omitted from the write instead",
+        "The omit-on-mismatch behavior must name what actually happens to a "
+        "value that fails validation, not just that substitution is refused.",
     )
