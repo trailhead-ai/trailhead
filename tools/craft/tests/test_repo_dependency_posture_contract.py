@@ -39,19 +39,27 @@ def _section(text: str, heading: str) -> str:
 
 def test_claude_md_carries_a_named_dependency_posture_section():
     """The posture must be a standalone section a survey step lands on directly —
-    not a substring anywhere in the file."""
+    present as its own heading line, not merely as a substring anywhere in the
+    file (e.g. inside a sentence quoting or describing the section)."""
     text = _text()
-    assert POSTURE_HEADING in text
+    assert any(line.strip() == POSTURE_HEADING for line in text.splitlines()), (
+        f"{POSTURE_HEADING!r} must appear as its own heading line in CLAUDE.md"
+    )
 
 
 def test_dependency_posture_section_is_distinct_from_the_commands_section():
     """Slice 4's council review flagged restating the posture inside `## Commands`
-    as blending two reading purposes — the posture gets its own home."""
+    as blending two reading purposes — the posture gets its own home, and its
+    prescriptive prose is not restated inside `## Commands`."""
     text = _text()
     posture_section = _section(text, POSTURE_HEADING)
-    assert COMMANDS_HEADING not in posture_section.splitlines()[0]
     commands_section = _section(text, COMMANDS_HEADING)
+    assert COMMANDS_HEADING not in posture_section
     assert POSTURE_HEADING not in commands_section
+    assert "no new dependencies" not in commands_section, (
+        "the posture's prescriptive declaration must not be restated inside "
+        "`## Commands`"
+    )
 
 
 def test_dependency_posture_section_names_the_no_new_dependencies_posture():
