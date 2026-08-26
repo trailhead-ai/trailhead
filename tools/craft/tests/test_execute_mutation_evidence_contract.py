@@ -61,33 +61,78 @@ WHAT_YOU_DO_NOT_CHECK_HEADING = "## What you do NOT check"
 DRIFT_GATE_RULES_START = "Rules:"
 DRIFT_GATE_RULES_END = "## What you check"
 
+SMALL_ROW_START = "| **Small**"
+MEDIUM_ROW_START = "| **Medium**"
 
-def _section(text: str, start_heading: str, end_heading: str) -> str:
-    start = text.index(start_heading)
-    end = text.index(end_heading, start)
+PASS_BULLET_START = "- `PASS`"
+DRIFT_BULLET_START = "- `DRIFT`"
+BLOCKED_BULLET_START = "- `BLOCKED`"
+
+
+class SectionBoundaryError(Exception):
+    """Raised when a boundary string used to slice out a section can no
+    longer be found in the source text — e.g. a paragraph the boundary
+    quotes verbatim got reworded elsewhere in the file."""
+
+
+def _section(text: str, start_heading: str, end_heading: str, *, context: str) -> str:
+    try:
+        start = text.index(start_heading)
+    except ValueError:
+        raise SectionBoundaryError(
+            f"{context}: start boundary {start_heading!r} not found in the source "
+            f"text — this section can no longer be located."
+        ) from None
+    try:
+        end = text.index(end_heading, start)
+    except ValueError:
+        raise SectionBoundaryError(
+            f"{context}: end boundary {end_heading!r} not found in the source "
+            f"text — this section can no longer be located."
+        ) from None
     return text[start:end]
 
 
 def _dispatch_section() -> str:
     text = SHARED_EXECUTE.read_text()
-    return _section(text, DISPATCH_HEADING, REVIEW_HEADING)
+    return _section(text, DISPATCH_HEADING, REVIEW_HEADING, context="execute.md dispatch step")
 
 
 def _dispatch_expects_section() -> str:
     """Narrower than `_dispatch_section` — bounded to just the 'The agent
     expects:' list, excluding the model-escalation prose and the trailing
     `Returns:` line that follow it in the same step."""
-    return _section(_dispatch_section(), DISPATCH_EXPECTS_START, DISPATCH_EXPECTS_END)
+    return _section(
+        _dispatch_section(),
+        DISPATCH_EXPECTS_START,
+        DISPATCH_EXPECTS_END,
+        context="execute.md dispatch step's 'The agent expects:' list",
+    )
 
 
 def _review_table_section() -> str:
     text = SHARED_EXECUTE.read_text()
-    return _section(text, REVIEW_HEADING, NEXT_TASK_HEADING)
+    return _section(text, REVIEW_HEADING, NEXT_TASK_HEADING, context="execute.md review step")
+
+
+def _small_row_section() -> str:
+    """Narrower than `_review_table_section` — bounded to just the physical
+    `| **Small**` table row, excluding the Medium/Large rows and the
+    surrounding prose. A pin scoped only to the wider review section stays
+    green if its clause is relocated into the Medium row, which is exactly
+    the gap this section exists to close: Small is the one path with no
+    drift-gate dispatch, so its row is the sole mutation-evidence guard."""
+    return _section(
+        _review_table_section(),
+        SMALL_ROW_START,
+        MEDIUM_ROW_START,
+        context="execute.md review table's Small row",
+    )
 
 
 def _report_format_section() -> str:
     text = EXECUTOR_AGENT.read_text()
-    return _section(text, REPORT_FORMAT_HEADING, RULES_HEADING)
+    return _section(text, REPORT_FORMAT_HEADING, RULES_HEADING, context="executor.md report format")
 
 
 def _controller_head_section() -> str:
@@ -97,22 +142,52 @@ def _controller_head_section() -> str:
     relocated into the durable tail, which is exactly the gap this section
     exists to close."""
     text = EXECUTOR_AGENT.read_text()
-    return _section(text, CONTROLLER_HEAD_HEADING, DURABLE_TAIL_HEADING)
+    return _section(
+        text, CONTROLLER_HEAD_HEADING, DURABLE_TAIL_HEADING, context="executor.md controller-facing head"
+    )
 
 
 def _step7_section() -> str:
     text = EXECUTOR_AGENT.read_text()
-    return _section(text, STEP7_HEADING, STEP8_HEADING)
+    return _section(text, STEP7_HEADING, STEP8_HEADING, context="executor.md Step 7")
 
 
 def _what_you_check_section() -> str:
     text = DRIFT_GATE_AGENT.read_text()
-    return _section(text, WHAT_YOU_CHECK_HEADING, WHAT_YOU_DO_NOT_CHECK_HEADING)
+    return _section(
+        text, WHAT_YOU_CHECK_HEADING, WHAT_YOU_DO_NOT_CHECK_HEADING, context="drift-gate.md 'What you check'"
+    )
 
 
 def _drift_gate_rules_section() -> str:
     text = DRIFT_GATE_AGENT.read_text()
-    return _section(text, DRIFT_GATE_RULES_START, DRIFT_GATE_RULES_END)
+    return _section(text, DRIFT_GATE_RULES_START, DRIFT_GATE_RULES_END, context="drift-gate.md Rules block")
+
+
+def _pass_bullet_section() -> str:
+    """Narrower than `_drift_gate_rules_section` — bounded to just the
+    `PASS` bullet, excluding the `DRIFT` and `BLOCKED` bullets. A pin scoped
+    only to the wider Rules block stays green if its clause is relocated
+    into another bullet, which is exactly the gap this section exists to
+    close: a pin must guard the verdict it names."""
+    return _section(
+        _drift_gate_rules_section(),
+        PASS_BULLET_START,
+        DRIFT_BULLET_START,
+        context="drift-gate.md Rules block's PASS bullet",
+    )
+
+
+def _drift_bullet_section() -> str:
+    """Narrower than `_drift_gate_rules_section` — bounded to just the
+    `DRIFT` bullet, excluding the `PASS` and `BLOCKED` bullets. See
+    `_pass_bullet_section` for why a per-bullet scope matters."""
+    return _section(
+        _drift_gate_rules_section(),
+        DRIFT_BULLET_START,
+        BLOCKED_BULLET_START,
+        context="drift-gate.md Rules block's DRIFT bullet",
+    )
 
 
 def _pin_in(section_text: str, path_label: str, phrase: str, why: str) -> None:
@@ -161,13 +236,17 @@ def test_dispatch_section_pins_no_evidence_means_not_done():
 
 def test_review_table_names_mutation_evidence_for_small_slices():
     _pin_in(
-        _review_table_section(),
+        _small_row_section(),
         "execute.md#4",
         "confirm mutation evidence was reported for every test-contract item",
         "A Small slice skips the formal drift-gate dispatch entirely, so the "
         "inline review the table prescribes must itself name the "
         "mutation-evidence check — otherwise an unevidenced DONE on a Small "
-        "slice reaches the metrics row and the run close unchecked.",
+        "slice reaches the metrics row and the run close unchecked. This pin "
+        "is scoped to the physical Small row (not the whole Review section) "
+        "because Small is the one path with no drift-gate run — this row is "
+        "the sole mutation-evidence guard on it, and a clause that reads fine "
+        "after being relocated to the Medium row leaves Small unguarded.",
     )
 
 
@@ -205,12 +284,6 @@ def test_report_format_pins_downgrade_does_not_exempt_the_item():
     )
 
 
-def test_field_schema_fixture_ships():
-    assert FIELD_SCHEMA_FIXTURE.exists(), (
-        f"Expected the canonical mutation-evidence field schema fixture at {FIELD_SCHEMA_FIXTURE}"
-    )
-
-
 def test_report_format_field_schema_is_byte_identical_to_fixture():
     schema = FIELD_SCHEMA_FIXTURE.read_text().strip()
     _pin_in(
@@ -242,26 +315,31 @@ def test_what_you_check_pins_drift_regardless_of_claimed_status():
 
 def test_rules_block_pass_requires_mutation_evidence():
     _pin_in(
-        _drift_gate_rules_section(),
+        _pass_bullet_section(),
         "drift-gate.md#rules",
         "every test-contract item carries mutation evidence",
         "The verdict block's `PASS` definition is the gate's operative "
         "decision table — a slice with zero mutation evidence must not "
         "satisfy it, so `PASS` must require mutation evidence explicitly, "
         "not rely on the separate 'What you check' list a reader of the "
-        "Rules block alone would never see.",
+        "Rules block alone would never see. Scoped to the PASS bullet only "
+        "(not the whole Rules block), so relocating this clause into the "
+        "DRIFT or BLOCKED bullet — where it no longer guards PASS — fails.",
     )
 
 
 def test_rules_block_drift_fires_regardless_of_claimed_status():
     _pin_in(
-        _drift_gate_rules_section(),
+        _drift_bullet_section(),
         "drift-gate.md#rules",
         "a test-contract item carries no mutation evidence, regardless of the claimed status",
         "The verdict block's `DRIFT` definition must enumerate the "
         "no-mutation-evidence case explicitly and status-agnostically, "
         "mirroring the 'What you check' list, so a gate reading only the "
-        "Rules block still returns DRIFT rather than PASS.",
+        "Rules block still returns DRIFT rather than PASS. Scoped to the "
+        "DRIFT bullet only (not the whole Rules block), so relocating this "
+        "clause into the PASS or BLOCKED bullet — where it no longer guards "
+        "DRIFT — fails.",
     )
 
 
@@ -280,3 +358,28 @@ def test_step7_states_mutation_pass_precedes_commit():
         "commit when a mutation exposes a defect. Step 7 must say where in "
         "the loop the mutation pass happens.",
     )
+
+
+# --- drift-gate.md pin: mutation-evidence check names both test-contract shapes ---
+
+
+def test_what_you_check_pins_both_test_contract_shapes():
+    _pin_in(
+        _what_you_check_section(),
+        "drift-gate.md#what-you-check",
+        "for each item in the intent document's `**Test contract:**` (or `## Test contract`)",
+        "executor.md's dispatch loop accepts a standalone leaf's test "
+        "contract in either the `**Test contract:**` label or the "
+        "`## Test contract` heading shape. If the gate's mutation-evidence "
+        "check only names the label shape, a record in the heading shape "
+        "gives it no items to iterate and check 4 passes vacuously — the "
+        "gate must be taught both shapes explicitly.",
+    )
+
+
+# --- test-file infrastructure: _section raises a named, explanatory error ---
+
+
+def test_section_raises_named_error_when_boundary_missing():
+    with pytest.raises(SectionBoundaryError, match=r"nonexistent-boundary.*not found"):
+        _section("some prose with a start marker in it", "start", "nonexistent-boundary", context="a test fixture")
