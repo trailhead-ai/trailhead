@@ -430,6 +430,7 @@ class Harness(ABC):
         session_id: str,
         *,
         session_name: str | None = None,
+        initial_prompt: str | None = None,
     ) -> list[str] | None:
         """DIVERGES: raises :class:`HarnessError` on a malformed ``session_id``, where
         ``session_resume`` returns ``None`` for the same input.
@@ -445,6 +446,22 @@ class Harness(ABC):
         override that honors it must validate it as an inert argv token with
         the same rigor as ``session_id`` and raise :class:`HarnessError` on a
         malformed value rather than passing it through.
+
+        ``initial_prompt`` is text the caller wants the launched session to
+        begin its first turn with. It is admitted to the argv by position and
+        separator alone, never by the ``session_id``/``session_name`` inert-token
+        predicate — a prompt is free text, not a path/argv-safe token, and can
+        legitimately look like a flag, contain spaces, or span multiple lines.
+        A concrete override that honors ``initial_prompt`` MUST append it as
+        the argv's **final token, immediately preceded by a literal `--`** —
+        i.e. the returned argv ends with ``["--", initial_prompt]`` — so a
+        prompt beginning with ``-`` is never parsed as a flag by the harness's
+        own CLI. ``None`` means the caller has no prompt to hand over and the
+        argv is unchanged from the no-prompt case; a harness that ignores
+        ``initial_prompt`` entirely (or has no concept of one) simply omits the
+        separator and prompt from its returned argv. An empty or
+        whitespace-only ``initial_prompt`` raises :class:`HarnessError` rather
+        than emitting a bare trailing ``--`` with nothing after it.
 
         The divergence above is from the ``None``-on-malformed-input
         convention used elsewhere in this module. A consumer who learned "check for ``None``, else

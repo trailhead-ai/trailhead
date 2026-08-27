@@ -667,6 +667,82 @@ class TestClaudeCodeSessionLaunch:
             "sess-1",
         ]
 
+    def test_no_initial_prompt_leaves_argv_byte_for_byte_unchanged(self, tmp_path):
+        """Pins the spec's "unchanged behavior" criterion: omitting
+        ``initial_prompt`` must not append anything, not even an empty
+        separator."""
+        assert ClaudeCodeHarness().session_launch(tmp_path, "sess-1") == [
+            "claude",
+            "--remote-control",
+            "--session-id",
+            "sess-1",
+        ]
+
+    def test_initial_prompt_is_appended_after_a_separator(self, tmp_path):
+        assert ClaudeCodeHarness().session_launch(
+            tmp_path, "sess-1", initial_prompt="hello"
+        ) == [
+            "claude",
+            "--remote-control",
+            "--session-id",
+            "sess-1",
+            "--",
+            "hello",
+        ]
+
+    def test_flag_shaped_prompt_is_not_consumed_as_a_flag(self, tmp_path):
+        """The prompt lands after the ``--`` separator, so a flag-shaped prompt
+        stays inert data instead of being parsed as a flag."""
+        argv = ClaudeCodeHarness().session_launch(
+            tmp_path, "sess-1", initial_prompt="--dangerously-skip-permissions"
+        )
+        assert argv[-2:] == ["--", "--dangerously-skip-permissions"]
+
+    def test_prompt_with_spaces_stays_one_argv_element(self, tmp_path):
+        argv = ClaudeCodeHarness().session_launch(
+            tmp_path, "sess-1", initial_prompt="hello there world"
+        )
+        assert argv[-1] == "hello there world"
+
+    def test_prompt_with_a_newline_stays_one_argv_element(self, tmp_path):
+        argv = ClaudeCodeHarness().session_launch(
+            tmp_path, "sess-1", initial_prompt="line one\nline two"
+        )
+        assert argv[-1] == "line one\nline two"
+
+    def test_prompt_that_is_not_a_valid_session_id_is_still_accepted(self, tmp_path):
+        """Proves the prompt is admitted by the ``--`` separator, not by
+        ``_is_session_id`` — a value that predicate would reject (spaces, a
+        leading dash) still lands as the final argv token."""
+        argv = ClaudeCodeHarness().session_launch(
+            tmp_path, "sess-1", initial_prompt="not a session id; rm -rf /"
+        )
+        assert argv[-1] == "not a session id; rm -rf /"
+
+    def test_malformed_session_id_still_raises_with_a_prompt_supplied(self, tmp_path):
+        with pytest.raises(HarnessError):
+            ClaudeCodeHarness().session_launch(
+                tmp_path, "--bad", initial_prompt="hello"
+            )
+
+    def test_malformed_session_name_still_raises_with_a_prompt_supplied(self, tmp_path):
+        with pytest.raises(HarnessError):
+            ClaudeCodeHarness().session_launch(
+                tmp_path, "sess-1", session_name="--bad", initial_prompt="hello"
+            )
+
+    def test_empty_initial_prompt_raises_instead_of_emitting_a_bare_separator(
+        self, tmp_path
+    ):
+        with pytest.raises(HarnessError):
+            ClaudeCodeHarness().session_launch(tmp_path, "sess-1", initial_prompt="")
+
+    def test_whitespace_only_initial_prompt_raises(self, tmp_path):
+        with pytest.raises(HarnessError):
+            ClaudeCodeHarness().session_launch(
+                tmp_path, "sess-1", initial_prompt="   "
+            )
+
 
 class TestClaudeCodeSessionLaunchModality:
     def test_returns_tty_required(self):

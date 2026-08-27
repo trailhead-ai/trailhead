@@ -1031,9 +1031,11 @@ class ClaudeCodeHarness(Harness):
         session_id: str,
         *,
         session_name: str | None = None,
+        initial_prompt: str | None = None,
     ) -> list[str]:
         """Return ``["claude", "--remote-control", "--session-id", <session-id>]``,
-        plus ``["--name", <session-name>]`` when a name is requested.
+        plus ``["--name", <session-name>]`` when a name is requested, plus
+        ``["--", <initial-prompt>]`` when a prompt is requested.
 
         Raises :class:`HarnessError` on a malformed ``session_id`` — see the
         base contract's DIVERGES note: this is the one seam here that raises
@@ -1044,6 +1046,13 @@ class ClaudeCodeHarness(Harness):
         ``session_id``: it lands in the same argv, so a separator, an empty
         string, or a leading dash is the same flag-injection surface and
         raises the same way.
+
+        ``initial_prompt`` is admitted by the ``--`` separator alone, never by
+        ``_is_session_id`` — it is free text, not a path/argv-safe token, so a
+        leading dash, spaces, or a newline are all legitimate prompt content
+        rather than flag-injection surface. Only a genuinely empty or
+        whitespace-only prompt is rejected, since that would otherwise emit a
+        bare trailing ``--`` with nothing after it.
         """
         if not _is_session_id(session_id):
             raise HarnessError(f"session_launch: invalid session_id: {session_id!r}")
@@ -1054,6 +1063,12 @@ class ClaudeCodeHarness(Harness):
                     f"session_launch: invalid session_name: {session_name!r}"
                 )
             argv += ["--name", session_name]
+        if initial_prompt is not None:
+            if not initial_prompt.strip():
+                raise HarnessError(
+                    f"session_launch: invalid initial_prompt: {initial_prompt!r}"
+                )
+            argv += ["--", initial_prompt]
         return argv
 
     def session_launch_modality(self) -> Modality:
