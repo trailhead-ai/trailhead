@@ -339,16 +339,19 @@ def main() -> int:
         context = None
 
     if context:
-        print(
-            json.dumps(
-                {
-                    "hookSpecificOutput": {
-                        "hookEventName": "SessionStart",
-                        "additionalContext": context,
+        try:
+            print(
+                json.dumps(
+                    {
+                        "hookSpecificOutput": {
+                            "hookEventName": "SessionStart",
+                            "additionalContext": context,
+                        }
                     }
-                }
+                )
             )
-        )
+        except (BrokenPipeError, OSError):
+            pass
     return 0
 
 

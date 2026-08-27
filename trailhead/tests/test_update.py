@@ -197,6 +197,38 @@ class TestOriginMismatch:
         assert not any(c[3] in ("fetch", "rev-list") for c in calls)
 
 
+class TestOriginRedactionRoundTrip:
+    def test_credentialed_origin_matches_after_symmetric_redaction(self, tmp_path):
+        """`write_stamp` persists `origin_url` credential-redacted. The live
+        `git remote get-url origin` fetched on every check still returns the
+        UNREDACTED URL, so the comparison must redact that side too — otherwise
+        a legitimately unchanged, credentialed remote reports "unanswerable"
+        on every single check."""
+        from trailhead.provenance import write_stamp
+
+        env = _env(tmp_path)
+        checkout = _checkout(tmp_path)
+        credentialed = "https://ghp_supersecrettoken@example.com/r.git"
+
+        def probe_runner(args, **kw):
+            sub = args[3]
+            if sub == "rev-parse" and args[4] == "HEAD":
+                return subprocess.CompletedProcess(args, 0, stdout=_SHA + "\n", stderr="")
+            if sub == "rev-parse" and "@{u}" in args:
+                return subprocess.CompletedProcess(args, 0, stdout=_BRANCH + "\n", stderr="")
+            if sub == "remote":
+                return subprocess.CompletedProcess(args, 0, stdout=credentialed + "\n", stderr="")
+            raise AssertionError(f"unexpected git invocation: {args}")
+
+        write_stamp(checkout, env=env, runner=probe_runner)
+
+        runner, calls = _make_runner(origin_url=credentialed, count="0")
+        result = update.check_for_update(env=env, runner=runner)
+
+        assert result["outcome"] == "ok"
+        assert "ghp_supersecrettoken" not in json.dumps(result)
+
+
 class TestNoStamp:
     def test_missing_stamp_reports_unanswerable_with_clear_reason(self, tmp_path):
         env = _env(tmp_path)
@@ -449,6 +481,42 @@ class TestChangelogDeltaSanitization:
         assert "\x00" not in joined
         assert "```" not in joined
 
+    def test_c1_control_codepoints_are_stripped(self, tmp_path):
+        """C1 controls (\\x80-\\x9f) are 8-bit escape introducers in their own
+        right (U+009B CSI, U+009D OSC, U+0090 DCS) that bypass the 7-bit-only
+        ANSI regex."""
+        env = _env(tmp_path)
+        _install_stamp(tmp_path, env)
+        adversarial = "@@ -1,1 +1,2 @@\n+- \x9bred herring\x9d entry\n"
+        runner, calls = _make_runner(count="3", diff_stdout=adversarial)
+
+        result = update.check_for_update(env=env, runner=runner)
+
+        joined = "\n".join(result["changelog_delta"]["lines"])
+        assert "\x9b" not in joined
+        assert "\x9d" not in joined
+
+    def test_carriage_return_is_stripped(self):
+        """`splitlines()` (used to split the raw diff into lines) already
+        consumes a `\\r` used as a line separator, so an embedded `\\r` can
+        only ever reach the sanitizer mid-line — exercised directly here
+        against the unit the finding names, `_sanitize_delta_line`."""
+        assert "\r" not in update._sanitize_delta_line("entry\rwith embedded CR")
+
+    def test_bidi_override_and_zero_width_characters_are_stripped(self, tmp_path):
+        """U+202E (right-to-left override) and zero-width characters can make
+        displayed text visually diverge from what an agent actually reads."""
+        env = _env(tmp_path)
+        _install_stamp(tmp_path, env)
+        adversarial = "@@ -1,1 +1,2 @@\n+- safe‮evil​ entry\n"
+        runner, calls = _make_runner(count="3", diff_stdout=adversarial)
+
+        result = update.check_for_update(env=env, runner=runner)
+
+        joined = "\n".join(result["changelog_delta"]["lines"])
+        assert "‮" not in joined
+        assert "​" not in joined
+
 
 class TestChangelogDeltaNoShellInterpolation:
     def test_diff_invocation_is_argv_only_never_shell_interpolated(self, tmp_path):
@@ -547,6 +615,68 @@ class TestJsonSchemaAndHumanOutput:
         assert exit_code == 0
         assert "\x1b" not in out
         assert "\x1b" not in err
+
+
+class TestArgumentInjectionRCE:
+    """`_remote_name` derives the fetch remote from the stamp's `branch` field
+    and it is passed as a bare positional to `git fetch`. A branch shaped like
+    `--upload-pack=<command>/x` makes `_remote_name` return `--upload-pack=
+    <command>`, which `git fetch` parses as an OPTION and EXECUTES `<command>`
+    — a real, reproducible RCE. This is reproduced against REAL git: a real
+    checkout, a real executable payload placed on PATH, and an assertion that
+    the payload's marker file is never created.
+
+    `update.read_stamp` is monkeypatched here to hand back the malicious stamp
+    DIRECTLY, bypassing `provenance.read_stamp`'s own option-shaped-branch
+    rejection — this isolates proof that the `--` end-of-options guard at the
+    `git fetch` call site (layer a) holds even if validation upstream (layer
+    b) were ever bypassed or buggy. `read_stamp`'s own rejection is covered
+    separately in `test_provenance.py`.
+    """
+
+    def test_option_shaped_branch_does_not_execute_the_payload_via_fetch(
+        self, tmp_path, monkeypatch
+    ):
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        marker = tmp_path / "PWNED"
+        payload = bin_dir / "evilmarker"
+        payload.write_text(f"#!/bin/sh\ntouch {marker}\nexit 1\n")
+        payload.chmod(0o755)
+        monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
+
+        origin = tmp_path / "origin"
+        origin.mkdir()
+        subprocess.run(["git", "init", "-q", "--initial-branch=main", str(origin)], check=True)
+        subprocess.run(["git", "-C", str(origin), "config", "user.email", "a@example.com"], check=True)
+        subprocess.run(["git", "-C", str(origin), "config", "user.name", "Test"], check=True)
+        subprocess.run(["git", "-C", str(origin), "commit", "--allow-empty", "-m", "x", "-q"], check=True)
+        checkout = tmp_path / "home" / "checkout"
+        checkout.parent.mkdir(parents=True, exist_ok=True)
+        subprocess.run(["git", "clone", "-q", str(origin), str(checkout)], check=True)
+
+        # A single argv token that git fetch would parse as an option: the
+        # segment before the first "/" (what `_remote_name` extracts) is
+        # exactly the malicious `--upload-pack=<payload>` value.
+        malicious_stamp = {
+            "checkout": str(checkout),
+            "sha": "a" * 40,
+            "branch": "--upload-pack=evilmarker/main",
+            "origin_url": str(origin),
+            "wired_at": "2026-01-01T00:00:00Z",
+            "last_check": None,
+        }
+        monkeypatch.setattr(update, "read_stamp", lambda **kw: malicious_stamp)
+
+        env = _env(tmp_path)
+
+        def real_runner(args, **kw):
+            return subprocess.run(args, **kw)
+
+        result = update.check_for_update(env=env, runner=real_runner)
+
+        assert not marker.exists(), "the payload must never execute"
+        assert result["outcome"] == "unanswerable"
 
 
 class TestNamedErrorHygiene:

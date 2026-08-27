@@ -550,6 +550,24 @@ class TestMainAlwaysExitsZero:
         assert exit_code == 0
         assert capsys.readouterr().out == ""
 
+    def test_main_exits_zero_even_when_emitting_the_context_raises_broken_pipe(
+        self, monkeypatch
+    ):
+        """The emit `print(json.dumps(...))` call sits after `check_and_render`
+        returns successfully — a `BrokenPipeError` there (the consuming harness
+        closed its stdin) must not escape `main()` either."""
+        monkeypatch.setattr(hook, "check_and_render", lambda **kwargs: "some context")
+        monkeypatch.setattr(sys, "stdin", io.StringIO("{}"))
+
+        def _raise_broken_pipe(*args, **kwargs):
+            raise BrokenPipeError("broken pipe")
+
+        monkeypatch.setattr("builtins.print", _raise_broken_pipe)
+
+        exit_code = hook.main()
+
+        assert exit_code == 0
+
 
 # ---------------------------------------------------------------------------
 # uninstall removes the composed trailhead plugin

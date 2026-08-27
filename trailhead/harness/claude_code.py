@@ -670,13 +670,24 @@ class ClaudeCodeHarness(Harness):
         Safe to run against a config dir that already has the plugin — the CLI
         reports "already installed" and exits 0 — which is what lets a config dir
         with no marker yet take this branch instead of the uninstall/install pair.
+
+        A nonzero returncode from the injected *runner* raises ``HarnessError``
+        rather than being ignored — the marker (and, upstream, the provenance
+        stamp `trailhead update` advances) must never claim a wire that never
+        happened. ``_default_runner`` already raises via ``check=True``; this
+        check exists for whatever *runner* a caller injects instead, which may
+        return a failed ``CompletedProcess`` rather than raise.
         """
         _validate_tool(tool)
         _run = runner or _default_runner
-        _run(
+        result = _run(
             ["claude", "plugin", "install", f"{tool}@trailhead", "--scope", "user"],
             env=self._cli_env(env),
         )
+        if getattr(result, "returncode", 0) != 0:
+            raise HarnessError(
+                f"claude plugin install failed for {tool}@trailhead (exit {result.returncode})"
+            )
         self._write_marker(f"{_INSTALLED_MARKER_PREFIX}{tool}", env)
 
     def rewire_tool(
@@ -690,6 +701,11 @@ class ClaudeCodeHarness(Harness):
         succeeds (self-heal — a failure mid-pair leaves the marker absent so the
         next wire re-attempts cleanly).  A failing uninstall (``not installed``) is
         tolerated; the install must still run.
+
+        A nonzero returncode from the install call raises ``HarnessError``
+        (see ``install_tool``) — the marker must never claim a wire that never
+        happened, and the caller (``wire()``) turns this into a ``WireError``
+        that a self-update apply's rollback depends on.
         """
         _validate_tool(tool)
         _run = runner or _default_runner
@@ -706,10 +722,14 @@ class ClaudeCodeHarness(Harness):
         except Exception:
             pass
 
-        _run(
+        result = _run(
             ["claude", "plugin", "install", f"{tool}@trailhead", "--scope", "user"],
             env=cli_env,
         )
+        if getattr(result, "returncode", 0) != 0:
+            raise HarnessError(
+                f"claude plugin install failed for {tool}@trailhead (exit {result.returncode})"
+            )
         self._write_marker(f"{_INSTALLED_MARKER_PREFIX}{tool}", env)
 
     def unregister_tool(

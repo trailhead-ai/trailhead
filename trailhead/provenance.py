@@ -62,21 +62,23 @@ def stamp_path(*, env: dict[str, str] | None = None) -> Path:
 # Credential redaction
 # ---------------------------------------------------------------------------
 
-# HTTPS basic-auth: https://user:token@host/... -> https://***:***@host/...
-_HTTPS_CRED_RE = re.compile(r"(https?://)[^/@\s:]+:[^/@\s]+@")
-# SSH user@host: form: git@github.com:org/repo.git -> ***@github.com:org/repo.git
-_SSH_CRED_RE = re.compile(r"\b[\w.\-]+@(?=[\w.\-]+:)")
+# URL-form credentials: https://user:token@host/... or https://token@host/...
+# (the bare-token form, no colon) or ssh://user@host/... -> scheme://***@host/...
+_URL_CRED_RE = re.compile(r"((?:https?|ssh)://)[^/@\s]+@")
+# SCP-shorthand user@host: form: git@github.com:org/repo.git -> ***@github.com:org/repo.git
+_SCP_CRED_RE = re.compile(r"\b[\w.\-]+@(?=[\w.\-]+:)")
 
 
 def redact_credentials(text: str) -> str:
     """Strip embedded credentials from *text* before it is ever persisted.
 
-    Covers both forms a git remote URL can carry a secret in: HTTPS
-    basic-auth (``https://user:token@host/...``) and the SSH ``user@host:``
+    Covers every form a git remote URL can carry a secret in: HTTPS/SSH
+    basic-auth (``https://user:token@host/...``), the bare-token HTTPS form
+    with no colon (``https://token@host/...``), and the SCP ``user@host:``
     shorthand, where the "user" segment is sometimes itself a token.
     """
-    text = _HTTPS_CRED_RE.sub(r"\1***:***@", text)
-    text = _SSH_CRED_RE.sub("***@", text)
+    text = _URL_CRED_RE.sub(r"\1***@", text)
+    text = _SCP_CRED_RE.sub("***@", text)
     return text
 
 
@@ -194,21 +196,24 @@ def write_stamp(checkout: Path, *, env: dict[str, str] | None = None, runner=Non
     checkout's git state (HEAD / tracked upstream / origin) can't be
     resolved — this is deliberately a warning the caller may surface, never
     a raised error: an install must succeed even when provenance can't be
-    recorded.
+    recorded. This covers a raised ``GitProbeError`` (git ran but its output
+    didn't resolve) as well as git being entirely unavailable (``OSError``)
+    or timing out (``TimeoutExpired``) — neither may escape and fail an
+    install whose wiring already succeeded.
     """
     _env = env if env is not None else dict(os.environ)
     _runner = runner if runner is not None else _default_runner()
 
     try:
         sha, branch, origin_url = _probe_git(checkout, runner=_runner)
-    except GitProbeError as exc:
+    except (GitProbeError, OSError, subprocess.TimeoutExpired) as exc:
         return f"could not record install provenance for {checkout}: {exc}"
 
     stamp = {
         "checkout": str(checkout),
         "sha": sha,
         "branch": branch,
-        "origin_url": origin_url,
+        "origin_url": redact_credentials(origin_url),
         "wired_at": _now_iso(),
         "last_check": None,
     }
@@ -223,10 +228,13 @@ def read_stamp(
     stamped checkout path resolves outside the confinement root.
 
     Never raises: any read/parse failure — missing file, garbage bytes,
-    wrong shape — reads as `None`. The checkout confinement is the one check
-    every consumer relies on: nothing outside `confine_root` (the user's home
-    directory by default) is ever returned, because a later consumer execs
-    out of this path.
+    wrong shape, an option-shaped `branch` — reads as `None`. The checkout
+    confinement is the one check every consumer relies on: nothing outside
+    `confine_root` (the user's home directory by default) is ever returned,
+    because a later consumer execs out of this path. Confinement fails
+    CLOSED: if `confine_root` isn't given and `HOME` isn't set either, there
+    is no root to confine against, so the stamp reads as absent rather than
+    unconfined.
     """
     _env = env if env is not None else dict(os.environ)
     path = stamp_path(env=_env)
@@ -244,15 +252,25 @@ def read_stamp(
     if not all(isinstance(data.get(k), str) and data.get(k) for k in required):
         return None
 
+    # `branch` is passed as a bare positional to `git fetch`/`rev-parse`/`merge`/
+    # `merge-base` elsewhere (trailhead/update.py). A value shaped like a git
+    # option (leading `-`) is parsed by git as an OPTION, not a ref name — for
+    # `git fetch` this includes `--upload-pack=<command>`, which git executes.
+    # An option-shaped branch reads as no stamp at all, matching the confinement
+    # check below.
+    if data["branch"].startswith("-"):
+        return None
+
     if confine_root is None:
         home = _env.get("HOME")
-        confine_root = Path(home) if home else None
-
-    if confine_root is not None:
-        try:
-            Path(data["checkout"]).resolve().relative_to(Path(confine_root).resolve())
-        except (ValueError, OSError):
+        if not home:
             return None
+        confine_root = Path(home)
+
+    try:
+        Path(data["checkout"]).resolve().relative_to(Path(confine_root).resolve())
+    except (ValueError, OSError):
+        return None
 
     return data
 

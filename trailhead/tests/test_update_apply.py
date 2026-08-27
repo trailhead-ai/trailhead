@@ -13,11 +13,14 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
+from io import StringIO
 from pathlib import Path
 
 import pytest
 
 from trailhead import update
+from trailhead.install_config import ResolvedConfig, ResolvedHarness, ResolvedPlugin
 from trailhead.provenance import read_stamp
 from trailhead.wire import LockError, WireError, wire_lock
 
@@ -155,6 +158,48 @@ class TestConsentGate:
 
         assert exit_code == 0
         assert calls, "expected git invocations once consent is given"
+
+    def test_interactive_tty_confirmation_accepted_proceeds(self, tmp_path, monkeypatch):
+        env = _env(tmp_path)
+        _install_stamp(tmp_path, env)
+        runner, calls = _make_runner(remote_branch_sha=_NEW_SHA)
+        monkeypatch.setattr(update, "resolve_config_for_env", lambda env: _FakeCfg())
+        wire_calls = []
+        monkeypatch.setattr(
+            update, "wire_all_harnesses", lambda *a, **kw: wire_calls.append(1) or {}
+        )
+        monkeypatch.setattr(sys, "stdin", StringIO("y\n"))
+
+        exit_code = update.run_update_apply(
+            env=env, runner=runner, assume_yes=False, is_tty=lambda: True
+        )
+
+        assert exit_code == 0
+        assert wire_calls, "an accepted confirmation must proceed to the wire"
+        assert any(c[3] == "fetch" for c in calls)
+
+    def test_interactive_tty_confirmation_declined_aborts_and_mutates_nothing(
+        self, tmp_path, monkeypatch
+    ):
+        env = _env(tmp_path)
+        _install_stamp(tmp_path, env)
+        runner, calls = _make_runner(remote_branch_sha=_NEW_SHA)
+        monkeypatch.setattr(update, "resolve_config_for_env", lambda env: _FakeCfg())
+        wire_calls = []
+        monkeypatch.setattr(
+            update, "wire_all_harnesses", lambda *a, **kw: wire_calls.append(1) or {}
+        )
+        monkeypatch.setattr(sys, "stdin", StringIO("n\n"))
+
+        exit_code = update.run_update_apply(
+            env=env, runner=runner, assume_yes=False, is_tty=lambda: True
+        )
+
+        assert exit_code == 0
+        assert not calls, f"a declined confirmation must mutate nothing, got {calls}"
+        assert not wire_calls
+        stamp = read_stamp(env=env)
+        assert stamp["sha"] == _OLD_SHA
 
 
 class TestDirtyCheckout:
@@ -442,3 +487,97 @@ class TestTrueNoOpOnWireFailure:
 
         stamp_after = read_stamp(env=env)
         assert stamp_after["sha"] == old_sha
+
+
+# ---------------------------------------------------------------------------
+# A genuinely FAILING `claude plugin install` (nonzero exit, not a raising
+# stub) must still be detected and trigger rollback — exercising the real
+# `wire_all_harnesses` -> `wire()` -> `ClaudeCodeHarness.install_tool` path,
+# never a patched-out `wire_all_harnesses`.
+# ---------------------------------------------------------------------------
+
+
+def _real_git_and_stubbed_claude_runner(*, fail_install: bool):
+    """Real git subprocess calls; `claude plugin ...` calls are stubbed to a
+    genuinely failing (or succeeding) CompletedProcess — never a raise — so
+    this exercises the harness's own returncode check, not exception handling.
+    """
+
+    def runner(args, **kw):
+        if args[0] == "git":
+            return subprocess.run(args, **kw)
+        if args[0] == "claude":
+            if "install" in args and fail_install:
+                return subprocess.CompletedProcess(args, 1, stdout="", stderr="boom")
+            return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+        raise AssertionError(f"unexpected command: {args}")
+
+    return runner
+
+
+class TestRealFailingWireTriggersRollback:
+    def test_a_genuinely_failing_claude_plugin_install_rolls_back(self, tmp_path, monkeypatch):
+        env = _env(tmp_path)
+        env["TRAILHEAD_CLAUDE_DIR"] = str(tmp_path / "claude-dir")
+        origin, checkout, old_sha, new_sha = _init_real_repo_pair(tmp_path)
+        from trailhead import provenance
+
+        stamp = {
+            "checkout": str(checkout),
+            "sha": old_sha,
+            "branch": "origin/main",
+            "origin_url": str(origin),
+            "wired_at": "2026-01-01T00:00:00Z",
+            "last_check": None,
+        }
+        provenance._atomic_write_json(provenance.stamp_path(env=env), stamp)
+
+        cfg = ResolvedConfig(
+            cli_flags={},
+            harnesses=[ResolvedHarness(name="claude_code", plugins=[ResolvedPlugin(name="camp")])],
+        )
+        monkeypatch.setattr(update, "resolve_config_for_env", lambda env: cfg)
+
+        runner = _real_git_and_stubbed_claude_runner(fail_install=True)
+
+        exit_code = update.run_update_apply(env=env, runner=runner, assume_yes=True)
+
+        assert exit_code != 0
+        current_head = _run_git_real(checkout, "rev-parse", "HEAD").stdout.strip()
+        assert current_head == old_sha, "a real failing wire must still roll the checkout back"
+        stamp_after = read_stamp(env=env)
+        assert stamp_after["sha"] == old_sha, "the stamp must never advance past an install that failed"
+
+    def test_a_genuinely_succeeding_claude_plugin_install_advances_the_stamp(
+        self, tmp_path, monkeypatch
+    ):
+        env = _env(tmp_path)
+        env["TRAILHEAD_CLAUDE_DIR"] = str(tmp_path / "claude-dir")
+        origin, checkout, old_sha, new_sha = _init_real_repo_pair(tmp_path)
+        from trailhead import provenance
+
+        stamp = {
+            "checkout": str(checkout),
+            "sha": old_sha,
+            "branch": "origin/main",
+            "origin_url": str(origin),
+            "wired_at": "2026-01-01T00:00:00Z",
+            "last_check": None,
+        }
+        provenance._atomic_write_json(provenance.stamp_path(env=env), stamp)
+
+        cfg = ResolvedConfig(
+            cli_flags={},
+            harnesses=[ResolvedHarness(name="claude_code", plugins=[ResolvedPlugin(name="camp")])],
+        )
+        monkeypatch.setattr(update, "resolve_config_for_env", lambda env: cfg)
+
+        runner = _real_git_and_stubbed_claude_runner(fail_install=False)
+
+        exit_code = update.run_update_apply(env=env, runner=runner, assume_yes=True)
+
+        assert exit_code == 0
+        current_head = _run_git_real(checkout, "rev-parse", "HEAD").stdout.strip()
+        assert current_head == new_sha
+        stamp_after = read_stamp(env=env)
+        assert stamp_after["sha"] == new_sha

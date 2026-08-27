@@ -196,6 +196,17 @@ class TestRedactCredentials:
         assert "s3cr3t" not in out
         assert "alice" not in out
 
+    def test_redacts_https_bare_token_form(self):
+        """https://<token>@host/... — no colon, the common PAT-as-userinfo form."""
+        out = redact_credentials("https://ghp_supersecrettoken@example.com/repo.git")
+        assert "ghp_supersecrettoken" not in out
+        assert "example.com/repo.git" in out
+
+    def test_redacts_ssh_scheme_url_form(self):
+        out = redact_credentials("ssh://git@example.com/org/repo.git")
+        assert "git@" not in out
+        assert "example.com/org/repo.git" in out
+
     def test_redacts_ssh_user_host_form(self):
         out = redact_credentials("git@github.com:org/repo.git")
         assert "git@" not in out
@@ -204,3 +215,85 @@ class TestRedactCredentials:
     def test_leaves_credential_free_text_unchanged(self):
         text = "fetch failed: connection timed out after 10s"
         assert redact_credentials(text) == text
+
+
+class TestWriteStampRedactsOrigin:
+    def test_origin_url_credentials_never_reach_disk(self, tmp_path):
+        env = _env(tmp_path)
+        checkout = _checkout(tmp_path)
+
+        write_stamp(
+            checkout,
+            env=env,
+            runner=_fake_runner(origin_url="https://ghp_supersecrettoken@example.com/r.git"),
+        )
+
+        raw = provenance.stamp_path(env=env).read_text(encoding="utf-8")
+        assert "ghp_supersecrettoken" not in raw
+        stamp = read_stamp(env=env)
+        assert "ghp_supersecrettoken" not in stamp["origin_url"]
+
+    def test_write_stamp_survives_git_missing_entirely(self, tmp_path):
+        """An OSError from the injected runner (git not on PATH) must not raise —
+        write_stamp degrades to a warning, matching its GitProbeError contract."""
+        env = _env(tmp_path)
+        checkout = _checkout(tmp_path)
+
+        def runner(args, **kw):
+            raise OSError("git: command not found")
+
+        warning = write_stamp(checkout, env=env, runner=runner)
+
+        assert warning is not None
+        assert read_stamp(env=env) is None
+
+
+class TestReadStampRejectsOptionShapedBranch:
+    def test_option_shaped_branch_reads_as_no_stamp(self, tmp_path):
+        env = _env(tmp_path)
+        checkout = _checkout(tmp_path)
+        stamp = {
+            "checkout": str(checkout),
+            "sha": _GOOD_SHA,
+            "branch": "--upload-pack=/tmp/evil.sh",
+            "origin_url": "https://example.com/r.git",
+            "wired_at": "2026-01-01T00:00:00Z",
+            "last_check": None,
+        }
+        provenance._atomic_write_json(provenance.stamp_path(env=env), stamp)
+
+        assert read_stamp(env=env) is None
+
+    def test_ordinary_branch_still_reads_fine(self, tmp_path):
+        env = _env(tmp_path)
+        checkout = _checkout(tmp_path)
+        stamp = {
+            "checkout": str(checkout),
+            "sha": _GOOD_SHA,
+            "branch": "origin/main",
+            "origin_url": "https://example.com/r.git",
+            "wired_at": "2026-01-01T00:00:00Z",
+            "last_check": None,
+        }
+        provenance._atomic_write_json(provenance.stamp_path(env=env), stamp)
+
+        assert read_stamp(env=env) is not None
+
+
+class TestConfinementFailsClosed:
+    def test_no_confine_root_and_no_home_reads_as_no_stamp(self, tmp_path):
+        env = {**os.environ, "TRAILHEAD_STATE_DIR": str(tmp_path / "state")}
+        env.pop("HOME", None)
+        checkout = tmp_path / "somewhere" / "checkout"
+        checkout.mkdir(parents=True)
+        stamp = {
+            "checkout": str(checkout),
+            "sha": _GOOD_SHA,
+            "branch": "origin/main",
+            "origin_url": "https://example.com/r.git",
+            "wired_at": "2026-01-01T00:00:00Z",
+            "last_check": None,
+        }
+        provenance._atomic_write_json(provenance.stamp_path(env=env), stamp)
+
+        assert read_stamp(env=env) is None

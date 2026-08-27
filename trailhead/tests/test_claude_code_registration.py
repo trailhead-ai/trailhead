@@ -21,10 +21,12 @@ Contract (HERMETICITY):
 
 import inspect
 import json
+import subprocess
 from unittest.mock import patch
 
 import pytest
 
+from trailhead.harness.base import HarnessError
 from trailhead.harness.claude_code import ClaudeCodeHarness
 
 from .conftest import capturing_runner
@@ -237,6 +239,21 @@ class TestInstallTool:
             _harness().install_tool("lore", composed_root, runner=failing_runner)
         assert not (claude_dir / ".trailhead-installed-lore").exists()
 
+    def test_no_marker_when_runner_returns_a_nonzero_completed_process(
+        self, composed_root, claude_dir
+    ):
+        """A `claude plugin install` that genuinely FAILS returns a nonzero
+        CompletedProcess rather than raising — the injected runner here mirrors
+        that shape exactly (not a raising stub) to prove install_tool inspects
+        the returncode instead of only catching exceptions."""
+
+        def failing_runner(args, **kw):
+            return subprocess.CompletedProcess(args, returncode=1, stdout="", stderr="boom")
+
+        with pytest.raises(HarnessError):
+            _harness().install_tool("lore", composed_root, runner=failing_runner)
+        assert not (claude_dir / ".trailhead-installed-lore").exists()
+
     def test_per_tool_markers_are_distinct(self, composed_root, claude_dir):
         _harness().install_tool("lore", composed_root, runner=lambda args, **kw: None)
         _harness().install_tool("camp", composed_root, runner=lambda args, **kw: None)
@@ -321,6 +338,24 @@ class TestRewireTool:
                 raise RuntimeError("install failed")
 
         with pytest.raises(RuntimeError):
+            _harness().rewire_tool("lore", composed_root, runner=failing_on_install)
+        assert not marker.exists()
+
+    def test_no_marker_when_install_returns_a_nonzero_completed_process(
+        self, composed_root, claude_dir
+    ):
+        """Same as install_tool's equivalent: a genuinely failing `claude plugin
+        install` returns nonzero rather than raising, and rewire_tool must still
+        detect it instead of writing the marker back."""
+        marker = claude_dir / ".trailhead-installed-lore"
+        marker.write_text("{}")
+
+        def failing_on_install(args, **kw):
+            if "install" in args:
+                return subprocess.CompletedProcess(args, returncode=1, stdout="", stderr="boom")
+            return subprocess.CompletedProcess(args, returncode=0, stdout="", stderr="")
+
+        with pytest.raises(HarnessError):
             _harness().rewire_tool("lore", composed_root, runner=failing_on_install)
         assert not marker.exists()
 

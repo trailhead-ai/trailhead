@@ -61,16 +61,26 @@ fast-forwards the stamped checkout, then re-wires via
 install` uses — and refreshes the provenance stamp. Consent is a technical
 gate: apply mode requires an interactive TTY confirmation or an explicit
 `--yes`; a non-interactive invocation without it refuses before any git
-invocation runs. The fetch, the fast-forward, and the re-wire all run under
-one acquisition of `trailhead.wire.wire_lock`, so a concurrent install can
-never interleave with an in-flight upgrade. A dirty or diverged checkout
-refuses without mutating anything. If the re-wire fails after a successful
-fast-forward, the checkout is reset to the pre-upgrade sha and re-wired again
-against that reverted state, so a failed upgrade is a true no-op rather than
-a half-upgraded install; the provenance stamp is written only once that
-re-wire actually completes, so it never claims a sha that was never fully
-wired. Every refusal and failure prints a `trailhead: <message>` line on
-stderr naming a concrete recovery command.
+invocation runs. A dirty checkout, or an `origin` remote that has changed
+since install (mirroring `check_for_update`'s own refusal), is refused before
+anything is fetched. The fetch, the fast-forward, and the re-wire all run
+under one acquisition of `trailhead.wire.wire_lock`, so a concurrent install
+can never interleave with an in-flight upgrade; the config that drives the
+re-wire is resolved before any of it runs, so a config error refuses cleanly
+instead of surfacing after the checkout has already moved. If the re-wire
+fails after a successful fast-forward, the checkout is reset to its actual
+HEAD from immediately before the fast-forward (captured fresh, not read back
+off the stamp — a manually-advanced checkout must not be rewound below where
+it really was) and re-wired again against that reverted state, so a failed
+upgrade is a true no-op rather than a half-upgraded install; the provenance
+stamp is written only once that re-wire actually completes, so it never
+claims a sha that was never fully wired. A failed re-wire is detected by its
+own harness call's returncode, not merely a raised exception, so a `claude
+plugin install` that genuinely fails (nonzero exit, no exception) still
+triggers the rollback. Every refusal and failure prints a `trailhead:
+<message>` line on stderr naming a concrete recovery command, and the
+rollback's own message reports truthfully whether the reset and re-wire it
+attempted actually succeeded.
 """
 
 from __future__ import annotations
@@ -111,9 +121,20 @@ CHANGELOG_DELTA_MAX_LINE_CHARS = 500
 # Strips ANSI/VT escape sequences (CSI and simple two-byte forms) before any
 # changelog content is ever surfaced to an agent.
 _ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]|\x1b[@-Z\\-_]")
-# C0/C1 control characters, excluding none — a changelog line is prose, it
-# never legitimately carries a raw control byte.
-_CONTROL_CHAR_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+# C0 AND C1 control characters (\x00-\x1f, \x7f-\x9f), excluding none — a
+# changelog line is prose, it never legitimately carries a raw control byte.
+# The C1 range matters even though `_ANSI_ESCAPE_RE` only strips 7-bit ESC
+# sequences: C1 codepoints are single-byte escape introducers in their own
+# right (U+0090 DCS, U+009B CSI, U+009D OSC) and would otherwise bypass it.
+_CONTROL_CHAR_RE = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+# Zero-width characters (U+200B-U+200F) and bidirectional-override/isolate
+# controls (U+202A-U+202E embedding/override, U+2066-U+2069 isolates,
+# U+FEFF zero-width no-break space): a changelog line is rendered as plain
+# prose, and either category can be used to make displayed text visually
+# diverge from the bytes an agent actually reads — the same
+# rendering-versus-parsing gap that motivates the ANSI and control-character
+# sanitization above.
+_BIDI_ZERO_WIDTH_RE = re.compile("[​-‏‪-‮⁦-⁩﻿]")
 
 
 # ---------------------------------------------------------------------------
@@ -168,7 +189,7 @@ def _run_git(checkout: Path, *args: str, runner, timeout: int):
             text=True,
             timeout=timeout,
         )
-    except subprocess.TimeoutExpired:
+    except (subprocess.TimeoutExpired, OSError):
         return None
 
 
@@ -176,9 +197,9 @@ def _proc_stderr(proc) -> str:
     """Render a git invocation's stderr for a user-facing reason string.
 
     Credentials are redacted here so no caller can forget to; a `None` proc
-    means `_run_git` swallowed a timeout.
+    means `_run_git` swallowed a timeout or an OSError (e.g. no `git` on PATH).
     """
-    return redact_credentials((proc.stderr or "").strip()) if proc is not None else "timed out"
+    return redact_credentials((proc.stderr or "").strip()) if proc is not None else "timed out or git unavailable"
 
 
 def _remote_name(stamped_branch: str) -> str:
@@ -197,15 +218,16 @@ def _unavailable_delta() -> dict:
 def _sanitize_delta_line(line: str) -> str:
     """Neutralise one changelog delta line before it can reach an agent.
 
-    Strips ANSI escapes and control characters, then breaks any markdown
-    fence sequence (```) so the delta can later be embedded inside a
-    delimited untrusted-content block without letting attacker text close
-    that fence early. Also bounds a single line's length — an attacker
-    controls this text and a single absurdly long line would otherwise
-    defeat the line-count cap.
+    Strips ANSI escapes, control characters (C0 and C1), and zero-width /
+    bidi-override characters, then breaks any markdown fence sequence (```)
+    so the delta can later be embedded inside a delimited untrusted-content
+    block without letting attacker text close that fence early. Also bounds
+    a single line's length — an attacker controls this text and a single
+    absurdly long line would otherwise defeat the line-count cap.
     """
     line = _ANSI_ESCAPE_RE.sub("", line)
     line = _CONTROL_CHAR_RE.sub("", line)
+    line = _BIDI_ZERO_WIDTH_RE.sub("", line)
     line = line.replace("```", "'''")
     if len(line) > CHANGELOG_DELTA_MAX_LINE_CHARS:
         line = line[:CHANGELOG_DELTA_MAX_LINE_CHARS] + "…"
@@ -303,7 +325,10 @@ def check_for_update(
             _env,
         )
 
-    current_origin = origin_proc.stdout.strip()
+    # `stamped_origin` is persisted credential-redacted (`provenance.write_stamp`);
+    # redact the freshly-fetched origin the same way before comparing, so a
+    # credentialed remote doesn't spuriously "change" on every check.
+    current_origin = redact_credentials(origin_proc.stdout.strip())
     if current_origin != stamped_origin:
         return _finish(
             "unanswerable",
@@ -317,7 +342,13 @@ def check_for_update(
 
     if not _fetch_is_fresh(_env, window):
         _stamp_fetch_attempt(_env)
-        fetch_proc = _run_git(checkout, "fetch", "--quiet", remote_name, runner=_runner, timeout=timeout)
+        # `--` ends option parsing before the stamp-derived remote name: without
+        # it a name shaped like `--upload-pack=<command>` is parsed by `git
+        # fetch` as an option and the command is EXECUTED. `read_stamp` also
+        # rejects an option-shaped `branch` outright; this is defense in depth.
+        fetch_proc = _run_git(
+            checkout, "fetch", "--quiet", "--", remote_name, runner=_runner, timeout=timeout
+        )
         if fetch_proc is None or fetch_proc.returncode != 0:
             return _finish(
                 "unanswerable",
@@ -418,6 +449,7 @@ def run_update_apply(
     checkout = Path(stamp["checkout"])
     pre_sha = stamp["sha"]
     stamped_branch = stamp["branch"]
+    stamped_origin = stamp["origin_url"]
     remote_name = _remote_name(stamped_branch)
 
     # ------------------------------------------------------------------
@@ -464,6 +496,30 @@ def run_update_apply(
         )
         return 1
 
+    # ------------------------------------------------------------------
+    # Origin pre-flight — refuse a repointed remote BEFORE fetching, mirroring
+    # `check_for_update`'s own refusal. Without this, apply mode would wire
+    # code from a remote that `--check` would have refused to trust.
+    # ------------------------------------------------------------------
+    origin_proc = _run_git(checkout, "remote", "get-url", "origin", runner=_runner, timeout=timeout)
+    if origin_proc is None or origin_proc.returncode != 0 or not (origin_proc.stdout or "").strip():
+        print(
+            f"trailhead: could not resolve the `origin` remote: "
+            f"{_proc_stderr(origin_proc)}. Inspect directly: "
+            f"git -C {checkout} remote get-url origin",
+            file=sys.stderr,
+        )
+        return 1
+    current_origin = redact_credentials(origin_proc.stdout.strip())
+    if current_origin != stamped_origin:
+        print(
+            "trailhead: refusing to upgrade — the `origin` remote has changed "
+            "since install; re-run `trailhead install` to record the new "
+            "remote before upgrading.",
+            file=sys.stderr,
+        )
+        return 1
+
     if dry_run:
         print(
             f"trailhead: dry run — would fetch {remote_name}, fast-forward "
@@ -479,8 +535,18 @@ def run_update_apply(
     # ------------------------------------------------------------------
     try:
         with wire_lock(env=_env):
+            # Resolved BEFORE any mutation: a config error must refuse cleanly,
+            # never surface after the checkout has already been fast-forwarded
+            # with nothing left to roll it back.
+            cfg = resolve_config_for_env(_env)
+
+            # `--` ends option parsing before the stamp-derived remote name: a
+            # name shaped like `--upload-pack=<command>` would otherwise be
+            # parsed by `git fetch` as an option and the command EXECUTED.
+            # `read_stamp` also rejects an option-shaped `branch` outright;
+            # this is defense in depth.
             fetch_proc = _run_git(
-                checkout, "fetch", "--quiet", remote_name, runner=_runner, timeout=timeout
+                checkout, "fetch", "--quiet", "--", remote_name, runner=_runner, timeout=timeout
             )
             if fetch_proc is None or fetch_proc.returncode != 0:
                 print(
@@ -491,6 +557,11 @@ def run_update_apply(
                 )
                 return 1
 
+            # `git rev-parse -- <rev>` does NOT mean "end of options" — rev-parse
+            # echoes a literal `--` back as one of its outputs, corrupting the
+            # single-sha stdout this call depends on — so this call site relies
+            # entirely on `read_stamp`'s option-shaped-branch rejection (layer b)
+            # rather than a `--` guard (layer a doesn't apply here).
             remote_sha_proc = _run_git(
                 checkout, "rev-parse", stamped_branch, runner=_runner, timeout=timeout
             )
@@ -513,6 +584,7 @@ def run_update_apply(
                 "merge-base",
                 "--is-ancestor",
                 "HEAD",
+                "--",
                 stamped_branch,
                 runner=_runner,
                 timeout=timeout,
@@ -527,9 +599,23 @@ def run_update_apply(
                 )
                 return 1
 
+            # Captured immediately before the mutating fast-forward, NOT read
+            # from the stamp: a checkout manually advanced past its stamped
+            # sha must roll back to where it actually was, not below it.
+            pre_merge_proc = _run_git(checkout, "rev-parse", "HEAD", runner=_runner, timeout=timeout)
+            pre_merge_head = (pre_merge_proc.stdout or "").strip() if pre_merge_proc else ""
+            if pre_merge_proc is None or pre_merge_proc.returncode != 0 or not pre_merge_head:
+                print(
+                    f"trailhead: could not resolve HEAD before fast-forwarding: "
+                    f"{_proc_stderr(pre_merge_proc)}. Inspect directly: "
+                    f"git -C {checkout} status",
+                    file=sys.stderr,
+                )
+                return 1
+
             print(f"trailhead: fast-forwarding {checkout} to {stamped_branch}…")
             merge_proc = _run_git(
-                checkout, "merge", "--ff-only", stamped_branch, runner=_runner, timeout=timeout
+                checkout, "merge", "--ff-only", "--", stamped_branch, runner=_runner, timeout=timeout
             )
             if merge_proc is None or merge_proc.returncode != 0:
                 print(
@@ -541,24 +627,43 @@ def run_update_apply(
                 return 1
 
             print("trailhead: re-wiring plugins…")
-            cfg = resolve_config_for_env(_env)
             try:
                 wire_all_harnesses(cfg, env=_env, runner=_runner, quiet=True)
             except Exception as exc:
                 reset_proc = _run_git(
-                    checkout, "reset", "--hard", pre_sha, runner=_runner, timeout=timeout
+                    checkout, "reset", "--hard", pre_merge_head, runner=_runner, timeout=timeout
                 )
-                if reset_proc is not None and reset_proc.returncode == 0:
+                reset_ok = reset_proc is not None and reset_proc.returncode == 0
+                rewired_ok = False
+                if reset_ok:
                     try:
                         wire_all_harnesses(cfg, env=_env, runner=_runner, quiet=True)
+                        rewired_ok = True
                     except Exception:
                         pass  # best-effort restore; the error below still stands
-                print(
-                    f"trailhead: upgrade failed while re-wiring ({exc}); rolled "
-                    f"the checkout back to {pre_sha[:8]} and restored the prior "
-                    f"wiring. Re-run: trailhead update",
-                    file=sys.stderr,
-                )
+                if reset_ok and rewired_ok:
+                    print(
+                        f"trailhead: upgrade failed while re-wiring ({exc}); rolled "
+                        f"the checkout back to {pre_merge_head[:8]} and restored the "
+                        f"prior wiring. Re-run: trailhead update",
+                        file=sys.stderr,
+                    )
+                elif reset_ok:
+                    print(
+                        f"trailhead: upgrade failed while re-wiring ({exc}); rolled "
+                        f"the checkout back to {pre_merge_head[:8]} but the prior "
+                        f"wiring could NOT be restored automatically. Re-wire "
+                        f"manually: trailhead install",
+                        file=sys.stderr,
+                    )
+                else:
+                    print(
+                        f"trailhead: upgrade failed while re-wiring ({exc}); the "
+                        f"checkout could NOT be rolled back to {pre_merge_head[:8]}. "
+                        f"Inspect and repair manually: "
+                        f"git -C {checkout} reset --hard {pre_merge_head}",
+                        file=sys.stderr,
+                    )
                 return 1
 
             write_stamp(checkout, env=_env, runner=_runner)
