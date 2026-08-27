@@ -430,8 +430,7 @@ def test_reader_fails_closed_when_boundary_is_outside_this_runs_range():
     _pin_in(
         _phase_progress_section(),
         "execute.md#phase-progress-and-resumability",
-        "the same now applies when it resolves but lies outside this run's "
-        "own `base..HEAD` range",
+        "or resolves but lies outside this run's own `base..HEAD` range",
         "A boundary that is shape-valid and reachable from `HEAD` but predates "
         "this run's own `base` must still fail closed — the whole point of the "
         "bound is to refuse an out-of-range target, not merely check it.",
