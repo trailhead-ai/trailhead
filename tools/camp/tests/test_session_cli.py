@@ -566,6 +566,18 @@ def test_camp_launch_prompt_writes_an_audit_line_naming_the_prompt_and_workspace
     assert workspace_path in result.stderr
 
 
+def test_camp_launch_resume_with_prompt_refuses_rather_than_dropping_it(cli_env) -> None:
+    """`--resume` re-enters a session that is already mid-conversation, so there is
+    no first turn for a prompt to become. Dropping it silently would report success
+    while discarding the operator's instruction — the exact failure the seam's
+    `LaunchError` exists to prevent, one layer up."""
+    result = _camp(
+        cli_env, "launch", "--group", "mygroup", "--resume", "somesession", "--prompt", "go"
+    )
+
+    _assert_clean_refusal(result, needle="mutually exclusive")
+
+
 def test_camp_launch_without_prompt_writes_no_prompt_audit_line(cli_env) -> None:
     _new_workspace(cli_env, "feat-prompt-h")
     result = _camp(cli_env, "launch", "feat-prompt-h", "--group", "mygroup")

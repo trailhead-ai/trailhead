@@ -891,6 +891,13 @@ def _cmd_launch_group_cli(
             "never both"
         )
 
+    if resume_ref is not None and prompt is not None:
+        _die(
+            "camp launch: --resume and --prompt are mutually exclusive — a "
+            "prompt becomes a session's first turn, and a resumed session is "
+            "already past its first turn"
+        )
+
     if resume_ref is not None:
         if rest:
             _die(
