@@ -204,6 +204,10 @@ def rig(monkeypatch, tmp_path):
         session, "workspace_dir", lambda group, slug, env=None: state["workspace"]
     )
     monkeypatch.setattr(session, "pretrust_workspace", fake_pretrust)
+    # The pre-launch vault pull is a network round trip; neutralized by default
+    # so no test in this file shells out to the real `lore`. The tests that
+    # assert on it (test_launch_lore_pull.py) re-patch this name themselves.
+    monkeypatch.setattr(session, "pull_lore", lambda **kwargs: "pulled")
     monkeypatch.setattr(session.shutil, "which", lambda binary: state["which"])
     monkeypatch.setattr(session.subprocess, "run", fake_run)
     monkeypatch.setattr(
