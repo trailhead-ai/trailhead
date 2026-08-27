@@ -150,6 +150,10 @@ on your PATH.
 
 If you (or your agent) are contributing, read [`docs/vision.md`](docs/vision.md) first.
 
+Every user-visible change gets a [`CHANGELOG.md`](CHANGELOG.md) entry under
+`## [Unreleased]`, in [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
+format, as part of the same change.
+
 ## Tool READMEs
 
 - [lore](tools/lore/README.md) — skills, recall mechanics, vault layout

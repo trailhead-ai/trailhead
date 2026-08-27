@@ -27,18 +27,40 @@ The outcome is recorded back onto the provenance stamp via
 discoverable (`trailhead doctor`) rather than silently indistinguishable
 from "up to date".
 
-The `--json` output is a pinned schema (schema_version 1) — the producer
+The `--json` output is a pinned schema (schema_version 2) — the producer
 contract a SessionStart hook consumes:
 
-    {"schema_version": 1, "outcome": "ok"|"behind"|"unanswerable",
+    {"schema_version": 2, "outcome": "ok"|"behind"|"unanswerable",
      "commits_behind": <int|null>, "installed_sha": <str|null>,
-     "reason": <str|null>}
+     "reason": <str|null>,
+     "changelog_delta": {"available": <bool>, "lines": [<str>, ...],
+                          "truncated": <bool>}}
+
+`changelog_delta` is the ADDED lines of `git diff <installed_sha>
+<tracked_branch> -- CHANGELOG.md` — no markdown parsing, no version scheme,
+no tags. It is attacker-reachable: anyone who lands a commit on the tracked
+branch authors text that lands here before a human reads it. So it is
+treated as untrusted data end to end — control characters, ANSI escape
+sequences, and markdown fence-breaking sequences (` ``` `) are neutralised at
+extraction (`_sanitize_delta_line`), never left for a presentation layer to
+catch; it is carried as a plain data field and never interpolated into a
+shell command line (the diff invocation is argv-only, like every other git
+call here); and it is bounded (`CHANGELOG_DELTA_MAX_LINES`), degrading to an
+explicit truncation notice past the cap rather than growing unbounded.
+
+`available` is false whenever the delta could not be computed at all — no
+resolvable remote, an errored diff invocation — and in that case `lines` is
+always empty and `truncated` is always false: a caller must never mistake a
+failed extraction for a complete-but-empty one. The verdict fields
+(`outcome`, `commits_behind`) are computed independently and stay correct
+even when the delta extraction itself fails.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import tempfile
 from datetime import datetime, timezone
@@ -47,9 +69,20 @@ from pathlib import Path
 from trailhead.paths import ensure_dir, state_dir
 from trailhead.provenance import read_stamp, record_check_outcome, redact_credentials
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 FRESHNESS_WINDOW_SECONDS = 24 * 60 * 60
 FRESHNESS_STAMP_FILENAME = "update-check.json"
+
+CHANGELOG_PATH = "CHANGELOG.md"
+CHANGELOG_DELTA_MAX_LINES = 200
+CHANGELOG_DELTA_MAX_LINE_CHARS = 500
+
+# Strips ANSI/VT escape sequences (CSI and simple two-byte forms) before any
+# changelog content is ever surfaced to an agent.
+_ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]|\x1b[@-Z\\-_]")
+# C0/C1 control characters, excluding none — a changelog line is prose, it
+# never legitimately carries a raw control byte.
+_CONTROL_CHAR_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 
 
 def _default_runner():
@@ -135,13 +168,74 @@ def _run_git(checkout: Path, *args: str, runner, timeout: int):
         return None
 
 
-def _result(outcome: str, commits_behind: int | None, installed_sha: str | None, reason: str | None) -> dict:
+def _unavailable_delta() -> dict:
+    return {"available": False, "lines": [], "truncated": False}
+
+
+def _sanitize_delta_line(line: str) -> str:
+    """Neutralise one changelog delta line before it can reach an agent.
+
+    Strips ANSI escapes and control characters, then breaks any markdown
+    fence sequence (```) so the delta can later be embedded inside a
+    delimited untrusted-content block without letting attacker text close
+    that fence early. Also bounds a single line's length — an attacker
+    controls this text and a single absurdly long line would otherwise
+    defeat the line-count cap.
+    """
+    line = _ANSI_ESCAPE_RE.sub("", line)
+    line = _CONTROL_CHAR_RE.sub("", line)
+    line = line.replace("```", "'''")
+    if len(line) > CHANGELOG_DELTA_MAX_LINE_CHARS:
+        line = line[:CHANGELOG_DELTA_MAX_LINE_CHARS] + "…"
+    return line
+
+
+def _extract_changelog_delta(
+    checkout: Path, installed_sha: str, remote_ref: str, *, runner, timeout: int
+) -> dict:
+    """Return the sanitized, bounded added-lines delta of CHANGELOG.md.
+
+    Runs `git diff <installed_sha> <remote_ref> -- CHANGELOG.md` (argv-only,
+    read-only) and keeps only lines that are genuinely added — never removed
+    or context lines, and never the `+++ b/CHANGELOG.md` file header, which
+    also starts with `+`. Any diff failure (nonzero exit, timeout) reports
+    `available: False` rather than a partial delta.
+    """
+    proc = _run_git(
+        checkout, "diff", installed_sha, remote_ref, "--", CHANGELOG_PATH, runner=runner, timeout=timeout
+    )
+    if proc is None or proc.returncode != 0:
+        return _unavailable_delta()
+
+    added = [
+        _sanitize_delta_line(raw_line[1:])
+        for raw_line in (proc.stdout or "").splitlines()
+        if raw_line.startswith("+") and not raw_line.startswith("+++")
+    ]
+
+    truncated = len(added) > CHANGELOG_DELTA_MAX_LINES
+    if truncated:
+        omitted = len(added) - CHANGELOG_DELTA_MAX_LINES
+        added = added[:CHANGELOG_DELTA_MAX_LINES]
+        added.append(f"… truncated: {omitted} more line(s) omitted (delta exceeds {CHANGELOG_DELTA_MAX_LINES} lines)")
+
+    return {"available": True, "lines": added, "truncated": truncated}
+
+
+def _result(
+    outcome: str,
+    commits_behind: int | None,
+    installed_sha: str | None,
+    reason: str | None,
+    changelog_delta: dict | None = None,
+) -> dict:
     return {
         "schema_version": SCHEMA_VERSION,
         "outcome": outcome,
         "commits_behind": commits_behind,
         "installed_sha": installed_sha,
         "reason": reason,
+        "changelog_delta": changelog_delta if changelog_delta is not None else _unavailable_delta(),
     }
 
 
@@ -151,10 +245,11 @@ def _finish(
     installed_sha: str | None,
     reason: str | None,
     env: dict[str, str],
+    changelog_delta: dict | None = None,
 ) -> dict:
     redacted_reason = redact_credentials(reason) if reason else None
     record_check_outcome(outcome, reason=redacted_reason, env=env)
-    return _result(outcome, commits_behind, installed_sha, redacted_reason)
+    return _result(outcome, commits_behind, installed_sha, redacted_reason, changelog_delta)
 
 
 def check_for_update(
@@ -232,6 +327,10 @@ def check_for_update(
             "unanswerable", None, installed_sha, "unexpected rev-list output", _env
         )
 
+    changelog_delta = _extract_changelog_delta(
+        checkout, installed_sha, stamped_branch, runner=_runner, timeout=timeout
+    )
+
     if commits_behind == 0:
-        return _finish("ok", 0, installed_sha, None, _env)
-    return _finish("behind", commits_behind, installed_sha, None, _env)
+        return _finish("ok", 0, installed_sha, None, _env, changelog_delta)
+    return _finish("behind", commits_behind, installed_sha, None, _env, changelog_delta)
