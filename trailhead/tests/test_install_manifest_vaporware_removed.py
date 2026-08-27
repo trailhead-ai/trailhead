@@ -1,10 +1,9 @@
-"""Guards against re-introducing the retired install-manifest vaporware surface.
+"""Pins the repo-wide absence of the install-manifest surface.
 
 `install_manifest.toml`, `trailhead/fetch.py`, and the GPG-verification flow
-identified by its signing key fingerprint (`74AEB40C93C4250A`) were documented
-in `trailhead/docs/install-manifest.md` but never implemented. That doc is
-removed; this sweep pins the absence of those references repo-wide so the
-removal cannot silently regress.
+identified by the signing key fingerprint `74AEB40C93C4250A` describe install
+behavior trailhead does not implement. This sweep asserts no file references
+them, so the surface cannot reappear undetected.
 """
 
 from __future__ import annotations

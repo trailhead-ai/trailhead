@@ -848,10 +848,11 @@ def find_all_markdown_files(repo_root: Path) -> list[Path]:
 
 
 class TestRemovedInstallManifestDocHasNoDanglingLinks:
-    """Repo-wide extension of the inverse link check: the retired install-manifest
-    doc must be gone, and no markdown file anywhere in the repo may carry a
-    relative link that resolves to its path — not just the four indexed READMEs
-    the scan above covers."""
+    """No markdown file in the repo links to the install-manifest doc path.
+
+    Scans every markdown file, not only the indexed READMEs, and asserts both
+    that the doc is absent and that no relative link resolves to it.
+    """
 
     _REMOVED_DOC = _REPO_ROOT / "trailhead" / "docs" / "install-manifest.md"
 
