@@ -244,9 +244,11 @@ def test_phase5_pins_lesson_write_names_the_elected_vault():
         _phase5_section(),
         "execute.md#phase5",
         "--kind lesson --vault <elected-vault>",
-        "An unqualified `lore record create` resolves to the default vault, so "
-        "the lesson lands where the claim-time query — which is scoped to the "
-        "elected vault — will never find it.",
+        "An unqualified `lore record create` resolves to the default vault, "
+        "not the vault the parent task actually came from — a misrouted "
+        "write. (The claim-time `lore search` has no `--vault` flag and reads "
+        "across every configured vault, so this vault pin protects where the "
+        "lesson is written, not whether the later cross-vault read can see it.)",
     )
 
 
@@ -254,10 +256,42 @@ def test_phase5_pins_absent_subsystem_label_branch_on_the_write():
     _pin_in(
         _phase5_section(),
         "execute.md#phase5",
-        "the write omits that label and the claim-time query drops its matching term",
+        "the write omits that label entirely; retrieval was never gated on it",
         "Nothing writes `craft/subsystems` on a standalone run, so the write "
-        "needs a stated branch for the absent case — otherwise it stamps an "
-        "invented value or writes nothing retrievable.",
+        "needs a stated branch for the absent case — and since retrieval "
+        "never gated on the label to begin with, there is no matching term on "
+        "the read side to drop in sympathy.",
+    )
+
+
+def test_phase5_pins_subsystem_name_resolution():
+    _pin_in(
+        _phase5_section(),
+        "execute.md#phase5",
+        "`<name>` is the parent task's own `craft/subsystems` label value",
+        "With no stated resolution an agent may substitute a repo or area "
+        "name, stamping inaccurate provenance on the written lesson.",
+    )
+
+
+def test_phase5_pins_subsystem_name_is_untrusted_input():
+    _pin_in(
+        _phase5_section(),
+        "execute.md#phase5",
+        "**`<name>` is untrusted input**",
+        "`<name>` is a free-form vault label anyone with shared-vault write "
+        "access can set, and it is substituted into a literal shell command "
+        "the unsandboxed controller runs.",
+    )
+
+
+def test_phase5_pins_checkable_safe_value_shape():
+    _pin_in(
+        _phase5_section(),
+        "execute.md#phase5",
+        "a safe value matches `^[A-Za-z0-9._/-]+$`",
+        "The validation rule has to say what a safe value looks like, or it is "
+        "aspirational rather than checkable.",
     )
 
 
@@ -289,4 +323,23 @@ def test_phase5_pins_title_sanitization_before_quoting():
         "the title is stripped of single quotes, newlines, backticks, and `$` before it is quoted",
         "A single quote in the title breaks out of the quoted argument and "
         "injects a command into the controller's shell.",
+    )
+
+
+def test_phase5_pins_omit_on_mismatch_not_escape_on_mismatch():
+    _pin_in(
+        _phase5_section(),
+        "execute.md#phase5",
+        "a value that does not match is never substituted, quoted, or escaped in",
+        "The security posture is refusal, not escaping: an attacker-controlled "
+        "`<name>` that fails the safe-value regex must be omitted from the "
+        "write, never shell-escaped and substituted in — escaping instead of "
+        "omitting inverts the guarantee.",
+    )
+    _pin_in(
+        _phase5_section(),
+        "execute.md#phase5",
+        "`<name>` is omitted from the write instead",
+        "The omit-on-mismatch behavior must name what actually happens to a "
+        "value that fails validation, not just that substitution is refused.",
     )

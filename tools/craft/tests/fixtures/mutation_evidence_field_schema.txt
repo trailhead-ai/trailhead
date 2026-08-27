@@ -1,0 +1,1 @@
+mutation-evidence: <per test-contract item — test node id, the exact mutation applied, RED observed, GREEN observed, empty-diff confirmed — or the unevidenced item forcing a non-DONE status; or "none" if the test contract has no items>

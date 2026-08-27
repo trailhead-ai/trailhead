@@ -34,7 +34,7 @@ operators.
 - ``LabelExists(key)`` — indexed-label key existence (``has:label.worktree``); same
   dot-for-slash decoding on ``key``.
 - ``FullText(term)`` — a bare full-text term (``trailhead``).
-- ``Phrase(text)`` — a quoted adjacent-phrase (``"penny worker"``).
+- ``Phrase(text)`` — a quoted adjacent-phrase (``"billing worker"``).
 - ``Compare(field, op, value)`` — range comparison on a date/number column;
   ``op ∈ {">=", "<=", ">", "<"}``.
 - ``And(left, right)``, ``Or(left, right)``, ``Not(operand)`` — boolean composition.
@@ -193,7 +193,7 @@ class FieldEq:
 
 @dataclass(frozen=True)
 class FacetMembership:
-    """List-valued facet membership: ``area:penny``, ``phase:build``."""
+    """List-valued facet membership: ``area:billing``, ``phase:build``."""
 
     facet: str
     value: str
@@ -230,7 +230,7 @@ class FullText:
 
 @dataclass(frozen=True)
 class Phrase:
-    """Quoted adjacent phrase: ``"penny worker"``."""
+    """Quoted adjacent phrase: ``"billing worker"``."""
 
     text: str
 
@@ -680,7 +680,7 @@ def parse(query):
     """Parse a KQL-subset query string and return the AST root node.
 
     Args:
-        query: The raw query string (e.g. ``"kind:spec and area:penny"``).
+        query: The raw query string (e.g. ``"kind:spec and area:billing"``).
 
     Returns:
         An AST root node (one of the frozen dataclass types defined above).

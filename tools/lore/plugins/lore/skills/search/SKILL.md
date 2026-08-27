@@ -22,7 +22,7 @@ The query is a facet-filter string. The supported facets and operators:
 - `label.<key>:<value>` — exact match on an indexed label (e.g.
   `label.worktree:s5`). `has:label.<key>` checks the key exists, with no
   value match (e.g. `has:label.worktree`).
-- boolean `and` / `or` — combine facets, e.g. `kind:spec and area:penny`.
+- boolean `and` / `or` — combine facets, e.g. `kind:spec and area:billing`.
 
 A namespaced label key is queried with the **dot-for-slash** convention: a key
 stored as `claude-code/model` is queried as `label.claude-code.model:opus` —
@@ -44,7 +44,7 @@ lore search '<query>'
 Examples:
 
 ```bash
-lore search 'kind:spec and area:penny'
+lore search 'kind:spec and area:billing'
 lore search 'kind:decision or kind:lesson'
 lore search 'area:auth-service'
 ```
