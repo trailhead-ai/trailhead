@@ -114,8 +114,14 @@ def _state_dir(env: dict[str, str]) -> Path | None:
     return (Path(home) / ".local" / "state" / STATE_APP) if home else None
 
 
-def _read_stamp(env: dict[str, str]) -> dict[str, Any] | None:
-    """Return the stamped checkout path, confined under the user's home.
+def _read_stamp(env: dict[str, str]) -> Path | None:
+    """Return the stamped checkout path, RESOLVED and confined under the
+    user's home.
+
+    The resolved path is what gets returned, so the exec below runs out of
+    the exact path confinement was checked against — re-deriving it from the
+    raw stamp string would leave a window in which a symlink component could
+    be repointed between the check and the exec.
 
     The hook consumes exactly one stamped value — the checkout path it execs
     ``bin/trailhead`` out of — so it enforces exactly one check: that the
@@ -144,10 +150,11 @@ def _read_stamp(env: dict[str, str]) -> dict[str, Any] | None:
     if not home:
         return None
     try:
-        Path(checkout).resolve().relative_to(Path(home).resolve())
+        resolved = Path(checkout).resolve()
+        resolved.relative_to(Path(home).resolve())
     except (ValueError, OSError):
         return None
-    return data
+    return resolved
 
 
 def _update_check_disabled(checkout: Path, env: dict[str, str]) -> bool:
@@ -320,11 +327,9 @@ def check_and_render(
     _runner = runner if runner is not None else _default_runner()
     _now = now if now is not None else datetime.now(timezone.utc)
 
-    stamp = _read_stamp(_env)
-    if stamp is None:
+    checkout = _read_stamp(_env)
+    if checkout is None:
         return None
-
-    checkout = Path(stamp["checkout"])
 
     if _update_check_disabled(checkout, _env):
         return None

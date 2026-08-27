@@ -699,3 +699,24 @@ class TestVerdictNamesTheRightGap:
         out = self._render(tmp_path, commits_behind=3, install_behind=1)
         assert "install is 1 commit behind" in out
         assert "checkout is 3 commits behind" in out
+
+
+class TestExecUsesTheValidatedPath:
+    """Confinement is checked against the resolved checkout path, so the exec
+    must use that same resolved path. Re-deriving it from the raw stamp
+    string leaves a window in which a symlink component can be repointed
+    between the check and the exec, sending the exec somewhere never
+    validated."""
+
+    def test_exec_argv_is_the_resolved_checkout_not_the_raw_stamp_string(self, tmp_path):
+        env = _env(tmp_path)
+        real = _checkout(tmp_path, "real")
+        link = tmp_path / "home" / "via-link"
+        link.symlink_to(real)
+        _write_stamp(tmp_path, env, link)
+        runner, calls = _spy_runner(_BEHIND)
+
+        hook.check_and_render(env=env, runner=runner)
+
+        assert calls, "expected the check to be exec'd"
+        assert calls[0][0] == str(real / "bin" / "trailhead")
