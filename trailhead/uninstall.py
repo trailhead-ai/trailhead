@@ -35,6 +35,7 @@ from pathlib import Path
 from trailhead.harness import HarnessError, get_harness
 from trailhead.pathint import repo_root, resolve_shim_dir
 from trailhead.paths import state_dir
+from trailhead.provenance import remove_stamp
 from trailhead.wire import LockError, wire_lock
 
 
@@ -161,6 +162,11 @@ def run_uninstall(
     # ------------------------------------------------------------------
     if shim_dir.exists():
         shutil.rmtree(shim_dir, ignore_errors=True)
+
+    # ------------------------------------------------------------------
+    # Remove the install provenance stamp — its checkout is going away too.
+    # ------------------------------------------------------------------
+    remove_stamp(env=_env)
 
     # ------------------------------------------------------------------
     # Leftover state: drop the composed base dir if now empty.

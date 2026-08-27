@@ -17,7 +17,7 @@
 # against the convention-discovered plugin inventory (Manifest.skills / .subagents).
 
 # ---------------------------------------------------------------------------
-# CLI subcommands (kind=command) — the three real commands: install/uninstall/doctor
+# CLI subcommands (kind=command) — the four real commands: install/uninstall/doctor/update
 # ---------------------------------------------------------------------------
 
 [[claim]]
@@ -36,6 +36,12 @@ source = "root"
 kind = "command"
 tool = "trailhead"
 ref = "doctor"
+source = "root"
+
+[[claim]]
+kind = "command"
+tool = "trailhead"
+ref = "update"
 source = "root"
 
 # ---------------------------------------------------------------------------

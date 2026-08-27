@@ -18,10 +18,13 @@ def _claude_dir(tmp_path: Path) -> Path:
 
 
 def _env(tmp_path: Path) -> dict[str, str]:
+    home = tmp_path / "home"
+    home.mkdir(exist_ok=True)
     return {
         **os.environ,
         "TRAILHEAD_STATE_DIR": str(tmp_path),
         "TRAILHEAD_CLAUDE_DIR": str(_claude_dir(tmp_path)),
+        "HOME": str(home),
     }
 
 
@@ -310,3 +313,103 @@ class TestTrailheadField:
         )
         assert "trailhead" not in r.data["clis"]
 
+
+
+class TestProvenance:
+    def _checkout(self, tmp_path: Path) -> Path:
+        checkout = tmp_path / "home" / "checkout"
+        checkout.mkdir(parents=True, exist_ok=True)
+        return checkout
+
+    def test_reports_no_provenance_when_absent(self, tmp_path):
+        r = run_doctor(
+            env=_env(tmp_path), which_runner=lambda n: None, python_version_runner=_fake_py
+        )
+        assert r.data["provenance"] is None
+        assert "no install provenance" in r.human_output.lower()
+
+    def test_reports_the_stamp_when_present(self, tmp_path):
+        from trailhead.provenance import write_stamp
+
+        checkout = self._checkout(tmp_path)
+        env = _env(tmp_path)
+
+        def runner(args, **kw):
+            sub = args[3]
+            if sub == "rev-parse" and args[4] == "HEAD":
+                return subprocess.CompletedProcess(args, 0, stdout="c" * 40 + "\n", stderr="")
+            if sub == "rev-parse":
+                return subprocess.CompletedProcess(args, 0, stdout="origin/main\n", stderr="")
+            return subprocess.CompletedProcess(
+                args, 0, stdout="https://example.com/r.git\n", stderr=""
+            )
+
+        write_stamp(checkout, env=env, runner=runner)
+
+        r = run_doctor(env=env, which_runner=lambda n: None, python_version_runner=_fake_py)
+        assert r.data["provenance"]["checkout"] == str(checkout)
+        assert r.data["provenance"]["sha"] == "c" * 40
+        assert str(checkout) in r.human_output
+
+    def test_reports_last_check_outcome_when_present(self, tmp_path):
+        from trailhead.provenance import record_check_outcome, write_stamp
+
+        checkout = self._checkout(tmp_path)
+        env = _env(tmp_path)
+
+        def runner(args, **kw):
+            sub = args[3]
+            if sub == "rev-parse" and args[4] == "HEAD":
+                return subprocess.CompletedProcess(args, 0, stdout="d" * 40 + "\n", stderr="")
+            if sub == "rev-parse":
+                return subprocess.CompletedProcess(args, 0, stdout="origin/main\n", stderr="")
+            return subprocess.CompletedProcess(
+                args, 0, stdout="https://example.com/r.git\n", stderr=""
+            )
+
+        write_stamp(checkout, env=env, runner=runner)
+        record_check_outcome("unanswerable", reason="proxy blocked", env=env)
+
+        r = run_doctor(env=env, which_runner=lambda n: None, python_version_runner=_fake_py)
+        assert r.data["provenance"]["last_check"]["outcome"] == "unanswerable"
+        assert "unanswerable" in r.human_output.lower()
+
+    def test_says_so_plainly_when_no_check_has_run_yet(self, tmp_path):
+        from trailhead.provenance import write_stamp
+
+        checkout = self._checkout(tmp_path)
+        env = _env(tmp_path)
+
+        def runner(args, **kw):
+            sub = args[3]
+            if sub == "rev-parse" and args[4] == "HEAD":
+                return subprocess.CompletedProcess(args, 0, stdout="e" * 40 + "\n", stderr="")
+            if sub == "rev-parse":
+                return subprocess.CompletedProcess(args, 0, stdout="origin/main\n", stderr="")
+            return subprocess.CompletedProcess(
+                args, 0, stdout="https://example.com/r.git\n", stderr=""
+            )
+
+        write_stamp(checkout, env=env, runner=runner)
+
+        r = run_doctor(env=env, which_runner=lambda n: None, python_version_runner=_fake_py)
+        assert r.data["provenance"]["last_check"] is None
+        assert "no update check" in r.human_output.lower() or "never checked" in r.human_output.lower()
+
+    def test_reports_a_rejected_stamp_distinctly_from_an_absent_one(self, tmp_path):
+        from trailhead import provenance
+
+        env = _env(tmp_path)
+        checkout = self._checkout(tmp_path)
+        rejected_stamp = {
+            "checkout": str(checkout),
+            "sha": "not-a-real-sha",
+            "wired_at": "2026-01-01T00:00:00Z",
+            "last_check": None,
+        }
+        provenance._atomic_write_json(provenance.stamp_path(env=env), rejected_stamp)
+
+        r = run_doctor(env=env, which_runner=lambda n: None, python_version_runner=_fake_py)
+        assert r.data["provenance"] is None
+        assert "no install provenance recorded" not in r.human_output.lower()
+        assert "rejected" in r.human_output.lower()

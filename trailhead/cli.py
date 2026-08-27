@@ -31,6 +31,7 @@ from trailhead.outpost_lifecycle import OutpostLifecycleError, restart, start, s
 from trailhead.pathint import PathIntegrationError, shellenv_lines
 from trailhead.paths import PathResolutionError
 from trailhead.uninstall import run_uninstall
+from trailhead.update import FRESHNESS_WINDOW_SECONDS, check_for_update, run_update_apply
 from trailhead.wire import LockError, WireError
 
 # Named error family — maps to a clean 'trailhead: <message>' line.
@@ -58,6 +59,7 @@ Commands:
   install     Install agent-plugins into your code harness(es) + the camp/lore CLIs.
   uninstall   Remove the entire trailhead install (all plugins + CLIs). Keeps your data.
   doctor      Report what trailhead has installed (read-only).
+  update      Upgrade the install (or --check for a read-only freshness check).
   shellenv    Print shell env to put the camp/lore CLIs on PATH (brew-style).
 
 Install is config-driven and non-interactive. By default it auto-detects your
@@ -105,6 +107,43 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
     else:
         print(result.human_output)
     return result.exit_code
+
+
+def _cmd_update(args: argparse.Namespace) -> int:
+    if not args.check:
+        return run_update_apply(
+            assume_yes=args.yes,
+            dry_run=args.dry_run,
+            timeout=args.timeout,
+        )
+
+    result = check_for_update(timeout=args.timeout, window=args.window)
+
+    if args.json:
+        import json
+
+        print(json.dumps(result))
+        return 0
+
+    outcome = result["outcome"]
+    sha = result["installed_sha"]
+    short_sha = sha[:8] if sha else "unknown"
+    if outcome == "ok":
+        print(f"trailhead: up to date (installed {short_sha})")
+    elif outcome == "behind":
+        gaps = []
+        if result["install_commits_behind"]:
+            gaps.append(
+                f"install is {result['install_commits_behind']} commit(s) behind the checkout"
+            )
+        if result["commits_behind"]:
+            gaps.append(
+                f"checkout is {result['commits_behind']} commit(s) behind its tracked branch"
+            )
+        print(f"trailhead: {'; '.join(gaps)} (installed {short_sha})")
+    else:
+        print(f"trailhead: update check inconclusive: {result['reason']}")
+    return 0
 
 
 def _cmd_shellenv(args: argparse.Namespace) -> int:
@@ -223,6 +262,50 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Print a machine-readable JSON report.",
     )
 
+    update_p = subparsers.add_parser(
+        "update",
+        help="Upgrade the install (or check with --check) against its source checkout's remote.",
+    )
+    update_p.add_argument(
+        "--check",
+        action="store_true",
+        default=False,
+        help="Run the read-only freshness check instead of upgrading.",
+    )
+    update_p.add_argument(
+        "--yes",
+        "-y",
+        action="store_true",
+        default=False,
+        help="Skip the interactive confirmation prompt (apply mode only).",
+    )
+    update_p.add_argument(
+        "--dry-run",
+        action="store_true",
+        default=False,
+        help="Print what an upgrade would do without changing anything (apply mode only).",
+    )
+    update_p.add_argument(
+        "--json",
+        action="store_true",
+        default=False,
+        help="Print a machine-readable JSON result.",
+    )
+    update_p.add_argument(
+        "--timeout",
+        type=int,
+        default=10,
+        metavar="SECONDS",
+        help="Abandon the git fetch after this many seconds (default: 10).",
+    )
+    update_p.add_argument(
+        "--window",
+        type=int,
+        default=FRESHNESS_WINDOW_SECONDS,
+        metavar="SECONDS",
+        help="Freshness window between network fetches (default: 86400, 24h).",
+    )
+
     shellenv_p = subparsers.add_parser(
         "shellenv",
         help="Print shell env to put the camp/lore CLIs on PATH (brew-style).",
@@ -264,6 +347,7 @@ def main() -> int:
         "install": _cmd_install,
         "uninstall": _cmd_uninstall,
         "doctor": _cmd_doctor,
+        "update": _cmd_update,
         "shellenv": _cmd_shellenv,
         "outpost": _cmd_outpost,
     }

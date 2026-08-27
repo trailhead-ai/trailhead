@@ -52,6 +52,7 @@ from trailhead.install_config import (
     resolve_config_path,
 )
 from trailhead.pathint import create_shims, repo_root, trailhead_bin_executable
+from trailhead.provenance import write_stamp
 from trailhead.wire import LockError, WireError, default_manifest_paths, wire, wire_lock
 
 _REPO_ROOT = repo_root()
@@ -185,6 +186,73 @@ def run_lore_init(
     return proc.returncode, proc.stderr or ""
 
 
+def wire_all_harnesses(
+    cfg,
+    *,
+    env: dict[str, str],
+    runner=None,
+    quiet: bool = False,
+    as_json: bool = False,
+) -> dict[str, list[str]]:
+    """Compose and register every ``cfg.harnesses`` entry's plugin selection.
+
+    This is the reusable wire entrypoint (the "install/wire path") both
+    ``run_install`` and `trailhead update`'s apply mode drive: a fresh install
+    wires under its own ``wire_lock``, while an upgrade holds that same lock
+    across the git fast-forward *and* this call, so a concurrent install can
+    never interleave with an in-flight upgrade. Callers are responsible for
+    holding ``wire_lock`` — this function does not acquire it itself, so an
+    upgrade's rollback path can call it again (against the reverted checkout)
+    without re-entering the lock.
+
+    Raises ``WireError`` naming the tool + stage on a per-tool failure;
+    harnesses processed before the failure stay wired.
+    """
+    wired: dict[str, list[str]] = {}
+    for rh in cfg.harnesses:
+        harness = get_harness(rh.name)
+        plugin_names = [p.name for p in rh.plugins]
+        if not quiet and not as_json:
+            print(f"installing into {rh.name}: {', '.join(plugin_names) or '(no plugins)'}…")
+        wire(rh.selection(), harness=harness, env=env, runner=runner)
+        wired[rh.name] = plugin_names
+    return wired
+
+
+def resolve_config_for_env(
+    env: dict[str, str],
+    *,
+    config_arg: str | None = None,
+    harnesses: list[str] | None = None,
+    plugins: list[str] | None = None,
+    no_camp: bool = False,
+    no_lore: bool = False,
+    no_portage: bool = False,
+):
+    """Resolve the install config: config file + CLI overrides + detection.
+
+    The single config-resolution path. Called with no keyword overrides it
+    resolves exactly what an unqualified `trailhead install` would, which is
+    what apply-mode re-wiring (`trailhead update`) needs to recompose the same
+    selection a fresh install would; `run_install` passes its own CLI
+    overrides through the same call.
+
+    Raises ``ConfigResolveError`` / ``UnknownSubagentError`` /
+    ``UnknownSkillError`` — the caller decides how to surface them.
+    """
+    detected = [h.name for h in detect_harnesses(env)]
+    config_path = resolve_config_path(config_arg, _REPO_ROOT)
+    return resolve_config(
+        config_path=config_path,
+        cli_harnesses=harnesses,
+        cli_plugins=plugins,
+        no_camp=no_camp,
+        no_lore=no_lore,
+        no_portage=no_portage,
+        detected_harnesses=detected,
+    )
+
+
 def run_install(
     *,
     config_arg: str | None = None,
@@ -207,17 +275,15 @@ def run_install(
     # ------------------------------------------------------------------
     # Resolve config (file + CLI overrides + detection)
     # ------------------------------------------------------------------
-    detected = [h.name for h in detect_harnesses(_env)]
-    config_path = resolve_config_path(config_arg, _REPO_ROOT)
     try:
-        cfg = resolve_config(
-            config_path=config_path,
-            cli_harnesses=harnesses,
-            cli_plugins=plugins,
+        cfg = resolve_config_for_env(
+            _env,
+            config_arg=config_arg,
+            harnesses=harnesses,
+            plugins=plugins,
             no_camp=no_camp,
             no_lore=no_lore,
             no_portage=no_portage,
-            detected_harnesses=detected,
         )
     except (ConfigResolveError, UnknownSubagentError, UnknownSkillError) as exc:
         print(f"trailhead: {exc}", file=sys.stderr)
@@ -230,22 +296,23 @@ def run_install(
     if cfg.harnesses:
         try:
             with wire_lock(env=_env):
-                for rh in cfg.harnesses:
-                    harness = get_harness(rh.name)
-                    plugin_names = [p.name for p in rh.plugins]
-                    if not quiet and not as_json:
-                        print(
-                            f"installing into {rh.name}: "
-                            f"{', '.join(plugin_names) or '(no plugins)'}…"
-                        )
-                    wire(rh.selection(), harness=harness, env=_env, runner=runner)
-                    wired[rh.name] = plugin_names
+                wired = wire_all_harnesses(cfg, env=_env, runner=runner, quiet=quiet, as_json=as_json)
         except LockError as exc:
             print(str(exc), file=sys.stderr)
             return 1
         except WireError as exc:
             print(f"trailhead: {exc}", file=sys.stderr)
             return 1
+
+        # --------------------------------------------------------------
+        # Record install provenance — the only durable pointer from this
+        # install back to the checkout it was run from. A checkout whose git
+        # state can't be resolved (no commits, no upstream, no `origin`) is
+        # a warning, never a reason to fail an otherwise-successful install.
+        # --------------------------------------------------------------
+        stamp_warning = write_stamp(_REPO_ROOT, env=_env)
+        if stamp_warning:
+            print(f"trailhead: {stamp_warning}", file=sys.stderr)
 
     # ------------------------------------------------------------------
     # Install each wired plugin's declared user-level ruleset into every

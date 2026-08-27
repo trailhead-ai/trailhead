@@ -11,7 +11,7 @@ Forward check:
    by the resolver.
 4. Forward check: for every claim, resolve ref against its oracle:
    - skill / agent  → build_real_anchor_set() (per-tool selectable inventory)
-   - command        → _KNOWN_COMMANDS ({install, uninstall, doctor})
+   - command        → _KNOWN_COMMANDS ({install, uninstall, doctor, update})
    - doc-link       → (REPO_ROOT / ref).exists()
    Fails closed with a named assertion on mismatch.
 5. build_real_anchor_set() enumerates from sorted glob of tools/*/capabilities.toml,
@@ -49,10 +49,8 @@ _REPO_ROOT = Path(__file__).parent.parent.parent
 _CLAIMS_FILE = _REPO_ROOT / "trailhead" / "landing_claims.toml"
 
 # CLI subcommands — hardcoded closed set.
-# The config-driven CLI has exactly three commands: install / uninstall / doctor.
-# (The old preset/capability model and the update/config commands were removed.)
 # add new subcommands here
-_KNOWN_COMMANDS: frozenset[str] = frozenset({"install", "uninstall", "doctor"})
+_KNOWN_COMMANDS: frozenset[str] = frozenset({"install", "uninstall", "doctor", "update"})
 
 # Valid kind values — closed set.
 # The capability-GROUP and preset concepts were removed; install selects subagents
@@ -827,6 +825,51 @@ class TestRealReadmeInverseScan:
         assert not failures, f"{len(failures)} README(s) failed the inverse check:\n" + "\n".join(
             f"  - {f}" for f in failures
         )
+
+
+# Excluded directories for the repo-wide markdown sweep below.
+_MD_SWEEP_EXCLUDED_DIRS = frozenset(
+    {".git", ".venv", "trailhead.egg-info", "__pycache__", "node_modules"}
+)
+
+
+def find_all_markdown_files(repo_root: Path) -> list[Path]:
+    """Every `.md` file in the repo, excluding VCS/venv/build directories.
+
+    Sorted for determinism.
+    """
+    return sorted(
+        p
+        for p in repo_root.rglob("*.md")
+        if not any(part in _MD_SWEEP_EXCLUDED_DIRS for part in p.parts)
+    )
+
+
+class TestRemovedInstallManifestDocHasNoDanglingLinks:
+    """No markdown file in the repo links to the install-manifest doc path.
+
+    Scans every markdown file, not only the indexed READMEs, and asserts both
+    that the doc is absent and that no relative link resolves to it.
+    """
+
+    _REMOVED_DOC = _REPO_ROOT / "trailhead" / "docs" / "install-manifest.md"
+
+    def test_install_manifest_doc_removed_and_unlinked(self):
+        assert not self._REMOVED_DOC.exists(), (
+            f"{self._REMOVED_DOC} still exists; it documents install-manifest "
+            "behavior that was never implemented and must be removed"
+        )
+
+        removed_resolved = self._REMOVED_DOC.resolve()
+        offenders: list[str] = []
+        for md_path in find_all_markdown_files(_REPO_ROOT):
+            text = md_path.read_text(encoding="utf-8")
+            for link in sorted(extract_relative_links(text)):
+                resolved = (md_path.parent / link).resolve()
+                if resolved == removed_resolved:
+                    offenders.append(f"{md_path}: link {link!r} resolves to the removed doc")
+
+        assert not offenders, "dangling link(s) to the removed doc:\n" + "\n".join(offenders)
 
 
 # ---------------------------------------------------------------------------

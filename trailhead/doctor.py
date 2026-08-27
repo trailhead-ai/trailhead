@@ -34,6 +34,7 @@ from trailhead.capabilities import ConfineError, ManifestError, cli_bearing_mani
 from trailhead.harness import HarnessError, get_harness
 from trailhead.pathint import resolve_shim_dir, trailhead_bin_executable
 from trailhead.paths import state_dir
+from trailhead.provenance import read_stamp_with_reason
 from trailhead.wire import default_manifest_paths
 
 
@@ -167,6 +168,8 @@ def run_doctor(
     shim_dir = resolve_shim_dir(env=_env)
     clis = {name: _which(name) for name in _discover_cli_names(manifest_paths)}
 
+    provenance, provenance_rejected_reason = read_stamp_with_reason(env=_env)
+
     data = {
         "harnesses": harnesses,
         "shim_dir": str(shim_dir),
@@ -174,6 +177,8 @@ def run_doctor(
         "clis": clis,
         "trailhead": _trailhead_field(_which("trailhead")),
         "python3_version": _python_version(_pyrunner),
+        "provenance": provenance,
+        "provenance_rejected_reason": provenance_rejected_reason,
     }
 
     return DoctorResult(data=data, human_output=_build_human(data), exit_code=0)
@@ -229,5 +234,40 @@ def _build_human(data: dict) -> str:
         f"  shim dir: {data['shim_dir']} ({'present' if data['shim_dir_present'] else 'absent'})"
     )
     lines.append(f"  python3: {data['python3_version']}")
+    lines.append("")
+    lines.extend(_build_provenance_human(data["provenance"], data["provenance_rejected_reason"]))
 
     return "\n".join(lines)
+
+
+def _build_provenance_human(
+    provenance: Optional[dict], rejected_reason: Optional[str] = None
+) -> list[str]:
+    """Render the `install provenance:` block: the stamped checkout + HEAD,
+    and the outcome of the last update check, when present.
+
+    A stamp that exists on disk but was REJECTED (confinement, a malformed
+    `sha`, malformed JSON) is reported distinctly from a
+    genuinely absent one — the fail-closed paths that reject a stamp are
+    otherwise indistinguishable from "never installed"."""
+    if provenance is None:
+        if rejected_reason:
+            return [f"  install provenance: rejected — {rejected_reason}"]
+        return ["  install provenance: no install provenance recorded"]
+
+    lines = [
+        "  install provenance:",
+        f"    checkout: {provenance['checkout']}",
+        f"    wired at: {provenance['sha']} ({provenance['wired_at']})",
+    ]
+    last_check = provenance.get("last_check")
+    if last_check is None:
+        lines.append("    last update check: no update check has run yet")
+    else:
+        outcome = last_check["outcome"]
+        checked_at = last_check.get("checked_at", "")
+        reason = last_check.get("reason")
+        detail = f" — {reason}" if reason else ""
+        lines.append(f"    last update check: {outcome} ({checked_at}){detail}")
+
+    return lines

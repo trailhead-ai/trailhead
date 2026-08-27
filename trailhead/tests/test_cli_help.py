@@ -1,7 +1,6 @@
 """Tests for trailhead/cli.py — subcommand tree + curated help.
 
-The CLI exposes three commands: install / uninstall / doctor. (update + config
-were removed in the config-driven rewrite.)
+The CLI exposes four commands: install / uninstall / doctor / update.
 
 Output hygiene: bare `trailhead` and `--help` print a curated grouped menu, never a
 raw argparse dump; main() returns an int exit code.
@@ -38,7 +37,7 @@ class TestCuratedHelp:
 
     def test_bare_names_the_commands(self):
         _, out, _ = _run([])
-        for cmd in ("install", "uninstall", "doctor", "shellenv"):
+        for cmd in ("install", "uninstall", "doctor", "update", "shellenv"):
             assert cmd in out
 
     def test_help_mentions_config_flag(self):
@@ -58,6 +57,13 @@ class TestSubcommandHelp:
         ec, out, _ = _run(["uninstall", "--help"])
         assert ec == 0
         assert "--yes" in out or "-y" in out
+
+    def test_update_help_shows_check_and_json_flags(self):
+        ec, out, err = _run(["update", "--help"])
+        assert ec == 0
+        text = out + err
+        for flag in ("--check", "--json", "--timeout", "--window", "--yes", "--dry-run"):
+            assert flag in text
 
     def test_doctor_help_exits_zero(self):
         assert _run(["doctor", "--help"])[0] == 0
