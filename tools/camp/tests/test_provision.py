@@ -223,8 +223,14 @@ class TestU1RealSurvival:
 
         subprocess.run([_VENV_PYTHON, str(parent)], capture_output=True, timeout=15)
 
+        # Wait for the logfile to carry the child's output — not for the
+        # sentinel. The child writes the sentinel BEFORE it prints, so a
+        # sentinel-gated wait can return while the print is still in flight
+        # and read an empty logfile.
         deadline = time.monotonic() + 8.0
-        while not sentinel.exists() and time.monotonic() < deadline:
+        while time.monotonic() < deadline:
+            if logfile.exists() and "provisioner completed" in logfile.read_text():
+                break
             time.sleep(0.05)
 
         assert logfile.exists(), "setup.log never created"
