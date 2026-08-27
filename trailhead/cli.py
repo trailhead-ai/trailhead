@@ -31,7 +31,7 @@ from trailhead.outpost_lifecycle import OutpostLifecycleError, restart, start, s
 from trailhead.pathint import PathIntegrationError, shellenv_lines
 from trailhead.paths import PathResolutionError
 from trailhead.uninstall import run_uninstall
-from trailhead.update import FRESHNESS_WINDOW_SECONDS, check_for_update
+from trailhead.update import FRESHNESS_WINDOW_SECONDS, check_for_update, run_update_apply
 from trailhead.wire import LockError, WireError
 
 # Named error family — maps to a clean 'trailhead: <message>' line.
@@ -59,7 +59,7 @@ Commands:
   install     Install agent-plugins into your code harness(es) + the camp/lore CLIs.
   uninstall   Remove the entire trailhead install (all plugins + CLIs). Keeps your data.
   doctor      Report what trailhead has installed (read-only).
-  update      Check whether the install's source checkout is behind its remote.
+  update      Upgrade the install (or --check for a read-only freshness check).
   shellenv    Print shell env to put the camp/lore CLIs on PATH (brew-style).
 
 Install is config-driven and non-interactive. By default it auto-detects your
@@ -111,8 +111,11 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
 
 def _cmd_update(args: argparse.Namespace) -> int:
     if not args.check:
-        args.update_parser.print_help(file=sys.stderr)
-        return 2
+        return run_update_apply(
+            assume_yes=args.yes,
+            dry_run=args.dry_run,
+            timeout=args.timeout,
+        )
 
     result = check_for_update(timeout=args.timeout, window=args.window)
 
@@ -252,13 +255,26 @@ def _build_parser() -> argparse.ArgumentParser:
 
     update_p = subparsers.add_parser(
         "update",
-        help="Check whether the install's source checkout is behind its remote.",
+        help="Upgrade the install (or check with --check) against its source checkout's remote.",
     )
     update_p.add_argument(
         "--check",
         action="store_true",
         default=False,
-        help="Run the read-only freshness check (the only supported mode today).",
+        help="Run the read-only freshness check instead of upgrading.",
+    )
+    update_p.add_argument(
+        "--yes",
+        "-y",
+        action="store_true",
+        default=False,
+        help="Skip the interactive confirmation prompt (apply mode only).",
+    )
+    update_p.add_argument(
+        "--dry-run",
+        action="store_true",
+        default=False,
+        help="Print what an upgrade would do without changing anything (apply mode only).",
     )
     update_p.add_argument(
         "--json",
@@ -280,7 +296,6 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="SECONDS",
         help="Freshness window between network fetches (default: 86400, 24h).",
     )
-    update_p.set_defaults(update_parser=update_p)
 
     shellenv_p = subparsers.add_parser(
         "shellenv",

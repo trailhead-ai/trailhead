@@ -1,4 +1,4 @@
-"""Update detection probe — `trailhead update --check`.
+"""Update detection (`trailhead update --check`) and apply (`trailhead update`).
 
 Reads the install provenance stamp (`trailhead/provenance.py`), runs a
 read-only, timeout-bounded `git fetch` against the stamped checkout, and
@@ -54,6 +54,23 @@ always empty and `truncated` is always false: a caller must never mistake a
 failed extraction for a complete-but-empty one. The verdict fields
 (`outcome`, `commits_behind`) are computed independently and stay correct
 even when the delta extraction itself fails.
+
+`run_update_apply` (`trailhead update`, no `--check`) performs the upgrade:
+fast-forwards the stamped checkout, then re-wires via
+`trailhead.install.wire_all_harnesses` — the same wire entrypoint `trailhead
+install` uses — and refreshes the provenance stamp. Consent is a technical
+gate: apply mode requires an interactive TTY confirmation or an explicit
+`--yes`; a non-interactive invocation without it refuses before any git
+invocation runs. The fetch, the fast-forward, and the re-wire all run under
+one acquisition of `trailhead.wire.wire_lock`, so a concurrent install can
+never interleave with an in-flight upgrade. A dirty or diverged checkout
+refuses without mutating anything. If the re-wire fails after a successful
+fast-forward, the checkout is reset to the pre-upgrade sha and re-wired again
+against that reverted state, so a failed upgrade is a true no-op rather than
+a half-upgraded install; the provenance stamp is written only once that
+re-wire actually completes, so it never claims a sha that was never fully
+wired. Every refusal and failure prints a `trailhead: <message>` line on
+stderr naming a concrete recovery command.
 """
 
 from __future__ import annotations
@@ -62,12 +79,15 @@ import json
 import os
 import re
 import subprocess
+import sys
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
+from trailhead.install import resolve_config_for_env, wire_all_harnesses
 from trailhead.paths import ensure_dir, state_dir
-from trailhead.provenance import read_stamp, record_check_outcome, redact_credentials
+from trailhead.provenance import read_stamp, record_check_outcome, redact_credentials, write_stamp
+from trailhead.wire import LockError, wire_lock
 
 SCHEMA_VERSION = 2
 FRESHNESS_WINDOW_SECONDS = 24 * 60 * 60
@@ -334,3 +354,221 @@ def check_for_update(
     if commits_behind == 0:
         return _finish("ok", 0, installed_sha, None, _env, changelog_delta)
     return _finish("behind", commits_behind, installed_sha, None, _env, changelog_delta)
+
+
+# ---------------------------------------------------------------------------
+# Apply mode — `trailhead update` (no `--check`)
+# ---------------------------------------------------------------------------
+
+
+def _default_is_tty():
+    return sys.stdin.isatty()
+
+
+def _confirm(prompt: str) -> bool:
+    """Read a y/N confirmation from stdin. Anything but y/yes is False."""
+    print(prompt, end="", flush=True)
+    try:
+        raw = sys.stdin.readline()
+    except (EOFError, KeyboardInterrupt):
+        return False
+    return raw.strip().lower() in ("y", "yes")
+
+
+def _proc_stderr(proc) -> str:
+    return redact_credentials((proc.stderr or "").strip()) if proc is not None else "timed out"
+
+
+def run_update_apply(
+    *,
+    env: dict[str, str] | None = None,
+    runner=None,
+    assume_yes: bool = False,
+    dry_run: bool = False,
+    timeout: int = 10,
+    confine_root: Path | str | None = None,
+    is_tty=None,
+) -> int:
+    """Perform the upgrade: fast-forward the stamped checkout, then re-wire.
+
+    Consent is a TECHNICAL gate, not a courtesy: without ``assume_yes`` this
+    refuses on any non-interactive invocation, and mutates nothing before that
+    gate passes. Every refusal and every failure prints a named, actionable
+    ``trailhead: <message>`` line naming a recovery command.
+
+    Failure past the fast-forward is a true no-op: if the re-wire raises after
+    a successful fast-forward, the checkout is reset to the pre-upgrade sha
+    and ``wire_all_harnesses`` is run again against that reverted checkout so
+    the prior wiring is restored — the provenance stamp is written ONLY after
+    a re-wire actually completes, so it never claims a sha that was never
+    fully wired.
+
+    Returns 0 on success or a genuine no-op (already up to date); 1 on any
+    refusal or failure.
+    """
+    _env = env if env is not None else dict(os.environ)
+    _runner = runner if runner is not None else _default_runner()
+    _is_tty = is_tty if is_tty is not None else _default_is_tty
+
+    stamp = read_stamp(env=_env, confine_root=confine_root)
+    if stamp is None:
+        print(
+            "trailhead: no install provenance stamp found — nothing to upgrade. "
+            "Run `trailhead install` first.",
+            file=sys.stderr,
+        )
+        return 1
+
+    checkout = Path(stamp["checkout"])
+    pre_sha = stamp["sha"]
+    stamped_branch = stamp["branch"]
+    remote_name = stamped_branch.split("/", 1)[0] if "/" in stamped_branch else "origin"
+
+    # ------------------------------------------------------------------
+    # Consent gate — technical, not a courtesy. Nothing below this point may
+    # run before it passes (dry-run previews without mutating, so it bypasses
+    # the gate entirely).
+    # ------------------------------------------------------------------
+    if not dry_run and not assume_yes:
+        if _is_tty():
+            print(
+                f"This upgrades the trailhead install from {checkout}, "
+                f"tracking {stamped_branch}: fetches, fast-forwards, and "
+                f"re-wires every configured plugin.\n"
+            )
+            if not _confirm("Proceed? [y/N] "):
+                print("aborted — nothing was changed")
+                return 0
+        else:
+            print(
+                "trailhead: refusing to upgrade without confirmation — re-run "
+                "with --yes, or run interactively. `trailhead update` never "
+                "mutates the install unprompted.",
+                file=sys.stderr,
+            )
+            return 1
+
+    # ------------------------------------------------------------------
+    # Dirty-checkout guard — refuse before touching anything.
+    # ------------------------------------------------------------------
+    status_proc = _run_git(checkout, "status", "--porcelain", runner=_runner, timeout=timeout)
+    if status_proc is None or status_proc.returncode != 0:
+        print(
+            f"trailhead: could not read the checkout's working-tree status: "
+            f"{_proc_stderr(status_proc)}. Inspect it directly: "
+            f"git -C {checkout} status",
+            file=sys.stderr,
+        )
+        return 1
+    if (status_proc.stdout or "").strip():
+        print(
+            f"trailhead: refusing to upgrade — {checkout} has uncommitted "
+            f"changes. Commit or stash them, then re-run: trailhead update",
+            file=sys.stderr,
+        )
+        return 1
+
+    if dry_run:
+        print(
+            f"trailhead: dry run — would fetch {remote_name}, fast-forward "
+            f"{checkout} to {stamped_branch} if possible, then re-wire. "
+            f"No changes made."
+        )
+        return 0
+
+    # ------------------------------------------------------------------
+    # Everything from here mutates the checkout and/or the composed trees —
+    # held under the shared wire lock so a concurrent install can never
+    # interleave with an in-flight upgrade.
+    # ------------------------------------------------------------------
+    try:
+        with wire_lock(env=_env):
+            fetch_proc = _run_git(
+                checkout, "fetch", "--quiet", remote_name, runner=_runner, timeout=timeout
+            )
+            if fetch_proc is None or fetch_proc.returncode != 0:
+                print(
+                    f"trailhead: git fetch failed: {_proc_stderr(fetch_proc)}. "
+                    f"Retry: trailhead update, or inspect directly: "
+                    f"git -C {checkout} fetch {remote_name}",
+                    file=sys.stderr,
+                )
+                return 1
+
+            remote_sha_proc = _run_git(
+                checkout, "rev-parse", stamped_branch, runner=_runner, timeout=timeout
+            )
+            remote_sha = (remote_sha_proc.stdout or "").strip() if remote_sha_proc else ""
+            if remote_sha_proc is None or remote_sha_proc.returncode != 0 or not remote_sha:
+                print(
+                    f"trailhead: could not resolve {stamped_branch}: "
+                    f"{_proc_stderr(remote_sha_proc)}. Inspect directly: "
+                    f"git -C {checkout} rev-parse {stamped_branch}",
+                    file=sys.stderr,
+                )
+                return 1
+
+            if remote_sha == pre_sha:
+                print(f"trailhead: already up to date (installed {pre_sha[:8]})")
+                return 0
+
+            ancestor_proc = _run_git(
+                checkout,
+                "merge-base",
+                "--is-ancestor",
+                "HEAD",
+                stamped_branch,
+                runner=_runner,
+                timeout=timeout,
+            )
+            if ancestor_proc is None or ancestor_proc.returncode != 0:
+                print(
+                    f"trailhead: refusing to upgrade — {checkout}'s HEAD has "
+                    f"diverged from {stamped_branch} and cannot be "
+                    f"fast-forwarded. Resolve it yourself, e.g.: "
+                    f"git -C {checkout} merge {stamped_branch}",
+                    file=sys.stderr,
+                )
+                return 1
+
+            print(f"trailhead: fast-forwarding {checkout} to {stamped_branch}…")
+            merge_proc = _run_git(
+                checkout, "merge", "--ff-only", stamped_branch, runner=_runner, timeout=timeout
+            )
+            if merge_proc is None or merge_proc.returncode != 0:
+                print(
+                    f"trailhead: fast-forward failed: {_proc_stderr(merge_proc)}. "
+                    f"The checkout was not changed. Inspect directly: "
+                    f"git -C {checkout} status",
+                    file=sys.stderr,
+                )
+                return 1
+
+            print("trailhead: re-wiring plugins…")
+            cfg = resolve_config_for_env(_env)
+            try:
+                wire_all_harnesses(cfg, env=_env, runner=_runner, quiet=True)
+            except Exception as exc:
+                reset_proc = _run_git(
+                    checkout, "reset", "--hard", pre_sha, runner=_runner, timeout=timeout
+                )
+                if reset_proc is not None and reset_proc.returncode == 0:
+                    try:
+                        wire_all_harnesses(cfg, env=_env, runner=_runner, quiet=True)
+                    except Exception:
+                        pass  # best-effort restore; the error below still stands
+                print(
+                    f"trailhead: upgrade failed while re-wiring ({exc}); rolled "
+                    f"the checkout back to {pre_sha[:8]} and restored the prior "
+                    f"wiring. Re-run: trailhead update",
+                    file=sys.stderr,
+                )
+                return 1
+
+            write_stamp(checkout, env=_env, runner=_runner)
+    except LockError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    print(f"trailhead: upgraded to {remote_sha[:8]}")
+    return 0

@@ -186,6 +186,60 @@ def run_lore_init(
     return proc.returncode, proc.stderr or ""
 
 
+def wire_all_harnesses(
+    cfg,
+    *,
+    env: dict[str, str],
+    runner=None,
+    quiet: bool = False,
+    as_json: bool = False,
+) -> dict[str, list[str]]:
+    """Compose and register every ``cfg.harnesses`` entry's plugin selection.
+
+    This is the reusable wire entrypoint (the "install/wire path") both
+    ``run_install`` and `trailhead update`'s apply mode drive: a fresh install
+    wires under its own ``wire_lock``, while an upgrade holds that same lock
+    across the git fast-forward *and* this call, so a concurrent install can
+    never interleave with an in-flight upgrade. Callers are responsible for
+    holding ``wire_lock`` — this function does not acquire it itself, so an
+    upgrade's rollback path can call it again (against the reverted checkout)
+    without re-entering the lock.
+
+    Raises ``WireError`` naming the tool + stage on a per-tool failure;
+    harnesses processed before the failure stay wired.
+    """
+    wired: dict[str, list[str]] = {}
+    for rh in cfg.harnesses:
+        harness = get_harness(rh.name)
+        plugin_names = [p.name for p in rh.plugins]
+        if not quiet and not as_json:
+            print(f"installing into {rh.name}: {', '.join(plugin_names) or '(no plugins)'}…")
+        wire(rh.selection(), harness=harness, env=env, runner=runner)
+        wired[rh.name] = plugin_names
+    return wired
+
+
+def resolve_config_for_env(env: dict[str, str]):
+    """Resolve the install config the same way a plain `trailhead install` would.
+
+    No CLI overrides — harness/plugin selection comes from auto-detection plus
+    the config file, exactly as an unqualified `trailhead install` run resolves
+    it. Used by apply-mode re-wiring (`trailhead update`) to recompose the same
+    selection a fresh install would.
+    """
+    detected = [h.name for h in detect_harnesses(env)]
+    config_path = resolve_config_path(None, _REPO_ROOT)
+    return resolve_config(
+        config_path=config_path,
+        cli_harnesses=None,
+        cli_plugins=None,
+        no_camp=False,
+        no_lore=False,
+        no_portage=False,
+        detected_harnesses=detected,
+    )
+
+
 def run_install(
     *,
     config_arg: str | None = None,
@@ -231,16 +285,7 @@ def run_install(
     if cfg.harnesses:
         try:
             with wire_lock(env=_env):
-                for rh in cfg.harnesses:
-                    harness = get_harness(rh.name)
-                    plugin_names = [p.name for p in rh.plugins]
-                    if not quiet and not as_json:
-                        print(
-                            f"installing into {rh.name}: "
-                            f"{', '.join(plugin_names) or '(no plugins)'}…"
-                        )
-                    wire(rh.selection(), harness=harness, env=_env, runner=runner)
-                    wired[rh.name] = plugin_names
+                wired = wire_all_harnesses(cfg, env=_env, runner=runner, quiet=quiet, as_json=as_json)
         except LockError as exc:
             print(str(exc), file=sys.stderr)
             return 1
