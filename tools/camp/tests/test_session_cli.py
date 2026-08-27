@@ -131,8 +131,11 @@ class FakeHarness(ClaudeCodeHarness):
 
     name = "fakeharness"
 
-    def session_launch(self, workspace, session_id, *, session_name=None):
-        return ["fake-launch", session_id]
+    def session_launch(self, workspace, session_id, *, session_name=None, initial_prompt=None):
+        argv = ["fake-launch", session_id]
+        if initial_prompt is not None:
+            argv += ["--", initial_prompt]
+        return argv
 
     def session_launch_modality(self):
         return "detached"
@@ -210,6 +213,7 @@ surviving its own kill (CAMP_FAKE_TMUX_UNDEAD), and not answering at all
 """
 import json
 import os
+import shlex
 import sys
 import time
 
@@ -218,6 +222,17 @@ argv_log = os.environ.get("CAMP_FAKE_TMUX_ARGV_FILE")
 if argv_log:
     with open(argv_log, "a") as handle:
         handle.write("\\t".join(args) + "\\n")
+
+
+def _session_id_from_tail(tokens):
+    """The session id is the harness argv's last token — UNLESS a prompt rides
+    it, in which case the argv's final two tokens are the literal `--` and the
+    prompt (the seam contract session_launch pins), and the session id sits one
+    token further back. Position-based, never text-search, so a prompt whose
+    own text happens to contain `--` cannot be mistaken for the separator."""
+    if len(tokens) >= 3 and tokens[-2] == "--":
+        return tokens[-3]
+    return tokens[-1]
 
 if os.environ.get("CAMP_FAKE_TMUX_HANG") and args and args[0] != "new-session":
     time.sleep(float(os.environ["CAMP_FAKE_TMUX_HANG"]))
@@ -256,10 +271,14 @@ if args and args[0] == "new-session" and not os.environ.get("CAMP_FAKE_TMUX_NO_R
         if arg == "-s" and i + 1 < len(args):
             name = args[i + 1]
     with open(os.environ["CAMP_FAKE_SESSIONS_FILE"], "a") as handle:
-        handle.write(f"{args[-1]}\\t{launch_dir}\\n")
+        handle.write(f"{_session_id_from_tail(args)}\\t{launch_dir}\\n")
     if _TABLE:
         table = _table()
-        table[name] = " ".join(args[pane_at:])
+        # shlex-joined, not plain-space-joined: a prompt can carry spaces of its
+        # own, and `_is_camp_launched` (camp.launch.stop) reads this back with
+        # `shlex.split` — a naive join would scramble a multi-word prompt back
+        # into several tokens on that read.
+        table[name] = shlex.join(args[pane_at:])
         _write(table)
 elif args and args[0] == "has-session":
     sys.exit(0 if _target() in _table() else 1)
@@ -278,7 +297,7 @@ elif args and args[0] == "kill-session":
         # was running stops enumerating too. The pane command ends in the
         # session id, which is what ties the two files together.
         if pane:
-            dead = pane.split()[-1]
+            dead = _session_id_from_tail(shlex.split(pane))
             rows_path = os.environ["CAMP_FAKE_SESSIONS_FILE"]
             with open(rows_path) as handle:
                 rows = [r for r in handle.read().splitlines() if r.split("\\t")[0] != dead]
@@ -456,6 +475,115 @@ def test_camp_launch_unknown_harness_is_a_one_line_refusal(cli_env) -> None:
     assert result.stderr.strip().splitlines() == [
         "camp launch: refusing to launch — no harness named 'nosuchharness' is registered"
     ]
+
+
+# ---------------------------------------------------------------------------
+# camp launch --prompt
+# ---------------------------------------------------------------------------
+
+
+def test_camp_launch_prompt_threads_to_the_tmux_argv(cli_env) -> None:
+    _new_workspace(cli_env, "feat-prompt-a")
+    result = _camp(cli_env, "launch", "feat-prompt-a", "--group", "mygroup", "--prompt", "go")
+
+    assert result.returncode == 0, result.stderr
+    argv = _tmux_new_session_argv(cli_env)[-1]
+    assert argv[-2:] == ["--", "go"]
+
+
+def test_camp_launch_prompt_leaves_stdout_as_only_the_session_id(cli_env) -> None:
+    _new_workspace(cli_env, "feat-prompt-b")
+    result = _camp(cli_env, "launch", "feat-prompt-b", "--group", "mygroup", "--prompt", "go")
+
+    assert result.returncode == 0, result.stderr
+    session_id = result.stdout.rstrip("\n")
+    assert result.stdout == f"{session_id}\n"
+    assert len(session_id) == 36
+
+
+def test_camp_launch_prompt_json_key_set_matches_unprompted(cli_env) -> None:
+    _new_workspace(cli_env, "feat-prompt-c1")
+    plain = _camp(cli_env, "launch", "feat-prompt-c1", "--group", "mygroup", "--json")
+    assert plain.returncode == 0, plain.stderr
+
+    _new_workspace(cli_env, "feat-prompt-c2")
+    prompted = _camp(
+        cli_env, "launch", "feat-prompt-c2", "--group", "mygroup", "--json", "--prompt", "go"
+    )
+    assert prompted.returncode == 0, prompted.stderr
+
+    assert set(json.loads(prompted.stdout)) == set(json.loads(plain.stdout))
+
+
+def test_camp_launch_prompt_beginning_with_dash_is_carried_verbatim(cli_env) -> None:
+    """A prompt beginning with `-` must be carried through as the prompt — never
+    parsed as a camp flag (consumed here) nor as a `claude` flag (the harness
+    tail, asserted against the ACTUAL pane argv the fake tmux recorded)."""
+    _new_workspace(cli_env, "feat-prompt-d")
+    result = _camp(cli_env, "launch", "feat-prompt-d", "--group", "mygroup", "--prompt", "--rc")
+
+    assert result.returncode == 0, result.stderr
+    argv = _tmux_new_session_argv(cli_env)[-1]
+    assert argv[-2:] == ["--", "--rc"]
+
+
+def test_camp_launch_prompt_empty_string_refuses(cli_env) -> None:
+    _new_workspace(cli_env, "feat-prompt-e")
+    result = _camp(cli_env, "launch", "feat-prompt-e", "--group", "mygroup", "--prompt", "")
+
+    assert result.returncode != 0
+    assert result.stdout == ""
+    assert "camp launch: --prompt requires a non-empty value" in result.stderr
+
+
+def test_camp_launch_prompt_positional_slug_still_resolves_the_slug(cli_env) -> None:
+    _new_workspace(cli_env, "feat-prompt-f")
+    result = _camp(cli_env, "launch", "feat-prompt-f", "--group", "mygroup", "--prompt", "go")
+
+    assert result.returncode == 0, result.stderr
+    argv = _tmux_new_session_argv(cli_env)[-1]
+    assert _flag_value(argv, "-s").startswith("camp-feat-prompt-f-")
+
+
+def test_camp_launch_prompt_outside_a_workspace_still_needs_a_slug(cli_env) -> None:
+    result = _camp(cli_env, "launch", "--group", "mygroup", "--prompt", "go")
+
+    assert result.returncode != 0
+    assert result.stdout == ""
+    assert "camp launch: could not determine slug from cwd" in result.stderr
+
+
+def test_camp_launch_prompt_writes_an_audit_line_naming_the_prompt_and_workspace(
+    cli_env,
+) -> None:
+    workspace_path = _new_workspace(cli_env, "feat-prompt-g")
+    result = _camp(
+        cli_env, "launch", "feat-prompt-g", "--group", "mygroup", "--prompt", "do a bad thing"
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "do a bad thing" in result.stderr
+    assert workspace_path in result.stderr
+
+
+def test_camp_launch_without_prompt_writes_no_prompt_audit_line(cli_env) -> None:
+    _new_workspace(cli_env, "feat-prompt-h")
+    result = _camp(cli_env, "launch", "feat-prompt-h", "--group", "mygroup")
+
+    assert result.returncode == 0, result.stderr
+    assert "the prompt:" not in result.stderr
+
+
+def test_camp_help_documents_camp_launch_must_not_be_auto_allowed() -> None:
+    result = subprocess.run(
+        [sys.executable, str(_CLI_CAMP), "help"], capture_output=True, text=True
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert (
+        "camp launch must never be added to an agent's Bash auto-allow list"
+        in result.stdout
+    )
 
 
 def test_camp_launch_unconfirmed_session_refuses_with_empty_stdout(cli_env) -> None:

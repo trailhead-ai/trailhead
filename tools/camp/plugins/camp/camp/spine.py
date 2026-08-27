@@ -506,6 +506,14 @@ def cmd_help(_args: list[str]) -> None:
         "  --name <slug>    Target a specific worktree from any cwd\n"
         "  --dry-run        Print what camp would exec; do not run it\n"
         "  CAMP_DRY_RUN=1   Equivalent to --dry-run\n"
+        "\n"
+        "Security:\n"
+        "  camp launch must never be added to an agent's Bash auto-allow list —\n"
+        "  a prompt-carrying `camp launch --prompt` call must always surface its\n"
+        "  own permission prompt, naming the exact text handed to the new\n"
+        "  session, before it runs. camp cannot tell an injected agent from a\n"
+        "  legitimate one, so it cannot authorize the call; the harness's own\n"
+        "  permission prompt is what actually gates it.\n"
     )
 
 

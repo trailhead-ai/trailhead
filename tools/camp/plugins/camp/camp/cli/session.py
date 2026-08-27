@@ -21,6 +21,18 @@ what could not be determined, and an honestly-empty one is silent.
 ``camp new --launch`` reuses this module rather than re-deriving the flow, so a
 launch means the same thing and refuses the same way at both entry points.
 
+``--prompt`` hands the launched session an initial prompt through the harness
+seam. Security note: camp cannot distinguish an injected agent invoking this
+flag from a legitimate operator doing the same — both are the same process
+with the same privileges, so no check camp performs on itself can authorize
+the call. What camp guarantees instead is that the call can never happen
+quietly: a prompt-carrying launch writes an audit line to stderr naming the
+prompt verbatim and the workspace it is launching into, so it is visible in
+the terminal and in the session transcript. The gate that actually enforces is
+the harness's own permission prompt — which is why ``camp launch`` must never
+be added to any agent's Bash auto-allow list (see ``camp help``): a direct
+invocation then always surfaces this text for review before anything runs.
+
 The RESUME flavor adds one more CLI job: turning an operator's session reference
 into exactly one addressable session, or refusing. The resolution itself is pure
 and lives in ``camp.launch.recovery``; everything the operator SEES about it —
@@ -109,6 +121,7 @@ def launch_and_confirm(
     trust_scope: Path | None = None,
     resume_session_id: str | None = None,
     camp_managed_root: bool = False,
+    initial_prompt: str | None = None,
 ):
     """Spawn a session — by workspace *slug* or at a named *root* — and confirm it.
 
@@ -119,8 +132,15 @@ def launch_and_confirm(
     identical for all three flavors, so they report the same three stderr lines
     and return the same :class:`LaunchedSession`.
 
+    *initial_prompt*, given, is handed to the engine whole and additionally
+    named on stderr, verbatim, alongside the workspace it is launching into —
+    the audit line that makes a prompt-carrying launch impossible to happen
+    quietly (see the module docstring's security note). An unprompted launch
+    prints no such line.
+
     Raises :class:`LaunchError` on refusal — including a spawn that never
-    confirmed, which the engine has already killed.
+    confirmed, which the engine has already killed, and including the engine's
+    own refusal when a harness accepted `initial_prompt` and dropped it anyway.
     """
     from ..launch.profile import harness_for
     from ..launch.session import confirm_session, launch_session
@@ -134,7 +154,23 @@ def launch_and_confirm(
         trust_scope=trust_scope,
         resume_session_id=resume_session_id,
         camp_managed_root=camp_managed_root,
+        initial_prompt=initial_prompt,
     )
+    if initial_prompt is not None:
+        # camp cannot tell an injected agent from a legitimate one — both are
+        # the same process with the same privileges — so this cannot AUTHORIZE
+        # anything. What it guarantees is that the launch leaves a record
+        # naming exactly what was handed to the peer: visible here, in the
+        # session transcript, and in the pane's own start command. The gate
+        # that actually enforces is the harness's own permission prompt, which
+        # is why `camp launch` must never be added to an agent's auto-allow
+        # list (see `camp help`) — a direct call surfaces this text for review
+        # before anything runs.
+        print(
+            f"camp launch: handing session {launched.session_id} in "
+            f"{launched.launch_dir} the prompt: {initial_prompt}",
+            file=sys.stderr,
+        )
     print(
         f"camp launch: launched session {launched.session_id} in {launched.launch_dir}\n"
         f"  attach: tmux attach -t {launched.tmux_name}",
@@ -830,12 +866,23 @@ def _cmd_launch_group_cli(
     resume_ref = _consume_flag_value(rest, RESUME_FLAG)
     directory = _consume_flag_value(rest, "--dir")
     as_json = _consume_flag(rest, "--json")
+    # Consumed unconditionally, like every other flag here, and BEFORE the
+    # positional slug is read — an unconsumed `--prompt` would otherwise be
+    # read as the slug and die reporting the wrong problem. Taken as free text:
+    # a value beginning with `-` is still the prompt, never a camp flag,
+    # because `_consume_flag_value` grabs whatever token follows `--prompt`
+    # regardless of its shape.
+    prompt = _consume_flag_value(rest, "--prompt")
 
     if directory is None and "--dir" in rest:
         # `--dir` with nothing after it: consumed by neither branch above.
         _die("camp launch: --dir requires a directory path")
     if resume_ref is None and RESUME_FLAG in rest:
         _die("camp launch: --resume requires a session reference")
+    if prompt is None and "--prompt" in rest:
+        _die("camp launch: --prompt requires a value")
+    if prompt is not None and not prompt.strip():
+        _die("camp launch: --prompt requires a non-empty value")
 
     if directory is not None and resume_ref is not None:
         _die(
@@ -923,6 +970,7 @@ def _cmd_launch_group_cli(
             root=root,
             name_component=name_component,
             trust_scope=trust_scope,
+            initial_prompt=prompt,
         )
     except LaunchError as exc:
         _die(_refusal(exc))

@@ -84,6 +84,7 @@ class FakeHarness:
         env_set_keys=(ACCOUNT_KEY,),
         default_is_absence=False,
         scrub=None,
+        honor_prompt=True,
     ):
         self._launch_argv = launch_argv
         self._resume_argv = resume_argv
@@ -92,15 +93,25 @@ class FakeHarness:
         self.launch_calls: list[tuple[Path, str, str | None]] = []
         self.resume_calls: list[str] = []
         self.env_set_calls: list[tuple[str | None, dict[str, str]]] = []
+        self.prompt_calls: list[str | None] = []
         self._env_set_keys = env_set_keys
         self._default_is_absence = default_is_absence
         self._scrub = tuple(SCRUB) if scrub is None else tuple(scrub)
+        # A knob so a test can model a harness that ADVERTISES prompt support
+        # (accepts the keyword) yet drops it on the floor — the exact half-honored
+        # seam this engine's refusal path exists to catch.
+        self._honor_prompt = honor_prompt
 
-    def session_launch(self, workspace, session_id, *, session_name=None):
+    def session_launch(self, workspace, session_id, *, session_name=None, initial_prompt=None):
         self.launch_calls.append((workspace, session_id, session_name))
+        self.prompt_calls.append(initial_prompt)
         if self._launch_argv is ...:
-            return ["fakeharness", "--rc", "--sid", session_id]
-        return self._launch_argv
+            argv = ["fakeharness", "--rc", "--sid", session_id]
+        else:
+            argv = self._launch_argv
+        if argv is not None and initial_prompt is not None and self._honor_prompt:
+            argv = list(argv) + ["--", initial_prompt]
+        return argv
 
     def session_resume(self, session_id):
         self.resume_calls.append(session_id)
@@ -218,8 +229,10 @@ def rig(monkeypatch, tmp_path):
     return state
 
 
-def _launch(rig, group=GROUP, slug="feat-x", env=None):
-    return rig["module"].launch_session(group, slug, env=env or {"PATH": "/usr/bin"})
+def _launch(rig, group=GROUP, slug="feat-x", env=None, initial_prompt=None):
+    return rig["module"].launch_session(
+        group, slug, env=env or {"PATH": "/usr/bin"}, initial_prompt=initial_prompt
+    )
 
 
 def _pane_command(argv: list[str]) -> list[str]:
@@ -657,6 +670,43 @@ class TestRefusals:
         assert pane[0] == "env"
         assert pane[1] == f"{ACCOUNT_KEY}={FAKE_DEFAULT_HOME}"
         assert pane[2] == "fakeharness"
+
+
+# ---------------------------------------------------------------------------
+# initial_prompt — threaded to the seam, refused if the seam drops it
+# ---------------------------------------------------------------------------
+
+
+class TestInitialPrompt:
+    """`initial_prompt` reaches `session_launch`; a dropped prompt refuses.
+
+    The refusal reads the seam's own documented contract (`HarnessBase.
+    session_launch`'s abstract docstring: the argv must end ``["--", prompt]``)
+    rather than any concrete harness's specific flags — so it catches ANY
+    harness that advertises the keyword and silently drops it, not just the
+    one this test's stand-in models.
+    """
+
+    def test_no_prompt_calls_session_launch_with_none(self, rig):
+        _launch(rig)
+
+        assert rig["harness"].prompt_calls == [None]
+
+    def test_a_harness_that_honors_the_prompt_reaches_the_pane_argv(self, rig):
+        _launch(rig, initial_prompt="go")
+
+        pane = _pane_command(rig["spawn"].argv)
+        assert pane[-2:] == ["--", "go"]
+        assert rig["harness"].prompt_calls == ["go"]
+
+    def test_a_harness_that_drops_the_prompt_refuses_with_no_spawn(self, rig):
+        rig["harness"] = FakeHarness(honor_prompt=False)
+
+        with pytest.raises(rig["module"].LaunchError) as excinfo:
+            _launch(rig, initial_prompt="go")
+
+        assert "fakeharness" in str(excinfo.value)
+        assert rig["spawn"].calls == []
 
 
 # ---------------------------------------------------------------------------

@@ -37,6 +37,15 @@ name or that cannot start or re-enter sessions, a missing `tmux`, a trust pre-se
 that reported failure, or a tmux that refused the spawn. The CLI layer turns that
 into camp's one-line stderr refusal.
 
+`initial_prompt`, when given, rides only the fresh-launch half of
+`session_launch` — never a resume — and is checked against the seam's own
+documented contract (`HarnessBase.session_launch`'s abstract docstring: the
+returned argv must end ``["--", initial_prompt]``) before anything is spawned.
+A harness that advertises the keyword and drops it anyway refuses exactly like
+any other half-implemented seam: :class:`LaunchError`, no process started. This
+guards the seam contract itself, never one concrete harness's flags — the same
+check applies no matter which harness is registered.
+
 Sessions already live in the launch directory are the deliberate NON-refusal for a
 fresh launch — reported on stderr, and the launch proceeds. For a re-entry they are
 the opposite: running a session that is already running would double it. Two
@@ -65,6 +74,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from ..group.manifest import workspace_dir
 from .claude_trust import config_file, pretrust_workspace, trust_status
@@ -141,6 +151,18 @@ _CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
 
 class LaunchError(Exception):
     """A launch camp refused. Guarantees no process was started."""
+
+
+def _seam_carried_prompt(argv: list[str], initial_prompt: str) -> bool:
+    """Does *argv* actually carry *initial_prompt*, per the seam's own contract?
+
+    Reads `HarnessBase.session_launch`'s documented shape — the argv's final two
+    tokens must be the literal separator ``--`` followed by the prompt verbatim
+    — rather than any concrete harness's specific flags. That is what lets this
+    catch ANY harness that accepted the keyword and silently dropped it, not
+    just the one flavor of drop a hand-picked check happens to anticipate.
+    """
+    return len(argv) >= 2 and argv[-2] == "--" and argv[-1] == initial_prompt
 
 
 @dataclass(frozen=True)
@@ -538,6 +560,7 @@ def launch_session(
     trust_scope: Path | None = None,
     resume_session_id: str | None = None,
     camp_managed_root: bool = False,
+    initial_prompt: str | None = None,
 ) -> LaunchedSession:
     """Spawn a detached, tmux-hosted harness session; return its handles.
 
@@ -554,6 +577,14 @@ def launch_session(
     *resume_session_id* rides on either flavor: given, the session runs under that
     id and the pane runs the harness's re-entry argv instead of a fresh-session
     one, so the session reclaims the very tmux name its first launch used.
+
+    *initial_prompt*, when given, applies only to a fresh launch (never a
+    resume) and is handed to ``session_launch`` by keyword. Before anything is
+    spawned, the returned argv is checked against the seam's own documented
+    contract — it must end ``["--", initial_prompt]`` — and a harness that
+    accepted the keyword but returned an argv not carrying it raises
+    :class:`LaunchError` with no process started, rather than launching a peer
+    that silently boots idle while camp reports success.
 
     The group's ``[launch] account`` is resolved through the harness ONCE and the
     result steers both halves of the launch that must agree about it: the trust
@@ -609,15 +640,31 @@ def launch_session(
     )
 
     if resume_session_id is None:
-        harness_argv = harness.session_launch(
-            launch_dir, session_id, session_name=tmux_name
-        )
+        # `initial_prompt` is passed by keyword ONLY when given, not as an
+        # always-present `None`, so a harness stub whose `session_launch`
+        # override has no `initial_prompt` parameter at all — legitimate for a
+        # harness with no such concept — keeps working for every unprompted
+        # launch, which is every launch prior to this parameter's existence.
+        launch_kwargs: dict[str, Any] = {"session_name": tmux_name}
+        if initial_prompt is not None:
+            launch_kwargs["initial_prompt"] = initial_prompt
+        harness_argv = harness.session_launch(launch_dir, session_id, **launch_kwargs)
         unsupported = "cannot launch sessions"
     else:
         harness_argv = harness.session_resume(session_id)
         unsupported = "cannot re-enter sessions"
     if harness_argv is None:
         raise _unsupported_harness(harness, profile, unsupported)
+    if (
+        resume_session_id is None
+        and initial_prompt is not None
+        and not _seam_carried_prompt(harness_argv, initial_prompt)
+    ):
+        raise LaunchError(
+            f"camp: refusing to launch — harness {harness.name or profile.binary!r} "
+            "ignored the initial prompt; camp will not launch a peer that "
+            "silently boots idle while it reports success"
+        )
 
     if shutil.which("tmux") is None:
         raise LaunchError("camp: refusing to launch — tmux is not on PATH")
