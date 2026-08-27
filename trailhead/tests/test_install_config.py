@@ -288,8 +288,8 @@ class TestSelectionBridge:
         assert "camp" in sel
         subagents, skills = sel["camp"]
         # A bare plugin name expands to camp's whole discovered inventory: its
-        # skill, selected with no override path, and no subagents.
-        assert skills == {"concierge": None}
+        # skills, each selected with no override path, and no subagents.
+        assert skills == {"concierge": None, "fork": None}
         assert subagents == {}
 
 
