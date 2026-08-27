@@ -750,6 +750,63 @@ def test_risk_and_dispute_are_operator_only_overrides():
     )
 
 
+def test_answered_is_operator_only_with_a_quoted_never_drafted_reason():
+    """`answered`'s safety property is the single most load-bearing one in the
+    disposition vocabulary: the operator, not the agent, supplies the
+    counterargument, and it is quoted verbatim rather than drafted.
+
+    Without a pin naming `answered` specifically, `answered` could be dropped from
+    the operator-only-overrides list, from the never-drafted rule, and from the
+    reason-slot-never-empty rule, and this suite would stay green — the existing
+    pins on those three rules were written before `answered` existed and check
+    generic phrasing that holds regardless of which dispositions are named.
+    """
+    step = _flat(_resolution_step(GAUNTLET.read_text()))
+    assert (
+        "`accepted-as-risk: <reason>`, `disputed: <reason>`, and "
+        "`answered: <reason>` are **operator-only overrides**"
+    ) in step, (
+        "`answered` must be named alongside `accepted-as-risk` and `disputed` as "
+        "an operator-only override — an agent may not propose it"
+    )
+    assert "`answered: <reason>`" in step, (
+        "the resolution step must carry `answered: <reason>` with its reason slot"
+    )
+    assert (
+        "**An override with no reason is incomplete.** `accepted-as-risk`, "
+        "`disputed`, and `answered` carry the operator's reason text"
+    ) in step, (
+        "`answered` must be named among the dispositions whose reason text the "
+        "agent may not supply on the operator's behalf"
+    )
+    assert "**Never record any of the three with a reason you drafted" in step, (
+        "the never-drafted, never-empty prohibition must cover `answered` as one "
+        "of 'the three' operator-only overrides, not just `accepted-as-risk` and "
+        "`disputed`"
+    )
+
+
+def test_answered_is_not_terminal_and_folds_into_the_record_as_an_edit():
+    """`answered`'s other load-bearing property: it is not a veto.
+
+    The counterargument must land in the record as an edit, or the next gauntlet
+    raises the identical finding against the next draft — the exact defect this
+    disposition exists to fix.
+    """
+    step = _flat(_resolution_step(GAUNTLET.read_text()))
+    assert "`answered` is **not terminal**" in step, (
+        "the resolution step must state that `answered` is not terminal — a "
+        "vetoing reading of `answered` reproduces the reframe-when-an-edit-would-do "
+        "defect one disposition to the left"
+    )
+    assert "the counterargument is folded into the record as an edit" in step, (
+        "an answered row's counterargument must be stated to land in the record as "
+        "an edit — an answered row that resolves with no edit drafted leaves the "
+        "counterargument out of the artifact, so the next gauntlet raises the same "
+        "finding again"
+    )
+
+
 def test_both_route_names_are_pinned():
     """Two routes, two names, used everywhere — including the per-mode tails.
 
@@ -840,9 +897,7 @@ def test_route_rule_is_total_over_the_disposition_vocabulary():
         "is non-terminal — a vocabulary term the operator can reach but the "
         "route rule never resolves is exactly the uncovered case this pins"
     )
-    assert "It does not by\nitself force the reframe route." in _resolution_step(
-        GAUNTLET.read_text()
-    ), (
+    assert "It does not by itself force the reframe route." in step, (
         "an answered Critical must be stated NOT to force the reframe route — "
         "without it the reframe arm reads as firing on the pre-adjudication "
         "disposition, which is the defect the answered disposition exists to fix"
@@ -854,6 +909,57 @@ def test_route_rule_is_total_over_the_disposition_vocabulary():
         "the freeze arm must be stated as the complement — every remaining "
         "combination of `resolved` / `accepted-as-risk` / `disputed`, plus the "
         "no-Criticals run — and must land on the freeze route by name"
+    )
+
+
+def test_freeze_arm_never_lists_answered_as_a_reachable_final_term():
+    """Structural check on the freeze arm's own enumerated terms.
+
+    A substring pin on the whole freeze-arm sentence only catches an edit to that
+    exact sentence. It would not catch a future edit that makes `answered`
+    reachable as a final disposition somewhere else in the route rule while
+    leaving this sentence untouched. Parse the freeze arm's own term list instead
+    of matching it as one opaque string, so the set of terms it actually
+    enumerates is what is pinned.
+    """
+    step = _flat(_resolution_step(GAUNTLET.read_text()))
+    match = re.search(
+        r"\*\*Every other combination\*\* of (.+?), including a run with "
+        r"no Criticals at all",
+        step,
+    )
+    assert match, (
+        "the freeze arm sentence must be present in its known shape for its term "
+        "list to be parsed out of it"
+    )
+    terms = {term.strip("` ") for term in match.group(1).split("/")}
+    assert terms == {"resolved", "accepted-as-risk", "disputed"}, (
+        f"the freeze arm's enumerated terms must be exactly resolved / "
+        f"accepted-as-risk / disputed — got {terms!r}. `answered` reachable here "
+        "would route a re-adjudication-pending Critical to freeze without it ever "
+        "being re-adjudicated"
+    )
+
+
+def test_route_may_not_be_derived_while_a_critical_remains_answered():
+    """The route rule's totality claim is false unless every `answered` row is
+    resolved before the table is read for a route.
+
+    `answered` is reachable by the operator but names no route on its own; a run
+    left with any Critical still at `answered` has no final disposition for that
+    row yet, and deriving a route from the table anyway would derive it from a
+    disposition that has not happened.
+    """
+    step = _flat(_resolution_step(GAUNTLET.read_text()))
+    assert "matches **neither** arm" in step, (
+        "the route rule must say that an un-re-adjudicated `answered` row matches "
+        "neither the reframe arm nor the freeze arm — otherwise a reader can "
+        "assume it silently falls into the freeze arm's 'every other combination'"
+    )
+    assert "route may not be derived while any Critical remains at `answered`" in step, (
+        "the route rule must forbid deriving a route while any Critical is still "
+        "at `answered` — this is the non-terminality claim stated as a rule about "
+        "when the route may be read, not just as a description of `answered`"
     )
 
 

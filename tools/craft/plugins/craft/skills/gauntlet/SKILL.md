@@ -200,8 +200,9 @@ still a decision", below):
 2. **The recommended route**, on its own line, by name (below).
 3. **The per-Critical table** — supporting detail, not the explanation. The synthesis has already
    said what the findings mean and what you propose doing; the table is the row-level view for
-   checking that against the findings, and the handle the operator names to override. One row per
-   Critical, in `C1`…`Cn` order:
+   checking that against the findings, and the handle the operator names to override — into
+   `accepted-as-risk`, `disputed`, or `answered` when the operator holds a counterargument the passes
+   did not have. One row per Critical, in `C1`…`Cn` order:
 
    | id | finding | proposed disposition | proposed edit |
    |---|---|---|---|
@@ -234,10 +235,10 @@ the adjudicator has read every pass that attacked it.
 **Before proposing `reframed`, apply the edit-first test.** Ask whether any set of edits to the
 record's own sections would answer the finding. If yes, the disposition is `resolved` and drafting
 those edits is the adjudicator's job — the test is applied, not skipped because the finding sounds
-severe. `reframed` is reserved for a finding that invalidates the Decision itself, such that editing
-the record would mean writing a different decision, not amending this one. State the asymmetry
+severe. `reframed` is reserved for a finding that invalidates the record's framing itself, such that
+editing the record would mean writing a different record, not amending this one. State the asymmetry
 plainly: a finding of the form "the record does not say X" is never a reframe — at most it is a
-missing edit; only "X makes this the wrong decision" can be a reframe. **Reframing a finding an edit
+missing edit; only "X makes this the wrong record" can be a reframe. **Reframing a finding an edit
 would answer is the expensive error** — it spends a brainstorm, discards a record the operator has
 already reasoned through, and loses whatever counterargument the operator had, none of which a
 missed line ever required.
@@ -260,12 +261,19 @@ them**. Do not propose any of the three, and do not offer a reason the operator 
   are measuring the system as it is and I am changing it", "that capability is absent because I
   intend to build it", and "that is out of scope, here is the bound" — one instance of a general
   rule: any finding the passes raised for lack of information the operator actually holds is
-  answered, not disputed or accepted as risk. `answered` is **not terminal** — an answered row gets
-  a new disposition, normally `resolved`, and **the counterargument is folded into the record as an
-  edit**. This is the load-bearing half: a counterargument the artifact does not carry is one the
-  next gauntlet raises again, because the record still does not say it. An answered row that becomes
-  `resolved` needs its edit drafted and therefore re-presents — the existing "override *into*
-  `resolved` re-presents too" rule below already covers this case; nothing further is added here.
+  answered, not disputed or accepted as risk. `answered` is **not terminal** — **the adjudicator
+  re-adjudicates it**, on the same footing as its original proposal: the re-adjudicated outcome is
+  `resolved` or `reframed`, the same two terms and no others — never `accepted-as-risk`, `disputed`,
+  or `answered` again. Those three stay operator-only overrides; re-adjudicating into one would let
+  the adjudicator self-author an operator-only disposition under cover of "answering" it. `resolved`
+  is the ordinary case, and **the counterargument is folded into the record as an edit**. This is the
+  load-bearing half: a counterargument the artifact does not carry is one the next gauntlet raises
+  again, because the record still does not say it. **Whichever of the two terms the re-adjudication
+  lands on, it re-presents before anything is written** — an answered row that becomes `resolved`
+  needs its edit drafted and therefore re-presents, which the existing "override *into* `resolved`
+  re-presents too" rule below already covers; an answered row that becomes `reframed` re-presents on
+  the same footing, including on a run where another `reframed` row already holds the route, so the
+  discarded counterargument is never dropped without the operator seeing the swap.
 
 #### The two routes, and the rule that picks one
 
@@ -286,7 +294,12 @@ an outcome left to freelance:
 - **Every other combination** of `resolved` / `accepted-as-risk` / `disputed`, including a run with
   no Criticals at all → the **freeze route**.
 
-A Critical the operator `answered` never itself reaches this rule — `answered` is not terminal, and
+A Critical still sitting at `answered` is not yet a final disposition — it is a request for
+re-adjudication, not an outcome of one — and matches **neither** arm above: not the reframe arm,
+which fires only on `reframed`, and not the freeze arm, whose enumerated terms do not include
+`answered`. **The route may not be derived while any Critical remains at `answered`.**
+Re-adjudicate every answered row first; only once each one carries `resolved` or `reframed` does the
+table hold final dispositions the rule can read. Once re-adjudicated, `answered` is not terminal, and
 the row's final disposition is whatever it is re-adjudicated to, normally `resolved`. It does not by
 itself force the reframe route.
 
@@ -305,9 +318,10 @@ one who accepts it.
 
 #### Accepting, and overriding in one round-trip
 
-Present, then wait. The operator either accepts ("go") or overrides ("dispute C3, otherwise go").
-Overrides apply in **one round-trip**: take every override from that one reply, apply them
-together, and do not walk back through the table finding by finding.
+Present, then wait. The operator either accepts ("go") or overrides — "dispute C3, otherwise go", or
+"answer C3: we're changing the auth provider next quarter, otherwise go" when the operator holds a
+counterargument the passes did not have. Overrides apply in **one round-trip**: take every override
+from that one reply, apply them together, and do not walk back through the table finding by finding.
 
 - **Echo the full post-override table.** After applying any override, re-render the complete
   `C1`…`Cn` disposition table — **not just the route line** — as the last thing before the accepted
@@ -345,6 +359,13 @@ together, and do not walk back through the table finding by finding.
   re-presenting a recommendation nothing changed, and **a newly drafted edit is a change**. Skip it
   and you are composing the edit after acceptance, which is exactly what drafting every `resolved`
   edit before presenting forbids.
+- **A re-adjudication landing on `reframed` re-presents too, whatever the route does.** An `answered`
+  row re-adjudicated to `resolved` is covered by the rule above; one re-adjudicated to `reframed`
+  gets the identical treatment, including on a run that already holds another `reframed` row, where
+  the route-changing-override rule never fires because the route does not move. Present the revised
+  table and take acceptance again **before anything is written** — an operator who answered a finding
+  is owed the chance to see that their counterargument was re-adjudicated away before the record that
+  discards it becomes permanent, not after.
 
 #### Escalation points
 
