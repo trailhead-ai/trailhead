@@ -11,7 +11,7 @@ Forward check:
    by the resolver.
 4. Forward check: for every claim, resolve ref against its oracle:
    - skill / agent  → build_real_anchor_set() (per-tool selectable inventory)
-   - command        → _KNOWN_COMMANDS ({install, uninstall, doctor})
+   - command        → _KNOWN_COMMANDS ({install, uninstall, doctor, update})
    - doc-link       → (REPO_ROOT / ref).exists()
    Fails closed with a named assertion on mismatch.
 5. build_real_anchor_set() enumerates from sorted glob of tools/*/capabilities.toml,
@@ -49,10 +49,8 @@ _REPO_ROOT = Path(__file__).parent.parent.parent
 _CLAIMS_FILE = _REPO_ROOT / "trailhead" / "landing_claims.toml"
 
 # CLI subcommands — hardcoded closed set.
-# The config-driven CLI has exactly three commands: install / uninstall / doctor.
-# (The old preset/capability model and the update/config commands were removed.)
 # add new subcommands here
-_KNOWN_COMMANDS: frozenset[str] = frozenset({"install", "uninstall", "doctor"})
+_KNOWN_COMMANDS: frozenset[str] = frozenset({"install", "uninstall", "doctor", "update"})
 
 # Valid kind values — closed set.
 # The capability-GROUP and preset concepts were removed; install selects subagents

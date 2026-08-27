@@ -182,7 +182,17 @@ class TestPluginExpansion:
         path = _write(tmp_path, "install_camp_cli = true\n")  # no plugins key
         cfg = resolve_config(config_path=path, detected_harnesses=["claude_code"])
         names = [p.name for p in cfg.harnesses[0].plugins]
-        assert names == ["camp", "lore", "craft", "portage", "outpost", "ranger"]
+        assert names == ["camp", "lore", "craft", "portage", "outpost", "ranger", "trailhead"]
+
+    def test_selecting_trailhead_includes_its_hook(self):
+        cfg = resolve_config(cli_harnesses=["claude_code"], cli_plugins=["camp", "trailhead"])
+        names = [p.name for p in cfg.harnesses[0].plugins]
+        assert "trailhead" in names
+
+    def test_deselecting_trailhead_excludes_its_hook(self):
+        cfg = resolve_config(cli_harnesses=["claude_code"], cli_plugins=["camp"])
+        names = [p.name for p in cfg.harnesses[0].plugins]
+        assert "trailhead" not in names
 
     def test_per_harness_plugins_override_top_level(self, tmp_path):
         path = _write(
@@ -308,4 +318,4 @@ class TestShippedDefault:
         assert cfg.cli_flags["lore"] is True
         assert cfg.cli_flags["portage"] is True
         names = [p.name for p in cfg.harnesses[0].plugins]
-        assert names == ["camp", "lore", "craft", "portage", "outpost", "ranger"]
+        assert names == ["camp", "lore", "craft", "portage", "outpost", "ranger", "trailhead"]

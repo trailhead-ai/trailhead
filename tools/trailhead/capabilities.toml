@@ -1,0 +1,8 @@
+# trailhead — the management CLI's own first-party plugin.
+# tool.name MUST equal the plugins/<name>/ dir ("trailhead").
+# No subagents, no skills, no CLI of its own — the only capability this tool
+# ships is the SessionStart self-update-notice hook.
+
+[tool]
+name = "trailhead"
+hooks_json = "hooks/hooks.json"

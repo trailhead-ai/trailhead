@@ -60,6 +60,7 @@ hidden interactive steps.
 trailhead install      # install plugins into your harness(es) + the camp/lore/portage CLIs
 trailhead uninstall    # remove the ENTIRE install (all plugins + CLIs); keeps your data
 trailhead doctor       # read-only report of what's installed
+trailhead update       # check for (or apply) an upgrade from your source checkout
 ```
 
 ### `install` flags
@@ -82,6 +83,39 @@ from your config never removes it from the install. To remove pieces, run
 **`uninstall` is all-or-nothing.** It removes every plugin from every harness and
 all three CLIs. Your data is kept (the lore vault, camp groups, and each plugin's
 harness data dir survive a later re-install).
+
+---
+
+## Staying up to date
+
+`trailhead install` writes a small provenance stamp (checkout path, wired
+commit, tracked branch, `origin` URL) recording where the install came from.
+`trailhead update` reads it back:
+
+```sh
+trailhead update --check   # read-only: are we behind our source checkout?
+trailhead update            # fetch, fast-forward, and re-wire — asks first
+trailhead update --yes      # same, without the interactive confirmation
+```
+
+`--check` runs a read-only `git fetch` against the stamped checkout (throttled
+to at most once every 24h) and reports whether it's behind, plus the added
+lines of `CHANGELOG.md` between your installed commit and the tracked branch.
+Applying the upgrade always asks for confirmation first (or requires `--yes`
+non-interactively) — nothing is ever pulled or re-wired without it. If a
+re-wire fails partway through, the checkout is rolled back to its pre-upgrade
+commit and re-wired again, so a failed upgrade is a no-op rather than a
+half-upgraded install.
+
+The `trailhead` plugin (installed by default alongside the others) carries a
+SessionStart hook that runs this same check at the start of a session and, if
+you're behind, adds a short notice — with the changelog delta — to the
+agent's context. It never upgrades on its own; it only tells you and names the
+command to run. The notice repeats at most once a day even if you ignore it,
+and `trailhead doctor` always shows the outcome of the last check. Disable it
+entirely by setting `session_start_update_check = false` in your config (see
+below) or the `TRAILHEAD_DISABLE_UPDATE_CHECK` environment variable, which
+always wins over the config value.
 
 ---
 

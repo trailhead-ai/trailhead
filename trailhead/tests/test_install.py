@@ -88,7 +88,15 @@ class TestDetectionDrivenInstall:
         with _patched(detected=True) as m:
             run_install(env=_env(tmp_path), quiet=True)
         selection = m["wire"].call_args[0][0]
-        assert set(selection) == {"camp", "lore", "craft", "portage", "outpost", "ranger"}
+        assert set(selection) == {
+            "camp",
+            "lore",
+            "craft",
+            "portage",
+            "outpost",
+            "ranger",
+            "trailhead",
+        }
 
     def test_clis_installed(self, tmp_path):
         with _patched(detected=True) as m:

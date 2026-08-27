@@ -63,7 +63,7 @@ class TestSubcommandHelp:
         ec, out, err = _run(["update", "--help"])
         assert ec == 0
         text = out + err
-        for flag in ("--check", "--json", "--timeout", "--window"):
+        for flag in ("--check", "--json", "--timeout", "--window", "--yes", "--dry-run"):
             assert flag in text
 
     def test_doctor_help_exits_zero(self):

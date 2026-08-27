@@ -1,0 +1,5 @@
+{
+  "name": "trailhead",
+  "version": "0.1.0",
+  "description": "Self-update notice: tells a session when its trailhead install is behind its source checkout, with the changelog delta."
+}
