@@ -1276,3 +1276,87 @@ class TestSnippetBatching:
 
         assert len(hits) == 4, hits
         assert counting["n"] == 1, counting["n"]
+
+    def test_fetch_hits_chunks_snippet_lookup_past_batch_size(
+        self, kql, compiler, ranking_equivalence_index, monkeypatch
+    ):
+        """With the batch size forced below the row count, the snippet lookup
+        must split into multiple bounded ``IN (...)`` queries — never one query
+        binding every id at once — and still resolve every row's snippet."""
+        conn, vault, env = ranking_equivalence_index
+        engine = load_script("lore.search.engine")
+        monkeypatch.setattr(engine, "_SNIPPET_BATCH_SIZE", 2)
+
+        counting = {"n": 0, "max_ids": 0}
+
+        class _CountingConn:
+            def execute(self, sql, params=()):
+                if "record_fts" in sql and "body" in sql:
+                    counting["n"] += 1
+                    counting["max_ids"] = max(counting["max_ids"], len(params))
+                return conn.execute(sql, params)
+
+        cq = compiler.compile(kql.parse("kind:spec"), limit=20)
+        hits, total = engine._fetch_hits(_CountingConn(), cq)
+
+        assert len(hits) == 4, hits
+        assert counting["n"] == 2, counting["n"]  # ceil(4 / batch_size=2)
+        assert counting["max_ids"] <= 2, counting["max_ids"]
+        assert all(hit["snippet"] for hit in hits), hits
+
+    def test_fetch_hits_snippet_fallback_when_fts_row_missing(
+        self, kql, compiler, ranking_equivalence_index
+    ):
+        """A returned row with no matching ``record_fts`` body row must fall
+        back to an empty snippet (``snippets_by_id.get(id, "")``), not raise
+        or silently drop the hit."""
+        conn, vault, env = ranking_equivalence_index
+        engine = load_script("lore.search.engine")
+
+        class _DroppingConn:
+            def execute(self, sql, params=()):
+                cur = conn.execute(sql, params)
+                if "record_fts" in sql and "body" in sql:
+                    rows = [row for row in cur.fetchall() if not row[0].endswith("/r1")]
+
+                    class _FakeCursor:
+                        def fetchall(self_inner):
+                            return rows
+
+                    return _FakeCursor()
+                return cur
+
+        cq = compiler.compile(kql.parse("kind:spec"), limit=20)
+        hits, total = engine._fetch_hits(_DroppingConn(), cq)
+
+        by_id = {hit["id"]: hit for hit in hits}
+        r1_id = next(i for i in by_id if i.endswith("/r1"))
+        assert by_id[r1_id]["snippet"] == ""
+        others = [hit for hit in hits if hit["id"] != r1_id]
+        assert all(hit["snippet"] for hit in others), others
+
+
+class TestCountTotalParamStart:
+    """``_count_total`` must slice the WHERE params from the right offset in
+    BOTH the has-fts (leading rank param) and pure-facet (no rank param) cases."""
+
+    def test_count_total_start_zero_for_pure_facet_query(self, kql, compiler, fixture_index):
+        conn, vault, env = fixture_index
+        engine = load_script("lore.search.engine")
+        cq = compiler.compile(kql.parse("kind:spec"), limit=10)
+        assert cq.has_fts is False
+        total = engine._count_total(conn, cq)
+        assert total == 1
+
+
+class TestMixedNegationRankingShape:
+    """A query mixing a positive full-text term with a negated one must still
+    carry the ranking JOIN (has_fts True) but must exclude the negated term
+    from the ranking MATCH expression."""
+
+    def test_positive_and_negated_term_join_present_negated_excluded(self, kql, compiler):
+        cq = compiler.compile(kql.parse("zephyr and not penny"))
+        assert cq.has_fts is True
+        assert cq.join_clause != ""
+        assert cq.rank_match == "zephyr"
+        assert "penny" not in cq.rank_match

@@ -53,10 +53,9 @@ aligned with ``CompiledQuery.params``.
 
 When the query carries ANY full-text term, order by bm25 with the locked weights
 ``(3.0, 2.0, 1.0)`` for ``(title, keywords, body)``, best-first = ASC (bm25 is
-negative). The score is computed ONCE per matching row by a ``LEFT JOIN`` against
-a subquery that runs the FTS ``MATCH`` and computes ``bm25(...)`` for every
-matching row in one scan, rather than a correlated scalar subquery re-run per
-candidate row:
+negative). The score is computed by a ``LEFT JOIN`` against a subquery that runs
+the FTS ``MATCH`` and ``bm25(...)`` once, with a single bind param — never a
+correlated scalar subquery re-run once per candidate row in the ``ORDER BY``:
 
   LEFT JOIN (
     SELECT rowid, bm25(record_fts, 3.0, 2.0, 1.0) AS score

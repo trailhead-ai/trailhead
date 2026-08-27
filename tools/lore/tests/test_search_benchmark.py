@@ -46,26 +46,25 @@ CORPUS_1X = 2149  # ~current vault size
 # corpus, not a stopword-frequency term that matches most rows.
 REPRESENTATIVE_QUERY = "kind:lesson and scrubber"
 
-# A bare, no-facet, high-match-count query — the regression class the
-# correlated-scalar-bm25 ranking missed entirely (REPRESENTATIVE_QUERY narrows to
-# ~61 candidate rows before ranking, hiding the per-candidate-row MATCH re-run).
-# "it" is a filler word present in ~89% of generated bodies (~1,912 of 2,149) —
-# the same shape as a bare `test` search on the real vault (2,084 of 3,508, ~59%):
-# no facet to narrow candidates before the bm25 ORDER BY runs.
+# A bare, no-facet, high-match-count query: with no facet to narrow candidates
+# before the bm25 ORDER BY runs, this is the shape that stresses per-row ranking
+# cost the hardest (REPRESENTATIVE_QUERY narrows to ~61 candidate rows before
+# ranking, which does not exercise that cost). "it" is a filler word present in
+# ~89% of generated bodies (~1,912 of 2,149) — the same shape as a bare `test`
+# search on the real vault (2,084 of 3,508, ~59%).
 BARE_QUERY = "it"
 # This machine runs many concurrent camp/agent sessions, so absolute wall-clock
 # ms is too noisy a signal for this large-match-count case on its own (a shared
 # host under load can inflate EVERY query's absolute time by 5-10x). The
-# regression this pins is a QUERY-SHAPE defect (per-candidate-row correlated
-# subqueries vs. one JOIN), so the reliable signal is the SPEEDUP RATIO between
-# the current compiler's query and the pre-fix correlated-subquery shape,
-# measured back-to-back against the SAME index in the SAME narrow time window
-# — ambient host noise affects both sides roughly equally, so the ratio survives
-# noise that would make either side's raw ms flaky alone. A ceiling on the
-# compiled query's own p95 still applies as a sanity floor.
+# reliable signal for a per-candidate-row ranking regression is the SPEEDUP
+# RATIO between the current compiler's single-JOIN query and an alternate
+# correlated-scalar-subquery ranking shape, measured back-to-back against the
+# SAME index in the SAME narrow time window — ambient host noise affects both
+# sides roughly equally, so the ratio survives noise that would make either
+# side's raw ms flaky alone. The ratio is the sole gate; see
+# ``test_search_latency_bare_high_match_query_speedup`` for why no absolute-ms
+# assertion accompanies it.
 BARE_MIN_SPEEDUP = 1.5  # measured ~2.0x consistently on a loaded host; comfortable margin
-BARE_CEILING_1X_MS = 500.0  # sanity ceiling on the FIXED query alone; the speedup
-# ratio below is the test's real regression signal
 
 _KINDS = ["spec", "lesson", "decision", "deferred", "dead-end", "plan", "session"]
 _AREAS = ["penny", "phi-scrubber", "worker", "ingest", "routing", "auth", "vault"]
@@ -131,10 +130,10 @@ def _percentile(samples_ms: list[float], pct: float) -> float:
 
 
 def _old_style_ranked_query(term: str, limit: int) -> tuple[str, list]:
-    """The PRE-FIX ranking shape: two correlated scalar subqueries in ORDER BY,
-    each re-running the FTS MATCH once per candidate row — the exact defect this
-    fix replaces with a single JOIN. Used only to measure the speedup ratio; the
-    production compiler (``kql_compile.compile``) never emits this shape anymore.
+    """An alternate ranking shape: two correlated scalar subqueries in ORDER BY,
+    each re-running the FTS MATCH once per candidate row, instead of the single
+    JOIN the production compiler uses. Used only as the speedup-ratio baseline in
+    ``_measure_speedup_ratio``; ``kql_compile.compile`` never emits this shape.
     """
     bm25_subquery = (
         "(SELECT bm25(record_fts, 3.0, 2.0, 1.0) FROM record_fts "
@@ -150,10 +149,32 @@ def _old_style_ranked_query(term: str, limit: int) -> tuple[str, list]:
     return sql, [term, term, term, limit]
 
 
+def test_old_style_ranked_query_pinned_to_locked_fts_predicate_and_weights():
+    """``_old_style_ranked_query`` hardcodes a copy of the deleted correlated-
+    subquery SQL as the speedup baseline. Nothing else ties it to the real
+    ``kql_compile`` constants it is meant to mirror, so a change to the FTS
+    predicate shape or the locked bm25 weights could drift silently and leave
+    the speedup ratio comparing two SQL shapes that no longer share a WHERE
+    clause or a weighting — pin both here so that drift fails loudly instead."""
+    kql_compile = load_script("lore.search.kql_compile")
+    old_sql, _ = _old_style_ranked_query("zephyr", 20)
+
+    assert kql_compile._FTS_PREDICATE in old_sql, (
+        "the baseline's WHERE clause no longer matches kql_compile._FTS_PREDICATE"
+    )
+
+    cq = kql_compile.compile(load_script("lore.search.kql").parse("zephyr"))
+    weights_sql = cq.join_clause.split("bm25(record_fts, ", 1)[1].split(")", 1)[0]
+    assert f"bm25(record_fts, {weights_sql})" in old_sql, (
+        "the baseline's bm25 weights no longer match the locked production weights"
+    )
+
+
 def _measure_speedup_ratio(state_dir: Path, *, query: str, runs: int = 20) -> tuple[float, float]:
-    """Interleave the current compiler's query and the pre-fix correlated-subquery
-    shape against the SAME fresh-connection-per-run pattern, so both sides see
-    the same ambient host load in each iteration. Returns (new_p95_ms, old_p95_ms).
+    """Interleave the current compiler's query and the alternate correlated-
+    subquery ranking shape (``_old_style_ranked_query``) against the SAME
+    fresh-connection-per-run pattern, so both sides see the same ambient host
+    load in each iteration. Returns (new_p95_ms, old_p95_ms).
     """
     index_store = load_script("lore.search.index")
     kql = load_script("lore.search.kql")
@@ -244,20 +265,25 @@ def test_search_latency_p95_under_target(tmp_path, capsys, corpus_size, label, c
 
 
 @pytest.mark.parametrize(
-    "corpus_size,label,ceiling_ms",
+    "corpus_size,label",
     [
-        (CORPUS_1X, "1x", BARE_CEILING_1X_MS),
+        (CORPUS_1X, "1x"),
     ],
 )
-def test_search_latency_bare_high_match_query_speedup(tmp_path, capsys, corpus_size, label, ceiling_ms):
+def test_search_latency_bare_high_match_query_speedup(tmp_path, capsys, corpus_size, label):
     """A bare, no-facet, high-match-count query — the shape REPRESENTATIVE_QUERY's
-    facet narrowing hides. This pins the correlated-scalar-bm25 regression class
-    via a SPEEDUP RATIO (current compiler vs. the pre-fix correlated-subquery
-    shape, measured back-to-back so ambient host noise cancels out) rather than
-    an absolute ms ceiling alone: it fails when the current compiler's query is
-    not meaningfully faster than the old shape (as it would be if a regression
-    reintroduced correlated subqueries) and passes once bm25 is computed once
-    per row via a single JOIN."""
+    facet narrowing does not exercise. This pins the per-candidate-row ranking
+    regression class via a SPEEDUP RATIO (current compiler's single-JOIN query
+    vs. an alternate correlated-scalar-subquery ranking shape, measured
+    back-to-back so ambient host noise cancels out). No absolute-ms assertion
+    accompanies it: this machine's shared-host noise inflates a large-match-count
+    query's raw wall-clock by 5-10x run to run (see the module-level comment
+    above ``BARE_QUERY``), so an absolute ceiling here would gate on noise
+    instead of the query-shape regression this test exists to catch. The ratio
+    fails when the current compiler's query is not meaningfully faster than the
+    alternate shape (as it would be if a regression reintroduced correlated
+    subqueries) and passes once bm25 is computed once per row via a single
+    JOIN."""
     vault = tmp_path / "vault"
     state = tmp_path / "state"
     vault.mkdir()
@@ -273,18 +299,14 @@ def test_search_latency_bare_high_match_query_speedup(tmp_path, capsys, corpus_s
         print(
             f"\n[search-benchmark {label}-bare] indexed={indexed} records "
             f"query={BARE_QUERY!r} new_p95={new_p95:.2f}ms old_p95={old_p95:.2f}ms "
-            f"speedup={speedup:.1f}x (min {BARE_MIN_SPEEDUP:.1f}x, ceiling<{ceiling_ms:.0f}ms)"
+            f"speedup={speedup:.1f}x (min {BARE_MIN_SPEEDUP:.1f}x)"
         )
 
     assert indexed >= corpus_size, f"corpus under-built: indexed {indexed} of {corpus_size}"
-    assert new_p95 < ceiling_ms, (
-        f"the current compiler's query p95 {new_p95:.2f}ms exceeded the sanity "
-        f"ceiling of {ceiling_ms:.0f}ms at the {label} corpus ({indexed} records)."
-    )
     assert speedup >= BARE_MIN_SPEEDUP, (
         f"the current compiler's query was only {speedup:.1f}x faster than the "
-        f"pre-fix correlated-subquery shape (need >= {BARE_MIN_SPEEDUP:.1f}x) at "
-        f"the {label} corpus ({indexed} records, new_p95={new_p95:.2f}ms, "
+        f"alternate correlated-subquery ranking shape (need >= {BARE_MIN_SPEEDUP:.1f}x) "
+        f"at the {label} corpus ({indexed} records, new_p95={new_p95:.2f}ms, "
         f"old_p95={old_p95:.2f}ms) — the bm25 ranking may no longer be computed "
         "once per row via a single JOIN."
     )

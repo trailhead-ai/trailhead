@@ -12,8 +12,9 @@ spirit (no INSERT/UPDATE/DELETE, no commit) and closes it.
    (raises ``ValueError`` on an uncompilable node).
 3. ``index_store.open_index(env=…)`` → connection.
 4. ``conn.execute(cq.full_query(), cq.params)`` → the hit rows (ONE query).
-5. Per-hit body excerpt read from ``record_fts.body`` by rowid (body is NOT a
-   ``records`` column — stay index-only; never read the vault ``.md`` files).
+5. Per-hit body excerpt read from ``record_fts.body`` via one batched, chunked
+   ``IN (...)`` lookup keyed by record id (body is NOT a ``records`` column —
+   stay index-only; never read the vault ``.md`` files).
 6. Render — human banner or ``--json``.
 
 **Injection-defense output (airtight).** Each hit's ``shared`` flag (read
@@ -77,6 +78,14 @@ _REVERSE_EDGE_ALIASES = frozenset({"area", "phase", "keyword"})
 
 # Snippet excerpt length (chars) for the per-hit match preview.
 _SNIPPET_MAX = 160
+
+# Max ids bound into one snippet-lookup ``IN (...)`` query. SQLite's default
+# `SQLITE_LIMIT_VARIABLE_NUMBER` is 999 (pre-3.32); a discovery-shaped caller
+# (e.g. `lore flush`'s dirty-session scan, which searches with a 100,000-row
+# limit) can return far more rows than that in one result set, so binding every
+# id at once risks `sqlite3.OperationalError: too many SQL variables`. Chunked
+# well under the ceiling to leave headroom for older bundled SQLite builds.
+_SNIPPET_BATCH_SIZE = 500
 
 
 # ---------------------------------------------------------------------------
@@ -204,17 +213,20 @@ def _fetch_hits(conn, cq):
 
     records = [dict(zip(cols, row)) for row in rows]
 
-    # Snippet bodies live only in the populated FTS table (record_fts.body). A
-    # single IN (...) query fetches them all keyed by id, instead of one
-    # round-trip per returned row.
+    # Snippet bodies live only in the populated FTS table (record_fts.body).
+    # Batched IN (...) queries fetch them keyed by id, instead of one
+    # round-trip per returned row — chunked at ``_SNIPPET_BATCH_SIZE`` so a
+    # large result set never binds more ids than SQLite's variable limit
+    # allows in a single statement.
     ids = [record["id"] for record in records]
     snippets_by_id: dict = {}
-    if ids:
-        placeholders = ",".join("?" for _ in ids)
+    for start in range(0, len(ids), _SNIPPET_BATCH_SIZE):
+        batch = ids[start : start + _SNIPPET_BATCH_SIZE]
+        placeholders = ",".join("?" for _ in batch)
         body_rows = conn.execute(
             "SELECT r.id, f.body FROM record_fts f JOIN records r ON r.rowid = f.rowid "
             f"WHERE r.id IN ({placeholders})",
-            ids,
+            batch,
         ).fetchall()
         for record_id, body in body_rows:
             if body:
