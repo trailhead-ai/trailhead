@@ -80,11 +80,12 @@ _REVERSE_EDGE_ALIASES = frozenset({"area", "phase", "keyword"})
 _SNIPPET_MAX = 160
 
 # Max ids bound into one snippet-lookup ``IN (...)`` query. SQLite's default
-# `SQLITE_LIMIT_VARIABLE_NUMBER` is 999 (pre-3.32); a discovery-shaped caller
-# (e.g. `lore flush`'s dirty-session scan, which searches with a 100,000-row
-# limit) can return far more rows than that in one result set, so binding every
-# id at once risks `sqlite3.OperationalError: too many SQL variables`. Chunked
-# well under the ceiling to leave headroom for older bundled SQLite builds.
+# `SQLITE_LIMIT_VARIABLE_NUMBER` is 32,766 since 3.32 (this repo runs 3.53); a
+# discovery-shaped caller (e.g. `lore flush`'s dirty-session scan, which
+# searches with a 100,000-row limit) can still return more rows than that in
+# one result set, so binding every id at once remains unsafe in principle even
+# though 500 is nowhere near today's ceiling. Chunked well under any plausible
+# ceiling rather than tied to the current default.
 _SNIPPET_BATCH_SIZE = 500
 
 

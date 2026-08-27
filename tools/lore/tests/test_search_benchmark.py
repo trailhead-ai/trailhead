@@ -64,7 +64,16 @@ BARE_QUERY = "it"
 # side's raw ms flaky alone. The ratio is the sole gate; see
 # ``test_search_latency_bare_high_match_query_speedup`` for why no absolute-ms
 # assertion accompanies it.
-BARE_MIN_SPEEDUP = 1.5  # measured ~2.0x consistently on a loaded host; comfortable margin
+# Measured ~322x-378x across repeated runs once bm25 is genuinely computed once
+# via a non-flattenable JOIN (see kql_compile's `LIMIT -1` rationale). A prior
+# floor of 1.5x encoded the ~2x a FLATTENED JOIN produces (SQLite folds a plain
+# subquery join back into a per-row, rowid-constrained MATCH — same asymptotic
+# cost as the old correlated-subquery baseline, just wearing a join) — that
+# floor could not tell "computed once" apart from "computed once per row instead
+# of twice per row". 20x sits with real headroom below every measured run
+# (~16-19x margin) while sitting two orders of magnitude above what either the
+# flattened-JOIN or correlated-subquery shape can produce.
+BARE_MIN_SPEEDUP = 20.0
 
 _KINDS = ["spec", "lesson", "decision", "deferred", "dead-end", "plan", "session"]
 _AREAS = ["penny", "phi-scrubber", "worker", "ingest", "routing", "auth", "vault"]
@@ -129,11 +138,19 @@ def _percentile(samples_ms: list[float], pct: float) -> float:
     return ordered[k]
 
 
-def _old_style_ranked_query(term: str, limit: int) -> tuple[str, list]:
+def _old_style_ranked_query(match_expr: str, limit: int) -> tuple[str, list]:
     """An alternate ranking shape: two correlated scalar subqueries in ORDER BY,
     each re-running the FTS MATCH once per candidate row, instead of the single
-    JOIN the production compiler uses. Used only as the speedup-ratio baseline in
-    ``_measure_speedup_ratio``; ``kql_compile.compile`` never emits this shape.
+    non-flattenable JOIN the production compiler uses. Used only as the
+    speedup-ratio baseline in ``_measure_speedup_ratio``; ``kql_compile.compile``
+    never emits this shape.
+
+    ``match_expr`` must be the compiler's own SANITIZED MATCH expression (e.g.
+    ``cq.params[0]``), never the raw query term — for a bare single-token query
+    like ``BARE_QUERY`` they happen to be identical, but a phrase or a multi-term
+    query sanitizes to a different MATCH string, and binding the raw term here
+    would silently compare two different match sets on the two sides, invalidating
+    the speedup ratio.
     """
     bm25_subquery = (
         "(SELECT bm25(record_fts, 3.0, 2.0, 1.0) FROM record_fts "
@@ -146,7 +163,7 @@ def _old_style_ranked_query(term: str, limit: int) -> tuple[str, list]:
         "updated_at DESC, last_referenced_at DESC\n"
         "LIMIT ?"
     )
-    return sql, [term, term, term, limit]
+    return sql, [match_expr, match_expr, match_expr, limit]
 
 
 def test_old_style_ranked_query_pinned_to_locked_fts_predicate_and_weights():
@@ -157,7 +174,8 @@ def test_old_style_ranked_query_pinned_to_locked_fts_predicate_and_weights():
     the speedup ratio comparing two SQL shapes that no longer share a WHERE
     clause or a weighting — pin both here so that drift fails loudly instead."""
     kql_compile = load_script("lore.search.kql_compile")
-    old_sql, _ = _old_style_ranked_query("zephyr", 20)
+    cq_probe = kql_compile.compile(load_script("lore.search.kql").parse("zephyr"))
+    old_sql, _ = _old_style_ranked_query(cq_probe.params[0], 20)
 
     assert kql_compile._FTS_PREDICATE in old_sql, (
         "the baseline's WHERE clause no longer matches kql_compile._FTS_PREDICATE"
@@ -183,7 +201,12 @@ def _measure_speedup_ratio(state_dir: Path, *, query: str, runs: int = 20) -> tu
 
     ast = kql.parse(query)
     cq = kql_compile.compile(ast, limit=20)
-    old_sql, old_params = _old_style_ranked_query(query, 20)
+    # Bind the SAME sanitized MATCH expression the production side binds
+    # (``cq.params[0]``, the rank-JOIN param), never the raw query string — for a
+    # bare single-token query like BARE_QUERY they are identical today, but a
+    # phrase or multi-term query sanitizes differently, and comparing two
+    # different match sets would invalidate the ratio.
+    old_sql, old_params = _old_style_ranked_query(cq.params[0], 20)
 
     new_samples: list[float] = []
     old_samples: list[float] = []

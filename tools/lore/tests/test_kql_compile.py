@@ -7,19 +7,22 @@ uniformly in SQL. Each FullText/Phrase node compiles to
 
 with the sanitized single-term/phrase MATCH string as a BOUND param. And/Or/Not/
 Group compose these full-text predicates and the scalar/facet predicates uniformly
-as SQL boolean. Ranking, when any full-text term is present, is a correlated bm25
-subquery over the OR-combined POSITIVE (non-negated) full-text terms; pure-facet
-queries use recency order.
+as SQL boolean. Ranking, when any full-text term is present, is a single LEFT JOIN
+that computes bm25 once over the OR-combined POSITIVE (non-negated) full-text
+terms; pure-facet queries use recency order.
 
-FINAL SELECT shape the executor runs (no mandatory FTS JOIN):
+FINAL SELECT shape the executor runs (JOIN present only when the query has FTS):
 
-  SELECT * FROM records
+  SELECT records.* FROM records
+  [LEFT JOIN (SELECT rowid, bm25(...) AS score FROM record_fts
+    WHERE record_fts MATCH ? LIMIT -1) rank ON rank.rowid = records.rowid]
   WHERE <predicates, full-text predicates inline>
-  ORDER BY <bm25 subquery sort key | recency>
+  ORDER BY <rank.score sort key | recency>
   LIMIT ?
 
-Bound-param order: WHERE-clause params (tree order, including each MATCH string),
-then the ranking-subquery MATCH param (only when full-text present), then LIMIT.
+Bound-param order: the rank-JOIN MATCH param once (only when full-text present,
+since the JOIN precedes WHERE positionally), then WHERE-clause params (tree
+order, including each MATCH string), then LIMIT.
 ``CompiledQuery.full_query()`` + ``params`` stay positionally aligned.
 """
 
@@ -1205,10 +1208,22 @@ class TestRankingEquivalence:
 
 
 class TestQueryPlanShape:
-    """The bm25 ranking must be a single JOIN scan, never a per-row correlated
-    scalar subquery."""
+    """The bm25 ranking must be computed in a single, non-flattenable scan of
+    ``record_fts`` — never re-run once per candidate row.
 
-    def test_ranked_query_plan_has_no_correlated_scalar_subquery(
+    SQLite's query flattening optimizer will fold a plain ``LEFT JOIN (SELECT …
+    FROM record_fts WHERE record_fts MATCH ?) rank ON …`` subquery straight into
+    the outer join, turning the MATCH into a per-row, rowid-constrained scan. The
+    plan's tell for that is ``SCAN record_fts VIRTUAL TABLE INDEX 0:=M3`` (the
+    ``=`` means the match is constrained by the outer row's rowid, i.e. re-run
+    per row) — a string like ``CORRELATED SCALAR SUBQUERY`` never appears for a
+    flattened JOIN, so asserting its absence does not catch this. The fix keeps
+    the rank relation from being flattened, which the plan shows as a
+    ``MATERIALIZE rank`` step feeding a single, unconstrained
+    ``SCAN record_fts VIRTUAL TABLE INDEX 0:M3``.
+    """
+
+    def test_ranked_query_plan_computes_rank_in_one_unconstrained_scan(
         self, kql, compiler, ranking_equivalence_index
     ):
         conn, vault, env = ranking_equivalence_index
@@ -1218,7 +1233,10 @@ class TestQueryPlanShape:
         ).fetchall()
         detail_col = 3  # EXPLAIN QUERY PLAN: (id, parent, notused, detail)
         details = [row[detail_col] for row in plan_rows]
-        assert not any("CORRELATED SCALAR SUBQUERY" in d for d in details), details
+        # The flattened, per-row-constrained form: MATCH re-run once per outer row.
+        assert not any("0:=M3" in d for d in details), details
+        # The materialized, single-scan form: rank computed once, then joined.
+        assert any("MATERIALIZE" in d and "rank" in d for d in details), details
 
 
 class TestParamOrderContract:

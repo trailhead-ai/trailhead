@@ -35,7 +35,7 @@ Every combination is now correct:
 
   SELECT records.* FROM records
   [LEFT JOIN (SELECT rowid, bm25(...) AS score FROM record_fts WHERE record_fts
-    MATCH ?) rank ON rank.rowid = records.rowid]   -- only when the query has FTS
+    MATCH ? LIMIT -1) rank ON rank.rowid = records.rowid]  -- only when query has FTS
   WHERE <predicates — full-text predicates live inline in the tree>
   ORDER BY <ranking>
   LIMIT ?
@@ -61,9 +61,30 @@ correlated scalar subquery re-run once per candidate row in the ``ORDER BY``:
     SELECT rowid, bm25(record_fts, 3.0, 2.0, 1.0) AS score
     FROM record_fts
     WHERE record_fts MATCH ?
+    LIMIT -1
   ) rank ON rank.rowid = records.rowid
   ...
   ORDER BY rank.score IS NULL, rank.score ASC, updated_at DESC, last_referenced_at DESC
+
+**Why the inner ``LIMIT -1``.** A plain subquery here — without it — is NOT safe
+from re-running per row: SQLite's query flattening optimizer folds a flattenable
+``LEFT JOIN (SELECT …) rank ON …`` straight into the outer join, turning the FTS
+``MATCH`` into a per-row, rowid-constrained scan (``EXPLAIN QUERY PLAN`` shows
+``SCAN record_fts VIRTUAL TABLE INDEX 0:=M3 LEFT-JOIN`` — the ``=`` means the
+match is constrained by the outer row's rowid). That reintroduces the exact
+per-candidate-row bm25 recomputation this JOIN exists to remove, just wearing a
+join instead of a correlated-subquery costume — same cost, different shape. A
+subquery carrying a ``LIMIT`` is disqualified from flattening, so ``LIMIT -1``
+(a no-op on the result set — a real row cap is always a non-negative integer)
+forces SQLite to compute the subquery as its own materialized step exactly once
+(``MATERIALIZE rank`` feeding an unconstrained ``SCAN record_fts VIRTUAL TABLE
+INDEX 0:M3``). ``WITH rank AS MATERIALIZED (...)`` achieves the same query
+shape but needs SQLite ≥ 3.35 (2021); this repo's ``pyproject.toml`` pins
+``requires-python = ">=3.11"``, which is a language-version floor, not a
+promise about the ``sqlite3`` build linked against a given interpreter (a
+system/homebrew/distro Python often links whatever ``libsqlite3`` the OS
+ships, which can be older) — so ``LIMIT -1``, which has forced this same
+non-flattening behavior since long before 3.35, is the version-safe choice.
 
 The ``IS NULL`` leading key pushes rows that do not match the ranking expression
 (NULL score — the LEFT JOIN found no matching ``rank`` row) AFTER the matched
@@ -429,14 +450,26 @@ def compile(ast, *, vault=None, limit=20) -> CompiledQuery:
 
     if has_fts:
         rank_match = " OR ".join(compiler.positive_fts)
-        # The JOIN computes bm25 ONCE per matching row via a single scan of
-        # record_fts; a correlated scalar subquery in the ORDER BY would re-run
-        # the MATCH per candidate row instead. The JOIN clause precedes WHERE
-        # positionally, so its param is bound first.
+        # The JOIN computes bm25 ONCE via a single unconstrained scan of
+        # record_fts. A plain subquery here would be flattened by SQLite's query
+        # optimizer straight into the outer join, turning the MATCH into a
+        # per-row, rowid-constrained scan (EXPLAIN QUERY PLAN shows
+        # `SCAN record_fts ... 0:=M3 LEFT-JOIN`) — the exact per-candidate-row
+        # re-run this JOIN exists to avoid, just wearing a join instead of a
+        # correlated-subquery costume. The inner `LIMIT -1` is a no-op on the
+        # result (a real LIMIT would be a positive integer) but it disqualifies
+        # the subquery from flattening, so SQLite must compute it as its own
+        # materialized step (EXPLAIN QUERY PLAN shows `MATERIALIZE rank` +
+        # `SCAN record_fts ... 0:M3`, no `=`). This works on any SQLite version
+        # — unlike `WITH rank AS MATERIALIZED (...)`, which needs 3.35+ and
+        # isn't a version this repo's stdlib-only `sqlite3` can guarantee is
+        # linked. The JOIN clause precedes WHERE positionally, so its param is
+        # bound first.
         join_clause = (
             "LEFT JOIN (\n"
             "    SELECT rowid, bm25(record_fts, 3.0, 2.0, 1.0) AS score\n"
             "    FROM record_fts WHERE record_fts MATCH ?\n"
+            "    LIMIT -1\n"
             ") rank ON rank.rowid = records.rowid"
         )
         final_params.append(rank_match)
