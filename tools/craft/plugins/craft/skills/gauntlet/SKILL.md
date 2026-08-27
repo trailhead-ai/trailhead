@@ -378,7 +378,7 @@ no auto-accept flag, and every point below waits on a human today.
 |---|---|
 | **operator acceptance gate** | the operator accepting the presented deliverable — on every run, clean ones included |
 | **override round-trip** | the operator's overrides, applied together and echoed as a full table |
-| **route-change re-present** | acceptance of the revised recommendation, whenever overrides changed the route — or drafted an edit the presented table did not carry |
+| **route-change re-present** | acceptance of the revised recommendation, whenever overrides changed the route — or drafted an edit the presented table did not carry, or re-adjudicated an `answered` row to `resolved` or to `reframed`, the latter even on a run whose route never moved |
 | **failed-write report** | nothing — the tail has stopped and the operator is told the partial state; the record stays `draft` **unless the failure fell after the status flip**, which only the adr tail's supersession write is ordered to do (see "Reviewing an adr") |
 
 #### The accepted tail

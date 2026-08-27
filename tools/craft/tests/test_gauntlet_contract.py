@@ -807,6 +807,36 @@ def test_answered_is_not_terminal_and_folds_into_the_record_as_an_edit():
     )
 
 
+def test_re_adjudication_may_not_land_on_an_operator_only_disposition():
+    """The invariant that stops the adjudicator self-authoring an operator veto.
+
+    `answered` hands the adjudicator a row it must re-dispose. If the terms it may
+    re-dispose to are not constrained to the two it may already propose, the
+    adjudicator can write `accepted-as-risk` or `disputed` itself — an
+    operator-only disposition, carrying an operator-only reason, authored by the
+    agent under cover of "answering" the finding. That is the same signature
+    forgery the empty-reason rule exists to prevent, reached by a different door.
+    """
+    step = _flat(_resolution_step(GAUNTLET.read_text()))
+    assert "the re-adjudicated outcome is `resolved` or `reframed`" in step, (
+        "re-adjudication must be constrained to the two terms the adjudicator may "
+        "already propose — an unconstrained re-adjudication vocabulary lets the "
+        "agent author an operator-only disposition"
+    )
+    for term in ("accepted-as-risk", "disputed", "answered"):
+        assert f"`{term}`" in step, f"the excluded term `{term}` must be named"
+    assert (
+        "never `accepted-as-risk`, `disputed`, or `answered` again" in step
+    ), (
+        "the three excluded terms must be named explicitly — a positive-only "
+        "statement of the allowed set reads as a default, not a prohibition"
+    )
+    assert "self-author an operator-only disposition" in step, (
+        "the prose must name WHY the constraint exists — an unexplained "
+        "enumeration is the first thing a later edit relaxes"
+    )
+
+
 def test_both_route_names_are_pinned():
     """Two routes, two names, used everywhere — including the per-mode tails.
 
