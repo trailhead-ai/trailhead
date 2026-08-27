@@ -428,7 +428,7 @@ no auto-accept flag, and every point below waits on a human today.
 | **operator acceptance gate** | the operator accepting the presented deliverable — on every run, clean ones included |
 | **override round-trip** | the operator's overrides, applied together and echoed as a full table |
 | **route-change re-present** | acceptance of the revised recommendation, whenever overrides change whether any Critical still carries `revise`, or whenever a prescription or edit not in the presented table was newly drafted |
-| **failed-write report** | nothing — the tail has stopped and the operator is told the partial state; the record stays `draft` **unless the failure fell after the status flip**, which only the adr tail's supersession write is ordered to do (see "Reviewing an adr") |
+| **failed-write report** | nothing — the tail has stopped and the operator is told the partial state; the record under review always keeps the status it arrived with, because no write is ordered after its flip in either mode. The one partial state to report is a **predecessor** already flipped `superseded` by the adr tail's back-edge while the record under review stays `draft` (see "Reviewing an adr") |
 
 #### The accepted tail
 
@@ -461,9 +461,11 @@ the only point at which anyone looks at it before it is permanent:
    stamp to follow: `--diff` leaves the body byte-for-byte unmodified on any rejected hunk, and that
    property is the only thing making the accepted set all-or-nothing. A record holding half its
    accepted edits is a record nobody reviewed.
-2. **Then the status flip** — and, where the mode has one, the predecessor supersession write —
-   **only after that write has succeeded**. The flip is what freezes the record; running it ahead of
-   the edits freezes a record whose accepted edits are still hypothetical.
+2. **Then the mode's remaining writes** — the spec tail's status flip, or the adr tail's
+   predecessor supersession write — **only after that write has succeeded**. A flip is what freezes
+   a record; running one ahead of the edits freezes a record whose accepted edits are still
+   hypothetical. **The adr tail flips nothing it is reviewing** — an adr leaves this tail `draft`
+   on every outcome, and distill activates it once its derived specs are terminal.
 
 **On any rejected hunk or failed write, nothing further runs.** Not the flip, not the supersession
 write, not a retry with the hunks re-cut. The record stays `draft` and you **report the partial

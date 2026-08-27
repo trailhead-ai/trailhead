@@ -1426,19 +1426,33 @@ def test_resolution_names_its_escalation_points_in_the_execute_style():
     )
 
 
-def test_failed_write_escalation_row_admits_the_post_flip_failure():
-    """The shared table's `failed-write report` row states the record stays `draft`.
+def test_failed_write_escalation_row_does_not_promise_a_frozen_record_under_review():
+    """No write is ordered after a flip of the record under review, in either mode.
 
-    One write in the whole skill is ordered AFTER the status flip — the adr tail's
-    supersession back-edge — and a failure there leaves a record that is already
-    frozen. Left unqualified, the shared row is simply wrong for that case, and
-    an agent reading it would report a `draft` record that is `active`.
+    The adr tail no longer flips the record it is reviewing — distill owns that
+    now — and the spec tail's flip is its last write, so nothing can fail "after
+    the flip" and leave the record under review frozen. The row previously
+    qualified its `draft` claim for exactly that case and pointed at the adr
+    tail's supersession write as the write that does it. That write flips the
+    PREDECESSOR, a different record; reading it as the reviewed record is what
+    the stale qualifier invited. An agent trusting it would report the reviewed
+    record as possibly `active` when this skill can no longer make it so.
     """
     step = _flat(_resolution_step(GAUNTLET.read_text()))
-    assert "unless the failure fell after the status flip" in step, (
-        "the `failed-write report` row must qualify its `draft` claim for the one "
-        "write ordered after the flip, rather than contradicting the per-mode tail "
-        "that describes it"
+    assert "unless the failure fell after the status flip" not in step, (
+        "the `failed-write report` row still qualifies its `draft` claim for a "
+        "post-flip failure of the record under review — no write is ordered after "
+        "such a flip in either mode now that the adr tail does not flip at all"
+    )
+    row = next(
+        line for line in _resolution_step(GAUNTLET.read_text()).splitlines()
+        if "**failed-write report**" in line
+    )
+    assert "**predecessor**" in row and "stays `draft`" in row, (
+        "the `failed-write report` row itself must name the one partial state a "
+        "failed adr tail can genuinely leave behind — a predecessor already "
+        "flipped `superseded` while the record under review stays `draft`. "
+        "Asserting over the whole step matches the word elsewhere and pins nothing"
     )
     assert (
         "or whenever a prescription or edit not in the presented table was newly "
@@ -1449,13 +1463,23 @@ def test_failed_write_escalation_row_admits_the_post_flip_failure():
         "run whose revise-presence never moved — or the row names a trigger "
         "narrower than the rule it restates"
     )
-    assert (
-        "whenever overrides change whether any Critical still carries `revise`"
-        in step
-    ), (
-        "the `route-change re-present` row must state the revise-presence "
-        "trigger explicitly — a row still phrased in terms of a route change "
-        "restates a rule that no longer exists"
+
+
+def test_shared_accepted_tail_does_not_claim_a_status_flip_in_every_mode():
+    """The shared tail is shared, so it must not assert a step only one mode runs.
+
+    Step 2 named the status flip as the universal second step, with the
+    predecessor supersession write as the mode-specific extra. That inverted the
+    truth after this change: the spec tail flips, the adr tail does not flip the
+    record under review at all, and the write the adr tail does run targets a
+    different record. A shared step asserting a flip both modes perform
+    contradicts the per-mode adr section two hundred lines below it.
+    """
+    step = _flat(_resolution_step(GAUNTLET.read_text()))
+    assert "2. **Then the status flip** — and, where the mode has one," not in step, (
+        "the shared accepted tail still names the status flip as the universal "
+        "second step; it must name the mode's remaining writes instead, since "
+        "the adr tail flips nothing it is reviewing"
     )
 
 
@@ -1569,7 +1593,7 @@ def _adr_tail(text: str) -> str:
     return _section(_adr_mode_section(text), ADR_TAIL_HEADER, "\n### ")
 
 
-def test_accepted_tail_is_one_atomic_write_then_the_status_flip():
+def test_accepted_tail_is_one_atomic_write_then_the_modes_remaining_writes():
     """Edits and stamp land together, or not at all — and the flip goes last.
 
     A record carrying half its accepted edits is a record nobody reviewed, and a
@@ -1586,16 +1610,22 @@ def test_accepted_tail_is_one_atomic_write_then_the_status_flip():
         f"provenance stamp apply as {_ATOMIC_WRITE} — not one write per Critical, "
         "and not edits now with the stamp to follow"
     )
-    assert "**Then the status flip**" in tail, (
-        "the tail's second step must be the status flip"
+    assert "**Then the mode's remaining writes**" in tail, (
+        "the tail's second step must be the mode's remaining writes — the spec "
+        "tail's status flip or the adr tail's predecessor supersession write. "
+        "Naming a status flip both modes perform contradicts the adr tail, which "
+        "flips nothing it is reviewing"
     )
     assert "only after that write has succeeded" in tail, (
-        "the flip must be conditioned on the atomic write succeeding — an "
+        "the second step must be conditioned on the atomic write succeeding — an "
         "unconditional flip is the failure mode the ordering exists to prevent"
     )
-    assert tail.index(_ATOMIC_WRITE) < tail.index("**Then the status flip**"), (
-        "the atomic write must be stated before the status flip — the tail is an "
-        "ordered sequence, and prose order is the only thing carrying that order"
+    assert tail.index(_ATOMIC_WRITE) < tail.index(
+        "**Then the mode's remaining writes**"
+    ), (
+        "the atomic write must be stated before the mode's remaining writes — the "
+        "tail is an ordered sequence, and prose order is the only thing carrying "
+        "that order"
     )
 
 
