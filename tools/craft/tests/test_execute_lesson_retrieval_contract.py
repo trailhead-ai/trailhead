@@ -24,7 +24,7 @@ CRAFT = Path(__file__).parent.parent / "plugins" / "craft"
 SHARED_EXECUTE = CRAFT / "skills" / "_shared" / "execute.md"
 INJECTION_FIXTURE = Path(__file__).parent / "fixtures" / "injection_defense_canonical.txt"
 ZERO_RESULT_FIXTURE = Path(__file__).parent / "fixtures" / "zero_result_protocol.txt"
-LESSON_CONTRACT_FIXTURE = Path(__file__).parent / "fixtures" / "dispatch_lesson_contract.txt"
+READ_CONTRACT_FIXTURE = Path(__file__).parent / "fixtures" / "dispatch_lesson_read_contract.txt"
 
 STATUS_WALK_MARKER = "**Status walk.**"
 RESUME_HEADING = "### Resuming a run"
@@ -96,8 +96,19 @@ def test_claim_pins_retrieval_query_inline_verbatim():
     _pin_in(
         _claim_section(),
         "execute.md#claim",
-        "kind:lesson label.craft.dispatch-lesson:executor label.craft.subsystems:",
-        "The claim section must spell out the label-scoped query verbatim.",
+        "kind:lesson label.craft.dispatch-lesson:executor",
+        "The claim section must spell out the retrieval query verbatim.",
+    )
+
+
+def test_claim_query_never_ands_subsystem_label():
+    section = _claim_section()
+    assert "label.craft.subsystems:" not in section, (
+        "execute.md#claim: retrieval must never AND `label.craft.subsystems:` "
+        "into the claim query as a precondition — subsystem is at most a "
+        "ranking signal, never a gate. A universal process lesson learned "
+        "while building one subsystem must be reachable from a run touching "
+        "a different subsystem — the case that previously returned zero."
     )
 
 
@@ -227,30 +238,26 @@ def test_step3_pins_specify_the_what_instruction_intact():
     )
 
 
-def test_fixtures_ship_lesson_contract():
-    assert LESSON_CONTRACT_FIXTURE.exists()
-
-
-def test_claim_lesson_contract_is_byte_identical_to_fixture():
-    contract = LESSON_CONTRACT_FIXTURE.read_text().strip()
+def test_claim_lesson_contract_is_byte_identical_to_read_fixture():
+    contract = READ_CONTRACT_FIXTURE.read_text().strip()
     _pin_in(
         _claim_section(),
         "execute.md#claim",
         contract,
-        "The read side must state the kind + label contract from the same "
-        "canonical fixture the write side does, so a rename cannot leave both "
-        "suites green while the ritual silently learns nothing.",
+        "The read side must state its own kind + label contract from its own "
+        "canonical fixture, distinct from the write side's, so a rename on "
+        "either cannot leave both suites green while the ritual silently "
+        "teaches nothing.",
     )
 
 
-def test_claim_pins_subsystem_name_resolution():
+def test_claim_pins_subsystem_as_ranking_signal_at_most():
     _pin_in(
         _claim_section(),
         "execute.md#claim",
-        "`<name>` is the parent task's own `craft/subsystems` label value",
-        "With no stated resolution an agent may substitute a repo or area "
-        "name, producing a permanently empty conjunction indistinguishable "
-        "from genuine absence.",
+        "subsystem is at most a ranking signal for retrieval, never a gate",
+        "The claim must state the demotion explicitly: subsystem provenance "
+        "on the write side no longer gates the read side.",
     )
 
 
@@ -287,18 +294,6 @@ def test_step3_pins_framing_travels_with_the_forwarded_text():
 
 
 # --- absent subsystem label, standalone claim, and forwarding carve-outs -------
-
-
-def test_claim_pins_absent_subsystem_label_branch_on_the_query():
-    _pin_in(
-        _claim_section(),
-        "execute.md#claim",
-        "drop the `label.craft.subsystems:` term and run the query as "
-        "`kind:lesson label.craft.dispatch-lesson:executor`",
-        "`craft/subsystems` is written only conditionally by planning and never "
-        "by refine, so on a standalone run there is no value to substitute and "
-        "the query silently matches nothing.",
-    )
 
 
 def test_standalone_status_walk_loads_dispatch_lessons():
@@ -368,22 +363,29 @@ def test_step3_has_no_raw_body_read_carve_out():
     )
 
 
-def test_claim_pins_subsystem_name_is_untrusted_input():
-    _pin_in(
-        _claim_section(),
-        "execute.md#claim",
-        "**`<name>` is untrusted input.**",
-        "`<name>` is a free-form vault label anyone with shared-vault write "
-        "access can set, and it is substituted into a literal shell command the "
-        "unsandboxed controller runs.",
+
+
+def test_claim_read_contract_is_not_widened_with_a_subsystem_term():
+    """The stated read contract must not have the subsystem term appended back
+    onto it.
+
+    The byte-identical pin above matches the fixture as a SUBSTRING, so prose
+    that states the read contract and then appends `+ craft/subsystems=<name>`
+    re-creates Defect 2's conjunction while that pin still passes. This asserts
+    on what directly follows the contract, which is where a widening lands.
+    """
+    contract = READ_CONTRACT_FIXTURE.read_text().strip()
+    section = _claim_section()
+    lines = [line for line in section.splitlines() if contract in line]
+    assert len(lines) == 1, (
+        f"execute.md#claim: expected exactly one line stating the read "
+        f"contract, found {len(lines)}."
     )
-
-
-def test_claim_pins_checkable_safe_value_shape():
-    _pin_in(
-        _claim_section(),
-        "execute.md#claim",
-        "a safe value matches `^[A-Za-z0-9._/-]+$`",
-        "The validation rule has to say what a safe value looks like, or it is "
-        "aspirational rather than checkable.",
+    tail = lines[0].split(contract, 1)[1]
+    assert not tail.lstrip("`").lstrip().startswith("+ craft/subsystems"), (
+        "execute.md#claim: the read contract is widened with a subsystem term "
+        "appended directly onto it. Retrieval must query the dispatch-lesson "
+        "label on its own — re-ANDing subsystem is the precise defect this "
+        "change exists to remove, and it must not creep back in via the "
+        "contract sentence."
     )
