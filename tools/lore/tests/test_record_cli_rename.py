@@ -1246,3 +1246,77 @@ def test_symlinked_sidecar_outside_the_vault_is_never_read(install):
     # artifacts are confined, so the honest body is left alone too.
     assert (ref_json / "bait.md").read_text(encoding="utf-8") == "see [[adr/old-name]]"
     assert str(external) not in proc.stdout + proc.stderr
+
+
+# ---------------------------------------------------------------------------
+# active-adr immutability at the rename-sweep write seam
+# ---------------------------------------------------------------------------
+
+
+def test_rename_referenced_by_active_adr_succeeds_with_link_substitution_only(install):
+    """Renaming a record an ``active`` adr wikilinks to is the narrow, deliberate
+    exemption: the ADR's body changes by exactly the stem substitution, nothing
+    else — link-rot maintenance, not an edit.
+    """
+    install.create(
+        "default", "adr", "Referencing Decision", body="see [[spec/old-thing]] here",
+        extra=["--status", "active"],
+    )
+    spec_id = install.create("default", "spec", "Old Thing", body="x")
+
+    proc = install.cli(["record", "rename", spec_id, "--title", "New Thing"])
+    assert proc.returncode == 0, proc.stderr
+    assert install.body("default", "adr/referencing-decision") == "see [[spec/new-thing]] here"
+
+
+def test_rename_path_body_change_not_pure_substitution_against_active_adr_is_rejected(
+    tmp_path, monkeypatch
+):
+    """The rename exemption is exactly as narrow as a pure stem substitution.
+
+    The sweep's own ``rewrite_body`` is monkeypatched to append text beyond the
+    substitution — simulating a future accidental widening of that function —
+    while the guard's independent :func:`guards.compute_stem_rewrite` stays the
+    real, narrow implementation. The mismatch must be caught structurally: the
+    active adr's stored body must not change at all.
+    """
+    rename = load_script("lore.record.rename")
+    store = rename.store
+    index = load_script("lore.search.index")
+
+    vault = _single_vault_install(tmp_path, monkeypatch)
+    conn = index.open_index()
+    try:
+        adr_loc = store.place_record("Referencing Decision", "adr", None, str(vault))
+        adr_id = store.validate_and_write(
+            adr_loc,
+            {"kind": "adr", "title": "Referencing Decision", "status": "active"},
+            "see [[spec/old-thing]] here",
+            conn,
+        )
+        conn.commit()
+
+        spec_loc = store.place_record("Old Thing", "spec", None, str(vault))
+        store.validate_and_write(
+            spec_loc, {"kind": "spec", "title": "Old Thing", "status": "draft"}, "x", conn,
+        )
+        conn.commit()
+
+        real_rewrite_body = rename.rewrite_body
+
+        def corrupting_rewrite_body(body, kind, old_stem, new_stem):
+            return real_rewrite_body(body, kind, old_stem, new_stem) + " EXTRA UNRELATED TEXT"
+
+        monkeypatch.setattr(rename, "rewrite_body", corrupting_rewrite_body)
+
+        report = rename.rename_record("spec/old-thing", "New Thing", conn)
+        conn.commit()
+    finally:
+        conn.close()
+
+    adr_rewrite = next(rw for rw in report.rewrites if rw.record_id == adr_id)
+    assert adr_rewrite.error is not None
+    assert "[adr-active-immutable]" in adr_rewrite.error
+
+    stored = (vault / "adr" / "referencing-decision.md").read_text(encoding="utf-8")
+    assert stored == "see [[spec/old-thing]] here"

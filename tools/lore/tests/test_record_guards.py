@@ -880,3 +880,136 @@ def test_dispatcher_is_a_noop_for_an_unrelated_kind(tmp_path):
             g, tmp_path, kind=kind, sidecar={"depends-on": ["spec/b"]},
             body="", status_set="superseded",
         ) == ([], [])
+
+
+# ---------------------------------------------------------------------------
+# active-adr body immutability
+# ---------------------------------------------------------------------------
+
+
+def test_active_adr_immutable_check_blocks_body_change_against_active_status():
+    g = _guards()
+    msg = g.check_active_adr_body_immutable(
+        kind="adr", name="foo", prior_status="active",
+        prior_body="old body", new_body="new body",
+    )
+    assert msg is not None
+    assert "[adr-active-immutable]" in msg
+
+
+def test_active_adr_immutable_check_message_parses_and_names_the_remedy():
+    g = _guards()
+    msg = g.check_active_adr_body_immutable(
+        kind="adr", name="foo", prior_status="active",
+        prior_body="old body", new_body="new body",
+    )
+    assert msg.startswith("graph-guard [adr-active-immutable]: ")
+    assert "\n" not in msg
+    assert "supersede" in msg.lower()
+    assert "do not edit" in msg.lower()
+    assert "--status superseded" in msg
+    assert "--related adr=" in msg
+
+
+def test_active_adr_immutable_check_allows_unchanged_body():
+    g = _guards()
+    msg = g.check_active_adr_body_immutable(
+        kind="adr", name="foo", prior_status="active",
+        prior_body="same body", new_body="same body",
+    )
+    assert msg is None
+
+
+def test_active_adr_immutable_check_keys_on_status_not_kind_alone_draft_allows():
+    g = _guards()
+    msg = g.check_active_adr_body_immutable(
+        kind="adr", name="foo", prior_status="draft",
+        prior_body="old body", new_body="new body",
+    )
+    assert msg is None
+
+
+def test_active_adr_immutable_check_ignores_non_adr_kind():
+    g = _guards()
+    msg = g.check_active_adr_body_immutable(
+        kind="spec", name="foo", prior_status="active",
+        prior_body="old body", new_body="new body",
+    )
+    assert msg is None
+
+
+def test_active_adr_immutable_check_default_prior_body_none_is_a_noop():
+    g = _guards()
+    msg = g.check_active_adr_body_immutable(
+        kind="adr", name="foo", prior_status="active",
+        prior_body=None, new_body="anything",
+    )
+    assert msg is None
+
+
+def test_active_adr_immutable_check_compares_after_fence_neutralization():
+    """A metadata-only re-supply of the ORIGINAL pre-neutralization fence text
+    must be recognized as a no-op — it neutralizes to exactly what is already
+    on disk, and comparing the raw values would reject it despite the write
+    landing byte-identical bytes.
+    """
+    g = _guards()
+    store = load_script("lore.record.store")
+    raw = "See <external-memory>note</external-memory> here.\n"
+    stored = store.neutralize_fences(raw)
+    assert stored != raw  # sanity: neutralization actually changed something
+    msg = g.check_active_adr_body_immutable(
+        kind="adr", name="foo", prior_status="active",
+        prior_body=stored, new_body=raw,
+    )
+    assert msg is None
+
+
+def test_active_adr_immutable_check_allowed_body_exemption_permits_exact_match():
+    g = _guards()
+    msg = g.check_active_adr_body_immutable(
+        kind="adr", name="foo", prior_status="active",
+        prior_body="see [[old-thing]] here", new_body="see [[new-thing]] here",
+        allowed_body="see [[new-thing]] here",
+    )
+    assert msg is None
+
+
+def test_active_adr_immutable_check_rejects_body_change_not_matching_allowed_exemption():
+    """The exemption cannot be widened by accident: a change that matches
+    neither the prior body nor the caller-supplied allowed body is rejected,
+    even though an *allowed_body* was supplied.
+    """
+    g = _guards()
+    msg = g.check_active_adr_body_immutable(
+        kind="adr", name="foo", prior_status="active",
+        prior_body="see [[old-thing]] here", new_body="see [[old-thing]] here PLUS EXTRA",
+        allowed_body="see [[new-thing]] here",
+    )
+    assert msg is not None
+    assert "[adr-active-immutable]" in msg
+
+
+def test_compute_stem_rewrite_only_rewrites_the_wikilink():
+    g = _guards()
+    out = g.compute_stem_rewrite("see [[old-thing]] and other text", "spec", "old-thing", "new-thing")
+    assert out == "see [[new-thing]] and other text"
+
+
+def test_dispatcher_threads_prior_body_and_status_into_adr_immutability_check(tmp_path):
+    g = _guards()
+    errors, _ = g.evaluate_graph_guards(
+        kind="adr", name="foo", sidecar={"kind": "adr", "status": "active"},
+        body="new body", vault_root=str(tmp_path), status_set=None,
+        prior_status="active", prior_body="old body",
+    )
+    assert any("[adr-active-immutable]" in e for e in errors)
+
+
+def test_dispatcher_default_prior_body_none_does_not_enforce_immutability(tmp_path):
+    g = _guards()
+    errors, _ = g.evaluate_graph_guards(
+        kind="adr", name="foo", sidecar={"kind": "adr", "status": "active"},
+        body="new body", vault_root=str(tmp_path), status_set=None,
+    )
+    assert not any("[adr-active-immutable]" in e for e in errors)
