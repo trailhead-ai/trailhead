@@ -139,7 +139,7 @@ class TestTimeoutSignalsTheGroup:
 
 
 class TestTheLaunchEngineCallsIt:
-    def test_the_pull_happens_exactly_once_before_the_tmux_spawn(self, rig, monkeypatch):
+    def test_the_pull_happens_exactly_once_before_the_tmux_spawn(self, rig, monkeypatch):  # noqa: F811  (shared fixture parameter)
         order: list[str] = []
         monkeypatch.setattr(
             rig["module"], "pull_lore", lambda **kwargs: order.append("pull") or "pulled"
@@ -155,13 +155,13 @@ class TestTheLaunchEngineCallsIt:
         _launch(rig)
         assert order == ["pull", "spawn"]
 
-    def test_a_failing_pull_still_launches_the_session(self, rig, monkeypatch):
+    def test_a_failing_pull_still_launches_the_session(self, rig, monkeypatch):  # noqa: F811  (shared fixture parameter)
         monkeypatch.setattr(rig["module"], "pull_lore", lambda **kwargs: "timed-out")
         result = _launch(rig)
         assert result.session_id
         assert len(rig["spawn"].calls) == 1
 
-    def test_a_pull_that_raises_still_launches_the_session(self, rig, monkeypatch):
+    def test_a_pull_that_raises_still_launches_the_session(self, rig, monkeypatch):  # noqa: F811  (shared fixture parameter)
         def boom(**kwargs):
             raise RuntimeError("unreachable remote")
 
@@ -170,7 +170,7 @@ class TestTheLaunchEngineCallsIt:
         assert result.session_id
         assert len(rig["spawn"].calls) == 1
 
-    def test_a_refused_launch_pulls_nothing(self, rig, monkeypatch):
+    def test_a_refused_launch_pulls_nothing(self, rig, monkeypatch):  # noqa: F811  (shared fixture parameter)
         calls: list[str] = []
         monkeypatch.setattr(
             rig["module"], "pull_lore", lambda **kwargs: calls.append("pull") or "pulled"
