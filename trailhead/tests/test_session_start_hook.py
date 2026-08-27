@@ -720,3 +720,23 @@ class TestExecUsesTheValidatedPath:
 
         assert calls, "expected the check to be exec'd"
         assert calls[0][0] == str(real / "bin" / "trailhead")
+
+
+class TestNullInstallGapStillNotifies:
+    """The install-versus-checkout hop degrades to null on its own when the
+    wired sha is no longer a valid revision. The checkout-versus-branch gap
+    is still answerable, so the notice must still fire and name only the gap
+    it actually knows."""
+
+    def test_null_install_gap_reports_the_checkout_gap(self, tmp_path):
+        env = _env(tmp_path)
+        _write_stamp(tmp_path, env, _checkout(tmp_path))
+        runner, _ = _spy_runner(
+            {**_BEHIND, "commits_behind": 2, "install_commits_behind": None}
+        )
+
+        out = hook.check_and_render(env=env, runner=runner)
+
+        assert out is not None
+        assert "checkout is 2 commits behind" in out
+        assert "install is" not in out

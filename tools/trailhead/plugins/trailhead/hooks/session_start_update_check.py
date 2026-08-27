@@ -340,15 +340,25 @@ def check_and_render(
     result = _run_check(checkout, runner=_runner, timeout=exec_timeout)
     if result is None:
         return None
-    if result.get("schema_version") != EXPECTED_SCHEMA_VERSION:
+    # A newer producer is tolerated: this hook reads a fixed set of fields
+    # and a schema bump is additive. An OLDER producer is not — it predates
+    # fields read below. The composed copy of this hook and the checkout it
+    # execs can legitimately be at different versions, which is the very
+    # staleness it exists to announce.
+    version = result.get("schema_version")
+    if not isinstance(version, int) or version < EXPECTED_SCHEMA_VERSION:
         return None
     if result.get("outcome") != "behind":
         return None
 
     commits_behind = result.get("commits_behind")
     install_behind = result.get("install_commits_behind")
-    if not isinstance(commits_behind, int) or not isinstance(install_behind, int):
+    if not isinstance(commits_behind, int):
         return None
+    # The install hop degrades to null on its own when the wired sha is no
+    # longer a valid revision; the checkout hop stays reportable.
+    if not isinstance(install_behind, int):
+        install_behind = 0
     if commits_behind <= 0 and install_behind <= 0:
         return None
 

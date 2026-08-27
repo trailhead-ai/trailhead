@@ -943,3 +943,120 @@ class TestCliHumanOutputNamesBothGaps:
     def test_stale_checkout_is_named(self, tmp_path, monkeypatch):
         out = self._run(tmp_path, monkeypatch, count="3", install_count="0")
         assert "checkout is 3 commit(s) behind its tracked branch" in out
+
+
+class TestHostileUpstreamBranchNeverReachesGit:
+    """The tracked upstream branch is read from the checkout rather than the
+    stamp, but git does NOT refuse an option-shaped ref: only `git branch`
+    rejects the shape. A remote named `--output=<path>` with a matching
+    remote-tracking ref makes `git rev-parse --abbrev-ref @{u}` return
+    `--output=<path>/main`, which `git diff` parses as an option and uses to
+    TRUNCATE that path. Reproduced against REAL git.
+    """
+
+    def _hostile_checkout(self, tmp_path, remote_name: str):
+        checkout = tmp_path / "home" / "checkout"
+        checkout.parent.mkdir(parents=True, exist_ok=True)
+        subprocess.run(
+            ["git", "init", "-q", "--initial-branch=main", str(checkout)],
+            check=True,
+            capture_output=True,
+        )
+
+        def run(*a):
+            subprocess.run(["git", "-C", str(checkout), *a], check=True, capture_output=True)
+
+        run("config", "user.email", "a@example.com")
+        run("config", "user.name", "Test")
+        run("commit", "--allow-empty", "-qm", "base")
+        run("config", f"remote.{remote_name}.url", "/nonexistent")
+        run("config", f"remote.{remote_name}.fetch", f"+refs/heads/*:refs/remotes/{remote_name}/*")
+        run("update-ref", f"refs/remotes/{remote_name}/main", "HEAD")
+        run("config", "branch.main.remote", remote_name)
+        run("config", "branch.main.merge", "refs/heads/main")
+        return checkout
+
+    def test_an_option_shaped_upstream_is_refused_at_the_source(self, tmp_path):
+        """The resolver is the one place the branch enters the program, so it
+        is the one place the shape is checked — every downstream call site
+        (`diff`, `rev-parse`) takes it as a positional git would parse as an
+        option, and some of them have no `--` guard available."""
+        checkout = self._hostile_checkout(tmp_path, "--output=/tmp/victim")
+
+        branch, error = update._resolve_upstream_branch(
+            checkout, runner=lambda args, **kw: subprocess.run(args, **kw), timeout=10
+        )
+
+        assert branch is None
+        assert "option" in error
+
+    def test_option_shaped_upstream_does_not_overwrite_a_file_via_diff(self, tmp_path):
+        victim = tmp_path / "VICTIM.txt"
+        victim.write_text("important")
+        checkout = self._hostile_checkout(tmp_path, f"--output={victim}")
+
+        env = _env(tmp_path)
+        from trailhead import provenance
+
+        head = subprocess.run(
+            ["git", "-C", str(checkout), "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        provenance._atomic_write_json(
+            provenance.stamp_path(env=env),
+            {
+                "checkout": str(checkout),
+                "sha": head,
+                "wired_at": "2026-01-01T00:00:00Z",
+                "last_check": None,
+            },
+        )
+
+        result = update.check_for_update(
+            env=env, runner=lambda args, **kw: subprocess.run(args, **kw)
+        )
+
+        assert victim.read_text() == "important", "the victim file must not be touched"
+        assert result["outcome"] == "unanswerable"
+
+    def test_an_ordinary_upstream_still_resolves(self, tmp_path):
+        checkout = self._hostile_checkout(tmp_path, "origin")
+        branch, error = update._resolve_upstream_branch(
+            checkout, runner=lambda args, **kw: subprocess.run(args, **kw), timeout=10
+        )
+        assert branch == "origin/main", error
+
+
+class TestSecondHopFailureKeepsTheFirstHopVerdict:
+    """The two hops are independent probes. A wired sha that was force-pushed
+    away, amended, or gc'd makes `<sha>..HEAD` an invalid revision range, but
+    the checkout-versus-branch hop is still perfectly answerable — collapsing
+    the whole verdict to unanswerable silences the notice for good."""
+
+    def test_unresolvable_wired_sha_reports_the_checkout_gap_anyway(self, tmp_path):
+        env = _env(tmp_path)
+        _install_stamp(tmp_path, env)
+
+        def runner(args, **kw):
+            sub = args[3]
+            if sub == "rev-parse":
+                return subprocess.CompletedProcess(args, 0, stdout=_BRANCH + "\n", stderr="")
+            if sub == "fetch":
+                return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+            if sub == "rev-list":
+                if args[-1].startswith(_SHA):
+                    return subprocess.CompletedProcess(
+                        args, 128, stdout="", stderr="fatal: Invalid revision range"
+                    )
+                return subprocess.CompletedProcess(args, 0, stdout="2\n", stderr="")
+            if sub == "diff":
+                return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+            raise AssertionError(f"unexpected git invocation: {args}")
+
+        result = update.check_for_update(env=env, runner=runner)
+
+        assert result["outcome"] == "behind"
+        assert result["commits_behind"] == 2
+        assert result["install_commits_behind"] is None

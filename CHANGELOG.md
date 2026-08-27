@@ -5,11 +5,28 @@ format described by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+- `trailhead update` refuses a tracked upstream branch whose name is
+  option-shaped. Reading the branch from git rather than from a file is not
+  on its own enough to make it safe as a git argument: only `git branch`
+  rejects a name beginning with `-`, so a remote named `--output=<path>` with
+  a matching remote-tracking ref makes git report that name back as the
+  upstream, and `git diff` then parses it as an option and truncates that
+  path.
+- An update check no longer goes permanently inconclusive when the wired
+  commit is force-pushed away, amended, or garbage-collected. That hop
+  reports as unknown on its own while the checkout-versus-branch verdict
+  stays correct.
+- `trailhead update` no longer refuses a checkout that is merely ahead of its
+  tracked branch as "diverged". A checkout carrying local commits has nothing
+  to fast-forward, so a stale install on top of one is re-wired instead of
+  being turned away with a merge command that would do nothing.
+
 - The install provenance stamp now records only the checkout path and the
   commit that was wired — the two values that cannot be re-derived later. The
   tracked upstream branch and the `origin` URL are read live from the checkout
-  at check time, so no value a rewritable file controls reaches a git argument
-  position any more. `trailhead update --check --json` moves to schema
+  at check time. The only stamped value still reaching git is the checkout
+  path, as the `-C` argument, which consumes the token after it whatever its
+  shape. `trailhead update --check --json` moves to schema
   version 3.
 - `trailhead update` now reports the two gaps separately: how far your install
   is behind the checkout it was wired from, and how far that checkout is
@@ -35,8 +52,9 @@ format described by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   as an option and execute an attacker-supplied command; an option-shaped
   `sha` (e.g. `--output=<path>`) could be parsed by `git diff` as an option
   and overwrite an arbitrary file. `git fetch`/`merge`/`merge-base` now insert
-  `--` before every ref positional, and the stamp's `sha` is rejected outright
-  unless it is exactly 40 hex characters — the general rule is that no value
+  `--` before the ref wherever git accepts an end-of-options marker, the
+  tracked upstream branch is refused if it is option-shaped, and the stamp's
+  `sha` is rejected outright unless it is exactly 40 hex characters — the general rule is that no value
   read from the stamp may reach a git argv position without being validated to
   a shape that cannot be parsed as an option.
 - Fixed `trailhead update`'s rollback guarantee: a failing `claude plugin

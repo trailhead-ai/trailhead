@@ -404,8 +404,6 @@ class TestProvenance:
         rejected_stamp = {
             "checkout": str(checkout),
             "sha": "not-a-real-sha",
-            "branch": "origin/main",
-            "origin_url": "https://example.com/r.git",
             "wired_at": "2026-01-01T00:00:00Z",
             "last_check": None,
         }

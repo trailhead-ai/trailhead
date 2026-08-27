@@ -18,7 +18,9 @@ how far the wired install is behind the checkout: an install snapshots the
 plugin trees rather than pointing at them, so pulling the checkout without
 re-running install leaves the install stale while the checkout is current.
 `commits_behind` counts how far the checkout is behind its tracked branch.
-Either being nonzero is "behind"; both zero is "ok".
+Either being nonzero is "behind"; both zero is "ok". The second hop degrades
+to null on its own — a wired sha that was force-pushed away or gc'd is no
+longer a valid revision — without taking the first hop's verdict with it.
 
 The check performs no mutation of the checkout: every git invocation it
 makes is one of `rev-parse`, `fetch`, `rev-list`, `diff` — never `pull`,
@@ -66,7 +68,10 @@ fast-forwards the checkout when it is behind, then re-wires via
 install` uses — and refreshes the provenance stamp. Consent is a technical
 gate: apply mode requires an interactive TTY confirmation or an explicit
 `--yes`; a non-interactive invocation without it refuses before any git
-invocation runs. A dirty checkout is refused before anything is fetched.
+invocation runs. Nothing is read from the checkout before that gate, its
+tracked upstream branch included — so a checkout with no upstream configured
+is confirmed and only then refused, rather than probed ahead of consent. A
+dirty checkout is refused before anything is fetched.
 The fetch, the fast-forward, and the re-wire all run
 under one acquisition of `trailhead.wire.wire_lock`, so a concurrent install
 can never interleave with an in-flight upgrade; the config that drives the
@@ -222,7 +227,7 @@ def _proc_stderr(proc) -> str:
 
 
 def _remote_name(branch: str) -> str:
-    """The remote to fetch from, derived from the stamped tracked branch.
+    """The remote to fetch from, derived from the tracked upstream branch.
 
     A tracked branch is normally `<remote>/<branch>`; a bare branch name with
     no remote prefix falls back to `origin`.
@@ -290,10 +295,19 @@ def _extract_changelog_delta(
 def _resolve_upstream_branch(checkout: Path, *, runner, timeout: int) -> tuple[str | None, str]:
     """Return (tracked upstream branch, error) for *checkout*, read live.
 
-    The branch is the value every later git call takes as a ref positional.
-    Reading it from git rather than from a rewritable file means it can only
-    ever be a name git itself accepted — git refuses to create a ref that
-    begins with `-`, so no derived value here can be parsed as an option.
+    The branch is the value every later git call takes as a ref positional,
+    and several of those call sites (`diff`, `rev-parse`) have no `--`
+    end-of-options guard available. Reading the branch from git is NOT on
+    its own enough to make it argv-safe: only `git branch` refuses a name
+    beginning with `-`. `git check-ref-format` accepts one, and a remote
+    named `--output=<path>` with a matching remote-tracking ref makes
+    `rev-parse --abbrev-ref @{u}` hand back `--output=<path>/main`, which
+    `git diff` parses as an option and uses to truncate that path. So the
+    shape is checked here, at the single point the branch enters the
+    program, rather than at each call site that consumes it.
+
+    Control characters need no check: `check-ref-format` rejects them, so
+    git cannot produce a ref carrying one.
     """
     proc = _run_git(
         checkout, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}",
@@ -301,9 +315,9 @@ def _resolve_upstream_branch(checkout: Path, *, runner, timeout: int) -> tuple[s
     )
     branch = (proc.stdout or "").strip() if proc else ""
     if proc is None or proc.returncode != 0 or not branch:
-        return None, (
-            f"could not resolve the tracked upstream branch: {_proc_stderr(proc)}"
-        )
+        return None, (f"could not resolve the tracked upstream branch: {_proc_stderr(proc)}")
+    if branch.startswith("-"):
+        return None, "the tracked upstream branch is option-shaped; refusing to pass it to git"
     return branch, ""
 
 
@@ -356,7 +370,8 @@ def check_for_update(
     """Check whether the stamped checkout is behind its tracked remote branch.
 
     Returns the pinned `{"schema_version", "outcome", "commits_behind",
-    "installed_sha", "reason"}` shape. Never raises for a git-side failure —
+    "install_commits_behind", "installed_sha", "reason", "changelog_delta"}`
+    shape (see the module docstring). Never raises for a git-side failure —
     those all collapse to `outcome == "unanswerable"`.
     """
     _env = env if env is not None else dict(os.environ)
@@ -407,17 +422,25 @@ def check_for_update(
     if commits_behind is None:
         return _finish("unanswerable", None, installed_sha, error, _env)
 
-    install_behind, error = _count_commits(
+    # A wired sha that was force-pushed away, amended, or gc'd is no longer a
+    # valid revision here. That hop degrades to null on its own; it never
+    # takes the checkout-versus-branch verdict down with it, or an install
+    # whose sha went missing would be silent forever.
+    #
+    # An install AHEAD of HEAD (the checkout was reset backwards) counts 0:
+    # there is nothing to bring the install forward TO, and the checkout hop
+    # still reports whatever the remote holds. Apply mode treats the same
+    # state as a re-wire, since re-wiring is what makes the install match the
+    # checkout again.
+    install_behind, _error = _count_commits(
         checkout, f"{installed_sha}..HEAD", runner=_runner, timeout=timeout
     )
-    if install_behind is None:
-        return _finish("unanswerable", None, installed_sha, error, _env)
 
     changelog_delta = _extract_changelog_delta(
         checkout, installed_sha, branch, runner=_runner, timeout=timeout
     )
 
-    outcome = "ok" if commits_behind == 0 and install_behind == 0 else "behind"
+    outcome = "ok" if commits_behind == 0 and not install_behind else "behind"
     return _finish(
         outcome, commits_behind, installed_sha, None, _env, changelog_delta, install_behind
     )
@@ -624,17 +647,31 @@ def run_update_apply(
                 )
                 return 1
 
-            # Two independent hops. The checkout may already be current while
-            # the install behind it is not — an install snapshots the plugin
-            # trees, so a manually pulled checkout still needs a re-wire.
-            if remote_sha == pre_merge_head and pre_merge_head == pre_sha:
+            # A checkout carrying local commits is AHEAD of its tracked
+            # branch, not diverged from it: there is nothing to fetch down,
+            # and refusing it would name a merge that does nothing.
+            remote_is_behind = remote_sha != pre_merge_head and _run_git(
+                checkout,
+                "merge-base",
+                "--is-ancestor",
+                "--",
+                branch,
+                "HEAD",
+                runner=_runner,
+                timeout=timeout,
+            )
+            nothing_to_pull = remote_sha == pre_merge_head or (
+                remote_is_behind is not None and remote_is_behind.returncode == 0
+            )
+
+            # Two independent hops. The checkout may have nothing to pull while
+            # the install behind it is stale — an install snapshots the plugin
+            # trees — in which case the re-wire below still runs.
+            if nothing_to_pull and pre_merge_head == pre_sha:
                 print(f"trailhead: already up to date (installed {pre_sha[:8]})")
                 return 0
 
-            # The checkout may already be level with the remote while the
-            # install behind it is not: the fast-forward is skipped and the
-            # re-wire below still runs.
-            if remote_sha != pre_merge_head:
+            if not nothing_to_pull:
                 ancestor_proc = _run_git(
                     checkout,
                     "merge-base",

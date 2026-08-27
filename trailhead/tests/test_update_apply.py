@@ -73,6 +73,7 @@ def _make_runner(
     remote_branch_sha: str = _NEW_SHA,
     remote_branch_rc: int = 0,
     ancestor_rc: int = 0,
+    remote_is_ancestor_rc: int = 1,
     merge_rc: int = 0,
     merge_stderr: str = "",
     probe_sha: str = _NEW_SHA,
@@ -114,6 +115,13 @@ def _make_runner(
                 args, remote_branch_rc, stdout=(remote_branch_sha + "\n") if remote_branch_rc == 0 else "", stderr=""
             )
         if sub == "merge-base":
+            # Two distinct questions share this subcommand: `-- <branch> HEAD`
+            # asks whether the remote is already an ancestor of HEAD (nothing
+            # to pull); `HEAD -- <branch>` asks the fast-forward question.
+            if args[5] == "--":
+                return subprocess.CompletedProcess(
+                    args, remote_is_ancestor_rc, stdout="", stderr=""
+                )
             return subprocess.CompletedProcess(args, ancestor_rc, stdout="", stderr="")
         if sub == "merge":
             if merge_rc == 0:
@@ -441,8 +449,6 @@ class TestErrorHygiene:
         rejected_stamp = {
             "checkout": str(checkout),
             "sha": "not-a-real-sha",
-            "branch": _BRANCH,
-            "origin_url": _ORIGIN_URL,
             "wired_at": "2026-01-01T00:00:00Z",
             "last_check": None,
         }
@@ -524,8 +530,6 @@ class TestTrueNoOpOnWireFailure:
         stamp = {
             "checkout": str(checkout),
             "sha": old_sha,
-            "branch": "origin/main",
-            "origin_url": str(origin),
             "wired_at": "2026-01-01T00:00:00Z",
             "last_check": None,
         }
@@ -598,8 +602,6 @@ class TestRealFailingWireTriggersRollback:
         stamp = {
             "checkout": str(checkout),
             "sha": old_sha,
-            "branch": "origin/main",
-            "origin_url": str(origin),
             "wired_at": "2026-01-01T00:00:00Z",
             "last_check": None,
         }
@@ -632,8 +634,6 @@ class TestRealFailingWireTriggersRollback:
         stamp = {
             "checkout": str(checkout),
             "sha": old_sha,
-            "branch": "origin/main",
-            "origin_url": str(origin),
             "wired_at": "2026-01-01T00:00:00Z",
             "last_check": None,
         }
@@ -737,3 +737,94 @@ class TestApplyDerivesBranchAndReWiresAStaleInstall:
         assert rc == 0
         assert wired == []
         assert not any(c[3] in ("merge", "merge-base") for c in calls)
+
+
+class TestCheckoutAheadOfItsRemote:
+    """A checkout carrying local commits is ahead of its tracked branch, not
+    diverged from it. There is nothing to fast-forward, so a stale install on
+    top of one must still re-wire rather than be refused with a merge command
+    that would do nothing."""
+
+    def _stamp(self, tmp_path, env, *, sha):
+        from trailhead import provenance
+
+        checkout = _checkout(tmp_path)
+        provenance._atomic_write_json(
+            provenance.stamp_path(env=env),
+            {
+                "checkout": str(checkout),
+                "sha": sha,
+                "wired_at": "2026-01-01T00:00:00Z",
+                "last_check": None,
+            },
+        )
+        return checkout
+
+    def _runner(self, *, head, remote, remote_is_ancestor_of_head=True):
+        calls: list[list[str]] = []
+
+        def runner(args, **kw):
+            calls.append(list(args))
+            sub = args[3]
+            if sub == "status":
+                return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+            if sub == "fetch":
+                return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+            if sub == "rev-parse":
+                if args[4] == "--abbrev-ref":
+                    return subprocess.CompletedProcess(args, 0, stdout=_BRANCH + "\n", stderr="")
+                if args[4] == "HEAD":
+                    return subprocess.CompletedProcess(args, 0, stdout=head + "\n", stderr="")
+                return subprocess.CompletedProcess(args, 0, stdout=remote + "\n", stderr="")
+            if sub == "merge-base":
+                # `<branch> .. HEAD` asks "is the remote an ancestor of HEAD";
+                # `HEAD .. <branch>` asks the fast-forward question.
+                asks_remote_is_ancestor = args[5] == "--" and args[6] == _BRANCH
+                if asks_remote_is_ancestor:
+                    return subprocess.CompletedProcess(
+                        args, 0 if remote_is_ancestor_of_head else 1, stdout="", stderr=""
+                    )
+                return subprocess.CompletedProcess(args, 1, stdout="", stderr="")
+            raise AssertionError(f"unexpected git invocation: {args}")
+
+        return runner, calls
+
+    def test_stale_install_on_an_ahead_checkout_re_wires(self, tmp_path, monkeypatch):
+        env = _env(tmp_path)
+        self._stamp(tmp_path, env, sha=_OLD_SHA)
+        runner, calls = self._runner(head=_NEW_SHA, remote=_OLD_SHA)
+        wired = []
+        monkeypatch.setattr(update, "resolve_config_for_env", lambda e: _FakeCfg())
+        monkeypatch.setattr(update, "wire_all_harnesses", lambda *a, **k: wired.append(1))
+
+        rc = update.run_update_apply(env=env, runner=runner, assume_yes=True)
+
+        assert rc == 0
+        assert wired == [1]
+        assert not any(c[3] == "merge" for c in calls)
+
+    def test_level_install_on_an_ahead_checkout_is_a_no_op(self, tmp_path, monkeypatch):
+        env = _env(tmp_path)
+        self._stamp(tmp_path, env, sha=_NEW_SHA)
+        runner, calls = self._runner(head=_NEW_SHA, remote=_OLD_SHA)
+        wired = []
+        monkeypatch.setattr(update, "resolve_config_for_env", lambda e: _FakeCfg())
+        monkeypatch.setattr(update, "wire_all_harnesses", lambda *a, **k: wired.append(1))
+
+        rc = update.run_update_apply(env=env, runner=runner, assume_yes=True)
+
+        assert rc == 0
+        assert wired == []
+
+    def test_a_genuinely_diverged_checkout_is_still_refused(self, tmp_path, monkeypatch):
+        env = _env(tmp_path)
+        self._stamp(tmp_path, env, sha=_OLD_SHA)
+        runner, _ = self._runner(
+            head=_NEW_SHA, remote="c" * 40, remote_is_ancestor_of_head=False
+        )
+        monkeypatch.setattr(update, "resolve_config_for_env", lambda e: _FakeCfg())
+        monkeypatch.setattr(update, "wire_all_harnesses", lambda *a, **k: None)
+
+        rc = update.run_update_apply(env=env, runner=runner, assume_yes=True)
+
+        assert rc == 1
