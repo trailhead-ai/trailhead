@@ -53,10 +53,7 @@ from pathlib import Path
 
 import pytest
 
-_TESTS_DIR = Path(__file__).resolve().parent
-if str(_TESTS_DIR) not in sys.path:
-    sys.path.insert(0, str(_TESTS_DIR))
-import test_skill_conformance_common as skill_common
+from . import test_skill_conformance_common as skill_common
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
