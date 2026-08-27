@@ -823,13 +823,29 @@ def test_route_rule_is_total_over_the_disposition_vocabulary():
         "the route rule must be stated as total — an incomplete rule is an "
         "invitation to invent an outcome for the uncovered case"
     )
+    assert "reads **final dispositions**" in step, (
+        "the route rule must read final dispositions — a rule that reads an "
+        "intermediate one routes on a disposition the operator has already moved"
+    )
     assert (
-        "**Any Critical dispositioned `reframed`**, whether you proposed it or the "
-        "operator overrode into it → the **reframe route**"
+        "**Any Critical whose final disposition is `reframed`**, whether you "
+        "proposed it or the operator overrode into it → the **reframe route**"
     ) in step, (
-        "the reframe arm must fire on any `reframed` Critical, proposed or "
-        "overridden, and must land on the reframe route by name — an arm stated "
-        "without its route reads the same inverted"
+        "the reframe arm must fire on any Critical whose FINAL disposition is "
+        "`reframed`, proposed or overridden, and must land on the reframe route "
+        "by name — an arm stated without its route reads the same inverted"
+    )
+    assert "`answered` is not terminal" in step, (
+        "totality over the expanded vocabulary requires stating that `answered` "
+        "is non-terminal — a vocabulary term the operator can reach but the "
+        "route rule never resolves is exactly the uncovered case this pins"
+    )
+    assert "It does not by\nitself force the reframe route." in _resolution_step(
+        GAUNTLET.read_text()
+    ), (
+        "an answered Critical must be stated NOT to force the reframe route — "
+        "without it the reframe arm reads as firing on the pre-adjudication "
+        "disposition, which is the defect the answered disposition exists to fix"
     )
     assert (
         "**Every other combination** of `resolved` / `accepted-as-risk` / "
