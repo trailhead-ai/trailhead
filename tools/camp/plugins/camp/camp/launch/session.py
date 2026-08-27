@@ -68,6 +68,7 @@ from pathlib import Path
 
 from ..group.manifest import workspace_dir
 from .claude_trust import config_file, pretrust_workspace, trust_status
+from .lore_pull import pull_lore
 from .profile import harness_for, resolve_harness_profile
 from .recovery import printable_path, sanitize_name_component
 
@@ -630,6 +631,28 @@ def launch_session(
     _warn_if_account_has_no_config(account, launch_env)
 
     _assert_trust(profile, launch_dir, trust_root, launch_env)
+
+    # Refresh the vaults before the session exists, so it reads the plan, task,
+    # or ADR authored on another machine rather than yesterday's copy. Placed
+    # after every refusal path so a launch that is never going to happen does
+    # not pay for a network round trip, and before the spawn because a pull
+    # landing after the harness boots is a pull the session does not see.
+    #
+    # Best-effort in the strongest sense: the ENTIRE step is wrapped, and every
+    # outcome other than a clean pull is one stderr line. A vault that could not
+    # be refreshed is a stale session, not a failed one.
+    try:
+        outcome = pull_lore(env=launch_env)
+    except Exception:  # noqa: BLE001 — best-effort, never blocks a launch
+        # Collapsed to the same token the runner would have returned, so the
+        # report below is the only place an operator hears about it.
+        outcome = "failed"
+    if outcome in ("failed", "timed-out"):
+        print(
+            f"camp: lore pull {outcome} (continuing) — this session may be "
+            "reading a stale vault",
+            file=sys.stderr,
+        )
 
     # The scrub rides INSIDE the pane command, as `env -u` operands sitting
     # between tmux's own options and the harness argv. Scrubbing camp's own
