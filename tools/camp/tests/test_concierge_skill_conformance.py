@@ -5,7 +5,15 @@ renamed verb, an invented flag, or a deleted guarantee would ship silently. This
 module is the CI-side check that keeps the document honest against the CLI it
 documents. It never runs while an operator is using the skill.
 
-Three groups:
+The two checks every skill's conformance suite needs — invocation conformance
+and the anti-mechanism guard's forbidden-command check — live in
+`test_skill_conformance_common` and are shared with `test_fork_skill_conformance`.
+This module supplies its own verb-to-handler map and builds on those shared
+checks; everything else here (the gate anchors, the output-shape checks, and
+the name-reconstruction half of the anti-mechanism guard) is specific to what
+concierge itself promises.
+
+Four groups:
 
 1. **Invocation conformance** — every `camp …` command the document shows names
    a real verb and passes flags that verb accepts. The verb registry is
@@ -45,6 +53,11 @@ from pathlib import Path
 
 import pytest
 
+_TESTS_DIR = Path(__file__).resolve().parent
+if str(_TESTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_TESTS_DIR))
+import test_skill_conformance_common as skill_common
+
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
 _SKILL = _PLUGIN_DIR / "skills" / "concierge" / "SKILL.md"
@@ -56,53 +69,6 @@ if str(_PLUGIN_DIR) not in sys.path:
 def skill_text() -> str:
     assert _SKILL.exists(), f"the concierge skill document is missing: {_SKILL}"
     return _SKILL.read_text(encoding="utf-8")
-
-
-# ---------------------------------------------------------------------------
-# Extraction — command strings and their parsed shape
-# ---------------------------------------------------------------------------
-
-_FENCE_RE = re.compile(r"^\s*```")
-_INLINE_RE = re.compile(r"`([^`\n]+)`")
-
-
-def _command_strings(text: str) -> list[str]:
-    """Every command-shaped string in the document.
-
-    Two carriers, both of which an agent reads as "run this": a line inside a
-    fenced block, and an inline code span. Prose is deliberately excluded — the
-    document describes what it will not do in prose, and that is not an
-    instruction to run anything.
-    """
-    found: list[str] = []
-    in_fence = False
-    for line in text.splitlines():
-        if _FENCE_RE.match(line):
-            in_fence = not in_fence
-            continue
-        if in_fence:
-            stripped = line.strip()
-            if stripped and not stripped.startswith("#"):
-                found.append(stripped)
-            continue
-        found.extend(span.strip() for span in _INLINE_RE.findall(line))
-    return found
-
-
-def _camp_invocations(text: str) -> list[list[str]]:
-    """Tokenized `camp …` invocations, deduplicated, in document order."""
-    seen: set[str] = set()
-    invocations: list[list[str]] = []
-    for command in _command_strings(text):
-        if not command.startswith("camp ") or command in seen:
-            continue
-        seen.add(command)
-        invocations.append(command.split())
-    return invocations
-
-
-def _flags(tokens: list[str]) -> list[str]:
-    return [token.split("=", 1)[0] for token in tokens if token.startswith("--")]
 
 
 # ---------------------------------------------------------------------------
@@ -129,34 +95,9 @@ _VERB_HANDLERS: dict[str, tuple[str, str]] = {
 _GROUP_FLAG = "--group"
 _GROUP_FLAG_REFUSED_BY = frozenset({"group", "groups"})
 
-_FLAG_RE = re.compile(r"--[a-z][a-z0-9-]*")
-
-
-def _function_source(relpath: str, func_name: str) -> str:
-    source = (_PLUGIN_DIR / relpath).read_text(encoding="utf-8")
-    for node in ast.walk(ast.parse(source)):
-        if isinstance(node, ast.FunctionDef) and node.name == func_name:
-            return ast.get_source_segment(source, node)
-    raise AssertionError(f"{func_name} no longer exists in {relpath}")
-
-
-def _handler_source(verb: str) -> str:
-    """The argument-parsing function's own source — docstring included, since
-    that is where several verbs spell their usage."""
-    return _function_source(*_VERB_HANDLERS[verb])
-
-
-def _accepted_flags(verb: str) -> set[str]:
-    flags = set(_FLAG_RE.findall(_handler_source(verb)))
-    if verb in _GROUP_FLAG_REFUSED_BY:
-        flags.discard(_GROUP_FLAG)
-    else:
-        flags.add(_GROUP_FLAG)
-    return flags
-
 
 # ---------------------------------------------------------------------------
-# 1. Invocation conformance
+# 1. Invocation conformance (shared gate — see test_skill_conformance_common)
 # ---------------------------------------------------------------------------
 
 
@@ -164,47 +105,34 @@ def test_document_shows_the_invocations_it_is_checked_against(skill_text: str) -
     """A guard with nothing to check is not a guard: the document has to carry
     the group read, the two launch paths, and the reads the report is built
     from."""
-    assert len(_camp_invocations(skill_text)) >= 5
+    assert len(skill_common.camp_invocations(skill_text)) >= 5
 
 
 def test_every_mapped_handler_exists() -> None:
-    for verb in _VERB_HANDLERS:
-        assert _handler_source(verb), verb
+    skill_common.every_mapped_handler_exists(_PLUGIN_DIR, _VERB_HANDLERS)
 
 
 def test_every_documented_verb_is_a_real_camp_verb(skill_text: str) -> None:
     from camp.spine import RESERVED
 
-    offenders = [
-        tokens[1]
-        for tokens in _camp_invocations(skill_text)
-        if len(tokens) > 1 and not tokens[1].startswith("-") and tokens[1] not in RESERVED
-    ]
+    offenders = skill_common.unreal_verbs(skill_text, RESERVED)
     assert offenders == [], f"not camp verbs: {sorted(set(offenders))}"
 
 
 def test_every_documented_verb_has_a_mapped_handler(skill_text: str) -> None:
     """A new verb in the document needs its flag surface mapped, or its flags go unchecked."""
-    offenders = sorted(
-        {
-            tokens[1]
-            for tokens in _camp_invocations(skill_text)
-            if len(tokens) > 1 and tokens[1] not in _VERB_HANDLERS
-        }
-    )
+    offenders = skill_common.unmapped_verbs(skill_text, _VERB_HANDLERS)
     assert offenders == [], f"add these verbs to _VERB_HANDLERS: {offenders}"
 
 
 def test_every_documented_flag_is_accepted_by_its_verb(skill_text: str) -> None:
-    offenders: dict[str, list[str]] = {}
-    for tokens in _camp_invocations(skill_text):
-        verb = tokens[1]
-        if verb not in _VERB_HANDLERS:
-            continue
-        accepted = _accepted_flags(verb)
-        bad = [flag for flag in _flags(tokens) if flag not in accepted]
-        if bad:
-            offenders.setdefault(verb, []).extend(bad)
+    offenders = skill_common.unaccepted_flags(
+        skill_text,
+        _PLUGIN_DIR,
+        _VERB_HANDLERS,
+        group_flag=_GROUP_FLAG,
+        group_flag_refused_by=_GROUP_FLAG_REFUSED_BY,
+    )
     assert offenders == {}, f"flags no camp verb accepts: {offenders}"
 
 
@@ -220,9 +148,9 @@ def test_group_flag_placement_is_derivable() -> None:
 
 def test_groupless_reads_are_documented_without_a_group_flag(skill_text: str) -> None:
     """Group enumeration must stay runnable from a session that is in no group."""
-    for tokens in _camp_invocations(skill_text):
+    for tokens in skill_common.camp_invocations(skill_text):
         if tokens[1] in _GROUP_FLAG_REFUSED_BY:
-            assert _GROUP_FLAG not in _flags(tokens), " ".join(tokens)
+            assert _GROUP_FLAG not in skill_common.flags(tokens), " ".join(tokens)
 
 
 def test_group_scoped_verbs_are_documented_with_a_group(skill_text: str) -> None:
@@ -238,12 +166,12 @@ def test_group_scoped_verbs_are_documented_with_a_group(skill_text: str) -> None
     from camp.cli.dispatch import _is_ref_addressed_launch
     from camp.workspace.verb_taxonomy import NEEDS_GROUP_VERBS
 
-    for tokens in _camp_invocations(skill_text):
+    for tokens in skill_common.camp_invocations(skill_text):
         if tokens[1] not in NEEDS_GROUP_VERBS:
             continue
         if _is_ref_addressed_launch(tokens[1], tokens[2:]):
             continue
-        assert _GROUP_FLAG in _flags(tokens), " ".join(tokens)
+        assert _GROUP_FLAG in skill_common.flags(tokens), " ".join(tokens)
 
 
 def test_the_groupless_launch_exemption_is_narrow() -> None:
@@ -383,7 +311,7 @@ _JSON_KEY_RE = re.compile(r'"([a-z_]+)"\s*:')
 
 def _emitted_key_sets(emitter: str) -> set[frozenset[str]]:
     """Every all-string-keyed dict literal the emitter builds."""
-    tree = ast.parse(_function_source(*_EMITTERS[emitter]))
+    tree = ast.parse(skill_common.function_source(_PLUGIN_DIR, *_EMITTERS[emitter]))
     shapes = {
         frozenset(key.value for key in node.keys)
         for node in ast.walk(tree)
@@ -440,11 +368,6 @@ def test_both_launch_paths_print_the_same_success_shape() -> None:
 # 4. Anti-mechanism guard
 # ---------------------------------------------------------------------------
 
-# Programs the skill must never drive itself: camp's launch path is where the
-# environment scrub and trust pre-seeding happen, and a session started around
-# it gets neither.
-_FORBIDDEN_COMMANDS = ("tmux", "claude")
-
 # Spellings that BUILD the derived session name instead of reading it.
 _RECONSTRUCTION_SPELLINGS = (
     "camp-{",
@@ -493,10 +416,11 @@ def _sentences(text: str) -> list[str]:
 
 def _forbidden_mechanism_hits(text: str) -> dict[str, list[str]]:
     hits: dict[str, list[str]] = {}
-    for command in _command_strings(text):
-        head = command.split()[0] if command.split() else ""
-        if head in _FORBIDDEN_COMMANDS:
-            hits.setdefault("direct invocation", []).append(command)
+    # Direct invocation of a forbidden program (`tmux`, `claude`) is the
+    # generic gate shared with every skill's conformance suite.
+    direct = skill_common.forbidden_mechanism_hits(text)
+    if direct:
+        hits["direct invocation"] = direct
     for spelling in _RECONSTRUCTION_SPELLINGS:
         if spelling in text:
             hits.setdefault("name reconstruction", []).append(spelling)
