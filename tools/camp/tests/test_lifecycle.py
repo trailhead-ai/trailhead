@@ -1648,13 +1648,16 @@ class TestSetupActivatePhaseRetry:
         group = _make_group_config(group_name, [{"name": member_name, "repo_root": "/tmp/fake-repo", "tasks": [task]}])
 
         task_started = threading.Event()
+        release_task = threading.Event()
 
         def slow_run(*args, **kwargs):
             task_started.set()
             # Deliberately far longer than any realistic lock-acquire delay:
             # proves the probe acquires without waiting this task out, rather
-            # than merely acquiring faster than a tight number.
-            time.sleep(10.0)
+            # than merely acquiring faster than a tight number. `release_task`
+            # lets the proof end this wait as soon as it's done, rather than
+            # paying for the full margin in teardown every run.
+            release_task.wait(timeout=10.0)
             return MagicMock(returncode=0, stdout="", stderr="")
 
         errors: list[Exception] = []
@@ -1688,6 +1691,9 @@ class TestSetupActivatePhaseRetry:
                 "task was running — the lock must not be held across the task subprocess"
             )
         finally:
+            # The proof is already complete by this point; don't pay for the
+            # remainder of the wait margin in teardown.
+            release_task.set()
             t.join(timeout=15.0)
         assert not errors, errors
 

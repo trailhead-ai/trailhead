@@ -67,6 +67,12 @@ def _sleep_step(seconds: float) -> list[str]:
     return [_PY, "-c", f"import time; time.sleep({seconds})"]
 
 
+def _touch_then_sleep_step(marker: Path, seconds: float) -> list[str]:
+    """An argv step that creates `marker` and then sleeps — lets a test prove
+    whether the step ever started running by checking for `marker`."""
+    return [_PY, "-c", f"open({str(marker)!r}, 'w').close(); import time; time.sleep({seconds})"]
+
+
 def _missing_binary_step() -> list[str]:
     return ["this-binary-does-not-exist-anywhere-on-path"]
 
@@ -620,14 +626,23 @@ def test_over_budget_does_not_raise_for_required_task_and_later_tasks_still_run(
     remaining-check, and the post-step within-budget check for "fine" (made to
     read as no time having passed, so its step gets ample real subprocess
     headroom and its own elapsed check stays inside the deadline).
+
+    "slow"'s step touches `slow_marker` on execution, so its absence pins
+    which branch classified "slow" as over-budget: the pre-step
+    `remaining <= 0` check, not the step ever actually running and then
+    getting clamped. The sibling `test_required_task_clamped_step_is_over_budget_not_failed`
+    covers the other over-budget branch — a step that DOES start but is
+    clamped to the remaining budget — for a required task, using a real
+    clock.
     """
     later_marker = tmp_path / "later_marker"
+    slow_marker = tmp_path / "slow_marker"
     tasks = [
         {
             "name": "slow",
             "phase": "provision",
             "required": True,
-            "steps": [_sleep_step(0.01)],
+            "steps": [_touch_then_sleep_step(slow_marker, 0.01)],
         },
         {"name": "fine", "phase": "provision", "steps": [_touch_step(later_marker)]},
     ]
@@ -651,10 +666,42 @@ def test_over_budget_does_not_raise_for_required_task_and_later_tasks_still_run(
         completed={},
         task_deadline_seconds=0.05,
     )
+    assert not slow_marker.exists(), (
+        "slow's step ran even though it should have gone over-budget before "
+        "any step executed"
+    )
     assert later_marker.exists()
     assert [r.name for r in results] == ["slow", "fine"]
     assert results[0].state == "over-budget"
     assert results[1].state == "ok"
+
+
+def test_required_task_clamped_step_is_over_budget_not_failed(tmp_path: Path):
+    """The clamped-step branch (a step that DOES start, but whose effective
+    timeout is clamped to the remaining budget and then runs out) must also
+    yield "over-budget" — never "failed", and never TaskError — for a
+    required task. This is the sibling of
+    `test_single_long_step_is_clamped_to_the_remaining_budget` (which uses a
+    non-required task); `required` does not gate the over-budget outcome in
+    the implementation, but proving it against a required task closes the
+    combination the fake-clock test above no longer exercises.
+    """
+    tasks = [
+        {
+            "name": "slow-required-step",
+            "phase": "provision",
+            "required": True,
+            "steps": [_sleep_step(30)],
+        }
+    ]
+    results = run_member_tasks(
+        tasks,
+        "provision",
+        _context(tmp_path),
+        completed={},
+        task_deadline_seconds=0.1,
+    )
+    assert results == [TaskResult(name="slow-required-step", state="over-budget")]
 
 
 def test_task_deadline_absent_never_produces_over_budget(tmp_path: Path):

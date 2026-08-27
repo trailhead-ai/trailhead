@@ -44,7 +44,8 @@ posture for any sibling repository.
 ## Commands
 
 Requires **Python 3.11+**, **zero third-party runtime deps** (stdlib only; system
-`python3` may be too old — `direnv` provisions a 3.11+ `.venv` carrying just pytest).
+`python3` may be too old — `direnv` provisions a 3.11+ `.venv` carrying pytest and
+pytest-xdist).
 
 ```sh
 pip install -e .                  # editable install (optional; bin/trailhead works without it)
@@ -58,6 +59,18 @@ bin/trailhead install --harness claude_code --plugin lore --plugin craft
 bin/trailhead doctor              # read-only health roll-up
 bin/trailhead uninstall           # remove the whole install (keeps your data)
 ```
+
+The root `pyproject.toml`'s `addopts` applies `-n auto` (pytest-xdist) whenever
+pytest resolves that file as its config — the whole-suite run, and any path under
+`trailhead/tests`, `tools/outpost/tests`, `tools/portage/tests`, or
+`tools/ranger/tests` (they have no config of their own). `tools/camp`,
+`tools/craft`, and `tools/lore` each carry their own `pyproject.toml` with no
+`addopts`, so a path under `tools/camp/tests` / `tools/craft/tests` /
+`tools/lore/tests` runs serially by default — `--pdb` works there unmodified.
+Wherever `-n auto` IS in effect, `--pdb` does not work, and `-p no:xdist` is
+**not** a valid way to go serial — xdist stays registered either way. The only
+serial escape hatch is `-n 0`, e.g.
+`python -m pytest -n 0 --pdb trailhead/tests/test_paths.py::TestMacosBranch`.
 
 There is no separate lint step configured in-repo. Path resolvers accept injected
 `platform=` / `env=` — use those plus `tmp_path` so tests never touch real
