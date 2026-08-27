@@ -183,7 +183,7 @@ def test_step3_pins_ceiling_fallback_options():
     _pin_in(
         _step3_section(),
         "execute.md#step3",
-        "split the run into a scoped subset of the suite that fits under the ceiling, or dispatch against a scoped suite",
+        "split the run into a scoped subset of the suite that fits under the ceiling, or dispatch against a scoped suite",  # noqa: E501
         "The ceiling fallback must name concrete degraded paths, not just "
         "assert that one exists.",
     )

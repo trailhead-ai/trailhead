@@ -80,7 +80,7 @@ def test_escalate_via_park_forward_references_the_untrusted_input_rule():
     _pin_in(
         _escalate_via_park_section(),
         "execute.md#escalate-via-park",
-        "Every vault-sourced or externally-influenced value substituted into a command shown anywhere in this document is untrusted input",
+        "Every vault-sourced or externally-influenced value substituted into a command shown anywhere in this document is untrusted input",  # noqa: E501
         "The escalate-via-park section runs the document's first shell "
         "interpolation of a vault-sourced `<name>` — the untrusted-input rule "
         "must be stated or forward-referenced here, before that command, not "
