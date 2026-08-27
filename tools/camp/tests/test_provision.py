@@ -1367,7 +1367,13 @@ class TestBootPathBudget:
         import camp.provision.reconcile as reconcile
         from camp.group.manifest import read_central_manifest
 
-        monkeypatch.setattr(reconcile, "BOOT_TASK_BUDGET_SECONDS", 0.05)
+        # Deliberately generous relative to the original 0.05s: the "later"
+        # task below is a genuinely fast, trivial subprocess spawn that must
+        # complete WITHIN budget for this test to prove anything — a budget
+        # this tight to process-spawn/scheduling overhead under contention
+        # would make "later" spuriously over-budget too, collapsing the two
+        # outcomes this test exists to distinguish.
+        monkeypatch.setattr(reconcile, "BOOT_TASK_BUDGET_SECONDS", 5.0)
 
         repo = tmp_path / "repo"
         _init_git_repo(repo)
@@ -1385,7 +1391,10 @@ class TestBootPathBudget:
                             "slow",
                             [
                                 _step("first", _sleep_cmd(0.15)),
-                                _step("second", _sleep_cmd(5)),
+                                # Well past the 5.0s budget above, so the
+                                # clamp unambiguously classifies this task
+                                # over-budget regardless of scheduling noise.
+                                _step("second", _sleep_cmd(30)),
                             ],
                         ),
                         _provision_task(
