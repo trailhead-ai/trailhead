@@ -77,7 +77,7 @@ def add_search_subparser(sub) -> None:
     )
     p_search.add_argument(
         "query",
-        help="KQL-subset query string (e.g. 'kind:spec and area:penny')",
+        help="KQL-subset query string (e.g. 'kind:spec and area:billing')",
     )
     p_search.add_argument(
         "--json",
