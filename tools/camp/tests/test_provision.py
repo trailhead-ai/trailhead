@@ -1279,7 +1279,11 @@ class TestBootPathBudget:
         import camp.provision.reconcile as reconcile
         from camp.group.manifest import read_central_manifest
 
-        monkeypatch.setattr(reconcile, "BOOT_TASK_BUDGET_SECONDS", 0.05)
+        # Generous headroom for the trivial "mark" write step to reliably
+        # complete under contention before the budget check bites — the
+        # proof is the clamp on "second", not on how tight "mark"'s own
+        # window is.
+        monkeypatch.setattr(reconcile, "BOOT_TASK_BUDGET_SECONDS", 5.0)
 
         repo = tmp_path / "repo"
         _init_git_repo(repo)
@@ -1297,7 +1301,10 @@ class TestBootPathBudget:
                             "slow",
                             [
                                 _step("mark", [_VENV_PYTHON, "-c", f"open({str(runs)!r}, 'a').write('x')"]),
-                                _step("second", _sleep_cmd(5)),
+                                # Deliberately far longer than the 5.0s budget:
+                                # proves the step is clamped over-budget rather
+                                # than merely finishing before a tight window.
+                                _step("second", _sleep_cmd(30)),
                             ],
                         )
                     ],
