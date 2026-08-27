@@ -8,10 +8,9 @@ to a COPY under the harness's composed tree, never the source checkout
 ``import trailhead``: the package that owns the provenance-stamp contract
 lives outside anything composed alongside a hook. It is therefore a genuinely
 self-contained, stdlib-only script that re-derives just enough of that
-contract (state-dir resolution, required stamp fields, option-shaped-field
-rejection, checkout-path confinement under HOME/USERPROFILE) to find the
-checkout on its own, then hands
-everything else — the git probe, the network-fetch throttle, the changelog
+contract (state-dir resolution and checkout-path confinement under
+HOME/USERPROFILE) to find the checkout on its own, then hands everything
+else — the git probe, the network-fetch throttle, the changelog
 extraction and sanitization — to that checkout's own
 ``bin/trailhead update --check --json``, invoked as a plain argv list and
 never through a shell.
@@ -76,7 +75,7 @@ NOTICE_FILENAME = "session-start-notice.json"
 DEFAULT_NOTICE_WINDOW_SECONDS = 24 * 60 * 60
 DEFAULT_EXEC_TIMEOUT_SECONDS = 10
 MAX_DELTA_LINES = 40
-EXPECTED_SCHEMA_VERSION = 2
+EXPECTED_SCHEMA_VERSION = 3
 DISABLE_ENV_VAR = "TRAILHEAD_DISABLE_UPDATE_CHECK"
 CONFIG_KEY = "session_start_update_check"
 
@@ -115,22 +114,18 @@ def _state_dir(env: dict[str, str]) -> Path | None:
     return (Path(home) / ".local" / "state" / STATE_APP) if home else None
 
 
-_SHA_RE_PATTERN = r"\A[0-9a-f]{40}\Z"
-_CONTROL_IN_FIELD_PATTERN = r"[\x00-\x1f\x7f-\x9f]"
-
-
 def _read_stamp(env: dict[str, str]) -> dict[str, Any] | None:
-    """Re-derive ``trailhead.provenance.read_stamp``'s contract independently.
+    """Return the stamped checkout path, confined under the user's home.
 
-    Required fields, option-shaped-`branch`/`sha` rejection, and
-    checkout-path confinement under HOME (or ``USERPROFILE`` on Windows) —
-    the SAME checks ``read_stamp()`` enforces, kept in sync deliberately: a
-    second copy of a security-relevant contract that silently drifts from
-    the original is exactly what this area has gotten wrong before, so this
-    function's checks must be updated in lockstep with
-    ``trailhead.provenance.read_stamp`` whenever that contract changes. This
-    hook re-implements them against the same on-disk file rather than
-    importing that function (see the module docstring for why it can't).
+    The hook consumes exactly one stamped value — the checkout path it execs
+    ``bin/trailhead`` out of — so it enforces exactly one check: that the
+    path resolves under HOME (or ``USERPROFILE`` on Windows). A rewritten
+    stamp is otherwise a lever to redirect that exec anywhere on disk. Every
+    other field is validated by ``trailhead.provenance.read_stamp`` in the
+    process this hook launches, where those fields are actually used. This
+    hook re-implements the confinement check against the same on-disk file
+    rather than importing that function (see the module docstring for why it
+    can't).
     """
     state = _state_dir(env)
     if state is None:
@@ -142,20 +137,14 @@ def _read_stamp(env: dict[str, str]) -> dict[str, Any] | None:
         return None
     if not isinstance(data, dict):
         return None
-    required = ("checkout", "sha", "branch", "origin_url", "wired_at")
-    if not all(isinstance(data.get(k), str) and data.get(k) for k in required):
-        return None
-    if re.search(_CONTROL_IN_FIELD_PATTERN, data["branch"]):
-        return None
-    if data["branch"].startswith("-"):
-        return None
-    if not re.match(_SHA_RE_PATTERN, data["sha"]):
+    checkout = data.get("checkout")
+    if not isinstance(checkout, str) or not checkout:
         return None
     home = env.get("HOME") or env.get("USERPROFILE")
     if not home:
         return None
     try:
-        Path(data["checkout"]).resolve().relative_to(Path(home).resolve())
+        Path(checkout).resolve().relative_to(Path(home).resolve())
     except (ValueError, OSError):
         return None
     return data
@@ -267,7 +256,16 @@ def _run_check(checkout: Path, *, runner, timeout: int) -> dict[str, Any] | None
     return result if isinstance(result, dict) else None
 
 
-def _build_envelope(commits_behind: int, lines: list[str]) -> str:
+def _plural(n: int, noun: str) -> str:
+    return f"{n} {noun}" if n == 1 else f"{n} {noun}s"
+
+
+def _build_envelope(commits_behind: int, install_behind: int, lines: list[str]) -> str:
+    """Render the notice. The two gaps are named separately: how far the
+    install is behind the checkout it was wired from, and how far that
+    checkout is behind its tracked branch. They move independently — pulling
+    the checkout without re-running install widens the first and closes the
+    second — so collapsing them into one number misnames the work."""
     body_lines = [_neutralize_fence(ln) for ln in lines]
     if len(body_lines) > MAX_DELTA_LINES:
         omitted = len(body_lines) - MAX_DELTA_LINES
@@ -283,10 +281,19 @@ def _build_envelope(commits_behind: int, lines: list[str]) -> str:
         else "(no changelog entries were added on top of your installed commit)"
     )
 
-    plural = "" if commits_behind == 1 else "s"
+    gaps = []
+    if install_behind > 0:
+        gaps.append(
+            f"your install is {_plural(install_behind, 'commit')} behind its "
+            "source checkout"
+        )
+    if commits_behind > 0:
+        gaps.append(
+            f"your source checkout is {_plural(commits_behind, 'commit')} behind "
+            "its tracked branch"
+        )
     return (
-        f"trailhead: your install is {commits_behind} commit{plural} behind its "
-        "source checkout.\n\n"
+        f"trailhead: {'; '.join(gaps)}.\n\n"
         "To review and apply the upgrade yourself, run: trailhead update\n"
         "(This asks for your confirmation before changing anything — trailhead "
         "never upgrades automatically.)\n"
@@ -334,7 +341,10 @@ def check_and_render(
         return None
 
     commits_behind = result.get("commits_behind")
-    if not isinstance(commits_behind, int):
+    install_behind = result.get("install_commits_behind")
+    if not isinstance(commits_behind, int) or not isinstance(install_behind, int):
+        return None
+    if commits_behind <= 0 and install_behind <= 0:
         return None
 
     delta = result.get("changelog_delta")
@@ -342,7 +352,7 @@ def check_and_render(
     if not isinstance(lines, list):
         lines = []
 
-    envelope = _build_envelope(commits_behind, [str(ln) for ln in lines])
+    envelope = _build_envelope(commits_behind, install_behind, [str(ln) for ln in lines])
     _stamp_notified(_env, now=_now)
     return envelope
 

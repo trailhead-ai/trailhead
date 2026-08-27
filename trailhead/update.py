@@ -1,8 +1,9 @@
 """Update detection (`trailhead update --check`) and apply (`trailhead update`).
 
-Reads the install provenance stamp (`trailhead/provenance.py`), runs a
-read-only, timeout-bounded `git fetch` against the stamped checkout, and
-reports whether it is behind its tracked remote branch. Modelled on lore's
+Reads the install provenance stamp (`trailhead/provenance.py`) for the
+checkout path and the sha that was wired, reads the tracked upstream branch
+live from that checkout, and runs a read-only, timeout-bounded `git fetch`
+against it. Modelled on lore's
 sync freshness probe: a freshness stamp under `state_dir("trailhead")`
 throttles the network fetch to once per window, written on ATTEMPT rather
 than success, so an offline session pays one timeout per window instead of
@@ -10,13 +11,17 @@ one per invocation.
 
 Any errored git invocation — nonzero exit, empty stdout, a missing upstream
 ref, a timed-out fetch — reports the outcome "unanswerable", never "ok" or
-"behind": a wrong confident answer here is worse than no answer. The
-`origin` URL recorded at install time is compared against the checkout's
-current `origin` on every check; a mismatch also reports "unanswerable" and
-the comparison never proceeds against the repointed remote.
+"behind": a wrong confident answer here is worse than no answer.
+
+The verdict answers two independent hops. `install_commits_behind` counts
+how far the wired install is behind the checkout: an install snapshots the
+plugin trees rather than pointing at them, so pulling the checkout without
+re-running install leaves the install stale while the checkout is current.
+`commits_behind` counts how far the checkout is behind its tracked branch.
+Either being nonzero is "behind"; both zero is "ok".
 
 The check performs no mutation of the checkout: every git invocation it
-makes is one of `remote get-url`, `fetch`, `rev-list`, `diff` — never `pull`,
+makes is one of `rev-parse`, `fetch`, `rev-list`, `diff` — never `pull`,
 `checkout`, `merge`, or `reset`. git is injected via `runner` (same shape as
 `provenance`'s — a callable(args, **kw) -> CompletedProcess-like object),
 argv-only, never `shell=True`. git stderr is redacted of credentials
@@ -27,12 +32,12 @@ The outcome is recorded back onto the provenance stamp via
 discoverable (`trailhead doctor`) rather than silently indistinguishable
 from "up to date".
 
-The `--json` output is a pinned schema (schema_version 2) — the producer
+The `--json` output is a pinned schema (schema_version 3) — the producer
 contract a SessionStart hook consumes:
 
-    {"schema_version": 2, "outcome": "ok"|"behind"|"unanswerable",
-     "commits_behind": <int|null>, "installed_sha": <str|null>,
-     "reason": <str|null>,
+    {"schema_version": 3, "outcome": "ok"|"behind"|"unanswerable",
+     "commits_behind": <int|null>, "install_commits_behind": <int|null>,
+     "installed_sha": <str|null>, "reason": <str|null>,
      "changelog_delta": {"available": <bool>, "lines": [<str>, ...],
                           "truncated": <bool>}}
 
@@ -52,18 +57,17 @@ explicit truncation notice past the cap rather than growing unbounded.
 resolvable remote, an errored diff invocation — and in that case `lines` is
 always empty and `truncated` is always false: a caller must never mistake a
 failed extraction for a complete-but-empty one. The verdict fields
-(`outcome`, `commits_behind`) are computed independently and stay correct
+(`outcome` and both counts) are computed independently and stay correct
 even when the delta extraction itself fails.
 
 `run_update_apply` (`trailhead update`, no `--check`) performs the upgrade:
-fast-forwards the stamped checkout, then re-wires via
+fast-forwards the checkout when it is behind, then re-wires via
 `trailhead.install.wire_all_harnesses` — the same wire entrypoint `trailhead
 install` uses — and refreshes the provenance stamp. Consent is a technical
 gate: apply mode requires an interactive TTY confirmation or an explicit
 `--yes`; a non-interactive invocation without it refuses before any git
-invocation runs. A dirty checkout, or an `origin` remote that has changed
-since install (mirroring `check_for_update`'s own refusal), is refused before
-anything is fetched. The fetch, the fast-forward, and the re-wire all run
+invocation runs. A dirty checkout is refused before anything is fetched.
+The fetch, the fast-forward, and the re-wire all run
 under one acquisition of `trailhead.wire.wire_lock`, so a concurrent install
 can never interleave with an in-flight upgrade; the config that drives the
 re-wire is resolved before any of it runs, so a config error refuses cleanly
@@ -103,7 +107,6 @@ from trailhead.provenance import (
     _atomic_write_json,
     _default_runner,
     _now_iso,
-    read_stamp,
     read_stamp_with_reason,
     record_check_outcome,
     redact_credentials,
@@ -111,7 +114,7 @@ from trailhead.provenance import (
 )
 from trailhead.wire import LockError, wire_lock
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 FRESHNESS_WINDOW_SECONDS = 24 * 60 * 60
 FRESHNESS_STAMP_FILENAME = "update-check.json"
 
@@ -218,13 +221,13 @@ def _proc_stderr(proc) -> str:
     return redact_credentials((proc.stderr or "").strip()) if proc is not None else "timed out or git unavailable"
 
 
-def _remote_name(stamped_branch: str) -> str:
+def _remote_name(branch: str) -> str:
     """The remote to fetch from, derived from the stamped tracked branch.
 
     A tracked branch is normally `<remote>/<branch>`; a bare branch name with
     no remote prefix falls back to `origin`.
     """
-    return stamped_branch.split("/", 1)[0] if "/" in stamped_branch else "origin"
+    return branch.split("/", 1)[0] if "/" in branch else "origin"
 
 
 def _unavailable_delta() -> dict:
@@ -284,6 +287,39 @@ def _extract_changelog_delta(
     return {"available": True, "lines": added, "truncated": truncated}
 
 
+def _resolve_upstream_branch(checkout: Path, *, runner, timeout: int) -> tuple[str | None, str]:
+    """Return (tracked upstream branch, error) for *checkout*, read live.
+
+    The branch is the value every later git call takes as a ref positional.
+    Reading it from git rather than from a rewritable file means it can only
+    ever be a name git itself accepted — git refuses to create a ref that
+    begins with `-`, so no derived value here can be parsed as an option.
+    """
+    proc = _run_git(
+        checkout, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}",
+        runner=runner, timeout=timeout,
+    )
+    branch = (proc.stdout or "").strip() if proc else ""
+    if proc is None or proc.returncode != 0 or not branch:
+        return None, (
+            f"could not resolve the tracked upstream branch: {_proc_stderr(proc)}"
+        )
+    return branch, ""
+
+
+def _count_commits(checkout: Path, rev_range: str, *, runner, timeout: int) -> tuple[int | None, str]:
+    """Return (commit count for *rev_range*, error). Shared by both hops of
+    the verdict so a failure on either degrades identically."""
+    proc = _run_git(checkout, "rev-list", "--count", rev_range, runner=runner, timeout=timeout)
+    stdout = (proc.stdout or "").strip() if proc else ""
+    if proc is None or proc.returncode != 0 or not stdout:
+        return None, f"could not determine commits behind: {_proc_stderr(proc)}"
+    try:
+        return int(stdout), ""
+    except ValueError:
+        return None, "unexpected rev-list output"
+
+
 def _finish(
     outcome: str,
     commits_behind: int | None,
@@ -291,16 +327,18 @@ def _finish(
     reason: str | None,
     env: dict[str, str],
     changelog_delta: dict | None = None,
+    install_commits_behind: int | None = None,
 ) -> dict:
     """Record the check outcome onto the provenance stamp and return the
-    pinned schema-v2 result. Every `check_for_update` exit goes through here,
-    so no outcome can reach a caller without also being recorded."""
+    pinned result. Every `check_for_update` exit goes through here, so no
+    outcome can reach a caller without also being recorded."""
     redacted_reason = redact_credentials(reason) if reason else None
     record_check_outcome(outcome, reason=redacted_reason, env=env)
     return {
         "schema_version": SCHEMA_VERSION,
         "outcome": outcome,
         "commits_behind": commits_behind,
+        "install_commits_behind": install_commits_behind,
         "installed_sha": installed_sha,
         "reason": redacted_reason,
         "changelog_delta": changelog_delta if changelog_delta is not None else _unavailable_delta(),
@@ -335,40 +373,18 @@ def check_for_update(
 
     checkout = Path(stamp["checkout"])
     installed_sha = stamp["sha"]
-    stamped_branch = stamp["branch"]
-    stamped_origin = stamp["origin_url"]
 
-    origin_proc = _run_git(checkout, "remote", "get-url", "origin", runner=_runner, timeout=timeout)
-    if origin_proc is None or origin_proc.returncode != 0 or not (origin_proc.stdout or "").strip():
-        return _finish(
-            "unanswerable",
-            None,
-            installed_sha,
-            f"could not resolve origin remote: {_proc_stderr(origin_proc)}",
-            _env,
-        )
+    branch, branch_error = _resolve_upstream_branch(checkout, runner=_runner, timeout=timeout)
+    if branch is None:
+        return _finish("unanswerable", None, installed_sha, branch_error, _env)
 
-    # `stamped_origin` is persisted credential-redacted (`provenance.write_stamp`);
-    # redact the freshly-fetched origin the same way before comparing, so a
-    # credentialed remote doesn't spuriously "change" on every check.
-    current_origin = redact_credentials(origin_proc.stdout.strip())
-    if current_origin != stamped_origin:
-        return _finish(
-            "unanswerable",
-            None,
-            installed_sha,
-            "origin remote has changed since install; refusing to compare against it",
-            _env,
-        )
-
-    remote_name = _remote_name(stamped_branch)
+    remote_name = _remote_name(branch)
 
     if not _fetch_is_fresh(_env, window):
         _stamp_fetch_attempt(_env)
-        # `--` ends option parsing before the stamp-derived remote name: without
-        # it a name shaped like `--upload-pack=<command>` is parsed by `git
-        # fetch` as an option and the command is EXECUTED. `read_stamp` also
-        # rejects an option-shaped `branch` outright; this is defense in depth.
+        # `--` ends option parsing before the remote name. The name is derived
+        # from git's own upstream ref, which can never begin with `-`; the
+        # guard costs nothing and holds the invariant at the call site.
         fetch_proc = _run_git(
             checkout, "fetch", "--quiet", "--", remote_name, runner=_runner, timeout=timeout
         )
@@ -381,33 +397,30 @@ def check_for_update(
                 _env,
             )
 
-    count_proc = _run_git(
-        checkout, "rev-list", "--count", f"HEAD..{stamped_branch}", runner=_runner, timeout=timeout
+    # Two hops, counted separately: the checkout against its remote, and the
+    # wired install against the checkout. An install snapshots the plugin
+    # trees, so a checkout pulled without re-running install is current while
+    # the install behind it is not.
+    commits_behind, error = _count_commits(
+        checkout, f"HEAD..{branch}", runner=_runner, timeout=timeout
     )
-    stdout = (count_proc.stdout or "").strip() if count_proc else ""
-    if count_proc is None or count_proc.returncode != 0 or not stdout:
-        return _finish(
-            "unanswerable",
-            None,
-            installed_sha,
-            f"could not determine commits behind: {_proc_stderr(count_proc)}",
-            _env,
-        )
+    if commits_behind is None:
+        return _finish("unanswerable", None, installed_sha, error, _env)
 
-    try:
-        commits_behind = int(stdout)
-    except ValueError:
-        return _finish(
-            "unanswerable", None, installed_sha, "unexpected rev-list output", _env
-        )
+    install_behind, error = _count_commits(
+        checkout, f"{installed_sha}..HEAD", runner=_runner, timeout=timeout
+    )
+    if install_behind is None:
+        return _finish("unanswerable", None, installed_sha, error, _env)
 
     changelog_delta = _extract_changelog_delta(
-        checkout, installed_sha, stamped_branch, runner=_runner, timeout=timeout
+        checkout, installed_sha, branch, runner=_runner, timeout=timeout
     )
 
-    if commits_behind == 0:
-        return _finish("ok", 0, installed_sha, None, _env, changelog_delta)
-    return _finish("behind", commits_behind, installed_sha, None, _env, changelog_delta)
+    outcome = "ok" if commits_behind == 0 and install_behind == 0 else "behind"
+    return _finish(
+        outcome, commits_behind, installed_sha, None, _env, changelog_delta, install_behind
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -441,12 +454,16 @@ def run_update_apply(
 ) -> int:
     """Perform the upgrade: fast-forward the stamped checkout, then re-wire.
 
+    The checkout may already be level with its tracked remote while the
+    install behind it is not — an install snapshots the plugin trees rather
+    than pointing at them — so the fast-forward is skipped and the re-wire
+    still runs. Only a checkout that is level with the remote AND wired from
+    that same sha is a no-op.
+
     Consent is a TECHNICAL gate, not a courtesy: without ``assume_yes`` this
     refuses on any non-interactive invocation, and mutates nothing before that
-    gate passes. A dirty checkout, or an ``origin`` remote that has changed
-    since install, is refused BEFORE anything is fetched — mirroring
-    ``check_for_update``'s own refusal, so apply mode never wires code from a
-    remote the check would have refused to trust. Every refusal and every
+    gate passes. A dirty checkout is refused BEFORE anything is fetched.
+    Every refusal and every
     failure prints a named, actionable ``trailhead: <message>`` line naming a
     recovery command.
 
@@ -484,9 +501,7 @@ def run_update_apply(
 
     checkout = Path(stamp["checkout"])
     pre_sha = stamp["sha"]
-    stamped_branch = stamp["branch"]
-    stamped_origin = stamp["origin_url"]
-    remote_name = _remote_name(stamped_branch)
+
 
     # ------------------------------------------------------------------
     # Consent gate — technical, not a courtesy. Nothing below this point may
@@ -496,8 +511,8 @@ def run_update_apply(
     if not dry_run and not assume_yes:
         if _is_tty():
             print(
-                f"This upgrades the trailhead install from {checkout}, "
-                f"tracking {stamped_branch}: fetches, fast-forwards, and "
+                f"This upgrades the trailhead install from {checkout}: "
+                f"fetches its tracked upstream branch, fast-forwards, and "
                 f"re-wires every configured plugin.\n"
             )
             if not _confirm("Proceed? [y/N] "):
@@ -512,8 +527,18 @@ def run_update_apply(
             )
             return 1
 
+    branch, branch_error = _resolve_upstream_branch(checkout, runner=_runner, timeout=timeout)
+    if branch is None:
+        print(
+            f"trailhead: {branch_error}. Inspect directly: "
+            f"git -C {checkout} rev-parse --abbrev-ref --symbolic-full-name @{{u}}",
+            file=sys.stderr,
+        )
+        return 1
+    remote_name = _remote_name(branch)
+
     # ------------------------------------------------------------------
-    # Dirty-checkout guard — refuse before touching anything.
+    # Dirty-checkout guard — refuse before mutating anything.
     # ------------------------------------------------------------------
     status_proc = _run_git(checkout, "status", "--porcelain", runner=_runner, timeout=timeout)
     if status_proc is None or status_proc.returncode != 0:
@@ -532,34 +557,10 @@ def run_update_apply(
         )
         return 1
 
-    # ------------------------------------------------------------------
-    # Origin pre-flight — refuse a repointed remote BEFORE fetching, mirroring
-    # `check_for_update`'s own refusal. Without this, apply mode would wire
-    # code from a remote that `--check` would have refused to trust.
-    # ------------------------------------------------------------------
-    origin_proc = _run_git(checkout, "remote", "get-url", "origin", runner=_runner, timeout=timeout)
-    if origin_proc is None or origin_proc.returncode != 0 or not (origin_proc.stdout or "").strip():
-        print(
-            f"trailhead: could not resolve the `origin` remote: "
-            f"{_proc_stderr(origin_proc)}. Inspect directly: "
-            f"git -C {checkout} remote get-url origin",
-            file=sys.stderr,
-        )
-        return 1
-    current_origin = redact_credentials(origin_proc.stdout.strip())
-    if current_origin != stamped_origin:
-        print(
-            "trailhead: refusing to upgrade — the `origin` remote has changed "
-            "since install; re-run `trailhead install` to record the new "
-            "remote before upgrading.",
-            file=sys.stderr,
-        )
-        return 1
-
     if dry_run:
         print(
             f"trailhead: dry run — would fetch {remote_name}, fast-forward "
-            f"{checkout} to {stamped_branch} if possible, then re-wire. "
+            f"{checkout} to {branch} if possible, then re-wire. "
             f"No changes made."
         )
         return 0
@@ -576,11 +577,9 @@ def run_update_apply(
             # with nothing left to roll it back.
             cfg = resolve_config_for_env(_env)
 
-            # `--` ends option parsing before the stamp-derived remote name: a
-            # name shaped like `--upload-pack=<command>` would otherwise be
-            # parsed by `git fetch` as an option and the command EXECUTED.
-            # `read_stamp` also rejects an option-shaped `branch` outright;
-            # this is defense in depth.
+            # `--` ends option parsing before the remote name. The name is
+            # derived from git's own upstream ref, which can never begin with
+            # `-`; the guard costs nothing and holds the invariant here too.
             fetch_proc = _run_git(
                 checkout, "fetch", "--quiet", "--", remote_name, runner=_runner, timeout=timeout
             )
@@ -595,49 +594,25 @@ def run_update_apply(
 
             # `git rev-parse -- <rev>` does NOT mean "end of options" — rev-parse
             # echoes a literal `--` back as one of its outputs, corrupting the
-            # single-sha stdout this call depends on — so this call site relies
-            # entirely on `read_stamp`'s option-shaped-branch rejection (layer b)
-            # rather than a `--` guard (layer a doesn't apply here).
+            # single-sha stdout this call depends on. The branch is read from
+            # git's own upstream ref, which can never begin with `-`, so there
+            # is nothing option-shaped for a guard to stop here.
             remote_sha_proc = _run_git(
-                checkout, "rev-parse", stamped_branch, runner=_runner, timeout=timeout
+                checkout, "rev-parse", branch, runner=_runner, timeout=timeout
             )
             remote_sha = (remote_sha_proc.stdout or "").strip() if remote_sha_proc else ""
             if remote_sha_proc is None or remote_sha_proc.returncode != 0 or not remote_sha:
                 print(
-                    f"trailhead: could not resolve {stamped_branch}: "
+                    f"trailhead: could not resolve {branch}: "
                     f"{_proc_stderr(remote_sha_proc)}. Inspect directly: "
-                    f"git -C {checkout} rev-parse {stamped_branch}",
+                    f"git -C {checkout} rev-parse {branch}",
                     file=sys.stderr,
                 )
                 return 1
 
-            if remote_sha == pre_sha:
-                print(f"trailhead: already up to date (installed {pre_sha[:8]})")
-                return 0
-
-            ancestor_proc = _run_git(
-                checkout,
-                "merge-base",
-                "--is-ancestor",
-                "HEAD",
-                "--",
-                stamped_branch,
-                runner=_runner,
-                timeout=timeout,
-            )
-            if ancestor_proc is None or ancestor_proc.returncode != 0:
-                print(
-                    f"trailhead: refusing to upgrade — {checkout}'s HEAD has "
-                    f"diverged from {stamped_branch} and cannot be "
-                    f"fast-forwarded. Resolve it yourself, e.g.: "
-                    f"git -C {checkout} merge {stamped_branch}",
-                    file=sys.stderr,
-                )
-                return 1
-
-            # Captured immediately before the mutating fast-forward, NOT read
-            # from the stamp: a checkout manually advanced past its stamped
-            # sha must roll back to where it actually was, not below it.
+            # Captured immediately before any mutation, NOT read from the
+            # stamp: a checkout manually advanced past its wired sha must roll
+            # back to where it actually was, not below it.
             pre_merge_proc = _run_git(checkout, "rev-parse", "HEAD", runner=_runner, timeout=timeout)
             pre_merge_head = (pre_merge_proc.stdout or "").strip() if pre_merge_proc else ""
             if pre_merge_proc is None or pre_merge_proc.returncode != 0 or not pre_merge_head:
@@ -649,18 +624,49 @@ def run_update_apply(
                 )
                 return 1
 
-            print(f"trailhead: fast-forwarding {checkout} to {stamped_branch}…")
-            merge_proc = _run_git(
-                checkout, "merge", "--ff-only", "--", stamped_branch, runner=_runner, timeout=timeout
-            )
-            if merge_proc is None or merge_proc.returncode != 0:
-                print(
-                    f"trailhead: fast-forward failed: {_proc_stderr(merge_proc)}. "
-                    f"The checkout was not changed. Inspect directly: "
-                    f"git -C {checkout} status",
-                    file=sys.stderr,
+            # Two independent hops. The checkout may already be current while
+            # the install behind it is not — an install snapshots the plugin
+            # trees, so a manually pulled checkout still needs a re-wire.
+            if remote_sha == pre_merge_head and pre_merge_head == pre_sha:
+                print(f"trailhead: already up to date (installed {pre_sha[:8]})")
+                return 0
+
+            # The checkout may already be level with the remote while the
+            # install behind it is not: the fast-forward is skipped and the
+            # re-wire below still runs.
+            if remote_sha != pre_merge_head:
+                ancestor_proc = _run_git(
+                    checkout,
+                    "merge-base",
+                    "--is-ancestor",
+                    "HEAD",
+                    "--",
+                    branch,
+                    runner=_runner,
+                    timeout=timeout,
                 )
-                return 1
+                if ancestor_proc is None or ancestor_proc.returncode != 0:
+                    print(
+                        f"trailhead: refusing to upgrade — {checkout}'s HEAD has "
+                        f"diverged from {branch} and cannot be "
+                        f"fast-forwarded. Resolve it yourself, e.g.: "
+                        f"git -C {checkout} merge {branch}",
+                        file=sys.stderr,
+                    )
+                    return 1
+
+                print(f"trailhead: fast-forwarding {checkout} to {branch}…")
+                merge_proc = _run_git(
+                    checkout, "merge", "--ff-only", "--", branch, runner=_runner, timeout=timeout
+                )
+                if merge_proc is None or merge_proc.returncode != 0:
+                    print(
+                        f"trailhead: fast-forward failed: {_proc_stderr(merge_proc)}. "
+                        f"The checkout was not changed. Inspect directly: "
+                        f"git -C {checkout} status",
+                        file=sys.stderr,
+                    )
+                    return 1
 
             print("trailhead: re-wiring plugins…")
             try:

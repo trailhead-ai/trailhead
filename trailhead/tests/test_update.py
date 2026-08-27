@@ -21,7 +21,6 @@ from pathlib import Path
 import pytest
 
 from trailhead import update
-from trailhead.provenance import read_stamp, write_stamp
 from trailhead.tests.fixtures.update_check_schema import (
     BEHIND_EXAMPLE,
     OK_EXAMPLE,
@@ -34,7 +33,7 @@ _BRANCH = "origin/main"
 
 # The only git subcommands the check path may ever invoke — a mutation adding
 # any other subcommand (e.g. "pull") must fail item 14's assertion.
-_READ_ONLY_SUBCOMMANDS = {"remote", "fetch", "rev-list", "diff"}
+_READ_ONLY_SUBCOMMANDS = {"rev-parse", "fetch", "rev-list", "diff"}
 
 
 def _env(tmp_path: Path) -> dict[str, str]:
@@ -53,14 +52,7 @@ def _checkout(tmp_path: Path, name: str = "checkout") -> Path:
     return path
 
 
-def _install_stamp(
-    tmp_path: Path,
-    env: dict[str, str],
-    *,
-    sha: str = _SHA,
-    branch: str = _BRANCH,
-    origin_url: str = _ORIGIN_URL,
-) -> Path:
+def _install_stamp(tmp_path: Path, env: dict[str, str], *, sha: str = _SHA) -> Path:
     """Write a provenance stamp directly (bypassing git) for a fixed checkout."""
     checkout = _checkout(tmp_path)
     from trailhead import provenance
@@ -68,8 +60,6 @@ def _install_stamp(
     stamp = {
         "checkout": str(checkout),
         "sha": sha,
-        "branch": branch,
-        "origin_url": origin_url,
         "wired_at": "2026-01-01T00:00:00Z",
         "last_check": None,
     }
@@ -79,14 +69,15 @@ def _install_stamp(
 
 def _make_runner(
     *,
-    origin_url: str = _ORIGIN_URL,
+    branch: str = _BRANCH,
+    branch_rc: int = 0,
     fetch_rc: int = 0,
     fetch_stderr: str = "",
     fetch_raises: Exception | None = None,
     count: str | None = "3",
     count_rc: int = 0,
     count_stderr: str = "",
-    remote_rc: int = 0,
+    install_count: str = "0",
     diff_stdout: str = "",
     diff_rc: int = 0,
     diff_raises: Exception | None = None,
@@ -108,15 +99,21 @@ def _make_runner(
         assert kw.get("shell") is not True, "git must never be invoked with shell=True"
         assert args[0] == "git"
         sub = args[3]
-        if sub == "remote":
+        if sub == "rev-parse":
             return subprocess.CompletedProcess(
-                args, remote_rc, stdout=(origin_url + "\n") if remote_rc == 0 else "", stderr=""
+                args, branch_rc, stdout=(branch + "\n") if branch_rc == 0 else "", stderr=""
             )
         if sub == "fetch":
             if fetch_raises is not None:
                 raise fetch_raises
             return subprocess.CompletedProcess(args, fetch_rc, stdout="", stderr=fetch_stderr)
         if sub == "rev-list":
+            # Two hops share this subcommand — the install-behind-checkout
+            # range starts at the wired sha, the other at HEAD.
+            if args[-1].startswith(_SHA):
+                return subprocess.CompletedProcess(
+                    args, 0, stdout=install_count + "\n", stderr=""
+                )
             stdout = (count + "\n") if count is not None else ""
             return subprocess.CompletedProcess(args, count_rc, stdout=stdout, stderr=count_stderr)
         if sub == "diff":
@@ -181,55 +178,6 @@ class TestErroredInvocationNeverReportsNotBehind:
         assert result["outcome"] == "unanswerable"
         assert result["outcome"] != "ok"
         assert result["outcome"] != "behind"
-
-
-class TestOriginMismatch:
-    def test_repointed_origin_reports_unanswerable_with_reason_and_skips_comparison(
-        self, tmp_path
-    ):
-        env = _env(tmp_path)
-        _install_stamp(tmp_path, env, origin_url=_ORIGIN_URL)
-        runner, calls = _make_runner(origin_url="https://example.com/different.git", count="0")
-
-        result = update.check_for_update(env=env, runner=runner)
-
-        assert result["outcome"] == "unanswerable"
-        assert result["reason"]
-        assert "origin" in result["reason"].lower()
-        # Never proceeded to compare against the new remote.
-        assert not any(c[3] in ("fetch", "rev-list") for c in calls)
-
-
-class TestOriginRedactionRoundTrip:
-    def test_credentialed_origin_matches_after_symmetric_redaction(self, tmp_path):
-        """`write_stamp` persists `origin_url` credential-redacted. The live
-        `git remote get-url origin` fetched on every check still returns the
-        UNREDACTED URL, so the comparison must redact that side too — otherwise
-        a legitimately unchanged, credentialed remote reports "unanswerable"
-        on every single check."""
-        from trailhead.provenance import write_stamp
-
-        env = _env(tmp_path)
-        checkout = _checkout(tmp_path)
-        credentialed = "https://ghp_supersecrettoken@example.com/r.git"
-
-        def probe_runner(args, **kw):
-            sub = args[3]
-            if sub == "rev-parse" and args[4] == "HEAD":
-                return subprocess.CompletedProcess(args, 0, stdout=_SHA + "\n", stderr="")
-            if sub == "rev-parse" and "@{u}" in args:
-                return subprocess.CompletedProcess(args, 0, stdout=_BRANCH + "\n", stderr="")
-            if sub == "remote":
-                return subprocess.CompletedProcess(args, 0, stdout=credentialed + "\n", stderr="")
-            raise AssertionError(f"unexpected git invocation: {args}")
-
-        write_stamp(checkout, env=env, runner=probe_runner)
-
-        runner, calls = _make_runner(origin_url=credentialed, count="0")
-        result = update.check_for_update(env=env, runner=runner)
-
-        assert result["outcome"] == "ok"
-        assert "ghp_supersecrettoken" not in json.dumps(result)
 
 
 class TestNoStamp:
@@ -639,6 +587,7 @@ class TestChangelogDeltaUnavailableOnDiffError:
             "schema_version",
             "outcome",
             "commits_behind",
+            "install_commits_behind",
             "installed_sha",
             "reason",
             "changelog_delta",
@@ -696,20 +645,20 @@ class TestJsonSchemaAndHumanOutput:
 
 
 class TestArgumentInjectionRCE:
-    """`_remote_name` derives the fetch remote from the stamp's `branch` field
-    and it is passed as a bare positional to `git fetch`. A branch shaped like
-    `--upload-pack=<command>/x` makes `_remote_name` return `--upload-pack=
-    <command>`, which `git fetch` parses as an OPTION and EXECUTES `<command>`
-    — a real, reproducible RCE. This is reproduced against REAL git: a real
-    checkout, a real executable payload placed on PATH, and an assertion that
-    the payload's marker file is never created.
+    """`_remote_name` derives the fetch remote from the tracked upstream
+    branch and passes it to `git fetch` as a bare positional. A branch shaped
+    like `--upload-pack=<command>/x` makes `_remote_name` return
+    `--upload-pack=<command>`, which `git fetch` parses as an OPTION and
+    EXECUTES — a real, reproducible RCE. Reproduced against REAL git: a real
+    checkout, a real executable payload on PATH, and an assertion that the
+    payload's marker file is never created.
 
-    `update.read_stamp` is monkeypatched here to hand back the malicious stamp
-    DIRECTLY, bypassing `provenance.read_stamp`'s own option-shaped-branch
-    rejection — this isolates proof that the `--` end-of-options guard at the
-    `git fetch` call site (layer a) holds even if validation upstream (layer
-    b) were ever bypassed or buggy. `read_stamp`'s own rejection is covered
-    separately in `test_provenance.py`.
+    The branch is read from git's own upstream ref, which git will not let
+    begin with `-`, so no such value can arise in practice.
+    `_resolve_upstream_branch` is monkeypatched here to hand one back anyway,
+    isolating proof that the `--` end-of-options guard at the `git fetch`
+    call site holds on its own even if the derivation above it were ever
+    compromised.
     """
 
     def test_option_shaped_branch_does_not_execute_the_payload_via_fetch(
@@ -726,27 +675,28 @@ class TestArgumentInjectionRCE:
         origin = tmp_path / "origin"
         origin.mkdir()
         subprocess.run(["git", "init", "-q", "--initial-branch=main", str(origin)], check=True)
-        subprocess.run(["git", "-C", str(origin), "config", "user.email", "a@example.com"], check=True)
+        subprocess.run(
+            ["git", "-C", str(origin), "config", "user.email", "a@example.com"], check=True
+        )
         subprocess.run(["git", "-C", str(origin), "config", "user.name", "Test"], check=True)
-        subprocess.run(["git", "-C", str(origin), "commit", "--allow-empty", "-m", "x", "-q"], check=True)
+        subprocess.run(
+            ["git", "-C", str(origin), "commit", "--allow-empty", "-m", "x", "-q"], check=True
+        )
         checkout = tmp_path / "home" / "checkout"
         checkout.parent.mkdir(parents=True, exist_ok=True)
         subprocess.run(["git", "clone", "-q", str(origin), str(checkout)], check=True)
 
+        env = _env(tmp_path)
+        _install_stamp(tmp_path, env)
+
         # A single argv token that git fetch would parse as an option: the
         # segment before the first "/" (what `_remote_name` extracts) is
         # exactly the malicious `--upload-pack=<payload>` value.
-        malicious_stamp = {
-            "checkout": str(checkout),
-            "sha": "a" * 40,
-            "branch": "--upload-pack=evilmarker/main",
-            "origin_url": str(origin),
-            "wired_at": "2026-01-01T00:00:00Z",
-            "last_check": None,
-        }
-        monkeypatch.setattr(update, "read_stamp", lambda **kw: malicious_stamp)
-
-        env = _env(tmp_path)
+        monkeypatch.setattr(
+            update,
+            "_resolve_upstream_branch",
+            lambda *a, **kw: ("--upload-pack=evilmarker/main", ""),
+        )
 
         def real_runner(args, **kw):
             return subprocess.run(args, **kw)
@@ -874,3 +824,122 @@ class TestFenceRunsSeparatedByInvisibleCharacters:
     def test_emoji_zwj_sequence_still_survives(self):
         line = update._sanitize_delta_line("shipped \U0001f469‍\U0001f4bb support")
         assert "‍" in line
+
+
+class TestDerivedBranchAndTwoHopVerdict:
+    """The stamp carries only `checkout` and `sha`. The tracked upstream
+    branch is read live from the checkout, and the verdict answers both
+    hops: how far the install is behind the checkout, and how far the
+    checkout is behind its remote."""
+
+    def _runner(self, *, branch="origin/main", head_behind="0", install_behind="0"):
+        calls: list[list[str]] = []
+
+        def runner(args, **kw):
+            calls.append(list(args))
+            sub = args[3]
+            if sub == "rev-parse":
+                return subprocess.CompletedProcess(args, 0, stdout=branch + "\n", stderr="")
+            if sub == "fetch":
+                return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+            if sub == "rev-list":
+                rng = args[-1]
+                out = install_behind if rng.startswith(_SHA) else head_behind
+                return subprocess.CompletedProcess(args, 0, stdout=out + "\n", stderr="")
+            if sub == "diff":
+                return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+            raise AssertionError(f"unexpected git invocation: {args}")
+
+        return runner, calls
+
+    def _stamp(self, tmp_path, env):
+        from trailhead import provenance
+
+        checkout = _checkout(tmp_path)
+        provenance._atomic_write_json(
+            provenance.stamp_path(env=env),
+            {
+                "checkout": str(checkout),
+                "sha": _SHA,
+                "wired_at": "2026-01-01T00:00:00Z",
+                "last_check": None,
+            },
+        )
+        return checkout
+
+    def test_branch_is_read_from_the_checkout_not_the_stamp(self, tmp_path):
+        env = _env(tmp_path)
+        self._stamp(tmp_path, env)
+        runner, calls = self._runner(branch="upstream/release")
+
+        update.check_for_update(env=env, runner=runner)
+
+        assert ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"] == calls[0][3:]
+        assert any(c[3] == "fetch" and c[-1] == "upstream" for c in calls)
+
+    def test_origin_url_is_never_probed_or_compared(self, tmp_path):
+        env = _env(tmp_path)
+        self._stamp(tmp_path, env)
+        runner, calls = self._runner()
+
+        update.check_for_update(env=env, runner=runner)
+
+        assert not any(c[3] == "remote" for c in calls)
+
+    def test_install_behind_checkout_reports_behind_even_when_checkout_is_current(
+        self, tmp_path
+    ):
+        env = _env(tmp_path)
+        self._stamp(tmp_path, env)
+        runner, _ = self._runner(head_behind="0", install_behind="4")
+
+        result = update.check_for_update(env=env, runner=runner)
+
+        assert result["outcome"] == "behind"
+        assert result["commits_behind"] == 0
+        assert result["install_commits_behind"] == 4
+
+    def test_both_hops_level_reports_ok(self, tmp_path):
+        env = _env(tmp_path)
+        self._stamp(tmp_path, env)
+        runner, _ = self._runner(head_behind="0", install_behind="0")
+
+        result = update.check_for_update(env=env, runner=runner)
+
+        assert result["outcome"] == "ok"
+        assert result["install_commits_behind"] == 0
+
+    def test_unresolvable_upstream_is_unanswerable(self, tmp_path):
+        env = _env(tmp_path)
+        self._stamp(tmp_path, env)
+
+        def runner(args, **kw):
+            if args[3] == "rev-parse":
+                return subprocess.CompletedProcess(args, 128, stdout="", stderr="fatal: no upstream")
+            raise AssertionError(f"unexpected git invocation after failure: {args}")
+
+        result = update.check_for_update(env=env, runner=runner)
+
+        assert result["outcome"] == "unanswerable"
+        assert "upstream" in result["reason"]
+
+
+class TestCliHumanOutputNamesBothGaps:
+    def _run(self, tmp_path, monkeypatch, *, count, install_count):
+        env = _env(tmp_path)
+        _install_stamp(tmp_path, env)
+        runner, _ = _make_runner(count=count, install_count=install_count)
+        monkeypatch.setattr(update, "_default_runner", lambda: runner)
+        exit_code, out, _err = _run_cli(["update", "--check"], env=env)
+        assert exit_code == 0
+        return out
+
+    def test_stale_install_is_named_separately_from_a_stale_checkout(
+        self, tmp_path, monkeypatch
+    ):
+        out = self._run(tmp_path, monkeypatch, count="0", install_count="4")
+        assert "install is 4 commit(s) behind the checkout" in out
+
+    def test_stale_checkout_is_named(self, tmp_path, monkeypatch):
+        out = self._run(tmp_path, monkeypatch, count="3", install_count="0")
+        assert "checkout is 3 commit(s) behind its tracked branch" in out

@@ -46,38 +46,30 @@ def _checkout(tmp_path: Path, name: str = "checkout") -> Path:
     return path
 
 
-def _fake_runner(*, sha=_GOOD_SHA, branch="origin/main", origin_url="https://example.com/r.git"):
-    """A recording git-command stub: dispatches on the final positional git arg."""
+def _fake_runner(*, sha=_GOOD_SHA):
+    """A git-command stub: the stamp write probes HEAD and nothing else."""
 
     def runner(args, **kw):
         assert args[0] == "git"
-        sub = args[3]  # ["git", "-C", checkout, <subcommand>, ...]
-        if sub == "rev-parse" and args[4] == "HEAD":
-            return subprocess.CompletedProcess(args, 0, stdout=sha + "\n", stderr="")
-        if sub == "rev-parse" and "@{u}" in args:
-            return subprocess.CompletedProcess(args, 0, stdout=branch + "\n", stderr="")
-        if sub == "remote":
-            return subprocess.CompletedProcess(args, 0, stdout=origin_url + "\n", stderr="")
-        raise AssertionError(f"unexpected git invocation: {args}")
+        assert args[3:] == ["rev-parse", "HEAD"], f"unexpected git invocation: {args}"
+        return subprocess.CompletedProcess(args, 0, stdout=sha + "\n", stderr="")
 
     return runner
 
 
 def _failing_runner(stage: str):
-    """A git stub whose `stage` subcommand fails (simulates unresolved HEAD/upstream)."""
+    """A git stub whose `stage` subcommand fails (simulates an unresolvable HEAD)."""
 
     def runner(args, **kw):
-        sub = args[3]
-        fails = sub == stage and (stage != "rev-parse" or args[4] == "HEAD")
-        if fails:
-            return subprocess.CompletedProcess(args, 128, stdout="", stderr="fatal: no upstream")
+        if args[3] == stage:
+            return subprocess.CompletedProcess(args, 128, stdout="", stderr="fatal: no HEAD")
         return _fake_runner()(args, **kw)
 
     return runner
 
 
 class TestWriteAndRead:
-    def test_wiring_writes_a_stamp_with_all_fields(self, tmp_path):
+    def test_wiring_writes_a_stamp(self, tmp_path):
         env = _env(tmp_path)
         checkout = _checkout(tmp_path)
 
@@ -89,8 +81,6 @@ class TestWriteAndRead:
         assert stamp["checkout"] == str(checkout)
         assert stamp["sha"] == _GOOD_SHA
         assert len(stamp["sha"]) == 40
-        assert stamp["branch"] == "origin/main"
-        assert stamp["origin_url"] == "https://example.com/r.git"
         # ISO-8601 UTC timestamp — must parse and carry a UTC offset.
         from datetime import datetime
 
@@ -223,22 +213,7 @@ class TestRedactCredentials:
         assert redact_credentials(text) == text
 
 
-class TestWriteStampRedactsOrigin:
-    def test_origin_url_credentials_never_reach_disk(self, tmp_path):
-        env = _env(tmp_path)
-        checkout = _checkout(tmp_path)
-
-        write_stamp(
-            checkout,
-            env=env,
-            runner=_fake_runner(origin_url="https://ghp_supersecrettoken@example.com/r.git"),
-        )
-
-        raw = provenance.stamp_path(env=env).read_text(encoding="utf-8")
-        assert "ghp_supersecrettoken" not in raw
-        stamp = read_stamp(env=env)
-        assert "ghp_supersecrettoken" not in stamp["origin_url"]
-
+class TestWriteStampDegradesGracefully:
     def test_write_stamp_survives_git_missing_entirely(self, tmp_path):
         """An OSError from the injected runner (git not on PATH) must not raise —
         write_stamp degrades to a warning, matching its GitProbeError contract."""
@@ -252,38 +227,6 @@ class TestWriteStampRedactsOrigin:
 
         assert warning is not None
         assert read_stamp(env=env) is None
-
-
-class TestReadStampRejectsOptionShapedBranch:
-    def test_option_shaped_branch_reads_as_no_stamp(self, tmp_path):
-        env = _env(tmp_path)
-        checkout = _checkout(tmp_path)
-        stamp = {
-            "checkout": str(checkout),
-            "sha": _GOOD_SHA,
-            "branch": "--upload-pack=/tmp/evil.sh",
-            "origin_url": "https://example.com/r.git",
-            "wired_at": "2026-01-01T00:00:00Z",
-            "last_check": None,
-        }
-        provenance._atomic_write_json(provenance.stamp_path(env=env), stamp)
-
-        assert read_stamp(env=env) is None
-
-    def test_ordinary_branch_still_reads_fine(self, tmp_path):
-        env = _env(tmp_path)
-        checkout = _checkout(tmp_path)
-        stamp = {
-            "checkout": str(checkout),
-            "sha": _GOOD_SHA,
-            "branch": "origin/main",
-            "origin_url": "https://example.com/r.git",
-            "wired_at": "2026-01-01T00:00:00Z",
-            "last_check": None,
-        }
-        provenance._atomic_write_json(provenance.stamp_path(env=env), stamp)
-
-        assert read_stamp(env=env) is not None
 
 
 class TestReadStampRejectsOptionShapedSha:
@@ -301,8 +244,6 @@ class TestReadStampRejectsOptionShapedSha:
         stamp = {
             "checkout": str(checkout),
             "sha": "--output=/tmp/victim.txt",
-            "branch": "origin/main",
-            "origin_url": "https://example.com/r.git",
             "wired_at": "2026-01-01T00:00:00Z",
             "last_check": None,
         }
@@ -316,8 +257,6 @@ class TestReadStampRejectsOptionShapedSha:
         stamp = {
             "checkout": str(checkout),
             "sha": "not-a-real-sha",
-            "branch": "origin/main",
-            "origin_url": "https://example.com/r.git",
             "wired_at": "2026-01-01T00:00:00Z",
             "last_check": None,
         }
@@ -331,46 +270,12 @@ class TestReadStampRejectsOptionShapedSha:
         stamp = {
             "checkout": str(checkout),
             "sha": _GOOD_SHA,
-            "branch": "origin/main",
-            "origin_url": "https://example.com/r.git",
             "wired_at": "2026-01-01T00:00:00Z",
             "last_check": None,
         }
         provenance._atomic_write_json(provenance.stamp_path(env=env), stamp)
 
         assert read_stamp(env=env) is not None
-
-
-class TestEveryStampFieldRejectsOptionShapedValues:
-    """The invariant, not just an instance: no value read from the
-    provenance stamp may reach a git argv position without being validated
-    to a shape that cannot be parsed as an option. `checkout` reaches git
-    only via `-C <path>`, which always consumes the very next argv token as
-    its value regardless of a leading `-` — safe by construction, not by
-    shape validation — so it is exempt below; `wired_at` never reaches argv
-    at all. `branch` and `sha` are the two fields a stamp author can shape
-    into a git option, and both must be rejected."""
-
-    @pytest.mark.parametrize(
-        "field",
-        ["branch", "sha"],
-        ids=["branch", "sha"],
-    )
-    def test_option_shaped_field_reads_as_no_stamp(self, tmp_path, field):
-        env = _env(tmp_path)
-        checkout = _checkout(tmp_path)
-        stamp = {
-            "checkout": str(checkout),
-            "sha": _GOOD_SHA,
-            "branch": "origin/main",
-            "origin_url": "https://example.com/r.git",
-            "wired_at": "2026-01-01T00:00:00Z",
-            "last_check": None,
-        }
-        stamp[field] = "--upload-pack=/tmp/evil.sh"
-        provenance._atomic_write_json(provenance.stamp_path(env=env), stamp)
-
-        assert read_stamp(env=env) is None
 
 
 class TestReadStampWithReasonDistinguishesRejectedFromAbsent:
@@ -395,8 +300,6 @@ class TestReadStampWithReasonDistinguishesRejectedFromAbsent:
         bad_stamp = {
             "checkout": str(checkout),
             "sha": "--output=/tmp/victim.txt",
-            "branch": "origin/main",
-            "origin_url": "https://example.com/r.git",
             "wired_at": "2026-01-01T00:00:00Z",
             "last_check": None,
         }
@@ -437,8 +340,6 @@ class TestConfinementFailsClosed:
         stamp = {
             "checkout": str(checkout),
             "sha": _GOOD_SHA,
-            "branch": "origin/main",
-            "origin_url": "https://example.com/r.git",
             "wired_at": "2026-01-01T00:00:00Z",
             "last_check": None,
         }
@@ -461,8 +362,6 @@ class TestConfinementFailsClosed:
         stamp = {
             "checkout": str(checkout),
             "sha": _GOOD_SHA,
-            "branch": "origin/main",
-            "origin_url": "https://example.com/r.git",
             "wired_at": "2026-01-01T00:00:00Z",
             "last_check": None,
         }
@@ -471,22 +370,16 @@ class TestConfinementFailsClosed:
         assert read_stamp(env=env) is not None
 
 
-class TestStampFieldControlCharacterRejection:
-    """Stamp fields reaching a git argv position carry no control bytes.
-
-    An embedded NUL passes a leading-dash check but makes `subprocess` raise
-    while building argv, so the update path crashes instead of degrading to
-    an unanswerable result.
-    """
+class TestShaShapeRejection:
+    """`sha` is the one stamped value reaching a git argv position. A trailing
+    newline passes a leading-dash check but is not a sha; the exact-40-hex
+    match rejects it, along with every other non-sha shape."""
 
     def _write(self, tmp_path, **over):
         env = _env(tmp_path)
-        checkout = _checkout(tmp_path)
         stamp = {
-            "checkout": str(checkout),
+            "checkout": str(_checkout(tmp_path)),
             "sha": _GOOD_SHA,
-            "branch": "origin/main",
-            "origin_url": "https://example.com/r.git",
             "wired_at": "2026-01-01T00:00:00Z",
             "last_check": None,
         }
@@ -494,19 +387,8 @@ class TestStampFieldControlCharacterRejection:
         provenance._atomic_write_json(provenance.stamp_path(env=env), stamp)
         return env
 
-    @pytest.mark.parametrize(
-        "branch",
-        ["origin/main\x00junk", "origin/main\nrefs/heads/evil", "origin/\x1bmain"],
-    )
-    def test_control_character_in_branch_reads_as_no_stamp(self, tmp_path, branch):
-        env = self._write(tmp_path, branch=branch)
-        assert read_stamp(env=env) is None
-
     def test_sha_with_trailing_newline_reads_as_no_stamp(self, tmp_path):
-        env = self._write(tmp_path, sha=_GOOD_SHA + "\n")
-        assert read_stamp(env=env) is None
+        assert read_stamp(env=self._write(tmp_path, sha=_GOOD_SHA + "\n")) is None
 
-    def test_ordinary_branch_name_is_still_accepted(self, tmp_path):
-        env = self._write(tmp_path, branch="feature/x-1.2")
-        stamp = read_stamp(env=env)
-        assert stamp is not None and stamp["branch"] == "feature/x-1.2"
+    def test_sha_with_an_embedded_control_character_reads_as_no_stamp(self, tmp_path):
+        assert read_stamp(env=self._write(tmp_path, sha=_GOOD_SHA[:-1] + "\x00")) is None

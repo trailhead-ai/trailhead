@@ -10,7 +10,6 @@ state rather than mocked calls.
 
 from __future__ import annotations
 
-import json
 import os
 import subprocess
 import sys
@@ -22,7 +21,7 @@ import pytest
 from trailhead import update
 from trailhead.install_config import ResolvedConfig, ResolvedHarness, ResolvedPlugin
 from trailhead.provenance import read_stamp
-from trailhead.wire import LockError, WireError, wire_lock
+from trailhead.wire import WireError, wire_lock
 
 _OLD_SHA = "a" * 40
 _NEW_SHA = "b" * 40
@@ -46,22 +45,13 @@ def _checkout(tmp_path: Path) -> Path:
     return path
 
 
-def _install_stamp(
-    tmp_path: Path,
-    env: dict[str, str],
-    *,
-    sha: str = _OLD_SHA,
-    branch: str = _BRANCH,
-    origin_url: str = _ORIGIN_URL,
-) -> Path:
+def _install_stamp(tmp_path: Path, env: dict[str, str], *, sha: str = _OLD_SHA) -> Path:
     from trailhead import provenance
 
     checkout = _checkout(tmp_path)
     stamp = {
         "checkout": str(checkout),
         "sha": sha,
-        "branch": branch,
-        "origin_url": origin_url,
         "wired_at": "2026-01-01T00:00:00Z",
         "last_check": None,
     }
@@ -87,17 +77,20 @@ def _make_runner(
     merge_stderr: str = "",
     probe_sha: str = _NEW_SHA,
     probe_branch: str = _BRANCH,
-    probe_origin: str = _ORIGIN_URL,
+    head_sha: str = _OLD_SHA,
     reset_rc: int = 0,
     reset_stderr: str = "",
 ):
     """A recording git-command stub dispatching on the git subcommand.
 
-    `rev-parse` is used both to resolve the stamped branch's remote sha and
-    (inside `write_stamp`'s probe) to resolve HEAD — disambiguated by the
-    revision argument.
+    `rev-parse` resolves the tracked upstream branch, that branch's remote
+    sha, and HEAD — disambiguated by the revision argument. HEAD is stateful:
+    it reads `head_sha` until a fast-forward succeeds and `probe_sha`
+    afterwards, so the pre-merge and post-merge reads differ as they do in a
+    real checkout.
     """
     calls: list[list[str]] = []
+    merged: list[bool] = []
 
     def runner(args, **kw):
         calls.append(list(args))
@@ -112,18 +105,19 @@ def _make_runner(
         if sub == "rev-parse":
             rev = args[4]
             if rev == "HEAD":
-                return subprocess.CompletedProcess(args, 0, stdout=probe_sha + "\n", stderr="")
+                current = probe_sha if merged else head_sha
+                return subprocess.CompletedProcess(args, 0, stdout=current + "\n", stderr="")
             if rev == "--abbrev-ref":
                 return subprocess.CompletedProcess(args, 0, stdout=probe_branch + "\n", stderr="")
             # resolving the stamped branch itself
             return subprocess.CompletedProcess(
                 args, remote_branch_rc, stdout=(remote_branch_sha + "\n") if remote_branch_rc == 0 else "", stderr=""
             )
-        if sub == "remote":
-            return subprocess.CompletedProcess(args, 0, stdout=probe_origin + "\n", stderr="")
         if sub == "merge-base":
             return subprocess.CompletedProcess(args, ancestor_rc, stdout="", stderr="")
         if sub == "merge":
+            if merge_rc == 0:
+                merged.append(True)
             return subprocess.CompletedProcess(args, merge_rc, stdout="", stderr=merge_stderr)
         if sub == "reset":
             return subprocess.CompletedProcess(args, reset_rc, stdout="", stderr=reset_stderr)
@@ -255,41 +249,6 @@ class TestDiverged:
         assert not wire_calls
         stamp = read_stamp(env=env)
         assert stamp["sha"] == _OLD_SHA
-
-
-class TestOriginPreflight:
-    """Apply mode must refuse a repointed `origin` remote BEFORE fetching,
-    mirroring `check_for_update`'s own refusal — without this, apply mode
-    would wire code from a remote that `--check` would have refused to
-    trust."""
-
-    def test_repointed_origin_refuses_and_writes_nothing(self, tmp_path, monkeypatch):
-        env = _env(tmp_path)
-        _install_stamp(tmp_path, env, origin_url=_ORIGIN_URL)
-        runner, calls = _make_runner(probe_origin="https://example.com/a-different-repo.git")
-        monkeypatch.setattr(update, "resolve_config_for_env", lambda env: _FakeCfg())
-        wire_calls = []
-        monkeypatch.setattr(
-            update, "wire_all_harnesses", lambda *a, **kw: wire_calls.append(1) or {}
-        )
-
-        exit_code = update.run_update_apply(env=env, runner=runner, assume_yes=True)
-
-        assert exit_code != 0
-        assert not wire_calls
-        stamp = read_stamp(env=env)
-        assert stamp["sha"] == _OLD_SHA
-
-    def test_repointed_origin_refuses_before_any_fetch(self, tmp_path, monkeypatch):
-        env = _env(tmp_path)
-        _install_stamp(tmp_path, env, origin_url=_ORIGIN_URL)
-        runner, calls = _make_runner(probe_origin="https://example.com/a-different-repo.git")
-        monkeypatch.setattr(update, "resolve_config_for_env", lambda env: _FakeCfg())
-        monkeypatch.setattr(update, "wire_all_harnesses", lambda *a, **kw: {})
-
-        update.run_update_apply(env=env, runner=runner, assume_yes=True)
-
-        assert not any(c[3] == "fetch" for c in calls), "must refuse before fetching"
 
 
 class TestAlreadyUpToDate:
@@ -695,3 +654,86 @@ class TestRealFailingWireTriggersRollback:
         assert current_head == new_sha
         stamp_after = read_stamp(env=env)
         assert stamp_after["sha"] == new_sha
+
+
+class TestApplyDerivesBranchAndReWiresAStaleInstall:
+    """Apply mode reads the tracked branch from the checkout, never from the
+    stamp, and treats a checkout that is current but wired from an older sha
+    as work to do rather than a no-op."""
+
+    def _stamp(self, tmp_path, env, *, sha=_OLD_SHA):
+        from trailhead import provenance
+
+        checkout = _checkout(tmp_path)
+        provenance._atomic_write_json(
+            provenance.stamp_path(env=env),
+            {
+                "checkout": str(checkout),
+                "sha": sha,
+                "wired_at": "2026-01-01T00:00:00Z",
+                "last_check": None,
+            },
+        )
+        return checkout
+
+    def _runner(self, *, head=_NEW_SHA, remote=_NEW_SHA, branch=_BRANCH):
+        calls: list[list[str]] = []
+
+        def runner(args, **kw):
+            calls.append(list(args))
+            sub = args[3]
+            if sub == "status":
+                return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+            if sub == "fetch":
+                return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+            if sub == "rev-parse":
+                if args[4] == "--abbrev-ref":
+                    return subprocess.CompletedProcess(args, 0, stdout=branch + "\n", stderr="")
+                if args[4] == "HEAD":
+                    return subprocess.CompletedProcess(args, 0, stdout=head + "\n", stderr="")
+                return subprocess.CompletedProcess(args, 0, stdout=remote + "\n", stderr="")
+            if sub in ("merge-base", "merge"):
+                return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+            raise AssertionError(f"unexpected git invocation: {args}")
+
+        return runner, calls
+
+    def test_origin_url_is_never_probed(self, tmp_path, monkeypatch):
+        env = _env(tmp_path)
+        self._stamp(tmp_path, env)
+        runner, calls = self._runner()
+        monkeypatch.setattr(update, "resolve_config_for_env", lambda e: _FakeCfg())
+        monkeypatch.setattr(update, "wire_all_harnesses", lambda *a, **k: None)
+
+        update.run_update_apply(env=env, runner=runner, assume_yes=True)
+
+        assert not any(c[3] == "remote" for c in calls)
+
+    def test_current_checkout_with_a_stale_stamp_re_wires(self, tmp_path, monkeypatch):
+        env = _env(tmp_path)
+        self._stamp(tmp_path, env, sha=_OLD_SHA)
+        runner, calls = self._runner(head=_NEW_SHA, remote=_NEW_SHA)
+        wired = []
+        monkeypatch.setattr(update, "resolve_config_for_env", lambda e: _FakeCfg())
+        monkeypatch.setattr(update, "wire_all_harnesses", lambda *a, **k: wired.append(1))
+
+        rc = update.run_update_apply(env=env, runner=runner, assume_yes=True)
+
+        assert rc == 0
+        assert wired == [1]
+        assert not any(c[3] == "merge" for c in calls)
+        assert read_stamp(env=env)["sha"] == _NEW_SHA
+
+    def test_everything_level_is_a_true_no_op(self, tmp_path, monkeypatch):
+        env = _env(tmp_path)
+        self._stamp(tmp_path, env, sha=_NEW_SHA)
+        runner, calls = self._runner(head=_NEW_SHA, remote=_NEW_SHA)
+        wired = []
+        monkeypatch.setattr(update, "resolve_config_for_env", lambda e: _FakeCfg())
+        monkeypatch.setattr(update, "wire_all_harnesses", lambda *a, **k: wired.append(1))
+
+        rc = update.run_update_apply(env=env, runner=runner, assume_yes=True)
+
+        assert rc == 0
+        assert wired == []
+        assert not any(c[3] in ("merge", "merge-base") for c in calls)

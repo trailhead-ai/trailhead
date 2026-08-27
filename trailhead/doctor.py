@@ -246,8 +246,8 @@ def _build_provenance_human(
     """Render the `install provenance:` block: the stamped checkout + HEAD,
     and the outcome of the last update check, when present.
 
-    A stamp that exists on disk but was REJECTED (confinement, an
-    option-shaped field, malformed JSON) is reported distinctly from a
+    A stamp that exists on disk but was REJECTED (confinement, a malformed
+    `sha`, malformed JSON) is reported distinctly from a
     genuinely absent one — the fail-closed paths that reject a stamp are
     otherwise indistinguishable from "never installed"."""
     if provenance is None:
@@ -258,7 +258,7 @@ def _build_provenance_human(
     lines = [
         "  install provenance:",
         f"    checkout: {provenance['checkout']}",
-        f"    wired at: {provenance['sha']} ({provenance['branch']}, {provenance['wired_at']})",
+        f"    wired at: {provenance['sha']} ({provenance['wired_at']})",
     ]
     last_check = provenance.get("last_check")
     if last_check is None:

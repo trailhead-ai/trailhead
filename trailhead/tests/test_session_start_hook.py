@@ -48,8 +48,6 @@ def _load_hook():
 hook = _load_hook()
 
 _SHA = "a" * 40
-_ORIGIN_URL = "https://example.com/r.git"
-_BRANCH = "origin/main"
 
 
 def _env(tmp_path: Path, **extra: str) -> dict[str, str]:
@@ -77,8 +75,6 @@ def _write_stamp(tmp_path: Path, env: dict[str, str], checkout: Path) -> None:
             {
                 "checkout": str(checkout),
                 "sha": _SHA,
-                "branch": _BRANCH,
-                "origin_url": _ORIGIN_URL,
                 "wired_at": "2026-01-01T00:00:00Z",
                 "last_check": None,
             }
@@ -103,27 +99,30 @@ def _spy_runner(result: dict):
 
 
 _BEHIND = {
-    "schema_version": 2,
+    "schema_version": 3,
     "outcome": "behind",
     "commits_behind": 3,
+    "install_commits_behind": 0,
     "installed_sha": _SHA,
     "reason": None,
     "changelog_delta": {"available": True, "lines": ["Added: a new thing"], "truncated": False},
 }
 
 _OK = {
-    "schema_version": 2,
+    "schema_version": 3,
     "outcome": "ok",
     "commits_behind": 0,
+    "install_commits_behind": 0,
     "installed_sha": _SHA,
     "reason": None,
     "changelog_delta": {"available": True, "lines": [], "truncated": False},
 }
 
 _UNANSWERABLE = {
-    "schema_version": 2,
+    "schema_version": 3,
     "outcome": "unanswerable",
     "commits_behind": None,
+    "install_commits_behind": None,
     "installed_sha": None,
     "reason": "no install provenance stamp found",
     "changelog_delta": {"available": False, "lines": [], "truncated": False},
@@ -229,32 +228,11 @@ class TestQuietOutcomes:
 
         assert hook.check_and_render(env=env, runner=runner) is None
 
-    def test_option_shaped_branch_never_execs(self, tmp_path):
-        """The hook re-derives `read_stamp`'s contract independently — this
-        pins that its own copy rejects an option-shaped `branch` exactly as
-        `provenance.read_stamp` does, so the two never disagree."""
-        env = _env(tmp_path)
-        checkout = _checkout(tmp_path)
-        state = Path(env["TRAILHEAD_STATE_DIR"])
-        state.mkdir(parents=True, exist_ok=True)
-        (state / "provenance.json").write_text(
-            json.dumps(
-                {
-                    "checkout": str(checkout),
-                    "sha": _SHA,
-                    "branch": "--upload-pack=evil",
-                    "origin_url": _ORIGIN_URL,
-                    "wired_at": "2026-01-01T00:00:00Z",
-                    "last_check": None,
-                }
-            )
-        )
-        runner, calls = _spy_runner(_BEHIND)
-
-        assert hook.check_and_render(env=env, runner=runner) is None
-        assert calls == []
-
-    def test_option_shaped_sha_never_execs(self, tmp_path):
+    def test_a_hostile_sha_yields_no_notice(self, tmp_path):
+        """The hook validates only the checkout path it execs out of; every
+        other stamped value is validated by `provenance.read_stamp` in the
+        process it launches. An option-shaped `sha` is refused there, so the
+        check comes back unanswerable and the hook emits nothing."""
         env = _env(tmp_path)
         checkout = _checkout(tmp_path)
         state = Path(env["TRAILHEAD_STATE_DIR"])
@@ -264,17 +242,14 @@ class TestQuietOutcomes:
                 {
                     "checkout": str(checkout),
                     "sha": "--output=/tmp/victim.txt",
-                    "branch": _BRANCH,
-                    "origin_url": _ORIGIN_URL,
                     "wired_at": "2026-01-01T00:00:00Z",
                     "last_check": None,
                 }
             )
         )
-        runner, calls = _spy_runner(_BEHIND)
+        runner, _ = _spy_runner(_UNANSWERABLE)
 
         assert hook.check_and_render(env=env, runner=runner) is None
-        assert calls == []
 
     def test_userprofile_alone_confines_like_home_does(self, tmp_path):
         env = {
@@ -291,8 +266,6 @@ class TestQuietOutcomes:
                 {
                     "checkout": str(checkout),
                     "sha": _SHA,
-                    "branch": _BRANCH,
-                    "origin_url": _ORIGIN_URL,
                     "wired_at": "2026-01-01T00:00:00Z",
                     "last_check": None,
                 }
@@ -693,3 +666,36 @@ class TestFenceRunsSeparatedByInvisibleCharacters:
 
     def test_plain_prose_backticks_are_untouched(self):
         assert hook._neutralize_fence("run `trailhead update`") == "run `trailhead update`"
+
+
+class TestVerdictNamesTheRightGap:
+    """The notice reports the two hops separately: the install against the
+    checkout it was wired from, and the checkout against its tracked branch.
+    Reporting one count as the other misnames what the reader has to do."""
+
+    def _render(self, tmp_path, *, commits_behind, install_behind):
+        env = _env(tmp_path)
+        checkout = _checkout(tmp_path)
+        _write_stamp(tmp_path, env, checkout)
+        result = {
+            **_BEHIND,
+            "commits_behind": commits_behind,
+            "install_commits_behind": install_behind,
+        }
+        runner, _ = _spy_runner(result)
+        return hook.check_and_render(env=env, runner=runner)
+
+    def test_stale_install_names_the_checkout_gap(self, tmp_path):
+        out = self._render(tmp_path, commits_behind=0, install_behind=4)
+        assert "install is 4 commits behind" in out
+        assert "checkout is" not in out
+
+    def test_stale_checkout_names_the_branch_gap(self, tmp_path):
+        out = self._render(tmp_path, commits_behind=3, install_behind=0)
+        assert "checkout is 3 commits behind" in out
+        assert "install is" not in out
+
+    def test_both_gaps_are_reported(self, tmp_path):
+        out = self._render(tmp_path, commits_behind=3, install_behind=1)
+        assert "install is 1 commit behind" in out
+        assert "checkout is 3 commits behind" in out

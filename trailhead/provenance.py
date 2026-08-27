@@ -5,23 +5,29 @@ source checkout.
 COMPOSED destination, never the source checkout it was composed from
 (trailhead/wire.py's compose-then-promote path always copies). This module is
 the only durable pointer back the other way: `trailhead install` writes a
-stamp recording where it was run FROM — the checkout path, its HEAD sha,
-tracked upstream branch, and `origin` URL — as JSON under
-`state_dir("trailhead")`, and a later SessionStart hook reads it through
-`read_stamp()` to find the checkout to probe for updates.
+stamp as JSON under `state_dir("trailhead")`, and a later SessionStart hook
+reads it through `read_stamp()` to find the checkout to probe for updates.
+
+The stamp records ONLY what cannot be re-derived from the checkout itself:
+the checkout path (a process running outside the checkout has no other way
+to find it) and the HEAD sha that was actually wired (an install snapshots
+the plugin trees rather than pointing at them, so the wired sha diverges
+from the checkout's HEAD once the checkout is pulled without re-running
+install). The tracked upstream branch and the `origin` URL are read live
+from the checkout at check time — deriving them keeps every value that
+reaches a git argv position sourced from git itself rather than from a
+rewritable file.
 
 `read_stamp()` is the ONLY sanctioned way to consume the stamp: it validates
 the stamped checkout path against a confinement root (the user's home, or
 `USERPROFILE` on Windows, by default) before returning anything, because a
 rewritten stamp file is otherwise a lever to redirect a later consumer's exec
-anywhere on disk. It also rejects any stamp field that reaches a later git
-invocation as a bare positional (`branch`, `sha`) unless it is shaped so it
-can never be parsed as an option — the general rule behind both checks is
-that no value read from this stamp may reach a git argv position without
-being validated to a shape that cannot be parsed as an option. A path outside
-the root, or an option-shaped `branch`/`sha`, reads as no stamp at all;
-`read_stamp_with_reason()` additionally reports WHY a present-but-rejected
-stamp was refused, distinguishing that case from a genuinely absent one.
+anywhere on disk, and it requires `sha` to be exactly 40 hex characters — the
+one stamped value that reaches git as a bare positional, and a shape that can
+never be parsed as an option. A path outside the root, or a malformed `sha`,
+reads as no stamp at all; `read_stamp_with_reason()` additionally reports WHY
+a present-but-rejected stamp was refused, distinguishing that case from a
+genuinely absent one.
 
 The stamp also carries the outcome of the last update check (`record_check_
 outcome`) — ok / behind / unanswerable, plus a redacted reason and a
@@ -54,9 +60,8 @@ STAMP_FILENAME = "provenance.json"
 
 
 class GitProbeError(Exception):
-    """Raised when a checkout's HEAD, tracked upstream, or origin URL cannot
-    be resolved (e.g. no commits, no upstream configured, no `origin`
-    remote)."""
+    """Raised when a checkout's HEAD sha cannot be resolved (e.g. no commits,
+    or not a git checkout at all)."""
 
 
 def stamp_path(*, env: dict[str, str] | None = None) -> Path:
@@ -116,11 +121,10 @@ def _git(checkout: Path, *args: str, runner, timeout: int = 10):
     )
 
 
-def _probe_git(checkout: Path, *, runner) -> tuple[str, str, str]:
-    """Return (sha, tracked_branch, origin_url) for *checkout*.
+def _probe_head_sha(checkout: Path, *, runner) -> str:
+    """Return *checkout*'s HEAD sha.
 
-    Raises GitProbeError naming the failed stage if HEAD, the upstream
-    branch, or the `origin` remote can't be resolved — deliberately fatal to
+    Raises GitProbeError if HEAD can't be resolved — deliberately fatal to
     the *stamp write*, not to the install: the caller (`write_stamp`) turns
     this into a warning rather than an install failure.
     """
@@ -130,26 +134,7 @@ def _probe_git(checkout: Path, *, runner) -> tuple[str, str, str]:
         raise GitProbeError(
             f"could not resolve HEAD for {checkout}: {(sha_proc.stderr or '').strip()}"
         )
-
-    branch_proc = _git(
-        checkout, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}", runner=runner
-    )
-    branch = (branch_proc.stdout or "").strip()
-    if branch_proc.returncode != 0 or not branch:
-        raise GitProbeError(
-            f"could not resolve the tracked upstream branch for {checkout}: "
-            f"{(branch_proc.stderr or '').strip()}"
-        )
-
-    origin_proc = _git(checkout, "remote", "get-url", "origin", runner=runner)
-    origin_url = (origin_proc.stdout or "").strip()
-    if origin_proc.returncode != 0 or not origin_url:
-        raise GitProbeError(
-            f"could not resolve the `origin` remote for {checkout}: "
-            f"{(origin_proc.stderr or '').strip()}"
-        )
-
-    return sha, branch, origin_url
+    return sha
 
 
 # ---------------------------------------------------------------------------
@@ -200,8 +185,7 @@ def write_stamp(checkout: Path, *, env: dict[str, str] | None = None, runner=Non
     checkout's current HEAD, never appends).
 
     Returns a human-readable warning string, and writes NOTHING, if the
-    checkout's git state (HEAD / tracked upstream / origin) can't be
-    resolved — this is deliberately a warning the caller may surface, never
+    checkout's HEAD can't be resolved — this is deliberately a warning the caller may surface, never
     a raised error: an install must succeed even when provenance can't be
     recorded. This covers a raised ``GitProbeError`` (git ran but its output
     didn't resolve) as well as git being entirely unavailable (``OSError``)
@@ -212,15 +196,13 @@ def write_stamp(checkout: Path, *, env: dict[str, str] | None = None, runner=Non
     _runner = runner if runner is not None else _default_runner()
 
     try:
-        sha, branch, origin_url = _probe_git(checkout, runner=_runner)
+        sha = _probe_head_sha(checkout, runner=_runner)
     except (GitProbeError, OSError, subprocess.TimeoutExpired) as exc:
         return f"could not record install provenance for {checkout}: {exc}"
 
     stamp = {
         "checkout": str(checkout),
         "sha": sha,
-        "branch": branch,
-        "origin_url": redact_credentials(origin_url),
         "wired_at": _now_iso(),
         "last_check": None,
     }
@@ -229,7 +211,6 @@ def write_stamp(checkout: Path, *, env: dict[str, str] | None = None, runner=Non
 
 
 _SHA_RE = re.compile(r"\A[0-9a-f]{40}\Z")
-_CONTROL_IN_FIELD_RE = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 
 
 def read_stamp(
@@ -239,7 +220,7 @@ def read_stamp(
     stamped checkout path resolves outside the confinement root.
 
     Never raises: any read/parse failure — missing file, garbage bytes,
-    wrong shape, an option-shaped `branch`/`sha` — reads as `None`. The
+    wrong shape, a malformed `sha` — reads as `None`. The
     checkout confinement is the one check every consumer relies on: nothing
     outside `confine_root` (the user's home directory by default) is ever
     returned, because a later consumer execs out of this path. Confinement
@@ -264,8 +245,8 @@ def read_stamp_with_reason(
     `rejected_reason` is `None` whenever the stamp is entirely absent (no
     file on disk) OR fully valid (`stamp` is returned). It is a short,
     human-readable string ONLY when a stamp file exists on disk but was
-    rejected — malformed JSON, missing/wrong-typed fields, an option-shaped
-    `branch`/`sha`, or a checkout path outside the confinement root — so a
+    rejected — malformed JSON, missing/wrong-typed fields, a malformed
+    `sha`, or a checkout path outside the confinement root — so a
     caller can tell "never installed" apart from "installed, but the stamp
     is unusable" (a distinction that matters because the latter is a sign
     something is actively wrong, not merely unset).
@@ -286,27 +267,14 @@ def read_stamp_with_reason(
     if not isinstance(data, dict):
         return None, "the provenance stamp is not a JSON object"
 
-    required = ("checkout", "sha", "branch", "origin_url", "wired_at")
+    required = ("checkout", "sha", "wired_at")
     if not all(isinstance(data.get(k), str) and data.get(k) for k in required):
         return None, "the provenance stamp is missing required fields"
 
-    # `branch` is passed as a bare positional to `git fetch`/`rev-parse`/`merge`/
-    # `merge-base` elsewhere (trailhead/update.py). A value shaped like a git
-    # option (leading `-`) is parsed by git as an OPTION, not a ref name — for
-    # `git fetch` this includes `--upload-pack=<command>`, which git executes.
-    # An option-shaped branch is rejected outright.
-    if data["branch"].startswith("-"):
-        return None, "the provenance stamp's branch field is option-shaped"
-
-    # A control character in a value bound for an argv position never belongs
-    # in a ref name, and an embedded NUL makes `subprocess` raise while
-    # building argv — a crash where the contract promises a clean refusal.
-    if _CONTROL_IN_FIELD_RE.search(data["branch"]):
-        return None, "the provenance stamp's branch field carries a control character"
-
-    # `sha` reaches `git diff` as a bare positional (`_extract_changelog_delta`).
-    # A real git sha is always exactly 40 hex characters, which can never start
-    # with `-`; anything else — including an option like `--output=<path>`,
+    # `sha` is the one stamped value that reaches git as a bare positional
+    # (`_extract_changelog_delta`'s `git diff`). A real git sha is always
+    # exactly 40 hex characters, which can never start with `-`; anything
+    # else — including an option like `--output=<path>`,
     # which `git diff` would otherwise happily execute as a write target — is
     # rejected outright rather than merely checked for a leading dash, closing
     # the whole option-shape class for this field rather than one example of it.

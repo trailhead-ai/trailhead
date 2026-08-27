@@ -131,7 +131,16 @@ def _cmd_update(args: argparse.Namespace) -> int:
     if outcome == "ok":
         print(f"trailhead: up to date (installed {short_sha})")
     elif outcome == "behind":
-        print(f"trailhead: {result['commits_behind']} commit(s) behind (installed {short_sha})")
+        gaps = []
+        if result["install_commits_behind"]:
+            gaps.append(
+                f"install is {result['install_commits_behind']} commit(s) behind the checkout"
+            )
+        if result["commits_behind"]:
+            gaps.append(
+                f"checkout is {result['commits_behind']} commit(s) behind its tracked branch"
+            )
+        print(f"trailhead: {'; '.join(gaps)} (installed {short_sha})")
     else:
         print(f"trailhead: update check inconclusive: {result['reason']}")
     return 0

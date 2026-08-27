@@ -5,6 +5,19 @@ format described by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+- The install provenance stamp now records only the checkout path and the
+  commit that was wired — the two values that cannot be re-derived later. The
+  tracked upstream branch and the `origin` URL are read live from the checkout
+  at check time, so no value a rewritable file controls reaches a git argument
+  position any more. `trailhead update --check --json` moves to schema
+  version 3.
+- `trailhead update` now reports the two gaps separately: how far your install
+  is behind the checkout it was wired from, and how far that checkout is
+  behind its tracked branch. Previously the checkout-versus-branch count was
+  reported as though it were the install's, and an install left stale by a
+  manual `git pull` was reported as up to date. Applying an upgrade in that
+  state now re-wires instead of doing nothing.
+
 - Closed a fence-containment bypass in the changelog delta shown at session
   start. The sanitizer preserves ZWJ and the directionality marks so emoji
   sequences and bidi prose render correctly, but those codepoints are
@@ -13,25 +26,19 @@ format described by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   closing fence. Any run of three or more backticks joined only by
   zero-width or directionality codepoints is now neutralized, in both the
   producer and the hook's independent re-check.
-- The provenance stamp's `branch` field is rejected if it carries a control
-  character: an embedded NUL passed the option-shape check and then made
-  `subprocess` raise while building argv, crashing `trailhead update`
-  instead of reporting an unanswerable result.
 - The stamp's `sha` validator is anchored with `\A`/`\Z`, so a value with a
   trailing newline is no longer accepted as an exact 40-character sha.
 
 - Fixed two critical argument-injection vulnerabilities in `trailhead update`,
   both reachable unattended from the SessionStart hook: an option-shaped
-  `branch` in the install provenance stamp (e.g. `--upload-pack=<command>`)
-  could be parsed by `git fetch` as an option and execute an
-  attacker-supplied command; an option-shaped `sha` (e.g.
-  `--output=<path>`) could be parsed by `git diff` as an option and
-  overwrite an arbitrary file. `git fetch`/`merge`/`merge-base` now insert
-  `--` before every stamp-derived positional, and the stamp's `branch` and
-  `sha` fields are each rejected outright if shaped like an option — the
-  general rule is that no value read from the stamp may reach a git argv
-  position without being validated to a shape that cannot be parsed as an
-  option.
+  branch name (e.g. `--upload-pack=<command>`) could be parsed by `git fetch`
+  as an option and execute an attacker-supplied command; an option-shaped
+  `sha` (e.g. `--output=<path>`) could be parsed by `git diff` as an option
+  and overwrite an arbitrary file. `git fetch`/`merge`/`merge-base` now insert
+  `--` before every ref positional, and the stamp's `sha` is rejected outright
+  unless it is exactly 40 hex characters — the general rule is that no value
+  read from the stamp may reach a git argv position without being validated to
+  a shape that cannot be parsed as an option.
 - Fixed `trailhead update`'s rollback guarantee: a failing `claude plugin
   install` call (registering the marketplace, installing a tool, or the
   install half of a rewire) is now detected via its returncode and raises,
@@ -40,20 +47,17 @@ format described by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   that never happened. A failing `claude plugin uninstall` remains tolerated
   by design — a rewire's uninstall half and a plain uninstall's own call are
   both self-heal steps that must not block the install/removal that follows.
-- `trailhead update` now refuses to upgrade if the checkout's `origin` remote
-  has changed since install (mirroring `--check`'s existing refusal),
-  resolves its config before mutating anything, rolls a failed re-wire back
+- `trailhead update` now resolves its config before mutating anything, rolls a failed re-wire back
   to the checkout's actual pre-upgrade HEAD (rather than the stamped sha),
   and reports rollback failures truthfully instead of always claiming
   success.
-- The install provenance stamp no longer persists an unredacted `origin_url`
-  (previously visible via `trailhead doctor --json`); credential redaction
-  now also covers the bare-token HTTPS form and `ssh://` URLs. The stamp's
+- Credential redaction in reported git errors now also covers the bare-token
+  HTTPS form and `ssh://` URLs. The stamp's
   checkout-path confinement check now fails closed when neither `HOME` nor
   `USERPROFILE` is set, matching the SessionStart hook's own independent
   check, and accepts `USERPROFILE` alongside `HOME` so the feature isn't
   silently disabled on Windows. A stamp that exists but was rejected
-  (confinement, an option-shaped field, malformed JSON) is now reported
+  (confinement, a malformed `sha`, malformed JSON) is now reported
   distinctly from one that was never written, in `trailhead update --check`,
   `trailhead update`, and `trailhead doctor`.
 - The changelog-delta sanitizer used by `trailhead update --check` now also

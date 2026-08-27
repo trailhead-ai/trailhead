@@ -88,8 +88,8 @@ harness data dir survive a later re-install).
 
 ## Staying up to date
 
-`trailhead install` writes a small provenance stamp (checkout path, wired
-commit, tracked branch, `origin` URL) recording where the install came from.
+`trailhead install` writes a small provenance stamp — just the checkout path
+and the commit that was wired, the two things that can't be re-derived later.
 `trailhead update` reads it back:
 
 ```sh
@@ -99,8 +99,12 @@ trailhead update --yes      # same, without the interactive confirmation
 ```
 
 `--check` runs a read-only `git fetch` against the stamped checkout (throttled
-to at most once every 24h) and reports whether it's behind, plus the added
-lines of `CHANGELOG.md` between your installed commit and the tracked branch.
+to at most once every 24h) and reports two gaps: how far your install is
+behind the checkout it was wired from, and how far that checkout is behind its
+tracked branch. They move independently — pulling the checkout without
+re-running `install` widens the first and closes the second. It also reports
+the added lines of `CHANGELOG.md` between your installed commit and the
+tracked branch.
 Applying the upgrade always asks for confirmation first (or requires `--yes`
 non-interactively) — nothing is ever pulled or re-wired without it. If a
 re-wire fails partway through, the checkout is rolled back to its pre-upgrade
