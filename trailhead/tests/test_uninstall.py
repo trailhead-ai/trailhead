@@ -255,3 +255,42 @@ class TestComposedTreeBlastRadius:
 
         assert rc == 0
         assert not root.exists()
+
+
+class TestProvenanceStampRemoval:
+    def test_uninstall_removes_the_provenance_stamp(self, tmp_path):
+        import subprocess
+
+        from trailhead.provenance import read_stamp, stamp_path, write_stamp
+
+        env = _env(tmp_path)
+        checkout = tmp_path / "home" / "checkout"
+        checkout.mkdir(parents=True)
+
+        def runner_git(args, **kw):
+            sub = args[3]
+            if sub == "rev-parse" and args[4] == "HEAD":
+                return subprocess.CompletedProcess(args, 0, stdout="f" * 40 + "\n", stderr="")
+            if sub == "rev-parse":
+                return subprocess.CompletedProcess(args, 0, stdout="origin/main\n", stderr="")
+            return subprocess.CompletedProcess(
+                args, 0, stdout="https://example.com/r.git\n", stderr=""
+            )
+
+        write_stamp(checkout, env=env, runner=runner_git)
+        assert stamp_path(env=env).is_file()
+
+        _make_harness_tree(tmp_path, "claude_code", ["lore"])
+        with _recording() as (calls, runner, _):
+            rc = run_uninstall(env=env, assume_yes=True, runner=runner)
+
+        assert rc == 0
+        assert not stamp_path(env=env).exists()
+        assert read_stamp(env=env) is None
+
+    def test_uninstall_with_no_stamp_does_not_raise(self, tmp_path):
+        env = _env(tmp_path)
+        _make_harness_tree(tmp_path, "claude_code", ["lore"])
+        with _recording() as (calls, runner, _):
+            rc = run_uninstall(env=env, assume_yes=True, runner=runner)
+        assert rc == 0

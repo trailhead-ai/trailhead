@@ -32,13 +32,18 @@ def _env(tmp_path: Path) -> dict[str, str]:
 
 
 @contextmanager
-def _patched(*, detected=None, lore_init_rc=0, lore_init_stderr=""):
-    """Patch wire, create_shims, detect_harnesses, run_lore_init.
+def _patched(*, detected=None, lore_init_rc=0, lore_init_stderr="", stamp_warning=None):
+    """Patch wire, create_shims, detect_harnesses, run_lore_init, write_stamp.
 
     ``run_lore_init`` is ALWAYS patched (Axiom 6): these tests must never
     invoke the real ``lore init`` against the user's vault/state. The default
     stub reports success; tests that exercise the failure path pass a non-zero
     ``lore_init_rc`` + ``lore_init_stderr``.
+
+    ``write_stamp`` is likewise ALWAYS patched: it otherwise shells out to the
+    real git checkout this test suite lives in. The default stub reports
+    success (no warning); pass ``stamp_warning`` to exercise the unresolved-
+    HEAD path.
     """
     sdr = ShimDirResult(shim_dir=Path("/shim/bin"), shims={})
     lore_result = (lore_init_rc, lore_init_stderr)
@@ -50,12 +55,14 @@ def _patched(*, detected=None, lore_init_rc=0, lore_init_stderr=""):
             return_value=([ClaudeCodeHarness()] if detected else []),
         ) as detect_mock,
         patch("trailhead.install.run_lore_init", return_value=lore_result) as lore_mock,
+        patch("trailhead.install.write_stamp", return_value=stamp_warning) as stamp_mock,
     ):
         yield {
             "wire": wire_mock,
             "pathint": pathint_mock,
             "detect": detect_mock,
             "lore_init": lore_mock,
+            "write_stamp": stamp_mock,
         }
 
 
@@ -659,3 +666,32 @@ class TestRulesetInstall:
         assert rc == 0
         assert harness.ruleset_calls == []
         assert "could not install the outpost ruleset" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------
+# Install provenance stamp
+# ---------------------------------------------------------------------------
+
+
+class TestProvenanceStampIntegration:
+    def test_install_writes_a_provenance_stamp_after_wiring(self, tmp_path):
+        with _patched(detected=True) as m:
+            rc = run_install(env=_env(tmp_path), quiet=True)
+        assert rc == 0
+        m["write_stamp"].assert_called_once()
+        args, kwargs = m["write_stamp"].call_args
+        assert Path(args[0]).is_dir()  # the checkout path (repo root)
+
+    def test_unresolvable_head_prints_a_warning_but_install_still_succeeds(
+        self, tmp_path, capsys
+    ):
+        with _patched(detected=True, stamp_warning="could not record install provenance: boom"):
+            rc = run_install(env=_env(tmp_path), quiet=True)
+        assert rc == 0
+        err = capsys.readouterr().err
+        assert "could not record install provenance" in err
+
+    def test_no_harness_skips_the_provenance_stamp(self, tmp_path):
+        with _patched(detected=False) as m:
+            run_install(env=_env(tmp_path), quiet=True)
+        m["write_stamp"].assert_not_called()

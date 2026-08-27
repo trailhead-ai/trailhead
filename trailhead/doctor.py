@@ -34,6 +34,7 @@ from trailhead.capabilities import ConfineError, ManifestError, cli_bearing_mani
 from trailhead.harness import HarnessError, get_harness
 from trailhead.pathint import resolve_shim_dir, trailhead_bin_executable
 from trailhead.paths import state_dir
+from trailhead.provenance import read_stamp
 from trailhead.wire import default_manifest_paths
 
 
@@ -174,6 +175,7 @@ def run_doctor(
         "clis": clis,
         "trailhead": _trailhead_field(_which("trailhead")),
         "python3_version": _python_version(_pyrunner),
+        "provenance": read_stamp(env=_env),
     }
 
     return DoctorResult(data=data, human_output=_build_human(data), exit_code=0)
@@ -229,5 +231,31 @@ def _build_human(data: dict) -> str:
         f"  shim dir: {data['shim_dir']} ({'present' if data['shim_dir_present'] else 'absent'})"
     )
     lines.append(f"  python3: {data['python3_version']}")
+    lines.append("")
+    lines.extend(_build_provenance_human(data["provenance"]))
 
     return "\n".join(lines)
+
+
+def _build_provenance_human(provenance: Optional[dict]) -> list[str]:
+    """Render the `install provenance:` block: the stamped checkout + HEAD,
+    and the outcome of the last update check, when present."""
+    if provenance is None:
+        return ["  install provenance: no install provenance recorded"]
+
+    lines = [
+        "  install provenance:",
+        f"    checkout: {provenance['checkout']}",
+        f"    wired at: {provenance['sha']} ({provenance['branch']}, {provenance['wired_at']})",
+    ]
+    last_check = provenance.get("last_check")
+    if last_check is None:
+        lines.append("    last update check: no update check has run yet")
+    else:
+        outcome = last_check["outcome"]
+        checked_at = last_check.get("checked_at", "")
+        reason = last_check.get("reason")
+        detail = f" — {reason}" if reason else ""
+        lines.append(f"    last update check: {outcome} ({checked_at}){detail}")
+
+    return lines

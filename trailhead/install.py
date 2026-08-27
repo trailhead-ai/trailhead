@@ -52,6 +52,7 @@ from trailhead.install_config import (
     resolve_config_path,
 )
 from trailhead.pathint import create_shims, repo_root, trailhead_bin_executable
+from trailhead.provenance import write_stamp
 from trailhead.wire import LockError, WireError, default_manifest_paths, wire, wire_lock
 
 _REPO_ROOT = repo_root()
@@ -246,6 +247,16 @@ def run_install(
         except WireError as exc:
             print(f"trailhead: {exc}", file=sys.stderr)
             return 1
+
+        # --------------------------------------------------------------
+        # Record install provenance — the only durable pointer from this
+        # install back to the checkout it was run from. A checkout whose git
+        # state can't be resolved (no commits, no upstream, no `origin`) is
+        # a warning, never a reason to fail an otherwise-successful install.
+        # --------------------------------------------------------------
+        stamp_warning = write_stamp(_REPO_ROOT, env=_env)
+        if stamp_warning:
+            print(f"trailhead: {stamp_warning}", file=sys.stderr)
 
     # ------------------------------------------------------------------
     # Install each wired plugin's declared user-level ruleset into every
