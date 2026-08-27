@@ -36,6 +36,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import subprocess
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -85,9 +86,13 @@ def redact_credentials(text: str) -> str:
 
 
 def _default_runner():
-    def runner(args, **kw):
-        import subprocess
+    """Build the default injectable git runner.
 
+    Shared with `trailhead.update`, which imports it rather than restating it,
+    so both modules invoke git through exactly one code path.
+    """
+
+    def runner(args, **kw):
         return subprocess.run(args, **kw)
 
     return runner
@@ -143,16 +148,18 @@ def _probe_git(checkout: Path, *, runner) -> tuple[str, str, str]:
 # ---------------------------------------------------------------------------
 
 
-def _atomic_write_json(path: Path, data: dict) -> None:
+def _atomic_write_json(path: Path, data: dict, *, prefix: str = ".provenance-") -> None:
     """Write *data* to *path* as JSON, atomically.
 
-    Writes to a temp file in the SAME directory (so the final `os.replace` is
-    a same-filesystem rename, never a cross-device copy), then replaces
-    *path* in one step. A failure at any point before the replace leaves
-    *path* completely untouched — the previous stamp, if any, survives intact.
+    Writes to a temp file named *prefix* in the SAME directory (so the final
+    `os.replace` is a same-filesystem rename, never a cross-device copy), then
+    replaces *path* in one step. A failure at any point before the replace
+    leaves *path* completely untouched — the previous file, if any, survives
+    intact. Shared with `trailhead.update`, which passes its own *prefix* for
+    the freshness stamp it writes into the same state dir.
     """
     ensure_dir(path.parent, mode=0o700)
-    fd, tmp_name = tempfile.mkstemp(prefix=".provenance-", dir=str(path.parent))
+    fd, tmp_name = tempfile.mkstemp(prefix=prefix, dir=str(path.parent))
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(data, f)
@@ -168,6 +175,7 @@ def _atomic_write_json(path: Path, data: dict) -> None:
 
 
 def _now_iso() -> str:
+    """The one UTC timestamp format every trailhead state file is written in."""
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 

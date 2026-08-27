@@ -219,23 +219,36 @@ def wire_all_harnesses(
     return wired
 
 
-def resolve_config_for_env(env: dict[str, str]):
-    """Resolve the install config the same way a plain `trailhead install` would.
+def resolve_config_for_env(
+    env: dict[str, str],
+    *,
+    config_arg: str | None = None,
+    harnesses: list[str] | None = None,
+    plugins: list[str] | None = None,
+    no_camp: bool = False,
+    no_lore: bool = False,
+    no_portage: bool = False,
+):
+    """Resolve the install config: config file + CLI overrides + detection.
 
-    No CLI overrides — harness/plugin selection comes from auto-detection plus
-    the config file, exactly as an unqualified `trailhead install` run resolves
-    it. Used by apply-mode re-wiring (`trailhead update`) to recompose the same
-    selection a fresh install would.
+    The single config-resolution path. Called with no keyword overrides it
+    resolves exactly what an unqualified `trailhead install` would, which is
+    what apply-mode re-wiring (`trailhead update`) needs to recompose the same
+    selection a fresh install would; `run_install` passes its own CLI
+    overrides through the same call.
+
+    Raises ``ConfigResolveError`` / ``UnknownSubagentError`` /
+    ``UnknownSkillError`` — the caller decides how to surface them.
     """
     detected = [h.name for h in detect_harnesses(env)]
-    config_path = resolve_config_path(None, _REPO_ROOT)
+    config_path = resolve_config_path(config_arg, _REPO_ROOT)
     return resolve_config(
         config_path=config_path,
-        cli_harnesses=None,
-        cli_plugins=None,
-        no_camp=False,
-        no_lore=False,
-        no_portage=False,
+        cli_harnesses=harnesses,
+        cli_plugins=plugins,
+        no_camp=no_camp,
+        no_lore=no_lore,
+        no_portage=no_portage,
         detected_harnesses=detected,
     )
 
@@ -262,17 +275,15 @@ def run_install(
     # ------------------------------------------------------------------
     # Resolve config (file + CLI overrides + detection)
     # ------------------------------------------------------------------
-    detected = [h.name for h in detect_harnesses(_env)]
-    config_path = resolve_config_path(config_arg, _REPO_ROOT)
     try:
-        cfg = resolve_config(
-            config_path=config_path,
-            cli_harnesses=harnesses,
-            cli_plugins=plugins,
+        cfg = resolve_config_for_env(
+            _env,
+            config_arg=config_arg,
+            harnesses=harnesses,
+            plugins=plugins,
             no_camp=no_camp,
             no_lore=no_lore,
             no_portage=no_portage,
-            detected_harnesses=detected,
         )
     except (ConfigResolveError, UnknownSubagentError, UnknownSkillError) as exc:
         print(f"trailhead: {exc}", file=sys.stderr)

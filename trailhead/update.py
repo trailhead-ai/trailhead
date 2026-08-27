@@ -80,13 +80,24 @@ import os
 import re
 import subprocess
 import sys
-import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
 from trailhead.install import resolve_config_for_env, wire_all_harnesses
-from trailhead.paths import ensure_dir, state_dir
-from trailhead.provenance import read_stamp, record_check_outcome, redact_credentials, write_stamp
+from trailhead.paths import state_dir
+
+# State-file plumbing is shared with `trailhead.provenance` rather than
+# restated here: both modules write JSON into the same state dir, stamp the
+# same timestamp format, and shell out to git through the same runner shape.
+from trailhead.provenance import (
+    _atomic_write_json,
+    _default_runner,
+    _now_iso,
+    read_stamp,
+    record_check_outcome,
+    redact_credentials,
+    write_stamp,
+)
 from trailhead.wire import LockError, wire_lock
 
 SCHEMA_VERSION = 2
@@ -105,13 +116,6 @@ _ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]|\x1b[@-Z\\-_]")
 _CONTROL_CHAR_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 
 
-def _default_runner():
-    def runner(args, **kw):
-        return subprocess.run(args, **kw)
-
-    return runner
-
-
 # ---------------------------------------------------------------------------
 # Freshness stamp — attempted-at, not succeeded-at
 # ---------------------------------------------------------------------------
@@ -121,28 +125,6 @@ def freshness_stamp_path(*, env: dict[str, str] | None = None) -> Path:
     """Return the freshness-throttle stamp path: state_dir("trailhead")/update-check.json."""
     _env = env if env is not None else dict(os.environ)
     return state_dir("trailhead", env=_env) / FRESHNESS_STAMP_FILENAME
-
-
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
-def _atomic_write_json(path: Path, data: dict) -> None:
-    """Write *data* to *path* as JSON, atomically (temp file + os.replace)."""
-    ensure_dir(path.parent, mode=0o700)
-    fd, tmp_name = tempfile.mkstemp(prefix=".update-check-", dir=str(path.parent))
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(data, f)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp_name, path)
-    except BaseException:
-        try:
-            os.unlink(tmp_name)
-        except OSError:
-            pass
-        raise
 
 
 def _fetch_is_fresh(env: dict[str, str], window: int) -> bool:
@@ -168,7 +150,9 @@ def _stamp_fetch_attempt(env: dict[str, str]) -> None:
     near-simultaneous callers each replace the file wholesale, so the file on
     disk is always exactly one well-formed JSON object.
     """
-    _atomic_write_json(freshness_stamp_path(env=env), {"attempted_at": _now_iso()})
+    _atomic_write_json(
+        freshness_stamp_path(env=env), {"attempted_at": _now_iso()}, prefix=".update-check-"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -186,6 +170,24 @@ def _run_git(checkout: Path, *args: str, runner, timeout: int):
         )
     except subprocess.TimeoutExpired:
         return None
+
+
+def _proc_stderr(proc) -> str:
+    """Render a git invocation's stderr for a user-facing reason string.
+
+    Credentials are redacted here so no caller can forget to; a `None` proc
+    means `_run_git` swallowed a timeout.
+    """
+    return redact_credentials((proc.stderr or "").strip()) if proc is not None else "timed out"
+
+
+def _remote_name(stamped_branch: str) -> str:
+    """The remote to fetch from, derived from the stamped tracked branch.
+
+    A tracked branch is normally `<remote>/<branch>`; a bare branch name with
+    no remote prefix falls back to `origin`.
+    """
+    return stamped_branch.split("/", 1)[0] if "/" in stamped_branch else "origin"
 
 
 def _unavailable_delta() -> dict:
@@ -242,23 +244,6 @@ def _extract_changelog_delta(
     return {"available": True, "lines": added, "truncated": truncated}
 
 
-def _result(
-    outcome: str,
-    commits_behind: int | None,
-    installed_sha: str | None,
-    reason: str | None,
-    changelog_delta: dict | None = None,
-) -> dict:
-    return {
-        "schema_version": SCHEMA_VERSION,
-        "outcome": outcome,
-        "commits_behind": commits_behind,
-        "installed_sha": installed_sha,
-        "reason": reason,
-        "changelog_delta": changelog_delta if changelog_delta is not None else _unavailable_delta(),
-    }
-
-
 def _finish(
     outcome: str,
     commits_behind: int | None,
@@ -267,9 +252,19 @@ def _finish(
     env: dict[str, str],
     changelog_delta: dict | None = None,
 ) -> dict:
+    """Record the check outcome onto the provenance stamp and return the
+    pinned schema-v2 result. Every `check_for_update` exit goes through here,
+    so no outcome can reach a caller without also being recorded."""
     redacted_reason = redact_credentials(reason) if reason else None
     record_check_outcome(outcome, reason=redacted_reason, env=env)
-    return _result(outcome, commits_behind, installed_sha, redacted_reason, changelog_delta)
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "outcome": outcome,
+        "commits_behind": commits_behind,
+        "installed_sha": installed_sha,
+        "reason": redacted_reason,
+        "changelog_delta": changelog_delta if changelog_delta is not None else _unavailable_delta(),
+    }
 
 
 def check_for_update(
@@ -300,9 +295,12 @@ def check_for_update(
 
     origin_proc = _run_git(checkout, "remote", "get-url", "origin", runner=_runner, timeout=timeout)
     if origin_proc is None or origin_proc.returncode != 0 or not (origin_proc.stdout or "").strip():
-        stderr = (origin_proc.stderr or "").strip() if origin_proc else "timed out"
         return _finish(
-            "unanswerable", None, installed_sha, f"could not resolve origin remote: {stderr}", _env
+            "unanswerable",
+            None,
+            installed_sha,
+            f"could not resolve origin remote: {_proc_stderr(origin_proc)}",
+            _env,
         )
 
     current_origin = origin_proc.stdout.strip()
@@ -315,15 +313,18 @@ def check_for_update(
             _env,
         )
 
-    remote_name = stamped_branch.split("/", 1)[0] if "/" in stamped_branch else "origin"
+    remote_name = _remote_name(stamped_branch)
 
     if not _fetch_is_fresh(_env, window):
         _stamp_fetch_attempt(_env)
         fetch_proc = _run_git(checkout, "fetch", "--quiet", remote_name, runner=_runner, timeout=timeout)
         if fetch_proc is None or fetch_proc.returncode != 0:
-            stderr = (fetch_proc.stderr or "").strip() if fetch_proc else "timed out"
             return _finish(
-                "unanswerable", None, installed_sha, f"git fetch failed: {stderr}", _env
+                "unanswerable",
+                None,
+                installed_sha,
+                f"git fetch failed: {_proc_stderr(fetch_proc)}",
+                _env,
             )
 
     count_proc = _run_git(
@@ -331,12 +332,11 @@ def check_for_update(
     )
     stdout = (count_proc.stdout or "").strip() if count_proc else ""
     if count_proc is None or count_proc.returncode != 0 or not stdout:
-        stderr = (count_proc.stderr or "").strip() if count_proc else "timed out"
         return _finish(
             "unanswerable",
             None,
             installed_sha,
-            f"could not determine commits behind: {stderr}",
+            f"could not determine commits behind: {_proc_stderr(count_proc)}",
             _env,
         )
 
@@ -373,10 +373,6 @@ def _confirm(prompt: str) -> bool:
     except (EOFError, KeyboardInterrupt):
         return False
     return raw.strip().lower() in ("y", "yes")
-
-
-def _proc_stderr(proc) -> str:
-    return redact_credentials((proc.stderr or "").strip()) if proc is not None else "timed out"
 
 
 def run_update_apply(
@@ -422,7 +418,7 @@ def run_update_apply(
     checkout = Path(stamp["checkout"])
     pre_sha = stamp["sha"]
     stamped_branch = stamp["branch"]
-    remote_name = stamped_branch.split("/", 1)[0] if "/" in stamped_branch else "origin"
+    remote_name = _remote_name(stamped_branch)
 
     # ------------------------------------------------------------------
     # Consent gate — technical, not a courtesy. Nothing below this point may
