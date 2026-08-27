@@ -829,6 +829,50 @@ class TestRealReadmeInverseScan:
         )
 
 
+# Excluded directories for the repo-wide markdown sweep below.
+_MD_SWEEP_EXCLUDED_DIRS = frozenset(
+    {".git", ".venv", "trailhead.egg-info", "__pycache__", "node_modules"}
+)
+
+
+def find_all_markdown_files(repo_root: Path) -> list[Path]:
+    """Every `.md` file in the repo, excluding VCS/venv/build directories.
+
+    Sorted for determinism.
+    """
+    return sorted(
+        p
+        for p in repo_root.rglob("*.md")
+        if not any(part in _MD_SWEEP_EXCLUDED_DIRS for part in p.parts)
+    )
+
+
+class TestRemovedInstallManifestDocHasNoDanglingLinks:
+    """Repo-wide extension of the inverse link check: the retired install-manifest
+    doc must be gone, and no markdown file anywhere in the repo may carry a
+    relative link that resolves to its path — not just the four indexed READMEs
+    the scan above covers."""
+
+    _REMOVED_DOC = _REPO_ROOT / "trailhead" / "docs" / "install-manifest.md"
+
+    def test_install_manifest_doc_removed_and_unlinked(self):
+        assert not self._REMOVED_DOC.exists(), (
+            f"{self._REMOVED_DOC} still exists; it documents install-manifest "
+            "behavior that was never implemented and must be removed"
+        )
+
+        removed_resolved = self._REMOVED_DOC.resolve()
+        offenders: list[str] = []
+        for md_path in find_all_markdown_files(_REPO_ROOT):
+            text = md_path.read_text(encoding="utf-8")
+            for link in sorted(extract_relative_links(text)):
+                resolved = (md_path.parent / link).resolve()
+                if resolved == removed_resolved:
+                    offenders.append(f"{md_path}: link {link!r} resolves to the removed doc")
+
+        assert not offenders, "dangling link(s) to the removed doc:\n" + "\n".join(offenders)
+
+
 # ---------------------------------------------------------------------------
 # Honesty guards
 # ---------------------------------------------------------------------------
