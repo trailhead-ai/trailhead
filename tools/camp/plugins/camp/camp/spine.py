@@ -1047,6 +1047,131 @@ def _doctor_asdf_present() -> bool:
     return bool(shutil.which("asdf"))
 
 
+def _doctor_bash_allow_settings_paths() -> list[Path]:
+    """Candidate Claude Code settings.json paths, resolved without a group.
+
+    `camp doctor` never resolves a group/slug (see _SKIP_GROUP_RESOLVE in
+    cli/dispatch.py), so this cannot reuse group.manifest.workspace_dir()
+    directly. It instead follows the shape hooks_writer.py already writes:
+    a member repo's `.claude/settings.json` (write_hooks_for_member) sits one
+    level below the unified workspace dir's own `.claude/settings.json`
+    (write_workspace_hooks) when cwd is a member repo checked out inside that
+    workspace — the layout camp itself creates. Both are read-only guesses;
+    a miss just means the check finds nothing to flag, not a failure.
+    """
+    cwd = Path.cwd()
+    return [
+        cwd / ".claude" / "settings.json",
+        cwd.parent / ".claude" / "settings.json",
+    ]
+
+
+def _bash_allow_pattern(entry: str) -> str | None:
+    """Return the matcher pattern inside a `Bash(...)` allow entry, or None.
+
+    A bare `"Bash"` entry (no parens) is Claude Code's blanket allow-all-Bash
+    spelling, normalized here to the `"*"` pattern so callers can treat it
+    the same as `Bash(*)`.
+    """
+    if entry == "Bash":
+        return "*"
+    if entry.startswith("Bash(") and entry.endswith(")"):
+        return entry[len("Bash(") : -1]
+    return None
+
+
+def _bash_pattern_permits_camp_launch(pattern: str) -> bool:
+    """Return True if a Bash allow matcher pattern would let `camp launch` run.
+
+    Claude Code's Bash matcher syntax: a `<prefix>:*` pattern prefix-matches
+    the command string; a bare pattern (no trailing `:*`) matches only that
+    exact full command. Covers, at minimum: an entry naming `camp launch`
+    itself (exact or prefixed, e.g. `camp launch --prompt:*`), a broader
+    `camp` wildcard (`camp:*`), and a blanket Bash wildcard (`*`, or the bare
+    `Bash` entry normalized to `*` by `_bash_allow_pattern`).
+    """
+    target = "camp launch"
+    p = pattern.strip()
+    if p in ("", "*"):
+        return True
+
+    prefix = p[:-2].strip() if p.endswith(":*") else None
+    if prefix is not None:
+        if prefix in ("", "*"):
+            return True
+        if target == prefix or target.startswith(prefix + " "):
+            return True
+        if prefix.startswith(target) and (
+            len(prefix) == len(target) or prefix[len(target)] in (" ", ":")
+        ):
+            return True
+        return False
+
+    # No trailing ":*" — an exact-command match. It only covers camp launch
+    # if it names camp launch (with or without further fixed arguments).
+    return p == target or p.startswith(target + " ")
+
+
+def _doctor_bash_allow_offenders(paths: list[Path]) -> list[tuple[Path, str]]:
+    """Read-only, best-effort scan of `paths` for a Bash allow entry covering `camp launch`.
+
+    Never raises: an absent, unreadable, or malformed settings file is simply
+    skipped (not a violation) rather than failing the scan.
+    """
+    offenders: list[tuple[Path, str]] = []
+    for path in paths:
+        try:
+            if not path.is_file():
+                continue
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        permissions = data.get("permissions")
+        if not isinstance(permissions, dict):
+            continue
+        allow = permissions.get("allow")
+        if not isinstance(allow, list):
+            continue
+        for entry in allow:
+            if not isinstance(entry, str):
+                continue
+            pattern = _bash_allow_pattern(entry)
+            if pattern is None:
+                continue
+            if _bash_pattern_permits_camp_launch(pattern):
+                offenders.append((path, entry))
+    return offenders
+
+
+def _doctor_bash_allow_check(paths: list[Path] | None = None) -> tuple[bool, str]:
+    """Passive check: no Bash auto-allow rule in reachable settings covers `camp launch`.
+
+    Read-only and best-effort — see _doctor_bash_allow_offenders. Never raises
+    and never fails on a missing/unreadable/malformed settings file; only an
+    actually-present offending entry fails the check.
+    """
+    try:
+        settings_paths = paths if paths is not None else _doctor_bash_allow_settings_paths()
+        offenders = _doctor_bash_allow_offenders(settings_paths)
+    except Exception:
+        return True, "could not determine (settings unreadable)"
+
+    if not offenders:
+        return True, "no Bash auto-allow rule covers camp launch"
+
+    lines = [
+        f"{path}: {entry!r} auto-allows Bash commands that cover 'camp launch' — "
+        "remove or narrow this entry in permissions.allow. camp launch must "
+        "never be auto-allowed: it hands a first-turn prompt to a new agent "
+        "session, and the harness's own permission prompt is the only gate "
+        "that can tell a legitimate call from a prompt-injected one."
+        for path, entry in offenders
+    ]
+    return False, "; ".join(lines)
+
+
 def cmd_doctor(args: list[str], dry_run: bool = False) -> None:
     """camp doctor [--json]
 
@@ -1057,6 +1182,9 @@ def cmd_doctor(args: list[str], dry_run: bool = False) -> None:
       (a) asdf present — asdf resolvable/installed.
       (b) manifest ↔ git-worktree consistency — a placeholder that always
           passes (no writer of registry.json exists to produce drift).
+      (c) Bash auto-allow settings do not cover `camp launch` — passive,
+          read-only scan of reachable settings.json files (see
+          _doctor_bash_allow_check).
     """
     as_json = "--json" in args
 
@@ -1090,6 +1218,19 @@ def cmd_doctor(args: list[str], dry_run: bool = False) -> None:
                 f"stale registry instances: {stale_ids}" if stale_ids else "no drift detected"
             ),
             "stale_registry_instances": stale_ids,
+        }
+    )
+
+    # --- check (c): no Bash auto-allow rule covers `camp launch` ---
+    bash_allow_ok, bash_allow_details = _doctor_bash_allow_check()
+    if not bash_allow_ok:
+        any_failed = True
+    checks.append(
+        {
+            "check": "bash-allow-camp-launch",
+            "description": "Bash auto-allow settings do not cover camp launch",
+            "pass": bash_allow_ok,
+            "details": bash_allow_details,
         }
     )
 

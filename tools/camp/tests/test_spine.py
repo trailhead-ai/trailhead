@@ -251,6 +251,129 @@ def test_status_json_scoped_entry_retains_fire_and_dev_env_keys(
     assert entry["repos"] == []
 
 
+def _write_settings(path: Path, data: dict) -> None:
+    import json as _json
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(_json.dumps(data))
+
+
+def test_doctor_bash_allow_check_passes_with_no_settings_files(tmp_path: Path) -> None:
+    """No settings files at all → check passes, no exception."""
+    from camp.spine import _doctor_bash_allow_check
+
+    missing = [tmp_path / "does-not-exist" / ".claude" / "settings.json"]
+    ok, details = _doctor_bash_allow_check(missing)
+    assert ok is True
+    assert isinstance(details, str)
+
+
+def test_doctor_bash_allow_check_passes_on_malformed_json(tmp_path: Path) -> None:
+    """Malformed JSON in a settings file → check passes, no exception."""
+    from camp.spine import _doctor_bash_allow_check
+
+    settings_path = tmp_path / ".claude" / "settings.json"
+    settings_path.parent.mkdir(parents=True)
+    settings_path.write_text("{ not valid json ")
+
+    ok, _details = _doctor_bash_allow_check([settings_path])
+    assert ok is True
+
+
+def test_doctor_bash_allow_check_passes_on_unreadable_settings(tmp_path: Path) -> None:
+    """An unreadable settings path (a directory, not a file) → check passes, no exception."""
+    from camp.spine import _doctor_bash_allow_check
+
+    settings_path = tmp_path / ".claude" / "settings.json"
+    settings_path.mkdir(parents=True)
+
+    ok, _details = _doctor_bash_allow_check([settings_path])
+    assert ok is True
+
+
+def test_doctor_bash_allow_check_passes_with_innocuous_allow_list(tmp_path: Path) -> None:
+    """An allow list with unrelated Bash entries → check passes."""
+    from camp.spine import _doctor_bash_allow_check
+
+    settings_path = tmp_path / ".claude" / "settings.json"
+    _write_settings(
+        settings_path,
+        {"permissions": {"allow": ["Bash(git status:*)", "Bash(npm test:*)"]}},
+    )
+
+    ok, details = _doctor_bash_allow_check([settings_path])
+    assert ok is True
+    assert "no Bash auto-allow rule" in details
+
+
+def test_doctor_bash_allow_check_fails_on_camp_launch_entry(tmp_path: Path) -> None:
+    """An allow entry specifically covering `camp launch` → check fails."""
+    from camp.spine import _doctor_bash_allow_check
+
+    settings_path = tmp_path / ".claude" / "settings.json"
+    _write_settings(
+        settings_path,
+        {"permissions": {"allow": ["Bash(camp launch:*)"]}},
+    )
+
+    ok, details = _doctor_bash_allow_check([settings_path])
+    assert ok is False
+    assert "camp launch" in details
+    assert str(settings_path) in details
+
+
+def test_doctor_bash_allow_check_fails_on_camp_wildcard(tmp_path: Path) -> None:
+    """A broad `camp` wildcard allow entry covers camp launch → check fails."""
+    from camp.spine import _doctor_bash_allow_check
+
+    settings_path = tmp_path / ".claude" / "settings.json"
+    _write_settings(
+        settings_path,
+        {"permissions": {"allow": ["Bash(camp:*)"]}},
+    )
+
+    ok, _details = _doctor_bash_allow_check([settings_path])
+    assert ok is False
+
+
+def test_doctor_bash_allow_check_fails_on_blanket_bash_wildcard(tmp_path: Path) -> None:
+    """A blanket `Bash` (or `Bash(*)`) auto-allow entry covers camp launch → check fails."""
+    from camp.spine import _doctor_bash_allow_check
+
+    settings_path = tmp_path / ".claude" / "settings.json"
+    _write_settings(
+        settings_path,
+        {"permissions": {"allow": ["Bash"]}},
+    )
+
+    ok, _details = _doctor_bash_allow_check([settings_path])
+    assert ok is False
+
+
+def test_doctor_json_reports_bash_allow_offender(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`camp doctor --json` surfaces a failing bash-allow-camp-launch check."""
+    import json as _json
+
+    from camp.spine import cmd_doctor
+
+    _isolate_roots(monkeypatch, tmp_path)
+    _write_settings(
+        tmp_path / ".claude" / "settings.json",
+        {"permissions": {"allow": ["Bash(camp launch:*)"]}},
+    )
+
+    try:
+        cmd_doctor(["--json"])
+    except SystemExit:
+        pass  # asdf check may fail in CI; we only assert on the bash-allow check
+    report = _json.loads(capsys.readouterr().out)
+    bash_allow = next(c for c in report["checks"] if c["check"] == "bash-allow-camp-launch")
+    assert bash_allow["pass"] is False
+    assert "camp launch" in bash_allow["details"]
+
+
 def test_doctor_json_no_registry_consistency_passes(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
