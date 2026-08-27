@@ -40,8 +40,8 @@ CEILING_1X_MS = TARGET_P95_MS  # 100ms — the pinned SLO is asserted at the rea
 CORPUS_1X = 2149  # ~current vault size
 
 # A representative mixed query: a facet predicate + a distinctive full-text term
-# (exercises the kind predicate, the FTS MATCH inline-IN, and the bm25 ORDER BY
-# correlated subquery). The term ``scrubber`` is seeded into a minority (~1 in 11)
+# (exercises the kind predicate, the FTS MATCH inline-IN, and the bm25 ranking
+# JOIN). The term ``scrubber`` is seeded into a minority (~1 in 11)
 # of bodies — representative of a real keyword search that hits a small slice of the
 # corpus, not a stopword-frequency term that matches most rows.
 REPRESENTATIVE_QUERY = "kind:lesson and scrubber"
@@ -181,12 +181,12 @@ def _measure_speedup_ratio(state_dir: Path, *, query: str, runs: int = 20) -> tu
     return _percentile(new_samples, 95.0), _percentile(old_samples, 95.0)
 
 
-def _measure_query_p95(state_dir: Path, *, query: str = REPRESENTATIVE_QUERY, runs: int = 30) -> float:
+def _measure_query_p95(state_dir: Path, *, runs: int = 30) -> float:
     """Time the hot query path (parse → compile → execute) ``runs`` times; p95 ms.
 
     Each run opens the index fresh (mirroring a cold ``lore search`` invocation),
-    parses + compiles ``query``, executes the single SQL query, and drains the
-    rows. Returns the p95 in milliseconds.
+    parses + compiles the representative query, executes the single SQL query, and
+    drains the rows. Returns the p95 in milliseconds.
     """
     index_store = load_script("lore.search.index")
     kql = load_script("lore.search.kql")
@@ -198,7 +198,7 @@ def _measure_query_p95(state_dir: Path, *, query: str = REPRESENTATIVE_QUERY, ru
         conn = index_store.open_index(env=env)
         try:
             t0 = time.perf_counter()
-            ast = kql.parse(query)
+            ast = kql.parse(REPRESENTATIVE_QUERY)
             cq = kql_compile.compile(ast, limit=20)
             rows = conn.execute(cq.full_query(), cq.params).fetchall()
             _ = len(rows)
@@ -238,8 +238,8 @@ def test_search_latency_p95_under_target(tmp_path, capsys, corpus_size, label, c
     assert p95 < ceiling_ms, (
         f"search p95 {p95:.2f}ms exceeded the {ceiling_ms:.0f}ms ceiling at the "
         f"{label} corpus ({indexed} records). The pinned target is "
-        f"{TARGET_P95_MS:.0f}ms; the ceiling covers host noise + the documented "
-        "correlated-bm25 ranking cost — a breach signals a real query-path regression."
+        f"{TARGET_P95_MS:.0f}ms; the ceiling covers host noise — a breach signals "
+        "a real query-path regression."
     )
 
 

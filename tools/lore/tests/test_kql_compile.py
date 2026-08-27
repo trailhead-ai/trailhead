@@ -441,10 +441,9 @@ class TestMatchEncoding:
 
 
 class TestRankingSelection:
-    """bm25 is computed once, in the ranking JOIN clause (not the ORDER BY
-    expression itself, which now just sorts on the pre-computed ``rank.score``)
-    — so these assert the locked weights appear in the assembled query
-    (the mechanism), not literally inside ``order_by`` (wording that moved)."""
+    """bm25 is computed once, in the ranking JOIN clause; the ORDER BY sorts on
+    the pre-computed ``rank.score``. So these assert the locked weights appear in
+    the assembled query, not literally inside ``order_by``."""
 
     def test_fulltext_query_uses_bm25_order(self, kql, compiler):
         cq = compiler.compile(kql.parse("foo"))
@@ -1081,12 +1080,12 @@ class TestCompiledQueryStructure:
 
 
 # ---------------------------------------------------------------------------
-# PERF FIX — bm25 computed once (single JOIN), not per-candidate-row
+# Single-JOIN bm25 ranking — score computed once per matching row
 #
-# The correlated-scalar-subquery ranking re-ran the FTS MATCH once per candidate
-# row in the ORDER BY (2.37s -> ~10ms regression on the live vault). The fix
-# replaces the two correlated scalar subqueries with a single LEFT JOIN against a
-# subquery that computes bm25 once per matching row.
+# A single LEFT JOIN computes bm25 once per matching row. A correlated scalar
+# subquery in the ORDER BY would re-run the FTS MATCH for every candidate row
+# instead (2.37s vs ~10ms on a 3,508-record vault), so the query PLAN is pinned
+# alongside the ordering it produces.
 # ---------------------------------------------------------------------------
 
 
@@ -1156,9 +1155,9 @@ def ranking_equivalence_index(tmp_path, index_store):
 
 
 class TestRankingEquivalence:
-    """Pins the exact ordered id sequence the PRE-FIX correlated-subquery compiler
-    produced for four query shapes, captured before the JOIN-based rewrite, so the
-    rewrite is proven to be a pure mechanism change with byte-identical ordering."""
+    """Pins the exact ordered id sequence for four query shapes — bare term,
+    facet+term, negation, and pure-facet — so any change to the ranking mechanism
+    has to reproduce the ordering byte-for-byte."""
 
     def test_bare_high_match_term_order_unchanged(self, kql, compiler, ranking_equivalence_index):
         conn, vault, env = ranking_equivalence_index
@@ -1207,7 +1206,7 @@ class TestRankingEquivalence:
 
 class TestQueryPlanShape:
     """The bm25 ranking must be a single JOIN scan, never a per-row correlated
-    scalar subquery — the actual defect this fix addresses."""
+    scalar subquery."""
 
     def test_ranked_query_plan_has_no_correlated_scalar_subquery(
         self, kql, compiler, ranking_equivalence_index

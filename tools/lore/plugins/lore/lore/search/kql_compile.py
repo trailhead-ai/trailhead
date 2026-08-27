@@ -428,13 +428,12 @@ def compile(ast, *, vault=None, limit=20) -> CompiledQuery:
 
     final_params: list = []
 
-    join_clause = ""
     if has_fts:
         rank_match = " OR ".join(compiler.positive_fts)
         # The JOIN computes bm25 ONCE per matching row via a single scan of
-        # record_fts, replacing the two correlated scalar subqueries that used to
-        # re-run the MATCH per candidate row in the ORDER BY. The JOIN clause
-        # precedes WHERE positionally, so its param is bound first.
+        # record_fts; a correlated scalar subquery in the ORDER BY would re-run
+        # the MATCH per candidate row instead. The JOIN clause precedes WHERE
+        # positionally, so its param is bound first.
         join_clause = (
             "LEFT JOIN (\n"
             "    SELECT rowid, bm25(record_fts, 3.0, 2.0, 1.0) AS score\n"
@@ -442,8 +441,14 @@ def compile(ast, *, vault=None, limit=20) -> CompiledQuery:
             ") rank ON rank.rowid = records.rowid"
         )
         final_params.append(rank_match)
+        # NULL (unmatched) rows sort LAST (the LEFT JOIN found no `rank` row);
+        # matched (negative) rows sort ASC = best first; recency tiebreak makes
+        # the order stable.
+        order_by = "rank.score IS NULL, rank.score ASC, updated_at DESC, last_referenced_at DESC"
     else:
         rank_match = ""
+        join_clause = ""
+        order_by = "updated_at DESC, last_referenced_at DESC"
 
     where_parts = []
 
@@ -456,14 +461,6 @@ def compile(ast, *, vault=None, limit=20) -> CompiledQuery:
         final_params.append(vault)
 
     where = " AND ".join(where_parts) if where_parts else "1"
-
-    if has_fts:
-        # NULL (unmatched) rows sort LAST (the LEFT JOIN found no `rank` row);
-        # matched (negative) rows sort ASC = best first; recency tiebreak makes
-        # the order stable.
-        order_by = "rank.score IS NULL, rank.score ASC, updated_at DESC, last_referenced_at DESC"
-    else:
-        order_by = "updated_at DESC, last_referenced_at DESC"
 
     final_params.append(limit)
 
