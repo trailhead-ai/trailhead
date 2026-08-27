@@ -572,41 +572,47 @@ cut: everything else that can attack an ADR still does.
 name it and stop — do not quietly run six and present the result as a gauntlet. Leave the adr at
 `draft`.
 
-### The gauntlet owns the flip, directly to `active`
+### The record stays `draft` on every outcome
 
 The adr vocab (`draft`, `active`, `superseded`, `dropped`) has no `ready` — there is no intermediate
-frozen-but-inactive state the way a spec has. Once the operator has accepted **and no Critical
-carries a final disposition of `revise`**, the gauntlet flips the record directly:
+frozen-but-inactive state the way a spec has, and this skill does not write the record under review
+toward one. The gauntlet never advances the adr it is reviewing past `draft`, on either outcome.
+Once the operator has accepted, the accepted tail below lands that round's `resolved` edits and its
+provenance and stops — no status write on this record. **If any Critical's final disposition is
+`revise`,** the same tail lands identically, and a new revise round begins, re-running only the
+passes that raised the surviving `revise` Criticals. Either way this record is still `draft` when
+this skill is done with it.
+
+Activation is not this skill's job. Distill flips a forward adr `draft -> active` when every spec
+derived from it reaches a terminal status (`distill/SKILL.md`, "Write, in a fixed order") — the same
+rule that already makes distill the sole writer of a spec's `planned -> complete` edge now makes it
+the sole writer of an adr's `draft -> active` edge too, on both the forward and the backward path.
+`active` immutability is unchanged by this move: it changes WHEN activation happens, never whether an
+`active` record can still be edited. Amendment while `draft`, including everything this review
+accepts, stays unrestricted — any ritual that makes a decision may record it, with no
+material/immaterial distinction to adjudicate, and this does not reopen that question for an
+already-`active` record.
+
+### Supersession's predecessor write survives, decoupled from activation
+
+Distill is not the only writer that ever touches an ADR's status. The forward path (brainstorm's
+altitude gate → this gauntlet) can author a draft that names an existing `active` ADR as its
+predecessor via `--related adr=<predecessor>`, set at creation same as any other provenance edge —
+and when this review accepts that draft, retiring the predecessor is this skill's one remaining
+status write in adr mode:
 
 ```
-lore record update <adr-id> --status active
-```
-
-**If any Critical's final disposition is `revise`, the adr stays `draft`.** It never goes to
-`dropped` or any other status — the accepted tail below still lands that round's `resolved` edits
-and its provenance, and a new revise round begins, re-running only the passes that raised the
-surviving `revise` Criticals.
-
-### Supersession writes both directions, on the forward path too
-
-Distill is not the only writer of an ADR — the forward path (brainstorm's altitude gate → this
-gauntlet) authors and activates ADRs as well, and supersession's "both directions" contract binds
-here identically: an `active` ADR the gauntlet is about to supersede must end this flip with its
-predecessor flipped `superseded` and back-linked, not just the new one flipped `active`.
-
-The successor's `--related adr=<predecessor>` edge is set **before** this step — brainstorm (or
-whoever authored the draft) writes it at creation, same as any other provenance edge. At
-activation, when that edge names an existing `active` ADR, the gauntlet's flip is two writes, in
-this order (mirroring distill's pinned internal order):
-
-```
-lore record update <adr-id> --status active
 lore record update <predecessor-adr-id> --status superseded --related adr=<adr-id>
 ```
 
-Skipping the second write leaves the predecessor `active` next to its own successor — the same
-inconsistent state distill's resume rule exists to heal, except nothing here would ever heal it,
-because only distilled ADRs are on distill's resume path.
+This is not "a gauntlet outcome" in the sense the disposition vocabulary bans — it does not come
+from a Critical's disposition, and it never sets a status on the record under review. It fires off
+the successor's own predecessor edge, independent of the dispositions a run produced. The
+predecessor retires on review acceptance, decoupled from the successor's own activation: the
+successor can stay `draft` for as long as its derived specs take to reach a terminal status, and
+there is no reason to leave a decision review already replaced marked `active` in the meantime. A
+reader who lands on the predecessor finds its successor via the back-edge immediately, well before
+distill ever activates it.
 
 ### Provenance goes to annotations, never the body
 
@@ -621,12 +627,14 @@ freeze.
 ### The accepted tail, in adr terms
 
 The shared accepted tail's sequence, its pre-write scrub and marker, and its failure behavior hold
-here. The exhaustive body adds one write ahead of them, and the order of all three is fixed:
+here. The exhaustive body adds one write ahead of it, and the order is fixed. **The first two writes
+land the same way, in the same order, on every outcome — accept or revise. Neither one ever advances
+the record under review past `draft`:**
 
 ```
 printf '%s' "$DETAIL" | lore record create --kind lesson --title "Gauntlet detail — <adr title>" --related adr=<adr-id>
 printf '%s' "$EDITS" | lore record update <adr-id> --diff --annotation gauntlet=<date>:7-passes:<n>-resolved,<n>-revise,<n>-accepted-as-risk,<n>-disputed:<n>-from-proposal,<n>-operator-override
-lore record update <adr-id> --status active
+lore record update <predecessor-adr-id> --status superseded --related adr=<adr-id>
 ```
 
 1. **The `lesson` record is written first**, carrying the consolidated detail and its
@@ -646,34 +654,41 @@ lore record update <adr-id> --status active
    inside a single read-modify-write, so a rejected hunk leaves the body *and* the annotation
    untouched, and the all-or-nothing property the shared tail depends on holds here unchanged. What
    the exhaustive body keeps out is the provenance and the finding detail — never the accepted
-   edits, which are edits to Context, Decision, Consequences, and Alternatives rejected and must
-   land before anything freezes. An adr flipped `active` without them is an immutable decision no
-   acceptance ever reached. The counts alongside the accepted-from-proposal / operator-override
-   split are how the provenance stamp renders for an adr, and `<n>-revise` is what tells an
-   auditor of an adr still in `draft` which disposition withheld its freeze. **This write runs on
-   every accepted run, including one with zero `resolved` Criticals** — `$EDITS` is then an empty diff, which the
-   CLI applies as a no-op, and the annotation rides the same invocation regardless. Skipped there,
-   the adr flips `active` carrying no provenance at all, because the annotation is the only
-   provenance its exhaustive body will ever hold.
-3. **Then the status flip, only if no Critical's final disposition is `revise`** — `--status
-   active`, and, when the successor's edge names an `active` predecessor, the two-write
-   supersession above in its pinned order.
+   edits, which are edits to Context, Decision, Consequences, and Alternatives rejected, and this is
+   the only write that ever lands them; an adr this review accepted edits for, with the write
+   skipped, is an approved edit the record never received. The counts alongside the
+   accepted-from-proposal / operator-override split are how the provenance stamp renders for an adr,
+   and `<n>-revise` is what tells an auditor whether this run is still cycling revise rounds.
+   **This write runs on every accepted run, including one with zero `resolved` Criticals** —
+   `$EDITS` is then an empty diff, which the CLI applies as a no-op, and the annotation rides the
+   same invocation regardless. Skipped there, this run leaves no provenance at all, because the
+   annotation is the only provenance the exhaustive body will ever hold.
 
-**If any Critical's final disposition is `revise`, this step does not run.** The first two
-writes above — the linked `lesson` record and the shared atomic write — still land this round's
-`resolved` edits and its provenance identically; a revising adr keeps its review evidence the
-same as any other run, and only the flip is withheld. A new revise round begins, re-running only
-the passes that raised the surviving `revise` Criticals, and the adr stays `draft` until a round
-produces none.
+3. **Then, only if the successor's edge names an existing `active` predecessor, the predecessor
+   is retired** — `--status superseded --related adr=<adr-id>` back to the successor. This is the
+   one status write left in adr mode, and it lands on every accepted run regardless of the
+   dispositions it carries, because it belongs to the successor's own provenance edge, not to any
+   Critical's disposition.
+
+**The first two writes land identically on either outcome.** A surviving `revise` begins a new
+revise round, re-running only the passes that raised it — it does not change what those two writes
+are or how they run, and the adr under review stays `draft` throughout; nothing in this skill ever
+changes that. **The third write is the one exception**: it fires only once, when the successor's
+edge names a predecessor, regardless of which round it fires in — retrying it on a later round it
+already landed in is a no-op, since the predecessor is already `superseded`.
 
 Lesson-first is chosen for the state a crash leaves behind. Its worst surviving artifact is a
-`draft` adr with an extra record pointing at it, which is harmless and re-runnable; the reverse
-order's is an `active`, immutable decision whose review evidence was never written at all.
+`draft` adr with an extra `lesson` record pointing at it, which is harmless and re-runnable; the
+reverse order's worst artifact is a counts annotation claiming a review whose `lesson` record was
+never written.
 
-**Any failure before the flip stops the sequence**: the adr stays `draft`, and a `lesson` record
-already written when a later write fails is **never silently abandoned** — report the orphaned
-`lesson` record to the operator by name, so they can re-run or delete it. Give them the lookup as
-well:
+**Any failure anywhere in this tail stops the sequence**: the adr under review stays `draft`
+regardless of which write failed — nothing in this tail ever makes it otherwise. A `lesson` record
+already written when a later write then fails is **never silently abandoned** — report the orphaned
+`lesson` record to the operator by name, so they can re-run or delete it. A failure at the third
+write leaves the predecessor still `active`, unlinked from an already-accepted successor; name both
+records and hand back the one write that closes it — the predecessor write above, unchanged, is
+itself the retry. Give them the `lesson` lookup as well:
 
 ```
 lore search 'kind:lesson related-adr:"<adr-id>"'
@@ -689,19 +704,6 @@ writes, so it resolves immediately and needs no `lore reindex` first. (The rever
 query from the adr's side — is a reindex-only property, and is not what this lookup uses.) Still
 report the record name alongside the query, never the query alone: the name is what the operator
 acts on, and it survives an index this report cannot inspect.
-
-**A failure after the flip reports differently.** The predecessor's `superseded` back-edge is the
-only write ordered after the status flip, so the rule above — the adr stays `draft` — cannot
-describe it: the adr is already `active` and immutable, and re-running the flip changes nothing.
-Name both records, say that the successor is `active` and the predecessor is still `active` and
-unlinked, and hand back the one write that closes it:
-
-```
-lore record update <predecessor-adr-id> --status superseded --related adr=<adr-id>
-```
-
-Nothing heals that pair on its own — distill's resume rule walks only distilled ADRs, and this one
-came the forward way.
 
 ### Distilled ADRs skip the gauntlet
 

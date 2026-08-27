@@ -466,3 +466,178 @@ def test_every_batch_update_passes_vault_explicitly():
         "scan, so an unscoped update in a multi-vault install lands wherever the "
         "scan happens to hit first"
     )
+
+
+
+
+# --- Slice 4: gauntlet stops flipping, distill activates on the last derived spec ---
+
+import re  # noqa: E402
+import sys  # noqa: E402
+
+_LORE_PLUGIN_DIR = Path(__file__).parent.parent.parent / "lore" / "plugins" / "lore"
+sys.path.insert(0, str(_LORE_PLUGIN_DIR))
+
+from lore.pipeline.derive import TERMINAL_SPEC_STATUSES  # noqa: E402
+
+GAUNTLET = CRAFT / "skills" / "gauntlet" / "SKILL.md"
+
+_ACTIVATION_STEP_HEADER = "6. **Then check activation"
+_ABSORPTION_EXCLUSION_SENTENCE = (
+    "This surfacing excludes a `draft` ADR carrying any `related: spec=` edge to "
+    "a spec whose status\nhas not yet reached a terminal status"
+)
+
+
+def _flat(text: str) -> str:
+    """Whitespace-collapsed prose, so a pinned sentence survives a line wrap."""
+    return " ".join(text.split())
+
+
+def _activation_step(text: str) -> str:
+    assert _ACTIVATION_STEP_HEADER in text, (
+        "distill/SKILL.md must carry the activation-check step in 'Write, in a "
+        "fixed order'"
+    )
+    start = text.index(_ACTIVATION_STEP_HEADER)
+    end = text.index("## Terminal outcomes", start)
+    return text[start:end]
+
+
+def _would_activate(sibling_statuses: set[str]) -> bool:
+    """The activation predicate distill's prose describes, built off the real
+    `TERMINAL_SPEC_STATUSES` constant rather than a duplicated literal — so this
+    helper and distill's own condition can never silently drift apart.
+    """
+    all_terminal = all(status in TERMINAL_SPEC_STATUSES for status in sibling_statuses)
+    at_least_one_complete = "complete" in sibling_statuses
+    return all_terminal and at_least_one_complete
+
+
+def test_activation_check_states_trigger_condition_and_mechanism_together():
+    """Trigger, condition, and mechanism must read as one clause — not three
+    separate sentences a later edit could quietly pull apart.
+    """
+    step = _flat(_activation_step(_text()))
+    assert "completing a member spec is also the trigger" in step, (
+        "the activation check must name its trigger: a member spec reaching "
+        "`complete`"
+    )
+    assert "Activate only when **every** sibling has reached a terminal status" in step, (
+        "the activation check must state its condition: every related spec "
+        "terminal AND at least one complete"
+    )
+    assert "and at least one** reached `complete`" in step, (
+        "the activation check must also require at least one `complete` sibling"
+    )
+    assert '"complete", "superseded", "dropped"' in step, (
+        'the activation check must name the mechanism verbatim: '
+        'TERMINAL_SPEC_STATUSES = {"complete", "superseded", "dropped"}'
+    )
+    assert "pipeline/derive.py:97" in step, (
+        "the mechanism must cite where the real constant lives, not just its value"
+    )
+
+
+def test_an_adr_with_complete_and_dropped_derived_specs_does_activate():
+    """The case a `complete`-only condition would strand forever.
+
+    No executable activation path exists in this repo — distill is pure prose,
+    run by an agent rather than code — so this pins the predicate the prose
+    describes against the real constant; the prose itself is pinned separately
+    below.
+    """
+    assert _would_activate({"complete", "dropped"}) is True
+
+
+def test_an_adr_whose_derived_specs_are_all_dropped_does_not_activate():
+    assert _would_activate({"dropped", "dropped"}) is False
+
+
+def test_absorption_sweep_and_activation_read_terminality_off_the_same_set():
+    """Both checks must read `TERMINAL_SPEC_STATUSES` — the real constant, not a
+    duplicated literal — so they cannot silently drift apart.
+    """
+    text = _text()
+    sweep_section = text[
+        text.index("Lingering `draft` ADRs"):text.index("### The deferral rule")
+    ]
+    activation_section = _flat(_activation_step(text))
+    for status in TERMINAL_SPEC_STATUSES:
+        assert f'"{status}"' in sweep_section, (
+            f"the absorption-sweep exclusion must name {status!r} from the real "
+            "TERMINAL_SPEC_STATUSES constant"
+        )
+        assert f'"{status}"' in activation_section, (
+            f"the activation condition must name {status!r} from the real "
+            "TERMINAL_SPEC_STATUSES constant"
+        )
+
+
+def test_distill_emits_the_activation_write_guarded_on_the_condition():
+    step = _activation_step(_text())
+    write = "lore record update <adr-id> --status active --vault <name>"
+    assert write in step, "distill/SKILL.md must emit the adr-activation write"
+    guard_idx = step.index("Activate only when")
+    write_idx = step.index(write)
+    assert guard_idx < write_idx, (
+        "the activation write must be guarded by the condition stated ahead of it"
+    )
+
+
+def test_distill_is_the_sole_writer_of_draft_to_active_on_both_paths():
+    step = _flat(_activation_step(_text()))
+    assert "Distill is the sole writer of `draft -> active` on this path" in step, (
+        "distill/SKILL.md must state it is the sole writer of the activation edge"
+    )
+    assert (
+        "exactly as it is the sole writer of `planned -> complete`" in step
+    ), (
+        "distill must tie the new sole-writer claim to the existing one for "
+        "`planned -> complete`"
+    )
+    assert "the gauntlet, no longer advances an adr past `draft` at all" in step, (
+        "distill must state the other forward-path writer (the gauntlet) no "
+        "longer advances an adr at all"
+    )
+
+
+def test_absorption_sweep_exclusion_is_a_pinned_procedural_step():
+    assert _ABSORPTION_EXCLUSION_SENTENCE in _text(), (
+        "distill/SKILL.md must state the absorption-sweep's exclusion for drafts "
+        "with incomplete derived specs as a concrete, pinned procedural step"
+    )
+
+
+def test_activation_states_active_immutability_is_unchanged():
+    step = _flat(_activation_step(_text()))
+    assert "`active` immutability is unchanged by this" in step, (
+        "distill must restate that `active` immutability is unchanged by moving "
+        "when activation happens"
+    )
+    assert "never whether an `active` record can still be edited" in step, (
+        "distill must state explicitly this does not reopen an editable-active "
+        "adr — only WHEN activation happens moves"
+    )
+
+
+def test_amendment_while_draft_is_unrestricted_in_distill():
+    step = _flat(_activation_step(_text()))
+    assert "Amendment while `draft` remains unrestricted" in step, (
+        "distill must state amendment while `draft` is unrestricted, with no "
+        "material/immaterial distinction to adjudicate"
+    )
+
+
+def test_status_active_absence_sweep_is_scoped_to_gauntlet_not_banned_globally():
+    """distill legitimately emits `--status active` — the absence sweep must not
+    ban the string globally, only from the gauntlet skill.
+    """
+    assert "lore record update <adr-id> --status active" in _text(), (
+        "distill/SKILL.md must legitimately carry the adr-activation write — a "
+        "global ban on this string would be wrong, not a fix"
+    )
+    assert not re.compile(r"<adr-id>\s+--status\s+active").search(GAUNTLET.read_text()), (
+        "gauntlet/SKILL.md must not carry the adr-activation write — the sweep is "
+        "scoped to the gauntlet skill specifically, not the string everywhere"
+    )

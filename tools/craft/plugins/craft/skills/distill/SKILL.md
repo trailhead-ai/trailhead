@@ -161,6 +161,14 @@ distillation may fold a draft's content into the cluster ADR rather than startin
 record. When it does, the draft is retired (`--status dropped`) with a `related: adr=` edge to the
 ADR that absorbed it, so the abandoned number is traceable rather than merely a gap.
 
+**This surfacing excludes a `draft` ADR carrying any `related: spec=` edge to a spec whose status
+has not yet reached a terminal status** — read the same `TERMINAL_SPEC_STATUSES = {"complete",
+"superseded", "dropped"}` (`pipeline/derive.py:97`) the activation check below reads, the same
+way. Such an ADR is still mid-decision, waiting on its own derived specs to finish, not lingering —
+absorbing it here would erase a decision still in flight. The two checks read the identical set the
+identical way on purpose: a sweep that excluded on a looser condition than activation requires could
+absorb an ADR activation was about to reach on its own.
+
 ### The deferral rule
 
 **A cluster with any member still in flight is deferred whole** — report "waiting on spec X" and
@@ -248,6 +256,34 @@ claims `complete` until everything behind it landed.
    means distilled; a spec that never reached `planned`, or whose cluster no human dispositioned,
    has not been distilled no matter what else ran. Last position is deliberate: an interruption
    anywhere above leaves the spec still queued, and the sweep picks it up again.
+
+6. **Then check activation, for every spec just flipped `complete` that carries a `related: adr=`
+   edge** — completing a member spec is also the trigger that may finish the forward ADR it was
+   derived from:
+
+   ```
+   lore search "kind:spec related-adr:<adr-id>"
+   ```
+
+   Read every sibling spec's status via `lore record show <spec-id> --json` and test the whole set
+   against `TERMINAL_SPEC_STATUSES = {"complete", "superseded", "dropped"}` (`pipeline/derive.py:97`)
+   — the same set, read the same way, that the absorption-sweep exclusion above reads. **Terminal,
+   not `complete`**: a derived spec that is `dropped` or `superseded` will never reach `complete`, so
+   a `complete`-only condition would strand the parent ADR `draft` forever, invisible to both this
+   check and the absorption sweep. Activate only when **every** sibling has reached a terminal status
+   **and at least one** reached `complete` — an ADR whose derived specs were all abandoned recorded
+   no decision worth activating, and is left `draft` for the operator to close directly:
+
+   ```
+   lore record update <adr-id> --status active --vault <name>
+   ```
+
+   Distill is the sole writer of `draft -> active` on this path, exactly as it is the sole writer of
+   `planned -> complete` above — the forward path's other writer, the gauntlet, no longer advances an
+   adr past `draft` at all (`gauntlet/SKILL.md`, "Reviewing an adr"). `active` immutability is
+   unchanged by this: it moves WHEN activation happens, never whether an `active` record can still be
+   edited. Amendment while `draft` remains unrestricted throughout, with no material/immaterial
+   distinction to adjudicate.
 
 ## Terminal outcomes
 
