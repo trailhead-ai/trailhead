@@ -3,8 +3,9 @@
 The gauntlet is the review a spec passes before it freezes: eight parallel passes
 (fact verification, premise attack, the four council lenses, an internal-consistency
 audit, a plan-divergence probe), adjudicated in the main session and delivered to the
-operator as one compact recommendation — synthesis, route, per-Critical dispositions —
-which they accept or override in a single round-trip before anything is written.
+operator as one compact recommendation — synthesis, recommended outcome, per-Critical
+dispositions — which they accept or override in a single round-trip before anything is
+written.
 
 The user-facing decision was "mandatory, no skip flag" — but a checklist item saying
 "don't skip this" is honored only as well as the next agent feels like honoring it.
@@ -50,8 +51,9 @@ PREMISE_ATTACKER = AGENTS_DIR / "premise-attacker.md"
 _SPEC_ADVANCE_RE = re.compile(r"<spec-id>\s+--status\s+(\w+)")
 
 # States that imply the spec is frozen (gauntlet-passed). `draft` and `superseded`
-# are not advances — brainstorm creates at `draft`, and a spec carrying a final `revise`
-# disposition is superseded.
+# are not advances — brainstorm creates at `draft`, and a spec carrying a final
+# `revise` disposition withholds the freeze and stays `draft`, revise round by
+# revise round, rather than advancing anywhere.
 _FROZEN_STATES = {"ready", "planned", "complete"}
 
 # `planned` may be written by a planning path, but ONLY behind this guard — the
@@ -327,12 +329,20 @@ def test_disposition_names_pinned(name: str):
     )
 
 
-def test_revise_disposition_supersedes_rather_than_freezes():
-    """`revise` is the premise pass's landing place: the spec must NOT freeze."""
-    text = GAUNTLET.read_text()
-    assert "superseded" in text, (
-        "gauntlet/SKILL.md must route a `revise` Critical to a superseded spec — a "
-        "spec whose framing failed review must not reach `ready`"
+def test_revise_disposition_withholds_freeze_rather_than_superseding():
+    """`revise` is the premise pass's landing place: the spec must NOT freeze —
+    but it is not discarded either. It stays `draft` for another revise round.
+    """
+    step = _flat(_resolution_step(GAUNTLET.read_text()))
+    assert (
+        "freezes when no Critical carries a final disposition of `revise`"
+    ) in step, (
+        "gauntlet/SKILL.md must withhold the freeze while a `revise` Critical "
+        "survives — a spec whose framing failed review must not reach `ready`"
+    )
+    assert "<spec-id> --status superseded" not in GAUNTLET.read_text(), (
+        "a `revise` Critical must not route the spec to `superseded` — it "
+        "withholds the freeze and starts another revise round instead"
     )
 
 
@@ -669,10 +679,10 @@ def test_interpretive_per_pass_reading_is_licensed():
     )
 
 
-def test_deliverable_pins_the_route_line_and_the_per_critical_table():
+def test_deliverable_pins_the_recommended_outcome_and_the_per_critical_table():
     """The synthesis is one of four parts, and the other three carry the decision.
 
-    The route is what the operator accepts; the table is what they override
+    The outcome is what the operator accepts; the table is what they override
     against. Left unpinned, either can drift into prose the operator has to parse.
     """
     step = _resolution_step(GAUNTLET.read_text())
@@ -691,9 +701,10 @@ def test_deliverable_pins_the_route_line_and_the_per_critical_table():
         "unqualified it re-accumulates the weight the narrative is supposed to "
         "carry, which is the failure this shape replaced"
     )
-    assert "**The recommended route**, on its own line, by name" in flat, (
-        "the route must be its own line, named — a route inferred from prose is a "
-        "route the operator accepts without reading"
+    assert "**The recommended outcome**, on its own line" in flat, (
+        "the outcome — freeze, or the round the record continues into — must be "
+        "its own line, named — an outcome inferred from prose is one the operator "
+        "accepts without reading"
     )
     assert "| id | finding | proposed disposition | proposed edit |" in step, (
         "the per-Critical table must pin its columns — id, finding, proposed "
@@ -704,7 +715,7 @@ def test_deliverable_pins_the_route_line_and_the_per_critical_table():
     )
     assert (
         flat.index("**The narrative synthesis**")
-        < flat.index("**The recommended route**")
+        < flat.index("**The recommended outcome**")
         < flat.index("**The per-Critical table**")
         < flat.index("**Important and Minor, compressed**")
     ), (
@@ -799,6 +810,86 @@ def test_reaches_downstream_writes_nothing_to_the_named_specs():
         "a `reaches-downstream` prescription must be pinned as writing nothing to "
         "the specs it names — re-entry into brainstorming is the operator's act, "
         "not something the gauntlet does on its own write"
+    )
+
+
+def test_per_critical_table_renders_a_revise_row_as_a_prescription_block():
+    """A `revise` row's prescription (and scope) cannot fit the one-clause edit
+    cell the table defines for `resolved` — so the step must say what a `revise`
+    row renders as instead: a compact header line plus an indented prescription
+    block, with a `reaches-downstream` block also naming the specs it reaches.
+    """
+    step = _flat(_resolution_step(GAUNTLET.read_text()))
+    assert "compact header line" in step, (
+        "the per-Critical table section must describe a `revise` row's rendering "
+        "as a compact header line — the one-clause edit cell cannot hold a "
+        "prescription and its scope"
+    )
+    assert "indented prescription block" in step, (
+        "the compact header line must be followed by an indented prescription "
+        "block naming what is wrong, what to change, and how"
+    )
+    assert "Reaches:" in step, (
+        "a `reaches-downstream` row's block must carry a `Reaches:` line naming "
+        "the derived specs it invalidates"
+    )
+
+
+# Bounds the worked-example fixture below in gauntlet/SKILL.md. The markers are
+# HTML comments so they render as nothing in a rendered skill doc.
+_WORKED_EXAMPLE_START = "<!-- worked-example:start -->"
+_WORKED_EXAMPLE_END = "<!-- worked-example:end -->"
+
+
+def _worked_example(text: str) -> str:
+    assert _WORKED_EXAMPLE_START in text and _WORKED_EXAMPLE_END in text, (
+        "the resolution step must carry a worked-example fixture bounded by "
+        f"{_WORKED_EXAMPLE_START!r} / {_WORKED_EXAMPLE_END!r} markers — the "
+        "layout claim needs a real fixture to check, not just a description"
+    )
+    start = text.index(_WORKED_EXAMPLE_START) + len(_WORKED_EXAMPLE_START)
+    end = text.index(_WORKED_EXAMPLE_END)
+    return text[start:end]
+
+
+def test_worked_example_renders_three_criticals_with_a_reaches_downstream_row():
+    """A real render of 3+ Criticals, one `reaches-downstream`, checked against
+    the "one screen per typical run" UI Direction — as a fixture, not a claim.
+
+    The bound: a `resolved` (or operator-override) row is one table line; a
+    `revise` row is a header line plus at most two prescription lines (three
+    for `reaches-downstream`, which adds the `Reaches:` line). The full
+    deliverable's other three parts — the narrative synthesis (three short
+    paragraphs), the one-line recommended outcome, and the compressed
+    Important/Minor summary — need roughly half of the step's own ~40-line
+    budget, so a typical run's per-Critical table (here: 3 Criticals, one of
+    each disposition shape) has to fit inside the other half. 20 lines is
+    that ceiling, and this fixture is checked against it directly rather than
+    asserted to satisfy it.
+    """
+    step = _resolution_step(GAUNTLET.read_text())
+    example = _worked_example(step)
+    lines = [line for line in example.splitlines() if line.strip()]
+
+    critical_ids = set(re.findall(r"\bC\d+\b", example))
+    assert len(critical_ids) >= 3, (
+        f"the worked example must render at least 3 Criticals — found {critical_ids!r}"
+    )
+
+    reaches_lines = [line for line in lines if line.strip().startswith("Reaches:")]
+    assert reaches_lines, (
+        "the worked example must include a `reaches-downstream` row with a "
+        "`Reaches:` line naming derived specs"
+    )
+    assert any(re.search(r"spec/[a-z0-9][a-z0-9-]*", line) for line in reaches_lines), (
+        "the `Reaches:` line must name at least one derived spec by its record id"
+    )
+
+    assert len(lines) <= 20, (
+        f"the worked example's per-Critical table rendered {len(lines)} non-blank "
+        "lines, past the 20-line ceiling this fixture is checked against — see "
+        "this test's docstring for how that ceiling was derived from the "
+        "step's own ~40-line one-screen budget"
     )
 
 
@@ -911,159 +1002,149 @@ def test_re_adjudication_may_not_land_on_an_operator_only_disposition():
     )
 
 
-def test_both_route_names_are_pinned():
-    """Two routes, two names, used everywhere — including the per-mode tails.
+def test_no_craft_prose_names_the_discarded_route_vocabulary():
+    """The two-route table, and its `freeze route` / `reframe route` names, are
+    gone from every craft prose file, not just the gauntlet skill itself.
 
-    Unnamed routes get re-described wherever they are mentioned, and the
-    descriptions drift until "the spec doesn't freeze" means two different things
-    in two sections.
+    A record no longer routes to one of two destinations — it either freezes or
+    it does not, per the freeze condition below — so the route vocabulary these
+    two phrases named has nowhere left to live.
+    """
+    offenders = {
+        route: [
+            p for p in _craft_prose_files() if route in p.read_text()
+        ]
+        for route in ("freeze route", "reframe route")
+    }
+    offenders = {route: paths for route, paths in offenders.items() if paths}
+    assert not offenders, (
+        "these craft files still name the discarded route vocabulary: "
+        f"{ {route: [str(p.relative_to(CRAFT)) for p in paths] for route, paths in offenders.items()} } "
+        "— a record now freezes when no Critical carries a final `revise`, with "
+        "no second destination to route to"
+    )
+
+
+def test_freeze_condition_is_no_critical_carries_final_revise():
+    """The route rule's replacement: one condition, not two destinations.
+
+    Stated any other way — a threshold, a vote, a majority — the condition is
+    reinvented per reader. Pinned as the literal test for it: does any Critical's
+    FINAL disposition read `revise`.
+    """
+    step = _flat(_resolution_step(GAUNTLET.read_text()))
+    assert (
+        "freezes when no Critical carries a final disposition of `revise`"
+    ) in step, (
+        "the resolution step must state the freeze condition in exactly these "
+        "terms — a record freezes when no Critical carries a final disposition "
+        "of `revise`"
+    )
+    assert "There is no round cap" in step, (
+        "the freeze condition must state there is no round cap — operator "
+        "overrides are what ends a revising record, not a limit on rounds"
+    )
+    assert "operator overrides are the termination guarantee" in step, (
+        "the step must name operator overrides as the termination guarantee, "
+        "given there is no round cap"
+    )
+
+
+def test_revise_round_and_run_are_both_defined_and_distinct():
+    """`round` and `run` cannot be used interchangeably — a run is the whole
+    invocation; a round is one adjudication cycle inside it. Conflating the two
+    is exactly the internal contradiction a prior gauntlet review found here.
+    """
+    step = _flat(_resolution_step(GAUNTLET.read_text()))
+    assert (
+        "A **revise round** is one adjudication cycle inside a single gauntlet "
+        "invocation"
+    ) in step, (
+        "the resolution step must define a revise round as one adjudication "
+        "cycle inside a single gauntlet invocation"
+    )
+    assert "A **run** is one invocation of" in step, (
+        "the resolution step must define a run as one invocation of the skill, "
+        "distinct from a round"
+    )
+    assert "re-runs only the passes that raised the surviving" in step, (
+        "a revise round must be stated to re-run only the passes that raised "
+        "the surviving `revise` Criticals — not the full roster"
+    )
+
+
+def test_accepted_tail_runs_per_round_withholding_only_the_freeze():
+    """A surviving `revise` must not withhold the writes this round already
+    earned — only the flip. Otherwise a record mid-round loses `resolved` edits
+    it already has, every time adjudication continues.
+    """
+    step = _flat(_resolution_step(GAUNTLET.read_text()))
+    assert (
+        "Each revise round runs the full accepted tail" in step
+        or "Every revise round runs the full accepted tail" in step
+    ), (
+        "the resolution step must state that each revise round runs the full "
+        "accepted tail — that round's edits and provenance, not just the final "
+        "one"
+    )
+    assert "land atomically before the round ends" in step, (
+        "a round's `resolved` edits and provenance must be stated to land "
+        "atomically before the round ends"
+    )
+    assert (
+        "a surviving `revise` withholds only the freeze, never the writes"
+    ) in step, (
+        "the step must state plainly that a surviving `revise` withholds only "
+        "the freeze — the writes already happened, round by round"
+    )
+
+
+def test_freezing_may_not_be_evaluated_while_a_critical_remains_answered():
+    """`answered` is not a final disposition, so a freeze check that reads it
+    anyway is reading a disposition that has not happened yet.
+    """
+    step = _flat(_resolution_step(GAUNTLET.read_text()))
+    assert "not yet a final disposition" in step, (
+        "the step must state that an `answered` Critical is not yet a final "
+        "disposition — it is a request for re-adjudication, not an outcome"
+    )
+    assert (
+        "Freezing may not be evaluated while any Critical remains at `answered`"
+        in step
+    ), (
+        "the step must forbid evaluating the freeze condition while any "
+        "Critical is still at `answered`"
+    )
+
+
+_GAUNTLET_STATUS_WRITE_RE = re.compile(r"--status\s+(\w+)")
+
+
+def test_no_gauntlet_authored_write_sets_superseded_or_dropped():
+    """No gauntlet outcome sets a record to `superseded` or `dropped`, in either
+    mode — both statuses keep their existing (non-gauntlet) uses.
+
+    A bare grep for the words `superseded` / `dropped` would also flag the
+    predecessor-supersession write ("Supersession writes both directions"),
+    which is a legitimate, spec-preserved mechanism unrelated to this rule. This
+    pins the two specific command strings the old route wrote instead — the
+    predecessor write's own placeholder (`<predecessor-adr-id>`) is untouched.
     """
     text = GAUNTLET.read_text()
-    for route in ("freeze route", "reframe route"):
-        assert route in text, (
-            f"gauntlet/SKILL.md must name the {route!r} — the two routes are the "
-            "vocabulary the resolution step and both per-mode tails share"
+    for offending_write in (
+        "<spec-id> --status superseded",
+        "<adr-id> --status dropped",
+    ):
+        assert offending_write not in text, (
+            f"gauntlet/SKILL.md must not carry {offending_write!r} — no gauntlet "
+            "outcome may set a record to `superseded` or `dropped`"
         )
-
-
-# The route table's rows: each route's spec target, adr target, and handoff
-# direction. The route names alone are vocabulary; this mapping is the mechanical
-# rule the whole flow turns on, and it lives in exactly one table.
-_ROUTE_TABLE_HEADER = "| Route | Spec target | Adr target | Handoff |"
-_ROUTE_TARGETS: dict[str, tuple[str, str, str]] = {
-    "freeze route": ("ready", "active", "forward"),
-    "reframe route": ("superseded", "dropped", "back to brainstorming"),
-}
-
-
-def _route_table_row(step: str, route: str) -> list[str]:
-    prefix = f"| **{route}** |"
-    for line in step.splitlines():
-        if line.strip().startswith(prefix):
-            return [cell.strip() for cell in line.strip().strip("|").split("|")]
-    raise AssertionError(
-        f"the resolution step's route table must carry a row for the {route!r}"
-    )
-
-
-def test_route_table_binds_each_route_to_its_per_mode_targets():
-    """Route names without their target statuses are half a rule.
-
-    An agent reading "reframe route" still has to know it takes a spec to
-    `superseded` and an adr to `dropped`; unpinned, the two rows can swap targets
-    and every other pin in this file still passes.
-    """
-    step = _resolution_step(GAUNTLET.read_text())
-    assert _ROUTE_TABLE_HEADER in step, (
-        "the resolution step's route table must carry the "
-        f"{_ROUTE_TABLE_HEADER!r} header — the column order is what gives each "
-        "cell below it its meaning"
-    )
-    for route, (spec_target, adr_target, handoff) in _ROUTE_TARGETS.items():
-        cells = _route_table_row(step, route)
-        assert cells[1] == f"`{spec_target}`", (
-            f"the {route}'s spec target must be `{spec_target}`; row reads {cells!r}"
-        )
-        assert cells[2] == f"`{adr_target}`", (
-            f"the {route}'s adr target must be `{adr_target}`; row reads {cells!r}"
-        )
-        assert handoff in cells[3], (
-            f"the {route}'s handoff must point {handoff!r}; row reads {cells!r}"
-        )
-
-
-def test_route_rule_is_total_over_the_disposition_vocabulary():
-    """Every combination of dispositions must land on exactly one route.
-
-    A partial rule leaves the agent freelancing the outcome for whatever it does
-    not cover — which is how a record ends up in a state the lifecycle vocabulary
-    has no name for.
-    """
-    step = _flat(_resolution_step(GAUNTLET.read_text()))
-    assert "total over the disposition vocabulary" in step, (
-        "the route rule must be stated as total — an incomplete rule is an "
-        "invitation to invent an outcome for the uncovered case"
-    )
-    assert "reads **final dispositions**" in step, (
-        "the route rule must read final dispositions — a rule that reads an "
-        "intermediate one routes on a disposition the operator has already moved"
-    )
-    assert (
-        "**Any Critical whose final disposition is `revise`**, whether you "
-        "proposed it or the operator overrode into it → the **reframe route**"
-    ) in step, (
-        "the reframe arm must fire on any Critical whose FINAL disposition is "
-        "`revise`, proposed or overridden, and must land on the reframe route "
-        "by name — an arm stated without its route reads the same inverted"
-    )
-    assert "`answered` is not terminal" in step, (
-        "totality over the expanded vocabulary requires stating that `answered` "
-        "is non-terminal — a vocabulary term the operator can reach but the "
-        "route rule never resolves is exactly the uncovered case this pins"
-    )
-    assert "It does not by itself force the reframe route." in step, (
-        "an answered Critical must be stated NOT to force the reframe route — "
-        "without it the reframe arm reads as firing on the pre-adjudication "
-        "disposition, which is the defect the answered disposition exists to fix"
-    )
-    assert (
-        "**Every other combination** of `resolved` / `accepted-as-risk` / "
-        "`disputed`, including a run with no Criticals at all → the **freeze route**"
-    ) in step, (
-        "the freeze arm must be stated as the complement — every remaining "
-        "combination of `resolved` / `accepted-as-risk` / `disputed`, plus the "
-        "no-Criticals run — and must land on the freeze route by name"
-    )
-
-
-def test_freeze_arm_never_lists_answered_as_a_reachable_final_term():
-    """Structural check on the freeze arm's own enumerated terms.
-
-    A substring pin on the whole freeze-arm sentence only catches an edit to that
-    exact sentence. It would not catch a future edit that makes `answered`
-    reachable as a final disposition somewhere else in the route rule while
-    leaving this sentence untouched. Parse the freeze arm's own term list instead
-    of matching it as one opaque string, so the set of terms it actually
-    enumerates is what is pinned.
-    """
-    step = _flat(_resolution_step(GAUNTLET.read_text()))
-    match = re.search(
-        r"\*\*Every other combination\*\* of (.+?), including a run with "
-        r"no Criticals at all",
-        step,
-    )
-    assert match, (
-        "the freeze arm sentence must be present in its known shape for its term "
-        "list to be parsed out of it"
-    )
-    terms = {term.strip("` ") for term in match.group(1).split("/")}
-    assert terms == {"resolved", "accepted-as-risk", "disputed"}, (
-        f"the freeze arm's enumerated terms must be exactly resolved / "
-        f"accepted-as-risk / disputed — got {terms!r}. `answered` reachable here "
-        "would route a re-adjudication-pending Critical to freeze without it ever "
-        "being re-adjudicated"
-    )
-
-
-def test_route_may_not_be_derived_while_a_critical_remains_answered():
-    """The route rule's totality claim is false unless every `answered` row is
-    resolved before the table is read for a route.
-
-    `answered` is reachable by the operator but names no route on its own; a run
-    left with any Critical still at `answered` has no final disposition for that
-    row yet, and deriving a route from the table anyway would derive it from a
-    disposition that has not happened.
-    """
-    step = _flat(_resolution_step(GAUNTLET.read_text()))
-    assert "matches **neither** arm" in step, (
-        "the route rule must say that an un-re-adjudicated `answered` row matches "
-        "neither the reframe arm nor the freeze arm — otherwise a reader can "
-        "assume it silently falls into the freeze arm's 'every other combination'"
-    )
-    assert "route may not be derived while any Critical remains at `answered`" in step, (
-        "the route rule must forbid deriving a route while any Critical is still "
-        "at `answered` — this is the non-terminality claim stated as a rule about "
-        "when the route may be read, not just as a description of `answered`"
+    # The legitimate predecessor-supersession write must survive this sweep
+    # unharmed — it is what proves the pin above is not a bare word ban.
+    assert "<predecessor-adr-id> --status superseded --related adr=<adr-id>" in text, (
+        "the predecessor-supersession write is a legitimate, non-gauntlet-outcome "
+        "use of `superseded` and must still be present — this sweep bans two "
+        "specific command strings, not the word"
     )
 
 
@@ -1180,9 +1261,9 @@ def test_overrides_apply_in_one_round_trip():
 
 
 def test_full_post_override_table_is_echoed_before_the_tail():
-    """A route line cannot show a misapplied override.
+    """A one-line outcome cannot show a misapplied override.
 
-    "dispute C3" recorded against C4 changes nothing the route line displays, and
+    "dispute C3" recorded against C4 changes nothing that one line displays, and
     the audit trail it lands in is permanent.
     """
     step = _flat(_resolution_step(GAUNTLET.read_text()))
@@ -1190,8 +1271,9 @@ def test_full_post_override_table_is_echoed_before_the_tail():
         "the resolution step must re-render the complete disposition table after "
         "any override"
     )
-    assert "**not just the route line**" in step, (
-        "the echo must be pinned as the full table rather than the route line alone"
+    assert "**not just the outcome line**" in step, (
+        "the echo must be pinned as the full table rather than the outcome line "
+        "alone"
     )
     assert "as the last thing before the accepted tail executes" in step, (
         "the echo must be positioned as the final output before the tail runs — an "
@@ -1258,20 +1340,20 @@ def test_override_off_resolved_withdraws_that_rows_drafted_edit():
 
 
 def test_override_into_resolved_re_presents_its_newly_drafted_edit():
-    """The re-present fires on a route change — which an override into `resolved`
-    need not cause, on a run another `revise` row still holds.
+    """The re-present fires on a revise-presence change — which an override into
+    `resolved` need not cause, on a run another `revise` row still holds.
 
     That row's edit was never drafted (only proposals of `resolved` are), so
     accepting straight through would leave the edit composed after acceptance.
     """
     step = _flat(_resolution_step(GAUNTLET.read_text()))
     assert (
-        "**An override *into* `resolved` re-presents too, whatever the route does.**"
-        in step
+        "**An override *into* `resolved` re-presents too, whatever the freeze "
+        "decision does.**" in step
     ), (
         "the override rules must cover an override INTO `resolved`, whose edit was "
-        "never drafted — the route-change trigger alone misses it whenever another "
-        "`revise` row holds the route unchanged"
+        "never drafted — the revise-presence trigger alone misses it whenever "
+        "another `revise` row holds the freeze decision unchanged"
     )
     assert "a newly drafted edit is a change" in step, (
         "the re-present cap must be reconciled with this case explicitly, or the "
@@ -1279,22 +1361,35 @@ def test_override_into_resolved_re_presents_its_newly_drafted_edit():
     )
 
 
-def test_route_changing_override_re_presents_before_any_write():
-    """The route is the one thing an override can change that the operator did not
-    directly name — so it goes back for acceptance before anything is written.
+def test_revise_presence_changing_override_re_presents_before_any_write():
+    """Whether any Critical still carries `revise` is the one thing an override
+    can change that the operator did not directly name — so it goes back for
+    acceptance before anything is written.
     """
     step = _flat(_resolution_step(GAUNTLET.read_text()))
-    assert "**A route-changing override re-presents once.**" in step, (
-        "an override that changes the route must re-present the revised recommendation"
+    assert (
+        "**An override changing revise-presence re-presents once.**" in step
+    ), (
+        "an override that changes whether any Critical still carries `revise` "
+        "must re-present the revised recommendation"
     )
     assert "**before anything is written**" in step, (
-        "the re-present must precede every write — a route change discovered after "
-        "the tail has started is a record already flipped the wrong way"
+        "the re-present must precede every write — a revise-presence change "
+        "discovered after the tail has started is a record already flipped the "
+        "wrong way"
     )
-    assert "**The cap is one re-present per route change, not one per run.**" in step, (
-        "the step must say what happens when the reply to a re-present changes the "
-        "route again — read as a per-run cap, the second change would be written on "
-        "a route the operator never accepted"
+    assert (
+        "**The cap is one re-present per revise-presence change, not one per "
+        "run.**" in step
+    ), (
+        "the step must say what happens when the reply to a re-present changes "
+        "revise-presence again — read as a per-run cap, the second change would "
+        "be written on a freeze decision the operator never accepted"
+    )
+    assert "Each re-presented deliverable carries its round number" in step, (
+        "a re-presented deliverable must carry its round number — with no round "
+        "cap, the count is the only signal distinguishing convergence from a "
+        "directionless loop"
     )
 
 
@@ -1339,10 +1434,22 @@ def test_failed_write_escalation_row_admits_the_post_flip_failure():
         "write ordered after the flip, rather than contradicting the per-mode tail "
         "that describes it"
     )
-    assert "or drafted an edit the presented table did not carry" in step, (
+    assert (
+        "or whenever a prescription or edit not in the presented table was newly "
+        "drafted" in step
+    ), (
         "the `route-change re-present` row must cover the other re-present the "
-        "override rules require — an override into `resolved` on a run whose route "
-        "never moved — or the table lists a trigger narrower than the rule it names"
+        "override rules require — an override into `resolved` or `revise` on a "
+        "run whose revise-presence never moved — or the row names a trigger "
+        "narrower than the rule it restates"
+    )
+    assert (
+        "whenever overrides change whether any Critical still carries `revise`"
+        in step
+    ), (
+        "the `route-change re-present` row must state the revise-presence "
+        "trigger explicitly — a row still phrased in terms of a route change "
+        "restates a rule that no longer exists"
     )
 
 
@@ -1683,22 +1790,27 @@ def test_spec_tail_applies_the_accepted_edits_in_the_same_atomic_write():
     )
 
 
-def test_spec_tail_flips_per_route_with_a_formed_handoff():
+def test_spec_tail_flips_on_freeze_and_starts_a_new_round_otherwise():
     tail = _spec_tail(GAUNTLET.read_text())
     assert "<spec-id> --status ready" in tail, (
-        "the spec tail's freeze route must carry the `ready` flip"
+        "the spec tail's freeze path must carry the `ready` flip"
     )
-    assert "<spec-id> --status superseded" in tail, (
-        "the spec tail's reframe route must carry the `superseded` flip as a "
-        "command, not only as prose — the route that does not freeze still writes"
+    assert "<spec-id> --status superseded" not in tail, (
+        "the spec tail must not carry a `superseded` flip — a surviving `revise` "
+        "withholds only the freeze, it does not route the spec anywhere"
     )
     flat = _flat(tail)
-    assert "/craft:brainstorm" in flat, (
-        "the reframe route must hand back to brainstorming"
+    assert "the spec does not flip" in flat, (
+        "the spec tail must state that a surviving `revise` Critical leaves the "
+        "spec unflipped"
+    )
+    assert "Begin the next revise round" in flat, (
+        "the spec tail must state that adjudication continues into a new revise "
+        "round rather than handing the record anywhere"
     )
     assert "fully formed" in flat, (
-        "the handoff command must be emitted with the real record id, so the "
-        "operator can paste it into a fresh session as-is"
+        "the freeze-path handoff command must be emitted with the real record "
+        "id, so the operator can paste it into a fresh session as-is"
     )
 
 
@@ -1778,9 +1890,10 @@ def test_adr_tail_writes_the_lesson_first_then_the_atomic_write_then_flips():
 
 
 def test_adr_counts_annotation_covers_the_whole_disposition_vocabulary():
-    """A missing slot reads as a zero, and `revise` is the disposition that drove
-    the reframe route — so a `dropped` adr whose annotation has no `revise` slot
-    is annotated as a clean run. `answered` is excluded from this loop on purpose:
+    """A missing slot reads as a zero, and `revise` is the disposition that
+    withholds the freeze — so an adr whose annotation has no `revise` slot is
+    annotated as a clean run even while it is still revising. `answered` is
+    excluded from this loop on purpose:
     it is not a final disposition and contributes no term of its own to the
     annotation grammar (see `_FINAL_DISPOSITION_NAMES`).
     """
@@ -1835,16 +1948,21 @@ def test_adr_tail_states_the_post_flip_supersession_failure_branch():
     )
 
 
-def test_reframe_route_targets_stay_pinned_per_mode():
-    """One route, two targets — and neither may drift into the other's vocabulary."""
+def test_neither_mode_routes_a_surviving_revise_to_a_terminal_status():
+    """A surviving `revise` withholds the freeze in both modes — it does not
+    route a spec to `superseded` or an adr to `dropped`; both statuses keep
+    only their pre-existing, non-gauntlet uses.
+    """
     text = GAUNTLET.read_text()
-    assert "<spec-id> --status superseded" in _spec_tail(text), (
-        "the reframe route takes a spec to `superseded`"
+    assert "<spec-id> --status superseded" not in _spec_tail(text), (
+        "the spec tail must not take a spec to `superseded` on a surviving "
+        "`revise` — it withholds the freeze and starts another round instead"
     )
     adr_flat = _flat(_adr_mode_section(text))
-    assert "takes an adr to `dropped`" in adr_flat, (
-        "the reframe route takes an adr to `dropped`, not `superseded` — a draft "
-        "adr never went `active`, so it has no predecessor decision to supersede"
+    assert "the adr stays `draft`" in adr_flat, (
+        "the adr-mode section must state that a surviving `revise` leaves the "
+        "adr `draft` — not `dropped`, which a draft adr never went `active` to "
+        "supersede a predecessor from in the first place"
     )
 
 
@@ -1899,12 +2017,20 @@ def test_adr_atomic_write_runs_even_with_no_resolved_edits():
     )
 
 
-def test_adr_tail_carries_the_reframe_flip_too():
-    """The sequence is the same on both routes; only its last write differs."""
+def test_adr_tail_withholds_the_flip_on_a_surviving_revise():
+    """The first two writes land on every accepted run; only the flip is
+    conditional on the freeze condition.
+    """
     tail = _adr_tail(GAUNTLET.read_text())
-    assert "<adr-id> --status dropped" in tail, (
-        "the adr tail's reframe route must carry the `dropped` flip as a command — "
-        "the detail record and the annotation are written on that route too"
+    assert "<adr-id> --status dropped" not in tail, (
+        "the adr tail must not carry a `dropped` flip — a surviving `revise` "
+        "withholds only the status flip, the lesson record and the atomic write "
+        "still land"
+    )
+    flat = _flat(tail)
+    assert "this step does not run" in flat, (
+        "the adr tail must state that the status-flip step does not run while "
+        "any Critical's final disposition is `revise`"
     )
 
 
