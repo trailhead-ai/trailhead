@@ -301,8 +301,8 @@ file and fill in the body sections.
    first write. Planting the seeds is this session's job; fleshing one out is not — each seed is
    then brainstormed and gauntleted separately, at its own altitude, when it's picked up.
 
-3. **If the ADR is later rejected at gauntlet** (a Critical dispositioned `reframed`, which routes
-   the adr to `dropped`), the rule is this:
+3. **If the ADR is later rejected at gauntlet** (a Critical carries a final `revise` disposition,
+   which routes the adr to `dropped`), the rule is this:
 
    its seeded derived specs are orphaned back to brainstorm — their `related: adr=` edge points at the `dropped` draft as provenance.
 
@@ -372,9 +372,9 @@ is **frozen**: no more edits; new thinking on the same topic creates a new spec 
 
 **The `draft` → `ready` edge is the gauntlet's.** Brainstorm leaves the spec at `draft`; the
 `gauntlet` skill flips it once the operator has accepted its recommendation. A gauntlet Critical
-dispositioned `reframed` sends the spec to `superseded` instead — the framing didn't survive, so
-this spec never freezes and a new one takes its place. That is the review working, not the spec
-failing.
+carrying a final `revise` disposition sends the spec to `superseded` instead — the framing didn't
+survive, so this spec never freezes and a new one takes its place. That is the review working, not
+the spec failing.
 
 ## Bounce-Back from Planning
 

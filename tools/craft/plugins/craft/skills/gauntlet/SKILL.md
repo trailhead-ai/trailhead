@@ -229,19 +229,19 @@ conformance, not quality.
 
 #### Who may propose what
 
-The agent proposes **only `resolved` or `reframed`**. Both are judgments about the document, and
+The agent proposes **only `resolved` or `revise`**. Both are judgments about the document, and
 the adjudicator has read every pass that attacked it.
 
-**Before proposing `reframed`, apply the edit-first test.** Ask whether any set of edits to the
+**Before proposing `revise`, apply the edit-first test.** Ask whether any set of edits to the
 record's own sections would answer the finding. If yes, the disposition is `resolved` and drafting
 those edits is the adjudicator's job — the test is applied, not skipped because the finding sounds
-severe. `reframed` is reserved for a finding that invalidates the record's framing itself, such that
-editing the record would mean writing a different record, not amending this one. State the asymmetry
-plainly: a finding of the form "the record does not say X" is never a reframe — at most it is a
-missing edit; only "X makes this the wrong record" can be a reframe. **Reframing a finding an edit
-would answer is the expensive error** — it spends a brainstorm, discards a record the operator has
-already reasoned through, and loses whatever counterargument the operator had, none of which a
-missed line ever required.
+severe. `revise` is reserved for a finding an edit here cannot answer: the record's framing is wrong,
+or the fix reaches beyond this record's own sections. State the asymmetry plainly: a finding of the
+form "the record does not say X" is never a `revise` — at most it is a missing edit, and the
+disposition is `resolved`; only a finding that a drafted edit cannot answer on the spot is a `revise`.
+**Proposing `revise` for a finding an edit would answer is the expensive error** — it defers a fix
+the adjudicator could draft right now, and hands the operator a prescription for work that was
+already done, none of which a missed line ever required.
 
 `accepted-as-risk: <reason>`, `disputed: <reason>`, and `answered: <reason>` are **operator-only
 overrides**. All three are judgments about what this project is willing to live with, or knows that
@@ -250,10 +250,22 @@ them**. Do not propose any of the three, and do not offer a reason the operator 
 
 - `resolved` — the record is edited to address the finding. It is still `draft`; edits are free
   here, which is the entire point of reviewing now.
-- `reframed` — the finding invalidates the record's framing. Return to brainstorming and write a
-  new record. This is the premise pass's characteristic outcome, and it is a *success* of the
-  gauntlet, not a failure of the record — a reframe here costs a conversation; the same reframe
-  discovered mid-build costs the build.
+- `revise` — the finding needs a change the edit-first test could not resolve on the spot. This is
+  the premise pass's characteristic outcome, and landing on it is a *success* of the gauntlet, not a
+  failure of the record — a prescription here costs a conversation; the same gap discovered mid-build
+  costs the build. **Every `revise` carries a prescription** naming what is wrong, what to change,
+  and how — specific enough to act on without re-deriving the reasoning. **A finding that cannot
+  produce a prescription this specific is not a Critical.** Every prescription also declares a
+  **scope**:
+  - **`record-only`** — the change lands inside the record under review; the finding is its own
+    evidence.
+  - **`reaches-downstream`** — the change invalidates work already seeded from this record. It must
+    name each derived spec it invalidates, and it must meet the **downstream evidence bar**: a
+    named, specific alternative that accomplishes the same outcome — an existing capability, a
+    library, or a shape that makes the decision unnecessary — stated with why it achieves the outcome
+    and what it costs. **Generalised doubt does not meet it.** A `reaches-downstream` prescription
+    **writes nothing to the named specs**: it names them in the escalation table, and re-entry into
+    brainstorming is the operator's act; the `related: adr=` edge stays provenance, not a live link.
 - `accepted-as-risk: <reason>` — explicit acceptance, recorded for audit.
 - `disputed: <reason>` — the operator disagrees with the finding; recorded for audit.
 - `answered: <reason>` — the operator supplies a counterargument the passes did not have, and the
@@ -263,7 +275,7 @@ them**. Do not propose any of the three, and do not offer a reason the operator 
   rule: any finding the passes raised for lack of information the operator actually holds is
   answered, not disputed or accepted as risk. `answered` is **not terminal** — **the adjudicator
   re-adjudicates it**, on the same footing as its original proposal: the re-adjudicated outcome is
-  `resolved` or `reframed`, the same two terms and no others — never `accepted-as-risk`, `disputed`,
+  `resolved` or `revise`, the same two terms and no others — never `accepted-as-risk`, `disputed`,
   or `answered` again. Those three stay operator-only overrides; re-adjudicating into one would let
   the adjudicator self-author an operator-only disposition under cover of "answering" it. `resolved`
   is the ordinary case, and **the counterargument is folded into the record as an edit**. This is the
@@ -271,8 +283,8 @@ them**. Do not propose any of the three, and do not offer a reason the operator 
   again, because the record still does not say it. **Whichever of the two terms the re-adjudication
   lands on, it re-presents before anything is written** — an answered row that becomes `resolved`
   needs its edit drafted and therefore re-presents, which the existing "override *into* `resolved`
-  re-presents too" rule below already covers; an answered row that becomes `reframed` re-presents on
-  the same footing, including on a run where another `reframed` row already holds the route, so the
+  re-presents too" rule below already covers; an answered row that becomes `revise` re-presents on
+  the same footing, including on a run where another `revise` row already holds the route, so the
   discarded counterargument is never dropped without the operator seeing the swap.
 
 #### The two routes, and the rule that picks one
@@ -289,16 +301,16 @@ override and any re-adjudication, never an intermediate one — and is **total o
 vocabulary**: every combination of final dispositions lands on exactly one route, so there is never
 an outcome left to freelance:
 
-- **Any Critical whose final disposition is `reframed`**, whether you proposed it or the operator
+- **Any Critical whose final disposition is `revise`**, whether you proposed it or the operator
   overrode into it → the **reframe route**.
 - **Every other combination** of `resolved` / `accepted-as-risk` / `disputed`, including a run with
   no Criticals at all → the **freeze route**.
 
 A Critical still sitting at `answered` is not yet a final disposition — it is a request for
 re-adjudication, not an outcome of one — and matches **neither** arm above: not the reframe arm,
-which fires only on `reframed`, and not the freeze arm, whose enumerated terms do not include
+which fires only on `revise`, and not the freeze arm, whose enumerated terms do not include
 `answered`. **The route may not be derived while any Critical remains at `answered`.**
-Re-adjudicate every answered row first; only once each one carries `resolved` or `reframed` does the
+Re-adjudicate every answered row first; only once each one carries `resolved` or `revise` does the
 table hold final dispositions the rule can read. Once re-adjudicated, `answered` is not terminal, and
 the row's final disposition is whatever it is re-adjudicated to, normally `resolved`. It does not by
 itself force the reframe route.
@@ -339,29 +351,29 @@ from that one reply, apply them together, and do not walk back through the table
 - **An override off `resolved` withdraws that row's drafted edit.** Every `resolved` row's edit text
   was drafted before you presented, and only the rows still `resolved` once the overrides are
   applied belong to the accepted set. An override to `disputed`, `accepted-as-risk`, `answered`, or
-  `reframed` therefore **removes that row's edit from `$EDITS`**, and the echoed post-override table
+  `revise` therefore **removes that row's edit from `$EDITS`**, and the echoed post-override table
   is what says which edits remain — an override into `answered` removes it only until
   re-adjudication drafts a new one, which the override-into-`resolved` rule below covers. A diff
   assembled before the override lands the one change the operator explicitly declined, permanently,
   in a record about to freeze.
 - **A route-changing override re-presents once.** If applying the overrides changes the route — an
-  override that removes the last `reframed`, or one that introduces one — present the revised
+  override that removes the last `revise`, or one that introduces one — present the revised
   recommendation once more and take acceptance again **before anything is written**. If that reply
   changes the route again, it is a further override round-trip and it re-presents again.
   **The cap is one re-present per route change, not one per run.** What the cap forbids is
   re-presenting a recommendation nothing changed; what it never licenses is writing a route the
   operator has not seen and accepted.
 - **An override *into* `resolved` re-presents too, whatever the route does.** Only the rows you
-  proposed `resolved` have their edit text drafted, so an override moving a `reframed` row to
+  proposed `resolved` have their edit text drafted, so an override moving a `revise` row to
   `resolved` — or an `answered` row re-adjudicated to `resolved` — produces an accepted row with no
   edit behind it. Draft that edit, then present once more and take acceptance again — including on a
-  run whose route never moved because another `reframed` row still holds it. The cap above forbids
+  run whose route never moved because another `revise` row still holds it. The cap above forbids
   re-presenting a recommendation nothing changed, and **a newly drafted edit is a change**. Skip it
   and you are composing the edit after acceptance, which is exactly what drafting every `resolved`
   edit before presenting forbids.
-- **A re-adjudication landing on `reframed` re-presents too, whatever the route does.** An `answered`
-  row re-adjudicated to `resolved` is covered by the rule above; one re-adjudicated to `reframed`
-  gets the identical treatment, including on a run that already holds another `reframed` row, where
+- **A re-adjudication landing on `revise` re-presents too, whatever the route does.** An `answered`
+  row re-adjudicated to `resolved` is covered by the rule above; one re-adjudicated to `revise`
+  gets the identical treatment, including on a run that already holds another `revise` row, where
   the route-changing-override rule never fires because the route does not move. Present the revised
   table and take acceptance again **before anything is written** — an operator who answered a finding
   is owed the chance to see that their counterargument was re-adjudicated away before the record that
@@ -378,7 +390,7 @@ no auto-accept flag, and every point below waits on a human today.
 |---|---|
 | **operator acceptance gate** | the operator accepting the presented deliverable — on every run, clean ones included |
 | **override round-trip** | the operator's overrides, applied together and echoed as a full table |
-| **route-change re-present** | acceptance of the revised recommendation, whenever overrides changed the route — or drafted an edit the presented table did not carry, or re-adjudicated an `answered` row to `resolved` or to `reframed`, the latter even on a run whose route never moved |
+| **route-change re-present** | acceptance of the revised recommendation, whenever overrides changed the route — or drafted an edit the presented table did not carry, or re-adjudicated an `answered` row to `resolved` or to `revise`, the latter even on a run whose route never moved |
 | **failed-write report** | nothing — the tail has stopped and the operator is told the partial state; the record stays `draft` **unless the failure fell after the status flip**, which only the adr tail's supersession write is ordered to do (see "Reviewing an adr") |
 
 #### The accepted tail
@@ -435,7 +447,7 @@ operator actually saw. Derive that split from the dispositions themselves, never
   of the round-trip. An answered row's *final* disposition (normally `resolved`) is what the counts
   annotation counts under that final disposition's term — `answered` contributes no term of its own
   to the grammar; it counts as its final disposition **plus** an operator override.
-- `resolved` and `reframed` are accepted-from-proposal *unless* this run's override reply changed
+- `resolved` and `revise` are accepted-from-proposal *unless* this run's override reply changed
   that row — which the echoed post-override table records, an answered-then-resolved row included.
 
 ### 6. Stamp and freeze
@@ -485,8 +497,8 @@ and hand off to planning. Do not enter planning from inside the gauntlet — let
 real spec-id, never a `<placeholder>` (e.g. `/craft:plan spec/streaming-export`) — so the user can
 paste it into a fresh session as-is.
 
-On the **reframe route** the write is identical — a reframed spec still keeps its review record —
-and only the flip and the handoff differ:
+On the **reframe route** the write is identical — a spec carrying a final `revise` disposition still
+keeps its review record — and only the flip and the handoff differ:
 
 ```
 lore record update <spec-id> --status superseded
@@ -576,7 +588,7 @@ here. The exhaustive body adds one write ahead of them, and the order of all thr
 
 ```
 printf '%s' "$DETAIL" | lore record create --kind lesson --title "Gauntlet detail — <adr title>" --related adr=<adr-id>
-printf '%s' "$EDITS" | lore record update <adr-id> --diff --annotation gauntlet=<date>:7-passes:<n>-resolved,<n>-reframed,<n>-accepted-as-risk,<n>-disputed:<n>-from-proposal,<n>-operator-override
+printf '%s' "$EDITS" | lore record update <adr-id> --diff --annotation gauntlet=<date>:7-passes:<n>-resolved,<n>-revise,<n>-accepted-as-risk,<n>-disputed:<n>-from-proposal,<n>-operator-override
 lore record update <adr-id> --status active
 ```
 
@@ -600,7 +612,7 @@ lore record update <adr-id> --status active
    edits, which are edits to Context, Decision, Consequences, and Alternatives rejected and must
    land before anything freezes. An adr flipped `active` without them is an immutable decision no
    acceptance ever reached. The counts alongside the accepted-from-proposal / operator-override
-   split are how the provenance stamp renders for an adr, and `<n>-reframed` is what tells an
+   split are how the provenance stamp renders for an adr, and `<n>-revise` is what tells an
    auditor of a `dropped` adr which disposition sent it there. **This write runs on every accepted
    run, including one with zero `resolved` Criticals** — `$EDITS` is then an empty diff, which the
    CLI applies as a no-op, and the annotation rides the same invocation regardless. Skipped there,

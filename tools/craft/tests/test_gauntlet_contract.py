@@ -40,6 +40,7 @@ DISTILL = SKILLS_DIR / "distill" / "SKILL.md"
 PLAN = SKILLS_DIR / "plan" / "SKILL.md"
 SHARED_COUNCIL = SKILLS_DIR / "_shared" / "council.md"
 PLANNER = AGENTS_DIR / "planner.md"
+PREMISE_ATTACKER = AGENTS_DIR / "premise-attacker.md"
 
 # Any forward advance of a SPEC's status, in any craft prose. Matched as a regex
 # rather than a fixed literal because the invariant is about the *transition*, not
@@ -49,7 +50,8 @@ PLANNER = AGENTS_DIR / "planner.md"
 _SPEC_ADVANCE_RE = re.compile(r"<spec-id>\s+--status\s+(\w+)")
 
 # States that imply the spec is frozen (gauntlet-passed). `draft` and `superseded`
-# are not advances — brainstorm creates at `draft`, and a reframed spec is superseded.
+# are not advances — brainstorm creates at `draft`, and a spec carrying a final `revise`
+# disposition is superseded.
 _FROZEN_STATES = {"ready", "planned", "complete"}
 
 # `planned` may be written by a planning path, but ONLY behind this guard — the
@@ -89,15 +91,28 @@ _GAUNTLET_DISPATCHED_AGENTS: list[str] = [
     "advocate",
 ]
 
-# The disposition vocabulary. `reframed` is the gauntlet's delta over planning's set:
+# The disposition vocabulary. `revise` is the gauntlet's delta over planning's set:
 # a spec can fail review by being the wrong spec, an outcome a plan review has no
-# analogue for. Dropping it would silently remove the premise pass's only landing
-# place — its characteristic (and highest-value) outcome.
+# analogue for. Unlike the `reframed` disposition it replaced, `revise` carries a
+# mandatory prescription and scope rather than handing back a closed door — dropping
+# it would silently remove the premise pass's only landing place, its characteristic
+# (and highest-value) outcome. `answered` is the operator's non-terminal override,
+# re-adjudicated into one of the two agent-proposable terms above.
 _DISPOSITION_NAMES: list[str] = [
     "resolved",
-    "reframed",
+    "revise",
     "accepted-as-risk",
     "disputed",
+    "answered",
+]
+
+# The subset of `_DISPOSITION_NAMES` that gets its own slot in the adr counts
+# annotation. `answered` is excluded on purpose: it is not a final disposition and
+# "contributes no term of its own to the grammar" (SKILL.md's provenance-stamp
+# rule) — it counts under whichever of `resolved` / `revise` it is re-adjudicated
+# to, plus an operator-override marker, never under its own name.
+_FINAL_DISPOSITION_NAMES: list[str] = [
+    name for name in _DISPOSITION_NAMES if name != "answered"
 ]
 
 
@@ -312,11 +327,11 @@ def test_disposition_names_pinned(name: str):
     )
 
 
-def test_reframed_disposition_supersedes_rather_than_freezes():
-    """`reframed` is the premise pass's landing place: the spec must NOT freeze."""
+def test_revise_disposition_supersedes_rather_than_freezes():
+    """`revise` is the premise pass's landing place: the spec must NOT freeze."""
     text = GAUNTLET.read_text()
     assert "superseded" in text, (
-        "gauntlet/SKILL.md must route a `reframed` Critical to a superseded spec — a "
+        "gauntlet/SKILL.md must route a `revise` Critical to a superseded spec — a "
         "spec whose framing failed review must not reach `ready`"
     )
 
@@ -719,12 +734,71 @@ def test_criticals_carry_stable_presentation_ordered_ids():
     )
 
 
-def test_only_resolved_and_reframed_are_agent_proposable():
+def test_only_resolved_and_revise_are_agent_proposable():
     step = _flat(_resolution_step(GAUNTLET.read_text()))
-    assert "The agent proposes **only `resolved` or `reframed`**" in step, (
+    assert "The agent proposes **only `resolved` or `revise`**" in step, (
         "the resolution step must restrict agent-proposed dispositions to "
-        "`resolved` and `reframed` — those are judgments about the document, which "
+        "`resolved` and `revise` — those are judgments about the document, which "
         "the adjudicator has read in full"
+    )
+
+
+def test_revise_requires_a_prescription_to_be_a_critical():
+    """A `revise` with no prescription is the exact defect this disposition exists
+    to fix: a verdict that hands back a closed door instead of something actionable.
+    """
+    step = _flat(_resolution_step(GAUNTLET.read_text()))
+    assert (
+        "Every `revise` carries a prescription** naming what is wrong, what to "
+        "change, and how"
+    ) in step, (
+        "the resolution step must require every `revise` to carry a prescription "
+        "naming what is wrong, what to change, and how"
+    )
+    assert (
+        "A finding that cannot produce a prescription this specific is not a "
+        "Critical." in step
+    ), (
+        "the resolution step must state that a finding unable to produce a "
+        "prescription this specific is not a Critical — otherwise `revise` can "
+        "still be proposed as a bare verdict"
+    )
+
+
+def test_revise_prescription_declares_a_scope_with_the_downstream_evidence_bar():
+    step = _flat(_resolution_step(GAUNTLET.read_text()))
+    assert "`record-only`" in step, (
+        "the resolution step must define the `record-only` scope"
+    )
+    assert (
+        "the change lands inside the record under review; the finding is its own "
+        "evidence" in step
+    ), "the `record-only` scope must be defined in these terms"
+    assert "`reaches-downstream`" in step, (
+        "the resolution step must define the `reaches-downstream` scope"
+    )
+    assert "downstream evidence bar" in step, (
+        "the resolution step must name the downstream evidence bar a "
+        "`reaches-downstream` prescription must meet"
+    )
+    assert (
+        "a named, specific alternative that accomplishes the same outcome" in step
+    ), "the downstream evidence bar must require a named, specific alternative"
+    assert "**Generalised doubt does not meet it.**" in step, (
+        "the downstream evidence bar must state its exclusion: generalised doubt "
+        "does not meet it"
+    )
+
+
+def test_reaches_downstream_writes_nothing_to_the_named_specs():
+    step = _flat(_resolution_step(GAUNTLET.read_text()))
+    assert (
+        "A `reaches-downstream` prescription **writes nothing to the named "
+        "specs**" in step
+    ), (
+        "a `reaches-downstream` prescription must be pinned as writing nothing to "
+        "the specs it names — re-entry into brainstorming is the operator's act, "
+        "not something the gauntlet does on its own write"
     )
 
 
@@ -818,7 +892,7 @@ def test_re_adjudication_may_not_land_on_an_operator_only_disposition():
     forgery the empty-reason rule exists to prevent, reached by a different door.
     """
     step = _flat(_resolution_step(GAUNTLET.read_text()))
-    assert "the re-adjudicated outcome is `resolved` or `reframed`" in step, (
+    assert "the re-adjudicated outcome is `resolved` or `revise`" in step, (
         "re-adjudication must be constrained to the two terms the adjudicator may "
         "already propose — an unconstrained re-adjudication vocabulary lets the "
         "agent author an operator-only disposition"
@@ -915,11 +989,11 @@ def test_route_rule_is_total_over_the_disposition_vocabulary():
         "intermediate one routes on a disposition the operator has already moved"
     )
     assert (
-        "**Any Critical whose final disposition is `reframed`**, whether you "
+        "**Any Critical whose final disposition is `revise`**, whether you "
         "proposed it or the operator overrode into it → the **reframe route**"
     ) in step, (
         "the reframe arm must fire on any Critical whose FINAL disposition is "
-        "`reframed`, proposed or overridden, and must land on the reframe route "
+        "`revise`, proposed or overridden, and must land on the reframe route "
         "by name — an arm stated without its route reads the same inverted"
     )
     assert "`answered` is not terminal" in step, (
@@ -1185,7 +1259,7 @@ def test_override_off_resolved_withdraws_that_rows_drafted_edit():
 
 def test_override_into_resolved_re_presents_its_newly_drafted_edit():
     """The re-present fires on a route change — which an override into `resolved`
-    need not cause, on a run another `reframed` row still holds.
+    need not cause, on a run another `revise` row still holds.
 
     That row's edit was never drafted (only proposals of `resolved` are), so
     accepting straight through would leave the edit composed after acceptance.
@@ -1197,7 +1271,7 @@ def test_override_into_resolved_re_presents_its_newly_drafted_edit():
     ), (
         "the override rules must cover an override INTO `resolved`, whose edit was "
         "never drafted — the route-change trigger alone misses it whenever another "
-        "`reframed` row holds the route unchanged"
+        "`revise` row holds the route unchanged"
     )
     assert "a newly drafted edit is a change" in step, (
         "the re-present cap must be reconciled with this case explicitly, or the "
@@ -1704,12 +1778,14 @@ def test_adr_tail_writes_the_lesson_first_then_the_atomic_write_then_flips():
 
 
 def test_adr_counts_annotation_covers_the_whole_disposition_vocabulary():
-    """A missing slot reads as a zero, and `reframed` is the disposition that drove
-    the reframe route — so a `dropped` adr whose annotation has no `reframed` slot
-    is annotated as a clean run.
+    """A missing slot reads as a zero, and `revise` is the disposition that drove
+    the reframe route — so a `dropped` adr whose annotation has no `revise` slot
+    is annotated as a clean run. `answered` is excluded from this loop on purpose:
+    it is not a final disposition and contributes no term of its own to the
+    annotation grammar (see `_FINAL_DISPOSITION_NAMES`).
     """
     flat = _flat(_adr_tail(GAUNTLET.read_text()))
-    for name in _DISPOSITION_NAMES:
+    for name in _FINAL_DISPOSITION_NAMES:
         assert f"<n>-{name}" in flat, (
             f"the counts annotation must carry a `{name}` slot — the annotation is "
             "where an auditor reads the run's disposition counts, and an absent "
@@ -1875,4 +1951,51 @@ def test_calibration_names_only_adjudication_work_the_steps_still_define():
     assert "the single recommendation built out of them are the job" in _flat(text), (
         "Calibration must name the work the process actually defines: consolidate, "
         "spot-verify, and build the one recommendation the operator decides on"
+    )
+
+
+def test_no_craft_prose_carries_the_discarded_reframed_disposition():
+    """`reframed` is gone from the disposition vocabulary in both gauntlet modes.
+
+    Swept over every craft prose file, not just the four sibling files named in
+    the task — a scoped grep would miss a sibling `_craft_prose_files()` was
+    added specifically to catch.
+    """
+    offenders = [
+        p for p in _craft_prose_files() if "reframed" in p.read_text()
+    ]
+    assert not offenders, (
+        "these craft files still carry the discarded `reframed` disposition: "
+        f"{[str(p.relative_to(CRAFT)) for p in offenders]} — it was replaced by "
+        "`revise`, which carries a prescription and a declared scope instead of "
+        "handing back a closed door"
+    )
+
+
+def test_premise_attacker_retains_all_three_verdicts_and_revise_not_discard():
+    """The premise pass keeps its full mandate, altitude included.
+
+    What changes under `revise` is only what a `framing-fails` verdict can
+    PRODUCE — a prescription, never a discard. Losing any of the three verdicts,
+    or losing the "produces a prescription, not a discard" restatement, would
+    silently narrow the pass's mandate or reintroduce the discard route through
+    the one pass most likely to reach for it.
+    """
+    text = PREMISE_ATTACKER.read_text()
+    for verdict in ("framing-holds", "framing-wobbles", "framing-fails"):
+        assert f"`{verdict}`" in text, (
+            f"premise-attacker.md must retain the `{verdict}` verdict"
+        )
+    flat = _flat(text)
+    assert (
+        "A `framing-fails` verdict produces a `revise` prescription" in flat
+    ), (
+        "premise-attacker.md must state that a `framing-fails` verdict produces a "
+        "`revise` prescription — its L74 reservation prose must say so explicitly, "
+        "not leave it implied"
+    )
+    assert "never a discard" in flat, (
+        "premise-attacker.md must state plainly that `framing-fails` never "
+        "produces a discard — the gauntlet no longer has a discard route, and the "
+        "premise pass is the one most likely to reach for it"
     )

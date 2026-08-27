@@ -203,8 +203,9 @@ returned summary, and tell the caller what closes it:
 > Run `/craft:gauntlet <spec-id>` in the main session; if the gauntlet's premise pass reframes the
 > spec, this plan is void and planning restarts against the successor spec.
 
-This is not a formality. In the runs that calibrated the gauntlet, the premise pass reframed a spec
-badly enough to supersede it outright — a plan built on that spec would have been wasted work.
+This is not a formality. In the runs that calibrated the gauntlet, the premise pass's finding
+carried a final `revise` disposition serious enough to supersede the spec outright — a plan built
+on that spec would have been wasted work.
 
 ---
 

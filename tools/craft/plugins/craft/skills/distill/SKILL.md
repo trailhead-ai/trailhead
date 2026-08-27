@@ -148,8 +148,9 @@ Reconstitute the candidates into **logical design changes — M specs ↔ N ADRs
 
 - **`related` edges** between specs, and between specs and tasks.
 - **Shared areas** — specs whose work landed in the same area are usually one design change.
-- **Superseded chains** — a reframed spec and its successor are one thread. Superseded specs are
-  never distilled individually; they enter **only as chain context** for the surviving spec.
+- **Superseded chains** — a spec superseded by a `revise` disposition and its successor are one
+  thread. Superseded specs are never distilled individually; they enter **only as chain context**
+  for the surviving spec.
 - **Judgment**, where the graph is thin. Name the judgment when you present the cluster.
 
 Execution-convenience splits (one design change cut into three specs so it could ship in pieces)
