@@ -101,7 +101,7 @@ Run the project's local test suite for the surface you touched, scoped to the re
 
 If lint surfaces an obvious issue in your diff, fix it. Don't chase pre-existing lint.
 
-Produce mutation evidence now, before Step 8's commit: for each test-contract item, break the behaviour, observe RED for the stated reason, restore the code exactly, observe GREEN, and verify the restore with a diff that comes back empty. Doing this here — not after committing — means a mutation that exposes a defect gets fixed in the same commit, not via an amend afterward.
+Produce mutation evidence now, before Step 8's commit — the per-item procedure is in `## Report format` below. Doing it here, not after committing, means a mutation that exposes a defect gets fixed in the same commit rather than via an amend.
 
 ## Step 8: Commit
 
