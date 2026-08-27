@@ -31,12 +31,20 @@ Every combination is now correct:
   - ``not foo``          → ``NOT (rowid IN (… MATCH ?))`` (no FTS syntax error)
   - ``kind:spec not foo`` → ``(records.kind = ?) AND (NOT (rowid IN (… MATCH ?)))``
 
-**Exact SELECT shape (no mandatory FTS JOIN):**
+**Exact SELECT shape:**
 
-  SELECT * FROM records
+  SELECT records.* FROM records
+  [LEFT JOIN (SELECT rowid, bm25(...) AS score FROM record_fts WHERE record_fts
+    MATCH ? LIMIT -1) rank ON rank.rowid = records.rowid]  -- only when query has FTS
   WHERE <predicates — full-text predicates live inline in the tree>
   ORDER BY <ranking>
   LIMIT ?
+
+The ``JOIN`` is present only when the query carries full-text; the full-text
+MATCH predicates themselves stay inline in WHERE (see ``_FTS_PREDICATE`` — the
+JOIN exists purely to compute the ranking score once, not to filter rows). The
+SELECT list is ``records.*`` (not ``*``) because the JOIN puts a second relation
+in scope, making an unqualified ``*`` ambiguous.
 
 Use ``CompiledQuery.full_query()`` to obtain the assembled SQL; it is positionally
 aligned with ``CompiledQuery.params``.
@@ -45,31 +53,51 @@ aligned with ``CompiledQuery.params``.
 
 When the query carries ANY full-text term, order by bm25 with the locked weights
 ``(3.0, 2.0, 1.0)`` for ``(title, keywords, body)``, best-first = ASC (bm25 is
-negative). Because full-text is now in WHERE (not a filtering JOIN), the score is
-computed with a correlated subquery over the OR-combined POSITIVE (non-negated)
-full-text terms:
+negative). The score is computed by a ``LEFT JOIN`` against a subquery that runs
+the FTS ``MATCH`` and ``bm25(...)`` once, with a single bind param — never a
+correlated scalar subquery re-run once per candidate row in the ``ORDER BY``:
 
-  ORDER BY (
-    SELECT bm25(record_fts, 3.0, 2.0, 1.0)
+  LEFT JOIN (
+    SELECT rowid, bm25(record_fts, 3.0, 2.0, 1.0) AS score
     FROM record_fts
-    WHERE record_fts.rowid = records.rowid AND record_fts MATCH ?
-  ) IS NULL, (
-    SELECT bm25(record_fts, 3.0, 2.0, 1.0)
-    FROM record_fts
-    WHERE record_fts.rowid = records.rowid AND record_fts MATCH ?
-  ) ASC, updated_at DESC, last_referenced_at DESC
+    WHERE record_fts MATCH ?
+    LIMIT -1
+  ) rank ON rank.rowid = records.rowid
+  ...
+  ORDER BY rank.score IS NULL, rank.score ASC, updated_at DESC, last_referenced_at DESC
+
+**Why the inner ``LIMIT -1``.** A plain subquery here — without it — is NOT safe
+from re-running per row: SQLite's query flattening optimizer folds a flattenable
+``LEFT JOIN (SELECT …) rank ON …`` straight into the outer join, turning the FTS
+``MATCH`` into a per-row, rowid-constrained scan (``EXPLAIN QUERY PLAN`` shows
+``SCAN record_fts VIRTUAL TABLE INDEX 0:=M3 LEFT-JOIN`` — the ``=`` means the
+match is constrained by the outer row's rowid). That reintroduces the exact
+per-candidate-row bm25 recomputation this JOIN exists to remove, just wearing a
+join instead of a correlated-subquery costume — same cost, different shape. A
+subquery carrying a ``LIMIT`` is disqualified from flattening, so ``LIMIT -1``
+(a no-op on the result set — a real row cap is always a non-negative integer)
+forces SQLite to compute the subquery as its own materialized step exactly once
+(``MATERIALIZE rank`` feeding an unconstrained ``SCAN record_fts VIRTUAL TABLE
+INDEX 0:M3``). ``WITH rank AS MATERIALIZED (...)`` achieves the same query
+shape but needs SQLite ≥ 3.35 (2021); this repo's ``pyproject.toml`` pins
+``requires-python = ">=3.11"``, which is a language-version floor, not a
+promise about the ``sqlite3`` build linked against a given interpreter (a
+system/homebrew/distro Python often links whatever ``libsqlite3`` the OS
+ships, which can be older) — so ``LIMIT -1``, which has forced this same
+non-flattening behavior since long before 3.35, is the version-safe choice.
 
 The ``IS NULL`` leading key pushes rows that do not match the ranking expression
-(NULL score) AFTER the matched (negative) rows; ``updated_at DESC,
-last_referenced_at DESC`` is a stable tiebreak. A PURE-FACET query (no full-text
-node at all) orders by ``updated_at DESC, last_referenced_at DESC`` (no bm25).
+(NULL score — the LEFT JOIN found no matching ``rank`` row) AFTER the matched
+(negative) rows; ``updated_at DESC, last_referenced_at DESC`` is a stable
+tiebreak. A PURE-FACET query (no full-text node at all) has no JOIN and orders by
+``updated_at DESC, last_referenced_at DESC`` (no bm25).
 
 **Bound-param ORDER (positionally aligned with full_query()):**
-  1. WHERE-clause params in AST tree order (each scalar/facet value AND each
+  1. The ranking-JOIN MATCH param (the OR-combined positive-full-text expr) —
+     emitted ONCE, because a JOIN clause precedes WHERE positionally and the score
+     is computed a single time. Only present when the query has full-text.
+  2. WHERE-clause params in AST tree order (each scalar/facet value AND each
      full-text MATCH string).
-  2. The ranking-subquery MATCH param (the OR-combined positive-full-text expr) —
-     emitted TWICE because the ORDER BY references it in both the ``IS NULL`` key
-     and the ``ASC`` key. Only present when the query has full-text.
   3. The ``LIMIT ?`` value, always last.
 
 **Alias resolution:**
@@ -212,18 +240,21 @@ class CompiledQuery:
     """Output of ``compile(ast)``.
 
     Attributes:
-        where:      The SQL WHERE clause fragment (without the ``WHERE`` keyword).
-                    Full-text predicates (``records.rowid IN (SELECT rowid FROM
-                    record_fts WHERE record_fts MATCH ?)``) are inline in the tree.
-        params:     Ordered bind params, positionally aligned with ``full_query()``:
-                    WHERE params (tree order incl. each MATCH string), then the
-                    ranking-subquery MATCH param (twice, only when ``has_fts``),
-                    then the LIMIT value.
-        order_by:   The ORDER BY clause string (without the ``ORDER BY`` keyword).
-        limit:      The LIMIT value (int).
-        has_fts:    True when the query contains at least one full-text node.
-        rank_match: The OR-combined POSITIVE full-text MATCH expression used by the
-                    bm25 ranking subquery (empty string for a pure-facet query).
+        where:       The SQL WHERE clause fragment (without the ``WHERE`` keyword).
+                     Full-text predicates (``records.rowid IN (SELECT rowid FROM
+                     record_fts WHERE record_fts MATCH ?)``) are inline in the tree.
+        params:      Ordered bind params, positionally aligned with ``full_query()``:
+                     the ranking-JOIN MATCH param (once, only when ``has_fts`` —
+                     the JOIN precedes WHERE positionally), then WHERE params (tree
+                     order incl. each MATCH string), then the LIMIT value.
+        order_by:    The ORDER BY clause string (without the ``ORDER BY`` keyword).
+        limit:       The LIMIT value (int).
+        has_fts:     True when the query contains at least one full-text node.
+        rank_match:  The OR-combined POSITIVE full-text MATCH expression used by the
+                     bm25 ranking JOIN (empty string for a pure-facet query).
+        join_clause: The ``LEFT JOIN (...) rank ON ...`` clause computing the bm25
+                     score once per matching row (empty string when ``has_fts`` is
+                     False — a pure-facet query has no JOIN at all).
     """
 
     where: str
@@ -232,14 +263,20 @@ class CompiledQuery:
     limit: int
     has_fts: bool
     rank_match: str
+    join_clause: str = ""
 
     def full_query(self) -> str:
-        """Assemble the full SELECT statement (FROM records — no mandatory join).
+        """Assemble the full SELECT statement.
+
+        ``records.*`` (not ``*``) because the optional ranking JOIN puts a second
+        relation in scope, making an unqualified ``*`` ambiguous.
 
         Returns a SQL string with ``?`` placeholders positionally aligned with
         ``self.params``.
         """
-        parts = ["SELECT * FROM records"]
+        parts = ["SELECT records.* FROM records"]
+        if self.join_clause:
+            parts.append(self.join_clause)
         if self.where:
             parts.append(f"WHERE {self.where}")
         parts.append(f"ORDER BY {self.order_by}")
@@ -399,8 +436,8 @@ def compile(ast, *, vault=None, limit=20) -> CompiledQuery:
 
     Returns:
         A :class:`CompiledQuery` whose ``params`` is positionally aligned with
-        ``full_query()`` (WHERE params, then the rank-subquery MATCH param ×2 when
-        full-text is present, then the LIMIT value).
+        ``full_query()`` (the rank-JOIN MATCH param once when full-text is present,
+        then WHERE params, then the LIMIT value).
     """
     limit = int(limit)
 
@@ -409,8 +446,43 @@ def compile(ast, *, vault=None, limit=20) -> CompiledQuery:
 
     has_fts = bool(compiler.positive_fts)
 
-    where_parts = []
     final_params: list = []
+
+    if has_fts:
+        rank_match = " OR ".join(compiler.positive_fts)
+        # The JOIN computes bm25 ONCE via a single unconstrained scan of
+        # record_fts. A plain subquery here would be flattened by SQLite's query
+        # optimizer straight into the outer join, turning the MATCH into a
+        # per-row, rowid-constrained scan (EXPLAIN QUERY PLAN shows
+        # `SCAN record_fts ... 0:=M3 LEFT-JOIN`) — the exact per-candidate-row
+        # re-run this JOIN exists to avoid, just wearing a join instead of a
+        # correlated-subquery costume. The inner `LIMIT -1` is a no-op on the
+        # result (a real LIMIT would be a positive integer) but it disqualifies
+        # the subquery from flattening, so SQLite must compute it as its own
+        # materialized step (EXPLAIN QUERY PLAN shows `MATERIALIZE rank` +
+        # `SCAN record_fts ... 0:M3`, no `=`). This works on any SQLite version
+        # — unlike `WITH rank AS MATERIALIZED (...)`, which needs 3.35+ and
+        # isn't a version this repo's stdlib-only `sqlite3` can guarantee is
+        # linked. The JOIN clause precedes WHERE positionally, so its param is
+        # bound first.
+        join_clause = (
+            "LEFT JOIN (\n"
+            "    SELECT rowid, bm25(record_fts, 3.0, 2.0, 1.0) AS score\n"
+            "    FROM record_fts WHERE record_fts MATCH ?\n"
+            "    LIMIT -1\n"
+            ") rank ON rank.rowid = records.rowid"
+        )
+        final_params.append(rank_match)
+        # NULL (unmatched) rows sort LAST (the LEFT JOIN found no `rank` row);
+        # matched (negative) rows sort ASC = best first; recency tiebreak makes
+        # the order stable.
+        order_by = "rank.score IS NULL, rank.score ASC, updated_at DESC, last_referenced_at DESC"
+    else:
+        rank_match = ""
+        join_clause = ""
+        order_by = "updated_at DESC, last_referenced_at DESC"
+
+    where_parts = []
 
     if sql_frag:
         where_parts.append(sql_frag)
@@ -422,25 +494,6 @@ def compile(ast, *, vault=None, limit=20) -> CompiledQuery:
 
     where = " AND ".join(where_parts) if where_parts else "1"
 
-    if has_fts:
-        rank_match = " OR ".join(compiler.positive_fts)
-        bm25_subquery = (
-            "(SELECT bm25(record_fts, 3.0, 2.0, 1.0) FROM record_fts "
-            "WHERE record_fts.rowid = records.rowid AND record_fts MATCH ?)"
-        )
-        # NULL (unmatched) rows sort LAST; matched (negative) rows sort ASC = best
-        # first; recency tiebreak makes the order stable. The MATCH param appears
-        # twice (the IS NULL key and the ASC key), so it is appended twice.
-        order_by = (
-            f"{bm25_subquery} IS NULL, {bm25_subquery} ASC, "
-            "updated_at DESC, last_referenced_at DESC"
-        )
-        final_params.append(rank_match)
-        final_params.append(rank_match)
-    else:
-        rank_match = ""
-        order_by = "updated_at DESC, last_referenced_at DESC"
-
     final_params.append(limit)
 
     return CompiledQuery(
@@ -450,4 +503,5 @@ def compile(ast, *, vault=None, limit=20) -> CompiledQuery:
         limit=limit,
         has_fts=has_fts,
         rank_match=rank_match,
+        join_clause=join_clause,
     )

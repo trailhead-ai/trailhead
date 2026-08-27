@@ -12,8 +12,9 @@ spirit (no INSERT/UPDATE/DELETE, no commit) and closes it.
    (raises ``ValueError`` on an uncompilable node).
 3. ``index_store.open_index(env=…)`` → connection.
 4. ``conn.execute(cq.full_query(), cq.params)`` → the hit rows (ONE query).
-5. Per-hit body excerpt read from ``record_fts.body`` by rowid (body is NOT a
-   ``records`` column — stay index-only; never read the vault ``.md`` files).
+5. Per-hit body excerpt read from ``record_fts.body`` via one batched, chunked
+   ``IN (...)`` lookup keyed by record id (body is NOT a ``records`` column —
+   stay index-only; never read the vault ``.md`` files).
 6. Render — human banner or ``--json``.
 
 **Injection-defense output (airtight).** Each hit's ``shared`` flag (read
@@ -77,6 +78,15 @@ _REVERSE_EDGE_ALIASES = frozenset({"area", "phase", "keyword"})
 
 # Snippet excerpt length (chars) for the per-hit match preview.
 _SNIPPET_MAX = 160
+
+# Max ids bound into one snippet-lookup ``IN (...)`` query. SQLite's default
+# `SQLITE_LIMIT_VARIABLE_NUMBER` is 32,766 since 3.32 (this repo runs 3.53); a
+# discovery-shaped caller (e.g. `lore flush`'s dirty-session scan, which
+# searches with a 100,000-row limit) can still return more rows than that in
+# one result set, so binding every id at once remains unsafe in principle even
+# though 500 is nowhere near today's ceiling. Chunked well under any plausible
+# ceiling rather than tied to the current default.
+_SNIPPET_BATCH_SIZE = 500
 
 
 # ---------------------------------------------------------------------------
@@ -202,19 +212,29 @@ def _fetch_hits(conn, cq):
     rows = cur.fetchall()
     cols = [d[0] for d in cur.description]
 
+    records = [dict(zip(cols, row)) for row in rows]
+
+    # Snippet bodies live only in the populated FTS table (record_fts.body).
+    # Batched IN (...) queries fetch them keyed by id, instead of one
+    # round-trip per returned row — chunked at ``_SNIPPET_BATCH_SIZE`` so a
+    # large result set never binds more ids than SQLite's variable limit
+    # allows in a single statement.
+    ids = [record["id"] for record in records]
+    snippets_by_id: dict = {}
+    for start in range(0, len(ids), _SNIPPET_BATCH_SIZE):
+        batch = ids[start : start + _SNIPPET_BATCH_SIZE]
+        placeholders = ",".join("?" for _ in batch)
+        body_rows = conn.execute(
+            "SELECT r.id, f.body FROM record_fts f JOIN records r ON r.rowid = f.rowid "
+            f"WHERE r.id IN ({placeholders})",
+            batch,
+        ).fetchall()
+        for record_id, body in body_rows:
+            if body:
+                snippets_by_id[record_id] = _excerpt(body)
+
     hits = []
-    for row in rows:
-        record = dict(zip(cols, row))
-        # Snippet body lives only in the populated FTS table (record_fts.body),
-        # keyed by the rowid that aliases records.rowid. One join fetches it
-        # directly from the record id — no separate rowid round-trip.
-        body_row = conn.execute(
-            "SELECT f.body FROM record_fts f JOIN records r ON r.rowid = f.rowid WHERE r.id = ?",
-            (record["id"],),
-        ).fetchone()
-        snippet = ""
-        if body_row is not None and body_row[0]:
-            snippet = _excerpt(body_row[0])
+    for record in records:
         hits.append(
             {
                 "id": record["id"],
@@ -223,7 +243,7 @@ def _fetch_hits(conn, cq):
                 "status": record.get("status") or "",
                 "shared": 1 if _is_shared(record.get("shared")) else 0,
                 "vault": record.get("vault") or "",
-                "snippet": snippet,
+                "snippet": snippets_by_id.get(record["id"], ""),
             }
         )
 
@@ -234,15 +254,17 @@ def _fetch_hits(conn, cq):
 def _count_total(conn, cq) -> int:
     """Total rows matching the WHERE (ignoring LIMIT), for the truncation note.
 
-    Reuses the compiled WHERE clause and its params, dropping the ranking-MATCH
-    params (only used by ORDER BY) and the trailing LIMIT param. The WHERE params
-    are exactly the ones consumed by ``WHERE <where>`` — tree order.
+    Reuses the compiled WHERE clause and its params, dropping the ranking-JOIN
+    MATCH param (only used by the ranking JOIN, which this COUNT query has no
+    need for — it never touches ``rank.score``) and the trailing LIMIT param.
+    Under the single-JOIN contract the rank param is emitted ONCE, ahead of the
+    WHERE params (the JOIN clause precedes WHERE positionally), so the WHERE
+    params are the params AFTER the leading rank param and BEFORE the LIMIT.
     """
     sql = f"SELECT COUNT(*) FROM records WHERE {cq.where}"
-    where_param_count = len(cq.params) - 1  # drop LIMIT
-    if cq.has_fts:
-        where_param_count -= 2  # drop the rank-MATCH param emitted twice
-    where_params = cq.params[:where_param_count]
+    start = 1 if cq.has_fts else 0  # skip the leading rank-JOIN param
+    end = len(cq.params) - 1  # drop the trailing LIMIT
+    where_params = cq.params[start:end]
     return conn.execute(sql, where_params).fetchone()[0]
 
 
