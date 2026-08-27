@@ -46,6 +46,27 @@ CORPUS_1X = 2149  # ~current vault size
 # corpus, not a stopword-frequency term that matches most rows.
 REPRESENTATIVE_QUERY = "kind:lesson and scrubber"
 
+# A bare, no-facet, high-match-count query — the regression class the
+# correlated-scalar-bm25 ranking missed entirely (REPRESENTATIVE_QUERY narrows to
+# ~61 candidate rows before ranking, hiding the per-candidate-row MATCH re-run).
+# "it" is a filler word present in ~89% of generated bodies (~1,912 of 2,149) —
+# the same shape as a bare `test` search on the real vault (2,084 of 3,508, ~59%):
+# no facet to narrow candidates before the bm25 ORDER BY runs.
+BARE_QUERY = "it"
+# This machine runs many concurrent camp/agent sessions, so absolute wall-clock
+# ms is too noisy a signal for this large-match-count case on its own (a shared
+# host under load can inflate EVERY query's absolute time by 5-10x). The
+# regression this pins is a QUERY-SHAPE defect (per-candidate-row correlated
+# subqueries vs. one JOIN), so the reliable signal is the SPEEDUP RATIO between
+# the current compiler's query and the pre-fix correlated-subquery shape,
+# measured back-to-back against the SAME index in the SAME narrow time window
+# — ambient host noise affects both sides roughly equally, so the ratio survives
+# noise that would make either side's raw ms flaky alone. A ceiling on the
+# compiled query's own p95 still applies as a sanity floor.
+BARE_MIN_SPEEDUP = 1.5  # measured ~2.0x consistently on a loaded host; comfortable margin
+BARE_CEILING_1X_MS = 500.0  # sanity ceiling on the FIXED query alone; the speedup
+# ratio below is the test's real regression signal
+
 _KINDS = ["spec", "lesson", "decision", "deferred", "dead-end", "plan", "session"]
 _AREAS = ["penny", "phi-scrubber", "worker", "ingest", "routing", "auth", "vault"]
 # Common filler words present in most bodies (the bulk text an agent skims past).
@@ -109,12 +130,63 @@ def _percentile(samples_ms: list[float], pct: float) -> float:
     return ordered[k]
 
 
-def _measure_query_p95(state_dir: Path, *, runs: int = 30) -> float:
+def _old_style_ranked_query(term: str, limit: int) -> tuple[str, list]:
+    """The PRE-FIX ranking shape: two correlated scalar subqueries in ORDER BY,
+    each re-running the FTS MATCH once per candidate row — the exact defect this
+    fix replaces with a single JOIN. Used only to measure the speedup ratio; the
+    production compiler (``kql_compile.compile``) never emits this shape anymore.
+    """
+    bm25_subquery = (
+        "(SELECT bm25(record_fts, 3.0, 2.0, 1.0) FROM record_fts "
+        "WHERE record_fts.rowid = records.rowid AND record_fts MATCH ?)"
+    )
+    sql = (
+        "SELECT * FROM records\n"
+        "WHERE records.rowid IN (SELECT rowid FROM record_fts WHERE record_fts MATCH ?)\n"
+        f"ORDER BY {bm25_subquery} IS NULL, {bm25_subquery} ASC, "
+        "updated_at DESC, last_referenced_at DESC\n"
+        "LIMIT ?"
+    )
+    return sql, [term, term, term, limit]
+
+
+def _measure_speedup_ratio(state_dir: Path, *, query: str, runs: int = 20) -> tuple[float, float]:
+    """Interleave the current compiler's query and the pre-fix correlated-subquery
+    shape against the SAME fresh-connection-per-run pattern, so both sides see
+    the same ambient host load in each iteration. Returns (new_p95_ms, old_p95_ms).
+    """
+    index_store = load_script("lore.search.index")
+    kql = load_script("lore.search.kql")
+    kql_compile = load_script("lore.search.kql_compile")
+    env = {"XDG_STATE_HOME": str(state_dir)}
+
+    ast = kql.parse(query)
+    cq = kql_compile.compile(ast, limit=20)
+    old_sql, old_params = _old_style_ranked_query(query, 20)
+
+    new_samples: list[float] = []
+    old_samples: list[float] = []
+    for _ in range(runs):
+        conn = index_store.open_index(env=env)
+        try:
+            t0 = time.perf_counter()
+            conn.execute(cq.full_query(), cq.params).fetchall()
+            new_samples.append((time.perf_counter() - t0) * 1000.0)
+
+            t0 = time.perf_counter()
+            conn.execute(old_sql, old_params).fetchall()
+            old_samples.append((time.perf_counter() - t0) * 1000.0)
+        finally:
+            conn.close()
+    return _percentile(new_samples, 95.0), _percentile(old_samples, 95.0)
+
+
+def _measure_query_p95(state_dir: Path, *, query: str = REPRESENTATIVE_QUERY, runs: int = 30) -> float:
     """Time the hot query path (parse → compile → execute) ``runs`` times; p95 ms.
 
     Each run opens the index fresh (mirroring a cold ``lore search`` invocation),
-    parses + compiles the representative query, executes the single SQL query, and
-    drains the rows. Returns the p95 in milliseconds.
+    parses + compiles ``query``, executes the single SQL query, and drains the
+    rows. Returns the p95 in milliseconds.
     """
     index_store = load_script("lore.search.index")
     kql = load_script("lore.search.kql")
@@ -126,7 +198,7 @@ def _measure_query_p95(state_dir: Path, *, runs: int = 30) -> float:
         conn = index_store.open_index(env=env)
         try:
             t0 = time.perf_counter()
-            ast = kql.parse(REPRESENTATIVE_QUERY)
+            ast = kql.parse(query)
             cq = kql_compile.compile(ast, limit=20)
             rows = conn.execute(cq.full_query(), cq.params).fetchall()
             _ = len(rows)
@@ -168,4 +240,51 @@ def test_search_latency_p95_under_target(tmp_path, capsys, corpus_size, label, c
         f"{label} corpus ({indexed} records). The pinned target is "
         f"{TARGET_P95_MS:.0f}ms; the ceiling covers host noise + the documented "
         "correlated-bm25 ranking cost — a breach signals a real query-path regression."
+    )
+
+
+@pytest.mark.parametrize(
+    "corpus_size,label,ceiling_ms",
+    [
+        (CORPUS_1X, "1x", BARE_CEILING_1X_MS),
+    ],
+)
+def test_search_latency_bare_high_match_query_speedup(tmp_path, capsys, corpus_size, label, ceiling_ms):
+    """A bare, no-facet, high-match-count query — the shape REPRESENTATIVE_QUERY's
+    facet narrowing hides. This pins the correlated-scalar-bm25 regression class
+    via a SPEEDUP RATIO (current compiler vs. the pre-fix correlated-subquery
+    shape, measured back-to-back so ambient host noise cancels out) rather than
+    an absolute ms ceiling alone: it fails when the current compiler's query is
+    not meaningfully faster than the old shape (as it would be if a regression
+    reintroduced correlated subqueries) and passes once bm25 is computed once
+    per row via a single JOIN."""
+    vault = tmp_path / "vault"
+    state = tmp_path / "state"
+    vault.mkdir()
+    state.mkdir()
+
+    _build_corpus(vault, corpus_size)
+    indexed = _build_index(state, vault)
+
+    new_p95, old_p95 = _measure_speedup_ratio(state, query=BARE_QUERY)
+    speedup = old_p95 / new_p95 if new_p95 else float("inf")
+
+    with capsys.disabled():
+        print(
+            f"\n[search-benchmark {label}-bare] indexed={indexed} records "
+            f"query={BARE_QUERY!r} new_p95={new_p95:.2f}ms old_p95={old_p95:.2f}ms "
+            f"speedup={speedup:.1f}x (min {BARE_MIN_SPEEDUP:.1f}x, ceiling<{ceiling_ms:.0f}ms)"
+        )
+
+    assert indexed >= corpus_size, f"corpus under-built: indexed {indexed} of {corpus_size}"
+    assert new_p95 < ceiling_ms, (
+        f"the current compiler's query p95 {new_p95:.2f}ms exceeded the sanity "
+        f"ceiling of {ceiling_ms:.0f}ms at the {label} corpus ({indexed} records)."
+    )
+    assert speedup >= BARE_MIN_SPEEDUP, (
+        f"the current compiler's query was only {speedup:.1f}x faster than the "
+        f"pre-fix correlated-subquery shape (need >= {BARE_MIN_SPEEDUP:.1f}x) at "
+        f"the {label} corpus ({indexed} records, new_p95={new_p95:.2f}ms, "
+        f"old_p95={old_p95:.2f}ms) — the bm25 ranking may no longer be computed "
+        "once per row via a single JOIN."
     )

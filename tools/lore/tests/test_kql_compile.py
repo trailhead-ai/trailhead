@@ -441,23 +441,32 @@ class TestMatchEncoding:
 
 
 class TestRankingSelection:
+    """bm25 is computed once, in the ranking JOIN clause (not the ORDER BY
+    expression itself, which now just sorts on the pre-computed ``rank.score``)
+    — so these assert the locked weights appear in the assembled query
+    (the mechanism), not literally inside ``order_by`` (wording that moved)."""
+
     def test_fulltext_query_uses_bm25_order(self, kql, compiler):
         cq = compiler.compile(kql.parse("foo"))
-        assert "bm25(record_fts, 3.0, 2.0, 1.0)" in cq.order_by
+        assert "rank.score" in cq.order_by
+        assert "bm25(record_fts, 3.0, 2.0, 1.0)" in cq.full_query()
 
     def test_pure_facet_uses_recency_order(self, kql, compiler):
         cq = compiler.compile(kql.parse("kind:spec"))
         assert "updated_at" in cq.order_by
         assert "last_referenced_at" in cq.order_by
         assert "bm25" not in cq.order_by
+        assert "bm25" not in cq.full_query()
 
     def test_phrase_query_uses_bm25_order(self, kql, compiler):
         cq = compiler.compile(kql.parse('"penny worker"'))
-        assert "bm25(record_fts, 3.0, 2.0, 1.0)" in cq.order_by
+        assert "rank.score" in cq.order_by
+        assert "bm25(record_fts, 3.0, 2.0, 1.0)" in cq.full_query()
 
     def test_mixed_fulltext_and_facet_uses_bm25(self, kql, compiler):
         cq = compiler.compile(kql.parse("foo and kind:spec"))
-        assert "bm25(record_fts, 3.0, 2.0, 1.0)" in cq.order_by
+        assert "rank.score" in cq.order_by
+        assert "bm25(record_fts, 3.0, 2.0, 1.0)" in cq.full_query()
 
     def test_bm25_orders_title_hit_before_body_hit(self, kql, compiler, ranking_index):
         """A title-hit row sorts before a body-only-hit row under the bm25 ORDER BY."""
@@ -1069,3 +1078,202 @@ class TestCompiledQueryStructure:
     def test_rank_match_empty_for_pure_facet(self, kql, compiler):
         cq = compiler.compile(kql.parse("kind:spec"))
         assert not cq.rank_match
+
+
+# ---------------------------------------------------------------------------
+# PERF FIX — bm25 computed once (single JOIN), not per-candidate-row
+#
+# The correlated-scalar-subquery ranking re-ran the FTS MATCH once per candidate
+# row in the ORDER BY (2.37s -> ~10ms regression on the live vault). The fix
+# replaces the two correlated scalar subqueries with a single LEFT JOIN against a
+# subquery that computes bm25 once per matching row.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def ranking_equivalence_index(tmp_path, index_store):
+    """Five records exercising bare-term, facet+term, negation, and pure-facet
+    ranking shapes, with distinct ``updated_at`` values so the recency tiebreak
+    is fully deterministic:
+
+      - spec/r1 — title hit ("zephyr" in title), updated 2026-01-05
+      - spec/r2 — body-only hit ("zephyr" in body), updated 2026-01-04
+      - spec/r3 — no match, updated 2026-01-03
+      - plan/r4 — no match, kind=plan, updated 2026-01-02
+      - spec/r5 — title + keyword + body hit (strongest), updated 2026-01-01
+    """
+    vault = tmp_path / "vault"
+    fake_state = tmp_path / "xdg-state"
+    fake_state.mkdir()
+    env = dict(os.environ)
+    env["XDG_STATE_HOME"] = str(fake_state)
+
+    _write_record(
+        vault,
+        "spec",
+        "r1",
+        _sidecar(kind="spec", title="alpha zephyr focus", updated_at="2026-01-05T00:00:00Z"),
+        "filler word count filler",
+    )
+    _write_record(
+        vault,
+        "spec",
+        "r2",
+        _sidecar(kind="spec", title="Nothing Related At All", updated_at="2026-01-04T00:00:00Z"),
+        "zephyr appears deep in the body text only once",
+    )
+    _write_record(
+        vault,
+        "spec",
+        "r3",
+        _sidecar(kind="spec", title="Gamma No Match", updated_at="2026-01-03T00:00:00Z"),
+        "no term here either just filler",
+    )
+    _write_record(
+        vault,
+        "plan",
+        "r4",
+        _sidecar(kind="plan", title="Beta Plan No Match", updated_at="2026-01-02T00:00:00Z"),
+        "no term here",
+    )
+    _write_record(
+        vault,
+        "spec",
+        "r5",
+        _sidecar(
+            kind="spec",
+            title="zephyr keyword focus",
+            keywords=["zephyr"],
+            updated_at="2026-01-01T00:00:00Z",
+        ),
+        "another zephyr mention in body too",
+    )
+
+    conn = index_store.open_index(env=env)
+    index_store.rebuild([str(vault)], conn)
+    conn.commit()
+    return conn, vault, env
+
+
+class TestRankingEquivalence:
+    """Pins the exact ordered id sequence the PRE-FIX correlated-subquery compiler
+    produced for four query shapes, captured before the JOIN-based rewrite, so the
+    rewrite is proven to be a pure mechanism change with byte-identical ordering."""
+
+    def test_bare_high_match_term_order_unchanged(self, kql, compiler, ranking_equivalence_index):
+        conn, vault, env = ranking_equivalence_index
+        cq = compiler.compile(kql.parse("zephyr"))
+        rows = conn.execute(cq.full_query(), cq.params).fetchall()
+        ids = _ids(rows, conn)
+        assert [i.split("/")[-2:] for i in ids] == [
+            ["spec", "r5"],
+            ["spec", "r1"],
+            ["spec", "r2"],
+        ], ids
+
+    def test_facet_and_term_mix_order_unchanged(self, kql, compiler, ranking_equivalence_index):
+        conn, vault, env = ranking_equivalence_index
+        cq = compiler.compile(kql.parse("kind:spec and zephyr"))
+        rows = conn.execute(cq.full_query(), cq.params).fetchall()
+        ids = _ids(rows, conn)
+        assert [i.split("/")[-2:] for i in ids] == [
+            ["spec", "r5"],
+            ["spec", "r1"],
+            ["spec", "r2"],
+        ], ids
+
+    def test_negated_term_order_unchanged(self, kql, compiler, ranking_equivalence_index):
+        conn, vault, env = ranking_equivalence_index
+        cq = compiler.compile(kql.parse("not zephyr"))
+        rows = conn.execute(cq.full_query(), cq.params).fetchall()
+        ids = _ids(rows, conn)
+        assert [i.split("/")[-2:] for i in ids] == [
+            ["spec", "r3"],
+            ["plan", "r4"],
+        ], ids
+
+    def test_pure_facet_no_fts_order_unchanged(self, kql, compiler, ranking_equivalence_index):
+        conn, vault, env = ranking_equivalence_index
+        cq = compiler.compile(kql.parse("kind:spec"))
+        rows = conn.execute(cq.full_query(), cq.params).fetchall()
+        ids = _ids(rows, conn)
+        assert [i.split("/")[-2:] for i in ids] == [
+            ["spec", "r1"],
+            ["spec", "r2"],
+            ["spec", "r3"],
+            ["spec", "r5"],
+        ], ids
+
+
+class TestQueryPlanShape:
+    """The bm25 ranking must be a single JOIN scan, never a per-row correlated
+    scalar subquery — the actual defect this fix addresses."""
+
+    def test_ranked_query_plan_has_no_correlated_scalar_subquery(
+        self, kql, compiler, ranking_equivalence_index
+    ):
+        conn, vault, env = ranking_equivalence_index
+        cq = compiler.compile(kql.parse("zephyr"))
+        plan_rows = conn.execute(
+            f"EXPLAIN QUERY PLAN {cq.full_query()}", cq.params
+        ).fetchall()
+        detail_col = 3  # EXPLAIN QUERY PLAN: (id, parent, notused, detail)
+        details = [row[detail_col] for row in plan_rows]
+        assert not any("CORRELATED SCALAR SUBQUERY" in d for d in details), details
+
+
+class TestParamOrderContract:
+    """Single-JOIN param order: rank-JOIN MATCH param (once) precedes WHERE params,
+    both precede the trailing LIMIT."""
+
+    def test_rank_param_precedes_where_params(self, kql, compiler):
+        cq = compiler.compile(kql.parse("zephyr and kind:spec"), limit=5)
+        # Exactly one rank param, at index 0 — no doubled trailing param.
+        assert cq.params.count("zephyr") == 2  # WHERE MATCH string + rank param
+        assert cq.params[0] == "zephyr"  # the rank-JOIN param, ahead of WHERE
+        assert cq.params[1] == "zephyr"  # the WHERE MATCH predicate param
+        assert cq.params[2] == "spec"  # the kind:spec WHERE param
+        assert cq.params[-1] == 5  # LIMIT trails
+
+    def test_params_positionally_align_with_full_query(self, kql, compiler, fixture_index):
+        conn, vault, env = fixture_index
+        cq = compiler.compile(kql.parse("zephyr and kind:spec"), vault=str(vault), limit=10)
+        sql = cq.full_query()
+        assert sql.count("?") == len(cq.params)
+        rows = conn.execute(sql, cq.params).fetchall()
+        ids = _ids(rows, conn)
+        assert any(i.endswith("/spec/alpha") for i in ids), ids
+
+    def test_count_total_extracts_exactly_where_params(self, kql, compiler, fixture_index):
+        """``engine._count_total`` must slice out exactly the WHERE params under
+        the new (rank-param-first) contract — never the rank param, never LIMIT."""
+        conn, vault, env = fixture_index
+        engine = load_script("lore.search.engine")
+        cq = compiler.compile(kql.parse("zephyr and kind:spec"), limit=10)
+        total = engine._count_total(conn, cq)
+        assert total == 1
+
+
+class TestSnippetBatching:
+    """``engine._fetch_hits`` must issue ONE snippet query regardless of row
+    count, not one per returned row (the N+1 this fix also closes)."""
+
+    def test_fetch_hits_issues_one_snippet_query_for_multiple_rows(
+        self, kql, compiler, ranking_equivalence_index
+    ):
+        conn, vault, env = ranking_equivalence_index
+        engine = load_script("lore.search.engine")
+
+        counting = {"n": 0}
+
+        class _CountingConn:
+            def execute(self, sql, params=()):
+                if "record_fts" in sql and "body" in sql:
+                    counting["n"] += 1
+                return conn.execute(sql, params)
+
+        cq = compiler.compile(kql.parse("kind:spec"), limit=20)
+        hits, total = engine._fetch_hits(_CountingConn(), cq)
+
+        assert len(hits) == 4, hits
+        assert counting["n"] == 1, counting["n"]
