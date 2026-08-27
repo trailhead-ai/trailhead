@@ -602,18 +602,48 @@ def test_task_within_deadline_yields_ok(tmp_path: Path):
 
 
 def test_over_budget_does_not_raise_for_required_task_and_later_tasks_still_run(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ):
+    """The over-budget check reads elapsed wall-clock time from
+    `time.monotonic()`, not from how fast the real machine happens to run each
+    step's subprocess. A razor-thin real deadline paired with a real subprocess
+    step makes this test race process-spawn contention on a loaded machine
+    (irrelevant to the deadline arithmetic under test), so the clock the
+    deadline math reads is replaced with a fully controlled fake — decoupling
+    the assertion from machine load while still exercising the real
+    `run_member_tasks` deadline-checking code path with real subprocess steps.
+
+    The fake clock supplies exactly the sequence of values `run_member_tasks`
+    reads via `time.monotonic()` for this two-task list: task_start then a
+    remaining-check for "slow" (made to already read past the deadline, so
+    "slow" goes over-budget before its step ever runs); then task_start, a
+    remaining-check, and the post-step within-budget check for "fine" (made to
+    read as no time having passed, so its step gets ample real subprocess
+    headroom and its own elapsed check stays inside the deadline).
+    """
     later_marker = tmp_path / "later_marker"
     tasks = [
         {
             "name": "slow",
             "phase": "provision",
             "required": True,
-            "steps": [_sleep_step(0.5)],
+            "steps": [_sleep_step(0.01)],
         },
         {"name": "fine", "phase": "provision", "steps": [_touch_step(later_marker)]},
     ]
+    fake_clock = iter([0.0, 1000.0, 2000.0, 1000.0, 1000.0])
+
+    def fake_monotonic() -> float:
+        try:
+            return next(fake_clock)
+        except StopIteration:
+            pytest.fail(
+                "run_member_tasks called time.monotonic() more times than this "
+                "test's fake clock accounts for"
+            )
+
+    monkeypatch.setattr("camp.provision.tasks.time.monotonic", fake_monotonic)
+
     results = run_member_tasks(
         tasks,
         "provision",

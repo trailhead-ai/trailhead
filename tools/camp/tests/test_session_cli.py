@@ -888,6 +888,36 @@ def _workspace_launch_dir(cli_env, slug: str) -> Path:
     return Path(_new_workspace(cli_env, slug)).resolve()
 
 
+def _wait_for_workspace_ready(
+    cli_env, slug: str, *, group: str = "mygroup", timeout: float = 20.0
+) -> None:
+    """Block until `camp status` reports every member of `slug` boot-ready.
+
+    `camp new` seeds a workspace synchronously but provisions it via a detached
+    background process — its own docstring says as much: "provisioning is
+    async (check it with `camp status <slug>`)". A statelessness assertion
+    that snapshots state right after `camp new` returns can still have that
+    provisioner's writes land later, attributed to whatever runs next. Polling
+    `camp status` — which reads the same persisted manifest the provisioner
+    itself writes (exit 0 all ready, 2 some pending, 3 any failed) — can't be
+    fooled by a provisioner merely descheduled under load the way a
+    filesystem quiet-period heuristic can: a descheduled provisioner still
+    reports pending, never ready-by-omission.
+    """
+    deadline = time.monotonic() + timeout
+    while True:
+        result = _camp(cli_env, "status", "--group", group, "--name", slug)
+        if result.returncode == 0:
+            return
+        assert result.returncode == 2, (
+            f"workspace {slug!r} failed to provision: {result.stdout}{result.stderr}"
+        )
+        assert time.monotonic() < deadline, (
+            f"workspace {slug!r} did not finish provisioning within {timeout}s"
+        )
+        time.sleep(0.1)
+
+
 def test_camp_launch_resume_reenters_a_workspace_session_without_a_group_flag(
     cli_env,
 ) -> None:
@@ -897,8 +927,9 @@ def test_camp_launch_resume_reenters_a_workspace_session_without_a_group_flag(
     transcript decides where the session comes back up.
     """
     launch_dir = _workspace_launch_dir(cli_env, "feat-resume")
+    _wait_for_workspace_ready(cli_env, "feat-resume")
     _seed_transcript(cli_env, _UUID_A, launch_dir)
-    before = _settled_state_tree(cli_env)
+    before = _state_tree(cli_env)
 
     result = _camp(cli_env, "launch", "--resume", _UUID_A, cwd=cli_env["tmp_path"])
 
@@ -913,8 +944,9 @@ def test_camp_launch_resume_reenters_a_workspace_session_without_a_group_flag(
 
 def test_camp_launch_resume_by_uuid_prefix_reaches_the_identical_spawn(cli_env) -> None:
     launch_dir = _workspace_launch_dir(cli_env, "feat-resume")
+    _wait_for_workspace_ready(cli_env, "feat-resume")
     _seed_transcript(cli_env, _UUID_A, launch_dir)
-    before = _settled_state_tree(cli_env)
+    before = _state_tree(cli_env)
 
     result = _camp(cli_env, "launch", "--resume", _UUID_A[:8], cwd=cli_env["tmp_path"])
 
@@ -930,8 +962,9 @@ def test_camp_launch_resume_by_derived_name_prefix_reaches_the_identical_spawn(
     cli_env,
 ) -> None:
     launch_dir = _workspace_launch_dir(cli_env, "feat-resume")
+    _wait_for_workspace_ready(cli_env, "feat-resume")
     _seed_transcript(cli_env, _UUID_A, launch_dir)
-    before = _settled_state_tree(cli_env)
+    before = _state_tree(cli_env)
 
     result = _camp(cli_env, "launch", "--resume", "camp-feat-resume-", cwd=cli_env["tmp_path"])
 
@@ -1039,11 +1072,12 @@ def test_camp_launch_resume_inside_a_group_still_requires_an_explicit_group(
 ) -> None:
     """A resolvable cwd is not consent: the boundary may never move with the caller."""
     workspace = Path(_new_workspace(cli_env, "feat-standing"))
+    _wait_for_workspace_ready(cli_env, "feat-standing")
     target = cli_env["tmp_path"] / "roots" / "myproject"
     target.mkdir(parents=True)
     _set_launch_roots(cli_env, cli_env["tmp_path"] / "roots")
     _seed_transcript(cli_env, _UUID_A, target)
-    before = _settled_state_tree(cli_env)
+    before = _state_tree(cli_env)
 
     result = _camp(cli_env, "launch", "--resume", _UUID_A, cwd=workspace)
 
@@ -1254,8 +1288,10 @@ def test_camp_launch_resume_zero_match_messages_differ_by_whether_the_pool_is_em
         cwd=cli_env["tmp_path"],
     )
 
-    _seed_transcript(cli_env, _UUID_A, _workspace_launch_dir(cli_env, "feat-one"))
-    before = _settled_state_tree(cli_env)
+    launch_dir = _workspace_launch_dir(cli_env, "feat-one")
+    _wait_for_workspace_ready(cli_env, "feat-one")
+    _seed_transcript(cli_env, _UUID_A, launch_dir)
+    before = _state_tree(cli_env)
     populated_store = _camp(
         cli_env, "launch", "--resume", "deadbeef", "--group", "mygroup",
         cwd=cli_env["tmp_path"],
