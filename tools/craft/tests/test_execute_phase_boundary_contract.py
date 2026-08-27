@@ -159,7 +159,7 @@ def test_writer_mandate_names_lore_record_update_as_the_write_mechanism():
 # --- writer atomicity: tick and boundary are one write (Fix 2) ------------------
 
 
-def test_tick_and_boundary_are_one_atomic_write():
+def test_tick_and_boundary_land_from_one_invocation():
     _pin_in(
         _phase_progress_section(),
         "execute.md#phase-progress-and-resumability",
@@ -172,9 +172,25 @@ def test_tick_and_boundary_are_one_atomic_write():
     _pin_in(
         _phase_progress_section(),
         "execute.md#phase-progress-and-resumability",
-        "must land as one atomic write, never a body write followed by a separate label write",
-        "The section must state the atomicity requirement explicitly, not just "
-        "show a command that happens to combine the flags.",
+        "must land from the same `lore record update` invocation, never a separate "
+        "command for the body followed by a separate command for the label",
+        "The section must state the single-invocation requirement explicitly, not "
+        "just show a command that happens to combine the flags — and must not "
+        "call it a single atomic write, which the CLI does not provide (it "
+        "performs two sequential atomic renames, body then sidecar).",
+    )
+
+
+def test_writer_states_residual_crash_window_is_narrowed_not_closed():
+    _pin_in(
+        _phase_progress_section(),
+        "execute.md#phase-progress-and-resumability",
+        "narrows the crash window between the two to microseconds rather than closing it",
+        "The document must not claim the single invocation closes the crash "
+        "window entirely — `validate_and_write` (tools/lore/plugins/lore/lore/"
+        "record/store.py:791-792) performs it as two separate atomic renames, "
+        "body then sidecar, so the honest claim is a narrowed window, not an "
+        "eliminated one.",
     )
 
 
@@ -185,11 +201,24 @@ def test_writer_states_policy_for_a_failed_boundary_write():
     _pin_in(
         _phase_progress_section(),
         "execute.md#phase-progress-and-resumability",
-        "the phase logs the failure and retries the write before proceeding",
+        "the phase logs the failure and retries the write",
         "A failed boundary write needs a stated policy, consistent with the "
         "postmortem's log-and-continue-plus-flag rule for its own failed write "
         "(:496) — a silently failed write leaves a stale or absent boundary that "
         "only surfaces as a fail-closed stop on the next resume.",
+    )
+
+
+def test_writer_states_terminal_escalation_for_persistent_boundary_write_failure():
+    _pin_in(
+        _phase_progress_section(),
+        "execute.md#phase-progress-and-resumability",
+        "If retries keep failing, the phase stops and reports rather than proceeding",
+        "Unlike the postmortem's own failed write (:496, log-and-continue-plus-"
+        "flag), a persistent boundary-write failure needs a named terminal "
+        "outcome: proceeding with a stale boundary would let the next resume's "
+        "revert discard this phase's own commits, so the escalation must stop "
+        "the run rather than carry the failure forward silently.",
     )
 
 
@@ -220,6 +249,19 @@ def test_reader_requires_reachability_validation():
     )
 
 
+def test_reader_states_shape_check_as_precondition_of_reachability_probe():
+    _pin_in(
+        _phase_progress_section(),
+        "execute.md#phase-progress-and-resumability",
+        "the regex match is a precondition of running that git command",
+        "The reachability probe is itself a git command receiving the raw "
+        "label value, so it is governed by the same untrusted-input rule as "
+        "any other command shown in this document (:69) — the shape check "
+        "must be stated as an ordered precondition of running `git merge-base`, "
+        "not merely joined to the reachability check by a plain conjunction.",
+    )
+
+
 def test_reader_fails_closed_on_malformed_or_unreachable_sha():
     _pin_in(
         _phase_progress_section(),
@@ -227,6 +269,33 @@ def test_reader_fails_closed_on_malformed_or_unreachable_sha():
         "if the label is missing, does not match that shape, or does not resolve on the branch",
         "A malformed or unreachable sha must be treated exactly like an absent "
         "label — stop and report, never substituted into the revert command.",
+    )
+
+
+# --- end-phase label existence is expected, not guaranteed (Fix 3) -------------
+
+
+def test_end_phase_label_stated_as_expected_not_guaranteed():
+    _pin_in(
+        _phase_progress_section(),
+        "execute.md#phase-progress-and-resumability",
+        "is **expected** to exist by construction",
+        "A run already in flight when the phase-boundary label mandate landed "
+        "ticked phases before any phase existed to write the label, so the "
+        "end-phase branch cannot claim the label is guaranteed to exist — only "
+        "expected, with the fail-closed clause covering the gap.",
+    )
+
+
+def test_end_phase_branch_names_the_migration_case():
+    _pin_in(
+        _phase_progress_section(),
+        "execute.md#phase-progress-and-resumability",
+        "a run already in flight when this label mandate landed",
+        "The migration case is not hypothetical — an in-flight run's earlier "
+        "phases ticked before this mandate existed, so it must be named "
+        "explicitly rather than left to the reader to infer from the "
+        "fail-closed clause alone.",
     )
 
 
@@ -264,6 +333,50 @@ def test_mid_build_branch_states_why_base_would_be_wrong():
         "The document's habit is to state the reason, not just the rule: "
         "reverting to `base` in the mid-build case would discard committed "
         "slice work, and that reason must be spelled out, not implied.",
+    )
+
+
+# --- anchors point at the section that actually defines the branches (Fix 5) ----
+
+
+def test_in_progress_cases_link_targets_determine_the_task_shape():
+    _pin_in(
+        _phase_progress_section(),
+        "execute.md#phase-progress-and-resumability",
+        "the two `in-progress` cases at [Determine the task shape](#determine-the-task-shape)",
+        "The two `in-progress` branches are defined under '### Determine the "
+        "task shape', not under '### Resuming a run' — the anchor must point "
+        "where the branches are actually defined.",
+    )
+
+
+def test_no_ticked_phase_line_link_targets_determine_the_task_shape():
+    _pin_in(
+        _phase_progress_section(),
+        "execute.md#phase-progress-and-resumability",
+        "[No ticked phase line](#determine-the-task-shape)",
+        "Same mispointed-anchor defect as the case above, for the mid-build "
+        "bullet's own link.",
+    )
+
+
+# --- `base` is not claimed to be recorded in `## End Phases` (Fix 6) ------------
+
+
+def test_base_reference_does_not_claim_it_is_recorded_in_end_phases():
+    section = _phase_progress_section()
+    assert "recorded in `## End Phases`" not in section, (
+        "'base' is defined in '### After All Slices' (:401) but this document "
+        "never mandates writing it into the `## End Phases` checklist — the "
+        "mid-build bullet must not claim it is recorded there."
+    )
+    _pin_in(
+        section,
+        "execute.md#phase-progress-and-resumability",
+        "fixed once at the start of the phase pipeline",
+        "Refer to `base` by how it is actually established — fixed once at the "
+        "start of the whole-change phase pipeline — rather than by a false "
+        "claim about where it is recorded.",
     )
 
 
