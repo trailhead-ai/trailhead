@@ -228,12 +228,14 @@ def _unavailable_delta() -> dict:
 def _sanitize_delta_line(line: str) -> str:
     """Neutralise one changelog delta line before it can reach an agent.
 
-    Strips ANSI escapes, control characters (C0 and C1), and zero-width /
-    bidi-override characters, then breaks any markdown fence sequence (```)
-    so the delta can later be embedded inside a delimited untrusted-content
-    block without letting attacker text close that fence early. Also bounds
-    a single line's length — an attacker controls this text and a single
-    absurdly long line would otherwise defeat the line-count cap.
+    Strips ANSI escapes, control characters (C0 and C1, excluding TAB), and
+    the zero-width/bidi-override characters that carry a display-vs-parse
+    divergence risk (see `_BIDI_ZERO_WIDTH_RE`), then breaks any markdown
+    fence sequence (```) so the delta can later be embedded inside a
+    delimited untrusted-content block without letting attacker text close
+    that fence early. Also bounds a single line's length — an attacker
+    controls this text and a single absurdly long line would otherwise
+    defeat the line-count cap.
     """
     line = _ANSI_ESCAPE_RE.sub("", line)
     line = _CONTROL_CHAR_RE.sub("", line)
