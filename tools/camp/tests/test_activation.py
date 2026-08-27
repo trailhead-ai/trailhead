@@ -1607,7 +1607,10 @@ def test_reconcile_break_does_not_block_on_in_progress_activation(tmp_path: Path
     release_event = threading.Event()
 
     def hold_guard():
-        release_event.wait(5.0)
+        # Deliberately far longer than any realistic reconcile_break
+        # critical section: proves it returns without waiting this hold
+        # out, rather than merely returning faster than a tight number.
+        release_event.wait(15.0)
         fcntl.flock(holder_fd.fileno(), fcntl.LOCK_UN)
         holder_fd.close()
 
@@ -1617,14 +1620,14 @@ def test_reconcile_break_does_not_block_on_in_progress_activation(tmp_path: Path
         start = time.monotonic()
         result = reconcile_break(group, slug, env=env, force=True)
         elapsed = time.monotonic() - start
-        assert elapsed < 3.0, (
+        assert elapsed < 5.0, (
             f"reconcile_break took {elapsed:.2f}s — it must not block on the "
             "in-progress activate-phase guard"
         )
         assert result["status"] == "ok", result
     finally:
         release_event.set()
-        holder_thread.join(timeout=5.0)
+        holder_thread.join(timeout=20.0)
 
 
 # ---------------------------------------------------------------------------

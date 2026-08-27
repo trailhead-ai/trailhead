@@ -680,7 +680,10 @@ def test_single_long_step_is_clamped_to_the_remaining_budget(tmp_path: Path):
         {
             "name": "slow-single-step",
             "phase": "provision",
-            "steps": [_sleep_step(5)],
+            # Deliberately far longer than any realistic clamp overhead:
+            # proves the step is clamped to the deadline rather than merely
+            # finishing faster than a tight number.
+            "steps": [_sleep_step(30)],
         }
     ]
     started = time.monotonic()
@@ -693,7 +696,7 @@ def test_single_long_step_is_clamped_to_the_remaining_budget(tmp_path: Path):
     )
     elapsed = time.monotonic() - started
 
-    assert elapsed < 2, (
+    assert elapsed < 5, (
         f"took {elapsed}s — the single step ran far past the task deadline "
         "instead of being clamped to it"
     )

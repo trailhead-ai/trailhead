@@ -565,13 +565,16 @@ cmd = {json.dumps(step_cmd)}
         slow_step_cmd = [
             sys.executable,
             "-c",
-            "import sys, time; open(sys.argv[1], 'a').write('step\\n'); time.sleep(3)",
+            # Deliberately far longer than any realistic camp-rm critical
+            # section: proves rm returns without waiting this step out,
+            # rather than merely returning faster than a tight number.
+            "import sys, time; open(sys.argv[1], 'a').write('step\\n'); time.sleep(20)",
             "{worktree}/log.txt",
         ]
         toml_path = activate_cli_env["toml_path"]
         toml_text = activate_cli_env["build_toml"](slow_step_cmd)
         toml_path.write_text(toml_text)
-        assert "time.sleep(3)" in toml_path.read_text(), (
+        assert "time.sleep(20)" in toml_path.read_text(), (
             "the slow step must actually land in the written TOML"
         )
 
@@ -593,10 +596,13 @@ cmd = {json.dumps(step_cmd)}
             )
             elapsed = time.monotonic() - start
 
-            assert elapsed < 2.0, (
+            assert elapsed < 6.0, (
                 f"camp rm took {elapsed:.2f}s while a concurrent activate-phase "
                 "retry was running — the lock must not be held across the task subprocess"
             )
             assert rm.returncode == 0, f"camp rm failed: {rm.stderr}"
         finally:
+            # The proof is already complete by this point; don't pay for the
+            # remainder of the widened sleep in teardown.
+            proc.kill()
             proc.wait(timeout=10)
