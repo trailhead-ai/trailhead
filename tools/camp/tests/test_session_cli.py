@@ -406,6 +406,7 @@ def _camp(cli_env, *args, extra_env=None, cwd=None):
 def _new_workspace(cli_env, slug: str, group: str = "mygroup"):
     result = _camp(cli_env, "new", slug, "--group", group)
     assert result.returncode == 0, result.stderr
+    _wait_for_workspace_ready(cli_env, slug, group=group)
     return result.stdout.strip()
 
 
@@ -499,24 +500,6 @@ def _state_tree(cli_env) -> list[str]:
     """
     root = cli_env["state_dir"]
     return sorted(str(p.relative_to(root)) for p in root.rglob("*"))
-
-
-def _settled_state_tree(cli_env, *, quiet_for: float = 0.3, timeout: float = 20.0) -> list[str]:
-    """`_state_tree` once `camp new`'s background provisioner has stopped writing.
-
-    Workspace creation provisions in the background, so a snapshot taken right
-    after it is still moving — and a statelessness assertion against a moving
-    baseline reports the provisioner's writes as the command-under-test's.
-    """
-    deadline = time.monotonic() + timeout
-    previous = _state_tree(cli_env)
-    while time.monotonic() < deadline:
-        time.sleep(quiet_for)
-        current = _state_tree(cli_env)
-        if current == previous:
-            return current
-        previous = current
-    return previous
 
 
 def _tmux_argv(cli_env) -> list[list[str]]:
@@ -675,7 +658,7 @@ def test_camp_launch_dir_inside_a_workspace_still_requires_an_explicit_group(cli
     target = cli_env["tmp_path"] / "roots" / "myproject"
     target.mkdir(parents=True)
     _set_launch_roots(cli_env, cli_env["tmp_path"] / "roots")
-    before = _settled_state_tree(cli_env)
+    before = _state_tree(cli_env)
 
     result = _camp(cli_env, "launch", "--dir", str(target), cwd=workspace)
 
@@ -927,7 +910,6 @@ def test_camp_launch_resume_reenters_a_workspace_session_without_a_group_flag(
     transcript decides where the session comes back up.
     """
     launch_dir = _workspace_launch_dir(cli_env, "feat-resume")
-    _wait_for_workspace_ready(cli_env, "feat-resume")
     _seed_transcript(cli_env, _UUID_A, launch_dir)
     before = _state_tree(cli_env)
 
@@ -944,7 +926,6 @@ def test_camp_launch_resume_reenters_a_workspace_session_without_a_group_flag(
 
 def test_camp_launch_resume_by_uuid_prefix_reaches_the_identical_spawn(cli_env) -> None:
     launch_dir = _workspace_launch_dir(cli_env, "feat-resume")
-    _wait_for_workspace_ready(cli_env, "feat-resume")
     _seed_transcript(cli_env, _UUID_A, launch_dir)
     before = _state_tree(cli_env)
 
@@ -962,7 +943,6 @@ def test_camp_launch_resume_by_derived_name_prefix_reaches_the_identical_spawn(
     cli_env,
 ) -> None:
     launch_dir = _workspace_launch_dir(cli_env, "feat-resume")
-    _wait_for_workspace_ready(cli_env, "feat-resume")
     _seed_transcript(cli_env, _UUID_A, launch_dir)
     before = _state_tree(cli_env)
 
@@ -992,7 +972,7 @@ def test_camp_launch_resume_roots_at_the_recorded_cwd_below_the_workspace(
     nested = workspace / "member" / "src"
     nested.mkdir(parents=True)
     _seed_transcript(cli_env, _UUID_A, nested)
-    before = _settled_state_tree(cli_env)
+    before = _state_tree(cli_env)
 
     result = _camp(cli_env, "launch", "--resume", _UUID_A, cwd=cli_env["tmp_path"])
 
@@ -1012,7 +992,7 @@ def test_camp_launch_resume_json_key_set_matches_a_slug_launch_exactly(cli_env) 
 
     launch_dir = _workspace_launch_dir(cli_env, "feat-resume")
     _seed_transcript(cli_env, _UUID_A, launch_dir)
-    before = _settled_state_tree(cli_env)
+    before = _state_tree(cli_env)
 
     result = _camp(
         cli_env, "launch", "--resume", _UUID_A, "--json", cwd=cli_env["tmp_path"]
@@ -1035,7 +1015,7 @@ def test_camp_launch_resume_at_a_non_workspace_root_resumes_with_an_explicit_gro
     target.mkdir(parents=True)
     _set_launch_roots(cli_env, cli_env["tmp_path"] / "roots")
     _seed_transcript(cli_env, _UUID_A, target)
-    before = _settled_state_tree(cli_env)
+    before = _state_tree(cli_env)
 
     result = _camp(
         cli_env, "launch", "--resume", _UUID_A, "--group", "mygroup",
@@ -1058,7 +1038,7 @@ def test_camp_launch_resume_at_a_non_workspace_root_without_a_group_refuses(
     target.mkdir(parents=True)
     _set_launch_roots(cli_env, cli_env["tmp_path"] / "roots")
     _seed_transcript(cli_env, _UUID_A, target)
-    before = _settled_state_tree(cli_env)
+    before = _state_tree(cli_env)
 
     result = _camp(cli_env, "launch", "--resume", _UUID_A, cwd=cli_env["tmp_path"])
 
@@ -1072,7 +1052,6 @@ def test_camp_launch_resume_inside_a_group_still_requires_an_explicit_group(
 ) -> None:
     """A resolvable cwd is not consent: the boundary may never move with the caller."""
     workspace = Path(_new_workspace(cli_env, "feat-standing"))
-    _wait_for_workspace_ready(cli_env, "feat-standing")
     target = cli_env["tmp_path"] / "roots" / "myproject"
     target.mkdir(parents=True)
     _set_launch_roots(cli_env, cli_env["tmp_path"] / "roots")
@@ -1096,7 +1075,7 @@ def test_camp_launch_resume_at_a_root_outside_the_allowlist_refuses_naming_it(
     target.mkdir()
     _set_launch_roots(cli_env, allowed)
     _seed_transcript(cli_env, _UUID_A, target)
-    before = _settled_state_tree(cli_env)
+    before = _state_tree(cli_env)
 
     result = _camp(
         cli_env, "launch", "--resume", _UUID_A, "--group", "mygroup",
@@ -1118,7 +1097,7 @@ def test_camp_launch_resume_at_a_credential_store_refuses_on_the_credential_rule
     ssh.mkdir(parents=True)
     _set_launch_roots(cli_env, "~")
     _seed_transcript(cli_env, _UUID_A, ssh)
-    before = _settled_state_tree(cli_env)
+    before = _state_tree(cli_env)
 
     result = _camp(
         cli_env, "launch", "--resume", _UUID_A, "--group", "mygroup",
@@ -1137,7 +1116,7 @@ def test_camp_launch_resume_with_a_missing_root_refuses_without_recreating_it(
     target = cli_env["tmp_path"] / "roots" / "torn-down"
     _set_launch_roots(cli_env, cli_env["tmp_path"] / "roots")
     _seed_transcript(cli_env, _UUID_A, target)
-    before = _settled_state_tree(cli_env)
+    before = _state_tree(cli_env)
 
     result = _camp(
         cli_env, "launch", "--resume", _UUID_A, "--group", "mygroup",
@@ -1163,7 +1142,7 @@ def test_camp_launch_resume_of_an_unreadable_candidate_carries_no_sentinel(
     _set_launch_roots(cli_env, cli_env["tmp_path"] / "roots")
     _seed_transcript(cli_env, _UUID_B, torn_down)
     _seed_transcript(cli_env, _UUID_A, None)
-    before = _settled_state_tree(cli_env)
+    before = _state_tree(cli_env)
 
     unreadable = _camp(
         cli_env, "launch", "--resume", _UUID_A, "--group", "mygroup",
@@ -1188,7 +1167,7 @@ def test_camp_launch_resume_of_a_live_session_says_already_running(cli_env) -> N
     launch_dir = _workspace_launch_dir(cli_env, "feat-live")
     _seed_transcript(cli_env, _UUID_A, launch_dir)
     _register_live(cli_env, _UUID_A, launch_dir)
-    before = _settled_state_tree(cli_env)
+    before = _state_tree(cli_env)
 
     result = _camp(cli_env, "launch", "--resume", _UUID_A, cwd=cli_env["tmp_path"])
 
@@ -1205,7 +1184,7 @@ def test_camp_launch_resume_of_a_live_session_with_no_transcript_says_already_ru
     """The union is what makes this answerable — transcripts alone say "not found"."""
     launch_dir = _workspace_launch_dir(cli_env, "feat-live")
     _register_live(cli_env, _UUID_A, launch_dir)
-    before = _settled_state_tree(cli_env)
+    before = _state_tree(cli_env)
 
     result = _camp(cli_env, "launch", "--resume", _UUID_A, cwd=cli_env["tmp_path"])
 
@@ -1223,7 +1202,7 @@ def test_camp_launch_resume_with_an_ambiguous_ref_exits_two_and_lists_candidates
     second = _workspace_launch_dir(cli_env, "feat-two")
     _seed_transcript(cli_env, _UUID_A, first, age_seconds=30.0)
     _seed_transcript(cli_env, _UUID_B, second, age_seconds=90.0)
-    before = _settled_state_tree(cli_env)
+    before = _state_tree(cli_env)
 
     result = _camp(cli_env, "launch", "--resume", "camp-feat-", cwd=cli_env["tmp_path"])
 
@@ -1249,7 +1228,7 @@ def test_camp_launch_resume_ambiguous_json_rows_carry_the_candidate_key_set(
     second = _workspace_launch_dir(cli_env, "feat-two")
     _seed_transcript(cli_env, _UUID_A, first, age_seconds=30.0)
     _seed_transcript(cli_env, _UUID_B, second, age_seconds=90.0)
-    before = _settled_state_tree(cli_env)
+    before = _state_tree(cli_env)
 
     result = _camp(
         cli_env, "launch", "--resume", "camp-feat-", "--json", cwd=cli_env["tmp_path"]
@@ -1289,7 +1268,6 @@ def test_camp_launch_resume_zero_match_messages_differ_by_whether_the_pool_is_em
     )
 
     launch_dir = _workspace_launch_dir(cli_env, "feat-one")
-    _wait_for_workspace_ready(cli_env, "feat-one")
     _seed_transcript(cli_env, _UUID_A, launch_dir)
     before = _state_tree(cli_env)
     populated_store = _camp(
@@ -1312,7 +1290,7 @@ def test_camp_launch_resume_zero_match_messages_differ_by_whether_the_pool_is_em
 
 def test_camp_launch_resume_with_a_positional_slug_refuses(cli_env) -> None:
     _seed_transcript(cli_env, _UUID_A, _workspace_launch_dir(cli_env, "feat-one"))
-    before = _settled_state_tree(cli_env)
+    before = _state_tree(cli_env)
 
     result = _camp(
         cli_env, "launch", "feat-one", "--resume", _UUID_A, "--group", "mygroup",
@@ -1326,7 +1304,7 @@ def test_camp_launch_resume_with_a_positional_slug_refuses(cli_env) -> None:
 
 
 def test_camp_launch_resume_with_no_value_refuses(cli_env) -> None:
-    before = _settled_state_tree(cli_env)
+    before = _state_tree(cli_env)
 
     result = _camp(cli_env, "launch", "--resume", "--group", "mygroup")
 
@@ -1337,7 +1315,7 @@ def test_camp_launch_resume_with_no_value_refuses(cli_env) -> None:
 
 def test_camp_launch_resume_with_a_flag_shaped_ref_refuses_on_the_flag(cli_env) -> None:
     """An unconsumed flag swallowed as the ref must report the flag, not a miss."""
-    before = _settled_state_tree(cli_env)
+    before = _state_tree(cli_env)
 
     result = _camp(cli_env, "launch", "--resume", "--json", "--group", "mygroup")
 
@@ -1350,7 +1328,7 @@ def test_camp_launch_resume_with_a_flag_shaped_ref_refuses_on_the_flag(cli_env) 
 def test_camp_launch_resume_on_a_harness_without_transcripts_refuses_naming_it(
     cli_env,
 ) -> None:
-    before = _settled_state_tree(cli_env)
+    before = _state_tree(cli_env)
 
     result = _camp(
         cli_env, "launch", "--resume", _UUID_A, "--group", "mygroup",
@@ -1374,7 +1352,7 @@ def test_camp_launch_resume_on_a_harness_whose_store_raises_refuses_naming_it(
     is supposed to answer in one line.
     """
     _seed_transcript(cli_env, _UUID_A, _workspace_launch_dir(cli_env, "feat-raiser"))
-    before = _settled_state_tree(cli_env)
+    before = _state_tree(cli_env)
 
     result = _camp(
         cli_env, "launch", "--resume", _UUID_A,
@@ -1390,7 +1368,7 @@ def test_camp_launch_resume_on_a_harness_that_cannot_reenter_refuses_naming_it(
     cli_env,
 ) -> None:
     _seed_transcript(cli_env, _UUID_A, _workspace_launch_dir(cli_env, "feat-one"))
-    before = _settled_state_tree(cli_env)
+    before = _state_tree(cli_env)
 
     result = _camp(
         cli_env, "launch", "--resume", _UUID_A,
@@ -1406,7 +1384,7 @@ def test_camp_launch_resume_that_never_confirms_is_killed_by_its_exact_name(
     cli_env,
 ) -> None:
     _seed_transcript(cli_env, _UUID_A, _workspace_launch_dir(cli_env, "feat-one"))
-    before = _settled_state_tree(cli_env)
+    before = _state_tree(cli_env)
 
     result = _camp(
         cli_env, "launch", "--resume", _UUID_A,
@@ -1688,7 +1666,7 @@ def test_camp_sessions_recoverable_scopes_to_the_workspace_subtree(cli_env) -> N
     outside.mkdir()
     _seed_transcript(cli_env, _UUID_A, nested, age_seconds=30.0)
     _seed_transcript(cli_env, _UUID_B, outside, age_seconds=60.0)
-    before = _settled_state_tree(cli_env)
+    before = _state_tree(cli_env)
 
     result = _camp(
         cli_env, "sessions", "--recoverable", "feat-scope", "--group", "mygroup",
@@ -2695,7 +2673,7 @@ def test_camp_kill_without_a_reference_refuses_on_one_line(cli_env) -> None:
 
 def test_camp_kill_writes_nothing_under_camp_state_dir(cli_env) -> None:
     session_id = _launched_session(cli_env)
-    before = _settled_state_tree(cli_env)
+    before = _state_tree(cli_env)
 
     result = _camp(cli_env, "kill", session_id[:8], cwd=cli_env["tmp_path"])
 

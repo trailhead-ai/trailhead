@@ -62,4 +62,13 @@ jobs:
         # Invoked as `python -m pytest` so the repo root is on sys.path and the
         # `trailhead` package imports without an editable install (the checkout IS
         # the source). testpaths in pyproject.toml span the CLI + all tool suites.
+        # addopts in pyproject.toml deselects `benchmark`-marked tests here — a
+        # wall-clock latency assertion is meaningless under xdist worker contention.
         run: python -m pytest
+
+      - name: Run benchmark tests serially
+        # Timing/latency assertions need uncontended CPU to mean anything, so
+        # they run here with parallelism off instead of in the main step above.
+        # -o addopts= clears pyproject's `-n auto -m "not benchmark"` so this
+        # step isn't parallel and isn't deselecting the tests it exists to run.
+        run: python -m pytest -o addopts="" -n 0 -m benchmark

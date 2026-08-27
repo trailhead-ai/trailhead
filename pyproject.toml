@@ -8,15 +8,6 @@ version = "0.1.0"
 requires-python = ">=3.11"
 dependencies = []
 
-# Dev-only tooling — never installed as a runtime dependency (see dependencies =
-# [] above and the zero-third-party-dependency posture in CLAUDE.md). Declared
-# here as the standard, tool-discoverable `pip install -e .[dev]` extra;
-# `.envrc` and the CI pytest job provision the same packages directly (pinned
-# in CI, matching the `ruff==` pin style) rather than reading this extra, so a
-# version bump here doesn't silently drift what local/CI runs actually use.
-[project.optional-dependencies]
-dev = ["pytest", "pytest-xdist"]
-
 [project.scripts]
 trailhead = "trailhead.cli:main"
 
@@ -36,10 +27,14 @@ testpaths = [
 # -n auto: parallelize across all available cores (pytest-xdist). The suite is
 # I/O-bound on subprocess + filesystem work, not CPU-bound, so this scales
 # with whatever machine runs it (dev laptop or a smaller CI runner) without a
-# fixed worker count that's wrong on one of them.
-addopts = "-n auto"
+# fixed worker count that's wrong on one of them. `-m "not benchmark"` excludes
+# timing/latency assertions from the parallel run — worker contention makes
+# wall-clock latency meaningless, not the benchmark broken; those run serially
+# as a dedicated CI step instead (see .github/workflows/tests.yml).
+addopts = "-n auto -m \"not benchmark\""
 markers = [
     "real_home: the test genuinely means the developer's real home; opts out of the Path.home() guard",
+    "benchmark: a timing/latency assertion that requires uncontended CPU — excluded from the parallel run, run serially instead",
 ]
 
 [tool.ruff]
