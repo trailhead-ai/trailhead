@@ -142,6 +142,12 @@ _CONTROL_CHAR_RE = re.compile(r"[\x00-\x08\x0a-\x1f\x7f-\x9f]")
 # carries this class's display-vs-parse divergence risk, so both must survive
 # sanitization intact.
 _BIDI_ZERO_WIDTH_RE = re.compile("[​-‌‪-‮⁦-⁩﻿]")
+# A markdown fence is three backticks, but the codepoints deliberately
+# preserved above (ZWJ, LRM/RLM, word joiner) are invisible when rendered, so
+# backticks separated by them still display as a fence while defeating a
+# literal "```" match. Any run of three or more backticks joined only by
+# zero-width or directionality codepoints is therefore a fence.
+_FENCE_RUN_RE = re.compile(r"(?:`[\u200b-\u200f\u2060-\u2064\ufeff]*){3,}")
 
 
 # ---------------------------------------------------------------------------
@@ -240,7 +246,7 @@ def _sanitize_delta_line(line: str) -> str:
     line = _ANSI_ESCAPE_RE.sub("", line)
     line = _CONTROL_CHAR_RE.sub("", line)
     line = _BIDI_ZERO_WIDTH_RE.sub("", line)
-    line = line.replace("```", "'''")
+    line = _FENCE_RUN_RE.sub(lambda m: m.group(0).replace("`", "'"), line)
     if len(line) > CHANGELOG_DELTA_MAX_LINE_CHARS:
         line = line[:CHANGELOG_DELTA_MAX_LINE_CHARS] + "…"
     return line

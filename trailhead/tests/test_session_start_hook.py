@@ -676,3 +676,20 @@ class TestUninstallRemovesComposedPlugin:
 
         assert exit_code == 0
         assert not composed_dest.exists()
+
+
+class TestFenceRunsSeparatedByInvisibleCharacters:
+    """The hook's independent fence check matches the producer's.
+
+    The hook re-asserts containment on delta text it cannot trust the
+    producer to have sanitized, so a backtick run split by codepoints that
+    survive sanitization must be neutralized here too.
+    """
+
+    def test_split_backtick_run_is_neutralized(self):
+        for sep in ("\u200d", "\u200e", "\u200f"):
+            out = hook._neutralize_fence("`" + sep + "`" + sep + "`then attacker text")
+            assert out.count("`") < 3, f"not neutralized for {sep!r}"
+
+    def test_plain_prose_backticks_are_untouched(self):
+        assert hook._neutralize_fence("run `trailhead update`") == "run `trailhead update`"

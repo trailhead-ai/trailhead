@@ -469,3 +469,44 @@ class TestConfinementFailsClosed:
         provenance._atomic_write_json(provenance.stamp_path(env=env), stamp)
 
         assert read_stamp(env=env) is not None
+
+
+class TestStampFieldControlCharacterRejection:
+    """Stamp fields reaching a git argv position carry no control bytes.
+
+    An embedded NUL passes a leading-dash check but makes `subprocess` raise
+    while building argv, so the update path crashes instead of degrading to
+    an unanswerable result.
+    """
+
+    def _write(self, tmp_path, **over):
+        env = _env(tmp_path)
+        checkout = _checkout(tmp_path)
+        stamp = {
+            "checkout": str(checkout),
+            "sha": _GOOD_SHA,
+            "branch": "origin/main",
+            "origin_url": "https://example.com/r.git",
+            "wired_at": "2026-01-01T00:00:00Z",
+            "last_check": None,
+        }
+        stamp.update(over)
+        provenance._atomic_write_json(provenance.stamp_path(env=env), stamp)
+        return env
+
+    @pytest.mark.parametrize(
+        "branch",
+        ["origin/main\x00junk", "origin/main\nrefs/heads/evil", "origin/\x1bmain"],
+    )
+    def test_control_character_in_branch_reads_as_no_stamp(self, tmp_path, branch):
+        env = self._write(tmp_path, branch=branch)
+        assert read_stamp(env=env) is None
+
+    def test_sha_with_trailing_newline_reads_as_no_stamp(self, tmp_path):
+        env = self._write(tmp_path, sha=_GOOD_SHA + "\n")
+        assert read_stamp(env=env) is None
+
+    def test_ordinary_branch_name_is_still_accepted(self, tmp_path):
+        env = self._write(tmp_path, branch="feature/x-1.2")
+        stamp = read_stamp(env=env)
+        assert stamp is not None and stamp["branch"] == "feature/x-1.2"

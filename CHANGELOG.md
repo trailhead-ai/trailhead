@@ -5,6 +5,21 @@ format described by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+- Closed a fence-containment bypass in the changelog delta shown at session
+  start. The sanitizer preserves ZWJ and the directionality marks so emoji
+  sequences and bidi prose render correctly, but those codepoints are
+  invisible, so backticks interleaved with them stepped around a fence check
+  keyed on the literal ``` substring and reached the agent as a working
+  closing fence. Any run of three or more backticks joined only by
+  zero-width or directionality codepoints is now neutralized, in both the
+  producer and the hook's independent re-check.
+- The provenance stamp's `branch` field is rejected if it carries a control
+  character: an embedded NUL passed the option-shape check and then made
+  `subprocess` raise while building argv, crashing `trailhead update`
+  instead of reporting an unanswerable result.
+- The stamp's `sha` validator is anchored with `\A`/`\Z`, so a value with a
+  trailing newline is no longer accepted as an exact 40-character sha.
+
 - Fixed two critical argument-injection vulnerabilities in `trailhead update`,
   both reachable unattended from the SessionStart hook: an option-shaped
   `branch` in the install provenance stamp (e.g. `--upload-pack=<command>`)

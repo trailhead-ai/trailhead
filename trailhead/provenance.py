@@ -228,7 +228,8 @@ def write_stamp(checkout: Path, *, env: dict[str, str] | None = None, runner=Non
     return None
 
 
-_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+_SHA_RE = re.compile(r"\A[0-9a-f]{40}\Z")
+_CONTROL_IN_FIELD_RE = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 
 
 def read_stamp(
@@ -296,6 +297,12 @@ def read_stamp_with_reason(
     # An option-shaped branch is rejected outright.
     if data["branch"].startswith("-"):
         return None, "the provenance stamp's branch field is option-shaped"
+
+    # A control character in a value bound for an argv position never belongs
+    # in a ref name, and an embedded NUL makes `subprocess` raise while
+    # building argv — a crash where the contract promises a clean refusal.
+    if _CONTROL_IN_FIELD_RE.search(data["branch"]):
+        return None, "the provenance stamp's branch field carries a control character"
 
     # `sha` reaches `git diff` as a bare positional (`_extract_changelog_delta`).
     # A real git sha is always exactly 40 hex characters, which can never start

@@ -81,6 +81,9 @@ DISABLE_ENV_VAR = "TRAILHEAD_DISABLE_UPDATE_CHECK"
 CONFIG_KEY = "session_start_update_check"
 
 _FENCE = "```"
+# Backticks separated only by zero-width or directionality codepoints still
+# render as a fence while defeating a literal "```" match.
+_FENCE_RUN_RE = re.compile(r"(?:`[\u200b-\u200f\u2060-\u2064\ufeff]*){3,}")
 
 
 def _truthy(value: str) -> bool:
@@ -112,7 +115,8 @@ def _state_dir(env: dict[str, str]) -> Path | None:
     return (Path(home) / ".local" / "state" / STATE_APP) if home else None
 
 
-_SHA_RE_PATTERN = "^[0-9a-f]{40}$"
+_SHA_RE_PATTERN = r"\A[0-9a-f]{40}\Z"
+_CONTROL_IN_FIELD_PATTERN = r"[\x00-\x1f\x7f-\x9f]"
 
 
 def _read_stamp(env: dict[str, str]) -> dict[str, Any] | None:
@@ -140,6 +144,8 @@ def _read_stamp(env: dict[str, str]) -> dict[str, Any] | None:
         return None
     required = ("checkout", "sha", "branch", "origin_url", "wired_at")
     if not all(isinstance(data.get(k), str) and data.get(k) for k in required):
+        return None
+    if re.search(_CONTROL_IN_FIELD_PATTERN, data["branch"]):
         return None
     if data["branch"].startswith("-"):
         return None
@@ -231,7 +237,7 @@ def _neutralize_fence(line: str) -> str:
     untrusted content. See the module docstring for why this check runs here
     too, independent of ``trailhead update``'s own sanitizer.
     """
-    return line.replace(_FENCE, "'''")
+    return _FENCE_RUN_RE.sub(lambda m: m.group(0).replace("`", "'"), line)
 
 
 def _default_runner():
