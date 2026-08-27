@@ -142,6 +142,131 @@ def test_reader_fails_closed_when_label_absent():
     )
 
 
+# --- writer mandate names the write mechanism (Fix 5) ---------------------------
+
+
+def test_writer_mandate_names_lore_record_update_as_the_write_mechanism():
+    _pin_in(
+        _phase_progress_section(),
+        "execute.md#phase-progress-and-resumability",
+        "upserts the phase boundary onto the parent task record via `lore record update`",
+        "The mandate must pin the write mechanism as `lore record update` — long "
+        "enough to disambiguate from the `## End Phases` checklist sentence at "
+        ":535, which also names that command but for a different write.",
+    )
+
+
+# --- writer atomicity: tick and boundary are one write (Fix 2) ------------------
+
+
+def test_tick_and_boundary_are_one_atomic_write():
+    _pin_in(
+        _phase_progress_section(),
+        "execute.md#phase-progress-and-resumability",
+        "--diff --label craft/phase-boundary=<sha>",
+        "The tick (a body diff) and the boundary (a label) must land in the same "
+        "`lore record update` invocation — a separate body write followed by a "
+        "separate label write leaves a crash window where the ticked phase's "
+        "recorded boundary still names the previous phase's tree.",
+    )
+    _pin_in(
+        _phase_progress_section(),
+        "execute.md#phase-progress-and-resumability",
+        "must land as one atomic write, never a body write followed by a separate label write",
+        "The section must state the atomicity requirement explicitly, not just "
+        "show a command that happens to combine the flags.",
+    )
+
+
+# --- writer failure policy for the boundary write (Fix 4) -----------------------
+
+
+def test_writer_states_policy_for_a_failed_boundary_write():
+    _pin_in(
+        _phase_progress_section(),
+        "execute.md#phase-progress-and-resumability",
+        "the phase logs the failure and retries the write before proceeding",
+        "A failed boundary write needs a stated policy, consistent with the "
+        "postmortem's log-and-continue-plus-flag rule for its own failed write "
+        "(:496) — a silently failed write leaves a stale or absent boundary that "
+        "only surfaces as a fail-closed stop on the next resume.",
+    )
+
+
+# --- reader validates the sha before a destructive revert (Fix 1) ---------------
+
+
+def test_reader_requires_sha_shape_validation():
+    _pin_in(
+        _phase_progress_section(),
+        "execute.md#phase-progress-and-resumability",
+        "match `^[0-9a-f]{7,40}$`",
+        "The boundary sha must be shape-validated before it is substituted into "
+        "the destructive revert command — the same untrusted-input rule at :69 "
+        "governs every vault-sourced value substituted into a command in this "
+        "document, and this label is one such value.",
+    )
+
+
+def test_reader_requires_reachability_validation():
+    _pin_in(
+        _phase_progress_section(),
+        "execute.md#phase-progress-and-resumability",
+        "resolve to a commit reachable from",
+        "A shape-valid sha is not necessarily a real, reachable commit — the "
+        "value must also resolve on the task branch before it is used as a "
+        "revert target, or a shape-valid-but-bogus label would still reach the "
+        "destructive git command.",
+    )
+
+
+def test_reader_fails_closed_on_malformed_or_unreachable_sha():
+    _pin_in(
+        _phase_progress_section(),
+        "execute.md#phase-progress-and-resumability",
+        "if the label is missing, does not match that shape, or does not resolve on the branch",
+        "A malformed or unreachable sha must be treated exactly like an absent "
+        "label — stop and report, never substituted into the revert command.",
+    )
+
+
+# --- mid-build resume branch is distinguished from end-phase resume (Fix 3) -----
+
+
+def test_mid_build_branch_is_not_a_fail_closed_stop():
+    _pin_in(
+        _phase_progress_section(),
+        "execute.md#phase-progress-and-resumability",
+        "so no boundary label exists yet by construction",
+        "The mid-build resume branch (before any phase has ticked) must be "
+        "named explicitly as the case where no `craft/phase-boundary` label "
+        "can exist yet — otherwise the fail-closed rule for the end-phase "
+        "branch would deadlock every dirty mid-build resume.",
+    )
+
+
+def test_mid_build_branch_discards_drift_against_head_not_base():
+    _pin_in(
+        _phase_progress_section(),
+        "execute.md#phase-progress-and-resumability",
+        "discarding uncommitted and untracked changes against the current `HEAD`",
+        "Without a boundary label, the mid-build branch must still reach a "
+        "clean tree — by discarding drift against `HEAD`, not by reverting to "
+        "a guessed target and not by skipping the clean-tree requirement.",
+    )
+
+
+def test_mid_build_branch_states_why_base_would_be_wrong():
+    _pin_in(
+        _phase_progress_section(),
+        "execute.md#phase-progress-and-resumability",
+        "reverting to it would discard whatever slice commits the build has already landed",
+        "The document's habit is to state the reason, not just the rule: "
+        "reverting to `base` in the mid-build case would discard committed "
+        "slice work, and that reason must be spelled out, not implied.",
+    )
+
+
 # --- label round trip through the real CLI --------------------------------------
 
 
