@@ -350,6 +350,22 @@ def _without_account_binding(
 def _is_camp_launched(
     harness, candidate: SessionCandidate, pane_command: str | None
 ) -> bool:
+    """Whether *pane_command* is a command camp itself would have started.
+
+    A pane camp launched WITH an initial prompt is not an extra shape to
+    compose: the prompt text is unrecoverable at stop time (``SessionCandidate``
+    carries no prompt field, and transcripts never store the launch argv), so
+    there is nothing to compose it FROM. Instead this accepts an owning shape
+    followed by the literal token ``--`` and an arbitrary tail — the exact
+    shape `session_launch`'s ``initial_prompt`` contract pins the argv into.
+    Only the prefix up to and including that ``--`` is compared, so a prompt
+    tmux re-renders into a different set of tokens than were originally passed
+    still matches.
+
+    This must NOT relax into "observed starts with an owning shape": a pane
+    that merely shares a prefix with one, but whose next token is not exactly
+    ``--``, is a foreign command and stays refused.
+    """
     if not pane_command:
         return False
     try:
@@ -357,7 +373,15 @@ def _is_camp_launched(
     except ValueError:
         return False
     keys = _account_binding_keys(harness)
-    return _without_account_binding(observed, keys) in _owning_commands(harness, candidate)
+    observed = _without_account_binding(observed, keys)
+    for shape in _owning_commands(harness, candidate):
+        if observed == shape:
+            return True
+        if len(observed) > len(shape) and observed[: len(shape)] == shape and (
+            observed[len(shape)] == "--"
+        ):
+            return True
+    return False
 
 
 def stop_session(

@@ -970,3 +970,219 @@ def test_a_harness_that_raises_composing_the_binding_refuses_rather_than_raising
     assert isinstance(outcome, stop.Refused)
     assert outcome.reason == stop.REFUSED_NOT_CAMP_LAUNCHED
     assert tmux.killed == []
+
+
+# ---------------------------------------------------------------------------
+# ownership survives an initial prompt riding the pane — a prefix rule, not an
+# extra composed shape (the prompt itself is unrecoverable at stop time)
+# ---------------------------------------------------------------------------
+
+
+def test_a_pane_command_equal_to_the_owning_shape_with_no_prompt_is_still_camp_launched(
+    tmp_path: Path,
+) -> None:
+    """Today's behavior, unchanged by the prefix rule."""
+    from camp.launch.stop import Stopped
+
+    state, ws, env, harness, derived, tmux = _fixture(tmp_path)
+
+    outcome = _stop(
+        _UUID_A[:8],
+        tmux=tmux,
+        transcripts=[_transcript(_UUID_A, ws)],
+        live_records=[_record(_UUID_A, ws)],
+        env=env,
+        harness=harness,
+    )
+
+    assert isinstance(outcome, Stopped)
+    assert tmux.killed == [derived]
+
+
+def test_an_owning_shape_followed_by_dashdash_and_one_prompt_token_is_camp_launched(
+    tmp_path: Path,
+) -> None:
+    from camp.launch.stop import Stopped
+
+    state, ws, env, harness, derived, _tmux = _fixture(tmp_path)
+    pane = _launched_pane(harness, _UUID_A, derived, ws) + " -- hello"
+    tmux = _FakeTmux({derived: pane})
+
+    outcome = _stop(
+        _UUID_A[:8],
+        tmux=tmux,
+        transcripts=[_transcript(_UUID_A, ws)],
+        live_records=[_record(_UUID_A, ws)],
+        env=env,
+        harness=harness,
+    )
+
+    assert isinstance(outcome, Stopped)
+    assert tmux.killed == [derived]
+
+
+def test_a_prompt_that_shlex_reformats_into_a_different_tail_is_still_camp_launched(
+    tmp_path: Path,
+) -> None:
+    """tmux re-renders the pane command; a prompt with spaces/quotes can come
+    back split into a different set of tokens than were originally passed.
+    Only the prefix up to `--` is compared, so the tail's exact shape must not
+    matter."""
+    from camp.launch.stop import Stopped
+
+    state, ws, env, harness, derived, _tmux = _fixture(tmp_path)
+    # Unquoted multi-word prompt text: shlex.split yields SEVERAL tokens after
+    # `--`, not the single token the caller conceptually passed.
+    pane = (
+        _launched_pane(harness, _UUID_A, derived, ws)
+        + " -- hello 'world' with \"quoted phrase\" and spaces"
+    )
+    tmux = _FakeTmux({derived: pane})
+
+    outcome = _stop(
+        _UUID_A[:8],
+        tmux=tmux,
+        transcripts=[_transcript(_UUID_A, ws)],
+        live_records=[_record(_UUID_A, ws)],
+        env=env,
+        harness=harness,
+    )
+
+    assert isinstance(outcome, Stopped)
+    assert tmux.killed == [derived]
+
+
+def test_a_flag_shaped_prompt_does_not_change_the_verdict(tmp_path: Path) -> None:
+    from camp.launch.stop import Stopped
+
+    state, ws, env, harness, derived, _tmux = _fixture(tmp_path)
+    pane = _launched_pane(harness, _UUID_A, derived, ws) + " -- --dangerous-flag"
+    tmux = _FakeTmux({derived: pane})
+
+    outcome = _stop(
+        _UUID_A[:8],
+        tmux=tmux,
+        transcripts=[_transcript(_UUID_A, ws)],
+        live_records=[_record(_UUID_A, ws)],
+        env=env,
+        harness=harness,
+    )
+
+    assert isinstance(outcome, Stopped)
+    assert tmux.killed == [derived]
+
+
+def test_sharing_a_prefix_with_an_owning_shape_but_no_dashdash_next_is_not_camp_launched(
+    tmp_path: Path,
+) -> None:
+    """The rule must not degrade into "any pane starting with the owning
+    shape" — the next token after the shape must be the literal `--`, or the
+    pane is a foreign one that merely happens to share a prefix."""
+    from camp.launch.stop import REFUSED_NOT_CAMP_LAUNCHED, Refused
+
+    state, ws, env, harness, derived, _tmux = _fixture(tmp_path)
+    pane = _launched_pane(harness, _UUID_A, derived, ws) + " --extra-but-not-separator hello"
+    tmux = _FakeTmux({derived: pane})
+
+    outcome = _stop(
+        _UUID_A[:8],
+        tmux=tmux,
+        transcripts=[_transcript(_UUID_A, ws)],
+        live_records=[_record(_UUID_A, ws)],
+        env=env,
+        harness=harness,
+    )
+
+    assert isinstance(outcome, Refused)
+    assert outcome.reason == REFUSED_NOT_CAMP_LAUNCHED
+    assert tmux.killed == []
+
+
+def test_a_pane_command_shorter_than_the_owning_shape_is_not_camp_launched(
+    tmp_path: Path,
+) -> None:
+    import shlex as _shlex
+
+    from camp.launch.stop import REFUSED_NOT_CAMP_LAUNCHED, Refused
+
+    state, ws, env, harness, derived, _tmux = _fixture(tmp_path)
+    full = _launched_pane(harness, _UUID_A, derived, ws)
+    tokens = _shlex.split(full)
+    truncated = _shlex.join(tokens[:-1])
+    tmux = _FakeTmux({derived: truncated})
+
+    outcome = _stop(
+        _UUID_A[:8],
+        tmux=tmux,
+        transcripts=[_transcript(_UUID_A, ws)],
+        live_records=[_record(_UUID_A, ws)],
+        env=env,
+        harness=harness,
+    )
+
+    assert isinstance(outcome, Refused)
+    assert outcome.reason == REFUSED_NOT_CAMP_LAUNCHED
+    assert tmux.killed == []
+
+
+def test_ownership_survives_the_account_binding_with_a_prompt_present(
+    tmp_path: Path,
+) -> None:
+    """The existing account-binding strip must still compose with the new
+    prefix rule: strip the binding first, then apply the prefix rule to what
+    remains."""
+    from camp.launch.stop import Stopped
+
+    state, ws, env, harness, derived, _tmux = _fixture(tmp_path)
+    pane = (
+        _launched_pane_with_account(
+            harness, _UUID_A, derived, ws, "/home/someone/.account-other"
+        )
+        + " -- hello there"
+    )
+    tmux = _FakeTmux({derived: pane})
+
+    outcome = _stop(
+        _UUID_A[:8],
+        tmux=tmux,
+        transcripts=[_transcript(_UUID_A, ws)],
+        live_records=[_record(_UUID_A, ws)],
+        env=env,
+        harness=harness,
+    )
+
+    assert isinstance(outcome, Stopped)
+    assert tmux.killed == [derived]
+
+
+def test_a_harness_that_raises_from_session_launch_contributes_no_shape(
+    tmp_path: Path,
+) -> None:
+    """`session_launch` itself is a third-party call like every other one the
+    ownership check makes: a harness that raises composing it contributes no
+    shape, and the pane is refused rather than the verb raising."""
+    from camp.launch.stop import REFUSED_NOT_CAMP_LAUNCHED, Refused
+
+    state, ws, env, harness, derived, _tmux = _fixture(tmp_path)
+    pane = _launched_pane(harness, _UUID_A, derived, ws) + " -- hello"
+    tmux = _FakeTmux({derived: pane})
+
+    class _BrokenLaunch(_FakeHarness):
+        def session_launch(self, workspace, session_id, *, session_name=None):
+            raise RuntimeError("third-party harness blew up")
+
+        def session_resume(self, session_id):
+            raise RuntimeError("third-party harness blew up")
+
+    outcome = _stop(
+        _UUID_A[:8],
+        tmux=tmux,
+        transcripts=[_transcript(_UUID_A, ws)],
+        live_records=[_record(_UUID_A, ws)],
+        env=env,
+        harness=_BrokenLaunch(),
+    )
+
+    assert isinstance(outcome, Refused)
+    assert outcome.reason == REFUSED_NOT_CAMP_LAUNCHED
+    assert tmux.killed == []
