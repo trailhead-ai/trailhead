@@ -965,9 +965,20 @@ def _cmd_launch_group_cli(
         )
         trust_scope = root
     else:
+        rest_before_slug = list(rest)
         slug = _slug_from_args_or_cwd(
             rest, group, verb="launch", consume_positional=True, env=env
         )
+        if rest == rest_before_slug and rest:
+            # `_slug_from_args_or_cwd` took args[0] as the positional slug but
+            # never removes it from `rest` (it only mutates `rest` in place
+            # when `--name` was consumed instead) — drop it here so the
+            # leftover check below never mistakes the slug for an unconsumed
+            # flag.
+            rest = rest[1:]
+        unrecognized = next((tok for tok in rest if tok.startswith("-")), None)
+        if unrecognized is not None:
+            _die(f"camp launch: unrecognized flag: {unrecognized!r}")
 
     try:
         launched = launch_and_confirm(

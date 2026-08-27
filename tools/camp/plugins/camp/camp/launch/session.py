@@ -65,6 +65,7 @@ below.
 
 from __future__ import annotations
 
+import inspect
 import os
 import re
 import shutil
@@ -648,6 +649,14 @@ def launch_session(
         launch_kwargs: dict[str, Any] = {"session_name": tmux_name}
         if initial_prompt is not None:
             launch_kwargs["initial_prompt"] = initial_prompt
+            params = inspect.signature(harness.session_launch).parameters
+            if "initial_prompt" not in params:
+                raise LaunchError(
+                    f"camp: refusing to launch — harness "
+                    f"{harness.name or profile.binary!r} has no initial_prompt "
+                    "parameter on session_launch; camp will not launch a peer "
+                    "that silently boots idle while it reports success"
+                )
         harness_argv = harness.session_launch(launch_dir, session_id, **launch_kwargs)
         unsupported = "cannot launch sessions"
     else:

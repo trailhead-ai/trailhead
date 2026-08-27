@@ -147,6 +147,32 @@ class FakeHarness:
         return list(self._records)
 
 
+class _NoPromptParamHarness:
+    """A harness whose `session_launch` has no `initial_prompt` parameter at
+    all — legitimate per the base seam's docstring for a harness with no such
+    concept. A prompted launch against it must not raise a bare TypeError."""
+
+    name = "no-prompt-param-harness"
+
+    def session_launch(self, workspace, session_id, *, session_name=None):
+        return ["fake", "argv"]
+
+    def session_resume(self, session_id):
+        return ["fake", "--reattach", session_id]
+
+    def session_launch_env_unset(self):
+        return list(SCRUB)
+
+    def session_launch_env_set(self, account, *, env=None):
+        return {ACCOUNT_KEY: FAKE_DEFAULT_HOME}
+
+    def session_enumerate(self, workspace=None):
+        return None
+
+    def parse_session_list(self, output):
+        return None
+
+
 class Recorder:
     """Captures the single tmux spawn the engine is allowed to make.
 
@@ -706,6 +732,16 @@ class TestInitialPrompt:
             _launch(rig, initial_prompt="go")
 
         assert "fakeharness" in str(excinfo.value)
+        assert rig["spawn"].calls == []
+
+    def test_a_harness_missing_the_initial_prompt_param_refuses_cleanly(self, rig):
+        rig["harness"] = _NoPromptParamHarness()
+
+        with pytest.raises(rig["module"].LaunchError) as excinfo:
+            _launch(rig, initial_prompt="go")
+
+        assert "no-prompt-param-harness" in str(excinfo.value)
+        assert "initial_prompt" in str(excinfo.value)
         assert rig["spawn"].calls == []
 
 

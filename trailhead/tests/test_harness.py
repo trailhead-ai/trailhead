@@ -972,6 +972,28 @@ class _NoLaunchEnvSetHarness(_BareHarness):
         return None
 
 
+class _NoInitialPromptParamHarness(_BareHarness):
+    """Overrides the whole launch quartet with a signature that has no
+    ``initial_prompt`` parameter at all — override-detection and the other
+    value assertions all pass this one. A prompted launch against this
+    harness would raise TypeError at the call site rather than refusing
+    cleanly, so the quartet check must reject the signature itself."""
+
+    name = "no-initial-prompt-param"
+
+    def session_launch(self, workspace, session_id, *, session_name=None):
+        return ["fake", "argv"]
+
+    def session_launch_modality(self):
+        return MODALITY_TTY_REQUIRED
+
+    def session_launch_env_unset(self):
+        return []
+
+    def session_launch_env_set(self, account, *, env=None):
+        return {"FAKE_ACCOUNT_DIR": account or "/default"}
+
+
 class _EnumerateOnlyBrokenHarness(_BareHarness):
     """Implements session_enumerate but not parse_session_list — the base
     default leaves parse_session_list at None, breaking the pair."""
@@ -1021,6 +1043,13 @@ class TestBothOrNeitherInvariants:
             f"together or not at all, got {overrides!r}"
         )
         if any(overrides):
+            params = inspect.signature(cls.session_launch).parameters
+            assert "initial_prompt" in params, (
+                f"{type(harness).__name__}: session_launch overrides the base "
+                f"seam but its signature has no initial_prompt parameter; a "
+                f"prompted launch against it would raise TypeError instead of "
+                f"refusing cleanly"
+            )
             modality = harness.session_launch_modality()
             assert modality in MODALITIES, (
                 f"{type(harness).__name__}: session_launch_modality() returned "
@@ -1087,6 +1116,13 @@ class TestBothOrNeitherInvariants:
     def test_enumerate_only_broken_harness_fails_the_pair_invariant(self):
         with pytest.raises(AssertionError):
             self._assert_enumeration_pair(_EnumerateOnlyBrokenHarness())
+
+    def test_no_initial_prompt_param_harness_fails_the_quartet_invariant(self):
+        """Override-detection and the value assertions all pass this harness —
+        only a signature check on session_launch catches the missing
+        initial_prompt parameter."""
+        with pytest.raises(AssertionError):
+            self._assert_launch_quartet(_NoInitialPromptParamHarness())
 
     def test_bare_harness_with_neither_concept_passes_both_invariants(self):
         self._assert_launch_quartet(_BareHarness())

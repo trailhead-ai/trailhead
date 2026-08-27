@@ -64,7 +64,7 @@ camp launch --json
 or, with a forwarded prompt:
 
 ```bash
-camp launch --prompt <text> --json
+camp launch --prompt "<text>" --json
 ```
 
 `<text>` is `$ARGUMENTS`, unmodified — no reformatting, no wrapping, no added

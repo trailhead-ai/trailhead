@@ -553,6 +553,18 @@ def test_camp_launch_prompt_outside_a_workspace_still_needs_a_slug(cli_env) -> N
     assert "camp launch: could not determine slug from cwd" in result.stderr
 
 
+def test_camp_launch_refuses_an_unrecognized_flag_typo(cli_env) -> None:
+    """A typo'd flag (`--promt` for `--prompt`) must refuse, not silently be
+    dropped while the launch reports success with no prompt."""
+    _new_workspace(cli_env, "feat-typo")
+    result = _camp(cli_env, "launch", "feat-typo", "--group", "mygroup", "--promt", "go")
+
+    assert result.returncode != 0
+    assert result.stdout == ""
+    assert "camp launch: unrecognized" in result.stderr
+    assert "--promt" in result.stderr
+
+
 def test_camp_launch_prompt_writes_an_audit_line_naming_the_prompt_and_workspace(
     cli_env,
 ) -> None:

@@ -199,3 +199,26 @@ def test_document_carries_skill_frontmatter(skill_text: str) -> None:
     frontmatter = "\n".join(lines[1:closing])
     assert "name: fork" in frontmatter
     assert "description:" in frontmatter
+
+
+# ---------------------------------------------------------------------------
+# 5. The `--prompt` invocation must be shown quoted
+# ---------------------------------------------------------------------------
+
+
+def test_prompted_invocation_shows_the_prompt_value_quoted(skill_text: str) -> None:
+    """`$ARGUMENTS` is multi-word by design and `_consume_flag_value` takes
+    exactly one token — an unquoted substitution truncates the prompt to its
+    first word. The documented invocation must show the quoted form so a
+    literal substitution of $ARGUMENTS carries the whole prompt."""
+    invocations = [
+        invocation
+        for invocation in skill_common.camp_invocations(skill_text)
+        if "--prompt" in invocation
+    ]
+    assert invocations, "no documented camp launch --prompt invocation found"
+    for invocation in invocations:
+        value = invocation[invocation.index("--prompt") + 1]
+        assert value.startswith('"') and value.endswith('"'), (
+            f"--prompt value {value!r} is not quoted in the documented invocation"
+        )

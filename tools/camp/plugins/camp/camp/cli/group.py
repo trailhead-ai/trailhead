@@ -373,6 +373,13 @@ def _cmd_new_group_cli(
 
     slug = _resolve_slug(rest[0], context="new")
 
+    # Anything left after the slug and the known flags above is a token
+    # `camp new` does not understand — e.g. `--prompt "go"` (not threaded
+    # through `camp new`; see module docs). Reporting success while silently
+    # discarding it would leave the operator believing it took effect.
+    if len(rest) > 1:
+        _die(f"camp new: unrecognized argument: {rest[1]!r}")
+
     group_name = group["group"]["name"]
     if not group["members"]:
         _die(f"camp new: group {group_name!r} has no members")

@@ -404,6 +404,26 @@ class TestNoSlug:
         assert "camp ai" not in err
 
 
+class TestUnrecognizedTrailingArgument:
+    """`camp new <slug> --prompt "go"` must refuse loudly, not silently drop
+    `--prompt "go"` and report success. `--prompt` is not threaded through
+    `camp new` (scope decision) — this pins the refusal instead."""
+
+    def test_unrecognized_trailing_flag_refuses(self, camp_cli, group_env, capsys):
+        g = group_env
+        with pytest.raises(SystemExit) as exc:
+            camp_cli._cmd_new_group_cli(
+                ["feat-x", "--prompt", "go"], g["group"], g["env"], dry_run=False
+            )
+        assert exc.value.code != 0
+        err = capsys.readouterr().err
+        assert "camp new" in err
+        assert "--prompt" in err
+        assert not _manifest_path(g["env"], "feat-x").is_file(), (
+            "a refused camp new must not seed the workspace"
+        )
+
+
 def _activate_task(name: str = "npm-ci") -> dict:
     """A minimal resolved activate-phase task, config-shaped (not manifest-shaped)."""
     return {
