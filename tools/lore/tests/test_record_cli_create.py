@@ -229,9 +229,15 @@ def test_create_silent_open_stdin_refuses_instead_of_blocking(tmp_path):
     vault, state = _make_vault(tmp_path)
     existing = sorted(p.name for p in (vault / "spec").glob("*.json")) if (vault / "spec").exists() else []
 
-    r, elapsed = _run_silent_pipe(_BASE_ARGS, vault=vault, state_dir=state, timeout=5.0)
+    r, elapsed = _run_silent_pipe(
+        _BASE_ARGS,
+        # Deliberately far longer than any realistic refusal check: proves
+        # the command returns without waiting out the pipe, rather than
+        # merely returning faster than a tight number.
+        vault=vault, state_dir=state, timeout=60.0,
+    )
 
-    assert elapsed < 2.0, f"took {elapsed}s — looks like it blocked on stdin"
+    assert elapsed < 15.0, f"took {elapsed}s — looks like it blocked on stdin"
     assert r.returncode != 0
     assert "stdin" in r.stderr.lower()
     after = sorted(p.name for p in (vault / "spec").glob("*.json")) if (vault / "spec").exists() else []

@@ -233,13 +233,16 @@ def test_update_silent_open_stdin_refuses_instead_of_blocking(tmp_path):
         ["record", "update", record_id, "--keyword", "bar"],
         vault=vault,
         state_dir=state,
-        timeout=5.0,
+        # Deliberately far longer than any realistic refusal check: proves
+        # the command returns without waiting out the pipe, rather than
+        # merely returning faster than a tight number.
+        timeout=60.0,
     )
 
     # Must return well within the harness's own timeout budget, not merely
     # "before subprocess.run kills it" — that would still count a near-timeout
     # hang as a pass.
-    assert elapsed < 2.0, f"took {elapsed}s — looks like it blocked on stdin"
+    assert elapsed < 15.0, f"took {elapsed}s — looks like it blocked on stdin"
     assert r.returncode != 0
     assert "stdin" in r.stderr.lower()
 

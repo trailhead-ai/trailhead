@@ -223,8 +223,14 @@ class TestU1RealSurvival:
 
         subprocess.run([_VENV_PYTHON, str(parent)], capture_output=True, timeout=15)
 
+        # Wait for the logfile to carry the child's output — not for the
+        # sentinel. The child writes the sentinel BEFORE it prints, so a
+        # sentinel-gated wait can return while the print is still in flight
+        # and read an empty logfile.
         deadline = time.monotonic() + 8.0
-        while not sentinel.exists() and time.monotonic() < deadline:
+        while time.monotonic() < deadline:
+            if logfile.exists() and "provisioner completed" in logfile.read_text():
+                break
             time.sleep(0.05)
 
         assert logfile.exists(), "setup.log never created"
@@ -1251,7 +1257,11 @@ class TestBootPathBudget:
                             "slow",
                             [
                                 _step("first", _sleep_cmd(0.15)),
-                                _step("second", _sleep_cmd(5)),
+                                # Deliberately far longer than any realistic
+                                # boot-budget check: proves the hook returns
+                                # without waiting this step out, rather than
+                                # merely returning faster than a tight number.
+                                _step("second", _sleep_cmd(60)),
                             ],
                         )
                     ],
@@ -1263,7 +1273,7 @@ class TestBootPathBudget:
         reconcile.reconcile_worktree(group, "s", env=env)
         elapsed = time.monotonic() - started
 
-        assert elapsed < 2, f"reconcile_worktree took {elapsed}s — boot budget not enforced"
+        assert elapsed < 15, f"reconcile_worktree took {elapsed}s — boot budget not enforced"
 
         mpath = _workspace_dir("bootbudgetg", "s", env) / "manifest.json"
         entry = read_central_manifest(mpath)["members"][0]
@@ -1275,7 +1285,11 @@ class TestBootPathBudget:
         import camp.provision.reconcile as reconcile
         from camp.group.manifest import read_central_manifest
 
-        monkeypatch.setattr(reconcile, "BOOT_TASK_BUDGET_SECONDS", 0.05)
+        # Generous headroom for the trivial "mark" write step to reliably
+        # complete under contention before the budget check bites — the
+        # proof is the clamp on "second", not on how tight "mark"'s own
+        # window is.
+        monkeypatch.setattr(reconcile, "BOOT_TASK_BUDGET_SECONDS", 5.0)
 
         repo = tmp_path / "repo"
         _init_git_repo(repo)
@@ -1293,7 +1307,10 @@ class TestBootPathBudget:
                             "slow",
                             [
                                 _step("mark", [_VENV_PYTHON, "-c", f"open({str(runs)!r}, 'a').write('x')"]),
-                                _step("second", _sleep_cmd(5)),
+                                # Deliberately far longer than the 5.0s budget:
+                                # proves the step is clamped over-budget rather
+                                # than merely finishing before a tight window.
+                                _step("second", _sleep_cmd(30)),
                             ],
                         )
                     ],
@@ -1363,7 +1380,13 @@ class TestBootPathBudget:
         import camp.provision.reconcile as reconcile
         from camp.group.manifest import read_central_manifest
 
-        monkeypatch.setattr(reconcile, "BOOT_TASK_BUDGET_SECONDS", 0.05)
+        # Deliberately generous relative to the original 0.05s: the "later"
+        # task below is a genuinely fast, trivial subprocess spawn that must
+        # complete WITHIN budget for this test to prove anything — a budget
+        # this tight to process-spawn/scheduling overhead under contention
+        # would make "later" spuriously over-budget too, collapsing the two
+        # outcomes this test exists to distinguish.
+        monkeypatch.setattr(reconcile, "BOOT_TASK_BUDGET_SECONDS", 5.0)
 
         repo = tmp_path / "repo"
         _init_git_repo(repo)
@@ -1381,7 +1404,10 @@ class TestBootPathBudget:
                             "slow",
                             [
                                 _step("first", _sleep_cmd(0.15)),
-                                _step("second", _sleep_cmd(5)),
+                                # Well past the 5.0s budget above, so the
+                                # clamp unambiguously classifies this task
+                                # over-budget regardless of scheduling noise.
+                                _step("second", _sleep_cmd(30)),
                             ],
                         ),
                         _provision_task(

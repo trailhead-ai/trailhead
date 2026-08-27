@@ -1648,10 +1648,16 @@ class TestSetupActivatePhaseRetry:
         group = _make_group_config(group_name, [{"name": member_name, "repo_root": "/tmp/fake-repo", "tasks": [task]}])
 
         task_started = threading.Event()
+        release_task = threading.Event()
 
         def slow_run(*args, **kwargs):
             task_started.set()
-            time.sleep(1.5)
+            # Deliberately far longer than any realistic lock-acquire delay:
+            # proves the probe acquires without waiting this task out, rather
+            # than merely acquiring faster than a tight number. `release_task`
+            # lets the proof end this wait as soon as it's done, rather than
+            # paying for the full margin in teardown every run.
+            release_task.wait(timeout=10.0)
             return MagicMock(returncode=0, stdout="", stderr="")
 
         errors: list[Exception] = []
@@ -1680,12 +1686,15 @@ class TestSetupActivatePhaseRetry:
             fcntl.flock(probe_fd.fileno(), fcntl.LOCK_UN)
             probe_fd.close()
 
-            assert elapsed < 0.5, (
+            assert elapsed < 3.0, (
                 f"acquiring .reconcile.lock took {elapsed:.2f}s while the activate "
                 "task was running — the lock must not be held across the task subprocess"
             )
         finally:
-            t.join(timeout=10.0)
+            # The proof is already complete by this point; don't pay for the
+            # remainder of the wait margin in teardown.
+            release_task.set()
+            t.join(timeout=15.0)
         assert not errors, errors
 
     def test_activate_retry_manifest_write_happens_under_reconcile_lock(self, tmp_path):

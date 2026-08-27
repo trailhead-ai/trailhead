@@ -24,8 +24,17 @@ testpaths = [
     "tools/outpost/tests",
     "tools/ranger/tests",
 ]
+# -n auto: parallelize across all available cores (pytest-xdist). The suite is
+# I/O-bound on subprocess + filesystem work, not CPU-bound, so this scales
+# with whatever machine runs it (dev laptop or a smaller CI runner) without a
+# fixed worker count that's wrong on one of them. `-m "not benchmark"` excludes
+# timing/latency assertions from the parallel run — worker contention makes
+# wall-clock latency meaningless, not the benchmark broken; those run serially
+# as a dedicated CI step instead (see .github/workflows/tests.yml).
+addopts = "-n auto -m \"not benchmark\""
 markers = [
     "real_home: the test genuinely means the developer's real home; opts out of the Path.home() guard",
+    "benchmark: a timing/latency assertion that requires uncontended CPU — excluded from the parallel run, run serially instead",
 ]
 
 [tool.ruff]

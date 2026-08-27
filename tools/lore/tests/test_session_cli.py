@@ -133,10 +133,13 @@ class TestFenceNeutralization:
         r, elapsed = _run_silent_pipe(
             ["session", "candidate", "--session-id", SID,
              "--kind", "spec", "--phase", "Plan"],
-            vault=vault, state_dir=state, timeout=5.0,
+            # Deliberately far longer than any realistic refusal check: proves
+            # the command returns without waiting out the pipe, rather than
+            # merely returning faster than a tight number.
+            vault=vault, state_dir=state, timeout=60.0,
         )
 
-        assert elapsed < 2.0, f"took {elapsed}s — looks like it blocked on stdin"
+        assert elapsed < 15.0, f"took {elapsed}s — looks like it blocked on stdin"
         assert r.returncode != 0
         assert "stdin" in r.stderr.lower()
         assert not note_path.exists()  # no write happened

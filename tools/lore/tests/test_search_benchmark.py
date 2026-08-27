@@ -252,6 +252,7 @@ def _measure_query_p95(state_dir: Path, *, runs: int = 30) -> float:
     return _percentile(samples_ms, 95.0)
 
 
+@pytest.mark.benchmark
 @pytest.mark.parametrize(
     "corpus_size,label,ceiling_ms",
     [
