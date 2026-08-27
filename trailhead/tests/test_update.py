@@ -89,6 +89,7 @@ def _make_runner(
     remote_rc: int = 0,
     diff_stdout: str = "",
     diff_rc: int = 0,
+    diff_raises: Exception | None = None,
     kwargs_log: list[dict] | None = None,
 ):
     """A recording git-command stub: dispatches on the git subcommand.
@@ -119,6 +120,8 @@ def _make_runner(
             stdout = (count + "\n") if count is not None else ""
             return subprocess.CompletedProcess(args, count_rc, stdout=stdout, stderr=count_stderr)
         if sub == "diff":
+            if diff_raises is not None:
+                raise diff_raises
             return subprocess.CompletedProcess(args, diff_rc, stdout=diff_stdout, stderr="")
         raise AssertionError(f"unexpected git invocation: {args}")
 
@@ -374,6 +377,28 @@ class TestTimeout:
         assert result["outcome"] == "unanswerable"
 
 
+class TestNonUtf8DiffOutputNeverRaises:
+    """`subprocess.run(text=True)` decodes a subprocess's output using the
+    locale's encoding, and raises `UnicodeDecodeError` if the bytes don't
+    decode — a real risk on the one path explicitly expected to carry
+    attacker-authored non-ASCII (the changelog diff). `_run_git` must catch
+    this the same way it already catches a timeout or a missing git binary,
+    never letting it escape as a traceback."""
+
+    def test_undecodable_diff_output_reports_unavailable_delta_not_a_traceback(self, tmp_path):
+        env = _env(tmp_path)
+        _install_stamp(tmp_path, env)
+        runner, _ = _make_runner(
+            count="3",
+            diff_raises=UnicodeDecodeError("utf-8", b"\xff\xfe", 0, 1, "invalid start byte"),
+        )
+
+        result = update.check_for_update(env=env, runner=runner)
+
+        assert result["outcome"] == "behind"
+        assert result["changelog_delta"]["available"] is False
+
+
 class TestCredentialRedaction:
     def test_https_credentials_never_appear_in_output(self, tmp_path):
         env = _env(tmp_path)
@@ -544,6 +569,31 @@ class TestChangelogDeltaSanitization:
         joined = "\n".join(result["changelog_delta"]["lines"])
         assert "‮" not in joined
         assert "​" not in joined
+
+    def test_zero_width_joiner_is_preserved_so_emoji_sequences_survive(self):
+        """U+200D ZWJ joins codepoints into one emoji glyph (e.g. a family or
+        a professional emoji); stripping it splits the sequence into several
+        unrelated emoji rather than the one intended. It falls inside the
+        naive U+200B-U+200F range but carries no display-vs-parse divergence
+        risk of its own, so it must survive sanitization intact."""
+        line = "shipped a new 👩‍💻 icon"
+        assert "‍" in update._sanitize_delta_line(line)
+
+    def test_rtl_and_ltr_marks_are_preserved(self):
+        """U+200E (LRM) / U+200F (RLM) are directionality HINTS, not overrides
+        — they don't reorder surrounding text the way U+202E does — and
+        stripping them corrupts legitimate bidirectional prose."""
+        line = "legitimate ‎RTL‏ text"
+        sanitized = update._sanitize_delta_line(line)
+        assert "‎" in sanitized
+        assert "‏" in sanitized
+
+    def test_tab_is_preserved_in_changelog_prose(self):
+        """A tab is ordinary whitespace in changelog prose (e.g. an indented
+        sub-bullet); it is not a terminal escape sequence and must not be
+        treated as one."""
+        line = "entry\twith an embedded tab"
+        assert "\t" in update._sanitize_delta_line(line)
 
 
 class TestChangelogDeltaNoShellInterpolation:

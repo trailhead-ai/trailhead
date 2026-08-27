@@ -122,20 +122,26 @@ CHANGELOG_DELTA_MAX_LINE_CHARS = 500
 # Strips ANSI/VT escape sequences (CSI and simple two-byte forms) before any
 # changelog content is ever surfaced to an agent.
 _ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]|\x1b[@-Z\\-_]")
-# C0 AND C1 control characters (\x00-\x1f, \x7f-\x9f), excluding none — a
-# changelog line is prose, it never legitimately carries a raw control byte.
+# C0 AND C1 control characters (\x00-\x1f, \x7f-\x9f), excluding TAB (\x09) —
+# a changelog line is prose, which never legitimately carries a raw control
+# byte EXCEPT a tab used as ordinary whitespace (e.g. an indented sub-bullet).
 # The C1 range matters even though `_ANSI_ESCAPE_RE` only strips 7-bit ESC
 # sequences: C1 codepoints are single-byte escape introducers in their own
 # right (U+0090 DCS, U+009B CSI, U+009D OSC) and would otherwise bypass it.
-_CONTROL_CHAR_RE = re.compile(r"[\x00-\x1f\x7f-\x9f]")
-# Zero-width characters (U+200B-U+200F) and bidirectional-override/isolate
-# controls (U+202A-U+202E embedding/override, U+2066-U+2069 isolates,
-# U+FEFF zero-width no-break space): a changelog line is rendered as plain
-# prose, and either category can be used to make displayed text visually
-# diverge from the bytes an agent actually reads — the same
-# rendering-versus-parsing gap that motivates the ANSI and control-character
-# sanitization above.
-_BIDI_ZERO_WIDTH_RE = re.compile("[​-‏‪-‮⁦-⁩﻿]")
+_CONTROL_CHAR_RE = re.compile(r"[\x00-\x08\x0a-\x1f\x7f-\x9f]")
+# Zero-width space/non-joiner (U+200B-U+200C), bidirectional-override/isolate
+# controls (U+202A-U+202E embedding/override, U+2066-U+2069 isolates), and
+# U+FEFF (zero-width no-break space / BOM): a changelog line is rendered as
+# plain prose, and any of these can make displayed text visually diverge from
+# the bytes an agent actually reads or hide content in an invisible gap — the
+# same rendering-versus-parsing gap that motivates the ANSI and
+# control-character sanitization above. Deliberately EXCLUDES the rest of the
+# U+200B-U+200F zero-width/mark range: U+200D ZWJ joins codepoints into one
+# emoji glyph (stripping it splits the sequence into unrelated emoji), and
+# U+200E/U+200F (LRM/RLM) are directionality HINTS, not overrides — neither
+# carries this class's display-vs-parse divergence risk, so both must survive
+# sanitization intact.
+_BIDI_ZERO_WIDTH_RE = re.compile("[​-‌‪-‮⁦-⁩﻿]")
 
 
 # ---------------------------------------------------------------------------
@@ -190,7 +196,7 @@ def _run_git(checkout: Path, *args: str, runner, timeout: int):
             text=True,
             timeout=timeout,
         )
-    except (subprocess.TimeoutExpired, OSError):
+    except (subprocess.TimeoutExpired, OSError, UnicodeDecodeError):
         return None
 
 
@@ -198,7 +204,10 @@ def _proc_stderr(proc) -> str:
     """Render a git invocation's stderr for a user-facing reason string.
 
     Credentials are redacted here so no caller can forget to; a `None` proc
-    means `_run_git` swallowed a timeout or an OSError (e.g. no `git` on PATH).
+    means `_run_git` swallowed a timeout, an OSError (e.g. no `git` on PATH),
+    or a `UnicodeDecodeError` (subprocess output that doesn't decode under the
+    active locale — a real risk on the diff path, which carries
+    attacker-authored non-ASCII).
     """
     return redact_credentials((proc.stderr or "").strip()) if proc is not None else "timed out or git unavailable"
 

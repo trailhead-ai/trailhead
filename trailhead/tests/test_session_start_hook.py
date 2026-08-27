@@ -229,6 +229,81 @@ class TestQuietOutcomes:
 
         assert hook.check_and_render(env=env, runner=runner) is None
 
+    def test_option_shaped_branch_never_execs(self, tmp_path):
+        """The hook re-derives `read_stamp`'s contract independently — this
+        pins that its own copy rejects an option-shaped `branch` exactly as
+        `provenance.read_stamp` does, so the two never disagree."""
+        env = _env(tmp_path)
+        checkout = _checkout(tmp_path)
+        state = Path(env["TRAILHEAD_STATE_DIR"])
+        state.mkdir(parents=True, exist_ok=True)
+        (state / "provenance.json").write_text(
+            json.dumps(
+                {
+                    "checkout": str(checkout),
+                    "sha": _SHA,
+                    "branch": "--upload-pack=evil",
+                    "origin_url": _ORIGIN_URL,
+                    "wired_at": "2026-01-01T00:00:00Z",
+                    "last_check": None,
+                }
+            )
+        )
+        runner, calls = _spy_runner(_BEHIND)
+
+        assert hook.check_and_render(env=env, runner=runner) is None
+        assert calls == []
+
+    def test_option_shaped_sha_never_execs(self, tmp_path):
+        env = _env(tmp_path)
+        checkout = _checkout(tmp_path)
+        state = Path(env["TRAILHEAD_STATE_DIR"])
+        state.mkdir(parents=True, exist_ok=True)
+        (state / "provenance.json").write_text(
+            json.dumps(
+                {
+                    "checkout": str(checkout),
+                    "sha": "--output=/tmp/victim.txt",
+                    "branch": _BRANCH,
+                    "origin_url": _ORIGIN_URL,
+                    "wired_at": "2026-01-01T00:00:00Z",
+                    "last_check": None,
+                }
+            )
+        )
+        runner, calls = _spy_runner(_BEHIND)
+
+        assert hook.check_and_render(env=env, runner=runner) is None
+        assert calls == []
+
+    def test_userprofile_alone_confines_like_home_does(self, tmp_path):
+        env = {
+            "TRAILHEAD_STATE_DIR": str(tmp_path / "state"),
+            "USERPROFILE": str(tmp_path / "winhome"),
+        }
+        (tmp_path / "winhome").mkdir()
+        checkout = tmp_path / "winhome" / "checkout"
+        checkout.mkdir()
+        state = Path(env["TRAILHEAD_STATE_DIR"])
+        state.mkdir(parents=True, exist_ok=True)
+        (state / "provenance.json").write_text(
+            json.dumps(
+                {
+                    "checkout": str(checkout),
+                    "sha": _SHA,
+                    "branch": _BRANCH,
+                    "origin_url": _ORIGIN_URL,
+                    "wired_at": "2026-01-01T00:00:00Z",
+                    "last_check": None,
+                }
+            )
+        )
+        runner, calls = _spy_runner(_OK)
+
+        hook.check_and_render(env=env, runner=runner)
+
+        assert len(calls) == 1, "a USERPROFILE-confined checkout must still be usable"
+
 
 # ---------------------------------------------------------------------------
 # Opt-out: env var + config key, env wins

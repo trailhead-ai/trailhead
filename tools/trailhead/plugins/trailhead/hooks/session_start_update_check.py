@@ -8,8 +8,9 @@ to a COPY under the harness's composed tree, never the source checkout
 ``import trailhead``: the package that owns the provenance-stamp contract
 lives outside anything composed alongside a hook. It is therefore a genuinely
 self-contained, stdlib-only script that re-derives just enough of that
-contract (state-dir resolution, required stamp fields, checkout-path
-confinement under HOME) to find the checkout on its own, then hands
+contract (state-dir resolution, required stamp fields, option-shaped-field
+rejection, checkout-path confinement under HOME/USERPROFILE) to find the
+checkout on its own, then hands
 everything else — the git probe, the network-fetch throttle, the changelog
 extraction and sanitization — to that checkout's own
 ``bin/trailhead update --check --json``, invoked as a plain argv list and
@@ -60,6 +61,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -110,13 +112,21 @@ def _state_dir(env: dict[str, str]) -> Path | None:
     return (Path(home) / ".local" / "state" / STATE_APP) if home else None
 
 
-def _read_stamp(env: dict[str, str]) -> dict[str, Any] | None:
-    """Re-derive ``trailhead.provenance.read_stamp``'s contract (default confine_root).
+_SHA_RE_PATTERN = "^[0-9a-f]{40}$"
 
-    Required fields plus checkout-path confinement under HOME, exactly as
-    ``read_stamp()`` enforces — this hook re-implements the same checks
-    against the same on-disk file rather than importing that function (see
-    the module docstring for why it can't).
+
+def _read_stamp(env: dict[str, str]) -> dict[str, Any] | None:
+    """Re-derive ``trailhead.provenance.read_stamp``'s contract independently.
+
+    Required fields, option-shaped-`branch`/`sha` rejection, and
+    checkout-path confinement under HOME (or ``USERPROFILE`` on Windows) —
+    the SAME checks ``read_stamp()`` enforces, kept in sync deliberately: a
+    second copy of a security-relevant contract that silently drifts from
+    the original is exactly what this area has gotten wrong before, so this
+    function's checks must be updated in lockstep with
+    ``trailhead.provenance.read_stamp`` whenever that contract changes. This
+    hook re-implements them against the same on-disk file rather than
+    importing that function (see the module docstring for why it can't).
     """
     state = _state_dir(env)
     if state is None:
@@ -131,7 +141,11 @@ def _read_stamp(env: dict[str, str]) -> dict[str, Any] | None:
     required = ("checkout", "sha", "branch", "origin_url", "wired_at")
     if not all(isinstance(data.get(k), str) and data.get(k) for k in required):
         return None
-    home = env.get("HOME")
+    if data["branch"].startswith("-"):
+        return None
+    if not re.match(_SHA_RE_PATTERN, data["sha"]):
+        return None
+    home = env.get("HOME") or env.get("USERPROFILE")
     if not home:
         return None
     try:
