@@ -650,8 +650,8 @@ lore record update <adr-id> --status active
    land before anything freezes. An adr flipped `active` without them is an immutable decision no
    acceptance ever reached. The counts alongside the accepted-from-proposal / operator-override
    split are how the provenance stamp renders for an adr, and `<n>-revise` is what tells an
-   auditor of a `dropped` adr which disposition sent it there. **This write runs on every accepted
-   run, including one with zero `resolved` Criticals** — `$EDITS` is then an empty diff, which the
+   auditor of an adr still in `draft` which disposition withheld its freeze. **This write runs on
+   every accepted run, including one with zero `resolved` Criticals** — `$EDITS` is then an empty diff, which the
    CLI applies as a no-op, and the annotation rides the same invocation regardless. Skipped there,
    the adr flips `active` carrying no provenance at all, because the annotation is the only
    provenance its exhaustive body will ever hold.

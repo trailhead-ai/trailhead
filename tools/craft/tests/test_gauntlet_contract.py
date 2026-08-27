@@ -2125,3 +2125,28 @@ def test_premise_attacker_retains_all_three_verdicts_and_revise_not_discard():
         "produces a discard — the gauntlet no longer has a discard route, and the "
         "premise pass is the one most likely to reach for it"
     )
+
+
+def test_adr_tail_never_explains_provenance_by_reference_to_a_dropped_adr():
+    """No gauntlet write sets an adr `dropped`, so provenance cannot be justified by one.
+
+    The accepted tail explains why the `<n>-revise` count is worth stamping. That
+    justification must name a state the gauntlet can actually leave an adr in. A
+    surviving `revise` withholds the freeze and leaves the adr `draft`; it never
+    sends the adr to `dropped`, because no gauntlet-authored write sets that status
+    at all — the same section pins exactly that, two paragraphs below. An audience
+    named as "an auditor of a `dropped` adr" therefore describes a record this skill
+    can no longer produce, which reads to a later editor as licence to restore the
+    discard route the freeze condition replaced.
+    """
+    tail = _flat(_adr_tail(GAUNTLET.read_text()))
+    assert "auditor of a `dropped` adr" not in tail, (
+        "the adr accepted tail justifies the `<n>-revise` count by appeal to an "
+        "auditor of a `dropped` adr — a state no gauntlet write can produce now "
+        "that the discard route is gone; name the `draft` adr the withheld freeze "
+        "actually leaves behind"
+    )
+    assert "`<n>-revise`" in tail, (
+        "the adr accepted tail must still say what the `<n>-revise` count is for — "
+        "deleting the stale audience must not delete the provenance rationale"
+    )
