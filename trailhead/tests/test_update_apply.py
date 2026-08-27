@@ -381,6 +381,36 @@ class TestErrorHygiene:
         assert "Traceback" not in err
         assert "\x1b" not in err
 
+    def test_rejected_stamp_error_differs_from_the_absent_stamp_error(self, tmp_path, capsys):
+        runner, _ = _make_runner()
+
+        env_absent = _env(tmp_path)
+        exit_code_absent = update.run_update_apply(env=env_absent, runner=runner, assume_yes=True)
+        err_absent = capsys.readouterr().err
+        assert exit_code_absent != 0
+
+        rejected_root = tmp_path / "rejected"
+        rejected_root.mkdir()
+        env_rejected = _env(rejected_root)
+        from trailhead import provenance
+
+        checkout = _checkout(rejected_root)
+        rejected_stamp = {
+            "checkout": str(checkout),
+            "sha": "not-a-real-sha",
+            "branch": _BRANCH,
+            "origin_url": _ORIGIN_URL,
+            "wired_at": "2026-01-01T00:00:00Z",
+            "last_check": None,
+        }
+        provenance._atomic_write_json(provenance.stamp_path(env=env_rejected), rejected_stamp)
+
+        exit_code_rejected = update.run_update_apply(env=env_rejected, runner=runner, assume_yes=True)
+        err_rejected = capsys.readouterr().err
+
+        assert exit_code_rejected != 0
+        assert err_rejected != err_absent
+
     def test_dirty_checkout_error_has_no_traceback_no_ansi(self, tmp_path, monkeypatch, capsys):
         env = _env(tmp_path)
         _install_stamp(tmp_path, env)

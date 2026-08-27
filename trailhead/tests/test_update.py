@@ -240,6 +240,34 @@ class TestNoStamp:
         assert isinstance(result, dict)
 
 
+class TestRejectedStampIsDistinguishableFromAbsent:
+    """A stamp that exists but was REJECTED (confinement, an option-shaped
+    field, malformed JSON) must not report the same reason as "never
+    installed" — the two are diagnosable only if they read differently."""
+
+    def test_rejected_stamp_reason_differs_from_the_absent_stamp_reason(self, tmp_path):
+        env = _env(tmp_path)
+        from trailhead import provenance
+
+        absent_result = update.check_for_update(env=env, runner=_make_runner()[0])
+
+        checkout = _checkout(tmp_path)
+        rejected_stamp = {
+            "checkout": str(checkout),
+            "sha": "not-a-real-sha",
+            "branch": _BRANCH,
+            "origin_url": _ORIGIN_URL,
+            "wired_at": "2026-01-01T00:00:00Z",
+            "last_check": None,
+        }
+        provenance._atomic_write_json(provenance.stamp_path(env=env), rejected_stamp)
+
+        rejected_result = update.check_for_update(env=env, runner=_make_runner()[0])
+
+        assert rejected_result["outcome"] == "unanswerable"
+        assert rejected_result["reason"] != absent_result["reason"]
+
+
 class TestFreshnessThrottle:
     def test_within_window_no_fetch_is_attempted(self, tmp_path):
         env = _env(tmp_path)
@@ -677,6 +705,61 @@ class TestArgumentInjectionRCE:
 
         assert not marker.exists(), "the payload must never execute"
         assert result["outcome"] == "unanswerable"
+
+
+class TestArgumentInjectionArbitraryFileOverwrite:
+    """`_extract_changelog_delta` passes the stamp's `sha` field as a bare
+    positional to `git diff`. A `sha` shaped like `--output=<path>` is a real
+    `git diff` option that writes the diff output to `<path>`, truncating it
+    first — an unattended arbitrary-file-overwrite from the SessionStart hook
+    while the check still reports a normal outcome. Reproduced end-to-end
+    against REAL git: a real checkout, a real provenance stamp written to
+    disk (not bypassing `read_stamp`), and a real victim file with known
+    contents.
+
+    The fix lives in `provenance.read_stamp`'s own sha-shape validation (a
+    real sha is always exactly 40 hex characters, which can never be
+    option-shaped) — this test exercises the whole pipeline through that real
+    entry point, unlike `TestArgumentInjectionRCE` above which isolates a
+    second, independent defense layer at the `git fetch` call site itself.
+    """
+
+    def test_option_shaped_sha_does_not_overwrite_a_file_via_diff(self, tmp_path):
+        victim = tmp_path / "victim.txt"
+        victim.write_text("do not touch me\n")
+
+        origin = tmp_path / "origin"
+        origin.mkdir()
+        subprocess.run(["git", "init", "-q", "--initial-branch=main", str(origin)], check=True)
+        subprocess.run(["git", "-C", str(origin), "config", "user.email", "a@example.com"], check=True)
+        subprocess.run(["git", "-C", str(origin), "config", "user.name", "Test"], check=True)
+        (origin / "CHANGELOG.md").write_text("# Changelog\n")
+        subprocess.run(["git", "-C", str(origin), "add", "CHANGELOG.md"], check=True)
+        subprocess.run(["git", "-C", str(origin), "commit", "-m", "x", "-q"], check=True)
+        checkout = tmp_path / "home" / "checkout"
+        checkout.parent.mkdir(parents=True, exist_ok=True)
+        subprocess.run(["git", "clone", "-q", str(origin), str(checkout)], check=True)
+
+        env = _env(tmp_path)
+        from trailhead import provenance
+
+        malicious_stamp = {
+            "checkout": str(checkout),
+            "sha": f"--output={victim}",
+            "branch": "origin/main",
+            "origin_url": str(origin),
+            "wired_at": "2026-01-01T00:00:00Z",
+            "last_check": None,
+        }
+        provenance._atomic_write_json(provenance.stamp_path(env=env), malicious_stamp)
+
+        def real_runner(args, **kw):
+            return subprocess.run(args, **kw)
+
+        result = update.check_for_update(env=env, runner=real_runner)
+
+        assert victim.read_text() == "do not touch me\n", "the victim file must never be overwritten"
+        assert result["outcome"] == "unanswerable", "an option-shaped sha must read as no stamp at all"
 
 
 class TestNamedErrorHygiene:

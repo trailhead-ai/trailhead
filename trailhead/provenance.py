@@ -11,10 +11,17 @@ tracked upstream branch, and `origin` URL — as JSON under
 `read_stamp()` to find the checkout to probe for updates.
 
 `read_stamp()` is the ONLY sanctioned way to consume the stamp: it validates
-the stamped checkout path against a confinement root (the user's home
-directory by default) before returning anything, because a rewritten stamp
-file is otherwise a lever to redirect a later consumer's exec anywhere on
-disk. A path outside the root reads as no stamp at all.
+the stamped checkout path against a confinement root (the user's home, or
+`USERPROFILE` on Windows, by default) before returning anything, because a
+rewritten stamp file is otherwise a lever to redirect a later consumer's exec
+anywhere on disk. It also rejects any stamp field that reaches a later git
+invocation as a bare positional (`branch`, `sha`) unless it is shaped so it
+can never be parsed as an option — the general rule behind both checks is
+that no value read from this stamp may reach a git argv position without
+being validated to a shape that cannot be parsed as an option. A path outside
+the root, or an option-shaped `branch`/`sha`, reads as no stamp at all;
+`read_stamp_with_reason()` additionally reports WHY a present-but-rejected
+stamp was refused, distinguishing that case from a genuinely absent one.
 
 The stamp also carries the outcome of the last update check (`record_check_
 outcome`) — ok / behind / unanswerable, plus a redacted reason and a
@@ -221,6 +228,9 @@ def write_stamp(checkout: Path, *, env: dict[str, str] | None = None, runner=Non
     return None
 
 
+_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+
+
 def read_stamp(
     *, env: dict[str, str] | None = None, confine_root: Path | str | None = None
 ) -> dict | None:
@@ -228,51 +238,86 @@ def read_stamp(
     stamped checkout path resolves outside the confinement root.
 
     Never raises: any read/parse failure — missing file, garbage bytes,
-    wrong shape, an option-shaped `branch` — reads as `None`. The checkout
-    confinement is the one check every consumer relies on: nothing outside
-    `confine_root` (the user's home directory by default) is ever returned,
-    because a later consumer execs out of this path. Confinement fails
-    CLOSED: if `confine_root` isn't given and `HOME` isn't set either, there
-    is no root to confine against, so the stamp reads as absent rather than
-    unconfined.
+    wrong shape, an option-shaped `branch`/`sha` — reads as `None`. The
+    checkout confinement is the one check every consumer relies on: nothing
+    outside `confine_root` (the user's home directory by default) is ever
+    returned, because a later consumer execs out of this path. Confinement
+    fails CLOSED: if `confine_root` isn't given and neither `HOME` nor
+    `USERPROFILE` is set either, there is no root to confine against, so the
+    stamp reads as absent rather than unconfined.
+
+    A caller that needs to tell "no stamp was ever written" apart from "a
+    stamp exists but was rejected" (e.g. to report the difference in
+    `trailhead doctor` or an `--check` failure reason) should call
+    `read_stamp_with_reason` instead.
+    """
+    data, _reason = read_stamp_with_reason(env=env, confine_root=confine_root)
+    return data
+
+
+def read_stamp_with_reason(
+    *, env: dict[str, str] | None = None, confine_root: Path | str | None = None
+) -> tuple[dict | None, str | None]:
+    """Return `(stamp, rejected_reason)`.
+
+    `rejected_reason` is `None` whenever the stamp is entirely absent (no
+    file on disk) OR fully valid (`stamp` is returned). It is a short,
+    human-readable string ONLY when a stamp file exists on disk but was
+    rejected — malformed JSON, missing/wrong-typed fields, an option-shaped
+    `branch`/`sha`, or a checkout path outside the confinement root — so a
+    caller can tell "never installed" apart from "installed, but the stamp
+    is unusable" (a distinction that matters because the latter is a sign
+    something is actively wrong, not merely unset).
     """
     _env = env if env is not None else dict(os.environ)
     path = stamp_path(env=_env)
 
     try:
         raw = path.read_text(encoding="utf-8")
+    except OSError:
+        return None, None
+
+    try:
         data = json.loads(raw)
-    except (OSError, UnicodeError, json.JSONDecodeError):
-        return None
+    except (UnicodeError, json.JSONDecodeError):
+        return None, "the provenance stamp is not valid JSON"
 
     if not isinstance(data, dict):
-        return None
+        return None, "the provenance stamp is not a JSON object"
 
     required = ("checkout", "sha", "branch", "origin_url", "wired_at")
     if not all(isinstance(data.get(k), str) and data.get(k) for k in required):
-        return None
+        return None, "the provenance stamp is missing required fields"
 
     # `branch` is passed as a bare positional to `git fetch`/`rev-parse`/`merge`/
     # `merge-base` elsewhere (trailhead/update.py). A value shaped like a git
     # option (leading `-`) is parsed by git as an OPTION, not a ref name — for
     # `git fetch` this includes `--upload-pack=<command>`, which git executes.
-    # An option-shaped branch reads as no stamp at all, matching the confinement
-    # check below.
+    # An option-shaped branch is rejected outright.
     if data["branch"].startswith("-"):
-        return None
+        return None, "the provenance stamp's branch field is option-shaped"
+
+    # `sha` reaches `git diff` as a bare positional (`_extract_changelog_delta`).
+    # A real git sha is always exactly 40 hex characters, which can never start
+    # with `-`; anything else — including an option like `--output=<path>`,
+    # which `git diff` would otherwise happily execute as a write target — is
+    # rejected outright rather than merely checked for a leading dash, closing
+    # the whole option-shape class for this field rather than one example of it.
+    if not _SHA_RE.match(data["sha"]):
+        return None, "the provenance stamp's sha field is not a 40-character hex sha"
 
     if confine_root is None:
-        home = _env.get("HOME")
+        home = _env.get("HOME") or _env.get("USERPROFILE")
         if not home:
-            return None
+            return None, "no confinement root available (HOME/USERPROFILE unset)"
         confine_root = Path(home)
 
     try:
         Path(data["checkout"]).resolve().relative_to(Path(confine_root).resolve())
     except (ValueError, OSError):
-        return None
+        return None, "the provenance stamp's checkout path is outside the confinement root"
 
-    return data
+    return data, None
 
 
 def record_check_outcome(

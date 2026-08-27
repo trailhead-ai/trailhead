@@ -16,7 +16,7 @@ current `origin` on every check; a mismatch also reports "unanswerable" and
 the comparison never proceeds against the repointed remote.
 
 The check performs no mutation of the checkout: every git invocation it
-makes is one of `remote get-url`, `fetch`, `rev-list` — never `pull`,
+makes is one of `remote get-url`, `fetch`, `rev-list`, `diff` — never `pull`,
 `checkout`, `merge`, or `reset`. git is injected via `runner` (same shape as
 `provenance`'s — a callable(args, **kw) -> CompletedProcess-like object),
 argv-only, never `shell=True`. git stderr is redacted of credentials
@@ -104,6 +104,7 @@ from trailhead.provenance import (
     _default_runner,
     _now_iso,
     read_stamp,
+    read_stamp_with_reason,
     record_check_outcome,
     redact_credentials,
     write_stamp,
@@ -306,9 +307,14 @@ def check_for_update(
     _env = env if env is not None else dict(os.environ)
     _runner = runner if runner is not None else _default_runner()
 
-    stamp = read_stamp(env=_env, confine_root=confine_root)
+    stamp, rejected_reason = read_stamp_with_reason(env=_env, confine_root=confine_root)
     if stamp is None:
-        return _finish("unanswerable", None, None, "no install provenance stamp found", _env)
+        reason = (
+            f"install provenance stamp rejected: {rejected_reason}"
+            if rejected_reason
+            else "no install provenance stamp found"
+        )
+        return _finish("unanswerable", None, None, reason, _env)
 
     checkout = Path(stamp["checkout"])
     installed_sha = stamp["sha"]
@@ -420,15 +426,21 @@ def run_update_apply(
 
     Consent is a TECHNICAL gate, not a courtesy: without ``assume_yes`` this
     refuses on any non-interactive invocation, and mutates nothing before that
-    gate passes. Every refusal and every failure prints a named, actionable
-    ``trailhead: <message>`` line naming a recovery command.
+    gate passes. A dirty checkout, or an ``origin`` remote that has changed
+    since install, is refused BEFORE anything is fetched — mirroring
+    ``check_for_update``'s own refusal, so apply mode never wires code from a
+    remote the check would have refused to trust. Every refusal and every
+    failure prints a named, actionable ``trailhead: <message>`` line naming a
+    recovery command.
 
-    Failure past the fast-forward is a true no-op: if the re-wire raises after
-    a successful fast-forward, the checkout is reset to the pre-upgrade sha
-    and ``wire_all_harnesses`` is run again against that reverted checkout so
-    the prior wiring is restored — the provenance stamp is written ONLY after
-    a re-wire actually completes, so it never claims a sha that was never
-    fully wired.
+    Failure past the fast-forward is a true no-op ATTEMPT: if the re-wire
+    raises after a successful fast-forward, the checkout is reset to the
+    pre-upgrade sha and ``wire_all_harnesses`` is run again against that
+    reverted checkout to restore the prior wiring — but the reported outcome
+    is truthful about whether that reset and re-wire actually succeeded,
+    never a claimed restoration that didn't happen. The provenance stamp is
+    written ONLY after a re-wire actually completes, so it never claims a sha
+    that was never fully wired.
 
     Returns 0 on success or a genuine no-op (already up to date); 1 on any
     refusal or failure.
@@ -437,13 +449,20 @@ def run_update_apply(
     _runner = runner if runner is not None else _default_runner()
     _is_tty = is_tty if is_tty is not None else _default_is_tty
 
-    stamp = read_stamp(env=_env, confine_root=confine_root)
+    stamp, rejected_reason = read_stamp_with_reason(env=_env, confine_root=confine_root)
     if stamp is None:
-        print(
-            "trailhead: no install provenance stamp found — nothing to upgrade. "
-            "Run `trailhead install` first.",
-            file=sys.stderr,
-        )
+        if rejected_reason:
+            print(
+                f"trailhead: install provenance stamp rejected: {rejected_reason}. "
+                "Run `trailhead install` again to write a fresh stamp.",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                "trailhead: no install provenance stamp found — nothing to upgrade. "
+                "Run `trailhead install` first.",
+                file=sys.stderr,
+            )
         return 1
 
     checkout = Path(stamp["checkout"])

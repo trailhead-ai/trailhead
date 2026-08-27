@@ -18,7 +18,13 @@ from unittest.mock import patch
 import pytest
 
 from trailhead import provenance
-from trailhead.provenance import read_stamp, record_check_outcome, redact_credentials, write_stamp
+from trailhead.provenance import (
+    read_stamp,
+    read_stamp_with_reason,
+    record_check_outcome,
+    redact_credentials,
+    write_stamp,
+)
 
 _GOOD_SHA = "a" * 40
 _OTHER_SHA = "b" * 40
@@ -280,10 +286,152 @@ class TestReadStampRejectsOptionShapedBranch:
         assert read_stamp(env=env) is not None
 
 
+class TestReadStampRejectsOptionShapedSha:
+    """`sha` reaches `git diff` as a bare positional in
+    `update._extract_changelog_delta`. A value like `--output=/tmp/victim`
+    is a real `git diff` option that writes the diff output to that path —
+    an unattended arbitrary-file-overwrite from the SessionStart hook. A
+    real sha is always exactly 40 hex characters, which can never be
+    option-shaped, so anything else is rejected outright.
+    """
+
+    def test_option_shaped_sha_reads_as_no_stamp(self, tmp_path):
+        env = _env(tmp_path)
+        checkout = _checkout(tmp_path)
+        stamp = {
+            "checkout": str(checkout),
+            "sha": "--output=/tmp/victim.txt",
+            "branch": "origin/main",
+            "origin_url": "https://example.com/r.git",
+            "wired_at": "2026-01-01T00:00:00Z",
+            "last_check": None,
+        }
+        provenance._atomic_write_json(provenance.stamp_path(env=env), stamp)
+
+        assert read_stamp(env=env) is None
+
+    def test_short_or_non_hex_sha_reads_as_no_stamp(self, tmp_path):
+        env = _env(tmp_path)
+        checkout = _checkout(tmp_path)
+        stamp = {
+            "checkout": str(checkout),
+            "sha": "not-a-real-sha",
+            "branch": "origin/main",
+            "origin_url": "https://example.com/r.git",
+            "wired_at": "2026-01-01T00:00:00Z",
+            "last_check": None,
+        }
+        provenance._atomic_write_json(provenance.stamp_path(env=env), stamp)
+
+        assert read_stamp(env=env) is None
+
+    def test_ordinary_sha_still_reads_fine(self, tmp_path):
+        env = _env(tmp_path)
+        checkout = _checkout(tmp_path)
+        stamp = {
+            "checkout": str(checkout),
+            "sha": _GOOD_SHA,
+            "branch": "origin/main",
+            "origin_url": "https://example.com/r.git",
+            "wired_at": "2026-01-01T00:00:00Z",
+            "last_check": None,
+        }
+        provenance._atomic_write_json(provenance.stamp_path(env=env), stamp)
+
+        assert read_stamp(env=env) is not None
+
+
+class TestEveryStampFieldRejectsOptionShapedValues:
+    """The invariant, not just an instance: no value read from the
+    provenance stamp may reach a git argv position without being validated
+    to a shape that cannot be parsed as an option. `checkout` reaches git
+    only via `-C <path>`, which always consumes the very next argv token as
+    its value regardless of a leading `-` — safe by construction, not by
+    shape validation — so it is exempt below; `wired_at` never reaches argv
+    at all. `branch` and `sha` are the two fields a stamp author can shape
+    into a git option, and both must be rejected."""
+
+    @pytest.mark.parametrize(
+        "field",
+        ["branch", "sha"],
+        ids=["branch", "sha"],
+    )
+    def test_option_shaped_field_reads_as_no_stamp(self, tmp_path, field):
+        env = _env(tmp_path)
+        checkout = _checkout(tmp_path)
+        stamp = {
+            "checkout": str(checkout),
+            "sha": _GOOD_SHA,
+            "branch": "origin/main",
+            "origin_url": "https://example.com/r.git",
+            "wired_at": "2026-01-01T00:00:00Z",
+            "last_check": None,
+        }
+        stamp[field] = "--upload-pack=/tmp/evil.sh"
+        provenance._atomic_write_json(provenance.stamp_path(env=env), stamp)
+
+        assert read_stamp(env=env) is None
+
+
+class TestReadStampWithReasonDistinguishesRejectedFromAbsent:
+    def test_no_file_at_all_reports_no_reason(self, tmp_path):
+        env = _env(tmp_path)
+        stamp, reason = read_stamp_with_reason(env=env)
+        assert stamp is None
+        assert reason is None
+
+    def test_valid_stamp_reports_no_reason(self, tmp_path):
+        env = _env(tmp_path)
+        checkout = _checkout(tmp_path)
+        write_stamp(checkout, env=env, runner=_fake_runner())
+
+        stamp, reason = read_stamp_with_reason(env=env)
+        assert stamp is not None
+        assert reason is None
+
+    def test_option_shaped_sha_is_reported_as_a_rejection_not_absence(self, tmp_path):
+        env = _env(tmp_path)
+        checkout = _checkout(tmp_path)
+        bad_stamp = {
+            "checkout": str(checkout),
+            "sha": "--output=/tmp/victim.txt",
+            "branch": "origin/main",
+            "origin_url": "https://example.com/r.git",
+            "wired_at": "2026-01-01T00:00:00Z",
+            "last_check": None,
+        }
+        provenance._atomic_write_json(provenance.stamp_path(env=env), bad_stamp)
+
+        stamp, reason = read_stamp_with_reason(env=env)
+        assert stamp is None
+        assert reason is not None and "sha" in reason
+
+    def test_confinement_rejection_is_reported_as_a_rejection_not_absence(self, tmp_path):
+        env = _env(tmp_path)
+        outside = tmp_path / "outside-home" / "checkout"
+        outside.mkdir(parents=True)
+        write_stamp(outside, env=env, runner=_fake_runner())
+
+        stamp, reason = read_stamp_with_reason(env=env)
+        assert stamp is None
+        assert reason is not None and "confine" in reason.lower()
+
+    def test_garbage_json_is_reported_as_a_rejection_not_absence(self, tmp_path):
+        env = _env(tmp_path)
+        path = provenance.stamp_path(env=env)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("{not valid json at all")
+
+        stamp, reason = read_stamp_with_reason(env=env)
+        assert stamp is None
+        assert reason is not None
+
+
 class TestConfinementFailsClosed:
     def test_no_confine_root_and_no_home_reads_as_no_stamp(self, tmp_path):
         env = {**os.environ, "TRAILHEAD_STATE_DIR": str(tmp_path / "state")}
         env.pop("HOME", None)
+        env.pop("USERPROFILE", None)
         checkout = tmp_path / "somewhere" / "checkout"
         checkout.mkdir(parents=True)
         stamp = {
@@ -297,3 +445,27 @@ class TestConfinementFailsClosed:
         provenance._atomic_write_json(provenance.stamp_path(env=env), stamp)
 
         assert read_stamp(env=env) is None
+
+    def test_userprofile_alone_confines_like_home_does(self, tmp_path):
+        """Windows: state_dir resolves via LOCALAPPDATA, and HOME is normally
+        unset — every other home resolver in this repo accepts USERPROFILE
+        too (harness/claude_code.py, camp/launch/eligibility.py); confinement
+        must not silently disable the whole feature there."""
+        env = {**os.environ, "TRAILHEAD_STATE_DIR": str(tmp_path / "state")}
+        env.pop("HOME", None)
+        home = tmp_path / "winhome"
+        home.mkdir()
+        env["USERPROFILE"] = str(home)
+        checkout = home / "checkout"
+        checkout.mkdir()
+        stamp = {
+            "checkout": str(checkout),
+            "sha": _GOOD_SHA,
+            "branch": "origin/main",
+            "origin_url": "https://example.com/r.git",
+            "wired_at": "2026-01-01T00:00:00Z",
+            "last_check": None,
+        }
+        provenance._atomic_write_json(provenance.stamp_path(env=env), stamp)
+
+        assert read_stamp(env=env) is not None

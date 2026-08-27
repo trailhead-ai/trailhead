@@ -395,3 +395,23 @@ class TestProvenance:
         r = run_doctor(env=env, which_runner=lambda n: None, python_version_runner=_fake_py)
         assert r.data["provenance"]["last_check"] is None
         assert "no update check" in r.human_output.lower() or "never checked" in r.human_output.lower()
+
+    def test_reports_a_rejected_stamp_distinctly_from_an_absent_one(self, tmp_path):
+        from trailhead import provenance
+
+        env = _env(tmp_path)
+        checkout = self._checkout(tmp_path)
+        rejected_stamp = {
+            "checkout": str(checkout),
+            "sha": "not-a-real-sha",
+            "branch": "origin/main",
+            "origin_url": "https://example.com/r.git",
+            "wired_at": "2026-01-01T00:00:00Z",
+            "last_check": None,
+        }
+        provenance._atomic_write_json(provenance.stamp_path(env=env), rejected_stamp)
+
+        r = run_doctor(env=env, which_runner=lambda n: None, python_version_runner=_fake_py)
+        assert r.data["provenance"] is None
+        assert "no install provenance recorded" not in r.human_output.lower()
+        assert "rejected" in r.human_output.lower()
