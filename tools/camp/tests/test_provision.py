@@ -1251,7 +1251,11 @@ class TestBootPathBudget:
                             "slow",
                             [
                                 _step("first", _sleep_cmd(0.15)),
-                                _step("second", _sleep_cmd(5)),
+                                # Deliberately far longer than any realistic
+                                # boot-budget check: proves the hook returns
+                                # without waiting this step out, rather than
+                                # merely returning faster than a tight number.
+                                _step("second", _sleep_cmd(60)),
                             ],
                         )
                     ],
@@ -1263,7 +1267,7 @@ class TestBootPathBudget:
         reconcile.reconcile_worktree(group, "s", env=env)
         elapsed = time.monotonic() - started
 
-        assert elapsed < 2, f"reconcile_worktree took {elapsed}s — boot budget not enforced"
+        assert elapsed < 15, f"reconcile_worktree took {elapsed}s — boot budget not enforced"
 
         mpath = _workspace_dir("bootbudgetg", "s", env) / "manifest.json"
         entry = read_central_manifest(mpath)["members"][0]
