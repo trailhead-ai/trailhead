@@ -647,12 +647,24 @@ class ClaudeCodeHarness(Harness):
         creates belongs to one config dir.  That pairing is also recorded in the
         composed tree's registration ledger, so a teardown run under a different
         config dir can see this one still sourcing its plugins from here.
+
+        A nonzero returncode from the injected *runner* raises ``HarnessError``:
+        the marker (and, upstream, the provenance stamp `trailhead update`
+        advances) must never claim a registration that never happened.
+        ``_default_runner`` already raises via ``check=True``; this check
+        exists for whatever *runner* a caller injects instead, which may
+        return a failed ``CompletedProcess`` rather than raise.
         """
         _run = runner or _default_runner
-        _run(
+        result = _run(
             ["claude", "plugin", "marketplace", "add", "--scope", "user", str(composed_root)],
             env=self._cli_env(env),
         )
+        if getattr(result, "returncode", 0) != 0:
+            raise HarnessError(
+                f"claude plugin marketplace add failed for {composed_root} "
+                f"(exit {result.returncode})"
+            )
         self._write_marker(_REGISTERED_MARKER, env)
         entry = self._registration_entry(composed_root, env)
         entry.parent.mkdir(parents=True, exist_ok=True)
@@ -671,12 +683,12 @@ class ClaudeCodeHarness(Harness):
         reports "already installed" and exits 0 — which is what lets a config dir
         with no marker yet take this branch instead of the uninstall/install pair.
 
-        A nonzero returncode from the injected *runner* raises ``HarnessError``
-        rather than being ignored — the marker (and, upstream, the provenance
-        stamp `trailhead update` advances) must never claim a wire that never
-        happened. ``_default_runner`` already raises via ``check=True``; this
-        check exists for whatever *runner* a caller injects instead, which may
-        return a failed ``CompletedProcess`` rather than raise.
+        A nonzero returncode from the injected *runner* raises ``HarnessError``:
+        the marker (and, upstream, the provenance stamp `trailhead update`
+        advances) must never claim a wire that never happened.
+        ``_default_runner`` already raises via ``check=True``; this check
+        exists for whatever *runner* a caller injects instead, which may return
+        a failed ``CompletedProcess`` rather than raise.
         """
         _validate_tool(tool)
         _run = runner or _default_runner

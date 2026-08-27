@@ -201,6 +201,22 @@ class TestRegister:
             _harness().register(composed_root, runner=lambda args, **kw: None)
             mock_run.assert_not_called()
 
+    def test_no_marker_when_runner_returns_a_nonzero_completed_process(
+        self, composed_root, claude_dir
+    ):
+        """A `claude plugin marketplace add` that genuinely FAILS returns a
+        nonzero CompletedProcess rather than raising — the injected runner
+        here mirrors that shape exactly (not a raising stub) to prove
+        register inspects the returncode instead of only catching
+        exceptions, the same defect class `install_tool` already closes."""
+
+        def failing_runner(args, **kw):
+            return subprocess.CompletedProcess(args, returncode=1, stdout="", stderr="boom")
+
+        with pytest.raises(HarnessError):
+            _harness().register(composed_root, runner=failing_runner)
+        assert not (claude_dir / ".trailhead-registered").exists()
+
 
 # ---------------------------------------------------------------------------
 # install_tool — per-tool install + per-tool marker

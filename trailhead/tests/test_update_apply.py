@@ -88,6 +88,8 @@ def _make_runner(
     probe_sha: str = _NEW_SHA,
     probe_branch: str = _BRANCH,
     probe_origin: str = _ORIGIN_URL,
+    reset_rc: int = 0,
+    reset_stderr: str = "",
 ):
     """A recording git-command stub dispatching on the git subcommand.
 
@@ -124,7 +126,7 @@ def _make_runner(
         if sub == "merge":
             return subprocess.CompletedProcess(args, merge_rc, stdout="", stderr=merge_stderr)
         if sub == "reset":
-            return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+            return subprocess.CompletedProcess(args, reset_rc, stdout="", stderr=reset_stderr)
         raise AssertionError(f"unexpected git invocation: {args}")
 
     return runner, calls
@@ -255,6 +257,41 @@ class TestDiverged:
         assert stamp["sha"] == _OLD_SHA
 
 
+class TestOriginPreflight:
+    """Apply mode must refuse a repointed `origin` remote BEFORE fetching,
+    mirroring `check_for_update`'s own refusal — without this, apply mode
+    would wire code from a remote that `--check` would have refused to
+    trust."""
+
+    def test_repointed_origin_refuses_and_writes_nothing(self, tmp_path, monkeypatch):
+        env = _env(tmp_path)
+        _install_stamp(tmp_path, env, origin_url=_ORIGIN_URL)
+        runner, calls = _make_runner(probe_origin="https://example.com/a-different-repo.git")
+        monkeypatch.setattr(update, "resolve_config_for_env", lambda env: _FakeCfg())
+        wire_calls = []
+        monkeypatch.setattr(
+            update, "wire_all_harnesses", lambda *a, **kw: wire_calls.append(1) or {}
+        )
+
+        exit_code = update.run_update_apply(env=env, runner=runner, assume_yes=True)
+
+        assert exit_code != 0
+        assert not wire_calls
+        stamp = read_stamp(env=env)
+        assert stamp["sha"] == _OLD_SHA
+
+    def test_repointed_origin_refuses_before_any_fetch(self, tmp_path, monkeypatch):
+        env = _env(tmp_path)
+        _install_stamp(tmp_path, env, origin_url=_ORIGIN_URL)
+        runner, calls = _make_runner(probe_origin="https://example.com/a-different-repo.git")
+        monkeypatch.setattr(update, "resolve_config_for_env", lambda env: _FakeCfg())
+        monkeypatch.setattr(update, "wire_all_harnesses", lambda *a, **kw: {})
+
+        update.run_update_apply(env=env, runner=runner, assume_yes=True)
+
+        assert not any(c[3] == "fetch" for c in calls), "must refuse before fetching"
+
+
 class TestAlreadyUpToDate:
     def test_up_to_date_is_a_noop_and_exits_zero_without_changing_the_sha(self, tmp_path, monkeypatch):
         env = _env(tmp_path)
@@ -356,6 +393,53 @@ class TestStampNeverClaimsAnIncompleteWire:
         exit_code = update.run_update_apply(env=env, runner=runner, assume_yes=True)
 
         assert exit_code != 0
+        stamp = read_stamp(env=env)
+        assert stamp["sha"] == _OLD_SHA
+
+
+class TestRollbackReportsTruthfully:
+    """The rollback branch after a failed re-wire must report exactly what
+    actually happened — never a claimed restoration that didn't occur. Two
+    distinct failure shapes: the reset succeeds but the retried re-wire still
+    fails (partial restore), and the reset itself fails (no restore at
+    all)."""
+
+    def test_reset_succeeds_but_rewire_retry_also_fails_reports_partial_restore(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        env = _env(tmp_path)
+        _install_stamp(tmp_path, env)
+        runner, _ = _make_runner()
+        monkeypatch.setattr(update, "resolve_config_for_env", lambda env: _FakeCfg())
+        monkeypatch.setattr(
+            update, "wire_all_harnesses", lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("boom"))
+        )
+
+        exit_code = update.run_update_apply(env=env, runner=runner, assume_yes=True)
+
+        assert exit_code != 0
+        err = capsys.readouterr().err
+        assert "rolled" in err.lower()
+        assert "could not" in err.lower() or "could NOT" in err
+        assert "restore" in err.lower() or "wiring" in err.lower()
+        stamp = read_stamp(env=env)
+        assert stamp["sha"] == _OLD_SHA
+
+    def test_reset_itself_fails_reports_manual_repair(self, tmp_path, monkeypatch, capsys):
+        env = _env(tmp_path)
+        _install_stamp(tmp_path, env)
+        runner, _ = _make_runner(reset_rc=1, reset_stderr="fatal: could not reset")
+        monkeypatch.setattr(update, "resolve_config_for_env", lambda env: _FakeCfg())
+        monkeypatch.setattr(
+            update, "wire_all_harnesses", lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("boom"))
+        )
+
+        exit_code = update.run_update_apply(env=env, runner=runner, assume_yes=True)
+
+        assert exit_code != 0
+        err = capsys.readouterr().err
+        assert "could not" in err.lower() and "rolled back" in err.lower()
+        assert "repair manually" in err.lower() or "reset --hard" in err
         stamp = read_stamp(env=env)
         assert stamp["sha"] == _OLD_SHA
 
