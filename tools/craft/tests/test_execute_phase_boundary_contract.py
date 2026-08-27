@@ -229,11 +229,14 @@ def test_reader_requires_sha_shape_validation():
     _pin_in(
         _phase_progress_section(),
         "execute.md#phase-progress-and-resumability",
-        "match `^[0-9a-f]{7,40}$`",
+        "match `\\A[0-9a-f]{7,40}\\Z`",
         "The boundary sha must be shape-validated before it is substituted into "
         "the destructive revert command — the same untrusted-input rule at :69 "
         "governs every vault-sourced value substituted into a command in this "
-        "document, and this label is one such value.",
+        "document, and this label is one such value. The pattern is pinned in "
+        "explicit full-string match form (`\\A...\\Z`) rather than `^...$`, "
+        "since `$` matches immediately before a trailing newline in some regex "
+        "engines (security-fix Informational finding).",
     )
 
 
@@ -363,13 +366,13 @@ def test_no_ticked_phase_line_link_targets_determine_the_task_shape():
 # --- `base` is not claimed to be recorded in `## End Phases` (Fix 6) ------------
 
 
-def test_base_reference_does_not_claim_it_is_recorded_in_end_phases():
+def test_mid_build_bullet_refers_to_base_by_establishment_not_a_recording_claim():
+    """The mid-build bullet's own account of `base` must keep referring to how
+    `base` is established (fixed once at pipeline start), not assert that it is
+    itself the thing that records `base` into `## End Phases` — the actual
+    recording mandate lives once, at pipeline entry (see the security-fix Medium
+    finding test below), not restated per-bullet."""
     section = _phase_progress_section()
-    assert "recorded in `## End Phases`" not in section, (
-        "'base' is defined in '### After All Slices' (:401) but this document "
-        "never mandates writing it into the `## End Phases` checklist — the "
-        "mid-build bullet must not claim it is recorded there."
-    )
     _pin_in(
         section,
         "execute.md#phase-progress-and-resumability",
@@ -377,6 +380,91 @@ def test_base_reference_does_not_claim_it_is_recorded_in_end_phases():
         "Refer to `base` by how it is actually established — fixed once at the "
         "start of the whole-change phase pipeline — rather than by a false "
         "claim about where it is recorded.",
+    )
+
+
+# --- `base` is recorded durably into `## End Phases` at pipeline entry (Fix 1, Medium) --
+
+
+def test_base_is_recorded_into_end_phases_at_pipeline_entry():
+    _pin_in(
+        _phase_progress_section(),
+        "execute.md#phase-progress-and-resumability",
+        "record the run's `base` (the pre-execution SHA, fixed once per "
+        "[After All Slices](#after-all-slices)) into the `## End Phases` checklist",
+        "The security-fix Medium finding requires recording `base` durably so a "
+        "resumed run can recompute it and bound the revert target — this is the "
+        "enabling state for the base-bound reachability check, stated once at "
+        "entry to the end-phase pipeline.",
+    )
+
+
+# --- reader bounds the revert target to this run's own commit range (Fix 1, Medium) ---
+
+
+def test_reader_requires_base_bound_reachability():
+    _pin_in(
+        _phase_progress_section(),
+        "execute.md#phase-progress-and-resumability",
+        "`git merge-base --is-ancestor <base> <sha>`",
+        "Reachability from `HEAD` alone proves the boundary is *some* ancestor, "
+        "not the *recent* one — a stale label set to an old commit would still "
+        "pass. The boundary must also lie at or after this run's own `base`, "
+        "bounding the revert's blast radius to this run's commit range.",
+    )
+
+
+def test_reader_states_shape_check_precedes_both_merge_base_probes():
+    _pin_in(
+        _phase_progress_section(),
+        "execute.md#phase-progress-and-resumability",
+        "the shape check runs first, and only a shape-valid value is ever "
+        "passed to any git command, including both `merge-base` probes below",
+        "Ordering must be stated explicitly: the shape check comes before "
+        "either `merge-base` probe runs, since both receive the raw label "
+        "value as an argument.",
+    )
+
+
+def test_reader_fails_closed_when_boundary_is_outside_this_runs_range():
+    _pin_in(
+        _phase_progress_section(),
+        "execute.md#phase-progress-and-resumability",
+        "the same now applies when it resolves but lies outside this run's "
+        "own `base..HEAD` range",
+        "A boundary that is shape-valid and reachable from `HEAD` but predates "
+        "this run's own `base` must still fail closed — the whole point of the "
+        "bound is to refuse an out-of-range target, not merely check it.",
+    )
+
+
+def test_reader_states_residual_risk_within_the_bounded_range():
+    _pin_in(
+        _phase_progress_section(),
+        "execute.md#phase-progress-and-resumability",
+        "does not make the label trustworthy",
+        "The document's habit is to state what a control does not cover: "
+        "bounding the revert target to this run's own range still leaves a "
+        "vault writer able to steer a resume into discarding this run's own "
+        "already-completed phase commits, and that residual risk must be "
+        "named explicitly rather than implied.",
+    )
+
+
+# --- reader shows the revert command literally (Fix 2, Low) ---------------------
+
+
+def test_reader_shows_the_revert_command_literally():
+    _pin_in(
+        _phase_progress_section(),
+        "execute.md#phase-progress-and-resumability",
+        "`git reset --hard <sha> && git clean -fd`",
+        "Every other consequential operation in this section is given as a "
+        "literal backtick command; the destructive revert itself must be shown "
+        "the same way, with the validated `<sha>` substituted, rather than left "
+        "as prose only — matching the section's convention and closing the "
+        "hyper-literal reading that the untrusted-input rule only binds a "
+        "command 'shown' in the document.",
     )
 
 
