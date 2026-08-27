@@ -136,7 +136,7 @@ is the wrong problem" belongs to that pass and should not be raised here.
 *Builder — spec review:*
 - An objective has no implementable reading — no build satisfies it as stated
 - The spec mandates an approach that contradicts a declared project axiom or a prior decision record
-- The spec depends on a capability that does not exist and does not name it as a dependency
+- The spec depends on a capability that does not exist yet and does not name that capability as a dependency the build must satisfy — the defect is the missing name, not the missing capability
 - The spec requires a new subsystem where an existing one already covers the need
 
 *Reliability — spec review:* (criterion **testability** and objective **coverage** belong to the `consistency-auditor` pass — do not raise them here; stay on failure behavior)
@@ -172,7 +172,7 @@ pass, not a lens.
 *Builder — adr review:*
 - The Decision has no implementable reading — nothing a build could conform to as stated
 - The Decision contradicts a declared project axiom or a prior, not-yet-superseded ADR
-- The Decision depends on a capability that does not exist and the record does not name it as a dependency
+- The Decision depends on a capability that does not exist yet and the record does not name that capability as a dependency the Decision relies on — the defect is the missing name, not the missing capability
 - Alternatives rejected omits an alternative that was clearly live, making the Decision look uncontested when it wasn't
 
 *Reliability — adr review:*
