@@ -88,6 +88,25 @@ def test_adr_template_pins_gauntlet_annotation_provenance():
     )
 
 
+def test_adr_template_names_distill_as_forward_activator_at_completion():
+    """A forward ADR is activated by distill once its derived specs complete — not
+    flipped by the gauntlet at birth. Names the mechanism, not just the absence of
+    the old claim."""
+    text = ADR_TEMPLATE.read_text()
+    assert "activated by distill when its derived specs complete" in text, (
+        "templates/adr.md must name distill as the mechanism that activates a "
+        "forward ADR, once its derived specs complete."
+    )
+
+
+def test_adr_template_does_not_claim_gauntlet_flips_a_forward_adr():
+    text = ADR_TEMPLATE.read_text()
+    assert "flipped active by the gauntlet" not in text, (
+        "templates/adr.md must not claim the gauntlet flips a forward ADR active — "
+        "the gauntlet reviews it, but distill is the sole activator."
+    )
+
+
 # ---------------------------------------------------------------------------
 # area.md — the quartet, cross-referenced against the librarian's spelling
 # ---------------------------------------------------------------------------

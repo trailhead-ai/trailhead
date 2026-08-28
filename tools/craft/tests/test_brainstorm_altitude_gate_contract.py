@@ -35,10 +35,18 @@ _ALTITUDE_TRIGGER_PHRASE = "one design change, more than one spec of work"
 # this pin share exactly one spelling of the phrase.
 _SEED_EDGE_PHRASE = "related: adr=<the-adr>"
 
-# The rejected-ADR orphan rule, pinned verbatim.
+# The reaches-downstream orphan rule, pinned verbatim — names the mechanism
+# (a reaches-downstream prescription naming the specs) rather than the old
+# gauntlet-discard framing this replaces.
 _ORPHAN_RULE = (
-    "its seeded derived specs are orphaned back to brainstorm — their "
-    "`related: adr=` edge points at the `dropped` draft as provenance"
+    "only the derived specs it names are orphaned back to brainstorm — their "
+    "`related: adr=` edge stays as provenance, not a live link to act on"
+)
+
+# The unnamed-seed-is-not-orphaned pin, pinned verbatim.
+_UNNAMED_SEED_NOT_ORPHANED_RULE = (
+    "An unnamed seed is not orphaned: it proceeds as drafted, undisturbed by a "
+    "`reaches-downstream` finding that did not name it"
 )
 
 
@@ -132,9 +140,23 @@ def test_seeds_are_each_brainstormed_and_gauntleted_separately():
     )
 
 
-def test_rejected_adr_orphans_its_seeded_specs():
-    assert _ORPHAN_RULE in _text(), (
-        f"brainstorm/SKILL.md must pin the rejected-ADR orphan rule verbatim — {_ORPHAN_RULE!r}"
+def test_reaches_downstream_prescription_orphans_only_the_named_specs():
+    text = _text()
+    assert "reaches-downstream" in text, (
+        "brainstorm/SKILL.md's orphaning rule must be expressed in terms of a "
+        "`reaches-downstream` prescription, not a gauntlet discard of the ADR — "
+        "the gauntlet no longer discards a draft ADR."
+    )
+    assert _ORPHAN_RULE in text, (
+        f"brainstorm/SKILL.md must pin the reaches-downstream orphan rule verbatim — "
+        f"{_ORPHAN_RULE!r}"
+    )
+
+
+def test_unnamed_seed_is_not_orphaned():
+    assert _UNNAMED_SEED_NOT_ORPHANED_RULE in _text(), (
+        "brainstorm/SKILL.md must pin that a seed NOT named by a reaches-downstream "
+        f"prescription is not orphaned, verbatim — {_UNNAMED_SEED_NOT_ORPHANED_RULE!r}"
     )
 
 

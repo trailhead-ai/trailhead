@@ -301,14 +301,19 @@ file and fill in the body sections.
    first write. Planting the seeds is this session's job; fleshing one out is not — each seed is
    then brainstormed and gauntleted separately, at its own altitude, when it's picked up.
 
-3. **If the ADR is later rejected at gauntlet** (a Critical carries a final `revise` disposition,
-   which routes the adr to `dropped`), the rule is this:
+3. **A `reaches-downstream` revise prescription against this ADR orphans only the specs it
+   names.** A gauntlet revise round that finds the decision itself wrong writes a `revise`
+   disposition scoped `reaches-downstream`, and that scope must name every derived spec it
+   invalidates — the mechanism is the escalation table's named list, never a status flip on the
+   ADR (the ADR stays `draft`; `reaches-downstream` revises it in place, it does not discard it).
+   The rule is this:
 
-   its seeded derived specs are orphaned back to brainstorm — their `related: adr=` edge points at the `dropped` draft as provenance.
+   only the derived specs it names are orphaned back to brainstorm — their `related: adr=` edge stays as provenance, not a live link to act on.
 
-   That edge is a trace of the decision that spawned them, not a live link to act on. None of the
-   orphaned seeds proceed as drafted; each re-enters brainstorming on its own, unanchored to a
-   surviving decision.
+   A `reaches-downstream` prescription writes nothing to the named specs itself; re-entry into
+   brainstorming is the operator's act, unanchored to the ADR's surviving decision.
+
+   An unnamed seed is not orphaned: it proceeds as drafted, undisturbed by a `reaches-downstream` finding that did not name it.
 
 **If this brainstorm consumed a routed task** — the entry point was a `task` record carrying refine's `route=brainstorm` sidecar label (and its `## Refine — unresolved` section) — close the loop on the source record after the spec is written: `lore record update task/<source-name> --status superseded --related spec=<spec-name> --unset-label route` — one write. The routing has been acted on: the spec is now the canonical statement of the what/why, the `related` edge preserves the source's captured context, and a superseded source stops rendering a stale routed chip or next-step affordance on task boards. Never leave the consumed source `open`.
 
