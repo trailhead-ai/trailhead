@@ -2289,7 +2289,7 @@ def test_update_guard_message_parses_and_names_the_remedy(tmp_path):
         vault=vault, state_dir=state, stdin_text="# Decision\n\nEdited text.\n",
     )
     assert r.returncode != 0
-    line = next(l for l in r.stderr.splitlines() if "[adr-active-immutable]" in l)
+    line = next(ln for ln in r.stderr.splitlines() if "[adr-active-immutable]" in ln)
     assert line.startswith("graph-guard [adr-active-immutable]: ")
     assert "supersede" in line.lower()
     assert "do not edit" in line.lower()
