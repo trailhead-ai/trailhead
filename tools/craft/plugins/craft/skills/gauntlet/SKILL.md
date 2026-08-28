@@ -1,7 +1,7 @@
 ---
 name: gauntlet
 description: >
-  Run the adversarial review — the gauntlet — on a draft spec or a draft adr before it freezes. For
+  Run the adversarial review — the gauntlet — on a draft spec or a draft adr before it advances. For
   a spec, eight parallel passes attack it from independent angles: fact verification, premise attack,
   the four council lenses, an internal-consistency audit, and a plan-divergence probe. For an adr, the
   same roster runs minus the divergence probe (no analogue for a decision document) — seven passes.
@@ -12,10 +12,10 @@ description: >
   TRIGGER when: brainstorming has produced a spec and is at its exit gate (the gauntlet is a
   mandatory step there), a draft adr needs review before it flips to `active`, or the user says "run
   the gauntlet", "gauntlet this spec", "gauntlet this adr", "adversarial spec review", "review the
-  spec/adr before it freezes", or invokes /craft:gauntlet explicitly.
+  spec/adr before it advances", or invokes /craft:gauntlet explicitly.
   DO NOT TRIGGER when: reviewing an implementation plan (planning's Council Review step covers that),
   reviewing written code (use review), the spec is already `ready`, or the adr is already `active` —
-  a frozen record is not re-gauntleted; new thinking creates a new spec, and a change in decision
+  a settled record is not re-gauntleted; new thinking creates a new spec, and a change in decision
   creates a new, superseding adr. A distilled (backward) adr also never triggers this skill — the
   distill disposition owns its flip.
 ---
@@ -26,12 +26,20 @@ A spec is the most expensive artifact in the pipeline to get wrong. Every plan, 
 every line of code downstream inherits its mistakes — and by the time the mistake is visible, it is
 load-bearing. The gauntlet is the last point where the spec is still cheap to change.
 
+**This is a refining step, not a braking one.** The gauntlet exists to sharpen an idea against
+everything that already constrains it — the corpus of what the vault records, the decisions already
+made, the code that actually exists, and the realities of the world the spec has to survive in — so
+the version that reaches planning is the one worth building. Its output is a better spec and more
+momentum, not a delay to be endured; a pass that only slows the record down without changing it has
+failed at its job. Treat the findings as the fastest available route forward, because they are: the
+alternative is discovering the same things after they are load-bearing.
+
 Eight passes attack the spec in parallel, each from an angle the others structurally cannot see. The
-main session adjudicates what comes back and turns it into one recommendation. Nothing freezes
+main session adjudicates what comes back and turns it into one recommendation. Nothing advances
 until the user has accepted that recommendation.
 
 The same review runs against a draft **adr** with an adapted, seven-pass roster and a different
-freeze target — see "Reviewing an adr" below. Everything else in this document is written for the
+advance target — see "Reviewing an adr" below. Everything else in this document is written for the
 spec case; the adr section states only its deltas.
 
 ## Two independent failure axes
@@ -60,7 +68,7 @@ premise pass most often reframes.
 
 Take the spec record id from the invocation, or — when brainstorming hands off at its exit gate —
 the spec it just wrote. Read it **in full** (`lore record show <spec-id>`). Confirm its status is
-`draft`; a `ready` spec is frozen and is not re-gauntleted (see brainstorm's Status Lifecycle — new
+`draft`; a `ready` spec has already advanced and is not re-gauntleted (see brainstorm's Status Lifecycle — new
 thinking creates a new spec instead).
 
 **Resolve its absolute path too** (`lore record show <spec-id> --json` carries it; `lore search`
@@ -197,7 +205,7 @@ still a decision", below):
      that could not see each other, and which of them were right is a judgment only the adjudicator
      is positioned to make. Making it is movement two's whole job; the shared contract names what
      stays forbidden.
-2. **The recommended outcome**, on its own line — whether the record freezes this round, or which
+2. **The recommended outcome**, on its own line — whether the record advances this round, or which
    revise round it continues into (below).
 3. **The per-Critical table** — supporting detail, not the explanation. The synthesis has already
    said what the findings mean and what you propose doing; the table is the row-level view for
@@ -324,12 +332,12 @@ them**. Do not propose any of the three, and do not offer a reason the operator 
   lands on, it re-presents before anything is written** — an answered row that becomes `resolved`
   needs its edit drafted and therefore re-presents, which the existing "override *into* `resolved`
   re-presents too" rule below already covers; an answered row that becomes `revise` re-presents on
-  the same footing, including on a run where another `revise` row already holds the freeze
+  the same footing, including on a run where another `revise` row already holds the advance
   decision, so the discarded counterargument is never dropped without the operator seeing the swap.
 
-#### Freezing, revise rounds, and runs
+#### Advancing, revise rounds, and runs
 
-A record **freezes when no Critical carries a final disposition of `revise`** — final meaning the
+A record **advances when no Critical carries a final disposition of `revise`** — final meaning the
 disposition a Critical carries after any override and any re-adjudication, never an intermediate
 one. **There is no round cap; operator overrides are the termination guarantee**, not a limit on
 how many rounds a record may take.
@@ -342,13 +350,13 @@ are never interchangeable.
 
 **Each revise round runs the full accepted tail**: that round's `resolved` edits and its
 provenance land atomically before the round ends, so **a surviving `revise` withholds only the
-freeze, never the writes**. A record mid-round is never behind on the edits it has already
-earned; only the flip to `ready` / `active` waits on the freeze condition.
+advance, never the writes**. A record mid-round is never behind on the edits it has already
+earned; only the flip to `ready` / `active` waits on the advance condition.
 
 A Critical still sitting at `answered` is **not yet a final disposition** — it is a request for
-re-adjudication, not an outcome of one. **Freezing may not be evaluated while any Critical remains
+re-adjudication, not an outcome of one. **Advancing may not be evaluated while any Critical remains
 at `answered`.** Re-adjudicate every answered row first; only once each one carries `resolved` or
-`revise` does the freeze condition have final dispositions to read. Once re-adjudicated, `answered`
+`revise` does the advance condition have final dispositions to read. Once re-adjudicated, `answered`
 is not terminal, and the row's final disposition is whatever it is re-adjudicated to, normally
 `resolved`.
 
@@ -358,7 +366,7 @@ A run that produced no Criticals presents the deliverable anyway — synthesis, 
 and the compressed Important and Minor summary, labeled as a clean run, with no per-Critical table, since
 there are no rows for it to hold — and **still gates on operator acceptance**. Clean of Criticals is
 not clean of findings: the Important and Minor themes are part of what the operator accepts here,
-and a run that presents none of them reads as a sweep that found nothing. A gauntlet never freezes a
+and a run that presents none of them reads as a sweep that found nothing. A gauntlet never advances a
 record on its own reading of a clean sweep; the clean sweep is the finding, and the operator is the
 one who accepts it.
 
@@ -389,23 +397,23 @@ from that one reply, apply them together, and do not walk back through the table
   is what says which edits remain — an override into `answered` removes it only until
   re-adjudication drafts a new one, which the override-into-`resolved` rule below covers. A diff
   assembled before the override lands the one change the operator explicitly declined, permanently,
-  in a record about to freeze.
+  in a record about to advance.
 - **An override changing revise-presence re-presents once.** If applying the overrides changes
   whether any Critical still carries `revise` — an override that removes the last `revise`, or one
   that introduces one — present the revised recommendation once more and take acceptance again
   **before anything is written**. If that reply changes revise-presence again, it is a further
   override round-trip and it re-presents again. **The cap is one re-present per revise-presence
   change, not one per run.** What the cap forbids is re-presenting a recommendation nothing
-  changed; what it never licenses is writing a freeze the operator has not seen and accepted.
-- **An override *into* `resolved` re-presents too, whatever the freeze decision does.** Only the
+  changed; what it never licenses is writing an advance the operator has not seen and accepted.
+- **An override *into* `resolved` re-presents too, whatever the advance decision does.** Only the
   rows you proposed `resolved` have their edit text drafted, so an override moving a `revise` row
   to `resolved` — or an `answered` row re-adjudicated to `resolved` — produces an accepted row with
   no edit behind it. Draft that edit, then present once more and take acceptance again — including
-  on a run whose freeze decision never moved because another `revise` row still holds it. The cap
+  on a run whose advance decision never moved because another `revise` row still holds it. The cap
   above forbids re-presenting a recommendation nothing changed, and **a newly drafted edit is a
   change**. Skip it and you are composing the edit after acceptance, which is exactly what drafting
   every `resolved` edit before presenting forbids.
-- **A re-adjudication landing on `revise` re-presents too, whatever the freeze decision does.** An
+- **A re-adjudication landing on `revise` re-presents too, whatever the advance decision does.** An
   `answered` row re-adjudicated to `resolved` is covered by the rule above; one re-adjudicated to
   `revise` gets the identical treatment, including on a run that already holds another `revise`
   row, where the revise-presence-changing-override rule never fires because revise-presence does
@@ -462,8 +470,8 @@ the only point at which anyone looks at it before it is permanent:
    property is the only thing making the accepted set all-or-nothing. A record holding half its
    accepted edits is a record nobody reviewed.
 2. **Then the mode's remaining writes** — the spec tail's status flip, or the adr tail's
-   predecessor supersession write — **only after that write has succeeded**. A flip is what freezes
-   a record; running one ahead of the edits freezes a record whose accepted edits are still
+   predecessor supersession write — **only after that write has succeeded**. A flip is what advances
+   a record; running one ahead of the edits advances a record whose accepted edits are still
    hypothetical. **The adr tail flips nothing it is reviewing** — an adr leaves this tail `draft`
    on every outcome, and distill activates it once its derived specs are terminal.
 
@@ -489,7 +497,7 @@ operator actually saw. Derive that split from the dispositions themselves, never
 - `resolved` and `revise` are accepted-from-proposal *unless* this run's override reply changed
   that row — which the echoed post-override table records, an answered-then-resolved row included.
 
-### 6. Stamp and freeze
+### 6. Stamp and advance
 
 This is the accepted tail in the spec's own terms; its sequence, its pre-write scrub and marker, and
 its failure behavior are the shared ones above.
@@ -525,7 +533,7 @@ carries the provenance stamp in its next bullet, and holds the detail in the rem
 printf '%s' "$EDITS" | lore record update <spec-id> --diff
 ```
 
-**Then, and only once that write has succeeded, check the freeze condition.** If no Critical
+**Then, and only once that write has succeeded, check the advance condition.** If no Critical
 carries a final disposition of `revise`:
 
 ```
@@ -539,7 +547,7 @@ paste it into a fresh session as-is.
 
 **If any Critical's final disposition is `revise`, the spec does not flip.** Its `resolved` edits
 and this round's provenance already landed in the write above — a surviving `revise` withholds
-only the freeze, never the writes. Begin the next revise round: re-run only the passes that raised
+only the advance, never the writes. Begin the next revise round: re-run only the passes that raised
 the surviving `revise` Criticals, fold their findings back into step 5, and present again. The spec
 stays `draft` for as long as any Critical carries `revise`; there is no round cap, and this skill
 writes no status for "still revising."
@@ -547,13 +555,13 @@ writes no status for "still revising."
 ## Reviewing an adr
 
 The gauntlet also runs against a draft `adr` record before it flips to `active` — same mandate,
-same "no skip flag," an adapted roster, and a different freeze target. Steps 1, 2, 4, and 5 above
+same "no skip flag," an adapted roster, and a different advance target. Steps 1, 2, 4, and 5 above
 carry over unchanged (resolve the record and its absolute path, decompose its claims, adjudicate in
 the main session, and resolve by recommend-then-accept); this section states only where an adr
 target changes the rest.
 
 **Resolving the record:** `lore record show <adr-id>` in place of `<spec-id>`. Confirm its status is
-`draft`; an `active` adr is frozen by convention (`templates/adr.md`) and is not re-gauntleted — a
+`draft`; an `active` adr is immutable by convention (`templates/adr.md`) and is not re-gauntleted — a
 change in direction is a new, superseding ADR, not an edit to this one.
 
 ### The adapted roster — 7 passes, no divergence probe
@@ -577,7 +585,7 @@ name it and stop — do not quietly run six and present the result as a gauntlet
 ### The record stays `draft` on every outcome
 
 The adr vocab (`draft`, `active`, `superseded`, `dropped`) has no `ready` — there is no intermediate
-frozen-but-inactive state the way a spec has, and this skill does not write the record under review
+settled-but-inactive state the way a spec has, and this skill does not write the record under review
 toward one. The gauntlet never advances the adr it is reviewing past `draft`, on either outcome.
 Once the operator has accepted, the accepted tail below lands that round's `resolved` edits and its
 provenance and stops — no status write on this record. **If any Critical's final disposition is
@@ -623,8 +631,7 @@ Alternatives rejected, nothing else.
 
 Gauntlet provenance for an adr target goes to the record's annotations, never the body. The full
 consolidated finding detail has nowhere to live in an exhaustive body either — it goes to a linked
-`lesson` record rather than being dropped, so the evidence behind an immutable decision survives the
-freeze.
+`lesson` record rather than being dropped, so the evidence behind an immutable decision survives it.
 
 ### The accepted tail, in adr terms
 

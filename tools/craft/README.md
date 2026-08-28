@@ -72,14 +72,14 @@ Base skills (always available): `/craft:polish`
 
 **Planning:** `/craft:plan`, `/craft:brainstorm` — turn a fuzzy idea into a
 draft spec by interrogating requirements, details, and gaps; the spec is
-frozen via `/craft:gauntlet` before `/craft:plan` builds on it.
+settled via `/craft:gauntlet` before `/craft:plan` builds on it.
 
 **Council:** `/craft:consult` — convene the four-lens panel on a question and
 synthesize. The standalone form of the planning skill's council-review step;
 membership is single-sourced from `skills/_shared/council.md`.
 
 **Spec gauntlet:** `/craft:gauntlet` — the adversarial review a draft spec (or
-draft ADR) goes through before it freezes: fact verification, premise attack,
+draft ADR) goes through before it advances: fact verification, premise attack,
 the four council lenses, an internal-consistency audit, and (for specs) a
 plan-divergence probe.
 

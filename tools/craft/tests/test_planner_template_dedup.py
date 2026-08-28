@@ -109,7 +109,7 @@ def test_plan_checklist_carries_all_required_sections():
 def test_planner_gate_description_reflects_recommend_then_accept():
     """The gauntlet gates on one recommendation the user accepts or overrides.
 
-    planner.md's explanation of why it cannot freeze a spec turns on that gate
+    planner.md's explanation of why it cannot advance a spec turns on that gate
     needing a user in the room, so it has to describe the real one.
     """
     text = _text()
