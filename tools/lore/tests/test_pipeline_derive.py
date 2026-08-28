@@ -124,6 +124,15 @@ class TestTerminalMemberAccounting:
 
 
 class TestOrphanedSeeds:
+    def test_orphaning_adr_statuses_is_exactly_dropped_and_superseded(self):
+        """Regression pin, not a new rule: the gauntlet no longer writes `dropped`
+        or `superseded` onto a draft ADR it reviews (it now writes `revise`
+        prescriptions instead), so the sole remaining forward-path trigger for
+        orphaning a seed is supersession. The constant itself is unchanged by that
+        shift — this pins it stays exactly the closed two-status set, asserted
+        rather than assumed."""
+        assert derive.ORPHANING_ADR_STATUSES == frozenset({"dropped", "superseded"})
+
     def test_a_dropped_root_renders_while_a_non_terminal_spec_still_points_at_it(self):
         lineages = _derive(
             [

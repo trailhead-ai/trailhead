@@ -2132,3 +2132,390 @@ def test_update_allows_aliased_path_when_shared_flags_agree(tmp_path):
     assert r.returncode == 0, r.stderr
     assert _find_sidecar(vault_b, rid)["status"] == "superseded"
     assert _index_shared(state, vault_b, kind, name) == [1]
+
+
+# ---------------------------------------------------------------------------
+# active-adr body immutability at the update seam
+# ---------------------------------------------------------------------------
+
+
+def _create_adr(vault: Path, state: Path, *, title: str, status: str, body: str) -> str:
+    r = _run(
+        ["record", "create", "--kind", "adr", "--title", title, "--keyword", "k",
+         "--status", status],
+        vault=vault, state_dir=state, stdin_text=body,
+    )
+    assert r.returncode == 0, r.stderr
+    return r.stdout.strip()
+
+
+def test_update_body_change_against_active_adr_rejected_body_unchanged_on_disk(tmp_path):
+    vault, state = _make_vault(tmp_path)
+    body = "# Decision\n\nOriginal text.\n"
+    rid = _create_adr(vault, state, title="Original Decision", status="active", body=body)
+
+    r = _run(
+        ["record", "update", rid],
+        vault=vault, state_dir=state, stdin_text="# Decision\n\nEdited text.\n",
+    )
+    assert r.returncode != 0
+    assert "[adr-active-immutable]" in r.stderr
+    assert _find_body(vault, rid) == body
+
+
+def test_update_body_change_against_draft_adr_succeeds(tmp_path):
+    vault, state = _make_vault(tmp_path)
+    rid = _create_adr(vault, state, title="Draft Decision", status="draft",
+                       body="# Decision\n\nOriginal text.\n")
+
+    r = _run(
+        ["record", "update", rid],
+        vault=vault, state_dir=state, stdin_text="# Decision\n\nEdited text.\n",
+    )
+    assert r.returncode == 0, r.stderr
+    assert _find_body(vault, rid) == "# Decision\n\nEdited text.\n"
+
+
+def test_update_related_only_against_active_adr_succeeds(tmp_path):
+    vault, state = _make_vault(tmp_path)
+    body = "# Decision\n\nOriginal text.\n"
+    rid = _create_adr(vault, state, title="Original Decision Two", status="active", body=body)
+    successor = _create_adr(vault, state, title="Successor Decision", status="draft",
+                             body="# Successor\n")
+    successor_name = successor.split("/", 1)[1]
+
+    r = _run(
+        ["record", "update", rid, "--related", f"adr={successor_name}"],
+        vault=vault, state_dir=state,
+    )
+    assert r.returncode == 0, r.stderr
+    assert _find_body(vault, rid) == body
+
+
+def test_update_status_superseded_flip_against_active_adr_succeeds(tmp_path):
+    vault, state = _make_vault(tmp_path)
+    body = "# Decision\n\nOriginal text.\n"
+    rid = _create_adr(vault, state, title="Original Decision Three", status="active", body=body)
+
+    r = _run(
+        ["record", "update", rid, "--status", "superseded"],
+        vault=vault, state_dir=state,
+    )
+    assert r.returncode == 0, r.stderr
+    assert _find_body(vault, rid) == body
+    assert _find_sidecar(vault, rid)["status"] == "superseded"
+
+
+def test_update_status_superseded_with_backedge_same_call_succeeds(tmp_path):
+    vault, state = _make_vault(tmp_path)
+    body = "# Decision\n\nOriginal text.\n"
+    rid = _create_adr(vault, state, title="Original Decision Four", status="active", body=body)
+    successor = _create_adr(vault, state, title="Successor Decision Four", status="draft",
+                             body="# Successor\n")
+    successor_name = successor.split("/", 1)[1]
+
+    r = _run(
+        ["record", "update", rid, "--status", "superseded",
+         "--related", f"adr={successor_name}"],
+        vault=vault, state_dir=state,
+    )
+    assert r.returncode == 0, r.stderr
+    assert _find_body(vault, rid) == body
+
+
+def test_update_status_superseded_with_dangling_backedge_still_succeeds_body_unchanged(tmp_path):
+    """The exception is keyed on the body being unchanged, never on the edge
+    resolving — a dangling ``--related adr=`` target is a valid write on its
+    own (design edges are not existence-checked) and must not block the flip.
+    """
+    vault, state = _make_vault(tmp_path)
+    body = "# Decision\n\nOriginal text.\n"
+    rid = _create_adr(vault, state, title="Original Decision Five", status="active", body=body)
+
+    r = _run(
+        ["record", "update", rid, "--status", "superseded",
+         "--related", "adr=does-not-exist"],
+        vault=vault, state_dir=state,
+    )
+    assert r.returncode == 0, r.stderr
+    assert _find_body(vault, rid) == body
+
+
+def test_update_body_change_with_wellformed_backedge_against_active_adr_still_rejected(tmp_path):
+    """A well-formed back-edge does not buy a body change — the exception is
+    body-equality only, never the presence of ``--related adr=``.
+    """
+    vault, state = _make_vault(tmp_path)
+    body = "# Decision\n\nOriginal text.\n"
+    rid = _create_adr(vault, state, title="Original Decision Six", status="active", body=body)
+    successor = _create_adr(vault, state, title="Successor Decision Six", status="draft",
+                             body="# Successor\n")
+    successor_name = successor.split("/", 1)[1]
+
+    r = _run(
+        ["record", "update", rid, "--related", f"adr={successor_name}"],
+        vault=vault, state_dir=state, stdin_text="# Decision\n\nEdited text.\n",
+    )
+    assert r.returncode != 0
+    assert "[adr-active-immutable]" in r.stderr
+    assert _find_body(vault, rid) == body
+
+
+def test_update_body_change_against_active_non_adr_kind_is_unaffected(tmp_path):
+    vault, state = _make_vault(tmp_path)
+    r = _run(
+        ["record", "create", "--kind", "decision", "--title", "Some Decision",
+         "--keyword", "k", "--status", "active"],
+        vault=vault, state_dir=state, stdin_text="original\n",
+    )
+    assert r.returncode == 0, r.stderr
+    rid = r.stdout.strip()
+
+    r2 = _run(
+        ["record", "update", rid],
+        vault=vault, state_dir=state, stdin_text="edited\n",
+    )
+    assert r2.returncode == 0, r2.stderr
+    assert _find_body(vault, rid) == "edited\n"
+
+
+def test_update_guard_message_parses_and_names_the_remedy(tmp_path):
+    vault, state = _make_vault(tmp_path)
+    body = "# Decision\n\nOriginal text.\n"
+    rid = _create_adr(vault, state, title="Original Decision Seven", status="active", body=body)
+
+    r = _run(
+        ["record", "update", rid],
+        vault=vault, state_dir=state, stdin_text="# Decision\n\nEdited text.\n",
+    )
+    assert r.returncode != 0
+    line = next(ln for ln in r.stderr.splitlines() if "[adr-active-immutable]" in ln)
+    assert line.startswith("graph-guard [adr-active-immutable]: ")
+    assert "supersede" in line.lower()
+    assert "do not edit" in line.lower()
+    assert "--status superseded" in line
+    assert "--related adr=" in line
+
+
+def test_update_move_path_rejects_body_changing_write_against_active_adr(tmp_path):
+    """The move path re-runs the SAME guarded closure used for the in-place
+    write, so a body-changing scope-flag move against an active adr is
+    rejected exactly like an in-place update — pinning that a future split of
+    the two paths would fail loudly rather than silently reopening a bypass.
+    """
+    vault_a, state = _make_vault(tmp_path)
+    vault_b = tmp_path / "vault_b"
+    vault_b.mkdir(parents=True)
+    config_home = tmp_path / "config"
+    _write_config(
+        config_home,
+        [
+            {"name": "default", "scope": "default", "path": str(vault_a)},
+            {"name": "alpha", "scope": "team", "records": ["adr"], "path": str(vault_a)},
+            {"name": "beta", "scope": "team", "records": ["adr"], "path": str(vault_b)},
+        ],
+    )
+    body = "# Decision\n\nOriginal text.\n"
+    r = _run_cfg(
+        ["record", "create", "--kind", "adr", "--title", "Move Test Decision",
+         "--keyword", "k", "--status", "active", "--team", "alpha"],
+        vault=vault_a, state=state, config_home=config_home, stdin_text=body,
+    )
+    assert r.returncode == 0, r.stderr
+    rid = r.stdout.strip()
+    kind, name = rid.split("/", 1)
+
+    r2 = _run_cfg(
+        ["record", "update", rid, "--team", "beta"],
+        vault=vault_a, state=state, config_home=config_home,
+        stdin_text="# Decision\n\nEdited text.\n",
+    )
+    assert r2.returncode != 0
+    assert "[adr-active-immutable]" in r2.stderr
+    assert _find_body(vault_a, rid) == body
+    assert not (vault_b / kind / f"{name}.md").exists()
+    assert not (vault_b / kind / f"{name}.json").exists()
+
+
+def test_update_metadata_only_against_active_adr_with_neutralized_fence_body_succeeds(tmp_path):
+    """A metadata-only update reuses the on-disk body verbatim as its ``new_body``,
+    so it is byte-identical to what is stored regardless of any content already
+    inside it — including an already-neutralized ``<external-memory>`` fence.
+    """
+    vault, state = _make_vault(tmp_path)
+    raw = "See <external-memory>note</external-memory> here.\n"
+    rid = _create_adr(vault, state, title="Fenced Decision", status="active", body=raw)
+    stored = _find_body(vault, rid)
+    assert "external-memory" not in stored or stored != raw  # neutralized on create
+
+    r = _run(
+        ["record", "update", rid, "--keyword", "extra"],
+        vault=vault, state_dir=state,
+    )
+    assert r.returncode == 0, r.stderr
+    assert _find_body(vault, rid) == stored
+
+
+def test_update_full_body_replace_supplying_pre_neutralization_text_succeeds(tmp_path):
+    """The comparison runs on the NEUTRALIZED form of both bodies: resupplying
+    the exact pre-neutralization content that created the stored (neutralized)
+    body must be recognized as a no-op change, since that is exactly what will
+    land on disk again. Comparing the raw, un-neutralized values would reject
+    this even though the write changes nothing.
+    """
+    vault, state = _make_vault(tmp_path)
+    raw = "See <external-memory>note</external-memory> here.\n"
+    rid = _create_adr(vault, state, title="Fenced Decision Two", status="active", body=raw)
+    stored = _find_body(vault, rid)
+    assert stored != raw
+
+    r = _run(
+        ["record", "update", rid],
+        vault=vault, state_dir=state, stdin_text=raw,
+    )
+    assert r.returncode == 0, r.stderr
+    assert _find_body(vault, rid) == stored
+
+
+# ---------------------------------------------------------------------------
+# active-adr immutability: status-laundering bypass
+# ---------------------------------------------------------------------------
+
+
+def test_update_status_launder_to_draft_against_active_adr_rejected(tmp_path):
+    """The two-write laundering bypass: flip an active adr back to ``draft``
+    (metadata-only, so the immutability check passes trivially), then edit the
+    body while the prior status is no longer ``active``. The first write is the
+    whole exploit — an adr that has left ``draft`` can never return to it.
+    """
+    vault, state = _make_vault(tmp_path)
+    body = "# Decision\n\nOriginal text.\n"
+    rid = _create_adr(vault, state, title="Launder Target", status="active", body=body)
+
+    launder = _run(
+        ["record", "update", rid, "--status", "draft"],
+        vault=vault, state_dir=state,
+    )
+    assert launder.returncode != 0, launder.stdout
+    assert "[adr-frozen-status]" in launder.stderr
+    assert _find_sidecar(vault, rid)["status"] == "active"
+
+    edit = _run(
+        ["record", "update", rid],
+        vault=vault, state_dir=state, stdin_text="# Decision\n\nHacked.\n",
+    )
+    assert edit.returncode != 0
+    assert _find_body(vault, rid) == body
+
+
+def test_update_body_change_against_superseded_adr_rejected(tmp_path):
+    """A legitimate exit from ``active`` is not a laundering path: once
+    superseded, the frozen decision's body stays frozen.
+    """
+    vault, state = _make_vault(tmp_path)
+    body = "# Decision\n\nOriginal text.\n"
+    rid = _create_adr(vault, state, title="Superseded Target", status="active", body=body)
+
+    flip = _run(
+        ["record", "update", rid, "--status", "superseded"],
+        vault=vault, state_dir=state,
+    )
+    assert flip.returncode == 0, flip.stderr
+
+    edit = _run(
+        ["record", "update", rid],
+        vault=vault, state_dir=state, stdin_text="# Decision\n\nHacked.\n",
+    )
+    assert edit.returncode != 0
+    assert "[adr-active-immutable]" in edit.stderr
+    assert _find_body(vault, rid) == body
+
+
+def test_update_body_change_against_dropped_adr_rejected(tmp_path):
+    """The other legitimate exit from ``active`` is likewise not a laundering
+    path.
+    """
+    vault, state = _make_vault(tmp_path)
+    body = "# Decision\n\nOriginal text.\n"
+    rid = _create_adr(vault, state, title="Dropped Target", status="active", body=body)
+
+    flip = _run(
+        ["record", "update", rid, "--status", "dropped"],
+        vault=vault, state_dir=state,
+    )
+    assert flip.returncode == 0, flip.stderr
+
+    edit = _run(
+        ["record", "update", rid],
+        vault=vault, state_dir=state, stdin_text="# Decision\n\nHacked.\n",
+    )
+    assert edit.returncode != 0
+    assert "[adr-active-immutable]" in edit.stderr
+    assert _find_body(vault, rid) == body
+
+
+def test_update_status_draft_flip_against_superseded_adr_rejected(tmp_path):
+    """Nor can the supersession exit be chained back into ``draft`` — the
+    frozen statuses are closed under every permitted transition.
+    """
+    vault, state = _make_vault(tmp_path)
+    body = "# Decision\n\nOriginal text.\n"
+    rid = _create_adr(vault, state, title="Chained Launder Target", status="active", body=body)
+
+    flip = _run(
+        ["record", "update", rid, "--status", "superseded"],
+        vault=vault, state_dir=state,
+    )
+    assert flip.returncode == 0, flip.stderr
+
+    launder = _run(
+        ["record", "update", rid, "--status", "draft"],
+        vault=vault, state_dir=state,
+    )
+    assert launder.returncode != 0
+    assert "[adr-frozen-status]" in launder.stderr
+    assert _find_sidecar(vault, rid)["status"] == "superseded"
+
+
+def test_update_supersession_flip_with_backedge_still_permitted_after_freeze(tmp_path):
+    """The required supersession flow — predecessor flipped to ``superseded``
+    with a back-edge naming its successor, body untouched — must stay open.
+    """
+    vault, state = _make_vault(tmp_path)
+    body = "# Decision\n\nOriginal text.\n"
+    rid = _create_adr(vault, state, title="Freeze Regression Guard", status="active", body=body)
+    successor = _create_adr(vault, state, title="Freeze Regression Successor",
+                            status="draft", body="# Successor\n")
+    successor_name = successor.split("/", 1)[1]
+
+    r = _run(
+        ["record", "update", rid, "--status", "superseded",
+         "--related", f"adr={successor_name}"],
+        vault=vault, state_dir=state,
+    )
+    assert r.returncode == 0, r.stderr
+    assert _find_sidecar(vault, rid)["status"] == "superseded"
+    assert _find_body(vault, rid) == body
+
+
+def test_update_draft_adr_may_still_be_promoted_and_edited(tmp_path):
+    """``draft`` is the only unfrozen status, and the promotion INTO a frozen
+    status is untouched: a draft body stays editable, and draft → active still
+    works.
+    """
+    vault, state = _make_vault(tmp_path)
+    rid = _create_adr(vault, state, title="Still Draft", status="draft",
+                      body="# Decision\n\nOriginal.\n")
+
+    edit = _run(
+        ["record", "update", rid],
+        vault=vault, state_dir=state, stdin_text="# Decision\n\nRevised.\n",
+    )
+    assert edit.returncode == 0, edit.stderr
+
+    promote = _run(
+        ["record", "update", rid, "--status", "active"],
+        vault=vault, state_dir=state,
+    )
+    assert promote.returncode == 0, promote.stderr
+    assert _find_sidecar(vault, rid)["status"] == "active"

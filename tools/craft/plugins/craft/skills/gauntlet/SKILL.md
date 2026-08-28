@@ -5,10 +5,10 @@ description: >
   a spec, eight parallel passes attack it from independent angles: fact verification, premise attack,
   the four council lenses, an internal-consistency audit, and a plan-divergence probe. For an adr, the
   same roster runs minus the divergence probe (no analogue for a decision document) — seven passes.
-  The main session adjudicates and hands back one compact recommendation — a synthesis, a route,
-  and a proposed disposition per Critical — which the user accepts or overrides in a single
-  round-trip, before the record is stamped with review provenance and flips (a spec to `ready`,
-  an adr to `active`).
+  The main session adjudicates and hands back one compact recommendation — a synthesis, a
+  recommended outcome, and a proposed disposition per Critical — which the user accepts or overrides in a single
+  round-trip, before the record is stamped with review provenance. A spec then flips to `ready`;
+  a draft adr stays `draft` — distill activates it once every spec derived from it lands.
   TRIGGER when: brainstorming has produced a spec and is at its exit gate (the gauntlet is a
   mandatory step there), a draft adr needs review before it flips to `active`, or the user says "run
   the gauntlet", "gauntlet this spec", "gauntlet this adr", "adversarial spec review", "review the
@@ -197,15 +197,56 @@ still a decision", below):
      that could not see each other, and which of them were right is a judgment only the adjudicator
      is positioned to make. Making it is movement two's whole job; the shared contract names what
      stays forbidden.
-2. **The recommended route**, on its own line, by name (below).
+2. **The recommended outcome**, on its own line — whether the record freezes this round, or which
+   revise round it continues into (below).
 3. **The per-Critical table** — supporting detail, not the explanation. The synthesis has already
    said what the findings mean and what you propose doing; the table is the row-level view for
-   checking that against the findings, and the handle the operator names to override. One row per
-   Critical, in `C1`…`Cn` order:
+   checking that against the findings, and the handle the operator names to override — into
+   `accepted-as-risk`, `disputed`, or `answered` when the operator holds a counterargument the passes
+   did not have. One row per Critical, in `C1`…`Cn` order:
 
    | id | finding | proposed disposition | proposed edit |
    |---|---|---|---|
    | C1 | *headline, one line* | `resolved` | *one clause: what the edit does* |
+
+   **A `revise` row cannot fit in that one-clause edit cell** — its prescription names what is
+   wrong, what to change, and how, and a `reaches-downstream` prescription also names the specs it
+   invalidates. Render it instead of a table row, as a compact header line followed by an indented
+   prescription block:
+
+   ```
+   **C2** — *headline, one line* — `revise` (`record-only`)
+     Prescription: <what is wrong, what to change, and how>
+   ```
+
+   A `reaches-downstream` prescription's block adds the specs it names:
+
+   ```
+   **C3** — *headline, one line* — `revise` (`reaches-downstream`)
+     Prescription: <what is wrong, what to change, and how>
+     Reaches: spec/<name-one>, spec/<name-two>
+   ```
+
+   Worked example — three Criticals, one `resolved`, one `revise` of each scope:
+
+   <!-- worked-example:start -->
+   | id | finding | proposed disposition | proposed edit |
+   |---|---|---|---|
+   | C1 | *cache TTL undocumented* | `resolved` | *add a Constraints row stating the TTL* |
+
+   **C2** — *auth model assumes single tenant* — `revise` (`record-only`)
+     Prescription: rewrite the Objectives to state multi-tenant is out of scope, or the criteria
+     to require tenant scoping.
+
+   **C3** — *retry policy duplicates existing library behavior* — `revise` (`reaches-downstream`)
+     Prescription: drop the custom backoff loop; the existing HTTP client already retries with
+     jitter.
+     Reaches: spec/retry-policy-for-the-notification-worker
+   <!-- worked-example:end -->
+
+   The block stays inside the one-screen budget the deliverable is held to — one header line and
+   at most two prescription lines per `revise` Critical, same as the one-clause edit it replaces
+   for every other disposition.
 
 4. **Important and Minor, compressed** to a count plus a one-line theme apiece. They take no
    disposition — they are logged for the audit trail.
@@ -228,47 +269,93 @@ conformance, not quality.
 
 #### Who may propose what
 
-The agent proposes **only `resolved` or `reframed`**. Both are judgments about the document, and
+The agent proposes **only `resolved` or `revise`**. Both are judgments about the document, and
 the adjudicator has read every pass that attacked it.
 
-`accepted-as-risk: <reason>` and `disputed: <reason>` are **operator-only overrides**. Both are
-judgments about what this project is willing to live with, and their reason text is the operator's
-own — quote it, **never drafted for them**. Do not propose either disposition, and do not offer a
-reason the operator did not say.
+**Before proposing `revise`, apply the edit-first test.** Ask whether any set of edits to the
+record's own sections would answer the finding. If yes, the disposition is `resolved` and drafting
+those edits is the adjudicator's job — the test is applied, not skipped because the finding sounds
+severe. `revise` is reserved for a finding an edit here cannot answer: the record's framing is wrong,
+or the fix reaches beyond this record's own sections. State the asymmetry plainly: a finding of the
+form "the record does not say X" is never a `revise` — at most it is a missing edit, and the
+disposition is `resolved`; only a finding that a drafted edit cannot answer on the spot is a `revise`.
+**Proposing `revise` for a finding an edit would answer is the expensive error** — it defers a fix
+the adjudicator could draft right now, and hands the operator a prescription for work that was
+already done, none of which a missed line ever required.
+
+`accepted-as-risk: <reason>`, `disputed: <reason>`, and `answered: <reason>` are **operator-only
+overrides**. All three are judgments about what this project is willing to live with, or knows that
+the passes did not, and their reason text is the operator's own — quote it, **never drafted for
+them**. Do not propose any of the three, and do not offer a reason the operator did not say.
 
 - `resolved` — the record is edited to address the finding. It is still `draft`; edits are free
   here, which is the entire point of reviewing now.
-- `reframed` — the finding invalidates the record's framing. Return to brainstorming and write a
-  new record. This is the premise pass's characteristic outcome, and it is a *success* of the
-  gauntlet, not a failure of the record — a reframe here costs a conversation; the same reframe
-  discovered mid-build costs the build.
+- `revise` — the finding needs a change the edit-first test could not resolve on the spot. This is
+  the premise pass's characteristic outcome, and landing on it is a *success* of the gauntlet, not a
+  failure of the record — a prescription here costs a conversation; the same gap discovered mid-build
+  costs the build. **Every `revise` carries a prescription** naming what is wrong, what to change,
+  and how — specific enough to act on without re-deriving the reasoning. **A finding that cannot
+  produce a prescription this specific is not a Critical.** Every prescription also declares a
+  **scope**:
+  - **`record-only`** — the change lands inside the record under review; the finding is its own
+    evidence.
+  - **`reaches-downstream`** — the change invalidates work already seeded from this record. It must
+    name each derived spec it invalidates, and it must meet the **downstream evidence bar**: a
+    named, specific alternative that accomplishes the same outcome — an existing capability, a
+    library, or a shape that makes the decision unnecessary — stated with why it achieves the outcome
+    and what it costs. **Generalised doubt does not meet it.** A `reaches-downstream` prescription
+    **writes nothing to the named specs**: it names them in the escalation table, and re-entry into
+    brainstorming is the operator's act; the `related: adr=` edge stays provenance, not a live link.
 - `accepted-as-risk: <reason>` — explicit acceptance, recorded for audit.
 - `disputed: <reason>` — the operator disagrees with the finding; recorded for audit.
+- `answered: <reason>` — the operator supplies a counterargument the passes did not have, and the
+  finding is **re-adjudicated in light of it** rather than vetoed. It is the operator's move for "you
+  are measuring the system as it is and I am changing it", "that capability is absent because I
+  intend to build it", and "that is out of scope, here is the bound" — one instance of a general
+  rule: any finding the passes raised for lack of information the operator actually holds is
+  answered, not disputed or accepted as risk. `answered` is **not terminal** — **the adjudicator
+  re-adjudicates it**, on the same footing as its original proposal: the re-adjudicated outcome is
+  `resolved` or `revise`, the same two terms and no others — never `accepted-as-risk`, `disputed`,
+  or `answered` again. Those three stay operator-only overrides; re-adjudicating into one would let
+  the adjudicator self-author an operator-only disposition under cover of "answering" it. `resolved`
+  is the ordinary case, and **the counterargument is folded into the record as an edit**. This is the
+  load-bearing half: a counterargument the artifact does not carry is one the next gauntlet raises
+  again, because the record still does not say it. **Whichever of the two terms the re-adjudication
+  lands on, it re-presents before anything is written** — an answered row that becomes `resolved`
+  needs its edit drafted and therefore re-presents, which the existing "override *into* `resolved`
+  re-presents too" rule below already covers; an answered row that becomes `revise` re-presents on
+  the same footing, including on a run where another `revise` row already holds the freeze
+  decision, so the discarded counterargument is never dropped without the operator seeing the swap.
 
-#### The two routes, and the rule that picks one
+#### Freezing, revise rounds, and runs
 
-There are exactly **two** routes. These are their names, here and in both per-mode tails:
+A record **freezes when no Critical carries a final disposition of `revise`** — final meaning the
+disposition a Critical carries after any override and any re-adjudication, never an intermediate
+one. **There is no round cap; operator overrides are the termination guarantee**, not a limit on
+how many rounds a record may take.
 
-| Route | Spec target | Adr target | Handoff |
-|---|---|---|---|
-| **freeze route** | `ready` | `active` | forward — planning for a spec |
-| **reframe route** | `superseded` | `dropped` | back to brainstorming |
+A **run** is one invocation of this skill. A **revise round** is one adjudication cycle inside a
+single gauntlet invocation, and **re-runs only the passes that raised the surviving `revise`
+Criticals** — not the full roster, since the passes that already resolved cleanly have nothing
+left to re-attack. The two — round and run — are named distinctly wherever either appears; they
+are never interchangeable.
 
-The rule that picks one is **total over the disposition vocabulary** — every combination of
-dispositions lands on exactly one route, so there is never an outcome left to freelance:
+**Each revise round runs the full accepted tail**: that round's `resolved` edits and its
+provenance land atomically before the round ends, so **a surviving `revise` withholds only the
+freeze, never the writes**. A record mid-round is never behind on the edits it has already
+earned; only the flip to `ready` / `active` waits on the freeze condition.
 
-- **Any Critical dispositioned `reframed`**, whether you proposed it or the operator overrode into
-  it → the **reframe route**.
-- **Every other combination** of `resolved` / `accepted-as-risk` / `disputed`, including a run with
-  no Criticals at all → the **freeze route**.
-
-Derive the route; do not choose it. And do not invent a third — a route with no target status is a
-record left in a state the lifecycle vocabulary has no name for.
+A Critical still sitting at `answered` is **not yet a final disposition** — it is a request for
+re-adjudication, not an outcome of one. **Freezing may not be evaluated while any Critical remains
+at `answered`.** Re-adjudicate every answered row first; only once each one carries `resolved` or
+`revise` does the freeze condition have final dispositions to read. Once re-adjudicated, `answered`
+is not terminal, and the row's final disposition is whatever it is re-adjudicated to, normally
+`resolved`.
 
 #### Zero Criticals is still a decision
 
-A run that produced no Criticals presents the deliverable anyway — synthesis, route, and the
-compressed Important and Minor summary, labeled as a clean run, with no per-Critical table, since
+A run that produced no Criticals presents the deliverable anyway — synthesis, recommended outcome,
+and the compressed Important and Minor summary, labeled as a clean run, with no per-Critical table, since
 there are no rows for it to hold — and **still gates on operator acceptance**. Clean of Criticals is
 not clean of findings: the Important and Minor themes are part of what the operator accepts here,
 and a run that presents none of them reads as a sweep that found nothing. A gauntlet never freezes a
@@ -277,43 +364,57 @@ one who accepts it.
 
 #### Accepting, and overriding in one round-trip
 
-Present, then wait. The operator either accepts ("go") or overrides ("dispute C3, otherwise go").
-Overrides apply in **one round-trip**: take every override from that one reply, apply them
-together, and do not walk back through the table finding by finding.
+Present, then wait. The operator either accepts ("go") or overrides — "dispute C3, otherwise go", or
+"answer C3: we're changing the auth provider next quarter, otherwise go" when the operator holds a
+counterargument the passes did not have. Overrides apply in **one round-trip**: take every override
+from that one reply, apply them together, and do not walk back through the table finding by finding.
 
 - **Echo the full post-override table.** After applying any override, re-render the complete
-  `C1`…`Cn` disposition table — **not just the route line** — as the last thing before the accepted
-  tail executes. A misapplied override ("dispute C3" recorded against C4) changes nothing the route
-  line displays, and the audit trail it lands in is permanent.
+  `C1`…`Cn` disposition table — **not just the outcome line** — as the last thing before the
+  accepted tail executes. A misapplied override ("dispute C3" recorded against C4) changes nothing
+  that one line displays, and the audit trail it lands in is permanent.
 - **An override naming an id outside the presented range is rejected.** "dispute C7" against a
   five-row table is an error, not a puzzle: say which ids exist and ask again. **Never map an
   unknown id onto the id you think was meant.**
-- **An override with no reason is incomplete.** `accepted-as-risk` and `disputed` carry the
-  operator's reason text, and you may not write it for them — so "dispute C3", with nothing said
-  about why, is not yet a disposition: ask for the reason and record nothing until they give it.
-  **Never record either disposition with a reason you drafted, and never with the reason slot
-  empty.** This is the one path by which text you wrote could enter the permanent trail wearing the
-  operator's signature.
+- **An override with no reason is incomplete.** `accepted-as-risk`, `disputed`, and `answered`
+  carry the operator's reason text, and you may not write it for them — so "dispute C3" or "answer
+  C3", with nothing said about why, is not yet a disposition: ask for the reason and record nothing
+  until they give it. **Never record any of the three with a reason you drafted, and never with the
+  reason slot empty.** This is the one path by which text you wrote could enter the permanent trail
+  wearing the operator's signature.
 - **An override off `resolved` withdraws that row's drafted edit.** Every `resolved` row's edit text
   was drafted before you presented, and only the rows still `resolved` once the overrides are
-  applied belong to the accepted set. An override to `disputed`, `accepted-as-risk`, or `reframed`
-  therefore **removes that row's edit from `$EDITS`**, and the echoed post-override table is what
-  says which edits remain. A diff assembled before the override lands the one change the operator
-  explicitly declined, permanently, in a record about to freeze.
-- **A route-changing override re-presents once.** If applying the overrides changes the route — an
-  override that removes the last `reframed`, or one that introduces one — present the revised
-  recommendation once more and take acceptance again **before anything is written**. If that reply
-  changes the route again, it is a further override round-trip and it re-presents again.
-  **The cap is one re-present per route change, not one per run.** What the cap forbids is
-  re-presenting a recommendation nothing changed; what it never licenses is writing a route the
-  operator has not seen and accepted.
-- **An override *into* `resolved` re-presents too, whatever the route does.** Only the rows you
-  proposed `resolved` have their edit text drafted, so an override moving a `reframed` row to
-  `resolved` produces an accepted row with no edit behind it. Draft that edit, then present once
-  more and take acceptance again — including on a run whose route never moved because another
-  `reframed` row still holds it. The cap above forbids re-presenting a recommendation nothing
-  changed, and **a newly drafted edit is a change**. Skip it and you are composing the edit after
-  acceptance, which is exactly what drafting every `resolved` edit before presenting forbids.
+  applied belong to the accepted set. An override to `disputed`, `accepted-as-risk`, `answered`, or
+  `revise` therefore **removes that row's edit from `$EDITS`**, and the echoed post-override table
+  is what says which edits remain — an override into `answered` removes it only until
+  re-adjudication drafts a new one, which the override-into-`resolved` rule below covers. A diff
+  assembled before the override lands the one change the operator explicitly declined, permanently,
+  in a record about to freeze.
+- **An override changing revise-presence re-presents once.** If applying the overrides changes
+  whether any Critical still carries `revise` — an override that removes the last `revise`, or one
+  that introduces one — present the revised recommendation once more and take acceptance again
+  **before anything is written**. If that reply changes revise-presence again, it is a further
+  override round-trip and it re-presents again. **The cap is one re-present per revise-presence
+  change, not one per run.** What the cap forbids is re-presenting a recommendation nothing
+  changed; what it never licenses is writing a freeze the operator has not seen and accepted.
+- **An override *into* `resolved` re-presents too, whatever the freeze decision does.** Only the
+  rows you proposed `resolved` have their edit text drafted, so an override moving a `revise` row
+  to `resolved` — or an `answered` row re-adjudicated to `resolved` — produces an accepted row with
+  no edit behind it. Draft that edit, then present once more and take acceptance again — including
+  on a run whose freeze decision never moved because another `revise` row still holds it. The cap
+  above forbids re-presenting a recommendation nothing changed, and **a newly drafted edit is a
+  change**. Skip it and you are composing the edit after acceptance, which is exactly what drafting
+  every `resolved` edit before presenting forbids.
+- **A re-adjudication landing on `revise` re-presents too, whatever the freeze decision does.** An
+  `answered` row re-adjudicated to `resolved` is covered by the rule above; one re-adjudicated to
+  `revise` gets the identical treatment, including on a run that already holds another `revise`
+  row, where the revise-presence-changing-override rule never fires because revise-presence does
+  not move. Present the revised table and take acceptance again **before anything is written** —
+  an operator who answered a finding is owed the chance to see that their counterargument was
+  re-adjudicated away before the record that discards it becomes permanent, not after.
+- **Each re-presented deliverable carries its round number.** Rounds are uncapped by design, so the
+  count is the only signal distinguishing convergence from a directionless loop; it is also the
+  after-the-fact evidence that a runaway adjudication happened at all.
 
 #### Escalation points
 
@@ -326,8 +427,8 @@ no auto-accept flag, and every point below waits on a human today.
 |---|---|
 | **operator acceptance gate** | the operator accepting the presented deliverable — on every run, clean ones included |
 | **override round-trip** | the operator's overrides, applied together and echoed as a full table |
-| **route-change re-present** | acceptance of the revised recommendation, whenever overrides changed the route — or drafted an edit the presented table did not carry |
-| **failed-write report** | nothing — the tail has stopped and the operator is told the partial state; the record stays `draft` **unless the failure fell after the status flip**, which only the adr tail's supersession write is ordered to do (see "Reviewing an adr") |
+| **route-change re-present** | acceptance of the revised recommendation, whenever overrides change whether any Critical still carries `revise`, or whenever a prescription or edit not in the presented table was newly drafted |
+| **failed-write report** | nothing — the tail has stopped and the operator is told the partial state; the record under review always keeps the status it arrived with, because no write is ordered after its flip in either mode. The one partial state to report is a **predecessor** already flipped `superseded` by the adr tail's back-edge while the record under review stays `draft` (see "Reviewing an adr") |
 
 #### The accepted tail
 
@@ -360,9 +461,11 @@ the only point at which anyone looks at it before it is permanent:
    stamp to follow: `--diff` leaves the body byte-for-byte unmodified on any rejected hunk, and that
    property is the only thing making the accepted set all-or-nothing. A record holding half its
    accepted edits is a record nobody reviewed.
-2. **Then the status flip** — and, where the mode has one, the predecessor supersession write —
-   **only after that write has succeeded**. The flip is what freezes the record; running it ahead of
-   the edits freezes a record whose accepted edits are still hypothetical.
+2. **Then the mode's remaining writes** — the spec tail's status flip, or the adr tail's
+   predecessor supersession write — **only after that write has succeeded**. A flip is what freezes
+   a record; running one ahead of the edits freezes a record whose accepted edits are still
+   hypothetical. **The adr tail flips nothing it is reviewing** — an adr leaves this tail `draft`
+   on every outcome, and distill activates it once its derived specs are terminal.
 
 **On any rejected hunk or failed write, nothing further runs.** Not the flip, not the supersession
 write, not a retry with the hunks re-cut. The record stays `draft` and you **report the partial
@@ -378,10 +481,13 @@ teaches them to wave through the one prompt that would have mattered.
 and it quotes the `C1`…`Cn` ids so an auditor can line every disposition up against the table the
 operator actually saw. Derive that split from the dispositions themselves, never from memory:
 
-- `accepted-as-risk` and `disputed` are **operator overrides by construction** — you may not propose
-  either, so a Critical carrying one was overridden, whatever you recall of the round-trip.
-- `resolved` and `reframed` are accepted-from-proposal *unless* this run's override reply changed
-  that row — which the echoed post-override table records.
+- `accepted-as-risk`, `disputed`, and `answered` are **operator overrides by construction** — you
+  may not propose any of the three, so a Critical carrying one was overridden, whatever you recall
+  of the round-trip. An answered row's *final* disposition (normally `resolved`) is what the counts
+  annotation counts under that final disposition's term — `answered` contributes no term of its own
+  to the grammar; it counts as its final disposition **plus** an operator override.
+- `resolved` and `revise` are accepted-from-proposal *unless* this run's override reply changed
+  that row — which the echoed post-override table records, an answered-then-resolved row included.
 
 ### 6. Stamp and freeze
 
@@ -393,7 +499,10 @@ its failure behavior are the shared ones above.
 section appended to the spec body. The detail is part of the same atomic write, not a second write
 after the flip: a `ready` spec missing its own review record is exactly the artifact the audit trail
 exists to prevent. A spec body has no exhaustive-section contract, so the detail belongs in the
-record it reviewed:
+record it reviewed. A Critical the operator answered marks its final-disposition parenthetical
+`answered` and quotes the counterargument verbatim — that is where the reasoning becomes durable
+and auditable, since the counts annotation itself carries only the final disposition and the
+override count (see above):
 
 ```markdown
 ## Gauntlet
@@ -402,8 +511,9 @@ record it reviewed:
   as its settled design content (`skills/receiving-code-review/SKILL.md`).
 - Adversarial spec review (gauntlet, <date>): 8 passes — facts <n>/<n> confirmed; <n> design-changing
   findings folded in (<one-clause each>). Criticals dispositioned: C1 `resolved` (from proposal),
-  C2 `disputed` (operator override — "<their reason, quoted>"), … — <n> from proposal, <n> operator
-  overrides. Important <n>, Minor <n>, detail below.
+  C2 `disputed` (operator override — "<their reason, quoted>"), C3 `resolved` (operator override —
+  answered: "<their counterargument, quoted>"), … — <n> from proposal, <n> operator overrides.
+  Important <n>, Minor <n>, detail below.
 - <the consolidated detail, per finding, in the shape `_shared/council.md` defines>
 ```
 
@@ -415,7 +525,8 @@ carries the provenance stamp in its next bullet, and holds the detail in the rem
 printf '%s' "$EDITS" | lore record update <spec-id> --diff
 ```
 
-**Then, and only once that write has succeeded, flip.** On the **freeze route**:
+**Then, and only once that write has succeeded, check the freeze condition.** If no Critical
+carries a final disposition of `revise`:
 
 ```
 lore record update <spec-id> --status ready
@@ -426,15 +537,12 @@ and hand off to planning. Do not enter planning from inside the gauntlet — let
 real spec-id, never a `<placeholder>` (e.g. `/craft:plan spec/streaming-export`) — so the user can
 paste it into a fresh session as-is.
 
-On the **reframe route** the write is identical — a reframed spec still keeps its review record —
-and only the flip and the handoff differ:
-
-```
-lore record update <spec-id> --status superseded
-```
-
-The handoff is back to brainstorming, not forward to planning — end with `/craft:brainstorm`,
-equally fully formed.
+**If any Critical's final disposition is `revise`, the spec does not flip.** Its `resolved` edits
+and this round's provenance already landed in the write above — a surviving `revise` withholds
+only the freeze, never the writes. Begin the next revise round: re-run only the passes that raised
+the surviving `revise` Criticals, fold their findings back into step 5, and present again. The spec
+stays `draft` for as long as any Critical carries `revise`; there is no round cap, and this skill
+writes no status for "still revising."
 
 ## Reviewing an adr
 
@@ -466,39 +574,47 @@ cut: everything else that can attack an ADR still does.
 name it and stop — do not quietly run six and present the result as a gauntlet. Leave the adr at
 `draft`.
 
-### The gauntlet owns the flip, directly to `active`
+### The record stays `draft` on every outcome
 
 The adr vocab (`draft`, `active`, `superseded`, `dropped`) has no `ready` — there is no intermediate
-frozen-but-inactive state the way a spec has. On the **freeze route**, once the operator has
-accepted, the gauntlet flips the record directly:
+frozen-but-inactive state the way a spec has, and this skill does not write the record under review
+toward one. The gauntlet never advances the adr it is reviewing past `draft`, on either outcome.
+Once the operator has accepted, the accepted tail below lands that round's `resolved` edits and its
+provenance and stops — no status write on this record. **If any Critical's final disposition is
+`revise`,** the same tail lands identically, and a new revise round begins, re-running only the
+passes that raised the surviving `revise` Criticals. Either way this record is still `draft` when
+this skill is done with it.
+
+Activation is not this skill's job. Distill flips a forward adr `draft -> active` when every spec
+derived from it reaches a terminal status (`distill/SKILL.md`, "Write, in a fixed order") — the same
+rule that already makes distill the sole writer of a spec's `planned -> complete` edge now makes it
+the sole writer of an adr's `draft -> active` edge too, on both the forward and the backward path.
+`active` immutability is unchanged by this move: it changes WHEN activation happens, never whether an
+`active` record can still be edited. Amendment while `draft`, including everything this review
+accepts, stays unrestricted — any ritual that makes a decision may record it, with no
+material/immaterial distinction to adjudicate, and this does not reopen that question for an
+already-`active` record.
+
+### Supersession's predecessor write survives, decoupled from activation
+
+Distill is not the only writer that ever touches an ADR's status. The forward path (brainstorm's
+altitude gate → this gauntlet) can author a draft that names an existing `active` ADR as its
+predecessor via `--related adr=<predecessor>`, set at creation same as any other provenance edge —
+and when this review accepts that draft, retiring the predecessor is this skill's one remaining
+status write in adr mode:
 
 ```
-lore record update <adr-id> --status active
-```
-
-(The **reframe route** takes an adr to `dropped`, not `superseded` — it never went `active`, so
-there is no predecessor decision for it to supersede.)
-
-### Supersession writes both directions, on the forward path too
-
-Distill is not the only writer of an ADR — the forward path (brainstorm's altitude gate → this
-gauntlet) authors and activates ADRs as well, and supersession's "both directions" contract binds
-here identically: an `active` ADR the gauntlet is about to supersede must end this flip with its
-predecessor flipped `superseded` and back-linked, not just the new one flipped `active`.
-
-The successor's `--related adr=<predecessor>` edge is set **before** this step — brainstorm (or
-whoever authored the draft) writes it at creation, same as any other provenance edge. At
-activation, when that edge names an existing `active` ADR, the gauntlet's flip is two writes, in
-this order (mirroring distill's pinned internal order):
-
-```
-lore record update <adr-id> --status active
 lore record update <predecessor-adr-id> --status superseded --related adr=<adr-id>
 ```
 
-Skipping the second write leaves the predecessor `active` next to its own successor — the same
-inconsistent state distill's resume rule exists to heal, except nothing here would ever heal it,
-because only distilled ADRs are on distill's resume path.
+This is not "a gauntlet outcome" in the sense the disposition vocabulary bans — it does not come
+from a Critical's disposition, and it never sets a status on the record under review. It fires off
+the successor's own predecessor edge, independent of the dispositions a run produced. The
+predecessor retires on review acceptance, decoupled from the successor's own activation: the
+successor can stay `draft` for as long as its derived specs take to reach a terminal status, and
+there is no reason to leave a decision review already replaced marked `active` in the meantime. A
+reader who lands on the predecessor finds its successor via the back-edge immediately, well before
+distill ever activates it.
 
 ### Provenance goes to annotations, never the body
 
@@ -513,58 +629,68 @@ freeze.
 ### The accepted tail, in adr terms
 
 The shared accepted tail's sequence, its pre-write scrub and marker, and its failure behavior hold
-here. The exhaustive body adds one write ahead of them, and the order of all three is fixed:
+here. The exhaustive body adds one write ahead of it, and the order is fixed. **The first two writes
+land the same way, in the same order, on every outcome — accept or revise. Neither one ever advances
+the record under review past `draft`:**
 
 ```
 printf '%s' "$DETAIL" | lore record create --kind lesson --title "Gauntlet detail — <adr title>" --related adr=<adr-id>
-printf '%s' "$EDITS" | lore record update <adr-id> --diff --annotation gauntlet=<date>:7-passes:<n>-resolved,<n>-reframed,<n>-accepted-as-risk,<n>-disputed:<n>-from-proposal,<n>-operator-override
-lore record update <adr-id> --status active
+printf '%s' "$EDITS" | lore record update <adr-id> --diff --annotation gauntlet=<date>:7-passes:<n>-resolved,<n>-revise,<n>-accepted-as-risk,<n>-disputed:<n>-from-proposal,<n>-operator-override
+lore record update <predecessor-adr-id> --status superseded --related adr=<adr-id>
 ```
 
 1. **The `lesson` record is written first**, carrying the consolidated detail and its
    `--related adr=<adr-id>` edge on the same command — an edge added by a later write is an edge
    that a failure between the two never writes. It is also where the shared stamp's per-Critical
    half lands **in full**: the `C1`…`Cn` dispositions, each one **marked from-proposal or
-   operator-override**, and every `accepted-as-risk` / `disputed` reason **quoted in the operator's
-   own words**. An annotation is a key/value — it holds the counts and nothing else — so the ids,
-   the markers, and the reasons need a record with a body, and this is it. Write the counts alone
-   and the operator's stated reason for living with a risk is missing from the trail of a decision
-   nothing can edit afterwards. Its body opens with the shared marker line naming it retained
-   review evidence: a `lesson` is precisely the sibling record a later pass reads back as prior art.
+   operator-override**, a row the operator answered additionally marked `answered` alongside its
+   final disposition, and every `accepted-as-risk` / `disputed` / `answered` reason **quoted in the
+   operator's own words**. An annotation is a key/value — it holds the counts and nothing else — so
+   the ids, the markers, and the reasons need a record with a body, and this is it. Write the counts
+   alone and the operator's stated reason for living with a risk, or their counterargument to a
+   finding, is missing from the trail of a decision nothing can edit afterwards. Its body opens with
+   the shared marker line naming it retained review evidence: a `lesson` is precisely the sibling
+   record a later pass reads back as prior art.
 2. **Then the shared tail's one atomic write** — `$EDITS` is the unified diff of every `resolved`
    edit, and the counts annotation rides the same invocation. `--diff` and `--annotation` apply
    inside a single read-modify-write, so a rejected hunk leaves the body *and* the annotation
    untouched, and the all-or-nothing property the shared tail depends on holds here unchanged. What
    the exhaustive body keeps out is the provenance and the finding detail — never the accepted
-   edits, which are edits to Context, Decision, Consequences, and Alternatives rejected and must
-   land before anything freezes. An adr flipped `active` without them is an immutable decision no
-   acceptance ever reached. The counts alongside the accepted-from-proposal / operator-override
-   split are how the provenance stamp renders for an adr, and `<n>-reframed` is what tells an
-   auditor of a `dropped` adr which disposition sent it there. **This write runs on every accepted
-   run, including one with zero `resolved` Criticals** — `$EDITS` is then an empty diff, which the
-   CLI applies as a no-op, and the annotation rides the same invocation regardless. Skipped there,
-   the adr flips `active` carrying no provenance at all, because the annotation is the only
-   provenance its exhaustive body will ever hold.
-3. **Then the status flip** — `--status active` on the freeze route, and, when the successor's edge
-   names an `active` predecessor, the two-write supersession above in its pinned order.
+   edits, which are edits to Context, Decision, Consequences, and Alternatives rejected, and this is
+   the only write that ever lands them; an adr this review accepted edits for, with the write
+   skipped, is an approved edit the record never received. The counts alongside the
+   accepted-from-proposal / operator-override split are how the provenance stamp renders for an adr,
+   and `<n>-revise` is what tells an auditor whether this run is still cycling revise rounds.
+   **This write runs on every accepted run, including one with zero `resolved` Criticals** —
+   `$EDITS` is then an empty diff, which the CLI applies as a no-op, and the annotation rides the
+   same invocation regardless. Skipped there, this run leaves no provenance at all, because the
+   annotation is the only provenance the exhaustive body will ever hold.
 
-The **reframe route** runs the first two writes identically — a dropped adr keeps its review
-evidence, which is often the whole reason it was dropped — and differs only in the last one:
+3. **Then, only if the successor's edge names an existing `active` predecessor, the predecessor
+   is retired** — `--status superseded --related adr=<adr-id>` back to the successor. This is the
+   one status write left in adr mode, and it lands on every accepted run regardless of the
+   dispositions it carries, because it belongs to the successor's own provenance edge, not to any
+   Critical's disposition.
 
-```
-lore record update <adr-id> --status dropped
-```
-
-with no supersession write, since a dropped adr never became the decision of record.
+**The first two writes land identically on either outcome.** A surviving `revise` begins a new
+revise round, re-running only the passes that raised it — it does not change what those two writes
+are or how they run, and the adr under review stays `draft` throughout; nothing in this skill ever
+changes that. **The third write is the one exception**: it fires only once, when the successor's
+edge names a predecessor, regardless of which round it fires in — retrying it on a later round it
+already landed in is a no-op, since the predecessor is already `superseded`.
 
 Lesson-first is chosen for the state a crash leaves behind. Its worst surviving artifact is a
-`draft` adr with an extra record pointing at it, which is harmless and re-runnable; the reverse
-order's is an `active`, immutable decision whose review evidence was never written at all.
+`draft` adr with an extra `lesson` record pointing at it, which is harmless and re-runnable; the
+reverse order's worst artifact is a counts annotation claiming a review whose `lesson` record was
+never written.
 
-**Any failure before the flip stops the sequence**: the adr stays `draft`, and a `lesson` record
-already written when a later write fails is **never silently abandoned** — report the orphaned
-`lesson` record to the operator by name, so they can re-run or delete it. Give them the lookup as
-well:
+**Any failure anywhere in this tail stops the sequence**: the adr under review stays `draft`
+regardless of which write failed — nothing in this tail ever makes it otherwise. A `lesson` record
+already written when a later write then fails is **never silently abandoned** — report the orphaned
+`lesson` record to the operator by name, so they can re-run or delete it. A failure at the third
+write leaves the predecessor still `active`, unlinked from an already-accepted successor; name both
+records and hand back the one write that closes it — the predecessor write above, unchanged, is
+itself the retry. Give them the `lesson` lookup as well:
 
 ```
 lore search 'kind:lesson related-adr:"<adr-id>"'
@@ -580,19 +706,6 @@ writes, so it resolves immediately and needs no `lore reindex` first. (The rever
 query from the adr's side — is a reindex-only property, and is not what this lookup uses.) Still
 report the record name alongside the query, never the query alone: the name is what the operator
 acts on, and it survives an index this report cannot inspect.
-
-**A failure after the flip reports differently.** The predecessor's `superseded` back-edge is the
-only write ordered after the status flip, so the rule above — the adr stays `draft` — cannot
-describe it: the adr is already `active` and immutable, and re-running the flip changes nothing.
-Name both records, say that the successor is `active` and the predecessor is still `active` and
-unlinked, and hand back the one write that closes it:
-
-```
-lore record update <predecessor-adr-id> --status superseded --related adr=<adr-id>
-```
-
-Nothing heals that pair on its own — distill's resume rule walks only distilled ADRs, and this one
-came the forward way.
 
 ### Distilled ADRs skip the gauntlet
 

@@ -200,11 +200,13 @@ So the plan you write here is **provisional against an un-reviewed spec**. Say e
 returned summary, and tell the caller what closes it:
 
 > Spec written at `draft` — **not yet gauntleted**. The plan below is provisional until it is.
-> Run `/craft:gauntlet <spec-id>` in the main session; if the gauntlet's premise pass reframes the
-> spec, this plan is void and planning restarts against the successor spec.
+> Run `/craft:gauntlet <spec-id>` in the main session; if a Critical lands a final `revise`
+> disposition, the spec is revised in place and stays `draft` — re-check this plan against the
+> revised spec before building on it.
 
-This is not a formality. In the runs that calibrated the gauntlet, the premise pass reframed a spec
-badly enough to supersede it outright — a plan built on that spec would have been wasted work.
+This is not a formality. In the runs that calibrated the gauntlet, the premise pass's finding
+carried a final `revise` disposition that reworked the spec's framing — a plan built on the
+pre-review spec would have been wasted work.
 
 ---
 

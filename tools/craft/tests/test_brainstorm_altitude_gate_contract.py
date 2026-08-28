@@ -10,8 +10,8 @@ and gauntleted separately at its own altitude.
 Brainstorm still never flips a status itself in either branch — that discipline
 (pinned for the spec branch by `test_gauntlet_contract.py::
 test_brainstorm_hands_off_to_gauntlet_and_does_not_freeze`) must hold for the new ADR
-branch too: no craft file may flip an adr `active` except the gauntlet
-(`test_only_gauntlet_flips_an_adr_active` in `test_gauntlet_contract.py`), so brainstorm
+branch too: no craft file may flip an adr `active` except distill
+(`test_only_distill_flips_an_adr_active` in `test_gauntlet_contract.py`), so brainstorm
 must never carry the literal `--status active` write.
 
 These are content anchors on the prose, not a runtime harness — same contract-pin
@@ -35,10 +35,18 @@ _ALTITUDE_TRIGGER_PHRASE = "one design change, more than one spec of work"
 # this pin share exactly one spelling of the phrase.
 _SEED_EDGE_PHRASE = "related: adr=<the-adr>"
 
-# The rejected-ADR orphan rule, pinned verbatim.
+# The reaches-downstream orphan rule, pinned verbatim — names the mechanism
+# (a reaches-downstream prescription naming the specs) rather than the old
+# gauntlet-discard framing this replaces.
 _ORPHAN_RULE = (
-    "its seeded derived specs are orphaned back to brainstorm — their "
-    "`related: adr=` edge points at the `dropped` draft as provenance"
+    "only the derived specs it names are orphaned back to brainstorm — their "
+    "`related: adr=` edge stays as provenance, not a live link to act on"
+)
+
+# The unnamed-seed-is-not-orphaned pin, pinned verbatim.
+_UNNAMED_SEED_NOT_ORPHANED_RULE = (
+    "An unnamed seed is not orphaned: it proceeds as drafted, undisturbed by a "
+    "`reaches-downstream` finding that did not name it"
 )
 
 
@@ -132,9 +140,23 @@ def test_seeds_are_each_brainstormed_and_gauntleted_separately():
     )
 
 
-def test_rejected_adr_orphans_its_seeded_specs():
-    assert _ORPHAN_RULE in _text(), (
-        f"brainstorm/SKILL.md must pin the rejected-ADR orphan rule verbatim — {_ORPHAN_RULE!r}"
+def test_reaches_downstream_prescription_orphans_only_the_named_specs():
+    text = _text()
+    assert "reaches-downstream" in text, (
+        "brainstorm/SKILL.md's orphaning rule must be expressed in terms of a "
+        "`reaches-downstream` prescription, not a gauntlet discard of the ADR — "
+        "the gauntlet no longer discards a draft ADR."
+    )
+    assert _ORPHAN_RULE in text, (
+        f"brainstorm/SKILL.md must pin the reaches-downstream orphan rule verbatim — "
+        f"{_ORPHAN_RULE!r}"
+    )
+
+
+def test_unnamed_seed_is_not_orphaned():
+    assert _UNNAMED_SEED_NOT_ORPHANED_RULE in _text(), (
+        "brainstorm/SKILL.md must pin that a seed NOT named by a reaches-downstream "
+        f"prescription is not orphaned, verbatim — {_UNNAMED_SEED_NOT_ORPHANED_RULE!r}"
     )
 
 
@@ -180,12 +202,12 @@ def test_handoff_does_not_cite_the_gauntlet_internal_step_numbering():
 
 def test_brainstorm_never_writes_the_adr_active_flip():
     """Brainstorm creates the draft ADR and hands off — it must never flip statuses
-    itself, in either branch. The gauntlet alone owns `draft -> active`
-    (`test_only_gauntlet_flips_an_adr_active` in test_gauntlet_contract.py); if this
+    itself, in either branch. Distill alone owns `draft -> active`
+    (`test_only_distill_flips_an_adr_active` in test_gauntlet_contract.py); if this
     literal string ever appears here, brainstorm has grown a bypass around it."""
     assert "--status active" not in _text(), (
         "brainstorm/SKILL.md must never carry the literal `--status active` write — "
-        "the gauntlet alone flips an adr to active, never brainstorm"
+        "distill alone flips an adr to active, never brainstorm"
     )
 
 

@@ -1323,6 +1323,12 @@ def _cmd_record_update(args) -> int:
                 # an entry stored before that check existed must not block an
                 # unrelated update (a ``--status`` flip) to the record holding
                 # it, nor the ``--unset-depends-on`` that removes it.
+                #
+                # ``prior_status`` / ``prior_body`` are the on-disk values read
+                # above, BEFORE this call's mutations — keyed on what the
+                # record WAS, not what this write sets, so a ``--status
+                # superseded`` flip is judged as "was this active adr's body
+                # left alone", never as "is the record still active after".
                 guard_errors, notices = guards_mod.evaluate_graph_guards(
                     kind=location.kind,
                     name=location.name,
@@ -1331,6 +1337,8 @@ def _cmd_record_update(args) -> int:
                     vault_root=location.vault_root,
                     status_set=getattr(args, "status", None),
                     supplied_depends_on=list(getattr(args, "depends_on", None) or []),
+                    prior_status=existing_sidecar.get("status"),
+                    prior_body=existing_body,
                 )
                 if guard_errors:
                     raise _UpdateAborted(_fail(guard_errors))
