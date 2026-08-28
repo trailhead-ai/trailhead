@@ -497,14 +497,30 @@ def _flat(text: str) -> str:
     return " ".join(text.split())
 
 
+def _section(text: str, header: str, stop: str, why: str = "") -> str:
+    """One section of distill/SKILL.md, from *header* up to *stop*.
+
+    Every section pin below scopes itself this way rather than matching the whole
+    file: the skill states neighbouring rules in near-identical prose, so a
+    whole-file substring check passes on a sibling section's wording and pins
+    nothing. Both bounds are located with ``index``, so a missing *stop* raises
+    rather than silently widening the slice to the end of the file.
+    """
+    assert header in text, why or f"distill/SKILL.md must carry a {header!r} section"
+    start = text.index(header)
+    return text[start:text.index(stop, start)]
+
+
 def _activation_step(text: str) -> str:
-    assert _ACTIVATION_STEP_HEADER in text, (
-        "distill/SKILL.md must carry the activation-check step in 'Write, in a "
-        "fixed order'"
+    return _section(
+        text,
+        _ACTIVATION_STEP_HEADER,
+        "## Terminal outcomes",
+        why=(
+            "distill/SKILL.md must carry the activation-check step in 'Write, in a "
+            "fixed order'"
+        ),
     )
-    start = text.index(_ACTIVATION_STEP_HEADER)
-    end = text.index("## Terminal outcomes", start)
-    return text[start:end]
 
 
 def _would_activate(sibling_statuses: set[str]) -> bool:
@@ -652,38 +668,35 @@ _FORWARD_ANCHORED_HEADER = "### Forward-anchored clusters"
 
 
 def _queue_exclusion_section(text: str) -> str:
-    """Just §2 of the sweep queue — the per-candidate exclusion rule itself.
-
-    Scoped deliberately: a whole-file substring check cannot tell this rule's
-    prose from the surrounding queue prose, and would pass with the change
-    reverted.
-    """
-    start = text.index("### 2. Apply the exclusion per candidate")
-    end = text.index("### 3. Resolve each surviving spec's task tree", start)
-    return text[start:end]
+    """Just §2 of the sweep queue — the per-candidate exclusion rule itself."""
+    return _section(
+        text,
+        "### 2. Apply the exclusion per candidate",
+        "### 3. Resolve each surviving spec's task tree",
+    )
 
 
 def _forward_anchored_section(text: str) -> str:
-    assert _FORWARD_ANCHORED_HEADER in text, (
-        "distill/SKILL.md must carry a forward-anchored cluster rule in 'Step 1 — "
-        "Cluster before drafting'"
+    return _section(
+        text,
+        _FORWARD_ANCHORED_HEADER,
+        "### The deferral rule",
+        why=(
+            "distill/SKILL.md must carry a forward-anchored cluster rule in 'Step 1 "
+            "— Cluster before drafting'"
+        ),
     )
-    start = text.index(_FORWARD_ANCHORED_HEADER)
-    end = text.index("### The deferral rule", start)
-    return text[start:end]
 
 
 def _proposal_step(text: str) -> str:
-    start = text.index("## Step 2 — Draft the proposal")
-    end = text.index("## Step 3 — Disposition", start)
-    return text[start:end]
+    return _section(text, "## Step 2 — Draft the proposal", "## Step 3 — Disposition")
 
 
 def _outcome_bullet(text: str, label: str) -> str:
     """One bullet of '## Terminal outcomes', so an assertion cannot pass on a
     sibling outcome's prose.
     """
-    outcomes = text[text.index("## Terminal outcomes"):text.index("## Resuming an interrupted run")]
+    outcomes = _section(text, "## Terminal outcomes", "## Resuming an interrupted run")
     start = outcomes.index(f"- **{label}**")
     nxt = outcomes.find("\n- **", start + 1)
     return outcomes[start:] if nxt == -1 else outcomes[start:nxt]

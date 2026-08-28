@@ -10,8 +10,8 @@ and gauntleted separately at its own altitude.
 Brainstorm still never flips a status itself in either branch — that discipline
 (pinned for the spec branch by `test_gauntlet_contract.py::
 test_brainstorm_hands_off_to_gauntlet_and_does_not_freeze`) must hold for the new ADR
-branch too: no craft file may flip an adr `active` except the gauntlet
-(`test_only_gauntlet_flips_an_adr_active` in `test_gauntlet_contract.py`), so brainstorm
+branch too: no craft file may flip an adr `active` except distill
+(`test_only_distill_flips_an_adr_active` in `test_gauntlet_contract.py`), so brainstorm
 must never carry the literal `--status active` write.
 
 These are content anchors on the prose, not a runtime harness — same contract-pin
@@ -202,12 +202,12 @@ def test_handoff_does_not_cite_the_gauntlet_internal_step_numbering():
 
 def test_brainstorm_never_writes_the_adr_active_flip():
     """Brainstorm creates the draft ADR and hands off — it must never flip statuses
-    itself, in either branch. The gauntlet alone owns `draft -> active`
-    (`test_only_gauntlet_flips_an_adr_active` in test_gauntlet_contract.py); if this
+    itself, in either branch. Distill alone owns `draft -> active`
+    (`test_only_distill_flips_an_adr_active` in test_gauntlet_contract.py); if this
     literal string ever appears here, brainstorm has grown a bypass around it."""
     assert "--status active" not in _text(), (
         "brainstorm/SKILL.md must never carry the literal `--status active` write — "
-        "the gauntlet alone flips an adr to active, never brainstorm"
+        "distill alone flips an adr to active, never brainstorm"
     )
 
 

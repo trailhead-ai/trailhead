@@ -2,9 +2,9 @@
 
 <!-- ADRs are immutable once `active` (convention-enforced). A forward ADR is drafted by
 brainstorm, reviewed by the gauntlet — which may send it through one or more `revise` rounds
-but never activates or discards it — and activated by distill when its derived specs complete,
-i.e. once every spec carrying `related: adr=<this-adr>` has reached `complete`. A backward
-(distilled) ADR is instead created already `active` by the distill ritual's write-order
+but never activates or discards it — and activated by distill when its derived specs complete
+(`skills/distill/SKILL.md`, "Write, in a fixed order", which states the exact condition). A
+backward (distilled) ADR is instead created already `active` by the distill ritual's write-order
 disposition — either way, once `active` an edit means a new, superseding ADR, not a change to
 this one.
 Keep the whole record to roughly one screenful: a decision that doesn't fit a screen is

@@ -405,8 +405,8 @@ _ADR_MODE_AGENTS: list[str] = [
 # Mirrors `_SPEC_ADVANCE_RE`: a literal substring only catches the one exact
 # spelling this file happens to use, so a differently-phrased adr activation
 # elsewhere (extra whitespace, reordered flags) would silently escape the
-# "only gauntlet flips it" guard. The gauntlet owns this edge too, and it is
-# the ONLY file allowed to carry it.
+# "only distill flips it" guard. Distill owns this edge, on both the forward and
+# the backward path, and it is the ONLY file allowed to carry it.
 _ADR_ADVANCE_RE = re.compile(r"<adr-id>\s+--status\s+active")
 
 _ANNOTATION_PROVENANCE_SENTENCE = (
@@ -420,12 +420,31 @@ _DISTILLED_SKIP_SENTENCE = (
 )
 
 
+def _section(text: str, header: str, stop: str | None = None, why: str = "") -> str:
+    """One section of gauntlet/SKILL.md, from *header* up to *stop*.
+
+    Every section pin scopes itself this way rather than matching the whole file:
+    the skill states the spec-mode and adr-mode rules in near-identical prose, so
+    a whole-file substring check passes on the other mode's wording and pins
+    nothing. A *stop* of ``None``, or one that does not occur after *header*,
+    means "to the end of the text" — the last section of a file or of a slice has
+    no following marker to bound it.
+    """
+    assert header in text, why or f"gauntlet/SKILL.md must carry a {header!r} section"
+    start = text.index(header)
+    end = -1 if stop is None else text.find(stop, start + 1)
+    return text[start:] if end == -1 else text[start:end]
+
+
 def _adr_mode_section(text: str) -> str:
-    assert ADR_SECTION_HEADER in text, (
-        f"gauntlet/SKILL.md must carry a {ADR_SECTION_HEADER!r} section describing "
-        "adr-target mode"
+    return _section(
+        text,
+        ADR_SECTION_HEADER,
+        why=(
+            f"gauntlet/SKILL.md must carry a {ADR_SECTION_HEADER!r} section "
+            "describing adr-target mode"
+        ),
     )
-    return text[text.index(ADR_SECTION_HEADER):]
 
 
 def test_gauntlet_never_flips_an_adr_active():
@@ -608,14 +627,16 @@ def _resolution_step(text: str) -> str:
     `#### ` subsections inside the step do not terminate it; only the next `### `
     step heading does.
     """
-    assert RESOLUTION_HEADER in text, (
-        f"gauntlet/SKILL.md must carry a {RESOLUTION_HEADER!r} step — the adjudicated "
-        "findings reach the operator as one recommendation, not as a per-finding "
-        "interrogation"
+    return _section(
+        text,
+        RESOLUTION_HEADER,
+        "\n### ",
+        why=(
+            f"gauntlet/SKILL.md must carry a {RESOLUTION_HEADER!r} step — the "
+            "adjudicated findings reach the operator as one recommendation, not as "
+            "a per-finding interrogation"
+        ),
     )
-    start = text.index(RESOLUTION_HEADER)
-    end = text.find("\n### ", start + 1)
-    return text[start:] if end == -1 else text[start:end]
 
 
 def test_resolution_step_exists():
@@ -1570,13 +1591,6 @@ def _accepted_tail(text: str) -> str:
         f"the resolution step must carry a {ACCEPTED_TAIL_ANCHOR!r} subsection"
     )
     return step[step.index(ACCEPTED_TAIL_ANCHOR):]
-
-
-def _section(text: str, header: str, stop: str) -> str:
-    assert header in text, f"gauntlet/SKILL.md must carry a {header!r} section"
-    start = text.index(header)
-    end = text.find(stop, start + 1)
-    return text[start:] if end == -1 else text[start:end]
 
 
 def _spec_tail(text: str) -> str:
