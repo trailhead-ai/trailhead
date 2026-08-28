@@ -845,3 +845,20 @@ def test_the_queue_keeps_specs_whose_anchoring_adr_is_still_draft():
         "§2's annotation exclusion list must include the forward-anchored value, "
         "or a distilled forward-anchored cluster re-enters the queue forever"
     )
+
+
+def test_the_activation_step_names_the_narrowed_exclusion_that_feeds_it():
+    """The cross-reference must be mutual, not one-directional.
+
+    §2 names step 6 three times as the reason its edge exclusion is narrow. Step
+    6 must name §2 back: a reader who arrives at the activation check alone
+    otherwise cannot tell why a spec carrying a `related: adr=` edge is reachable
+    here at all, since the unnarrowed reading of §2 excludes exactly those specs
+    before clustering. A commitment whose enforcement lives in an unnamed other
+    section is the failure mode both clauses exist to prevent.
+    """
+    flat = _flat(_activation_step(_text()))
+    assert "still `draft`" in flat and "queue" in flat, (
+        "the activation step must name the narrowed §2 exclusion that lets a "
+        "`draft`-anchored spec stay in the queue and reach this check"
+    )

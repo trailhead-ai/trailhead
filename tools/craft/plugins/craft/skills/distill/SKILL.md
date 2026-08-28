@@ -304,7 +304,10 @@ claims `complete` until everything behind it landed.
 
 6. **Then check activation, for every spec just flipped `complete` that carries a `related: adr=`
    edge** — completing a member spec is also the trigger that may finish the forward ADR it was
-   derived from:
+   derived from. Such a spec reaches this point only because §2's edge exclusion is narrowed to
+   anchoring ADRs that are already `active` or terminal: a spec whose anchoring ADR is still
+   `draft` **stays in the queue** and clusters as a forward-anchored member, which is what leaves
+   this check something to fire on.
 
    ```
    lore search "kind:spec related-adr:<adr-id>"
