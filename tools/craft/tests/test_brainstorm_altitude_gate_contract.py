@@ -9,7 +9,7 @@ and gauntleted separately at its own altitude.
 
 Brainstorm still never flips a status itself in either branch — that discipline
 (pinned for the spec branch by `test_gauntlet_contract.py::
-test_brainstorm_hands_off_to_gauntlet_and_does_not_freeze`) must hold for the new ADR
+test_brainstorm_hands_off_to_gauntlet_and_does_not_advance`) must hold for the new ADR
 branch too: no craft file may flip an adr `active` except distill
 (`test_only_distill_flips_an_adr_active` in `test_gauntlet_contract.py`), so brainstorm
 must never carry the literal `--status active` write.
@@ -182,7 +182,7 @@ def test_brainstorm_still_hands_off_to_gauntlet_for_the_spec_branch():
 def test_handoff_does_not_cite_the_gauntlet_internal_step_numbering():
     """The gauntlet's resolution flow forks per mode after its shared steps.
 
-    A spec freezes in the numbered spec tail; an adr freezes in the adr tail, which
+    A spec advances in the numbered spec tail; an adr advances in the adr tail, which
     carries no step number at all. Citing one number for both is wrong for the adr
     branch, and it re-breaks every time the gauntlet renumbers.
     """

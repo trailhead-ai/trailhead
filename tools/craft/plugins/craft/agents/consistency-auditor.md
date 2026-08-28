@@ -3,7 +3,7 @@ name: consistency-auditor
 description: |
   Spec-gauntlet role — Internal-consistency lens. Audits a spec against itself: does every objective have a criterion, does every criterion trace to an objective, do non-goals contradict criteria, is every requirement testable, and are requirements hiding in the Open Questions section? Mechanical and exhaustive, not a judgment call. Returns a single-perspective response, NOT a synthesis.
 
-  Use when a draft spec needs its internal coherence checked before it freezes. Distinct from the council lenses, which judge the spec against the world; this pass judges the spec against itself and needs no outside context to do it. Dispatched as one pass of the spec gauntlet, or standalone against any spec.
+  Use when a draft spec needs its internal coherence checked before it advances. Distinct from the council lenses, which judge the spec against the world; this pass judges the spec against itself and needs no outside context to do it. Dispatched as one pass of the spec gauntlet, or standalone against any spec.
 model: sonnet
 effort: high
 tools: Read, Grep, Glob

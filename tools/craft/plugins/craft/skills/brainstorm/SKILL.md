@@ -3,7 +3,7 @@ name: brainstorm
 description: >
   Use BEFORE planning, when an idea is still fuzzy and needs discovery. Reach a precise, shared
   understanding of exactly what to build by interrogating the user relentlessly — fleshing out every
-  requirement, detail, and gap — then freeze it into a spec (problem, objectives, acceptance
+  requirement, detail, and gap — then settle it into a spec (problem, objectives, acceptance
   criteria, non-goals, UI direction). The spec is the *output* of that understanding, not a shortcut
   to it; don't rush it.
   TRIGGER when: user says "thinking about", "what if", "exploring", "noodling on", "should we",
@@ -332,7 +332,7 @@ Before declaring brainstorming done, verify the checklist:
   spec (6a), or the ADR plus its seeded specs (6b)
 
 If all checklist items are green, hand off to the **gauntlet** — the adversarial review that every
-spec, and every draft ADR, passes before it freezes.
+spec, and every draft ADR, passes before it advances.
 
 **Common case (6a):**
 
@@ -358,7 +358,7 @@ brainstorm writes the spec at `draft`, or the ADR at its default `draft`, and st
 cases; the `gauntlet` skill owns the flip, spec or adr alike — it runs in the accepted tail,
 once the operator has accepted the gauntlet's recommendation. That split is deliberate
 — it makes the review structurally unskippable rather than a checklist item to honor, because
-nothing else in the pipeline freezes either kind of record.
+nothing else in the pipeline advances either kind of record.
 
 Let the user invoke `/craft:gauntlet` explicitly so it loads cleanly — do not enter it from within
 brainstorm (a skill→skill chain is unreliable).
@@ -369,22 +369,22 @@ within brainstorm; let the user invoke `/craft:plan` explicitly once the spec is
 
 ## Status Lifecycle
 
-The spec frontmatter `status` walks `draft` (brainstorming) → `ready` (frozen, planning-ready) →
+The spec frontmatter `status` walks `draft` (brainstorming) → `ready` (settled, planning-ready) →
 `planned` (a plan references it) → `complete` (work landed). Only these values are valid —
 off-vocab values like `shipped` are rejected. Once `ready`, the spec
-is **frozen**: no more edits; new thinking on the same topic creates a new spec with a
+is **settled**: no more edits; new thinking on the same topic creates a new spec with a
 `Related → Prior specs` link back.
 
 **The `draft` → `ready` edge is the gauntlet's.** Brainstorm leaves the spec at `draft`; the
 `gauntlet` skill flips it once the operator has accepted its recommendation. A gauntlet Critical
-carrying a final `revise` disposition withholds the freeze instead — the spec stays `draft`, the
+carrying a final `revise` disposition withholds the advance instead — the spec stays `draft`, the
 prescription is folded in, and the next revise round re-runs only the passes that raised it. It
-freezes when no Critical still carries `revise`. That is the review working, not the spec failing.
+advances when no Critical still carries `revise`. That is the review working, not the spec failing.
 
 ## Bounce-Back from Planning
 
 If planning or implementation surfaces something that would change a spec's **objectives, acceptance
-criteria, or non-goals**, don't edit the frozen spec — stop, re-enter brainstorming on the new
+criteria, or non-goals**, don't edit the settled spec — stop, re-enter brainstorming on the new
 dimension, produce a new spec referencing the prior one in `Related`, and resume planning against it.
 Task-level uncertainty (how to structure a query, which library to use, what to name a module) is
 resolved inline in planning instead — the bounce-back rule is for *what / why* shifts, not *how* shifts.
