@@ -1175,6 +1175,122 @@ def test_no_gauntlet_authored_write_sets_superseded_or_dropped():
     )
 
 
+# --- the discard route stays deleted in the SIBLING skills too ---
+
+# Files that describe the gauntlet from outside it. gauntlet/SKILL.md itself is
+# deliberately excluded: it has legitimate, separately-pinned uses of the
+# supersession vocabulary (the adr status vocab, the escalation table, and the
+# predecessor-supersession write), and its own outcome vocabulary is pinned by
+# `test_no_gauntlet_authored_write_sets_superseded_or_dropped` and
+# `test_revise_disposition_withholds_freeze_rather_than_superseding`.
+_SIBLING_DESCRIBERS = (BRAINSTORM, DISTILL, PLAN, PLANNER, PREMISE_ATTACKER)
+
+# A paragraph is talking about a gauntlet disposition if it names `revise` or the
+# premise pass...
+_DISPOSITION_TALK_RE = re.compile(r"revise|premise pass", re.IGNORECASE)
+# ...and it is restating the deleted discard route if it also reaches for the
+# supersession vocabulary in the same breath.
+_DISCARD_TALK_RE = re.compile(r"supersed|successor", re.IGNORECASE)
+
+
+def _paragraphs(path: Path) -> list[str]:
+    return [" ".join(block.split()) for block in path.read_text().split("\n\n")]
+
+
+def test_no_sibling_skill_restates_the_discard_route_in_revise_vocabulary():
+    """The discard route is gone everywhere, not just in the gauntlet's own file.
+
+    A `revise` disposition withholds the freeze and starts another round; it never
+    supersedes the record under review and never produces a successor record. The
+    gauntlet's own absence sweep is scoped to gauntlet/SKILL.md, so every sibling
+    that describes the gauntlet from outside — brainstorm's status lifecycle,
+    distill's clustering rule, plan's plannability gate, the planner agent's
+    provisional-plan caveat — was free to keep restating the deleted route in the
+    new vocabulary. Three of them did.
+
+    The rule this pins: no paragraph of a sibling may talk about a gauntlet
+    disposition and about supersession/successors at the same time. They are
+    unrelated mechanisms, and every observed drift came from a sentence that mixed
+    them. A paragraph with a legitimate need for both (an ADR superseding an ADR,
+    say) splits into two.
+    """
+    offenders = []
+    for path in _SIBLING_DESCRIBERS:
+        for para in _paragraphs(path):
+            if _DISPOSITION_TALK_RE.search(para) and _DISCARD_TALK_RE.search(para):
+                offenders.append(f"{path.relative_to(CRAFT)}: {para[:180]}")
+    assert not offenders, (
+        "a gauntlet `revise` disposition never supersedes the record under review "
+        "and never yields a successor — these paragraphs restate the deleted "
+        "discard route in the new vocabulary:\n  " + "\n  ".join(offenders)
+    )
+
+
+def test_the_planner_caveat_sends_the_operator_to_a_revise_round_not_a_successor():
+    """The planner's returned-summary blockquote is the copy an operator reads.
+
+    It told them a gauntlet finding voids the plan and restarts planning against a
+    successor spec. No gauntlet outcome makes that write: the spec stays `draft`
+    and is revised in place, so the plan is provisional against a spec that may
+    CHANGE, not one that may be replaced.
+    """
+    caveat = _section(
+        PLANNER.read_text(),
+        "> Spec written at `draft`",
+        "This is not a formality.",
+        why="planner.md must carry the provisional-plan caveat blockquote",
+    )
+    # Strip the blockquote markers before flattening — a pinned sentence must
+    # survive a line wrap inside the quote, not just outside it.
+    flat = _flat(caveat.replace("\n>", "\n"))
+    assert "the spec is revised in place and stays `draft`" in flat, (
+        "the caveat must tell the operator what a surviving `revise` actually "
+        "does — the spec is revised in place, never replaced"
+    )
+    assert "re-check this plan against the revised spec" in flat, (
+        "the caveat must name the operator's actual next step: re-check the plan "
+        "against the revised spec, not restart against a successor"
+    )
+    for banned in ("successor spec", "this plan is void"):
+        assert banned not in flat, (
+            f"the caveat must not claim {banned!r} — planning does not restart "
+            "against a replacement spec, because no replacement is written"
+        )
+
+
+# --- the skill description is loaded at trigger time and must not lie ---
+
+
+def _description_lead(text: str) -> str:
+    """The `description:` block's leading paragraph — everything before TRIGGER.
+
+    This is the text a harness loads into an agent's context when the skill
+    triggers, so a false promise here is read before any of the body is.
+    """
+    return _section(
+        text,
+        "description: >",
+        "TRIGGER when:",
+        why="gauntlet/SKILL.md must carry a frontmatter `description:` block",
+    )
+
+
+def test_the_skill_description_does_not_promise_an_adr_activation_it_never_writes():
+    lead = _flat(_description_lead(GAUNTLET.read_text()))
+    assert "an adr to `active`" not in lead, (
+        "the description must not promise it flips an adr to `active` — the body "
+        "says 'Activation is not this skill's job', and the description is the "
+        "half that gets loaded into an agent's context at trigger time"
+    )
+    assert "a draft adr stays `draft`" in lead, (
+        "the description must state the adr outcome it actually writes: none"
+    )
+    assert "distill activates it" in lead, (
+        "the description must name distill as the writer of the adr's activation, "
+        "so an agent reading only the description knows where the flip lives"
+    )
+
+
 def test_security_criticals_are_exempt_from_compression():
     """Compression is a convenience; it must not eat the costliest finding class.
 

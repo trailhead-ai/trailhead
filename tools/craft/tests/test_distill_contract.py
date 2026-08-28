@@ -487,8 +487,8 @@ GAUNTLET = CRAFT / "skills" / "gauntlet" / "SKILL.md"
 
 _ACTIVATION_STEP_HEADER = "6. **Then check activation"
 _ABSORPTION_EXCLUSION_SENTENCE = (
-    "This surfacing excludes a `draft` ADR carrying any `related: spec=` edge to "
-    "a spec whose status\nhas not yet reached a terminal status"
+    "This surfacing excludes a `draft` ADR while any spec carrying a "
+    "`related: adr=` edge to it has not yet reached a terminal status."
 )
 
 
@@ -573,15 +573,56 @@ def test_an_adr_whose_derived_specs_are_all_dropped_does_not_activate():
     assert _would_activate({"dropped", "dropped"}) is False
 
 
-def test_absorption_sweep_and_activation_read_terminality_off_the_same_set():
-    """Both checks must read `TERMINAL_SPEC_STATUSES` — the real constant, not a
-    duplicated literal — so they cannot silently drift apart.
+def _absorption_sweep_section(text: str) -> str:
+    """Just the absorption-sweep exclusion, bounded before the forward-anchored
+    rule — the neighbouring section states the same edge in the same vocabulary,
+    so a wider slice would pin nothing.
+    """
+    return _section(
+        text,
+        "**Lingering `draft` ADRs",
+        _FORWARD_ANCHORED_HEADER,
+        why=(
+            "distill/SKILL.md must carry the absorption-sweep exclusion in 'Step 1 "
+            "— Cluster before drafting'"
+        ),
+    )
+
+
+def test_absorption_sweep_and_activation_read_the_same_edge_and_the_same_set():
+    """The "the two sweeps cannot disagree" claim is about edge DIRECTION first.
+
+    A forward ADR never carries a `related: spec=` edge of its own: brainstorm's
+    altitude gate writes the edge **spec-side** on each derived seed (`--related
+    adr=<adr-id>` from birth), and distill writes it ADR-side only on the backward
+    path ("never on the spec"). So an exclusion keyed on the draft ADR's own
+    `related: spec=` edges is unsatisfiable for exactly the population it
+    protects, and the sweep would retire in-flight forward ADRs with `--status
+    dropped`. Both checks must traverse spec-side, off the same forward facet —
+    and only then read terminality off the same constant.
     """
     text = _text()
-    sweep_section = text[
-        text.index("Lingering `draft` ADRs"):text.index("### The deferral rule")
-    ]
+    sweep_section = _absorption_sweep_section(text)
     activation_section = _flat(_activation_step(text))
+    flat_sweep = _flat(sweep_section)
+    assert "any spec carrying a `related: adr=` edge to it" in flat_sweep, (
+        "the absorption-sweep exclusion must key on the specs that carry a "
+        "`related: adr=` edge TO the draft ADR — a forward ADR carries no "
+        "`related: spec=` edge of its own, so keying on one excludes nothing"
+    )
+    assert "carrying any `related: spec=` edge" not in flat_sweep, (
+        "the exclusion must not key on a `related: spec=` edge carried by the "
+        "draft ADR — that edge only ever exists on the backward path"
+    )
+    for section, which in (
+        (flat_sweep, "absorption-sweep exclusion"),
+        (activation_section, "activation check"),
+    ):
+        assert 'lore search "kind:spec related-adr:<adr-id>"' in section, (
+            f"the {which} must resolve the ADR's derived specs off the forward "
+            "`related-adr` facet — the two cannot disagree only if they traverse "
+            "the same edge in the same direction"
+        )
     for status in TERMINAL_SPEC_STATUSES:
         assert f'"{status}"' in sweep_section, (
             f"the absorption-sweep exclusion must name {status!r} from the real "
@@ -622,7 +663,9 @@ def test_distill_is_the_sole_writer_of_draft_to_active_on_both_paths():
 
 
 def test_absorption_sweep_exclusion_is_a_pinned_procedural_step():
-    assert _ABSORPTION_EXCLUSION_SENTENCE in _text(), (
+    assert _ABSORPTION_EXCLUSION_SENTENCE in _flat(
+        _absorption_sweep_section(_text())
+    ), (
         "distill/SKILL.md must state the absorption-sweep's exclusion for drafts "
         "with incomplete derived specs as a concrete, pinned procedural step"
     )
@@ -827,6 +870,31 @@ def test_the_deferral_rule_is_unchanged_for_forward_anchored_clusters():
     ), (
         "the deferral rule must be restated as unchanged for forward-anchored "
         "clusters — recognition changes which proposal is presented, nothing else"
+    )
+
+
+def test_the_queue_exclusion_imperative_carries_the_anchor_status_narrowing():
+    """The operative sentence must state the narrowed rule itself.
+
+    "drop the candidate on either hit" is the imperative a reader acts on; a
+    correction that arrives in a later paragraph arrives after the drop.
+    """
+    flat = _flat(_queue_exclusion_section(_text()))
+    assert (
+        "drop the candidate on an annotation hit, or on a `related: adr` edge "
+        "whose anchoring ADR has itself reached `active` or a terminal status" in flat
+    ), (
+        "§2's operative imperative must carry the anchor-status narrowing in the "
+        "same sentence — stating the un-narrowed rule and correcting it later "
+        "drops in-flight forward-anchored specs out of the queue"
+    )
+    assert "never on a bare edge whose anchor is still `draft`" in flat, (
+        "the imperative must name the case it must NOT drop on — the whole point "
+        "of the narrowing is the candidate it keeps"
+    )
+    assert "drop the candidate on either hit" not in flat, (
+        "the un-narrowed imperative must be gone, not merely followed by a "
+        "correction"
     )
 
 

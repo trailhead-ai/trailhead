@@ -7,8 +7,8 @@ description: >
   same roster runs minus the divergence probe (no analogue for a decision document) — seven passes.
   The main session adjudicates and hands back one compact recommendation — a synthesis, a
   recommended outcome, and a proposed disposition per Critical — which the user accepts or overrides in a single
-  round-trip, before the record is stamped with review provenance and flips (a spec to `ready`,
-  an adr to `active`).
+  round-trip, before the record is stamped with review provenance. A spec then flips to `ready`;
+  a draft adr stays `draft` — distill activates it once every spec derived from it lands.
   TRIGGER when: brainstorming has produced a spec and is at its exit gate (the gauntlet is a
   mandatory step there), a draft adr needs review before it flips to `active`, or the user says "run
   the gauntlet", "gauntlet this spec", "gauntlet this adr", "adversarial spec review", "review the

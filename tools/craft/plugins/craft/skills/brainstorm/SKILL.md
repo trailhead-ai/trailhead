@@ -377,9 +377,9 @@ is **frozen**: no more edits; new thinking on the same topic creates a new spec 
 
 **The `draft` → `ready` edge is the gauntlet's.** Brainstorm leaves the spec at `draft`; the
 `gauntlet` skill flips it once the operator has accepted its recommendation. A gauntlet Critical
-carrying a final `revise` disposition sends the spec to `superseded` instead — the framing didn't
-survive, so this spec never freezes and a new one takes its place. That is the review working, not
-the spec failing.
+carrying a final `revise` disposition withholds the freeze instead — the spec stays `draft`, the
+prescription is folded in, and the next revise round re-runs only the passes that raised it. It
+freezes when no Critical still carries `revise`. That is the review working, not the spec failing.
 
 ## Bounce-Back from Planning
 
