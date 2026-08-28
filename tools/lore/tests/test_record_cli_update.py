@@ -2375,3 +2375,147 @@ def test_update_full_body_replace_supplying_pre_neutralization_text_succeeds(tmp
     )
     assert r.returncode == 0, r.stderr
     assert _find_body(vault, rid) == stored
+
+
+# ---------------------------------------------------------------------------
+# active-adr immutability: status-laundering bypass
+# ---------------------------------------------------------------------------
+
+
+def test_update_status_launder_to_draft_against_active_adr_rejected(tmp_path):
+    """The two-write laundering bypass: flip an active adr back to ``draft``
+    (metadata-only, so the immutability check passes trivially), then edit the
+    body while the prior status is no longer ``active``. The first write is the
+    whole exploit — an adr that has left ``draft`` can never return to it.
+    """
+    vault, state = _make_vault(tmp_path)
+    body = "# Decision\n\nOriginal text.\n"
+    rid = _create_adr(vault, state, title="Launder Target", status="active", body=body)
+
+    launder = _run(
+        ["record", "update", rid, "--status", "draft"],
+        vault=vault, state_dir=state,
+    )
+    assert launder.returncode != 0, launder.stdout
+    assert "[adr-frozen-status]" in launder.stderr
+    assert _find_sidecar(vault, rid)["status"] == "active"
+
+    edit = _run(
+        ["record", "update", rid],
+        vault=vault, state_dir=state, stdin_text="# Decision\n\nHacked.\n",
+    )
+    assert edit.returncode != 0
+    assert _find_body(vault, rid) == body
+
+
+def test_update_body_change_against_superseded_adr_rejected(tmp_path):
+    """A legitimate exit from ``active`` is not a laundering path: once
+    superseded, the frozen decision's body stays frozen.
+    """
+    vault, state = _make_vault(tmp_path)
+    body = "# Decision\n\nOriginal text.\n"
+    rid = _create_adr(vault, state, title="Superseded Target", status="active", body=body)
+
+    flip = _run(
+        ["record", "update", rid, "--status", "superseded"],
+        vault=vault, state_dir=state,
+    )
+    assert flip.returncode == 0, flip.stderr
+
+    edit = _run(
+        ["record", "update", rid],
+        vault=vault, state_dir=state, stdin_text="# Decision\n\nHacked.\n",
+    )
+    assert edit.returncode != 0
+    assert "[adr-active-immutable]" in edit.stderr
+    assert _find_body(vault, rid) == body
+
+
+def test_update_body_change_against_dropped_adr_rejected(tmp_path):
+    """The other legitimate exit from ``active`` is likewise not a laundering
+    path.
+    """
+    vault, state = _make_vault(tmp_path)
+    body = "# Decision\n\nOriginal text.\n"
+    rid = _create_adr(vault, state, title="Dropped Target", status="active", body=body)
+
+    flip = _run(
+        ["record", "update", rid, "--status", "dropped"],
+        vault=vault, state_dir=state,
+    )
+    assert flip.returncode == 0, flip.stderr
+
+    edit = _run(
+        ["record", "update", rid],
+        vault=vault, state_dir=state, stdin_text="# Decision\n\nHacked.\n",
+    )
+    assert edit.returncode != 0
+    assert "[adr-active-immutable]" in edit.stderr
+    assert _find_body(vault, rid) == body
+
+
+def test_update_status_draft_flip_against_superseded_adr_rejected(tmp_path):
+    """Nor can the supersession exit be chained back into ``draft`` — the
+    frozen statuses are closed under every permitted transition.
+    """
+    vault, state = _make_vault(tmp_path)
+    body = "# Decision\n\nOriginal text.\n"
+    rid = _create_adr(vault, state, title="Chained Launder Target", status="active", body=body)
+
+    flip = _run(
+        ["record", "update", rid, "--status", "superseded"],
+        vault=vault, state_dir=state,
+    )
+    assert flip.returncode == 0, flip.stderr
+
+    launder = _run(
+        ["record", "update", rid, "--status", "draft"],
+        vault=vault, state_dir=state,
+    )
+    assert launder.returncode != 0
+    assert "[adr-frozen-status]" in launder.stderr
+    assert _find_sidecar(vault, rid)["status"] == "superseded"
+
+
+def test_update_supersession_flip_with_backedge_still_permitted_after_freeze(tmp_path):
+    """The required supersession flow — predecessor flipped to ``superseded``
+    with a back-edge naming its successor, body untouched — must stay open.
+    """
+    vault, state = _make_vault(tmp_path)
+    body = "# Decision\n\nOriginal text.\n"
+    rid = _create_adr(vault, state, title="Freeze Regression Guard", status="active", body=body)
+    successor = _create_adr(vault, state, title="Freeze Regression Successor",
+                            status="draft", body="# Successor\n")
+    successor_name = successor.split("/", 1)[1]
+
+    r = _run(
+        ["record", "update", rid, "--status", "superseded",
+         "--related", f"adr={successor_name}"],
+        vault=vault, state_dir=state,
+    )
+    assert r.returncode == 0, r.stderr
+    assert _find_sidecar(vault, rid)["status"] == "superseded"
+    assert _find_body(vault, rid) == body
+
+
+def test_update_draft_adr_may_still_be_promoted_and_edited(tmp_path):
+    """``draft`` is the only unfrozen status, and the promotion INTO a frozen
+    status is untouched: a draft body stays editable, and draft → active still
+    works.
+    """
+    vault, state = _make_vault(tmp_path)
+    rid = _create_adr(vault, state, title="Still Draft", status="draft",
+                      body="# Decision\n\nOriginal.\n")
+
+    edit = _run(
+        ["record", "update", rid],
+        vault=vault, state_dir=state, stdin_text="# Decision\n\nRevised.\n",
+    )
+    assert edit.returncode == 0, edit.stderr
+
+    promote = _run(
+        ["record", "update", rid, "--status", "active"],
+        vault=vault, state_dir=state,
+    )
+    assert promote.returncode == 0, promote.stderr
+    assert _find_sidecar(vault, rid)["status"] == "active"
