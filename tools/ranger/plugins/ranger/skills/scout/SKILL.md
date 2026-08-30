@@ -2,9 +2,10 @@
 name: scout
 description: >
   Take one fuzzy idea and return a walking skeleton — a thin slice running end to end — by
-  surveying, writing a parent task with child slices directly, and building them. No spec, no
-  gauntlet, no plan ritual, no approval loops. Optimized for speed and for what building the
-  thing teaches you, not for correctness.
+  surveying, writing a parent task with child slices directly, building them, and shipping the
+  branch through the group's normal release path. No spec, no gauntlet, no plan ritual, no
+  approval loops. Optimized for speed and for what building the thing teaches you, not for
+  correctness.
   TRIGGER when: user says "scout this", "spike this", "just build me something end to end",
   "I want to see it working", "give me a first iteration", or invokes /ranger:scout explicitly.
   DO NOT TRIGGER when: the work is understood and needs building properly (use /craft:brainstorm
@@ -14,7 +15,12 @@ description: >
 # Scout
 
 Build a **walking skeleton** for one idea: a thin slice that runs end to end, fast, so there is
-something real to react to. Then report what building it taught you.
+something real to react to. Then ship it the way the group ships everything else, and report what
+building it taught you.
+
+What comes back is a merged branch — or one sitting green and ready to merge, if that is what the
+group's config says — plus a report. Not a pile of local commits waiting on the operator to do the
+last mile.
 
 You are not producing a correct implementation, and you are not producing a spec. You are
 producing an artifact the operator will look at, form an opinion about, and then re-do properly
@@ -57,9 +63,10 @@ The skeleton must not break things that already work. Two rules, in order:
 2. **The existing test suite is the guard.** Run it before you start (know what was already
    red) and again at the end. Newly-red tests are a stop condition, not a note for the report.
 
-Everything happens on a branch. **Nothing merges, and nothing pushes.** The run ends at
-committed work on a local branch plus a report; pushing is outward-facing and stays the
-operator's call, as does whether any of it becomes real.
+Everything happens on a branch, and that branch ships through the group's normal release path
+(step 6). **Scout holds no merge authority of its own.** It hands the PR to `portage`, whose
+`auto_merge` gate is fail-closed — so whether a skeleton lands is a standing decision the operator
+already made once in the group's config, not one scout makes per run.
 
 ## Process
 
@@ -129,7 +136,7 @@ Two bounds on that, so a run cannot grow forever:
   That growth is a finding in its own right — it is the clearest possible evidence that the
   original framing was too small.
 
-### 5. Report
+### 5. Report — this becomes the PR body
 
 Findings first. The forks are secondary.
 
@@ -145,9 +152,36 @@ Findings first. The forks are secondary.
   here. An operator who mistakes a stub for a working feature is the most likely way this whole
   ritual does damage.
 
-Then stop. Do not open a PR, do not merge, do not distill, do not write a spec, and do not offer
-to "finish it properly" — the operator decides whether the next pass is a real brainstorm or a
-second scout.
+Write this once, as the pull request description. It is not a chat message that scrolls away: the
+PR is where a reviewer meets the skeleton, and where someone finds it six months later wondering
+why the code looks like that. Lead the PR body by saying plainly that this is a scout skeleton and
+not a feature.
+
+### 6. Ship it
+
+Hand the branch to `portage` — do not drive `git push` or `gh` by hand.
+
+`/portage:pull_request create` pushes the branch, opens the PR with the step-5 report as its body,
+and links sibling PRs across the group's repos. It then watches CI and dispatches the group's
+configured `green_driver_agent` to triage and fix failures until the PR is green.
+
+Merging is `portage merge`'s call, gated on `[release] auto_merge` in the group TOML:
+
+- **Enabled** — the PR merges once green, in the group's `merge_order`. No further approval is
+  sought, because enabling that flag *was* the approval.
+- **Unset or false** — nothing merges; the run ends at a green, ready-to-merge PR and says so.
+
+Scout does not decide between those, does not merge outside `portage merge`'s answer, and does not
+ask the operator to re-authorize what the config already settled.
+
+**Green means the existing suite, honestly.** If CI cannot be made green, **stop and report.** Do
+not weaken a test, do not skip one, do not narrow a CI config to route around a failure, and do
+not merge red. A skeleton that cannot pass the suite that already existed has discovered something
+about the idea — that is the most valuable finding a run can produce, and burying it to reach a
+green check destroys the only thing scout was for.
+
+Then stop. Do not distill, do not write a spec, and do not offer to "finish it properly" — the
+operator decides whether the next pass is a real brainstorm or a second scout.
 
 ## Never
 
@@ -155,6 +189,8 @@ second scout.
   of assurance, scout was the wrong tool.
 - Never write a `spec` or an `adr` record. Scout's output is a task graph, a branch, and a
   report.
-- Never merge, and never open a PR.
+- Never merge by hand, and never merge outside `portage merge`'s answer — the `auto_merge` gate
+  is the only merge authority in play.
+- Never weaken, skip, or delete a test, and never touch CI config, to make a run go green.
 - Never block on a question. Answer it, note it as a fork, and keep moving.
 - Never let a slice go deep at the cost of the last slice existing at all.
