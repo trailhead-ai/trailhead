@@ -1,5 +1,6 @@
-# ranger — the unattended sweeps over a camp group's task queue: `refine`
-# (shaping the open queue) and `execute` (draining the buildable queue).
+# ranger — the unattended postures over a camp group's work: `refine` (shaping
+# the open queue), `execute` (draining the buildable queue), and `scout` (taking
+# one fuzzy idea to a walking skeleton, bypassing the shaping rituals entirely).
 # tool.name MUST equal the plugins/<name>/ dir ("ranger").
 # Selectable skills (skills/*/ with SKILL.md) and subagents (agents/*.md) are
 # discovered on disk; no always-on base. The product surface is the CLI.
