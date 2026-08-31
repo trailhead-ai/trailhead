@@ -75,7 +75,7 @@ each member's dispatch (the `<lens-critical-bars>` token):
 
 | Reviewing | Use |
 |---|---|
-| An implementation plan (`planning` step 8.5) | **Per-lens Critical bars** (below) — phrased at slice altitude |
+| An implementation plan (`planning` step 8.5) | **Per-lens Critical bars** (below) — phrased at task altitude |
 | A draft spec (`gauntlet` lens pass) | **Per-lens Critical bars — spec review** (further below) — phrased at spec altitude |
 | A draft adr (`gauntlet` lens pass, adr mode) | **Per-lens Critical bars — adr review** (further below) — phrased at decision altitude |
 | A standalone question (`consult`) | The plan bars, read as applying to the unit under review; skip any bar with no analogue |

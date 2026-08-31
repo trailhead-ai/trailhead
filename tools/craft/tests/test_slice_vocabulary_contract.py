@@ -372,3 +372,18 @@ def test_review_skill_names_its_unit_of_work_task():
         "review/SKILL.md's Integration with Workflows section must describe "
         "execute as task-by-task, not slice-by-slice"
     )
+
+
+def test_council_plan_bars_row_names_task_altitude():
+    """The plan-review bars are phrased about the component unit, which is now a task.
+
+    council.md's mode table tells a dispatcher which bar block to paste. Its plan row
+    must name the same altitude the bars themselves are written at — those read
+    "Task ordering creates a dependency that can't be tested" — or the table sends a
+    dispatcher looking for a block that does not exist under that name.
+    """
+    text = (CRAFT / "skills" / "_shared" / "council.md").read_text()
+    assert "phrased at task altitude" in text, (
+        "council.md's implementation-plan row must describe its bars as phrased at "
+        "task altitude, matching the component unit the bars actually name"
+    )
