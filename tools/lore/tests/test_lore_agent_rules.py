@@ -109,6 +109,26 @@ class TestInitWritesRuleset:
             "the installed ruleset must be byte-exact with render_ruleset_content()"
         )
 
+    def test_ruleset_names_every_free_write_zone_the_guard_exempts(self):
+        """Every zone `lore init` exempts must be named in the write rules.
+
+        The rules block is the ONLY protection against Bash-mediated vault
+        writes, and it is also what tells an agent which subtrees it may write
+        directly. A zone the guard allows but the rules do not mention is a
+        zone agents refuse to use; a zone the rules bless but the guard denies
+        is a blocked write with a confusing reason. Deriving the expected names
+        from the init module rather than hardcoding them means a third zone
+        fails here until the prose catches up.
+        """
+        init_mod = load_script("lore.cli.init")
+        zones = [init_mod._SITES_DIR, init_mod._OUTPOST_DIR]
+        content = _ruleset_content()
+        for zone in zones:
+            assert f"`{zone}/`" in content, (
+                f"the write rules must name the {zone!r} free-write zone; "
+                "an unnamed zone is one agents will refuse to write"
+            )
+
     def test_init_emits_per_harness_confirmation_line(self, tmp_path):
         state, config, home = _dirs(tmp_path)
         res = _run(["init"], state=state, config=config, home=home)

@@ -505,6 +505,42 @@ class TestGuardExemptZone:
             f"exemption pattern covers it; stderr={result.stderr!r}"
         )
 
+    def test_both_zones_are_exempt_when_both_patterns_are_registered(self, tmp_path):
+        """The exemption list is a LIST: a second pattern joins the first rather
+        than replacing it, and both zones are writable in the same session.
+
+        This is the property the Outpost config zone rests on — that the guard
+        is a multi-zone mechanism, not a single-valued variable that happens to
+        be read with a glob.
+        """
+        vaults_root, vault = self._vaults(tmp_path)
+        patterns = [f"{vaults_root}/*/sites", f"{vaults_root}/*/outpost"]
+        for zone, target in (
+            ("sites", vault / "sites" / "demo" / "index.html"),
+            ("outpost", vault / "outpost" / "streams" / "a-stream.json"),
+        ):
+            result = _run_guard(target, [vaults_root], exempt=patterns)
+            assert result.returncode == 0, (
+                f"the {zone} zone must be writable when both patterns are "
+                f"registered; stderr={result.stderr!r}"
+            )
+
+    def test_a_second_zone_does_not_unguard_the_record_trees(self, tmp_path):
+        """Registering another zone must not widen the deny anywhere else."""
+        vaults_root, vault = self._vaults(tmp_path)
+        patterns = [f"{vaults_root}/*/sites", f"{vaults_root}/*/outpost"]
+        for target in (
+            vault / "adr" / "some-decision.md",
+            vault / "task" / "some-task.md",
+            vault / "task" / "some-task" / "outpost" / "sneaky.json",
+            vault / "outpost-archive" / "x.json",
+        ):
+            result = _run_guard(target, [vaults_root], exempt=patterns)
+            assert result.returncode == 2, (
+                f"{target} must stay denied with both zones registered; "
+                f"stderr={result.stderr!r}"
+            )
+
     def test_record_write_in_the_same_vault_is_still_denied(self, tmp_path):
         vaults_root, vault = self._vaults(tmp_path)
         target = vault / "adr" / "some-decision.md"
@@ -1241,7 +1277,13 @@ class TestInitInstallsGuardrail:
         assert data.get("env", {}).get("FOO") == "bar", "unrelated env dropped"
 
     def test_init_sets_guard_exempt_env(self, tmp_path):
-        """The hook's exemption list must name each vault's top-level sites dir."""
+        """The hook's exemption list names every free-write zone a vault has.
+
+        Two zones today: the static-site tree and the Outpost config tree. The
+        value is a newline-joined list, and the order is the order lore
+        provisions them in — asserted whole rather than by membership so a
+        silently dropped zone cannot pass.
+        """
         state, config, home = _dirs(tmp_path)
         res = _run_init(["init"], state=state, config=config, home=home)
         assert res.returncode == 0, res.stderr
@@ -1249,9 +1291,10 @@ class TestInitInstallsGuardrail:
         _, data = self._read_user_settings(home)
         exempt = data.get("env", {}).get("LORE_VAULT_GUARD_EXEMPT", "")
         vaults = state / "lore" / "vaults"
-        assert exempt.split("\n") == [f"{vaults}/*/sites"], (
-            f"expected the per-vault sites exemption pattern; got {exempt!r}"
-        )
+        assert exempt.split("\n") == [
+            f"{vaults}/*/sites",
+            f"{vaults}/*/outpost",
+        ], f"expected the per-vault sites and outpost exemption patterns; got {exempt!r}"
 
     def test_init_aborts_cleanly_on_corrupt_settings(self, tmp_path):
         """A present-but-corrupt settings file → clean `error:` + nonzero, no traceback

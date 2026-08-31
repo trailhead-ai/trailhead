@@ -102,10 +102,13 @@ _GUARD_ROOT_DELIM = "\n"
 # newline, for the same reason.
 _GUARD_EXEMPT_DELIM = "\n"
 
-#: The one subtree of a vault that is not a record tree: a free-write zone for
-#: static sites, written with plain file operations and distributed by
-#: ``lore sync`` like any other vault content.
+#: The subtrees of a vault that are not record trees: free-write zones written
+#: with plain file operations and distributed by ``lore sync`` like any other
+#: vault content. ``sites`` holds static sites; ``outpost`` holds the Outpost
+#: daemon's per-vault configuration, which is an operator's working set over
+#: records rather than project memory and so is deliberately not a record kind.
 _SITES_DIR = "sites"
+_OUTPOST_DIR = "outpost"
 
 #: The files lore scaffolds at a vault ROOT. They are denied by literal name
 #: rather than by a ``*/*`` catch-all: a deny rule that matches a DIRECTORY
@@ -134,9 +137,10 @@ def _install_guardrail(settings_path: Path, vaults_root: Path) -> None:
          POSIX path, so a vault path containing ':' is not corrupted). The hook
          ``realpath``s these on every call, so the ``default`` symlink's *current*
          real target is always covered — never an install-time snapshot.
-      3. ``env.LORE_VAULT_GUARD_EXEMPT`` = ``<vaults_root>/*/sites`` — the one
-         subtree the hook lets through, so each vault's static-site zone is
-         directly writable while every record tree stays CLI-only.
+      3. ``env.LORE_VAULT_GUARD_EXEMPT`` = ``<vaults_root>/*/sites`` and
+         ``<vaults_root>/*/outpost`` — the subtrees the hook lets through, so
+         each vault's static-site and Outpost-config zones are directly
+         writable while every record tree stays CLI-only.
       4. Static ``permissions.deny`` ``Edit(...)`` rules as **defense-in-depth
          only** (they cannot cover a symlink's real target, so the runtime hook
          above is the security-sufficient mechanism): one rule per record kind,
@@ -171,9 +175,15 @@ def _install_guardrail(settings_path: Path, vaults_root: Path) -> None:
 
     default_link = vaults_root / "default"
     guard_root_value = _GUARD_ROOT_DELIM.join([str(vaults_root), str(default_link)])
-    # One pattern today — each vault's top-level sites zone. The env var carries
-    # a list, so another exemption joins it without a format change.
-    exempt_patterns = [str(vaults_root / "*" / _SITES_DIR)]
+    # One pattern per free-write zone, each naming that zone across every vault.
+    # The hook evaluates the list pattern by pattern and allows a target the
+    # moment any one covers it, so zones are independent: adding one cannot
+    # narrow or widen another, and each is still held to the `<vault>/<zone>`
+    # anchoring rule that keeps an exemption from unguarding a record tree.
+    exempt_patterns = [
+        str(vaults_root / "*" / _SITES_DIR),
+        str(vaults_root / "*" / _OUTPOST_DIR),
+    ]
     guard_exempt_value = _GUARD_EXEMPT_DELIM.join(exempt_patterns)
 
     settings_writer_mod.upsert_hook(

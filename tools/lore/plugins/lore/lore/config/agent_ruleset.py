@@ -14,10 +14,12 @@ only supplies the bytes.
     "Drift caveat" paragraph (which described a since-removed per-project
     multi-rules-file model) is intentionally dropped. It MUST stay first: this
     is the load-bearing guardrail and a reorder must never demote it.  It also
-    carries the one carve-out — a vault's top-level ``sites/`` directory is a
-    free-write zone — because the prohibition and its scope have to be read
-    together: stated apart, an agent applies the prohibition to the sites zone
-    and refuses a publish the hook and the deny rules both allow.
+    carries the carve-outs — a vault's top-level ``sites/`` and ``outpost/``
+    directories are free-write zones — because the prohibition and its scope
+    have to be read together: stated apart, an agent applies the prohibition to
+    a zone and refuses a write the hook and the deny rules both allow. Every
+    zone ``lore init`` exempts must be named here; an unnamed one is a zone
+    agents will not use.
   * ``PRIMER`` — a short (≤20-line) disposition primer: what lore is, the capture
     disposition (``lore session candidate`` is the default for findings during
     work; ``lore record`` is the direct-write exception for authored artifacts;
@@ -48,14 +50,20 @@ protection for that gap.  Violating it silently corrupts vault records.
 For harnesses without a PreToolUse hook (Cursor, Codex, etc.) this block is
 the **sole guardrail** — treat it as binding regardless of harness.
 
-**One carve-out — `sites/`:** a vault's top-level `sites/` directory holds
-static sites, not records, and is a **free-write zone**: write it with plain
-file operations, following the `outpost:publish-site` skill. `lore sync`
-distributes it like any other vault content. Never create a nested `.git`
-inside the zone — it corrupts the vault's own sync. The carve-out is exactly
-that one directory at the top level of a vault — a `sites/` directory
-anywhere else is inside a record tree and stays CLI-only, as does everything
-else in the vault.
+**Two carve-outs — `sites/` and `outpost/`:** these two top-level directories
+of a vault hold content, not records, and are **free-write zones**: write them
+with plain file operations. `lore sync` distributes them like any other vault
+content, and never create a nested `.git` inside either — it corrupts the
+vault's own sync.
+
+- `sites/` holds static sites; publish through the `outpost:publish-site` skill.
+- `outpost/` holds the Outpost daemon's per-vault configuration — an operator's
+  working set over records (work-stream declarations and the like), which is
+  deliberately not a record kind because it is not project memory.
+
+Each carve-out is exactly that one directory at the **top level** of a vault. A
+`sites/` or `outpost/` directory anywhere else is inside a record tree and stays
+CLI-only, as does everything else in the vault.
 
 Capture and read records via the CLI: `lore session candidate …` to capture
 findings during work and `lore record …` to write a durable record directly;
