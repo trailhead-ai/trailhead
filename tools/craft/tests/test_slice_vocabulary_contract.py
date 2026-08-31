@@ -14,6 +14,10 @@ from pathlib import Path
 
 CRAFT = Path(__file__).parent.parent / "plugins" / "craft"
 SHARED_SLICE = CRAFT / "skills" / "_shared" / "slice.md"
+PLAN_SKILL = CRAFT / "skills" / "plan" / "SKILL.md"
+TEMPLATE_TASK = CRAFT / "templates" / "task.md"
+TEMPLATE_PLAN = CRAFT / "templates" / "plan.md"
+PLANNER_AGENT = CRAFT / "agents" / "planner.md"
 
 
 def test_shared_slice_definition_ships():
@@ -101,4 +105,95 @@ def test_enabler_justification_writes_no_record():
     assert "writes no record" in SHARED_SLICE.read_text(), (
         "_shared/slice.md must state that naming the consuming slice in the "
         "justification writes no record for that slice"
+    )
+
+
+# ---------------------------------------------------------------------------
+# The planning surface — plan/SKILL.md, its two child templates, and
+# planner.md's Planning-phase decomposition prose — points at _shared/slice.md
+# rather than restating it, and names the plan's child unit "task".
+# ---------------------------------------------------------------------------
+
+
+def test_plan_skill_decomposition_section_names_the_child_unit_task():
+    text = PLAN_SKILL.read_text()
+    assert "### 7. Define Tasks" in text, (
+        "plan/SKILL.md must re-head its decomposition step 'Define Tasks' — the "
+        "plan's child unit is a task, not a slice"
+    )
+    start = text.index("### 7. Define Tasks")
+    end = text.index("### 8. Write the Plan")
+    section = text[start:end]
+    assert "Break the feature into buildable tasks" in section, (
+        "plan/SKILL.md's decomposition section must call the plan's child unit "
+        "'task'"
+    )
+    assert "Tasks with unproven unknowns come first" in section, (
+        "plan/SKILL.md's decomposition ordering rules must refer to 'tasks'"
+    )
+
+
+def test_plan_skill_uses_slice_for_the_observable_increment():
+    text = PLAN_SKILL.read_text()
+    assert "build it in slices" in text, (
+        "plan/SKILL.md must still use 'slice' for the observable vertical "
+        "increment it designs the whole feature toward"
+    )
+
+
+def test_plan_skill_references_shared_slice_rather_than_restating_the_bar():
+    text = PLAN_SKILL.read_text()
+    assert "_shared/slice.md" in text, (
+        "plan/SKILL.md must reference _shared/slice.md for the quality bar and "
+        "the value floor rather than restating them"
+    )
+    bar_wording = "Valuable, Small, Testable"
+    carriers = sorted(
+        p
+        for p in CRAFT.rglob("*.md")
+        if bar_wording in p.read_text(encoding="utf-8")
+    )
+    assert carriers == [SHARED_SLICE], (
+        f"the quality bar's wording ({bar_wording!r}) must live in exactly one "
+        f"shipped file (_shared/slice.md); found it in {carriers}"
+    )
+
+
+def test_task_template_describes_task_as_the_component_shaped_unit():
+    assert "component-shaped unit beneath a slice" in TEMPLATE_TASK.read_text(), (
+        "templates/task.md's comment block must describe a task as the "
+        "component-shaped unit beneath a slice"
+    )
+
+
+def test_plan_template_comment_matches_task_template():
+    assert "component-shaped unit beneath a slice" in TEMPLATE_PLAN.read_text(), (
+        "templates/plan.md's comment block must describe a child task the same "
+        "way templates/task.md does — the component-shaped unit beneath a slice"
+    )
+
+
+def test_planner_decomposition_section_names_the_child_unit_task():
+    text = PLANNER_AGENT.read_text()
+    assert "### 7. Define Tasks" in text, (
+        "planner.md's Planning-phase decomposition step must re-head to 'Define "
+        "Tasks'"
+    )
+    start = text.index("### 7. Define Tasks")
+    end = text.index("### 8. Write the Plan")
+    section = text[start:end]
+    assert "Break the feature into buildable tasks" in section, (
+        "planner.md's decomposition section must call the plan's child unit "
+        "'task'"
+    )
+    assert "Tasks with unproven unknowns come first" in section, (
+        "planner.md's decomposition ordering rules must refer to 'tasks'"
+    )
+
+
+def test_planner_uses_slice_for_the_observable_increment():
+    text = PLANNER_AGENT.read_text()
+    assert "build in slices" in text, (
+        "planner.md must still use 'slice' for the observable vertical "
+        "increment, the same sense plan/SKILL.md uses"
     )

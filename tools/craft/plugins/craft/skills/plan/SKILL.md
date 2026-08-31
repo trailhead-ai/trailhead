@@ -161,44 +161,44 @@ After the design is agreed, explicitly call out assumptions that need to be prov
 
 - What do we believe to be true but haven't verified? (e.g., "the existing resolver supports cursor-based pagination," "the mobile client handles empty state gracefully")
 - Which unknowns are riskiest — highest cost if wrong?
-- Which slices depend on which unknowns?
+- Which tasks depend on which unknowns?
 
 These are the things that, if wrong, would change the design.
 
-### 7. Define Slices
+### 7. Define Tasks
 
-Break the feature into buildable slices. Each slice is a vertical cut of functionality that can be built, tested, and committed independently. Order slices so that:
+Break the feature into buildable tasks. Each task is the component-shaped unit beneath a slice — see `_shared/slice.md` for the quality bar a slice must clear and the value floor it's read against. Order tasks so that:
 
-- Slices with unproven unknowns come first
-- Each slice produces something testable
-- Later slices build on validated earlier ones
+- Tasks with unproven unknowns come first
+- Each task produces something testable
+- Later tasks build on validated earlier ones
 
-**Every slice follows TDD.** Each slice description must include the test contract — the behaviors to prove with failing tests before writing implementation code. Slices that skip or defer tests are not valid slices.
+**Every task follows TDD.** Each task description must include the test contract — the behaviors to prove with failing tests before writing implementation code. Tasks that skip or defer tests are not valid tasks.
 
-Slices don't need step-by-step implementation detail. The subagent figures out how to build it. What the plan needs is: what the slice delivers, what files it touches, what unknown (if any) it depends on, and what test behaviors prove the slice works.
+Tasks don't need step-by-step implementation detail. The subagent figures out how to build it. What the plan needs is: what the task delivers, what files it touches, what unknown (if any) it depends on, and what test behaviors prove the task works.
 
 ### 8. Write the Plan
 
 A plan is persisted as a **`task` record graph** (`../_shared/note-storage.md`): one parent
-`task` record for the plan as a whole, plus one child `task` record per slice, wired to the
-parent and ordered against each other with the graph edges.
+`task` record for the plan as a whole, plus one child `task` record for each task, wired to
+the parent and ordered against each other with the graph edges.
 
 1. **Create the parent task.** Render craft's parent-task body template
    (`${CLAUDE_PLUGIN_ROOT}/templates/plan.md`),
    fill in the sections, then pipe it in — `printf '%s' "$BODY" | lore record create --kind
    task --title "<topic>" --status ready`. This stores the plan as a searchable lore `task`
    record, linkable from session notes and future planning.
-2. **Create a child task per slice.** Render craft's child-task body template
-   (`${CLAUDE_PLUGIN_ROOT}/templates/task.md`) for each slice, then create it contained by the
-   parent and ordered after any slice it builds on — `printf '%s' "$SLICE_BODY" | lore record create --kind task
-   --title "<slice topic>" --status ready --parent <parent-name> --depends-on
-   <earlier-slice-name>`. Create children at `ready`; the `depends-on` edges — not the status —
-   gate which are runnable, so a later slice stays un-runnable until its dependencies are
-   `done`. Omit `--depends-on` for slices with no predecessor.
+2. **Create each child task.** Render craft's child-task body template
+   (`${CLAUDE_PLUGIN_ROOT}/templates/task.md`) for each task, then create it contained by the
+   parent and ordered after any task it builds on — `printf '%s' "$TASK_BODY" | lore record create --kind task
+   --title "<task topic>" --status ready --parent <parent-name> --depends-on
+   <earlier-task-name>`. Create children at `ready`; the `depends-on` edges — not the status —
+   gate which are runnable, so a later task stays un-runnable until its dependencies are
+   `done`. Omit `--depends-on` for tasks with no predecessor.
 3. **Verify the graph** with `lore task graph <parent-name>` — confirm the containment subtree,
-   `depends-on` edges, and per-task statuses match your slice ordering before handing off.
+   `depends-on` edges, and per-task statuses match your task ordering before handing off.
 
-If the `lore` CLI is not on PATH, write the parent plan and its slice bodies to a `plans/`
+If the `lore` CLI is not on PATH, write the parent plan and its task bodies to a `plans/`
 directory in your vault manually, mirroring the template shapes.
 
 **Label the parent task with its subsystem**, if your vault's subsystem profiles name one: `lore record update <parent-id> --label craft/subsystems=<name>` — so the plan is linked to the area it touches. Lore v1 records carry a JSON sidecar, not frontmatter; the label stays queryable as `label.craft.subsystems:<name>`.
@@ -212,7 +212,7 @@ The parent-task body template (`${CLAUDE_PLUGIN_ROOT}/templates/plan.md`) carrie
 - **Goal** — one or two sentences
 - **Delta design** — 2-3 sentences about the approach to the change
 - **Given Axioms** — the ground truth this plan rests on, each **as a citation**. Each axiom must be either (a) verifiable at a file:line citation, (b) traced to a recorded decision/ADR, or (c) a constraint stated by the user. If you'd need to investigate to know it's true, it belongs in **Known Unknowns**, not here.
-- **Known Unknowns** — checkbox list; each notes which child task (slice) it blocks.
+- **Known Unknowns** — checkbox list; each notes which child task it blocks.
 - **`## Flow-out`** — the knowledge-flow-out completion gate (ticked at execution time before the parent goes `done`); leave the checklist unticked here.
 
 Each child-task body (`${CLAUDE_PLUGIN_ROOT}/templates/task.md`) carries **Delivers / Test contract / Files**, plus "Unknown to resolve first" and "Depends on" noted in the body where applicable (the `depends-on` edge is the machine-checked form).
@@ -241,7 +241,7 @@ This step is mandatory on every plan. There is no skip flag — calibration is t
   ```text
 
   Cross-cutting Critical you may also raise (any lens):
-  - Spec drift: plan's slices, summed, don't satisfy spec's acceptance criteria
+  - Spec drift: plan's tasks, summed, don't satisfy spec's acceptance criteria
   - Hidden scope expansion: plan touches a subsystem the spec didn't claim
   - Reversibility unnamed: plan deploys something hard to roll back without naming rollback path
   ```
@@ -267,15 +267,15 @@ Important and Minor findings do NOT require dispositions — they are logged for
 *Members dispatched:* builder, breaker, attacker, advocate
 
 *Critical:*
-- Slice 2 producer contract isn't tested but Slice 3 consumer depends on it (raised by: Builder) — *Disposition:* `resolved`
+- Task 2 producer contract isn't tested but Task 3 consumer depends on it (raised by: Builder) — *Disposition:* `resolved`
 - New admin endpoint has no named authz check (raised by: Security) — *Disposition:* `accepted-as-risk: endpoint already behind admin scope guard at router:142; explicit per-endpoint check deferred to next iteration`
 
 *Important:*
-- A destructive backfill in Slice 4 runs outside a replayable console (raised by: Reliability)
+- A destructive backfill in Task 4 runs outside a replayable console (raised by: Reliability)
 - Loading state copy reads as dev jargon (raised by: Advocate) (downgraded from Critical: speculative — no concrete user moment named)
 
 *Minor:*
-- Slice naming inconsistent between "Validate" and "Verify" (raised by: Builder)
+- Task naming inconsistent between "Validate" and "Verify" (raised by: Builder)
 ```
 
 If no Critical findings surfaced, the section still gets appended — record an empty Critical list explicitly (e.g. `*Critical:* none`) so future audits can distinguish "zero findings" from "review skipped."
@@ -292,7 +292,7 @@ Share the plan path and a short summary, then wait for explicit user approval be
 
 End the presentation with an explicit handoff prompt so the trigger is unambiguous, e.g.:
 
-> "Plan is written to your vault. Reply **build** to hand off to `/craft:execute` and start building slice by slice, or run `/craft:execute task/<parent-name>` in a fresh session. Call out anything that needs adjustment first."
+> "Plan is written to your vault. Reply **build** to hand off to `/craft:execute` and start building task by task, or run `/craft:execute task/<parent-name>` in a fresh session. Call out anything that needs adjustment first."
 
 The continuation verb (`build`, `start`, `go`, `ship it`) is what pulls in the `/craft:execute` skill — don't rely on implicit continuation. Use a verb here rather than the bare skill name so the trigger word stays distinct from the `/craft:execute` command itself.
 
@@ -301,8 +301,8 @@ The fresh-session alternative must be printed **fully formed** — the real pare
 ## Key Principles
 
 - **Design the whole, build in slices** — understand the full picture, then prove and build incrementally
-- **Tests before code, always** — every slice follows TDD. The plan defines *what* to test; a test-driven-development skill enforces *how*. No slice ships without a failing test first.
-- **Prove before building** — if a slice depends on an unknown, resolve the unknown first
+- **Tests before code, always** — every task follows TDD. The plan defines *what* to test; a test-driven-development skill enforces *how*. No task ships without a failing test first.
+- **Prove before building** — if a task depends on an unknown, resolve the unknown first
 - **Plans are disposable** — if an unknown is invalidated, the plan changes
 - **State unknowns explicitly** — so they can be caught early
 - **Flag surprises immediately** — unexpected behavior during implementation may invalidate the direction
