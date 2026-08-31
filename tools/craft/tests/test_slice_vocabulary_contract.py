@@ -382,7 +382,7 @@ def test_council_plan_bars_row_names_task_altitude():
     "Task ordering creates a dependency that can't be tested" — or the table sends a
     dispatcher looking for a block that does not exist under that name.
     """
-    text = (CRAFT / "skills" / "_shared" / "council.md").read_text()
+    text = COUNCIL_SHARED.read_text()
     assert "phrased at task altitude" in text, (
         "council.md's implementation-plan row must describe its bars as phrased at "
         "task altitude, matching the component unit the bars actually name"
