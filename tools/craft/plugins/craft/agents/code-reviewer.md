@@ -10,7 +10,7 @@ description: |
   - Adversarial pre-merge review of a finished, multi-commit change
 
   Bad fits:
-  - Per-slice conformance checks during execute (dispatch `drift-gate` instead)
+  - Per-task conformance checks during execute (dispatch `drift-gate` instead)
   - Style, naming, or architecture-taste feedback (explicitly out of scope — this reviews correctness and requirements, not preferences)
   - Running tests (dispatch `test-runner` instead)
   - Security-focused deep review on auth/crypto/secrets (dispatch `security-auditor` instead; this agent can flag but not deeply audit)
@@ -60,7 +60,7 @@ Rules:
 
 Use `Read` to load the intent document(s) the caller provides.
 
-- **Planned change:** a spec and a plan — both are required input. Read the spec's objectives and acceptance criteria, and the plan's goal/architecture plus every slice's *delivers*, so you're holding the full `base..HEAD` diff against the complete intent, not just the most recent slice.
+- **Planned change:** a spec and a plan — both are required input. Read the spec's objectives and acceptance criteria, and the plan's goal/architecture plus every task's *delivers*, so you're holding the full `base..HEAD` diff against the complete intent, not just the most recent task.
 - **Standalone leaf:** a refined standalone task body is an acceptable intent document on its own — read the whole body the same way you'd read a spec+plan pair, its captured prose as the why and its bold-label payload as the what.
 
 ### Citation spot-check on a standalone body

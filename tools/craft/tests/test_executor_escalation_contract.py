@@ -52,7 +52,7 @@ def test_reactive_escalation_paths_survive():
         "`troubleshooter` confirms the issue is reasoning capacity" in TEXT
     )
     assert (
-        "Executor returns `DONE_WITH_CONCERNS` repeatedly on the same slice"
+        "Executor returns `DONE_WITH_CONCERNS` repeatedly on the same task"
         " → re-dispatch with `model: \"opus\"`" in TEXT
     )
     assert "Needs more reasoning → re-dispatch with `model: \"opus\"`" in TEXT

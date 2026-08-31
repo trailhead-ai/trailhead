@@ -64,7 +64,7 @@ high-water mark instead of current state.
   step, which picks up `ready` leaves and moves them off this value.
 - **`ready → in-progress`** — writer: the orchestrating session, at the run's
   first dispatch. This value belongs to the **run's task** — a plan's parent, or
-  a standalone leaf run on its own; child slices under a plan walk
+  a standalone leaf run on its own; child tasks under a plan walk
   `ready → done` and never take it. Exit owner: the two execute exit writes
   below (done and blocked), plus reconciliation on resume. An escalation
   *answered* in-session writes no status — the run continues and the task holds

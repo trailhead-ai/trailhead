@@ -140,7 +140,7 @@ def test_execute_skill_per_slice_review_does_not_name_code_reviewer():
     allowing the whole-change reference.
     """
     text = EXECUTE_SKILL_MD.read_text()
-    marker = "## After All Slices"
+    marker = "## After All Tasks"
     assert marker in text, "execute/SKILL.md must retain the After All Slices section"
     per_slice_region = text[: text.index(marker)]
     assert "code-reviewer" not in per_slice_region, (
@@ -341,11 +341,11 @@ def test_simplifier_charter_has_revert_on_failed_regreen_clause():
 
 def test_simplifier_charter_has_separate_commit_clause():
     text = SIMPLIFIER_MD.read_text()
-    assert "separately from slice commits" in text or (
-        "separate" in text.lower() and "slice commit" in text.lower()
+    assert "separately from the task commits" in text or (
+        "separate" in text.lower() and "task commit" in text.lower()
     ), (
         "simplifier.md must state it commits its change separately from "
-        "slice commits, GPG-signed with a conventional commit prefix."
+        "task commits, GPG-signed with a conventional commit prefix."
     )
 
 
@@ -396,7 +396,7 @@ def test_execute_skill_wires_simplifier():
 
 def _after_all_slices(text: str) -> str:
     """The After All Slices section body — the phase-pipeline scope."""
-    marker = "## After All Slices"
+    marker = "## After All Tasks"
     assert marker in text, "execute/SKILL.md must retain the After All Slices section"
     return text[text.index(marker):]
 
@@ -566,8 +566,8 @@ def test_after_all_slices_completion_report_per_finding_citation():
     text = _after_all_slices(EXECUTE_SKILL_MD.read_text())
     section = _phase_section(text, "Phase 6: Close", None)
     lowered = section.lower()
-    assert "local-to-one-slice" in lowered and "cross-slice" in lowered, (
-        "each finding must be classified local-to-one-slice vs cross-slice."
+    assert "local-to-one-task" in lowered and "cross-task" in lowered, (
+        "each finding must be classified local-to-one-task vs cross-task."
     )
     assert "plan section" in lowered and "cited" in lowered, (
         "each Critical/Important finding must be cited against its plan section."

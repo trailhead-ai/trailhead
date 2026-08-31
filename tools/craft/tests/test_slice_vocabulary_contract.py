@@ -18,6 +18,16 @@ PLAN_SKILL = CRAFT / "skills" / "plan" / "SKILL.md"
 TEMPLATE_TASK = CRAFT / "templates" / "task.md"
 TEMPLATE_PLAN = CRAFT / "templates" / "plan.md"
 PLANNER_AGENT = CRAFT / "agents" / "planner.md"
+EXECUTE_SHARED = CRAFT / "skills" / "_shared" / "execute.md"
+EXECUTE_SKILL = CRAFT / "skills" / "execute" / "SKILL.md"
+NOTE_STORAGE = CRAFT / "skills" / "_shared" / "note-storage.md"
+STATUS_OWNERSHIP = CRAFT / "skills" / "_shared" / "status-ownership.md"
+EXECUTOR_AGENT = CRAFT / "agents" / "executor.md"
+DRIFT_GATE_AGENT = CRAFT / "agents" / "drift-gate.md"
+SIMPLIFIER_AGENT = CRAFT / "agents" / "simplifier.md"
+ASSUMPTION_PROVER_AGENT = CRAFT / "agents" / "assumption-prover.md"
+CODE_REVIEWER_AGENT = CRAFT / "agents" / "code-reviewer.md"
+LOG_SIFTER_AGENT = CRAFT / "agents" / "log-sifter.md"
 
 
 def test_shared_slice_definition_ships():
@@ -196,4 +206,122 @@ def test_planner_uses_slice_for_the_observable_increment():
     assert "build in slices" in text, (
         "planner.md must still use 'slice' for the observable vertical "
         "increment, the same sense plan/SKILL.md uses"
+    )
+
+
+# ---------------------------------------------------------------------------
+# The execute surface — _shared/execute.md, execute/SKILL.md,
+# _shared/note-storage.md, _shared/status-ownership.md, and the dispatched
+# agents — names the per-child dispatched unit "task" and keeps "slice" only
+# for the observable vertical increment (_shared/slice.md's sense).
+# ---------------------------------------------------------------------------
+
+
+def test_execute_shared_processes_the_plan_task_by_task():
+    text = EXECUTE_SHARED.read_text()
+    assert "builds an approved implementation plan task-by-task" in text, (
+        "_shared/execute.md must process a plan's children task-by-task, not "
+        "slice-by-slice — the plan itself is the slice; its children are tasks"
+    )
+    assert "### 1. Does this task have an unresolved unknown?" in text, (
+        "_shared/execute.md's per-task loop must name the dispatched unit 'task'"
+    )
+
+
+def test_execute_shared_still_calls_a_standalone_task_its_own_slice():
+    text = EXECUTE_SHARED.read_text()
+    assert "a standalone\ntask record as its own single slice" in text, (
+        "_shared/execute.md must keep calling a standalone task record its own "
+        "single slice — that is the true vertical-increment sense of 'slice', "
+        "unchanged by this rename"
+    )
+
+
+def test_execute_skill_processes_the_plan_task_by_task():
+    text = EXECUTE_SKILL.read_text()
+    assert "Execute a plan task-by-task" in text, (
+        "execute/SKILL.md must mirror _shared/execute.md's task-by-task framing"
+    )
+
+
+def test_note_storage_describes_parent_slice_task_containing_child_tasks():
+    text = NOTE_STORAGE.read_text()
+    assert "each task is a child\n  `task` record" in text, (
+        "note-storage.md must describe the plan's children as tasks, not slices"
+    )
+
+
+def test_note_storage_status_walk_names_the_same_transitions_in_new_words():
+    text = NOTE_STORAGE.read_text()
+    assert "the parent plan task's `ready → in-progress → done` lifecycle" in text, (
+        "note-storage.md must still say only the parent plan task walks "
+        "ready -> in-progress -> done"
+    )
+    assert "Child tasks\nunder a plan walk `ready → done`" in text, (
+        "note-storage.md must restate 'child slices go straight ready -> done' "
+        "as 'child tasks', without changing which record walks which statuses"
+    )
+
+
+def test_status_ownership_names_the_same_writer_in_new_words():
+    text = STATUS_OWNERSHIP.read_text()
+    assert (
+        "child tasks under a plan walk\n  `ready → done` and never take it" in text
+    ), (
+        "status-ownership.md must restate the child-slice carve-out as "
+        "'child tasks' without changing the writer or the transition"
+    )
+
+
+def test_drift_gate_names_its_unit_of_work_task():
+    text = DRIFT_GATE_AGENT.read_text()
+    assert "Per-task conformance gate for the execute loop" in text, (
+        "drift-gate.md must name its unit of work 'task', consistent with "
+        "_shared/slice.md"
+    )
+    assert "next-task readiness: N/A — standalone leaf" in text, (
+        "drift-gate.md's check 3 must be renamed 'next-task readiness'"
+    )
+
+
+def test_executor_names_its_unit_of_work_task():
+    text = EXECUTOR_AGENT.read_text()
+    assert "TDD implementer for a single task in the execute loop" in text, (
+        "executor.md must name its unit of work 'task', consistent with "
+        "_shared/slice.md"
+    )
+    assert "no earlier or next tasks" in text, (
+        "executor.md must say a standalone leaf has no earlier or next tasks"
+    )
+
+
+def test_simplifier_names_its_unit_of_work_task():
+    text = SIMPLIFIER_AGENT.read_text()
+    assert "commit your change **separately from the task commits**" in text, (
+        "simplifier.md must commit separately from task commits, not slice "
+        "commits"
+    )
+
+
+def test_assumption_prover_names_its_unit_of_work_task():
+    text = ASSUMPTION_PROVER_AGENT.read_text()
+    assert "when a task depends on an unresolved unknown" in text, (
+        "assumption-prover.md must name its unit of work 'task', consistent "
+        "with _shared/slice.md"
+    )
+
+
+def test_code_reviewer_names_drift_gates_unit_of_work_task():
+    text = CODE_REVIEWER_AGENT.read_text()
+    assert "Per-task conformance checks during execute" in text, (
+        "code-reviewer.md's bad-fits list must call drift-gate's job "
+        "per-task, not per-slice"
+    )
+
+
+def test_log_sifter_keeps_the_ordinary_english_sense_of_slice():
+    text = LOG_SIFTER_AGENT.read_text()
+    assert "extracts the relevant slices" in text, (
+        "log-sifter.md's 'relevant slices' of a log is ordinary English, not "
+        "craft's work-unit vocabulary — it must be left alone"
     )
