@@ -28,6 +28,8 @@ SIMPLIFIER_AGENT = CRAFT / "agents" / "simplifier.md"
 ASSUMPTION_PROVER_AGENT = CRAFT / "agents" / "assumption-prover.md"
 CODE_REVIEWER_AGENT = CRAFT / "agents" / "code-reviewer.md"
 LOG_SIFTER_AGENT = CRAFT / "agents" / "log-sifter.md"
+COUNCIL_SHARED = CRAFT / "skills" / "_shared" / "council.md"
+REVIEW_SKILL = CRAFT / "skills" / "review" / "SKILL.md"
 
 
 def test_shared_slice_definition_ships():
@@ -324,4 +326,49 @@ def test_log_sifter_keeps_the_ordinary_english_sense_of_slice():
     assert "extracts the relevant slices" in text, (
         "log-sifter.md's 'relevant slices' of a log is ordinary English, not "
         "craft's work-unit vocabulary — it must be left alone"
+    )
+
+
+# ---------------------------------------------------------------------------
+# The remaining prose surface — _shared/council.md's plan-review finding
+# examples and review/SKILL.md's own unit of work — names the plan-altitude
+# component unit "task", consistent with _shared/slice.md.
+# ---------------------------------------------------------------------------
+
+
+def test_council_shared_plan_bars_name_the_component_unit_task():
+    text = COUNCIL_SHARED.read_text()
+    assert "Task ordering creates a dependency that can't be tested" in text, (
+        "_shared/council.md's Builder plan-review bar must name the plan's "
+        "component unit 'task', consistent with _shared/slice.md"
+    )
+    assert (
+        "Producer task's contract isn't proven by tests but a consumer task "
+        "depends on it" in text
+    ), (
+        "_shared/council.md's Builder plan-review bar must name both the "
+        "producer and consumer unit 'task'"
+    )
+    assert "A task has no test contract, OR test contract is vacuous" in text, (
+        "_shared/council.md's Reliability plan-review bar must name the "
+        "plan's component unit 'task'"
+    )
+    assert (
+        "A task does irreversible work without dry-run / preview / staged "
+        "rollout" in text
+    ), (
+        "_shared/council.md's Reliability plan-review bar must name the "
+        "plan's component unit 'task'"
+    )
+
+
+def test_review_skill_names_its_unit_of_work_task():
+    text = REVIEW_SKILL.read_text()
+    assert "Per-task conformance during execute is `drift-gate`'s job" in text, (
+        "review/SKILL.md must name the unit drift-gate conforms 'task', "
+        "consistent with _shared/slice.md"
+    )
+    assert "**Execute (task-by-task subagent development):**" in text, (
+        "review/SKILL.md's Integration with Workflows section must describe "
+        "execute as task-by-task, not slice-by-slice"
     )

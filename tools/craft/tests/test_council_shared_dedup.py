@@ -34,18 +34,18 @@ GAUNTLET = SKILLS_DIR / "gauntlet" / "SKILL.md"
 # Each is a contiguous block exactly as it read at HEAD~. If a
 # reviewer edits a bar's wording, the assertion below fails.
 BUILDER_BARS = """*Builder:*
-- Slice ordering creates a dependency that can't be tested
+- Task ordering creates a dependency that can't be tested
 - Architecture choice contradicts a declared axiom in the plan
-- Producer slice's contract isn't proven by tests but a consumer slice depends on it
+- Producer task's contract isn't proven by tests but a consumer task depends on it
 - Plan introduces a new abstraction layer for a single caller (premature)"""
 
 RELIABILITY_BARS = (
     "*Reliability:*\n"
-    "- A slice has no test contract, OR test contract is vacuous\n"
+    "- A task has no test contract, OR test contract is vacuous\n"
     "- New code path's failure mode is invisible — no health check, metric, log, "
     "or other signal — with no substantive reason\n"
     "- Plan removes existing test coverage without replacement\n"
-    "- A slice does irreversible work without dry-run / preview / staged rollout\n"
+    "- A task does irreversible work without dry-run / preview / staged rollout\n"
     "- A destructive migration or backfill runs without a gated, replayable console "
     "(the ORM / query layer or migration/backfill console) instead of an ad-hoc one-shot"
 )

@@ -80,24 +80,24 @@ each member's dispatch (the `<lens-critical-bars>` token):
 | A draft adr (`gauntlet` lens pass, adr mode) | **Per-lens Critical bars — adr review** (further below) — phrased at decision altitude |
 | A standalone question (`consult`) | The plan bars, read as applying to the unit under review; skip any bar with no analogue |
 
-The sets are **not** interchangeable. A spec has no slices, no test contracts, and
+The sets are **not** interchangeable. A spec has no tasks, no test contracts, and
 no code paths yet — running the plan bars against a spec produces findings that
-are all technically true and all useless ("this slice has no test contract" — there
-are no slices). The spec bars fire on what a spec can actually get wrong. An adr's
+are all technically true and all useless ("this task has no test contract" — there
+are no tasks). The spec bars fire on what a spec can actually get wrong. An adr's
 sections are not a spec's either, so the spec bars misfire the same way in the other
 direction — the adr set below names the sections a decision record does have.
 
 *Builder:*
-- Slice ordering creates a dependency that can't be tested
+- Task ordering creates a dependency that can't be tested
 - Architecture choice contradicts a declared axiom in the plan
-- Producer slice's contract isn't proven by tests but a consumer slice depends on it
+- Producer task's contract isn't proven by tests but a consumer task depends on it
 - Plan introduces a new abstraction layer for a single caller (premature)
 
 *Reliability:*
-- A slice has no test contract, OR test contract is vacuous
+- A task has no test contract, OR test contract is vacuous
 - New code path's failure mode is invisible — no health check, metric, log, or other signal — with no substantive reason
 - Plan removes existing test coverage without replacement
-- A slice does irreversible work without dry-run / preview / staged rollout
+- A task does irreversible work without dry-run / preview / staged rollout
 - A destructive migration or backfill runs without a gated, replayable console (the ORM / query layer or migration/backfill console) instead of an ad-hoc one-shot
 
 *Security:*

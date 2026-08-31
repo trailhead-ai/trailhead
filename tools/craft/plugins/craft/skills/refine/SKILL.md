@@ -6,9 +6,9 @@ description: >
   answer, and escalate only an irreducible operator decision.
   TRIGGER when: user says "refine this task", "promote this task", "make this task ready",
   "get this task executor-ready", "fill in this task's payload", "is this task runnable yet",
-  or hands over a captured standalone task that has no payload and no child slices.
+  or hands over a captured standalone task that has no payload and no child tasks.
   DO NOT TRIGGER when: the task already has child tasks (that is a plan — use plan) or a
-  parent task (that is a slice — execute its parent instead), the
+  parent task (that is a plan's child task — execute its parent instead), the
   work needs two or more independently-committable cuts or its what/why is still open (use
   plan or brainstorm), the user is executing an approved plan (use execute — it runs this
   procedure inline on a standalone task), or the request is to write new code rather than to

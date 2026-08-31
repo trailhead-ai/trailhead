@@ -106,7 +106,7 @@ Use this structure for the brief body:
 
 Address <N> follow-up items raised after initial implementation of <feature>. Each item is small/mechanical; this brief batches them for one subagent dispatch.
 
-## Slice 1: Follow-ups batch
+## Task 1: Follow-ups batch
 
 **Delivers:**
 
@@ -141,7 +141,7 @@ Keep the brief tight. The executor reads it and works from it — verbosity here
 One dispatch per brief (per working directory). Use the `Agent` tool with `subagent_type: executor`. Pass:
 
 - **plan path** — absolute path to the brief you just wrote
-- **slice** — `Slice 1: Follow-ups batch`
+- **task name** — `Task 1: Follow-ups batch`
 - **proven unknowns** — `None`
 - **assumption-prover tests to clean up** — `None`
 - **working directory** — absolute path to the worktree for this brief

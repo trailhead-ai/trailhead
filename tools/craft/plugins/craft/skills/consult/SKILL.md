@@ -61,7 +61,7 @@ prompt (never ship a literal `<token>`):
   ```
 - `<lens-critical-bars>` → the matching block from "Per-lens Critical bars" in
   `_shared/council.md`. Those bars are phrased for plan review; read each as
-  applying to the question / design / diff under review (map "slice" → the unit
+  applying to the question / design / diff under review (map "task" → the unit
   under review) and skip any bar with no analogue for this question.
 - `<cross-cutting>` → the empty string (the cross-cutting plan-drift block is
   planning-only; consult reviews a standalone question, not a plan)
