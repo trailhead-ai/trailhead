@@ -300,7 +300,8 @@ draft`.
 The spec body template (`${CLAUDE_PLUGIN_ROOT}/templates/spec.md`) carries these canonical
 sections — fill each in: **Problem**
 (situation / gap, why now) · **Objectives** (measurable, outcome-framed) · **Acceptance Criteria**
-(bulleted, testable) · **Non-Goals** (explicit scope bounds) · **Constraints** (technical / business /
+(bulleted, testable) · **Required Interfaces** (each boundary the spec implies, and the criteria
+it must satisfy — not its shape) · **Non-Goals** (explicit scope bounds) · **Constraints** (technical / business /
 timing) · **UI Direction** (verbal, or `n/a`) · **Open Questions / Risks** · **Related** (prior
 specs, decisions). Then open the
 file and fill in the body sections.

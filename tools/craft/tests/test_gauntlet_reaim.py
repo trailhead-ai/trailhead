@@ -46,6 +46,7 @@ SPEC_TEMPLATE = TEMPLATES_DIR / "spec.md"
 PLANNER = AGENTS_DIR / "planner.md"
 DIVERGENCE_PROBER = AGENTS_DIR / "divergence-prober.md"
 CONSISTENCY_AUDITOR = AGENTS_DIR / "consistency-auditor.md"
+BRAINSTORM_SKILL = CRAFT / "skills" / "brainstorm" / "SKILL.md"
 
 # The three specs the interface-shape jurisdiction transfers to, once a
 # required interface is named but not yet defined.
@@ -70,6 +71,10 @@ def _section(text, heading, next_heading_prefix="\n## "):
     start = text.index(heading)
     end = text.index(next_heading_prefix, start + 1)
     return text[start:end]
+
+
+def _normalize_ws(text):
+    return " ".join(text.split())
 
 
 # --- 1. spec template: Required Interfaces + deferral vocabulary ---
@@ -167,6 +172,27 @@ def test_planner_fill_in_list_names_required_interfaces():
     assert ac_pos < ri_pos < ng_pos, (
         "Required Interfaces must sit between Acceptance Criteria and Non-Goals "
         "in the checklist, matching the position it occupies in templates/spec.md"
+    )
+
+
+def test_brainstorm_canonical_sections_names_required_interfaces():
+    text = BRAINSTORM_SKILL.read_text()
+    start = text.index("carries these canonical")
+    end = text.index("Then open the", start)
+    normalized = _normalize_ws(text[start:end])
+    assert "**Required Interfaces**" in normalized, (
+        "brainstorm/SKILL.md's canonical-sections paragraph must name "
+        "**Required Interfaces** — a spec section a producer's enumeration "
+        "doesn't name is a section that producer never fills in, and "
+        "brainstorm is the other producer that enumerates the template's "
+        "sections alongside planner.md"
+    )
+    ac_pos = normalized.index("**Acceptance Criteria**")
+    ri_pos = normalized.index("**Required Interfaces**")
+    ng_pos = normalized.index("**Non-Goals**")
+    assert ac_pos < ri_pos < ng_pos, (
+        "Required Interfaces must sit between Acceptance Criteria and Non-Goals "
+        "in the enumeration, matching the position it occupies in templates/spec.md"
     )
 
 
