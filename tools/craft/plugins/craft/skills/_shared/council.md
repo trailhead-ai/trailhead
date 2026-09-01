@@ -142,7 +142,7 @@ is the wrong problem" belongs to that pass and should not be raised here.
 *Reliability — spec review:* (criterion **testability** and objective **coverage** belong to the `consistency-auditor` pass — do not raise them here; stay on failure behavior)
 - A failure mode named in the Problem has no criterion proving it is addressed
 - The spec commits to something irreversible (a migration, a deletion, a published contract) without naming the rollback or migration path
-- The spec defines no behavior for a state the system will certainly reach — empty, partial, concurrent, or interrupted — a state no acceptance criterion covers
+- The spec defines no behavior for a state the system will certainly reach — empty, partial, concurrent, or interrupted — a state-coverage gap: a state no acceptance criterion covers, distinct from the criterion-coverage matrix the consistency-auditor pass already builds
 - When this fails in production, the spec names no signal a human would see; the first reporter is a user
 
 *Security — spec review:*

@@ -26,7 +26,8 @@ n/a — describe here if there is no UI surface involved. -->
 
 ## Open Questions / Risks
 <!-- Unresolved decisions, unknowns, or risks that could affect the design.
-Each item should include a proposed resolution or an owner.
+Each item is either a decision already made or a deliberate deferral naming both
+an owner and a revisit condition — no other shape is sanctioned.
 
 Use one of these forms for a deliberate deferral rather than inventing your own:
   - `Accepted risk: <risk>. Owner: <who>. Mitigation: <mitigation>. Revisit if <condition>.`

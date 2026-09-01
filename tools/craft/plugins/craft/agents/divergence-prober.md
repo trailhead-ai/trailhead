@@ -67,7 +67,7 @@ Budget: at most 2 dispatches. Use **`Explore`** to find existing consumers of th
 
 ## Output shape
 
-1. **Verdict** — one line: `determined` | `underdetermined` | `severely-underdetermined`. `underdetermined` means at least one derivation-forking or boundary-crossing divergence exists. `severely-underdetermined` means no plan roots at one slice of this spec without inventing requirements — under the slice model a plan is rooted at a single slice, not the whole feature, so the bar is whether that first slice's plan can be written, not whether the whole spec could be.
+1. **Verdict** — one line: `determined` | `underdetermined` | `severely-underdetermined`. `underdetermined` means at least one derivation-forking or boundary-crossing divergence exists. `severely-underdetermined` means no plan roots at this spec's first slice without inventing requirements — under the slice model a plan roots at one slice, not the whole feature, so the bar is whether that first slice's plan can be written, not whether the whole spec could be.
 2. **Build A / Build B** — a short table contrasting the two on each axis you pushed apart. Concrete enough that a reader can see they're really different and really both valid. This is your evidence; without it your findings are assertions.
 3. **Load-bearing divergences** — the deliverable. For each: which bucket it's in (derivation-forking, boundary-crossing, or both), what A does, what B does, what breaks or which slice set diverges, and **the one-line pin**. Ordered by blast radius.
 4. **Free divergences** — one line each. Named to show they were considered and deliberately left open.

@@ -153,6 +153,17 @@ def test_open_questions_section_does_not_claim_settled_carries_an_owner():
     )
 
 
+def test_open_questions_section_does_not_offer_a_shape_the_auditor_flags():
+    text = SPEC_TEMPLATE.read_text()
+    section = _section(text, "## Open Questions / Risks")
+    assert "proposed resolution or an owner" not in section, (
+        "the section's lead-in must not offer 'a proposed resolution or an owner' "
+        "as a sanctioned shape — that shape (an owner alone, no revisit condition) "
+        "is exactly what the consistency auditor's Open Questions rule flags, so "
+        "the template would be teaching authors a form the auditor then rejects"
+    )
+
+
 # --- 2. planner: Required Interfaces reaches the producer's checklist ---
 
 
@@ -249,13 +260,17 @@ def test_divergence_prober_still_flags_a_commitment_the_project_does_not_control
     )
 
 
-def test_divergence_prober_frames_the_question_as_slice_derivation():
+def test_divergence_prober_primary_question_frames_it_as_slice_derivation():
     text = DIVERGENCE_PROBER.read_text()
-    assert "derive a different set of slices" in text, (
-        "divergence-prober.md must re-aim its core question: not whether two builders "
-        "write different code, but whether two readers derive a different set of "
-        "slices, or stop at a different point — that is a coverage finding, not an "
-        "execution one"
+    section = _section(text, "## Judging a divergence", "\n## Every finding")
+    primary_question_paragraph = section.split("\n\n")[1]
+    assert "derive a different set of slices" in primary_question_paragraph, (
+        "the primary-question paragraph itself, not just the Derivation-forking "
+        "bucket that repeats the phrase further down, must re-aim divergence-prober's "
+        "core question: not whether two builders write different code, but whether "
+        "two readers derive a different set of slices, or stop at a different point — "
+        "a whole-file check stays green even if this paragraph were deleted, since the "
+        "bucket text alone satisfies it"
     )
 
 
@@ -313,9 +328,26 @@ def test_divergence_prober_severely_underdetermined_bar_reads_against_slice_mode
         "cannot be written from this spec' — that phrasing has two referents now "
         "that a plan roots at one slice, not the whole feature"
     )
-    assert "roots at one slice" in text or "roots at a" in text, (
+    assert "roots at one slice" in text, (
         "the severely-underdetermined verdict bar must be restated against the slice "
         "model, naming that a plan roots at one slice rather than the whole spec"
+    )
+
+
+def test_divergence_prober_severely_underdetermined_bar_names_first_slice_in_its_own_clause():
+    text = DIVERGENCE_PROBER.read_text()
+    verdict_line = next(
+        line for line in text.splitlines() if line.strip().startswith("1. **Verdict**")
+    )
+    bar_clause = verdict_line.split("`severely-underdetermined` means", 1)[1].split("—", 1)[0]
+    assert "first slice" in bar_clause, (
+        "the severely-underdetermined bar's own defining clause, not just the "
+        "explanatory continuation after the dash, must name the first slice — as "
+        "written it reads 'no plan roots at one slice of this spec', which is "
+        "ambiguous between 'no slice of this spec is plannable' (a universal "
+        "reading) and 'the first slice is not plannable' (what the continuation "
+        "that follows actually says the bar means), so the two halves disagree "
+        "for a spec whose first slice is plannable but a later one is not"
     )
 
 
@@ -336,18 +368,55 @@ def test_consistency_auditor_enumerates_required_interfaces():
     )
 
 
-def test_consistency_auditor_open_questions_exception():
+def test_consistency_auditor_open_questions_exception_requires_both_owner_and_revisit():
     text = CONSISTENCY_AUDITOR.read_text()
-    assert "owner" in text and "revisit condition" in text, (
-        "consistency-auditor.md's Open Questions rule must exempt an item carrying "
-        "both an owner and a revisit condition — under the slice loop that is a named, "
-        "gated deferral discharged by assumption-prover, not a requirement decided "
-        "silently by whoever builds it"
+    section = _section(text, "### 3. Requirements smuggled into the wrong section", "\n### 4.")
+    open_questions_bullet = next(
+        line for line in section.splitlines()
+        if line.strip().startswith("- **Requirements hiding in Open Questions")
     )
-    assert "will get decided" not in text, (
+    assert "both an owner and a revisit condition" in open_questions_bullet, (
+        "the Open Questions exception must require both an owner and a revisit "
+        "condition together, stated inside the Open Questions bullet itself — a "
+        "whole-file substring check stays green even if the exception is weakened "
+        "from 'both' to 'either', or moved out of this bullet entirely, since the "
+        "words could still appear somewhere else in the file"
+    )
+    assert "will get decided" not in open_questions_bullet, (
         "the claim that a parked decision 'will get decided — silently, by whoever "
-        "builds it' no longer holds unconditionally under the slice loop and must be "
-        "removed or qualified by the owner-plus-revisit-condition exception"
+        "builds it' no longer holds unconditionally under the slice loop and must not "
+        "survive inside the Open Questions bullet"
+    )
+
+
+def test_consistency_auditor_open_questions_exempts_a_decision_already_made():
+    text = CONSISTENCY_AUDITOR.read_text()
+    section = _section(text, "### 3. Requirements smuggled into the wrong section", "\n### 4.")
+    open_questions_bullet = next(
+        line for line in section.splitlines()
+        if line.strip().startswith("- **Requirements hiding in Open Questions")
+    )
+    assert "already made" in open_questions_bullet, (
+        "the Open Questions rule must also carve out an item that records a decision "
+        "already made, not just a deliberate deferral — the spec template's "
+        "`Settled: ...` form carries neither an owner nor a revisit condition by "
+        "design, and the owner-plus-revisit-condition exception alone would flag it "
+        "as a smuggled requirement, teaching a template form the pass then flags"
+    )
+
+
+def test_consistency_auditor_cross_matrix_flags_uncovered_required_interface():
+    text = CONSISTENCY_AUDITOR.read_text()
+    cross_matrix = _section(
+        text, "### 1. The cross-matrix", "\n### 2. The verification bar"
+    )
+    assert "Required Interfaces" in cross_matrix and "coverage finding" in cross_matrix, (
+        "the doctrine claim that a named required interface with no acceptance "
+        "criterion is a coverage finding must be stated in the cross-matrix section "
+        "itself, where the auditor actually builds the Required Interfaces row — "
+        "pinning it only through the Output shape item's mention of Required "
+        "Interfaces leaves the rule deletable at its source while that other pin "
+        "stays green"
     )
 
 
@@ -406,6 +475,33 @@ def test_council_spec_review_unspecified_state_bar_names_a_coverage_consequence(
         "coverage consequence — that no acceptance criterion covers the state — "
         "not merely restate that the state's behavior is undefined; a bar that "
         "restates its own premise doesn't say why the gap clears Critical"
+    )
+
+
+def test_council_spec_review_unspecified_state_bar_distinguishes_state_from_criterion_coverage():
+    text = SHARED_COUNCIL.read_text()
+    spec_review_block = _section(
+        text, "## Per-lens Critical bars — spec review", "\n## Per-lens Critical bars — adr review"
+    )
+    reliability_header = next(
+        line for line in spec_review_block.splitlines() if line.startswith("*Reliability")
+    )
+    unspecified_state_bar = next(
+        line for line in spec_review_block.splitlines()
+        if "certainly reach" in line
+    )
+    assert "criterion" in reliability_header and "consistency-auditor" in reliability_header, (
+        "the Reliability lens header must say criterion testability and objective "
+        "coverage belong to the consistency-auditor pass — the fixture for this test"
+    )
+    assert "state" in unspecified_state_bar.lower() and (
+        "state-coverage" in unspecified_state_bar or "state coverage" in unspecified_state_bar
+    ), (
+        "the unspecified-state bar's coverage clause must distinguish state "
+        "coverage (this lens's job) from criterion coverage (the "
+        "consistency-auditor's, per the lens header) — as written the bar grounds "
+        "the Critical purely in acceptance-criterion coverage, which the header "
+        "says is not this lens's lane"
     )
 
 
