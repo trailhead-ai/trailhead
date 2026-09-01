@@ -113,10 +113,20 @@ def test_step3_mandate_does_not_direct_the_executor_to_run_the_full_suite():
     CONTROLLER's own Phase 1 gate ("the controller's own full-suite gate").
     So this bans the imperative form in either spelling rather than the noun
     phrase, which is what would actually contradict executor.md Step 7.
+
+    "entire suite" is banned in the same imperative forms as "full suite" —
+    they are synonyms, and a guard that only pins the keyword "full suite"
+    is evadable by rewording to "entire suite" while keeping the same
+    imperative meaning. The section legitimately uses the bare noun phrase
+    "the entire suite" descriptively (for the controller's own Phase 1/2/3
+    full-suite gates), so — same as above — only the imperative forms are
+    banned, not the noun phrase itself.
     """
     section = _step3_section()
     for phrase in ("run the full suite", "run the full-suite", "the full suite here",
-                   "the full-suite gate here"):
+                   "the full-suite gate here", "run the entire suite",
+                   "run the entire-suite", "the entire suite here",
+                   "the entire-suite gate here"):
         assert phrase not in section, (
             f"execute.md#step3: the dispatch mandate must not direct the "
             f"executor to run the full suite ({phrase!r}) — executor.md Step 7 "

@@ -151,6 +151,51 @@ def test_dispatch_states_scoped_vs_phase1_full_distinction():
     )
 
 
+# --- Contract item D: the "entire suite" claim states a scoping rule, not a false count ---
+
+
+def test_dispatch_does_not_claim_the_entire_suite_runs_an_exact_count():
+    section = _dispatch_expects_section()
+    assert "runs exactly once" not in section, (
+        "execute.md#3: the scoped-vs-Phase-1-full paragraph must not claim the "
+        "entire suite 'runs exactly once' — this same document's Phase 2 has "
+        "simplifier re-green the full suite, and Phase 3 requires every "
+        "correctness fix to re-pass the Phase 1 gate, so a run with a simplify "
+        "commit and one fix round greens the whole suite three times. A false "
+        "count invites a controller to read it as licence to skip the "
+        "post-simplify and post-fix re-gates."
+    )
+
+
+def test_dispatch_states_entire_suite_never_runs_per_slice():
+    _pin_in(
+        _dispatch_expects_section(),
+        "execute.md#3",
+        "the entire suite is never run per slice",
+        "The scoping claim must be about what does NOT happen per slice, not "
+        "about how many times the whole pipeline runs the entire suite overall "
+        "— Phase 2's simplify re-green and Phase 3's per-fix re-gate mean that "
+        "count is more than one.",
+    )
+
+
+# --- Contract item E: the executor widens a controller-named scoped command that under-scopes ---
+
+
+def test_dispatch_states_executor_widens_named_command_past_named_scope():
+    _pin_in(
+        _dispatch_expects_section(),
+        "execute.md#3",
+        "the executor widens that named command mid-build if its edits reach past what it names",
+        "Naming the scoped command asks the controller to fix the blast radius "
+        "up front, before the build — but which callers get touched is only "
+        "knowable to the executor mid-build. Per the recorded precedent, a "
+        "dispatch's test-run mandate overrides the agent's own scoping rule "
+        "(executor.md Step 7), so an under-scoped named command would "
+        "otherwise silently skip caller suites rather than being widened.",
+    )
+
+
 # --- Contract item C: test-runner.md's examples include a scoped invocation ---
 
 
