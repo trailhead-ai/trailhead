@@ -28,6 +28,7 @@ CRAFT_PLUGIN = Path(__file__).parent.parent / "plugins" / "craft"
 # Retired create/search kind tokens. Word-boundary-anchored so `--kind task` and general
 # English ("the plan", "planning") never trip — only the literal retired-kind selectors do.
 _FORBIDDEN_KIND_RE = re.compile(r"(?:--kind|kind:)\s*(?:backlog|plan)\b")
+_NO_INLINE_CHILD_UNIT_RE = re.compile(r"(?im)^\s*#{2,}\s+(?:task|slice)\b")
 
 
 def _prose_files() -> list[Path]:
@@ -54,7 +55,16 @@ def test_plan_template_has_no_slice_body_mechanics():
     """The parent-task template must not carry `### Slice` sub-sections — each slice is now a
     child `task` record, not a heading in the parent body."""
     text = (CRAFT_PLUGIN / "templates" / "plan.md").read_text()
-    assert not re.search(r"(?im)^\s*#{2,}\s+slice\b", text), (
+    assert not _NO_INLINE_CHILD_UNIT_RE.search(text), (
         "templates/plan.md still carries `### Slice` body mechanics; slices are separate child "
         "`task` records wired via `--parent`/`--depends-on`."
+    )
+
+
+def test_plan_template_guard_catches_inline_task_heading():
+    """The child-unit is spelled `task` under current vocabulary — inlining it as a `### Task`
+    sub-heading in the parent plan body is the same anti-pattern the guard exists to catch."""
+    text = "### Task 3: does the thing\n"
+    assert _NO_INLINE_CHILD_UNIT_RE.search(text), (
+        "guard must catch a `### Task` heading, not just the retired `### Slice` spelling"
     )

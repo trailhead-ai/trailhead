@@ -79,13 +79,25 @@ def test_plan_template_flow_out_is_a_heading():
 
 
 def test_plan_template_carries_no_slice_subsections():
-    """Slices are now separate child `task` records, not `### Slice` body sub-sections."""
+    """Slices are now separate child `task` records, not `### Slice` (or `### Task`) body
+    sub-sections."""
     text = (TEMPLATES_DIR / "plan.md").read_text()
     import re
 
-    assert not re.search(r"(?im)^\s*#{2,}\s+slice\b", text), (
-        "craft plan.md (parent-task body) must not carry `### Slice` sub-sections — each slice "
-        "is its own child `task` record wired via `--parent`/`--depends-on`."
+    assert not re.search(r"(?im)^\s*#{2,}\s+(?:task|slice)\b", text), (
+        "craft plan.md (parent-task body) must not carry `### Task` (or `### Slice`) sub-sections "
+        "— each slice is its own child `task` record wired via `--parent`/`--depends-on`."
+    )
+
+
+def test_plan_template_guard_catches_inline_task_heading():
+    """The child-unit is spelled `task` under current vocabulary — inlining it as a `### Task`
+    sub-heading in the parent plan body is the same anti-pattern the guard exists to catch."""
+    import re
+
+    text = "### Task 3: does the thing\n"
+    assert re.search(r"(?im)^\s*#{2,}\s+(?:task|slice)\b", text), (
+        "guard must catch a `### Task` heading, not just the retired `### Slice` spelling"
     )
 
 

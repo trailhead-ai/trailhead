@@ -201,9 +201,9 @@ Phase 3's whole-change correctness-review dispatch.
   citation-resolution gate against the task's payload: its verdict was
   stamped at promotion time, and commits landing since can slide a cited line onto
   different-but-existing content. A citation that no longer resolves is a gap again —
-  stop and report rather than dispatching against it. Then treat the task itself as
-  the one slice: run step 3 (dispatch `executor`) and step 4 (review, scaled to the
-  size table) below against it, then skip straight to
+  stop and report rather than dispatching against it. Then dispatch the standalone
+  task itself as the sole unit of work: run step 3 (dispatch `executor`) and step 4
+  (review, scaled to the size table) below against it, then skip straight to
   [After All Tasks](#after-all-tasks) — there is no next leaf to pick.
 - **`open`** — run the `../_shared/refine.md` procedure inline. Pass `--interactive` only
   when execute itself has a human channel to a live operator right now; otherwise run it

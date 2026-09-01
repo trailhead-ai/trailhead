@@ -273,6 +273,13 @@ def test_status_ownership_names_the_same_writer_in_new_words():
         "status-ownership.md must restate the child-slice carve-out as "
         "'child tasks' without changing the writer or the transition"
     )
+    assert (
+        "never take it. Exit owner: the two execute exit writes\n  below "
+        "(done and blocked), plus reconciliation on resume." in text
+    ), (
+        "status-ownership.md must still name the exit owner for `ready → "
+        "in-progress` right alongside the child-task carve-out"
+    )
 
 
 def test_drift_gate_names_its_unit_of_work_task():
