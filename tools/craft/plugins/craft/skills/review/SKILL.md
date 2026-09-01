@@ -91,11 +91,19 @@ You: [Fix progress indicators]
 
 ## Closing handoff
 
-Review sits before distill in the pipeline (brainstorm → gauntlet → (slice → plan → execute → review)* → distill) — merging closes review's own job, not the spec's lifecycle. Once
-the reviewed diff is merged, end with a fully-formed handoff command — the real spec
-id, never a `<placeholder>` — so a fresh session can pick up distillation as-is:
+Review sits before distill in the pipeline (brainstorm → gauntlet → (slice → plan → execute → review)* → distill) — merging closes review's own job, not the spec's lifecycle. Under
+the loop, one review closes one slice, not the spec: once the reviewed diff is merged, end
+with a fully-formed handoff back into `/craft:slice` for the spec's next pass — the real
+spec id, never a `<placeholder>`:
 
-> "Review passed and the change is merged. Run `/craft:distill spec/streaming-export`
+> "Review passed and the change is merged. Run `/craft:slice spec/streaming-export`
+> to choose the next slice."
+
+Hand off to distill instead, fully formed the same way, but only once the slice loop reports
+the spec closed out (`craft/slice-loop=complete`, per `../_shared/status-ownership.md`) —
+never as the unconditional next step from a per-slice review:
+
+> "The slice loop reports spec/streaming-export closed out. Run `/craft:distill spec/streaming-export`
 > when you're ready to distill this work into the ADR log."
 
 ## Red Flags

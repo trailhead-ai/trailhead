@@ -15,8 +15,8 @@ path into the two prose surfaces that produce or resolve a task's payload:
     among many.
 
 It also closes the last unhandoff'd pipeline boundary: review is the stage before
-distill (brainstorm -> gauntlet -> plan -> execute -> review -> distill), and every
-other boundary in the pipeline already prints a fully-formed handoff command for a
+distill (brainstorm -> gauntlet -> (slice -> plan -> execute -> review)* -> distill), and
+every other boundary in the pipeline already prints a fully-formed handoff command for a
 fresh session to pick up (plan -> execute, distill's own closing report). Review did
 not, until now. The handoff must not itself advance the spec's status — that remains
 distill's licensed edge alone (`test_gauntlet_contract.py`'s `_SPEC_ADVANCE_RE`).

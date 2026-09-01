@@ -253,8 +253,11 @@ Phase 6 takes it
 
 ### Resuming a run
 
-Invoking execute against a task already `in-progress` **resumes** it — never refuses, never
-restarts from scratch. You already have the task in hand and need its branch, so read the
+Invoking execute against a task already `in-progress` **resumes** it once it carries the
+`craft/branch` label — never refuses, never restarts from scratch, for a claimed run. An
+`in-progress` task with no `craft/branch` label was never claimed by any dispatch and is
+refused instead, per the `in-progress` bullet under
+[Determine the task shape](#determine-the-task-shape). You already have the task in hand and need its branch, so read the
 `craft/branch` label straight off the task record, falling back to a locally-present branch
 matching the task name; then pick up wherever the graph and workspace show the run left off.
 **A resumed run still loads dispatch lessons** — run the retrieval command in
@@ -295,8 +298,13 @@ off `ready` and write its branch label together —
 (bump `updated:` to today). Write both at dispatch, not only at close — `craft/branch`'s
 primary reader is crash-resume logic, which runs on tasks that never reached close. Skip the
 status write if the parent is already `in-progress`, `done`, `dropped`, or `superseded` — if
-it's `in-progress` from an earlier session, see [Resuming a run](#resuming-a-run) above
-instead of re-dispatching from scratch — but write `craft/branch` regardless: the label
+it's `in-progress` **and carries the `craft/branch` label**, an earlier session already claimed it:
+see [Resuming a run](#resuming-a-run) above instead of re-dispatching from scratch. An
+`in-progress` parent with **no** `craft/branch` label was never claimed by any
+dispatch — the shape `/craft:slice` leaves before `/craft:plan` adds children — so this
+dispatch claims it now, same as the `ready` case: skip the status write (already
+`in-progress`) and proceed as this run's first dispatch, never [Resuming a run](#resuming-a-run)'s reconcile-or-release branch —
+but write `craft/branch` regardless: the label
 write is not conditional on the status write.
 
 **Load dispatch lessons before the first dispatch.** Run this command inline, right here, not as a dispatch to another agent — mandatory inline commands fired 26/26 in transcript review against 6/26 for conditional dispatch and 0/2 for passive prose ([[lesson/prior-art-verification-must-be-dispatched-not-instructed]]):

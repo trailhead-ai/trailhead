@@ -69,6 +69,11 @@ high-water mark instead of current state.
   below (done and blocked), plus reconciliation on resume. An escalation
   *answered* in-session writes no status — the run continues and the task holds
   `in-progress` until one of those two writes lands.
+- **`(created) → in-progress`** — writer: `/craft:slice`, at slice materialization. This
+  is a **created-at** status, not the `ready → in-progress` transition the entry above
+  covers — the slice parent task record is created directly at `in-progress`, with no
+  `ready` state of its own to leave. Exit owner: `/craft:plan`, which decomposes it into
+  children before execute's own claim ever reaches this record.
 - **`in-progress → done`** — writer: the orchestrating session at close,
   **after push succeeds** (see push guarantee below). `done` is terminal for
   craft; there is no further exit edge to own.
@@ -118,6 +123,15 @@ Craft owns the `craft/` label-key namespace for its own lifecycle facts.
   since an unquoted `/` is a lexer error; the match is exact on the value, and a
   value containing `/` is fine as long as it is quoted
   (`label.craft.branch:"feat/foo"`).
+- **`craft/slice-loop`** — written on the **spec** record, not a task, by
+  `/craft:slice` at its terminating condition. Two values:
+  `craft/slice-loop=complete` (every acceptance criterion is covered by the
+  `## Slices` ledger — the loop is done) and `craft/slice-loop=stopped` (the
+  pass stopped early with criteria still unmet, alongside a body note
+  explaining why). A later pass selecting again unsets it — the same shape
+  `craft/push` already documents below: the label marks a stopping point, not
+  a permanent verdict, and a fresh selection clears it rather than leaving a
+  stale value behind.
 - **`craft/push=failed`** — written when a push attempt fails at close or at a
   `blocked` transition with unpushed commits. Lets resume logic distinguish
   "un-pushable" from "crashed" and skip-and-report instead of re-running the
@@ -142,7 +156,11 @@ after the move.
 
 Reconciliation (independent of ranger): invoking execute against a task already
 `in-progress` resumes it — via `craft/branch` or a locally-present branch —
-rather than refusing or restarting. An `in-progress` task whose workspace no
+rather than refusing or restarting, but only once it carries the `craft/branch`
+label as proof an earlier dispatch claimed it. An `in-progress` task with no
+`craft/branch` label was never claimed: `/craft:slice` materializes a parent there directly,
+before `/craft:plan` gives it children, and that task is refused instead, naming
+`/craft:plan <id>` as the remedy. An `in-progress` task whose workspace no
 longer exists is resumed (branch recoverable) or released back to `ready`.
 Tasks carrying `craft/push=failed` are skipped-and-reported, never silently
 re-run.

@@ -540,9 +540,11 @@ carries a final disposition of `revise`:
 lore record update <spec-id> --status ready
 ```
 
-and hand off to planning. Do not enter planning from inside the gauntlet — let the user invoke
-`/craft:plan` so it loads cleanly. End the wrap-up with the handoff command **fully formed** — the
-real spec-id, never a `<placeholder>` (e.g. `/craft:plan spec/streaming-export`) — so the user can
+and hand off to the slice loop. Do not enter it from inside the gauntlet — let the user invoke
+`/craft:slice` so it loads cleanly; this is the loop's only wired entry point, so its own
+`/craft:plan spec/<id>` handoff would create a second, unlinked parent and strand the spec
+outside the loop. End the wrap-up with the handoff command **fully formed** — the
+real spec-id, never a `<placeholder>` (e.g. `/craft:slice spec/streaming-export`) — so the user can
 paste it into a fresh session as-is.
 
 **If any Critical's final disposition is `revise`, the spec does not flip.** Its `resolved` edits
