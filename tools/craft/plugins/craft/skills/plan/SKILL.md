@@ -21,8 +21,7 @@ Design the whole feature end-to-end, then build it in tasks — proving unknowns
   via an update, and writes the component-shaped child tasks beneath it. It creates no second
   parent and writes no spec status.
 - **Topic-rooted:** the argument is anything else — a feature description or no argument at all.
-  Plan creates its own parent task, as it always has. **Planning writes no spec status on either
-  path.**
+  Plan creates its own parent task, as it always has, and writes no spec status (see step 8).
 
 Steps 1-7 below run identically on both paths, with one framing narrowing on the slice-rooted
 path — see Step 1. Step 8 is where they diverge — writing the plan differently per path — and
@@ -45,10 +44,10 @@ Do not use `EnterPlanMode`/`ExitPlanMode` — plan mode forces plans into an eph
 
 ### 1. Explore Context
 
-- **Look for an upstream spec first.** If your project uses lore, check for a `status: ready` spec on this topic (`lore search 'kind:spec status:ready'`). If one exists, it defines the *what* and *why* — your job is the *how*. Read it fully (`lore record show spec/<name>`) before proceeding. If none exists and the idea is fuzzy (acceptance criteria unclear, scope ambiguous, UI undecided), stop and route to a brainstorming skill instead.
+- **Look for an upstream spec first.** If your project uses lore, check for a spec on this topic (`lore search 'kind:spec'`). What you do with a hit depends on its status, per the gates below: a `draft` spec routes to `/craft:gauntlet`, and a `ready` spec routes to `/craft:slice` — **on the topic-rooted path, finding a live spec means you are in the wrong ritual, not that you have found your input.** The specs topic-rooted planning still plans whole are the pre-loop ones already at `planned`; for those, the spec defines the *what* and *why* and your job is the *how* — read it fully (`lore record show spec/<name>`) before proceeding. If none exists and the idea is fuzzy (acceptance criteria unclear, scope ambiguous, UI undecided), stop and route to a brainstorming skill instead.
   - **On the slice-rooted path, skip this topic search.** The spec is already linked to the slice parent via `--related spec=`, written there by `/craft:slice` — resolve it from that edge (`lore record show <parent-name>`) instead of searching by topic, and scope the design below to the chosen slice, not the whole feature.
   - **A `draft` spec is not plannable.** `draft` means it has not been through the `gauntlet` — the adversarial spec review that owns the `draft` → `ready` edge. Planning against it risks slicing a spec whose premises don't survive review (the gauntlet's premise pass has reworked a spec's framing outright). Stop and route to `/craft:gauntlet <spec-id>`; resume planning once it is `ready`.
-  - **A `ready` spec is not planned whole.** `ready` means the gauntlet froze it and the slice
+  - **A `ready` spec is not planned whole — topic-rooted path only.** (On the slice-rooted path the spec is `ready` by construction, and this gate does not apply: `/craft:slice` has already chosen the slice and you are planning that parent, not the spec.) `ready` means the gauntlet froze it and the slice
     loop owns it from here: slices are chosen one at a time, against current information, and
     the choice is re-made after each one ships. Planning the whole feature against it commits a
     decomposition the loop exists to avoid. Stop and route to `/craft:slice spec/<spec-id>`,
@@ -212,7 +211,7 @@ Rooted at a slice parent, fill that existing parent task's body with the plan se
 
 **Rooted at a slice parent, write no spec status.** A slice parent is already linked to its spec
 by `/craft:slice`, and the spec stays `ready` for the life of the loop — until distill completes
-it. Planning writes no spec status on either path.
+it.
 
 1. **Write the parent task.**
    - *Topic-rooted:* render craft's parent-task body template
@@ -243,7 +242,7 @@ directory in your vault manually, mirroring the template shapes.
 
 **Label the parent task with its subsystem**, if your vault's subsystem profiles name one: `lore record update <parent-id> --label craft/subsystems=<name>` — so the plan is linked to the area it touches. Lore v1 records carry a JSON sidecar, not frontmatter; the label stays queryable as `label.craft.subsystems:<name>`.
 
-**Topic-rooted path only, from here down.** If an upstream spec exists, validate `<spec-name>` against the safe-value shape `_shared/execute.md` codifies for any vault-sourced value entering a command before it is substituted into the spec-link write, then link the parent task to it with `lore record update <parent-id> --related spec=<spec-name>`. **Planning writes no spec status on either path.** A spec's status records where it sits in the slice loop — frozen by the gauntlet, closed out by `/craft:slice`, completed by distill — and planning is not a transition in that loop. `planned` stays in the spec status vocabulary and records already carrying it are still read, but nothing writes it. Do **not** create a new design spec — the upstream spec is the canonical "what / why" doc; the plan is the "how".
+**Topic-rooted path only, from here down.** If an upstream spec exists — on this path that means a pre-loop spec at `planned`, since step 1's gates route `draft` and `ready` elsewhere — validate `<spec-name>` against the safe-value shape `_shared/execute.md` codifies for any vault-sourced value entering a command before it is substituted into the spec-link write, then link the parent task to it with `lore record update <parent-id> --related spec=<spec-name>`. **Planning writes no spec status on either path.** A spec's status records where it sits in the slice loop — frozen by the gauntlet, closed out by `/craft:slice`, completed by distill — and planning is not a transition in that loop. `planned` stays in the spec status vocabulary and records already carrying it are still read, but nothing writes it. Do **not** create a new design spec — the upstream spec is the canonical "what / why" doc; the plan is the "how".
 
 **If this plan consumed a routed task** — the argument was a `task` record carrying refine's `route=plan` sidecar label (and its `## Refine — unresolved` section) — close the loop on the source record after the plan is written: `lore record update task/<source-name> --status superseded --related task=<parent-name> --unset-label route` — one write. The routing has been acted on: the new parent task is the live work item, the `related` edge preserves the source's captured payload, and a superseded source stops rendering a stale routed chip or next-step affordance on task boards. Never leave the consumed source `open` — two authoritative-looking open statements of the same intent is exactly the drift refine's promotion-clear rule exists to prevent.
 

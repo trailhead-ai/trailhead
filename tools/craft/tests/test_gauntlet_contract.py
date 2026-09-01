@@ -61,9 +61,10 @@ _ADVANCED_STATES = {"ready", "planned", "complete"}
 _ADVANCE_GUARD = "only if the spec is already `ready`"
 
 # `complete` is the second licensed advance, and it belongs to exactly one file.
-# The distill ritual owns the spec `planned -> complete` edge — `complete` *means*
-# distilled — so its write carries its own guard rather than planning's: a spec may
-# only complete from `planned`, and only once its whole cluster was dispositioned.
+# The distill ritual owns the spec completion edge — `complete` *means* distilled —
+# so its write carries its own guard rather than planning's: a spec may only
+# complete once it is closed out (already `planned`, or `ready` carrying
+# `craft/slice-loop=complete`) and its whole cluster was dispositioned.
 _COMPLETE_ADVANCE_GUARD = "only if the spec is closed out and its cluster is dispositioned"
 
 

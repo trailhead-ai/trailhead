@@ -14,7 +14,7 @@ lifecycle operations.
   `task` record (rendered from `${CLAUDE_PLUGIN_ROOT}/templates/task.md`) wired to the parent
   with `--parent` and ordered against its siblings with `--depends-on`. A **spec** is a `spec` record. `task` and `spec` each carry
   their own status vocab (task: `open → ready → in-progress → done`, off-path `blocked` /
-  `dropped` / `superseded`; spec: `draft → ready → planned → complete`). Persisting a plan or
+  `dropped` / `superseded`; spec: `draft → ready → complete`, with `planned` retained in the vocabulary but no longer written). Persisting a plan or
   spec is `lore record create --kind task|spec` — **not** `lore new`.
 - **Vault-write rule:** record bodies are authored **through the lore CLI** (`lore record
   create` reads the body from stdin), never by direct file edits to a vault path.

@@ -6,9 +6,9 @@ points write differently:
   - **Slice-rooted** (argument resolves to an existing `task` record): plan fills
     that parent's body with the plan sections via an update and writes the
     component-shaped child tasks beneath it. It does NOT create a second parent.
-    It writes no spec status — the `ready -> planned` advance does not fire.
+    It writes no spec status; neither does the topic-rooted path.
   - **Topic-rooted** (argument is anything else): plan creates its own parent task
-    and, unchanged, still advances a `ready` spec to `planned`. It also gains one
+    and refuses a `ready` spec, routing it to `/craft:slice`. It also gains one
     cross-check: if the resolved spec already has an open slice parent, plan says
     so rather than silently creating a duplicate parent beside it.
 
@@ -126,9 +126,11 @@ def test_no_path_advances_a_spec_to_planned():
     This pins the behaviour the removal is for: a spec's status is craft's record
     of where it sits in the loop, and planning is not a transition in that loop.
     """
-    assert "Planning writes no spec status on either path" in _text(), (
+    _pin_normalized(
+        "Planning writes no spec status on either path",
         "plan/SKILL.md must state that neither the slice-rooted nor the "
-        "topic-rooted path writes a spec status"
+        "topic-rooted path writes a spec status — pinned unique, so deleting the "
+        "statement at its owning site cannot be masked by a restatement elsewhere.",
     )
 # --- topic-rooted path: cross-check for an existing open slice parent ---
 

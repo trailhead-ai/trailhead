@@ -112,11 +112,12 @@ def test_review_handoff_to_distill_is_carryoutable():
         "review/SKILL.md must hand off to distill as a live, fully formed command "
         "— distill now queues the `ready` specs the slice loop closes out.",
     )
-    text = REVIEW.read_text()
-    assert "is pending" not in text, (
-        "review/SKILL.md's distill handoff must no longer defer to later work: "
-        "the precondition it was waiting on — distill queueing a loop-closed "
-        "`ready` spec — is satisfied, so the handoff is carryoutable today."
+    _pin(
+        REVIEW,
+        "This handoff is carryoutable.",
+        "review/SKILL.md must state the distill handoff is carryoutable and say "
+        "why — distill queues `ready` specs carrying the slice-loop marker — so a "
+        "reader meets a live instruction rather than a deferral.",
     )
 def test_review_handoff_still_never_advances_the_spec_itself():
     text = REVIEW.read_text()

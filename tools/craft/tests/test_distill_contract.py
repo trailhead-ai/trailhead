@@ -2,7 +2,8 @@
 
 Distill is the final stage of the pipeline (brainstorm -> gauntlet ->
 (slice -> plan -> execute -> review)* -> distill) and the sole writer of a spec's
-`planned -> complete` edge. Everything that makes it safe is a prose contract no type system can hold, so
+completion edge (`planned -> complete` for pre-loop records, `ready -> complete` for
+a spec the slice loop closed out). Everything that makes it safe is a prose contract no type system can hold, so
 each one is pinned here as a literal phrase:
 
   - **Clustering happens before drafting.** M specs condense into N ADRs; a
@@ -652,10 +653,11 @@ def test_distill_is_the_sole_writer_of_draft_to_active_on_both_paths():
         "distill/SKILL.md must state it is the sole writer of the activation edge"
     )
     assert (
-        "exactly as it is the sole writer of `planned -> complete`" in step
+        "exactly as it is the sole writer of the completion edge above" in step
     ), (
-        "distill must tie the new sole-writer claim to the existing one for "
-        "`planned -> complete`"
+        "distill must tie the new sole-writer claim to the existing one for the "
+        "spec completion edge — which is `planned -> complete` for pre-loop "
+        "records and `ready -> complete` for a spec the slice loop closed out"
     )
     assert "the gauntlet, no longer advances an adr past `draft` at all" in step, (
         "distill must state the other forward-path writer (the gauntlet) no "
@@ -976,6 +978,20 @@ def test_the_loop_closed_query_does_not_displace_the_planned_cohort():
     )
 
 
+def _completion_gate(text: str) -> str:
+    """Step 5's member-completion write, up to the Terminal outcomes section.
+
+    Scoped rather than whole-file: step 1's prose names both marker values too, so
+    a whole-file check passes even with this gate deleted outright.
+    """
+    return _section(
+        text,
+        "5. Finally, **member-spec `complete` flips land last**",
+        "## Terminal outcomes",
+        why="distill/SKILL.md must carry step 5's member-completion write",
+    )
+
+
 def test_the_completion_flip_is_conditioned_on_the_complete_marker_value():
     """`stopped` and `complete` are not the same outcome and must not share a fate.
 
@@ -984,14 +1000,18 @@ def test_the_completion_flip_is_conditioned_on_the_complete_marker_value():
     irreversible in practice: `/craft:slice`'s own guard then refuses to select
     against a `complete` spec, and its stated remedy is to start a new spec.
     """
-    flat = _flat(_text())
-    assert "craft/slice-loop=complete" in flat, (
+    gate = _flat(_completion_gate(_text()))
+    assert "craft/slice-loop=complete" in gate, (
         "distill/SKILL.md's completion gate must name the marker value it accepts "
         "— `craft/slice-loop=complete` — not merely the presence of the label"
     )
-    assert "craft/slice-loop=stopped" in flat, (
+    assert "craft/slice-loop=stopped" in gate, (
         "distill/SKILL.md must name the `stopped` marker value it deliberately "
         "does not complete, or a reader cannot tell the exclusion is intentional"
+    )
+    assert "Two spec shapes count as closed out, and no others" in gate, (
+        "the gate must state that its accepted shapes are exhaustive — an open "
+        "list would let a third shape be read in later"
     )
 
 

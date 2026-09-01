@@ -34,7 +34,7 @@ A record's `kind` is one of nine. Each carries a `status` from its own vocabular
 - **`task`** — anything worth seeing through to completion: implementation work (a parent task plus `ready` children wired with `parent`/`depends-on` edges), **deferred items** (set aside, with a trigger to revisit), **abandoned approaches** (tried, didn't work), and **external things being watched** (upstream issues, dep releases) — distinguished by `status`: `open` (actionable, not yet started), `ready` (unblocked, workable now), `in-progress`, `blocked` (watching an external condition or a dependency), `done`, `dropped` (abandoned), `superseded`. *(open → ready → in-progress → done, off-path: blocked / dropped / superseded)*
 - **`collaboration`** — working-style preferences and conventions for how to work with this person/team/agent. *(status: active)*
 - **`session`** — per-worktree session records: the candidate log captured during a session, finalized by `flush`. *(dirty / clean)*
-- **`spec`** — frozen specification artifacts (what gets built). *(draft → ready → planned → complete → superseded / dropped)*
+- **`spec`** — frozen specification artifacts (what gets built). *(draft → ready → complete → superseded / dropped; `planned` is retained in the vocabulary but no longer written)*
 - **`blob`** — a freeform capture that doesn't fit another kind. *(status: active)*
 
 **"On hold" is ambiguous.** A task with `status: open`/`ready` is *our* choice to revisit or work on later; one with `status: blocked` is something we *can't* act on yet — waiting on an external condition or another task's `depends-on` edge. If asked about "things on hold," clarify which sense — or report both.
