@@ -47,8 +47,8 @@ command execute pins, so the two callers agree on what *resolves* means too.
   names. Do not classify it silently, and **do not redirect before the value resolves**
   — run `lore record show task/<parent-value>` first, because the two causes have
   opposite remediations:
-  - **It resolves to a real task** → the task is already a slice of someone else's plan.
-    Refuse and redirect to that parent: a child slice's payload is the parent plan's to
+  - **It resolves to a real task** → the task is already a child task of someone else's plan.
+    Refuse and redirect to that parent: a child task's payload is the parent plan's to
     shape, and `/craft:execute` already walks it. Name the parent in the refusal so the
     operator can re-root there.
   - **It resolves to nothing** → the edge itself is the suspect. Report the suspected
@@ -189,7 +189,7 @@ against it.
 
 Append the payload in the **bold inline label** form of
 `${CLAUDE_PLUGIN_ROOT}/templates/task.md` — exactly the child-task shape, **not**
-`##` headings, so a promoted standalone leaf and a planned child slice read
+`##` headings, so a promoted standalone leaf and a planned child task read
 identically to execute, `drift-gate`, and `code-reviewer`:
 
 ```markdown

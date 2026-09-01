@@ -29,7 +29,7 @@ READ_CONTRACT_FIXTURE = Path(__file__).parent / "fixtures" / "dispatch_lesson_re
 STATUS_WALK_MARKER = "**Status walk.**"
 RESUME_HEADING = "### Resuming a run"
 CLAIM_HEADING = "### Claiming the run at first dispatch"
-STEP1_HEADING = "### 1. Does this slice have an unresolved unknown?"
+STEP1_HEADING = "### 1. Does this task have an unresolved unknown?"
 STEP3_HEADING = "### 3. Dispatch `executor`"
 STEP4_HEADING = "### 4. Review (scaled to change size)"
 

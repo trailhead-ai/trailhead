@@ -25,13 +25,15 @@ content-only guard scrubbed their bodies but left the plan-phase prefix in the
 name. ``_NAME_DENYLIST`` closes that gap so a plan-phase-named file cannot creep
 back in.
 
-Why lore-only (craft is deliberately excluded): craft ships "Slice" and
-"Known Unknown" as *product* vocabulary — the plan template's ``### Slice N``
-headings, the plan/polish skills, the council panel — and craft tests legitimately
-assert on that content. A regex cannot tell "Slice 5 cutover" (a dev-process leak)
-from "Slice ordering" (an asserted product fixture), so guarding craft mechanically
-would risk scrubbing the very features it ships. craft's tests are scrubbed by
-hand; only lore is guarded here.
+Why lore-only (craft is deliberately excluded): craft ships "slice" and
+"Known Unknown" as *product* vocabulary — ``_shared/slice.md``'s canonical
+slice/task definitions and quality bar (``Valuable, Small, Testable``), the
+plan template's ``Known Unknowns`` checklist, the plan/polish skills, the
+council panel — and craft tests legitimately assert on that content. A regex
+cannot tell "Slice 5 cutover" (a dev-process leak) from "a standalone task as
+its own single slice" (an asserted product fixture), so guarding craft
+mechanically would risk scrubbing the very features it ships. craft's tests
+are scrubbed by hand; only lore is guarded here.
 """
 
 from __future__ import annotations

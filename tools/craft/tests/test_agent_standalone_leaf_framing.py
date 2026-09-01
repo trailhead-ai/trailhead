@@ -166,9 +166,9 @@ def test_drift_gate_verdict_definitions_cover_the_standalone_leaf():
 def test_drift_gate_next_slice_readiness_is_explicit_na_on_a_standalone_leaf():
     """A vacuously-passing check reads identically to a check that found nothing."""
     text = _text("drift-gate.md")
-    assert "next-slice readiness: N/A — standalone leaf" in text, (
+    assert "next-task readiness: N/A — standalone leaf" in text, (
         "drift-gate.md must make check 3 explicitly N/A-with-a-note on a standalone "
-        "leaf — there is no next slice, and a silent pass hides which of the three "
+        "leaf — there is no next task, and a silent pass hides which of the three "
         "checks actually ran."
     )
 
@@ -187,8 +187,8 @@ def test_executor_names_the_standalone_leaf_case():
 
 def test_executor_covers_no_earlier_or_next_slices():
     text = _text("executor.md")
-    assert "no earlier or next slices" in text, (
-        "executor.md must say a standalone leaf has no earlier or next slices."
+    assert "no earlier or next tasks" in text, (
+        "executor.md must say a standalone leaf has no earlier or next tasks."
     )
 
 

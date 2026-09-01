@@ -44,7 +44,7 @@ be repeated.
 
 Read the **procedure document** at the path you were passed, in full, and follow it end
 to end in its **unattended** mode. It is the authority on the build ritual: the skip
-gate, the assumption-prover and executor dispatches, the review step, the after-all-slices
+gate, the assumption-prover and executor dispatches, the review step, the After All Tasks
 phases, the push, and the escalate-via-park contract. Do not restate it, do not improvise
 around it, and do not substitute your own idea of what executing a task means.
 
@@ -62,7 +62,7 @@ your tool list — so that is not a path you can take, and it is not a path you 
 substitute for either. You are handed exactly one standalone task, which is the
 procedure's single-slice shape: **you build the task INLINE**, yourself, in this context,
 following the procedure's single-slice path — its skip gate, its TDD discipline, its
-review step, its after-all-slices phases, its push, and its escalate-via-park contract —
+review step, its After All Tasks phases, its push, and its escalate-via-park contract —
 with every step you perform yourself instead of dispatching it. **You never dispatch a
 subagent.** Nothing about the ritual is skipped by building it inline; only the delegation
 is.

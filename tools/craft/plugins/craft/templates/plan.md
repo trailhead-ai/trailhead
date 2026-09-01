@@ -1,14 +1,15 @@
 # {{name}} Implementation Plan
 
-<!-- This is the PARENT task body. A plan is a parent `task` record; each slice is its own
-child `task` record (Delivers / Test contract / Files — see templates/task.md) wired to this
-parent via `--parent` and ordered with `--depends-on`. Do NOT inline `### Slice` sections
-here — render one child task per slice instead. -->
+<!-- This is the PARENT task body. A plan is a parent `task` record; each child `task`
+record is the component-shaped unit beneath a slice (`skills/_shared/slice.md`) — Delivers / Test
+contract / Files, see templates/task.md — wired to this parent via `--parent` and ordered
+with `--depends-on`. Do NOT inline `### Task` sections here — render one child task record
+per task instead. -->
 
 **Goal:** <!-- One or two sentences: what this plan achieves when every child task is done. -->
 
 **Delta design:** <!-- High-level design of the change: the components touched, the data flow,
-key constraints. Keep it brief — the child tasks carry the per-slice detail. -->
+key constraints. Keep it brief — the child tasks carry the per-task detail. -->
 
 **Given Axioms (ground truth this plan rests on):**
 <!-- The facts this plan depends on, each as a citation: a file:line reference, a recorded

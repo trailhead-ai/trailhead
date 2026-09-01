@@ -62,7 +62,7 @@ done — go to planning.
 
 **Inline vs. dispatched:** This skill runs brainstorming inline in the current session — use when
 you want interactive back-and-forth with the user. If brainstorming is a step inside an automated
-workflow that pauses because a slice surfaced an objectives-level question, dispatch a planner
+workflow that pauses because a task surfaced an objectives-level question, dispatch a planner
 subagent instead — it covers the full brainstorm → spec → plan arc in an isolated context and
 returns a summary.
 

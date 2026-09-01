@@ -332,10 +332,10 @@ def test_mid_build_branch_states_why_base_would_be_wrong():
     _pin_in(
         _phase_progress_section(),
         "execute.md#phase-progress-and-resumability",
-        "reverting to it would discard whatever slice commits the build has already landed",
+        "reverting to it would discard whatever task commits the build has already landed",
         "The document's habit is to state the reason, not just the rule: "
         "reverting to `base` in the mid-build case would discard committed "
-        "slice work, and that reason must be spelled out, not implied.",
+        "task work, and that reason must be spelled out, not implied.",
     )
 
 
@@ -391,7 +391,7 @@ def test_base_is_recorded_into_end_phases_at_pipeline_entry():
         _phase_progress_section(),
         "execute.md#phase-progress-and-resumability",
         "record the run's `base` (the pre-execution SHA, fixed once per "
-        "[After All Slices](#after-all-slices)) into the `## End Phases` checklist",
+        "[After All Tasks](#after-all-tasks)) into the `## End Phases` checklist",
         "The security-fix Medium finding requires recording `base` durably so a "
         "resumed run can recompute it and bound the revert target — this is the "
         "enabling state for the base-bound reachability check, stated once at "

@@ -52,7 +52,7 @@ ESCALATION_HEADING = "### Escalation points and their unattended re-route"
 # for the same note. "## When to Use" is the next real heading.
 WHEN_TO_USE_HEADING = "## When to Use"
 CLAIM_HEADING = "### Claiming the run at first dispatch"
-STEP1_HEADING = "### 1. Does this slice have an unresolved unknown?"
+STEP1_HEADING = "### 1. Does this task have an unresolved unknown?"
 
 
 def _section(start_heading: str, end_heading: str) -> str:

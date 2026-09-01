@@ -140,7 +140,7 @@ lore task graph <task-name>
 The first query rides the **forward** `related-spec` facet, which is maintained on every write — a
 freshly-linked task shows up with no reindex in between. The second expands each matched task into
 its tree, because the facet returns the task that carries the edge, not its parent plan or its
-sibling slices.
+sibling tasks.
 
 **A spec with zero task edges is deferred, not queued.** Report it as:
 

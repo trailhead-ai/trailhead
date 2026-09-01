@@ -4,7 +4,7 @@ description: |
   Resolves an unknown before the execute loop builds on top of it. Writes a TDD test that captures the assumption, runs it, reports VALIDATED / INVALIDATED with evidence and surprises. The test is ephemeral — the executor cleans it up after building proper behavioral tests.
 
   Good fits:
-  - Dispatched by the `execute` skill when a slice depends on an unresolved unknown
+  - Dispatched by the `execute` skill when a task depends on an unresolved unknown
   - "Does the existing UserResolver support cursor pagination with `after:` and `first:`?"
   - "Will the background job's `unique` constraint dedupe across queues?"
 
@@ -21,14 +21,14 @@ You are resolving a single unknown before the controller builds on top of it. Yo
 
 - **plan path** — the plan file the caller provides
 - **the unknown** — a specific, restated claim to prove or disprove
-- **why it matters** — which slice is blocked, what breaks if the assumption is wrong
+- **why it matters** — which task is blocked, what breaks if the assumption is wrong
 - **working directory** — the repo or worktree to operate in
 
 If any are missing or vague, stop and report `NEEDS_CONTEXT`. A test that proves the wrong thing is worse than no test.
 
 ## Step 1: Read context
 
-Read the plan file's "Known Unknowns" section and the slice that depends on this unknown. Read the architecture summary so you understand *why* the unknown matters — that frames what a useful test looks like.
+Read the plan file's "Known Unknowns" section and the task that depends on this unknown. Read the architecture summary so you understand *why* the unknown matters — that frames what a useful test looks like.
 
 ## Step 2: Verify external surface (if applicable)
 
@@ -44,7 +44,7 @@ The test should pass if the assumption is true and fail if false. One behavior, 
 
 ## Step 4: Run the test
 
-Watch it pass or fail. If it passes, the assumption holds. If it fails, the assumption doesn't — and the slice that depends on it needs to be reshaped.
+Watch it pass or fail. If it passes, the assumption holds. If it fails, the assumption doesn't — and the task that depends on it needs to be reshaped.
 
 ## Step 5: Follow surprises within reason
 
@@ -61,7 +61,7 @@ GPG-signed, even though the test is ephemeral. Use a `test:` or `chore:` prefix 
 
 ## Scope — strict
 
-Your ONLY job is to resolve this unknown. Do not build the feature. Do not implement the slice. Do not refactor adjacent code. Prove or disprove.
+Your ONLY job is to resolve this unknown. Do not build the feature. Do not implement the task. Do not refactor adjacent code. Prove or disprove.
 
 If resolving the unknown turns out to need more context than you have, or the scope is bigger than expected, stop and report `NEEDS_CONTEXT` or `BLOCKED`.
 
@@ -80,7 +80,7 @@ Status: VALIDATED | INVALIDATED | NEEDS_CONTEXT | BLOCKED
 <anything unexpected: new unknowns, behavior that differs from docs, edge cases the plan didn't anticipate>
 
 ## Recommendation (optional)
-<what this means for the slice that depends on it — does the plan hold, or does it need to change?>
+<what this means for the task that depends on it — does the plan hold, or does it need to change?>
 
 ## Files changed
 <git diff --stat output>

@@ -144,9 +144,9 @@ def test_step5_pins_drift_not_counted_as_redispatch():
 
 def test_phase6_pins_run_metrics_totals():
     for field in [
-        "final run-total row: slices",
+        "final run-total row: tasks",
         "total dispatches",
-        "dispatches-per-slice",
+        "dispatches-per-task",
         "end-to-end wall clock",
     ]:
         _pin_in(
@@ -182,10 +182,10 @@ def test_step5_pins_block_is_created_on_the_first_slice():
     _pin_in(
         _step5_section(),
         "execute.md#5",
-        "appending the block itself on the first slice if it is not there yet",
+        "appending the block itself on the first task if it is not there yet",
         "Nothing else in the document prescribes creating the `## Run Metrics` "
         "block, so 'append one row to the block' would assume a block that does "
-        "not exist on the first slice.",
+        "not exist on the first task.",
     )
 
 
@@ -193,7 +193,7 @@ def test_step5_pins_non_completing_slices_still_emit_a_row():
     _pin_in(
         _step5_section(),
         "execute.md#5",
-        "a slice that ends `NEEDS_CONTEXT` or `BLOCKED` emits its row too",
+        "a task that ends `NEEDS_CONTEXT` or `BLOCKED` emits its row too",
         "Step 5 is headed 'after each child task completes' while the status "
         "column enumerates non-completing statuses — say which it is, or the "
         "rows the postmortem most needs are the ones never written.",

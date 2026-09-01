@@ -10,7 +10,7 @@ lifecycle operations.
   `## Flow-out`; child task: Delivers / Test contract / Files; spec: Problem / Objectives /
   Acceptance Criteria …). Render the body, then pipe it to `lore record create`.
 - A **plan is a `task` record graph**, not a single document. The parent plan is one `task`
-  record (rendered from `${CLAUDE_PLUGIN_ROOT}/templates/plan.md`); each slice is a child
+  record (rendered from `${CLAUDE_PLUGIN_ROOT}/templates/plan.md`); each task is a child
   `task` record (rendered from `${CLAUDE_PLUGIN_ROOT}/templates/task.md`) wired to the parent
   with `--parent` and ordered against its siblings with `--depends-on`. A **spec** is a `spec` record. `task` and `spec` each carry
   their own status vocab (task: `open → ready → in-progress → done`, off-path `blocked` /
@@ -38,17 +38,17 @@ printf '%s' "$BODY" | lore record create \
 ### `graph(parent, children)`
 
 A plan is a parent task plus its child tasks. Create the parent first, then create each child
-with `--parent <parent-name>` (the containment edge) and, where a slice depends on an earlier
+with `--parent <parent-name>` (the containment edge) and, where a task depends on an earlier
 one, `--depends-on <sibling-name>` (the ordering edge). Both flags are `task`-only.
 
 ```sh
 # parent
 printf '%s' "$PARENT_BODY" | lore record create \
   --kind task --title "<plan topic>" --status ready
-# child slice, contained by the parent and ordered after an earlier slice
+# child task, contained by the parent and ordered after an earlier task
 printf '%s' "$CHILD_BODY" | lore record create \
-  --kind task --title "<slice topic>" --status ready \
-  --parent <parent-name> --depends-on <earlier-slice-name>
+  --kind task --title "<task topic>" --status ready \
+  --parent <parent-name> --depends-on <earlier-task-name>
 ```
 
 Render the resulting graph — containment subtree, `depends-on` edges, per-task status, and
@@ -63,9 +63,9 @@ status is validated against the kind's vocab):
 lore record update task/<name> --status in-progress
 ```
 
-This covers the parent plan task's `ready → in-progress → done` lifecycle. Child slices
+This covers the parent plan task's `ready → in-progress → done` lifecycle. Child tasks
 under a plan walk `ready → done` — `in-progress` is the run's claim on the parent, not a
-per-slice value. Setting a parent `--status done` while it still has
+per-task value. Setting a parent `--status done` while it still has
 non-terminal children is refused (the children are named in the error); a parent completed
 without a `## Flow-out` section gets a non-blocking flow-out reminder.
 

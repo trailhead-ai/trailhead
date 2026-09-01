@@ -9,9 +9,12 @@
 #   - skills/_shared — council.md (the review-panel roster + dispatch contract), read
 #     by the plan, consult, and gauntlet skills; status-ownership.md (the task-status
 #     ownership contract, read by execute); refine.md (the standalone-task
-#     promotion procedure), read by the refine skill and by execute's inline run; and
+#     promotion procedure), read by the refine skill and by execute's inline run;
 #     note-storage.md (the plan/spec persistence seam, read by brainstorm, plan,
-#     polish, and agents/planner.md). It has no SKILL.md, so it is never selectable.
+#     polish, and agents/planner.md); and slice.md (the slice/task vocabulary and the
+#     quality bar a slice must clear), read by the plan skill, agents/planner.md, and
+#     both the plan.md and task.md templates. It has no SKILL.md, so it is never
+#     selectable.
 #   - templates — the spec/plan/task body templates, resolved at runtime through
 #     ${CLAUDE_PLUGIN_ROOT}/templates/<name>.md by brainstorm (spec.md), plan
 #     (plan.md + task.md), agents/planner.md (all three — it covers the whole
@@ -21,7 +24,7 @@
 #     and agents, not install-time scaffolding, which is why selection cannot drop them.
 #   - scripts — footprint_guard.py, resolved at runtime through
 #     ${CLAUDE_PLUGIN_ROOT}/scripts/footprint_guard.py by the simplifier agent and by
-#     execute's After-All-Slices simplify phase. Selecting `simplifier` without this
+#     execute's After All Tasks simplify phase. Selecting `simplifier` without this
 #     directory would leave that path unresolvable in a composed install.
 #
 # Dependency worth knowing when hand-picking a selection: the `gauntlet` skill owns

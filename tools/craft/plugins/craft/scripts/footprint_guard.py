@@ -13,7 +13,7 @@ Usage:
 Runs against the git repository rooted at the current working directory.
 
 Footprint = the set of files touched in the `base..pre-simplify` diff — i.e.
-everything the slices legitimately changed before the simplify phase started.
+everything the tasks legitimately changed before the simplify phase started.
 
 "Post-simplify state" is the union of:
   - files touched in the `pre-simplify..post-simplify-ref` diff (covers the

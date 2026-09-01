@@ -146,7 +146,7 @@ read it; do not re-inline the roster, prompt template, or bars here. Fill the su
   Spec: <spec-path>
   ```
 - `<lens-critical-bars>` → the matching block from **"Per-lens Critical bars — spec review"** in
-  `_shared/council.md`. **Not** the plan bars — a spec has no slices, and the plan bars fire on
+  `_shared/council.md`. **Not** the plan bars — a spec has no tasks, and the plan bars fire on
   things that don't exist yet.
 - `<cross-cutting>` → the empty string (the plan-drift block is planning-only).
 

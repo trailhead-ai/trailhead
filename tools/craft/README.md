@@ -20,7 +20,7 @@ named below, by name; the default installs them all.)
 | Area | What it covers |
 |---|---|
 | Planning | Turn fuzzy ideas into specs and implementation plans |
-| Execute | TDD subagent-driven implementation, slice by slice, gated per-slice by a conformance check; once every slice lands, a whole-change simplify → correctness → conditional-security pipeline runs before close |
+| Execute | TDD subagent-driven implementation, task by task, gated per-task by a conformance check; once every task lands, a whole-change simplify → correctness → conditional-security pipeline runs before close |
 | Review | Whole-change/PR adversarial review, dispatched standalone before merge or as execute's correctness phase |
 | Council | Four-lens review panel (builder / reliability / security / advocate) |
 | Spec gauntlet | Adversarial spec/ADR review passes (premise, consistency, divergence) dispatched alongside the council quartet |
@@ -32,17 +32,17 @@ named below, by name; the default installs them all.)
 **Planning:** `craft:planner`, `craft:architect`
 
 **Execute:** `craft:assumption-prover` (resolves unknowns via throwaway TDD
-tests), `craft:executor` (TDD implementer), `craft:drift-gate` (per-slice
-conformance gate — plan delivered, executor's status claim holds, next slice
+tests), `craft:executor` (TDD implementer), `craft:drift-gate` (per-task
+conformance gate — plan delivered, executor's status claim holds, next task
 unblocked; quality and style are explicitly out of scope), `craft:simplifier`
-(whole-change simplify-mutation phase in execute's After All Slices pipeline —
-removes cross-slice duplication and dead scaffolding, write-scope mechanically
+(whole-change simplify-mutation phase in execute's After All Tasks pipeline —
+removes cross-task duplication and dead scaffolding, write-scope mechanically
 enforced by `footprint_guard.py`)
 
 **Review:** `craft:code-reviewer` — whole-change/PR reviewer. Dispatched
 standalone via `/craft:review` before merge, and again as execute's
-After-All-Slices correctness phase against the full `base..HEAD` diff. Not a
-per-slice reviewer; per-slice conformance is `drift-gate`'s job.
+After-All-Tasks correctness phase against the full `base..HEAD` diff. Not a
+per-task reviewer; per-task conformance is `drift-gate`'s job.
 
 **Council** — four-lens review panel dispatched as a parallel quartet by a
 planning skill's council review step, and each member is also dispatchable

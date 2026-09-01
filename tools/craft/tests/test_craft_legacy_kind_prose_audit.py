@@ -11,7 +11,8 @@ Scanned surface: the whole shipped craft plugin tree (agents, skills, templates,
 Forbidden patterns:
   - `--kind backlog` / `--kind plan` — the retired create-command kinds.
   - `kind:backlog` / `kind:plan` — the retired search-query kinds.
-  - `### Slice` (or deeper) headings inside `templates/plan.md` — slices are child records now.
+  - `### Task` or `### Slice` (or deeper) headings inside `templates/plan.md` — the child unit
+    is its own record, never a sub-section of the parent body.
 
 Write BEFORE the prose migration — this test must fail RED first, then green after.
 """
@@ -28,6 +29,7 @@ CRAFT_PLUGIN = Path(__file__).parent.parent / "plugins" / "craft"
 # Retired create/search kind tokens. Word-boundary-anchored so `--kind task` and general
 # English ("the plan", "planning") never trip — only the literal retired-kind selectors do.
 _FORBIDDEN_KIND_RE = re.compile(r"(?:--kind|kind:)\s*(?:backlog|plan)\b")
+_NO_INLINE_CHILD_UNIT_RE = re.compile(r"(?im)^\s*#{2,}\s+(?:task|slice)\b")
 
 
 def _prose_files() -> list[Path]:
@@ -51,10 +53,19 @@ def test_no_retired_kind_reference(md: Path):
 
 
 def test_plan_template_has_no_slice_body_mechanics():
-    """The parent-task template must not carry `### Slice` sub-sections — each slice is now a
+    """The parent-task template must not carry `### Task`/`### Slice` sub-sections — each is now a
     child `task` record, not a heading in the parent body."""
     text = (CRAFT_PLUGIN / "templates" / "plan.md").read_text()
-    assert not re.search(r"(?im)^\s*#{2,}\s+slice\b", text), (
-        "templates/plan.md still carries `### Slice` body mechanics; slices are separate child "
+    assert not _NO_INLINE_CHILD_UNIT_RE.search(text), (
+        "templates/plan.md still carries inlined child-unit body mechanics; each is a separate child "
         "`task` records wired via `--parent`/`--depends-on`."
+    )
+
+
+def test_plan_template_guard_catches_inline_task_heading():
+    """The child-unit is spelled `task` under current vocabulary — inlining it as a `### Task`
+    sub-heading in the parent plan body is the same anti-pattern the guard exists to catch."""
+    text = "### Task 3: does the thing\n"
+    assert _NO_INLINE_CHILD_UNIT_RE.search(text), (
+        "guard must catch a `### Task` heading, not just the retired `### Slice` spelling"
     )
