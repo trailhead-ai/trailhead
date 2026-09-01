@@ -114,7 +114,29 @@ def test_cwd_at_a_workspace_derives_the_slug(tmp_path: Path) -> None:
     assert derive_name_component(ws, [_group("alpha")], env=_env(state)) == "feat-x"
 
 
-def test_cwd_deep_under_a_workspace_derives_the_slug(tmp_path: Path) -> None:
+def test_cwd_at_a_member_derives_the_slug_and_the_member(tmp_path: Path) -> None:
+    """A session rooted at a member names the member it owns, not just the workspace.
+
+    This is what tells two workers in one multi-repo workspace apart: rooted at
+    their own member, they differ by that member's name rather than by hash.
+    """
+    from camp.launch.recovery import derive_name_component
+
+    state = tmp_path / "state"
+    ws = _workspace(state, "alpha", "feat-x")
+    member = ws / "member"
+    member.mkdir()
+
+    assert derive_name_component(member, [_group("alpha")], env=_env(state)) == "feat-x-member"
+
+
+def test_cwd_deep_under_a_member_stops_at_the_member(tmp_path: Path) -> None:
+    """The rule caps one level below the workspace.
+
+    A session rooted deeper still belongs to the member it is inside, and the
+    name says so without growing a segment per directory — a tmux name has to
+    stay something an operator can type.
+    """
     from camp.launch.recovery import derive_name_component
 
     state = tmp_path / "state"
@@ -122,7 +144,46 @@ def test_cwd_deep_under_a_workspace_derives_the_slug(tmp_path: Path) -> None:
     deep = ws / "member" / "src" / "pkg"
     deep.mkdir(parents=True)
 
-    assert derive_name_component(deep, [_group("alpha")], env=_env(state)) == "feat-x"
+    assert derive_name_component(deep, [_group("alpha")], env=_env(state)) == "feat-x-member"
+
+
+def test_cwd_at_the_workspace_itself_derives_the_slug_alone(tmp_path: Path) -> None:
+    """The workspace root has no member to name, and gains no suffix for one."""
+    from camp.launch.recovery import derive_name_component
+
+    state = tmp_path / "state"
+    ws = _workspace(state, "alpha", "feat-x")
+
+    assert derive_name_component(ws, [_group("alpha")], env=_env(state)) == "feat-x"
+
+
+def test_member_segment_is_folded_like_every_other_component(tmp_path: Path) -> None:
+    """A member directory carrying a tmux target separator is folded, not passed through."""
+    from camp.launch.recovery import derive_name_component
+
+    state = tmp_path / "state"
+    ws = _workspace(state, "alpha", "feat-x")
+    member = ws / "trailhead-ai.github.io"
+    member.mkdir()
+
+    assert (
+        derive_name_component(member, [_group("alpha")], env=_env(state))
+        == "feat-x-trailhead-ai-github-io"
+    )
+
+
+def test_is_workspace_root_is_unchanged_by_the_member_suffix(tmp_path: Path) -> None:
+    """The boolean half still answers about containment, not about the name."""
+    from camp.launch.recovery import is_workspace_root
+
+    state = tmp_path / "state"
+    ws = _workspace(state, "alpha", "feat-x")
+    member = ws / "member"
+    member.mkdir()
+
+    env = _env(state)
+    assert is_workspace_root(ws, [_group("alpha")], env=env) is True
+    assert is_workspace_root(member, [_group("alpha")], env=env) is True
 
 
 def test_cwd_under_an_unconfigured_groups_worktrees_derives_the_basename(tmp_path: Path) -> None:
@@ -217,6 +278,36 @@ def test_is_workspace_root_answers_the_same_test_as_a_boolean(tmp_path: Path) ->
     assert is_workspace_root(elsewhere, groups, env=env) is False
 
 
+def test_workspace_root_for_answers_the_workspace_a_member_sits_in(tmp_path: Path) -> None:
+    """The workspace directory a launch root belongs to, for any depth inside it."""
+    from camp.launch.recovery import workspace_root_for
+
+    state = tmp_path / "state"
+    ws = _workspace(state, "alpha", "feat-x")
+    member = ws / "member"
+    member.mkdir()
+    deep = member / "src"
+    deep.mkdir()
+
+    groups = [_group("alpha")]
+    env = _env(state)
+
+    assert workspace_root_for(ws, groups, env=env) == ws
+    assert workspace_root_for(member, groups, env=env) == ws
+    assert workspace_root_for(deep, groups, env=env) == ws
+
+
+def test_workspace_root_for_answers_none_outside_a_workspace(tmp_path: Path) -> None:
+    from camp.launch.recovery import workspace_root_for
+
+    state = tmp_path / "state"
+    _workspace(state, "alpha", "feat-x")
+    elsewhere = tmp_path / "code" / "some-repo"
+    elsewhere.mkdir(parents=True)
+
+    assert workspace_root_for(elsewhere, [_group("alpha")], env=_env(state)) is None
+
+
 # ---------------------------------------------------------------------------
 # The agreement pin: the rule and the launch engine must not drift apart
 # ---------------------------------------------------------------------------
@@ -227,7 +318,15 @@ class _FakeHarness:
 
     name = "fakeharness"
 
-    def session_launch(self, workspace, session_id, *, session_name=None):
+    settings_paths: list
+
+    def __init__(self):
+        self.settings_paths = []
+
+    def session_launch(
+        self, workspace, session_id, *, session_name=None, settings_path=None
+    ):
+        self.settings_paths.append(settings_path)
         return ["fakeharness", "--sid", session_id]
 
     def session_launch_env_unset(self):
@@ -292,6 +391,80 @@ def test_derived_name_reproduces_the_launch_engines_tmux_name(
     component = derive_name_component(launched.launch_dir, [group], env=env)
     assert launched.tmux_name == f"camp-{component}-{launched.session_id[:8]}"
     assert launched.tmux_name in recorder.calls[0]
+
+
+def test_a_member_rooted_launch_is_handed_the_workspace_settings(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A launch below the workspace carries `--settings` for the workspace's own file.
+
+    The harness stops its upward settings search at a git repository boundary, and
+    a member worktree is one, so it never discovers `<workspace>/.claude/
+    settings.json` on its own — camp's SessionStart bootstrap and, critically, the
+    PostToolUse inject drain would simply not exist for that session. Handing the
+    file over at launch is what keeps `camp inject` able to reach it, without
+    writing anything into the member repo (which would leave every worktree
+    permanently dirty).
+    """
+    import camp.launch.session as session
+    from camp.group.manifest import workspace_dir
+
+    state = tmp_path / "state"
+    env = _env(state)
+    group = _group(
+        "settingsgroup",
+        harness={"cwd": "{workspace}/member", "pretrust": False},
+    )
+    slug = "worker"
+
+    ws = workspace_dir("settingsgroup", slug, env=env)
+    (ws / "member").mkdir(parents=True)
+    settings = ws / ".claude" / "settings.json"
+    settings.parent.mkdir(parents=True)
+    settings.write_text("{}", encoding="utf-8")
+
+    harness = _FakeHarness()
+    monkeypatch.setattr(session, "harness_for", lambda g: harness)
+    monkeypatch.setattr(session, "shutil", session.shutil)
+    monkeypatch.setattr(session.shutil, "which", lambda binary: "/usr/bin/tmux")
+    monkeypatch.setattr(session.subprocess, "run", _SpawnRecorder())
+
+    session.launch_session(group, slug, env=env)
+
+    assert harness.settings_paths == [settings]
+
+
+def test_a_workspace_rooted_launch_is_handed_no_settings(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Rooted AT the workspace, the harness finds that file itself.
+
+    Camp does not assert what the harness already resolves on its own. Passing it
+    anyway is measured to be harmless — the same file discovered and passed fires
+    its hooks once, not twice — so this pins an intent, not a hazard.
+    """
+    import camp.launch.session as session
+    from camp.group.manifest import workspace_dir
+
+    state = tmp_path / "state"
+    env = _env(state)
+    group = _group("settingsgroup2", harness={"pretrust": False})
+    slug = "worker"
+
+    ws = workspace_dir("settingsgroup2", slug, env=env)
+    ws.mkdir(parents=True)
+    settings = ws / ".claude" / "settings.json"
+    settings.parent.mkdir(parents=True)
+    settings.write_text("{}", encoding="utf-8")
+
+    harness = _FakeHarness()
+    monkeypatch.setattr(session, "harness_for", lambda g: harness)
+    monkeypatch.setattr(session.shutil, "which", lambda binary: "/usr/bin/tmux")
+    monkeypatch.setattr(session.subprocess, "run", _SpawnRecorder())
+
+    session.launch_session(group, slug, env=env)
+
+    assert harness.settings_paths == [None]
 
 
 # ---------------------------------------------------------------------------
@@ -981,4 +1154,6 @@ class TestRecoverableCandidates:
             now=_NOW,
         )
 
-        assert result[0].derived_name == f"camp-feat-x-{_UUID_A[:8]}"
+        # The transcript is rooted at a member, so the row names that member —
+        # exactly what a launch into that same directory now mints.
+        assert result[0].derived_name == f"camp-feat-x-member-{_UUID_A[:8]}"

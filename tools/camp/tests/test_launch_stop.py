@@ -104,7 +104,9 @@ class _FakeHarness:
 
     name = "fakeharness"
 
-    def session_launch(self, workspace, session_id, *, session_name=None):
+    def session_launch(
+        self, workspace, session_id, *, session_name=None, settings_path=None
+    ):
         argv = ["fakeharness", "--control", "--sid", session_id]
         if session_name is not None:
             argv += ["--name", session_name]

@@ -96,7 +96,9 @@ class FakeHarness:
         self._default_is_absence = default_is_absence
         self._scrub = tuple(SCRUB) if scrub is None else tuple(scrub)
 
-    def session_launch(self, workspace, session_id, *, session_name=None):
+    def session_launch(
+        self, workspace, session_id, *, session_name=None, settings_path=None
+    ):
         self.launch_calls.append((workspace, session_id, session_name))
         if self._launch_argv is ...:
             return ["fakeharness", "--rc", "--sid", session_id]
@@ -169,8 +171,12 @@ def rig(monkeypatch, tmp_path):
     """Wire the engine's collaborators to fakes; hand back the knobs."""
     import camp.launch.session as session
 
-    ws = tmp_path / "ws"
-    ws.mkdir()
+    # Named by the slug the default `_launch` uses, because camp's own layout
+    # guarantees it: a workspace directory IS `worktrees/<slug>`. The engine
+    # derives the session name from the directory it resolves, so a double that
+    # named this anything else would answer a question production never asks.
+    ws = tmp_path / "ws" / "feat-x"
+    ws.mkdir(parents=True)
 
     state: dict[str, Any] = {
         "harness": FakeHarness(),
@@ -532,7 +538,7 @@ class TestSessionIdentity:
         _, _, session_name = rig["harness"].launch_calls[0]
         assert session_name == result.tmux_name
 
-    def test_the_name_the_seam_is_given_is_the_folded_one(self, rig):
+    def test_the_name_the_seam_is_given_is_the_folded_one(self, rig, tmp_path):
         """The handle is folded BEFORE the harness is told it, not after.
 
         Folding and naming-the-harness are two rules over the same string, and
@@ -540,6 +546,10 @@ class TestSessionIdentity:
         after being handed over would have the harness's clients display one
         session name while tmux answers to another.
         """
+        workspace = tmp_path / "ws" / "my.proj"
+        workspace.mkdir(parents=True)
+        rig["workspace"] = workspace
+
         result = _launch(rig, slug="my.proj")
 
         _, _, session_name = rig["harness"].launch_calls[0]

@@ -108,12 +108,17 @@ def _workspace_containers(
     return tuple(containers)
 
 
-def _slug_at_or_under(resolved: Path, containers: Iterable[Path]) -> str | None:
-    """The workspace slug *resolved* sits at or under, or ``None``.
+def _relative_parts(resolved: Path, containers: Iterable[Path]) -> tuple[str, ...] | None:
+    """*resolved* as path components below whichever container holds it, or ``None``.
 
     *resolved* and *containers* are both already fully resolved. The `worktrees`
-    container itself is not a workspace — there is no slug there — so it answers
-    ``None``.
+    container itself is not a workspace — there is nothing below it there — so it
+    answers ``None``.
+
+    The single traversal both halves of the name rule read: the boolean half
+    wants only the first component, the naming half wants the member under it,
+    and deriving them from one answer is what keeps them from disagreeing about
+    which container matched.
     """
     for container in containers:
         try:
@@ -121,14 +126,39 @@ def _slug_at_or_under(resolved: Path, containers: Iterable[Path]) -> str | None:
         except ValueError:
             continue
         if relative.parts:
-            return relative.parts[0]
+            return relative.parts
     return None
 
 
+def _slug_at_or_under(resolved: Path, containers: Iterable[Path]) -> str | None:
+    """The workspace slug *resolved* sits at or under, or ``None``."""
+    parts = _relative_parts(resolved, containers)
+    return parts[0] if parts is not None else None
+
+
+#: How far below the workspace the name rule reads. The workspace slug names the
+#: workspace; one more component names the member repo inside it, which is what
+#: tells two workers in one multi-repo workspace apart. Nothing below that adds
+#: identity — a session in `member/src/pkg` belongs to `member` — and every extra
+#: segment costs an operator typing the tmux name.
+_NAME_DEPTH = 2
+
+
 def _name_component(resolved: Path, containers: Iterable[Path]) -> str:
-    """The name rule itself, over an already-resolved path: slug, else basename."""
-    slug = _slug_at_or_under(resolved, containers)
-    return slug if slug is not None else resolved.name
+    """The name rule itself, over an already-resolved path.
+
+    Inside a camp workspace: the slug, plus the member directory under it when
+    the path is in one. Anywhere else: the basename.
+
+    The result is a single component by the time it reaches a tmux name — the
+    join happens here so that :func:`sanitize_name_component` folds the whole
+    thing at once, and a member whose directory carries a tmux target separator
+    cannot smuggle one through by being joined after the fold.
+    """
+    parts = _relative_parts(resolved, containers)
+    if parts is None:
+        return resolved.name
+    return "-".join(parts[:_NAME_DEPTH])
 
 
 #: Characters a tmux session name may carry and still be addressable. tmux
@@ -203,6 +233,31 @@ def is_workspace_root(
     """
     containers = _workspace_containers(groups, env)
     return _slug_at_or_under(Path(cwd).resolve(), containers) is not None
+
+
+def workspace_root_for(
+    cwd: Path | str,
+    groups: Iterable[dict[str, Any]],
+    *,
+    env: Mapping[str, str],
+) -> Path | None:
+    """The workspace directory *cwd* sits at or under, or ``None``.
+
+    The locating half of the same rule :func:`is_workspace_root` answers as a
+    boolean: where that says whether a directory is camp-managed, this says which
+    workspace manages it. A caller that has to reach something stored AT the
+    workspace — its settings, its queue — needs the directory, not the verdict.
+    """
+    containers = _workspace_containers(groups, env)
+    resolved = Path(cwd).resolve()
+    for container in containers:
+        try:
+            relative = resolved.relative_to(container)
+        except ValueError:
+            continue
+        if relative.parts:
+            return container / relative.parts[0]
+    return None
 
 
 def printable_path(path) -> str:

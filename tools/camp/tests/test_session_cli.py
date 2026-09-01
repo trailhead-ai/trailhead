@@ -84,6 +84,7 @@ import re
 import subprocess
 import sys
 import time
+import pathlib
 from pathlib import Path
 
 import pytest
@@ -131,7 +132,9 @@ class FakeHarness(ClaudeCodeHarness):
 
     name = "fakeharness"
 
-    def session_launch(self, workspace, session_id, *, session_name=None):
+    def session_launch(
+        self, workspace, session_id, *, session_name=None, settings_path=None
+    ):
         return ["fake-launch", session_id]
 
     def session_launch_modality(self):
@@ -545,6 +548,40 @@ def test_camp_launch_dir_reports_the_session_like_a_slug_launch(cli_env) -> None
     assert _state_tree(cli_env) == before
 
 
+def test_camp_launch_dir_at_a_member_needs_no_allowlist_entry(cli_env) -> None:
+    """A directory camp itself provisioned does not have to clear the allowlist.
+
+    This is the per-repo worker shape: `--dir <workspace>/<member>` roots a
+    session at the one repo it owns. The allowlist asks who CHOSE the directory,
+    and camp built this one from its own layout — the same reasoning the resume
+    path already relies on. Without the waiver an operator would have to widen
+    `[launch] roots` to cover camp's own state directory to launch a worker.
+
+    The name it lands under is the point of the whole shape: the workspace slug
+    AND the member, so two workers in one workspace are told apart by name.
+    """
+    state = pathlib.Path(cli_env["env"]["CAMP_STATE_DIR"])
+    member = state / "mygroup" / "worktrees" / "feat-x" / "outpost"
+    member.mkdir(parents=True)
+    # Deliberately NO _set_launch_roots: the allowlist covers nothing here.
+
+    result = _camp(cli_env, "launch", "--dir", str(member), "--group", "mygroup")
+
+    assert result.returncode == 0, result.stderr
+    session_id = result.stdout.rstrip("\n")
+    assert f"tmux attach -t camp-feat-x-outpost-{session_id[:8]}" in result.stderr
+
+
+def test_camp_launch_dir_outside_a_workspace_still_needs_the_allowlist(cli_env) -> None:
+    """The waiver is checked, not trusted — it buys nothing for a named directory."""
+    target = cli_env["tmp_path"] / "elsewhere" / "myproject"
+    target.mkdir(parents=True)
+
+    result = _camp(cli_env, "launch", "--dir", str(target), "--group", "mygroup")
+
+    _assert_clean_refusal(result, needle="[launch] roots")
+
+
 def test_camp_launch_dir_spawns_tmux_at_the_directory_under_a_derived_name(cli_env) -> None:
     target = cli_env["tmp_path"] / "roots" / "myproject"
     target.mkdir(parents=True)
@@ -804,11 +841,11 @@ def test_camp_launch_dir_inside_a_workspace_takes_the_workspace_slug_as_its_name
     """One session, one name — the name `--dir` mints is the one `--resume` rebuilds.
 
     A resume reconstructs the derived name from the transcript's recorded cwd
-    through the name rule, which yields the workspace SLUG for any directory at
-    or under a workspace. A launch that named the same directory by its own
-    basename would give one session two names, and the tmux duplicate-name claim
-    — the race-proof backstop against resuming a session twice — could then never
-    fire for it.
+    through the name rule, which yields the workspace slug AND the member the
+    directory sits in. A launch that named the same directory by any other rule
+    would give one session two names, and the tmux duplicate-name claim — the
+    race-proof backstop against resuming a session twice — could then never fire
+    for it. What the name IS matters less here than that one rule mints it.
     """
     workspace = Path(_new_workspace(cli_env, "feat-slugname")).resolve()
     nested = workspace / "member"
@@ -821,7 +858,7 @@ def test_camp_launch_dir_inside_a_workspace_takes_the_workspace_slug_as_its_name
     session_id = result.stdout.strip()
     spawned = _tmux_new_session_argv(cli_env)
     assert len(spawned) == 1
-    assert _flag_value(spawned[0], "-s") == f"camp-feat-slugname-{session_id[:8]}"
+    assert _flag_value(spawned[0], "-s") == f"camp-feat-slugname-member-{session_id[:8]}"
     assert _flag_value(spawned[0], "-c") == str(nested)
 
 
@@ -964,9 +1001,10 @@ def test_camp_launch_resume_roots_at_the_recorded_cwd_below_the_workspace(
     A group's `[harness] cwd` routinely roots a launch BELOW the workspace, so a
     resume that recomputed the launch directory from the group config instead of
     honoring what the transcript recorded would bring the session back up in the
-    wrong directory — and report success while doing it. The derived name stays
-    the workspace slug, because that is the name the original launch minted and
-    the tmux-name claim is what makes a duplicate resume collide.
+    wrong directory — and report success while doing it. The derived name carries
+    the member the recorded cwd sits in, because that is the name the original
+    launch minted from the same rule and the tmux-name claim is what makes a
+    duplicate resume collide.
     """
     workspace = _workspace_launch_dir(cli_env, "feat-nested")
     nested = workspace / "member" / "src"
@@ -981,7 +1019,7 @@ def test_camp_launch_resume_roots_at_the_recorded_cwd_below_the_workspace(
     spawned = _tmux_new_session_argv(cli_env)
     assert len(spawned) == 1
     assert _flag_value(spawned[0], "-c") == str(nested)
-    assert _flag_value(spawned[0], "-s") == f"camp-feat-nested-{_UUID_A[:8]}"
+    assert _flag_value(spawned[0], "-s") == f"camp-feat-nested-member-{_UUID_A[:8]}"
     assert _state_tree(cli_env) == before
 
 

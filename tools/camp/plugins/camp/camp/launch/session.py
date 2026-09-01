@@ -70,7 +70,12 @@ from ..group.manifest import workspace_dir
 from .claude_trust import config_file, pretrust_workspace, trust_status
 from .lore_pull import pull_lore
 from .profile import harness_for, resolve_harness_profile
-from .recovery import printable_path, sanitize_name_component
+from .recovery import (
+    derive_name_component,
+    printable_path,
+    sanitize_name_component,
+    workspace_root_for,
+)
 
 #: Seconds to wait on the pre-spawn enumeration probe. It is advisory output
 #: only, so it must never be able to hold up a launch.
@@ -234,6 +239,40 @@ def _resolve_named_root(
             f"camp: cannot launch — launch directory {printable_path(resolved)} is not a directory"
         )
     return resolved
+
+
+def _workspace_settings_to_hand_over(
+    launch_dir: Path, group: dict, env: dict[str, str]
+) -> Path | None:
+    """The workspace settings file a launch will not find on its own, or ``None``.
+
+    The harness resolves project settings by walking UP from its launch directory
+    and stopping at the first one it finds — or at a git repository boundary. A
+    member worktree is a repository, so a session rooted at one never reaches
+    `<workspace>/.claude/settings.json`, and camp's SessionStart bootstrap and
+    PostToolUse inject drain simply do not exist for it. The drain is the only
+    channel `camp inject` has into a live session, so without this the workspace
+    can queue documents for a worker that will never read them.
+
+    Handed over rather than written into the member, deliberately: camp does not
+    own that repository, and a settings file placed there is an untracked file in
+    every worktree — permanently dirty, which is both `git status` noise the
+    operator did not ask for and a tree camp's own teardown then refuses to clean.
+
+    ``None`` where there is nothing to hand over: a launch rooted AT the workspace
+    already discovers the file, and a launch outside any camp workspace has no
+    workspace settings to hand over at all.
+
+    The workspace-rooted case is redundancy, not a hazard — measured, not assumed:
+    the same file discovered AND passed to `--settings` fires its hooks once, not
+    twice, so this gate exists to keep camp from asserting something it does not
+    need to rather than to prevent a double registration.
+    """
+    ws_root = workspace_root_for(launch_dir, [group], env=env)
+    if ws_root is None or launch_dir == ws_root:
+        return None
+    candidate = ws_root / ".claude" / "settings.json"
+    return candidate if candidate.is_file() else None
 
 
 def _assert_trust(profile, launch_dir: Path, ws_dir: Path, env: dict[str, str]) -> None:
@@ -580,7 +619,14 @@ def launch_session(
     if root is None:
         trust_root = workspace_dir(group["group"]["name"], slug, env=env)
         launch_dir = _resolve_launch_dir(profile, slug, trust_root)
-        name_component = slug
+        # Derived from the resolved launch directory, never restated as the slug.
+        # A group's `[harness] cwd` may root the launch below the workspace (at a
+        # member repo), and recovery re-derives the name from that same directory
+        # with no slug to hand. Stating the slug here would agree with recovery
+        # only for as long as the rule ignored everything below the workspace —
+        # and the moment it stops, the two mint different names for one session
+        # and the tmux duplicate-name claim stops backstopping anything.
+        name_component = derive_name_component(launch_dir, [group], env=env)
     else:
         launch_dir = _resolve_named_root(root, group, env, camp_managed=camp_managed_root)
         trust_root = trust_scope
@@ -610,7 +656,10 @@ def launch_session(
 
     if resume_session_id is None:
         harness_argv = harness.session_launch(
-            launch_dir, session_id, session_name=tmux_name
+            launch_dir,
+            session_id,
+            session_name=tmux_name,
+            settings_path=_workspace_settings_to_hand_over(launch_dir, group, env),
         )
         unsupported = "cannot launch sessions"
     else:

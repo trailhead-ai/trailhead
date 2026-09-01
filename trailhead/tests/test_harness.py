@@ -668,6 +668,37 @@ class TestClaudeCodeSessionLaunch:
         ]
 
 
+    def test_session_launch_carries_a_settings_file(self, tmp_path):
+        """A launch rooted where the harness will not DISCOVER camp's settings can
+        still be handed them.
+
+        The harness resolves project settings by first-match-wins upward search
+        that stops at a git repository boundary, so a session rooted at a member
+        repo inside a workspace never finds the workspace's own hooks. `--settings`
+        loads them additionally, without anything being written into the repo the
+        session is rooted in.
+        """
+        settings = tmp_path / "settings.json"
+        argv = ClaudeCodeHarness().session_launch(
+            tmp_path, "sess-1", settings_path=settings
+        )
+        assert argv[-2:] == ["--settings", str(settings)]
+
+    def test_session_launch_omits_settings_when_not_asked(self, tmp_path):
+        assert "--settings" not in ClaudeCodeHarness().session_launch(tmp_path, "sess-1")
+
+    def test_session_launch_refuses_a_flag_shaped_settings_path(self, tmp_path):
+        """Same flag-injection surface as session_id and session_name.
+
+        A path that reads as a flag lands in the same argv and is refused there
+        for the same reason, rather than being passed to the harness to interpret.
+        """
+        with pytest.raises(HarnessError):
+            ClaudeCodeHarness().session_launch(
+                tmp_path, "sess-1", settings_path=Path("--dangerously-skip-permissions")
+            )
+
+
 class TestClaudeCodeSessionLaunchModality:
     def test_returns_tty_required(self):
         assert ClaudeCodeHarness().session_launch_modality() == MODALITY_TTY_REQUIRED
