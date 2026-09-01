@@ -293,6 +293,35 @@ def test_standalone_task_walks_its_own_status():
     )
 
 
+def test_claim_writes_the_branch_label_even_when_the_status_write_is_skipped():
+    """The claim's two writes are not one all-or-nothing unit.
+
+    A parent found already `in-progress` (e.g. `/craft:slice` materialized it before
+    `/craft:plan` added children) skips the redundant status flip, but crash-resume
+    still needs `craft/branch` on that parent — so the label write must not be gated
+    on the status write's own skip condition.
+    """
+    text = _execute_text()
+    assert "but write `craft/branch` regardless" in text, (
+        "execute/SKILL.md's claim step must write `craft/branch` unconditionally — "
+        "skipping the status flip when the parent is already `in-progress` must not "
+        "also skip the label write, or crash-resume has no branch to read"
+    )
+
+
+def test_claim_status_write_keeps_its_skip_condition():
+    """The label write becoming unconditional must not loosen the status write's own skip."""
+    normalized = " ".join(_execute_text().split())
+    assert (
+        "Skip the status write if the parent is already `in-progress`, `done`, "
+        "`dropped`, or `superseded`" in normalized
+    ), (
+        "execute/SKILL.md's claim step must still skip the status write for a parent "
+        "already `in-progress`, `done`, `dropped`, or `superseded` — only the label "
+        "write becomes unconditional, not the status write"
+    )
+
+
 def test_standalone_branch_covers_the_remaining_statuses():
     """`ready` and `open` are two of six; the rest must not fall through silently."""
     text = _execute_text()

@@ -293,10 +293,11 @@ just as much as the `executor` in step 3 — claim the plan in one command: flip
 off `ready` and write its branch label together —
 `lore record update task/<parent-name> --vault <elected-vault> --status in-progress --label craft/branch=<bare-branch>`
 (bump `updated:` to today). Write both at dispatch, not only at close — `craft/branch`'s
-primary reader is crash-resume logic, which runs on tasks that never reached close. Skip if
-the parent is already `in-progress`, `done`, `dropped`, or `superseded` — if it's
-`in-progress` from an earlier session, see [Resuming a run](#resuming-a-run) above instead
-of re-dispatching from scratch.
+primary reader is crash-resume logic, which runs on tasks that never reached close. Skip the
+status write if the parent is already `in-progress`, `done`, `dropped`, or `superseded` — if
+it's `in-progress` from an earlier session, see [Resuming a run](#resuming-a-run) above
+instead of re-dispatching from scratch — but write `craft/branch` regardless: the label
+write is not conditional on the status write.
 
 **Load dispatch lessons before the first dispatch.** Run this command inline, right here, not as a dispatch to another agent — mandatory inline commands fired 26/26 in transcript review against 6/26 for conditional dispatch and 0/2 for passive prose ([[lesson/prior-art-verification-must-be-dispatched-not-instructed]]):
 
