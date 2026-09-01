@@ -150,18 +150,32 @@ def test_label_conventions_name_the_unset_on_reselection_rule():
 # --- "Both are single-valued" now follows three registered labels ---
 
 
-def test_single_valued_summary_names_all_three_labels_not_just_two():
+def test_single_valued_summary_counts_every_registered_label():
+    """The summary sentence names how many labels it covers, so it goes stale every
+    time one is registered — it has already been wrong once ("Both" after a third
+    landed). The count is derived from the documented entries rather than hardcoded,
+    so registering the next label fails this test at the summary rather than silently
+    leaving the number one short.
+    """
+    import re
+
     text = _text()
-    assert "Both are **single-valued" not in text, (
-        "status-ownership.md's label-conventions summary must not say 'Both' "
-        "— three labels are registered now (craft/branch, craft/slice-loop, "
-        "craft/push), not two, so 'Both' is a stale referent."
+    registered = re.findall(r"^- \*\*`craft/[a-z-]+", text, re.M)
+    words = {2: "Both", 3: "All three", 4: "All four", 5: "All five", 6: "All six"}
+    expected = words[len(registered)]
+    assert f"{expected} are **single-valued" in text or (
+        expected == "Both" and "Both are **single-valued" in text
+    ), (
+        f"status-ownership.md documents {len(registered)} craft/ labels "
+        f"({', '.join(r.split('`')[-1] for r in registered)}), so its "
+        f"single-valued summary must say {expected!r} — a summary naming fewer "
+        "than it covers leaves a label with no stated multiplicity"
     )
-    _pin(
-        "All three are **single-valued",
-        "status-ownership.md's label-conventions summary must refer to all "
-        "three registered labels, not the stale 'Both'.",
-    )
+    for stale in (w for n, w in words.items() if w != expected):
+        assert f"{stale} are **single-valued" not in text, (
+            f"status-ownership.md's summary says {stale!r} but documents "
+            f"{len(registered)} labels — stale referent"
+        )
 
 
 def test_single_valued_summary_states_slice_loops_multiplicity():
@@ -195,4 +209,20 @@ def test_created_at_in_progress_names_the_real_exit_owner():
         "blocked) the `ready → in-progress` entry above already names, "
         "reached once execute's claim treats the now-decomposed, "
         "still-unclaimed parent as its first dispatch.",
+    )
+
+
+def test_slice_parent_label_is_documented_in_the_shared_contract():
+    """The label is queried by two skills, so the shared contract is its owner —
+    a marker documented only where it is written is one a reader of the guard
+    cannot look up."""
+    text = _text()
+    assert "**`craft/slice-parent`**" in text, (
+        "status-ownership.md must document `craft/slice-parent` alongside the "
+        "other craft/ labels — it is written by /craft:slice at materialization "
+        "and read by both /craft:slice's guard and /craft:plan's cross-check"
+    )
+    assert "written on the parent task at materialization" in text, (
+        "the entry must say when it is written — at materialization, on the same "
+        "create as the record"
     )

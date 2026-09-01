@@ -118,12 +118,23 @@ chosen this pass.
 
 ### 5. Guard — refuse while a slice is already open on this spec
 
-Query the spec's linked slices: `lore search "kind:task related-spec:<spec-name> -status:done -status:dropped -status:superseded"` — the `related-spec:` form, filtered to every
+Query the spec's linked slices: `lore search "kind:task related-spec:<spec-name> has:label.craft.slice-parent -status:done -status:dropped -status:superseded"` — the `related-spec:` form, filtered to every
 non-terminal task status (`open`, `ready`, `in-progress`, `blocked`), so a slice that closes
 stops blocking future passes and one still in flight keeps blocking them.
 
 If this returns any task, refuse to select a second one — name the open slice by its title and task id, and name both ways forward: resume it (continue running `/craft:plan` or `/craft:execute` against that existing parent task) or drop it explicitly (`lore record update <task-id> --status dropped`, recording why). A crashed or interrupted run must be resumed or
 explicitly dropped, never silently duplicated by a second invocation of this skill.
+
+**The query is scoped to labelled slice parents — `has:label.craft.slice-parent`, the marker step
+9 writes at materialization.** A task linked to the spec that is not a slice parent does not block
+selection: a cross-repo follow-up, a coordination task owned by another session, or a handoff
+record written to survive a pause all legitimately carry `--related spec=`, and none of them is a
+slice in flight. Matching them freezes selection on a spec that has no open slice at all — observed
+three times against one spec, including a handoff record that blocked the very resume it was
+written to enable. The narrowing is deliberate, not an oversight.
+
+What the guard still catches is unchanged: a slice parent this skill materialized and that has not
+reached `done`, `dropped`, or `superseded`.
 
 **This guard is fail-closed.** If the `lore search` call errors, or its output cannot be parsed
 into a definite list of open slices, treat that exactly like finding an open slice: refuse and report the search failure, rather than proceeding as though nothing was open. Reading a search
@@ -209,8 +220,13 @@ Create the parent `task` record, linking it to the spec on the same write:
 ```sh
 printf '%s' "$BODY" | lore record create \
   --kind task --title "<slice title>" --status in-progress \
-  --related "spec=$SPEC_NAME"
+  --related "spec=$SPEC_NAME" --label craft/slice-parent
 ```
+
+**`--label craft/slice-parent` goes on this same create**, never a follow-up write. It is what
+step 5's guard queries to tell a slice parent from any other task linking to the spec; a marker
+written a moment later can miss a concurrent pass that has already run its guard, which is the same
+reason `--related spec=` is on this invocation rather than after it.
 
 Written at `in-progress` — never `open` or `ready` — because three automated selectors would
 otherwise reach a slice parent before it has anything decomposed beneath it:
@@ -226,7 +242,7 @@ invocation — never a follow-up write that could land after the record has alre
 
 ### 10. Re-check for a concurrent duplicate
 
-After the parent task is written, re-run the open-slice query from the guard above once more: `lore search "kind:task related-spec:<spec-name> -status:done -status:dropped -status:superseded"`. This does not make the guard atomic — a second invocation could still race
+After the parent task is written, re-run the open-slice query from the guard above once more: `lore search "kind:task related-spec:<spec-name> has:label.craft.slice-parent -status:done -status:dropped -status:superseded"`. This does not make the guard atomic — a second invocation could still race
 between the original query and this recheck — but it converts a concurrent double-materialization from silent into visible: if the recheck now finds more than the one
 slice this pass just wrote, report it to the operator by name rather than letting a duplicate
 sit undiscovered.

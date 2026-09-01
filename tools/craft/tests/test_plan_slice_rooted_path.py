@@ -311,3 +311,19 @@ def test_opening_line_says_plan_builds_in_tasks():
         "tasks' — the component-shaped unit it actually writes, whether "
         "rooted at a slice or a topic"
     )
+
+
+def test_cross_check_query_is_scoped_to_labelled_slice_parents():
+    """plan's cross-check asks the same question /craft:slice's guard asks — "is a
+    slice already open on this spec" — so it carries the same over-match. An
+    unrelated linked task made plan warn about a duplicate slice parent that does
+    not exist."""
+    assert (
+        'lore search "kind:task related-spec:<spec-name> has:label.craft.slice-parent '
+        '-status:done -status:dropped -status:superseded"' in _text()
+    ), (
+        "plan/SKILL.md's open-slice-parent cross-check must filter to "
+        "`has:label.craft.slice-parent` — the marker /craft:slice writes at "
+        "materialization — so a follow-up or coordination task linked to the same "
+        "spec is not reported as an open slice parent"
+    )
