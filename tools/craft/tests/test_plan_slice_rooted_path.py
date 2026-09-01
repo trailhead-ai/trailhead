@@ -217,3 +217,29 @@ def test_divergence_sentence_names_steps_8_5_and_9():
         "plan/SKILL.md's entry-point section must name Steps 8.5 and 9, not "
         "claim the two paths diverge only in Step 8"
     )
+
+
+# --- the opening line no longer claims plan builds slices ---
+#
+# /craft:plan always produces tasks — the component-shaped unit beneath a slice.
+# It never builds "in slices": /craft:slice is what chooses a slice, and plan
+# decomposes the one it's rooted at (or, on the topic-rooted path, the whole
+# feature) into tasks. "then build it in slices" was accurate before the slice
+# loop existed; it now sits beside the slice-rooted clause it contradicts.
+
+
+def test_opening_line_no_longer_claims_plan_builds_in_slices():
+    assert "then build it in slices" not in _text(), (
+        "plan/SKILL.md's opening line must not claim plan 'builds in slices' "
+        "— plan always produces tasks; /craft:slice is what chooses a slice, "
+        "and the slice-rooted clause right beside this sentence says plan "
+        "designs one slice's tasks, not that plan itself builds slices"
+    )
+
+
+def test_opening_line_says_plan_builds_in_tasks():
+    assert "Design the whole feature end-to-end, then build it in tasks" in _text(), (
+        "plan/SKILL.md's opening line must say plan builds the feature 'in "
+        "tasks' — the component-shaped unit it actually writes, whether "
+        "rooted at a slice or a topic"
+    )

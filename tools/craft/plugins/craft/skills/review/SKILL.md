@@ -106,6 +106,14 @@ never as the unconditional next step from a per-slice review:
 > "The slice loop reports spec/streaming-export closed out. Run `/craft:distill spec/streaming-export`
 > when you're ready to distill this work into the ADR log."
 
+**This handoff is pending later work, not carryoutable today.** `distill/SKILL.md` enumerates
+its sweep queue via `kind:spec status:planned` and writes a spec `complete` only if it is
+already `planned` — a status the slice loop never writes, since it holds a spec at `ready` for
+its whole run. Closing this gap means removing `/craft:plan`'s `ready → planned` advance and
+moving distill's candidate query off `status:planned`, deferred to a later slice of this spec.
+Until then, say so when handing off, so the next reader meets a known limitation rather than an
+instruction distill will refuse.
+
 ## Red Flags
 
 **Never:**

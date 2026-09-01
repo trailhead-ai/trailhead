@@ -28,6 +28,7 @@ from pathlib import Path
 CRAFT = Path(__file__).parent.parent / "plugins" / "craft"
 REVIEW = CRAFT / "skills" / "review" / "SKILL.md"
 GAUNTLET = CRAFT / "skills" / "gauntlet" / "SKILL.md"
+BRAINSTORM = CRAFT / "skills" / "brainstorm" / "SKILL.md"
 README = Path(__file__).parent.parent / "README.md"
 
 # Same regex test_gauntlet_contract.py polices every craft prose file with, restated
@@ -42,6 +43,21 @@ def _pin(path: Path, phrase: str, reason: str) -> None:
         f"{phrase!r}"
     )
     assert any(phrase in line for line in text.splitlines()), reason
+
+
+def _normalize(text: str) -> str:
+    return re.sub(r"\s+", " ", text)
+
+
+def _absent_normalized(path: Path, phrase: str, reason: str) -> None:
+    """Assert `phrase` is absent even after collapsing whitespace to single spaces.
+
+    A raw substring check on a negative pin is disarmed by any rewrap that
+    inserts or removes a line break inside the phrase — normalizing whitespace
+    first makes the check immune to reflow.
+    """
+    normalized = _normalize(path.read_text())
+    assert _normalize(phrase) not in normalized, reason
 
 
 # --- review/SKILL.md's closing handoff re-enters the loop, not distill directly ---
@@ -81,6 +97,27 @@ def test_review_handoff_still_hands_off_to_distill_fully_formed():
     )
 
 
+def test_review_handoff_names_the_distill_precondition_as_pending():
+    """The distill handoff fires on a spec the loop deliberately holds at `ready`.
+
+    `distill/SKILL.md` enumerates its sweep queue via `status:planned` and writes a
+    spec `complete` only if it is already `planned` — a precondition the slice loop
+    never satisfies (it never advances a spec off `ready`). Routing an operator into
+    that handoff today sends them into a refusal. Closing this properly means
+    removing `/craft:plan`'s `ready → planned` advance and moving distill's candidate
+    query — deferred, later work. Until then, the prose must name the handoff as
+    pending that work rather than presenting it as carryoutable now.
+    """
+    _pin(
+        REVIEW,
+        "is pending",
+        "review/SKILL.md's distill handoff must name itself as pending later work "
+        "— removing `/craft:plan`'s `ready → planned` advance and moving distill's "
+        "candidate query off `status:planned` — rather than presenting a handoff "
+        "that routes into distill's `planned` precondition as carryoutable today.",
+    )
+
+
 def test_review_handoff_still_never_advances_the_spec_itself():
     text = REVIEW.read_text()
     advances = _SPEC_ADVANCE_RE.findall(text)
@@ -105,11 +142,38 @@ def test_gauntlet_handoff_enters_the_loop_via_slice():
 
 
 def test_gauntlet_handoff_no_longer_names_plan_as_the_direct_next_step():
-    text = GAUNTLET.read_text()
-    assert "let the user invoke\n`/craft:plan`" not in text, (
+    _absent_normalized(
+        GAUNTLET,
+        "let the user invoke `/craft:plan`",
         "gauntlet/SKILL.md must no longer hand the operator directly to "
         "`/craft:plan` after a spec advances to `ready` — that bypasses the "
-        "slice loop's only wired entry point."
+        "slice loop's only wired entry point. Checked whitespace-insensitively "
+        "so a rewrap of this sentence can't silently disarm the pin.",
+    )
+
+
+# --- brainstorm/SKILL.md's ready-spec handoff enters the loop, not plan directly ---
+
+
+def test_brainstorm_handoff_enters_the_loop_via_slice():
+    _pin(
+        BRAINSTORM,
+        "/craft:slice spec/streaming-export",
+        "brainstorm/SKILL.md's ready-spec handoff must send the operator to "
+        "`/craft:slice spec/<id>` — the loop's only wired entry point — not to "
+        "`/craft:plan spec/<id>`, which creates its own parent and strands the "
+        "spec outside the loop.",
+    )
+
+
+def test_brainstorm_handoff_no_longer_names_plan_as_the_direct_next_step():
+    _absent_normalized(
+        BRAINSTORM,
+        "let the user invoke `/craft:plan` explicitly once the spec is `ready`",
+        "brainstorm/SKILL.md must no longer hand the operator directly to "
+        "`/craft:plan` once a spec is `ready` — that is the exact bypass "
+        "gauntlet/SKILL.md and README.md were re-wired to close. Checked "
+        "whitespace-insensitively so a rewrap can't silently disarm the pin.",
     )
 
 

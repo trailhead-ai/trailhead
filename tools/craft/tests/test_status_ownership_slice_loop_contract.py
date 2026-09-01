@@ -19,6 +19,7 @@ Every pinned phrase is verified whole-file-unique before being asserted.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 CRAFT = Path(__file__).parent.parent / "plugins" / "craft"
@@ -27,6 +28,20 @@ STATUS_OWNERSHIP = CRAFT / "skills" / "_shared" / "status-ownership.md"
 
 def _text() -> str:
     return STATUS_OWNERSHIP.read_text()
+
+
+def _normalize(text: str) -> str:
+    return re.sub(r"\s+", " ", text)
+
+
+def _pin_normalized(phrase: str, reason: str) -> None:
+    """Whitespace-insensitive pin: a rewrap that shifts a line break can't disarm it."""
+    normalized = _normalize(_text())
+    assert normalized.count(_normalize(phrase)) == 1, (
+        f"pinned phrase must be whitespace-normalized-unique in the file "
+        f"(found {normalized.count(_normalize(phrase))}): {phrase!r}"
+    )
+    assert reason
 
 
 def _pin(phrase: str, reason: str) -> None:
@@ -99,10 +114,85 @@ def test_label_conventions_name_both_slice_loop_values():
     )
 
 
+# --- the reconciliation note is scoped to the childless case ---
+
+
+def test_reconciliation_scopes_refusal_to_childless():
+    _pin(
+        "A childless `in-progress` task with no",
+        "The reconciliation note is this contract's owner and must scope its "
+        "refusal to a *childless* `in-progress` task with no `craft/branch` "
+        "label — unqualified, it contradicts `/craft:execute` claiming (not "
+        "refusing) a parent-with-children in that same shape, the loop's "
+        "normal post-`/craft:plan` path.",
+    )
+
+
+def test_reconciliation_names_the_claimed_with_children_half():
+    _pin(
+        "a parent-with-children in that same shape is claimed instead",
+        "The reconciliation note must also state the other half of the rule: "
+        "once `/craft:plan` gives the slice parent children, that same "
+        "in-progress, no-branch-label shape is claimed by execute's first "
+        "dispatch, not refused.",
+    )
+
+
 def test_label_conventions_name_the_unset_on_reselection_rule():
     _pin(
         "A later pass selecting again unsets it",
         "The `craft/slice-loop` registry entry must state the same "
         "last-write-wins-style rule `craft/push` already documents: a later "
         "pass that selects another slice unsets the label.",
+    )
+
+
+# --- "Both are single-valued" now follows three registered labels ---
+
+
+def test_single_valued_summary_names_all_three_labels_not_just_two():
+    text = _text()
+    assert "Both are **single-valued" not in text, (
+        "status-ownership.md's label-conventions summary must not say 'Both' "
+        "— three labels are registered now (craft/branch, craft/slice-loop, "
+        "craft/push), not two, so 'Both' is a stale referent."
+    )
+    _pin(
+        "All three are **single-valued",
+        "status-ownership.md's label-conventions summary must refer to all "
+        "three registered labels, not the stale 'Both'.",
+    )
+
+
+def test_single_valued_summary_states_slice_loops_multiplicity():
+    _pin_normalized(
+        "`craft/slice-loop` takes one of its two values",
+        "status-ownership.md must state `craft/slice-loop`'s multiplicity "
+        "explicitly — it is still single-valued (one of `complete` or "
+        "`stopped` at a time), the same shape `craft/branch` and "
+        "`craft/push` hold a single value in.",
+    )
+
+
+# --- the (created) -> in-progress entry names its real exit owner ---
+
+
+def test_created_at_in_progress_names_plan_writes_no_status():
+    _pin_normalized(
+        "not `/craft:plan` — it decomposes the parent into children but writes no status",
+        "status-ownership.md's `(created) → in-progress` entry must state "
+        "that `/craft:plan` is not the exit owner — it writes no status at "
+        "all on the slice-rooted path, so it cannot close the exit edge the "
+        "section's own rule requires an exit owner to close.",
+    )
+
+
+def test_created_at_in_progress_names_the_real_exit_owner():
+    _pin_normalized(
+        "The real exit owner is the same as the `ready → in-progress` entry above",
+        "status-ownership.md's `(created) → in-progress` entry must name "
+        "the real exit owner: the same two execute exit writes (done and "
+        "blocked) the `ready → in-progress` entry above already names, "
+        "reached once execute's claim treats the now-decomposed, "
+        "still-unclaimed parent as its first dispatch.",
     )

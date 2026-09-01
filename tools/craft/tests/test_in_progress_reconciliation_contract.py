@@ -126,3 +126,38 @@ def test_claiming_the_run_unclaimed_parent_never_reconciles():
         "workspace-reconcile logic, which can release the task back to `ready` "
         "— the defect this item fixes."
     )
+
+
+# --- Item 3: Resuming a run's refusal is scoped to the childless case ---
+#
+# The section's own refusal sentence names an unqualified `in-progress` task with
+# no `craft/branch` label as refused. But `### Claiming the run at first
+# dispatch` claims a parent-with-children in that exact shape — the loop's normal
+# post-`/craft:plan` path. Left unqualified, the two sections contradict on the
+# happy path.
+
+
+def test_resuming_a_run_refusal_is_scoped_to_childless():
+    text = _text()
+    _pin(
+        _resume_section(),
+        text,
+        "childless `in-progress` task with no `craft/branch` label",
+        "'### Resuming a run' must scope its refusal to a *childless* "
+        "`in-progress` task with no `craft/branch` label — unqualified, the "
+        "sentence contradicts 'Claiming the run at first dispatch', which "
+        "claims (not refuses) a parent-with-children in that same shape.",
+    )
+
+
+def test_resuming_a_run_names_the_claimed_with_children_half():
+    text = _text()
+    _pin(
+        _resume_section(),
+        text,
+        "a parent-with-children in that same shape is claimed instead",
+        "'### Resuming a run' must state the other half of the reconciled "
+        "rule: a parent-with-children task in that same in-progress, "
+        "no-branch-label shape is claimed, not refused — the loop's normal "
+        "path once `/craft:plan` has decomposed a slice.",
+    )

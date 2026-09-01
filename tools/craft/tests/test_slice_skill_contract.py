@@ -24,11 +24,25 @@ skill points at it rather than restating it — the restatement guard below is w
 keeps that single-source claim honest.
 """
 
+import re
 from pathlib import Path
 
 CRAFT = Path(__file__).parent.parent / "plugins" / "craft"
 SLICE_SKILL = CRAFT / "skills" / "slice" / "SKILL.md"
 SHARED_SLICE = CRAFT / "skills" / "_shared" / "slice.md"
+
+
+def _normalize(text: str) -> str:
+    return re.sub(r"\s+", " ", text)
+
+
+def _pin_normalized(phrase: str, reason: str) -> None:
+    """Whitespace-insensitive pin: a rewrap that shifts a line break can't disarm it."""
+    normalized = _normalize(_text())
+    assert normalized.count(_normalize(phrase)) == 1, (
+        f"pinned phrase must be whitespace-normalized-unique in the file "
+        f"(found {normalized.count(_normalize(phrase))}): {phrase!r}"
+    )
 
 # The canonical quality-bar sentence. `test_slice_vocabulary_contract.py` already pins
 # that this wording lives in exactly one shipped file (_shared/slice.md); restating it
@@ -105,14 +119,43 @@ def test_slice_skill_does_not_restate_the_quality_bar():
     )
 
 
-# --- the claim is stated before any write or planning ---
+# --- the claim is stated before the parent task write, specifically ---
+#
+# The promise used to read "before any record is written", but step 4's ledger
+# reconcile and step 6's craft/slice-loop label can both already have written by
+# the time step 8 runs — an unscoped promise is one this procedure itself
+# breaks. It is scoped to the parent-task write specifically, the one write
+# that actually creates the slice the operator is being asked to accept.
 
 
-def test_value_claim_is_stated_before_any_write_or_planning():
-    assert "Before any record is written and before any planning is invoked" in _text(), (
-        "slice/SKILL.md must state the ordering explicitly — the value claim reaches "
-        "the operator before any record write or /craft:plan hand-off, not merely "
-        "'the claim is stated' with no ordering attached"
+def test_value_claim_is_stated_before_the_parent_task_write():
+    assert (
+        "Before the parent task record is written and before any planning is "
+        "invoked" in _text()
+    ), (
+        "slice/SKILL.md must scope the ordering promise to the parent task "
+        "record specifically — step 4's ledger reconcile and step 6's "
+        "craft/slice-loop label can both already have written by step 8, so "
+        "an unscoped 'before any record' promise is one this procedure itself "
+        "breaks"
+    )
+
+
+def test_value_claim_promise_no_longer_claims_any_record():
+    assert "Before any record is written" not in _text(), (
+        "slice/SKILL.md must not claim its ordering promise covers 'any "
+        "record' — step 4 (ledger) and step 6 (craft/slice-loop label) can "
+        "both already have written by the time step 8 runs"
+    )
+
+
+def test_nothing_writes_promise_is_scoped_to_the_parent_task_record():
+    _pin_normalized(
+        "Nothing in this procedure writes the parent task record or hands "
+        "off to `/craft:plan` ahead of that statement",
+        "slice/SKILL.md's companion sentence must scope the same way: nothing "
+        "writes the parent task record or hands off to /craft:plan ahead of "
+        "the claim, not 'nothing writes a record'"
     )
 
 
@@ -407,11 +450,40 @@ def test_ledger_section_is_named_slices():
 
 def test_ledger_line_carries_all_four_fields():
     assert (
-        "append one line carrying all four fields — slice title, value claim, "
-        "task id, and close date" in _text()
+        "append one\nline carrying all four fields — slice title, value claim" in _text()
     ), (
         "slice/SKILL.md must state the ledger line carries all four fields — "
         "slice title, value claim, task id, close date"
+    )
+
+
+def test_ledger_names_the_value_claim_source():
+    _pin_normalized(
+        "read from the task body's `**Value claim:**` section",
+        "slice/SKILL.md must name where the ledger line's value claim comes "
+        "from — the task body's `**Value claim:**` section — not just the "
+        "close date's source",
+    )
+
+
+def test_ledger_value_claim_fallback_covers_a_pre_template_done_slice():
+    _pin_normalized(
+        "if absent, fall back to its `**Goal:**` text",
+        "slice/SKILL.md must give the value-claim source a fallback for a "
+        "`done` slice whose body predates the `**Value claim:**` section — "
+        "this spec's own slice 1 is the literal case: its parent body opens "
+        "with `**Goal:**` instead, and the first reconcile pass will hit it",
+    )
+
+
+def test_ledger_line_has_a_concrete_shape():
+    assert (
+        "- **<slice title>** — <value claim>. (`task/<task-id>`, closed "
+        "<close-date>)" in _text()
+    ), (
+        "slice/SKILL.md must specify a concrete line shape for a ledger "
+        "entry with no existing line — otherwise the four named fields have "
+        "no defined key and two passes can format them differently"
     )
 
 
@@ -573,13 +645,14 @@ def test_selection_step_routes_to_the_early_stop_path():
 
 
 def test_stopped_marker_is_cleared_on_a_later_selection():
-    assert (
-        "If the spec carries `craft/slice-loop=stopped` from an earlier pass, "
-        "clear it here" in _text()
-    ), (
-        "slice/SKILL.md must clear a stale craft/slice-loop=stopped marker when "
-        "a later pass selects again — otherwise a resumed loop keeps a "
-        "closed-out marker"
+    _pin_normalized(
+        "If the spec carries `craft/slice-loop=stopped` or "
+        "`craft/slice-loop=complete` from an earlier pass, clear it here",
+        "slice/SKILL.md must clear a stale craft/slice-loop marker — either "
+        "value — when a later pass selects again; a `complete` spec never "
+        "re-selects (the guard in step 3 refuses first), but a re-entered "
+        "`ready` spec (new criteria added, or the guard bypassed by hand) must "
+        "not leave a stale 'loop done' marker for review's handoff to trip on",
     )
     assert "--unset-label craft/slice-loop" in _text(), (
         "slice/SKILL.md must clear the stopped marker with "
@@ -650,8 +723,50 @@ def test_superseded_and_dropped_share_the_complete_guards_remedy():
 
 
 def test_outcome_prints_a_fully_formed_plan_handoff():
-    assert "`/craft:plan task/<task-id>`" in _text(), (
-        "slice/SKILL.md's Outcome section must print a fully formed "
-        "/craft:plan task/<task-id> handoff, matching the handoff convention "
-        "other craft skills use"
+    assert "`/craft:plan task/the-streaming-export-slice`" in _text(), (
+        "slice/SKILL.md's Outcome section must print a fully formed /craft:plan "
+        "handoff with a real-looking task id, matching gauntlet's and review's "
+        "own convention — the surrounding sentence demands 'never a placeholder', "
+        "so the example itself must not be one (`<task-id>`)"
+    )
+
+
+def test_outcome_handoff_example_is_not_a_bracketed_placeholder():
+    text = _text()
+    idx = text.index("End with a fully formed handoff")
+    tail = text[idx : idx + 400]
+    assert "<task-id>" not in tail, (
+        "slice/SKILL.md's own handoff example must not use `<task-id>` inside "
+        "the sentence demanding 'never a placeholder' — that is a placeholder"
+    )
+
+
+# --- the termination path gets its own next command ---
+
+
+def test_termination_path_names_its_own_next_command():
+    assert (
+        "the termination path" in _text() and "its own fully formed next command"
+        in _text()
+    ), (
+        "slice/SKILL.md's Outcome section must give the termination path its "
+        "own fully formed next command, not leave the operator with nothing "
+        "to run — the spec's objective is that an operator always knows what "
+        "to run next"
+    )
+
+
+def test_termination_complete_case_hands_off_to_distill():
+    assert "/craft:distill spec/streaming-export" in _text(), (
+        "slice/SKILL.md's Outcome section must hand a spec-complete "
+        "termination off to distill, fully formed, matching review/SKILL.md's "
+        "own closing handoff convention"
+    )
+
+
+def test_termination_early_stop_case_hands_off_to_reselecting():
+    assert "/craft:slice spec/streaming-export" in _text(), (
+        "slice/SKILL.md's Outcome section must hand an early-stop termination "
+        "off to re-running /craft:slice once the blocker is resolved, fully "
+        "formed with a real-looking spec id"
     )

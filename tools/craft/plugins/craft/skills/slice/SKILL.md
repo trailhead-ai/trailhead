@@ -74,7 +74,15 @@ If the spec's status is already `complete`, report that the slice loop for this 
 
 On entry, before deriving the candidate set, reconcile the ledger against what has actually
 shipped: query `lore search "kind:task related-spec:<spec-name> status:done"` for every linked
-slice at `done`. For each one with no existing line in the spec's `## Slices` section, append one line carrying all four fields — slice title, value claim, task id, and close date (the done task's `updated:` field).
+slice at `done`. For each one with no existing line in the spec's `## Slices` section, append one
+line carrying all four fields — slice title, value claim (read from the task body's
+`**Value claim:**` section; if absent, fall back to its `**Goal:**` text — a slice materialized
+before this skill existed, like this spec's own slice 1, carries the older plan-parent shape
+instead), task id, and close date (the done task's `updated:` field) — in this shape:
+
+```
+- **<slice title>** — <value claim>. (`task/<task-id>`, closed <close-date>)
+```
 
 **This reconcile query is fail-closed too.** If the `lore search` call errors, or its output
 cannot be parsed into a definite list of done slices, treat that as blocking: refuse and report
@@ -152,11 +160,14 @@ take the early-stop path described in step 6 above.
 
 ### 8. State the claim before writing anything
 
-**Before any record is written and before any planning is invoked**, state the chosen slice and
-its value claim — or, on the enabler path, its written justification — to the operator. Nothing
-in this procedure writes a record or hands off to `/craft:plan` ahead of that statement: the
-claim is stated while it is still cheap to reject, not discovered after the parent task already
-exists.
+**Before the parent task record is written and before any planning is invoked**, state the
+chosen slice and its value claim — or, on the enabler path, its written justification — to the
+operator. Steps 4 and 6 above may already have written to the spec record by this point (the
+ledger reconcile, and a stale `craft/slice-loop` marker's clear) — this promise is scoped to the
+parent task record specifically, the write that actually creates the slice the operator is being
+asked to accept. Nothing in this procedure writes the parent task record or hands off to
+`/craft:plan` ahead of that statement: the claim is stated while it is still cheap to reject, not
+discovered after the parent task already exists.
 
 The value claim is this skill's own summary of why the slice matters —
 **never a verbatim excerpt of the spec's prose**. Copying the spec's own words forward would
@@ -172,9 +183,9 @@ The parent task body carries the value claim (or enabler justification) under a
 and a later slice-rooted `/craft:plan` pass, both have a named place to read it from and to
 preserve.
 
-**If the spec carries `craft/slice-loop=stopped` from an earlier pass, clear it here** — this
-pass is selecting again, so the earlier stop is no longer the loop's live status:
-`lore record update spec/<spec-name> --unset-label craft/slice-loop`.
+**If the spec carries `craft/slice-loop=stopped` or `craft/slice-loop=complete` from an earlier
+pass, clear it here** — this pass is selecting again, so an earlier stopping point is no longer
+the loop's live status: `lore record update spec/<spec-name> --unset-label craft/slice-loop`.
 
 **Credential-pattern scrub, before any write.** Run the drafted body — the value claim or
 enabler justification, and anything else composed into it — through `_shared/execute.md`'s
@@ -213,6 +224,15 @@ sit undiscovered.
 Report the chosen slice, its value claim (or, on the enabler path, its written justification),
 and the new parent task's record id — `lore record show <task-id>` prints it back without the
 operator needing to know the CLI. End with a fully formed handoff, the real task id substituted
-in, never a placeholder: `/craft:plan task/<task-id>` — matching the handoff convention other
-craft skills use, so it can be pasted into a fresh session as-is. On the termination path,
-report the spec complete (or the early stop and what remains) instead.
+in, never a placeholder — e.g. `/craft:plan task/the-streaming-export-slice` — matching the
+handoff convention other craft skills use, so it can be pasted into a fresh session as-is.
+
+On the termination path, report the spec complete (or the early stop and what remains) instead,
+and end with its own fully formed next command, never the selection path's `/craft:plan`
+handoff — the operator must always know what to run next:
+
+- **Spec complete:** hand off to distill, fully formed, matching review/SKILL.md's own closing
+  handoff — e.g. `Run /craft:distill spec/streaming-export when you're ready to distill this
+  work into the ADR log.`
+- **Early stop:** name what remains, then hand off to re-running this skill once it clears —
+  e.g. `Run /craft:slice spec/streaming-export again once <what's blocking> is resolved.`

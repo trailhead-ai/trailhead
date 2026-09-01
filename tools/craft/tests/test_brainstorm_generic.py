@@ -40,7 +40,7 @@ _PRIVATE_TOKENS: list[str] = [
 # ---------------------------------------------------------------------------
 
 _BRAINSTORM_SKIP_PHRASES: list[tuple[str, str]] = [
-    ("planning_handoff", "Handoff to planning"),
+    ("planning_handoff", "Handoff to the slice loop"),
 ]
 
 

@@ -8,7 +8,7 @@ description: >
 
 # Plan
 
-Design the whole feature end-to-end, then build it in slices — proving unknowns before building on top of them. On the slice-rooted path, "whole" narrows: `/craft:slice` has already chosen the increment, so this skill designs the whole of that one slice, not the whole feature.
+Design the whole feature end-to-end, then build it in tasks — proving unknowns before building on top of them. On the slice-rooted path, "whole" narrows: `/craft:slice` has already chosen the increment, so this skill designs the whole of that one slice, not the whole feature.
 
 **A plan is a hypothesis, not a contract. It can be invalidated at any point.**
 

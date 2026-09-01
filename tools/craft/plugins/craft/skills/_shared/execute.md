@@ -254,10 +254,12 @@ Phase 6 takes it
 ### Resuming a run
 
 Invoking execute against a task already `in-progress` **resumes** it once it carries the
-`craft/branch` label — never refuses, never restarts from scratch, for a claimed run. An
-`in-progress` task with no `craft/branch` label was never claimed by any dispatch and is
-refused instead, per the `in-progress` bullet under
-[Determine the task shape](#determine-the-task-shape). You already have the task in hand and need its branch, so read the
+`craft/branch` label — never refuses, never restarts from scratch, for a claimed run. A
+childless `in-progress` task with no `craft/branch` label was never claimed by any dispatch and
+is refused instead, per the `in-progress` bullet under
+[Determine the task shape](#determine-the-task-shape); a parent-with-children in that same shape is claimed instead, per
+[Claiming the run at first dispatch](#claiming-the-run-at-first-dispatch) — the loop's normal
+path once `/craft:plan` has decomposed a slice. You already have the task in hand and need its branch, so read the
 `craft/branch` label straight off the task record, falling back to a locally-present branch
 matching the task name; then pick up wherever the graph and workspace show the run left off.
 **A resumed run still loads dispatch lessons** — run the retrieval command in
