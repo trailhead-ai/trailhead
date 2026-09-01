@@ -62,9 +62,9 @@ def test_step3_pins_explicit_timeout_mandate():
     _pin_in(
         _step3_section(),
         "execute.md#step3",
-        "an explicit tool timeout in milliseconds set above the suite's measured runtime",
+        "an explicit tool timeout in milliseconds set above that scoped suite's measured runtime",
         "The dispatch payload must state an explicit tool timeout above the "
-        "suite's measured runtime — a suite that outruns the Bash tool's "
+        "scoped suite's measured runtime — a suite that outruns the Bash tool's "
         "~120s auto-background threshold makes a bare 'run in the foreground' "
         "instruction impossible to obey.",
     )
@@ -113,10 +113,20 @@ def test_step3_mandate_does_not_direct_the_executor_to_run_the_full_suite():
     CONTROLLER's own Phase 1 gate ("the controller's own full-suite gate").
     So this bans the imperative form in either spelling rather than the noun
     phrase, which is what would actually contradict executor.md Step 7.
+
+    "entire suite" is banned in the same imperative forms as "full suite" —
+    they are synonyms, and a guard that only pins the keyword "full suite"
+    is evadable by rewording to "entire suite" while keeping the same
+    imperative meaning. The section legitimately uses the bare noun phrase
+    "the entire suite" descriptively (for the controller's own Phase 1/2/3
+    full-suite gates), so — same as above — only the imperative forms are
+    banned, not the noun phrase itself.
     """
     section = _step3_section()
     for phrase in ("run the full suite", "run the full-suite", "the full suite here",
-                   "the full-suite gate here"):
+                   "the full-suite gate here", "run the entire suite",
+                   "run the entire-suite", "the entire suite here",
+                   "the entire-suite gate here"):
         assert phrase not in section, (
             f"execute.md#step3: the dispatch mandate must not direct the "
             f"executor to run the full suite ({phrase!r}) — executor.md Step 7 "
@@ -160,7 +170,7 @@ def test_step3_pins_obey_it_by_naming_a_timeout():
     _pin_in(
         _step3_section(),
         "execute.md#step3",
-        "Obey it by naming a concrete timeout value above the suite's measured runtime",
+        "Obey it by naming a concrete timeout value above the scoped suite's measured runtime",
         "The 'never by starting the suite as a background job' clause must "
         "modify a stated verb ('obey it by …, never by …') rather than "
         "dangling with nothing to attach to.",
@@ -183,7 +193,7 @@ def test_step3_pins_ceiling_fallback_options():
     _pin_in(
         _step3_section(),
         "execute.md#step3",
-        "split the run into a scoped subset of the suite that fits under the ceiling, or dispatch against a scoped suite",  # noqa: E501
+        "narrow the scoped subset further until it fits under the ceiling, or dispatch against a narrower scoped suite",  # noqa: E501
         "The ceiling fallback must name concrete degraded paths, not just "
         "assert that one exists.",
     )
