@@ -71,7 +71,7 @@ returns a summary.
 **Every vault-sourced value is shape-checked before it enters a command line.** Record ids and
 record names arrive from a git-synced vault a teammate can write, and this ritual substitutes
 them into `lore record create` and `lore record update` invocations — most exposed of all, the
-routed-task close-out in step 7, which interpolates two such names into one executed command.
+routed-task close-out in step 6a, which interpolates two such names into one executed command.
 Validate each one against the safe-value shape `^[A-Za-z0-9._/-]+$` **before ANY substitution** —
 the same untrusted-vault-value rule `_shared/execute.md` codifies, and the same one
 `slice/SKILL.md`, `plan/SKILL.md`, and `distill/SKILL.md` already apply. This validation
@@ -164,7 +164,8 @@ name that could not be trusted.
 
    ```sh
    SIBLING="<sibling-candidate>"
-   lore record update decision/<this-candidate> --related "decision=$SIBLING"
+   THIS="<this-candidate>"
+   lore record update "decision/$THIS" --related "decision=$SIBLING"
    ```
 
    Each record carries: the capability needed, the candidate with a resolved URL and the date it

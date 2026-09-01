@@ -13,7 +13,7 @@ own deltas (the deep pass, human confirmation, non-blocking failure, adopt-as-a-
 legitimate-outcome) live outside those markers, in brainstorm's own Frame prose.
 
 These are content anchors on the shipped prose, not a runtime harness — same
-contract-pin style as `test_brainstorm_altitude_gate_contract.py`.
+contract-pin style as `test_brainstorm_single_spec_exit_contract.py`.
 """
 
 from __future__ import annotations

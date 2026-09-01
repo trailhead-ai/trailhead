@@ -55,9 +55,9 @@ def _text() -> str:
 def _handoff_quote(header: str, stop_marker: str) -> str:
     """One handoff quote, scoped to its own branch.
 
-    Scoped rather than matched file-wide: both branches say similar things, so a
-    file-wide count of a shared phrase is satisfied by either branch saying it
-    twice and pins neither handoff it names.
+    Scoped rather than matched file-wide: the exit-gate prose and the handoff quote
+    say similar things, so a file-wide count of a shared phrase is satisfied by the
+    other site saying it twice and pins neither.
     """
     text = _text()
     assert header in text, f"brainstorm/SKILL.md must carry a {header!r} handoff quote"
@@ -102,22 +102,20 @@ def test_brainstorm_still_hands_off_to_gauntlet_for_the_spec_branch():
 
 
 def test_handoff_does_not_cite_the_gauntlet_internal_step_numbering():
-    """The gauntlet's resolution flow forks per mode after its shared steps.
-
-    A spec advances in the numbered spec tail; an adr advances in the adr tail, which
-    carries no step number at all. Citing one number for both is wrong for the adr
-    branch, and it re-breaks every time the gauntlet renumbers.
+    """The gauntlet advances a spec in its numbered spec tail, and renumbers as it is
+    edited. Pinning brainstorm's prose to one of those numbers couples this file to the
+    gauntlet's headings, so the citation breaks every time the gauntlet is reorganized.
     """
     text = " ".join(_text().split())
     claim = "the `gauntlet` skill owns the flip"
     assert claim in text, (
-        "brainstorm/SKILL.md must state that the gauntlet owns the spec flip "
-        "record kinds — that ownership is what makes the review unskippable"
+        "brainstorm/SKILL.md must state that the gauntlet owns the spec flip — "
+        "that ownership is what makes the review unskippable"
     )
     sentence = text[text.index(claim):].split(".")[0]
     assert "step" not in sentence, (
-        "the flip-ownership claim must not name a step of the gauntlet — the adr "
-        "flip does not live in a numbered step, and a number here pins brainstorm "
+        "the flip-ownership claim must not name a step of the gauntlet — a number "
+        "here pins brainstorm "
         f"to the gauntlet's headings. Got: {sentence!r}"
     )
 
@@ -144,15 +142,13 @@ def test_spec_handoff_reflects_recommend_then_accept():
 def test_ready_edge_description_reflects_recommend_then_accept():
     """The Status Lifecycle section's prose description of the draft -> ready edge
     must also describe recommend-then-accept, not per-finding disposition."""
-    text = _text()
-    assert "Criticals are dispositioned" not in text, (
-        "brainstorm/SKILL.md must not describe the gauntlet's `draft` -> `ready` "
-        "flip as happening once Criticals 'are dispositioned' — the flip follows "
-        "the operator accepting the gauntlet's recommendation"
-    )
-    assert "operator has accepted" in text or "operator accepts" in text, (
+    lifecycle = _section("## Status Lifecycle", "## Bounce-Back")
+    assert "operator has accepted" in lifecycle or "operator accepts" in lifecycle, (
         "brainstorm/SKILL.md's Status Lifecycle section must describe the "
-        "gauntlet's flip in operator-accepts-the-recommendation terms"
+        "gauntlet's flip in operator-accepts-the-recommendation terms. Scoped to "
+        "the section rather than matched file-wide: the handoff quote says the "
+        "same thing, so a file-wide match stays green with this section's "
+        "sentence deleted outright"
     )
 
 
@@ -232,4 +228,73 @@ def test_distill_is_the_only_craft_path_that_authors_an_adr():
     assert "--kind adr" in distill.read_text(encoding="utf-8"), (
         "distill/SKILL.md must carry the ADR-authoring write — it is the only craft "
         "path that authors an ADR, and this pin is what makes that claim checkable"
+    )
+
+
+def _section(header: str, stop: str) -> str:
+    """One named section, whitespace-collapsed — scoped so a pin cannot be satisfied
+    by near-identical wording in a sibling section."""
+    text = _text()
+    assert header in text, f"brainstorm/SKILL.md must carry a {header!r} section"
+    start = text.index(header)
+    end = text.find(stop, start + len(header))
+    assert end != -1, f"the {header!r} section must be bounded by {stop!r}"
+    return _flat(text[start:end])
+
+
+def test_the_exit_gate_requires_deferred_scope_to_be_captured():
+    """The capture half of the altitude rewrite: scope brainstorm discovers but does
+    not spec must land as deferred `task` records, not be spoken and lost."""
+    gate = _section("### 7. Exit Gate", "**The handoff:**")
+    assert _flat(
+        "Scope discovered but not specced now is captured as deferred `task` "
+        "records with revisit conditions, and noted in the spec"
+    ) in gate, (
+        "brainstorm/SKILL.md's Exit Gate must carry a checklist item requiring "
+        "deferred scope to be captured — without it the altitude rewrite's capture "
+        "step has no gate, and a brainstorm can exit having discarded the discovery"
+    )
+
+
+def test_the_handoff_copy_names_the_deferred_tasks():
+    """The half of the capture that actually reaches the operator.
+
+    Capturing deferred scope into records is worthless if the handoff never mentions
+    them: the handoff is the one message read as marching orders, so work captured
+    but unmentioned is work nobody returns to.
+    """
+    tail = _section("**Print the handoff command fully formed**", "## ")
+    assert _flat("**If any scope was deferred, name those tasks here too**") in tail, (
+        "brainstorm/SKILL.md's handoff instruction must require naming the deferred "
+        "tasks — otherwise the records are written and never surfaced to the operator"
+    )
+
+
+def test_no_craft_skill_or_agent_but_distill_authors_an_adr():
+    """The spec's criterion is exclusivity — 'distill is the only path that writes an
+    ADR' — so pinning that distill *has* the write leaves the claim unpinned in the
+    direction that matters. Scanned plugin-wide: a future ADR create in gauntlet,
+    plan, or brainstorm goes red here.
+    """
+    craft = BRAINSTORM.parent.parent.parent
+    authors = sorted(
+        p.relative_to(craft).as_posix()
+        for p in craft.rglob("*.md")
+        if "--kind adr" in p.read_text(encoding="utf-8")
+    )
+    assert authors == ["skills/distill/SKILL.md"], (
+        "distill/SKILL.md must be the only craft file carrying an ADR-authoring "
+        f"write — found {authors}. Craft authors ADRs backward from finished work; "
+        "a forward ADR is the waterfall commitment the slice model rejects"
+    )
+
+
+def test_brainstorm_never_flips_an_adr_active():
+    """Authorship and activation are separate capabilities. The `--kind adr` pin covers
+    brainstorm creating one; this covers it flipping one that arrives by id, which the
+    authorship pin cannot see.
+    """
+    assert "--status active" not in _text(), (
+        "brainstorm/SKILL.md must never flip a record to `active` — ADR activation "
+        "belongs to distill, and brainstorm has no ADR path at all"
     )

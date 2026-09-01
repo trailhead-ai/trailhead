@@ -1,7 +1,7 @@
 """`brainstorm/SKILL.md` shape-checks vault-sourced values before substitution.
 
 Brainstorm substitutes vault-sourced identifiers into executed `lore` command
-lines — most visibly the routed-task close-out at step 7, which interpolates both
+lines — most visibly the routed-task close-out in step 6a, which interpolates both
 `<source-name>` and `<spec-name>`. Every other craft skill that does this
 (`slice`, `plan`, `distill`) names the safe-value shape and states that a failing
 value causes a loud refusal rather than a silent omission. These pins hold
@@ -87,7 +87,7 @@ def test_the_guard_is_stated_once_not_repeated_per_site():
 
 
 def test_the_guard_precedes_the_routed_task_close_out_it_governs():
-    """The close-out at step 7 is brainstorm's most exposed interpolation: it
+    """The close-out in step 6a is brainstorm's most exposed interpolation: it
     substitutes two vault-sourced names into one executed command. A guard stated
     *after* it reads as not covering it."""
     text = _text()
