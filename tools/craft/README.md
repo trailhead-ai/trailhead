@@ -83,6 +83,12 @@ draft ADR) goes through before it advances: fact verification, premise attack,
 the four council lenses, an internal-consistency audit, and (for specs) a
 plan-divergence probe.
 
+**Slice:** `/craft:slice` — choose the next vertical slice from a `ready` spec:
+read the spec fresh, derive the remaining candidates against its `## Slices`
+ledger, choose smallest-next above the value floor, state the value claim to
+the operator, then write the chosen slice as an `in-progress` parent task
+linked to the spec, for `/craft:plan` to decompose.
+
 **Execute:** `/craft:execute`
 
 **Refine:** `/craft:refine` — promote a standalone (childless, parentless) task
