@@ -32,6 +32,9 @@ Enumerate the spec's **Objectives**, **Acceptance Criteria**, and **Non-Goals**.
 - A non-goal that contradicts a criterion is a spec that cannot be satisfied. Top severity.
 - A non-goal that merely *tensions* with an objective (you'd have to be careful, but it's satisfiable) is worth flagging one notch lower.
 
+**Required Interfaces → Criterion coverage.** For each named required interface, which acceptance criterion, if passed, would prove that boundary is satisfied?
+- A required interface with **zero** covering criteria is a coverage finding — the spec named a boundary but never wrote what must be true of it.
+
 ### 2. The verification bar
 
 For each acceptance criterion, ask: **what observation distinguishes pass from fail?**
@@ -42,7 +45,7 @@ For each acceptance criterion, ask: **what observation distinguishes pass from f
 ### 3. Requirements smuggled into the wrong section
 
 This is the failure mode the section headings invite, and it is the one you are most uniquely placed to catch:
-- **Requirements hiding in Open Questions / Risks.** An "open question" phrased as a decision the implementer must make is a requirement that hasn't been decided. It will get decided — silently, by whoever builds it. Quote each one and say which section it belongs in.
+- **Requirements hiding in Open Questions / Risks.** An "open question" phrased as a decision the implementer must make is a requirement that hasn't been decided. **Exception:** an item that names both an owner and a revisit condition is a deliberate deferral, not a smuggled requirement — under the slice loop it is a named, gated moment discharged by `assumption-prover`, not decided silently by whoever builds it. Flag an item only when it is missing an owner, missing a revisit condition, or missing both; quote each finding and say which section it belongs in.
 - **Requirements hiding in the Problem statement.** Behavior described in Problem but never restated as an objective or criterion will be assumed by readers and built by nobody.
 - **Requirements hiding in UI Direction.** Behavioral rules stated only in the UI section are invisible to anyone testing the backend.
 - **Decisions hiding as constraints.** A "constraint" that was actually a choice, presented as if externally imposed, hides a live alternative.
@@ -65,7 +68,7 @@ If a finding requires you to know something outside the document, it is not your
 ## Output shape
 
 1. **Verdict** — one line: `coherent` | `gaps` | `contradictory`. `contradictory` means at least one pair of statements cannot both be satisfied.
-2. **Coverage matrix** — a table, one row per objective: `Objective | Criteria covering it | Coverage: full / partial / none`. Then a short list of any criteria serving no objective. This table is the deliverable — do not summarize it away.
+2. **Coverage matrix** — a table, one row per objective: `Objective | Criteria covering it | Coverage: full / partial / none`. Then a second table, one row per named Required Interface: `Interface | Criteria covering it | Coverage: full / none`. Then a short list of any criteria serving no objective. These tables are the deliverable — do not summarize them away.
 3. **Untestable criteria** — quote each, and name the missing observation.
 4. **Contradictions** — each as a pair: `<statement A>` (section) vs `<statement B>` (section) — why they can't both hold.
 5. **Misplaced requirements** — each smuggled requirement, quoted, with the section it's in and the section it belongs in.
