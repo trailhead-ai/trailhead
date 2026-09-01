@@ -23,7 +23,7 @@ finished work and condenses it into the ADR log, then brings the `area` profiles
 back into agreement with it.
 
 It is the final stage of the pipeline: brainstorm → gauntlet → (slice → plan → execute → review)* → distill. The bracketed loop repeats once per slice; distill attaches once, after the loop reports the spec closed out.
-It is also the **sole writer of a spec's `planned → complete` edge** — `complete` *means* distilled,
+It is also the **sole writer of a spec's completion edge** (`planned → complete` for pre-loop records, `ready → complete` for a spec the slice loop closed out) — `complete` *means* distilled,
 including the zero-ADR outcome.
 
 ## The bar: what is worth an ADR
@@ -63,6 +63,18 @@ A direct write bypasses the index and the sidecar and silently corrupts the reco
 a direct read sees bytes on disk without the sidecar that gives them meaning. This ritual touches
 more records in one sitting than any other in craft, so a shortcut here costs the most.
 
+**Every vault-sourced value is shape-checked before it enters a command line.** Record ids,
+record names, and vault names all arrive from a git-synced vault a teammate can write, and this
+ritual substitutes them into `lore search`, `lore record show`, and `lore record update`
+invocations throughout. Validate each one against the safe-value shape `^[A-Za-z0-9._/-]+$`
+**before ANY substitution** — the same rule `_shared/execute.md` codifies for any vault-sourced
+value entering a command, and the same one `plan/SKILL.md` and `slice/SKILL.md` already apply.
+This validation **governs every substitution site** in this document, not a fixed count of them:
+a site added later is covered by it without amending this rule. A value that fails the check is
+**never substituted, quoted, or escaped in** — refuse loudly and stop. Silently omitting it
+would turn a refusal into a query that returns zero hits and reads as "nothing found", which is
+exactly the wrong report for a record whose id could not be trusted.
+
 **Every batch update passes `--vault <name>` explicitly.** `lore record update` locates a record by
 scanning the configured vaults in **config order**, so an unscoped update in a multi-vault install
 lands wherever the scan happens to hit first — which is not necessarily where the record lives.
@@ -89,12 +101,42 @@ lore search "kind:spec status:complete"
 — and let the exclusion check below drop the ones that were genuinely distilled. Once the migration
 cohort is worked through, this second query returns only already-excluded records.
 
+Plus, **specs the slice loop closed out**. A spec under the slice loop holds `ready` from the
+gauntlet until distill completes it — it never reaches `planned`, so the first query cannot see
+it and the pipeline would have no terminus. Enumerate them by the marker `/craft:slice` writes at
+its terminating condition:
+
+```
+lore search "kind:spec status:ready has:label.craft.slice-loop"
+```
+
+`has:label.` is the **presence** form, and it is presence that is wanted here: the marker takes
+two values, `craft/slice-loop=complete` and `craft/slice-loop=stopped`, and both are closed-out
+outcomes distill has something to say about. Narrowing this to
+`label.craft.slice-loop:complete` would strand every early-stopped spec. The key takes the
+dot-for-slash spelling because an unquoted `/` is a lexer error — the same convention
+`label.craft.branch` and `label.craft.subsystems` already use (`_shared/status-ownership.md`).
+
+A spec **mid-loop** never matches: `/craft:slice` unsets the label whenever it selects again, so
+the marker is present only while the loop is actually stopped. What the two values mean for the
+completion write — they are not the same outcome — is step 5 below.
+
 ### 2. Apply the exclusion per candidate, never in the query
 
 A spec is out of the queue if it already carries **a `distilled=` annotation** —
 `distilled=adr` (ADRs written), `distilled=zero-adr`, `distilled=forward-anchored`, or
 `distilled=rejected` — **or a `related: adr`
-edge whose anchoring ADR has itself reached `active` or a terminal status**. Two keys, not one,
+edge whose anchoring ADR has itself reached `active` or a terminal status**.
+
+**One narrow exception, and it is the resumed-after-stop case.** A spec that stopped early was
+distilled and annotated but deliberately left `ready` (step 5), and the loop can be re-entered
+against it afterwards — `/craft:slice` clears the marker on reselection and writes it again when
+the loop next terminates. So a spec that is `ready`, carries `craft/slice-loop=complete`, and
+carries a `distilled=` annotation is **back in the queue**: the annotation records an earlier,
+partial distillation, and the slices shipped since it was written have never been distilled at
+all. Excluding it on the annotation alone would leave a finished spec permanently unable to
+reach `complete` — the one shape this ritual must never produce. Every other annotated spec stays
+excluded. Two keys, not one,
 because they arise from opposite directions: distill's own writes never
 land spec-side — step 1 writes the ADR's provenance edge as `--related spec=<member>` **on the ADR**,
 never on the spec, so a `related: adr` edge on a spec never came from a prior distillation. It comes
@@ -304,10 +346,36 @@ claims `complete` until everything behind it landed.
    lore record update <spec-id> --status complete --vault <name>
    ```
 
-   Write this **only if the spec is already `planned` and its cluster is dispositioned**. `complete`
-   means distilled; a spec that never reached `planned`, or whose cluster no human dispositioned,
-   has not been distilled no matter what else ran. Last position is deliberate: an interruption
-   anywhere above leaves the spec still queued, and the sweep picks it up again.
+   Write this **only if the spec is closed out and its cluster is dispositioned**. `complete` means
+   distilled; a cluster no human dispositioned has not been distilled no matter what else ran. Two
+   spec shapes count as closed out, and no others:
+
+   - the spec is already `planned` — the pre-loop route; or
+   - the spec is `ready` and carries `craft/slice-loop=complete` — the slice loop reached its
+     terminating condition with every acceptance criterion covered.
+
+   **A spec carrying `craft/slice-loop=stopped` is distilled but is not flipped `complete`.** It
+   stopped with acceptance criteria still unmet, and `complete` is irreversible in practice:
+   `/craft:slice` refuses to select against a `complete` spec, and its stated remedy is to start a
+   new spec entirely. So an early-stopped spec keeps its `ready` status and its marker. The
+   annotation-only write in **Terminal outcomes** below (`--annotation distilled=<value>` with no
+   `--status complete`) is what keeps it out of later sweeps, so it neither re-queues forever nor
+   claims a completeness it never reached.
+
+   That distinction has to be **visible at disposition, not just here**: a `stopped` spec is
+   rendered in the write list with its marker value and its recorded stop-reason note shown, so
+   closing one out is a choice someone made rather than a side effect of approving the cluster.
+
+   **Guard this write with a fresh read.** Re-read the spec and re-check the marker immediately
+   before it lands — never trust the read from queue-build. An arbitrarily long human disposition sits between the two, and
+   `/craft:slice` clears and re-asserts `craft/slice-loop` on every re-entry. Without the
+   re-check, an operator who adds a slice while this cluster awaits disposition ends up with a
+   `complete` spec and an `in-progress` slice orphaned beneath it. This is the same "read fresh
+   immediately before the write" discipline `/craft:slice` applies to its own spec writes; it
+   shrinks the lost-update window without closing it.
+
+   Last position is deliberate: an interruption anywhere above leaves the spec still queued, and
+   the sweep picks it up again.
 
 6. **Then check activation, for every spec just flipped `complete` that carries a `related: adr=`
    edge** — completing a member spec is also the trigger that may finish the forward ADR it was
@@ -334,7 +402,7 @@ claims `complete` until everything behind it landed.
    ```
 
    Distill is the sole writer of `draft -> active` on this path, exactly as it is the sole writer of
-   `planned -> complete` above — the forward path's other writer, the gauntlet, no longer advances an
+   the completion edge above — the forward path's other writer, the gauntlet, no longer advances an
    adr past `draft` at all (`gauntlet/SKILL.md`, "Reviewing an adr"). `active` immutability is
    unchanged by this: it moves WHEN activation happens, never whether an `active` record can still be
    edited. Amendment while `draft` remains unrestricted throughout, with no material/immaterial
@@ -344,6 +412,20 @@ claims `complete` until everything behind it landed.
 
 Every cluster ends in exactly one of these, and every one of them is terminal — nothing re-queues
 forever.
+
+**The `--status complete` half of every command below is conditional; the `--annotation` half is
+not.** Each write is spelled here for a member that is closed out *complete* — already `planned`,
+or `ready` carrying `craft/slice-loop=complete` (step 5's gate). For a member carrying
+`craft/slice-loop=stopped`, drop `--status complete` and write the annotation alone:
+
+```
+lore record update <spec-id> --annotation distilled=<value> --vault <name>
+```
+
+That is the annotation-only form step 5 relies on: it is what keeps an early-stopped spec out of
+later sweeps without claiming a completeness it never reached. The annotation value is chosen from
+the outcomes below exactly as it would be for any other member — the cluster's outcome does not
+change because one of its members stopped early.
 
 - **ADRs written.** The ADR(s) carry `related: spec=<member>` edges from step 1, and the members
   reach `complete` in step 5, stamped so the exclusion check can tell this outcome from "not yet
@@ -385,8 +467,11 @@ forever.
 
 ## Resuming an interrupted run
 
-A run that stops mid-write order leaves a cluster whose ADR exists and whose specs are still
-`planned` — which is exactly what the next sweep re-surfaces.
+A run that stops mid-write order leaves a cluster whose ADR exists and whose specs have not
+reached their terminal state — still `planned` for pre-loop records, still `ready` with the
+`craft/slice-loop` marker and no `distilled=` annotation for a loop-closed spec. Either shape is
+exactly what the next sweep re-surfaces, since both remain in step 1's queues and neither has
+picked up the annotation that would exclude it.
 
 Before drafting anything for a re-surfaced cluster,
 **detect the existing cluster ADR via the forward `related-spec` facet** —

@@ -373,8 +373,10 @@ outside the loop.
 
 ## Status Lifecycle
 
-The spec frontmatter `status` walks `draft` (brainstorming) → `ready` (settled, planning-ready) →
-`planned` (a plan references it) → `complete` (work landed). Only these values are valid —
+The spec frontmatter `status` walks `draft` (brainstorming) → `ready` (settled, the slice loop
+owns it from here) → `complete` (distilled). `planned` remains a valid value and records already
+carrying it are still read, but nothing writes it: a spec under the slice loop holds `ready` for
+the whole run, because another slice can always be added. Only these values are valid —
 off-vocab values like `shipped` are rejected. Once `ready`, the spec
 is **settled**: no more edits; new thinking on the same topic creates a new spec with a
 `Related → Prior specs` link back.

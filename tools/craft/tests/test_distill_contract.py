@@ -2,7 +2,8 @@
 
 Distill is the final stage of the pipeline (brainstorm -> gauntlet ->
 (slice -> plan -> execute -> review)* -> distill) and the sole writer of a spec's
-`planned -> complete` edge. Everything that makes it safe is a prose contract no type system can hold, so
+completion edge (`planned -> complete` for pre-loop records, `ready -> complete` for
+a spec the slice loop closed out). Everything that makes it safe is a prose contract no type system can hold, so
 each one is pinned here as a literal phrase:
 
   - **Clustering happens before drafting.** M specs condense into N ADRs; a
@@ -652,10 +653,11 @@ def test_distill_is_the_sole_writer_of_draft_to_active_on_both_paths():
         "distill/SKILL.md must state it is the sole writer of the activation edge"
     )
     assert (
-        "exactly as it is the sole writer of `planned -> complete`" in step
+        "exactly as it is the sole writer of the completion edge above" in step
     ), (
-        "distill must tie the new sole-writer claim to the existing one for "
-        "`planned -> complete`"
+        "distill must tie the new sole-writer claim to the existing one for the "
+        "spec completion edge — which is `planned -> complete` for pre-loop "
+        "records and `ready -> complete` for a spec the slice loop closed out"
     )
     assert "the gauntlet, no longer advances an adr past `draft` at all" in step, (
         "distill must state the other forward-path writer (the gauntlet) no "
@@ -943,4 +945,152 @@ def test_the_activation_step_names_the_narrowed_exclusion_that_feeds_it():
     assert "still `draft`" in flat and "queue" in flat, (
         "the activation step must name the narrowed §2 exclusion that lets a "
         "`draft`-anchored spec stay in the queue and reach this check"
+    )
+
+
+# --- the slice loop's terminus: queueing and completing a loop-closed spec ---
+
+
+def test_sweep_queue_enumerates_loop_closed_ready_specs():
+    """A spec the slice loop closed out never reaches `planned`, so the `planned`
+    queue alone cannot see it.
+
+    The loop holds a spec at `ready` from the gauntlet until distill completes it
+    (`spec/specs-are-delivered-one-vertical-slice-at-a-time`). Without this query
+    every loop-driven spec is invisible to distill forever and the pipeline has no
+    terminus. `has:label.` is the presence form, so it matches both values the
+    marker takes — narrowing it to one value would strand the other.
+    """
+    flat = _flat(_text())
+    assert "kind:spec status:ready has:label.craft.slice-loop" in flat, (
+        "distill/SKILL.md's sweep queue must name the KQL query that enumerates "
+        "specs the slice loop closed out — the `has:label.` presence form, so it "
+        "matches both `complete` and `stopped`"
+    )
+
+
+def test_the_loop_closed_query_does_not_displace_the_planned_cohort():
+    """Records already carrying `planned` must stay reachable."""
+    assert "kind:spec status:planned" in _text(), (
+        "distill/SKILL.md must keep enumerating `planned` specs — the loop-closed "
+        "query is an addition, not a replacement, or every pre-loop record is "
+        "stranded"
+    )
+
+
+def _completion_gate(text: str) -> str:
+    """Step 5's member-completion write, up to the Terminal outcomes section.
+
+    Scoped rather than whole-file: step 1's prose names both marker values too, so
+    a whole-file check passes even with this gate deleted outright.
+    """
+    return _section(
+        text,
+        "5. Finally, **member-spec `complete` flips land last**",
+        "## Terminal outcomes",
+        why="distill/SKILL.md must carry step 5's member-completion write",
+    )
+
+
+def test_the_completion_flip_is_conditioned_on_the_complete_marker_value():
+    """`stopped` and `complete` are not the same outcome and must not share a fate.
+
+    The queue matches both marker values, but only one of them means the spec's
+    acceptance criteria were met. Flipping a `stopped` spec to `complete` is
+    irreversible in practice: `/craft:slice`'s own guard then refuses to select
+    against a `complete` spec, and its stated remedy is to start a new spec.
+    """
+    gate = _flat(_completion_gate(_text()))
+    assert "craft/slice-loop=complete" in gate, (
+        "distill/SKILL.md's completion gate must name the marker value it accepts "
+        "— `craft/slice-loop=complete` — not merely the presence of the label"
+    )
+    assert "craft/slice-loop=stopped" in gate, (
+        "distill/SKILL.md must name the `stopped` marker value it deliberately "
+        "does not complete, or a reader cannot tell the exclusion is intentional"
+    )
+    assert "Two spec shapes count as closed out, and no others" in gate, (
+        "the gate must state that its accepted shapes are exhaustive — an open "
+        "list would let a third shape be read in later"
+    )
+
+
+def test_a_stopped_spec_is_distilled_without_being_completed():
+    flat = _flat(_text())
+    assert "is distilled but is not flipped `complete`" in flat, (
+        "distill/SKILL.md must state the `stopped` outcome plainly: such a spec is "
+        "distilled and annotated, but keeps its `ready` status"
+    )
+    assert "stop-reason" in flat, (
+        "a `stopped` spec must surface its recorded stop reason in the write list, "
+        "so closing one out is a visible choice rather than a side effect of "
+        "generic disposition"
+    )
+
+
+def test_the_completion_write_re_reads_the_spec_immediately_before_writing():
+    """The marker is checked at queue-build; a human dispositions; then the write
+    lands. `/craft:slice` clears and re-asserts `craft/slice-loop` on every
+    re-entry, so without a re-check an operator adding a slice during that gap
+    leaves a `complete` spec with an `in-progress` slice orphaned beneath it.
+    """
+    flat = _flat(_text())
+    assert "Re-read the spec and re-check the marker immediately before" in flat, (
+        "distill/SKILL.md's completion write must re-read the spec immediately "
+        "before the flip — the same discipline `/craft:slice` applies to its own "
+        "spec writes — rather than trusting a marker read at queue-build time"
+    )
+
+
+def test_the_forward_machinery_stays_decoupled_from_the_planned_status():
+    """The forward-anchored cluster class and the activation check key off the
+    `related: adr` edge and terminal statuses, never `planned`. Pinning that keeps
+    a future edit from quietly coupling them to a status this slice is retiring.
+    """
+    flat = _flat(_forward_anchored_section(_text()))
+    assert "related: adr" in flat, (
+        "the forward-anchored cluster class must be defined by the `related: adr` "
+        "edge, not by a spec status"
+    )
+    assert "status:planned" not in flat, (
+        "the forward-anchored cluster class must not key off `planned` — that "
+        "status is unused under the slice loop, and coupling to it would strand "
+        "every forward-anchored cluster"
+    )
+
+
+# --- untrusted vault-sourced values entering a command line ---
+
+
+def test_distill_validates_vault_sourced_values_before_substitution():
+    """Distill interpolates `<spec-id>`, `<adr-id>`, and `<name>` — all read out of
+    a git-synced, teammate-writable vault — into `lore record show` / `lore record
+    update` command lines.
+
+    `_shared/execute.md` codifies the rule and `plan/SKILL.md` and `slice/SKILL.md`
+    both carry it. Distill carried it nowhere, and the loop-closed query above is
+    what newly routes loop-driven specs into those sites.
+    """
+    flat = _flat(_text())
+    assert "^[A-Za-z0-9._/-]+$" in flat, (
+        "distill/SKILL.md must name the safe-value shape every vault-sourced value "
+        "is validated against before it is substituted into a command"
+    )
+
+
+def test_a_value_failing_the_shape_check_is_refused_not_omitted():
+    flat = _flat(_text())
+    assert "never substituted, quoted, or escaped in" in flat, (
+        "distill/SKILL.md must state that a value failing the shape check is "
+        "refused outright — silently omitting it would turn a refusal into a "
+        "query that returns nothing and reads as 'nothing found'"
+    )
+
+
+def test_the_shape_check_governs_every_substitution_site_not_a_fixed_count():
+    flat = _flat(_text())
+    assert "governs every substitution site" in flat, (
+        "distill/SKILL.md's guard must be stated as governing every substitution "
+        "site in the file — a guard scoped to an enumerated list silently stops "
+        "covering the next site someone adds"
     )

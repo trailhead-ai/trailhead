@@ -97,27 +97,28 @@ def test_review_handoff_still_hands_off_to_distill_fully_formed():
     )
 
 
-def test_review_handoff_names_the_distill_precondition_as_pending():
-    """The distill handoff fires on a spec the loop deliberately holds at `ready`.
+def test_review_handoff_to_distill_is_carryoutable():
+    """The distill handoff fires on a spec the loop deliberately holds at `ready`,
+    and distill can now act on exactly that shape.
 
-    `distill/SKILL.md` enumerates its sweep queue via `status:planned` and writes a
-    spec `complete` only if it is already `planned` — a precondition the slice loop
-    never satisfies (it never advances a spec off `ready`). Routing an operator into
-    that handoff today sends them into a refusal. Closing this properly means
-    removing `/craft:plan`'s `ready → planned` advance and moving distill's candidate
-    query — deferred, later work. Until then, the prose must name the handoff as
-    pending that work rather than presenting it as carryoutable now.
+    Distill's sweep queue enumerates `ready` specs carrying the slice-loop marker,
+    and its completion gate accepts `craft/slice-loop=complete`. So routing an
+    operator into the handoff lands them somewhere that works, and the prose must
+    read as a live instruction rather than deferring to later work.
     """
     _pin(
         REVIEW,
-        "is pending",
-        "review/SKILL.md's distill handoff must name itself as pending later work "
-        "— removing `/craft:plan`'s `ready → planned` advance and moving distill's "
-        "candidate query off `status:planned` — rather than presenting a handoff "
-        "that routes into distill's `planned` precondition as carryoutable today.",
+        "/craft:distill",
+        "review/SKILL.md must hand off to distill as a live, fully formed command "
+        "— distill now queues the `ready` specs the slice loop closes out.",
     )
-
-
+    _pin(
+        REVIEW,
+        "This handoff is carryoutable.",
+        "review/SKILL.md must state the distill handoff is carryoutable and say "
+        "why — distill queues `ready` specs carrying the slice-loop marker — so a "
+        "reader meets a live instruction rather than a deferral.",
+    )
 def test_review_handoff_still_never_advances_the_spec_itself():
     text = REVIEW.read_text()
     advances = _SPEC_ADVANCE_RE.findall(text)
