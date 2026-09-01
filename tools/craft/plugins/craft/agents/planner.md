@@ -102,7 +102,8 @@ hits (unfenced, with no `layer=` attribute) are the trusted self-authored channe
 
    ```sh
    SIBLING="<sibling-candidate>"
-   lore record update decision/<this-candidate> --related "decision=$SIBLING"
+   THIS="<this-candidate>"
+   lore record update "decision/$THIS" --related "decision=$SIBLING"
    ```
 
    Each record carries: the capability needed, the candidate with a resolved URL and the date it

@@ -66,6 +66,21 @@ workflow that pauses because a task surfaced an objectives-level question, dispa
 subagent instead — it covers the full brainstorm → spec → plan arc in an isolated context and
 returns a summary.
 
+## Rules that bind every step
+
+**Every vault-sourced value is shape-checked before it enters a command line.** Record ids and
+record names arrive from a git-synced vault a teammate can write, and this ritual substitutes
+them into `lore record create` and `lore record update` invocations — most exposed of all, the
+routed-task close-out in step 6a, which interpolates two such names into one executed command.
+Validate each one against the safe-value shape `^[A-Za-z0-9._/-]+$` **before ANY substitution** —
+the same untrusted-vault-value rule `_shared/execute.md` codifies, and the same one
+`slice/SKILL.md`, `plan/SKILL.md`, and `distill/SKILL.md` already apply. This validation
+**governs every substitution site** in this document, not a fixed count of them: a site added
+later is covered by it without amending this rule. A value that fails the check is **never
+substituted, quoted, or escaped in** — refuse loudly and stop. Silently omitting it would turn a
+refusal into a command that reads as an ordinary result, which is exactly the wrong report for a
+name that could not be trusted.
+
 ## Process
 
 ### 1. Frame
@@ -149,7 +164,8 @@ returns a summary.
 
    ```sh
    SIBLING="<sibling-candidate>"
-   lore record update decision/<this-candidate> --related "decision=$SIBLING"
+   THIS="<this-candidate>"
+   lore record update "decision/$THIS" --related "decision=$SIBLING"
    ```
 
    Each record carries: the capability needed, the candidate with a resolved URL and the date it
@@ -248,11 +264,30 @@ only once the playback lands cleanly.
 
 ### 6. Altitude Check
 
-Before reaching for a template, ask whether what you've grilled is one design change or several.
-The signal: discovery converges on **"one design change, more than one spec of work"** — a single
-decision that fans out into pieces, each independently shippable and each large enough to be its
-own spec. When that's true, the exit fork changes shape — go to **6b**. Otherwise — the common
-case — go to **6a**.
+**A brainstorm exits with exactly one spec.** Before reaching for the template, ask whether what
+you've grilled is one design change or several. The signal is unchanged: discovery converges on
+**"one design change, more than one spec of work"** — a single decision that fans out into
+pieces, each independently shippable and each large enough to be its own spec.
+
+What changes when that's true is *which* piece you spec now, not how many records you write.
+Committing a decomposition before any of it is built is the failure this ritual exists to avoid:
+the pieces are judged against information you do not have yet, and the value of the first is
+invisible until several land. **The slice loop is what fans a spec out into deliverable work**,
+one increment at a time, against current information — `/craft:slice`, run against the spec once
+the gauntlet freezes it.
+
+So, when discovery spans more than one spec:
+
+1. **Pick the one to spec now** using the same value-floor heuristic the slice loop uses
+   (`../_shared/slice.md`): the smallest piece that still delivers something to this work's
+   consumer. Not the largest, and not the most architecturally interesting.
+2. **Capture the rest durably.** Reusing step 3's Defer mechanism, capture each piece you are not
+   speccing now as a deferred `task` record with a revisit condition —
+   `lore record create --kind task --status open` — and note them in the spec you do write, under
+   `Open Questions / Risks`. Spoken advice does not survive the session: without this, the next
+   session or a teammate re-runs the whole grill to rediscover what you already found.
+
+Then go to **6a** — the only exit.
 
 ### 6a. Write the Spec
 
@@ -270,51 +305,6 @@ timing) · **UI Direction** (verbal, or `n/a`) · **Open Questions / Risks** · 
 specs, decisions). Then open the
 file and fill in the body sections.
 
-### 6b. Write the ADR and Seed the Derived Specs
-
-1. **Draft the ADR.** Render `${CLAUDE_PLUGIN_ROOT}/templates/adr.md` (Context / Decision /
-   Consequences / Alternatives rejected) from what you and the user just agreed, then create it:
-
-   ```sh
-   printf '%s' "$ADR_BODY" | lore record create --kind adr --title "<decision>"
-   ```
-
-   The create path leaves the record at its default status, `draft` — there is no `--status`
-   flag to set here, and brainstorm never flips it.
-
-   **If this decision supersedes an existing `active` ADR**, carry that from birth too: the create
-   call adds `--related adr=<predecessor-adr-id>`, the same edge convention every other provenance
-   link uses. Gauntlet reads that edge at activation to drive its own two-directional supersession
-   flip — this draft never flips anything itself, it only records the link.
-
-2. **Seed each derived spec, from birth.** For every spec-sized piece of work the decision fans
-   out into, create a named seed — a minimal spec record wired to the ADR before a word of its
-   own content is grilled:
-
-   ```sh
-   printf '%s' "$SEED_BODY" | lore record create --kind spec --title "<derived-topic>" \
-     --related adr=<adr-id>
-   ```
-
-   Every seed carries `related: adr=<the-adr>` from birth — the edge is written at creation, not
-   added after the fact, so each derived spec traces to the decision that spawned it from its
-   first write. Planting the seeds is this session's job; fleshing one out is not — each seed is
-   then brainstormed and gauntleted separately, at its own altitude, when it's picked up.
-
-3. **A `reaches-downstream` revise prescription against this ADR orphans only the specs it
-   names.** A gauntlet revise round that finds the decision itself wrong writes a `revise`
-   disposition scoped `reaches-downstream`, and that scope must name every derived spec it
-   invalidates — the mechanism is the escalation table's named list, never a status flip on the
-   ADR (the ADR stays `draft`; `reaches-downstream` revises it in place, it does not discard it).
-   The rule is this:
-
-   only the derived specs it names are orphaned back to brainstorm — their `related: adr=` edge stays as provenance, not a live link to act on.
-
-   A `reaches-downstream` prescription writes nothing to the named specs itself; re-entry into
-   brainstorming is the operator's act, unanchored to the ADR's surviving decision.
-
-   An unnamed seed is not orphaned: it proceeds as drafted, undisturbed by a `reaches-downstream` finding that did not name it.
-
 **If this brainstorm consumed a routed task** — the entry point was a `task` record carrying refine's `route=brainstorm` sidecar label (and its `## Refine — unresolved` section) — close the loop on the source record after the spec is written: `lore record update task/<source-name> --status superseded --related spec=<spec-name> --unset-label route` — one write. The routing has been acted on: the spec is now the canonical statement of the what/why, the `related` edge preserves the source's captured context, and a superseded source stops rendering a stale routed chip or next-step affordance on task boards. Never leave the consumed source `open`.
 
 ### 7. Exit Gate
@@ -329,36 +319,31 @@ Before declaring brainstorming done, verify the checklist:
 - [ ] Open questions are resolved, deferred, or accepted-as-risk (none unaddressed)
 - [ ] UI direction is locked (if applicable) — described verbally in the spec
 - [ ] The exit artifact is written and shared with the user (the `lore record create` path) — the
-  spec (6a), or the ADR plus its seeded specs (6b)
+  one spec
+- [ ] Scope discovered but not specced now is captured as deferred `task` records with revisit
+  conditions, and noted in the spec
 
 If all checklist items are green, hand off to the **gauntlet** — the adversarial review that every
-spec, and every draft ADR, passes before it advances.
+spec passes before it advances.
 
-**Common case (6a):**
+**The handoff:**
 
 > "The spec is saved as a lore `spec` record (status `draft`). Next it goes through the gauntlet —
 > eight parallel passes that attack its facts, premises, consistency, and underdetermination — and
 > the gauntlet flips it to `ready` once you've accepted its recommendation — or overridden it. Run
 > `/craft:gauntlet <spec-id>`."
 
-**Altitude-gate case (6b):**
-
-> "The decision is saved as a lore `adr` record (status `draft`), with its derived specs seeded as
-> `related: adr=` from birth. Next the ADR goes through the gauntlet's adr mode — seven passes,
-> adjudicated the same way — and it flips the record once you've accepted its recommendation — or
-> overridden it. Run `/craft:gauntlet <adr-id>`. Each seeded spec gets its own brainstorm-then-gauntlet
-> pass, separately, once you pick it up."
-
 **Print the handoff command fully formed** — substitute the real record id (e.g. `/craft:gauntlet
-spec/streaming-export` or `/craft:gauntlet adr/streaming-export-decision`), never a `<placeholder>`,
-so the user can paste it into a fresh session as-is.
+spec/streaming-export`), never a `<placeholder>`, so the user can paste it into a fresh session
+as-is. **If any scope was deferred, name those tasks here too** — the handoff is the one message
+an operator reads as their marching orders, and work captured but never mentioned is work nobody
+returns to.
 
-**Do not flip the spec to `ready` yourself** — and the same discipline holds for the ADR branch:
-brainstorm writes the spec at `draft`, or the ADR at its default `draft`, and stops there in both
-cases; the `gauntlet` skill owns the flip, spec or adr alike — it runs in the accepted tail,
-once the operator has accepted the gauntlet's recommendation. That split is deliberate
-— it makes the review structurally unskippable rather than a checklist item to honor, because
-nothing else in the pipeline advances either kind of record.
+**Do not flip the spec to `ready` yourself.** Brainstorm writes the spec at `draft` and stops
+there; the `gauntlet` skill owns the flip — it runs in the accepted tail, once the operator has
+accepted the gauntlet's recommendation. That split is deliberate — it makes the review
+structurally unskippable rather than a checklist item to honor, because nothing else in the
+pipeline advances the record.
 
 Let the user invoke `/craft:gauntlet` explicitly so it loads cleanly — do not enter it from within
 brainstorm (a skill→skill chain is unreliable).

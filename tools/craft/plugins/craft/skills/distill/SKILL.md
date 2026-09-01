@@ -10,9 +10,9 @@ description: >
   /craft:distill explicitly; also as the handoff after a plan's work has landed and been reviewed.
   DO NOT TRIGGER when: the work is still in flight (distillation is a post-hoc reading of finished
   work — the deferral rule would defer it anyway), the user wants to author a design decision BEFORE
-  the work (that is the forward path — brainstorm's altitude gate writes a draft adr and /craft:gauntlet
-  reviews it), or the user wants to record a single in-flight finding (that is lore's `decision` /
-  `lesson` capture, deliberately cheap and liberal).
+  the work, or wants to record a single in-flight finding (both are lore's `decision` / `lesson`
+  capture, deliberately cheap and liberal — craft authors ADRs only backward, from work already
+  finished, so there is no forward path to route a pre-work decision into).
 ---
 
 # Distill
