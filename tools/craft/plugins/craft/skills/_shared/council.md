@@ -127,7 +127,7 @@ Otherwise internal-admin findings are Important at most. Admin users tolerate fr
 
 Used by the `gauntlet` skill's lens pass. A spec is reviewed for what it *commits the
 project to*, not for how it will be built — the lenses here fire on objectives,
-acceptance criteria, non-goals, and constraints.
+acceptance criteria, Required Interfaces, non-goals, and constraints.
 
 The four lenses accept the spec's framing and review within it. Attacking the framing
 itself is the `premise-attacker`'s job, not a lens's — a lens finding of the form "this
@@ -142,7 +142,7 @@ is the wrong problem" belongs to that pass and should not be raised here.
 *Reliability — spec review:* (criterion **testability** and objective **coverage** belong to the `consistency-auditor` pass — do not raise them here; stay on failure behavior)
 - A failure mode named in the Problem has no criterion proving it is addressed
 - The spec commits to something irreversible (a migration, a deletion, a published contract) without naming the rollback or migration path
-- The spec defines no behavior for a state the system will certainly reach — empty, partial, concurrent, or interrupted — leaving that state's behavior unspecified
+- The spec defines no behavior for a state the system will certainly reach — empty, partial, concurrent, or interrupted — a state no acceptance criterion covers
 - When this fails in production, the spec names no signal a human would see; the first reporter is a user
 
 *Security — spec review:*

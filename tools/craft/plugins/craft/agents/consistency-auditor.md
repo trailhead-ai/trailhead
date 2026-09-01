@@ -19,7 +19,7 @@ You are the pass that is *mechanical on purpose*. The others exercise judgment; 
 
 ### 1. The cross-matrix (build it — do not eyeball it)
 
-Enumerate the spec's **Objectives**, **Acceptance Criteria**, and **Non-Goals**. Then build the matrix and walk every cell:
+Enumerate the spec's **Objectives**, **Acceptance Criteria**, **Non-Goals**, and **Required Interfaces**. Then build the matrix and walk every cell:
 
 **Objective → Criterion coverage.** For each objective, which acceptance criteria, if all passed, would demonstrate it was met?
 - An objective with **zero** criteria is an unverifiable objective — the spec cannot tell whether it succeeded. This is your highest-severity finding class.
@@ -68,7 +68,7 @@ If a finding requires you to know something outside the document, it is not your
 ## Output shape
 
 1. **Verdict** — one line: `coherent` | `gaps` | `contradictory`. `contradictory` means at least one pair of statements cannot both be satisfied.
-2. **Coverage matrix** — a table, one row per objective: `Objective | Criteria covering it | Coverage: full / partial / none`. Then a second table, one row per named Required Interface: `Interface | Criteria covering it | Coverage: full / none`. Then a short list of any criteria serving no objective. These tables are the deliverable — do not summarize them away.
+2. **Coverage matrix** — a table, one row per objective: `Objective | Criteria covering it | Coverage: full / partial / none`. Then a second table, one row per named Required Interface: `Interface | Criteria covering it | Coverage: full / none` — this table is the Required Interfaces coverage extension. Then a short list of any criteria serving no objective. These tables are the deliverable — do not summarize them away.
 3. **Untestable criteria** — quote each, and name the missing observation.
 4. **Contradictions** — each as a pair: `<statement A>` (section) vs `<statement B>` (section) — why they can't both hold.
 5. **Misplaced requirements** — each smuggled requirement, quoted, with the section it's in and the section it belongs in.

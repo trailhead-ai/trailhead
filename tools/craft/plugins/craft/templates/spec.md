@@ -29,11 +29,13 @@ n/a — describe here if there is no UI surface involved. -->
 Each item should include a proposed resolution or an owner.
 
 Use one of these forms for a deliberate deferral rather than inventing your own:
-  - `Accepted risk: <risk>. Mitigation: <mitigation>. Revisit if <condition>.`
-  - `Settled: <decision already made, and why>.`
-  - `Deferred with revisit conditions: <what is deferred and what would reopen it>.`
-An item using one of these forms carries an owner and a revisit condition, and is a
-deliberate deferral rather than a smuggled requirement. -->
+  - `Accepted risk: <risk>. Owner: <who>. Mitigation: <mitigation>. Revisit if <condition>.`
+  - `Deferred with revisit conditions: <what is deferred>. Owner: <who>. Reopen if <condition>.`
+An item using one of these two forms carries an owner and a revisit condition, and is a
+deliberate deferral rather than a smuggled requirement.
+
+`Settled: <decision already made, and why>.` is not a deferral — it records a decision
+that has already been made, so it names no owner and carries no revisit condition. -->
 
 ## Related
 <!-- Links to related specs, decisions, or plans. Use [[wikilink]] or bare path. -->
