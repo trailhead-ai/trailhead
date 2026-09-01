@@ -135,11 +135,20 @@ Craft owns the `craft/` label-key namespace for its own lifecycle facts.
   `craft/push` already documents below: the label marks a stopping point, not
   a permanent verdict, and a fresh selection clears it rather than leaving a
   stale value behind.
+- **`craft/slice-parent`** — written on the parent task at materialization by `/craft:slice`,
+  on the same `lore record create` as the record itself. It is a **presence marker**, carrying no
+  meaningful value; query it as `has:label.craft.slice-parent`. Its readers are `/craft:slice`'s
+  open-slice guard and `/craft:plan`'s duplicate-parent cross-check, both of which ask "is a slice
+  already open on this spec". Without it those queries match every non-terminal task linked to the
+  spec — a cross-repo follow-up, another session's coordination task, a handoff record — and freeze
+  selection on a spec with no open slice at all. Never written by a follow-up update: a marker that
+  lands after the record can miss a concurrent pass that has already run its guard.
 - **`craft/push=failed`** — written when a push attempt fails at close or at a
   `blocked` transition with unpushed commits. Lets resume logic distinguish
   "un-pushable" from "crashed" and skip-and-report instead of re-running the
   build.
-- All three are **single-valued, last-write-wins** — `craft/slice-loop` takes one of its two
+- All four are **single-valued, last-write-wins** — `craft/slice-parent` is a bare presence
+  marker rather than a key/value pair, and `craft/slice-loop` takes one of its two
   values (`complete` or `stopped`) at a time, the same single-value shape `craft/branch` and
   `craft/push` each hold — and last-write-wins applies **per
   key**: `--label` on `lore record update` is a repeatable upsert that mutates

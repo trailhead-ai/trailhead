@@ -54,8 +54,11 @@ SAFE_VALUE_SHAPE = "^[A-Za-z0-9._/-]+$"
 # The open-slice guard query: the `related-spec:` facet, filtered to every
 # non-terminal task status. Pinned once here and asserted at both the guard and
 # the post-write re-check, which must reuse the identical query.
-OPEN_SLICE_QUERY = (
-    'lore search "kind:task related-spec:<spec-name> '
+# The same query, scoped to labelled slice parents. The guard's job is to stop a
+# SECOND slice being selected while one is in flight — not to freeze selection
+# because unrelated work happens to link to the spec.
+OPEN_SLICE_QUERY_SCOPED = (
+    'lore search "kind:task related-spec:<spec-name> has:label.craft.slice-parent '
     '-status:done -status:dropped -status:superseded"'
 )
 
@@ -441,10 +444,15 @@ def test_open_slice_guard_names_both_remedies():
 
 
 def test_open_slice_query_is_related_spec_form_filtered_to_non_terminal_status():
-    assert OPEN_SLICE_QUERY in _text(), (
+    assert OPEN_SLICE_QUERY_SCOPED in _text(), (
         "slice/SKILL.md must query open slices with the related-spec: form "
         "filtered to non-terminal task status — an unfiltered query would refuse "
         "forever once any slice closes"
+    )
+    assert "has:label.craft.slice-parent" in OPEN_SLICE_QUERY_SCOPED, (
+        "the query must also filter to labelled slice parents — matching every "
+        "linked non-terminal task freezes selection on a spec that merely carries "
+        "unrelated open work"
     )
 
 
@@ -468,7 +476,7 @@ def test_post_write_recheck_reruns_the_open_slice_query():
         "slice/SKILL.md must re-run the open-slice query once after the parent "
         "task is written"
     )
-    assert _text().count(OPEN_SLICE_QUERY) >= 2, (
+    assert _text().count(OPEN_SLICE_QUERY_SCOPED) >= 2, (
         "the post-write re-check must reuse the identical open-slice query the "
         "guard uses, not a second, drifted copy of it"
     )
@@ -837,4 +845,52 @@ def test_termination_early_stop_case_hands_off_to_reselecting():
         "slice/SKILL.md's Outcome section must hand an early-stop termination "
         "off to re-running /craft:slice once the blocker is resolved, fully "
         "formed with a real-looking spec id"
+    )
+
+
+# --- the guard scopes to slice parents, not every linked task ---
+#
+# The guard exists to stop a SECOND slice being selected while one is in flight.
+# Matching every non-terminal task linked to the spec over-matches: a cross-repo
+# follow-up, a coordination task from another session, or a handoff note all read
+# as "a slice is open" and freeze selection on a spec with no open slice at all.
+# Observed three times against one spec, including a handoff record that blocked
+# the very resume it was written to enable.
+
+SLICE_PARENT_LABEL = "craft/slice-parent"
+
+
+def test_slice_parents_are_labelled_at_materialization():
+    assert f"--label {SLICE_PARENT_LABEL}" in _text(), (
+        "slice/SKILL.md must label the parent task it materializes with "
+        f"`{SLICE_PARENT_LABEL}` — without a marker written at creation there is "
+        "nothing the guard can use to tell a slice parent from any other task "
+        "that merely links to the same spec"
+    )
+
+
+def test_the_label_is_written_on_the_same_create_as_the_record():
+    """A follow-up write can land after the record has already been selected against
+    by a concurrent pass — the same reason `--related spec=` is on the create."""
+    # Scoped to the fenced command itself, not the prose after it: the paragraph
+    # explaining the rule also names the label, so a window that runs past the
+    # closing fence stays green with the flag deleted from the actual command.
+    text = _text()
+    start = text.index("printf '%s' \"$BODY\" | lore record create")
+    create = text[start : text.index("```", start)]
+    assert SLICE_PARENT_LABEL in create, (
+        f"`{SLICE_PARENT_LABEL}` must be written in the same `lore record create` "
+        "invocation that creates the parent, never as a follow-up update"
+    )
+
+
+def test_the_guard_states_what_it_deliberately_no_longer_matches():
+    text = " ".join(_text().split())
+    assert (
+        "A task linked to the spec that is not a slice parent does not block "
+        "selection" in text
+    ), (
+        "slice/SKILL.md must state that non-slice-parent linked tasks do not block "
+        "selection — otherwise the narrowing reads as an oversight to a future "
+        "reader and gets 'fixed' back into an over-match"
     )
