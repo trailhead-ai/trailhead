@@ -1063,9 +1063,16 @@ class ClaudeCodeHarness(Harness):
         session_id: str,
         *,
         session_name: str | None = None,
+        settings_path: Path | None = None,
     ) -> list[str]:
         """Return ``["claude", "--remote-control", "--session-id", <session-id>]``,
-        plus ``["--name", <session-name>]`` when a name is requested.
+        plus ``["--name", <session-name>]`` when a name is requested, plus
+        ``["--settings", <path>]`` when settings are handed over.
+
+        ``--settings`` loads a file ADDITIONALLY: claude still discovers what it
+        would have found on its own, and hooks from the two sources merge rather
+        than replace each other. That is what makes it safe to hand a session the
+        settings its own launch directory would not lead it to.
 
         Raises :class:`HarnessError` on a malformed ``session_id`` — see the
         base contract's DIVERGES note: this is the one seam here that raises
@@ -1086,6 +1093,16 @@ class ClaudeCodeHarness(Harness):
                     f"session_launch: invalid session_name: {session_name!r}"
                 )
             argv += ["--name", session_name]
+        if settings_path is not None:
+            # Held to the same inert-token predicate as the two above: this is a
+            # path, so it is checked for the one shape that stops being a path
+            # once it reaches argv — a leading dash, which claude reads as a flag.
+            text = str(settings_path)
+            if not text or text.startswith("-"):
+                raise HarnessError(
+                    f"session_launch: invalid settings_path: {settings_path!r}"
+                )
+            argv += ["--settings", text]
         return argv
 
     def session_launch_modality(self) -> Modality:

@@ -430,9 +430,21 @@ class Harness(ABC):
         session_id: str,
         *,
         session_name: str | None = None,
+        settings_path: Path | None = None,
     ) -> list[str] | None:
         """DIVERGES: raises :class:`HarnessError` on a malformed ``session_id``, where
         ``session_resume`` returns ``None`` for the same input.
+
+        ``settings_path`` is a settings file the caller wants loaded IN ADDITION
+        to whatever the harness discovers for itself. It exists because a caller
+        may root a session where its own settings will not be found — a harness
+        that resolves settings by walking up from the launch directory can stop
+        short of them — and the alternative, writing settings into the directory
+        the session is rooted in, mutates a tree the caller does not own. Like
+        ``session_name`` it is a hint: a harness with no such concept ignores it.
+        A concrete override that honors it must validate it as an inert argv
+        token, since it lands in the same argv and is the same flag-injection
+        surface.
 
         Returns the argv that starts a brand-new session, or ``None`` if the
         harness cannot launch sessions at all.

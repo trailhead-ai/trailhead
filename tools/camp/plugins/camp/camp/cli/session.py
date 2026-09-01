@@ -819,7 +819,7 @@ def _cmd_launch_group_cli(
     exits `2`, because there the rows are the answer.
     """
     from ..group.config import load_all_groups
-    from ..launch.recovery import derive_name_component
+    from ..launch.recovery import derive_name_component, is_workspace_root
     from ..launch.session import LaunchError
     from ..spine import _consume_flag_value, _die
     from .common import _groups_dir
@@ -874,6 +874,7 @@ def _cmd_launch_group_cli(
     root: Path | None = None
     name_component: str | None = None
     trust_scope: Path | None = None
+    camp_managed_root = False
 
     if directory is not None:
         if rest:
@@ -910,6 +911,21 @@ def _cmd_launch_group_cli(
             env=dict(env) if env is not None else dict(os.environ),
         )
         trust_scope = root
+        # The same claim the resume path makes for a workspace-rooted session:
+        # a directory inside a group's OWN workspace tree was chosen by camp, not
+        # by the operator, so the allowlist — which asks who chose it — has
+        # nothing left to answer. It is a claim, not a grant: the engine re-checks
+        # it against the name rule and falls back to the allowlist when it does
+        # not hold, and the credential rule runs on both branches regardless.
+        #
+        # Without this, rooting a worker at the member repo it owns would mean
+        # widening `[launch] roots` to cover camp's own state directory, which
+        # would also open every other workspace on the machine.
+        camp_managed_root = is_workspace_root(
+            root,
+            [group] if group is not None else [],
+            env=dict(env) if env is not None else dict(os.environ),
+        )
     else:
         slug = _slug_from_args_or_cwd(
             rest, group, verb="launch", consume_positional=True, env=env
@@ -923,6 +939,7 @@ def _cmd_launch_group_cli(
             root=root,
             name_component=name_component,
             trust_scope=trust_scope,
+            camp_managed_root=camp_managed_root,
         )
     except LaunchError as exc:
         _die(_refusal(exc))

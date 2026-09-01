@@ -15,7 +15,8 @@ The doc embeds:
       camp activate <member>   -- activate a member for the current session
       camp status              -- check provisioning status
       camp setup               -- retry failed/pending provisioning
-  - guidance that members are INERT until `camp activate <member>`
+  - guidance that members are INERT until `camp activate <member>`, scoped
+    to a workspace-rooted session, and what a member-rooted session does instead
   - guidance that setup may be in flight (background provisioner)
 """
 
@@ -52,12 +53,24 @@ def _render_doc(
 
 ## Important: Members are INERT until activated
 
-Each member worktree is provisioned in the background and is **inert until
-you explicitly activate it** with `camp activate <member>`. Do not attempt to
-work in a member directory until you have activated it.
+This applies to a session rooted HERE, at the workspace. Each member worktree
+is provisioned in the background and is **inert until you explicitly activate
+it** with `camp activate <member>`. Do not attempt to work in a member
+directory until you have activated it.
 
 Setup may be in flight (background provisioner is running). Check status
 before acting on any member.
+
+## If you are rooted inside a member directory
+
+You are a worker for that one member, and the rule above is not yours to
+follow: you are already where activation would have put you, and there is
+nothing to activate. Work in the repository you are rooted at. The other
+members are siblings you are not responsible for.
+
+This file reaches you because the harness reads CLAUDE.md from your working
+directory and every directory above it — so read the workspace-level guidance
+here as context about where you sit, not as steps to run.
 
 ## Commands
 

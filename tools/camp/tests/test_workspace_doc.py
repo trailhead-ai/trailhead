@@ -67,6 +67,32 @@ def _camp_state_env(tmp_path: Path) -> dict[str, str]:
 
 
 # ---------------------------------------------------------------------------
+def test_doc_tells_a_member_rooted_session_it_needs_no_activation():
+    """The doc is read by workspace-rooted AND member-rooted sessions alike.
+
+    A session rooted at a member inherits this file — the harness concatenates
+    CLAUDE.md from the cwd and every directory above it — so guidance written as
+    if every reader started at the workspace root reaches a worker for which it
+    is simply false. Such a worker is already in the member it owns; telling it
+    to activate one first sends it looking for a step it has no reason to take.
+    """
+    from camp.workspace.doc import _render_doc
+
+    body = _render_doc(
+        {
+            "group": {"name": "mygroup"},
+            "members": [{"name": "alpha"}, {"name": "beta"}],
+        },
+        "feat-x",
+    )
+
+    assert "rooted" in body.lower(), body
+    lowered = body.lower()
+    marker = lowered.index("rooted")
+    window = lowered[max(0, marker - 400) : marker + 400]
+    assert "activate" in window, window
+
+
 # Test 1a: workspace_doc.write_workspace_doc writes both files
 # ---------------------------------------------------------------------------
 
