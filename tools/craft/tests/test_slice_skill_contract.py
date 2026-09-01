@@ -280,7 +280,40 @@ def test_validation_prose_is_count_free():
     )
 
 
+# --- the slice title is stripped at its command-line interpolation site ---
+#
+# Step 1's shape check is scoped to <spec-name> only. The slice title, derived from
+# spec acceptance criteria, is a second untrusted-prose value that enters the same
+# `lore record create` command line as --title. _shared/execute.md already carries
+# the precedent for this exact case; this skill must apply it explicitly, at the
+# title's own substitution site.
+
+
+def test_slice_title_strip_applies_the_execute_md_precedent():
+    _pin_normalized(
+        "the title is stripped of single quotes, newlines, backticks, and `$` "
+        "before it is quoted",
+        "slice/SKILL.md must apply _shared/execute.md's title-stripping precedent "
+        "at the --title substitution site in the parent task create command",
+    )
+
+
+def test_slice_title_strip_site_is_co_located_with_the_create_command():
+    title_write_site = _text().split('--title "<slice title>"')[0][-800:]
+    assert "stripped of single quotes, newlines, backticks" in title_write_site, (
+        "slice/SKILL.md's title-stripping rule must sit immediately before the "
+        "`lore record create --title \"<slice title>\"` command it governs, not "
+        "float elsewhere in the file"
+    )
+
+
 # --- credential scrub precedes every body write ---
+#
+# The claim that the scrub "precedes every body write this skill makes, not only
+# the first" is only true if a scrub reference is actually co-located with EACH
+# write site. Pinning the claim sentence alone is vacuous — it stays green even
+# if a write site never mentions a scrub at all — so each site is checked here on
+# its own text, not just the summary sentence's presence somewhere in the file.
 
 
 def test_credential_scrub_precedes_every_body_write():
@@ -290,6 +323,41 @@ def test_credential_scrub_precedes_every_body_write():
     ), (
         "slice/SKILL.md must run the credential-pattern scrub before every body "
         "write it makes, not only the first"
+    )
+
+
+def test_ledger_append_write_site_carries_a_scrub_reference():
+    _pin_normalized(
+        "Credential-pattern scrub, before this append too.",
+        "slice/SKILL.md's step 4 ledger append — a full-body write that pipes in "
+        "text read out of another record's body (the value claim or **Goal:** "
+        "fallback) — must carry its own credential-pattern scrub reference, not "
+        "rely on a scrub sentence written elsewhere in the file",
+    )
+    append_site = _text().split("**The append is a full-body")[0]
+    assert "credential-pattern scrub" in append_site, (
+        "slice/SKILL.md must mention the credential-pattern scrub before the "
+        "step 4 ledger append's write description, not only later in the file"
+    )
+
+
+def test_early_stop_note_write_site_carries_a_scrub_reference():
+    early_stop_site = _text().split("### 7. Choose smallest-next")[0].split(
+        "### 6. Termination"
+    )[1]
+    assert "credential-scrub" in early_stop_site, (
+        "slice/SKILL.md's step 6 early-stop body note must carry its own "
+        "credential-scrub reference at its write site"
+    )
+
+
+def test_parent_task_write_site_carries_a_scrub_reference():
+    parent_write_site = _text().split("### 9. Materialize the parent task")[1].split(
+        "### 10."
+    )[0]
+    assert "Credential-pattern scrub, before any write." in parent_write_site, (
+        "slice/SKILL.md's step 9 parent task write must carry its own "
+        "credential-pattern scrub reference at its write site"
     )
 
 

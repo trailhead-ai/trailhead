@@ -15,6 +15,7 @@ points write differently:
 Both halves are pinned here so neither path can be silently deleted.
 """
 
+import re
 from pathlib import Path
 
 CRAFT = Path(__file__).parent.parent / "plugins" / "craft"
@@ -23,6 +24,19 @@ PLAN_SKILL = CRAFT / "skills" / "plan" / "SKILL.md"
 
 def _text() -> str:
     return PLAN_SKILL.read_text()
+
+
+def _normalize(text: str) -> str:
+    return re.sub(r"\s+", " ", text)
+
+
+def _pin_normalized(phrase: str, reason: str) -> None:
+    """Whitespace-insensitive pin: a rewrap that shifts a line break can't disarm it."""
+    normalized = _normalize(_text())
+    assert normalized.count(_normalize(phrase)) == 1, (
+        f"pinned phrase must be whitespace-normalized-unique in the file "
+        f"(found {normalized.count(_normalize(phrase))}): {phrase!r}"
+    )
 
 
 # --- the discrimination rule between the two entry points ---
@@ -122,6 +136,39 @@ def test_cross_check_query_names_the_safe_value_shape_check():
         "plan/SKILL.md must name the shape check on <spec-name> at the "
         "cross-check query's interpolation site — a pointer to the shared rule "
         "in _shared/execute.md, not a restatement of it"
+    )
+
+
+# --- the topic-rooted path's spec-link write shape-checks <spec-name> too ---
+#
+# The cross-check query above names its shape check explicitly. The sibling
+# `--related spec=<spec-name>` write a few lines down substitutes the same
+# vault-sourced <spec-name> with no shape check named at its own site — an
+# unguarded interpolation that reads, to anyone scanning the file, as an
+# intentional exception rather than an oversight.
+
+
+def test_spec_link_write_names_the_safe_value_shape_check():
+    _pin_normalized(
+        "validate `<spec-name>` against the safe-value shape "
+        "`_shared/execute.md` codifies for any vault-sourced value entering a "
+        "command before it is substituted into the spec-link write",
+        "plan/SKILL.md's topic-rooted spec-link write (`--related "
+        "spec=<spec-name>`) must name the same safe-value shape check the "
+        "nearby cross-check query names, so the file does not read as though "
+        "this site were an intentional unguarded exception",
+    )
+
+
+def test_spec_link_write_shape_check_is_co_located_with_the_write():
+    link_write_site = _text().split(
+        "link the parent task to it with `lore record update <parent-id> "
+        "--related spec=<spec-name>`"
+    )[0][-400:]
+    assert "safe-value shape `_shared/execute.md` codifies" in link_write_site, (
+        "plan/SKILL.md's shape check on <spec-name> must sit immediately "
+        "before the `--related spec=<spec-name>` write it governs, not only "
+        "at the earlier cross-check query"
     )
 
 

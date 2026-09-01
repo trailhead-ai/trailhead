@@ -92,6 +92,11 @@ here would under-report what shipped and risk re-selecting a criterion already c
 A slice ending `dropped` or `blocked` writes no line: abandoned work is never mistaken for
 covered criteria, which is the entire point of a written ledger over a live status query.
 
+**Credential-pattern scrub, before this append too.** The appended line's text — the slice title
+and the value claim (or `**Goal:**` fallback), both read out of another record's body — is run
+through `_shared/execute.md`'s Phase 5 credential-pattern scrub before this write, the same scrub
+step 9 below documents for the parent task write.
+
 **The append is a full-body read-modify-write of the spec, not `lore record update --diff`.**
 Read the spec fresh immediately before this write — never the body read back in step 2, which
 may already be stale by now — add or extend its `## Slices` section with the new
@@ -191,6 +196,13 @@ the loop's live status: `lore record update spec/<spec-name> --unset-label craft
 enabler justification, and anything else composed into it — through `_shared/execute.md`'s
 Phase 5 credential-pattern scrub before any write.
 This precedes every body write this skill makes, not only the first.
+
+**The slice title is untrusted input too.** It is derived from the spec's acceptance criteria —
+vault-writable, git-synced prose — and enters the command line below as `--title`. Step 1's shape
+check is scoped to `<spec-name>` only, so this is a separate site: apply the same precedent
+`_shared/execute.md` already sets for a title drawn from generated prose repo content can
+influence — the title is stripped of single quotes, newlines, backticks, and `$` before it is
+quoted.
 
 Create the parent `task` record, linking it to the spec on the same write:
 
