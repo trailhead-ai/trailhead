@@ -37,6 +37,14 @@ QUALITY_BAR_WORDING = "Valuable, Small, Testable"
 
 SAFE_VALUE_SHAPE = "^[A-Za-z0-9._/-]+$"
 
+# The open-slice guard query: the `related-spec:` facet, filtered to every
+# non-terminal task status. Pinned once here and asserted at both the guard and
+# the post-write re-check, which must reuse the identical query.
+OPEN_SLICE_QUERY = (
+    'lore search "kind:task related-spec:<spec-name> '
+    '-status:done -status:dropped -status:superseded"'
+)
+
 
 def _text() -> str:
     return SLICE_SKILL.read_text()
@@ -232,4 +240,193 @@ def test_readme_lists_craft_slice():
     assert "/craft:slice" in readme, (
         "tools/craft/README.md must list /craft:slice — test_readme_inventory.py "
         "enforces this in both directions"
+    )
+
+
+# --- guard: a non-ready spec refuses, and a draft spec names its remedy ---
+
+
+def test_not_ready_guard_refuses_selection():
+    assert "Refuse to select against a spec whose status is not `ready`." in _text(), (
+        "slice/SKILL.md must refuse to select against a spec that is not `ready`"
+    )
+
+
+def test_not_ready_guard_names_the_gauntlet_remedy_for_a_draft_spec():
+    assert (
+        "A `draft` spec routes to `/craft:gauntlet <spec-id>` — the same routing "
+        "`/craft:plan` already applies to an un-gauntleted spec" in _text()
+    ), (
+        "slice/SKILL.md must name the remedy for a draft spec — route to "
+        "/craft:gauntlet, the same routing /craft:plan already applies — not just "
+        "state the refusal"
+    )
+
+
+# --- guard: a complete spec is reported, not re-selected, and names its remedy ---
+
+
+def test_complete_guard_reports_rather_than_reselects():
+    assert (
+        "the spec's status is already `complete`, report that the slice loop for "
+        "this spec has already closed out and stop — do not choose another slice"
+        in _text()
+    ), (
+        "slice/SKILL.md must report rather than re-select against a spec already "
+        "complete"
+    )
+
+
+def test_complete_guard_names_its_remedy():
+    assert (
+        "if further work belongs here, it starts as a new spec, not another slice "
+        "against this one" in _text()
+    ), (
+        "slice/SKILL.md must name the complete guard's remedy — new work starts as "
+        "a new spec — not leave the report with no way forward"
+    )
+
+
+# --- guard: an open slice on the spec refuses, names it, and names two remedies ---
+
+
+def test_open_slice_guard_names_the_open_slice():
+    assert (
+        "refuse to select a second one — name the open slice by its title and "
+        "task id" in _text()
+    ), (
+        "slice/SKILL.md must name the open slice (title and task id), not just "
+        "refuse anonymously"
+    )
+
+
+def test_open_slice_guard_names_both_remedies():
+    assert (
+        "resume it (continue running `/craft:plan` or `/craft:execute` against "
+        "that existing parent task) or drop it explicitly (`lore record update "
+        "<task-id> --status dropped`, recording why)" in _text()
+    ), (
+        "slice/SKILL.md must name both ways forward for an open slice — resume it, "
+        "or drop it explicitly — so a crashed run is never silently duplicated"
+    )
+
+
+def test_open_slice_query_is_related_spec_form_filtered_to_non_terminal_status():
+    assert OPEN_SLICE_QUERY in _text(), (
+        "slice/SKILL.md must query open slices with the related-spec: form "
+        "filtered to non-terminal task status — an unfiltered query would refuse "
+        "forever once any slice closes"
+    )
+
+
+def test_open_slice_guard_is_fail_closed_on_search_error():
+    assert (
+        "treat that exactly like finding an open slice: refuse and report the "
+        "search failure, rather than proceeding as though nothing was open"
+        in _text()
+    ), (
+        "slice/SKILL.md must fail closed when the guard's search errors or "
+        "returns unusable output — reading a search hiccup as 'no open slice' "
+        "produces exactly the duplicate the guard exists to prevent"
+    )
+
+
+# --- post-write re-check ---
+
+
+def test_post_write_recheck_reruns_the_open_slice_query():
+    assert "re-run the open-slice query from the guard above once more" in _text(), (
+        "slice/SKILL.md must re-run the open-slice query once after the parent "
+        "task is written"
+    )
+    assert _text().count(OPEN_SLICE_QUERY) >= 2, (
+        "the post-write re-check must reuse the identical open-slice query the "
+        "guard uses, not a second, drifted copy of it"
+    )
+
+
+def test_post_write_recheck_makes_a_duplicate_visible_not_silent():
+    assert (
+        "converts a concurrent double-materialization from silent into visible"
+        in _text()
+    ), (
+        "slice/SKILL.md must state that the re-check makes a concurrent duplicate "
+        "visible rather than silent — it does not make the guard atomic"
+    )
+
+
+# --- termination ---
+
+
+def test_termination_reports_the_spec_complete_when_criteria_are_met():
+    assert (
+        "every acceptance criterion is already covered by the `## Slices` ledger" in _text()
+    ) and ("the pass reports the spec complete" in _text()), (
+        "slice/SKILL.md must state the terminating condition — the spec's "
+        "acceptance criteria are met when the ledger already covers every one — "
+        "and that the pass reports the spec complete"
+    )
+
+
+def test_early_stop_is_a_first_class_recorded_outcome():
+    assert (
+        "Stopping early, with the spec's acceptance criteria still unmet, is a "
+        "first-class recorded outcome — never a silent abandonment." in _text()
+    ), (
+        "slice/SKILL.md must record an early stop as a first-class outcome on the "
+        "spec, not an abandonment"
+    )
+
+
+# --- the ## Slices ledger ---
+
+
+def test_ledger_section_is_named_slices():
+    assert "`## Slices` section" in _text(), (
+        "slice/SKILL.md must name the ledger section `## Slices`"
+    )
+
+
+def test_ledger_line_carries_all_four_fields():
+    assert (
+        "append one line carrying all four fields — slice title, value claim, "
+        "task id, and close date" in _text()
+    ), (
+        "slice/SKILL.md must state the ledger line carries all four fields — "
+        "slice title, value claim, task id, close date"
+    )
+
+
+def test_ledger_excludes_dropped_and_blocked_slices():
+    assert "A slice ending `dropped` or `blocked` writes no line" in _text(), (
+        "slice/SKILL.md must exclude dropped/blocked slices from the ledger — "
+        "the exclusion is the whole point of a written ledger over a status query"
+    )
+
+
+def test_ledger_append_is_a_full_body_read_modify_write():
+    assert (
+        "The append is a full-body read-modify-write of the spec, not "
+        "`lore record update --diff`." in _text()
+    ), (
+        "slice/SKILL.md must state the ledger append is a full-body "
+        "read-modify-write, not `lore record update --diff` — a unified diff "
+        "cannot reliably create a section that does not exist yet"
+    )
+
+
+def test_ledger_append_states_why_diff_is_wrong_for_a_first_ever_append():
+    assert (
+        "A unified diff cannot reliably create a section that does not exist "
+        "yet — precisely the first-ever-append case" in _text()
+    ), (
+        "slice/SKILL.md must state why --diff is wrong here — a unified diff "
+        "cannot reliably create a section that does not exist yet"
+    )
+
+
+def test_ledger_failed_append_surfaces():
+    assert "A failed append surfaces rather than being swallowed" in _text(), (
+        "slice/SKILL.md must state that a failed ledger append surfaces rather "
+        "than being swallowed"
     )
