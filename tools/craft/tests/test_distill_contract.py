@@ -944,3 +944,96 @@ def test_the_activation_step_names_the_narrowed_exclusion_that_feeds_it():
         "the activation step must name the narrowed §2 exclusion that lets a "
         "`draft`-anchored spec stay in the queue and reach this check"
     )
+
+
+# --- the slice loop's terminus: queueing and completing a loop-closed spec ---
+
+
+def test_sweep_queue_enumerates_loop_closed_ready_specs():
+    """A spec the slice loop closed out never reaches `planned`, so the `planned`
+    queue alone cannot see it.
+
+    The loop holds a spec at `ready` from the gauntlet until distill completes it
+    (`spec/specs-are-delivered-one-vertical-slice-at-a-time`). Without this query
+    every loop-driven spec is invisible to distill forever and the pipeline has no
+    terminus. `has:label.` is the presence form, so it matches both values the
+    marker takes — narrowing it to one value would strand the other.
+    """
+    flat = _flat(_text())
+    assert "kind:spec status:ready has:label.craft.slice-loop" in flat, (
+        "distill/SKILL.md's sweep queue must name the KQL query that enumerates "
+        "specs the slice loop closed out — the `has:label.` presence form, so it "
+        "matches both `complete` and `stopped`"
+    )
+
+
+def test_the_loop_closed_query_does_not_displace_the_planned_cohort():
+    """Records already carrying `planned` must stay reachable."""
+    assert "kind:spec status:planned" in _text(), (
+        "distill/SKILL.md must keep enumerating `planned` specs — the loop-closed "
+        "query is an addition, not a replacement, or every pre-loop record is "
+        "stranded"
+    )
+
+
+def test_the_completion_flip_is_conditioned_on_the_complete_marker_value():
+    """`stopped` and `complete` are not the same outcome and must not share a fate.
+
+    The queue matches both marker values, but only one of them means the spec's
+    acceptance criteria were met. Flipping a `stopped` spec to `complete` is
+    irreversible in practice: `/craft:slice`'s own guard then refuses to select
+    against a `complete` spec, and its stated remedy is to start a new spec.
+    """
+    flat = _flat(_text())
+    assert "craft/slice-loop=complete" in flat, (
+        "distill/SKILL.md's completion gate must name the marker value it accepts "
+        "— `craft/slice-loop=complete` — not merely the presence of the label"
+    )
+    assert "craft/slice-loop=stopped" in flat, (
+        "distill/SKILL.md must name the `stopped` marker value it deliberately "
+        "does not complete, or a reader cannot tell the exclusion is intentional"
+    )
+
+
+def test_a_stopped_spec_is_distilled_without_being_completed():
+    flat = _flat(_text())
+    assert "is distilled but is not flipped `complete`" in flat, (
+        "distill/SKILL.md must state the `stopped` outcome plainly: such a spec is "
+        "distilled and annotated, but keeps its `ready` status"
+    )
+    assert "stop-reason" in flat, (
+        "a `stopped` spec must surface its recorded stop reason in the write list, "
+        "so closing one out is a visible choice rather than a side effect of "
+        "generic disposition"
+    )
+
+
+def test_the_completion_write_re_reads_the_spec_immediately_before_writing():
+    """The marker is checked at queue-build; a human dispositions; then the write
+    lands. `/craft:slice` clears and re-asserts `craft/slice-loop` on every
+    re-entry, so without a re-check an operator adding a slice during that gap
+    leaves a `complete` spec with an `in-progress` slice orphaned beneath it.
+    """
+    flat = _flat(_text())
+    assert "Re-read the spec and re-check the marker immediately before" in flat, (
+        "distill/SKILL.md's completion write must re-read the spec immediately "
+        "before the flip — the same discipline `/craft:slice` applies to its own "
+        "spec writes — rather than trusting a marker read at queue-build time"
+    )
+
+
+def test_the_forward_machinery_stays_decoupled_from_the_planned_status():
+    """The forward-anchored cluster class and the activation check key off the
+    `related: adr` edge and terminal statuses, never `planned`. Pinning that keeps
+    a future edit from quietly coupling them to a status this slice is retiring.
+    """
+    flat = _flat(_forward_anchored_section(_text()))
+    assert "related: adr" in flat, (
+        "the forward-anchored cluster class must be defined by the `related: adr` "
+        "edge, not by a spec status"
+    )
+    assert "status:planned" not in flat, (
+        "the forward-anchored cluster class must not key off `planned` — that "
+        "status is unused under the slice loop, and coupling to it would strand "
+        "every forward-anchored cluster"
+    )

@@ -89,6 +89,26 @@ lore search "kind:spec status:complete"
 — and let the exclusion check below drop the ones that were genuinely distilled. Once the migration
 cohort is worked through, this second query returns only already-excluded records.
 
+Plus, **specs the slice loop closed out**. A spec under the slice loop holds `ready` from the
+gauntlet until distill completes it — it never reaches `planned`, so the first query cannot see
+it and the pipeline would have no terminus. Enumerate them by the marker `/craft:slice` writes at
+its terminating condition:
+
+```
+lore search "kind:spec status:ready has:label.craft.slice-loop"
+```
+
+`has:label.` is the **presence** form, and it is presence that is wanted here: the marker takes
+two values, `craft/slice-loop=complete` and `craft/slice-loop=stopped`, and both are closed-out
+outcomes distill has something to say about. Narrowing this to
+`label.craft.slice-loop:complete` would strand every early-stopped spec. The key takes the
+dot-for-slash spelling because an unquoted `/` is a lexer error — the same convention
+`label.craft.branch` and `label.craft.subsystems` already use (`_shared/status-ownership.md`).
+
+A spec **mid-loop** never matches: `/craft:slice` unsets the label whenever it selects again, so
+the marker is present only while the loop is actually stopped. What the two values mean for the
+completion write — they are not the same outcome — is step 5 below.
+
 ### 2. Apply the exclusion per candidate, never in the query
 
 A spec is out of the queue if it already carries **a `distilled=` annotation** —
@@ -304,10 +324,35 @@ claims `complete` until everything behind it landed.
    lore record update <spec-id> --status complete --vault <name>
    ```
 
-   Write this **only if the spec is already `planned` and its cluster is dispositioned**. `complete`
-   means distilled; a spec that never reached `planned`, or whose cluster no human dispositioned,
-   has not been distilled no matter what else ran. Last position is deliberate: an interruption
-   anywhere above leaves the spec still queued, and the sweep picks it up again.
+   Write this **only if the spec is closed out and its cluster is dispositioned**. `complete` means
+   distilled; a cluster no human dispositioned has not been distilled no matter what else ran. Two
+   spec shapes count as closed out, and no others:
+
+   - the spec is already `planned` — the pre-loop route; or
+   - the spec is `ready` and carries `craft/slice-loop=complete` — the slice loop reached its
+     terminating condition with every acceptance criterion covered.
+
+   **A spec carrying `craft/slice-loop=stopped` is distilled but is not flipped `complete`.** It
+   stopped with acceptance criteria still unmet, and `complete` is irreversible in practice:
+   `/craft:slice` refuses to select against a `complete` spec, and its stated remedy is to start a
+   new spec entirely. So an early-stopped spec keeps its `ready` status and its marker. The
+   `distilled=` annotation written above is what keeps it out of later sweeps, so it neither
+   re-queues forever nor claims a completeness it never reached.
+
+   That distinction has to be **visible at disposition, not just here**: a `stopped` spec is
+   rendered in the write list with its marker value and its recorded stop-reason note shown, so
+   closing one out is a choice someone made rather than a side effect of approving the cluster.
+
+   **Guard this write with a fresh read.** Re-read the spec and re-check the marker immediately
+   before it lands — never trust the read from queue-build. An arbitrarily long human disposition sits between the two, and
+   `/craft:slice` clears and re-asserts `craft/slice-loop` on every re-entry. Without the
+   re-check, an operator who adds a slice while this cluster awaits disposition ends up with a
+   `complete` spec and an `in-progress` slice orphaned beneath it. This is the same "read fresh
+   immediately before the write" discipline `/craft:slice` applies to its own spec writes; it
+   shrinks the lost-update window without closing it.
+
+   Last position is deliberate: an interruption anywhere above leaves the spec still queued, and
+   the sweep picks it up again.
 
 6. **Then check activation, for every spec just flipped `complete` that carries a `related: adr=`
    edge** — completing a member spec is also the trigger that may finish the forward ADR it was
