@@ -418,6 +418,48 @@ def test_end_phases_created_at_first_executor_dispatch():
     )
 
 
+# --- the in-progress branch: not-yet-planned slice vs. an interrupted run ---
+
+
+def test_in_progress_without_branch_label_is_not_an_interrupted_run():
+    """A childless `in-progress` task with no `craft/branch` label never got a dispatch.
+
+    Claiming the run writes status and the `craft/branch` label in the same command
+    (`--status in-progress --label craft/branch=<bare-branch>`), so the label's absence
+    on a childless task means no dispatch ever claimed it — it is a slice parent
+    materialized `in-progress` and left awaiting decomposition, not a crashed run.
+    """
+    text = _execute_text()
+    assert "no `craft/branch` label" in text, (
+        "execute/SKILL.md's `in-progress` branch must name the absent `craft/branch` "
+        "label as what distinguishes a not-yet-planned slice from an interrupted run"
+    )
+    assert "awaiting decomposition" in text, (
+        "execute/SKILL.md must describe a childless `in-progress` task with no "
+        "`craft/branch` label as a slice awaiting decomposition, not an interrupted run"
+    )
+
+
+def test_in_progress_without_branch_label_names_plan_as_the_remedy():
+    assert "run `/craft:plan <id>` first" in _execute_text(), (
+        "execute/SKILL.md must pin the remedy text, not just the refusal — the operator "
+        "reads exactly what to run next"
+    )
+
+
+def test_in_progress_with_branch_label_still_resumes():
+    """The existing resume path must survive untouched for the case it was written for."""
+    text = _execute_text()
+    assert "Resume rather than" in text, (
+        "execute/SKILL.md's `in-progress` branch must still resume — never re-dispatch "
+        "from the top — once the task carries a `craft/branch` label"
+    )
+    assert "No ticked phase line" in text and "At least one ticked phase line" in text, (
+        "execute/SKILL.md's resume sub-branches (no ticked phase line vs. at least one) "
+        "must remain intact for a task that does carry the `craft/branch` label"
+    )
+
+
 # --- cross-file coupling: the --interactive flag must not silently diverge ---
 
 

@@ -216,7 +216,14 @@ Phase 3's whole-change correctness-review dispatch.
   against a task that did not promote.
 - **`blocked`** — report the blocking condition recorded on the task and stop. `blocked`
   encodes an external condition execute can neither observe nor clear.
-- **`in-progress`** — a run already started against this task. Resume rather than
+- **`in-progress`** — first check the `craft/branch` label. Claiming a run writes status
+  and the `craft/branch` label in the same command (see
+  [Claiming the run](#claiming-the-run-at-first-dispatch)), so a childless task at
+  `in-progress` with no `craft/branch` label was never claimed by a dispatch at all — it
+  is not an interrupted run, it is a slice `/craft:slice` materialized `in-progress` and
+  left awaiting decomposition. Refuse and report: run `/craft:plan <id>` first. **Only
+  once the label is present** does this branch resume: a run already started against
+  this task. Resume rather than
   re-dispatching from the top, and read `## End Phases` to decide *where* — it exists from the
   first executor dispatch, so its presence proves nothing about how far the run got:
   - **No ticked phase line** (only the dispatch-count note, or nothing) — the build itself
