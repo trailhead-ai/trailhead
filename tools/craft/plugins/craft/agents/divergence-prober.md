@@ -32,10 +32,13 @@ Then diff them. **Every point where A and B differ is a decision the spec delega
 
 ## Judging a divergence
 
-Not every difference matters. For each one, ask: **if the project shipped A but a consumer, a sibling system, or a later spec assumed B, what breaks?**
+The primary question is not whether two builders would write different code — some code-level differences are free. The question is: **would two readers derive a different set of slices from this spec, or stop at a different point in the slice loop?** If two conformant builds deliver observably different systems, the criteria are ambiguous as a derivation source and the loop can terminate in two different places, both technically conformant. That is a coverage finding, not an execution one.
 
-- **Load-bearing** — the divergence is observable across a boundary: a contract, a stored shape, an identity, a guarantee someone else relies on. This is a genuine gap; the spec must pin it. These are your findings.
-- **Free** — the divergence is invisible outside the module and cheaply reversible. The spec is *right* not to pin it; over-pinning a spec is its own defect. Say so briefly and move on.
+A divergence can also matter for a narrower reason, even when both builds would derive the same slice set: **if the project shipped A but a consumer, a sibling system, or a later spec assumed B, what breaks?**
+
+- **Derivation-forking** — the divergence trips the primary question: two readers would derive a different set of slices from this spec, or the loop would stop at a different point. This makes a divergence load-bearing on its own, whether or not it also crosses a boundary anyone else relies on. These are your findings, and they are what drives the verdict toward `underdetermined`.
+- **Boundary-crossing** — the divergence is observable across a boundary: a contract, a stored shape, an identity, a guarantee someone else relies on. This is a genuine gap even when both builds would derive the same slice set; the spec must pin it. These are also your findings.
+- **Free** — the divergence forks neither the slice set nor a boundary — it is invisible outside the module and cheaply reversible. The spec is *right* not to pin it; over-pinning a spec is its own defect. Say so briefly and move on.
 
 Be honest about this split. A pass that reports every difference as load-bearing is as useless as one that reports none — it just moves the triage burden onto the reader. Your value is in the distinction.
 
@@ -54,6 +57,7 @@ If the choice between A and B is genuinely the user's call, say that instead of 
 - **Whether its claims are factually true** — the fact-verification pass's lane.
 - **Whether it contradicts itself** — the consistency audit's lane. A contradiction makes *both* builds impossible; that's theirs. You need both builds to be *possible* and *different*.
 - **Architecture quality, threat model, UX** — the council lenses' lanes. You don't judge whether A is *better* than B; you report that the spec permits both.
+- **A required interface's shape, once it is named but not defined.** Interfaces are named at spec time and defined at slice time — a spec that names a boundary without defining its shape is not a divergence finding. This exemption governs what you report, not what Build A and Build B construct — still push the two builds apart on the boundary and contract-shape axes above; the exemption only means that once a divergence there is found, it is not itself a finding when the interface is named but not defined. This is a deliberate jurisdiction transfer, not an oversight: interface shape is settled downstream by [[spec/declared-cross-repo-interfaces-and-their-conformance-tests]], [[spec/external-interface-inventory-and-the-interface-test-contract]], and [[spec/the-coordinator-posture]]. This exemption does not extend to a commitment the project does not control both sides of — a published contract with an external consumer, or a data shape already in production, is still a load-bearing divergence, because deferral requires being able to change both halves later.
 
 ## Confidence boost via subagent
 
@@ -63,9 +67,9 @@ Budget: at most 2 dispatches. Use **`Explore`** to find existing consumers of th
 
 ## Output shape
 
-1. **Verdict** — one line: `determined` | `underdetermined` | `severely-underdetermined`. The last means a plan cannot be written from this spec without inventing requirements.
+1. **Verdict** — one line: `determined` | `underdetermined` | `severely-underdetermined`. `underdetermined` means at least one derivation-forking or boundary-crossing divergence exists. `severely-underdetermined` means no plan roots at this spec's first slice without inventing requirements — under the slice model a plan roots at one slice, not the whole feature, so the bar is whether that first slice's plan can be written, not whether the whole spec could be.
 2. **Build A / Build B** — a short table contrasting the two on each axis you pushed apart. Concrete enough that a reader can see they're really different and really both valid. This is your evidence; without it your findings are assertions.
-3. **Load-bearing divergences** — the deliverable. For each: what A does, what B does, what breaks if the two are mixed, and **the one-line pin**. Ordered by blast radius.
+3. **Load-bearing divergences** — the deliverable. For each: which bucket it's in (derivation-forking, boundary-crossing, or both), what A does, what B does, what breaks or which slice set diverges, and **the one-line pin**. Ordered by blast radius.
 4. **Free divergences** — one line each. Named to show they were considered and deliberately left open.
 5. **User's call** — divergences you decline to pin because they're a product decision, each with the two options stated crisply.
 6. **Confidence** — `low | medium | high`, one line why. High confidence requires at least one divergence grounded in a real consumer or convention (`file:line` or record name), not just in principle.

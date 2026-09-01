@@ -176,7 +176,7 @@ If the idea has a user-facing surface, describe the visual direction before lock
 
 Persist the spec with `lore record create` (see `skills/_shared/note-storage.md`): render craft's spec body template (`${CLAUDE_PLUGIN_ROOT}/templates/spec.md`), fill in the sections, then pipe the filled body to it — `printf '%s' "$BODY" | lore record create --kind spec --title "<topic>" --status draft`.
 
-Fill in: **Problem** (real problem, why now) · **Objectives** (bulleted, outcome-framed) · **Acceptance Criteria** (testable, observable) · **Non-Goals** (explicit scope bounds) · **Constraints** (technical/business/timing) · **UI Direction** (omit if no UI surface) · **Open Questions / Risks** · **Related**
+Fill in: **Problem** (real problem, why now) · **Objectives** (bulleted, outcome-framed) · **Acceptance Criteria** (testable, observable) · **Required Interfaces** (each boundary the spec implies, and the criteria it must satisfy — not its shape) · **Non-Goals** (explicit scope bounds) · **Constraints** (technical/business/timing) · **UI Direction** (omit if no UI surface) · **Open Questions / Risks** · **Related**
 
 ### 6. Brainstorming Exit Gate
 

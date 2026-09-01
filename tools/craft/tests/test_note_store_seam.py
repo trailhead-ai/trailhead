@@ -53,6 +53,7 @@ _SPEC_SECTIONS = [
     "Problem",
     "Objectives",
     "Acceptance Criteria",
+    "Required Interfaces",
     "Non-Goals",
     "Constraints",
     "UI Direction",
