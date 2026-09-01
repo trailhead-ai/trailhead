@@ -97,20 +97,39 @@ def test_slice_rooted_path_writes_no_spec_status():
     )
 
 
-# --- topic-rooted path: unchanged, still advances ready -> planned ---
+# --- topic-rooted path: refuses a ready spec, writes no spec status ---
 
 
-def test_topic_rooted_path_still_advances_ready_spec_to_planned():
-    assert (
-        "advance the spec's status `ready → planned` "
-        "(`lore record update <spec-id> --status planned`)" in _text()
-    ), (
-        "plan/SKILL.md must still document the topic-rooted path's write that "
-        "advances a ready spec to planned — the old behavior must not be "
-        "silently deleted"
+def test_topic_rooted_path_refuses_a_ready_spec_and_routes_to_the_slice_loop():
+    """A `ready` spec belongs to the slice loop, not to whole-feature planning.
+
+    Topic-rooted planning gated only `draft` before. A `ready` spec fell through,
+    was planned whole, and was advanced to `planned` — the status `/craft:slice`
+    then refuses. With the advance gone, an ungated `ready` spec would be worse
+    still: it would carry neither `planned` nor the slice-loop marker, so neither
+    of distill's candidate queries could ever reach it.
+    """
+    text = _text()
+    assert "A `ready` spec is not planned whole" in text, (
+        "plan/SKILL.md's topic-rooted path must refuse a `ready` spec, mirroring "
+        "the `draft` -> /craft:gauntlet gate beside it"
+    )
+    assert "/craft:slice spec/<spec-id>" in text, (
+        "the refusal must name the remedy as a fully formed command — the "
+        "operator must always know what to run next"
     )
 
 
+def test_no_path_advances_a_spec_to_planned():
+    """`planned` stays in the spec status vocabulary but stops being written.
+
+    This pins the behaviour the removal is for: a spec's status is craft's record
+    of where it sits in the loop, and planning is not a transition in that loop.
+    """
+    assert "Planning writes no spec status on either path" in _text(), (
+        "plan/SKILL.md must state that neither the slice-rooted nor the "
+        "topic-rooted path writes a spec status"
+    )
 # --- topic-rooted path: cross-check for an existing open slice parent ---
 
 

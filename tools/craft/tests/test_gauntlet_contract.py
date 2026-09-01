@@ -64,7 +64,7 @@ _ADVANCE_GUARD = "only if the spec is already `ready`"
 # The distill ritual owns the spec `planned -> complete` edge — `complete` *means*
 # distilled — so its write carries its own guard rather than planning's: a spec may
 # only complete from `planned`, and only once its whole cluster was dispositioned.
-_COMPLETE_ADVANCE_GUARD = "only if the spec is already `planned` and its cluster is dispositioned"
+_COMPLETE_ADVANCE_GUARD = "only if the spec is closed out and its cluster is dispositioned"
 
 
 def _craft_prose_files() -> list[Path]:
@@ -216,7 +216,7 @@ def test_distill_carries_the_complete_advance_behind_its_own_guard():
     assert _COMPLETE_ADVANCE_GUARD in text, (
         "distill/SKILL.md must carry its advance guard verbatim: "
         f"{_COMPLETE_ADVANCE_GUARD!r}. Planning's `ready` guard is the wrong one "
-        "here — it would license completing a spec that was never planned, and say "
+        "here — it would license completing a spec nobody finished, and say "
         "nothing about the cluster disposition that gives `complete` its meaning."
     )
 

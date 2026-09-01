@@ -67,10 +67,9 @@ def test_write_the_plan_does_not_unconditionally_create_a_second_parent():
     )
 
 
-def test_write_the_plan_scopes_the_spec_advance_to_topic_rooted():
+def test_write_the_plan_advances_no_spec_on_either_path():
     _pin(
-        "The `ready → planned` advance below applies only on the topic-rooted path",
-        "agents/planner.md must scope the `ready → planned` spec advance to "
-        "the topic-rooted path, matching plan/SKILL.md, which writes no spec "
-        "status on the slice-rooted path.",
+        "Neither path advances the spec's status",
+        "agents/planner.md must state that neither the slice-rooted nor the "
+        "topic-rooted path advances a spec's status, matching plan/SKILL.md.",
     )
