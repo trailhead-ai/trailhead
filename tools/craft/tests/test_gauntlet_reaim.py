@@ -35,6 +35,7 @@ gauntlet contract suite uses: a named behavior, a literal fragment, and a
 failure message saying why that fragment IS the behavior.
 """
 
+import hashlib
 from pathlib import Path
 
 CRAFT = Path(__file__).parent.parent / "plugins" / "craft"
@@ -64,7 +65,8 @@ _INTERFACE_RECEIVING_SPECS = (
 # accident, and is expected to be deleted along with the adr-review block
 # itself when that amputation lands — it is not a standing invariant to work
 # around once the block it guards is gone.
-_ADR_REVIEW_BLOCK = "## Per-lens Critical bars — adr review\n\nUsed by the `gauntlet` skill's lens pass in adr mode. An `adr` record has exactly\nfour sections — Context, Decision, Consequences, Alternatives rejected\n(`templates/adr.md`) — and no Problem, Objectives, Acceptance Criteria, or UI\nDirection. The bars below fire on what a decision record can actually get wrong;\nthey do not cite sections it doesn't have.\n\nThe four lenses accept the Decision as framed and review within it — attacking\nwhether the Decision itself is the right one belongs to the `premise-attacker`\npass, not a lens.\n\n*Builder — adr review:*\n- The Decision has no implementable reading — nothing a build could conform to as stated\n- The Decision contradicts a declared project axiom or a prior, not-yet-superseded ADR\n- The Decision depends on a capability that does not exist yet and the record does not name that capability as a dependency the Decision relies on — the defect is the missing name, not the missing capability\n- Alternatives rejected omits an alternative that was clearly live, making the Decision look uncontested when it wasn't\n\n*Reliability — adr review:*\n- The Decision is framed as irreversible (immutable once `active`) but Consequences never names the supersession path for reversing course\n- Consequences omits a cost or constraint the Decision imposes that a later build will discover the hard way\n- Context doesn't establish why the Decision was necessary now — an unforced Decision invites relitigation later\n- Nothing in the record names a condition for when the Decision should be revisited\n\n*Security — adr review:*\n- The Decision introduces or shifts a trust boundary, authz model, or handling of sensitive data that Consequences never names\n- The Decision commits to storing, logging, or transmitting sensitive data without naming its classification or retention\n- The Decision assumes an existing security control still holds without Alternatives rejected having checked it\n\n*Advocate — adr review:*\n- The Decision changes a surface someone downstream will hit, but Consequences names no way they'd discover it happened\n- Consequences describes only system-internal effects with no outcome any downstream reader would notice\n\n"
+_ADR_REVIEW_BLOCK_SHA256 = "179b3b7a4b1ec15fd40763c988416911ca20fe9825cfd041315fcecd4f15d735"
+_ADR_REVIEW_BLOCK_LEN = 2214
 
 
 def _section(text, heading, next_heading_prefix="\n## "):
@@ -510,9 +512,15 @@ def test_council_adr_review_block_is_untouched():
     start = text.index("## Per-lens Critical bars — adr review")
     end = text.index("## Synthesis")
     adr_review_block = text[start:end]
-    assert adr_review_block == _ADR_REVIEW_BLOCK, (
+    digest = hashlib.sha256(adr_review_block.encode()).hexdigest()
+    assert (digest, len(adr_review_block)) == (
+        _ADR_REVIEW_BLOCK_SHA256,
+        _ADR_REVIEW_BLOCK_LEN,
+    ), (
         "the adr-review Critical bar block must stay byte-identical — a sibling "
         "session is sequenced to amputate the gauntlet's adr mode after this change, "
         "and re-aiming prose about to be deleted is wasted work that risks preserving "
-        "bars that should not survive"
+        "bars that should not survive. Compare the block under "
+        f"'## Per-lens Critical bars — adr review' in {SHARED_COUNCIL} against git HEAD "
+        f"(got {len(adr_review_block)} bytes, sha256 {digest})"
     )
