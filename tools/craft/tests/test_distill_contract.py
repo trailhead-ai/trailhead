@@ -1037,3 +1037,40 @@ def test_the_forward_machinery_stays_decoupled_from_the_planned_status():
         "status is unused under the slice loop, and coupling to it would strand "
         "every forward-anchored cluster"
     )
+
+
+# --- untrusted vault-sourced values entering a command line ---
+
+
+def test_distill_validates_vault_sourced_values_before_substitution():
+    """Distill interpolates `<spec-id>`, `<adr-id>`, and `<name>` — all read out of
+    a git-synced, teammate-writable vault — into `lore record show` / `lore record
+    update` command lines.
+
+    `_shared/execute.md` codifies the rule and `plan/SKILL.md` and `slice/SKILL.md`
+    both carry it. Distill carried it nowhere, and the loop-closed query above is
+    what newly routes loop-driven specs into those sites.
+    """
+    flat = _flat(_text())
+    assert "^[A-Za-z0-9._/-]+$" in flat, (
+        "distill/SKILL.md must name the safe-value shape every vault-sourced value "
+        "is validated against before it is substituted into a command"
+    )
+
+
+def test_a_value_failing_the_shape_check_is_refused_not_omitted():
+    flat = _flat(_text())
+    assert "never substituted, quoted, or escaped in" in flat, (
+        "distill/SKILL.md must state that a value failing the shape check is "
+        "refused outright — silently omitting it would turn a refusal into a "
+        "query that returns nothing and reads as 'nothing found'"
+    )
+
+
+def test_the_shape_check_governs_every_substitution_site_not_a_fixed_count():
+    flat = _flat(_text())
+    assert "governs every substitution site" in flat, (
+        "distill/SKILL.md's guard must be stated as governing every substitution "
+        "site in the file — a guard scoped to an enumerated list silently stops "
+        "covering the next site someone adds"
+    )

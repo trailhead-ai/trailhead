@@ -63,6 +63,18 @@ A direct write bypasses the index and the sidecar and silently corrupts the reco
 a direct read sees bytes on disk without the sidecar that gives them meaning. This ritual touches
 more records in one sitting than any other in craft, so a shortcut here costs the most.
 
+**Every vault-sourced value is shape-checked before it enters a command line.** Record ids,
+record names, and vault names all arrive from a git-synced vault a teammate can write, and this
+ritual substitutes them into `lore search`, `lore record show`, and `lore record update`
+invocations throughout. Validate each one against the safe-value shape `^[A-Za-z0-9._/-]+$`
+**before ANY substitution** — the same rule `_shared/execute.md` codifies for any vault-sourced
+value entering a command, and the same one `plan/SKILL.md` and `slice/SKILL.md` already apply.
+This validation **governs every substitution site** in this document, not a fixed count of them:
+a site added later is covered by it without amending this rule. A value that fails the check is
+**never substituted, quoted, or escaped in** — refuse loudly and stop. Silently omitting it
+would turn a refusal into a query that returns zero hits and reads as "nothing found", which is
+exactly the wrong report for a record whose id could not be trusted.
+
 **Every batch update passes `--vault <name>` explicitly.** `lore record update` locates a record by
 scanning the configured vaults in **config order**, so an unscoped update in a multi-vault install
 lands wherever the scan happens to hit first — which is not necessarily where the record lives.
