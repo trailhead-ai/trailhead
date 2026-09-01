@@ -62,9 +62,9 @@ def test_step3_pins_explicit_timeout_mandate():
     _pin_in(
         _step3_section(),
         "execute.md#step3",
-        "an explicit tool timeout in milliseconds set above the suite's measured runtime",
+        "an explicit tool timeout in milliseconds set above that scoped suite's measured runtime",
         "The dispatch payload must state an explicit tool timeout above the "
-        "suite's measured runtime — a suite that outruns the Bash tool's "
+        "scoped suite's measured runtime — a suite that outruns the Bash tool's "
         "~120s auto-background threshold makes a bare 'run in the foreground' "
         "instruction impossible to obey.",
     )
@@ -160,7 +160,7 @@ def test_step3_pins_obey_it_by_naming_a_timeout():
     _pin_in(
         _step3_section(),
         "execute.md#step3",
-        "Obey it by naming a concrete timeout value above the suite's measured runtime",
+        "Obey it by naming a concrete timeout value above the scoped suite's measured runtime",
         "The 'never by starting the suite as a background job' clause must "
         "modify a stated verb ('obey it by …, never by …') rather than "
         "dangling with nothing to attach to.",
@@ -183,7 +183,7 @@ def test_step3_pins_ceiling_fallback_options():
     _pin_in(
         _step3_section(),
         "execute.md#step3",
-        "split the run into a scoped subset of the suite that fits under the ceiling, or dispatch against a scoped suite",  # noqa: E501
+        "narrow the scoped subset further until it fits under the ceiling, or dispatch against a narrower scoped suite",  # noqa: E501
         "The ceiling fallback must name concrete degraded paths, not just "
         "assert that one exists.",
     )

@@ -8,6 +8,7 @@ description: |
   - "Run the lint + typecheck, report"
   - "Run just the tests in this file"
   - "Run the full CI check and summarize"
+  - "Run the scoped suite for this slice's blast radius and tell me what failed"
 
   Extension point — build_test_commands: the caller supplies the exact build/test
   command for their stack (e.g. the project's test runner, lint tool, or CI script).
