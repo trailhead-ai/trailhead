@@ -12,9 +12,9 @@
 #     promotion procedure), read by the refine skill and by execute's inline run;
 #     note-storage.md (the plan/spec persistence seam, read by brainstorm, plan,
 #     polish, and agents/planner.md); and slice.md (the slice/task vocabulary and the
-#     quality bar a slice must clear), read by the plan skill, agents/planner.md, and
-#     both the plan.md and task.md templates. It has no SKILL.md, so it is never
-#     selectable.
+#     quality bar a slice must clear), read by the plan skill, the slice skill,
+#     agents/planner.md, and both the plan.md and task.md templates. It has no
+#     SKILL.md, so it is never selectable.
 #   - templates — the spec/plan/task body templates, resolved at runtime through
 #     ${CLAUDE_PLUGIN_ROOT}/templates/<name>.md by brainstorm (spec.md), plan
 #     (plan.md + task.md), agents/planner.md (all three — it covers the whole

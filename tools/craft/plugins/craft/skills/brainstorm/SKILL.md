@@ -363,9 +363,13 @@ nothing else in the pipeline advances either kind of record.
 Let the user invoke `/craft:gauntlet` explicitly so it loads cleanly — do not enter it from within
 brainstorm (a skill→skill chain is unreliable).
 
-**Handoff to planning:** the `plan` skill picks up **after the gauntlet**, not after brainstorm — it
-plans from a `ready` spec, and only the gauntlet produces one. Do not enter planning yourself from
-within brainstorm; let the user invoke `/craft:plan` explicitly once the spec is `ready`.
+**Handoff to the slice loop:** the slice loop picks up **after the gauntlet**, not after
+brainstorm — it selects from a `ready` spec, and only the gauntlet produces one. Do not enter it
+yourself from within brainstorm; let the user invoke `/craft:slice spec/<id>` explicitly once the
+spec is `ready` — fully formed with the real spec id (e.g. `/craft:slice spec/streaming-export`),
+never a `<placeholder>`. `/craft:slice` is the loop's only wired entry point; a direct
+`/craft:plan spec/<id>` handoff here would create a second, unlinked parent and strand the spec
+outside the loop.
 
 ## Status Lifecycle
 

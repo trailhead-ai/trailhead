@@ -55,6 +55,7 @@ _ALLOWLIST = {
     ("tools/craft/plugins/craft/skills/plan/SKILL.md", "related-spec"),
     ("tools/craft/plugins/craft/skills/polish/SKILL.md", "related-spec"),
     ("tools/craft/plugins/craft/skills/distill/SKILL.md", "related-spec"),
+    ("tools/craft/plugins/craft/skills/slice/SKILL.md", "related-spec"),
 }
 
 

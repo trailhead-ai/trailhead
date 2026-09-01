@@ -216,7 +216,14 @@ Phase 3's whole-change correctness-review dispatch.
   against a task that did not promote.
 - **`blocked`** — report the blocking condition recorded on the task and stop. `blocked`
   encodes an external condition execute can neither observe nor clear.
-- **`in-progress`** — a run already started against this task. Resume rather than
+- **`in-progress`** — first check the `craft/branch` label. Claiming a run writes status
+  and the `craft/branch` label in the same command (see
+  [Claiming the run](#claiming-the-run-at-first-dispatch)), so a childless task at
+  `in-progress` with no `craft/branch` label was never claimed by a dispatch at all — it
+  is not an interrupted run, it is a slice `/craft:slice` materialized `in-progress` and
+  left awaiting decomposition. Refuse and report: run `/craft:plan <id>` first. **Only
+  once the label is present** does this branch resume: a run already started against
+  this task. Resume rather than
   re-dispatching from the top, and read `## End Phases` to decide *where* — it exists from the
   first executor dispatch, so its presence proves nothing about how far the run got:
   - **No ticked phase line** (only the dispatch-count note, or nothing) — the build itself
@@ -246,8 +253,13 @@ Phase 6 takes it
 
 ### Resuming a run
 
-Invoking execute against a task already `in-progress` **resumes** it — never refuses, never
-restarts from scratch. You already have the task in hand and need its branch, so read the
+Invoking execute against a task already `in-progress` **resumes** it once it carries the
+`craft/branch` label — never refuses, never restarts from scratch, for a claimed run. A
+childless `in-progress` task with no `craft/branch` label was never claimed by any dispatch and
+is refused instead, per the `in-progress` bullet under
+[Determine the task shape](#determine-the-task-shape); a parent-with-children in that same shape is claimed instead, per
+[Claiming the run at first dispatch](#claiming-the-run-at-first-dispatch) — the loop's normal
+path once `/craft:plan` has decomposed a slice. You already have the task in hand and need its branch, so read the
 `craft/branch` label straight off the task record, falling back to a locally-present branch
 matching the task name; then pick up wherever the graph and workspace show the run left off.
 **A resumed run still loads dispatch lessons** — run the retrieval command in
@@ -286,10 +298,16 @@ just as much as the `executor` in step 3 — claim the plan in one command: flip
 off `ready` and write its branch label together —
 `lore record update task/<parent-name> --vault <elected-vault> --status in-progress --label craft/branch=<bare-branch>`
 (bump `updated:` to today). Write both at dispatch, not only at close — `craft/branch`'s
-primary reader is crash-resume logic, which runs on tasks that never reached close. Skip if
-the parent is already `in-progress`, `done`, `dropped`, or `superseded` — if it's
-`in-progress` from an earlier session, see [Resuming a run](#resuming-a-run) above instead
-of re-dispatching from scratch.
+primary reader is crash-resume logic, which runs on tasks that never reached close. Skip the
+status write if the parent is already `in-progress`, `done`, `dropped`, or `superseded` — if
+it's `in-progress` **and carries the `craft/branch` label**, an earlier session already claimed it:
+see [Resuming a run](#resuming-a-run) above instead of re-dispatching from scratch. An
+`in-progress` parent with **no** `craft/branch` label was never claimed by any
+dispatch — the shape `/craft:slice` leaves before `/craft:plan` adds children — so this
+dispatch claims it now, same as the `ready` case: skip the status write (already
+`in-progress`) and proceed as this run's first dispatch, never [Resuming a run](#resuming-a-run)'s reconcile-or-release branch —
+but write `craft/branch` regardless: the label
+write is not conditional on the status write.
 
 **Load dispatch lessons before the first dispatch.** Run this command inline, right here, not as a dispatch to another agent — mandatory inline commands fired 26/26 in transcript review against 6/26 for conditional dispatch and 0/2 for passive prose ([[lesson/prior-art-verification-must-be-dispatched-not-instructed]]):
 

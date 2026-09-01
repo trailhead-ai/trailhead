@@ -293,6 +293,35 @@ def test_standalone_task_walks_its_own_status():
     )
 
 
+def test_claim_writes_the_branch_label_even_when_the_status_write_is_skipped():
+    """The claim's two writes are not one all-or-nothing unit.
+
+    A parent found already `in-progress` (e.g. `/craft:slice` materialized it before
+    `/craft:plan` added children) skips the redundant status flip, but crash-resume
+    still needs `craft/branch` on that parent — so the label write must not be gated
+    on the status write's own skip condition.
+    """
+    text = _execute_text()
+    assert "but write `craft/branch` regardless" in text, (
+        "execute/SKILL.md's claim step must write `craft/branch` unconditionally — "
+        "skipping the status flip when the parent is already `in-progress` must not "
+        "also skip the label write, or crash-resume has no branch to read"
+    )
+
+
+def test_claim_status_write_keeps_its_skip_condition():
+    """The label write becoming unconditional must not loosen the status write's own skip."""
+    normalized = " ".join(_execute_text().split())
+    assert (
+        "Skip the status write if the parent is already `in-progress`, `done`, "
+        "`dropped`, or `superseded`" in normalized
+    ), (
+        "execute/SKILL.md's claim step must still skip the status write for a parent "
+        "already `in-progress`, `done`, `dropped`, or `superseded` — only the label "
+        "write becomes unconditional, not the status write"
+    )
+
+
 def test_standalone_branch_covers_the_remaining_statuses():
     """`ready` and `open` are two of six; the rest must not fall through silently."""
     text = _execute_text()
@@ -415,6 +444,48 @@ def test_end_phases_created_at_first_executor_dispatch():
         "created at the first executor dispatch — widened from its normal "
         "end-pipeline-only lifecycle so the dispatch-count note has somewhere to live "
         "from the start"
+    )
+
+
+# --- the in-progress branch: not-yet-planned slice vs. an interrupted run ---
+
+
+def test_in_progress_without_branch_label_is_not_an_interrupted_run():
+    """A childless `in-progress` task with no `craft/branch` label never got a dispatch.
+
+    Claiming the run writes status and the `craft/branch` label in the same command
+    (`--status in-progress --label craft/branch=<bare-branch>`), so the label's absence
+    on a childless task means no dispatch ever claimed it — it is a slice parent
+    materialized `in-progress` and left awaiting decomposition, not a crashed run.
+    """
+    text = _execute_text()
+    assert "no `craft/branch` label" in text, (
+        "execute/SKILL.md's `in-progress` branch must name the absent `craft/branch` "
+        "label as what distinguishes a not-yet-planned slice from an interrupted run"
+    )
+    assert "awaiting decomposition" in text, (
+        "execute/SKILL.md must describe a childless `in-progress` task with no "
+        "`craft/branch` label as a slice awaiting decomposition, not an interrupted run"
+    )
+
+
+def test_in_progress_without_branch_label_names_plan_as_the_remedy():
+    assert "run `/craft:plan <id>` first" in _execute_text(), (
+        "execute/SKILL.md must pin the remedy text, not just the refusal — the operator "
+        "reads exactly what to run next"
+    )
+
+
+def test_in_progress_with_branch_label_still_resumes():
+    """The existing resume path must survive untouched for the case it was written for."""
+    text = _execute_text()
+    assert "Resume rather than" in text, (
+        "execute/SKILL.md's `in-progress` branch must still resume — never re-dispatch "
+        "from the top — once the task carries a `craft/branch` label"
+    )
+    assert "No ticked phase line" in text and "At least one ticked phase line" in text, (
+        "execute/SKILL.md's resume sub-branches (no ticked phase line vs. at least one) "
+        "must remain intact for a task that does carry the `craft/branch` label"
     )
 
 

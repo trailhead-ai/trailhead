@@ -147,9 +147,11 @@ def test_plan_skill_decomposition_section_names_the_child_unit_task():
 
 def test_plan_skill_uses_slice_for_the_observable_increment():
     text = PLAN_SKILL.read_text()
-    assert "build it in slices" in text, (
+    assert "designs the whole of that one slice, not the whole feature" in text, (
         "plan/SKILL.md must still use 'slice' for the observable vertical "
-        "increment it designs the whole feature toward"
+        "increment it designs the whole feature toward — plan itself builds "
+        "'in tasks' (the component-shaped unit it writes), but the "
+        "slice-rooted path's framing must still name the slice it is scoped to"
     )
 
 

@@ -12,7 +12,7 @@ codebase they're in.
 ## What craft covers
 
 craft's agents and skills organize into seven areas. craft owns the
-**plan → execute → review** development loop; shipping (PR lifecycle) lives in
+`(slice → plan → execute → review)*` development loop; shipping (PR lifecycle) lives in
 the sibling [portage](../portage) plugin. (These are conceptual areas, not
 install units — `trailhead install` selects individual subagents and skills,
 named below, by name; the default installs them all.)
@@ -72,7 +72,7 @@ Base skills (always available): `/craft:polish`
 
 **Planning:** `/craft:plan`, `/craft:brainstorm` — turn a fuzzy idea into a
 draft spec by interrogating requirements, details, and gaps; the spec is
-settled via `/craft:gauntlet` before `/craft:plan` builds on it.
+settled via `/craft:gauntlet` before `/craft:slice` starts the build loop.
 
 **Council:** `/craft:consult` — convene the four-lens panel on a question and
 synthesize. The standalone form of the planning skill's council-review step;
@@ -82,6 +82,12 @@ membership is single-sourced from `skills/_shared/council.md`.
 draft ADR) goes through before it advances: fact verification, premise attack,
 the four council lenses, an internal-consistency audit, and (for specs) a
 plan-divergence probe.
+
+**Slice:** `/craft:slice` — choose the next vertical slice from a `ready` spec:
+read the spec fresh, derive the remaining candidates against its `## Slices`
+ledger, choose smallest-next above the value floor, state the value claim to
+the operator, then write the chosen slice as an `in-progress` parent task
+linked to the spec, for `/craft:plan` to decompose.
 
 **Execute:** `/craft:execute`
 

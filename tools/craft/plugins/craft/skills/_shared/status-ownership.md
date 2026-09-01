@@ -69,6 +69,14 @@ high-water mark instead of current state.
   below (done and blocked), plus reconciliation on resume. An escalation
   *answered* in-session writes no status — the run continues and the task holds
   `in-progress` until one of those two writes lands.
+- **`(created) → in-progress`** — writer: `/craft:slice`, at slice materialization. This
+  is a **created-at** status, not the `ready → in-progress` transition the entry above
+  covers — the slice parent task record is created directly at `in-progress`, with no
+  `ready` state of its own to leave. Exit owner: not `/craft:plan` — it decomposes the parent
+  into children but writes no status, so it cannot close an exit edge (this section's own rule
+  requires a status write to do that). The real exit owner is the same as the `ready → in-progress`
+  entry above: the two execute exit writes (done and blocked), reached once execute's claim
+  treats the now-decomposed, still-unclaimed parent as its first dispatch.
 - **`in-progress → done`** — writer: the orchestrating session at close,
   **after push succeeds** (see push guarantee below). `done` is terminal for
   craft; there is no further exit edge to own.
@@ -118,11 +126,22 @@ Craft owns the `craft/` label-key namespace for its own lifecycle facts.
   since an unquoted `/` is a lexer error; the match is exact on the value, and a
   value containing `/` is fine as long as it is quoted
   (`label.craft.branch:"feat/foo"`).
+- **`craft/slice-loop`** — written on the **spec** record, not a task, by
+  `/craft:slice` at its terminating condition. Two values:
+  `craft/slice-loop=complete` (every acceptance criterion is covered by the
+  `## Slices` ledger — the loop is done) and `craft/slice-loop=stopped` (the
+  pass stopped early with criteria still unmet, alongside a body note
+  explaining why). A later pass selecting again unsets it — the same shape
+  `craft/push` already documents below: the label marks a stopping point, not
+  a permanent verdict, and a fresh selection clears it rather than leaving a
+  stale value behind.
 - **`craft/push=failed`** — written when a push attempt fails at close or at a
   `blocked` transition with unpushed commits. Lets resume logic distinguish
   "un-pushable" from "crashed" and skip-and-report instead of re-running the
   build.
-- Both are **single-valued, last-write-wins**, and last-write-wins applies **per
+- All three are **single-valued, last-write-wins** — `craft/slice-loop` takes one of its two
+  values (`complete` or `stopped`) at a time, the same single-value shape `craft/branch` and
+  `craft/push` each hold — and last-write-wins applies **per
   key**: `--label` on `lore record update` is a repeatable upsert that mutates
   only the keys it names, leaving every other key untouched. Re-asserting
   `craft/branch` therefore cannot disturb `craft/push` — only another
@@ -142,7 +161,13 @@ after the move.
 
 Reconciliation (independent of ranger): invoking execute against a task already
 `in-progress` resumes it — via `craft/branch` or a locally-present branch —
-rather than refusing or restarting. An `in-progress` task whose workspace no
+rather than refusing or restarting, but only once it carries the `craft/branch`
+label as proof an earlier dispatch claimed it. A childless `in-progress` task with no
+`craft/branch` label was never claimed: `/craft:slice` materializes a parent there directly,
+before `/craft:plan` gives it children, and that task is refused instead, naming
+`/craft:plan <id>` as the remedy. Once `/craft:plan` gives it children,
+a parent-with-children in that same shape is claimed instead, at execute's first
+dispatch — the loop's normal path. An `in-progress` task whose workspace no
 longer exists is resumed (branch recoverable) or released back to `ready`.
 Tasks carrying `craft/push=failed` are skipped-and-reported, never silently
 re-run.

@@ -179,7 +179,8 @@ class TestCraftInventory:
         # ritual that turns a captured standalone `open` task into a `ready`
         # executor-runnable leaf. distill is the backward-distillation ritual
         # that condenses completed spec work into ADRs and owns the spec's
-        # planned → complete edge.
+        # planned → complete edge. slice chooses and materializes the next
+        # vertical slice from a `ready` spec, and is what roots `/craft:plan`.
         m = load_manifest(_CRAFT_MANIFEST)
         assert set(m.skills) == {
             "polish",
@@ -192,6 +193,7 @@ class TestCraftInventory:
             "receiving-code-review",
             "refine",
             "distill",
+            "slice",
         }
 
     def test_shared_not_selectable(self):
