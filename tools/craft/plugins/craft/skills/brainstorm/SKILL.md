@@ -66,6 +66,21 @@ workflow that pauses because a task surfaced an objectives-level question, dispa
 subagent instead — it covers the full brainstorm → spec → plan arc in an isolated context and
 returns a summary.
 
+## Rules that bind every step
+
+**Every vault-sourced value is shape-checked before it enters a command line.** Record ids and
+record names arrive from a git-synced vault a teammate can write, and this ritual substitutes
+them into `lore record create` and `lore record update` invocations — most exposed of all, the
+routed-task close-out in step 7, which interpolates two such names into one executed command.
+Validate each one against the safe-value shape `^[A-Za-z0-9._/-]+$` **before ANY substitution** —
+the same untrusted-vault-value rule `_shared/execute.md` codifies, and the same one
+`slice/SKILL.md`, `plan/SKILL.md`, and `distill/SKILL.md` already apply. This validation
+**governs every substitution site** in this document, not a fixed count of them: a site added
+later is covered by it without amending this rule. A value that fails the check is **never
+substituted, quoted, or escaped in** — refuse loudly and stop. Silently omitting it would turn a
+refusal into a command that reads as an ordinary result, which is exactly the wrong report for a
+name that could not be trusted.
+
 ## Process
 
 ### 1. Frame
