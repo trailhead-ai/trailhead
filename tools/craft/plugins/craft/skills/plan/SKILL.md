@@ -8,7 +8,7 @@ description: >
 
 # Plan
 
-Design the whole feature end-to-end, then build it in slices — proving unknowns before building on top of them.
+Design the whole feature end-to-end, then build it in slices — proving unknowns before building on top of them. On the slice-rooted path, "whole" narrows: `/craft:slice` has already chosen the increment, so this skill designs the whole of that one slice, not the whole feature.
 
 **A plan is a hypothesis, not a contract. It can be invalidated at any point.**
 
@@ -24,8 +24,9 @@ Design the whole feature end-to-end, then build it in slices — proving unknown
   argument at all. Plan creates its own parent task (as it always has) and, once the plan is
   written, advances a `ready` spec to `planned`.
 
-Steps 1-7 below run identically on both paths; they diverge only in Step 8, where the plan is
-written.
+Steps 1-7 below run identically on both paths, with one framing narrowing on the slice-rooted
+path — see Step 1. Step 8 is where they diverge — writing the plan differently per path — and
+Steps 8.5 and 9 then run against whichever parent Step 8 produced.
 
 ## Skip Gate
 
@@ -45,6 +46,7 @@ Do not use `EnterPlanMode`/`ExitPlanMode` — plan mode forces plans into an eph
 ### 1. Explore Context
 
 - **Look for an upstream spec first.** If your project uses lore, check for a `status: ready` spec on this topic (`lore search 'kind:spec status:ready'`). If one exists, it defines the *what* and *why* — your job is the *how*. Read it fully (`lore record show spec/<name>`) before proceeding. If none exists and the idea is fuzzy (acceptance criteria unclear, scope ambiguous, UI undecided), stop and route to a brainstorming skill instead.
+  - **On the slice-rooted path, skip this topic search.** The spec is already linked to the slice parent via `--related spec=`, written there by `/craft:slice` — resolve it from that edge (`lore record show <parent-name>`) instead of searching by topic, and scope the design below to the chosen slice, not the whole feature.
   - **A `draft` spec is not plannable.** `draft` means it has not been through the `gauntlet` — the adversarial spec review that owns the `draft` → `ready` edge. Planning against it risks slicing a spec whose premises don't survive review (the gauntlet's premise pass has reworked a spec's framing outright). Stop and route to `/craft:gauntlet <spec-id>`; resume planning once it is `ready`.
 - Check files, docs, recent commits relevant to the request
 - For cross-subsystem features, if a knowledge-synthesis subagent is available (such as `lore:librarian`), dispatch it to get a synthesized view of subsystems, decisions, tasks, and lessons rather than listing directories yourself. If none is configured, query the vault through the `lore` CLI directly (`lore search`, then `lore record show` — never raw file reads), and note in the plan that the prior-art synthesis pass was skipped.
@@ -210,9 +212,13 @@ step applies only to the topic-rooted path — a slice parent is already linked 
      `printf '%s' "$BODY" | lore record create --kind task --title "<topic>" --status ready`.
      This stores the plan as a searchable lore `task` record, linkable from session notes and
      future planning. Before creating it, check whether the resolved spec already has an open slice parent — validate `<spec-name>` against the safe-value shape `_shared/execute.md` codifies for any vault-sourced value entering a command before it is substituted into this query: `lore search "kind:task related-spec:<spec-name> -status:done -status:dropped -status:superseded"`. Then, if the resolved spec already has an open slice parent, say so rather than silently creating a duplicate parent beside it, and confirm with the user before proceeding.
-   - *Slice-rooted:* render the same template sections, then write them into the slice parent's
-     body with a full-body `lore record update <parent-name>` — never `lore record create`,
-     which would produce the second parent this path exists to avoid.
+   - *Slice-rooted:* read the existing parent task body first, and preserve its
+     `**Value claim:**` section (or enabler justification) unchanged — that section is
+     `/craft:slice`'s value claim, the artifact this whole spec exists to produce and the
+     field the spec's `## Slices` ledger reads on a later pass. Render the same template
+     sections, append them after the preserved value claim, then write the combined body into
+     the slice parent with a full-body `lore record update <parent-name>` — never
+     `lore record create`, which would produce the second parent this path exists to avoid.
 2. **Create each child task.** Render craft's child-task body template
    (`${CLAUDE_PLUGIN_ROOT}/templates/task.md`) for each task, then create it contained by the
    parent (the slice parent, on the slice-rooted path) and ordered after any task it builds on —

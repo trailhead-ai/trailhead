@@ -123,3 +123,97 @@ def test_cross_check_query_names_the_safe_value_shape_check():
         "cross-check query's interpolation site — a pointer to the shared rule "
         "in _shared/execute.md, not a restatement of it"
     )
+
+
+# --- CRITICAL: the slice-rooted write preserves the existing value claim ---
+
+
+def test_slice_rooted_write_reads_the_existing_body_first():
+    assert (
+        "*Slice-rooted:* read the existing parent task body first, and preserve "
+        "its\n     `**Value claim:**` section" in _text()
+    ), (
+        "plan/SKILL.md's slice-rooted write must read the existing parent body "
+        "first, before rendering plan sections into it"
+    )
+
+
+def test_slice_rooted_write_preserves_the_value_claim_section_unchanged():
+    assert (
+        "`**Value claim:**` section (or enabler justification) unchanged"
+        in _text()
+    ), (
+        "plan/SKILL.md's slice-rooted write must preserve the parent's "
+        "`**Value claim:**` section (or enabler justification) unchanged — "
+        "destroying it would erase /craft:slice's value claim, the artifact "
+        "this whole spec exists to produce"
+    )
+
+
+def test_slice_rooted_write_names_why_the_value_claim_matters():
+    assert (
+        "the artifact this whole spec exists to produce and the\n     "
+        "field the spec's `## Slices` ledger reads on a later pass" in _text()
+    ), (
+        "plan/SKILL.md must name why the value claim must survive — it's the "
+        "artifact this whole spec exists to produce and the field the ledger "
+        "reads on a later pass"
+    )
+
+
+def test_slice_rooted_write_appends_plan_sections_after_the_preserved_claim():
+    assert (
+        "Render the same template\n     sections, append them after the "
+        "preserved value claim" in _text()
+    ), (
+        "plan/SKILL.md must append the rendered plan sections after the "
+        "preserved value claim, not overwrite it"
+    )
+
+
+# --- the slice-rooted path's framing narrows to the chosen slice ---
+
+
+def test_top_level_framing_narrows_on_the_slice_rooted_path():
+    assert (
+        "On the slice-rooted path, \"whole\" narrows: `/craft:slice` has "
+        "already chosen the increment, so this skill designs the whole of "
+        "that one slice, not the whole feature." in _text()
+    ), (
+        "plan/SKILL.md's opening framing must narrow to the chosen slice on "
+        "the slice-rooted path, not claim to design the whole feature"
+    )
+
+
+def test_step_1_skips_the_topic_search_on_the_slice_rooted_path():
+    assert (
+        "**On the slice-rooted path, skip this topic search.** The spec is "
+        "already linked to the slice parent via `--related spec=`" in _text()
+    ), (
+        "plan/SKILL.md's step 1 must skip the topic-search spec lookup on the "
+        "slice-rooted path and resolve the spec via the parent's related-spec "
+        "edge instead"
+    )
+
+
+def test_step_1_scopes_design_to_the_chosen_slice():
+    assert (
+        "scope the design below to the chosen slice, not the whole feature"
+        in _text()
+    ), (
+        "plan/SKILL.md's step 1 must scope the design to the chosen slice on "
+        "the slice-rooted path"
+    )
+
+
+# --- the divergence sentence covers Steps 8.5 and 9, not only Step 8 ---
+
+
+def test_divergence_sentence_names_steps_8_5_and_9():
+    assert (
+        "Steps 8.5 and 9 then run against whichever parent Step 8 produced."
+        in _text()
+    ), (
+        "plan/SKILL.md's entry-point section must name Steps 8.5 and 9, not "
+        "claim the two paths diverge only in Step 8"
+    )

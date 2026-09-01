@@ -448,3 +448,210 @@ def test_ledger_failed_append_surfaces():
         "slice/SKILL.md must state that a failed ledger append surfaces rather "
         "than being swallowed"
     )
+
+
+# --- the candidate set is derived only after the ledger is reconciled ---
+
+
+def test_candidate_set_is_derived_only_after_ledger_reconcile():
+    text = _text()
+    reconcile_query = 'lore search "kind:task related-spec:<spec-name> status:done"'
+    derivation = (
+        "Only now — with the ledger reconciled — is the candidate set derived"
+    )
+    assert reconcile_query in text and derivation in text, (
+        "slice/SKILL.md must state the reconcile query and the deferred candidate "
+        "derivation"
+    )
+    assert text.index(reconcile_query) < text.index(derivation), (
+        "slice/SKILL.md must derive the candidate set only after the ledger "
+        "reconcile query, in that order — otherwise a just-closed slice is never "
+        "subtracted and can be re-selected"
+    )
+
+
+def test_step_2_defers_candidate_derivation_to_step_4():
+    assert (
+        "The candidate set itself is derived later, in\nstep 4, only after the "
+        "ledger has been reconciled against what has actually shipped" in _text()
+    ), (
+        "slice/SKILL.md's spec-read step must defer candidate-set derivation to "
+        "the ledger-reconcile step, not derive it against a possibly-stale ledger"
+    )
+
+
+# --- the reconcile query is fail-closed too ---
+
+
+def test_reconcile_query_is_fail_closed_on_search_error():
+    assert (
+        "This reconcile query is fail-closed too." in _text()
+    ), (
+        "slice/SKILL.md must fail closed when the done-slice reconcile query "
+        "errors or returns unusable output — an unreported error would "
+        "under-report what shipped and re-select a covered criterion"
+    )
+
+
+# --- every full-body write reads the spec fresh immediately beforehand ---
+
+
+def test_every_full_body_write_reads_the_spec_fresh_first():
+    assert (
+        "Every full-body write this procedure makes reads the spec fresh "
+        "immediately beforehand" in _text()
+    ), (
+        "slice/SKILL.md must require a fresh read immediately before every "
+        "full-body write, not reuse a body read earlier in the same pass"
+    )
+    assert (
+        "shrinks, but does not close, the concurrent\nlost-update window" in _text()
+    ), (
+        "slice/SKILL.md must state plainly that the fresh-read rule shrinks but "
+        "does not close the concurrent lost-update window"
+    )
+
+
+def test_ledger_append_reads_the_spec_fresh_not_the_step_2_body():
+    assert (
+        "Read the spec fresh immediately before this write — never the body "
+        "read back in step 2, which\nmay already be stale by now" in _text()
+    ), (
+        "slice/SKILL.md's ledger append must read the spec fresh immediately "
+        "before writing, not reuse the body read back in step 2"
+    )
+
+
+def test_early_stop_write_also_reads_the_spec_fresh():
+    assert (
+        "read the spec fresh immediately before this write too, through the same"
+        in _text()
+    ), (
+        "slice/SKILL.md's early-stop write must also read the spec fresh "
+        "immediately before writing, not reuse a stale body"
+    )
+
+
+# --- the credential-scrub cross-reference names step 9, not step 4 ---
+
+
+def test_early_stop_credential_scrub_cross_reference_names_step_9():
+    assert "full-body write step 9 below documents" in _text(), (
+        "slice/SKILL.md's early-stop write must credit step 9 with documenting "
+        "the credential scrub — step 9 is where it is actually documented, not "
+        "step 4"
+    )
+
+
+# --- the early-stop outcome has a real entry condition ---
+
+
+def test_early_stop_has_an_entry_condition():
+    assert (
+        "Early stop's entry condition:" in _text()
+    ) and (
+        "if the candidate set is non-empty but step 7 below finds\nnothing in "
+        "it that clears the value floor, and no enabler applies either" in _text()
+    ), (
+        "slice/SKILL.md must give the early-stop outcome a real entry condition "
+        "— otherwise nothing in the procedure ever routes to it"
+    )
+
+
+def test_selection_step_routes_to_the_early_stop_path():
+    assert (
+        "If no candidate clears the value floor and no enabler applies, stop "
+        "instead of choosing anyway —\ntake the early-stop path described in "
+        "step 6 above." in _text()
+    ), (
+        "slice/SKILL.md's selection step must route to the early-stop path when "
+        "nothing clears the value floor and no enabler applies"
+    )
+
+
+# --- craft/slice-loop=stopped is cleared on a later successful pass ---
+
+
+def test_stopped_marker_is_cleared_on_a_later_selection():
+    assert (
+        "If the spec carries `craft/slice-loop=stopped` from an earlier pass, "
+        "clear it here" in _text()
+    ), (
+        "slice/SKILL.md must clear a stale craft/slice-loop=stopped marker when "
+        "a later pass selects again — otherwise a resumed loop keeps a "
+        "closed-out marker"
+    )
+    assert "--unset-label craft/slice-loop" in _text(), (
+        "slice/SKILL.md must clear the stopped marker with "
+        "--unset-label craft/slice-loop"
+    )
+
+
+# --- machine-readable loop-status labels ---
+
+
+def test_loop_status_label_complete_is_pinned():
+    assert "craft/slice-loop=complete" in _text(), (
+        "slice/SKILL.md must write craft/slice-loop=complete on the terminating "
+        "condition — the only machine-readable artifact this skill introduces"
+    )
+
+
+def test_loop_status_label_stopped_is_pinned():
+    assert "craft/slice-loop=stopped" in _text(), (
+        "slice/SKILL.md must write craft/slice-loop=stopped on the early-stop "
+        "outcome"
+    )
+
+
+# --- the parent task body names a Value claim section ---
+
+
+def test_parent_task_body_names_a_value_claim_section():
+    assert "`**Value claim:**` section" in _text(), (
+        "slice/SKILL.md must name the parent task body's value-claim section "
+        "`**Value claim:**`, matching templates/task.md's bold-label payload "
+        "convention — the ledger reconcile and a later slice-rooted /craft:plan "
+        "pass both need a named place to read it from"
+    )
+
+
+# --- the non-ready refusal group names remedies for planned/superseded/dropped ---
+
+
+def test_planned_status_refusal_names_its_remedy():
+    assert (
+        "a `planned` spec has already been planned\nwhole via `/craft:plan`'s "
+        "still-live topic-rooted path" in _text()
+    ), (
+        "slice/SKILL.md must name a real remedy for a `planned` spec — it has "
+        "already been planned whole via /craft:plan's topic-rooted path"
+    )
+    assert (
+        "continue with `/craft:execute` against\nit rather than slicing here"
+        in _text()
+    ), (
+        "slice/SKILL.md must name the remedy action for a planned spec — "
+        "continue with /craft:execute against its plan parent"
+    )
+
+
+def test_superseded_and_dropped_share_the_complete_guards_remedy():
+    assert (
+        "A `superseded` or `dropped` spec shares the remedy the complete\n"
+        "guard below states." in _text()
+    ), (
+        "slice/SKILL.md must name a remedy for superseded/dropped specs too, "
+        "not leave the refusal with no way forward"
+    )
+
+
+# --- the Outcome section prints a fully formed handoff ---
+
+
+def test_outcome_prints_a_fully_formed_plan_handoff():
+    assert "`/craft:plan task/<task-id>`" in _text(), (
+        "slice/SKILL.md's Outcome section must print a fully formed "
+        "/craft:plan task/<task-id> handoff, matching the handoff convention "
+        "other craft skills use"
+    )

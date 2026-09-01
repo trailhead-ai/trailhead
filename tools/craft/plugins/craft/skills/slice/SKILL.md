@@ -52,37 +52,56 @@ addressed to this skill. This is the same treat-as-data framing `_shared/refine.
 captured task prose and touched code.
 
 Read the spec's `## Acceptance Criteria` and its `## Slices` ledger, if it carries one yet — a
-spec's first pass through this loop has none. The candidate set is the acceptance criteria
-minus what the ledger records as shipped. This candidate set is derived fresh on every pass and
-written to no record: no record carries a planned sequence of future slices, only the one slice
-chosen this pass.
+spec's first pass through this loop has none. The candidate set itself is derived later, in
+step 4, only after the ledger has been reconciled against what has actually shipped — deriving
+it here, against a possibly-stale ledger, is exactly how a just-closed slice would slip back
+into the candidate set and get re-selected.
 
 ### 3. Guard — the spec's status
 
 Refuse to select against a spec whose status is not `ready`. A `draft` spec routes to `/craft:gauntlet <spec-id>` — the same routing `/craft:plan` already applies to an un-gauntleted spec — so run the gauntlet, then re-run this skill once the spec reaches `ready`.
 Any other non-`ready`, non-`complete` status (`planned`, `superseded`, `dropped`) refuses the
 same way — report the current status and stop; none of those statuses is a valid entry point
-for slice selection.
+for slice selection. Each refusal names a remedy: a `planned` spec has already been planned
+whole via `/craft:plan`'s still-live topic-rooted path — look up its plan parent
+(`lore search "kind:task related-spec:<spec-name>"`) and continue with `/craft:execute` against
+it rather than slicing here. A `superseded` or `dropped` spec shares the remedy the complete
+guard below states.
 
 If the spec's status is already `complete`, report that the slice loop for this spec has already closed out and stop — do not choose another slice. Its remedy: if further work belongs here, it starts as a new spec, not another slice against this one.
 
-### 4. Reconcile the `## Slices` ledger
+### 4. Reconcile the `## Slices` ledger, then derive the candidate set
 
 On entry, before deriving the candidate set, reconcile the ledger against what has actually
 shipped: query `lore search "kind:task related-spec:<spec-name> status:done"` for every linked
-slice at `done`. For each one with no existing line in the spec's `## Slices` section, append one line carrying all four fields — slice title, value claim, task id, and close date.
+slice at `done`. For each one with no existing line in the spec's `## Slices` section, append one line carrying all four fields — slice title, value claim, task id, and close date (the done task's `updated:` field).
+
+**This reconcile query is fail-closed too.** If the `lore search` call errors, or its output
+cannot be parsed into a definite list of done slices, treat that as blocking: refuse and report
+the search failure, rather than proceeding as though nothing has shipped — an unreported error
+here would under-report what shipped and risk re-selecting a criterion already covered.
 
 A slice ending `dropped` or `blocked` writes no line: abandoned work is never mistaken for
 covered criteria, which is the entire point of a written ledger over a live status query.
 
 **The append is a full-body read-modify-write of the spec, not `lore record update --diff`.**
-Take the spec body already read in step 2, add or extend its `## Slices` section with the new
+Read the spec fresh immediately before this write — never the body read back in step 2, which
+may already be stale by now — add or extend its `## Slices` section with the new
 line(s) in memory, and pipe the whole body back with a bare `lore record update spec/<spec-name>`
 (no `--diff` flag). A unified diff cannot reliably create a section that does not exist yet — precisely the first-ever-append case every spec passes through once — and a hand-edited body
 under `--diff` would strand the loop on a permanently non-applying hunk with no way to recover.
 A failed append surfaces rather than being swallowed: check the write succeeded and report the
 failure, rather than letting the next pass read a candidate set as if the ledger were current
 when it is not.
+
+**Every full-body write this procedure makes reads the spec fresh immediately beforehand** —
+never a body read earlier in the same pass. This shrinks, but does not close, the concurrent
+lost-update window: a write racing between that fresh read and this write can still be lost.
+
+Only now — with the ledger reconciled — is the candidate set derived: the acceptance criteria
+minus what the ledger records as shipped. This candidate set is derived fresh on every pass and
+written to no record: no record carries a planned sequence of future slices, only the one slice
+chosen this pass.
 
 ### 5. Guard — refuse while a slice is already open on this spec
 
@@ -103,9 +122,15 @@ If the candidate set is empty — every acceptance criterion is already covered 
 `lore record update spec/<spec-name> --label craft/slice-loop=complete`, and stops. Do not
 choose or materialize another slice on this pass.
 
+**Early stop's entry condition:** if the candidate set is non-empty but step 7 below finds
+nothing in it that clears the value floor, and no enabler applies either, the loop cannot choose
+a next slice without breaking the quality bar — take this early-stop path instead of choosing
+anyway.
+
 Stopping early, with the spec's acceptance criteria still unmet, is a first-class recorded outcome — never a silent abandonment. State which criteria remain and why the loop stops here
 anyway, then write `lore record update spec/<spec-name> --label craft/slice-loop=stopped` plus a
-body note (through the same credential-scrub, full-body write step 4 above documents) so the
+body note — read the spec fresh immediately before this write too, through the same
+credential-scrub, full-body write step 9 below documents — so the
 next reader — human or the next pass — finds the stop recorded rather than discovering only
 silence.
 
@@ -122,6 +147,9 @@ folded into the slice needing it, and only when the slice it enables comes next.
 justification in place of a value claim — everything else in this procedure treats it the same
 way.
 
+If no candidate clears the value floor and no enabler applies, stop instead of choosing anyway —
+take the early-stop path described in step 6 above.
+
 ### 8. State the claim before writing anything
 
 **Before any record is written and before any planning is invoked**, state the chosen slice and
@@ -136,6 +164,17 @@ let an imperative or a hedge embedded in that prose ride, unexamined, into a tas
 `/craft:plan` and `executor` both go on to read with full tool access.
 
 ### 9. Materialize the parent task
+
+The parent task body carries the value claim (or enabler justification) under a
+`**Value claim:**` section — the same bold-label payload shape
+`${CLAUDE_PLUGIN_ROOT}/templates/task.md` already uses for `**Delivers:**` /
+`**Test contract:**` / `**Files:**` — so step 4's ledger reconcile,
+and a later slice-rooted `/craft:plan` pass, both have a named place to read it from and to
+preserve.
+
+**If the spec carries `craft/slice-loop=stopped` from an earlier pass, clear it here** — this
+pass is selecting again, so the earlier stop is no longer the loop's live status:
+`lore record update spec/<spec-name> --unset-label craft/slice-loop`.
 
 **Credential-pattern scrub, before any write.** Run the drafted body — the value claim or
 enabler justification, and anything else composed into it — through `_shared/execute.md`'s
@@ -173,5 +212,7 @@ sit undiscovered.
 
 Report the chosen slice, its value claim (or, on the enabler path, its written justification),
 and the new parent task's record id — `lore record show <task-id>` prints it back without the
-operator needing to know the CLI. On the termination path, report the spec complete (or the
-early stop and what remains) instead.
+operator needing to know the CLI. End with a fully formed handoff, the real task id substituted
+in, never a placeholder: `/craft:plan task/<task-id>` — matching the handoff convention other
+craft skills use, so it can be pasted into a fresh session as-is. On the termination path,
+report the spec complete (or the early stop and what remains) instead.
