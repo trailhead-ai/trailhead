@@ -109,3 +109,17 @@ def test_topic_rooted_path_warns_on_an_existing_open_slice_parent():
         "an existing open slice parent on the spec and warns rather than "
         "silently duplicating it"
     )
+
+
+# --- the cross-check query's <spec-name> interpolation names its shape check ---
+
+
+def test_cross_check_query_names_the_safe_value_shape_check():
+    assert (
+        "validate `<spec-name>` against the safe-value shape `_shared/execute.md` "
+        "codifies" in _text()
+    ), (
+        "plan/SKILL.md must name the shape check on <spec-name> at the "
+        "cross-check query's interpolation site — a pointer to the shared rule "
+        "in _shared/execute.md, not a restatement of it"
+    )

@@ -209,7 +209,7 @@ step applies only to the topic-rooted path — a slice parent is already linked 
      (`${CLAUDE_PLUGIN_ROOT}/templates/plan.md`), fill in the sections, then pipe it in —
      `printf '%s' "$BODY" | lore record create --kind task --title "<topic>" --status ready`.
      This stores the plan as a searchable lore `task` record, linkable from session notes and
-     future planning. Before creating it, check whether the resolved spec already has an open slice parent (`lore search "kind:task related-spec:<spec-name> -status:done -status:dropped -status:superseded"`): if the resolved spec already has an open slice parent, say so rather than silently creating a duplicate parent beside it, and confirm with the user before proceeding.
+     future planning. Before creating it, check whether the resolved spec already has an open slice parent — validate `<spec-name>` against the safe-value shape `_shared/execute.md` codifies for any vault-sourced value entering a command (also stated in `slice/SKILL.md`) before it is substituted into this query: `lore search "kind:task related-spec:<spec-name> -status:done -status:dropped -status:superseded"`. Then, if the resolved spec already has an open slice parent, say so rather than silently creating a duplicate parent beside it, and confirm with the user before proceeding.
    - *Slice-rooted:* render the same template sections, then write them into the slice parent's
      body with a full-body `lore record update <parent-name>` — never `lore record create`,
      which would produce the second parent this path exists to avoid.

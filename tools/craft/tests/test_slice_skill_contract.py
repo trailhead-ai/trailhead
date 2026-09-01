@@ -219,6 +219,24 @@ def test_a_failing_spec_name_produces_a_refusal_not_a_silent_omission():
     )
 
 
+def test_validation_prose_is_count_free():
+    text = _text()
+    assert "before ANY substitution" in text, (
+        "slice/SKILL.md must state that <spec-name> is validated once, before "
+        "ANY substitution — not against a fixed count of substitution sites, "
+        "which goes stale the next time a site is added"
+    )
+    assert "governs every substitution site below" in text, (
+        "slice/SKILL.md must state that the validation rule governs every "
+        "substitution site below, rather than enumerating a fixed number of them"
+    )
+    assert "two places below" not in text, (
+        "slice/SKILL.md must not enumerate a fixed count of substitution sites "
+        "— later sections have added more, and a count in prose goes stale "
+        "again the next time one is"
+    )
+
+
 # --- credential scrub precedes every body write ---
 
 
