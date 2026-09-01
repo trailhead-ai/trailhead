@@ -1,13 +1,13 @@
 """The canonical slice/task vocabulary and quality bar — a conformance test.
 
-Craft is gaining a per-slice delivery loop
-([[spec/specs-are-delivered-one-vertical-slice-at-a-time]]), and its two units of
-work — the vertical increment and the component-shaped unit beneath it — need one
-place that defines them, so every skill's ritual text can point at the same wording
-instead of drifting into independent paraphrases. `_shared/slice.md` is that place.
+Craft names two units of work: a *slice*, the observable vertical increment, and a
+*task*, the component-shaped unit beneath it. `skills/_shared/slice.md` is the single
+place that defines them, together with the quality bar a slice must clear, the value
+floor it is read against, the selection rule, and the enabler carve-out.
 
-This task only ships the definition file and this test. Nothing else in craft reads
-the file yet — later tasks in this slice point the existing prose at it.
+These tests pin that file's wording, and pin that craft's ritual text points at it
+rather than restating it — a second copy of the bar in another shipped file is the
+drift this guards against.
 """
 
 from pathlib import Path

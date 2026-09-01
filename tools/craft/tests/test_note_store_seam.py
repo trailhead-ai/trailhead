@@ -17,9 +17,17 @@ Write BEFORE the implementation — these tests must fail RED first, then green 
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 CRAFT_PLUGIN = Path(__file__).parent.parent / "plugins" / "craft"
+# The child unit is spelled `task`; `slice` is its retired spelling. Both are the same
+# anti-pattern when inlined as a sub-heading in the parent plan body, so the guard
+# catches either. Both tests below read this one pattern — a second copy would let a
+# narrowed guard keep passing.
+_NO_INLINE_CHILD_UNIT_RE = re.compile(r"(?im)^\s*#{2,}\s+(?:task|slice)\b")
+
+
 TEMPLATES_DIR = CRAFT_PLUGIN / "templates"
 NOTE_STORAGE_MD = CRAFT_PLUGIN / "skills" / "_shared" / "note-storage.md"
 
@@ -82,9 +90,8 @@ def test_plan_template_carries_no_slice_subsections():
     """Slices are now separate child `task` records, not `### Slice` (or `### Task`) body
     sub-sections."""
     text = (TEMPLATES_DIR / "plan.md").read_text()
-    import re
 
-    assert not re.search(r"(?im)^\s*#{2,}\s+(?:task|slice)\b", text), (
+    assert not _NO_INLINE_CHILD_UNIT_RE.search(text), (
         "craft plan.md (parent-task body) must not carry `### Task` (or `### Slice`) sub-sections "
         "— each slice is its own child `task` record wired via `--parent`/`--depends-on`."
     )
@@ -93,10 +100,8 @@ def test_plan_template_carries_no_slice_subsections():
 def test_plan_template_guard_catches_inline_task_heading():
     """The child-unit is spelled `task` under current vocabulary — inlining it as a `### Task`
     sub-heading in the parent plan body is the same anti-pattern the guard exists to catch."""
-    import re
-
     text = "### Task 3: does the thing\n"
-    assert re.search(r"(?im)^\s*#{2,}\s+(?:task|slice)\b", text), (
+    assert _NO_INLINE_CHILD_UNIT_RE.search(text), (
         "guard must catch a `### Task` heading, not just the retired `### Slice` spelling"
     )
 

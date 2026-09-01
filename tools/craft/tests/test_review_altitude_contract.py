@@ -16,7 +16,7 @@ Slice 3 adds `simplifier` — the whole-change simplify mutation phase agent —
 pinning the agent charter's shape and its mechanically enforced write-scope
 story (footprint_guard.py, tested separately in test_footprint_guard.py).
 
-Slice 4 wires the whole-change phase pipeline into execute's After All Slices
+Slice 4 wires the whole-change phase pipeline into execute's After All Tasks
 section: simplify → correctness → conditional-security → flow-out → close.
 These tests pin the phase ordering, the fail-closed security trigger, the
 one-re-review cap, the guard-failure→revert mapping, the credential scrub, the
@@ -132,22 +132,22 @@ def test_execute_skill_verdict_vocabulary_pinned():
 def test_execute_skill_per_slice_review_does_not_name_code_reviewer():
     """The per-slice loop must not name `code-reviewer` (retargeted to `drift-gate`).
 
-    Scoped to the region BEFORE `## After All Slices` — the per-slice loop.
+    Scoped to the region BEFORE `## After All Tasks` — the per-slice loop.
     Slice 4 legitimately reintroduces `code-reviewer` as the whole-change
-    correctness-phase dispatch inside After All Slices, so a blanket file-wide
+    correctness-phase dispatch inside After All Tasks, so a blanket file-wide
     absence would now be wrong. This narrower pin still catches a regression of
     the per-slice retargeting (role table, step 4, absorption line) while
     allowing the whole-change reference.
     """
     text = EXECUTE_SKILL_MD.read_text()
     marker = "## After All Tasks"
-    assert marker in text, "execute/SKILL.md must retain the After All Slices section"
+    assert marker in text, "execute/SKILL.md must retain the After All Tasks section"
     per_slice_region = text[: text.index(marker)]
     assert "code-reviewer" not in per_slice_region, (
         "execute/SKILL.md's per-slice loop (everything before `## After All "
         "Slices`) must not reference `code-reviewer` — the per-slice conformance "
         "gate is `drift-gate`. The whole-change correctness phase may reference "
-        "`code-reviewer`, but only inside After All Slices."
+        "`code-reviewer`, but only inside After All Tasks."
     )
 
 
@@ -384,20 +384,20 @@ def test_simplifier_charter_retains_executor_status_vocabulary():
 def test_execute_skill_wires_simplifier():
     text = EXECUTE_SKILL_MD.read_text()
     assert "simplifier" in text, (
-        "simplifier must now be wired into execute's After All Slices simplify "
+        "simplifier must now be wired into execute's After All Tasks simplify "
         "phase — slice 4 dispatches it as the whole-change simplify pass."
     )
 
 
 # ---------------------------------------------------------------------------
-# Slice 4: After All Slices phase pipeline
+# Slice 4: After All Tasks phase pipeline
 # ---------------------------------------------------------------------------
 
 
 def _after_all_slices(text: str) -> str:
-    """The After All Slices section body — the phase-pipeline scope."""
+    """The After All Tasks section body — the phase-pipeline scope."""
     marker = "## After All Tasks"
-    assert marker in text, "execute/SKILL.md must retain the After All Slices section"
+    assert marker in text, "execute/SKILL.md must retain the After All Tasks section"
     return text[text.index(marker):]
 
 
@@ -414,7 +414,7 @@ def test_after_all_slices_phase_ordering():
     correctness = text.index("Phase 3: Correctness")
     security = text.index("Phase 4: Security")
     assert simplify < correctness < security, (
-        "After All Slices phases must run simplify → correctness → security in "
+        "After All Tasks phases must run simplify → correctness → security in "
         "that order."
     )
 

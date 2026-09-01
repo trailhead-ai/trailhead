@@ -1,7 +1,7 @@
 # {{name}} Implementation Plan
 
 <!-- This is the PARENT task body. A plan is a parent `task` record; each child `task`
-record is the component-shaped unit beneath a slice (`_shared/slice.md`) — Delivers / Test
+record is the component-shaped unit beneath a slice (`skills/_shared/slice.md`) — Delivers / Test
 contract / Files, see templates/task.md — wired to this parent via `--parent` and ordered
 with `--depends-on`. Do NOT inline `### Task` sections here — render one child task record
 per task instead. -->

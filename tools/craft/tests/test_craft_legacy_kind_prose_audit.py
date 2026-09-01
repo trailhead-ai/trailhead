@@ -11,7 +11,8 @@ Scanned surface: the whole shipped craft plugin tree (agents, skills, templates,
 Forbidden patterns:
   - `--kind backlog` / `--kind plan` — the retired create-command kinds.
   - `kind:backlog` / `kind:plan` — the retired search-query kinds.
-  - `### Slice` (or deeper) headings inside `templates/plan.md` — slices are child records now.
+  - `### Task` or `### Slice` (or deeper) headings inside `templates/plan.md` — the child unit
+    is its own record, never a sub-section of the parent body.
 
 Write BEFORE the prose migration — this test must fail RED first, then green after.
 """
@@ -52,11 +53,11 @@ def test_no_retired_kind_reference(md: Path):
 
 
 def test_plan_template_has_no_slice_body_mechanics():
-    """The parent-task template must not carry `### Slice` sub-sections — each slice is now a
+    """The parent-task template must not carry `### Task`/`### Slice` sub-sections — each is now a
     child `task` record, not a heading in the parent body."""
     text = (CRAFT_PLUGIN / "templates" / "plan.md").read_text()
     assert not _NO_INLINE_CHILD_UNIT_RE.search(text), (
-        "templates/plan.md still carries `### Slice` body mechanics; slices are separate child "
+        "templates/plan.md still carries inlined child-unit body mechanics; each is a separate child "
         "`task` records wired via `--parent`/`--depends-on`."
     )
 

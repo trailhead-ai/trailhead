@@ -252,7 +252,7 @@ Call out assumptions that need to be proven before building on top of them:
 
 ### 7. Define Tasks
 
-Break the feature into buildable tasks. Each task is the component-shaped unit beneath a slice — see `_shared/slice.md` for the quality bar a slice must clear and the value floor it's read against. Order so that:
+Break the feature into buildable tasks. Each task is the component-shaped unit beneath a slice — see `skills/_shared/slice.md` for the quality bar a slice must clear and the value floor it's read against. Order so that:
 
 - Tasks with unproven unknowns come first
 - Each task produces something testable
