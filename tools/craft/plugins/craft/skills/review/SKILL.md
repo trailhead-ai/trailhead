@@ -91,8 +91,7 @@ You: [Fix progress indicators]
 
 ## Closing handoff
 
-Review sits before distill in the pipeline (brainstorm → gauntlet → plan → execute →
-review → distill) — merging closes review's own job, not the spec's lifecycle. Once
+Review sits before distill in the pipeline (brainstorm → gauntlet → (slice → plan → execute → review)* → distill) — merging closes review's own job, not the spec's lifecycle. Once
 the reviewed diff is merged, end with a fully-formed handoff command — the real spec
 id, never a `<placeholder>` — so a fresh session can pick up distillation as-is:
 

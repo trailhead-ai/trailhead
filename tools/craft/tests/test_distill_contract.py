@@ -1,8 +1,8 @@
 """The distill ritual — backward distillation of completed specs into ADRs.
 
-Distill is the final stage of the pipeline (brainstorm -> gauntlet -> plan ->
-execute -> review -> distill) and the sole writer of a spec's `planned -> complete`
-edge. Everything that makes it safe is a prose contract no type system can hold, so
+Distill is the final stage of the pipeline (brainstorm -> gauntlet ->
+(slice -> plan -> execute -> review)* -> distill) and the sole writer of a spec's
+`planned -> complete` edge. Everything that makes it safe is a prose contract no type system can hold, so
 each one is pinned here as a literal phrase:
 
   - **Clustering happens before drafting.** M specs condense into N ADRs; a
@@ -44,9 +44,10 @@ def test_distill_skill_ships():
 
 
 def test_distill_is_the_final_pipeline_stage():
-    assert "brainstorm → gauntlet → plan → execute → review → distill" in _text(), (
+    assert "brainstorm → gauntlet → (slice → plan → execute → review)* → distill" in _text(), (
         "distill/SKILL.md must place itself at the end of the named pipeline — the "
-        "ritual only makes sense as the stage that runs after the work landed"
+        "bracketed loop repeats once per slice, and the ritual only makes sense as "
+        "the stage that runs after the loop reports the spec closed out"
     )
 
 

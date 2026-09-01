@@ -22,7 +22,7 @@ they crystallize across several specs and only become legible once the work is d
 finished work and condenses it into the ADR log, then brings the `area` profiles that work touched
 back into agreement with it.
 
-It is the final stage of the pipeline: brainstorm → gauntlet → plan → execute → review → distill.
+It is the final stage of the pipeline: brainstorm → gauntlet → (slice → plan → execute → review)* → distill. The bracketed loop repeats once per slice; distill attaches once, after the loop reports the spec closed out.
 It is also the **sole writer of a spec's `planned → complete` edge** — `complete` *means* distilled,
 including the zero-ADR outcome.
 
