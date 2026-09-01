@@ -603,7 +603,10 @@ def test_ledger_failed_append_surfaces():
 
 def test_candidate_set_is_derived_only_after_ledger_reconcile():
     text = _text()
-    reconcile_query = 'lore search "kind:task related-spec:<spec-name> status:done"'
+    reconcile_query = (
+        'lore search "kind:task related-spec:<spec-name> '
+        'has:label.craft.slice-parent status:done"'
+    )
     derivation = (
         "Only now — with the ledger reconciled — is the candidate set derived"
     )
@@ -893,4 +896,34 @@ def test_the_guard_states_what_it_deliberately_no_longer_matches():
         "slice/SKILL.md must state that non-slice-parent linked tasks do not block "
         "selection — otherwise the narrowing reads as an oversight to a future "
         "reader and gets 'fixed' back into an over-match"
+    )
+
+
+def test_reconcile_query_is_scoped_to_labelled_slice_parents():
+    """The ledger records what SHIPPED AS A SLICE. The reconcile query carried the
+    same over-match the guard did: any done task linked to the spec looked like a
+    slice to append. Observed live — two handoff records, both `done` and both
+    linked, would have been written into the ledger as though they were shipped
+    slices, each with a fabricated value claim read from a body that has none.
+    """
+    assert (
+        'lore search "kind:task related-spec:<spec-name> '
+        'has:label.craft.slice-parent status:done"' in _text()
+    ), (
+        "slice/SKILL.md's ledger reconcile must filter to labelled slice parents — "
+        "an unscoped query appends a ledger line for every done task linked to the "
+        "spec, including bookkeeping records that never shipped anything"
+    )
+
+
+def test_all_three_readers_of_the_slice_parent_label_are_scoped():
+    """Guard, post-write re-check, and ledger reconcile all ask a question about
+    slice parents. Pinned together: fixing two and leaving the third is exactly the
+    partial fix this test exists to prevent, and it already happened once.
+    """
+    text = _text()
+    assert text.count("has:label.craft.slice-parent") >= 3, (
+        "every query in slice/SKILL.md that asks about slice parents must filter on "
+        f"the marker — found {text.count('has:label.craft.slice-parent')} of 3 "
+        "(guard, post-write re-check, ledger reconcile)"
     )

@@ -73,7 +73,7 @@ If the spec's status is already `complete`, report that the slice loop for this 
 ### 4. Reconcile the `## Slices` ledger, then derive the candidate set
 
 On entry, before deriving the candidate set, reconcile the ledger against what has actually
-shipped: query `lore search "kind:task related-spec:<spec-name> status:done"` for every linked
+shipped: query `lore search "kind:task related-spec:<spec-name> has:label.craft.slice-parent status:done"` for every linked
 slice at `done`. For each one with no existing line in the spec's `## Slices` section, append one
 line carrying all four fields — slice title, value claim (read from the task body's
 `**Value claim:**` section; if absent, fall back to its `**Goal:**` text — a slice materialized
@@ -88,6 +88,12 @@ instead), task id, and close date (the done task's `updated:` field) — in this
 cannot be parsed into a definite list of done slices, treat that as blocking: refuse and report
 the search failure, rather than proceeding as though nothing has shipped — an unreported error
 here would under-report what shipped and risk re-selecting a criterion already covered.
+
+**Scoped to labelled slice parents, for the same reason step 5's guard is.** The ledger records
+what shipped *as a slice*. An unscoped query appends a line for every done task linked to the
+spec — a follow-up, a coordination task, a handoff record — each with a value claim fabricated
+from a body that has none, and the next pass then reads those lines as covered acceptance
+criteria. A done task without the marker is not a slice and gets no line.
 
 A slice ending `dropped` or `blocked` writes no line: abandoned work is never mistaken for
 covered criteria, which is the entire point of a written ledger over a live status query.
