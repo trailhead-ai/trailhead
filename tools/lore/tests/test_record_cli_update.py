@@ -1726,6 +1726,56 @@ def test_stored_prefixed_depends_on_does_not_block_a_status_update(tmp_path):
     assert after["depends-on"] == ["task/other"]
 
 
+def _stamp_stored_parent(vault: Path, record_id: str, parent: str) -> None:
+    """Write *parent* straight into the sidecar, bypassing the CLI's guards.
+
+    The ``parent`` counterpart of :func:`_stamp_stored_depends_on` — the CLI now
+    refuses to write a prefixed parent, so authoring the sidecar directly is the
+    only way to stand up a record stored before the form check covered it.
+    """
+    kind, name = record_id.split("/", 1)
+    path = vault / kind / f"{name}.json"
+    sidecar = json.loads(path.read_text(encoding="utf-8"))
+    sidecar["parent"] = parent
+    path.write_text(json.dumps(sidecar), encoding="utf-8")
+
+
+def test_stored_prefixed_parent_does_not_block_a_status_update(tmp_path):
+    """A status flip on a record holding a prefixed parent must still land."""
+    vault, state = _make_vault(tmp_path)
+    rid = _mk_task(vault, state, "a")
+    _stamp_stored_parent(vault, rid, "task/other")
+
+    u = _run(["record", "update", rid, "--status", "done"], vault=vault, state_dir=state)
+    assert u.returncode == 0, u.stderr
+    assert "task-edge-form" not in u.stderr
+    assert _find_sidecar(vault, rid)["status"] == "done"
+
+
+def test_repointing_a_stored_prefixed_parent_at_a_bare_name_is_the_repair(tmp_path):
+    """The repair path an operator actually takes must not be blocked."""
+    vault, state = _make_vault(tmp_path)
+    rid = _mk_task(vault, state, "a")
+    _stamp_stored_parent(vault, rid, "task/other")
+
+    u = _run(["record", "update", rid, "--parent", "other"], vault=vault, state_dir=state)
+    assert u.returncode == 0, u.stderr
+    assert _find_sidecar(vault, rid)["parent"] == "other"
+
+
+def test_newly_supplied_prefixed_parent_is_rejected_on_update(tmp_path):
+    """Grandfathering the stored parent does not open the door for a new one."""
+    vault, state = _make_vault(tmp_path)
+    rid = _mk_task(vault, state, "a")
+    before = _find_sidecar(vault, rid)
+
+    u = _run(["record", "update", rid, "--parent", "task/foo"], vault=vault, state_dir=state)
+    assert u.returncode != 0
+    assert "graph-guard [task-edge-form]" in u.stderr
+    assert "task/foo" in u.stderr
+    assert _find_sidecar(vault, rid) == before
+
+
 def test_newly_supplied_prefixed_depends_on_is_still_rejected_on_update(tmp_path):
     """Grandfathering the stored entries does not open the door for a new one."""
     vault, state = _make_vault(tmp_path)
