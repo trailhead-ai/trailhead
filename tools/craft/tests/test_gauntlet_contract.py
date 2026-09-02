@@ -428,9 +428,10 @@ def test_gauntlet_selects_spec_bars_not_plan_bars():
 
 _FRONT_MATTER_RE = re.compile(r"^---\n(.*?)\n---", re.S)
 
-# "draft spec" / "draft adr" is the phrasing gauntlet's own front-matter uses to
-# name what it reviews — matched as a regex so the derived subject set tracks
-# whatever the document actually says, not an assumption about it.
+# `draft <kind>` is the phrasing gauntlet's front matter uses to name what it
+# reviews. Matched as a regex over both kinds so the derived subject set tracks
+# whatever the document actually says: the pin below asserts the set is exactly
+# {spec}, and an adr named here would widen it and fail rather than slip past.
 _DRAFT_SUBJECT_RE = re.compile(r"\bdraft (spec|adr)\b")
 
 
