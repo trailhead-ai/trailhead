@@ -61,9 +61,11 @@ premise pass most often reframes.
 
 Take the spec record id from the invocation, or — when brainstorming hands off at its exit gate —
 the spec it just wrote. Read it **in full** (`lore record show <spec-id>`). Confirm its **kind** is
-`spec`; an adr resolved here is turned away before anything else runs — distill is the only path
-that authors and activates an adr, backward from an already-completed spec, so route it there
-instead of proceeding with a review this skill has no shape for. Confirm its status is
+`spec`; any other kind resolved here — an adr, a task, a lesson, or any other record — is turned
+away before anything else runs, naming the kind found so the operator knows what was rejected. An
+adr specifically routes to distill: it is the only path that authors and activates an adr, backward
+from an already-completed spec, so route it there instead of proceeding with a review this skill
+has no shape for. Confirm its status is
 `draft`; a `ready` spec has already advanced and is not re-gauntleted (see brainstorm's Status Lifecycle — new
 thinking creates a new spec instead).
 
@@ -347,7 +349,7 @@ are never interchangeable.
 **Each revise round runs the full accepted tail**: that round's `resolved` edits and its
 provenance land atomically before the round ends, so **a surviving `revise` withholds only the
 advance, never the writes**. A record mid-round is never behind on the edits it has already
-earned; only the flip to `ready` / `active` waits on the advance condition.
+earned; only the flip to `ready` waits on the advance condition.
 
 A Critical still sitting at `answered` is **not yet a final disposition** — it is a request for
 re-adjudication, not an outcome of one. **Advancing may not be evaluated while any Critical remains
@@ -468,8 +470,8 @@ the only point at which anyone looks at it before it is permanent:
    advances a record; running one ahead of the edits advances a record whose accepted edits are
    still hypothetical.
 
-**On any rejected hunk or failed write, nothing further runs.** Not the flip, not the supersession
-write, not a retry with the hunks re-cut. The record stays `draft` and you **report the partial
+**On any rejected hunk or failed write, nothing further runs.** Not the flip, not a retry with the
+hunks re-cut. The record stays `draft` and you **report the partial
 state explicitly** — which writes landed, which did not, and what the record holds right now. That
 is the `failed-write report` escalation point: a half-applied acceptance is precisely the state an
 agent must not resolve on its own reading.

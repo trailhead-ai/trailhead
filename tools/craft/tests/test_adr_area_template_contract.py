@@ -6,9 +6,8 @@ Two new craft-owned templates:
                       Alternatives rejected. This is exhaustive by spec — no fifth
                       section, no reordering. Provenance (source/derived specs, absorbed
                       decisions, a superseded predecessor) lives in `related:` metadata,
-                      never prose; gauntlet review provenance lives in annotations, never
-                      the body. Both are pinned so a future edit can't quietly grow the
-                      body into a place metadata should live.
+                      never prose. Pinned so a future edit can't quietly grow the body
+                      into a place metadata should live.
 
   templates/area.md  The Overview / Key files / Gotchas / Conventions quartet the
                       librarian agent already asserts is the area-profile shape
@@ -77,14 +76,6 @@ def test_adr_template_pins_related_metadata_provenance():
     assert "`related:`" in text and "never" in text, (
         "templates/adr.md must state that provenance (source/derived specs, absorbed "
         "decisions, superseded predecessor) lives in `related:` metadata, never prose."
-    )
-
-
-def test_adr_template_pins_gauntlet_annotation_provenance():
-    text = ADR_TEMPLATE.read_text()
-    assert "annotation" in text.lower() and "never the body" in text, (
-        "templates/adr.md must state that gauntlet review provenance goes to "
-        "annotations, never the body."
     )
 
 

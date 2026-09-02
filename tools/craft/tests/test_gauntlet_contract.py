@@ -455,8 +455,8 @@ def test_gauntlet_names_exactly_one_review_subject():
 
 
 # A roster is declared by a heading naming a pass count — e.g. "Dispatch the
-# eight passes" or "The adapted roster — 7 passes". Matched by heading shape,
-# not by two named headings, so a rename doesn't silently escape the guard.
+# eight passes". Matched by heading shape, not by one named heading, so a
+# rename doesn't silently escape the guard.
 _ROSTER_HEADING_RE = re.compile(
     r"^#{2,3}.*\b(eight|seven|six|five|four|three|nine|ten|\d+)\s+passes\b",
     re.I | re.M,
@@ -472,6 +472,15 @@ _NUMBER_WORDS = {
     "nine": 9,
     "ten": 10,
 }
+
+# Every stated pass count anywhere in the document — front matter's "Eight
+# parallel passes attack it...", body prose like "All eight passes are
+# required", and the roster heading itself. Matched by shape, not by quoting
+# each sentence, so a rewrite that moves the count to new prose is still caught.
+_PASS_COUNT_RE = re.compile(
+    r"\b(eight|seven|six|five|four|three|nine|ten|\d+)\s+(?:parallel\s+)?passes\b",
+    re.I,
+)
 
 
 def _roster_table_pass_count(text: str, start: int) -> int:
@@ -495,7 +504,12 @@ def _roster_table_pass_count(text: str, start: int) -> int:
 
 
 def test_gauntlet_states_one_roster_with_one_pass_count():
-    """One roster, its pass count stated once, matching what its table lists."""
+    """One roster, its pass count stated once, matching what its table lists.
+
+    Every stated pass count anywhere in the document — front matter, headings,
+    and body prose alike — must agree with the roster table, not only the
+    heading form.
+    """
     text = GAUNTLET.read_text()
     headings = list(_ROSTER_HEADING_RE.finditer(text))
     assert len(headings) == 1, (
@@ -510,6 +524,14 @@ def test_gauntlet_states_one_roster_with_one_pass_count():
     assert stated == actual, (
         f"gauntlet/SKILL.md's {heading.group(0)!r} states {stated} passes but its "
         f"roster table lists {actual}"
+    )
+
+    mentions = _PASS_COUNT_RE.findall(text)
+    stated_counts = {_NUMBER_WORDS[m.lower()] if m.isalpha() else int(m) for m in mentions}
+    assert stated_counts == {actual}, (
+        f"gauntlet/SKILL.md states pass counts {sorted(stated_counts)} somewhere in its "
+        f"front matter or body prose, but its roster table lists {actual} passes — "
+        "every stated count must agree"
     )
 
 
@@ -613,9 +635,8 @@ def test_the_only_route_any_adr_takes_to_active_is_distills_write_order_step_1()
     Distill creates ADRs `--status active` at authorship — that create is the
     *only* route to `active` any craft file carries; there is no later
     update-based flip for a second file to duplicate or race. A second hit
-    anywhere (distill included), of either the create shape or the old
-    update-flip shape, means the old activate-on-completion mechanism (or a
-    competing create path) has crept back.
+    anywhere (distill included), of either the create shape or an update-based
+    flip shape, means a second, competing route to `active` has appeared.
     """
     hits: list[tuple[Path, str]] = []
     for p in _craft_prose_files():
@@ -1774,11 +1795,11 @@ def test_provenance_split_is_derived_structurally_not_recalled():
 def test_persisted_detail_runs_through_the_shared_credential_scrub():
     """The retained detail is the one payload nobody reads before it is permanent.
 
-    Both tails write full, verbatim finding text into a git-backed vault that syncs
-    to a whole team, and the compact deliverable is designed to keep most of that
-    text off the operator's screen. A gauntlet run against a codebase holding a
-    committed credential can quote that value as its evidence, so this scrub is the
-    only thing between it and a second, durable home nobody was shown.
+    The accepted tail writes full, verbatim finding text into a git-backed vault
+    that syncs to a whole team, and the compact deliverable is designed to keep
+    most of that text off the operator's screen. A gauntlet run against a codebase
+    holding a committed credential can quote that value as its evidence, so this
+    scrub is the only thing between it and a second, durable home nobody was shown.
     """
     text = GAUNTLET.read_text()
     tail = _flat(_accepted_tail(text))
@@ -1910,17 +1931,6 @@ def test_spec_tail_flips_on_advance_and_starts_a_new_round_otherwise():
     assert "fully formed" in flat, (
         "the advance-path handoff command must be emitted with the real record "
         "id, so the operator can paste it into a fresh session as-is"
-    )
-
-
-def test_a_surviving_revise_does_not_route_the_spec_to_a_terminal_status():
-    """A surviving `revise` withholds the advance — it does not route a spec to
-    `superseded`, which keeps only its pre-existing, non-gauntlet use.
-    """
-    text = GAUNTLET.read_text()
-    assert "<spec-id> --status superseded" not in _spec_tail(text), (
-        "the spec tail must not take a spec to `superseded` on a surviving "
-        "`revise` — it withholds the advance and starts another round instead"
     )
 
 
