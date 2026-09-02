@@ -78,6 +78,18 @@ def _assert_defers_to_shared_slice(doc: Path, label: str) -> None:
         )
 
 
+def test_slice_skill_pointer_list_names_state_coverage_and_written_shapes():
+    _pin(
+        SLICE_SKILL,
+        "slice/task vocabulary, the quality bar, the value floor, the "
+        "smallest-next selection rule, the enabler carve-out, the "
+        "state-coverage reference, and the written shapes it fixes",
+        "slice/SKILL.md's early pointer to _shared/slice.md must also name "
+        "the state-coverage reference and the written shapes it fixes, "
+        "without restating their content",
+    )
+
+
 def test_state_coverage_reference_ships_in_shared_slice():
     assert SHARED_SLICE.exists(), (
         f"Expected the state-coverage reference at {SHARED_SLICE}"
@@ -161,6 +173,18 @@ def test_parent_enumerated_states_shape_is_one_bullet_per_state():
     )
 
 
+def test_enumerated_states_section_boundary_is_contiguous_bullets():
+    _pin(
+        SHARED_SLICE,
+        "The section's states are the contiguous `- ` bullets immediately "
+        "following the heading, ending at the first line that is not such a "
+        "bullet",
+        "_shared/slice.md must state the Enumerated states section's end "
+        "boundary: the contiguous `- ` bullets immediately following the "
+        "heading, ending at the first non-bullet line",
+    )
+
+
 def test_design_doc_state_heading_shape_uses_the_bullet_name_verbatim():
     _pin(
         SHARED_SLICE,
@@ -197,14 +221,17 @@ def test_third_shape_records_the_design_doc_path_as_a_parent_label():
     )
 
 
-def test_no_directory_convention_for_the_design_doc_file():
+def test_design_doc_path_is_relative_to_the_working_directory():
     _pin(
         SHARED_SLICE,
-        "That label is the only discovery mechanism — there is no convention "
-        "for where the design doc file lives on disk",
+        "That label is the only discovery mechanism, and the path it records "
+        "is relative to the repository working directory — not absolute, and "
+        "never reaching outside it; craft still does not dictate which "
+        "directory within the working directory the file lives in",
         "_shared/slice.md must state that the craft/design-doc label is the "
-        "only discovery mechanism and that no directory convention governs "
-        "where the design doc file lives",
+        "only discovery mechanism and that the path it records is relative to "
+        "the repository working directory, while still not dictating which "
+        "directory within it the file lives in",
     )
 
 
@@ -315,6 +342,19 @@ def test_step_9_no_visual_surface_case_writes_no_section_and_absence_is_the_sign
     )
 
 
+def test_step_9_enumeration_covers_at_least_the_archetype_floor():
+    _pin(
+        SLICE_SKILL,
+        "The enumeration covers at least the archetype floor "
+        "`_shared/slice.md` fixes for the slice's archetype — a minimum, not "
+        "a ceiling; the slice's actual states govern beyond it",
+        "slice/SKILL.md's step 9 must instruct that the enumeration covers "
+        "at least the archetype floor _shared/slice.md fixes, framed as a "
+        "minimum rather than a ceiling, and point at the reference rather "
+        "than restate the floors",
+    )
+
+
 def test_slice_skill_points_at_shared_slice_and_restates_neither_floors_nor_bullet_shape():
     _assert_defers_to_shared_slice(SLICE_SKILL, "slice/SKILL.md")
 
@@ -419,6 +459,17 @@ def test_step_6_5_names_the_design_doc_label_and_its_write_command_as_one_intera
     )
 
 
+def test_step_6_5_states_the_design_doc_path_is_working_directory_relative():
+    _pin(
+        PLAN_SKILL,
+        "the recorded path is relative to the repository working directory; "
+        "see `_shared/slice.md` for the shape",
+        "plan/SKILL.md's step 6.5 must state that the recorded design-doc "
+        "path is relative to the repository working directory, pointing at "
+        "_shared/slice.md for the shape rather than restating it",
+    )
+
+
 def test_plan_skill_points_at_shared_slice_and_restates_neither_floors_nor_shapes():
     _assert_defers_to_shared_slice(PLAN_SKILL, "plan/SKILL.md")
 
@@ -457,9 +508,13 @@ def test_slice_rooted_write_states_why_enumerated_states_is_preserved():
     )
 
 
-# --- Chain pins: the label token and the section name must be the same string
-# across writer, preserver, and reader — derived, not hardcoded thrice, so the
-# pin cannot pass by two documents drifting together onto the same wrong value.
+# --- Chain pins: each extracts the token/name from one document (the writer or
+# the definer) via a regex that still hardcodes that token, then asserts the same
+# extracted value appears in the other documents in the chain. That extraction
+# step means a joint drift where every document adopts the same wrong value
+# together fails loud (the regex stops matching) rather than passing silently —
+# these are not pins that would catch a hardcoded-thrice value drifting in lockstep
+# undetected; they catch exactly one document falling out of step with the rest.
 
 
 def test_design_doc_label_token_is_the_same_string_plan_writes_and_execute_reads():
@@ -517,6 +572,19 @@ def test_planner_produces_the_design_doc_and_records_the_label_when_enumerated()
     )
 
 
+def test_planner_design_doc_step_is_positioned_before_define_tasks():
+    text = PLANNER.read_text()
+    idx_6_5 = text.index("### 6.5.")
+    idx_7 = text.index("### 7. Define Tasks")
+    assert idx_6_5 < idx_7, (
+        "agents/planner.md's design-doc production must appear before "
+        "### 7. Define Tasks in document order — a pin on document position, "
+        "the same way test_step_6_5_is_positioned_before_define_tasks pins "
+        "plan/SKILL.md's step 6.5 ordering — so the states shape the "
+        "decomposition rather than being discovered after it"
+    )
+
+
 def test_planner_points_at_shared_slice_and_restates_neither_floors_nor_shapes():
     _assert_defers_to_shared_slice(PLANNER, "agents/planner.md")
 
@@ -544,11 +612,15 @@ def test_phase_6_new_gate_composes_with_the_pre_existing_completion_guard():
     _pin(
         EXECUTE_SHARED,
         "The completion guard refuses this while any child is non-terminal "
-        "(it names them); the state-coverage gate composes with it — both fire "
-        "on the same close and neither shadows the other, and a parent "
-        "carrying no `## Enumerated states` closes exactly as it does today",
+        "(it names them); the closing session evaluates the state-coverage "
+        "gate before issuing the completion update, composing with that "
+        "guard — both fire on the same close and neither shadows the other, "
+        "and a parent carrying no `## Enumerated states` closes exactly as it "
+        "does today",
         "Phase 6 must pin the new state-coverage gate and the pre-existing "
-        "completion guard as both firing at the same close, as one interaction "
+        "completion guard as both firing at the same close, naming the "
+        "closing session as the actor performing the comparison so the "
+        "sentence cannot be read as tool-enforced, as one interaction "
         "spanning both sentences — deleting either sentence must break this pin",
     )
 
@@ -563,6 +635,31 @@ def test_phase_6_gate_matching_rule_is_a_literal_name_set_comparison():
         "literally",
         "Phase 6 must state the matching rule as a literal name-set comparison, "
         "pointing at the shapes _shared/slice.md fixes rather than restating them",
+    )
+
+
+def test_phase_6_gate_points_at_the_section_boundary_rule():
+    _pin(
+        EXECUTE_SHARED,
+        "The parent's section boundary follows `_shared/slice.md`'s "
+        "contiguous-bullet rule, so plan-template content appended after "
+        "`## Enumerated states` is never mistaken for a state",
+        "Phase 6's state-coverage gate must point at _shared/slice.md's "
+        "contiguous-bullet boundary rule for where the Enumerated states "
+        "section ends, so plan-template content after it is never read as a "
+        "state",
+    )
+
+
+def test_phase_6_gate_names_the_refusal_disposition():
+    _pin(
+        EXECUTE_SHARED,
+        "A refused close leaves the parent `in-progress` — the honest state "
+        "— withholds Phase 6's tick, and the run reports the missing states "
+        "and stops",
+        "Phase 6's state-coverage gate must name the disposition of a refused "
+        "close: the parent stays in-progress, the Phase 6 tick is withheld, "
+        "and the run reports the missing states and stops",
     )
 
 

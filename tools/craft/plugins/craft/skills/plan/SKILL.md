@@ -204,9 +204,9 @@ verbatim, in the shape `_shared/slice.md` fixes.
 
 Record the design doc's path on the parent as the `craft/design-doc` label, written
 with `lore record update task/<parent-name> --vault <elected-vault> --label
-craft/design-doc=<path>` — see `_shared/slice.md` for the label's shape and the
-no-directory-convention rule it carries — so a later close gate has an unambiguous
-artifact to check. The path is constructed from vault-sourced values, so validate it
+craft/design-doc=<path>` — the recorded path is relative to the repository working
+directory; see `_shared/slice.md` for the shape — so a later close gate has an
+unambiguous artifact to check. The path is constructed from vault-sourced values, so validate it
 against the safe-value shape `^[A-Za-z0-9._/-]+$` (`_shared/execute.md`'s
 untrusted-input rule) before substitution — a failing value refuses loudly rather than
 being silently omitted; that validation governs this label's value.

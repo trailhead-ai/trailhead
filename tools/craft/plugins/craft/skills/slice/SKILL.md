@@ -22,9 +22,10 @@ task — nothing more. Designing and building that slice is `/craft:plan` and `/
 job, run against the parent task this skill writes.
 
 **The definitions live in `../_shared/slice.md`** (a sibling of this skill's directory) — the
-slice/task vocabulary, the quality bar, the value floor, the smallest-next selection rule, and
-the enabler carve-out. Read it before running this procedure. This skill does not restate any
-of it: a second copy here is exactly how the two would drift apart.
+slice/task vocabulary, the quality bar, the value floor, the smallest-next selection rule, the
+enabler carve-out, the state-coverage reference, and the written shapes it fixes. Read it
+before running this procedure. This skill does not restate any of it: a second copy here is
+exactly how the two would drift apart.
 
 ## Argument
 
@@ -213,6 +214,9 @@ preserve.
 defines, when the chosen slice touches a visual surface — the call step 8 already stated to the
 operator. A slice touching no visual surface writes no such section — the absence, not an empty
 section, is what tells `/craft:plan` there is nothing to design.
+
+The enumeration covers at least the archetype floor `_shared/slice.md` fixes for the slice's
+archetype — a minimum, not a ceiling; the slice's actual states govern beyond it.
 
 **If the spec carries `craft/slice-loop=stopped` or `craft/slice-loop=complete` from an earlier
 pass, clear it here** — this pass is selecting again, so an earlier stopping point is no longer
