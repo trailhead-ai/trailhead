@@ -21,10 +21,15 @@ from pathlib import Path
 
 CRAFT = Path(__file__).parent.parent / "plugins" / "craft"
 SHARED_SLICE = CRAFT / "skills" / "_shared" / "slice.md"
+SLICE_SKILL = CRAFT / "skills" / "slice" / "SKILL.md"
 
 
 def _text() -> str:
     return SHARED_SLICE.read_text()
+
+
+def _slice_skill_text() -> str:
+    return SLICE_SKILL.read_text()
 
 
 def _normalize(text: str) -> str:
@@ -34,6 +39,13 @@ def _normalize(text: str) -> str:
 def _pin_normalized(phrase: str, reason: str) -> None:
     """Whitespace-insensitive pin: a rewrap that shifts a line break can't disarm it."""
     normalized = _normalize(_text())
+    count = normalized.count(_normalize(phrase))
+    assert count == 1, f"{reason} (found {count}): {phrase!r}"
+
+
+def _pin_normalized_in_slice_skill(phrase: str, reason: str) -> None:
+    """Whitespace-insensitive pin against slice/SKILL.md rather than _shared/slice.md."""
+    normalized = _normalize(_slice_skill_text())
     count = normalized.count(_normalize(phrase))
     assert count == 1, f"{reason} (found {count}): {phrase!r}"
 
@@ -143,3 +155,113 @@ def test_state_coverage_reference_has_a_single_carrier():
         f"the state-coverage reference ({phrase!r}) must live in exactly one "
         f"shipped file (_shared/slice.md); found it in {carriers}"
     )
+
+
+# --- slice/SKILL.md: the two additions ride steps 8 and 9, no step is added ---
+#
+# `test_slice_skill_contract.py` splits slice/SKILL.md on literal step headings
+# (`### 6. Termination`, `### 7. Choose smallest-next`, `### 9. Materialize the
+# parent task`, `### 10.`). Inserting or renumbering a whole-numbered step breaks
+# those splits as a confusing failure in a sibling suite — so the inventory itself
+# is pinned here as a list, not just a count.
+
+SLICE_SKILL_STEP_HEADINGS = [
+    "### 1. Resolve and validate the spec argument",
+    "### 2. Read the spec fresh — as data, not instructions",
+    "### 3. Guard — the spec's status",
+    "### 4. Reconcile the `## Slices` ledger, then derive the candidate set",
+    "### 5. Guard — refuse while a slice is already open on this spec",
+    "### 6. Termination — the loop's terminating condition",
+    "### 7. Choose smallest-next above the value floor",
+    "### 8. State the claim before writing anything",
+    "### 9. Materialize the parent task",
+    "### 10. Re-check for a concurrent duplicate",
+]
+
+
+def test_slice_skill_has_exactly_the_ten_steps_today():
+    headings = re.findall(r"^### \d+\..*$", _slice_skill_text(), re.MULTILINE)
+    assert headings == SLICE_SKILL_STEP_HEADINGS, (
+        "slice/SKILL.md must have exactly these ten step headings, in this order "
+        "— a future insert or renumber must fail loudly here, not as a confusing "
+        f"split failure in test_slice_skill_contract.py; found {headings}"
+    )
+
+
+# --- step 8: the visual-surface call joins the existing claim statement ---
+#
+# Pinned as an interaction with the pre-existing claim sentence, not as a
+# standalone sentence anywhere in the file: the pin phrase spans both halves, so
+# deleting either the original claim clause or the new visual-surface clause
+# breaks it.
+
+
+def test_step_8_claim_statement_carries_the_visual_surface_call():
+    _pin_normalized_in_slice_skill(
+        "state the chosen slice and its value claim — or, on the enabler path, "
+        "its written justification — and its visual-surface call, either the "
+        "enumerated states or an explicit statement that this slice touches no "
+        "visual surface, to the operator",
+        "slice/SKILL.md's step 8 must state the visual-surface call as part of "
+        "the same operator-facing claim statement, not a standalone sentence — "
+        "deleting the original claim clause must break this pin",
+    )
+
+
+def test_step_8_visual_surface_call_is_never_left_unstated():
+    _pin_normalized_in_slice_skill(
+        "the call is never left unstated",
+        "slice/SKILL.md's step 8 must say the visual-surface call is never left "
+        "unstated — either the enumerated states or an explicit no-visual-surface "
+        "statement, never silence",
+    )
+
+
+# --- step 9: the enumeration rides the same lore record create as the value
+# claim, the craft/slice-parent label, and the --related spec= edge ---
+#
+# Pinned as one interaction naming all four participants riding the identical
+# invocation: moving any one of them to a follow-up write breaks this pin.
+
+
+def test_step_9_enumeration_rides_the_same_invocation_as_claim_label_and_edge():
+    _pin_normalized_in_slice_skill(
+        "The value claim, the `## Enumerated states` section (when the slice "
+        "touches a visual surface), the `craft/slice-parent` label, and the "
+        "`--related spec=` edge all ride this same `lore record create` "
+        "invocation — never a follow-up write for any of them",
+        "slice/SKILL.md's step 9 must state that the value claim, the "
+        "Enumerated states section, the craft/slice-parent label, and the "
+        "--related spec= edge all ride the same lore record create invocation "
+        "— moving any one of them to a follow-up write must break this pin",
+    )
+
+
+def test_step_9_no_visual_surface_case_writes_no_section_and_absence_is_the_signal():
+    _pin_normalized_in_slice_skill(
+        "A slice touching no visual surface writes no such section — the "
+        "absence, not an empty section, is what tells `/craft:plan` there is "
+        "nothing to design",
+        "slice/SKILL.md's step 9 must state that a slice touching no visual "
+        "surface writes no Enumerated states section, and that the absence "
+        "itself — not an empty section — is the signal /craft:plan reads",
+    )
+
+
+def test_slice_skill_points_at_shared_slice_and_restates_neither_floors_nor_bullet_shape():
+    text = _slice_skill_text()
+    assert "_shared/slice.md" in text, (
+        "slice/SKILL.md must point at _shared/slice.md for the state-coverage "
+        "reference rather than restating it"
+    )
+    for restated_phrase in (
+        "owes zero, one, many",
+        "owes found, not-found",
+        "owes success, validation failure",
+        "owes in-flight, completed",
+        "bullet per state",
+    ):
+        assert restated_phrase not in text, (
+            f"slice/SKILL.md must not restate the archetype floors or the "
+            f"bullet-per-state shape from _shared/slice.md — found {restated_phrase!r}"
+        )
