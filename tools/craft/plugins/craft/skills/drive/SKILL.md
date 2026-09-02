@@ -87,6 +87,42 @@ including its own `--vault` binding, its own status guard, and its own value-cla
 the operator — against `spec/<spec-name>`. This skill never restates that procedure: a second
 copy here is exactly how the two would drift apart.
 
+### 4.5 Checkpoint and resume
+
+The driver holds no state of its own: every checkpoint is a `## Driver run` block written onto the slice parent record chosen or reused at step 4, and resume reconstructs the run from that block alone rather than from anything held in a transcript. Check the parent's body for the block before doing anything else in this run.
+
+**No block present.** Resume gated from the start of the run: run this procedure from step 1 exactly as a fresh invocation, rather than assuming any other mode. A slice parent materialized by step 4 with no checkpoint of its own has never been driven before.
+
+**A block is present.** Read its `**Phase:**` field and re-enter at the phase after the one recorded, walking the fixed order select → plan → build → pr-tail → slice-close. A block recording `slice-close` names a finished run — there is no phase after it to resume into, and the driver reports the slice already closed rather than resuming anything.
+
+**Resuming into the build phase specifically** — whether because the recorded phase is `plan` and build is next, or the recorded phase is already `build` and the run died mid-dispatch — resolve the branch's state before dispatching anything. Read the parent's `craft/branch` label (`_shared/status-ownership.md`, Label conventions) and, if the named branch already carries commits, the driver never re-dispatches the build phase onto it on the assumption it is starting clean: a second build's commits stacked onto a partial one is exactly the corruption this check exists to prevent. Escalate instead, under the `build-resume-dirty-branch` trigger — this task only names the trigger and the condition; the escalation record's full mechanics are a later task against this same file, matching the multi-repo escalation below. Only once the branch is confirmed clean — no `craft/branch` label yet, or the label names a branch carrying no commits — does the driver proceed into the build phase.
+
+#### Checkpoint the run
+
+At each of the five phase boundaries this loop crosses — select, plan, build, PR tail, and slice close — write a `## Driver run` block onto the slice parent via `lore record update task/<slice-parent-name> --vault <elected-vault> --diff`, piping a unified diff that **appends** a fresh block: bare stdin to `lore record update` is a full-body replace and would destroy the record, exactly as `_shared/execute.md` states for the same command. The append preserves the value claim and every plan section already on the parent — nothing already there is overwritten. The block carries:
+
+```markdown
+## Driver run
+
+- **Mode:** gated
+- **Phase:** <select|plan|build|pr-tail|slice-close>
+- **Branch:** <bare branch name, or `(not yet cut)`>
+- **Plan outcome file:** <path, or `(not yet reached)`>
+- **Build outcome file:** <path, or `(not yet reached)`>
+```
+
+Run the block's text through the credential-pattern scrub before it is written (`_shared/execute.md`, [Phase 5](../_shared/execute.md#phase-5-flow-out)) — exactly like any other write to a record body, since the branch name or an outcome-file path could carry something that shouldn't ship to a git-backed vault.
+
+Resume reads the **last** `## Driver run` block in the parent body, never the first: each boundary appends its own block rather than editing the previous one in place, so the most recent block is the one naming the phase last completed.
+
+Each of the five boundaries below writes this block before the driver moves past it:
+
+- **select** — once the single-repo check at step 5 passes (or the multi-repo escalation fires), write the block recording `**Phase:** select` before reporting the outcome at step 6.
+- **plan** — once the plan phase (a later task against this same file) completes, write the block recording `**Phase:** plan`.
+- **build** — once the build phase (a later task against this same file) completes, write the block recording `**Phase:** build`.
+- **pr-tail** — once the PR tail phase (a later task against this same file) completes, write the block recording `**Phase:** pr-tail`.
+- **slice-close** — once the slice is closed out (a later task against this same file), write the block recording `**Phase:** slice-close`.
+
 ### 5. Refuse a slice spanning more than one repo
 
 Once `../slice/SKILL.md`'s procedure has chosen and materialized a slice parent (its outcome
