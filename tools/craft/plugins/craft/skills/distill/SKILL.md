@@ -215,23 +215,26 @@ Reconstitute the candidates into **logical design changes — M specs ↔ N ADRs
 Execution-convenience splits (one design change cut into three specs so it could ship in pieces)
 consolidate into **one** ADR. A spec carrying two independent decisions separates into **two**.
 
-**Lingering `draft` ADRs touching the cluster's areas are surfaced as candidate material** — a
-distillation may fold a draft's content into the cluster ADR rather than starting from a blank
-record. When it does, the draft is retired (`--status dropped`) with a `related: adr=` edge to the
-ADR that absorbed it, so the abandoned number is traceable rather than merely a gap.
+**Lingering `draft` ADRs are surfaced as candidate material two ways: an ADR any cluster member
+carries a `related: adr=` edge to, and a `draft` ADR touching the cluster's areas** — a
+distillation may fold either's content into the cluster ADR rather than starting from a blank
+record. The edge check is not optional: an ADR the cluster's own members descend from must never
+be left to area overlap alone to surface it. When either check hits, the draft is retired
+(`--status dropped`) with a `related: adr=` edge to the ADR that absorbed it, so the abandoned
+number is traceable rather than merely a gap.
 
 **This surfacing excludes a `draft` ADR while any spec carrying a `related: adr=` edge to it has
-not yet reached a terminal status.** Resolve those specs the way the activation check below does —
-off the forward facet, `lore search "kind:spec related-adr:<adr-id>"` — then read the same
-`TERMINAL_SPEC_STATUSES = {"complete", "superseded", "dropped"}` (`pipeline/derive.py:97`), the same
-way. **The edge is spec-side, never ADR-side**: brainstorm's altitude gate writes `--related
-adr=<adr-id>` on each derived seed from birth, and distill writes `--related spec=<member>` on the
-ADR only on the backward path — so a forward ADR carries no `related: spec=` edge of its own, and an
+not yet reached a terminal status.** Resolve those specs spec-side, off the forward facet —
+`lore search "kind:spec related-adr:<adr-id>"` — then read
+`TERMINAL_SPEC_STATUSES = {"complete", "superseded", "dropped"}` (`pipeline/derive.py:97`). **The
+edge is spec-side, never ADR-side**: a spec carries `related: adr=<adr-id>` when it descends from
+that decision, and distill writes `--related spec=<member>` on the ADR only on the backward path —
+so an ADR still waiting on its derived specs carries no `related: spec=` edge of its own, and an
 exclusion keyed on one would exclude nothing and retire the very ADRs it exists to protect. Such an
-ADR is still mid-decision, waiting on its own derived specs to finish, not lingering — absorbing it
-here would erase a decision still in flight. The two checks read the identical edge in the identical
-direction, and the identical set the identical way, on purpose: a sweep that excluded on a looser
-condition than activation requires could absorb an ADR activation was about to reach on its own.
+ADR is still mid-decision, waiting on its own derived specs to finish, not lingering. This
+exclusion protects decision context those unlanded specs are still relying on: absorbing the ADR
+here would erase it, retiring the ADR out from under every sibling spec still pointing at it as
+its provenance before the rest have landed.
 
 ### The deferral rule
 

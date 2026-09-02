@@ -622,6 +622,87 @@ def test_status_active_write_is_scoped_to_the_step_1_create_not_banned_globally(
     )
 
 
+# --- Task 3: the absorption-sweep exclusion stands on its own justification ---
+
+
+def test_absorption_sweep_exclusion_keys_on_the_specs_carrying_the_edge():
+    """The exclusion's condition itself: it fires on specs that carry the
+    `related: adr=` edge TO the draft ADR, resolved spec-side off the forward
+    facet — the direction that makes the exclusion satisfiable at all. This
+    must survive the activation check's removal untouched: it never depended on
+    activation to be true.
+    """
+    section = _flat(_absorption_sweep_section(_text()))
+    assert _ABSORPTION_EXCLUSION_SENTENCE in section, (
+        "distill/SKILL.md's absorption-sweep exclusion must still key on a spec "
+        "carrying a `related: adr=` edge to the draft ADR"
+    )
+    assert 'lore search "kind:spec related-adr:<adr-id>"' in section, (
+        "distill/SKILL.md must resolve the exclusion's specs spec-side, off the "
+        "forward `related-spec` facet — not by querying the ADR"
+    )
+
+
+def test_absorption_sweep_exclusion_reads_terminality_off_terminal_spec_statuses():
+    """The exclusion's terminality check: the same `TERMINAL_SPEC_STATUSES` set
+    the rest of distill and `pipeline/derive.py` use, cited by file:line so drift
+    there is not silent to this skill.
+    """
+    section = _flat(_absorption_sweep_section(_text()))
+    assert (
+        'TERMINAL_SPEC_STATUSES = {"complete", "superseded", "dropped"}'
+        in section
+    ), (
+        "distill/SKILL.md's absorption-sweep exclusion must read terminality off "
+        "the literal `TERMINAL_SPEC_STATUSES` set"
+    )
+    assert "pipeline/derive.py:97" in section, (
+        "distill/SKILL.md must cite where `TERMINAL_SPEC_STATUSES` is defined, so "
+        "drift there is not silent to this skill"
+    )
+
+
+def test_absorption_sweep_rationale_stands_without_an_activation_reference():
+    """The exclusion's justification, re-anchored: it protects decision context
+    unlanded sibling specs are still relying on. Pinned on the rationale it DOES
+    state — never on the absence of the deleted activation check.
+    """
+    section = _flat(_absorption_sweep_section(_text()))
+    assert (
+        "protects decision context those unlanded specs are still relying on"
+        in section
+    ), (
+        "distill/SKILL.md must justify the absorption-sweep exclusion on its own "
+        "terms — the decision context unlanded sibling specs still rely on — "
+        "rather than by reference to the deleted activation check"
+    )
+    assert "a spec carries `related: adr=<adr-id>` when it descends from that decision" in section, (
+        "distill/SKILL.md must describe the `related: adr=` edge as something a "
+        "spec carries, not as something brainstorm's altitude gate writes — that "
+        "gate no longer creates ADRs or derived specs at all"
+    )
+
+
+def test_lingering_draft_surfacing_also_checks_cluster_members_related_adr_edges():
+    """Absorption surfacing must be keyed on the `related: adr=` edge, not left to
+    area overlap alone — otherwise the six specs descended from the one in-flight
+    ADR could land without ever surfacing it as candidate material, and the
+    disposition this spec promises (absorbed by the backward pass) never fires.
+    """
+    section = _flat(_absorption_sweep_section(_text()))
+    assert (
+        "an ADR any cluster member carries a `related: adr=` edge to" in section
+    ), (
+        "distill/SKILL.md must surface a lingering `draft` ADR as candidate "
+        "material whenever a cluster member carries a `related: adr=` edge to "
+        "it, not only on area overlap"
+    )
+    assert "touching the cluster's areas" in section, (
+        "distill/SKILL.md must keep area overlap as an additional surfacing "
+        "trigger — the edge check adds to it, it does not replace it"
+    )
+
+
 # --- Slice 6: the forward-anchored cluster class collapses into the ordinary path ---
 
 
