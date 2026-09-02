@@ -149,10 +149,87 @@ enumerate member repos) and count its `members` array.
   report, and **halt the driver** — re-entry is the operator's act, by re-running `/craft:drive`
   once whatever is blocking the early stop is resolved.
 
+## Escalation
+
+Every escalation this ritual can raise — the two above and any a later task against this same
+file adds — follows one contract, defined here once so no escalation site restates it.
+**No retries: the first escalation from any phase ends the run.** On escalation the driver does
+not retry the phase, does not try a different approach, and does not continue into a later
+phase — it writes the escalation record, pushes work in flight, reports in-session, and stops.
+
+### The trigger vocabulary
+
+The trigger is typed from a **declared, closed vocabulary** — the escalation record names one
+of these, never free text:
+
+- **`multi-repo-slice`** — the chosen slice spans more than one camp-group member (step 5 above).
+- **`build-resume-dirty-branch`** — a resume finds commits already on the branch it was about to
+  dispatch the build phase onto (step 4.5 above).
+- **`plan-critical`** — the plan phase (a later task against this same file) surfaces a council
+  Critical the operator has not dispositioned.
+- **`worker-stalled`** — the build dispatch (a later task against this same file) passes its
+  liveness deadline with no progress signal.
+
+Add a member to this list only when a phase genuinely needs one — it is not a place to name a
+trigger speculatively ahead of the phase that would raise it.
+
+### Writing the escalation record
+
+Write a `task` record at `blocked`, as a **child of the slice parent, never standalone**:
+
+```sh
+printf '%s' "$BODY" | lore record create \
+  --kind task --title "<trigger-scoped escalation title>" --status blocked \
+  --parent <slice-parent-name> --vault <elected-vault>
+```
+
+**This parent edge is the entire mechanism keeping the escalation out of the automation it exists to interrupt.** A standalone `blocked` task enters ranger's refine sweep the moment the
+operator answers it, and is then built outside this loop and off the slice's branch — exactly the
+collision `/craft:slice` already dodges by materializing its own parent `in-progress`
+(`../slice/SKILL.md`, step 9). Never drop the `--parent` flag to "simplify" this write; doing so
+reopens the very automation this record exists to stay outside of.
+
+`$BODY` names the slice, the typed trigger, and the decision needed — a pointer to where that
+decision actually lives (the plan record's Council Review section, the spec's own escalation
+policy, or wherever the judgment call belongs), never a drafted disposition or a recommended
+verdict. **The driver never authors the operator's judgment for them** — it gathers the evidence
+and points at where the decision gets made, and stops there.
+
+Run `$BODY` through the credential-pattern scrub before this write — this body is evidence gathered from a failed build (worker output, CI text, error detail), and the vault is git-backed and syncs to the whole team, so a key pasted verbatim as evidence ships as surely as a committed
+one — exactly like the `## Driver run` checkpoint block above
+(`_shared/execute.md`, [Phase 5](../_shared/execute.md#phase-5-flow-out)).
+
+### Pushing work in flight
+
+Before the driver stops, push whatever is on the branch as a **draft PR**, so nothing is
+stranded on one machine and the escalation is actionable from a phone. This push routes through `_shared/execute.md`'s existing pre-push secret scan ([Phase 6](../_shared/execute.md#phase-6-close-and-completion-report)) rather than a bespoke driver-side `git push` that would bypass it. If the branch carries no commits, there is nothing to push and
+this step is a no-op.
+
+### What the driver never does
+
+**The driver cannot end its own escalation** — resolving a `blocked` escalation record is the operator's act, by answering it, exactly as any other answered-`blocked` task is resumed. The
+ritual carries no affordance for resolving, merging, or reverting: merging is portage's job once the operator's answer produces a green PR, and reverting is a git operation the operator or portage's own tooling performs, never a step this ritual names. The driver's part ends at the
+write, the push, and the report.
+
+### Reporting the escalation in-session
+
+The escalation is not a hang — it is a stop that reads as intentional. Report, in the same
+session:
+
+- that the run escalated, naming the trigger and the escalation record's task id;
+- the fully formed command to resume once the question is answered — e.g. `/craft:drive spec/streaming-export` — with this run's own resolved spec name substituted in,
+  never the literal `<spec-name>` template text. Re-running it re-enters this ritual at step 1,
+  reads the `## Driver run` checkpoint at step 4.5, and continues from the phase after the one
+  last recorded.
+
+This mirrors what the slice close already commits to at its own early-stop report
+(`../slice/SKILL.md`'s example: `Run /craft:slice spec/streaming-export again once
+<what's blocking> is resolved.`) — a concrete, runnable command, not a description of one.
+
 ## Outcome
 
 On a chosen slice that clears the single-repo check, report the slice, its value claim, and the
 parent task id, and note that plan and build are not yet wired to this skill. On spec complete
 or early stop, report exactly as `../slice/SKILL.md` would and stop — the driver has no further
 action to take. On a multi-repo escalation, report the escalation and the `multi-repo-slice`
-trigger and stop.
+trigger and stop, following the escalation contract above.
