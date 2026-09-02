@@ -152,7 +152,7 @@ name = "codex"
     # Map form: pick specific subagents/skills (omit a key to mean "all").
     [[harness.plugins]]
     name = "craft"
-    subagents = ["advocate", "artist"]
+    subagents = ["advocate", "breaker"]
     skills = ["execute"]
 
     # Override form: point a subagent/skill at your own file or directory.

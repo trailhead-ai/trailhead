@@ -31,7 +31,7 @@ hand-maintained list. A future CLI-bearing tool gets its own
     name = "codex"
         [[harness.plugins]]            # map form — per-plugin subagent/skill subset
         name = "craft"
-        subagents = ["advocate", "artist"]
+        subagents = ["advocate", "breaker"]
         skills = ["execute"]
             # override form (file_path points at a custom md file OR a skill dir):
             # [[harness.plugins.subagents]]

@@ -1,9 +1,11 @@
 """Tests for trailhead/install_config.py — pure config resolution."""
 
+import re
 from pathlib import Path
 
 import pytest
 
+from trailhead import install_config
 from trailhead.capabilities import load_manifest
 from trailhead.compose import UnknownSkillError, UnknownSubagentError
 from trailhead.install_config import (
@@ -214,11 +216,11 @@ class TestPluginExpansion:
             tmp_path,
             '[[harness]]\nname="claude_code"\n'
             '  [[harness.plugins]]\n  name="craft"\n'
-            '  subagents=["advocate","artist"]\n  skills=["execute"]\n',
+            '  subagents=["advocate","breaker"]\n  skills=["execute"]\n',
         )
         cfg = resolve_config(config_path=path, detected_harnesses=[])
         craft = cfg.harnesses[0].plugins[0]
-        assert set(craft.subagents) == {"advocate", "artist"}
+        assert set(craft.subagents) == {"advocate", "breaker"}
         assert set(craft.skills) == {"execute"}
 
     def test_map_form_missing_keys_means_all(self, tmp_path):
@@ -319,3 +321,25 @@ class TestShippedDefault:
         assert cfg.cli_flags["portage"] is True
         names = [p.name for p in cfg.harnesses[0].plugins]
         assert names == ["camp", "lore", "craft", "portage", "outpost", "ranger", "trailhead"]
+
+
+# ---------------------------------------------------------------------------
+# Module docstring example
+# ---------------------------------------------------------------------------
+
+
+class TestDocstringExample:
+    def test_documented_craft_subagents_example_resolves_to_real_subagents(self):
+        """The module docstring's map-form example (`subagents=["advocate", "breaker"]`)
+        must name subagents craft actually ships, so the doc can't drift ahead of
+        (or behind) the real, convention-discovered inventory."""
+        match = re.search(r'subagents\s*=\s*\[([^\]]*)\]', install_config.__doc__)
+        assert match, "install_config.py module docstring must carry a subagents=[...] example"
+        example_names = [n.strip().strip('"') for n in match.group(1).split(",")]
+
+        craft_inventory = load_manifest(_MANIFESTS["craft"])
+        missing = [n for n in example_names if n not in craft_inventory.subagents]
+        assert not missing, (
+            f"install_config.py docstring's subagents example names subagents craft "
+            f"doesn't ship: {missing}"
+        )

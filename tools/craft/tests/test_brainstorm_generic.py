@@ -1,7 +1,7 @@
 """brainstorm/SKILL.md generic-hygiene + visible-skip guards.
 
 The brainstorm skill was moved from the lore plugin into craft. These
-assertions — the extension-point visible-skip notices, the live `artist`
+assertions — the extension-point visible-skip notices, the removed
 design_mockup provider, and the private-token scan — moved with it from lore's
 test_lore_skills_generic.py so the contract follows the skill.
 
@@ -65,8 +65,8 @@ def test_brainstorm_visible_skip_phrase_present(test_id: str, phrase: str):
 
 def test_brainstorm_does_not_dispatch_design_mockup_provider():
     """The design_mockup seam was removed from brainstorm: the UI/UX step settles
-    direction verbally and writes it into the spec, rather than dispatching the
-    `artist`. (The `artist` agent itself is retained for direct invocation.)"""
+    direction verbally and writes it into the spec, rather than dispatching an
+    HTML-mockup design agent. craft ships no such agent."""
     assert _BRAINSTORM_SKILL.exists(), "brainstorm/SKILL.md does not exist"
     text = _BRAINSTORM_SKILL.read_text()
     assert "design_mockup" not in text, (
