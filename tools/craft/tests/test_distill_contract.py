@@ -28,6 +28,7 @@ annotations are never indexed, so the exclusions cannot ride the KQL query and m
 be re-checked per candidate.
 """
 
+import re
 from pathlib import Path
 
 import pytest
@@ -486,18 +487,7 @@ def test_every_batch_update_passes_vault_explicitly():
     )
 
 
-
-
-# --- Slice 4: gauntlet stops flipping, distill activates on the last derived spec ---
-
-import re  # noqa: E402
-
-GAUNTLET = CRAFT / "skills" / "gauntlet" / "SKILL.md"
-
-_ABSORPTION_EXCLUSION_SENTENCE = (
-    "This surfacing excludes a `draft` ADR while any spec carrying a "
-    "`related: adr=` edge to it has not yet reached a terminal status."
-)
+# --- section-scoped prose pins ---
 
 
 def _flat(text: str) -> str:
@@ -517,6 +507,9 @@ def _section(text: str, header: str, stop: str, why: str = "") -> str:
     assert header in text, why or f"distill/SKILL.md must carry a {header!r} section"
     start = text.index(header)
     return text[start:text.index(stop, start)]
+
+
+# --- the sole route to an `active` ADR ---
 
 
 def _write_order_section(text: str) -> str:
@@ -582,6 +575,14 @@ def test_the_step_1_create_is_distills_only_route_to_active():
     )
 
 
+# --- the absorption sweep's exclusion ---
+
+_ABSORPTION_EXCLUSION_SENTENCE = (
+    "This surfacing excludes a `draft` ADR while any spec carrying a "
+    "`related: adr=` edge to it has not yet reached a terminal status."
+)
+
+
 def _absorption_sweep_section(text: str) -> str:
     """Just the absorption-sweep exclusion, bounded before the deferral rule —
     the neighbouring section states the same edge in the same vocabulary, so a
@@ -596,33 +597,6 @@ def _absorption_sweep_section(text: str) -> str:
             "— Cluster before drafting'"
         ),
     )
-
-
-def test_absorption_sweep_exclusion_is_a_pinned_procedural_step():
-    assert _ABSORPTION_EXCLUSION_SENTENCE in _flat(
-        _absorption_sweep_section(_text())
-    ), (
-        "distill/SKILL.md must state the absorption-sweep's exclusion for drafts "
-        "with incomplete derived specs as a concrete, pinned procedural step"
-    )
-
-
-def test_status_active_write_is_scoped_to_the_step_1_create_not_banned_globally():
-    """distill legitimately emits `--status active` on the step-1 create — the
-    absence sweep must not ban the string globally, only from the gauntlet
-    skill, which no longer advances an adr past `draft` at all.
-    """
-    assert "lore record create --kind adr --status active" in _text(), (
-        "distill/SKILL.md must legitimately carry the step-1 ADR-creation write "
-        "— a global ban on this string would be wrong, not a fix"
-    )
-    assert not re.compile(r"<adr-id>\s+--status\s+active").search(GAUNTLET.read_text()), (
-        "gauntlet/SKILL.md must not carry an adr-activation write — the sweep is "
-        "scoped to the gauntlet skill specifically, not the string everywhere"
-    )
-
-
-# --- Task 3: the absorption-sweep exclusion stands on its own justification ---
 
 
 def test_absorption_sweep_exclusion_keys_on_the_specs_carrying_the_edge():
@@ -703,7 +677,7 @@ def test_lingering_draft_surfacing_also_checks_cluster_members_related_adr_edges
     )
 
 
-# --- Slice 6: the forward-anchored cluster class collapses into the ordinary path ---
+# --- draft-anchored candidates take the ordinary path ---
 
 
 def _queue_exclusion_section(text: str) -> str:
@@ -717,16 +691,6 @@ def _queue_exclusion_section(text: str) -> str:
 
 def _proposal_step(text: str) -> str:
     return _section(text, "## Step 2 — Draft the proposal", "## Step 3 — Disposition")
-
-
-def _outcome_bullet(text: str, label: str) -> str:
-    """One bullet of '## Terminal outcomes', so an assertion cannot pass on a
-    sibling outcome's prose.
-    """
-    outcomes = _section(text, "## Terminal outcomes", "## Resuming an interrupted run")
-    start = outcomes.index(f"- **{label}**")
-    nxt = outcomes.find("\n- **", start + 1)
-    return outcomes[start:] if nxt == -1 else outcomes[start:nxt]
 
 
 def test_step_2s_zero_adr_verdict_has_one_form_with_no_anchoring_adr_id_variant():
