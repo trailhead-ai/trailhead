@@ -165,6 +165,25 @@ def test_group_toml_path_formula_uses_camp_config_dir_convention():
     )
 
 
+def test_group_name_shape_checked_before_substitution_into_group_toml_path():
+    _pin(
+        "Validate the group name against the safe-value shape step 1 states "
+        "(`^[A-Za-z0-9._/-]+$`) before substituting it below",
+        "The group name read from manifest.json is substituted straight into a "
+        "filesystem path — it must be shape-checked first, matching every other "
+        "substitution site in this ritual, rather than skipped as the one exception.",
+    )
+
+
+def test_group_name_shape_check_refuses_rather_than_substituting_on_mismatch():
+    _pin(
+        "A value that fails the shape check is never substituted; refuse loudly "
+        "and stop",
+        "A group name failing the shape check must produce a loud refusal, "
+        "matching step 1's own refuse-loudly rule, not a silent substitution.",
+    )
+
+
 # --- the outcome file's parent directory is pre-created before dispatching monitor ------
 
 

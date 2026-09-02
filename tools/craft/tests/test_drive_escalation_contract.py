@@ -118,12 +118,30 @@ def test_escalation_body_runs_through_the_credential_scrub():
     )
 
 
-def test_escalation_body_is_evidence_from_a_failed_build():
+def test_escalation_body_cites_phase_5_summarized_never_verbatim_rule():
     _pin(
-        "this body is evidence gathered from a failed build (worker output, "
-        "CI text, error detail)",
-        "The scrub rationale must name what kind of text the body carries — "
-        "evidence a failed build produced — not merely gesture at 'the body'.",
+        "`$BODY` is bound by the same rule Phase 5 states for any record body",
+        "The escalation body must be bound by Phase 5's summarized-never-verbatim "
+        "rule for record bodies, cited rather than restated, so evidence gathered "
+        "from a failed build is never captured near-verbatim.",
+    )
+
+
+def test_escalation_body_names_pointers_not_pasted_output():
+    _pin(
+        "so it names pointers into the failed build's worker output or CI text "
+        "rather than pasting them in",
+        "The escalation body must name pointers into a failed build's worker "
+        "output or CI text, not paste that output in near-verbatim.",
+    )
+
+
+def test_escalation_scrub_is_second_line_of_defense_not_the_only_one():
+    _pin(
+        "the scrub is the second line of defense against a stray secret "
+        "surviving into a pointer, never a license to paste verbatim output",
+        "The credential scrub must be framed as the second line of defense on "
+        "the escalation body, not the sole safeguard licensing verbatim capture.",
     )
 
 

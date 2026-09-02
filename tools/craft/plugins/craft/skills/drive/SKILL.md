@@ -226,7 +226,7 @@ Outcome file: <outcome-file-path>
 
 Once step 9 returns `DONE`, hand the branch to portage from this session itself — never nested inside `craft:driver-worker` or any other subagent, which would lose the notification channel the same way a nested background dispatch would anywhere else in this ritual. The driver's responsibility ends at green: it maps portage's terminal tokens and hands off; it never merges, never orders a merge, and never reverts.
 
-**Derive `group_toml_path` from camp's own group config, never from a ranger artifact.** Read `manifest.json` at the derived camp workspace root again here — a resume re-entering directly at this phase skips step 5 entirely, so step 10 does not assume that read already happened this run — and take the group name from its `group` field; the group's TOML config lives where `camp group <name>` itself writes it — `config_dir("camp")/groups/<group>.toml` (`trailhead/paths.py`'s `config_dir`, mirrored by `camp`'s own `_groups_dir()` helper). Compute it from that same convention, honoring the per-app override before the XDG default before the plain fallback:
+**Derive `group_toml_path` from camp's own group config, never from a ranger artifact.** Read `manifest.json` at the derived camp workspace root again here — a resume re-entering directly at this phase skips step 5 entirely, so step 10 does not assume that read already happened this run — and take the group name from its `group` field; the group's TOML config lives where `camp group <name>` itself writes it — `config_dir("camp")/groups/<group>.toml` (`trailhead/paths.py`'s `config_dir`, mirrored by `camp`'s own `_groups_dir()` helper). Validate the group name against the safe-value shape step 1 states (`^[A-Za-z0-9._/-]+$`) before substituting it below — the group name is file-sourced rather than vault-sourced, but step 1's rule governs every substitution site in this ritual, not only vault-sourced ones. A value that fails the shape check is never substituted; refuse loudly and stop, matching step 1's own refusal, rather than silently building a `GROUP_TOML_PATH` that resolves to nowhere camp actually manages. Compute it from that same convention, honoring the per-app override before the XDG default before the plain fallback:
 
 ```sh
 GROUP_TOML_PATH="${CAMP_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/camp}/groups/<group>.toml"
@@ -330,8 +330,7 @@ policy, or wherever the judgment call belongs), never a drafted disposition or a
 verdict. **The driver never authors the operator's judgment for them** — it gathers the evidence
 and points at where the decision gets made, and stops there.
 
-Run `$BODY` through the credential-pattern scrub before this write — this body is evidence gathered from a failed build (worker output, CI text, error detail), and the vault is git-backed and syncs to the whole team, so a key pasted verbatim as evidence ships as surely as a committed
-one — exactly like the `## Driver run` checkpoint block above
+`$BODY` is bound by the same rule Phase 5 states for any record body (`_shared/execute.md`, [Phase 5](../_shared/execute.md#phase-5-flow-out)) — so it names pointers into the failed build's worker output or CI text rather than pasting them in. Run `$BODY` through the credential-pattern scrub before this write regardless: the scrub is the second line of defense against a stray secret surviving into a pointer, never a license to paste verbatim output because the scrub will catch it — exactly like the `## Driver run` checkpoint block above
 (`_shared/execute.md`, [Phase 5](../_shared/execute.md#phase-5-flow-out)).
 
 ### Pushing work in flight
