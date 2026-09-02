@@ -19,9 +19,9 @@ Take a `ready` spec through one single-repo slice end to end: choose, plan, buil
 portage — then stop at the slice boundary and report. The driver resolves nothing it is not
 already the owner of; anything it does not own escalates rather than getting a guess.
 
-**This skill currently ships the entry point, the selection phase, the plan phase, the build
-phase, and the PR tail.** Slice close itself is a later task against this same file — the PR
-tail below names that outcome and defers its mechanics, not invented behavior.
+**This skill ships the entry point, the selection phase, the plan phase, the build phase, the
+PR tail, and the slice close.** The PR tail below names a closing outcome and defers the close
+mechanics to step 11, which marks the slice parent `done` and stops at the slice boundary.
 
 ## Argument
 
@@ -121,7 +121,7 @@ Each of the five boundaries below writes this block before the driver moves past
 - **plan** — once the plan phase (steps 7–8 below) completes with no council Critical surviving synthesis, write the block recording `**Phase:** plan`.
 - **build** — once `craft:driver-worker`'s dispatch (step 9 below) returns `DONE`, write the block recording `**Phase:** build`.
 - **pr-tail** — once the PR tail phase (step 10 below) maps portage's outcome, write the block recording `**Phase:** pr-tail`.
-- **slice-close** — once the slice is closed out (a later task against this same file), write the block recording `**Phase:** slice-close`.
+- **slice-close** — once the slice is closed out at step 11 below, write the block recording `**Phase:** slice-close`.
 
 ### 5. Refuse a slice spanning more than one repo
 
@@ -236,6 +236,26 @@ Then dispatch `monitor` **in the background, from this top-level session** — n
 
 For every branch above that closes the slice, this phase names that outcome and defers the close mechanics to slice close, a later task against this same file — matching how earlier phases deferred to this one. Once the mapping resolves, write the `## Driver run` checkpoint block recording `**Phase:** pr-tail` before the slice-close mechanics run, so a crash in the tail does not resume as a crash before the build.
 
+### 11. Close the slice and stop at the boundary
+
+Once step 10 maps a closing outcome — `MERGED`, `READY <reason>`, or `STOPPED auto_merge disabled` — close the slice. Mark the slice parent `done`:
+
+```sh
+lore record update task/<slice-parent-name> --status done --vault <elected-vault>
+```
+
+**This close writes exactly two things onto the vault: the parent's `done` status and the final `## Driver run` checkpoint** — nothing else, and certainly no `## Slices` ledger line. The next time `../slice/SKILL.md`'s procedure runs against this spec — the operator's own re-entry, or a later drive run — its step 4 ledger reconcile queries every linked slice at `done` and appends the line this closed slice is owed; the driver writes no `## Slices` line itself; that append is the slice ritual's own work on its next pass, never the driver's. Two writers of one ledger section is exactly how it ends up with duplicated or conflicting entries.
+
+Per 4.5 above, write the final `## Driver run` checkpoint block recording `**Phase:** slice-close`. This is the last checkpoint this run writes: 4.5's resume table above already treats a block recording `slice-close` as a finished run with no phase after it to resume into, so a fresh session invoked against this slice parent reports the slice already closed rather than rebuilding it.
+
+Then stop. Report, in the same session:
+
+- the slice's value claim, already stated when the slice was chosen at step 6;
+- what shipped — the branch or PR reference named by whichever closing token step 10 mapped;
+- the fully formed command to re-enter — e.g. `/craft:drive spec/streaming-export`, with this run's own resolved spec name substituted in, never the literal `<spec-name>` template text.
+
+Re-entry is the operator's act: the driver does not invoke `/craft:slice` or `/craft:drive` again on its own initiative, and does not cross this boundary itself. Running the command above re-enters this ritual at step 1; if the spec still carries further acceptance criteria, the fresh run's own step 4 is what chooses the next slice — this run does not choose it.
+
 ## Escalation
 
 Every escalation this ritual can raise — the four above and any a later task against this same
@@ -325,10 +345,11 @@ This mirrors what the slice close already commits to at its own early-stop repor
 
 On a chosen slice that clears the single-repo check, report the slice, its value claim, and the
 parent task id, then the plan phase's own outcome, the build phase's own outcome, and the PR
-tail's own outcome — a `DONE` build advancing into the PR tail, which then either names the
-slice closed (`MERGED`, `READY <reason>`, or `STOPPED auto_merge disabled`) or escalates under
-`portage-blocked`, `portage-stopped`, or `portage-tail-stalled` — or a `plan-critical` /
-`worker-stalled` escalation earlier in the run. On spec complete or early stop, report exactly as
-`../slice/SKILL.md` would and stop — the driver has no further action to take. On a multi-repo
-escalation, report the escalation and the `multi-repo-slice` trigger and stop, following the
-escalation contract above.
+tail's own outcome — a `DONE` build advancing into the PR tail, which then either escalates under
+`portage-blocked`, `portage-stopped`, or `portage-tail-stalled`, or closes the slice
+(`MERGED`, `READY <reason>`, or `STOPPED auto_merge disabled`) and advances into step 11's close,
+which reports the value claim, what shipped, and the fully formed re-entry command, then halts —
+or a `plan-critical` / `worker-stalled` escalation earlier in the run. On spec complete or early
+stop, report exactly as `../slice/SKILL.md` would and stop — the driver has no further action to
+take. On a multi-repo escalation, report the escalation and the `multi-repo-slice` trigger and
+stop, following the escalation contract above.
