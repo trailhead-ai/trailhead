@@ -83,6 +83,27 @@ def test_updater_dispatched_synchronously_first():
     )
 
 
+# --- updater is dispatched in `create` mode, the mode that actually opens a PR ----------
+
+
+def test_updater_dispatched_with_create_mode():
+    _pin(
+        "passing `mode: create`",
+        "The build phase's own close pushes a branch but opens no PR, so the PR "
+        "tail must dispatch updater with `mode: create` — the mode that opens "
+        "one — never `mode: update`, which requires a PR to already exist.",
+    )
+
+
+def test_create_mode_chosen_because_it_opens_the_pr_not_because_unpushed():
+    _pin(
+        "`create` is selected because it is the mode that opens the PR, not "
+        "because the branch is unpushed",
+        "The ritual must state why `create` is correct even though the branch "
+        "may already be pushed by the build phase's own close.",
+    )
+
+
 # --- the driver never merges, orders a merge, or reverts --------------------------------
 
 

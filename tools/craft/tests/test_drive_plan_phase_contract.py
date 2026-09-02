@@ -225,6 +225,82 @@ def test_escalation_names_pointer_to_plan_records_council_section():
     )
 
 
+# --- contract item 6a: the driver persists its own council findings before escalating ----
+# --- so the pointer above resolves to something written, not an empty section ------------
+
+
+def test_driver_persists_council_review_section_before_escalating():
+    _pin(
+        "Append a `## Council Review` section to the slice parent",
+        "The driver must write its own `## Council Review` section onto the "
+        "plan record so the plan-critical escalation's pointer resolves to "
+        "something, since nothing else in the driver's flow writes it.",
+    )
+
+
+def test_persisted_section_written_regardless_of_outcome():
+    _pin(
+        "Write it whether or not a Critical survives synthesis",
+        "The persisted section must be written on every council run, not only "
+        "when a Critical escalates, matching plan/SKILL.md's own persistence "
+        "rule.",
+    )
+
+
+def test_persisted_schema_mirrors_plan_skill_step_8_5():
+    _pin(
+        "mirroring the schema `plan/SKILL.md` defines at its own step 8.5",
+        "The persisted `## Council Review` section must mirror the schema "
+        "plan/SKILL.md's own step 8.5 defines, so one section shape exists in "
+        "the vault, not two.",
+    )
+
+
+def test_persisted_schema_cites_plan_skill_line_range():
+    _pin(
+        "(`plan/SKILL.md:328-347`)",
+        "The schema reference must cite the exact line range plan/SKILL.md "
+        "defines it at.",
+    )
+
+
+def test_persisted_section_is_one_line_per_finding_grouped_by_severity():
+    _pin(
+        "then `*Critical:*`, `*Important:*`, and `*Minor:*` lists, one line "
+        "per finding, grouped by severity",
+        "The persisted section must state the one-line-per-finding, "
+        "grouped-by-severity shape explicitly.",
+    )
+
+
+def test_persisted_section_carries_no_disposition_text():
+    _pin(
+        "The driver writes the findings only: no disposition text for any "
+        "Critical, since disposition is an operator judgment it does not make",
+        "The persistence step must state explicitly that the driver writes no "
+        "disposition text — the disposition boundary does not move.",
+    )
+
+
+def test_persisted_write_appends_via_diff_not_replace():
+    _pin(
+        "piping a unified diff the same way the `## Driver run` checkpoint "
+        "does — bare stdin would replace the whole record body",
+        "The persisted section must be appended via a unified diff, never a "
+        "bare-stdin full-body replace.",
+    )
+
+
+def test_persisted_write_runs_through_the_credential_scrub():
+    _pin(
+        "run the section's text through the credential-pattern scrub before "
+        "it is written",
+        "The persisted `## Council Review` write must run through the "
+        "credential-pattern scrub like every other record-body write in this "
+        "ritual.",
+    )
+
+
 # --- contract item 7: the driver authors no disposition reason in any path ---------------
 # --- (absence-shaped: pinned as the positive statement, not a forbidden-word check) -------
 

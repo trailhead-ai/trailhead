@@ -193,3 +193,35 @@ def test_credential_scrub_references_shared_execute_phase_5():
         "The scrub reference must point at `_shared/execute.md`'s Phase 5 "
         "definition rather than restating the regex list here.",
     )
+
+
+# --- contract item 7: the resume check runs before the slice ritual, not after ---------
+
+
+def test_resume_check_runs_before_the_slice_ritual_is_invoked():
+    _pin(
+        "This check runs before the slice ritual below is ever invoked, not after",
+        "The resume check must be stated to run before the slice ritual, since "
+        "`../slice/SKILL.md`'s own guard refuses on a non-terminal slice parent "
+        "and every resume has exactly that.",
+    )
+
+
+def test_unconditional_slice_ritual_on_resume_is_named_as_the_failure_mode():
+    _pin(
+        "Running the slice ritual unconditionally on every entry, resume "
+        "included, would hit that refusal and die before this checkpoint was "
+        "ever read.",
+        "The ritual must state explicitly why running the slice ritual "
+        "unconditionally on a resume is a bug, not merely reorder the steps "
+        "silently.",
+    )
+
+
+def test_slice_selection_only_runs_when_no_open_slice_to_resume():
+    _pin(
+        "Only run the slice selection below when there is no open slice parent "
+        "to resume against.",
+        "The slice ritual must run only when the resume check above found no "
+        "open slice parent to resume.",
+    )
