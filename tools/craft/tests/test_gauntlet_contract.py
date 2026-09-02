@@ -550,6 +550,30 @@ def test_gauntlet_subject_matches_the_single_row_council_offers_it():
     )
 
 
+# Each "Use" cell in the subject-selection table either names a bar block
+# by its own heading ("**Per-lens Critical bars — spec review**") or defers to
+# one already named in an earlier row ("The plan bars..."). Only the
+# heading-naming cells make a claim this test can check.
+_TABLE_BAR_SECTION_RE = re.compile(r"\*\*(Per-lens Critical bars(?: — [^*]+)?)\*\*")
+
+
+def test_every_subject_selection_row_resolves_to_a_bar_section_that_exists():
+    """Every bar-block name the subject-selection table cites must resolve to
+    a `## <name>` heading that actually exists in this document — so the
+    amputation cannot leave a row pointing at a deleted section.
+    """
+    text = SHARED_COUNCIL.read_text()
+    table = _section(text, "## Per-lens Critical bars\n", "\n\nThe sets are")
+    names = _TABLE_BAR_SECTION_RE.findall(table)
+    assert names, "expected the subject-selection table to name at least one bar section"
+    for name in names:
+        heading = f"## {name}"
+        assert heading in text, (
+            f"_shared/council.md's subject-selection table names {name!r} but no "
+            f"{heading!r} heading exists in the document"
+        )
+
+
 # --- the sole route to active: distill's create, never a gauntlet-authored flip ---
 
 # Mirrors `_SPEC_ADVANCE_RE`: a literal substring only catches the one exact
@@ -626,18 +650,6 @@ def test_the_only_route_any_adr_takes_to_active_is_distills_write_order_step_1()
         "the sole route to `active` on an adr must be a `lore record create` "
         f"invocation (distill's write-order step 1), found: {only_line!r}"
     )
-
-
-def test_adr_review_bars_live_in_shared_council():
-    text = SHARED_COUNCIL.read_text()
-    assert "Per-lens Critical bars — adr review" in text, (
-        "_shared/council.md must carry the adr-review bar set for the gauntlet's "
-        "adr-mode lens pass"
-    )
-    for lens in ("*Builder — adr review:*", "*Reliability — adr review:*",
-                 "*Security — adr review:*", "*Advocate — adr review:*"):
-        assert lens in text, f"_shared/council.md missing the {lens!r} bar block"
-
 
 
 # --- resolution: one compact recommendation, accepted or overridden ---
@@ -1984,7 +1996,7 @@ def test_calibration_names_only_adjudication_work_the_steps_still_define():
 
 
 def test_no_craft_prose_carries_the_discarded_reframed_disposition():
-    """`reframed` is gone from the disposition vocabulary in both gauntlet modes.
+    """`reframed` is gone from the gauntlet's disposition vocabulary.
 
     Swept over every craft prose file, not just the four sibling files named in
     the task — a scoped grep would miss a sibling `_craft_prose_files()` was
