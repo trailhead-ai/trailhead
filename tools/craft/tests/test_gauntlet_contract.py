@@ -387,6 +387,130 @@ def test_gauntlet_selects_spec_bars_not_plan_bars():
     )
 
 
+# --- single review subject ---
+#
+# The gauntlet is meant to review exactly one kind of record. Each pin below
+# derives what the documents actually claim — from the gauntlet's own
+# front-matter description, from its own body, and from the shared council
+# document's subject-selection table — and asserts a single subject, rather
+# than hard-coding an expectation about prose that hasn't been written yet.
+# Each fails today for its own stated reason (two subjects / two pass counts /
+# two council rows), not on an import error or an empty match.
+
+_FRONT_MATTER_RE = re.compile(r"^---\n(.*?)\n---", re.S)
+
+# "draft spec" / "draft adr" is the phrasing gauntlet's own front-matter uses to
+# name what it reviews — matched as a regex so the derived subject set tracks
+# whatever the document actually says, not an assumption about it.
+_DRAFT_SUBJECT_RE = re.compile(r"\bdraft (spec|adr)\b")
+
+
+def _front_matter(text: str) -> str:
+    match = _FRONT_MATTER_RE.search(text)
+    assert match, "gauntlet/SKILL.md must open with a YAML front-matter block"
+    return match.group(1)
+
+
+def test_gauntlet_names_exactly_one_review_subject():
+    """The skill's own front-matter `description` names one record kind under review.
+
+    Derived from the text, not hard-coded: every `draft <kind>` the description
+    names is a subject the gauntlet claims to review.
+    """
+    description = _front_matter(GAUNTLET.read_text())
+    subjects = set(_DRAFT_SUBJECT_RE.findall(description))
+    assert subjects == {"spec"}, (
+        "gauntlet/SKILL.md's front-matter description must name exactly one "
+        f"review subject, {{'spec'}} — found {subjects}"
+    )
+
+
+# A roster is declared by a heading naming a pass count — e.g. "Dispatch the
+# eight passes" or "The adapted roster — 7 passes". Matched by heading shape,
+# not by two named headings, so a rename doesn't silently escape the guard.
+_ROSTER_HEADING_RE = re.compile(
+    r"^#{2,3}.*\b(eight|seven|six|five|four|three|nine|ten|\d+)\s+passes\b",
+    re.I | re.M,
+)
+
+_NUMBER_WORDS = {
+    "three": 3,
+    "four": 4,
+    "five": 5,
+    "six": 6,
+    "seven": 7,
+    "eight": 8,
+    "nine": 9,
+    "ten": 10,
+}
+
+
+def _roster_table_pass_count(text: str, start: int) -> int:
+    """Count the passes listed in the roster table following *start*.
+
+    Rows are numbered `1`, `2`, ... or a range like `3–6`; a range counts every
+    number it spans, not one row.
+    """
+    table_start = text.index("| #", start)
+    table_end = text.index("\n\n", table_start)
+    total = 0
+    for line in text[table_start:table_end].splitlines():
+        if not line.startswith("|"):
+            continue
+        cell = line.split("|")[1].strip()
+        m = re.match(r"^(\d+)(?:[–-](\d+))?$", cell)
+        if m:
+            lo, hi = int(m.group(1)), int(m.group(2) or m.group(1))
+            total += hi - lo + 1
+    return total
+
+
+def test_gauntlet_states_one_roster_with_one_pass_count():
+    """One roster, its pass count stated once, matching what its table lists."""
+    text = GAUNTLET.read_text()
+    headings = list(_ROSTER_HEADING_RE.finditer(text))
+    assert len(headings) == 1, (
+        "gauntlet/SKILL.md must declare exactly one pass roster — found "
+        f"{len(headings)} headings naming a pass count: "
+        f"{[h.group(0).strip() for h in headings]}"
+    )
+    heading = headings[0]
+    number = heading.group(1)
+    stated = _NUMBER_WORDS[number.lower()] if number.isalpha() else int(number)
+    actual = _roster_table_pass_count(text, heading.start())
+    assert stated == actual, (
+        f"gauntlet/SKILL.md's {heading.group(0)!r} states {stated} passes but its "
+        f"roster table lists {actual}"
+    )
+
+
+# A council row offers the gauntlet lens pass its subject: "A draft spec
+# (`gauntlet` lens pass)" today, plus an adr row before amputation. Matched by
+# row shape (subject cell + a `gauntlet` mention), not by two named rows.
+_COUNCIL_GAUNTLET_ROW_RE = re.compile(r"^\|\s*A draft (spec|adr)[^|]*gauntlet[^|]*\|", re.M)
+
+
+def test_gauntlet_subject_matches_the_single_row_council_offers_it():
+    """The subject council's table offers the `gauntlet` lens pass is the same
+    single subject the gauntlet skill itself declares — a chain pin across the
+    two documents, not two presence checks run in isolation.
+    """
+    council_text = SHARED_COUNCIL.read_text()
+    rows = _COUNCIL_GAUNTLET_ROW_RE.findall(council_text)
+    assert len(rows) == 1, (
+        "_shared/council.md's subject-selection table must offer the `gauntlet` "
+        f"lens pass exactly one row, found {len(rows)}: {rows}"
+    )
+    council_subject = rows[0]
+
+    gauntlet_subjects = set(_DRAFT_SUBJECT_RE.findall(_front_matter(GAUNTLET.read_text())))
+    assert gauntlet_subjects == {council_subject}, (
+        f"gauntlet/SKILL.md's declared review subject(s) {gauntlet_subjects} must "
+        f"equal the single subject {council_subject!r} the council table offers "
+        "its lens pass"
+    )
+
+
 # --- adr mode: adapted roster, direct advance, annotation-borne provenance ---
 
 # The `## Reviewing an adr` heading scopes the adr-specific checks below to just
@@ -456,50 +580,48 @@ def _adr_mode_section(text: str) -> str:
     )
 
 
-def test_gauntlet_never_flips_an_adr_active():
-    """The gauntlet does not own any part of the draft -> active edge.
-
-    Distill creates ADRs `--status active` at authorship (write-order step 1) —
-    there is no later update-based flip for any file to race. A `--status
-    active` invocation anywhere in the gauntlet skill is the old route back.
-    """
-    assert not _ADR_ADVANCE_RE.search(GAUNTLET.read_text()), (
-        "gauntlet/SKILL.md must not carry `lore record update <adr-id> --status "
-        "active` in either mode — the gauntlet never advances an adr past `draft`"
-    )
+# The union of both known routes to `active` on an adr: the create (write-order
+# step 1) and the old update-based flip. Matching both in one pattern means a
+# stray copy of *either* shape anywhere in craft's prose is caught by the same
+# pin — the widened pin below subsumes the old absence-only "gauntlet never
+# flips an adr active" test, whose subject was that the update route was gone;
+# this states the positive claim that test was standing in for: the only route
+# to `active`, full stop, is distill's create.
+_ADR_TO_ACTIVE_RE = re.compile(_ADR_ADVANCE_RE.pattern + "|" + _ADR_CREATE_RE.pattern)
 
 
-def test_the_adr_create_pattern_occurs_exactly_once_and_it_is_distills_write_order_step_1():
-    """`--status active` on an adr create occurs exactly once across craft's prose,
-    and that one occurrence is distill's write-order step 1.
+def test_the_only_route_any_adr_takes_to_active_is_distills_write_order_step_1():
+    """Every way any craft file could put an adr at `active` narrows to one line:
+    distill's `lore record create ... --kind adr --status active` at write-order
+    step 1.
 
     Distill creates ADRs `--status active` at authorship — that create is the
     *only* route to `active` any craft file carries; there is no later
-    update-based flip for a second file to duplicate. A second occurrence
-    anywhere (distill included) would mean either a competing create path or a
-    stray copy of the pattern outside step 1 — both are the old, deleted
-    activate-on-completion mechanism creeping back.
+    update-based flip for a second file to duplicate or race. A second hit
+    anywhere (distill included), of either the create shape or the old
+    update-flip shape, means the old activate-on-completion mechanism (or a
+    competing create path) has crept back.
     """
     hits: list[tuple[Path, str]] = []
     for p in _craft_prose_files():
         for line in p.read_text().splitlines():
-            if _ADR_CREATE_RE.search(line):
+            if _ADR_TO_ACTIVE_RE.search(line):
                 hits.append((p, line.strip()))
 
     assert len(hits) == 1, (
-        "the adr create pattern `--kind adr --status active` must occur exactly "
-        f"once across craft's prose files, found {len(hits)}: "
+        "an adr must reach `active` by exactly one route across craft's prose "
+        f"files, found {len(hits)}: "
         f"{[(str(p.relative_to(CRAFT)), line) for p, line in hits]}"
     )
 
     [(only_file, only_line)] = hits
     assert only_file == DISTILL, (
-        "the sole adr create occurrence must be in distill/SKILL.md, found it in "
-        f"{only_file.relative_to(CRAFT)}"
+        "the sole route to `active` on an adr must be in distill/SKILL.md, found "
+        f"it in {only_file.relative_to(CRAFT)}"
     )
     assert "lore record create" in only_line, (
-        "the sole adr create occurrence must be a `lore record create` invocation "
-        f"(distill's write-order step 1), found: {only_line!r}"
+        "the sole route to `active` on an adr must be a `lore record create` "
+        f"invocation (distill's write-order step 1), found: {only_line!r}"
     )
 
 
