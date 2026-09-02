@@ -169,7 +169,7 @@ Run the Planning Phase of your procedure against this slice parent, on its slice
 Do not write a summary, a file list, or anything else to the outcome file — one line, nothing else. Your reply is never read as the result of this run.
 ```
 
-Read the plan result from the outcome file above, never from the agent's reply — a subagent's reply is not a usable result channel, the same rule the build phase's own worker channel already follows. A `BLOCKED` or `NEEDS_CONTEXT` line stops the driver here and is reported in-session verbatim; wiring either into the escalation contract's typed vocabulary is out of this task's scope — only a council Critical, surfaced below, escalates through it. A `PLANNED <slice-parent-task-id>` line advances into the council review below.
+Read the plan result from the outcome file above, never from the agent's reply — a subagent's reply is not a usable result channel, the same rule the build phase's own worker channel already follows. A `BLOCKED` or `NEEDS_CONTEXT` line escalates under the `agent-blocked` trigger, following the escalation contract below — `craft:planner` failed to produce a usable result, and this stop writes the same record every other escalation site writes rather than halting on an in-session report alone. A `PLANNED <slice-parent-task-id>` line advances into the council review below.
 
 ### 8. Run the council review
 
@@ -185,11 +185,15 @@ The driver is the synthesizer, in session, never a subagent — de-duplicating b
 
 ## Escalation
 
-Every escalation this ritual can raise — the three above and any a later task against this same
+Every escalation this ritual can raise — the four above and any a later task against this same
 file adds — follows one contract, defined here once so no escalation site restates it.
 **No retries: the first escalation from any phase ends the run.** On escalation the driver does
 not retry the phase, does not try a different approach, and does not continue into a later
 phase — it writes the escalation record, pushes work in flight, reports in-session, and stops.
+**No stop path in this ritual halts without writing this record.** A stop that leaves no typed
+record behind is a defect regardless of which phase produced it — every dispatch-failure stop
+above names a trigger from this vocabulary and follows the contract below, and the same is true
+of any dispatch-failure stop a later phase adds.
 
 ### The trigger vocabulary
 
@@ -201,6 +205,8 @@ of these, never free text:
   dispatch the build phase onto (step 4.5 above).
 - **`plan-critical`** — the plan phase's council review (step 8 above) surfaces a Critical the
   operator has not dispositioned.
+- **`agent-blocked`** — a dispatched agent returns `BLOCKED` or `NEEDS_CONTEXT` instead of a
+  usable result (the plan phase's `craft:planner` dispatch at step 7 above).
 - **`worker-stalled`** — the build dispatch (a later task against this same file) passes its
   liveness deadline with no progress signal.
 

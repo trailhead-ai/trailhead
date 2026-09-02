@@ -175,7 +175,13 @@ def test_work_in_flight_is_pushed_as_a_draft_pr():
 # --- contract item 5: the trigger vocabulary is declared and every path names one ------
 
 
-_DECLARED_TRIGGERS = ["multi-repo-slice", "build-resume-dirty-branch", "plan-critical", "worker-stalled"]
+_DECLARED_TRIGGERS = [
+    "multi-repo-slice",
+    "build-resume-dirty-branch",
+    "plan-critical",
+    "worker-stalled",
+    "agent-blocked",
+]
 
 
 @pytest.mark.parametrize("trigger", _DECLARED_TRIGGERS)
@@ -201,6 +207,17 @@ def test_vocabulary_additions_are_not_speculative():
     )
 
 
+# --- contract item 9: no stop path halts without writing the escalation record --------
+
+
+def test_no_stop_path_halts_without_writing_a_record():
+    _pin(
+        "No stop path in this ritual halts without writing this record.",
+        "The escalation contract must state the general rule that no stop path "
+        "halts without writing a typed record, regardless of which phase produced it.",
+    )
+
+
 #: One test node per existing escalation *site* in the ritual text — not one test
 #: covering the vocabulary as a whole — so that removing the trigger name from a
 #: single site fails only that site's node, proving each pin is independently load-
@@ -208,6 +225,8 @@ def test_vocabulary_additions_are_not_speculative():
 _ESCALATION_SITES = {
     "multi-repo-slice": "Escalate with the `multi-repo-slice`",
     "build-resume-dirty-branch": "Escalate instead, under the `build-resume-dirty-branch` trigger",
+    "plan-critical": "is an escalation under the `plan-critical` trigger, following the escalation contract below",
+    "agent-blocked": "escalates under the `agent-blocked` trigger, following the escalation contract below",
 }
 
 
