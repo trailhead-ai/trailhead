@@ -109,15 +109,6 @@ _DISPOSITION_NAMES: list[str] = [
     "answered",
 ]
 
-# The subset of `_DISPOSITION_NAMES` that gets its own slot in the adr counts
-# annotation. `answered` is excluded on purpose: it is not a final disposition and
-# "contributes no term of its own to the grammar" (SKILL.md's provenance-stamp
-# rule) — it counts under whichever of `resolved` / `revise` it is re-adjudicated
-# to, plus an operator-override marker, never under its own name.
-_FINAL_DISPOSITION_NAMES: list[str] = [
-    name for name in _DISPOSITION_NAMES if name != "answered"
-]
-
 
 def test_gauntlet_skill_ships():
     assert GAUNTLET.exists(), f"Expected gauntlet/SKILL.md in {SKILLS_DIR}"
@@ -428,13 +419,12 @@ def test_gauntlet_selects_spec_bars_not_plan_bars():
 
 # --- single review subject ---
 #
-# The gauntlet is meant to review exactly one kind of record. Each pin below
-# derives what the documents actually claim — from the gauntlet's own
-# front-matter description, from its own body, and from the shared council
-# document's subject-selection table — and asserts a single subject, rather
-# than hard-coding an expectation about prose that hasn't been written yet.
-# Each fails today for its own stated reason (two subjects / two pass counts /
-# two council rows), not on an import error or an empty match.
+# The gauntlet reviews exactly one kind of record. Each pin below derives what
+# the documents actually claim — from the gauntlet's own front-matter
+# description, from its own body, and from the shared council document's
+# subject-selection table — and asserts a single subject. Deriving rather than
+# hard-coding is what makes the pins fire: a second subject, a second roster, or
+# a second council row shows up as a count that no longer equals one.
 
 _FRONT_MATTER_RE = re.compile(r"^---\n(.*?)\n---", re.S)
 
@@ -524,8 +514,9 @@ def test_gauntlet_states_one_roster_with_one_pass_count():
 
 
 # A council row offers the gauntlet lens pass its subject: "A draft spec
-# (`gauntlet` lens pass)" today, plus an adr row before amputation. Matched by
-# row shape (subject cell + a `gauntlet` mention), not by two named rows.
+# (`gauntlet` lens pass)". Matched by row shape (subject cell + a `gauntlet`
+# mention) rather than by a named row, so a second subject row is counted, not
+# skipped.
 _COUNCIL_GAUNTLET_ROW_RE = re.compile(r"^\|\s*A draft (spec|adr)[^|]*gauntlet[^|]*\|", re.M)
 
 
@@ -559,8 +550,8 @@ _TABLE_BAR_SECTION_RE = re.compile(r"\*\*(Per-lens Critical bars(?: — [^*]+)?)
 
 def test_every_subject_selection_row_resolves_to_a_bar_section_that_exists():
     """Every bar-block name the subject-selection table cites must resolve to
-    a `## <name>` heading that actually exists in this document — so the
-    amputation cannot leave a row pointing at a deleted section.
+    a `## <name>` heading that actually exists in this document — a row may not
+    point at a section the document does not carry.
     """
     text = SHARED_COUNCIL.read_text()
     table = _section(text, "## Per-lens Critical bars\n", "\n\nThe sets are")
@@ -656,8 +647,8 @@ def test_the_only_route_any_adr_takes_to_active_is_distills_write_order_step_1()
 
 # The resolution step is the only gauntlet output an operator acts on, so its shape
 # is behavior. Anchored on the heading so most checks below can be scoped to the
-# step: a phrase that happens to appear in the adr-mode section must not satisfy a
-# pin about the shared resolution step.
+# step: a phrase that happens to appear elsewhere in the file must not satisfy a
+# pin about the resolution step.
 RESOLUTION_HEADER = "### 5. Recommend, then accept"
 
 # The seam between deciding and writing. Named as its own subsection so the two
@@ -1205,9 +1196,6 @@ def test_advancing_may_not_be_evaluated_while_a_critical_remains_answered():
     )
 
 
-_GAUNTLET_STATUS_WRITE_RE = re.compile(r"--status\s+(\w+)")
-
-
 def test_no_gauntlet_authored_write_sets_superseded_or_dropped():
     """No gauntlet outcome sets the reviewed spec to `superseded` or `dropped` —
     both statuses keep their existing (non-gauntlet) uses.
@@ -1222,9 +1210,7 @@ def test_no_gauntlet_authored_write_sets_superseded_or_dropped():
 # --- the discard route stays deleted in the SIBLING skills too ---
 
 # Files that describe the gauntlet from outside it. gauntlet/SKILL.md itself is
-# deliberately excluded: it has legitimate, separately-pinned uses of the
-# supersession vocabulary (the adr status vocab, the escalation table, and the
-# predecessor-supersession write), and its own outcome vocabulary is pinned by
+# deliberately excluded: its own outcome vocabulary is pinned directly by
 # `test_no_gauntlet_authored_write_sets_superseded_or_dropped` and
 # `test_revise_disposition_withholds_advance_rather_than_superseding`.
 _SIBLING_DESCRIBERS = (BRAINSTORM, DISTILL, PLAN, PLANNER, PREMISE_ATTACKER)
@@ -1300,23 +1286,6 @@ def test_the_planner_caveat_sends_the_operator_to_a_revise_round_not_a_successor
             f"the caveat must not claim {banned!r} — planning does not restart "
             "against a replacement spec, because no replacement is written"
         )
-
-
-# --- the skill description is loaded at trigger time and must not lie ---
-
-
-def _description_lead(text: str) -> str:
-    """The `description:` block's leading paragraph — everything before TRIGGER.
-
-    This is the text a harness loads into an agent's context when the skill
-    triggers, so a false promise here is read before any of the body is.
-    """
-    return _section(
-        text,
-        "description: >",
-        "TRIGGER when:",
-        why="gauntlet/SKILL.md must carry a frontmatter `description:` block",
-    )
 
 
 def test_security_criticals_are_exempt_from_compression():
@@ -1661,10 +1630,9 @@ SPEC_TAIL_HEADER = "### 6. Stamp and advance"
 
 _ATOMIC_WRITE = "a single `lore record update --diff` write"
 
-# The spec's half of the shared atomic write. The spec tail's `--diff` write
-# carries all three of its payloads — the accepted edits, the provenance stamp, and
-# the `## Gauntlet` detail section — so the spec mode needs its own command form and
-# its own pin, symmetric with the adr one above.
+# The spec tail's `--diff` write carries all three of its payloads — the accepted
+# edits, the provenance stamp, and the `## Gauntlet` detail section — so it needs
+# its own command form and its own pin, distinct from the shared tail's.
 _SPEC_EDITS_WRITE = "lore record update <spec-id> --diff"
 
 # The two treatments the persisted-detail path runs before either payload is
@@ -1684,9 +1652,9 @@ _EVIDENCE_MARKER = "retained review evidence"
 # saying the exact opposite would also contain.
 _EVIDENCE_CITATION_RULE = "cut down to a `file:line` citation"
 
-# What each per-mode tail must name to inherit the shared treatments. The tails
-# restate their own deltas and defer everything else upward, so a tail that defers
-# only sequence and failure behavior is a tail that writes unscrubbed text.
+# What the spec tail must name to inherit the shared treatments. The tail restates
+# its own deltas and defers everything else upward, so a tail that defers only
+# sequence and failure behavior is a tail that writes unscrubbed text.
 _PRE_WRITE_TREATMENTS = "pre-write scrub and marker"
 
 # Fragments of the scrub's own regex list. They belong to exactly one file; any of
@@ -1923,9 +1891,9 @@ def test_spec_tail_retains_full_detail_in_a_gauntlet_body_section():
 def test_spec_tail_applies_the_accepted_edits_in_the_same_atomic_write():
     """The spec tail enumerates what its one write carries; it must also SHOW it.
 
-    Symmetric with the adr tail's pin: a tail that names a `## Gauntlet` section
-    and a `--status ready` flip, and gives a command form only for the flip, is a
-    tail an agent can execute by flipping a spec whose accepted edits never landed.
+    A tail that names a `## Gauntlet` section and a `--status ready` flip, and
+    gives a command form only for the flip, is a tail an agent can execute by
+    flipping a spec whose accepted edits never landed.
     """
     tail = _spec_tail(GAUNTLET.read_text())
     edits_lines = [line for line in tail.splitlines() if _SPEC_EDITS_WRITE in line]
