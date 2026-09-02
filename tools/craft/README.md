@@ -37,7 +37,9 @@ conformance gate — plan delivered, executor's status claim holds, next task
 unblocked; quality and style are explicitly out of scope), `craft:simplifier`
 (whole-change simplify-mutation phase in execute's After All Tasks pipeline —
 removes cross-task duplication and dead scaffolding, write-scope mechanically
-enforced by `footprint_guard.py`)
+enforced by `footprint_guard.py`), `craft:driver-worker` (runs the shared
+execute procedure's unattended mode against a slice parent's child task graph,
+in its own context, on `/craft:drive`'s behalf)
 
 **Review:** `craft:code-reviewer` — whole-change/PR reviewer. Dispatched
 standalone via `/craft:review` before merge, and again as execute's

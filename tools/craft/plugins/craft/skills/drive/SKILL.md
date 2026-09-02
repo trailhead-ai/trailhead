@@ -19,9 +19,9 @@ Take a `ready` spec through one single-repo slice end to end: choose, plan, buil
 portage — then stop at the slice boundary and report. The driver resolves nothing it is not
 already the owner of; anything it does not own escalates rather than getting a guess.
 
-**This skill currently ships the entry point, the selection phase, and the plan phase.** Build
-and the PR tail are later tasks against this same file — a clean plan hands off to them below
-with a stated placeholder, not invented behavior.
+**This skill currently ships the entry point, the selection phase, the plan phase, and the
+build phase.** The PR tail is a later task against this same file — a clean build hands off
+to it below with a stated placeholder, not invented behavior.
 
 ## Argument
 
@@ -119,7 +119,7 @@ Each of the five boundaries below writes this block before the driver moves past
 
 - **select** — once the single-repo check at step 5 passes (or the multi-repo escalation fires), write the block recording `**Phase:** select` before reporting the outcome at step 6.
 - **plan** — once the plan phase (steps 7–8 below) completes with no council Critical surviving synthesis, write the block recording `**Phase:** plan`.
-- **build** — once the build phase (a later task against this same file) completes, write the block recording `**Phase:** build`.
+- **build** — once `craft:driver-worker`'s dispatch (step 9 below) returns `DONE`, write the block recording `**Phase:** build`.
 - **pr-tail** — once the PR tail phase (a later task against this same file) completes, write the block recording `**Phase:** pr-tail`.
 - **slice-close** — once the slice is closed out (a later task against this same file), write the block recording `**Phase:** slice-close`.
 
@@ -181,7 +181,31 @@ The driver is the synthesizer, in session, never a subagent — de-duplicating b
 
 **A council Critical escalates.** Any Critical surviving synthesis is an escalation under the `plan-critical` trigger, following the escalation contract below. Disposition is an operator judgment, the same as the gauntlet's operator-only dispositions, so the driver authors none of its own. The escalation names a pointer to where the Critical's own text lives — the plan record and its `## Council Review` section — never a drafted verdict or a recommended resolution.
 
-**A clean council advances.** No Critical survives synthesis: write the `## Driver run` checkpoint block recording `**Phase:** plan` (per 4.5 above) before dispatching the build phase, a later task against this same file.
+**A clean council advances.** No Critical survives synthesis: write the `## Driver run` checkpoint block recording `**Phase:** plan` (per 4.5 above) before dispatching the build phase, a later task against this same file — step 9 below.
+
+### 9. Dispatch the build phase
+
+Once step 8 advances with no council Critical surviving, dispatch `craft:driver-worker` to build the chosen slice parent's child task graph, on the shared execute procedure's unattended mode — running it inline in this session would select the attended mode instead, per `_shared/execute.md`'s own two-mode table, and reinstate the per-escalation questions this spec exists to remove.
+
+Dispatch it **in the background**, from this top-level session — the driver's own dispatch of `craft:driver-worker` is never nested, so backgrounding it here loses no notification channel, matching portage's own precedent that a background dispatch is safe from the top level and unsafe only when nested inside another subagent. Pass it exactly six values and nothing else about the slice:
+
+```text
+Record id: <slice-parent-task-id>
+Execute procedure: <path-to-_shared-execute.md>
+Templates root: <path-to-templates-root>
+Elected vault: <elected-vault>
+Workspace path: <workspace-path>
+Outcome file: <outcome-file-path>
+```
+
+`craft:driver-worker` carries an `Agent` tool grant and genuinely dispatches `assumption-prover`, `executor`, and `drift-gate` to run the shared execute procedure's own controller loop against the graph — every one of *its own* dispatches stays synchronous, never backgrounded, a rule pinned in the agent's own text; the notification-channel loss that constrains a backgrounded dispatch applies only there, never to this top-level one.
+
+**The dispatch carries a liveness deadline.** It bounds the worker's own run, which ends at the shared procedure's close (a pushed branch, not a merge) — it does not cover the portage tail, which is external to this dispatch and belongs to a later task against this same file. Wait on the outcome file with a bounded until-loop rather than blocking indefinitely on the dispatch; once the deadline passes with no outcome file written, stop waiting, treat the worker as crashed, and escalate under the `worker-stalled` trigger with no retry, following the escalation contract below.
+
+**Read the result from the outcome file, never from the agent's reply** — matching the plan phase's own worker-channel rule at step 7. A missing or empty outcome file is read as a **crash**, not as still-running, and escalates under the same `worker-stalled` trigger a deadline expiry does — the two are the same failure observed by different clocks.
+
+- `DONE` — the build closed the slice parent. The checkpoint at this boundary is written before and after the dispatch: the `## Driver run` block recording `**Phase:** plan` already written at step 8 is the before-dispatch record, and writing the block recording `**Phase:** build` here is the after-dispatch record — so a crash inside the build phase is distinguishable from a crash before it. Then continue into the PR tail, a later task against this same file.
+- Anything else — `BLOCKED`, `NEEDS_CONTEXT`, any other token, a missing or empty outcome file, or a deadline expiry — escalates under the `worker-stalled` trigger, following the escalation contract below, with no retry.
 
 ## Escalation
 
@@ -207,8 +231,7 @@ of these, never free text:
   operator has not dispositioned.
 - **`agent-blocked`** — a dispatched agent returns `BLOCKED` or `NEEDS_CONTEXT` instead of a
   usable result (the plan phase's `craft:planner` dispatch at step 7 above).
-- **`worker-stalled`** — the build dispatch (a later task against this same file) passes its
-  liveness deadline with no progress signal.
+- **`worker-stalled`** — the build dispatch (step 9 above) passes its liveness deadline with no progress signal, or its outcome file comes back missing, empty, or naming anything other than `DONE`.
 
 Add a member to this list only when a phase genuinely needs one — it is not a place to name a
 trigger speculatively ahead of the phase that would raise it.
@@ -269,8 +292,9 @@ This mirrors what the slice close already commits to at its own early-stop repor
 ## Outcome
 
 On a chosen slice that clears the single-repo check, report the slice, its value claim, and the
-parent task id, then the plan phase's own outcome — a clean council advancing toward the build
-phase, or a `plan-critical` escalation — noting that build and the PR tail are not yet wired to
-this skill. On spec complete or early stop, report exactly as `../slice/SKILL.md` would and
-stop — the driver has no further action to take. On a multi-repo escalation, report the
-escalation and the `multi-repo-slice` trigger and stop, following the escalation contract above.
+parent task id, then the plan phase's own outcome and the build phase's own outcome — a `DONE`
+build advancing toward the PR tail, not yet wired to this skill, or a `plan-critical` /
+`worker-stalled` escalation. On spec complete or early stop, report exactly as
+`../slice/SKILL.md` would and stop — the driver has no further action to take. On a multi-repo
+escalation, report the escalation and the `multi-repo-slice` trigger and stop, following the
+escalation contract above.
