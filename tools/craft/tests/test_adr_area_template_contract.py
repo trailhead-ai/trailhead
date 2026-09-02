@@ -102,12 +102,6 @@ def test_adr_template_names_distill_as_authoring_it_backward_already_active():
     )
 
 
-def test_adr_template_does_not_claim_gauntlet_flips_a_forward_adr():
-    text = ADR_TEMPLATE.read_text()
-    assert "flipped active by the gauntlet" not in text, (
-        "templates/adr.md must not claim the gauntlet flips a forward ADR active — "
-        "the gauntlet reviews it, but distill is the sole activator."
-    )
 
 
 # ---------------------------------------------------------------------------

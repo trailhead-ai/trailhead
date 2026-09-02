@@ -29,12 +29,19 @@ be re-checked per candidate.
 """
 
 import re
+import sys
 from pathlib import Path
 
 import pytest
 
 CRAFT = Path(__file__).parent.parent / "plugins" / "craft"
 DISTILL = CRAFT / "skills" / "distill" / "SKILL.md"
+
+# The `lore` plugin lives in a sibling tool tree, not on the default path.
+_LORE_PLUGIN_DIR = Path(__file__).parent.parent.parent / "lore" / "plugins" / "lore"
+sys.path.insert(0, str(_LORE_PLUGIN_DIR))
+
+from lore.pipeline.derive import TERMINAL_SPEC_STATUSES  # noqa: E402
 
 
 def _text() -> str:
@@ -297,6 +304,7 @@ def test_an_edit_re_enters_the_reviewed_write_list_verbatim():
 # interruption never leaves a spec claiming a distillation that did not finish.
 _WRITE_ORDER: list[str] = [
     "ADR records are created first",
+    "absorbed `draft` ADRs are retired",
     "absorbed `decision` records are flipped `superseded` with a `related: adr=` edge",
     "superseded ADRs are flipped, both edge directions written",
     "touched `area` profiles are re-synthesized",
@@ -532,8 +540,8 @@ def _step_1(text: str) -> str:
 
 def test_the_write_order_terminates_at_the_completion_flip():
     """The write order's terminal step is the member-spec completion flip, pinned
-    against the document's own enumerated steps — so a step appended after it,
-    such as the removed activation check, fails this pin.
+    against the document's own enumerated steps — so any step appended after it
+    fails this pin.
     """
     order = _write_order_section(_text())
     step_markers = re.findall(r"(?m)^(\d+)\.\s", order)
@@ -551,8 +559,7 @@ def test_the_write_order_terminates_at_the_completion_flip():
 
 def test_the_step_1_create_is_distills_only_route_to_active():
     """Distill's only `--status active` ADR write is the create in write-order
-    step 1, reachable at authorship with no prior condition on derived specs —
-    the activation check that used to gate a later `active` write is gone.
+    step 1, reachable at authorship with no prior condition on derived specs.
     """
     text = _text()
     assert text.count("--status active") == 1, (
@@ -575,11 +582,64 @@ def test_the_step_1_create_is_distills_only_route_to_active():
     )
 
 
+def _retirement_step(text: str) -> str:
+    return _section(
+        text,
+        "2. Then **absorbed `draft` ADRs are retired**",
+        "3. Then **absorbed `decision` records",
+        why="distill/SKILL.md must carry the absorbed-draft-ADR retirement write-order step",
+    )
+
+
+def test_the_absorbed_draft_adr_retirement_has_its_own_write_order_slot():
+    """Retirement of an absorbed draft ADR is now the ONLY terminal path a
+    lingering draft ADR has — activation is gone. Before this fix the write-order
+    section named no step for it at all, so an agent that folded one into a
+    cluster's ADR had no ordered place to write the `--status dropped` flip and
+    the operator never dispositioned it.
+    """
+    step = _flat(_retirement_step(_text()))
+    assert "--status dropped" in step, (
+        "the retirement step must state the absorbed draft ADR is flipped "
+        "`--status dropped`"
+    )
+    assert "related: adr=" in step, (
+        "the retirement step must state the retired ADR carries a `related: adr=` "
+        "edge back to the ADR that absorbed it"
+    )
+    assert "only terminal path" in step, (
+        "the retirement step must state that this write is now the only terminal "
+        "path a lingering draft ADR has, now that forward activation is gone"
+    )
+
+
+def test_step_2_proposal_presents_absorbed_draft_adrs_for_disposition():
+    """With activation gone, folding a draft ADR into a cluster is a real write
+    (the retirement flip) — so the operator must see it in the write list before
+    it lands, exactly like an absorbed `decision` record, not just read about it
+    in Step 1's clustering prose.
+    """
+    step = _flat(_proposal_step(_text()))
+    assert (
+        "any lingering `draft` ADR Step 1 surfaced as candidate material for "
+        "this cluster" in step
+    ), (
+        "distill/SKILL.md's Step 2 proposal must present absorbed draft ADRs for "
+        "disposition, not just the `decision` records this ADR subsumes"
+    )
+    assert "retiring one is now the only terminal path it has" in step, (
+        "Step 2's proposal must say WHY the absorbed draft ADR needs "
+        "disposition here: retirement is its only terminal path now that "
+        "activation is gone"
+    )
+
+
 # --- the absorption sweep's exclusion ---
 
 _ABSORPTION_EXCLUSION_SENTENCE = (
-    "This surfacing excludes a `draft` ADR while any spec carrying a "
-    "`related: adr=` edge to it has not yet reached a terminal status."
+    "This surfacing excludes a `draft` ADR while some spec *other than the "
+    "cluster's own members* carries a `related: adr=` edge to it and has not "
+    "yet reached a terminal status."
 )
 
 
@@ -617,18 +677,67 @@ def test_absorption_sweep_exclusion_keys_on_the_specs_carrying_the_edge():
     )
 
 
+def test_absorption_sweep_exclusion_does_not_swallow_the_clusters_own_members():
+    """The edge-based surfacing rule fires when a cluster member carries a
+    `related: adr=` edge to a lingering draft ADR. Every cluster member is, by
+    construction, non-terminal at clustering time — its own `complete` flip is
+    write-order step 6, which has not run yet. An exclusion keyed on *any*
+    edged spec (the cluster's own members included) is therefore always true
+    exactly when the edge check fires, and the edge path could never absorb
+    anything — the two rules would cancel. The exclusion must instead be
+    scoped to specs *other than* the cluster's own members, so a cluster
+    holding the last outstanding edge finds every other edged spec already
+    terminal and absorption fires. This assertion is not satisfied by the
+    unscoped wording `_ABSORPTION_EXCLUSION_SENTENCE` replaced — that wording
+    names no carve-out and swallows the cluster's own members.
+    """
+    section = _flat(_absorption_sweep_section(_text()))
+    assert "other than the cluster's own members" in section, (
+        "distill/SKILL.md's absorption-sweep exclusion must scope itself to "
+        "specs OTHER than the cluster's own members — an exclusion that counts "
+        "the cluster's own (necessarily non-terminal) members is always true "
+        "exactly when the edge-based surfacing rule fires, so the edge path "
+        "could never absorb anything"
+    )
+    assert (
+        "every cluster member is, by construction, non-terminal at clustering "
+        "time" in section
+    ), (
+        "distill/SKILL.md must state WHY the carve-out is needed: a cluster "
+        "member's own `complete` flip is write-order step 6, which has not run "
+        "yet at clustering time"
+    )
+    assert (
+        "When the cluster being distilled holds the last outstanding edge, "
+        "every other edged spec is already terminal" in section
+    ), (
+        "distill/SKILL.md must state the moment absorption becomes correct: "
+        "when every OTHER edged spec has already landed"
+    )
+
+
 def test_absorption_sweep_exclusion_reads_terminality_off_terminal_spec_statuses():
     """The exclusion's terminality check: the same `TERMINAL_SPEC_STATUSES` set
     the rest of distill and `pipeline/derive.py` use, cited by file:line so drift
     there is not silent to this skill.
+
+    The expected literal is derived from the real, imported constant rather than
+    duplicated by hand, so a change to `TERMINAL_SPEC_STATUSES` itself makes this
+    test fail instead of silently drifting from the prose it pins.
     """
     section = _flat(_absorption_sweep_section(_text()))
-    assert (
-        'TERMINAL_SPEC_STATUSES = {"complete", "superseded", "dropped"}'
-        in section
-    ), (
+    match = re.search(r'TERMINAL_SPEC_STATUSES = \{([^}]*)\}', section)
+    assert match, (
         "distill/SKILL.md's absorption-sweep exclusion must read terminality off "
         "the literal `TERMINAL_SPEC_STATUSES` set"
+    )
+    pinned_statuses = {s.strip().strip('"') for s in match.group(1).split(",")}
+    assert pinned_statuses == set(TERMINAL_SPEC_STATUSES), (
+        "distill/SKILL.md's pinned TERMINAL_SPEC_STATUSES literal "
+        f"{pinned_statuses!r} must match the real constant "
+        f"{set(TERMINAL_SPEC_STATUSES)!r} in pipeline/derive.py — this test "
+        "derives its expectation from the imported constant so a change there "
+        "cannot silently drift from the prose"
     )
     assert "pipeline/derive.py:97" in section, (
         "distill/SKILL.md must cite where `TERMINAL_SPEC_STATUSES` is defined, so "
@@ -659,9 +768,9 @@ def test_absorption_sweep_rationale_stands_without_an_activation_reference():
 
 def test_lingering_draft_surfacing_also_checks_cluster_members_related_adr_edges():
     """Absorption surfacing must be keyed on the `related: adr=` edge, not left to
-    area overlap alone — otherwise the six specs descended from the one in-flight
-    ADR could land without ever surfacing it as candidate material, and the
-    disposition this spec promises (absorbed by the backward pass) never fires.
+    area overlap alone — otherwise a spec descended from an in-flight ADR could
+    land without ever surfacing that ADR as candidate material, and it would
+    never be absorbed by the backward pass.
     """
     section = _flat(_absorption_sweep_section(_text()))
     assert (
@@ -694,9 +803,9 @@ def _proposal_step(text: str) -> str:
 
 
 def test_step_2s_zero_adr_verdict_has_one_form_with_no_anchoring_adr_id_variant():
-    """The forward-anchored cluster class is gone, and with it the second,
-    anchoring-ADR-id-naming form of the zero-ADR verdict it required. There is
-    exactly one verdict shape now.
+    """The zero-ADR verdict has exactly one shape — a second,
+    anchoring-ADR-id-naming variant would mean a cluster is routed by which ADR
+    it anchors to rather than dispositioned as one cluster.
     """
     step = _flat(_proposal_step(_text()))
     assert (
@@ -736,12 +845,11 @@ def test_the_queue_exclusion_imperative_carries_the_anchor_status_narrowing():
 
 
 def test_the_queue_keeps_specs_whose_anchoring_adr_is_still_draft_and_treats_them_ordinarily():
-    """The forward-anchored cluster class is gone: a spec whose anchoring ADR is
-    still `draft` is no longer routed anywhere special. §2 still narrows the
-    exclusion (a blanket exclusion would hold such a spec at `planned` forever
-    with no way back into the queue), but what it states now is that the
-    candidate is treated like any other — no forward-anchored class, no
-    activation cross-reference.
+    """A spec whose anchoring ADR is still `draft` is not routed anywhere
+    special. §2 still narrows the exclusion (a blanket exclusion would strand
+    such a spec forever with no way back into the queue, whether it sits at
+    `planned` or, under the slice loop, at `ready`), but the candidate is
+    treated like any other — it clusters and drafts ordinarily.
     """
     section = _queue_exclusion_section(_text())
     flat = _flat(section)
@@ -759,8 +867,7 @@ def test_the_queue_keeps_specs_whose_anchoring_adr_is_still_draft_and_treats_the
         "a candidate with no anchor at all" in flat
     ), (
         "§2 must state the ordinary-path outcome explicitly — a spec kept in the "
-        "queue must not be left to route somewhere the deleted forward-anchored "
-        "class used to send it"
+        "queue must cluster and draft exactly like any other candidate"
     )
 
 
@@ -795,16 +902,17 @@ def test_the_loop_closed_query_does_not_displace_the_planned_cohort():
 
 
 def _completion_gate(text: str) -> str:
-    """Step 5's member-completion write, up to the Terminal outcomes section.
+    """The write order's final step, the member-completion write, up to the
+    Terminal outcomes section.
 
     Scoped rather than whole-file: step 1's prose names both marker values too, so
     a whole-file check passes even with this gate deleted outright.
     """
     return _section(
         text,
-        "5. Finally, **member-spec `complete` flips land last**",
+        "6. Finally, **member-spec `complete` flips land last**",
         "## Terminal outcomes",
-        why="distill/SKILL.md must carry step 5's member-completion write",
+        why="distill/SKILL.md must carry the write order's final member-completion write",
     )
 
 
@@ -858,20 +966,37 @@ def test_the_completion_write_re_reads_the_spec_immediately_before_writing():
     )
 
 
+_QUEUE_DROP_CONDITION_SENTENCE = (
+    "A spec is out of the queue if it already carries **a `distilled=` "
+    "annotation** — `distilled=adr` (ADRs written), `distilled=zero-adr`, or "
+    "`distilled=rejected` — **or a `related: adr` edge whose anchoring ADR has "
+    "itself reached `active` or a terminal status**."
+)
+
+
 def test_the_queue_exclusion_stays_decoupled_from_the_planned_status():
-    """§2's `related: adr` exclusion keys off the edge and terminal statuses,
-    never `planned`. Pinning that keeps a future edit from quietly coupling it to
-    a status the slice loop leaves unused.
+    """§2's exclusion condition — the sentence a reader actually acts on — is
+    defined entirely by the `distilled=` annotation and the `related: adr`
+    edge's anchor status, never by the candidate's own status (e.g. `planned`).
+    Pinning that keeps a future edit from quietly coupling it to a status the
+    slice loop leaves unused.
+
+    Pinned on the exact drop-condition sentence, not a whole-section substring
+    check: §2 legitimately mentions the bare word "planned" elsewhere (the
+    "edge half is narrow" paragraph illustrates the failure mode of a blanket
+    exclusion by naming the status it would strand a candidate at), so a
+    whole-section check for the literal `status:planned` can never fail for an
+    edit that couples the condition itself to a status, unless that edit
+    happens to spell it exactly as the KQL literal `status:planned` — which no
+    real coupling would. An exact-match on the whole sentence instead fails on
+    ANY addition to the condition, coupling to a status included.
     """
-    flat = _flat(_queue_exclusion_section(_text()))
-    assert "related: adr" in flat, (
-        "§2's exclusion must be defined by the `related: adr` edge, not by a "
-        "spec status"
-    )
-    assert "status:planned" not in flat, (
-        "§2's exclusion must not key off `planned` — that status is unused under "
-        "the slice loop, and coupling to it would strand every draft-anchored "
-        "candidate"
+    section = _flat(_queue_exclusion_section(_text()))
+    assert _QUEUE_DROP_CONDITION_SENTENCE in section, (
+        "§2 must state its drop condition with this exact sentence — defined "
+        "purely by the `distilled=` annotation and the `related: adr` edge's "
+        "anchor status, with nothing else appended to it (such as a condition "
+        "on the candidate's own status)"
     )
 
 
@@ -941,11 +1066,22 @@ def test_queue_exclusion_describes_the_adr_edge_as_carried_not_as_authored_by_br
     live authoring mechanism instead states a present-tense claim about who writes the
     edge, and the reader's next question — "so I should look for new ones" — has no
     true answer.
+
+    Pinned on the fuller clause, not the bare opening words: the bare phrase "a
+    spec carries" alone is satisfied even if the stale "brainstorm's altitude gate
+    creates every forward-derived spec … from birth" sentence were restored
+    alongside it, which would defeat the point of this pin.
     """
     # Lowercased: whether the phrase opens a sentence is a wrapping artifact, not
     # part of the claim being pinned.
     section = _flat(_queue_exclusion_section(_text())).lower()
-    assert "a spec carries" in section, (
-        "§2 must describe the `related: adr=` edge as something a spec carries, "
-        "since the exclusion's job is to recognise the edge wherever it already is"
+    assert (
+        "a spec carries `--related adr=<adr-id>` when it descends from that "
+        "decision"
+        in section
+    ), (
+        "§2 must describe the `related: adr=` edge with the full clause — a spec "
+        "carries `--related adr=<adr-id>` WHEN IT DESCENDS FROM THAT DECISION — "
+        "not just the bare opening words, which a restored stale sentence "
+        "elsewhere in the section would still satisfy"
     )
