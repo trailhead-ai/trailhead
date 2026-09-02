@@ -19,9 +19,9 @@ Take a `ready` spec through one single-repo slice end to end: choose, plan, buil
 portage — then stop at the slice boundary and report. The driver resolves nothing it is not
 already the owner of; anything it does not own escalates rather than getting a guess.
 
-**This skill currently ships the entry point, the selection phase, the plan phase, and the
-build phase.** The PR tail is a later task against this same file — a clean build hands off
-to it below with a stated placeholder, not invented behavior.
+**This skill currently ships the entry point, the selection phase, the plan phase, the build
+phase, and the PR tail.** Slice close itself is a later task against this same file — the PR
+tail below names that outcome and defers its mechanics, not invented behavior.
 
 ## Argument
 
@@ -120,7 +120,7 @@ Each of the five boundaries below writes this block before the driver moves past
 - **select** — once the single-repo check at step 5 passes (or the multi-repo escalation fires), write the block recording `**Phase:** select` before reporting the outcome at step 6.
 - **plan** — once the plan phase (steps 7–8 below) completes with no council Critical surviving synthesis, write the block recording `**Phase:** plan`.
 - **build** — once `craft:driver-worker`'s dispatch (step 9 below) returns `DONE`, write the block recording `**Phase:** build`.
-- **pr-tail** — once the PR tail phase (a later task against this same file) completes, write the block recording `**Phase:** pr-tail`.
+- **pr-tail** — once the PR tail phase (step 10 below) maps portage's outcome, write the block recording `**Phase:** pr-tail`.
 - **slice-close** — once the slice is closed out (a later task against this same file), write the block recording `**Phase:** slice-close`.
 
 ### 5. Refuse a slice spanning more than one repo
@@ -140,9 +140,9 @@ enumerate member repos) and count its `members` array.
 `../slice/SKILL.md`'s procedure ends in exactly one of three outcomes. The driver owns no termination logic of its own — it reports what `/craft:slice`'s procedure produced, verbatim:
 
 - **A chosen slice parent.** The single-repo check in step 5 above passed. Report the chosen
-  slice, its value claim, and the parent task id, then continue into the plan phase below — the
-  build phase and the PR tail remain later tasks against this same file. **This outcome does not
-  halt the driver**; it is the one case where the loop keeps going once those phases exist.
+  slice, its value claim, and the parent task id, then continue into the plan phase below —
+  slice close itself remains a later task against this same file. **This outcome does not
+  halt the driver**; it is the one case where the loop keeps going once that phase exists.
 - **Spec complete.** No candidate slice remains against the spec's acceptance criteria. Report the spec complete, matching `../slice/SKILL.md`'s own completion report, and **halt the driver** — there is nothing left to drive.
 - **Early stop.** Nothing in the candidate set clears the value floor and no enabler applies.
   Report what remains and why the loop stopped, matching `../slice/SKILL.md`'s own early-stop
@@ -204,8 +204,37 @@ Outcome file: <outcome-file-path>
 
 **Read the result from the outcome file, never from the agent's reply** — matching the plan phase's own worker-channel rule at step 7. A missing or empty outcome file is read as a **crash**, not as still-running, and escalates under the same `worker-stalled` trigger a deadline expiry does — the two are the same failure observed by different clocks.
 
-- `DONE` — the build closed the slice parent. The checkpoint at this boundary is written before and after the dispatch: the `## Driver run` block recording `**Phase:** plan` already written at step 8 is the before-dispatch record, and writing the block recording `**Phase:** build` here is the after-dispatch record — so a crash inside the build phase is distinguishable from a crash before it. Then continue into the PR tail, a later task against this same file.
+- `DONE` — the build closed the slice parent. The checkpoint at this boundary is written before and after the dispatch: the `## Driver run` block recording `**Phase:** plan` already written at step 8 is the before-dispatch record, and writing the block recording `**Phase:** build` here is the after-dispatch record — so a crash inside the build phase is distinguishable from a crash before it. Then continue into the PR tail — step 10 below.
 - Anything else — `BLOCKED`, `NEEDS_CONTEXT`, any other token, a missing or empty outcome file, or a deadline expiry — escalates under the `worker-stalled` trigger, following the escalation contract below, with no retry.
+
+### 10. Dispatch the PR tail
+
+Once step 9 returns `DONE`, hand the branch to portage from this session itself — never nested inside `craft:driver-worker` or any other subagent, which would lose the notification channel the same way a nested background dispatch would anywhere else in this ritual. The driver's responsibility ends at green: it maps portage's terminal tokens and hands off; it never merges, never orders a merge, and never reverts.
+
+**Derive `group_toml_path` from camp's own group config, never from a ranger artifact.** The camp manifest read at step 5 already carries the group name in its `group` field; the group's TOML config lives where `camp group <name>` itself writes it — `config_dir("camp")/groups/<group>.toml` (`trailhead/paths.py`'s `config_dir`, mirrored by `camp`'s own `_groups_dir()` helper). Compute it from that same convention, honoring the per-app override before the XDG default before the plain fallback:
+
+```sh
+GROUP_TOML_PATH="${CAMP_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/camp}/groups/<group>.toml"
+```
+
+**Pre-create the outcome file's parent directory before dispatching `monitor`.** `monitor` does not create it, and its write fails if the directory is absent — a silent way to turn every run into an empty-file escalation, so this gets its own explicit step rather than riding along with anything else: `mkdir -p` the outcome file's parent directory, mode `0700` matching ranger's own outcomes-directory pattern, before the dispatch below, never after.
+
+Dispatch `updater` first, synchronously, from this session, passing `mode: update`, the camp group, the worktree slug, `manifest_path`, and `group_toml_path`. Take the `pr_pairs` it returns.
+
+Then dispatch `monitor` **in the background, from this top-level session** — never nested inside `craft:driver-worker`, matching the build phase's own top-level-only dispatch rule at step 9 — passing the camp group, the worktree slug, `manifest_path`, `group_toml_path`, `pr_pairs`, and the outcome file path whose parent directory was just pre-created.
+
+**Poll the outcome file against the driver's own deadline, never wait on the dispatch notification.** The file is the documented contract for an unattended caller; the notification is not, matching the drain precedent at `tools/ranger/plugins/ranger/skills/execute/SKILL.md`, section 6, which ignores the same notification for the same reason. Read the outcome as exactly one line from the file, never from `monitor`'s reply — matching the plan and build phases' own worker-channel rule.
+
+**The four-token map is exhaustive — no default or fall-through branch handles anything else:**
+
+- `MERGED` — closes the slice; the token takes no argument.
+- `READY <reason>` — closes the slice.
+- `STOPPED auto_merge disabled` — closes the slice; the stacked-slice success path, not a failure.
+- Every other `STOPPED <reason>` — escalates under the `portage-stopped` trigger, following the escalation contract below, with no retry.
+- `BLOCKED <reason>` — escalates under the `portage-blocked` trigger, following the escalation contract below, with no retry.
+- An empty or missing outcome file — escalates under the `portage-tail-stalled` trigger, following the escalation contract below, with no retry.
+
+For every branch above that closes the slice, this phase names that outcome and defers the close mechanics to slice close, a later task against this same file — matching how earlier phases deferred to this one. Once the mapping resolves, write the `## Driver run` checkpoint block recording `**Phase:** pr-tail` before the slice-close mechanics run, so a crash in the tail does not resume as a crash before the build.
 
 ## Escalation
 
@@ -232,6 +261,9 @@ of these, never free text:
 - **`agent-blocked`** — a dispatched agent returns `BLOCKED` or `NEEDS_CONTEXT` instead of a
   usable result (the plan phase's `craft:planner` dispatch at step 7 above).
 - **`worker-stalled`** — the build dispatch (step 9 above) passes its liveness deadline with no progress signal, or its outcome file comes back missing, empty, or naming anything other than `DONE`.
+- **`portage-blocked`** — the PR tail's `monitor` outcome (step 10 above) comes back `BLOCKED <reason>`.
+- **`portage-stopped`** — the PR tail's `monitor` outcome (step 10 above) comes back `STOPPED <reason>` for any reason other than `auto_merge disabled`.
+- **`portage-tail-stalled`** — the PR tail's `monitor` outcome file (step 10 above) comes back missing or empty.
 
 Add a member to this list only when a phase genuinely needs one — it is not a place to name a
 trigger speculatively ahead of the phase that would raise it.
@@ -292,9 +324,11 @@ This mirrors what the slice close already commits to at its own early-stop repor
 ## Outcome
 
 On a chosen slice that clears the single-repo check, report the slice, its value claim, and the
-parent task id, then the plan phase's own outcome and the build phase's own outcome — a `DONE`
-build advancing toward the PR tail, not yet wired to this skill, or a `plan-critical` /
-`worker-stalled` escalation. On spec complete or early stop, report exactly as
+parent task id, then the plan phase's own outcome, the build phase's own outcome, and the PR
+tail's own outcome — a `DONE` build advancing into the PR tail, which then either names the
+slice closed (`MERGED`, `READY <reason>`, or `STOPPED auto_merge disabled`) or escalates under
+`portage-blocked`, `portage-stopped`, or `portage-tail-stalled` — or a `plan-critical` /
+`worker-stalled` escalation earlier in the run. On spec complete or early stop, report exactly as
 `../slice/SKILL.md` would and stop — the driver has no further action to take. On a multi-repo
 escalation, report the escalation and the `multi-repo-slice` trigger and stop, following the
 escalation contract above.
