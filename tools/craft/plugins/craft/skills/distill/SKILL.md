@@ -283,6 +283,9 @@ claims `complete` until everything behind it landed.
    existing one — `--related adr=<predecessor>`. The scope flag is not optional here either — on
    create it selects the destination vault, so an unscoped create can land the ADR in the wrong
    vault. Distilled ADRs do not route through `/craft:gauntlet`; this disposition owns their flip.
+   This create is distill's only route to `active`: no other write in this document sets that
+   flag on an ADR, and it is reachable at authorship — no condition on the status of the specs the
+   ADR derives from gates it.
 
 2. Then **absorbed `decision` records are flipped `superseded` with a `related: adr=` edge** back to
    the ADR that subsumed them, so no competing owner of the same decision is left `active`.
@@ -346,37 +349,6 @@ claims `complete` until everything behind it landed.
 
    Last position is deliberate: an interruption anywhere above leaves the spec still queued, and
    the sweep picks it up again.
-
-6. **Then check activation, for every spec just flipped `complete` that carries a `related: adr=`
-   edge** — completing a member spec is also the trigger that may finish the forward ADR it was
-   derived from. Such a spec reaches this point only because §2's edge exclusion is narrowed to
-   anchoring ADRs that are already `active` or terminal: a spec whose anchoring ADR is still
-   `draft` **stays in the queue** and clusters as a forward-anchored member, which is what leaves
-   this check something to fire on.
-
-   ```
-   lore search "kind:spec related-adr:<adr-id>"
-   ```
-
-   Read every sibling spec's status via `lore record show <spec-id> --json` and test the whole set
-   against `TERMINAL_SPEC_STATUSES = {"complete", "superseded", "dropped"}` (`pipeline/derive.py:97`)
-   — the same set, read the same way, that the absorption-sweep exclusion above reads. **Terminal,
-   not `complete`**: a derived spec that is `dropped` or `superseded` will never reach `complete`, so
-   a `complete`-only condition would strand the parent ADR `draft` forever, invisible to both this
-   check and the absorption sweep. Activate only when **every** sibling has reached a terminal status
-   **and at least one** reached `complete` — an ADR whose derived specs were all abandoned recorded
-   no decision worth activating, and is left `draft` for the operator to close directly:
-
-   ```
-   lore record update <adr-id> --status active --vault <name>
-   ```
-
-   Distill is the sole writer of `draft -> active` on this path, exactly as it is the sole writer of
-   the completion edge above — the forward path's other writer, the gauntlet, no longer advances an
-   adr past `draft` at all (`gauntlet/SKILL.md`, "Reviewing an adr"). `active` immutability is
-   unchanged by this: it moves WHEN activation happens, never whether an `active` record can still be
-   edited. Amendment while `draft` remains unrestricted throughout, with no material/immaterial
-   distinction to adjudicate.
 
 ## Terminal outcomes
 

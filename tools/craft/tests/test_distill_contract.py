@@ -491,16 +491,9 @@ def test_every_batch_update_passes_vault_explicitly():
 # --- Slice 4: gauntlet stops flipping, distill activates on the last derived spec ---
 
 import re  # noqa: E402
-import sys  # noqa: E402
-
-_LORE_PLUGIN_DIR = Path(__file__).parent.parent.parent / "lore" / "plugins" / "lore"
-sys.path.insert(0, str(_LORE_PLUGIN_DIR))
-
-from lore.pipeline.derive import TERMINAL_SPEC_STATUSES  # noqa: E402
 
 GAUNTLET = CRAFT / "skills" / "gauntlet" / "SKILL.md"
 
-_ACTIVATION_STEP_HEADER = "6. **Then check activation"
 _ABSORPTION_EXCLUSION_SENTENCE = (
     "This surfacing excludes a `draft` ADR while any spec carrying a "
     "`related: adr=` edge to it has not yet reached a terminal status."
@@ -526,66 +519,67 @@ def _section(text: str, header: str, stop: str, why: str = "") -> str:
     return text[start:text.index(stop, start)]
 
 
-def _activation_step(text: str) -> str:
+def _write_order_section(text: str) -> str:
     return _section(
         text,
-        _ACTIVATION_STEP_HEADER,
+        "## Step 4 — Write, in a fixed order",
         "## Terminal outcomes",
-        why=(
-            "distill/SKILL.md must carry the activation-check step in 'Write, in a "
-            "fixed order'"
-        ),
+        why="distill/SKILL.md must carry write-order step 4",
     )
 
 
-def _would_activate(sibling_statuses: set[str]) -> bool:
-    """The activation predicate distill's prose describes, built off the real
-    `TERMINAL_SPEC_STATUSES` constant rather than a duplicated literal — so this
-    helper and distill's own condition can never silently drift apart.
+def _step_1(text: str) -> str:
+    return _section(
+        text,
+        "1. **ADR records are created first.**",
+        "2. Then **absorbed",
+        why="distill/SKILL.md must carry write-order step 1",
+    )
+
+
+def test_the_write_order_terminates_at_the_completion_flip():
+    """The write order's terminal step is the member-spec completion flip, pinned
+    against the document's own enumerated steps — so a step appended after it,
+    such as the removed activation check, fails this pin.
     """
-    all_terminal = all(status in TERMINAL_SPEC_STATUSES for status in sibling_statuses)
-    at_least_one_complete = "complete" in sibling_statuses
-    return all_terminal and at_least_one_complete
+    order = _write_order_section(_text())
+    step_markers = re.findall(r"(?m)^(\d+)\.\s", order)
+    assert step_markers == [str(n) for n in range(1, len(step_markers) + 1)], (
+        f"distill/SKILL.md's write order must enumerate a contiguous 1..N "
+        f"sequence with no gap or extra step; got {step_markers!r}"
+    )
+    last_step_start = order.rindex(f"\n{step_markers[-1]}. ")
+    last_step = order[last_step_start:]
+    assert "member-spec `complete` flips land last" in last_step, (
+        "distill/SKILL.md's last enumerated write-order step must be the "
+        "member-spec completion flip — nothing follows it"
+    )
 
 
-def test_activation_check_states_trigger_condition_and_mechanism_together():
-    """Trigger, condition, and mechanism must read as one clause — not three
-    separate sentences a later edit could quietly pull apart.
+def test_the_step_1_create_is_distills_only_route_to_active():
+    """Distill's only `--status active` ADR write is the create in write-order
+    step 1, reachable at authorship with no prior condition on derived specs —
+    the activation check that used to gate a later `active` write is gone.
     """
-    step = _flat(_activation_step(_text()))
-    assert "completing a member spec is also the trigger" in step, (
-        "the activation check must name its trigger: a member spec reaching "
-        "`complete`"
+    text = _text()
+    assert text.count("--status active") == 1, (
+        "distill/SKILL.md must carry exactly one `--status active` write — the "
+        "create in write-order step 1; a second occurrence means another route "
+        "to `active` survived"
     )
-    assert "Activate only when **every** sibling has reached a terminal status" in step, (
-        "the activation check must state its condition: every related spec "
-        "terminal AND at least one complete"
+    step_1 = _flat(_step_1(text))
+    assert "--status active" in step_1, (
+        "the sole `--status active` write must live in write-order step 1's ADR "
+        "create"
     )
-    assert "and at least one** reached `complete`" in step, (
-        "the activation check must also require at least one `complete` sibling"
+    assert "distill's only route to `active`" in step_1, (
+        "step 1 must state explicitly that this create is distill's only route "
+        "to `active`"
     )
-    assert '"complete", "superseded", "dropped"' in step, (
-        'the activation check must name the mechanism verbatim: '
-        'TERMINAL_SPEC_STATUSES = {"complete", "superseded", "dropped"}'
+    assert "reachable at authorship" in step_1 and "no condition on the status of the specs" in step_1, (
+        "step 1 must state the create is reachable at authorship, with no prior "
+        "condition on the derived specs' status"
     )
-    assert "pipeline/derive.py:97" in step, (
-        "the mechanism must cite where the real constant lives, not just its value"
-    )
-
-
-def test_an_adr_with_complete_and_dropped_derived_specs_does_activate():
-    """The case a `complete`-only condition would strand forever.
-
-    No executable activation path exists in this repo — distill is pure prose,
-    run by an agent rather than code — so this pins the predicate the prose
-    describes against the real constant; the prose itself is pinned separately
-    below.
-    """
-    assert _would_activate({"complete", "dropped"}) is True
-
-
-def test_an_adr_whose_derived_specs_are_all_dropped_does_not_activate():
-    assert _would_activate({"dropped", "dropped"}) is False
 
 
 def _absorption_sweep_section(text: str) -> str:
@@ -604,80 +598,6 @@ def _absorption_sweep_section(text: str) -> str:
     )
 
 
-def test_absorption_sweep_and_activation_read_the_same_edge_and_the_same_set():
-    """The "the two sweeps cannot disagree" claim is about edge DIRECTION first.
-
-    A forward ADR never carries a `related: spec=` edge of its own: brainstorm's
-    altitude gate writes the edge **spec-side** on each derived seed (`--related
-    adr=<adr-id>` from birth), and distill writes it ADR-side only on the backward
-    path ("never on the spec"). So an exclusion keyed on the draft ADR's own
-    `related: spec=` edges is unsatisfiable for exactly the population it
-    protects, and the sweep would retire in-flight forward ADRs with `--status
-    dropped`. Both checks must traverse spec-side, off the same forward facet —
-    and only then read terminality off the same constant.
-    """
-    text = _text()
-    sweep_section = _absorption_sweep_section(text)
-    activation_section = _flat(_activation_step(text))
-    flat_sweep = _flat(sweep_section)
-    assert "any spec carrying a `related: adr=` edge to it" in flat_sweep, (
-        "the absorption-sweep exclusion must key on the specs that carry a "
-        "`related: adr=` edge TO the draft ADR — a forward ADR carries no "
-        "`related: spec=` edge of its own, so keying on one excludes nothing"
-    )
-    assert "carrying any `related: spec=` edge" not in flat_sweep, (
-        "the exclusion must not key on a `related: spec=` edge carried by the "
-        "draft ADR — that edge only ever exists on the backward path"
-    )
-    for section, which in (
-        (flat_sweep, "absorption-sweep exclusion"),
-        (activation_section, "activation check"),
-    ):
-        assert 'lore search "kind:spec related-adr:<adr-id>"' in section, (
-            f"the {which} must resolve the ADR's derived specs off the forward "
-            "`related-adr` facet — the two cannot disagree only if they traverse "
-            "the same edge in the same direction"
-        )
-    for status in TERMINAL_SPEC_STATUSES:
-        assert f'"{status}"' in sweep_section, (
-            f"the absorption-sweep exclusion must name {status!r} from the real "
-            "TERMINAL_SPEC_STATUSES constant"
-        )
-        assert f'"{status}"' in activation_section, (
-            f"the activation condition must name {status!r} from the real "
-            "TERMINAL_SPEC_STATUSES constant"
-        )
-
-
-def test_distill_emits_the_activation_write_guarded_on_the_condition():
-    step = _activation_step(_text())
-    write = "lore record update <adr-id> --status active --vault <name>"
-    assert write in step, "distill/SKILL.md must emit the adr-activation write"
-    guard_idx = step.index("Activate only when")
-    write_idx = step.index(write)
-    assert guard_idx < write_idx, (
-        "the activation write must be guarded by the condition stated ahead of it"
-    )
-
-
-def test_distill_is_the_sole_writer_of_draft_to_active_on_both_paths():
-    step = _flat(_activation_step(_text()))
-    assert "Distill is the sole writer of `draft -> active` on this path" in step, (
-        "distill/SKILL.md must state it is the sole writer of the activation edge"
-    )
-    assert (
-        "exactly as it is the sole writer of the completion edge above" in step
-    ), (
-        "distill must tie the new sole-writer claim to the existing one for the "
-        "spec completion edge — which is `planned -> complete` for pre-loop "
-        "records and `ready -> complete` for a spec the slice loop closed out"
-    )
-    assert "the gauntlet, no longer advances an adr past `draft` at all" in step, (
-        "distill must state the other forward-path writer (the gauntlet) no "
-        "longer advances an adr at all"
-    )
-
-
 def test_absorption_sweep_exclusion_is_a_pinned_procedural_step():
     assert _ABSORPTION_EXCLUSION_SENTENCE in _flat(
         _absorption_sweep_section(_text())
@@ -687,36 +607,17 @@ def test_absorption_sweep_exclusion_is_a_pinned_procedural_step():
     )
 
 
-def test_activation_states_active_immutability_is_unchanged():
-    step = _flat(_activation_step(_text()))
-    assert "`active` immutability is unchanged by this" in step, (
-        "distill must restate that `active` immutability is unchanged by moving "
-        "when activation happens"
-    )
-    assert "never whether an `active` record can still be edited" in step, (
-        "distill must state explicitly this does not reopen an editable-active "
-        "adr — only WHEN activation happens moves"
-    )
-
-
-def test_amendment_while_draft_is_unrestricted_in_distill():
-    step = _flat(_activation_step(_text()))
-    assert "Amendment while `draft` remains unrestricted" in step, (
-        "distill must state amendment while `draft` is unrestricted, with no "
-        "material/immaterial distinction to adjudicate"
-    )
-
-
-def test_status_active_absence_sweep_is_scoped_to_gauntlet_not_banned_globally():
-    """distill legitimately emits `--status active` — the absence sweep must not
-    ban the string globally, only from the gauntlet skill.
+def test_status_active_write_is_scoped_to_the_step_1_create_not_banned_globally():
+    """distill legitimately emits `--status active` on the step-1 create — the
+    absence sweep must not ban the string globally, only from the gauntlet
+    skill, which no longer advances an adr past `draft` at all.
     """
-    assert "lore record update <adr-id> --status active" in _text(), (
-        "distill/SKILL.md must legitimately carry the adr-activation write — a "
-        "global ban on this string would be wrong, not a fix"
+    assert "lore record create --kind adr --status active" in _text(), (
+        "distill/SKILL.md must legitimately carry the step-1 ADR-creation write "
+        "— a global ban on this string would be wrong, not a fix"
     )
     assert not re.compile(r"<adr-id>\s+--status\s+active").search(GAUNTLET.read_text()), (
-        "gauntlet/SKILL.md must not carry the adr-activation write — the sweep is "
+        "gauntlet/SKILL.md must not carry an adr-activation write — the sweep is "
         "scoped to the gauntlet skill specifically, not the string everywhere"
     )
 
@@ -815,23 +716,6 @@ def test_the_queue_keeps_specs_whose_anchoring_adr_is_still_draft_and_treats_the
         "§2 must state the ordinary-path outcome explicitly — a spec kept in the "
         "queue must not be left to route somewhere the deleted forward-anchored "
         "class used to send it"
-    )
-
-
-def test_the_activation_step_names_the_narrowed_exclusion_that_feeds_it():
-    """The cross-reference must be mutual, not one-directional.
-
-    §2 names step 6 three times as the reason its edge exclusion is narrow. Step
-    6 must name §2 back: a reader who arrives at the activation check alone
-    otherwise cannot tell why a spec carrying a `related: adr=` edge is reachable
-    here at all, since the unnarrowed reading of §2 excludes exactly those specs
-    before clustering. A commitment whose enforcement lives in an unnamed other
-    section is the failure mode both clauses exist to prevent.
-    """
-    flat = _flat(_activation_step(_text()))
-    assert "still `draft`" in flat and "queue" in flat, (
-        "the activation step must name the narrowed §2 exclusion that lets a "
-        "`draft`-anchored spec stay in the queue and reach this check"
     )
 
 
