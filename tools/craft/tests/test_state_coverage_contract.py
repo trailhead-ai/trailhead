@@ -24,38 +24,57 @@ from pathlib import Path
 CRAFT = Path(__file__).parent.parent / "plugins" / "craft"
 SHARED_SLICE = CRAFT / "skills" / "_shared" / "slice.md"
 SLICE_SKILL = CRAFT / "skills" / "slice" / "SKILL.md"
-
-
-def _text() -> str:
-    return SHARED_SLICE.read_text()
-
-
-def _slice_skill_text() -> str:
-    return SLICE_SKILL.read_text()
+PLAN_SKILL = CRAFT / "skills" / "plan" / "SKILL.md"
+EXECUTE_SHARED = CRAFT / "skills" / "_shared" / "execute.md"
 
 
 def _normalize(text: str) -> str:
     return re.sub(r"\s+", " ", text)
 
 
-def _pin_normalized(phrase: str, reason: str) -> None:
+def _pin(doc: Path, phrase: str, reason: str) -> None:
     """Whitespace-insensitive pin: a rewrap that shifts a line break can't disarm it."""
-    normalized = _normalize(_text())
-    count = normalized.count(_normalize(phrase))
+    count = _normalize(doc.read_text()).count(_normalize(phrase))
     assert count == 1, f"{reason} (found {count}): {phrase!r}"
 
 
-def _pin_normalized_in_slice_skill(phrase: str, reason: str) -> None:
-    """Whitespace-insensitive pin against slice/SKILL.md rather than _shared/slice.md."""
-    normalized = _normalize(_slice_skill_text())
-    count = normalized.count(_normalize(phrase))
-    assert count == 1, f"{reason} (found {count}): {phrase!r}"
+def _carriers(phrase: str) -> list[Path]:
+    """Every shipped craft `.md` carrying `phrase`, whitespace-insensitively."""
+    return sorted(
+        p
+        for p in CRAFT.rglob("*.md")
+        if _normalize(phrase) in _normalize(p.read_text(encoding="utf-8"))
+    )
 
 
 def _archetype_section(name: str) -> str:
-    normalized = _normalize(_text())
+    normalized = _normalize(SHARED_SLICE.read_text())
     idx = normalized.index(name)
     return normalized[idx : idx + 90]
+
+
+# A document that points at `_shared/slice.md` for the state-coverage reference must
+# not also restate the reference's own contents.
+RESTATED_PHRASES = (
+    "owes zero, one, many",
+    "owes found, not-found",
+    "owes success, validation failure",
+    "owes in-flight, completed",
+    "bullet per state",
+)
+
+
+def _assert_defers_to_shared_slice(doc: Path, label: str) -> None:
+    text = doc.read_text()
+    assert "_shared/slice.md" in text, (
+        f"{label} must point at _shared/slice.md for the state-coverage "
+        "reference rather than restating it"
+    )
+    for restated_phrase in RESTATED_PHRASES:
+        assert restated_phrase not in text, (
+            f"{label} must not restate the archetype floors or the "
+            f"bullet-per-state shape from _shared/slice.md — found {restated_phrase!r}"
+        )
 
 
 def test_state_coverage_reference_ships_in_shared_slice():
@@ -65,7 +84,8 @@ def test_state_coverage_reference_ships_in_shared_slice():
 
 
 def test_trigger_is_a_slice_that_introduces_or_changes_a_visual_surface():
-    _pin_normalized(
+    _pin(
+        SHARED_SLICE,
         "A slice that introduces or changes a visual surface",
         "_shared/slice.md must state the state-coverage trigger",
     )
@@ -102,13 +122,14 @@ def test_long_running_action_archetype_owes_its_three_states():
 
 
 def test_floor_is_stated_as_non_exhaustive():
-    assert "non-exhaustive" in _text(), (
+    assert "non-exhaustive" in SHARED_SLICE.read_text(), (
         "_shared/slice.md must state the state-coverage floor is non-exhaustive"
     )
 
 
 def test_unauthorized_state_and_access_check_are_pinned_as_one_interaction():
-    _pin_normalized(
+    _pin(
+        SHARED_SLICE,
         "Every archetype whose surface is reachable by more than one principal "
         "additionally owes an unauthorized state, and the slice that first makes "
         "that surface reachable ships its access check in that same slice rather "
@@ -120,7 +141,8 @@ def test_unauthorized_state_and_access_check_are_pinned_as_one_interaction():
 
 
 def test_a_state_arrives_with_the_slice_introducing_its_surface_never_earlier():
-    _pin_normalized(
+    _pin(
+        SHARED_SLICE,
         "A state arrives with the slice introducing the surface it belongs to, "
         "and never earlier",
         "_shared/slice.md must state that a state arrives with the slice "
@@ -129,7 +151,8 @@ def test_a_state_arrives_with_the_slice_introducing_its_surface_never_earlier():
 
 
 def test_parent_enumerated_states_shape_is_one_bullet_per_state():
-    _pin_normalized(
+    _pin(
+        SHARED_SLICE,
         "The parent task's `## Enumerated states` section is one `- <name>` "
         "bullet per state",
         "_shared/slice.md must pin the parent task's Enumerated states shape as "
@@ -138,7 +161,8 @@ def test_parent_enumerated_states_shape_is_one_bullet_per_state():
 
 
 def test_design_doc_state_heading_shape_uses_the_bullet_name_verbatim():
-    _pin_normalized(
+    _pin(
+        SHARED_SLICE,
         "The design doc carries one `## State — <name>` section per enumerated "
         "state, and each `<name>` is that bullet's text verbatim",
         "_shared/slice.md must pin the design doc's State heading shape and "
@@ -148,11 +172,7 @@ def test_design_doc_state_heading_shape_uses_the_bullet_name_verbatim():
 
 def test_state_coverage_reference_has_a_single_carrier():
     phrase = "ships its access check in that same slice"
-    carriers = sorted(
-        p
-        for p in CRAFT.rglob("*.md")
-        if _normalize(phrase) in _normalize(p.read_text(encoding="utf-8"))
-    )
+    carriers = _carriers(phrase)
     assert carriers == [SHARED_SLICE], (
         f"the state-coverage reference ({phrase!r}) must live in exactly one "
         f"shipped file (_shared/slice.md); found it in {carriers}"
@@ -160,18 +180,20 @@ def test_state_coverage_reference_has_a_single_carrier():
 
 
 def test_written_shapes_section_title_names_three_not_two():
-    assert "## The three written shapes state coverage depends on" in _text(), (
+    text = SHARED_SLICE.read_text()
+    assert "## The three written shapes state coverage depends on" in text, (
         "_shared/slice.md's written-shapes section must be retitled to three "
         "now that the design-doc label is a third written shape"
     )
-    assert "The two written shapes" not in _text(), (
+    assert "The two written shapes" not in text, (
         "_shared/slice.md must not still title the section as two written "
         "shapes once a third shape (the craft/design-doc label) is added"
     )
 
 
 def test_third_shape_records_the_design_doc_path_as_a_parent_label():
-    _pin_normalized(
+    _pin(
+        SHARED_SLICE,
         "The design doc's path is recorded on the parent task record as the "
         "label `craft/design-doc=<path>`",
         "_shared/slice.md must state the third written shape: the design doc's "
@@ -180,7 +202,8 @@ def test_third_shape_records_the_design_doc_path_as_a_parent_label():
 
 
 def test_no_directory_convention_for_the_design_doc_file():
-    _pin_normalized(
+    _pin(
+        SHARED_SLICE,
         "That label is the only discovery mechanism — there is no convention "
         "for where the design doc file lives on disk",
         "_shared/slice.md must state that the craft/design-doc label is the "
@@ -194,11 +217,7 @@ def test_design_doc_label_shape_has_a_single_carrier():
     # plan/SKILL.md legitimately names the label in its lore record update
     # invocation, so a bare-token guard would false-positive on that mention.
     phrase = "That label is the only discovery mechanism"
-    carriers = sorted(
-        p
-        for p in CRAFT.rglob("*.md")
-        if _normalize(phrase) in _normalize(p.read_text(encoding="utf-8"))
-    )
+    carriers = _carriers(phrase)
     assert carriers == [SHARED_SLICE], (
         f"the craft/design-doc label's shape-defining sentence ({phrase!r}) must "
         f"live in exactly one shipped file (_shared/slice.md); found it in {carriers}"
@@ -228,7 +247,7 @@ SLICE_SKILL_STEP_HEADINGS = [
 
 
 def test_slice_skill_has_exactly_the_ten_steps_today():
-    headings = re.findall(r"^### \d+\..*$", _slice_skill_text(), re.MULTILINE)
+    headings = re.findall(r"^### \d+\..*$", SLICE_SKILL.read_text(), re.MULTILINE)
     assert headings == SLICE_SKILL_STEP_HEADINGS, (
         "slice/SKILL.md must have exactly these ten step headings, in this order "
         "— a future insert or renumber must fail loudly here, not as a confusing "
@@ -245,7 +264,8 @@ def test_slice_skill_has_exactly_the_ten_steps_today():
 
 
 def test_step_8_claim_statement_carries_the_visual_surface_call():
-    _pin_normalized_in_slice_skill(
+    _pin(
+        SLICE_SKILL,
         "state the chosen slice and its value claim — or, on the enabler path, "
         "its written justification — and its visual-surface call, either the "
         "enumerated states or an explicit statement that this slice touches no "
@@ -257,7 +277,8 @@ def test_step_8_claim_statement_carries_the_visual_surface_call():
 
 
 def test_step_8_visual_surface_call_is_never_left_unstated():
-    _pin_normalized_in_slice_skill(
+    _pin(
+        SLICE_SKILL,
         "the call is never left unstated",
         "slice/SKILL.md's step 8 must say the visual-surface call is never left "
         "unstated — either the enumerated states or an explicit no-visual-surface "
@@ -273,7 +294,8 @@ def test_step_8_visual_surface_call_is_never_left_unstated():
 
 
 def test_step_9_enumeration_rides_the_same_invocation_as_claim_label_and_edge():
-    _pin_normalized_in_slice_skill(
+    _pin(
+        SLICE_SKILL,
         "The value claim, the `## Enumerated states` section (when the slice "
         "touches a visual surface), the `craft/slice-parent` label, and the "
         "`--related spec=` edge all ride this same `lore record create` "
@@ -286,7 +308,8 @@ def test_step_9_enumeration_rides_the_same_invocation_as_claim_label_and_edge():
 
 
 def test_step_9_no_visual_surface_case_writes_no_section_and_absence_is_the_signal():
-    _pin_normalized_in_slice_skill(
+    _pin(
+        SLICE_SKILL,
         "A slice touching no visual surface writes no such section — the "
         "absence, not an empty section, is what tells `/craft:plan` there is "
         "nothing to design",
@@ -297,22 +320,7 @@ def test_step_9_no_visual_surface_case_writes_no_section_and_absence_is_the_sign
 
 
 def test_slice_skill_points_at_shared_slice_and_restates_neither_floors_nor_bullet_shape():
-    text = _slice_skill_text()
-    assert "_shared/slice.md" in text, (
-        "slice/SKILL.md must point at _shared/slice.md for the state-coverage "
-        "reference rather than restating it"
-    )
-    for restated_phrase in (
-        "owes zero, one, many",
-        "owes found, not-found",
-        "owes success, validation failure",
-        "owes in-flight, completed",
-        "bullet per state",
-    ):
-        assert restated_phrase not in text, (
-            f"slice/SKILL.md must not restate the archetype floors or the "
-            f"bullet-per-state shape from _shared/slice.md — found {restated_phrase!r}"
-        )
+    _assert_defers_to_shared_slice(SLICE_SKILL, "slice/SKILL.md")
 
 
 # --- plan/SKILL.md: step 6.5 produces the design doc before Define Tasks ---
@@ -323,20 +331,6 @@ def test_slice_skill_points_at_shared_slice_and_restates_neither_floors_nor_bull
 # suites as a confusing failure elsewhere, so the new step is numbered 6.5,
 # following the existing 8.5 precedent, and the full heading inventory is
 # pinned here as a list so a future insert/renumber fails loudly in this file.
-
-PLAN_SKILL = CRAFT / "skills" / "plan" / "SKILL.md"
-
-
-def _plan_skill_text() -> str:
-    return PLAN_SKILL.read_text()
-
-
-def _pin_normalized_in_plan_skill(phrase: str, reason: str) -> None:
-    """Whitespace-insensitive pin against plan/SKILL.md rather than _shared/slice.md."""
-    normalized = _normalize(_plan_skill_text())
-    count = normalized.count(_normalize(phrase))
-    assert count == 1, f"{reason} (found {count}): {phrase!r}"
-
 
 PLAN_SKILL_STEP_HEADINGS = [
     "### 1. Explore Context",
@@ -354,7 +348,7 @@ PLAN_SKILL_STEP_HEADINGS = [
 
 
 def test_plan_skill_has_exactly_these_step_headings_in_order():
-    headings = re.findall(r"^### \d+\..*$", _plan_skill_text(), re.MULTILINE)
+    headings = re.findall(r"^### \d+\..*$", PLAN_SKILL.read_text(), re.MULTILINE)
     assert headings == PLAN_SKILL_STEP_HEADINGS, (
         "plan/SKILL.md must have exactly these step headings, in this order — a "
         "future insert or renumber must fail loudly here rather than as a "
@@ -364,7 +358,7 @@ def test_plan_skill_has_exactly_these_step_headings_in_order():
 
 
 def test_step_6_5_is_positioned_before_define_tasks():
-    text = _plan_skill_text()
+    text = PLAN_SKILL.read_text()
     idx_6_5 = text.index("### 6.5.")
     idx_7 = text.index("### 7. Define Tasks")
     assert idx_6_5 < idx_7, (
@@ -375,7 +369,8 @@ def test_step_6_5_is_positioned_before_define_tasks():
 
 
 def test_design_doc_production_is_conditioned_on_enumerated_states_as_one_interaction():
-    _pin_normalized_in_plan_skill(
+    _pin(
+        PLAN_SKILL,
         "when the parent carries `## Enumerated states`, produce the design doc "
         "now — before Define Tasks",
         "plan/SKILL.md's step 6.5 must state the design-doc production as "
@@ -386,7 +381,8 @@ def test_design_doc_production_is_conditioned_on_enumerated_states_as_one_intera
 
 
 def test_design_doc_state_sections_follow_the_shared_slice_shape():
-    _pin_normalized_in_plan_skill(
+    _pin(
+        PLAN_SKILL,
         "Write one `## State — <name>` section per enumerated bullet, reusing "
         "that bullet's name verbatim, in the shape `_shared/slice.md` fixes",
         "plan/SKILL.md's step 6.5 must state one State section per enumerated "
@@ -395,7 +391,8 @@ def test_design_doc_state_sections_follow_the_shared_slice_shape():
 
 
 def test_planning_session_writes_the_design_doc_itself():
-    _pin_normalized_in_plan_skill(
+    _pin(
+        PLAN_SKILL,
         "The planning session writes the document itself",
         "plan/SKILL.md's step 6.5 must positively state that the planning "
         "session writes the design doc itself, not that any agent is absent",
@@ -403,7 +400,8 @@ def test_planning_session_writes_the_design_doc_itself():
 
 
 def test_design_doc_path_is_validated_against_safe_value_shape_before_use():
-    _pin_normalized_in_plan_skill(
+    _pin(
+        PLAN_SKILL,
         "validate it against the safe-value shape `^[A-Za-z0-9._/-]+$` "
         "(`_shared/execute.md`'s untrusted-input rule) before substitution — a "
         "failing value refuses loudly rather than being silently omitted",
@@ -414,7 +412,8 @@ def test_design_doc_path_is_validated_against_safe_value_shape_before_use():
 
 
 def test_step_6_5_names_the_design_doc_label_and_its_write_command_as_one_interaction():
-    _pin_normalized_in_plan_skill(
+    _pin(
+        PLAN_SKILL,
         "Record the design doc's path on the parent as the `craft/design-doc` "
         "label, written with `lore record update task/<parent-name> --vault "
         "<elected-vault> --label craft/design-doc=<path>`",
@@ -425,22 +424,7 @@ def test_step_6_5_names_the_design_doc_label_and_its_write_command_as_one_intera
 
 
 def test_plan_skill_points_at_shared_slice_and_restates_neither_floors_nor_shapes():
-    text = _plan_skill_text()
-    assert "_shared/slice.md" in text, (
-        "plan/SKILL.md must point at _shared/slice.md for the state-coverage "
-        "reference rather than restating it"
-    )
-    for restated_phrase in (
-        "owes zero, one, many",
-        "owes found, not-found",
-        "owes success, validation failure",
-        "owes in-flight, completed",
-        "bullet per state",
-    ):
-        assert restated_phrase not in text, (
-            f"plan/SKILL.md must not restate the archetype floors or the "
-            f"bullet-per-state shape from _shared/slice.md — found {restated_phrase!r}"
-        )
+    _assert_defers_to_shared_slice(PLAN_SKILL, "plan/SKILL.md")
 
 
 # --- Phase 6: the state-coverage close gate ---
@@ -451,22 +435,10 @@ def test_plan_skill_points_at_shared_slice_and_restates_neither_floors_nor_shape
 # gate sentence breaks it, which is what proves the two compose rather than either
 # shadowing the other.
 
-EXECUTE_SHARED = CRAFT / "skills" / "_shared" / "execute.md"
-
-
-def _execute_text() -> str:
-    return EXECUTE_SHARED.read_text()
-
-
-def _pin_normalized_in_execute(phrase: str, reason: str) -> None:
-    """Whitespace-insensitive pin against _shared/execute.md."""
-    normalized = _normalize(_execute_text())
-    count = normalized.count(_normalize(phrase))
-    assert count == 1, f"{reason} (found {count}): {phrase!r}"
-
 
 def test_phase_6_gate_is_conditioned_on_enumerated_states():
-    _pin_normalized_in_execute(
+    _pin(
+        EXECUTE_SHARED,
         "A parent carrying `## Enumerated states` is refused `done` while any "
         "enumerated state has no matching section in the design doc",
         "Phase 6 must state the state-coverage gate, conditioned on the parent "
@@ -475,7 +447,8 @@ def test_phase_6_gate_is_conditioned_on_enumerated_states():
 
 
 def test_phase_6_new_gate_composes_with_the_pre_existing_completion_guard():
-    _pin_normalized_in_execute(
+    _pin(
+        EXECUTE_SHARED,
         "The completion guard refuses this while any child is non-terminal "
         "(it names them); the state-coverage gate composes with it — both fire "
         "on the same close and neither shadows the other, and a parent "
@@ -487,7 +460,8 @@ def test_phase_6_new_gate_composes_with_the_pre_existing_completion_guard():
 
 
 def test_phase_6_gate_matching_rule_is_a_literal_name_set_comparison():
-    _pin_normalized_in_execute(
+    _pin(
+        EXECUTE_SHARED,
         "The matching rule is a literal name-set comparison, not a judgment "
         "call: read the `- <name>` bullets from the parent's `## Enumerated "
         "states` and the `## State — <name>` headings from the design doc — "
@@ -499,7 +473,8 @@ def test_phase_6_gate_matching_rule_is_a_literal_name_set_comparison():
 
 
 def test_phase_6_gate_records_the_comparison_in_the_completion_report():
-    _pin_normalized_in_execute(
+    _pin(
+        EXECUTE_SHARED,
         "The comparison's result is recorded in the run's completion report — "
         "the set read from the parent, the set read from the doc, and the "
         "difference",
@@ -509,7 +484,8 @@ def test_phase_6_gate_records_the_comparison_in_the_completion_report():
 
 
 def test_phase_6_gate_refusal_names_the_missing_states():
-    _pin_normalized_in_execute(
+    _pin(
+        EXECUTE_SHARED,
         "The refusal names the missing states, rather than failing generically",
         "Phase 6's state-coverage gate must name the missing states in its "
         "refusal rather than failing generically",
@@ -517,7 +493,8 @@ def test_phase_6_gate_refusal_names_the_missing_states():
 
 
 def test_phase_6_gate_reads_the_design_doc_label_and_validates_it():
-    _pin_normalized_in_execute(
+    _pin(
+        EXECUTE_SHARED,
         "the `craft/design-doc` label's value is untrusted input and is "
         "validated against the safe-value shape `^[A-Za-z0-9._/-]+$` before "
         "being substituted into any command, the same rule this document "
@@ -530,7 +507,8 @@ def test_phase_6_gate_reads_the_design_doc_label_and_validates_it():
 
 
 def test_phase_6_gate_states_its_access_check_limit():
-    _pin_normalized_in_execute(
+    _pin(
+        EXECUTE_SHARED,
         "This gate verifies the design doc covers each enumerated state. It "
         "does not verify that an access check was built for a surface "
         "reachable by more than one principal",
@@ -540,7 +518,7 @@ def test_phase_6_gate_states_its_access_check_limit():
 
 
 def test_phase_6_gate_points_at_shared_slice_for_the_shapes():
-    assert "`_shared/slice.md` fixes" in _execute_text(), (
+    assert "`_shared/slice.md` fixes" in EXECUTE_SHARED.read_text(), (
         "Phase 6's state-coverage gate must point at _shared/slice.md for the "
         "written shapes rather than restating them"
     )
