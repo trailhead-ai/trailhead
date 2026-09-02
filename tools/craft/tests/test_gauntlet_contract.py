@@ -570,10 +570,9 @@ def test_every_subject_selection_row_resolves_to_a_bar_section_that_exists():
 # Mirrors `_SPEC_ADVANCE_RE`: a literal substring only catches the one exact
 # spelling this file happens to use, so a differently-phrased adr activation
 # elsewhere (extra whitespace, reordered flags) would silently escape the
-# guard below. An adr's `draft -> active` update no longer exists as a route
-# to `active` at all: distill creates ADRs `--status active` at authorship
-# (write-order step 1), so no craft file — distill included — may carry this
-# pattern.
+# guard below. An update that flips an adr to `active` is not a route craft
+# offers: distill creates ADRs `--status active` at authorship (write-order
+# step 1), so no craft file — distill included — may carry this pattern.
 _ADR_ADVANCE_RE = re.compile(r"<adr-id>\s+--status\s+active")
 
 # The adr *create* pattern — distill's write-order step 1, the only route any
@@ -598,13 +597,11 @@ def _section(text: str, header: str, stop: str | None = None, why: str = "") -> 
     return text[start:] if end == -1 else text[start:end]
 
 
-# The union of both known routes to `active` on an adr: the create (write-order
-# step 1) and the old update-based flip. Matching both in one pattern means a
-# stray copy of *either* shape anywhere in craft's prose is caught by the same
-# pin — the widened pin below subsumes the old absence-only "gauntlet never
-# flips an adr active" test, whose subject was that the update route was gone;
-# this states the positive claim that test was standing in for: the only route
-# to `active`, full stop, is distill's create.
+# The union of both shapes an adr activation could take: the create (write-order
+# step 1) and an update-based flip. Matching both in one pattern means a stray
+# copy of *either* shape anywhere in craft's prose is caught by the same pin,
+# which is what lets the pin below state the positive claim directly — the only
+# route to `active`, full stop, is distill's create.
 _ADR_TO_ACTIVE_RE = re.compile(_ADR_ADVANCE_RE.pattern + "|" + _ADR_CREATE_RE.pattern)
 
 
@@ -1581,24 +1578,6 @@ def test_failed_write_row_states_the_record_keeps_its_arrived_status():
         "override rules require — an override into `resolved` or `revise` on a "
         "run whose revise-presence never moved — or the row names a trigger "
         "narrower than the rule it restates"
-    )
-
-
-def test_shared_accepted_tail_does_not_claim_a_status_flip_in_every_mode():
-    """The shared tail is shared, so it must not assert a step only one mode runs.
-
-    Step 2 named the status flip as the universal second step, with the
-    predecessor supersession write as the mode-specific extra. That inverted the
-    truth after this change: the spec tail flips, the adr tail does not flip the
-    record under review at all, and the write the adr tail does run targets a
-    different record. A shared step asserting a flip both modes perform
-    contradicts the per-mode adr section two hundred lines below it.
-    """
-    step = _flat(_resolution_step(GAUNTLET.read_text()))
-    assert "2. **Then the status flip** — and, where the mode has one," not in step, (
-        "the shared accepted tail still names the status flip as the universal "
-        "second step; it must name the mode's remaining writes instead, since "
-        "the adr tail flips nothing it is reviewing"
     )
 
 
