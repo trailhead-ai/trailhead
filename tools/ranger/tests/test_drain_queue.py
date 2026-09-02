@@ -122,6 +122,29 @@ def test_excludes_runnable_tasks_with_a_parent_or_children():
     assert [e["name"] for e in result] == ["standalone"]
 
 
+def test_assumption_probe_blocked_child_of_in_progress_parent_is_excluded():
+    """ASSUMPTION PROBE (ephemeral) — see the-driver-escalation-contract task.
+
+    A `--runnable`-listed task carrying a `parent` edge must never surface in
+    the execute drain's queue, regardless of its own or its parent's status.
+    A `blocked` task would not normally appear in a `--runnable` listing, so
+    this also stands in for "even if it somehow did, the shape gate still
+    excludes it."
+    """
+    tasks = [
+        _task_entry("standalone", parent=None, children=[]),
+        _task_entry("escalation-child", status="blocked", parent="in-progress-slice-parent"),
+    ]
+    bodies = {"standalone": _buildable_body()}
+    runner = _make_runner(tasks=tasks, bodies=bodies)
+
+    result = drain_queue.derive_drain_queue(_VAULT, runner=runner)
+
+    names = [e["name"] for e in result]
+    assert "escalation-child" not in names
+    assert names == ["standalone"]
+
+
 # ---------------------------------------------------------------------------
 # Buildable payload
 # ---------------------------------------------------------------------------

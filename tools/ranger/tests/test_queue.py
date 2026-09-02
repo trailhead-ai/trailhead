@@ -152,6 +152,26 @@ def test_excludes_parented_and_childed_tasks_even_when_status_matches():
     assert names == {"standalone-open"}
 
 
+def test_assumption_probe_blocked_child_of_in_progress_parent_is_excluded():
+    """ASSUMPTION PROBE (ephemeral) — see the-driver-escalation-contract task.
+
+    A `blocked` task carrying a `parent` edge (as the driver's escalation
+    contract would write) must never surface in the refine sweep's queue,
+    regardless of its status or its parent's status.
+    """
+    entries = [
+        _task_entry("standalone-open", "open"),
+        _task_entry("escalation-child", "blocked", parent="in-progress-slice-parent"),
+    ]
+    runner = _make_runner(entries=entries, bodies={"standalone-open": _no_section_body()})
+
+    result = queue.derive_queue(_VAULT, runner=runner)
+
+    names = {e["name"] for e in result}
+    assert "escalation-child" not in names
+    assert names == {"standalone-open"}
+
+
 # ---------------------------------------------------------------------------
 # The four buckets
 # ---------------------------------------------------------------------------
