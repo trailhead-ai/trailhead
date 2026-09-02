@@ -154,12 +154,13 @@ def _add_record_field_flags(parser) -> None:
     )
     # depends-on: a bare TASK name on a task record, or a qualified
     # KIND/NAME[@STAGE] target (kind spec or adr) on a spec/adr record.
-    # --parent stays task-only, rejected on every other kind by validate().
+    # --parent stays task-only, rejected on every other kind by validate(), and
+    # takes the same bare-name grammar --depends-on does.
     parser.add_argument(
         "--depends-on", dest="depends_on", action="append", default=[],
         metavar="TASK|KIND/NAME[@STAGE]",
         help="Append a dependency: a bare TASK on a task record, or a qualified "
-             "KIND/NAME[@STAGE] target (kind spec or adr) on a spec/adr record.",
+             "KIND/NAME[@STAGE] on a spec/adr record.",
     )
     parser.add_argument(
         "--unset-depends-on", dest="unset_depends_on", action="append", default=[],
@@ -167,7 +168,7 @@ def _add_record_field_flags(parser) -> None:
     )
     parser.add_argument(
         "--parent", dest="parent", default=None, metavar="TASK",
-        help="Set this task's parent task (task-only).",
+        help="Set this task's parent: a bare TASK name (task-only).",
     )
     parser.add_argument(
         "--unset-parent", dest="unset_parent", action="store_true", default=False,
@@ -1337,6 +1338,7 @@ def _cmd_record_update(args) -> int:
                     vault_root=location.vault_root,
                     status_set=getattr(args, "status", None),
                     supplied_depends_on=list(getattr(args, "depends_on", None) or []),
+                    parent_supplied=getattr(args, "parent", None) is not None,
                     prior_status=existing_sidecar.get("status"),
                     prior_body=existing_body,
                 )

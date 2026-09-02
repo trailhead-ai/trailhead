@@ -261,6 +261,27 @@ def _wait_for_health(port: int, total_timeout: float, poll_interval: float = 0.1
 _PID_SETTLE_SECONDS = 0.3
 _PID_SETTLE_POLL_INTERVAL = 0.02
 
+#: Fraction of a restart's health timeout used as the pid-settle window when the
+#: caller does not name one. The two are proxies for the same thing — how slow
+#: this machine is right now — so a caller that allows 30s for /health to answer
+#: is also saying a doomed spawn may take well over 0.3s to finish dying.
+_PID_SETTLE_FRACTION = 0.1
+
+
+def _resolve_pid_settle_timeout(
+    *, pid_settle_timeout: float | None, restart_health_timeout: float
+) -> float:
+    """Resolve the pid-settle window for one restart.
+
+    An explicit *pid_settle_timeout* wins outright. Otherwise the window scales
+    with *restart_health_timeout*, floored at :data:`_PID_SETTLE_SECONDS` so a
+    caller that shortens its health tolerance never ends up with a window too
+    short to observe a doomed spawn exit at all.
+    """
+    if pid_settle_timeout is not None:
+        return pid_settle_timeout
+    return max(_PID_SETTLE_SECONDS, restart_health_timeout * _PID_SETTLE_FRACTION)
+
 
 def _settled_pid_alive(pid: int, timeout: float = _PID_SETTLE_SECONDS) -> bool:
     """Poll pid liveness for a short settle window. Returns False as soon as
@@ -410,6 +431,7 @@ def restart(
     health_timeout: float = 2.0,
     stop_timeout: float = _STOP_TIMEOUT_SECONDS,
     restart_health_timeout: float = 5.0,
+    pid_settle_timeout: float | None = None,
 ) -> int:
     """Rebuild the outpost checkout, then stop and restart the daemon.
 
@@ -429,6 +451,13 @@ def restart(
     confirms it is still alive, to prove it's our spawn — not a stale process
     still holding the port — that answered. OutpostLifecycleError is raised,
     naming what happened, if either check fails.
+
+    That liveness check waits ``pid_settle_timeout`` seconds for a doomed spawn
+    to finish dying. It is a race the caller can lose on a loaded machine — a
+    process dying on EADDRINUSE that has not exited yet still reads as alive,
+    and the restart is then reported successful. Left unset, the window scales
+    with ``restart_health_timeout`` (see :func:`_resolve_pid_settle_timeout`);
+    pass it explicitly to widen the window on a machine known to be slow.
     """
     checkout = _resolve_checkout(env)
     cmd = build_cmd if build_cmd is not None else list(DEFAULT_BUILD_CMD)
@@ -473,8 +502,12 @@ def restart(
     # unmanaged/old process could still be holding the port, in which case our
     # spawn just died on EADDRINUSE while the stale process keeps serving.
     # Confirm the pid start() recorded is still alive before trusting success.
+    settle_timeout = _resolve_pid_settle_timeout(
+        pid_settle_timeout=pid_settle_timeout,
+        restart_health_timeout=restart_health_timeout,
+    )
     new_pid = _read_pid(_pidfile(env))
-    if new_pid is None or not _settled_pid_alive(new_pid):
+    if new_pid is None or not _settled_pid_alive(new_pid, settle_timeout):
         raise OutpostLifecycleError(
             "outpost restart: /health answered but the process start() spawned "
             f"(pid {new_pid}) is not alive; another process is likely still "

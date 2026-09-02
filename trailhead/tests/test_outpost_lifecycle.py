@@ -477,6 +477,7 @@ def _restart(
     build_cmd: list[str],
     extra_env: dict[str, str] | None = None,
     restart_health_timeout: float | None = None,
+    pid_settle_timeout: float | None = None,
 ) -> subprocess.CompletedProcess:
     """Run ``restart`` the same orphaning way ``_start`` does. No cwd is set:
     ``restart`` runs the build with ``cwd=<checkout>`` itself, so the fake build
@@ -488,6 +489,8 @@ def _restart(
     )
     if restart_health_timeout is not None:
         call += f", restart_health_timeout={restart_health_timeout!r}"
+    if pid_settle_timeout is not None:
+        call += f", pid_settle_timeout={pid_settle_timeout!r}"
     call += ")"
     return _run_verb(
         o,
@@ -605,7 +608,14 @@ def test_restart_raises_when_new_process_dies_but_stale_process_still_answers_he
         assert _wait_until(lambda: _health_reachable(outpost.port), timeout=3.0)
 
         build_cmd = _build_script(tmp_path)
-        result = _restart(outpost, build_cmd, restart_health_timeout=1.0)
+        # The settle window is named explicitly, and generously: this test's
+        # whole subject is observing the doomed spawn die, and the default
+        # window is a race the machine wins under parallel load. Waiting longer
+        # costs nothing here — the check returns as soon as the pid is observed
+        # dead, and only a spawn that never dies pays the full window.
+        result = _restart(
+            outpost, build_cmd, restart_health_timeout=1.0, pid_settle_timeout=10.0
+        )
 
         assert result.returncode != 0
         assert "OutpostLifecycleError" in result.stderr
@@ -652,3 +662,77 @@ def test_outpost_verbs_parse():
 def test_named_error_registered_for_clean_cli_output():
     # The top-level guard converts these into a clean 'trailhead: <msg>' line.
     assert OutpostLifecycleError in cli._TRAILHEAD_ERRORS
+
+
+# ---------------------------------------------------------------------------
+# restart's pid-settle window: caller-tunable, and derived from the health
+# timeout when the caller does not name one
+# ---------------------------------------------------------------------------
+
+
+def test_settle_window_defaults_to_a_fraction_of_the_health_timeout():
+    """A caller declaring a generous health tolerance is declaring a slow machine."""
+    resolved = outpost_lifecycle._resolve_pid_settle_timeout(
+        pid_settle_timeout=None, restart_health_timeout=30.0
+    )
+    assert resolved == pytest.approx(30.0 * outpost_lifecycle._PID_SETTLE_FRACTION)
+
+
+def test_settle_window_never_shrinks_below_the_floor():
+    """A short health timeout must not shrink the window below the fixed floor."""
+    resolved = outpost_lifecycle._resolve_pid_settle_timeout(
+        pid_settle_timeout=None, restart_health_timeout=1.0
+    )
+    assert resolved == outpost_lifecycle._PID_SETTLE_SECONDS
+
+
+def test_an_explicit_settle_window_wins_over_the_derivation():
+    resolved = outpost_lifecycle._resolve_pid_settle_timeout(
+        pid_settle_timeout=7.5, restart_health_timeout=30.0
+    )
+    assert resolved == 7.5
+
+
+def _stub_restart_up_to_the_pid_check(monkeypatch, tmp_path, recorder):
+    """Stub everything ``restart`` does before the pid-liveness check.
+
+    Leaves exactly that check live, so a test can pin which settle window
+    ``restart`` actually hands it — the wiring, not just the arithmetic.
+    """
+    monkeypatch.setattr(outpost_lifecycle, "_resolve_checkout", lambda env: tmp_path)
+    monkeypatch.setattr(
+        outpost_lifecycle.subprocess,
+        "run",
+        lambda *a, **k: SimpleNamespace(returncode=0, stdout="", stderr=""),
+    )
+    monkeypatch.setattr(outpost_lifecycle, "stop", lambda **k: 0)
+    monkeypatch.setattr(outpost_lifecycle, "start", lambda **k: 0)
+    monkeypatch.setattr(outpost_lifecycle, "_wait_for_health", lambda port, timeout: {})
+    monkeypatch.setattr(outpost_lifecycle, "_read_pid", lambda pidfile: 4242)
+
+    def _record(pid, timeout):
+        recorder.append(timeout)
+        return True
+
+    monkeypatch.setattr(outpost_lifecycle, "_settled_pid_alive", _record)
+
+
+def test_restart_hands_the_derived_window_to_the_liveness_check(monkeypatch, tmp_path):
+    """The wiring pin: restart must not keep using the bare module constant."""
+    seen: list[float] = []
+    _stub_restart_up_to_the_pid_check(monkeypatch, tmp_path, seen)
+
+    outpost_lifecycle.restart(build_cmd=["true"], restart_health_timeout=30.0)
+
+    assert seen == [pytest.approx(30.0 * outpost_lifecycle._PID_SETTLE_FRACTION)]
+
+
+def test_restart_hands_an_explicit_window_to_the_liveness_check(monkeypatch, tmp_path):
+    seen: list[float] = []
+    _stub_restart_up_to_the_pid_check(monkeypatch, tmp_path, seen)
+
+    outpost_lifecycle.restart(
+        build_cmd=["true"], restart_health_timeout=30.0, pid_settle_timeout=7.5
+    )
+
+    assert seen == [7.5]

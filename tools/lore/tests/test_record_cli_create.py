@@ -681,6 +681,31 @@ def test_staged_depends_on_rejected_on_create(tmp_path):
     assert not (vault / "task" / "a.md").exists()
 
 
+def test_prefixed_parent_rejected_on_create(tmp_path):
+    """A kind-prefixed --parent detaches the child, so the create never lands."""
+    vault, state = _make_vault(tmp_path)
+    r = _create_task(vault, state, "a", extra=["--parent", "task/foo"])
+    assert r.returncode != 0
+    assert "graph-guard [task-edge-form]" in r.stderr
+    assert "task/foo" in r.stderr
+    assert not (vault / "task" / "a.md").exists()
+
+
+def test_staged_parent_rejected_on_create(tmp_path):
+    vault, state = _make_vault(tmp_path)
+    r = _create_task(vault, state, "a", extra=["--parent", "foo@ready"])
+    assert r.returncode != 0
+    assert "graph-guard [task-edge-form]" in r.stderr
+    assert not (vault / "task" / "a.md").exists()
+
+
+def test_bare_parent_still_creates(tmp_path):
+    """The accepted shape is unchanged — a bare parent name still writes."""
+    vault, state = _make_vault(tmp_path)
+    r = _create_task(vault, state, "a", extra=["--parent", "foo"])
+    assert r.returncode == 0, r.stderr
+
+
 # ---------------------------------------------------------------------------
 # flow-out reminder on parent completion (create with --status done)
 # ---------------------------------------------------------------------------

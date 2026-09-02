@@ -260,6 +260,7 @@ def evaluate_task_guards(
     status_set: str | None,
     deleting: bool = False,
     supplied_depends_on: list[str] | None = None,
+    parent_supplied: bool = True,
 ) -> tuple[list[str], list[str]]:
     """Evaluate the task graph guards for a create/update/delete.
 
@@ -279,7 +280,9 @@ def evaluate_task_guards(
     it is the list of ``depends-on`` values this write newly supplies, and only
     those are judged by the edge-FORM check below. ``None`` (the default) means
     "every entry is newly supplied", which is what a create passes and what
-    keeps every other caller at today's semantics. Confinement is deliberately
+    keeps every other caller at today's semantics. *parent_supplied* is the
+    ``parent`` analogue — ``False`` when this write leaves the stored ``parent``
+    alone, ``True`` (the default) when it sets one. Confinement is deliberately
     NOT narrowed: an unsafe reference is unsafe whoever wrote it.
 
     A no-op — ``([], [])`` — for every non-``task`` kind, so no other kind is
@@ -321,12 +324,14 @@ def evaluate_task_guards(
     if errors:
         return errors, []
 
-    # Task ``depends-on`` targets are BARE task names. The graph matches a stored
-    # value byte-for-byte against a task's stem with no prefix normalization, so a
-    # qualified or staged value writes clean and then reads as a detached node —
-    # an edge the operator believes exists and that nothing ever traverses. It is
-    # rejected here, after confinement, so a traversal-shaped value still reports
-    # the containment breach it actually is.
+    # Task ``depends-on`` targets and a task's ``parent`` are BARE task names. The
+    # graph matches a stored value byte-for-byte against a task's stem with no
+    # prefix normalization, so a qualified or staged value writes clean and then
+    # reads as a detached node — an edge the operator believes exists and that
+    # nothing ever traverses. A prefixed ``parent`` is the sharper of the two: the
+    # child renders detached and the parent renders childless, so a task graph
+    # silently loses a whole subtree. Both are rejected here, after confinement,
+    # so a traversal-shaped value still reports the containment breach it is.
     #
     # Scoped to what the write SUPPLIES, not to what the merged record holds: a
     # record stored before this check existed may carry a prefixed entry, and
@@ -346,6 +351,14 @@ def evaluate_task_guards(
                     f"'/' and '@' are not part of the task-edge grammar",
                 )
             )
+    if parent_supplied and isinstance(parent, str) and ("/" in parent or "@" in parent):
+        errors.append(
+            graph_mod.format_guard_message(
+                "task-edge-form",
+                f"parent {parent!r} must be a bare task name — "
+                f"'/' and '@' are not part of the task-edge grammar",
+            )
+        )
     if errors:
         return errors, []
 
@@ -790,6 +803,7 @@ def evaluate_graph_guards(
     status_set: str | None,
     deleting: bool = False,
     supplied_depends_on: list[str] | None = None,
+    parent_supplied: bool = True,
     prior_body: str | None = None,
     prior_status: str | None = None,
 ) -> tuple[list[str], list[str]]:
@@ -801,9 +815,9 @@ def evaluate_graph_guards(
     two graphs, so exactly one policy ever runs. ``body`` is consumed by the
     task policy (the flow-out ritual reminder has no design counterpart) and,
     for an ``adr``, by the ``active``-immutability check. *supplied_depends_on*
-    is task-only: the task-edge form check is the one guard that grandfathers
-    already-stored entries, because it is the one guard whose rule postdates
-    the data it reads. Every design ``depends-on`` entry on disk was written
+    and *parent_supplied* are task-only: the task-edge form check is the one
+    guard that grandfathers already-stored edges, because it is the one guard
+    whose rule postdates the data it reads. Every design ``depends-on`` entry on disk was written
     under the design grammar, so that policy judges the merged record whole.
 
     *prior_body* / *prior_status* are the record's on-disk values BEFORE this
@@ -823,6 +837,7 @@ def evaluate_graph_guards(
             status_set=status_set,
             deleting=deleting,
             supplied_depends_on=supplied_depends_on,
+            parent_supplied=parent_supplied,
         )
     if kind in graph_mod.DESIGN_KINDS:
         return evaluate_design_guards(

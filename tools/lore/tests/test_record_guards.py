@@ -429,12 +429,58 @@ def test_task_depends_on_bare_name_is_still_accepted(tmp_path):
     assert errors == []
 
 
-def test_task_parent_with_kind_prefix_is_still_accepted(tmp_path):
-    """``parent`` is deliberately untouched by the depends-on form rejection."""
+def test_task_parent_with_kind_prefix_is_a_blocking_error(tmp_path):
+    """A prefixed parent detaches the child from the graph — same shape as depends-on."""
     g = _guards()
     errors, notices = _task_guards(g, tmp_path, {"parent": "task/foo"})
-    assert errors == []
+    assert any("task-edge-form" in e for e in errors)
+    assert any("task/foo" in e for e in errors)
     assert notices == []
+
+
+def test_task_parent_with_stage_tail_is_a_blocking_error(tmp_path):
+    g = _guards()
+    errors, notices = _task_guards(g, tmp_path, {"parent": "foo@ready"})
+    assert any("task-edge-form" in e for e in errors)
+    assert any("foo@ready" in e for e in errors)
+
+
+def test_task_parent_bare_name_is_still_accepted(tmp_path):
+    g = _guards()
+    errors, notices = _task_guards(g, tmp_path, {"parent": "foo"})
+    assert errors == []
+
+
+def test_task_parent_traversal_still_reports_confinement_first(tmp_path):
+    """A traversal parent keeps its confinement rejection, not the form one."""
+    g = _guards()
+    errors, notices = _task_guards(g, tmp_path, {"parent": "../evil"})
+    assert any("edge-reference" in e for e in errors)
+    assert not any("task-edge-form" in e for e in errors)
+
+
+def test_stored_prefixed_parent_is_grandfathered_when_the_write_supplies_none(tmp_path):
+    """A record already holding a prefixed parent stays updatable."""
+    g = _guards()
+    errors, notices = _task_guards(
+        g, tmp_path, {"parent": "task/legacy"}, parent_supplied=False
+    )
+    assert errors == []
+
+
+def test_a_resupplied_prefixed_parent_is_rejected(tmp_path):
+    g = _guards()
+    errors, notices = _task_guards(
+        g, tmp_path, {"parent": "task/fresh"}, parent_supplied=True
+    )
+    assert any("task-edge-form" in e for e in errors)
+
+
+def test_omitting_parent_supplied_judges_the_stored_parent(tmp_path):
+    """The default is validate-everything — the semantics create depends on."""
+    g = _guards()
+    errors, notices = _task_guards(g, tmp_path, {"parent": "task/legacy"})
+    assert any("task-edge-form" in e for e in errors)
 
 
 def test_task_depends_on_traversal_still_reports_confinement_first(tmp_path):
