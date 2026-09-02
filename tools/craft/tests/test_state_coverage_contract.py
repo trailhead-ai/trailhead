@@ -8,10 +8,12 @@ the same slice that opens the surface, the rule that a state arrives with the sl
 introducing its surface and never earlier, and that the floor is explicitly
 non-exhaustive.
 
-It also carries the two written shapes three later documents depend on: the parent
-task's `## Enumerated states` bullet-per-state shape, and the design doc's
-`## State — <name>` heading-per-state shape, whose `<name>` must match the bullet's
-text verbatim.
+It also carries the three written shapes later documents depend on: the parent
+task's `## Enumerated states` bullet-per-state shape, the design doc's
+`## State — <name>` heading-per-state shape (whose `<name>` must match the bullet's
+text verbatim), and the design doc's path recorded on the parent task record as the
+`craft/design-doc` label — the only discovery mechanism, with no directory
+convention alongside it.
 
 These tests pin that wording and pin that no other shipped file restates it.
 """
@@ -154,6 +156,52 @@ def test_state_coverage_reference_has_a_single_carrier():
     assert carriers == [SHARED_SLICE], (
         f"the state-coverage reference ({phrase!r}) must live in exactly one "
         f"shipped file (_shared/slice.md); found it in {carriers}"
+    )
+
+
+def test_written_shapes_section_title_names_three_not_two():
+    assert "## The three written shapes state coverage depends on" in _text(), (
+        "_shared/slice.md's written-shapes section must be retitled to three "
+        "now that the design-doc label is a third written shape"
+    )
+    assert "The two written shapes" not in _text(), (
+        "_shared/slice.md must not still title the section as two written "
+        "shapes once a third shape (the craft/design-doc label) is added"
+    )
+
+
+def test_third_shape_records_the_design_doc_path_as_a_parent_label():
+    _pin_normalized(
+        "The design doc's path is recorded on the parent task record as the "
+        "label `craft/design-doc=<path>`",
+        "_shared/slice.md must state the third written shape: the design doc's "
+        "path recorded on the parent task record as the craft/design-doc label",
+    )
+
+
+def test_no_directory_convention_for_the_design_doc_file():
+    _pin_normalized(
+        "That label is the only discovery mechanism — there is no convention "
+        "for where the design doc file lives on disk",
+        "_shared/slice.md must state that the craft/design-doc label is the "
+        "only discovery mechanism and that no directory convention governs "
+        "where the design doc file lives",
+    )
+
+
+def test_design_doc_label_shape_has_a_single_carrier():
+    # Pinned on the descriptive sentence, not the bare "craft/design-doc" token:
+    # plan/SKILL.md legitimately names the label in its lore record update
+    # invocation, so a bare-token guard would false-positive on that mention.
+    phrase = "That label is the only discovery mechanism"
+    carriers = sorted(
+        p
+        for p in CRAFT.rglob("*.md")
+        if _normalize(phrase) in _normalize(p.read_text(encoding="utf-8"))
+    )
+    assert carriers == [SHARED_SLICE], (
+        f"the craft/design-doc label's shape-defining sentence ({phrase!r}) must "
+        f"live in exactly one shipped file (_shared/slice.md); found it in {carriers}"
     )
 
 
@@ -362,6 +410,17 @@ def test_design_doc_path_is_validated_against_safe_value_shape_before_use():
         "plan/SKILL.md's step 6.5 must validate the recorded design-doc path "
         "against the safe-value shape before substitution and refuse loudly on "
         "a failing value",
+    )
+
+
+def test_step_6_5_names_the_design_doc_label_and_its_write_command_as_one_interaction():
+    _pin_normalized_in_plan_skill(
+        "Record the design doc's path on the parent as the `craft/design-doc` "
+        "label, written with `lore record update task/<parent-name> --vault "
+        "<elected-vault> --label craft/design-doc=<path>`",
+        "plan/SKILL.md's step 6.5 must name the craft/design-doc label and show "
+        "the lore record update invocation as one interaction — dropping either "
+        "the label name or the write command must break this pin",
     )
 
 

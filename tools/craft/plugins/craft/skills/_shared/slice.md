@@ -55,8 +55,12 @@ ships its access check in that same slice rather than deferring it to a later on
 A state arrives with the slice introducing the surface it belongs to, and never
 earlier.
 
-## The two written shapes state coverage depends on
+## The three written shapes state coverage depends on
 
 The parent task's `## Enumerated states` section is one `- <name>` bullet per state.
 The design doc carries one `## State — <name>` section per enumerated state, and
 each `<name>` is that bullet's text verbatim.
+
+The design doc's path is recorded on the parent task record as the label
+`craft/design-doc=<path>`. That label is the only discovery mechanism — there is no
+convention for where the design doc file lives on disk.
