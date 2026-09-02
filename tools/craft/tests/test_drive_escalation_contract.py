@@ -93,7 +93,6 @@ def test_escalation_record_create_names_vault_flag():
 
 def test_escalation_create_command_is_literal_and_carries_both_flags():
     text = _text()
-    calls = re.findall(r"lore record create [^\n`]*", text.replace("\\\n", " "))
     # The escalation create command is a multi-line shell invocation in a fenced block;
     # search the fenced block directly instead of a single-line regex.
     block_match = re.search(
@@ -106,7 +105,6 @@ def test_escalation_create_command_is_literal_and_carries_both_flags():
     assert "--parent" in command, f"escalation create command missing --parent: {command}"
     assert "--vault" in command, f"escalation create command missing --vault: {command}"
     assert "--status blocked" in command, f"escalation create command missing --status blocked: {command}"
-    assert not calls or True  # calls unused beyond sanity; block_match is the real assertion
 
 
 # --- contract item 3: the escalation body runs through the credential-pattern scrub ----
@@ -203,6 +201,7 @@ _DECLARED_TRIGGERS = [
     "agent-blocked",
     "planner-stalled",
     "worker-stalled",
+    "updater-preflight-failed",
 ]
 
 
@@ -258,6 +257,40 @@ def test_rule_names_the_clean_terminal_halts_as_exceptions():
         "the clean terminal halts at step 6",
         "The scoped rule must name step 6's two clean terminal halts (spec "
         "complete, early stop) as named exceptions that write nothing.",
+    )
+
+
+def test_rule_names_the_missing_argument_stop_as_an_exception():
+    _pin(
+        "the missing-argument stop (`## Argument` above",
+        "The scoped rule must also name the missing-argument stop as a named "
+        "exception that writes nothing — it is neither a dispatch failure nor "
+        "an escalation, and was previously unnamed.",
+    )
+
+
+def test_rule_names_the_shape_check_refusal_as_an_exception():
+    _pin(
+        "the shape-check refusal at step 1",
+        "The scoped rule must also name step 1's shape-check refusal as a "
+        "named exception that writes nothing — it was previously unnamed, "
+        "leaving the 'no unnamed third case' claim false.",
+    )
+
+
+def test_spec_complete_halt_states_it_writes_nothing_of_its_own():
+    _pin(
+        "This halt writes nothing of its own",
+        "Step 6's spec-complete halt must state at its own site that it "
+        "writes nothing of its own, not merely 'halt the driver'.",
+    )
+
+
+def test_early_stop_halt_states_it_writes_nothing_of_its_own():
+    _pin(
+        "This halt too writes nothing of its own",
+        "Step 6's early-stop halt must state at its own site that it writes "
+        "nothing of its own, not merely 'halt the driver'.",
     )
 
 

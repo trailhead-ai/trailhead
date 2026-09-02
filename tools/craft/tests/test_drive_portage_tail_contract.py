@@ -104,6 +104,27 @@ def test_create_mode_chosen_because_it_opens_the_pr_not_because_unpushed():
     )
 
 
+# --- an updater preflight failure escalates rather than dispatching monitor against ------
+# --- pr_pairs that was never returned ----------------------------------------------------
+
+
+def test_updater_preflight_failure_escalates_under_named_trigger():
+    _pin(
+        "escalate under the `updater-preflight-failed` trigger",
+        "An `updater` preflight failure must escalate under a named trigger "
+        "from the closed vocabulary, rather than falling through to a "
+        "`monitor` dispatch against `pr_pairs` that was never returned.",
+    )
+
+
+def test_updater_preflight_failure_trigger_declared_in_vocabulary():
+    _pin(
+        "**`updater-preflight-failed`** — the PR tail's `updater` dispatch",
+        "The `updater-preflight-failed` trigger must be declared in the "
+        "closed trigger vocabulary with its full triggering condition named.",
+    )
+
+
 # --- the driver never merges, orders a merge, or reverts --------------------------------
 
 
@@ -123,6 +144,16 @@ def test_group_toml_path_derived_from_camps_own_group_config():
         "Derive `group_toml_path` from camp's own group config, never from a ranger artifact.",
         "group_toml_path must be derived from camp's own group config, never a ranger "
         "artifact.",
+    )
+
+
+def test_step_ten_names_its_own_manifest_read():
+    _pin(
+        "Read `manifest.json` at the derived camp workspace root again here — a resume "
+        "re-entering directly at this phase skips step 5 entirely",
+        "Step 10 must name its own read of manifest.json rather than sourcing the "
+        "camp group name from 'the camp manifest read at step 5', since a resume "
+        "re-entering at pr-tail skips step 5 and never performs that read.",
     )
 
 
@@ -211,8 +242,8 @@ def test_token_map_states_no_default_or_fallthrough():
 _TOKEN_MAP_CASES = {
     "merged": "`MERGED` — closes the slice; the token takes no argument.",
     "ready": "`READY <reason>` — closes the slice.",
-    "stopped-auto-merge-disabled": "`STOPPED auto_merge disabled` — closes the slice; the "
-    "stacked-slice success path, not a failure.",
+    "stopped-auto-merge": "`STOPPED <reason>` where `<reason>` contains `auto_merge` — "
+    "closes the slice; the stacked-slice success path, not a failure.",
     "stopped-other": "Every other `STOPPED <reason>` — escalates under the "
     "`portage-stopped` trigger, following the escalation contract below, with no retry.",
     "blocked": "`BLOCKED <reason>` — escalates under the `portage-blocked` trigger, "
@@ -236,12 +267,12 @@ def test_token_map_case_has_an_explicit_mapping(case, line):
 # --- (the single distinction carrying the whole stacked-slice path) --------------------
 
 
-def test_stopped_auto_merge_disabled_closes_the_slice():
+def test_stopped_auto_merge_closes_the_slice():
     _pin(
-        "`STOPPED auto_merge disabled` — closes the slice; the stacked-slice success "
-        "path, not a failure.",
-        "STOPPED auto_merge disabled must map to closing the slice, as the stacked-slice "
-        "success path — never to escalation.",
+        "`STOPPED <reason>` where `<reason>` contains `auto_merge` — closes the slice; "
+        "the stacked-slice success path, not a failure.",
+        "A STOPPED reason naming auto_merge must map to closing the slice, as the "
+        "stacked-slice success path — never to escalation.",
     )
 
 
@@ -253,31 +284,48 @@ def test_every_other_stopped_reason_escalates():
     )
 
 
-# --- the auto_merge-disabled match is resilient (prefix), never whole-string equality ---
+# --- the auto_merge match is a substring test, never prefix or whole-string equality ---
 # --- against portage's free-text STOPPED <reason> grammar ------------------------------
 
 
-def test_auto_merge_disabled_matched_by_prefix_not_whole_string_equality():
+def test_auto_merge_matched_by_substring_not_prefix_or_whole_string_equality():
     _pin(
-        "Match by prefix against the reason text, never by whole-line equality "
-        "against the literal `STOPPED auto_merge disabled`",
-        "The stacked-slice success case must be matched resiliently — a "
-        "prefix/substring rule against the reason text — never by exact "
-        "whole-string equality, since portage documents `auto_merge "
-        "disabled` as an example reason inside its free-text `STOPPED "
-        "<reason>` grammar, not a fixed literal.",
+        "Match on `auto_merge` appearing anywhere in the reason text, never on the "
+        "whole-string or prefix literal `STOPPED auto_merge disabled`",
+        "The stacked-slice success case must be matched by a substring test for "
+        "`auto_merge` anywhere in the reason — never by a prefix or whole-string "
+        "match against the literal `STOPPED auto_merge disabled`, which monitor "
+        "documents only as an example and does not actually emit.",
     )
 
 
-def test_states_why_exact_equality_is_wrong_here():
+def test_states_why_prefix_or_whole_string_equality_is_wrong_here():
     _pin(
-        "portage documents `auto_merge disabled` as an example reason, not a "
-        "fixed literal, and a whole-string match would silently misclassify a "
-        "future rewording of that reason as an escalation",
-        "The ritual must state explicitly why exact whole-string equality is "
-        "the wrong match rule here — a rewording of portage's reason text "
-        "must not silently turn every stacked-slice success into an "
-        "escalation.",
+        "no prefix of `auto_merge disabled` matches that text, so a prefix or "
+        "whole-string match would silently misclassify every stacked-slice "
+        "success as an escalation",
+        "The ritual must state explicitly why a prefix or whole-string match "
+        "is wrong here — monitor's real reason text, `auto_merge is unset/"
+        "false`, shares no prefix with `auto_merge disabled`, so that rule "
+        "would escalate every stacked-slice success instead of closing it.",
+    )
+
+
+def test_cites_monitor_documented_example_string():
+    _pin(
+        "monitor documents that string only as an example in its token grammar "
+        "(`tools/portage/plugins/portage/agents/monitor.md:90`)",
+        "The match-rule rationale must cite where monitor documents "
+        "`STOPPED auto_merge disabled` as an example, not a fixed literal.",
+    )
+
+
+def test_cites_monitor_actual_emitted_reason_text():
+    _pin(
+        "the reason text it actually emits is `STOPPED: all PRs are ready to merge, "
+        "but auto_merge is unset/false",
+        "The match-rule rationale must cite the actual reason text monitor emits, "
+        "which shares no prefix with the documented example.",
     )
 
 

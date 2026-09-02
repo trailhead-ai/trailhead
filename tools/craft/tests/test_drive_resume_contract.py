@@ -14,6 +14,7 @@ loudly as a wrap issue rather than reading as "phrase missing".
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -116,9 +117,12 @@ def test_no_block_case_never_self_reenters_the_procedure():
 
 def test_no_block_case_is_named_explicitly():
     _pin(
-        "**No block present.**",
-        "The no-block case must be named as its own explicit branch, not "
-        "left implicit in the has-a-block branch's prose.",
+        "**No open parent exists.**",
+        "The no-open-parent case must be named as its own explicit branch, keyed "
+        "on the absence of an open parent — not on the absence of a block, which "
+        "is also literally true of the next branch down (an open parent with no "
+        "checkpoint yet) and would let an agent matching on headlines take the "
+        "wrong one.",
     )
 
 
@@ -236,4 +240,90 @@ def test_slice_selection_only_runs_when_no_open_slice_to_resume():
         "to resume against.",
         "The slice ritual must run only when the resume check above found no "
         "open slice parent to resume.",
+    )
+
+
+# --- contract item 8: the open-slice-parent query carries no --vault flag --------------
+# --- (`lore search` has none — the flag does not exist and the call errors) ------------
+
+
+def test_open_slice_query_carries_no_vault_flag():
+    text = _text()
+    match = re.search(
+        r'lore search "kind:task related-spec:<spec-name> has:label\.craft\.slice-parent'
+        r'[^`\n]*',
+        text,
+    )
+    assert match, "expected the open-slice-parent `lore search` query in drive/SKILL.md"
+    assert "--vault" not in match.group(0), (
+        "the open-slice-parent `lore search` query must carry no `--vault` flag — "
+        "`lore search` has no such flag and errors when passed one: "
+        f"{match.group(0)!r}"
+    )
+
+
+def test_open_slice_query_matches_slice_skill_step_five_exactly():
+    _pin(
+        'lore search "kind:task related-spec:<spec-name> has:label.craft.slice-parent '
+        '-status:done -status:dropped -status:superseded"',
+        "The open-slice-parent query must match `../slice/SKILL.md`'s own step 5 guard "
+        "query exactly — same fields, same flags, run the same way.",
+    )
+
+
+def test_open_slice_query_is_fail_closed():
+    _pin(
+        "This check is fail-closed too, matching `../slice/SKILL.md`'s own guard",
+        "The open-slice-parent query must be stated as fail-closed, matching "
+        "`../slice/SKILL.md`'s own step 5 guard, so an errored or unparseable "
+        "search is treated as an open parent existing rather than as 'nothing found'.",
+    )
+
+
+def test_open_slice_query_fail_closed_names_the_reproduced_failure():
+    _pin(
+        'reading a search hiccup as "no open parent" would run the slice ritual '
+        "anyway and reproduce exactly the failure this check exists to prevent",
+        "The fail-closed rule must name the exact failure it prevents — a search "
+        "error read as 'no open parent' running the slice ritual straight into "
+        "its own step 5 refusal.",
+    )
+
+
+# --- contract item 9: a plan-critical escalation checkpoints the plan phase too, so a --
+# --- resume does not re-dispatch craft:planner against an already-decomposed parent ----
+
+
+def test_resume_into_build_checks_for_unresolved_escalation_first():
+    _pin(
+        "first check for an unresolved escalation before touching the branch at all",
+        "A resume into the build phase must check for an unresolved escalation "
+        "child of the slice parent before it ever inspects the branch state.",
+    )
+
+
+def test_unresolved_escalation_query_scoped_to_the_slice_parent():
+    _pin(
+        'lore search "kind:task parent:<slice-parent-task-id> status:blocked" '
+        "--vault <elected-vault>",
+        "The unresolved-escalation check must query for blocked children of the "
+        "slice parent specifically.",
+    )
+
+
+def test_unresolved_escalation_reraises_plan_critical_rather_than_dispatching_build():
+    _pin(
+        "report the same `plan-critical` escalation again, pointing at the open "
+        "child and the plan record's `## Council Review` section, and halt",
+        "An unresolved escalation found on resume must re-raise the plan-critical "
+        "escalation and halt, never silently proceed into dispatching the build "
+        "phase as though the Critical had been answered.",
+    )
+
+
+def test_unresolved_escalation_check_is_fail_closed():
+    _pin(
+        "This check is itself fail-closed, matching `../slice/SKILL.md`'s own guard",
+        "The unresolved-escalation check on resume must itself be fail-closed, "
+        "matching the slice ritual's own guard precedent.",
     )

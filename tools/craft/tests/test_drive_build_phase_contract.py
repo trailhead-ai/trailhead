@@ -198,6 +198,17 @@ def test_build_dispatch_block_itself_names_each_value(label, line):
     )
 
 
+def test_build_phase_states_it_never_invokes_craft_execute():
+    _pin(
+        "never invokes `/craft:execute`, which is attended-only by design and offers "
+        "no flag into any other mode",
+        "The build phase must state explicitly that it never invokes `/craft:execute` "
+        "— matching the spec's own acceptance criterion — since dispatching "
+        "`craft:driver-worker` on the shared execute procedure's unattended mode is "
+        "not the same skill running in-session.",
+    )
+
+
 def test_build_dispatch_passes_nothing_else_about_the_slice():
     _pin(
         "Pass it exactly six values and nothing else about the slice",

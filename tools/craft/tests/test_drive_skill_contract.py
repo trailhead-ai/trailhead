@@ -316,3 +316,26 @@ def test_multi_repo_path_defers_full_escalation_mechanics_to_the_contract():
         "escalation contract, and the file must say so rather than "
         "restating that mechanism here.",
     )
+
+
+# --- contract item 6b: both step 5 escalations name the remedy that clears the -----------
+# --- stranded slice parent, so a later /craft:drive re-entry does not just re-blocked -----
+
+
+def test_no_camp_workspace_names_its_remedy():
+    _pin(
+        "Remedy: once `manifest.json` is readable at the derived root",
+        "The `no-camp-workspace` escalation must name what closes it — the "
+        "parent is not permanently stranded once a camp workspace exists.",
+    )
+
+
+def test_multi_repo_slice_names_its_remedy():
+    _pin(
+        "Remedy: this parent cannot be driven to completion by this ritual — "
+        "the operator drops it explicitly",
+        "The `multi-repo-slice` escalation must name what closes it, even "
+        "though the multi-repo question has no answer inside this ritual's "
+        "scope — otherwise every later `/craft:drive` re-entry finds this "
+        "same parent and writes another `blocked` child against it.",
+    )

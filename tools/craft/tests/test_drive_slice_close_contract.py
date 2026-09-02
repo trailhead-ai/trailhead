@@ -160,10 +160,10 @@ def test_close_writes_the_final_checkpoint_recording_slice_close():
 
 def test_close_checkpoint_names_the_resume_table_it_feeds():
     _pin(
-        "4.5's resume table above already treats a block recording `slice-close` as a "
+        "step 4's resume table above already treats a block recording `slice-close` as a "
         "finished run with no phase after it to resume into",
-        "The close checkpoint must name the interaction with 4.5's resume table "
-        "explicitly — that a `slice-close` block is what makes 4.5 report the slice "
+        "The close checkpoint must name the interaction with step 4's resume table "
+        "explicitly — that a `slice-close` block is what makes step 4 report the slice "
         "already closed rather than resuming a build, not merely that both texts exist "
         "independently.",
     )

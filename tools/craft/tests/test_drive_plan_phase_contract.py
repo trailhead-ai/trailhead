@@ -442,6 +442,37 @@ def test_driver_authors_none_of_its_own_disposition():
     )
 
 
+# --- contract item 7a: a plan-critical escalation checkpoints the plan phase too, so a --
+# --- resume finds a phase to walk from instead of reconstructing a fresh invocation -----
+
+
+def test_plan_critical_escalation_writes_the_plan_checkpoint_too():
+    _pin(
+        "write the `## Driver run` checkpoint block recording `**Phase:** plan` — the "
+        "plan and its council review are both genuinely complete",
+        "A plan-critical escalation must checkpoint the plan phase too, so a later "
+        "resume finds a phase to walk from instead of finding no checkpoint at all "
+        "and reconstructing the run as a fresh invocation.",
+    )
+
+
+def test_council_schema_states_critical_none_convention():
+    _pin(
+        "record an empty Critical list explicitly (`*Critical:* none`)",
+        "The mirrored `## Council Review` schema must include plan/SKILL.md's own "
+        "`*Critical:* none` convention, so a clean council is distinguishable from a "
+        "section a skipped review would leave behind.",
+    )
+
+
+def test_council_schema_cites_plan_skill_critical_none_line():
+    _pin(
+        "matching `plan/SKILL.md`'s own convention (`plan/SKILL.md:348`)",
+        "The `*Critical:* none` convention must cite the exact plan/SKILL.md line it "
+        "mirrors.",
+    )
+
+
 # --- contract item 8: a clean council advances and checkpoints before the build phase -----
 
 
