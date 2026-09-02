@@ -441,3 +441,106 @@ def test_plan_skill_points_at_shared_slice_and_restates_neither_floors_nor_shape
             f"plan/SKILL.md must not restate the archetype floors or the "
             f"bullet-per-state shape from _shared/slice.md — found {restated_phrase!r}"
         )
+
+
+# --- Phase 6: the state-coverage close gate ---
+#
+# The gate composes with the pre-existing completion guard (the one refusing `done`
+# while any child is non-terminal). The interaction pin below spans both sentences as
+# one continuous phrase — deleting either the pre-existing guard sentence or the new
+# gate sentence breaks it, which is what proves the two compose rather than either
+# shadowing the other.
+
+EXECUTE_SHARED = CRAFT / "skills" / "_shared" / "execute.md"
+
+
+def _execute_text() -> str:
+    return EXECUTE_SHARED.read_text()
+
+
+def _pin_normalized_in_execute(phrase: str, reason: str) -> None:
+    """Whitespace-insensitive pin against _shared/execute.md."""
+    normalized = _normalize(_execute_text())
+    count = normalized.count(_normalize(phrase))
+    assert count == 1, f"{reason} (found {count}): {phrase!r}"
+
+
+def test_phase_6_gate_is_conditioned_on_enumerated_states():
+    _pin_normalized_in_execute(
+        "A parent carrying `## Enumerated states` is refused `done` while any "
+        "enumerated state has no matching section in the design doc",
+        "Phase 6 must state the state-coverage gate, conditioned on the parent "
+        "carrying `## Enumerated states`",
+    )
+
+
+def test_phase_6_new_gate_composes_with_the_pre_existing_completion_guard():
+    _pin_normalized_in_execute(
+        "The completion guard refuses this while any child is non-terminal "
+        "(it names them); the state-coverage gate composes with it — both fire "
+        "on the same close and neither shadows the other, and a parent "
+        "carrying no `## Enumerated states` closes exactly as it does today",
+        "Phase 6 must pin the new state-coverage gate and the pre-existing "
+        "completion guard as both firing at the same close, as one interaction "
+        "spanning both sentences — deleting either sentence must break this pin",
+    )
+
+
+def test_phase_6_gate_matching_rule_is_a_literal_name_set_comparison():
+    _pin_normalized_in_execute(
+        "The matching rule is a literal name-set comparison, not a judgment "
+        "call: read the `- <name>` bullets from the parent's `## Enumerated "
+        "states` and the `## State — <name>` headings from the design doc — "
+        "the shapes `_shared/slice.md` fixes — and compare the two name sets "
+        "literally",
+        "Phase 6 must state the matching rule as a literal name-set comparison, "
+        "pointing at the shapes _shared/slice.md fixes rather than restating them",
+    )
+
+
+def test_phase_6_gate_records_the_comparison_in_the_completion_report():
+    _pin_normalized_in_execute(
+        "The comparison's result is recorded in the run's completion report — "
+        "the set read from the parent, the set read from the doc, and the "
+        "difference",
+        "Phase 6 must state that the state-coverage comparison's result is "
+        "recorded in the completion report",
+    )
+
+
+def test_phase_6_gate_refusal_names_the_missing_states():
+    _pin_normalized_in_execute(
+        "The refusal names the missing states, rather than failing generically",
+        "Phase 6's state-coverage gate must name the missing states in its "
+        "refusal rather than failing generically",
+    )
+
+
+def test_phase_6_gate_reads_the_design_doc_label_and_validates_it():
+    _pin_normalized_in_execute(
+        "the `craft/design-doc` label's value is untrusted input and is "
+        "validated against the safe-value shape `^[A-Za-z0-9._/-]+$` before "
+        "being substituted into any command, the same rule this document "
+        "states for `craft/phase-boundary`",
+        "Phase 6's state-coverage gate must read the design doc via the "
+        "craft/design-doc label and validate the label value against the "
+        "safe-value shape before substitution, consistent with the "
+        "craft/phase-boundary precedent",
+    )
+
+
+def test_phase_6_gate_states_its_access_check_limit():
+    _pin_normalized_in_execute(
+        "This gate verifies the design doc covers each enumerated state. It "
+        "does not verify that an access check was built for a surface "
+        "reachable by more than one principal",
+        "Phase 6's state-coverage gate must state its limit: it verifies "
+        "state coverage only, not the access-check rule",
+    )
+
+
+def test_phase_6_gate_points_at_shared_slice_for_the_shapes():
+    assert "`_shared/slice.md` fixes" in _execute_text(), (
+        "Phase 6's state-coverage gate must point at _shared/slice.md for the "
+        "written shapes rather than restating them"
+    )
