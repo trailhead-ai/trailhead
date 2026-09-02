@@ -88,23 +88,20 @@ def test_adr_template_pins_gauntlet_annotation_provenance():
     )
 
 
-def test_adr_template_names_distill_as_forward_activator_at_completion():
-    """A forward ADR is activated by distill once its derived specs complete — not
-    flipped by the gauntlet at birth. Names the mechanism, not just the absence of
-    the old claim."""
+def test_adr_template_names_distill_as_authoring_it_backward_already_active():
+    """Distill authors an ADR backward from finished work, created already `active`
+    at authorship — there is no forward ADR and no later activation step. Names
+    the surviving mechanism, not the absence of the deleted one."""
     text = ADR_TEMPLATE.read_text()
-    assert "activated by distill when its derived specs complete" in text, (
-        "templates/adr.md must name distill as the mechanism that activates a "
-        "forward ADR, once its derived specs complete."
+    assert (
+        "Distill authors an ADR backward from finished work, created already "
+        "`active`" in text
+    ), (
+        "templates/adr.md must name distill as authoring an ADR backward from "
+        "finished work, created already `active` at authorship."
     )
 
 
-def test_adr_template_does_not_claim_gauntlet_flips_a_forward_adr():
-    text = ADR_TEMPLATE.read_text()
-    assert "flipped active by the gauntlet" not in text, (
-        "templates/adr.md must not claim the gauntlet flips a forward ADR active — "
-        "the gauntlet reviews it, but distill is the sole activator."
-    )
 
 
 # ---------------------------------------------------------------------------

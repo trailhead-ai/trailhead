@@ -406,9 +406,17 @@ _ADR_MODE_AGENTS: list[str] = [
 # Mirrors `_SPEC_ADVANCE_RE`: a literal substring only catches the one exact
 # spelling this file happens to use, so a differently-phrased adr activation
 # elsewhere (extra whitespace, reordered flags) would silently escape the
-# "only distill flips it" guard. Distill owns this edge, on both the forward and
-# the backward path, and it is the ONLY file allowed to carry it.
+# guard below. An adr's `draft -> active` update no longer exists as a route
+# to `active` at all: distill creates ADRs `--status active` at authorship
+# (write-order step 1), so no craft file — distill included — may carry this
+# pattern.
 _ADR_ADVANCE_RE = re.compile(r"<adr-id>\s+--status\s+active")
+
+# The adr *create* pattern — distill's write-order step 1, the only route any
+# craft file has to `active` on an adr. Matched narrowly (both flags, not just
+# `--status active`) so it can't accidentally match the update pattern above or
+# an unrelated `--status active` on some other record kind.
+_ADR_CREATE_RE = re.compile(r"--kind\s+adr\s+--status\s+active")
 
 _ANNOTATION_PROVENANCE_SENTENCE = (
     "Gauntlet provenance for an adr target goes to the record's annotations, "
@@ -449,38 +457,49 @@ def _adr_mode_section(text: str) -> str:
 
 
 def test_gauntlet_never_flips_an_adr_active():
-    """The gauntlet does not own the draft -> active edge any more — distill does.
+    """The gauntlet does not own any part of the draft -> active edge.
 
-    Activation moved from review-time (the gauntlet) to completion-time
-    (distill, when every derived spec reaches a terminal status). A `--status
+    Distill creates ADRs `--status active` at authorship (write-order step 1) —
+    there is no later update-based flip for any file to race. A `--status
     active` invocation anywhere in the gauntlet skill is the old route back.
     """
     assert not _ADR_ADVANCE_RE.search(GAUNTLET.read_text()), (
         "gauntlet/SKILL.md must not carry `lore record update <adr-id> --status "
-        "active` in either mode — the gauntlet never advances an adr past `draft`; "
-        "distill is the sole writer of that edge now"
+        "active` in either mode — the gauntlet never advances an adr past `draft`"
     )
 
 
-def test_only_distill_flips_an_adr_active():
-    """No craft file except distill may advance an adr to `active`.
+def test_the_adr_create_pattern_occurs_exactly_once_and_it_is_distills_write_order_step_1():
+    """`--status active` on an adr create occurs exactly once across craft's prose,
+    and that one occurrence is distill's write-order step 1.
 
-    The same structural mandate the spec advance uses, retargeted: a bypass here
-    can hand an unreviewed or premature activation straight into the immutable,
-    convention-enforced log.
+    Distill creates ADRs `--status active` at authorship — that create is the
+    *only* route to `active` any craft file carries; there is no later
+    update-based flip for a second file to duplicate. A second occurrence
+    anywhere (distill included) would mean either a competing create path or a
+    stray copy of the pattern outside step 1 — both are the old, deleted
+    activate-on-completion mechanism creeping back.
     """
-    offenders = [
-        p for p in _craft_prose_files()
-        if p != DISTILL and _ADR_ADVANCE_RE.search(p.read_text())
-    ]
-    assert not offenders, (
-        "these craft files can flip an adr to `active`, bypassing distill: "
-        f"{[str(p.relative_to(CRAFT)) for p in offenders]}"
+    hits: list[tuple[Path, str]] = []
+    for p in _craft_prose_files():
+        for line in p.read_text().splitlines():
+            if _ADR_CREATE_RE.search(line):
+                hits.append((p, line.strip()))
+
+    assert len(hits) == 1, (
+        "the adr create pattern `--kind adr --status active` must occur exactly "
+        f"once across craft's prose files, found {len(hits)}: "
+        f"{[(str(p.relative_to(CRAFT)), line) for p, line in hits]}"
     )
-    assert _ADR_ADVANCE_RE.search(DISTILL.read_text()), (
-        "distill/SKILL.md must carry the adr-activation command "
-        "(`lore record update <adr-id> --status active`) — it is the sole writer "
-        "of an adr's draft -> active edge now, on both the forward and backward path"
+
+    [(only_file, only_line)] = hits
+    assert only_file == DISTILL, (
+        "the sole adr create occurrence must be in distill/SKILL.md, found it in "
+        f"{only_file.relative_to(CRAFT)}"
+    )
+    assert "lore record create" in only_line, (
+        "the sole adr create occurrence must be a `lore record create` invocation "
+        f"(distill's write-order step 1), found: {only_line!r}"
     )
 
 

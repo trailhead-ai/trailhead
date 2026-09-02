@@ -119,17 +119,17 @@ dot-for-slash spelling because an unquoted `/` is a lexer error — the same con
 
 A spec **mid-loop** never matches: `/craft:slice` unsets the label whenever it selects again, so
 the marker is present only while the loop is actually stopped. What the two values mean for the
-completion write — they are not the same outcome — is step 5 below.
+completion write — they are not the same outcome — is step 6 below.
 
 ### 2. Apply the exclusion per candidate, never in the query
 
 A spec is out of the queue if it already carries **a `distilled=` annotation** —
-`distilled=adr` (ADRs written), `distilled=zero-adr`, `distilled=forward-anchored`, or
+`distilled=adr` (ADRs written), `distilled=zero-adr`, or
 `distilled=rejected` — **or a `related: adr`
 edge whose anchoring ADR has itself reached `active` or a terminal status**.
 
 **One narrow exception, and it is the resumed-after-stop case.** A spec that stopped early was
-distilled and annotated but deliberately left `ready` (step 5), and the loop can be re-entered
+distilled and annotated but deliberately left `ready` (step 6), and the loop can be re-entered
 against it afterwards — `/craft:slice` clears the marker on reselection and writes it again when
 the loop next terminates. So a spec that is `ready`, carries `craft/slice-loop=complete`, and
 carries a `distilled=` annotation is **back in the queue**: the annotation records an earlier,
@@ -139,11 +139,10 @@ reach `complete` — the one shape this ritual must never produce. Every other a
 excluded. Two keys, not one,
 because they arise from opposite directions: distill's own writes never
 land spec-side — step 1 writes the ADR's provenance edge as `--related spec=<member>` **on the ADR**,
-never on the spec, so a `related: adr` edge on a spec never came from a prior distillation. It comes
-from the forward path instead: brainstorm's altitude gate creates every forward-derived spec with
-`--related adr=<adr-id>` **from birth**, so a spec descended from an ADR already belongs to a decision
-already on record, and sweeping it would re-distill that decision into a second ADR restating its
-parent's. `distilled=` cannot ride the KQL query either, because
+never on the spec, so a `related: adr` edge on a spec never came from a prior distillation. A spec carries
+`--related adr=<adr-id>` when it descends from that decision, so a spec holding one already belongs to
+a decision already on record, and sweeping it would re-distill that decision into a second ADR
+restating its parent's. `distilled=` cannot ride the KQL query either, because
 annotations are never indexed, so this cannot be a KQL filter, and the same per-candidate check
 covers the edge too. Check per candidate:
 
@@ -160,11 +159,11 @@ carry.
 **The edge half of that exclusion is narrow on purpose.** Its stated job is to stop distill
 re-recording a decision that is already on record — and that job is done only once the anchoring ADR
 has actually reached `active` or a terminal status. While the anchoring ADR is still `draft` it is
-*not yet* a decision on record: it is waiting on exactly these specs to finish so that step 6's
-activation check can flip it `active`. Excluding them blanket would hold them at `planned` forever,
-leave step 6's activation check with nothing to fire on, and strand every forward ADR `draft`
-permanently. So a candidate whose anchoring ADR is still `draft` **stays in the queue** and clusters
-as a forward-anchored member below. Read the anchor's status with one more per-candidate call:
+*not yet* a decision on record, so excluding the candidate now would drop it before its own upstream
+decision is settled — and excluding it blanket would strand it there forever with no way back
+into the queue, whether it is sitting at `planned` or, under the slice loop, at `ready`. So a candidate whose anchoring ADR is still `draft` **stays in the queue**: it
+clusters normally and takes the ordinary drafting path, exactly like a candidate with no anchor at
+all. Read the anchor's status with one more per-candidate call:
 
 ```
 lore record show <adr-id> --json
@@ -215,49 +214,36 @@ Reconstitute the candidates into **logical design changes — M specs ↔ N ADRs
 Execution-convenience splits (one design change cut into three specs so it could ship in pieces)
 consolidate into **one** ADR. A spec carrying two independent decisions separates into **two**.
 
-**Lingering `draft` ADRs touching the cluster's areas are surfaced as candidate material** — a
-distillation may fold a draft's content into the cluster ADR rather than starting from a blank
-record. When it does, the draft is retired (`--status dropped`) with a `related: adr=` edge to the
-ADR that absorbed it, so the abandoned number is traceable rather than merely a gap.
+**Lingering `draft` ADRs are surfaced as candidate material two ways: an ADR any cluster member
+carries a `related: adr=` edge to, and a `draft` ADR touching the cluster's areas** — a
+distillation may fold either's content into the cluster ADR rather than starting from a blank
+record. The edge check is not optional: an ADR the cluster's own members descend from must never
+be left to area overlap alone to surface it. When either check hits, the draft is retired
+(`--status dropped`) with a `related: adr=` edge to the ADR that absorbed it, so the abandoned
+number is traceable rather than merely a gap.
 
-**This surfacing excludes a `draft` ADR while any spec carrying a `related: adr=` edge to it has
-not yet reached a terminal status.** Resolve those specs the way the activation check below does —
-off the forward facet, `lore search "kind:spec related-adr:<adr-id>"` — then read the same
-`TERMINAL_SPEC_STATUSES = {"complete", "superseded", "dropped"}` (`pipeline/derive.py:97`), the same
-way. **The edge is spec-side, never ADR-side**: brainstorm's altitude gate writes `--related
-adr=<adr-id>` on each derived seed from birth, and distill writes `--related spec=<member>` on the
-ADR only on the backward path — so a forward ADR carries no `related: spec=` edge of its own, and an
-exclusion keyed on one would exclude nothing and retire the very ADRs it exists to protect. Such an
-ADR is still mid-decision, waiting on its own derived specs to finish, not lingering — absorbing it
-here would erase a decision still in flight. The two checks read the identical edge in the identical
-direction, and the identical set the identical way, on purpose: a sweep that excluded on a looser
-condition than activation requires could absorb an ADR activation was about to reach on its own.
-
-### Forward-anchored clusters
-
-A cluster is **forward-anchored** when **every member carries a `related: adr=` edge to an existing
-adr** — the candidates the queue kept above because their anchoring ADR is still `draft`. Their
-decision is already recorded upstream in that ADR, so backward-distillation has nothing to draft:
-the cluster **routes to the zero-ADR disposition path** in Step 2 and **no ADR is drafted for it**,
-because the only ADR it could produce would restate its own parent. Its terminal outcome is
-**Forward-anchored**, below, and the member flips it writes are what step 6's activation check then
-reads. This is a routing rule over a path that already exists, not new machinery.
-
-Read the anchor id off `spec.sidecar.related.adr` in the `lore record show <spec-id> --json` output
-the queue pass already returned — no new index read and no pipeline dependency.
-
-**Recognition is a proposal, not an auto-write.** The forward-anchored verdict goes through Step 3's
-disposition gate like every other; nothing is written before the operator dispositions it. What the
-recognition changes is *which proposal is presented*, and nothing else.
-
-**A partly-anchored cluster partitions; it never merges and never drops.** Where some members carry
-the edge and some do not, split the anchored members into their own forward-anchored cluster and let the rest
-cluster normally and take the ordinary drafting path. The two halves have categorically different
-correct outcomes — route-to-zero-ADR versus draft-an-ADR — so merging them would force one group
-into the wrong one, while dropping the cluster whole would re-strand the anchoring ADR `draft`.
-
-The deferral rule below is unchanged by any of this: a forward-anchored cluster with any member
-still in flight defers whole, exactly like any other.
+**This surfacing excludes a `draft` ADR while some spec *other than the cluster's own members*
+carries a `related: adr=` edge to it and has not yet reached a terminal status.** The carve-out is
+required for the edge check above to ever fire: every cluster member is, by construction,
+non-terminal at clustering time — its own `complete` flip is write-order step 6, which has not run
+yet — so an exclusion keyed on *any* edged spec, the cluster's own members included, would always
+be true exactly when the edge-based surfacing rule fires, and that path could never absorb
+anything. Scoping the exclusion to specs other than the cluster's own members makes both rules hold
+at once: surfacing fires on the cluster member's edge, and the exclusion asks only whether every
+*other* edged spec has already landed. When the cluster being distilled holds the last outstanding
+edge, every other edged spec is already terminal — which is exactly the moment absorption becomes
+correct. Resolve those other specs spec-side, off the forward facet —
+`lore search "kind:spec related-adr:<adr-id>"`, filtered to exclude the cluster's own membership —
+then read `TERMINAL_SPEC_STATUSES = {"complete", "superseded", "dropped"}`
+(`pipeline/derive.py:97`). **The edge is spec-side, never ADR-side**: a spec carries
+`related: adr=<adr-id>` when it descends from that decision, and distill writes
+`--related spec=<member>` on the ADR only on the backward path — so an ADR still waiting on its
+derived specs carries no `related: spec=` edge of its own, and an exclusion keyed on one would
+exclude nothing and retire the very ADRs it exists to protect. Such an ADR is still mid-decision,
+waiting on its other derived specs to finish, not lingering. This exclusion protects decision
+context those unlanded specs are still relying on: absorbing the ADR here would erase it, retiring
+the ADR out from under every sibling spec still pointing at it as its provenance before the rest
+have landed.
 
 ### The deferral rule
 
@@ -271,12 +257,10 @@ re-surfaces the cluster once the last member lands.
 For each cluster, draft:
 
 - the proposed ADR(s), body-complete against `${CLAUDE_PLUGIN_ROOT}/templates/adr.md` — or the
-  explicit verdict **zero ADRs, because …**, which is a real outcome and not a failure. For a
-  forward-anchored cluster that verdict **names the anchoring ADR by id** — *zero ADRs, because the
-  decision is already recorded in adr/<id>* — and never a bare null verdict, because that id is the
-  operator's only signal separating "already recorded upstream" from a genuine nothing-to-record
-  verdict, and an operator who rejects it strands that ADR `draft` forever;
-- the **absorption list** — the `decision` records this ADR subsumes;
+  explicit verdict **zero ADRs, because …**, which is a real outcome and not a failure;
+- the **absorption list** — the `decision` records this ADR subsumes, and any lingering `draft`
+  ADR Step 1 surfaced as candidate material for this cluster, presented for disposition the same
+  as an absorbed decision — retiring one is now the only terminal path it has;
 - any **existing `active` ADR this supersedes**, and why;
 - the **area profiles** the cluster touched, and what changes in each.
 
@@ -313,11 +297,21 @@ claims `complete` until everything behind it landed.
    existing one — `--related adr=<predecessor>`. The scope flag is not optional here either — on
    create it selects the destination vault, so an unscoped create can land the ADR in the wrong
    vault. Distilled ADRs do not route through `/craft:gauntlet`; this disposition owns their flip.
+   This create is distill's only route to `active`: no other write in this document sets that
+   flag on an ADR, and it is reachable at authorship — no condition on the status of the specs the
+   ADR derives from gates it.
 
-2. Then **absorbed `decision` records are flipped `superseded` with a `related: adr=` edge** back to
+2. Then **absorbed `draft` ADRs are retired** — each `draft` ADR Step 1 surfaced as candidate
+   material and Step 2's proposal listed for disposition is flipped `--status dropped`, carrying a
+   `related: adr=` edge back to the ADR that absorbed it, so the abandoned number is traceable
+   rather than merely a gap. With forward activation gone, this write is the only terminal path a
+   lingering draft ADR has: an absorbed draft that never gets this write simply lingers `draft`
+   forever, undispositioned by anyone.
+
+3. Then **absorbed `decision` records are flipped `superseded` with a `related: adr=` edge** back to
    the ADR that subsumed them, so no competing owner of the same decision is left `active`.
 
-3. Then **superseded ADRs are flipped, both edge directions written** — the predecessor gains
+4. Then **superseded ADRs are flipped, both edge directions written** — the predecessor gains
    `--status superseded` and `--related adr=<successor>`. This bidirectional metadata write is the
    **sole metadata exception to active-ADR immutability**: a reader landing on a superseded ADR must
    see its successor without waiting for a reindex.
@@ -330,7 +324,7 @@ claims `complete` until everything behind it landed.
    This metadata-only repair is **licensed as part of the supersession exception** — it is the same
    write, finished late, not a new edit to an immutable record.
 
-4. Then **touched `area` profiles are re-synthesized** to the sections of
+5. Then **touched `area` profiles are re-synthesized** to the sections of
    `${CLAUDE_PLUGIN_ROOT}/templates/area.md`, citing the new ADRs inline as `[[wikilinks]]`. Areas
    describe how things work **now**, so a new ADR that changes the answer makes the profile wrong
    until this step runs. Use `lore record update --diff` **scoped to the affected sections**,
@@ -340,7 +334,7 @@ claims `complete` until everything behind it landed.
    itself, and an unverified failure leaves the profile quietly disagreeing with the ADR you just
    wrote.
 
-5. Finally, **member-spec `complete` flips land last** — one per member:
+6. Finally, **member-spec `complete` flips land last** — one per member:
 
    ```
    lore record update <spec-id> --status complete --vault <name>
@@ -377,37 +371,6 @@ claims `complete` until everything behind it landed.
    Last position is deliberate: an interruption anywhere above leaves the spec still queued, and
    the sweep picks it up again.
 
-6. **Then check activation, for every spec just flipped `complete` that carries a `related: adr=`
-   edge** — completing a member spec is also the trigger that may finish the forward ADR it was
-   derived from. Such a spec reaches this point only because §2's edge exclusion is narrowed to
-   anchoring ADRs that are already `active` or terminal: a spec whose anchoring ADR is still
-   `draft` **stays in the queue** and clusters as a forward-anchored member, which is what leaves
-   this check something to fire on.
-
-   ```
-   lore search "kind:spec related-adr:<adr-id>"
-   ```
-
-   Read every sibling spec's status via `lore record show <spec-id> --json` and test the whole set
-   against `TERMINAL_SPEC_STATUSES = {"complete", "superseded", "dropped"}` (`pipeline/derive.py:97`)
-   — the same set, read the same way, that the absorption-sweep exclusion above reads. **Terminal,
-   not `complete`**: a derived spec that is `dropped` or `superseded` will never reach `complete`, so
-   a `complete`-only condition would strand the parent ADR `draft` forever, invisible to both this
-   check and the absorption sweep. Activate only when **every** sibling has reached a terminal status
-   **and at least one** reached `complete` — an ADR whose derived specs were all abandoned recorded
-   no decision worth activating, and is left `draft` for the operator to close directly:
-
-   ```
-   lore record update <adr-id> --status active --vault <name>
-   ```
-
-   Distill is the sole writer of `draft -> active` on this path, exactly as it is the sole writer of
-   the completion edge above — the forward path's other writer, the gauntlet, no longer advances an
-   adr past `draft` at all (`gauntlet/SKILL.md`, "Reviewing an adr"). `active` immutability is
-   unchanged by this: it moves WHEN activation happens, never whether an `active` record can still be
-   edited. Amendment while `draft` remains unrestricted throughout, with no material/immaterial
-   distinction to adjudicate.
-
 ## Terminal outcomes
 
 Every cluster ends in exactly one of these, and every one of them is terminal — nothing re-queues
@@ -415,20 +378,20 @@ forever.
 
 **The `--status complete` half of every command below is conditional; the `--annotation` half is
 not.** Each write is spelled here for a member that is closed out *complete* — already `planned`,
-or `ready` carrying `craft/slice-loop=complete` (step 5's gate). For a member carrying
+or `ready` carrying `craft/slice-loop=complete` (step 6's gate). For a member carrying
 `craft/slice-loop=stopped`, drop `--status complete` and write the annotation alone:
 
 ```
 lore record update <spec-id> --annotation distilled=<value> --vault <name>
 ```
 
-That is the annotation-only form step 5 relies on: it is what keeps an early-stopped spec out of
+That is the annotation-only form step 6 relies on: it is what keeps an early-stopped spec out of
 later sweeps without claiming a completeness it never reached. The annotation value is chosen from
 the outcomes below exactly as it would be for any other member — the cluster's outcome does not
 change because one of its members stopped early.
 
 - **ADRs written.** The ADR(s) carry `related: spec=<member>` edges from step 1, and the members
-  reach `complete` in step 5, stamped so the exclusion check can tell this outcome from "not yet
+  reach `complete` in step 6, stamped so the exclusion check can tell this outcome from "not yet
   distilled":
 
   ```
@@ -441,19 +404,6 @@ change because one of its members stopped early.
   ```
   lore record update <spec-id> --status complete --annotation distilled=zero-adr --vault <name>
   ```
-
-- **Forward-anchored.** Every member's decision was already recorded upstream in the `draft` ADR it
-  was derived from, so the cluster produced no ADR of its own. The members still reach `complete`,
-  under their own annotation value — **not** `distilled=zero-adr`, which means "distilled, yielded
-  nothing". The two are distinct outcomes and stay machine-separable, so a later reader can tell
-  "already recorded upstream" from "nothing worth recording":
-
-  ```
-  lore record update <spec-id> --status complete --annotation distilled=forward-anchored --vault <name>
-  ```
-
-  These are the flips step 6's activation check reads to decide whether the anchoring ADR is ready
-  to go `active`.
 
 - **Rejected.** The operator rejected the cluster's drafts. The stamp goes on, and it
   **leaves their status untouched** — a rejection is the opposite of distilled, so `complete` would
