@@ -19,9 +19,9 @@ Take a `ready` spec through one single-repo slice end to end: choose, plan, buil
 portage — then stop at the slice boundary and report. The driver resolves nothing it is not
 already the owner of; anything it does not own escalates rather than getting a guess.
 
-**This skill currently ships only the entry point and the selection phase.** Plan, build, and
-the PR tail are later tasks against this same file — a chosen slice parent hands off to them
-below with a stated placeholder, not invented behavior.
+**This skill currently ships the entry point, the selection phase, and the plan phase.** Build
+and the PR tail are later tasks against this same file — a clean plan hands off to them below
+with a stated placeholder, not invented behavior.
 
 ## Argument
 
@@ -118,7 +118,7 @@ Resume reads the **last** `## Driver run` block in the parent body, never the fi
 Each of the five boundaries below writes this block before the driver moves past it:
 
 - **select** — once the single-repo check at step 5 passes (or the multi-repo escalation fires), write the block recording `**Phase:** select` before reporting the outcome at step 6.
-- **plan** — once the plan phase (a later task against this same file) completes, write the block recording `**Phase:** plan`.
+- **plan** — once the plan phase (steps 7–8 below) completes with no council Critical surviving synthesis, write the block recording `**Phase:** plan`.
 - **build** — once the build phase (a later task against this same file) completes, write the block recording `**Phase:** build`.
 - **pr-tail** — once the PR tail phase (a later task against this same file) completes, write the block recording `**Phase:** pr-tail`.
 - **slice-close** — once the slice is closed out (a later task against this same file), write the block recording `**Phase:** slice-close`.
@@ -140,8 +140,8 @@ enumerate member repos) and count its `members` array.
 `../slice/SKILL.md`'s procedure ends in exactly one of three outcomes. The driver owns no termination logic of its own — it reports what `/craft:slice`'s procedure produced, verbatim:
 
 - **A chosen slice parent.** The single-repo check in step 5 above passed. Report the chosen
-  slice, its value claim, and the parent task id, then hand off to the later phases — plan,
-  build, and the PR tail — which this file does not yet implement. **This outcome does not
+  slice, its value claim, and the parent task id, then continue into the plan phase below — the
+  build phase and the PR tail remain later tasks against this same file. **This outcome does not
   halt the driver**; it is the one case where the loop keeps going once those phases exist.
 - **Spec complete.** No candidate slice remains against the spec's acceptance criteria. Report the spec complete, matching `../slice/SKILL.md`'s own completion report, and **halt the driver** — there is nothing left to drive.
 - **Early stop.** Nothing in the candidate set clears the value floor and no enabler applies.
@@ -149,9 +149,43 @@ enumerate member repos) and count its `members` array.
   report, and **halt the driver** — re-entry is the operator's act, by re-running `/craft:drive`
   once whatever is blocking the early stop is resolved.
 
+### 7. Dispatch the plan phase
+
+Once step 6 reports a chosen slice, dispatch `craft:planner` against that slice parent on the slice-rooted path — `skills/plan/SKILL.md`'s Entry Point section is what discriminates the two paths; the parent already exists, so this dispatch updates it in place and creates no second parent. Pass it nothing else about the slice: the parent record itself already carries the value claim and, where the slice enumerates states, the `## Enumerated states` section, and a driver-supplied second copy of that context is exactly the kind of restated contract this ritual avoids everywhere else.
+
+`craft:planner` declares no outcome-file mechanism of its own, so there is no default grammar to override — pin the whole instruction in the dispatch prompt, the way `ranger:execute` pins its own outcome grammar to the agent it dispatches (`tools/ranger/plugins/ranger/agents/execute.md`):
+
+```text
+Task: <slice-parent-task-id>
+Outcome file: <outcome-file-path>
+Vault: <elected-vault>
+
+Run the Planning Phase of your procedure against this slice parent, on its slice-rooted path. When you are done, write exactly one line to the outcome file above and nothing else. This outcome grammar supersedes any default your own procedure names:
+
+- `PLANNED <slice-parent-task-id>` — the plan is written onto the parent record.
+- `BLOCKED <reason>` — you could not proceed; `<reason>` in a few words.
+- `NEEDS_CONTEXT <reason>` — the dispatch is missing something you need; `<reason>` in a few words.
+
+Do not write a summary, a file list, or anything else to the outcome file — one line, nothing else. Your reply is never read as the result of this run.
+```
+
+Read the plan result from the outcome file above, never from the agent's reply — a subagent's reply is not a usable result channel, the same rule the build phase's own worker channel already follows. A `BLOCKED` or `NEEDS_CONTEXT` line stops the driver here and is reported in-session verbatim; wiring either into the escalation contract's typed vocabulary is out of this task's scope — only a council Critical, surfaced below, escalates through it. A `PLANNED <slice-parent-task-id>` line advances into the council review below.
+
+### 8. Run the council review
+
+The plan `craft:planner` just wrote has not passed the mandatory council gate: that gate belongs to the `/craft:plan` skill, not to the `craft:planner` agent, whose own step 8.5 is a design-doc step and whose tool grant carries no `Agent` tool at all. The driver runs the council itself, in this session, against the plan now written on the slice parent.
+
+Dispatch the four council lenses — `builder`, `breaker`, `attacker`, `advocate` — per `_shared/council.md`'s dispatch contract. Read it; do not restate its roster, prompt template, or bars here — a second copy is exactly how the two documents would drift apart. Make all four `Agent` calls in a single message so they run concurrently. Fill the context-pointer line with the slice parent's resolved path (`lore record show <slice-parent-task-id> --vault <elected-vault> --json` carries it), `<lens-critical-bars>` with the plan-altitude "Per-lens Critical bars" block `_shared/council.md` defines, matching planning's own Council Review step, and `<cross-cutting>` with the empty string.
+
+The driver is the synthesizer, in session, never a subagent — de-duplicating by issue, weighting cross-pass convergence, and auto-downgrading speculative Criticals, per `_shared/council.md`'s synthesis rules.
+
+**A council Critical escalates.** Any Critical surviving synthesis is an escalation under the `plan-critical` trigger, following the escalation contract below. Disposition is an operator judgment, the same as the gauntlet's operator-only dispositions, so the driver authors none of its own. The escalation names a pointer to where the Critical's own text lives — the plan record and its `## Council Review` section — never a drafted verdict or a recommended resolution.
+
+**A clean council advances.** No Critical survives synthesis: write the `## Driver run` checkpoint block recording `**Phase:** plan` (per 4.5 above) before dispatching the build phase, a later task against this same file.
+
 ## Escalation
 
-Every escalation this ritual can raise — the two above and any a later task against this same
+Every escalation this ritual can raise — the three above and any a later task against this same
 file adds — follows one contract, defined here once so no escalation site restates it.
 **No retries: the first escalation from any phase ends the run.** On escalation the driver does
 not retry the phase, does not try a different approach, and does not continue into a later
@@ -165,8 +199,8 @@ of these, never free text:
 - **`multi-repo-slice`** — the chosen slice spans more than one camp-group member (step 5 above).
 - **`build-resume-dirty-branch`** — a resume finds commits already on the branch it was about to
   dispatch the build phase onto (step 4.5 above).
-- **`plan-critical`** — the plan phase (a later task against this same file) surfaces a council
-  Critical the operator has not dispositioned.
+- **`plan-critical`** — the plan phase's council review (step 8 above) surfaces a Critical the
+  operator has not dispositioned.
 - **`worker-stalled`** — the build dispatch (a later task against this same file) passes its
   liveness deadline with no progress signal.
 
@@ -229,7 +263,8 @@ This mirrors what the slice close already commits to at its own early-stop repor
 ## Outcome
 
 On a chosen slice that clears the single-repo check, report the slice, its value claim, and the
-parent task id, and note that plan and build are not yet wired to this skill. On spec complete
-or early stop, report exactly as `../slice/SKILL.md` would and stop — the driver has no further
-action to take. On a multi-repo escalation, report the escalation and the `multi-repo-slice`
-trigger and stop, following the escalation contract above.
+parent task id, then the plan phase's own outcome — a clean council advancing toward the build
+phase, or a `plan-critical` escalation — noting that build and the PR tail are not yet wired to
+this skill. On spec complete or early stop, report exactly as `../slice/SKILL.md` would and
+stop — the driver has no further action to take. On a multi-repo escalation, report the
+escalation and the `multi-repo-slice` trigger and stop, following the escalation contract above.
