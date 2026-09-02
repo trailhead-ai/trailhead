@@ -38,7 +38,7 @@ sweep that yields three ADRs from twenty specs is a normal sweep, not a failed o
 
 The four-section body contract in `${CLAUDE_PLUGIN_ROOT}/templates/adr.md` is exhaustive: Context,
 Decision, Consequences, Alternatives rejected, budgeted at roughly one screenful. Provenance never
-goes in prose — it goes in `related:` edges and annotations.
+goes in prose — it goes in `related:` edges.
 
 ## Two modes
 

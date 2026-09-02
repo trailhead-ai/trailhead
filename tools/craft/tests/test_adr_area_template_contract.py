@@ -1,4 +1,4 @@
-"""ADR and area templates — the section contracts a distill/gauntlet build depends on.
+"""ADR and area templates — the section contracts a distill build depends on.
 
 Two new craft-owned templates:
 

@@ -156,8 +156,8 @@ read it; do not re-inline the roster, prompt template, or bars here. Fill the su
 Eight passes return on the order of thirty raw findings. **Handing that list to the user is not
 adjudication — it is delegation of the work you were dispatched to do.** Consolidate first:
 
-1. **De-duplicate by issue, not by pass.** Two passes reaching the same finding from different
-   angles is one finding, annotated with both.
+1. **De-duplicate by issue, not by pass.** Two of the passes reaching the same finding from
+   different angles is one finding, annotated with both.
 2. **Weight cross-pass convergence.** When independent passes — which could not see each other's
    work — converge on the same issue, that is the **strongest severity signal available to you**.
    Rank convergent findings above single-pass findings of nominally equal severity.

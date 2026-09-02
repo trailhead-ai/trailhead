@@ -42,6 +42,7 @@ PLAN = SKILLS_DIR / "plan" / "SKILL.md"
 SHARED_COUNCIL = SKILLS_DIR / "_shared" / "council.md"
 PLANNER = AGENTS_DIR / "planner.md"
 PREMISE_ATTACKER = AGENTS_DIR / "premise-attacker.md"
+README = Path(__file__).parent.parent / "README.md"
 
 # Any forward advance of a SPEC's status, in any craft prose. Matched as a regex
 # rather than a fixed literal because the invariant is about the *transition*, not
@@ -432,13 +433,27 @@ _FRONT_MATTER_RE = re.compile(r"^---\n(.*?)\n---", re.S)
 # reviews. Matched as a regex over both kinds so the derived subject set tracks
 # whatever the document actually says: the pin below asserts the set is exactly
 # {spec}, and an adr named here would widen it and fail rather than slip past.
-_DRAFT_SUBJECT_RE = re.compile(r"\bdraft (spec|adr)\b")
+# Case-insensitive so `draft ADR` (the capitalized form other craft prose has
+# used) is caught the same as `draft adr`.
+_DRAFT_SUBJECT_RE = re.compile(r"\bdraft (spec|adr)\b", re.I)
+
+# Body prose sets a record kind off in markdown emphasis (`` `adr` ``, `**adr**`)
+# where the front matter does not. Stripped before matching so a body section
+# phrasing the kind this way is not invisible to `_DRAFT_SUBJECT_RE`'s literal
+# single space between `draft` and the kind word.
+_MARKDOWN_EMPHASIS_RE = re.compile(r"[`*]")
 
 
 def _front_matter(text: str) -> str:
     match = _FRONT_MATTER_RE.search(text)
     assert match, "gauntlet/SKILL.md must open with a YAML front-matter block"
     return match.group(1)
+
+
+def _draft_subjects(text: str) -> set[str]:
+    """Every `draft <kind>` *text* names, tolerant of markdown emphasis and case."""
+    stripped = _MARKDOWN_EMPHASIS_RE.sub("", text)
+    return {kind.lower() for kind in _DRAFT_SUBJECT_RE.findall(stripped)}
 
 
 def test_gauntlet_names_exactly_one_review_subject():
@@ -448,10 +463,61 @@ def test_gauntlet_names_exactly_one_review_subject():
     names is a subject the gauntlet claims to review.
     """
     description = _front_matter(GAUNTLET.read_text())
-    subjects = set(_DRAFT_SUBJECT_RE.findall(description))
+    subjects = _draft_subjects(description)
     assert subjects == {"spec"}, (
         "gauntlet/SKILL.md's front-matter description must name exactly one "
         f"review subject, {{'spec'}} — found {subjects}"
+    )
+
+
+def test_gauntlet_document_names_exactly_one_review_subject():
+    """The skill's whole document — front matter AND body — names one record kind
+    under review.
+
+    Scoped to the full text rather than the front matter alone: a body section
+    naming a second subject (its own roster, its own advance target) would pass
+    `test_gauntlet_names_exactly_one_review_subject` untouched, because that pin
+    only reads the front matter. Deriving over the whole document is what makes
+    a revived body section show up as a count that no longer equals one.
+    """
+    subjects = _draft_subjects(GAUNTLET.read_text())
+    assert subjects == {"spec"}, (
+        "gauntlet/SKILL.md must name exactly one review subject across its whole "
+        f"document, {{'spec'}} — found {subjects}"
+    )
+
+
+# Matched within the README's Spec-gauntlet coverage row and prose bullet only
+# (not the whole README, which legitimately says `adr` elsewhere — distill's own
+# ADR authoring, for one): any standalone `spec` or `adr` word there is a review
+# subject that text claims for the gauntlet. Case-insensitive because README
+# prose has, in the past, spelled it `ADR`.
+_SUBJECT_WORD_RE = re.compile(r"\b(spec|adr)\b", re.I)
+
+
+def test_readme_names_exactly_one_gauntlet_review_subject():
+    """`tools/craft/README.md`'s Spec-gauntlet table row and prose bullet name one
+    record kind under review — the same one-subject contract the skill itself
+    carries, pinned on its own copy in the README.
+
+    This surface sits outside `_craft_prose_files()` (skills/agents/templates
+    only) and every other gauntlet-subject pin, so it regressed silently once
+    already (a `draft spec (or draft ADR)` phrasing, fixed without a test
+    noticing either the break or the fix). Scoped to the Spec-gauntlet row and
+    bullet specifically, not the whole file, so this pin fires on a second
+    subject creeping back into either spot without a false positive on the
+    file's other, legitimate ADR mentions.
+    """
+    text = README.read_text()
+    row = _section(text, "| Spec gauntlet |", "\n")
+    prose = _section(
+        text, "**Spec gauntlet:**", "\n\n",
+        why="tools/craft/README.md must carry a '**Spec gauntlet:**' prose bullet",
+    )
+    subjects = {w.lower() for w in _SUBJECT_WORD_RE.findall(row + " " + prose)}
+    assert subjects == {"spec"}, (
+        "tools/craft/README.md's Spec-gauntlet coverage row and prose bullet must "
+        f"name exactly one review subject, {{'spec'}} — found {subjects}"
     )
 
 
@@ -464,6 +530,8 @@ _ROSTER_HEADING_RE = re.compile(
 )
 
 _NUMBER_WORDS = {
+    "one": 1,
+    "two": 2,
     "three": 3,
     "four": 4,
     "five": 5,
@@ -478,8 +546,11 @@ _NUMBER_WORDS = {
 # parallel passes attack it...", body prose like "All eight passes are
 # required", and the roster heading itself. Matched by shape, not by quoting
 # each sentence, so a rewrite that moves the count to new prose is still caught.
+# Covers `one`/`two` alongside `three`-`ten` and digits — a document-wide count
+# claim of "two passes" is as much a mismatch against an eight-pass roster as
+# "seven passes" would be, and neither word is privileged out of the check.
 _PASS_COUNT_RE = re.compile(
-    r"\b(eight|seven|six|five|four|three|nine|ten|\d+)\s+(?:parallel\s+)?passes\b",
+    r"\b(one|two|eight|seven|six|five|four|three|nine|ten|\d+)\s+(?:parallel\s+)?passes\b",
     re.I,
 )
 
@@ -586,6 +657,37 @@ def test_every_subject_selection_row_resolves_to_a_bar_section_that_exists():
             f"_shared/council.md's subject-selection table names {name!r} but no "
             f"{heading!r} heading exists in the document"
         )
+
+
+# Every bar-block heading the document actually carries, matched the same shape
+# the table-cell pattern above names ("## Per-lens Critical bars", "## Per-lens
+# Critical bars — spec review", ...). Matched by heading shape, not by one named
+# heading, so an orphaned bar section under a new name is still counted.
+_BAR_SECTION_HEADING_RE = re.compile(r"^## (Per-lens Critical bars(?: — .+)?)$", re.M)
+
+
+def test_every_bar_section_is_named_by_a_subject_selection_row():
+    """Every `## Per-lens Critical bars...` section this document carries is
+    named by a row in the subject-selection table — the reverse direction of
+    `test_every_subject_selection_row_resolves_to_a_bar_section_that_exists`.
+
+    That pin only checks rows -> sections; a bar section with no row pointing at
+    it (an orphan a body-level mode fork elsewhere could still cite by heading)
+    would pass it untouched. Deriving the section list from the document itself,
+    not from a fixed pair of known names, is what makes a reintroduced orphan
+    show up as a heading the table doesn't name.
+    """
+    text = SHARED_COUNCIL.read_text()
+    table = _section(text, "## Per-lens Critical bars\n", "\n\nThe sets are")
+    named = set(_TABLE_BAR_SECTION_RE.findall(table))
+    headings = set(_BAR_SECTION_HEADING_RE.findall(text))
+    assert headings, "expected at least one '## Per-lens Critical bars...' section"
+    orphans = headings - named
+    assert not orphans, (
+        f"_shared/council.md carries bar section(s) {orphans} that no row in the "
+        "subject-selection table names — an orphaned bar block a body-level mode "
+        "fork could still cite even though no row offers it"
+    )
 
 
 # --- the sole route to active: distill's create, never a gauntlet-authored flip ---
@@ -1215,9 +1317,9 @@ def test_advancing_may_not_be_evaluated_while_a_critical_remains_answered():
     )
 
 
-def test_no_gauntlet_authored_write_sets_superseded_or_dropped():
-    """No gauntlet outcome sets the reviewed spec to `superseded` or `dropped` —
-    both statuses keep their existing (non-gauntlet) uses.
+def test_no_gauntlet_authored_write_sets_the_spec_superseded():
+    """No gauntlet outcome sets the reviewed spec to `superseded` — that status
+    keeps its existing (non-gauntlet) use.
     """
     text = GAUNTLET.read_text()
     assert "<spec-id> --status superseded" not in text, (
@@ -1230,7 +1332,7 @@ def test_no_gauntlet_authored_write_sets_superseded_or_dropped():
 
 # Files that describe the gauntlet from outside it. gauntlet/SKILL.md itself is
 # deliberately excluded: its own outcome vocabulary is pinned directly by
-# `test_no_gauntlet_authored_write_sets_superseded_or_dropped` and
+# `test_no_gauntlet_authored_write_sets_the_spec_superseded` and
 # `test_revise_disposition_withholds_advance_rather_than_superseding`.
 _SIBLING_DESCRIBERS = (BRAINSTORM, DISTILL, PLAN, PLANNER, PREMISE_ATTACKER)
 

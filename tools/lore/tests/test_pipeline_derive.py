@@ -77,8 +77,9 @@ class TestAdrAnchoredLineages:
         assert lineages == []
 
     def test_a_draft_adr_alone_sustains_its_own_lineage(self):
-        """A draft root is itself the in-flight work — it needs gauntleting —
-        so it renders before any spec has been derived from it."""
+        """A draft root is itself the in-flight work — distill still needs to
+        absorb or retire it — so it renders before any spec has been derived
+        from it."""
         lineages = _derive(
             [_walk("local", {"adr/fresh": _adr("draft")})]
         )
