@@ -19,10 +19,6 @@ Take a `ready` spec through one single-repo slice end to end: choose, plan, buil
 portage — then stop at the slice boundary and report. The driver resolves nothing it is not
 already the owner of; anything it does not own escalates rather than getting a guess.
 
-**This skill ships the entry point, the selection phase, the plan phase, the build phase, the
-PR tail, and the slice close.** The PR tail below names a closing outcome and defers the close
-mechanics to step 11, which marks the slice parent `done` and stops at the slice boundary.
-
 ## Argument
 
 The spec record to drive — a record id or a bare spec name (`/craft:drive spec/<name>` or
@@ -95,7 +91,7 @@ The driver holds no state of its own: every checkpoint is a `## Driver run` bloc
 
 **A block is present.** Read its `**Phase:**` field and re-enter at the phase after the one recorded, walking the fixed order select → plan → build → pr-tail → slice-close. A block recording `slice-close` names a finished run — there is no phase after it to resume into, and the driver reports the slice already closed rather than resuming anything.
 
-**Resuming into the build phase specifically** — whether because the recorded phase is `plan` and build is next, or the recorded phase is already `build` and the run died mid-dispatch — resolve the branch's state before dispatching anything. Read the parent's `craft/branch` label (`_shared/status-ownership.md`, Label conventions) and, if the named branch already carries commits, the driver never re-dispatches the build phase onto it on the assumption it is starting clean: a second build's commits stacked onto a partial one is exactly the corruption this check exists to prevent. Escalate instead, under the `build-resume-dirty-branch` trigger — this task only names the trigger and the condition; the escalation record's full mechanics are a later task against this same file, matching the multi-repo escalation below. Only once the branch is confirmed clean — no `craft/branch` label yet, or the label names a branch carrying no commits — does the driver proceed into the build phase.
+**Resuming into the build phase specifically** — whether because the recorded phase is `plan` and build is next, or the recorded phase is already `build` and the run died mid-dispatch — resolve the branch's state before dispatching anything. Read the parent's `craft/branch` label (`_shared/status-ownership.md`, Label conventions) and, if the named branch already carries commits, the driver never re-dispatches the build phase onto it on the assumption it is starting clean: a second build's commits stacked onto a partial one is exactly the corruption this check exists to prevent. Escalate instead, under the `build-resume-dirty-branch` trigger, following the escalation contract below — this step names the trigger and the condition; the escalation record's full mechanics are defined once in that contract, not restated here, matching the multi-repo escalation below. Only once the branch is confirmed clean — no `craft/branch` label yet, or the label names a branch carrying no commits — does the driver proceed into the build phase.
 
 #### Checkpoint the run
 
@@ -133,16 +129,15 @@ file `camp status` reports from, and the same file `_shared/execute.md` already 
 enumerate member repos) and count its `members` array.
 
 - **One member:** this is the single-repo path this slice ships. Proceed to the later phases.
-- **More than one member:** refuse rather than inferring which repo the slice belongs to — a wrong guess would build the slice on the wrong branch. Escalate with the `multi-repo-slice` trigger, report the escalation in-session naming the chosen slice parent, and halt the driver. The full escalation record write — the `blocked` child task, the credential scrub, the draft-PR push, the typed-trigger vocabulary's other members — is a later task against this same file; this phase only detects the condition and names the trigger it escalates under.
+- **More than one member:** refuse rather than inferring which repo the slice belongs to — a wrong guess would build the slice on the wrong branch. Escalate with the `multi-repo-slice` trigger, following the escalation contract below, report the escalation in-session naming the chosen slice parent, and halt the driver. This phase detects the condition and names the trigger it escalates under; the full escalation record write — the `blocked` child task, the credential scrub, the draft-PR push — is defined once in that contract, not restated here.
 
 ### 6. Report the outcome
 
 `../slice/SKILL.md`'s procedure ends in exactly one of three outcomes. The driver owns no termination logic of its own — it reports what `/craft:slice`'s procedure produced, verbatim:
 
 - **A chosen slice parent.** The single-repo check in step 5 above passed. Report the chosen
-  slice, its value claim, and the parent task id, then continue into the plan phase below —
-  slice close itself remains a later task against this same file. **This outcome does not
-  halt the driver**; it is the one case where the loop keeps going once that phase exists.
+  slice, its value claim, and the parent task id, then continue into the plan phase below.
+  **This outcome does not halt the driver**; it is the one case where the loop keeps going.
 - **Spec complete.** No candidate slice remains against the spec's acceptance criteria. Report the spec complete, matching `../slice/SKILL.md`'s own completion report, and **halt the driver** — there is nothing left to drive.
 - **Early stop.** Nothing in the candidate set clears the value floor and no enabler applies.
   Report what remains and why the loop stopped, matching `../slice/SKILL.md`'s own early-stop
@@ -181,7 +176,7 @@ The driver is the synthesizer, in session, never a subagent — de-duplicating b
 
 **A council Critical escalates.** Any Critical surviving synthesis is an escalation under the `plan-critical` trigger, following the escalation contract below. Disposition is an operator judgment, the same as the gauntlet's operator-only dispositions, so the driver authors none of its own. The escalation names a pointer to where the Critical's own text lives — the plan record and its `## Council Review` section — never a drafted verdict or a recommended resolution.
 
-**A clean council advances.** No Critical survives synthesis: write the `## Driver run` checkpoint block recording `**Phase:** plan` (per 4.5 above) before dispatching the build phase, a later task against this same file — step 9 below.
+**A clean council advances.** No Critical survives synthesis: write the `## Driver run` checkpoint block recording `**Phase:** plan` (per 4.5 above) before dispatching the build phase — step 9 below.
 
 ### 9. Dispatch the build phase
 
@@ -200,7 +195,7 @@ Outcome file: <outcome-file-path>
 
 `craft:driver-worker` carries an `Agent` tool grant and genuinely dispatches `assumption-prover`, `executor`, and `drift-gate` to run the shared execute procedure's own controller loop against the graph — every one of *its own* dispatches stays synchronous, never backgrounded, a rule pinned in the agent's own text; the notification-channel loss that constrains a backgrounded dispatch applies only there, never to this top-level one.
 
-**The dispatch carries a liveness deadline.** It bounds the worker's own run, which ends at the shared procedure's close (a pushed branch, not a merge) — it does not cover the portage tail, which is external to this dispatch and belongs to a later task against this same file. Wait on the outcome file with a bounded until-loop rather than blocking indefinitely on the dispatch; once the deadline passes with no outcome file written, stop waiting, treat the worker as crashed, and escalate under the `worker-stalled` trigger with no retry, following the escalation contract below.
+**The dispatch carries a liveness deadline.** It bounds the worker's own run, which ends at the shared procedure's close (a pushed branch, not a merge) — it does not cover the portage tail, which is external to this dispatch and runs at step 10 below. Wait on the outcome file with a bounded until-loop rather than blocking indefinitely on the dispatch; once the deadline passes with no outcome file written, stop waiting, treat the worker as crashed, and escalate under the `worker-stalled` trigger with no retry, following the escalation contract below.
 
 **Read the result from the outcome file, never from the agent's reply** — matching the plan phase's own worker-channel rule at step 7. A missing or empty outcome file is read as a **crash**, not as still-running, and escalates under the same `worker-stalled` trigger a deadline expiry does — the two are the same failure observed by different clocks.
 
@@ -234,7 +229,7 @@ Then dispatch `monitor` **in the background, from this top-level session** — n
 - `BLOCKED <reason>` — escalates under the `portage-blocked` trigger, following the escalation contract below, with no retry.
 - An empty or missing outcome file — escalates under the `portage-tail-stalled` trigger, following the escalation contract below, with no retry.
 
-For every branch above that closes the slice, this phase names that outcome and defers the close mechanics to slice close, a later task against this same file — matching how earlier phases deferred to this one. Once the mapping resolves, write the `## Driver run` checkpoint block recording `**Phase:** pr-tail` before the slice-close mechanics run, so a crash in the tail does not resume as a crash before the build.
+For every branch above that closes the slice, this phase names that outcome and defers the close mechanics to slice close — step 11 below. Once the mapping resolves, write the `## Driver run` checkpoint block recording `**Phase:** pr-tail` before the slice-close mechanics run, so a crash in the tail does not resume as a crash before the build.
 
 ### 11. Close the slice and stop at the boundary
 
@@ -258,8 +253,8 @@ Re-entry is the operator's act: the driver does not invoke `/craft:slice` or `/c
 
 ## Escalation
 
-Every escalation this ritual can raise — the four above and any a later task against this same
-file adds — follows one contract, defined here once so no escalation site restates it.
+Every escalation this ritual can raise — every trigger in the vocabulary below — follows one
+contract, defined here once so no escalation site restates it.
 **No retries: the first escalation from any phase ends the run.** On escalation the driver does
 not retry the phase, does not try a different approach, and does not continue into a later
 phase — it writes the escalation record, pushes work in flight, reports in-session, and stops.

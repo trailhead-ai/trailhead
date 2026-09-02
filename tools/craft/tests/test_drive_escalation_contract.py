@@ -4,9 +4,8 @@ This task ships the driver's escalation contract: no retries, an escalation reco
 `blocked` child of the slice parent naming a typed trigger from a declared vocabulary and the
 decision needed, a credential-scrubbed body, a draft-PR push routed through the shared execute
 procedure's pre-push secret scan, and an in-session terminal report carrying a fully formed
-resume command. It does not build the plan, build, or PR-tail phases themselves (each is a later
-task against this same file); it defines the contract every escalation site — present and
-future — must follow.
+resume command. It defines the contract every escalation site — present and future — must
+follow; the phases that raise those escalations are pinned by their own contract files.
 
 Pinned here, using the wrap-aware `_pin` helper mirrored from `test_drive_resume_contract.py`
 (itself mirrored from `test_drive_skill_contract.py`'s own helper, mirrored in turn from

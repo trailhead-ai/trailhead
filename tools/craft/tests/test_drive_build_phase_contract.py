@@ -6,8 +6,8 @@ task graph, in its own context, and the driver-side dispatch that drives it — 
 six-value dispatch prompt, a background top-level dispatch bounded by a liveness deadline,
 a read of the worker's result from its outcome file (never its reply), a missing/empty
 outcome file read as a crash, and an escalation under `worker-stalled` with no retry on
-any non-success outcome. It does not build the PR tail (a later task against this same
-file); it defines the build phase and the worker agent that phase dispatches.
+any non-success outcome. It defines the build phase and the worker agent that phase
+dispatches; the PR tail it hands off to is pinned by `test_drive_portage_tail_contract.py`.
 
 Pinned here, using the wrap-aware `_pin` helper mirrored from
 `test_drive_plan_phase_contract.py` (itself mirrored from `test_drive_escalation_contract.py`,

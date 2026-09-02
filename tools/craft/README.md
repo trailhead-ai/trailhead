@@ -95,8 +95,10 @@ linked to the spec, for `/craft:plan` to decompose.
 read it inline into `/craft:slice`'s procedure rather than invoking it, report
 its three outcomes (a chosen slice, spec complete, or an early stop), and
 refuse a slice spanning more than one camp-group repo rather than guessing
-which one it belongs to. Ships its entry point and selection phase so far;
-plan, build, and the PR tail are later tasks against the same skill.
+which one it belongs to. Then plans the chosen slice, builds it through
+`craft:driver-worker`, hands the branch to portage, closes the slice, and stops
+at the slice boundary — escalating anything it does not own rather than
+resolving it.
 
 **Refine:** `/craft:refine` — promote a standalone (childless, parentless) task
 from `open` to `ready`: draft its Delivers / Test contract / Files payload from

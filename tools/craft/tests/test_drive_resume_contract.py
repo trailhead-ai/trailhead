@@ -2,9 +2,8 @@
 
 This task ships the driver's `## Driver run` checkpoint block — written onto the slice
 parent at each phase boundary and read on resume, so the run is reconstructable from vault
-records alone. It does not build the plan, build, PR-tail, or slice-close phases themselves
-(each is a later task against this same file); it defines where the checkpoint is written and
-what resume does with it.
+records alone. It defines where the checkpoint is written and what resume does with it; the
+phases that write it at their own boundaries are pinned by their own contract files.
 
 Pinned here, using the wrap-aware `_pin` helper mirrored from `test_drive_skill_contract.py`
 (itself mirrored from `test_execute_mode_contract.py`'s own helper, mirrored in turn from
@@ -139,13 +138,13 @@ def test_dirty_branch_check_reads_the_craft_branch_label():
     )
 
 
-def test_dirty_branch_mechanics_deferred_to_a_later_task():
+def test_dirty_branch_mechanics_deferred_to_the_escalation_contract():
     _pin(
-        "the escalation record's full mechanics are a later task against this "
-        "same file",
-        "This task only names the trigger and the condition — the escalation "
-        "record's contents are a later task's scope, matching the multi-repo "
-        "escalation's own precedent.",
+        "the escalation record's full mechanics are defined once in that "
+        "contract, not restated here",
+        "This site only names the trigger and the condition — the escalation "
+        "record's contents belong to the escalation contract, matching the "
+        "multi-repo escalation's own precedent, rather than being restated here.",
     )
 
 

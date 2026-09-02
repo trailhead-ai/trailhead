@@ -7,7 +7,7 @@ mandatory council review itself (the four lenses, dispatched and adjudicated in 
 per `_shared/council.md`'s dispatch contract, since planner's own tool grant carries no `Agent`
 tool), escalating a surviving Critical under the `plan-critical` trigger with a pointer rather
 than any disposition, and advancing a clean council by writing the phase checkpoint before the
-build phase (a later task against this same file).
+build phase, which `test_drive_build_phase_contract.py` pins.
 
 Pinned here, using the wrap-aware `_pin` helper mirrored from `test_drive_escalation_contract.py`
 (itself mirrored from `test_drive_resume_contract.py`, `test_drive_skill_contract.py`,
@@ -259,7 +259,8 @@ def test_clean_council_writes_the_plan_checkpoint():
 
 def test_clean_council_checkpoint_precedes_the_build_dispatch():
     _pin(
-        "before dispatching the build phase, a later task against this same file",
+        "before dispatching the build phase — step 9 below",
         "The plan-phase checkpoint must be written before the build phase is dispatched, "
-        "and the build dispatch itself must be named as still deferred to a later task.",
+        "and the dispatch must point at the real build-phase step rather than the old "
+        "'a later task' placeholder.",
     )

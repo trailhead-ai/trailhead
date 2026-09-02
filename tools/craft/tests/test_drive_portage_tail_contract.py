@@ -8,8 +8,8 @@ polling the outcome file against the driver's own deadline rather than waiting o
 notification, and mapping portage's four terminal tokens (plus the empty-file case) explicitly
 with no default or fall-through branch. `MERGED`, `READY <reason>`, and
 `STOPPED auto_merge disabled` all close the slice; every other `STOPPED <reason>`, `BLOCKED
-<reason>`, and an empty or missing outcome file all escalate. It does not build slice close
-itself (a later task against this same file); it defines the PR tail and its token map.
+<reason>`, and an empty or missing outcome file all escalate. It defines the PR tail and its
+token map; the slice close it hands off to is pinned by `test_drive_slice_close_contract.py`.
 
 Pinned here, using the wrap-aware `_pin` helper mirrored from `test_drive_build_phase_contract.py`
 (itself mirrored from `test_drive_plan_phase_contract.py`, `test_drive_escalation_contract.py`,
@@ -289,10 +289,11 @@ def test_checkpoint_prevents_tail_crash_resuming_as_pre_build_crash():
 
 def test_close_the_slice_outcome_is_named_and_deferred():
     _pin(
-        "this phase names that outcome and defers the close mechanics to slice close, a "
-        "later task against this same file",
+        "this phase names that outcome and defers the close mechanics to slice close — "
+        "step 11 below",
         "Every branch that closes the slice must name that outcome and defer the close "
-        "mechanics to the later slice-close task.",
+        "mechanics to slice close, pointing at the real step 11 rather than the old "
+        "'a later task' placeholder.",
     )
 
 

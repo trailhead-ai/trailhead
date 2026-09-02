@@ -4,7 +4,7 @@
 its entry point and selection phase: argument validation, the `--vault` binding, the `ready`
 status guard, deferral to `../slice/SKILL.md` (read inline, never invoked as a slash command),
 reporting `/craft:slice`'s three outcomes, and refusing a slice that spans more than one repo.
-Plan, build, and the PR tail are later tasks against this same file.
+The later phases are pinned by their own contract files.
 
 Pinned here, using the wrap-aware `_pin` helper mirrored from
 `test_execute_mode_contract.py`'s own helper (mirrored in turn from ranger's
@@ -265,11 +265,11 @@ def test_multi_repo_refusal_names_the_wrong_branch_risk():
     )
 
 
-def test_multi_repo_path_defers_full_escalation_mechanics_to_a_later_task():
+def test_multi_repo_path_defers_full_escalation_mechanics_to_the_contract():
     _pin(
-        "is a later task against",
-        "This task only detects the multi-repo condition and names the "
+        "is defined once in that contract, not restated here",
+        "This phase only detects the multi-repo condition and names the "
         "trigger — the full escalation record write belongs to the "
-        "escalation-contract task, and the file must say so rather than "
-        "inventing that mechanism here.",
+        "escalation contract, and the file must say so rather than "
+        "restating that mechanism here.",
     )
