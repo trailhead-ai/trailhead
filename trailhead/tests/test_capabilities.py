@@ -181,6 +181,9 @@ class TestCraftInventory:
         # that condenses completed spec work into ADRs and owns the spec's
         # planned → complete edge. slice chooses and materializes the next
         # vertical slice from a `ready` spec, and is what roots `/craft:plan`.
+        # drive takes a `ready` spec through one single-repo slice end to end —
+        # select, plan, build, PR tail — then stops at the slice boundary and
+        # reports, escalating rather than resolving anything it does not own.
         m = load_manifest(_CRAFT_MANIFEST)
         assert set(m.skills) == {
             "polish",
@@ -194,6 +197,7 @@ class TestCraftInventory:
             "refine",
             "distill",
             "slice",
+            "drive",
         }
 
     def test_shared_not_selectable(self):
