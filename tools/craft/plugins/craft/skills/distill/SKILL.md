@@ -139,11 +139,10 @@ reach `complete` — the one shape this ritual must never produce. Every other a
 excluded. Two keys, not one,
 because they arise from opposite directions: distill's own writes never
 land spec-side — step 1 writes the ADR's provenance edge as `--related spec=<member>` **on the ADR**,
-never on the spec, so a `related: adr` edge on a spec never came from a prior distillation. It comes
-from the forward path instead: brainstorm's altitude gate creates every forward-derived spec with
-`--related adr=<adr-id>` **from birth**, so a spec descended from an ADR already belongs to a decision
-already on record, and sweeping it would re-distill that decision into a second ADR restating its
-parent's. `distilled=` cannot ride the KQL query either, because
+never on the spec, so a `related: adr` edge on a spec never came from a prior distillation. A spec carries
+`--related adr=<adr-id>` when it descends from that decision, so a spec holding one already belongs to
+a decision already on record, and sweeping it would re-distill that decision into a second ADR
+restating its parent's. `distilled=` cannot ride the KQL query either, because
 annotations are never indexed, so this cannot be a KQL filter, and the same per-candidate check
 covers the edge too. Check per candidate:
 

@@ -967,3 +967,21 @@ def test_the_shape_check_governs_every_substitution_site_not_a_fixed_count():
         "site in the file — a guard scoped to an enumerated list silently stops "
         "covering the next site someone adds"
     )
+
+
+def test_queue_exclusion_describes_the_adr_edge_as_carried_not_as_authored_by_brainstorm():
+    """§2 explains where a spec's `related: adr=` edge comes from, to justify treating
+    it as a distinct exclusion key from the `distilled=` annotation.
+
+    That explanation must describe the edge as something a record carries. Naming a
+    live authoring mechanism instead states a present-tense claim about who writes the
+    edge, and the reader's next question — "so I should look for new ones" — has no
+    true answer.
+    """
+    # Lowercased: whether the phrase opens a sentence is a wrapping artifact, not
+    # part of the claim being pinned.
+    section = _flat(_queue_exclusion_section(_text())).lower()
+    assert "a spec carries" in section, (
+        "§2 must describe the `related: adr=` edge as something a spec carries, "
+        "since the exclusion's job is to recognise the edge wherever it already is"
+    )
