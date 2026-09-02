@@ -216,9 +216,8 @@ _DECLARED_TRIGGERS = [
     "multi-repo-slice",
     "build-resume-dirty-branch",
     "plan-critical",
-    "agent-blocked",
-    "planner-stalled",
-    "worker-stalled",
+    "plan-failed",
+    "build-failed",
     "updater-preflight-failed",
 ]
 
@@ -320,7 +319,7 @@ _ESCALATION_SITES = {
     "multi-repo-slice": "Escalate with the `multi-repo-slice`",
     "build-resume-dirty-branch": "Escalate instead, under the `build-resume-dirty-branch` trigger",
     "plan-critical": "is an escalation under the `plan-critical` trigger, following the escalation contract below",
-    "agent-blocked": "escalates under the `agent-blocked` trigger, following the escalation contract below",
+    "plan-failed": "escalate under the `plan-failed` trigger, following the escalation contract below",
 }
 
 

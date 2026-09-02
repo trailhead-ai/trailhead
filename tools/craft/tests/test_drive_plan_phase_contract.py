@@ -49,147 +49,107 @@ def _pin(phrase: str, why: str, path: Path = DRIVE_SKILL) -> None:
 # --- and passes nothing else about the slice ----------------------------------------------
 
 
-def test_planner_dispatch_names_the_chosen_slice_parent():
+def _plan_phase_section() -> str:
+    """The plan phase's own section body, bounded by the council-review heading."""
+    text = DRIVE_SKILL.read_text()
+    start = text.index("### 7. Run the plan phase")
+    end = text.index("### 8.", start)
+    return text[start:end]
+
+
+# --- contract item 1: the plan phase runs plan's own procedure inline ---------------------
+
+
+def test_plan_phase_heading_says_run_not_dispatch():
     _pin(
-        "dispatch `craft:planner` against that slice parent on the slice-rooted path",
-        "The plan phase must dispatch `craft:planner` against the chosen slice parent, "
-        "on its slice-rooted path.",
+        "### 7. Run the plan phase",
+        "The plan phase runs planning itself rather than dispatching it; naming the "
+        "step 'Dispatch' is what smuggled the unattended planner in.",
     )
 
 
-def test_planner_dispatch_passes_nothing_else_about_the_slice():
+def test_plan_phase_reads_the_plan_skill_and_follows_it_inline():
     _pin(
-        "Pass it nothing else about the slice",
-        "The dispatch must pass nothing else about the slice beyond the parent record "
-        "itself and the outcome-file instruction.",
+        "Read `../plan/SKILL.md` now, in full, and follow it inline in this session",
+        "The plan phase must defer to plan's own procedure by reading it, the same "
+        "way the selection phase defers to ../slice/SKILL.md.",
     )
 
 
-def test_planner_dispatch_names_an_outcome_file():
+def test_plan_phase_takes_the_slice_rooted_path():
     _pin(
-        "Outcome file: <outcome-file-path>",
-        "The dispatch prompt must name an outcome file for planner to write its result to.",
+        "on its slice-rooted path",
+        "The parent already exists, so planning must update it in place rather than "
+        "creating a second parent.",
     )
 
 
-# --- contract item 2: the dispatch pins its own outcome grammar in full -------------------
-
-
-def test_states_planner_has_no_outcome_file_mechanism_of_its_own():
-    _pin(
-        "`craft:planner` declares no outcome-file mechanism of its own, so there is no "
-        "default grammar to override",
-        "The ritual must state explicitly why the whole grammar is pinned in the dispatch "
-        "prompt rather than relying on a default planner already has.",
+def test_plan_phase_cites_the_slice_ritual_deferral_as_precedent():
+    section = _plan_phase_section()
+    assert "../slice/SKILL.md" in section, (
+        "the plan phase must cite the selection phase's own read-it-don't-invoke-it "
+        "deferral as the precedent it follows"
     )
 
 
-def test_pins_the_grammar_the_way_ranger_execute_does():
-    _pin(
-        "the way `ranger:execute` pins its own outcome grammar to the agent it dispatches",
-        "The pinned-grammar approach must be modelled explicitly on ranger's execute agent, "
-        "the precedent the intent document names.",
+def test_plan_phase_never_restates_planning():
+    section = _plan_phase_section()
+    assert "never restates" in section, (
+        "a second copy of planning's procedure inside the driver is exactly how the "
+        "two would drift apart, and the phase must say so"
     )
 
 
-@pytest.mark.parametrize(
-    "token",
-    [
-        "`PLANNED <slice-parent-task-id>`",
-        "`BLOCKED <reason>`",
-        "`NEEDS_CONTEXT <reason>`",
-    ],
-)
-def test_outcome_grammar_declares_each_token(token):
+# --- contract item 2: the operator answers planning's own questions -----------------------
+
+
+def test_clarify_step_asks_the_operator():
     _pin(
-        token,
-        f"the pinned outcome grammar must declare the {token} token for planner to write.",
+        "planning's own Clarify step asks the operator in this session",
+        "A human is present, so planning's clarifying questions reach them rather "
+        "than being suppressed and recorded as notes no one reads.",
     )
 
 
-def test_outcome_grammar_supersedes_any_default():
+def test_approval_step_asks_the_operator():
     _pin(
-        "This outcome grammar supersedes any default your own procedure names",
-        "The dispatch prompt must state that this grammar supersedes any default "
-        "planner's own procedure names, matching ranger's execute agent precedent.",
+        "planning's own Present for Approval step asks the operator in this session",
+        "Plan approval is a genuine operator judgment; the driver must not answer it "
+        "on the operator's behalf.",
     )
 
 
-def test_outcome_file_carries_nothing_but_the_one_line():
+def test_plan_phase_passes_nothing_else_about_the_slice():
     _pin(
-        "Do not write a summary, a file list, or anything else to the outcome file",
-        "The dispatch prompt must forbid anything beyond the single outcome line.",
+        "The parent record already carries the value claim",
+        "The plan phase must read the slice's context from the parent record rather "
+        "than restating it, matching this ritual's shape everywhere else.",
     )
 
 
-# --- contract item 3: the ritual reads the plan result from the outcome file, never reply --
+# --- contract item 3: a plan that cannot be written escalates under a typed trigger -------
 
 
-def test_reads_plan_result_from_outcome_file_never_the_reply():
+def test_plan_failure_escalates_under_plan_failed():
     _pin(
-        "Read the plan result from the outcome file above, never from the agent's reply",
-        "The driver must read the plan phase's result from the outcome file, never from "
-        "the dispatched agent's reply, matching the build phase's own worker channel rule.",
+        "escalate under the `plan-failed` trigger",
+        "A plan phase that cannot complete must write a typed escalation record like "
+        "every other stop in this ritual.",
     )
 
 
-def test_planned_line_advances_into_council_review():
+def test_plan_failed_trigger_declared_in_vocabulary():
     _pin(
-        "A `PLANNED <slice-parent-task-id>` line advances into the council review below",
-        "A `PLANNED` outcome line must advance the ritual into the council review step.",
+        "- **`plan-failed`** — the plan phase (step 7 above) cannot produce a plan",
+        "Every trigger a phase raises must be declared in the closed vocabulary.",
     )
 
 
-# --- contract item 2a: the planner dispatch carries a liveness deadline, mirroring the ---
-# --- build phase's own, and a crashed (missing/empty outcome file) planner is mapped -----
-
-
-def test_planner_dispatch_carries_a_liveness_deadline():
-    _pin(
-        "It bounds `craft:planner`'s own run the same way the build phase's own "
-        "deadline bounds `craft:driver-worker`'s",
-        "The planner dispatch must carry a liveness deadline rather than "
-        "waiting on it indefinitely, matching the build phase's own dispatch.",
-    )
-
-
-def test_missing_or_empty_planner_outcome_file_escalates():
-    _pin(
-        "A missing or empty outcome file is read as a **crash**, not as "
-        "still running, and escalates under the `planner-stalled` trigger",
-        "A crashed planner — a missing or empty outcome file — must be "
-        "mapped to an escalation, not left as an unmapped state with no "
-        "typed record, the same hole the build phase's own worker-stalled "
-        "mapping already closes.",
-    )
-
-
-def test_planner_stalled_trigger_declared_in_vocabulary():
-    _pin(
-        "**`planner-stalled`**",
-        "The `planner-stalled` trigger raised by a crashed planner dispatch "
-        "must be declared in the closed trigger vocabulary.",
-    )
-
-
-# --- contract item 2b: the dispatch overrides planner's clarify and wait-for-approval ----
-# --- steps for the unattended dispatch — otherwise it hangs or invents answers -----------
-
-
-def test_dispatch_overrides_planners_clarify_step():
-    _pin(
-        "override your own procedure's Clarify step",
-        "The unattended planner dispatch must explicitly override planner's "
-        "own Clarify step, since there is no human here to answer a question.",
-    )
-
-
-def test_dispatch_overrides_planners_approval_step():
-    _pin(
-        "Present for Approval step",
-        "The unattended planner dispatch must explicitly override planner's "
-        "own Present for Approval step, since the driver — never a task "
-        "body — is what ships the plan onward.",
+def test_plan_failure_carries_no_retry():
+    section = _plan_phase_section()
+    assert "no retry" in section, (
+        "the plan phase's escalation must state no-retry explicitly, matching every "
+        "other escalation site in this ritual"
     )
 
 
@@ -285,33 +245,34 @@ def test_driver_is_the_synthesizer_in_session():
     )
 
 
-def test_council_dispatched_against_a_plan_planner_wrote():
+def test_council_run_by_the_driver_against_the_plan_step_seven_wrote():
     _pin(
-        "The driver runs the council itself, in this session, against the plan now written "
-        "on the slice parent",
-        "The council must be run by the driver itself against the plan craft:planner just "
-        "wrote, since the planner agent structurally cannot run it.",
+        "The driver runs that gate itself here, in this session, against the plan step 7 "
+        "just wrote",
+        "The council gate must be run by the driver itself against the plan the inline "
+        "plan phase just wrote onto the slice parent.",
     )
 
 
-def test_design_doc_step_reference_matches_planners_own_numbering():
+def test_council_step_explains_why_the_gate_lives_at_the_drivers_altitude():
     _pin(
-        "whose own step 6.5 is a design-doc step",
-        "The cited step number for planner's design-doc step must match "
-        "planner.md's own numbering, not a stale reference.",
-    )
-    assert PLANNER_AGENT.read_text().count("### 6.5. Produce the Design Doc") == 1, (
-        "planner.md must actually carry a step 6.5 design-doc heading for "
-        "drive/SKILL.md's citation to be correct — cross-checking against the "
-        "cited document itself, not just asserting the digit in isolation."
+        "which is why the gate lives at the driver's altitude rather than inside the read above",
+        "The ritual must say why the council is run here rather than left to planning's "
+        "own step 8.5 — the checkpoint and the plan-critical escalation hang off it.",
     )
 
 
-def test_states_planner_has_no_agent_tool():
+def test_council_step_cites_the_step_it_was_excluded_from():
     _pin(
-        "whose tool grant carries no `Agent` tool at all",
-        "The ritual must state why planner cannot run the council itself — its tool grant "
-        "carries no Agent tool.",
+        "stopped before that skill's own Council Review step (`../plan/SKILL.md`, step 8.5)",
+        "The council step must name the step the inline plan read stopped before, or the "
+        "exclusion at step 7 and the gate here can drift apart silently.",
+    )
+    plan_skill = CRAFT / "skills" / "plan" / "SKILL.md"
+    assert "8.5" in plan_skill.read_text(), (
+        "plan/SKILL.md must actually carry a step 8.5 for drive/SKILL.md's citation to "
+        "be correct — cross-checked against the cited document itself, not asserted in "
+        "isolation."
     )
 
 
@@ -478,17 +439,41 @@ def test_council_schema_cites_plan_skill_critical_none_line():
 
 def test_clean_council_writes_the_plan_checkpoint():
     _pin(
-        "No Critical survives synthesis: write the `## Driver run` checkpoint block "
-        "recording `**Phase:** plan`",
-        "A clean council (no surviving Critical) must write the plan-phase checkpoint "
-        "block.",
+        "Write the `## Driver run` checkpoint block recording `**Phase:** plan` (per step 4 "
+        "above) once approval lands",
+        "A clean council must write the plan-phase checkpoint block — and only once the "
+        "operator's approval has landed, since an unapproved plan is not a completed phase.",
     )
 
 
 def test_clean_council_checkpoint_precedes_the_build_dispatch():
     _pin(
-        "before dispatching the build phase — step 9 below",
-        "The plan-phase checkpoint must be written before the build phase is dispatched, "
-        "and the dispatch must point at the real build-phase step rather than the old "
-        "'a later task' placeholder.",
+        "before entering the build phase — step 9 below",
+        "The plan-phase checkpoint must be written before the build phase is entered, and "
+        "must point at the real build-phase step rather than a placeholder.",
+    )
+
+
+def test_inline_plan_read_stops_before_plannings_own_council_step():
+    _pin(
+        "stopping before that skill's own Council Review step (`../plan/SKILL.md`, step 8.5)",
+        "The driver runs the council itself at step 8 — where the checkpoint and the "
+        "plan-critical escalation hang off it — so an unscoped inline read of planning "
+        "would run the four lenses twice.",
+    )
+
+
+def test_approval_runs_after_the_council_gate_not_before():
+    _pin(
+        "now run planning's own Present for Approval step (`../plan/SKILL.md`, step 9) inline",
+        "Planning's approval step sits after its council gate in planning's own ordering; "
+        "the driver must preserve that order rather than approving an unreviewed plan.",
+    )
+
+
+def test_declining_approval_ends_the_run():
+    _pin(
+        "An operator who declines to approve ends the run: escalate under the `plan-failed` trigger",
+        "A declined plan is a stop like any other and must leave a typed record behind, "
+        "not a silent halt.",
     )

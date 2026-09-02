@@ -37,9 +37,7 @@ conformance gate — plan delivered, executor's status claim holds, next task
 unblocked; quality and style are explicitly out of scope), `craft:simplifier`
 (whole-change simplify-mutation phase in execute's After All Tasks pipeline —
 removes cross-task duplication and dead scaffolding, write-scope mechanically
-enforced by `footprint_guard.py`), `craft:driver-worker` (runs the shared
-execute procedure's unattended mode against a slice parent's child task graph,
-in its own context, on `/craft:drive`'s behalf)
+enforced by `footprint_guard.py`)
 
 **Review:** `craft:code-reviewer` — whole-change/PR reviewer. Dispatched
 standalone via `/craft:review` before merge, and again as execute's
@@ -95,8 +93,9 @@ linked to the spec, for `/craft:plan` to decompose.
 read it inline into `/craft:slice`'s procedure rather than invoking it, report
 its three outcomes (a chosen slice, spec complete, or an early stop), and
 refuse a slice spanning more than one camp-group repo rather than guessing
-which one it belongs to. Then plans the chosen slice, builds it through
-`craft:driver-worker`, hands the branch to portage, closes the slice, and stops
+which one it belongs to. Then plans the chosen slice and builds it by running
+craft's own plan and execute procedures inline — attended, since the operator is
+present — hands the branch to portage, closes the slice, and stops
 at the slice boundary — escalating anything it does not own rather than
 resolving it.
 

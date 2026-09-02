@@ -1,13 +1,11 @@
 """`/craft:drive`'s build phase.
 
-This task ships the driver's build phase: a new `craft:driver-worker` agent that runs
-craft's shared execute procedure in its unattended mode against the slice parent's child
-task graph, in its own context, and the driver-side dispatch that drives it — a pinned
-six-value dispatch prompt, a background top-level dispatch bounded by a liveness deadline,
-a read of the worker's result from its outcome file (never its reply), a missing/empty
-outcome file read as a crash, and an escalation under `worker-stalled` with no retry on
-any non-success outcome. It defines the build phase and the worker agent that phase
-dispatches; the PR tail it hands off to is pinned by `test_drive_portage_tail_contract.py`.
+The driver runs craft's shared execute procedure **inline, in its own session**, against
+the slice parent's child task graph — reading `_shared/execute.md` and following it, the
+same read-it-don't-invoke-it deferral the selection phase already applies to
+`../slice/SKILL.md`. Running inline selects the shared procedure's **attended** mode, which
+is the point: a human is present, so every escalation the procedure names asks them rather
+than parking a question no one will read.
 
 Pinned here, using the wrap-aware `_pin` helper mirrored from
 `test_drive_plan_phase_contract.py` (itself mirrored from `test_drive_escalation_contract.py`,
@@ -26,7 +24,7 @@ import pytest
 
 CRAFT = Path(__file__).parent.parent / "plugins" / "craft"
 DRIVE_SKILL = CRAFT / "skills" / "drive" / "SKILL.md"
-DRIVER_WORKER = CRAFT / "agents" / "driver-worker.md"
+SHARED_EXECUTE = CRAFT / "skills" / "_shared" / "execute.md"
 
 
 def _pin(phrase: str, why: str, path: Path = DRIVE_SKILL) -> None:
@@ -42,316 +40,143 @@ def _pin(phrase: str, why: str, path: Path = DRIVE_SKILL) -> None:
     pytest.fail(f"{path.name}: missing the pinned span {phrase!r}. {why}")
 
 
-def _frontmatter(path: Path) -> str:
-    text = path.read_text()
-    assert text.startswith("---\n"), f"{path.name} must open with a frontmatter block"
-    end = text.find("\n---", 3)
-    assert end > 0, f"{path.name} frontmatter block is not closed"
-    return text[3:end]
-
-
-def _tools(path: Path) -> list[str]:
-    for line in _frontmatter(path).splitlines():
-        if line.strip().startswith("tools:"):
-            return [t.strip() for t in line.split(":", 1)[1].split(",") if t.strip()]
-    return []
-
-
-# --- the agent ships and is registrable / generic (mechanically re-checked here since ---
-# --- this task is what introduces the file the parametrized suites discover) ------------
-
-
-def test_driver_worker_agent_ships():
-    assert DRIVER_WORKER.exists(), f"Expected the craft:driver-worker agent at {DRIVER_WORKER}"
-
-
-# --- the Agent tool grant is a hard, mutation-checked requirement -----------------------
-
-
-def test_driver_worker_carries_an_agent_tool_grant():
-    tools = _tools(DRIVER_WORKER)
-    assert "Agent" in tools, (
-        "craft:driver-worker must carry an `Agent` tool grant — it genuinely dispatches "
-        f"assumption-prover, executor, and drift-gate. Got tools: {tools!r}"
-    )
-
-
-# --- the agent states why it needs Agent, and never cites ranger:execute as nesting proof ---
-
-
-def test_agent_states_it_genuinely_dispatches_subagents():
-    _pin(
-        "You genuinely dispatch subagents — unlike `ranger:execute`.",
-        "The agent must state plainly that it dispatches subagents, unlike ranger:execute.",
-        path=DRIVER_WORKER,
-    )
-
-
-def test_agent_cites_ranger_execute_for_shape_only():
-    _pin(
-        "`ranger:execute` is precedent for this agent's **shape**",
-        "The agent must cite ranger:execute as shape precedent only.",
-        path=DRIVER_WORKER,
-    )
-
-
-def test_agent_forbids_citing_ranger_execute_as_nesting_evidence():
-    _pin(
-        "Never cite it as evidence that nesting works",
-        "The agent must explicitly forbid citing ranger:execute as evidence nesting works, "
-        "since it carries no Agent tool at all and cannot nest.",
-        path=DRIVER_WORKER,
-    )
-
-
-def test_agent_states_nested_dispatches_are_synchronous():
-    _pin(
-        "Every dispatch you make is synchronous — never `run_in_background`.",
-        "The agent must pin that its own nested dispatches are always synchronous, "
-        "never backgrounded.",
-        path=DRIVER_WORKER,
-    )
-
-
-def test_agent_warns_against_backgrounding_out_of_caution():
-    _pin(
-        "Do not background any of them out of caution",
-        "The agent must warn a later implementer against backgrounding its nested "
-        "dispatches out of caution, since that would reintroduce the notification loss.",
-        path=DRIVER_WORKER,
-    )
-
-
-# --- the agent writes exactly one token to the outcome file -----------------------------
-
-
-def test_agent_writes_exactly_one_token():
-    _pin(
-        "Your last action is to write **exactly one token** to the outcome file",
-        "The agent must write exactly one token to its outcome file and nothing else.",
-        path=DRIVER_WORKER,
-    )
-
-
-def test_agent_treats_missing_file_as_crash():
-    _pin(
-        "A missing or empty outcome file reads to",
-        "The agent must state that a missing or empty outcome file reads as a crash.",
-        path=DRIVER_WORKER,
-    )
-
-
-# --- the agent's run ends at the procedure's close, never the portage tail --------------
-
-
-def test_agent_run_ends_at_procedure_close_not_portage():
-    _pin(
-        "Your run ends where the shared procedure's own close phase ends — a pushed "
-        "branch — never a merge",
-        "The agent's run must end at the shared procedure's close, not extend into "
-        "portage's tail.",
-        path=DRIVER_WORKER,
-    )
-
-
-# --- SKILL.md: the build phase dispatch names the six values and nothing else -----------
-
-
-_DISPATCH_LINES = {
-    "record-id": "Record id: <slice-parent-task-id>",
-    "execute-procedure": "Execute procedure: <path-to-_shared-execute.md>",
-    "templates-root": "Templates root: <path-to-templates-root>",
-    "elected-vault": "Elected vault: <elected-vault>",
-    "workspace-path": "Workspace path: <workspace-path>",
-    "outcome-file": "Outcome file: <outcome-file-path>",
-}
-
-
-def _build_dispatch_block() -> str:
-    """The six-value build-phase dispatch's own fenced block — scoped so a pin against
-    it cannot be vacuously satisfied by the plan phase's identical-looking dispatch
-    lines (e.g. `Outcome file: <outcome-file-path>` appears in both blocks)."""
+def _build_phase_section() -> str:
+    """The build phase's own section body, bounded by the next `### ` heading."""
     text = DRIVE_SKILL.read_text()
-    match = re.search(
-        r"```text\nRecord id: <slice-parent-task-id>\n.*?\n```", text, re.DOTALL
-    )
-    assert match, "expected the build-phase's six-value fenced dispatch block"
-    return match.group(0)
+    start = text.index("### 9. Run the build phase")
+    end = text.index("### 10.", start)
+    return text[start:end]
 
 
-@pytest.mark.parametrize("label,line", list(_DISPATCH_LINES.items()), ids=list(_DISPATCH_LINES))
-def test_build_dispatch_names_each_value(label, line):
+# --- the build phase runs the shared procedure inline, never through a dispatch ---------
+
+
+def test_build_phase_heading_says_run_not_dispatch():
     _pin(
-        line,
-        f"The build-phase dispatch prompt must name the {label} value on its own line.",
+        "### 9. Run the build phase",
+        "The build phase runs the shared execute procedure itself; naming the step "
+        "'Dispatch' is what smuggled an unattended worker in the first place.",
     )
 
 
-@pytest.mark.parametrize("label,line", list(_DISPATCH_LINES.items()), ids=list(_DISPATCH_LINES))
-def test_build_dispatch_block_itself_names_each_value(label, line):
-    block = _build_dispatch_block()
-    assert line in block, (
-        f"the build-phase's own six-value dispatch block is missing the {label} line "
-        f"({line!r}) — pinning this within the block (not just anywhere in the file) "
-        "is what stops a deletion of this line from being masked by the plan phase's "
-        "identical-looking dispatch lines elsewhere in the document"
+def test_build_phase_reads_the_shared_procedure_and_follows_it_inline():
+    _pin(
+        "Read `../_shared/execute.md` now, in full, and follow it inline in this session",
+        "The build phase must defer to the shared execute procedure by reading it, the "
+        "same way the selection phase defers to ../slice/SKILL.md.",
+    )
+
+
+def test_build_phase_cites_the_slice_ritual_deferral_as_precedent():
+    section = _build_phase_section()
+    assert "../slice/SKILL.md" in section, (
+        "the build phase must cite the selection phase's own read-it-don't-invoke-it "
+        "deferral as the precedent it follows — without the citation the inline read "
+        "reads as an ad-hoc choice rather than this ritual's established shape"
+    )
+
+
+def test_build_phase_never_restates_the_shared_procedure():
+    _pin(
+        "This skill never restates that procedure",
+        "A second copy of the execute procedure inside the driver is exactly how the "
+        "two would drift apart.",
+    )
+
+
+# --- running inline is what selects attended mode, and that is deliberate ---------------
+
+
+def test_inline_run_selects_attended_mode():
+    _pin(
+        "Running it inline in this session selects the shared procedure's **attended** mode",
+        "The driver must state that an inline run is attended — that is the mode "
+        "selection, and it is the reason the phase runs inline at all.",
+    )
+
+
+def test_attended_mode_is_named_as_deliberate_not_incidental():
+    _pin(
+        "a human is present in this session, so every escalation point asks them",
+        "Attended mode must be justified by the human actually being present, not "
+        "left as an accident of how the procedure was invoked.",
     )
 
 
 def test_build_phase_states_it_never_invokes_craft_execute():
     _pin(
-        "never invokes `/craft:execute`, which is attended-only by design and offers "
-        "no flag into any other mode",
+        "never invokes `/craft:execute`",
         "The build phase must state explicitly that it never invokes `/craft:execute` "
-        "— matching the spec's own acceptance criterion — since dispatching "
-        "`craft:driver-worker` on the shared execute procedure's unattended mode is "
-        "not the same skill running in-session.",
+        "— skill-to-skill chaining is unreliable by `/craft:plan`'s own rule, which is "
+        "why the procedure is read rather than the skill invoked.",
     )
 
 
-def test_build_dispatch_passes_nothing_else_about_the_slice():
-    _pin(
-        "Pass it exactly six values and nothing else about the slice",
-        "The build-phase dispatch must carry exactly the six named values and nothing else "
-        "about the slice.",
+def test_shared_procedure_attended_row_still_exists_to_be_selected():
+    text = SHARED_EXECUTE.read_text()
+    assert "**attended**" in text, (
+        "the shared execute procedure must still declare an attended mode — the "
+        "driver's inline run selects it, so its removal would silently strand the "
+        "build phase in a mode it never asked for"
     )
 
 
-# --- the dispatch is backgrounded from the top level, never nested ----------------------
+# --- the checkpoint still brackets the phase -------------------------------------------
 
 
-def test_build_dispatch_runs_in_the_background_from_the_top_level():
+def test_checkpoint_written_before_and_after_the_build_phase():
     _pin(
-        "Dispatch it **in the background**, from this top-level session",
-        "The driver's own dispatch of craft:driver-worker must run in the background, "
-        "since it is a top-level dispatch, not a nested one.",
-    )
-
-
-# --- the dispatch carries a liveness deadline bounding the worker's own run -------------
-
-
-def test_dispatch_carries_a_liveness_deadline():
-    _pin(
-        "The dispatch carries a liveness deadline.",
-        "The build-phase dispatch must carry a liveness deadline rather than waiting "
-        "indefinitely.",
-    )
-
-
-def test_deadline_bounds_the_workers_own_run_not_the_portage_tail():
-    _pin(
-        "It bounds the worker's own run, which ends at the shared procedure's close",
-        "The liveness deadline must be stated to bound the worker's own run — ending at "
-        "the shared procedure's close, not the portage tail.",
-    )
-
-
-def test_deadline_excludes_the_portage_tail():
-    _pin(
-        "it does not cover the portage tail, which is external to this dispatch",
-        "The deadline must be stated to exclude the portage tail explicitly.",
-    )
-
-
-# --- expiry and a missing/empty outcome file both escalate under worker-stalled ---------
-
-
-def test_deadline_expiry_escalates_under_worker_stalled_with_no_retry():
-    _pin(
-        "treat the worker as crashed, and escalate under the `worker-stalled` trigger with "
-        "no retry",
-        "A liveness-deadline expiry must escalate under the worker-stalled trigger, with "
-        "no retry.",
-    )
-
-
-def test_missing_or_empty_outcome_file_is_read_as_a_crash():
-    _pin(
-        "A missing or empty outcome file is read as a **crash**, not as still-running",
-        "A missing or empty outcome file must be read as a crash, not as still running.",
-    )
-
-
-def test_missing_file_shares_the_worker_stalled_trigger_with_deadline_expiry():
-    _pin(
-        "escalates under the same `worker-stalled` trigger a deadline expiry does",
-        "A missing/empty outcome file must escalate under the same trigger a deadline "
-        "expiry does — the two are the same failure observed by different clocks.",
-    )
-
-
-# --- the driver reads the result from the outcome file, never the agent's reply --------
-
-
-def test_build_result_read_from_outcome_file_never_the_reply():
-    _pin(
-        "matching the plan phase's own worker-channel rule at step 7",
-        "The build phase must read its result from the outcome file, matching the plan "
-        "phase's own rule against reading a subagent's reply.",
-    )
-
-
-# --- any non-success token escalates with no retry --------------------------------------
-
-
-def test_any_non_success_token_escalates_with_no_retry():
-    _pin(
-        "Anything else — `BLOCKED`, `NEEDS_CONTEXT`, any other token, a missing or empty "
-        "outcome file, or a deadline expiry — escalates under the `worker-stalled` trigger",
-        "Any non-success token, or a missing/empty file, or a deadline expiry must "
-        "escalate under worker-stalled with no retry.",
-    )
-
-
-# --- the phase checkpoint is written both before and after the dispatch ----------------
-
-
-def test_checkpoint_written_before_and_after_the_dispatch():
-    _pin(
-        "The checkpoint at this boundary is written before and after the dispatch",
-        "The phase checkpoint must be written both before and after the build dispatch, "
-        "so a crash inside the build phase is distinguishable from a crash before it.",
+        "The checkpoint at this boundary is written before and after the build phase",
+        "A crash inside the build phase must stay distinguishable from a crash before "
+        "it, which is what the bracketing checkpoints record.",
     )
 
 
 def test_before_checkpoint_is_the_plan_phase_block():
     _pin(
-        "the `## Driver run` block recording `**Phase:** plan` already written at step 8 "
-        "is the before-dispatch record",
-        "The before-dispatch checkpoint must be identified as the plan-phase block "
-        "already written at step 8.",
+        "recording `**Phase:** plan` already written at step 8 is the before-checkpoint",
+        "The plan-phase checkpoint is what marks the build phase as entered.",
     )
 
 
 def test_after_checkpoint_records_phase_build():
     _pin(
-        "writing the block recording `**Phase:** build` here is the after-dispatch record",
-        "The after-dispatch checkpoint must be identified as the build-phase block "
-        "written once the dispatch returns DONE.",
+        "writing the block recording `**Phase:** build` here is the after-checkpoint",
+        "Completing the build phase must record `**Phase:** build` so a resume knows "
+        "the PR tail is next.",
     )
-
-
-# --- the 4.5 resume table points the build boundary at the real dispatch, not a stub ---
 
 
 def test_resume_table_build_entry_points_at_step_nine():
-    _pin(
-        "once `craft:driver-worker`'s dispatch (step 9 below) returns `DONE`, write the "
-        "block recording `**Phase:** build`",
-        "The 4.5 resume table's build-boundary entry must point at the real build-phase "
-        "step rather than the old 'a later task' placeholder.",
+    text = DRIVE_SKILL.read_text()
+    assert re.search(r"once the build phase \(step 9 below\) completes", text), (
+        "the checkpoint table's build row must point at the step that actually runs "
+        "the build, or a resume walks to a step number that no longer exists"
     )
 
 
-# --- the trigger vocabulary's worker-stalled entry names the real condition ------------
+# --- a build that cannot complete escalates under a typed trigger ----------------------
 
 
-def test_worker_stalled_vocabulary_entry_names_the_real_condition():
+def test_build_failure_escalates_under_build_failed():
     _pin(
-        "the build dispatch (step 9 above) passes its liveness deadline with no progress "
-        "signal, or its outcome file comes back missing, empty, or naming anything other "
-        "than `DONE`",
-        "The worker-stalled vocabulary entry must name both triggering conditions — "
-        "deadline expiry and a missing/empty/non-DONE outcome file.",
+        "escalate under the `build-failed` trigger",
+        "A build phase that cannot complete must write a typed escalation record like "
+        "every other stop in this ritual, rather than halting on an in-session report.",
+    )
+
+
+def test_build_failed_trigger_declared_in_vocabulary():
+    _pin(
+        "- **`build-failed`** — the build phase (step 9 above) cannot complete the slice",
+        "Every trigger a phase raises must be declared in the closed vocabulary; an "
+        "undeclared trigger is free text by another name.",
+    )
+
+
+def test_build_failure_carries_no_retry():
+    section = _build_phase_section()
+    assert "no retry" in section, (
+        "the build phase's escalation must state no-retry explicitly, matching every "
+        "other escalation site in this ritual"
     )

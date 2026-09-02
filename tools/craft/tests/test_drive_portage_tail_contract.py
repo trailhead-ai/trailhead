@@ -52,9 +52,9 @@ def test_pr_tail_dispatched_from_the_driver_session_itself():
     )
 
 
-def test_pr_tail_never_nested_inside_driver_worker():
+def test_pr_tail_never_nested_inside_a_subagent():
     _pin(
-        "never nested inside `craft:driver-worker` or any other subagent, which would "
+        "never nested inside any subagent, which would "
         "lose the notification channel",
         "The PR tail dispatch must state it is never nested inside another subagent, "
         "since that would lose the notification channel.",
@@ -68,11 +68,11 @@ def test_monitor_dispatched_in_the_background_from_the_top_level():
     )
 
 
-def test_monitor_dispatch_never_nested_inside_driver_worker():
+def test_monitor_dispatch_never_nested_inside_a_subagent():
     _pin(
-        "never nested inside `craft:driver-worker`, matching the build phase's own "
-        "top-level-only dispatch rule at step 9",
-        "The monitor dispatch must explicitly rule out nesting inside craft:driver-worker.",
+        "never nested inside any subagent, matching this ritual's "
+        "top-level-only dispatch rule",
+        "The monitor dispatch must explicitly rule out nesting inside a subagent.",
     )
 
 

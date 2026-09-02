@@ -131,10 +131,10 @@ def test_no_block_case_is_named_explicitly():
 
 def test_dirty_branch_never_silently_redispatches_build():
     _pin(
-        "the driver never re-dispatches the build phase onto it on the assumption "
+        "the driver never re-enters the build phase onto it on the assumption "
         "it is starting clean",
         "Finding commits already on the branch at resume must not silently "
-        "re-dispatch the build phase.",
+        "re-enter the build phase.",
     )
 
 
