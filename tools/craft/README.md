@@ -88,6 +88,16 @@ linked to the spec, for `/craft:plan` to decompose.
 
 **Execute:** `/craft:execute`
 
+**Drive:** `/craft:drive` — the loop's single entry point against a `ready` spec:
+read it inline into `/craft:slice`'s procedure rather than invoking it, report
+its three outcomes (a chosen slice, spec complete, or an early stop), and
+refuse a slice spanning more than one camp-group repo rather than guessing
+which one it belongs to. Then plans the chosen slice and builds it by running
+craft's own plan and execute procedures inline — attended, since the operator is
+present — hands the branch to portage, closes the slice, and stops
+at the slice boundary — escalating anything it does not own rather than
+resolving it.
+
 **Refine:** `/craft:refine` — promote a standalone (childless, parentless) task
 from `open` to `ready`: draft its Delivers / Test contract / Files payload from
 the code and the vault, cite every derived answer, and escalate only an
