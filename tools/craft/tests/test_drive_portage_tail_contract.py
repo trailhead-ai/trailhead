@@ -253,6 +253,58 @@ def test_every_other_stopped_reason_escalates():
     )
 
 
+# --- the auto_merge-disabled match is resilient (prefix), never whole-string equality ---
+# --- against portage's free-text STOPPED <reason> grammar ------------------------------
+
+
+def test_auto_merge_disabled_matched_by_prefix_not_whole_string_equality():
+    _pin(
+        "Match by prefix against the reason text, never by whole-line equality "
+        "against the literal `STOPPED auto_merge disabled`",
+        "The stacked-slice success case must be matched resiliently — a "
+        "prefix/substring rule against the reason text — never by exact "
+        "whole-string equality, since portage documents `auto_merge "
+        "disabled` as an example reason inside its free-text `STOPPED "
+        "<reason>` grammar, not a fixed literal.",
+    )
+
+
+def test_states_why_exact_equality_is_wrong_here():
+    _pin(
+        "portage documents `auto_merge disabled` as an example reason, not a "
+        "fixed literal, and a whole-string match would silently misclassify a "
+        "future rewording of that reason as an escalation",
+        "The ritual must state explicitly why exact whole-string equality is "
+        "the wrong match rule here — a rewording of portage's reason text "
+        "must not silently turn every stacked-slice success into an "
+        "escalation.",
+    )
+
+
+# --- a malformed outcome line (none of the four tokens, or a bare READY) is mapped -----
+# --- to an escalation, so the map's exhaustiveness claim is actually true --------------
+
+
+def test_malformed_outcome_line_escalates():
+    _pin(
+        "A line naming none of `MERGED` / `READY <reason>` / `STOPPED <reason>` / "
+        "`BLOCKED <reason>`, or a `READY` with no argument — escalates under the "
+        "`portage-tail-malformed` trigger",
+        "A malformed outcome line — naming none of the four tokens, or a bare "
+        "`READY` with no argument, both of which portage's own parser refuses "
+        "— must be mapped to an escalation, not fall through the exhaustive "
+        "token map unhandled.",
+    )
+
+
+def test_portage_tail_malformed_trigger_declared_in_vocabulary():
+    _pin(
+        "**`portage-tail-malformed`**",
+        "The `portage-tail-malformed` trigger must be declared in the closed "
+        "trigger vocabulary.",
+    )
+
+
 # --- the trigger vocabulary carries the three new PR-tail triggers ----------------------
 
 

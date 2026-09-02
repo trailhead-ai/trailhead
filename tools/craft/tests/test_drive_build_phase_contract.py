@@ -19,6 +19,7 @@ loudly as a wrap issue rather than reading as "phrase missing".
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -166,11 +167,34 @@ _DISPATCH_LINES = {
 }
 
 
+def _build_dispatch_block() -> str:
+    """The six-value build-phase dispatch's own fenced block — scoped so a pin against
+    it cannot be vacuously satisfied by the plan phase's identical-looking dispatch
+    lines (e.g. `Outcome file: <outcome-file-path>` appears in both blocks)."""
+    text = DRIVE_SKILL.read_text()
+    match = re.search(
+        r"```text\nRecord id: <slice-parent-task-id>\n.*?\n```", text, re.DOTALL
+    )
+    assert match, "expected the build-phase's six-value fenced dispatch block"
+    return match.group(0)
+
+
 @pytest.mark.parametrize("label,line", list(_DISPATCH_LINES.items()), ids=list(_DISPATCH_LINES))
 def test_build_dispatch_names_each_value(label, line):
     _pin(
         line,
         f"The build-phase dispatch prompt must name the {label} value on its own line.",
+    )
+
+
+@pytest.mark.parametrize("label,line", list(_DISPATCH_LINES.items()), ids=list(_DISPATCH_LINES))
+def test_build_dispatch_block_itself_names_each_value(label, line):
+    block = _build_dispatch_block()
+    assert line in block, (
+        f"the build-phase's own six-value dispatch block is missing the {label} line "
+        f"({line!r}) — pinning this within the block (not just anywhere in the file) "
+        "is what stops a deletion of this line from being masked by the plan phase's "
+        "identical-looking dispatch lines elsewhere in the document"
     )
 
 

@@ -112,12 +112,20 @@ def test_non_ready_guard_writes_nothing():
 #: `lore search` carries no `--vault` flag at all — it queries every configured vault
 #: (`_shared/execute.md`'s own documented rule) — and `lore vault resolve` is the call
 #: that determines the elected vault in the first place, so neither belongs here.
-_VAULT_CAPABLE_LORE_CALLS = ("lore record show",)
+#: `lore record update` and `lore record create` are the other two vault-capable call
+#: shapes the ritual actually makes (checkpoint/council-review appends and the
+#: escalation-record write); a pin covering only `lore record show` never notices
+#: either dropping `--vault`.
+_VAULT_CAPABLE_LORE_CALLS = ("lore record show", "lore record update", "lore record create")
 
 
 @pytest.mark.parametrize("command", _VAULT_CAPABLE_LORE_CALLS)
 def test_every_vault_capable_lore_call_carries_vault(command):
-    text = _text()
+    # `lore record create`'s call is a multi-line shell invocation using `\`-continued
+    # lines (see the escalation-record fenced block) — join those before extracting
+    # calls, the same normalization `test_drive_escalation_contract.py` applies to the
+    # same command.
+    text = _text().replace("\\\n", " ")
     calls = re.findall(rf"{command} [^`\n]*", text)
     assert calls, f"expected at least one literal `{command} ...` call in drive/SKILL.md"
     missing = [c for c in calls if "--vault" not in c]
@@ -236,9 +244,10 @@ def test_detection_signal_is_the_camp_group_member_count():
 
 def test_reads_manifest_json_at_the_workspace_root():
     _pin(
-        "Read `manifest.json` at the camp workspace root",
+        "Read `manifest.json` at that derived root",
         "The manifest read must be named explicitly as the mechanism, "
-        "matching the precedent `_shared/execute.md` already establishes.",
+        "matching the precedent `_shared/execute.md` already establishes, "
+        "against the now-explicitly-derived camp workspace root.",
     )
 
 
@@ -246,6 +255,40 @@ def test_single_member_proceeds():
     _pin(
         "**One member:** this is the single-repo path this slice ships.",
         "A single-member group must proceed rather than escalate.",
+    )
+
+
+# --- contract item 6a: the camp workspace root is derived explicitly, and an absent -----
+# --- manifest.json is a named stop, not an undefined state -----------------------------
+
+
+def test_camp_workspace_root_is_derived_explicitly():
+    _pin(
+        "**Derive the camp workspace root as the parent directory of the repo "
+        "checkout the driver session is running in**",
+        "The ritual must state explicitly how the camp workspace root is "
+        "derived, not merely assume `manifest.json` is reachable from an "
+        "unstated location.",
+    )
+
+
+def test_absent_manifest_is_a_named_stop_not_vanilla_fallback():
+    _pin(
+        "this is not a vanilla-usage fallback the way `_shared/execute.md`'s "
+        "own push mechanics support",
+        "An absent or unreadable manifest.json must be named as a real stop, "
+        "not silently treated as vanilla single-repo usage — the PR tail's "
+        "own camp-group dependencies mean the driver cannot complete a run "
+        "with no camp workspace at all.",
+    )
+
+
+def test_absent_manifest_escalates_under_named_trigger():
+    _pin(
+        "Escalate under the `no-camp-workspace` trigger",
+        "An absent or unreadable manifest.json must escalate under a named "
+        "trigger from the closed vocabulary, not fall through as an "
+        "unhandled state.",
     )
 
 

@@ -78,7 +78,7 @@ The driver holds no state of its own: every checkpoint is a `## Driver run` bloc
 
 Query for a slice parent already open on this spec, using the same detection `../slice/SKILL.md`'s own guard applies at its step 5: `lore search "kind:task related-spec:<spec-name> has:label.craft.slice-parent -status:done -status:dropped -status:superseded" --vault <elected-vault>`. Check the parent's body for the `## Driver run` block before doing anything else in this run.
 
-**No block present.** Resume gated from the start of the run: run this procedure from step 1 exactly as a fresh invocation, rather than assuming any other mode. No slice parent is linked to the spec yet — nothing here has ever been driven before. Defer to the slice ritual below to choose and materialize one.
+**No block present.** Resume gated from the start of the run: no slice parent is linked to the spec yet — nothing here has ever been driven before — so this pass already behaves exactly as a fresh invocation would, with no distinct resume mode to enter. Defer to the slice ritual below to choose and materialize one.
 
 **An open parent exists with no checkpoint yet.** The query above found a slice parent whose body carries no `## Driver run` block — it has never had any phase confirmed complete. Skip the slice ritual below entirely; re-running it would only hit its own step 5 refusal against this same parent. Proceed straight to step 5's single-repo check against this parent, as though selection had just completed in this same run.
 
@@ -129,10 +129,11 @@ Once step 4 above has a slice parent in hand — chosen fresh by the slice ritua
 already open for resume — check the camp group's shape before handing off to plan. The
 detection signal is the
 **camp group's member count**, read from the group manifest — not repo attribution on task
-records, which does not exist yet. Read `manifest.json` at the camp workspace root (the same
+records, which does not exist yet. **Derive the camp workspace root as the parent directory of the repo checkout the driver session is running in** — the unified workspace layout puts every member worktree, `manifest.json`, and the workspace's own `CLAUDE.md` there as siblings, one level up from the repo the driver reads and writes in. Read `manifest.json` at that derived root (the same
 file `camp status` reports from, and the same file `_shared/execute.md` already reads to
 enumerate member repos) and count its `members` array.
 
+- **`manifest.json` absent or unreadable at the derived root:** this is not a vanilla-usage fallback the way `_shared/execute.md`'s own push mechanics support — the PR tail below (step 10) dispatches portage's `updater` and `monitor` against the same camp group's config (`group_toml_path`, `manifest_path`, the camp group name), so a driver run with no camp workspace at all cannot complete regardless of how step 5 itself is answered. Escalate under the `no-camp-workspace` trigger, following the escalation contract below, and halt the driver.
 - **One member:** this is the single-repo path this slice ships. Proceed to the later phases.
 - **More than one member:** refuse rather than inferring which repo the slice belongs to — a wrong guess would build the slice on the wrong branch. Escalate with the `multi-repo-slice` trigger, following the escalation contract below, report the escalation in-session naming the chosen slice parent, and halt the driver. This phase detects the condition and names the trigger it escalates under; the full escalation record write — the `blocked` child task, the credential scrub, the draft-PR push — is defined once in that contract, not restated here.
 
@@ -153,6 +154,8 @@ enumerate member repos) and count its `members` array.
 
 Once step 6 reports a chosen slice, dispatch `craft:planner` against that slice parent on the slice-rooted path — `skills/plan/SKILL.md`'s Entry Point section is what discriminates the two paths; the parent already exists, so this dispatch updates it in place and creates no second parent. Pass it nothing else about the slice: the parent record itself already carries the value claim and, where the slice enumerates states, the `## Enumerated states` section, and a driver-supplied second copy of that context is exactly the kind of restated contract this ritual avoids everywhere else.
 
+**The dispatch carries a liveness deadline.** It bounds `craft:planner`'s own run the same way the build phase's own deadline bounds `craft:driver-worker`'s (step 9 below) — nothing here reads a task body or answers a question meant for a human, so a stuck dispatch must be observable rather than hanging silently. Wait on the outcome file with a bounded until-loop rather than blocking indefinitely on the dispatch; once the deadline passes with no outcome file written, stop waiting, treat the planner as crashed, and escalate under the `planner-stalled` trigger with no retry, following the escalation contract below.
+
 `craft:planner` declares no outcome-file mechanism of its own, so there is no default grammar to override — pin the whole instruction in the dispatch prompt, the way `ranger:execute` pins its own outcome grammar to the agent it dispatches (`tools/ranger/plugins/ranger/agents/execute.md`):
 
 ```text
@@ -160,7 +163,7 @@ Task: <slice-parent-task-id>
 Outcome file: <outcome-file-path>
 Vault: <elected-vault>
 
-Run the Planning Phase of your procedure against this slice parent, on its slice-rooted path. When you are done, write exactly one line to the outcome file above and nothing else. This outcome grammar supersedes any default your own procedure names:
+Run the Planning Phase of your procedure against this slice parent, on its slice-rooted path. This dispatch runs unattended: override your own procedure's Clarify step (Planning Phase step 2) — ask no clarifying question of a human — and override your own procedure's Present for Approval step (Planning Phase step 9) — wait for no approval. Where either step would normally stop for a human, record what you would have asked or presented as a note on the parent record instead, and proceed on your own best judgment. When you are done, write exactly one line to the outcome file above and nothing else. This outcome grammar supersedes any default your own procedure names:
 
 - `PLANNED <slice-parent-task-id>` — the plan is written onto the parent record.
 - `BLOCKED <reason>` — you could not proceed; `<reason>` in a few words.
@@ -169,13 +172,21 @@ Run the Planning Phase of your procedure against this slice parent, on its slice
 Do not write a summary, a file list, or anything else to the outcome file — one line, nothing else. Your reply is never read as the result of this run.
 ```
 
-Read the plan result from the outcome file above, never from the agent's reply — a subagent's reply is not a usable result channel, the same rule the build phase's own worker channel already follows. A `BLOCKED` or `NEEDS_CONTEXT` line escalates under the `agent-blocked` trigger, following the escalation contract below — `craft:planner` failed to produce a usable result, and this stop writes the same record every other escalation site writes rather than halting on an in-session report alone. A `PLANNED <slice-parent-task-id>` line advances into the council review below.
+Read the plan result from the outcome file above, never from the agent's reply — a subagent's reply is not a usable result channel, the same rule the build phase's own worker channel already follows. A `BLOCKED` or `NEEDS_CONTEXT` line escalates under the `agent-blocked` trigger, following the escalation contract below — `craft:planner` failed to produce a usable result, and this stop writes the same record every other escalation site writes rather than halting on an in-session report alone. A missing or empty outcome file is read as a **crash**, not as still running, and escalates under the `planner-stalled` trigger — the same failure the deadline expiry above does, observed by different clocks. A `PLANNED <slice-parent-task-id>` line advances into the council review below.
 
 ### 8. Run the council review
 
-The plan `craft:planner` just wrote has not passed the mandatory council gate: that gate belongs to the `/craft:plan` skill, not to the `craft:planner` agent, whose own step 8.5 is a design-doc step and whose tool grant carries no `Agent` tool at all. The driver runs the council itself, in this session, against the plan now written on the slice parent.
+The plan `craft:planner` just wrote has not passed the mandatory council gate: that gate belongs to the `/craft:plan` skill, not to the `craft:planner` agent, whose own step 6.5 is a design-doc step and whose tool grant carries no `Agent` tool at all. The driver runs the council itself, in this session, against the plan now written on the slice parent.
 
-Dispatch the four council lenses — `builder`, `breaker`, `attacker`, `advocate` — per `_shared/council.md`'s dispatch contract. Read it; do not restate its roster, prompt template, or bars here — a second copy is exactly how the two documents would drift apart. Make all four `Agent` calls in a single message so they run concurrently. Fill the context-pointer line with the slice parent's resolved path (`lore record show <slice-parent-task-id> --vault <elected-vault> --json` carries it), `<lens-critical-bars>` with the plan-altitude "Per-lens Critical bars" block `_shared/council.md` defines, matching planning's own Council Review step, and `<cross-cutting>` with the empty string.
+Dispatch the four council lenses — `builder`, `breaker`, `attacker`, `advocate` — per `_shared/council.md`'s dispatch contract. Read it; do not restate its roster, prompt template, or bars here — a second copy is exactly how the two documents would drift apart. Make all four `Agent` calls in a single message so they run concurrently. Fill the context-pointer line with `Plan: <slice-parent-task-id>` and `Spec: <spec-path>` — the slice parent's resolved path (`lore record show <slice-parent-task-id> --vault <elected-vault> --json` carries it) and the linked spec's resolved path (`lore record show spec/<spec-name> --vault <elected-vault> --json` carries it), matching the `Plan:`/`Spec:` pair `plan/SKILL.md`'s own step 8.5 passes each lens so it can read the spec it is told to review against. Fill `<lens-critical-bars>` with the plan-altitude "Per-lens Critical bars" block `_shared/council.md` defines, matching planning's own Council Review step, and `<cross-cutting>` with `plan/SKILL.md`'s own plan-altitude cross-cutting Critical block (`plan/SKILL.md`, step 8.5) — never the empty string, which is `consult`'s substitution, not planning's: the dropped "plan's tasks, summed, don't satisfy spec's acceptance criteria" Critical is the single check a driver-run council most needs.
+
+```text
+
+Cross-cutting Critical you may also raise (any lens):
+- Spec drift: plan's tasks, summed, don't satisfy spec's acceptance criteria
+- Hidden scope expansion: plan touches a subsystem the spec didn't claim
+- Reversibility unnamed: plan deploys something hard to roll back without naming rollback path
+```
 
 The driver is the synthesizer, in session, never a subagent — de-duplicating by issue, weighting cross-pass convergence, and auto-downgrading speculative Criticals, per `_shared/council.md`'s synthesis rules.
 
@@ -231,9 +242,10 @@ Then dispatch `monitor` **in the background, from this top-level session** — n
 
 - `MERGED` — closes the slice; the token takes no argument.
 - `READY <reason>` — closes the slice.
-- `STOPPED auto_merge disabled` — closes the slice; the stacked-slice success path, not a failure.
+- `STOPPED auto_merge disabled` — closes the slice; the stacked-slice success path, not a failure. Match by prefix against the reason text, never by whole-line equality against the literal `STOPPED auto_merge disabled` — portage documents `auto_merge disabled` as an example reason, not a fixed literal, and a whole-string match would silently misclassify a future rewording of that reason as an escalation.
 - Every other `STOPPED <reason>` — escalates under the `portage-stopped` trigger, following the escalation contract below, with no retry.
 - `BLOCKED <reason>` — escalates under the `portage-blocked` trigger, following the escalation contract below, with no retry.
+- A line naming none of `MERGED` / `READY <reason>` / `STOPPED <reason>` / `BLOCKED <reason>`, or a `READY` with no argument — escalates under the `portage-tail-malformed` trigger, following the escalation contract below, with no retry — both are shapes portage's own outcome-line parser already refuses to emit, so a driver-side handling exists for a peer's parsing bug, not for a shape portage means to produce.
 - An empty or missing outcome file — escalates under the `portage-tail-stalled` trigger, following the escalation contract below, with no retry.
 
 For every branch above that closes the slice, this phase names that outcome and defers the close mechanics to slice close — step 11 below. Once the mapping resolves, write the `## Driver run` checkpoint block recording `**Phase:** pr-tail` before the slice-close mechanics run, so a crash in the tail does not resume as a crash before the build.
@@ -265,16 +277,25 @@ contract, defined here once so no escalation site restates it.
 **No retries: the first escalation from any phase ends the run.** On escalation the driver does
 not retry the phase, does not try a different approach, and does not continue into a later
 phase — it writes the escalation record, pushes work in flight, reports in-session, and stops.
-**No stop path in this ritual halts without writing this record.** A stop that leaves no typed
-record behind is a defect regardless of which phase produced it — every dispatch-failure stop
-above names a trigger from this vocabulary and follows the contract below, and the same is true
-of any dispatch-failure stop a later phase adds.
+**Every dispatch-failure and escalation stop in this ritual writes this record.** A stop that
+leaves no typed record behind is a defect regardless of which phase produced it — every
+dispatch-failure stop above names a trigger from this vocabulary and follows the contract below,
+and the same is true of any dispatch-failure stop a later phase adds. This rule carries two named
+exceptions, neither a dispatch failure or an escalation, and both stated as writing nothing at the
+site that defines them: the read-only refusal at step 3 (a spec whose status is not `ready` —
+refusing is read-only by its own explicit contract) and the clean terminal halts at step 6 (spec
+complete, early stop — `../slice/SKILL.md`'s own termination outcomes, reported verbatim rather
+than escalated). Naming them here keeps the rule non-vacuous: a future stop path is either one of
+these two named exceptions, or it writes the record — there is no unnamed third case.
 
 ### The trigger vocabulary
 
 The trigger is typed from a **declared, closed vocabulary** — the escalation record names one
 of these, never free text:
 
+- **`no-camp-workspace`** — `manifest.json` is absent or unreadable at the derived camp
+  workspace root (step 5 above); the PR tail's own camp-group dependencies mean the driver
+  cannot complete a run without one.
 - **`multi-repo-slice`** — the chosen slice spans more than one camp-group member (step 5 above).
 - **`build-resume-dirty-branch`** — a resume finds commits already on the branch it was about to
   dispatch the build phase onto (step 4.5 above).
@@ -282,9 +303,12 @@ of these, never free text:
   operator has not dispositioned.
 - **`agent-blocked`** — a dispatched agent returns `BLOCKED` or `NEEDS_CONTEXT` instead of a
   usable result (the plan phase's `craft:planner` dispatch at step 7 above).
+- **`planner-stalled`** — the plan phase's `craft:planner` dispatch (step 7 above) passes its
+  liveness deadline with no progress signal, or its outcome file comes back missing or empty.
 - **`worker-stalled`** — the build dispatch (step 9 above) passes its liveness deadline with no progress signal, or its outcome file comes back missing, empty, or naming anything other than `DONE`.
 - **`portage-blocked`** — the PR tail's `monitor` outcome (step 10 above) comes back `BLOCKED <reason>`.
 - **`portage-stopped`** — the PR tail's `monitor` outcome (step 10 above) comes back `STOPPED <reason>` for any reason other than `auto_merge disabled`.
+- **`portage-tail-malformed`** — the PR tail's `monitor` outcome (step 10 above) names none of the four tokens, or a `READY` with no argument.
 - **`portage-tail-stalled`** — the PR tail's `monitor` outcome file (step 10 above) comes back missing or empty.
 
 Add a member to this list only when a phase genuinely needs one — it is not a place to name a
@@ -319,8 +343,8 @@ one — exactly like the `## Driver run` checkpoint block above
 ### Pushing work in flight
 
 Before the driver stops, push whatever is on the branch as a **draft PR**, so nothing is
-stranded on one machine and the escalation is actionable from a phone. This push routes through `_shared/execute.md`'s existing pre-push secret scan ([Phase 6](../_shared/execute.md#phase-6-close-and-completion-report)) rather than a bespoke driver-side `git push` that would bypass it. If the branch carries no commits, there is nothing to push and
-this step is a no-op.
+stranded on one machine and the escalation is actionable from a phone. This push routes through `_shared/execute.md`'s existing pre-push secret scan ([Phase 6](../_shared/execute.md#phase-6-close-and-completion-report)) rather than a bespoke driver-side `git push` that would bypass it. **Phase 6's push alone opens no PR** — its close phase pushes a branch and stops there, so once that push lands, open a draft PR with `gh pr create --draft`, naming the escalation record in its body, so the escalation is something the operator can review and comment on from a phone, not merely a branch sitting on the remote. If the branch carries no commits, there is nothing to push and
+this step is a no-op — and no PR is opened either, since a draft PR against no commits has nothing to review.
 
 ### What the driver never does
 

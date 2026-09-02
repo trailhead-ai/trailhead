@@ -25,6 +25,7 @@ import pytest
 CRAFT = Path(__file__).parent.parent / "plugins" / "craft"
 DRIVE_SKILL = CRAFT / "skills" / "drive" / "SKILL.md"
 COUNCIL_SHARED = CRAFT / "skills" / "_shared" / "council.md"
+PLANNER_AGENT = CRAFT / "agents" / "planner.md"
 
 
 def _text() -> str:
@@ -139,6 +140,59 @@ def test_planned_line_advances_into_council_review():
     )
 
 
+# --- contract item 2a: the planner dispatch carries a liveness deadline, mirroring the ---
+# --- build phase's own, and a crashed (missing/empty outcome file) planner is mapped -----
+
+
+def test_planner_dispatch_carries_a_liveness_deadline():
+    _pin(
+        "It bounds `craft:planner`'s own run the same way the build phase's own "
+        "deadline bounds `craft:driver-worker`'s",
+        "The planner dispatch must carry a liveness deadline rather than "
+        "waiting on it indefinitely, matching the build phase's own dispatch.",
+    )
+
+
+def test_missing_or_empty_planner_outcome_file_escalates():
+    _pin(
+        "A missing or empty outcome file is read as a **crash**, not as "
+        "still running, and escalates under the `planner-stalled` trigger",
+        "A crashed planner — a missing or empty outcome file — must be "
+        "mapped to an escalation, not left as an unmapped state with no "
+        "typed record, the same hole the build phase's own worker-stalled "
+        "mapping already closes.",
+    )
+
+
+def test_planner_stalled_trigger_declared_in_vocabulary():
+    _pin(
+        "**`planner-stalled`**",
+        "The `planner-stalled` trigger raised by a crashed planner dispatch "
+        "must be declared in the closed trigger vocabulary.",
+    )
+
+
+# --- contract item 2b: the dispatch overrides planner's clarify and wait-for-approval ----
+# --- steps for the unattended dispatch — otherwise it hangs or invents answers -----------
+
+
+def test_dispatch_overrides_planners_clarify_step():
+    _pin(
+        "override your own procedure's Clarify step",
+        "The unattended planner dispatch must explicitly override planner's "
+        "own Clarify step, since there is no human here to answer a question.",
+    )
+
+
+def test_dispatch_overrides_planners_approval_step():
+    _pin(
+        "Present for Approval step",
+        "The unattended planner dispatch must explicitly override planner's "
+        "own Present for Approval step, since the driver — never a task "
+        "body — is what ships the plan onward.",
+    )
+
+
 # --- contract item 4: the driver dispatches all four council lenses itself ----------------
 
 
@@ -169,6 +223,60 @@ def test_council_dispatch_never_restates_the_shared_contract():
     )
 
 
+# --- contract item 4a: the context-pointer line carries a Spec: pointer, matching -----
+# --- what plan/SKILL.md's own step 8.5 passes each lens ------------------------------
+
+
+def test_context_pointer_names_a_spec_line():
+    _pin(
+        "Fill the context-pointer line with `Plan: <slice-parent-task-id>` and "
+        "`Spec: <spec-path>`",
+        "The council dispatch's context-pointer line must carry a `Spec:` "
+        "pointer alongside the `Plan:` one, matching what plan/SKILL.md's own "
+        "step 8.5 passes each lens — a lens told to read the spec with no "
+        "pointer to it cannot.",
+    )
+
+
+# --- contract item 4b: <cross-cutting> carries plan-altitude's block, never the empty ---
+# --- string, which is consult's substitution -------------------------------------------
+
+
+def test_cross_cutting_is_not_the_empty_string():
+    _pin(
+        "never the empty string, which is `consult`'s substitution, not planning's",
+        "The plan phase must state explicitly that substituting the empty "
+        "string for <cross-cutting> is consult's substitution, not planning's "
+        "— a driver-run council needs the plan-altitude block instead.",
+    )
+
+
+def test_cross_cutting_names_the_spec_drift_critical():
+    _pin(
+        "Spec drift: plan's tasks, summed, don't satisfy spec's acceptance criteria",
+        "The plan-altitude cross-cutting block's spec-drift Critical — the "
+        "single check a driver-run council most needs — must be supplied "
+        "verbatim, matching plan/SKILL.md's own step 8.5 block.",
+    )
+
+
+def test_cross_cutting_names_the_hidden_scope_critical():
+    _pin(
+        "Hidden scope expansion: plan touches a subsystem the spec didn't claim",
+        "The plan-altitude cross-cutting block's hidden-scope-expansion Critical "
+        "must be supplied verbatim, matching plan/SKILL.md's own step 8.5 block.",
+    )
+
+
+def test_cross_cutting_names_the_reversibility_critical():
+    _pin(
+        "Reversibility unnamed: plan deploys something hard to roll back without "
+        "naming rollback path",
+        "The plan-altitude cross-cutting block's reversibility-unnamed Critical "
+        "must be supplied verbatim, matching plan/SKILL.md's own step 8.5 block.",
+    )
+
+
 def test_driver_is_the_synthesizer_in_session():
     _pin(
         "The driver is the synthesizer, in session, never a subagent",
@@ -183,6 +291,19 @@ def test_council_dispatched_against_a_plan_planner_wrote():
         "on the slice parent",
         "The council must be run by the driver itself against the plan craft:planner just "
         "wrote, since the planner agent structurally cannot run it.",
+    )
+
+
+def test_design_doc_step_reference_matches_planners_own_numbering():
+    _pin(
+        "whose own step 6.5 is a design-doc step",
+        "The cited step number for planner's design-doc step must match "
+        "planner.md's own numbering, not a stale reference.",
+    )
+    assert PLANNER_AGENT.read_text().count("### 6.5. Produce the Design Doc") == 1, (
+        "planner.md must actually carry a step 6.5 design-doc heading for "
+        "drive/SKILL.md's citation to be correct — cross-checking against the "
+        "cited document itself, not just asserting the digit in isolation."
     )
 
 

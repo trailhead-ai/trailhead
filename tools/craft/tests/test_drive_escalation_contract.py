@@ -171,15 +171,38 @@ def test_work_in_flight_is_pushed_as_a_draft_pr():
     )
 
 
+# --- contract item 4a: the escalation actually opens a draft PR after the push, not ------
+# --- merely pushing a branch (Phase 6's own push opens nothing) --------------------------
+
+
+def test_escalation_opens_a_draft_pr_after_the_push():
+    _pin(
+        "open a draft PR with `gh pr create --draft`",
+        "The escalation must open an actual draft PR after the push — Phase "
+        "6's own push leaves no PR open, and a pushed branch alone is not "
+        "actionable from a phone the way the spec promises.",
+    )
+
+
+def test_escalation_states_phase_6_push_opens_no_pr():
+    _pin(
+        "Phase 6's push alone opens no PR",
+        "The ritual must state why the PR-open step is needed at all — "
+        "Phase 6's push mechanics open no PR of any kind.",
+    )
+
+
 # --- contract item 5: the trigger vocabulary is declared and every path names one ------
 
 
 _DECLARED_TRIGGERS = [
+    "no-camp-workspace",
     "multi-repo-slice",
     "build-resume-dirty-branch",
     "plan-critical",
-    "worker-stalled",
     "agent-blocked",
+    "planner-stalled",
+    "worker-stalled",
 ]
 
 
@@ -206,14 +229,35 @@ def test_vocabulary_additions_are_not_speculative():
     )
 
 
-# --- contract item 9: no stop path halts without writing the escalation record --------
+# --- contract item 9: every dispatch-failure/escalation stop writes the record, scoped --
+# --- explicitly — the read-only refusal and the clean terminal halts are named ----------
+# --- exceptions, not silently swept under the same absolute claim ----------------------
 
 
-def test_no_stop_path_halts_without_writing_a_record():
+def test_every_dispatch_failure_and_escalation_stop_writes_a_record():
     _pin(
-        "No stop path in this ritual halts without writing this record.",
-        "The escalation contract must state the general rule that no stop path "
-        "halts without writing a typed record, regardless of which phase produced it.",
+        "Every dispatch-failure and escalation stop in this ritual writes this record",
+        "The escalation contract must state its rule with its actual scope — "
+        "every dispatch-failure and escalation stop writes a typed record — "
+        "rather than the unscoped 'no stop path' claim that contradicts the "
+        "read-only refusal and the clean terminal halts elsewhere in the ritual.",
+    )
+
+
+def test_rule_names_the_readonly_refusal_as_an_exception():
+    _pin(
+        "the read-only refusal at step 3",
+        "The scoped rule must name step 3's read-only spec-status refusal as "
+        "a named exception that writes nothing, not leave the absolute claim "
+        "to silently contradict it.",
+    )
+
+
+def test_rule_names_the_clean_terminal_halts_as_exceptions():
+    _pin(
+        "the clean terminal halts at step 6",
+        "The scoped rule must name step 6's two clean terminal halts (spec "
+        "complete, early stop) as named exceptions that write nothing.",
     )
 
 

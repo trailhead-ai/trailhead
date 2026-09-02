@@ -102,6 +102,18 @@ def test_no_block_resumes_gated_from_the_start():
     )
 
 
+def test_no_block_case_never_self_reenters_the_procedure():
+    text = _text()
+    assert "run this procedure from step 1" not in text, (
+        "the no-block branch must not instruct itself to 're-run this "
+        "procedure from step 1' — that branch is reached from inside step "
+        "4's own execution, so telling it to jump back to step 1 reads as a "
+        "recursive re-entry rather than a plain continuation; the correct "
+        "statement is that this pass already behaves as a fresh invocation, "
+        "not that it must restart one"
+    )
+
+
 def test_no_block_case_is_named_explicitly():
     _pin(
         "**No block present.**",
