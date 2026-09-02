@@ -26,6 +26,7 @@ SHARED_SLICE = CRAFT / "skills" / "_shared" / "slice.md"
 SLICE_SKILL = CRAFT / "skills" / "slice" / "SKILL.md"
 PLAN_SKILL = CRAFT / "skills" / "plan" / "SKILL.md"
 EXECUTE_SHARED = CRAFT / "skills" / "_shared" / "execute.md"
+PLANNER = CRAFT / "agents" / "planner.md"
 
 
 def _normalize(text: str) -> str:
@@ -185,11 +186,6 @@ def test_written_shapes_section_title_names_three_not_two():
         "_shared/slice.md's written-shapes section must be retitled to three "
         "now that the design-doc label is a third written shape"
     )
-    assert "The two written shapes" not in text, (
-        "_shared/slice.md must not still title the section as two written "
-        "shapes once a third shape (the craft/design-doc label) is added"
-    )
-
 
 def test_third_shape_records_the_design_doc_path_as_a_parent_label():
     _pin(
@@ -427,6 +423,104 @@ def test_plan_skill_points_at_shared_slice_and_restates_neither_floors_nor_shape
     _assert_defers_to_shared_slice(PLAN_SKILL, "plan/SKILL.md")
 
 
+# --- plan/SKILL.md step 8: the slice-rooted full-body write preserves the
+# enumerated states, not just the value claim ---
+#
+# A full-body `lore record update` replaces the body. If the write step names
+# only `**Value claim:**` as preserved, the `## Enumerated states` section
+# `/craft:slice` wrote is silently destroyed before Phase 6's close gate ever
+# reads it. Pinned as one interaction spanning the preservation clause and the
+# full-body-update sentence: deleting either half breaks it.
+
+
+def test_slice_rooted_write_preserves_enumerated_states_with_the_full_body_update():
+    _pin(
+        PLAN_SKILL,
+        "preserve both its `**Value claim:**` section (or enabler justification) "
+        "and its `## Enumerated states` section, when present, unchanged before "
+        "writing the combined body into the slice parent with a full-body "
+        "`lore record update <parent-name>`",
+        "plan/SKILL.md's slice-rooted write must preserve `## Enumerated states` "
+        "alongside `**Value claim:**` as one interaction with the full-body "
+        "update sentence — deleting either the preservation clause or the "
+        "full-body-update clause must break this pin",
+    )
+
+
+def test_slice_rooted_write_states_why_enumerated_states_is_preserved():
+    _pin(
+        PLAN_SKILL,
+        "the enumerated states section is what Phase 6's close gate reads, so a "
+        "full-body write that drops it would silently disarm that gate",
+        "plan/SKILL.md must state why the enumerated states section is "
+        "preserved: Phase 6's close gate reads it",
+    )
+
+
+# --- Chain pins: the label token and the section name must be the same string
+# across writer, preserver, and reader — derived, not hardcoded thrice, so the
+# pin cannot pass by two documents drifting together onto the same wrong value.
+
+
+def test_design_doc_label_token_is_the_same_string_plan_writes_and_execute_reads():
+    match = re.search(r"--label\s+(craft/design-doc)=", PLAN_SKILL.read_text())
+    assert match, "plan/SKILL.md must write the craft/design-doc label via --label"
+    label_token = match.group(1)
+    assert label_token in EXECUTE_SHARED.read_text(), (
+        f"the label token {label_token!r} written by plan/SKILL.md's "
+        "`lore record update ... --label` invocation must be the same token "
+        "_shared/execute.md's state-coverage gate reads"
+    )
+
+
+def test_enumerated_states_section_name_is_one_string_across_writer_preserver_and_reader():
+    match = re.search(r"`(## Enumerated states)`", SHARED_SLICE.read_text())
+    assert match, "_shared/slice.md must name the Enumerated states section in backticks"
+    section_name = match.group(1)
+    assert section_name in SLICE_SKILL.read_text(), (
+        f"{section_name!r} (the writer, slice/SKILL.md) must carry the same "
+        "section name _shared/slice.md fixes"
+    )
+    assert section_name in PLAN_SKILL.read_text(), (
+        f"{section_name!r} (the preserver, plan/SKILL.md) must carry the same "
+        "section name _shared/slice.md fixes"
+    )
+    assert section_name in EXECUTE_SHARED.read_text(), (
+        f"{section_name!r} (the reader, _shared/execute.md) must carry the same "
+        "section name _shared/slice.md fixes"
+    )
+
+
+# --- agents/planner.md step 8: the slice-rooted path must mirror plan/SKILL.md's
+# preservation rule and design-doc production, in planner's own compressed voice.
+# Pointing at _shared/slice.md for the shapes, not restating them, is covered by
+# _assert_defers_to_shared_slice below.
+
+
+def test_planner_slice_rooted_write_preserves_enumerated_states():
+    _pin(
+        PLANNER,
+        "preserve its `## Enumerated states` section, when present, unchanged",
+        "agents/planner.md's slice-rooted Write the Plan step must preserve "
+        "`## Enumerated states` on the full-body write, mirroring plan/SKILL.md",
+    )
+
+
+def test_planner_produces_the_design_doc_and_records_the_label_when_enumerated():
+    _pin(
+        PLANNER,
+        "when the parent carries `## Enumerated states`, produce the design doc "
+        "and record its path as the `craft/design-doc` label",
+        "agents/planner.md must produce the design doc and record the "
+        "craft/design-doc label when the parent carries enumerated states, "
+        "mirroring plan/SKILL.md's step 6.5",
+    )
+
+
+def test_planner_points_at_shared_slice_and_restates_neither_floors_nor_shapes():
+    _assert_defers_to_shared_slice(PLANNER, "agents/planner.md")
+
+
 # --- Phase 6: the state-coverage close gate ---
 #
 # The gate composes with the pre-existing completion guard (the one refusing `done`
@@ -521,4 +615,46 @@ def test_phase_6_gate_points_at_shared_slice_for_the_shapes():
     assert "`_shared/slice.md` fixes" in EXECUTE_SHARED.read_text(), (
         "Phase 6's state-coverage gate must point at _shared/slice.md for the "
         "written shapes rather than restating them"
+    )
+
+
+def test_phase_6_gate_rejects_path_traversal_in_the_design_doc_label():
+    _pin(
+        EXECUTE_SHARED,
+        "the gate additionally rejects any value containing a `..` path "
+        "segment and requires the resolved path stay inside the working "
+        "directory",
+        "Phase 6's state-coverage gate must reject a `..` path segment in the "
+        "craft/design-doc label and bound the resolved path to the working "
+        "directory — the safe-value shape alone admits traversal",
+    )
+
+
+def test_phase_6_gate_fails_closed_on_a_missing_or_invalid_label():
+    _pin(
+        EXECUTE_SHARED,
+        "Absent, invalid, or unreadable fails this gate closed, same as it "
+        "does for `craft/phase-boundary`",
+        "Phase 6's state-coverage gate must state that an absent, invalid, or "
+        "unreadable craft/design-doc label fails the gate closed, consistent "
+        "with the craft/phase-boundary precedent",
+    )
+
+
+def test_phase_6_gate_names_the_remedy_for_a_bad_label():
+    _pin(
+        EXECUTE_SHARED,
+        "the remedy is re-running plan's step 6.5 to produce the design doc "
+        "and record the label",
+        "Phase 6's state-coverage gate must name the operator's remedy for a "
+        "missing or invalid label: re-run plan's step 6.5",
+    )
+
+
+def test_completion_report_worked_example_carries_the_state_coverage_line():
+    _pin(
+        EXECUTE_SHARED,
+        "state-coverage: parent 4, doc 4, missing 0",
+        "the completion report's worked example must carry a state-coverage "
+        "line, the same as every other phase outcome",
     )

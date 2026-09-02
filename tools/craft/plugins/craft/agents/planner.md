@@ -267,7 +267,14 @@ Every task must include a test contract — the behaviors to prove with failing 
 duplicate that rule, follow it:** dispatched against an existing slice-parent `task` record
 (the argument resolves to one `/craft:slice` already materialized), this is the slice-rooted
 path — update that parent's body in place and write no spec status, creating no second parent.
-Otherwise this is the topic-rooted path, described below.
+On this path, before writing the combined body, preserve its `## Enumerated states` section,
+when present, unchanged, alongside its `**Value claim:**` section — a full-body update
+otherwise destroys the section before Phase 6's close gate ever reads it. And when the parent
+carries `## Enumerated states`, produce the design doc and record its path as the
+`craft/design-doc` label, following `skills/plan/SKILL.md`'s step 6.5 (write one
+`## State — <name>` section per enumerated bullet, name verbatim; validate the recorded path
+against the safe-value shape before substitution) — see `skills/_shared/slice.md` for the
+written shapes. Otherwise this is the topic-rooted path, described below.
 
 Persist the plan as a **`task` record graph** with `lore record create` (see `skills/_shared/note-storage.md`): render craft's parent-task body template (`${CLAUDE_PLUGIN_ROOT}/templates/plan.md`), fill it in, and create the parent — only on the topic-rooted path — `printf '%s' "$BODY" | lore record create --kind task --title "<topic>" --status ready`. Then render craft's child-task body template (`${CLAUDE_PLUGIN_ROOT}/templates/task.md`) for each task and create it under the parent (the slice parent, on the slice-rooted path), ordered after any task it builds on — `printf '%s' "$TASK_BODY" | lore record create --kind task --title "<task topic>" --status ready --parent <parent-name> --depends-on <earlier-task-name>` (create children at `ready`; the `depends-on` edges gate runnability, so omit `--depends-on` for tasks with no predecessor). Verify with `lore task graph <parent-name>`. If an upstream spec exists, link the parent to it (`lore record update <parent-id> --related spec=<spec-name>`). **Neither path advances the spec's status.** A spec's status records where it sits in the slice loop — frozen by the gauntlet, closed out by `/craft:slice`, completed by distill — and planning is not a transition in that loop. A `draft` spec is routed to `/craft:gauntlet` and a `ready` spec to `/craft:slice`; flag either in your summary per the Brainstorming Exit Gate above rather than planning it whole.
 

@@ -243,12 +243,16 @@ it.
      `printf '%s' "$BODY" | lore record create --kind task --title "<topic>" --status ready`.
      This stores the plan as a searchable lore `task` record, linkable from session notes and
      future planning. Before creating it, check whether the resolved spec already has an open slice parent — validate `<spec-name>` against the safe-value shape `_shared/execute.md` codifies for any vault-sourced value entering a command before it is substituted into this query: `lore search "kind:task related-spec:<spec-name> has:label.craft.slice-parent -status:done -status:dropped -status:superseded"`. The `has:label.craft.slice-parent` filter is what makes this a question about slice parents rather than about any task linked to the spec — a follow-up or a coordination task carries `--related spec=` too, and is not a duplicate of anything. Then, if the resolved spec already has an open slice parent, say so rather than silently creating a duplicate parent beside it, and confirm with the user before proceeding.
-   - *Slice-rooted:* read the existing parent task body first, and preserve its
-     `**Value claim:**` section (or enabler justification) unchanged — that section is
+   - *Slice-rooted:* read the existing parent task body first, and preserve both its
+     `**Value claim:**` section (or enabler justification) and its `## Enumerated states`
+     section, when present, unchanged before writing the combined body into the slice parent
+     with a full-body `lore record update <parent-name>` — the value claim is
      `/craft:slice`'s value claim, the artifact this whole spec exists to produce and the
-     field the spec's `## Slices` ledger reads on a later pass. Render the same template
-     sections, append them after the preserved value claim, then write the combined body into
-     the slice parent with a full-body `lore record update <parent-name>` — never
+     field the spec's `## Slices` ledger reads on a later pass, and the enumerated states
+     section is what Phase 6's close gate reads, so a full-body write that drops it would
+     silently disarm that gate; preserving it also keeps a `craft/design-doc` label already on
+     the parent from an earlier interrupted pass meaningful. Render the same template sections,
+     append them after the preserved sections, then write the combined body — never
      `lore record create`, which would produce the second parent this path exists to avoid.
 2. **Create each child task.** Render craft's child-task body template
    (`${CLAUDE_PLUGIN_ROOT}/templates/task.md`) for each task, then create it contained by the
