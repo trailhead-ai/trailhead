@@ -1,23 +1,20 @@
 ---
 name: gauntlet
 description: >
-  Run the adversarial review — the gauntlet — on a draft spec or a draft adr before it advances. For
-  a spec, eight parallel passes attack it from independent angles: fact verification, premise attack,
-  the four council lenses, an internal-consistency audit, and a plan-divergence probe. For an adr, the
-  same roster runs minus the divergence probe (no analogue for a decision document) — seven passes.
-  The main session adjudicates and hands back one compact recommendation — a synthesis, a
-  recommended outcome, and a proposed disposition per Critical — which the user accepts or overrides in a single
-  round-trip, before the record is stamped with review provenance. A spec then flips to `ready`;
-  a draft adr stays `draft` — distill activates it once every spec derived from it lands.
+  Run the adversarial review — the gauntlet — on a draft spec before it advances. Eight parallel
+  passes attack it from independent angles: fact verification, premise attack, the four council
+  lenses, an internal-consistency audit, and a plan-divergence probe. The main session adjudicates
+  and hands back one compact recommendation — a synthesis, a recommended outcome, and a proposed
+  disposition per Critical — which the user accepts or overrides in a single round-trip, before
+  the record is stamped with review provenance and the spec flips to `ready`.
   TRIGGER when: brainstorming has produced a spec and is at its exit gate (the gauntlet is a
-  mandatory step there), a draft adr needs review before it flips to `active`, or the user says "run
-  the gauntlet", "gauntlet this spec", "gauntlet this adr", "adversarial spec review", "review the
-  spec/adr before it advances", or invokes /craft:gauntlet explicitly.
+  mandatory step there), or the user says "run the gauntlet", "gauntlet this spec", "adversarial
+  spec review", "review the spec before it advances", or invokes /craft:gauntlet explicitly.
   DO NOT TRIGGER when: reviewing an implementation plan (planning's Council Review step covers that),
-  reviewing written code (use review), the spec is already `ready`, or the adr is already `active` —
-  a settled record is not re-gauntleted; new thinking creates a new spec, and a change in decision
-  creates a new, superseding adr. A distilled (backward) adr also never triggers this skill — the
-  distill disposition owns its flip.
+  reviewing written code (use review), or the spec is already `ready` — a settled record is not
+  re-gauntleted; new thinking creates a new spec instead. An adr record never triggers this skill,
+  at any status — distill is the only path that authors and activates one, backward from an
+  already-completed spec, and its own disposition owns the flip.
 ---
 
 # The spec gauntlet
@@ -37,10 +34,6 @@ alternative is discovering the same things after they are load-bearing.
 Eight passes attack the spec in parallel, each from an angle the others structurally cannot see. The
 main session adjudicates what comes back and turns it into one recommendation. Nothing advances
 until the user has accepted that recommendation.
-
-The same review runs against a draft **adr** with an adapted, seven-pass roster and a different
-advance target — see "Reviewing an adr" below. Everything else in this document is written for the
-spec case; the adr section states only its deltas.
 
 ## Two independent failure axes
 
@@ -67,7 +60,10 @@ premise pass most often reframes.
 ### 1. Resolve and read the spec
 
 Take the spec record id from the invocation, or — when brainstorming hands off at its exit gate —
-the spec it just wrote. Read it **in full** (`lore record show <spec-id>`). Confirm its status is
+the spec it just wrote. Read it **in full** (`lore record show <spec-id>`). Confirm its **kind** is
+`spec`; an adr resolved here is turned away before anything else runs — distill is the only path
+that authors and activates an adr, backward from an already-completed spec, so route it there
+instead of proceeding with a review this skill has no shape for. Confirm its status is
 `draft`; a `ready` spec has already advanced and is not re-gauntleted (see brainstorm's Status Lifecycle — new
 thinking creates a new spec instead).
 
@@ -313,7 +309,7 @@ them**. Do not propose any of the three, and do not offer a reason the operator 
     library, or a shape that makes the decision unnecessary — stated with why it achieves the outcome
     and what it costs. **Generalised doubt does not meet it.** A `reaches-downstream` prescription
     **writes nothing to the named specs**: it names them in the escalation table, and re-entry into
-    brainstorming is the operator's act; the `related: adr=` edge stays provenance, not a live link.
+    brainstorming is the operator's act.
 - `accepted-as-risk: <reason>` — explicit acceptance, recorded for audit.
 - `disputed: <reason>` — the operator disagrees with the finding; recorded for audit.
 - `answered: <reason>` — the operator supplies a counterargument the passes did not have, and the
@@ -436,13 +432,12 @@ no auto-accept flag, and every point below waits on a human today.
 | **operator acceptance gate** | the operator accepting the presented deliverable — on every run, clean ones included |
 | **override round-trip** | the operator's overrides, applied together and echoed as a full table |
 | **route-change re-present** | acceptance of the revised recommendation, whenever overrides change whether any Critical still carries `revise`, or whenever a prescription or edit not in the presented table was newly drafted |
-| **failed-write report** | nothing — the tail has stopped and the operator is told the partial state; the record under review always keeps the status it arrived with, because no write is ordered after its flip in either mode. The one partial state to report is a **predecessor** already flipped `superseded` by the adr tail's back-edge while the record under review stays `draft` (see "Reviewing an adr") |
+| **failed-write report** | nothing — the tail has stopped and the operator is told the partial state; the record under review always keeps the status it arrived with, because no write is ordered after its flip |
 
 #### The accepted tail
 
-What runs once the operator accepts is **ordered and fail-closed**, and it is the same sequence in
-both modes. The per-mode tails restate only their own deltas — what the write carries and where the
-detail goes — the spec tail in step 6 below, the adr tail under "Reviewing an adr".
+What runs once the operator accepts is **ordered and fail-closed**. The spec tail in step 6 below
+restates only its own deltas — what the write carries and where the detail goes.
 
 **Two treatments run before either payload is assembled**, on the retained finding detail as much
 as on the accepted edits. Most of that detail is text the deliverable never printed, so this is
@@ -469,11 +464,9 @@ the only point at which anyone looks at it before it is permanent:
    stamp to follow: `--diff` leaves the body byte-for-byte unmodified on any rejected hunk, and that
    property is the only thing making the accepted set all-or-nothing. A record holding half its
    accepted edits is a record nobody reviewed.
-2. **Then the mode's remaining writes** — the spec tail's status flip, or the adr tail's
-   predecessor supersession write — **only after that write has succeeded**. A flip is what advances
-   a record; running one ahead of the edits advances a record whose accepted edits are still
-   hypothetical. **The adr tail flips nothing it is reviewing** — an adr leaves this tail `draft`
-   on every outcome, and distill activates it once its derived specs are terminal.
+2. **Then the spec tail's status flip** — only after that write has succeeded. A flip is what
+   advances a record; running one ahead of the edits advances a record whose accepted edits are
+   still hypothetical.
 
 **On any rejected hunk or failed write, nothing further runs.** Not the flip, not the supersession
 write, not a retry with the hunks re-cut. The record stays `draft` and you **report the partial
@@ -553,174 +546,6 @@ only the advance, never the writes. Begin the next revise round: re-run only the
 the surviving `revise` Criticals, fold their findings back into step 5, and present again. The spec
 stays `draft` for as long as any Critical carries `revise`; there is no round cap, and this skill
 writes no status for "still revising."
-
-## Reviewing an adr
-
-The gauntlet also runs against a draft `adr` record before it flips to `active` — same mandate,
-same "no skip flag," an adapted roster, and a different advance target. Steps 1, 2, 4, and 5 above
-carry over unchanged (resolve the record and its absolute path, decompose its claims, adjudicate in
-the main session, and resolve by recommend-then-accept); this section states only where an adr
-target changes the rest.
-
-**Resolving the record:** `lore record show <adr-id>` in place of `<spec-id>`. Confirm its status is
-`draft`; an `active` adr is immutable by convention (`templates/adr.md`) and is not re-gauntleted — a
-change in direction is a new, superseding ADR, not an edit to this one.
-
-### The adapted roster — 7 passes, no divergence probe
-
-| # | Pass | Agent | Give it |
-|---|---|---|---|
-| 1 | Fact verification | `Explore` | The adr path + the Fact claims |
-| 2 | Premise attack | `premise-attacker` | The adr path + the Premise claims |
-| 3–6 | The four lenses | `builder`, `breaker`, `attacker`, `advocate` | Per `_shared/council.md`, using **Per-lens Critical bars — adr review** for `<lens-critical-bars>` |
-| 7 | Consistency audit | `consistency-auditor` | The adr path |
-
-**The divergence probe is dropped.** Its method is constructing two materially different
-*implementations* that both satisfy the spec under review — a decision document has nothing to
-implement two versions of, so the pass has no analogue here. This is a roster change, not a corner
-cut: everything else that can attack an ADR still does.
-
-**All seven passes are required.** Same rule as the spec roster: if any pass agent is not installed,
-name it and stop — do not quietly run six and present the result as a gauntlet. Leave the adr at
-`draft`.
-
-### The record stays `draft` on every outcome
-
-The adr vocab (`draft`, `active`, `superseded`, `dropped`) has no `ready` — there is no intermediate
-settled-but-inactive state the way a spec has, and this skill does not write the record under review
-toward one. The gauntlet never advances the adr it is reviewing past `draft`, on either outcome.
-Once the operator has accepted, the accepted tail below lands that round's `resolved` edits and its
-provenance and stops — no status write on this record. **If any Critical's final disposition is
-`revise`,** the same tail lands identically, and a new revise round begins, re-running only the
-passes that raised the surviving `revise` Criticals. Either way this record is still `draft` when
-this skill is done with it.
-
-Activation is not this skill's job. Distill flips a forward adr `draft -> active` when every spec
-derived from it reaches a terminal status (`distill/SKILL.md`, "Write, in a fixed order") — the same
-rule that already makes distill the sole writer of a spec's `planned -> complete` edge now makes it
-the sole writer of an adr's `draft -> active` edge too, on both the forward and the backward path.
-`active` immutability is unchanged by this move: it changes WHEN activation happens, never whether an
-`active` record can still be edited. Amendment while `draft`, including everything this review
-accepts, stays unrestricted — any ritual that makes a decision may record it, with no
-material/immaterial distinction to adjudicate, and this does not reopen that question for an
-already-`active` record.
-
-### Supersession's predecessor write survives, decoupled from activation
-
-Distill is not the only writer that ever touches an ADR's status. The forward path (brainstorm's
-altitude gate → this gauntlet) can author a draft that names an existing `active` ADR as its
-predecessor via `--related adr=<predecessor>`, set at creation same as any other provenance edge —
-and when this review accepts that draft, retiring the predecessor is this skill's one remaining
-status write in adr mode:
-
-```
-lore record update <predecessor-adr-id> --status superseded --related adr=<adr-id>
-```
-
-This is not "a gauntlet outcome" in the sense the disposition vocabulary bans — it does not come
-from a Critical's disposition, and it never sets a status on the record under review. It fires off
-the successor's own predecessor edge, independent of the dispositions a run produced. The
-predecessor retires on review acceptance, decoupled from the successor's own activation: the
-successor can stay `draft` for as long as its derived specs take to reach a terminal status, and
-there is no reason to leave a decision review already replaced marked `active` in the meantime. A
-reader who lands on the predecessor finds its successor via the back-edge immediately, well before
-distill ever activates it.
-
-### Provenance goes to annotations, never the body
-
-The four-section body contract (`templates/adr.md`) is exhaustive — Context, Decision, Consequences,
-Alternatives rejected, nothing else.
-
-Gauntlet provenance for an adr target goes to the record's annotations, never the body. The full
-consolidated finding detail has nowhere to live in an exhaustive body either — it goes to a linked
-`lesson` record rather than being dropped, so the evidence behind an immutable decision survives it.
-
-### The accepted tail, in adr terms
-
-The shared accepted tail's sequence, its pre-write scrub and marker, and its failure behavior hold
-here. The exhaustive body adds one write ahead of it, and the order is fixed. **The first two writes
-land the same way, in the same order, on every outcome — accept or revise. Neither one ever advances
-the record under review past `draft`:**
-
-```
-printf '%s' "$DETAIL" | lore record create --kind lesson --title "Gauntlet detail — <adr title>" --related adr=<adr-id>
-printf '%s' "$EDITS" | lore record update <adr-id> --diff --annotation gauntlet=<date>:7-passes:<n>-resolved,<n>-revise,<n>-accepted-as-risk,<n>-disputed:<n>-from-proposal,<n>-operator-override
-lore record update <predecessor-adr-id> --status superseded --related adr=<adr-id>
-```
-
-1. **The `lesson` record is written first**, carrying the consolidated detail and its
-   `--related adr=<adr-id>` edge on the same command — an edge added by a later write is an edge
-   that a failure between the two never writes. It is also where the shared stamp's per-Critical
-   half lands **in full**: the `C1`…`Cn` dispositions, each one **marked from-proposal or
-   operator-override**, a row the operator answered additionally marked `answered` alongside its
-   final disposition, and every `accepted-as-risk` / `disputed` / `answered` reason **quoted in the
-   operator's own words**. An annotation is a key/value — it holds the counts and nothing else — so
-   the ids, the markers, and the reasons need a record with a body, and this is it. Write the counts
-   alone and the operator's stated reason for living with a risk, or their counterargument to a
-   finding, is missing from the trail of a decision nothing can edit afterwards. Its body opens with
-   the shared marker line naming it retained review evidence: a `lesson` is precisely the sibling
-   record a later pass reads back as prior art.
-2. **Then the shared tail's one atomic write** — `$EDITS` is the unified diff of every `resolved`
-   edit, and the counts annotation rides the same invocation. `--diff` and `--annotation` apply
-   inside a single read-modify-write, so a rejected hunk leaves the body *and* the annotation
-   untouched, and the all-or-nothing property the shared tail depends on holds here unchanged. What
-   the exhaustive body keeps out is the provenance and the finding detail — never the accepted
-   edits, which are edits to Context, Decision, Consequences, and Alternatives rejected, and this is
-   the only write that ever lands them; an adr this review accepted edits for, with the write
-   skipped, is an approved edit the record never received. The counts alongside the
-   accepted-from-proposal / operator-override split are how the provenance stamp renders for an adr,
-   and `<n>-revise` is what tells an auditor whether this run is still cycling revise rounds.
-   **This write runs on every accepted run, including one with zero `resolved` Criticals** —
-   `$EDITS` is then an empty diff, which the CLI applies as a no-op, and the annotation rides the
-   same invocation regardless. Skipped there, this run leaves no provenance at all, because the
-   annotation is the only provenance the exhaustive body will ever hold.
-
-3. **Then, only if the successor's edge names an existing `active` predecessor, the predecessor
-   is retired** — `--status superseded --related adr=<adr-id>` back to the successor. This is the
-   one status write left in adr mode, and it lands on every accepted run regardless of the
-   dispositions it carries, because it belongs to the successor's own provenance edge, not to any
-   Critical's disposition.
-
-**The first two writes land identically on either outcome.** A surviving `revise` begins a new
-revise round, re-running only the passes that raised it — it does not change what those two writes
-are or how they run, and the adr under review stays `draft` throughout; nothing in this skill ever
-changes that. **The third write is the one exception**: it fires only once, when the successor's
-edge names a predecessor, regardless of which round it fires in — retrying it on a later round it
-already landed in is a no-op, since the predecessor is already `superseded`.
-
-Lesson-first is chosen for the state a crash leaves behind. Its worst surviving artifact is a
-`draft` adr with an extra `lesson` record pointing at it, which is harmless and re-runnable; the
-reverse order's worst artifact is a counts annotation claiming a review whose `lesson` record was
-never written.
-
-**Any failure anywhere in this tail stops the sequence**: the adr under review stays `draft`
-regardless of which write failed — nothing in this tail ever makes it otherwise. A `lesson` record
-already written when a later write then fails is **never silently abandoned** — report the orphaned
-`lesson` record to the operator by name, so they can re-run or delete it. A failure at the third
-write leaves the predecessor still `active`, unlinked from an already-accepted successor; name both
-records and hand back the one write that closes it — the predecessor write above, unchanged, is
-itself the retry. Give them the `lesson` lookup as well:
-
-```
-lore search 'kind:lesson related-adr:"<adr-id>"'
-```
-
-**The query and the edge are the same `<adr-id>`, spelled the same way.** `--related adr=<adr-id>`
-stores that value verbatim, so a query naming the bare adr name matches nothing — and zero results
-read as "no orphan" to precisely the operator this report exists to warn. The id carries a `/`, so
-it is quoted; unquoted, the query is a parse error rather than a lookup.
-
-That is the `lesson` record's own **forward** edge, which `lore record create` projects as it
-writes, so it resolves immediately and needs no `lore reindex` first. (The reverse direction — a
-query from the adr's side — is a reindex-only property, and is not what this lookup uses.) Still
-report the record name alongside the query, never the query alone: the name is what the operator
-acts on, and it survives an index this report cannot inspect.
-
-### Distilled ADRs skip the gauntlet
-
-Distilled (backward) ADRs skip the gauntlet — the distill disposition owns their flip. An ADR that
-`/craft:distill` writes from an already-completed spec is authored and flipped by that ritual
-directly; it never routes through this skill.
 
 ## Calibration
 
