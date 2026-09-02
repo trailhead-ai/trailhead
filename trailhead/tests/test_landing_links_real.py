@@ -245,7 +245,7 @@ class TestForwardCheckPositive:
         claim = {
             "kind": "agent",
             "tool": "craft",
-            "ref": "agents/artist.md",
+            "ref": "agents/advocate.md",
             "source": "craft",
         }
         check_claim(claim, anchor_set)

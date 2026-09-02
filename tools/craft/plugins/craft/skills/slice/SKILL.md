@@ -22,9 +22,10 @@ task — nothing more. Designing and building that slice is `/craft:plan` and `/
 job, run against the parent task this skill writes.
 
 **The definitions live in `../_shared/slice.md`** (a sibling of this skill's directory) — the
-slice/task vocabulary, the quality bar, the value floor, the smallest-next selection rule, and
-the enabler carve-out. Read it before running this procedure. This skill does not restate any
-of it: a second copy here is exactly how the two would drift apart.
+slice/task vocabulary, the quality bar, the value floor, the smallest-next selection rule, the
+enabler carve-out, the state-coverage reference, and the written shapes it fixes. Read it
+before running this procedure. This skill does not restate any of it: a second copy here is
+exactly how the two would drift apart.
 
 ## Argument
 
@@ -183,8 +184,12 @@ take the early-stop path described in step 6 above.
 ### 8. State the claim before writing anything
 
 **Before the parent task record is written and before any planning is invoked**, state the
-chosen slice and its value claim — or, on the enabler path, its written justification — to the
-operator. Steps 4 and 6 above may already have written to the spec record by this point (the
+chosen slice and its value claim — or, on the enabler path, its written justification — and its
+visual-surface call, either the enumerated states or an explicit statement that this slice
+touches no visual surface, to the operator; the call is never left unstated. Whether the slice
+touches a visual surface is judged against `_shared/slice.md`'s state-coverage reference, a
+judgment call this skill states rather than derives mechanically. Steps 4 and 6 above may
+already have written to the spec record by this point (the
 ledger reconcile, and a stale `craft/slice-loop` marker's clear) — this promise is scoped to the
 parent task record specifically, the write that actually creates the slice the operator is being
 asked to accept. Nothing in this procedure writes the parent task record or hands off to
@@ -205,6 +210,14 @@ The parent task body carries the value claim (or enabler justification) under a
 and a later slice-rooted `/craft:plan` pass, both have a named place to read it from and to
 preserve.
 
+**The same body also carries a `## Enumerated states` section**, shaped as `_shared/slice.md`
+defines, when the chosen slice touches a visual surface — the call step 8 already stated to the
+operator. A slice touching no visual surface writes no such section — the absence, not an empty
+section, is what tells `/craft:plan` there is nothing to design.
+
+The enumeration covers at least the archetype floor `_shared/slice.md` fixes for the slice's
+archetype — a minimum, not a ceiling; the slice's actual states govern beyond it.
+
 **If the spec carries `craft/slice-loop=stopped` or `craft/slice-loop=complete` from an earlier
 pass, clear it here** — this pass is selecting again, so an earlier stopping point is no longer
 the loop's live status: `lore record update spec/<spec-name> --unset-label craft/slice-loop`.
@@ -220,6 +233,10 @@ check is scoped to `<spec-name>` only, so this is a separate site: apply the sam
 `_shared/execute.md` already sets for a title drawn from generated prose repo content can
 influence — the title is stripped of single quotes, newlines, backticks, and `$` before it is
 quoted.
+
+The value claim, the `## Enumerated states` section (when the slice touches a visual surface),
+the `craft/slice-parent` label, and the `--related spec=` edge all ride this same
+`lore record create` invocation — never a follow-up write for any of them.
 
 Create the parent `task` record, linking it to the spec on the same write:
 

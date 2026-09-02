@@ -199,7 +199,7 @@ def test_spec_link_write_shape_check_is_co_located_with_the_write():
 def test_slice_rooted_write_reads_the_existing_body_first():
     assert (
         "*Slice-rooted:* read the existing parent task body first, and preserve "
-        "its\n     `**Value claim:**` section" in _text()
+        "both its\n     `**Value claim:**` section" in _text()
     ), (
         "plan/SKILL.md's slice-rooted write must read the existing parent body "
         "first, before rendering plan sections into it"
@@ -208,7 +208,8 @@ def test_slice_rooted_write_reads_the_existing_body_first():
 
 def test_slice_rooted_write_preserves_the_value_claim_section_unchanged():
     assert (
-        "`**Value claim:**` section (or enabler justification) unchanged"
+        "`**Value claim:**` section (or enabler justification) and its "
+        "`## Enumerated states`\n     section, when present, unchanged"
         in _text()
     ), (
         "plan/SKILL.md's slice-rooted write must preserve the parent's "
@@ -231,8 +232,8 @@ def test_slice_rooted_write_names_why_the_value_claim_matters():
 
 def test_slice_rooted_write_appends_plan_sections_after_the_preserved_claim():
     assert (
-        "Render the same template\n     sections, append them after the "
-        "preserved value claim" in _text()
+        "Render the same template sections,\n     append them after the "
+        "preserved sections" in _text()
     ), (
         "plan/SKILL.md must append the rendered plan sections after the "
         "preserved value claim, not overwrite it"

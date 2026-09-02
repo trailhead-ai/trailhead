@@ -105,12 +105,6 @@ source = "craft"
 [[claim]]
 kind = "agent"
 tool = "craft"
-ref = "agents/artist.md"
-source = "craft"
-
-[[claim]]
-kind = "agent"
-tool = "craft"
 ref = "agents/advocate.md"
 source = "craft"
 

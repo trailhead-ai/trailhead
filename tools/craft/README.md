@@ -58,8 +58,6 @@ standalone:
 - `craft:consistency-auditor` (audits the spec against itself)
 - `craft:divergence-prober` (constructs two conformant implementations and reports where they diverge)
 
-**Design:** `craft:artist`
-
 **Helpers:** `craft:researcher`, `craft:troubleshooter`, `craft:doc-finder`,
 `craft:test-runner`, `craft:log-sifter`, `craft:security-auditor`
 

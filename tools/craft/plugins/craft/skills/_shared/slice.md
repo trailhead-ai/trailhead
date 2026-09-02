@@ -36,3 +36,35 @@ only if the slice consuming it comes next. Naming the consuming slice is prose, 
 commitment: it writes no record. This is the one permitted forward reference, which is
 why the no-stored-sequence rule is scoped to records rather than to any mention of
 future work.
+
+## State coverage: the floor a visual surface owes
+
+A slice that introduces or changes a visual surface owes state coverage against a
+floor keyed by slice archetype. The floor is a minimum, not a ceiling — it is
+explicitly non-exhaustive; a slice's actual states govern beyond it.
+
+- A **read-only collection** owes zero, one, many, and a collection-level failure.
+- A **single-record view** owes found, not-found, and a record-level failure.
+- A **mutation** owes success, validation failure, and concurrent-change.
+- A **long-running action** owes in-flight, completed, and failed.
+
+Every archetype whose surface is reachable by more than one principal additionally
+owes an unauthorized state, and the slice that first makes that surface reachable
+ships its access check in that same slice rather than deferring it to a later one.
+
+A state arrives with the slice introducing the surface it belongs to, and never
+earlier.
+
+## The three written shapes state coverage depends on
+
+The parent task's `## Enumerated states` section is one `- <name>` bullet per state.
+The section's states are the contiguous `- ` bullets immediately following the
+heading, ending at the first line that is not such a bullet. The design doc carries
+one `## State — <name>` section per enumerated state, and each `<name>` is that
+bullet's text verbatim.
+
+The design doc's path is recorded on the parent task record as the label
+`craft/design-doc=<path>`. That label is the only discovery mechanism, and the path
+it records is relative to the repository working directory — not absolute, and
+never reaching outside it; craft still does not dictate which directory within the
+working directory the file lives in.
