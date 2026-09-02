@@ -26,16 +26,13 @@ prose contracts:
      matrix extends to Required Interfaces.
   5. The council's spec-review preamble names Required Interfaces among the
      sections its lenses fire on, and the Reliability bar that used to read as
-     an execution complaint now names a coverage consequence instead — while
-     the adr-review bar block, scheduled for removal by a sibling change, not
-     this one, is left byte-identical.
+     an execution complaint now names a coverage consequence instead.
 
 Every assertion here is a literal-prose pin, matching the shape the rest of the
 gauntlet contract suite uses: a named behavior, a literal fragment, and a
 failure message saying why that fragment IS the behavior.
 """
 
-import hashlib
 from pathlib import Path
 
 CRAFT = Path(__file__).parent.parent / "plugins" / "craft"
@@ -56,18 +53,6 @@ _INTERFACE_RECEIVING_SPECS = (
     "spec/external-interface-inventory-and-the-interface-test-contract",
     "spec/the-coordinator-posture",
 )
-
-# Byte-for-byte capture of the adr-review Critical bar block as it reads at the
-# time this file was written — from its own heading up to (not including) the
-# `## Synthesis` heading that follows it. This block belongs to the gauntlet's
-# adr mode, which a sibling change is sequenced to amputate; this pin exists
-# ONLY to guard this change's blast radius against touching that block by
-# accident, and is expected to be deleted along with the adr-review block
-# itself when that amputation lands — it is not a standing invariant to work
-# around once the block it guards is gone.
-_ADR_REVIEW_BLOCK_SHA256 = "179b3b7a4b1ec15fd40763c988416911ca20fe9825cfd041315fcecd4f15d735"
-_ADR_REVIEW_BLOCK_LEN = 2214
-
 
 def _section(text, heading, next_heading_prefix="\n## "):
     start = text.index(heading)
@@ -453,7 +438,7 @@ def test_council_spec_review_preamble_names_required_interfaces():
 def test_council_spec_review_bar_no_longer_reads_as_execution_language():
     text = SHARED_COUNCIL.read_text()
     spec_review_block = _section(
-        text, "## Per-lens Critical bars — spec review", "\n## Per-lens Critical bars — adr review"
+        text, "## Per-lens Critical bars — spec review", "\n## Synthesis"
     )
     assert "so the build will invent one" not in spec_review_block, (
         "the spec-review Reliability bar must not read 'so the build will invent "
@@ -466,7 +451,7 @@ def test_council_spec_review_bar_no_longer_reads_as_execution_language():
 def test_council_spec_review_unspecified_state_bar_names_a_coverage_consequence():
     text = SHARED_COUNCIL.read_text()
     spec_review_block = _section(
-        text, "## Per-lens Critical bars — spec review", "\n## Per-lens Critical bars — adr review"
+        text, "## Per-lens Critical bars — spec review", "\n## Synthesis"
     )
     unspecified_state_bar = next(
         line for line in spec_review_block.splitlines()
@@ -483,7 +468,7 @@ def test_council_spec_review_unspecified_state_bar_names_a_coverage_consequence(
 def test_council_spec_review_unspecified_state_bar_distinguishes_state_from_criterion_coverage():
     text = SHARED_COUNCIL.read_text()
     spec_review_block = _section(
-        text, "## Per-lens Critical bars — spec review", "\n## Per-lens Critical bars — adr review"
+        text, "## Per-lens Critical bars — spec review", "\n## Synthesis"
     )
     reliability_header = next(
         line for line in spec_review_block.splitlines() if line.startswith("*Reliability")
@@ -504,23 +489,4 @@ def test_council_spec_review_unspecified_state_bar_distinguishes_state_from_crit
         "consistency-auditor's, per the lens header) — as written the bar grounds "
         "the Critical purely in acceptance-criterion coverage, which the header "
         "says is not this lens's lane"
-    )
-
-
-def test_council_adr_review_block_is_untouched():
-    text = SHARED_COUNCIL.read_text()
-    start = text.index("## Per-lens Critical bars — adr review")
-    end = text.index("## Synthesis")
-    adr_review_block = text[start:end]
-    digest = hashlib.sha256(adr_review_block.encode()).hexdigest()
-    assert (digest, len(adr_review_block)) == (
-        _ADR_REVIEW_BLOCK_SHA256,
-        _ADR_REVIEW_BLOCK_LEN,
-    ), (
-        "the adr-review Critical bar block must stay byte-identical — a sibling "
-        "session is sequenced to amputate the gauntlet's adr mode after this change, "
-        "and re-aiming prose about to be deleted is wasted work that risks preserving "
-        "bars that should not survive. Compare the block under "
-        f"'## Per-lens Critical bars — adr review' in {SHARED_COUNCIL} against git HEAD "
-        f"(got {len(adr_review_block)} bytes, sha256 {digest})"
     )

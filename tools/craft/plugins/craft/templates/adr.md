@@ -7,9 +7,7 @@ usually two decisions.
 Provenance never goes in prose:
 - Source/derived specs, absorbed decisions, and a superseded predecessor are recorded via
   `related:` metadata (e.g. `--related spec=<name>`, `--related decision=<name>`,
-  `--related adr=<predecessor-adr>`), never described here.
-- Gauntlet review provenance (which passes ran, disposition) goes to annotations
-  (`--annotation gauntlet=<...>`), never the body. -->
+  `--related adr=<predecessor-adr>`), never described here. -->
 
 ## Context
 <!-- 2-4 sentences: the forces at play that made a decision necessary. -->

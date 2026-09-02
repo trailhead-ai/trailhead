@@ -221,10 +221,11 @@ goes through the `lore` CLI, run by you, never through the daemon:
 1. **Re-read the status AND body immediately before editing — never trust an
    earlier snapshot in this session, including the `draft` check in §3.** Time
    can pass between when you evaluated a comment and when you actually write
-   (working through other comments, other reviews, a pause) — an ADR can
-   transition `draft` → `active` in that window (the reviewer or the gauntlet flipping it
-   mid-drain), and that flip is exactly the moment the body becomes a frozen
-   decision. Re-run `GET /api/adrs/:vault/:slug` here; it must report
+   (working through other comments, other reviews, a pause) — an ADR can leave
+   `draft` in that window: a reviewer promoting it directly via `lore`, or
+   distill retiring it as material absorbed into another ADR (`--status
+   dropped`) mid-sweep — and that flip is exactly the moment the body becomes a
+   frozen decision. Re-run `GET /api/adrs/:vault/:slug` here; it must report
    `status: "draft"` again. **If it reports anything else — or the request
    fails, or the field is missing — hard-stop: do not write, do not retry the
    write, and switch that comment to the §5 frozen path.**
@@ -334,17 +335,20 @@ change the reviewer needs to know about.
 
 ## Concurrency and write precedence
 
-A `draft` ADR body can be touched by two independent loops at once: the gauntlet
-(adversarial review of a draft ADR, run separately) and this feedback loop.
-**Gauntlet fold-in edits take precedence.** This loop absorbs concurrent edits by
-construction — the review's snapshot plus the daemon's re-anchor/orphan model is
-exactly what's built to survive a body changing underneath an open review. That
-is why step 4.1 is mandatory, not defensive-programming boilerplate: you must
-re-read the body **immediately before** applying any edit, never rely on
-`body_snapshot` (that's context for reading orphaned comments, not a base to
-write on top of) or on a body you read earlier in this session. The same re-read
-is what catches the `draft` → `active` flip that turns an editable draft into a
-frozen decision mid-drain.
+A `draft` ADR can be touched by another writer while this loop is open: a
+reviewer editing or promoting it directly via `lore` outside this workflow, or
+distill retiring it (`--status dropped`) as material absorbed into another ADR
+mid-sweep. **Whichever of them wrote most recently wins; this loop never
+overwrites without first confirming `draft` on a fresh read.** This loop
+absorbs a concurrent change by construction — the review's snapshot plus the
+daemon's re-anchor/orphan model is exactly what's built to survive a body
+changing underneath an open review. That is why step 4.1 is mandatory, not
+defensive-programming boilerplate: you must re-read the body **immediately
+before** applying any edit, never rely on `body_snapshot` (that's context for
+reading orphaned comments, not a base to write on top of) or on a body you read
+earlier in this session. The same re-read is what catches a `draft` → `active`
+(direct promotion) or `draft` → `dropped` (distill retirement) flip that turns
+an editable draft into a frozen decision mid-drain.
 
 ## Safety recap
 

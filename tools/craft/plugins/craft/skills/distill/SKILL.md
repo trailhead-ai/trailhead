@@ -38,7 +38,7 @@ sweep that yields three ADRs from twenty specs is a normal sweep, not a failed o
 
 The four-section body contract in `${CLAUDE_PLUGIN_ROOT}/templates/adr.md` is exhaustive: Context,
 Decision, Consequences, Alternatives rejected, budgeted at roughly one screenful. Provenance never
-goes in prose — it goes in `related:` edges and annotations.
+goes in prose — it goes in `related:` edges.
 
 ## Two modes
 
@@ -296,7 +296,7 @@ claims `complete` until everything behind it landed.
    `--related decision=<absorbed>` for each absorbed decision, and — when this ADR supersedes an
    existing one — `--related adr=<predecessor>`. The scope flag is not optional here either — on
    create it selects the destination vault, so an unscoped create can land the ADR in the wrong
-   vault. Distilled ADRs do not route through `/craft:gauntlet`; this disposition owns their flip.
+   vault. No ADR routes through `/craft:gauntlet`; this disposition owns every ADR's flip.
    This create is distill's only route to `active`: no other write in this document sets that
    flag on an ADR, and it is reachable at authorship — no condition on the status of the specs the
    ADR derives from gates it.

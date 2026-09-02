@@ -23,7 +23,7 @@ named below, by name; the default installs them all.)
 | Execute | TDD subagent-driven implementation, task by task, gated per-task by a conformance check; once every task lands, a whole-change simplify → correctness → conditional-security pipeline runs before close |
 | Review | Whole-change/PR adversarial review, dispatched standalone before merge or as execute's correctness phase |
 | Council | Four-lens review panel (builder / reliability / security / advocate) |
-| Spec gauntlet | Adversarial spec/ADR review passes (premise, consistency, divergence) dispatched alongside the council quartet |
+| Spec gauntlet | Adversarial spec review passes (premise, consistency, divergence) dispatched alongside the council quartet |
 | Design | Design-doc authoring and structured spec artifacts |
 | Helpers | Cheap specialist subagents for docs, logs, research, tests, security |
 
@@ -76,10 +76,9 @@ settled via `/craft:gauntlet` before `/craft:slice` starts the build loop.
 synthesize. The standalone form of the planning skill's council-review step;
 membership is single-sourced from `skills/_shared/council.md`.
 
-**Spec gauntlet:** `/craft:gauntlet` — the adversarial review a draft spec (or
-draft ADR) goes through before it advances: fact verification, premise attack,
-the four council lenses, an internal-consistency audit, and (for specs) a
-plan-divergence probe.
+**Spec gauntlet:** `/craft:gauntlet` — the adversarial review a draft spec
+goes through before it advances: fact verification, premise attack, the four
+council lenses, an internal-consistency audit, and a plan-divergence probe.
 
 **Slice:** `/craft:slice` — choose the next vertical slice from a `ready` spec:
 read the spec fresh, derive the remaining candidates against its `## Slices`

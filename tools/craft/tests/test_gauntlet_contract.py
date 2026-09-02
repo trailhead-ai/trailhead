@@ -42,6 +42,7 @@ PLAN = SKILLS_DIR / "plan" / "SKILL.md"
 SHARED_COUNCIL = SKILLS_DIR / "_shared" / "council.md"
 PLANNER = AGENTS_DIR / "planner.md"
 PREMISE_ATTACKER = AGENTS_DIR / "premise-attacker.md"
+README = Path(__file__).parent.parent / "README.md"
 
 # Any forward advance of a SPEC's status, in any craft prose. Matched as a regex
 # rather than a fixed literal because the invariant is about the *transition*, not
@@ -109,18 +110,48 @@ _DISPOSITION_NAMES: list[str] = [
     "answered",
 ]
 
-# The subset of `_DISPOSITION_NAMES` that gets its own slot in the adr counts
-# annotation. `answered` is excluded on purpose: it is not a final disposition and
-# "contributes no term of its own to the grammar" (SKILL.md's provenance-stamp
-# rule) — it counts under whichever of `resolved` / `revise` it is re-adjudicated
-# to, plus an operator-override marker, never under its own name.
-_FINAL_DISPOSITION_NAMES: list[str] = [
-    name for name in _DISPOSITION_NAMES if name != "answered"
-]
-
 
 def test_gauntlet_skill_ships():
     assert GAUNTLET.exists(), f"Expected gauntlet/SKILL.md in {SKILLS_DIR}"
+
+
+# --- step 1 rejects a non-spec record ---
+
+_STEP_1_HEADER = "### 1. Resolve and read the spec"
+_STEP_1_KIND_GUARD = "Confirm its **kind** is `spec`"
+_STEP_1_STATUS_GUARD = "Confirm its status is `draft`"
+
+
+def test_step_1_checks_kind_and_status_and_both_can_fire():
+    """Step 1 must reject a non-spec record before ever reaching the status check.
+
+    Step 1 already confirms `status: draft`, and that check alone is not enough:
+    with no mode fork left to route an adr id anywhere else, a draft adr passes
+    the status check too and receives a full spec-shaped review — the divergence
+    probe and the spec Critical bars misapplied to a four-section decision record
+    — ending in a misleading recommendation to flip it `ready`. The kind check and
+    the status check are independent guards on the same record and must both be
+    able to fire: the kind check runs first, so a wrong-kind record is turned away
+    before the status check ever gets a chance to also apply to it.
+    """
+    step = _flat(_section(GAUNTLET.read_text(), _STEP_1_HEADER, "\n### 2."))
+    assert _STEP_1_KIND_GUARD in step, (
+        "gauntlet/SKILL.md's step 1 must confirm the resolved record's kind is "
+        "`spec` before anything else — a draft adr must be turned away here, "
+        "routed to distill instead of receiving a spec-shaped review"
+    )
+    assert _STEP_1_STATUS_GUARD in step, (
+        "gauntlet/SKILL.md's step 1 must still confirm status `draft` — the kind "
+        "check is additional, not a replacement for it"
+    )
+    assert step.index(_STEP_1_KIND_GUARD) < step.index(_STEP_1_STATUS_GUARD), (
+        "the kind check must run before the status check — a wrong-kind record "
+        "should never reach the status confirmation at all"
+    )
+    assert "distill" in step.lower(), (
+        "step 1 must name distill as the only route an adr now travels, so an "
+        "agent that rejects a non-spec record knows where to point the operator"
+    )
 
 
 # --- the mandate: exactly one file may advance a spec ---
@@ -387,29 +418,286 @@ def test_gauntlet_selects_spec_bars_not_plan_bars():
     )
 
 
-# --- adr mode: adapted roster, direct advance, annotation-borne provenance ---
+# --- single review subject ---
+#
+# The gauntlet reviews exactly one kind of record. Each pin below derives what
+# the documents actually claim — from the gauntlet's own front-matter
+# description, from its own body, and from the shared council document's
+# subject-selection table — and asserts a single subject. Deriving rather than
+# hard-coding is what makes the pins fire: a second subject, a second roster, or
+# a second council row shows up as a count that no longer equals one.
 
-# The `## Reviewing an adr` heading scopes the adr-specific checks below to just
-# that section of the file, so a check for "divergence-prober absent" doesn't
-# also have to be true of the spec-mode section earlier in the same file.
-ADR_SECTION_HEADER = "## Reviewing an adr"
+_FRONT_MATTER_RE = re.compile(r"^---\n(.*?)\n---", re.S)
 
-_ADR_MODE_AGENTS: list[str] = [
-    "premise-attacker",
-    "consistency-auditor",
-    "builder",
-    "breaker",
-    "attacker",
-    "advocate",
-]
+# `draft <kind>` is the phrasing gauntlet's front matter uses to name what it
+# reviews. Matched as a regex over both kinds so the derived subject set tracks
+# whatever the document actually says: the pin below asserts the set is exactly
+# {spec}, and an adr named here would widen it and fail rather than slip past.
+# Case-insensitive so `draft ADR` (the capitalized form other craft prose has
+# used) is caught the same as `draft adr`.
+_DRAFT_SUBJECT_RE = re.compile(r"\bdraft (spec|adr)\b", re.I)
+
+# Body prose sets a record kind off in markdown emphasis (`` `adr` ``, `**adr**`)
+# where the front matter does not. Stripped before matching so a body section
+# phrasing the kind this way is not invisible to `_DRAFT_SUBJECT_RE`'s literal
+# single space between `draft` and the kind word.
+_MARKDOWN_EMPHASIS_RE = re.compile(r"[`*]")
+
+
+def _front_matter(text: str) -> str:
+    match = _FRONT_MATTER_RE.search(text)
+    assert match, "gauntlet/SKILL.md must open with a YAML front-matter block"
+    return match.group(1)
+
+
+def _draft_subjects(text: str) -> set[str]:
+    """Every `draft <kind>` *text* names, tolerant of markdown emphasis and case."""
+    stripped = _MARKDOWN_EMPHASIS_RE.sub("", text)
+    return {kind.lower() for kind in _DRAFT_SUBJECT_RE.findall(stripped)}
+
+
+def test_gauntlet_names_exactly_one_review_subject():
+    """The skill's own front-matter `description` names one record kind under review.
+
+    Derived from the text, not hard-coded: every `draft <kind>` the description
+    names is a subject the gauntlet claims to review.
+    """
+    description = _front_matter(GAUNTLET.read_text())
+    subjects = _draft_subjects(description)
+    assert subjects == {"spec"}, (
+        "gauntlet/SKILL.md's front-matter description must name exactly one "
+        f"review subject, {{'spec'}} — found {subjects}"
+    )
+
+
+def test_gauntlet_document_names_exactly_one_review_subject():
+    """The skill's whole document — front matter AND body — names one record kind
+    under review.
+
+    Scoped to the full text rather than the front matter alone: a body section
+    naming a second subject (its own roster, its own advance target) would pass
+    `test_gauntlet_names_exactly_one_review_subject` untouched, because that pin
+    only reads the front matter. Deriving over the whole document is what makes
+    a revived body section show up as a count that no longer equals one.
+    """
+    subjects = _draft_subjects(GAUNTLET.read_text())
+    assert subjects == {"spec"}, (
+        "gauntlet/SKILL.md must name exactly one review subject across its whole "
+        f"document, {{'spec'}} — found {subjects}"
+    )
+
+
+# Matched within the README's Spec-gauntlet coverage row and prose bullet only
+# (not the whole README, which legitimately says `adr` elsewhere — distill's own
+# ADR authoring, for one): any standalone `spec` or `adr` word there is a review
+# subject that text claims for the gauntlet. Case-insensitive because README
+# prose has, in the past, spelled it `ADR`.
+_SUBJECT_WORD_RE = re.compile(r"\b(spec|adr)\b", re.I)
+
+
+def test_readme_names_exactly_one_gauntlet_review_subject():
+    """`tools/craft/README.md`'s Spec-gauntlet table row and prose bullet name one
+    record kind under review — the same one-subject contract the skill itself
+    carries, pinned on its own copy in the README.
+
+    This surface sits outside `_craft_prose_files()` (skills/agents/templates
+    only) and every other gauntlet-subject pin, so it regressed silently once
+    already (a `draft spec (or draft ADR)` phrasing, fixed without a test
+    noticing either the break or the fix). Scoped to the Spec-gauntlet row and
+    bullet specifically, not the whole file, so this pin fires on a second
+    subject creeping back into either spot without a false positive on the
+    file's other, legitimate ADR mentions.
+    """
+    text = README.read_text()
+    row = _section(text, "| Spec gauntlet |", "\n")
+    prose = _section(
+        text, "**Spec gauntlet:**", "\n\n",
+        why="tools/craft/README.md must carry a '**Spec gauntlet:**' prose bullet",
+    )
+    subjects = {w.lower() for w in _SUBJECT_WORD_RE.findall(row + " " + prose)}
+    assert subjects == {"spec"}, (
+        "tools/craft/README.md's Spec-gauntlet coverage row and prose bullet must "
+        f"name exactly one review subject, {{'spec'}} — found {subjects}"
+    )
+
+
+# A roster is declared by a heading naming a pass count — e.g. "Dispatch the
+# eight passes". Matched by heading shape, not by one named heading, so a
+# rename doesn't silently escape the guard.
+_ROSTER_HEADING_RE = re.compile(
+    r"^#{2,3}.*\b(eight|seven|six|five|four|three|nine|ten|\d+)\s+passes\b",
+    re.I | re.M,
+)
+
+_NUMBER_WORDS = {
+    "one": 1,
+    "two": 2,
+    "three": 3,
+    "four": 4,
+    "five": 5,
+    "six": 6,
+    "seven": 7,
+    "eight": 8,
+    "nine": 9,
+    "ten": 10,
+}
+
+# Every stated pass count anywhere in the document — front matter's "Eight
+# parallel passes attack it...", body prose like "All eight passes are
+# required", and the roster heading itself. Matched by shape, not by quoting
+# each sentence, so a rewrite that moves the count to new prose is still caught.
+# Covers `one`/`two` alongside `three`-`ten` and digits — a document-wide count
+# claim of "two passes" is as much a mismatch against an eight-pass roster as
+# "seven passes" would be, and neither word is privileged out of the check.
+_PASS_COUNT_RE = re.compile(
+    r"\b(one|two|eight|seven|six|five|four|three|nine|ten|\d+)\s+(?:parallel\s+)?passes\b",
+    re.I,
+)
+
+
+def _roster_table_pass_count(text: str, start: int) -> int:
+    """Count the passes listed in the roster table following *start*.
+
+    Rows are numbered `1`, `2`, ... or a range like `3–6`; a range counts every
+    number it spans, not one row.
+    """
+    table_start = text.index("| #", start)
+    table_end = text.index("\n\n", table_start)
+    total = 0
+    for line in text[table_start:table_end].splitlines():
+        if not line.startswith("|"):
+            continue
+        cell = line.split("|")[1].strip()
+        m = re.match(r"^(\d+)(?:[–-](\d+))?$", cell)
+        if m:
+            lo, hi = int(m.group(1)), int(m.group(2) or m.group(1))
+            total += hi - lo + 1
+    return total
+
+
+def test_gauntlet_states_one_roster_with_one_pass_count():
+    """One roster, its pass count stated once, matching what its table lists.
+
+    Every stated pass count anywhere in the document — front matter, headings,
+    and body prose alike — must agree with the roster table, not only the
+    heading form.
+    """
+    text = GAUNTLET.read_text()
+    headings = list(_ROSTER_HEADING_RE.finditer(text))
+    assert len(headings) == 1, (
+        "gauntlet/SKILL.md must declare exactly one pass roster — found "
+        f"{len(headings)} headings naming a pass count: "
+        f"{[h.group(0).strip() for h in headings]}"
+    )
+    heading = headings[0]
+    number = heading.group(1)
+    stated = _NUMBER_WORDS[number.lower()] if number.isalpha() else int(number)
+    actual = _roster_table_pass_count(text, heading.start())
+    assert stated == actual, (
+        f"gauntlet/SKILL.md's {heading.group(0)!r} states {stated} passes but its "
+        f"roster table lists {actual}"
+    )
+
+    mentions = _PASS_COUNT_RE.findall(text)
+    stated_counts = {_NUMBER_WORDS[m.lower()] if m.isalpha() else int(m) for m in mentions}
+    assert stated_counts == {actual}, (
+        f"gauntlet/SKILL.md states pass counts {sorted(stated_counts)} somewhere in its "
+        f"front matter or body prose, but its roster table lists {actual} passes — "
+        "every stated count must agree"
+    )
+
+
+# A council row offers the gauntlet lens pass its subject: "A draft spec
+# (`gauntlet` lens pass)". Matched by row shape (subject cell + a `gauntlet`
+# mention) rather than by a named row, so a second subject row is counted, not
+# skipped.
+_COUNCIL_GAUNTLET_ROW_RE = re.compile(r"^\|\s*A draft (spec|adr)[^|]*gauntlet[^|]*\|", re.M)
+
+
+def test_gauntlet_subject_matches_the_single_row_council_offers_it():
+    """The subject council's table offers the `gauntlet` lens pass is the same
+    single subject the gauntlet skill itself declares — a chain pin across the
+    two documents, not two presence checks run in isolation.
+    """
+    council_text = SHARED_COUNCIL.read_text()
+    rows = _COUNCIL_GAUNTLET_ROW_RE.findall(council_text)
+    assert len(rows) == 1, (
+        "_shared/council.md's subject-selection table must offer the `gauntlet` "
+        f"lens pass exactly one row, found {len(rows)}: {rows}"
+    )
+    council_subject = rows[0]
+
+    gauntlet_subjects = set(_DRAFT_SUBJECT_RE.findall(_front_matter(GAUNTLET.read_text())))
+    assert gauntlet_subjects == {council_subject}, (
+        f"gauntlet/SKILL.md's declared review subject(s) {gauntlet_subjects} must "
+        f"equal the single subject {council_subject!r} the council table offers "
+        "its lens pass"
+    )
+
+
+# Each "Use" cell in the subject-selection table either names a bar block
+# by its own heading ("**Per-lens Critical bars — spec review**") or defers to
+# one already named in an earlier row ("The plan bars..."). Only the
+# heading-naming cells make a claim this test can check.
+_TABLE_BAR_SECTION_RE = re.compile(r"\*\*(Per-lens Critical bars(?: — [^*]+)?)\*\*")
+
+
+def test_every_subject_selection_row_resolves_to_a_bar_section_that_exists():
+    """Every bar-block name the subject-selection table cites must resolve to
+    a `## <name>` heading that actually exists in this document — a row may not
+    point at a section the document does not carry.
+    """
+    text = SHARED_COUNCIL.read_text()
+    table = _section(text, "## Per-lens Critical bars\n", "\n\nThe sets are")
+    names = _TABLE_BAR_SECTION_RE.findall(table)
+    assert names, "expected the subject-selection table to name at least one bar section"
+    for name in names:
+        heading = f"## {name}"
+        assert heading in text, (
+            f"_shared/council.md's subject-selection table names {name!r} but no "
+            f"{heading!r} heading exists in the document"
+        )
+
+
+# Every bar-block heading the document actually carries, matched the same shape
+# the table-cell pattern above names ("## Per-lens Critical bars", "## Per-lens
+# Critical bars — spec review", ...). Matched by heading shape, not by one named
+# heading, so an orphaned bar section under a new name is still counted.
+_BAR_SECTION_HEADING_RE = re.compile(r"^## (Per-lens Critical bars(?: — .+)?)$", re.M)
+
+
+def test_every_bar_section_is_named_by_a_subject_selection_row():
+    """Every `## Per-lens Critical bars...` section this document carries is
+    named by a row in the subject-selection table — the reverse direction of
+    `test_every_subject_selection_row_resolves_to_a_bar_section_that_exists`.
+
+    That pin only checks rows -> sections; a bar section with no row pointing at
+    it (an orphan a body-level mode fork elsewhere could still cite by heading)
+    would pass it untouched. Deriving the section list from the document itself,
+    not from a fixed pair of known names, is what makes a reintroduced orphan
+    show up as a heading the table doesn't name.
+    """
+    text = SHARED_COUNCIL.read_text()
+    table = _section(text, "## Per-lens Critical bars\n", "\n\nThe sets are")
+    named = set(_TABLE_BAR_SECTION_RE.findall(table))
+    headings = set(_BAR_SECTION_HEADING_RE.findall(text))
+    assert headings, "expected at least one '## Per-lens Critical bars...' section"
+    orphans = headings - named
+    assert not orphans, (
+        f"_shared/council.md carries bar section(s) {orphans} that no row in the "
+        "subject-selection table names — an orphaned bar block a body-level mode "
+        "fork could still cite even though no row offers it"
+    )
+
+
+# --- the sole route to active: distill's create, never a gauntlet-authored flip ---
 
 # Mirrors `_SPEC_ADVANCE_RE`: a literal substring only catches the one exact
 # spelling this file happens to use, so a differently-phrased adr activation
 # elsewhere (extra whitespace, reordered flags) would silently escape the
-# guard below. An adr's `draft -> active` update no longer exists as a route
-# to `active` at all: distill creates ADRs `--status active` at authorship
-# (write-order step 1), so no craft file — distill included — may carry this
-# pattern.
+# guard below. An update that flips an adr to `active` is not a route craft
+# offers: distill creates ADRs `--status active` at authorship (write-order
+# step 1), so no craft file — distill included — may carry this pattern.
 _ADR_ADVANCE_RE = re.compile(r"<adr-id>\s+--status\s+active")
 
 # The adr *create* pattern — distill's write-order step 1, the only route any
@@ -418,26 +706,15 @@ _ADR_ADVANCE_RE = re.compile(r"<adr-id>\s+--status\s+active")
 # an unrelated `--status active` on some other record kind.
 _ADR_CREATE_RE = re.compile(r"--kind\s+adr\s+--status\s+active")
 
-_ANNOTATION_PROVENANCE_SENTENCE = (
-    "Gauntlet provenance for an adr target goes to the record's annotations, "
-    "never the body"
-)
-
-_DISTILLED_SKIP_SENTENCE = (
-    "Distilled (backward) ADRs skip the gauntlet — the distill disposition owns "
-    "their flip"
-)
-
 
 def _section(text: str, header: str, stop: str | None = None, why: str = "") -> str:
     """One section of gauntlet/SKILL.md, from *header* up to *stop*.
 
     Every section pin scopes itself this way rather than matching the whole file:
-    the skill states the spec-mode and adr-mode rules in near-identical prose, so
-    a whole-file substring check passes on the other mode's wording and pins
-    nothing. A *stop* of ``None``, or one that does not occur after *header*,
-    means "to the end of the text" — the last section of a file or of a slice has
-    no following marker to bound it.
+    a whole-file substring check on prose reused nearby pins nothing. A *stop* of
+    ``None``, or one that does not occur after *header*, means "to the end of the
+    text" — the last section of a file or of a slice has no following marker to
+    bound it.
     """
     assert header in text, why or f"gauntlet/SKILL.md must carry a {header!r} section"
     start = text.index(header)
@@ -445,176 +722,54 @@ def _section(text: str, header: str, stop: str | None = None, why: str = "") -> 
     return text[start:] if end == -1 else text[start:end]
 
 
-def _adr_mode_section(text: str) -> str:
-    return _section(
-        text,
-        ADR_SECTION_HEADER,
-        why=(
-            f"gauntlet/SKILL.md must carry a {ADR_SECTION_HEADER!r} section "
-            "describing adr-target mode"
-        ),
-    )
+# The union of both shapes an adr activation could take: the create (write-order
+# step 1) and an update-based flip. Matching both in one pattern means a stray
+# copy of *either* shape anywhere in craft's prose is caught by the same pin,
+# which is what lets the pin below state the positive claim directly — the only
+# route to `active`, full stop, is distill's create.
+_ADR_TO_ACTIVE_RE = re.compile(_ADR_ADVANCE_RE.pattern + "|" + _ADR_CREATE_RE.pattern)
 
 
-def test_gauntlet_never_flips_an_adr_active():
-    """The gauntlet does not own any part of the draft -> active edge.
-
-    Distill creates ADRs `--status active` at authorship (write-order step 1) —
-    there is no later update-based flip for any file to race. A `--status
-    active` invocation anywhere in the gauntlet skill is the old route back.
-    """
-    assert not _ADR_ADVANCE_RE.search(GAUNTLET.read_text()), (
-        "gauntlet/SKILL.md must not carry `lore record update <adr-id> --status "
-        "active` in either mode — the gauntlet never advances an adr past `draft`"
-    )
-
-
-def test_the_adr_create_pattern_occurs_exactly_once_and_it_is_distills_write_order_step_1():
-    """`--status active` on an adr create occurs exactly once across craft's prose,
-    and that one occurrence is distill's write-order step 1.
+def test_the_only_route_any_adr_takes_to_active_is_distills_write_order_step_1():
+    """Every way any craft file could put an adr at `active` narrows to one line:
+    distill's `lore record create ... --kind adr --status active` at write-order
+    step 1.
 
     Distill creates ADRs `--status active` at authorship — that create is the
     *only* route to `active` any craft file carries; there is no later
-    update-based flip for a second file to duplicate. A second occurrence
-    anywhere (distill included) would mean either a competing create path or a
-    stray copy of the pattern outside step 1 — both are the old, deleted
-    activate-on-completion mechanism creeping back.
+    update-based flip for a second file to duplicate or race. A second hit
+    anywhere (distill included), of either the create shape or an update-based
+    flip shape, means a second, competing route to `active` has appeared.
     """
     hits: list[tuple[Path, str]] = []
     for p in _craft_prose_files():
         for line in p.read_text().splitlines():
-            if _ADR_CREATE_RE.search(line):
+            if _ADR_TO_ACTIVE_RE.search(line):
                 hits.append((p, line.strip()))
 
     assert len(hits) == 1, (
-        "the adr create pattern `--kind adr --status active` must occur exactly "
-        f"once across craft's prose files, found {len(hits)}: "
+        "an adr must reach `active` by exactly one route across craft's prose "
+        f"files, found {len(hits)}: "
         f"{[(str(p.relative_to(CRAFT)), line) for p, line in hits]}"
     )
 
     [(only_file, only_line)] = hits
     assert only_file == DISTILL, (
-        "the sole adr create occurrence must be in distill/SKILL.md, found it in "
-        f"{only_file.relative_to(CRAFT)}"
+        "the sole route to `active` on an adr must be in distill/SKILL.md, found "
+        f"it in {only_file.relative_to(CRAFT)}"
     )
     assert "lore record create" in only_line, (
-        "the sole adr create occurrence must be a `lore record create` invocation "
-        f"(distill's write-order step 1), found: {only_line!r}"
+        "the sole route to `active` on an adr must be a `lore record create` "
+        f"invocation (distill's write-order step 1), found: {only_line!r}"
     )
-
-
-@pytest.mark.parametrize("agent", _ADR_MODE_AGENTS)
-def test_adr_mode_roster_agents_resolve(agent: str):
-    adr_section = _adr_mode_section(GAUNTLET.read_text())
-    assert agent in adr_section, (
-        f"gauntlet/SKILL.md's adr-mode section does not dispatch {agent!r}"
-    )
-    agent_file = AGENTS_DIR / f"{agent}.md"
-    assert agent_file.exists(), f"{agent_file} does not exist — a dispatch must not dead-end"
-
-
-def test_adr_mode_dispatches_fact_verification_too():
-    adr_section = _adr_mode_section(GAUNTLET.read_text())
-    assert "Explore" in adr_section, (
-        "the adr roster keeps the fact-verification pass via the generic Explore agent"
-    )
-
-
-def test_adr_mode_drops_divergence_prober():
-    """The two-implementations method has no analogue for a decision document."""
-    text = GAUNTLET.read_text()
-    adr_section = _adr_mode_section(text)
-    assert "divergence-prober" not in adr_section, (
-        "divergence-prober must be absent from the adr roster"
-    )
-    assert "divergence-prober" in text, (
-        "divergence-prober must still be dispatched for the spec roster elsewhere "
-        "in the same file"
-    )
-
-
-def test_adr_mode_restates_all_passes_required():
-    adr_section = _adr_mode_section(GAUNTLET.read_text()).lower()
-    assert "name" in adr_section and "stop" in adr_section, (
-        "the 'all passes required — name the missing one and stop' rule must be "
-        "restated for the adr roster, not silently inherited from the spec section"
-    )
-
-
-def test_adr_provenance_goes_to_annotations_never_body():
-    assert _ANNOTATION_PROVENANCE_SENTENCE in GAUNTLET.read_text(), (
-        "the annotation-provenance rule must be pinned verbatim in gauntlet/SKILL.md"
-    )
-
-
-def test_distilled_adrs_skip_the_gauntlet():
-    assert _DISTILLED_SKIP_SENTENCE in GAUNTLET.read_text(), (
-        "the 'distilled ADRs skip the gauntlet' sentence must be pinned verbatim"
-    )
-
-
-_FORWARD_SUPERSESSION_BACK_EDGE = (
-    "lore record update <predecessor-adr-id> --status superseded --related adr=<adr-id>"
-)
-
-
-def test_gauntlet_writes_the_predecessor_supersession_back_edge():
-    """The forward path must not leave supersession one-directional.
-
-    Distill writes both directions for a backward ADR; a forward ADR authored and
-    activated through this gauntlet needs the identical guarantee, or a reader
-    landing on the superseded predecessor never finds its successor.
-    """
-    text = GAUNTLET.read_text()
-    assert _FORWARD_SUPERSESSION_BACK_EDGE in text, (
-        "gauntlet/SKILL.md must carry the predecessor's `superseded` flip + "
-        "`related: adr=` back-edge as part of the adr-activation flip, mirroring "
-        "distill's bidirectional supersession write"
-    )
-
-
-def test_gauntlet_supersession_back_edge_is_the_accepted_tails_third_write():
-    """Order matters: the accepted edits and provenance land before the predecessor flips.
-
-    The predecessor write comes last in the accepted tail — after the `lesson`
-    record and the atomic edits+annotation write — so a crash never leaves the
-    predecessor retired ahead of the successor's own accepted content.
-    """
-    tail = _adr_tail(GAUNTLET.read_text())
-    edits_idx = tail.index(_ADR_EDITS_WRITE)
-    back_edge_idx = tail.index(_FORWARD_SUPERSESSION_BACK_EDGE)
-    assert edits_idx < back_edge_idx, (
-        "gauntlet/SKILL.md must write the accepted tail's atomic edits+annotation "
-        "write before the predecessor's `superseded` back-edge"
-    )
-
-
-def test_gauntlet_selects_adr_bars_not_spec_or_plan_bars():
-    adr_section = _adr_mode_section(GAUNTLET.read_text())
-    assert "Per-lens Critical bars — adr review" in adr_section, (
-        "gauntlet/SKILL.md's adr-mode section must point the lens dispatch at the "
-        "ADR bars, not the spec or plan bars"
-    )
-
-
-def test_adr_review_bars_live_in_shared_council():
-    text = SHARED_COUNCIL.read_text()
-    assert "Per-lens Critical bars — adr review" in text, (
-        "_shared/council.md must carry the adr-review bar set for the gauntlet's "
-        "adr-mode lens pass"
-    )
-    for lens in ("*Builder — adr review:*", "*Reliability — adr review:*",
-                 "*Security — adr review:*", "*Advocate — adr review:*"):
-        assert lens in text, f"_shared/council.md missing the {lens!r} bar block"
-
 
 
 # --- resolution: one compact recommendation, accepted or overridden ---
 
 # The resolution step is the only gauntlet output an operator acts on, so its shape
 # is behavior. Anchored on the heading so most checks below can be scoped to the
-# step: a phrase that happens to appear in the adr-mode section must not satisfy a
-# pin about the shared resolution step.
+# step: a phrase that happens to appear elsewhere in the file must not satisfy a
+# pin about the resolution step.
 RESOLUTION_HEADER = "### 5. Recommend, then accept"
 
 # The seam between deciding and writing. Named as its own subsection so the two
@@ -1162,46 +1317,22 @@ def test_advancing_may_not_be_evaluated_while_a_critical_remains_answered():
     )
 
 
-_GAUNTLET_STATUS_WRITE_RE = re.compile(r"--status\s+(\w+)")
-
-
-def test_no_gauntlet_authored_write_sets_superseded_or_dropped():
-    """No gauntlet outcome sets a record to `superseded` or `dropped`, in either
-    mode — both statuses keep their existing (non-gauntlet) uses.
-
-    A bare grep for the words `superseded` / `dropped` would also flag the
-    predecessor-supersession write ("Supersession's predecessor write survives,
-    decoupled from activation"), which is a legitimate, spec-preserved mechanism
-    unrelated to this rule: it never sets a status on the record under review, and
-    it does not come from a Critical's disposition. This pins the two specific
-    command strings a disposition outcome would have written instead — the
-    predecessor write's own placeholder (`<predecessor-adr-id>`) is untouched.
+def test_no_gauntlet_authored_write_sets_the_spec_superseded():
+    """No gauntlet outcome sets the reviewed spec to `superseded` — that status
+    keeps its existing (non-gauntlet) use.
     """
     text = GAUNTLET.read_text()
-    for offending_write in (
-        "<spec-id> --status superseded",
-        "<adr-id> --status dropped",
-    ):
-        assert offending_write not in text, (
-            f"gauntlet/SKILL.md must not carry {offending_write!r} — no gauntlet "
-            "outcome may set a record to `superseded` or `dropped`"
-        )
-    # The legitimate predecessor-supersession write must survive this sweep
-    # unharmed — it is what proves the pin above is not a bare word ban.
-    assert "<predecessor-adr-id> --status superseded --related adr=<adr-id>" in text, (
-        "the predecessor-supersession write is a legitimate, non-gauntlet-outcome "
-        "use of `superseded` and must still be present — this sweep bans two "
-        "specific command strings, not the word"
+    assert "<spec-id> --status superseded" not in text, (
+        "gauntlet/SKILL.md must not carry '<spec-id> --status superseded' — no "
+        "gauntlet outcome may set the reviewed spec to `superseded`"
     )
 
 
 # --- the discard route stays deleted in the SIBLING skills too ---
 
 # Files that describe the gauntlet from outside it. gauntlet/SKILL.md itself is
-# deliberately excluded: it has legitimate, separately-pinned uses of the
-# supersession vocabulary (the adr status vocab, the escalation table, and the
-# predecessor-supersession write), and its own outcome vocabulary is pinned by
-# `test_no_gauntlet_authored_write_sets_superseded_or_dropped` and
+# deliberately excluded: its own outcome vocabulary is pinned directly by
+# `test_no_gauntlet_authored_write_sets_the_spec_superseded` and
 # `test_revise_disposition_withholds_advance_rather_than_superseding`.
 _SIBLING_DESCRIBERS = (BRAINSTORM, DISTILL, PLAN, PLANNER, PREMISE_ATTACKER)
 
@@ -1276,39 +1407,6 @@ def test_the_planner_caveat_sends_the_operator_to_a_revise_round_not_a_successor
             f"the caveat must not claim {banned!r} — planning does not restart "
             "against a replacement spec, because no replacement is written"
         )
-
-
-# --- the skill description is loaded at trigger time and must not lie ---
-
-
-def _description_lead(text: str) -> str:
-    """The `description:` block's leading paragraph — everything before TRIGGER.
-
-    This is the text a harness loads into an agent's context when the skill
-    triggers, so a false promise here is read before any of the body is.
-    """
-    return _section(
-        text,
-        "description: >",
-        "TRIGGER when:",
-        why="gauntlet/SKILL.md must carry a frontmatter `description:` block",
-    )
-
-
-def test_the_skill_description_does_not_promise_an_adr_activation_it_never_writes():
-    lead = _flat(_description_lead(GAUNTLET.read_text()))
-    assert "an adr to `active`" not in lead, (
-        "the description must not promise it flips an adr to `active` — the body "
-        "says 'Activation is not this skill's job', and the description is the "
-        "half that gets loaded into an agent's context at trigger time"
-    )
-    assert "a draft adr stays `draft`" in lead, (
-        "the description must state the adr outcome it actually writes: none"
-    )
-    assert "distill activates it" in lead, (
-        "the description must name distill as the writer of the adr's activation, "
-        "so an agent reading only the description knows where the flip lives"
-    )
 
 
 def test_security_criticals_are_exempt_from_compression():
@@ -1583,33 +1681,18 @@ def test_resolution_names_its_escalation_points_in_the_execute_style():
     )
 
 
-def test_failed_write_escalation_row_does_not_promise_an_advanced_record_under_review():
-    """No write is ordered after a flip of the record under review, in either mode.
-
-    The adr tail no longer flips the record it is reviewing — distill owns that
-    now — and the spec tail's flip is its last write, so nothing can fail "after
-    the flip" and leave the record under review advanced. The row previously
-    qualified its `draft` claim for exactly that case and pointed at the adr
-    tail's supersession write as the write that does it. That write flips the
-    PREDECESSOR, a different record; reading it as the reviewed record is what
-    the stale qualifier invited. An agent trusting it would report the reviewed
-    record as possibly `active` when this skill can no longer make it so.
+def test_failed_write_row_states_the_record_keeps_its_arrived_status():
+    """No write is ordered after the spec's status flip, so a failed tail always
+    leaves the record under review at the status it arrived with.
     """
     step = _flat(_resolution_step(GAUNTLET.read_text()))
-    assert "unless the failure fell after the status flip" not in step, (
-        "the `failed-write report` row still qualifies its `draft` claim for a "
-        "post-flip failure of the record under review — no write is ordered after "
-        "such a flip in either mode now that the adr tail does not flip at all"
-    )
     row = next(
         line for line in _resolution_step(GAUNTLET.read_text()).splitlines()
         if "**failed-write report**" in line
     )
-    assert "**predecessor**" in row and "stays `draft`" in row, (
-        "the `failed-write report` row itself must name the one partial state a "
-        "failed adr tail can genuinely leave behind — a predecessor already "
-        "flipped `superseded` while the record under review stays `draft`. "
-        "Asserting over the whole step matches the word elsewhere and pins nothing"
+    assert "always keeps the status it arrived with" in row, (
+        "the `failed-write report` row must state that a failed tail always "
+        "leaves the record under review at the status it arrived with"
     )
     assert (
         "or whenever a prescription or edit not in the presented table was newly "
@@ -1619,24 +1702,6 @@ def test_failed_write_escalation_row_does_not_promise_an_advanced_record_under_r
         "override rules require — an override into `resolved` or `revise` on a "
         "run whose revise-presence never moved — or the row names a trigger "
         "narrower than the rule it restates"
-    )
-
-
-def test_shared_accepted_tail_does_not_claim_a_status_flip_in_every_mode():
-    """The shared tail is shared, so it must not assert a step only one mode runs.
-
-    Step 2 named the status flip as the universal second step, with the
-    predecessor supersession write as the mode-specific extra. That inverted the
-    truth after this change: the spec tail flips, the adr tail does not flip the
-    record under review at all, and the write the adr tail does run targets a
-    different record. A shared step asserting a flip both modes perform
-    contradicts the per-mode adr section two hundred lines below it.
-    """
-    step = _flat(_resolution_step(GAUNTLET.read_text()))
-    assert "2. **Then the status flip** — and, where the mode has one," not in step, (
-        "the shared accepted tail still names the status flip as the universal "
-        "second step; it must name the mode's remaining writes instead, since "
-        "the adr tail flips nothing it is reviewing"
     )
 
 
@@ -1662,30 +1727,15 @@ def test_resolution_ends_at_the_accepted_tail_anchor():
 
 # --- the accepted tail: one atomic write, then the flip, fail-closed ---
 
-# The spec-mode tail. Scoped like the adr-mode section so a phrase that happens to
-# appear in the shared step cannot satisfy a pin about what the spec tail states.
+# The spec tail's own section, scoped so a phrase that happens to appear in the
+# shared step cannot satisfy a pin about what the spec tail states.
 SPEC_TAIL_HEADER = "### 6. Stamp and advance"
 
-# The adr-mode tail's ordered write sequence. Its own section because the order is
-# the contract — a reader who finds only the individual commands, scattered across
-# the sections that motivate them, has no way to know which runs first.
-ADR_TAIL_HEADER = "### The accepted tail, in adr terms"
-
 _ATOMIC_WRITE = "a single `lore record update --diff` write"
-_ADR_LESSON_CREATE = "lore record create --kind lesson"
-_ADR_LESSON_EDGE = "--related adr=<adr-id>"
-_ADR_COUNTS_ANNOTATION = "--annotation gauntlet="
 
-# The adr's half of the shared atomic write: the `--diff` body write carrying the
-# accepted `resolved` edits. `--diff` and `--annotation` apply inside one
-# read-modify-write, so both ride one invocation and a rejected hunk leaves body
-# and annotation alike unwritten.
-_ADR_EDITS_WRITE = "lore record update <adr-id> --diff"
-
-# The spec's half of the same shared atomic write. The spec tail's `--diff` write
-# carries all three of its payloads — the accepted edits, the provenance stamp, and
-# the `## Gauntlet` detail section — so the spec mode needs its own command form and
-# its own pin, symmetric with the adr one above.
+# The spec tail's `--diff` write carries all three of its payloads — the accepted
+# edits, the provenance stamp, and the `## Gauntlet` detail section — so it needs
+# its own command form and its own pin, distinct from the shared tail's.
 _SPEC_EDITS_WRITE = "lore record update <spec-id> --diff"
 
 # The two treatments the persisted-detail path runs before either payload is
@@ -1705,9 +1755,9 @@ _EVIDENCE_MARKER = "retained review evidence"
 # saying the exact opposite would also contain.
 _EVIDENCE_CITATION_RULE = "cut down to a `file:line` citation"
 
-# What each per-mode tail must name to inherit the shared treatments. The tails
-# restate their own deltas and defer everything else upward, so a tail that defers
-# only sequence and failure behavior is a tail that writes unscrubbed text.
+# What the spec tail must name to inherit the shared treatments. The tail restates
+# its own deltas and defers everything else upward, so a tail that defers only
+# sequence and failure behavior is a tail that writes unscrubbed text.
 _PRE_WRITE_TREATMENTS = "pre-write scrub and marker"
 
 # Fragments of the scrub's own regex list. They belong to exactly one file; any of
@@ -1730,20 +1780,16 @@ def _accepted_tail(text: str) -> str:
 
 
 def _spec_tail(text: str) -> str:
-    """The spec tail, bounded by the adr-mode heading that follows it.
+    """The spec tail, bounded by the `## Calibration` heading that follows it.
 
     Bounded on that exact heading rather than on any `## ` line: the tail quotes a
     literal `## Gauntlet` body section inside a fenced block, and a generic bound
     would read that example as the end of the section.
     """
-    return _section(text, SPEC_TAIL_HEADER, "\n" + ADR_SECTION_HEADER)
+    return _section(text, SPEC_TAIL_HEADER, "\n## Calibration")
 
 
-def _adr_tail(text: str) -> str:
-    return _section(_adr_mode_section(text), ADR_TAIL_HEADER, "\n### ")
-
-
-def test_accepted_tail_is_one_atomic_write_then_the_modes_remaining_writes():
+def test_accepted_tail_is_one_atomic_write_then_the_spec_tails_status_flip():
     """Edits and stamp land together, or not at all — and the flip goes last.
 
     A record carrying half its accepted edits is a record nobody reviewed, and a
@@ -1760,22 +1806,18 @@ def test_accepted_tail_is_one_atomic_write_then_the_modes_remaining_writes():
         f"provenance stamp apply as {_ATOMIC_WRITE} — not one write per Critical, "
         "and not edits now with the stamp to follow"
     )
-    assert "**Then the mode's remaining writes**" in tail, (
-        "the tail's second step must be the mode's remaining writes — the spec "
-        "tail's status flip or the adr tail's predecessor supersession write. "
-        "Naming a status flip both modes perform contradicts the adr tail, which "
-        "flips nothing it is reviewing"
+    assert "**Then the spec tail's status flip**" in tail, (
+        "the tail's second step must be the spec tail's status flip"
     )
     assert "only after that write has succeeded" in tail, (
         "the second step must be conditioned on the atomic write succeeding — an "
         "unconditional flip is the failure mode the ordering exists to prevent"
     )
     assert tail.index(_ATOMIC_WRITE) < tail.index(
-        "**Then the mode's remaining writes**"
+        "**Then the spec tail's status flip**"
     ), (
-        "the atomic write must be stated before the mode's remaining writes — the "
-        "tail is an ordered sequence, and prose order is the only thing carrying "
-        "that order"
+        "the atomic write must be stated before the status flip — the tail is an "
+        "ordered sequence, and prose order is the only thing carrying that order"
     )
 
 
@@ -1856,11 +1898,11 @@ def test_provenance_split_is_derived_structurally_not_recalled():
 def test_persisted_detail_runs_through_the_shared_credential_scrub():
     """The retained detail is the one payload nobody reads before it is permanent.
 
-    Both tails write full, verbatim finding text into a git-backed vault that syncs
-    to a whole team, and the compact deliverable is designed to keep most of that
-    text off the operator's screen. A gauntlet run against a codebase holding a
-    committed credential can quote that value as its evidence, so this scrub is the
-    only thing between it and a second, durable home nobody was shown.
+    The accepted tail writes full, verbatim finding text into a git-backed vault
+    that syncs to a whole team, and the compact deliverable is designed to keep
+    most of that text off the operator's screen. A gauntlet run against a codebase
+    holding a committed credential can quote that value as its evidence, so this
+    scrub is the only thing between it and a second, durable home nobody was shown.
     """
     text = GAUNTLET.read_text()
     tail = _flat(_accepted_tail(text))
@@ -1889,12 +1931,11 @@ def test_persisted_detail_runs_through_the_shared_credential_scrub():
             f"gauntlet/SKILL.md — found {fragment!r}, and two copies drift, with "
             "the stale one missing what the maintained one catches"
         )
-    for mode, mode_tail in (("spec", _spec_tail(text)), ("adr", _adr_tail(text))):
-        assert _PRE_WRITE_TREATMENTS in _flat(mode_tail), (
-            f"the {mode} tail must inherit the shared pre-write treatments by name "
-            f"({_PRE_WRITE_TREATMENTS!r}) — a per-mode tail that defers only "
-            "sequence and failure behavior reads as a tail with no scrub"
-        )
+    assert _PRE_WRITE_TREATMENTS in _flat(_spec_tail(text)), (
+        f"the spec tail must inherit the shared pre-write treatments by name "
+        f"({_PRE_WRITE_TREATMENTS!r}) — a tail that defers only sequence and "
+        "failure behavior reads as a tail with no scrub"
+    )
 
 
 def test_persisted_detail_is_marked_data_not_instructions():
@@ -1927,10 +1968,6 @@ def test_persisted_detail_is_marked_data_not_instructions():
         "the marker must open the retained section — a reader who meets the "
         "findings first has already read them as the spec's own content"
     )
-    assert _EVIDENCE_MARKER in _flat(_adr_tail(text)).lower(), (
-        "the adr tail's linked `lesson` record carries the same marker — it is the "
-        "sibling record a later pass reads, exactly like the spec's section"
-    )
 
 
 def test_spec_tail_retains_full_detail_in_a_gauntlet_body_section():
@@ -1957,9 +1994,9 @@ def test_spec_tail_retains_full_detail_in_a_gauntlet_body_section():
 def test_spec_tail_applies_the_accepted_edits_in_the_same_atomic_write():
     """The spec tail enumerates what its one write carries; it must also SHOW it.
 
-    Symmetric with the adr tail's pin: a tail that names a `## Gauntlet` section
-    and a `--status ready` flip, and gives a command form only for the flip, is a
-    tail an agent can execute by flipping a spec whose accepted edits never landed.
+    A tail that names a `## Gauntlet` section and a `--status ready` flip, and
+    gives a command form only for the flip, is a tail an agent can execute by
+    flipping a spec whose accepted edits never landed.
     """
     tail = _spec_tail(GAUNTLET.read_text())
     edits_lines = [line for line in tail.splitlines() if _SPEC_EDITS_WRITE in line]
@@ -2000,254 +2037,6 @@ def test_spec_tail_flips_on_advance_and_starts_a_new_round_otherwise():
     )
 
 
-def test_adr_full_detail_goes_to_a_linked_lesson_record():
-    """The adr body contract is exhaustive, so the detail cannot live in it.
-
-    A linked `lesson` record is the target that keeps the detail without violating
-    the four-section contract — and the `related adr=` edge is what makes it
-    findable from the decision it reviewed.
-    """
-    adr_section = _adr_mode_section(GAUNTLET.read_text())
-    lesson_lines = [
-        line for line in adr_section.splitlines() if _ADR_LESSON_CREATE in line
-    ]
-    assert lesson_lines, (
-        "the adr tail must create a linked `lesson` record for the full finding "
-        f"detail ({_ADR_LESSON_CREATE}) — the four-section body cannot hold it"
-    )
-    for line in lesson_lines:
-        assert _ADR_LESSON_EDGE in line, (
-            "the lesson record must be created with its `related adr=` edge on the "
-            "same command; an edge added by a later write is an edge that a failure "
-            f"between the two never writes. Got: {line!r}"
-        )
-    assert _ANNOTATION_PROVENANCE_SENTENCE in adr_section, (
-        "the lesson-record target must not displace the annotation-provenance rule "
-        "— provenance still goes to annotations, never the body"
-    )
-
-
-def test_adr_tail_applies_the_accepted_edits_in_the_same_atomic_write():
-    """The adr flip is into an immutable state, so the accepted edits precede it.
-
-    What the exhaustive body contract keeps out of an adr is the *provenance and
-    detail*, never the accepted content edits — those are edits to the record's own
-    four sections, and a sequence that skips them flips a decision to `active` with
-    every approved edit dropped.
-    """
-    tail = _adr_tail(GAUNTLET.read_text())
-    edits_lines = [line for line in tail.splitlines() if _ADR_EDITS_WRITE in line]
-    assert edits_lines, (
-        "the adr tail must carry the shared tail's atomic edits write "
-        f"({_ADR_EDITS_WRITE}) — without it the accepted `resolved` edits never "
-        "reach the record the operator approved them for"
-    )
-    for line in edits_lines:
-        assert _ADR_COUNTS_ANNOTATION in line, (
-            "the edits and the counts annotation must ride ONE invocation — split "
-            "across two writes, a rejected hunk leaves an annotation claiming a "
-            f"review the body never received. Got: {line!r}"
-        )
-
-
-def test_adr_tail_writes_the_lesson_first_then_the_atomic_write_then_the_predecessor():
-    """Order is the whole contract here, and it is chosen for its failure states.
-
-    Lesson-first leaves, at worst, a `draft` adr with an extra record pointing at
-    it — discoverable and harmless. The reverse order leaves a counts annotation
-    claiming a review whose `lesson` record was never written. Neither write ever
-    advances the record under review past `draft` — that edge belongs to distill
-    now, not to this tail.
-    """
-    tail = _adr_tail(GAUNTLET.read_text())
-    lesson_idx = tail.index(_ADR_LESSON_CREATE)
-    edits_idx = tail.index(_ADR_EDITS_WRITE)
-    annotation_idx = tail.index(_ADR_COUNTS_ANNOTATION)
-    back_edge_idx = tail.index(_FORWARD_SUPERSESSION_BACK_EDGE)
-    assert not _ADR_ADVANCE_RE.search(tail), (
-        "the adr tail must not carry a `--status active` flip on the record under "
-        "review — that edge belongs to distill now"
-    )
-    assert lesson_idx < edits_idx < back_edge_idx, (
-        "the adr tail's sequence must be: create the `lesson` record, then the "
-        "adr's one atomic write, then the predecessor's `superseded` back-edge"
-    )
-    assert edits_idx < annotation_idx < back_edge_idx, (
-        "the counts annotation belongs to that same atomic write, ahead of the "
-        "predecessor back-edge"
-    )
-
-
-def test_adr_counts_annotation_covers_the_whole_disposition_vocabulary():
-    """A missing slot reads as a zero, and `revise` is the disposition that
-    withholds the advance — so an adr whose annotation has no `revise` slot is
-    annotated as a clean run even while it is still revising. `answered` is
-    excluded from this loop on purpose:
-    it is not a final disposition and contributes no term of its own to the
-    annotation grammar (see `_FINAL_DISPOSITION_NAMES`).
-    """
-    flat = _flat(_adr_tail(GAUNTLET.read_text()))
-    for name in _FINAL_DISPOSITION_NAMES:
-        assert f"<n>-{name}" in flat, (
-            f"the counts annotation must carry a `{name}` slot — the annotation is "
-            "where an auditor reads the run's disposition counts, and an absent "
-            "slot is indistinguishable from a count of zero"
-        )
-
-
-def test_adr_tail_is_fail_closed_and_reports_an_orphaned_lesson():
-    """A lesson record left behind by a later failure is not garbage to ignore.
-
-    It is the only trace that a review happened, and the operator cannot act on a
-    record they were never told exists.
-    """
-    flat = _flat(_adr_tail(GAUNTLET.read_text()))
-    assert "the adr under review stays `draft`" in flat, (
-        "a failure anywhere in the adr tail must leave the record under review "
-        "`draft` — nothing in this tail ever advances it, so this holds regardless "
-        "of which write failed"
-    )
-    assert "**never silently abandoned**" in flat, (
-        "an orphaned lesson record must be surfaced, not dropped"
-    )
-    assert "report the orphaned `lesson` record to the operator" in flat, (
-        "the report must name the orphan explicitly — the operator decides whether "
-        "to re-run or delete it"
-    )
-
-
-def test_adr_tail_states_the_predecessor_write_failure_branch():
-    """A failure at the third write leaves the predecessor stranded `active`.
-
-    Unlike the old flip-then-supersede order, the record under review is never
-    made immutable by this failure — it is still `draft`, so the report must say
-    what actually needs closing: the predecessor, not the successor.
-    """
-    flat = _flat(_adr_tail(GAUNTLET.read_text()))
-    assert "the predecessor still `active`" in flat, (
-        "the tail must state that a failure at the predecessor write leaves it "
-        "still `active`, unlinked from an already-accepted successor"
-    )
-    assert _FORWARD_SUPERSESSION_BACK_EDGE in flat, (
-        "the failure report must hand back the single write that closes the gap, "
-        "not merely describe it"
-    )
-
-
-def test_neither_mode_routes_a_surviving_revise_to_a_terminal_status():
-    """A surviving `revise` withholds the advance in both modes — it does not
-    route a spec to `superseded` or an adr to `dropped`; both statuses keep
-    only their pre-existing, non-gauntlet uses.
-    """
-    text = GAUNTLET.read_text()
-    assert "<spec-id> --status superseded" not in _spec_tail(text), (
-        "the spec tail must not take a spec to `superseded` on a surviving "
-        "`revise` — it withholds the advance and starts another round instead"
-    )
-    adr_flat = _flat(_adr_mode_section(text))
-    assert "the adr under review stays `draft`" in adr_flat, (
-        "the adr-mode section must state that a surviving `revise` leaves the "
-        "record under review `draft` — not `dropped`, which a draft adr never "
-        "went `active` to supersede a predecessor from in the first place"
-    )
-
-
-def test_adr_tail_says_where_the_per_id_dispositions_land():
-    """An annotation is a key/value; it cannot hold the shared stamp's id detail.
-
-    The shared tail requires the stamp to quote `C1`…`Cn`. For an adr that has to
-    land somewhere, or the mode silently drops half the stamp contract.
-    """
-    flat = _flat(_adr_tail(GAUNTLET.read_text()))
-    assert "`C1`…`Cn` dispositions" in flat, (
-        "the adr tail must say where the per-id dispositions land — an annotation "
-        "carries counts, so the ids belong in the linked `lesson` record"
-    )
-
-
-def test_adr_lesson_record_holds_the_operator_reason_text_and_the_override_markers():
-    """The shared stamp requires more per Critical than a bare disposition.
-
-    It requires the `accepted-as-risk` / `disputed` reason in the operator's own
-    words and the from-proposal-vs-override marker per id. An annotation is a
-    key/value, so the adr mode has to give both a stated home or the mode drops
-    the operator's own reasons from the trail of an immutable decision.
-    """
-    flat = _flat(_adr_tail(GAUNTLET.read_text()))
-    assert "marked from-proposal or operator-override" in flat, (
-        "the adr tail must say where the per-id from-proposal-vs-override marker "
-        "lands — the counts annotation carries totals, not the per-id split"
-    )
-    assert "quoted in the operator's own words" in flat, (
-        "the adr tail must give the `accepted-as-risk` / `disputed` reason text a "
-        "home in the `lesson` record; written nowhere, the operator's stated reason "
-        "for living with a risk is absent from a decision nothing can edit later"
-    )
-
-
-def test_adr_atomic_write_runs_even_with_no_resolved_edits():
-    """A run with zero `resolved` Criticals still has provenance to write.
-
-    The counts annotation rides the edits write, and an adr's exhaustive body will
-    never hold provenance itself — so skipping the write on an empty diff flips the
-    decision `active` with no record of the review at all.
-    """
-    flat = _flat(_adr_tail(GAUNTLET.read_text()))
-    assert (
-        "This write runs on every accepted run, including one with zero `resolved` "
-        "Criticals" in flat
-    ), (
-        "the adr tail must state that the atomic write runs even when `$EDITS` is "
-        "empty — described only for a non-empty diff, the counts annotation never "
-        "lands on a clean run"
-    )
-
-
-def test_adr_tail_runs_identically_on_a_surviving_revise():
-    """The first two writes land the same way on every accepted run — there is no
-    flip left to withhold, so a surviving `revise` changes nothing about the tail
-    itself, only whether another revise round follows it.
-    """
-    tail = _adr_tail(GAUNTLET.read_text())
-    assert "<adr-id> --status dropped" not in tail, (
-        "the adr tail must not carry a `dropped` flip on the record under review — "
-        "a surviving `revise` only starts another round"
-    )
-    flat = _flat(tail)
-    assert "land identically on either outcome" in flat, (
-        "the adr tail must state that the lesson record and the atomic write land "
-        "identically whether or not a Critical's final disposition is `revise`"
-    )
-
-
-def test_orphaned_lesson_report_names_the_recovery_query():
-    """"Discoverable" is a claim the operator has to be able to act on.
-
-    A reverse-edge lookup they have to invent is one they will not run.
-    """
-    flat = _flat(_adr_tail(GAUNTLET.read_text()))
-    assert 'kind:lesson related-adr:"<adr-id>"' in flat, (
-        "the orphan report must name a query that matches the edge the tail wrote. "
-        "The edge is written `--related adr=<adr-id>` and stored verbatim, so the "
-        "query has to name the same `<adr-id>` — quoted, because that id carries a "
-        "`/` and an unquoted `/` is a KQL parse error"
-    )
-    assert _ADR_LESSON_EDGE in flat, (
-        "the query and the edge must appear in the same paragraph spelled the same "
-        "way — the failure this lookup exists to catch is the two drifting apart"
-    )
-    assert "projects as it writes" in flat, (
-        "the lookup reads the `lesson` record's own forward edge, which the create "
-        "projects on write — so the report must not attach the reverse-edge "
-        "reindex caveat, which would tell the operator to discount a zero result "
-        "that is in fact conclusive"
-    )
-    assert "report the record name alongside the query" in flat, (
-        "the orphan report must name the record itself, so it survives a lookup "
-        "that has not been reindexed yet"
-    )
-
-
 def test_calibration_names_only_adjudication_work_the_steps_still_define():
     """Calibration is read as a summary of the adjudicator's job.
 
@@ -2267,7 +2056,7 @@ def test_calibration_names_only_adjudication_work_the_steps_still_define():
 
 
 def test_no_craft_prose_carries_the_discarded_reframed_disposition():
-    """`reframed` is gone from the disposition vocabulary in both gauntlet modes.
+    """`reframed` is gone from the gauntlet's disposition vocabulary.
 
     Swept over every craft prose file, not just the four sibling files named in
     the task — a scoped grep would miss a sibling `_craft_prose_files()` was
@@ -2313,54 +2102,3 @@ def test_premise_attacker_retains_all_three_verdicts_and_revise_not_discard():
     )
 
 
-def test_adr_tail_never_explains_provenance_by_reference_to_a_dropped_adr():
-    """No gauntlet write sets an adr `dropped`, so provenance cannot be justified by one.
-
-    The accepted tail explains why the `<n>-revise` count is worth stamping. That
-    justification must name a state the gauntlet can actually leave an adr in. A
-    surviving `revise` withholds the advance and leaves the adr `draft`; it never
-    sends the adr to `dropped`, because no gauntlet-authored write sets that status
-    at all — the same section pins exactly that, two paragraphs below. An audience
-    named as "an auditor of a `dropped` adr" therefore describes a record this skill
-    can no longer produce, which reads to a later editor as licence to restore the
-    discard route the advance condition replaced.
-    """
-    tail = _flat(_adr_tail(GAUNTLET.read_text()))
-    assert "auditor of a `dropped` adr" not in tail, (
-        "the adr accepted tail justifies the `<n>-revise` count by appeal to an "
-        "auditor of a `dropped` adr — a state no gauntlet write can produce now "
-        "that the discard route is gone; name the `draft` adr the withheld advance "
-        "actually leaves behind"
-    )
-    assert "`<n>-revise`" in tail, (
-        "the adr accepted tail must still say what the `<n>-revise` count is for — "
-        "deleting the stale audience must not delete the provenance rationale"
-    )
-
-
-def test_adr_mode_states_the_record_stays_draft_on_every_outcome():
-    """Item 2 of the slice's test contract: the adr-mode prose must state this as
-    a single, unconditional fact — not derivable only by combining the accept and
-    revise branches separately.
-    """
-    adr_flat = _flat(_adr_mode_section(GAUNTLET.read_text()))
-    assert "The gauntlet never advances the adr it is reviewing past `draft`, on either outcome." in adr_flat, (
-        "gauntlet/SKILL.md's adr-mode section must state plainly, in one sentence, "
-        "that the record under review never leaves `draft` regardless of outcome"
-    )
-
-
-def test_adr_mode_does_not_reopen_active_immutability():
-    """`active` immutability moves WHEN it applies, not WHETHER it applies.
-
-    A reader who sees activation move off the gauntlet could mistake it for a
-    relaxation of immutability; this pins the explicit denial.
-    """
-    adr_flat = _flat(_adr_mode_section(GAUNTLET.read_text()))
-    assert "`active` immutability is unchanged by this move" in adr_flat, (
-        "gauntlet/SKILL.md must restate that `active` immutability is unchanged"
-    )
-    assert "this does not reopen that question for an already-`active` record" in adr_flat, (
-        "gauntlet/SKILL.md must state explicitly that moving activation does not "
-        "reopen editable-`active` ADRs"
-    )
