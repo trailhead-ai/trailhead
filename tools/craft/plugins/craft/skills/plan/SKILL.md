@@ -190,6 +190,26 @@ After the design is agreed, explicitly call out assumptions that need to be prov
 
 These are the things that, if wrong, would change the design.
 
+### 6.5. Produce the Design Doc
+
+On the slice-rooted path, when the parent carries `## Enumerated states`, produce the
+design doc now — before Define Tasks — so the states shape the decomposition rather
+than being discovered after it.
+
+Write one `## State — <name>` section per enumerated bullet, reusing that bullet's name
+verbatim, in the shape `_shared/slice.md` fixes.
+
+**The planning session writes the document itself.** No agent is dispatched, and no
+`design_mockup` provider, seam, or extension point of any kind is reinstated.
+
+Record the design doc's path on the parent, so a later close gate has an unambiguous
+artifact to check. The path is constructed from vault-sourced values, so validate it
+against the safe-value shape `^[A-Za-z0-9._/-]+$` (`_shared/execute.md`'s
+untrusted-input rule) before substitution — a failing value refuses loudly rather than
+being silently omitted.
+
+When the parent carries no `## Enumerated states` section, this step does nothing.
+
 ### 7. Define Tasks
 
 Break the feature into buildable tasks. Each task is the component-shaped unit beneath a slice — see `_shared/slice.md` for the quality bar a slice must clear and the value floor it's read against. Order tasks so that:

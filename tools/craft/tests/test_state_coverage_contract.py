@@ -265,3 +265,120 @@ def test_slice_skill_points_at_shared_slice_and_restates_neither_floors_nor_bull
             f"slice/SKILL.md must not restate the archetype floors or the "
             f"bullet-per-state shape from _shared/slice.md — found {restated_phrase!r}"
         )
+
+
+# --- plan/SKILL.md: step 6.5 produces the design doc before Define Tasks ---
+#
+# `test_slice_vocabulary_contract.py` (lines 132-137, 192-197) and
+# `test_prior_art_survey_contract.py` (line 35) index on the literal string
+# "### 8. Write the Plan" — inserting or renumbering that heading breaks those
+# suites as a confusing failure elsewhere, so the new step is numbered 6.5,
+# following the existing 8.5 precedent, and the full heading inventory is
+# pinned here as a list so a future insert/renumber fails loudly in this file.
+
+PLAN_SKILL = CRAFT / "skills" / "plan" / "SKILL.md"
+
+
+def _plan_skill_text() -> str:
+    return PLAN_SKILL.read_text()
+
+
+def _pin_normalized_in_plan_skill(phrase: str, reason: str) -> None:
+    """Whitespace-insensitive pin against plan/SKILL.md rather than _shared/slice.md."""
+    normalized = _normalize(_plan_skill_text())
+    count = normalized.count(_normalize(phrase))
+    assert count == 1, f"{reason} (found {count}): {phrase!r}"
+
+
+PLAN_SKILL_STEP_HEADINGS = [
+    "### 1. Explore Context",
+    "### 2. Clarify (1-2 questions max)",
+    "### 3. Propose Approaches",
+    "### 4. Design End-to-End",
+    "### 5. Research External Dependencies",
+    "### 6. Identify Known Unknowns",
+    "### 6.5. Produce the Design Doc",
+    "### 7. Define Tasks",
+    "### 8. Write the Plan",
+    "### 8.5. Council Review (mandatory)",
+    "### 9. Present for Approval",
+]
+
+
+def test_plan_skill_has_exactly_these_step_headings_in_order():
+    headings = re.findall(r"^### \d+\..*$", _plan_skill_text(), re.MULTILINE)
+    assert headings == PLAN_SKILL_STEP_HEADINGS, (
+        "plan/SKILL.md must have exactly these step headings, in this order — a "
+        "future insert or renumber must fail loudly here rather than as a "
+        "confusing split failure in test_slice_vocabulary_contract.py or "
+        f"test_prior_art_survey_contract.py; found {headings}"
+    )
+
+
+def test_step_6_5_is_positioned_before_define_tasks():
+    text = _plan_skill_text()
+    idx_6_5 = text.index("### 6.5.")
+    idx_7 = text.index("### 7. Define Tasks")
+    assert idx_6_5 < idx_7, (
+        "plan/SKILL.md's design-doc step must appear before ### 7. Define Tasks "
+        "in document order — a pin on document position, not on a prose claim "
+        "that it runs 'before Define Tasks'"
+    )
+
+
+def test_design_doc_production_is_conditioned_on_enumerated_states_as_one_interaction():
+    _pin_normalized_in_plan_skill(
+        "when the parent carries `## Enumerated states`, produce the design doc "
+        "now — before Define Tasks",
+        "plan/SKILL.md's step 6.5 must state the design-doc production as "
+        "conditioned on the parent carrying `## Enumerated states`, as one "
+        "interaction — deleting either the trigger clause or the production "
+        "clause must break this pin",
+    )
+
+
+def test_design_doc_state_sections_follow_the_shared_slice_shape():
+    _pin_normalized_in_plan_skill(
+        "Write one `## State — <name>` section per enumerated bullet, reusing "
+        "that bullet's name verbatim, in the shape `_shared/slice.md` fixes",
+        "plan/SKILL.md's step 6.5 must state one State section per enumerated "
+        "bullet, name verbatim, pointing at _shared/slice.md for the shape",
+    )
+
+
+def test_planning_session_writes_the_design_doc_itself():
+    _pin_normalized_in_plan_skill(
+        "The planning session writes the document itself",
+        "plan/SKILL.md's step 6.5 must positively state that the planning "
+        "session writes the design doc itself, not that any agent is absent",
+    )
+
+
+def test_design_doc_path_is_validated_against_safe_value_shape_before_use():
+    _pin_normalized_in_plan_skill(
+        "validate it against the safe-value shape `^[A-Za-z0-9._/-]+$` "
+        "(`_shared/execute.md`'s untrusted-input rule) before substitution — a "
+        "failing value refuses loudly rather than being silently omitted",
+        "plan/SKILL.md's step 6.5 must validate the recorded design-doc path "
+        "against the safe-value shape before substitution and refuse loudly on "
+        "a failing value",
+    )
+
+
+def test_plan_skill_points_at_shared_slice_and_restates_neither_floors_nor_shapes():
+    text = _plan_skill_text()
+    assert "_shared/slice.md" in text, (
+        "plan/SKILL.md must point at _shared/slice.md for the state-coverage "
+        "reference rather than restating it"
+    )
+    for restated_phrase in (
+        "owes zero, one, many",
+        "owes found, not-found",
+        "owes success, validation failure",
+        "owes in-flight, completed",
+        "bullet per state",
+    ):
+        assert restated_phrase not in text, (
+            f"plan/SKILL.md must not restate the archetype floors or the "
+            f"bullet-per-state shape from _shared/slice.md — found {restated_phrase!r}"
+        )
