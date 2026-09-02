@@ -400,7 +400,7 @@ def test_each_diff_is_verified_by_re_reading_the_body():
 
 @pytest.mark.parametrize(
     "annotation",
-    ["distilled=zero-adr", "distilled=forward-anchored", "distilled=rejected"],
+    ["distilled=zero-adr", "distilled=rejected"],
 )
 def test_terminal_annotation_spellings_pinned(annotation: str):
     """The annotation string is the queue's exclusion key, so its spelling is behavior.
@@ -409,6 +409,19 @@ def test_terminal_annotation_spellings_pinned(annotation: str):
     """
     assert annotation in _text(), (
         f"distill/SKILL.md must spell the terminal annotation {annotation!r} exactly"
+    )
+
+
+def test_the_annotation_vocabulary_is_exactly_three_values():
+    """Derived from the document, not compared against a hardcoded list — a value
+    added or left behind later fails this pin rather than silently passing.
+    """
+    values = set(re.findall(r"distilled=([a-z][a-z-]*)", _text()))
+    assert values == {"adr", "zero-adr", "rejected"}, (
+        "distill/SKILL.md's documented `distilled=` vocabulary must be exactly "
+        f"{{'adr', 'zero-adr', 'rejected'}}, got {values!r} — the forward-anchored "
+        "cluster class is gone, and its `distilled=forward-anchored` value must "
+        "not survive it in either direction"
     )
 
 
@@ -576,14 +589,14 @@ def test_an_adr_whose_derived_specs_are_all_dropped_does_not_activate():
 
 
 def _absorption_sweep_section(text: str) -> str:
-    """Just the absorption-sweep exclusion, bounded before the forward-anchored
-    rule — the neighbouring section states the same edge in the same vocabulary,
-    so a wider slice would pin nothing.
+    """Just the absorption-sweep exclusion, bounded before the deferral rule —
+    the neighbouring section states the same edge in the same vocabulary, so a
+    wider slice would pin nothing.
     """
     return _section(
         text,
         "**Lingering `draft` ADRs",
-        _FORWARD_ANCHORED_HEADER,
+        "### The deferral rule",
         why=(
             "distill/SKILL.md must carry the absorption-sweep exclusion in 'Step 1 "
             "— Cluster before drafting'"
@@ -708,9 +721,7 @@ def test_status_active_absence_sweep_is_scoped_to_gauntlet_not_banned_globally()
     )
 
 
-# --- Slice 5: forward-anchored clusters route to zero-ADR so activation can fire ---
-
-_FORWARD_ANCHORED_HEADER = "### Forward-anchored clusters"
+# --- Slice 6: the forward-anchored cluster class collapses into the ordinary path ---
 
 
 def _queue_exclusion_section(text: str) -> str:
@@ -719,18 +730,6 @@ def _queue_exclusion_section(text: str) -> str:
         text,
         "### 2. Apply the exclusion per candidate",
         "### 3. Resolve each surviving spec's task tree",
-    )
-
-
-def _forward_anchored_section(text: str) -> str:
-    return _section(
-        text,
-        _FORWARD_ANCHORED_HEADER,
-        "### The deferral rule",
-        why=(
-            "distill/SKILL.md must carry a forward-anchored cluster rule in 'Step 1 "
-            "— Cluster before drafting'"
-        ),
     )
 
 
@@ -748,131 +747,20 @@ def _outcome_bullet(text: str, label: str) -> str:
     return outcomes[start:] if nxt == -1 else outcomes[start:nxt]
 
 
-def test_forward_anchored_cluster_is_defined_by_the_related_adr_edge_on_every_member():
-    """The recognition condition, stated where clustering happens."""
-    section = _flat(_forward_anchored_section(_text()))
-    assert "every member carries a `related: adr=` edge to an existing adr" in section, (
-        "distill/SKILL.md must define a forward-anchored cluster by the "
-        "`related: adr=` edge carried by EVERY member — the whole recognition "
-        "turns on 'every', not 'any'"
-    )
-    assert "`lore record show <spec-id> --json`" in section, (
-        "the anchor id must be read off the per-candidate `--json` the queue pass "
-        "already returned — no new index read, no pipeline dependency"
-    )
-
-
-def test_a_forward_anchored_cluster_routes_to_the_zero_adr_path_and_drafts_nothing():
-    section = _flat(_forward_anchored_section(_text()))
-    assert "routes to the zero-ADR disposition path" in section, (
-        "a forward-anchored cluster must route to the EXISTING zero-ADR "
-        "disposition path — this slice adds a routing rule, not new machinery"
-    )
-    assert "no ADR is drafted for it" in section, (
-        "distill must state that no ADR is drafted for a forward-anchored cluster "
-        "— drafting one would restate its own parent ADR"
-    )
-
-
-def test_forward_anchored_members_complete_under_their_own_annotation_value():
-    """`forward-anchored` is a third outcome, not a spelling of `zero-adr`.
-
-    `zero-adr` means 'distilled, yielded nothing'; forward-anchored means 'the
-    decision is already recorded upstream'. A later reader must be able to
-    separate them mechanically, so the two annotation values stay distinct.
+def test_step_2s_zero_adr_verdict_has_one_form_with_no_anchoring_adr_id_variant():
+    """The forward-anchored cluster class is gone, and with it the second,
+    anchoring-ADR-id-naming form of the zero-ADR verdict it required. There is
+    exactly one verdict shape now.
     """
-    bullet = _outcome_bullet(_text(), "Forward-anchored.")
-    assert (
-        "lore record update <spec-id> --status complete "
-        "--annotation distilled=forward-anchored --vault <name>" in bullet
-    ), (
-        "the forward-anchored outcome must emit the member flip stamped "
-        "`distilled=forward-anchored`"
-    )
-    assert "distilled=zero-adr" not in _flat(bullet).replace(
-        "**not** `distilled=zero-adr`", ""
-    ), (
-        "the forward-anchored outcome must NOT reuse `distilled=zero-adr` for its "
-        "own write — the two outcomes must stay machine-separable"
-    )
-    assert "**not** `distilled=zero-adr`" in _flat(bullet), (
-        "the forward-anchored outcome must say explicitly that it is not "
-        "`distilled=zero-adr`, so a later editor cannot collapse the two"
-    )
-    zero = _outcome_bullet(_text(), "Zero ADRs.")
-    assert "--annotation distilled=zero-adr --vault <name>" in zero, (
-        "the zero-ADR outcome must keep its own distinct annotation value"
-    )
-    assert "distilled=forward-anchored" not in zero, (
-        "the zero-ADR outcome must not absorb the forward-anchored value"
-    )
-
-
-def test_the_forward_anchored_proposal_names_the_anchoring_adr_by_id():
-    """The operator's only signal that rejecting this strands activation."""
     step = _flat(_proposal_step(_text()))
-    assert "names the anchoring ADR by id" in step, (
-        "the Step 2 proposal for a forward-anchored cluster must name the "
-        "anchoring ADR by id"
-    )
-    assert "zero ADRs, because the decision is already recorded in adr/<id>" in step, (
-        "the `zero ADRs, because …` clause must be spelled out with the anchoring "
-        "adr id in it — a bare null verdict is what this exists to prevent"
-    )
-    assert "never a bare null verdict" in step, (
-        "Step 2 must forbid the bare null verdict for a forward-anchored cluster "
-        "— an operator who cannot tell it from a genuine nothing-to-record verdict "
-        "may reject it and strand the anchoring ADR `draft` forever"
-    )
-
-
-def test_forward_anchored_recognition_is_a_proposal_not_an_auto_write():
-    section = _flat(_forward_anchored_section(_text()))
-    assert "Recognition is a proposal, not an auto-write" in section, (
-        "the forward-anchored rule must state it proposes rather than writes"
-    )
-    assert "Step 3's disposition gate" in section, (
-        "the forward-anchored verdict must be routed through the existing "
-        "disposition gate by name — no write happens before the operator "
-        "dispositions it"
-    )
-
-
-def test_a_partly_anchored_cluster_partitions_rather_than_merging_or_dropping():
-    """Partly-anchored clusters are pinned to a stated behaviour, not left to the
-    reader.
-    """
-    section = _flat(_forward_anchored_section(_text()))
     assert (
-        "A partly-anchored cluster partitions; it never merges and never drops."
-        in section
-    ), (
-        "distill/SKILL.md must state the partly-anchored rule explicitly — some "
-        "members anchored, some not is otherwise left to the reader"
-    )
-    assert (
-        "split the anchored members into their own forward-anchored cluster and "
-        "let the rest cluster normally" in section
-    ), (
-        "the partly-anchored rule must say concretely how it partitions"
-    )
-    assert (
-        "merging them would force one group into the wrong one" in section
-        and "dropping the cluster whole would re-strand" in section
-    ), (
-        "the partly-anchored rule must carry its reason in the same clause — the "
-        "two groups have categorically different correct outcomes"
-    )
-
-
-def test_the_deferral_rule_is_unchanged_for_forward_anchored_clusters():
-    section = _flat(_forward_anchored_section(_text()))
-    assert (
-        "a forward-anchored cluster with any member still in flight defers whole"
-        in section
-    ), (
-        "the deferral rule must be restated as unchanged for forward-anchored "
-        "clusters — recognition changes which proposal is presented, nothing else"
+        "the explicit verdict **zero ADRs, because …**, which is a real outcome "
+        "and not a failure" in step
+    ), "Step 2 must state the single zero-ADR verdict form"
+    assert step.count("zero ADRs, because") == 1, (
+        "Step 2 must state exactly one zero-ADR verdict shape — a second, "
+        "anchoring-ADR-id-naming variant would mean the forward-anchored routing "
+        "this slice removes had survived"
     )
 
 
@@ -901,33 +789,32 @@ def test_the_queue_exclusion_imperative_carries_the_anchor_status_narrowing():
     )
 
 
-def test_the_queue_keeps_specs_whose_anchoring_adr_is_still_draft():
-    """The placement correction: the exclusion in §2 is what had to narrow.
-
-    §2 drops any candidate carrying a `related: adr` edge *before* Step 1 ever
-    clusters anything, so under a blanket exclusion every cluster is by
-    construction 100% non-anchored and a recognition rule inside clustering
-    would be unreachable — as would the activation check that reads specs
-    carrying exactly that edge.
+def test_the_queue_keeps_specs_whose_anchoring_adr_is_still_draft_and_treats_them_ordinarily():
+    """The forward-anchored cluster class is gone: a spec whose anchoring ADR is
+    still `draft` is no longer routed anywhere special. §2 still narrows the
+    exclusion (a blanket exclusion would hold such a spec at `planned` forever
+    with no way back into the queue), but what it states now is that the
+    candidate is treated like any other — no forward-anchored class, no
+    activation cross-reference.
     """
     section = _queue_exclusion_section(_text())
     flat = _flat(section)
     assert "edge whose anchoring ADR has itself reached `active` or a terminal status" in flat, (
         "§2's `related: adr` exclusion must be narrowed to anchoring ADRs that are "
-        "`active` or terminal — a blanket exclusion makes both the forward-anchored "
-        "recognition and the activation check unreachable"
+        "`active` or terminal — a blanket exclusion would strand every candidate "
+        "whose anchor is still `draft`"
     )
     assert "stays in the queue" in flat and "still `draft`" in flat, (
         "§2 must say what happens to a spec whose anchoring ADR is still `draft` — "
         "it stays in the queue"
     )
-    assert "step 6's activation check" in flat, (
-        "§2 must name the activation step it feeds, in the same clause that states "
-        "the rule — the rule and its reason must not live in separate sections"
-    )
-    assert "distilled=forward-anchored" in flat, (
-        "§2's annotation exclusion list must include the forward-anchored value, "
-        "or a distilled forward-anchored cluster re-enters the queue forever"
+    assert (
+        "it clusters normally and takes the ordinary drafting path, exactly like "
+        "a candidate with no anchor at all" in flat
+    ), (
+        "§2 must state the ordinary-path outcome explicitly — a spec kept in the "
+        "queue must not be left to route somewhere the deleted forward-anchored "
+        "class used to send it"
     )
 
 
@@ -1042,20 +929,41 @@ def test_the_completion_write_re_reads_the_spec_immediately_before_writing():
     )
 
 
-def test_the_forward_machinery_stays_decoupled_from_the_planned_status():
-    """The forward-anchored cluster class and the activation check key off the
-    `related: adr` edge and terminal statuses, never `planned`. Pinning that keeps
-    a future edit from quietly coupling them to a status this slice is retiring.
+def test_the_queue_exclusion_stays_decoupled_from_the_planned_status():
+    """§2's `related: adr` exclusion keys off the edge and terminal statuses,
+    never `planned`. Pinning that keeps a future edit from quietly coupling it to
+    a status the slice loop leaves unused.
     """
-    flat = _flat(_forward_anchored_section(_text()))
+    flat = _flat(_queue_exclusion_section(_text()))
     assert "related: adr" in flat, (
-        "the forward-anchored cluster class must be defined by the `related: adr` "
-        "edge, not by a spec status"
+        "§2's exclusion must be defined by the `related: adr` edge, not by a "
+        "spec status"
     )
     assert "status:planned" not in flat, (
-        "the forward-anchored cluster class must not key off `planned` — that "
-        "status is unused under the slice loop, and coupling to it would strand "
-        "every forward-anchored cluster"
+        "§2's exclusion must not key off `planned` — that status is unused under "
+        "the slice loop, and coupling to it would strand every draft-anchored "
+        "candidate"
+    )
+
+
+def test_the_edge_direction_sense_of_forward_survives_the_amputation():
+    """"Forward" names two things in this document: the doomed forward-anchored
+    ADR concept, now gone, and an edge *direction* that stays — the forward
+    `related-spec` facet distill uses to resolve a spec's task tree and to
+    detect an existing cluster ADR on resume. This pin exists to catch an
+    amputation done by keyword rather than by meaning: deleting the cluster
+    class must not touch the edge-direction sense of the word.
+    """
+    text = _text()
+    assert "kind:task related-spec:<name>" in text, (
+        "distill/SKILL.md must still resolve a spec's task tree through the "
+        "forward `related-spec` facet — this is edge DIRECTION, not the deleted "
+        "forward-anchored cluster class"
+    )
+    assert "detect the existing cluster ADR via the forward `related-spec` facet" in text, (
+        "distill/SKILL.md must still detect an existing cluster ADR on resume via "
+        "the forward `related-spec` facet — this is edge DIRECTION, not the "
+        "deleted forward-anchored cluster class"
     )
 
 

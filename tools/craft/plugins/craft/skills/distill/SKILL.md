@@ -124,7 +124,7 @@ completion write — they are not the same outcome — is step 5 below.
 ### 2. Apply the exclusion per candidate, never in the query
 
 A spec is out of the queue if it already carries **a `distilled=` annotation** —
-`distilled=adr` (ADRs written), `distilled=zero-adr`, `distilled=forward-anchored`, or
+`distilled=adr` (ADRs written), `distilled=zero-adr`, or
 `distilled=rejected` — **or a `related: adr`
 edge whose anchoring ADR has itself reached `active` or a terminal status**.
 
@@ -160,11 +160,11 @@ carry.
 **The edge half of that exclusion is narrow on purpose.** Its stated job is to stop distill
 re-recording a decision that is already on record — and that job is done only once the anchoring ADR
 has actually reached `active` or a terminal status. While the anchoring ADR is still `draft` it is
-*not yet* a decision on record: it is waiting on exactly these specs to finish so that step 6's
-activation check can flip it `active`. Excluding them blanket would hold them at `planned` forever,
-leave step 6's activation check with nothing to fire on, and strand every forward ADR `draft`
-permanently. So a candidate whose anchoring ADR is still `draft` **stays in the queue** and clusters
-as a forward-anchored member below. Read the anchor's status with one more per-candidate call:
+*not yet* a decision on record, so excluding the candidate now would drop it before its own upstream
+decision is settled — and excluding it blanket would hold it at `planned` forever with no way back
+into the queue. So a candidate whose anchoring ADR is still `draft` **stays in the queue**: it
+clusters normally and takes the ordinary drafting path, exactly like a candidate with no anchor at
+all. Read the anchor's status with one more per-candidate call:
 
 ```
 lore record show <adr-id> --json
@@ -233,32 +233,6 @@ here would erase a decision still in flight. The two checks read the identical e
 direction, and the identical set the identical way, on purpose: a sweep that excluded on a looser
 condition than activation requires could absorb an ADR activation was about to reach on its own.
 
-### Forward-anchored clusters
-
-A cluster is **forward-anchored** when **every member carries a `related: adr=` edge to an existing
-adr** — the candidates the queue kept above because their anchoring ADR is still `draft`. Their
-decision is already recorded upstream in that ADR, so backward-distillation has nothing to draft:
-the cluster **routes to the zero-ADR disposition path** in Step 2 and **no ADR is drafted for it**,
-because the only ADR it could produce would restate its own parent. Its terminal outcome is
-**Forward-anchored**, below, and the member flips it writes are what step 6's activation check then
-reads. This is a routing rule over a path that already exists, not new machinery.
-
-Read the anchor id off `spec.sidecar.related.adr` in the `lore record show <spec-id> --json` output
-the queue pass already returned — no new index read and no pipeline dependency.
-
-**Recognition is a proposal, not an auto-write.** The forward-anchored verdict goes through Step 3's
-disposition gate like every other; nothing is written before the operator dispositions it. What the
-recognition changes is *which proposal is presented*, and nothing else.
-
-**A partly-anchored cluster partitions; it never merges and never drops.** Where some members carry
-the edge and some do not, split the anchored members into their own forward-anchored cluster and let the rest
-cluster normally and take the ordinary drafting path. The two halves have categorically different
-correct outcomes — route-to-zero-ADR versus draft-an-ADR — so merging them would force one group
-into the wrong one, while dropping the cluster whole would re-strand the anchoring ADR `draft`.
-
-The deferral rule below is unchanged by any of this: a forward-anchored cluster with any member
-still in flight defers whole, exactly like any other.
-
 ### The deferral rule
 
 **A cluster with any member still in flight is deferred whole** — report "waiting on spec X" and
@@ -271,11 +245,7 @@ re-surfaces the cluster once the last member lands.
 For each cluster, draft:
 
 - the proposed ADR(s), body-complete against `${CLAUDE_PLUGIN_ROOT}/templates/adr.md` — or the
-  explicit verdict **zero ADRs, because …**, which is a real outcome and not a failure. For a
-  forward-anchored cluster that verdict **names the anchoring ADR by id** — *zero ADRs, because the
-  decision is already recorded in adr/<id>* — and never a bare null verdict, because that id is the
-  operator's only signal separating "already recorded upstream" from a genuine nothing-to-record
-  verdict, and an operator who rejects it strands that ADR `draft` forever;
+  explicit verdict **zero ADRs, because …**, which is a real outcome and not a failure;
 - the **absorption list** — the `decision` records this ADR subsumes;
 - any **existing `active` ADR this supersedes**, and why;
 - the **area profiles** the cluster touched, and what changes in each.
@@ -441,19 +411,6 @@ change because one of its members stopped early.
   ```
   lore record update <spec-id> --status complete --annotation distilled=zero-adr --vault <name>
   ```
-
-- **Forward-anchored.** Every member's decision was already recorded upstream in the `draft` ADR it
-  was derived from, so the cluster produced no ADR of its own. The members still reach `complete`,
-  under their own annotation value — **not** `distilled=zero-adr`, which means "distilled, yielded
-  nothing". The two are distinct outcomes and stay machine-separable, so a later reader can tell
-  "already recorded upstream" from "nothing worth recording":
-
-  ```
-  lore record update <spec-id> --status complete --annotation distilled=forward-anchored --vault <name>
-  ```
-
-  These are the flips step 6's activation check reads to decide whether the anchoring ADR is ready
-  to go `active`.
 
 - **Rejected.** The operator rejected the cluster's drafts. The stamp goes on, and it
   **leaves their status untouched** — a rejection is the opposite of distilled, so `complete` would
