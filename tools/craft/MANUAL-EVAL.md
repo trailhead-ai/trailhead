@@ -54,7 +54,8 @@ no severity field, so the pass cannot rate its own finding.
 | 2026-09-03 | treatment | `agents/consistency-auditor.md` @ `e44b49c` | 5 | **5/5 detection — but the fixture was contaminated** | Fixture 1. Recall, not reasoning. See below. |
 | 2026-09-03 | treatment | `agents/consistency-auditor.md` @ `e44b49c` | 3 | **3/3 detection under inverted phrasing** | Fixture 2. Generalization confirmed; its negative case was unsound. |
 | 2026-09-03 | treatment | `agents/consistency-auditor.md` @ `e44b49c` | 3 | **3/3 on the full anti-heuristic condition** | Fixture 3. Both criteria carry "and"; separated correctly every run. |
-| — | severity | `skills/gauntlet/SKILL.md` | — | _pending Task 4_ | 0/11 runs so far — the pass has no severity field by design. |
+| 2026-09-03 | severity baseline | `skills/gauntlet/SKILL.md` @ `e44b49c` | 6 | **Critical 6/6 — already** | 3 neutral + 3 leading prompt. Not red. |
+| 2026-09-03 | severity, post-bar | `skills/gauntlet/SKILL.md` @ `843100d` | 3 | **Critical 3/3 — no regression** | Bar now cited by name in the output. |
 
 ### Baseline evidence, 2026-09-03
 
@@ -161,3 +162,44 @@ designed: it fires on genuinely borderline cases (fixture 2) and not on insepara
   structurally cannot. Until Task 4 binds the finding to the Critical bar at adjudication, a
   detected compound criterion still gates nothing — which is the half of AC1 that makes the
   other half matter.
+
+### Severity evidence, 2026-09-03 — the arm that did not go red
+
+The severity half of AC1 is measured against the gauntlet's **adjudication** prose, not the
+auditor's, because the auditor's output shape carries no severity field — it structurally
+cannot rate its own finding. The arm feeds a captured real consistency-pass report
+(`fixtures/auditor-report-fixture1.md`, taken verbatim from a treatment run) to an adjudicator
+running the gauntlet skill, and reads back the severity and the advance decision.
+
+**The baseline was not red. Six of six runs rated the compound criterion Critical**, with the
+gauntlet prose unmodified — three under a neutral prompt, three under a prompt that named the
+finding. The leading prompt was written first, noticed to be leading, and re-run neutrally
+rather than kept; both sets agree.
+
+Two things follow, and both correct claims the plan made:
+
+**1. Critical does not gate the advance.** The rule is "a record advances when no Critical
+carries a final disposition of `revise`". All six runs dispositioned the compound finding
+`resolved` and advanced the spec — and that is the correct outcome, not a leak. `resolved`
+means the adjudicator drafts and applies the edit, and every one of the six wrote out the
+criterion split before advancing. The compound criterion does not survive.
+
+What the bar actually protects is that the finding **takes a disposition at all**. Important
+and Minor take none — they are logged for the audit trail only — so a compound criterion filed
+at either severity is noted while the spec advances with it intact. That asymmetry is the
+bar's whole justification.
+
+**2. The bar pins behavior rather than adding it.** With the compound check in place and the
+gauntlet prose untouched, the finding already reached Critical every time. The behavior
+appears to follow from the finding having its own top-level section in the auditor's output
+shape — a property an editor could remove without ever seeing this consequence. So the bar is
+written as codifying measured behavior, and the record says so. **It is deliberately not
+written as fixing a miss, because there is no miss.**
+
+**Post-bar: Critical 3/3, no regression** — and all three runs now cite the bar by name
+("Critical by rule"), where the baseline runs reached the same verdict by their own reasoning
+each time. That is the intended difference: same outcome, no longer emergent.
+
+**Honest labelling.** This arm is a **no-regression check, not a red-to-green transition**.
+The slice's genuine red-to-green evidence is the detection arm above — 0/3 on the full
+condition at baseline, 3/3 on the fixture built to defeat memorization.
