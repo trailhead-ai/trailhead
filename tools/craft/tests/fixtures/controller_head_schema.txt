@@ -1,9 +1,0 @@
-Status: DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT
-files: <git diff --stat one-liner, e.g. "2 files changed, 45 insertions(+), 12 deletions(-)">
-commits: <sha list — where the gate reads the mutation transcript>
-observation-points: <per property — the exact command run and its result count; or "none — <why>">
-mutation-summary: <n of m contract items evidenced; per unevidenced or stayed-GREEN item, one line naming it and which of the three explanations applies>
-review: needed | skip
-blocking: <one-liner on anything that stops the next task, or "none">
-unknowns: <new unknowns discovered during this task, or "none">
-cleanup: <assumption-prover test files/ranges removed, or "none">
