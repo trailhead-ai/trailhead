@@ -112,7 +112,8 @@ def test_lore_record_show_failure_upstream_of_the_documented_pipe_is_never_a_cle
 
 def _ledger_line_templates() -> list[str]:
     """Every `- **<slice title>** ...` fenced-code ledger-line template step 4
-    documents, in the order they appear."""
+    documents, in document order — the legacy (no-coverage) shape is written
+    first, the covers-carrying extension second."""
     step4 = _step("### 4. Reconcile the `## Slices` ledger, then derive the candidate set")
     blocks = re.findall(r"```\n(.*?)\n```", step4, re.DOTALL)
     return [b.strip() for b in blocks if b.strip().startswith("- **<slice title>**")]
@@ -125,17 +126,13 @@ def _render(template: str, **values: str) -> str:
     return out
 
 
-def test_step_4_documents_a_legacy_and_a_covers_carrying_ledger_line_shape():
+def test_legacy_parent_with_no_covers_field_yields_a_ledger_line_with_no_coverage_field():
     templates = _ledger_line_templates()
     assert len(templates) == 2, (
         "slice/SKILL.md step 4 must document exactly two ledger-line shapes — "
         f"one with no coverage field and one carrying it; found {templates}"
     )
-
-
-def test_legacy_parent_with_no_covers_field_yields_a_ledger_line_with_no_coverage_field():
-    templates = _ledger_line_templates()
-    legacy = min(templates, key=len)  # the shape with no coverage token is shorter
+    legacy = templates[0]  # documented first: the four-field, no-coverage shape
     rendered = _render(
         legacy,
         **{
@@ -152,9 +149,14 @@ def test_legacy_parent_with_no_covers_field_yields_a_ledger_line_with_no_coverag
     )
 
 
-def test_covers_carrying_parent_yields_a_ledger_line_naming_the_coverage():
+def test_covers_carrying_parent_yields_a_ledger_line_the_real_gate_certifies():
+    """The covers-carrying ledger-line shape is fed the identifiers a slice
+    actually recorded, and the rendered coverage token is then run through
+    the real `covers_gate.py` against a fixture spec declaring those
+    identifiers — pinning the documented ledger shape against the real
+    grammar, not against a copy of its own wording."""
     templates = _ledger_line_templates()
-    covers_shape = max(templates, key=len)
+    covers_shape = templates[1]  # documented second: the fifth-token extension
     rendered = _render(
         covers_shape,
         **{
@@ -165,7 +167,37 @@ def test_covers_carrying_parent_yields_a_ledger_line_naming_the_coverage():
             "covers-value": "AC2, AC5",
         },
     )
-    assert "AC2, AC5" in rendered, (
-        "slice/SKILL.md step 4's covers-carrying ledger-line shape must let "
-        f"the covered identifiers be substituted in: {rendered!r}"
+    match = re.search(r"covers ([^)]+)\)", rendered)
+    assert match, f"rendered ledger line must carry a 'covers <value>)' token: {rendered!r}"
+    covers_value = match.group(1)
+
+    result = subprocess.run(
+        [sys.executable, str(GATE), "--covers", covers_value],
+        input=NINE_CRITERIA_SPEC,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, (
+        f"the rendered ledger line's coverage token {covers_value!r} must "
+        f"certify against the real gate: {result.stderr}{result.stdout}"
+    )
+
+
+# ---- the gate certifies before the record is created, structurally --------
+
+
+def test_certify_pipe_precedes_lore_record_create_by_document_position():
+    """Reordering the certify paragraph after the `lore record create` block
+    would re-open the exact defect this gate exists to fix, and no test
+    would catch a reword-only pass unless it pins document position. Locate
+    both operations by the real command text step 9 documents and assert
+    the certify pipe comes first."""
+    step9 = _step("### 9. Materialize the parent task")
+    certify_match = re.search(r"covers_gate\.py --covers \"[^\"]+\"", step9)
+    create_match = re.search(r"\|\s*lore record create \\", step9)
+    assert certify_match, "slice/SKILL.md step 9 must document the certify pipe"
+    assert create_match, "slice/SKILL.md step 9 must document the lore record create invocation"
+    assert certify_match.start() < create_match.start(), (
+        "the covers gate certify pipe must be documented, by position, before "
+        "the lore record create invocation in slice/SKILL.md step 9"
     )

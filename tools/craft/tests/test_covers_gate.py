@@ -27,6 +27,10 @@ FIXTURES = Path(__file__).parent / "fixtures"
 
 NINE_CRITERIA_SPEC = (FIXTURES / "spec_ac1_to_ac9.md").read_text(encoding="utf-8")
 MISSING_HEADING_SPEC = (FIXTURES / "spec_missing_ac_heading.md").read_text(encoding="utf-8")
+INDENTED_HEADING_IN_FENCE_SPEC = (
+    FIXTURES / "spec_indented_heading_in_fence.md"
+).read_text(encoding="utf-8")
+ZERO_CRITERIA_SPEC = (FIXTURES / "spec_zero_criteria.md").read_text(encoding="utf-8")
 
 
 def _run(covers: str | None, spec_body: str) -> subprocess.CompletedProcess:
@@ -139,3 +143,55 @@ def test_parser_rejects_a_nested_bullet_as_a_bare_criterion():
     AC10 (there is no tenth criterion) exits 1."""
     r = _run("AC10", NINE_CRITERIA_SPEC)
     assert r.returncode == 1, r.stderr + r.stdout
+
+
+# ---- heading anchor: line-start only, never a loosely-indented match -----
+
+
+def test_indented_heading_inside_a_fenced_example_is_not_the_anchor():
+    """The fixture's worked example contains an indented `## Acceptance
+    Criteria` heading inside a fenced code block, above the real section. A
+    parser that anchors on `line.strip()` would treat that fake heading as
+    the section start and never reach the real AC1/AC2 below it. The real
+    identifiers must still certify."""
+    r = _run("AC1,AC2", INDENTED_HEADING_IN_FENCE_SPEC)
+    assert r.returncode == 0, r.stderr + r.stdout
+
+
+# ---- zero-identifier spec: legacy shape fails closed with its own reason --
+
+
+def test_zero_criterion_identifiers_exits_2_with_a_distinct_reason():
+    """A spec whose `## Acceptance Criteria` heading is present but which
+    declares no `**ACn.**` identifiers (predates the convention) must fail
+    closed at exit 2 — never exit 1's 'unknown criterion identifier(s)',
+    which misdiagnoses a legacy spec as a drafting error — and its reason
+    line must name that the spec declares no criterion identifiers, so a
+    caller can distinguish this case from every other exit-2 reason."""
+    r = _run("AC1", ZERO_CRITERIA_SPEC)
+    assert r.returncode == 2, r.stderr + r.stdout
+    assert "no criterion identifiers" in r.stderr, r.stderr
+
+
+# ---- non-UTF-8 stdin fails closed, never a traceback ----------------------
+
+
+def test_non_utf8_stdin_exits_2_not_a_traceback():
+    cmd = [sys.executable, str(GATE), "--covers", "AC1"]
+    r = subprocess.run(cmd, input=b"\xff\xfe not valid utf-8", capture_output=True)
+    assert r.returncode == 2, r.stderr + r.stdout
+    assert b"Traceback" not in r.stderr
+
+
+# ---- --covers grammar: no trailing newline admitted ------------------------
+
+
+def test_covers_value_with_trailing_newline_fails_grammar_not_membership():
+    """`_COVERS_RE`'s trailing `$` (without MULTILINE) matches before a
+    trailing newline, so `--covers "AC1\\n"` was wrongly accepted by the
+    grammar and only then refused as an unknown identifier — misnaming the
+    cause. It must be refused by the grammar check itself."""
+    r = _run("AC1\n", NINE_CRITERIA_SPEC)
+    assert r.returncode == 1, r.stderr + r.stdout
+    assert "not a valid identifier list" in r.stderr, r.stderr
+    assert "unknown criterion identifier" not in r.stderr, r.stderr

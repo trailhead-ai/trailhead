@@ -209,7 +209,9 @@ chosen slice and its value claim — or, on the enabler path, its written justif
 visual-surface call, either the enumerated states or an explicit statement that this slice
 touches no visual surface, to the operator — and, on the same footing as those two, by
 identifier, which spec acceptance criteria the chosen slice makes green; the call is never left
-unstated. Whether the slice
+unstated. On a spec predating the `**ACn.**` convention — one declaring no criterion
+identifiers at all — there is nothing to state by identifier; say so plainly instead, rather
+than inventing one. Whether the slice
 touches a visual surface is judged against `_shared/slice.md`'s state-coverage reference, a
 judgment call this skill states rather than derives mechanically. Steps 4 and 6 above may
 already have written to the spec record by this point (the
@@ -257,6 +259,14 @@ nothing else, the spec acceptance criteria step 8 already stated to the operator
 follow-up write, for the same reason as the label and the edge: a marker written a moment later
 can miss a concurrent pass that has already run its guard.
 
+**The drafted `--covers` value is untrusted input too.** It is derived from the spec's declared
+`## Acceptance Criteria` identifiers — vault-writable, git-synced content — and enters the
+command line below as a `--covers` argument. Step 1's shape check is scoped to `<spec-name>`
+only, so this is a separate site: apply the same precedent `_shared/execute.md` already sets for
+vault-derived content entering a command line — the drafted value is stripped of single quotes,
+newlines, backticks, and `$` before it is quoted, matching the treatment the slice title receives
+below.
+
 **Certify the drafted list before writing it.** Pipe the spec body through the covers gate
 against the drafted `--covers` identifier list, before `lore record create` runs:
 
@@ -268,6 +278,19 @@ A non-zero exit refuses the create — nothing is written until the gate exits 0
 in the same shape steps 3 and 5 above already use for their own refusals: report which
 identifier failed (the gate's `reason:` line on stderr names it) and that the fix is to correct
 the drafted list against the spec's declared acceptance criteria and re-run the gate.
+
+**A spec predating the `**ACn.**` convention is a legacy carve-out, not a drafting error.** When
+the spec declares zero criterion identifiers under `## Acceptance Criteria`, the gate above exits
+2 naming exactly that — a reason distinct from every other refusal. On that specific exit-2
+reason, the slice proceeds and the create below writes no `**Covers:**` field at all — not an
+empty one, not a fabricated full-coverage claim — mirroring step 4's legacy ledger line for the
+same case. Any other gate refusal, including every other exit-2 reason on a spec that does
+declare identifiers, still blocks the create exactly as above; only the zero-identifier reason
+gets this latitude.
+
+**The value written into the `**Covers:**` field is the exact string the gate just certified** —
+never re-derived, re-typed, or reformatted after the gate exits 0. Nothing between certification
+and the write below is allowed to drift the written string from the certified one.
 
 **The slice title is untrusted input too.** It is derived from the spec's acceptance criteria —
 vault-writable, git-synced prose — and enters the command line below as `--title`. Step 1's shape

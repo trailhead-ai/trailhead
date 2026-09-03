@@ -27,9 +27,11 @@ Exit codes:
        the `--covers` grammar is valid.
     1  violation — bad grammar, an unknown identifier, or a duplicate
        identifier (prints a `reason:` line to stderr).
-    2  error   — fail-closed: empty stdin, no `## Acceptance Criteria`
-       heading in the spec body, or a missing `--covers` argument. NEVER
-       exits 0 when it could not actually certify the drafted list.
+    2  error   — fail-closed: empty or non-UTF-8 stdin, no `## Acceptance
+       Criteria` heading in the spec body, a spec declaring zero criterion
+       identifiers under that heading (the legacy shape, distinct reason
+       line), or a missing `--covers` argument. NEVER exits 0 when it could
+       not actually certify the drafted list.
 """
 
 from __future__ import annotations
@@ -40,7 +42,7 @@ import sys
 
 _AC_HEADING = "## Acceptance Criteria"
 _CRITERION_RE = re.compile(r"^-\s+\*\*(AC\d+)\.\*\*")
-_COVERS_RE = re.compile(r"^AC\d+(,\ ?AC\d+)*$")
+_COVERS_RE = re.compile(r"\AAC\d+(,\ ?AC\d+)*\Z")
 
 
 def _err(msg: str) -> None:
@@ -59,7 +61,7 @@ def parse_criteria(spec_body: str) -> list[str]:
     lines = spec_body.splitlines()
     start = None
     for i, line in enumerate(lines):
-        if line.strip() == _AC_HEADING:
+        if line == _AC_HEADING:
             start = i + 1
             break
     if start is None:
@@ -100,7 +102,11 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--covers", required=True, help="comma-separated ACn identifiers, e.g. 'AC2, AC5'")
     args = ap.parse_args(argv)
 
-    spec_body = sys.stdin.read()
+    try:
+        spec_body = sys.stdin.buffer.read().decode("utf-8")
+    except UnicodeDecodeError as e:
+        _err(f"spec body on stdin is not valid UTF-8: {e}")
+        return 2
     if not spec_body.strip():
         _err("spec body on stdin is empty")
         return 2
@@ -110,6 +116,14 @@ def main(argv: list[str]) -> int:
     except ValueError as e:
         _err(str(e))
         _err("failing closed — cannot certify membership without a criteria list")
+        return 2
+
+    if not criteria:
+        _err(
+            "reason: spec declares no criterion identifiers under "
+            f"{_AC_HEADING!r} — this is the legacy shape a spec predating the "
+            "**ACn.** convention carries"
+        )
         return 2
 
     try:
