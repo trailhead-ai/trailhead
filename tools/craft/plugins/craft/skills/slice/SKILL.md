@@ -86,6 +86,20 @@ instead), task id, and close date (the done task's `updated:` field) — in this
 - **<slice title>** — <value claim>. (`task/<task-id>`, closed <close-date>)
 ```
 
+Where the closed slice's parent body carries a `**Covers:**` field, extend that same line with a
+fifth token naming it verbatim, in this shape:
+
+```
+- **<slice title>** — <value claim>. (`task/<task-id>`, closed <close-date>, covers <covers-value>)
+```
+
+Where the parent carries no `**Covers:**` field — every parent materialized before this field
+existed — the line keeps the four-field shape above unchanged: no coverage field at all, never an
+empty one and never a fabricated full-coverage claim. This is the two-shapes-in-one-vault
+situation this slice creates, in scope here rather than deferred to AC5-AC8: without this
+fallback, every parent written before this change would stop reconciling the moment the new
+field exists.
+
 **This reconcile query is fail-closed too.** If the `lore search` call errors, or its output
 cannot be parsed into a definite list of done slices, treat that as blocking: refuse and report
 the search failure, rather than proceeding as though nothing has shipped — an unreported error
@@ -193,7 +207,9 @@ take the early-stop path described in step 6 above.
 **Before the parent task record is written and before any planning is invoked**, state the
 chosen slice and its value claim — or, on the enabler path, its written justification — and its
 visual-surface call, either the enumerated states or an explicit statement that this slice
-touches no visual surface, to the operator; the call is never left unstated. Whether the slice
+touches no visual surface, to the operator — and, on the same footing as those two, by
+identifier, which spec acceptance criteria the chosen slice makes green; the call is never left
+unstated. Whether the slice
 touches a visual surface is judged against `_shared/slice.md`'s state-coverage reference, a
 judgment call this skill states rather than derives mechanically. Steps 4 and 6 above may
 already have written to the spec record by this point (the
@@ -233,6 +249,25 @@ the loop's live status: `lore record update spec/<spec-name> --unset-label craft
 enabler justification, and anything else composed into it — through `_shared/execute.md`'s
 Phase 5 credential-pattern scrub before any write.
 This precedes every body write this skill makes, not only the first.
+
+The `**Covers:**` field rides the same `lore record create` invocation the value claim, the
+`## Enumerated states` section, the `craft/slice-parent` label, and the `--related spec=` edge
+already ride below — the bold-label field naming, as a comma-separated identifier list and
+nothing else, the spec acceptance criteria step 8 already stated to the operator. It is never a
+follow-up write, for the same reason as the label and the edge: a marker written a moment later
+can miss a concurrent pass that has already run its guard.
+
+**Certify the drafted list before writing it.** Pipe the spec body through the covers gate
+against the drafted `--covers` identifier list, before `lore record create` runs:
+
+```sh
+lore record show spec/<spec-name> | ${CLAUDE_PLUGIN_ROOT}/scripts/covers_gate.py --covers "AC2, AC5"
+```
+
+A non-zero exit refuses the create — nothing is written until the gate exits 0. Name the remedy
+in the same shape steps 3 and 5 above already use for their own refusals: report which
+identifier failed (the gate's `reason:` line on stderr names it) and that the fix is to correct
+the drafted list against the spec's declared acceptance criteria and re-run the gate.
 
 **The slice title is untrusted input too.** It is derived from the spec's acceptance criteria —
 vault-writable, git-synced prose — and enters the command line below as `--title`. Step 1's shape
