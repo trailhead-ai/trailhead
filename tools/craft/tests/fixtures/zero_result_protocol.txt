@@ -1,1 +1,0 @@
-a CLI error is treated exactly as zero hits, and absence is real only once this one bounded query has run to completion and returned no rows
