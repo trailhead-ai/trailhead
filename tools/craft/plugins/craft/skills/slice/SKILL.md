@@ -151,8 +151,8 @@ the exit actually names. On exit 1 (`reason-code: undeclared-covered-identifier`
 stderr names the identifier a ledger line attests coverage for that the spec never declares —
 report it, and that the fix is to correct that ledger line or the spec's declared criteria
 before re-running. On exit 2 with `reason-code: malformed-coverage-token`, the gate's own stderr
-names the ledger line whose coverage token does not parse — report it, and that the fix is to
-correct that line's trailing parenthetical before re-running. Every other exit-2 reason (empty or
+names the malformed coverage token itself — report it, and that the fix is to correct that
+ledger entry's trailing parenthetical before re-running. Every other exit-2 reason (empty or
 non-UTF-8 stdin, no `## Acceptance Criteria` heading) names no identifier or line at all — the
 spec itself is unreadable or malformed, so the remedy is to fix the spec record, not a ledger
 line, before re-running.
@@ -210,12 +210,16 @@ the spec's acceptance criteria are met: the pass reports the spec complete, writ
 choose or materialize another slice on this pass.
 
 **An empty candidate set with `complete-eligible: no` does not terminate.** The union is known
-incomplete — some ledger line attesting coverage carries no coverage token — so completion cannot
-be certified from it. Take the early-stop path below instead, naming which ledger lines carry no
-coverage token, so an operator learns the loop stopped on incomplete information rather than
-reading silence as completion.
+incomplete — some ledger entry attesting coverage carries no coverage token, or does not match
+the canonical bullet shape at all — so completion cannot be certified from it. Take the
+early-stop path below instead, reporting `complete-eligible: no` as the reason the pass stopped
+rather than terminating; the gate emits no per-entry signal, so name only what it certified —
+never invent which ledger entry is at fault, since that would be exactly the hand-parsing this
+gate exists to replace.
 
-**Early stop's entry condition:** if the candidate set is non-empty but step 7 below finds
+**Early stop's entry condition:** this path is also where an empty candidate set whose union is
+not certified complete (`complete-eligible: no`) routes, per the paragraph above — completion
+cannot be certified from it either. Separately: if the candidate set is non-empty but step 7 below finds
 nothing in it that clears the value floor, and no enabler applies either, the loop cannot choose
 a next slice without breaking the quality bar — take this early-stop path instead of choosing
 anyway.

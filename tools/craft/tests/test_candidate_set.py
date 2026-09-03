@@ -47,6 +47,7 @@ UNDECLARED_COVERAGE = (FIXTURES / "spec_candidate_undeclared_coverage.md").read_
     encoding="utf-8"
 )
 MALFORMED_TOKEN = (FIXTURES / "spec_candidate_malformed_token.md").read_text(encoding="utf-8")
+DUPLICATE_TOKEN = (FIXTURES / "spec_candidate_duplicate_token.md").read_text(encoding="utf-8")
 MISSING_HEADING_SPEC = (FIXTURES / "spec_missing_ac_heading.md").read_text(encoding="utf-8")
 ZERO_CRITERIA_SPEC = (FIXTURES / "spec_zero_criteria.md").read_text(encoding="utf-8")
 FORGED_FENCE = (FIXTURES / "spec_candidate_forged_slices_in_fence.md").read_text(
@@ -58,6 +59,12 @@ FORGED_LINE_SEPARATOR = (
 INLINE_MENTION = (FIXTURES / "spec_candidate_inline_slices_mention.md").read_text(
     encoding="utf-8"
 )
+WRAPPED_ENTRIES = (FIXTURES / "spec_candidate_wrapped_ledger_entries.md").read_text(
+    encoding="utf-8"
+)
+NONCANONICAL_BULLET_WITH_FULL_COVERAGE = (
+    FIXTURES / "spec_candidate_noncanonical_bullet_with_full_coverage.md"
+).read_text(encoding="utf-8")
 
 _UNDECLARED_REASON_CODE = "reason-code: undeclared-covered-identifier"
 _MALFORMED_REASON_CODE = "reason-code: malformed-coverage-token"
@@ -169,6 +176,23 @@ def test_malformed_coverage_token_exits_2_with_reason_code():
     assert _MALFORMED_REASON_CODE in r.stderr, r.stderr
 
 
+def test_malformed_coverage_token_remedy_names_the_token_not_a_nonexistent_flag():
+    """This gate has no `--covers` flag, so its stderr must never point an
+    operator at one — even though the underlying validation is reused from
+    `covers_gate.py`, whose own message does name that flag correctly for its
+    own CLI."""
+    r = _run(MALFORMED_TOKEN)
+    assert r.returncode == 2, r.stderr + r.stdout
+    assert "--covers" not in r.stderr, r.stderr
+    assert "ledger coverage token" in r.stderr, r.stderr
+
+
+def test_within_entry_duplicate_coverage_identifier_is_malformed():
+    r = _run(DUPLICATE_TOKEN)
+    assert r.returncode == 2, r.stderr + r.stdout
+    assert _MALFORMED_REASON_CODE in r.stderr, r.stderr
+
+
 # ---- 8. no heading / zero identifiers fail closed --------------------------
 
 
@@ -226,6 +250,57 @@ def test_inline_mid_sentence_slices_mention_does_not_anchor():
     tokens = _tokens(r.stdout)
     assert tokens["candidates"] == "AC1, AC2, AC3, AC4, AC5, AC6, AC7, AC8, AC9"
     assert tokens["complete-eligible"] == "yes"
+
+
+# ---- 11a. logical entries, not physical lines: the real vault ledger shape -------
+
+
+def test_wrapped_ledger_entries_are_scored_as_logical_entries():
+    """Mirrors the real vault ledger shape: each entry wraps its value-claim prose
+    across several physical lines, with the trailing parenthetical on its own
+    continuation line. Scoring physical lines instead of logical entries loses
+    every wrapped entry's coverage entirely — the defect this pins against."""
+    r = _run(WRAPPED_ENTRIES)
+    assert r.returncode == 0, r.stderr + r.stdout
+    tokens = _tokens(r.stdout)
+    assert set(tokens["covered"].split(", ")) == {"AC1", "AC2", "AC5", "AC7"}, tokens
+    assert tokens["candidates"] == "AC3, AC4, AC6, AC8, AC9"
+    assert tokens["complete-eligible"] == "yes"
+
+
+# ---- 11b. a non-canonical bullet marker forces ineligibility, fail-closed --------
+
+
+def test_noncanonical_bullet_marker_forces_ineligible_despite_full_literal_coverage():
+    """A ledger entry marked with the wrong bullet character is invisible to the
+    canonical bullet regex. The eligibility rule must still catch it rather than
+    silently reporting the coverage union complete."""
+    r = _run(NONCANONICAL_BULLET_WITH_FULL_COVERAGE)
+    assert r.returncode == 0, r.stderr + r.stdout
+    tokens = _tokens(r.stdout)
+    assert tokens["candidates"] == "none"
+    assert tokens["complete-eligible"] == "no"
+
+
+# ---- 11c. non-UTF-8 stdin fails closed -------------------------------------
+
+
+def test_non_utf8_stdin_exits_2():
+    """The invalid byte sits inside an otherwise well-formed spec body (a real
+    `## Acceptance Criteria` heading with declared criteria), so the only way
+    this can fail closed is the UTF-8 decode itself — a body that fails for
+    the missing-heading reason instead would pass this test for the wrong
+    reason."""
+    body = FULL_COVERAGE.encode("utf-8")
+    mutated = body.replace(b"AC1", b"AC1\xff\xfe", 1)
+    r = subprocess.run(
+        [sys.executable, str(GATE)],
+        input=mutated,
+        capture_output=True,
+    )
+    stderr = r.stderr.decode(errors="replace")
+    assert r.returncode == 2, stderr + r.stdout.decode(errors="replace")
+    assert "not valid UTF-8" in stderr, stderr
 
 
 # ---- 11. sibling import resolves regardless of the caller's cwd -----------

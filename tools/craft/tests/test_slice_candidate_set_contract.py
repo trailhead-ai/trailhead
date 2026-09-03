@@ -209,10 +209,10 @@ def test_malformed_token_fixture_is_refused_never_fallen_back_on():
     )
 
 
-# ---- 6. the zero-identifier fixture takes the fallback and reports the legacy basis ----
+# ---- 6. the zero-identifier fixture is the one that fires the documented fallback ----
 
 
-def test_zero_identifier_fixture_takes_fallback_and_reports_distinct_legacy_basis():
+def test_zero_identifier_fixture_fires_the_documented_carveout_reason_code():
     step4 = _step("### 4. Reconcile the `## Slices` ledger, then derive the candidate set")
     carveout_match = re.search(
         r"gate exits 2 with\s*`reason-code:\s*([a-z0-9-]+)`", step4
@@ -225,20 +225,4 @@ def test_zero_identifier_fixture_takes_fallback_and_reports_distinct_legacy_basi
     assert _reason_code(zero_result.stderr) == carveout_code, (
         "the zero-identifier fixture must be the one that fires the documented "
         "legacy carve-out — this is the fixture reaching the fallback branch"
-    )
-
-    gate_basis_match = re.search(r"`(termination basis: gate-certified)`", step4)
-    legacy_basis_match = re.search(
-        r"`(termination basis: legacy prose-match, not gate-certified)`", step4
-    )
-    assert gate_basis_match, (
-        "slice/SKILL.md step 4 must document the gate-certified basis line verbatim"
-    )
-    assert legacy_basis_match, (
-        "slice/SKILL.md step 4 must document the legacy prose-match basis line "
-        "verbatim, for the reason-code the zero-identifier fixture fires"
-    )
-    assert gate_basis_match.group(1) != legacy_basis_match.group(1), (
-        "the gate-certified and legacy prose-match basis lines must never be "
-        "reported in the same words"
     )

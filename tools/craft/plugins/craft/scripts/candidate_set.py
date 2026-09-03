@@ -23,16 +23,29 @@ invisible to both the heading search and the ledger scan, and the `## Slices`
 heading is anchored at line start, case-insensitively, so an inline
 mid-sentence mention does not satisfy it.
 
-A `## Slices` ledger line's coverage token is the fifth field of its trailing
+A `## Slices` ledger entry's coverage token is the fifth field of its trailing
 parenthetical:
 
     - **<title>** — <value claim>. (`task/<id>`, closed <date>, covers AC2, AC5)
 
-A line with no coverage token (predates the field) contributes no identifier
-to the covered set and makes the coverage union unverifiable as complete — it
-is a legacy line, never a fabricated full-coverage claim. A spec with no
-`## Slices` section, or one with no ledger lines yet, is an empty ledger: no
-coverage, and eligible, since there is nothing left unaccounted for.
+An entry is scored as a whole — a `- ` bullet plus every continuation line up
+to the next entry or the end of the section — never one physical line at a
+time. The stored ledger shape wraps a long value claim across several
+physical lines, with the trailing parenthetical landing on a continuation
+line of its own; scoring physical lines instead of logical entries would read
+every wrapped entry's continuation lines, including its coverage token, as
+unrelated content and lose its coverage outright.
+
+An entry with no coverage token (predates the field) contributes no
+identifier to the covered set and makes the coverage union unverifiable as
+complete — it is a legacy entry, never a fabricated full-coverage claim. So
+does a line inside `## Slices` that reads as an attempted ledger entry but
+does not match the canonical top-level `- ` bullet — indented, or marked with
+`* ` instead of `- ` — since the bullet regex misses it entirely: this makes
+the union unverifiable too, the same as a legacy entry, rather than leaving
+it invisible to the eligibility rule. A spec with no `## Slices` section, or
+one with no ledger entries yet, is an empty ledger: no coverage, and
+eligible, since there is nothing left unaccounted for.
 
 Stdout on success (exit 0), one token per line, in this order:
 
@@ -42,9 +55,16 @@ Stdout on success (exit 0), one token per line, in this order:
     complete-eligible: yes
 
 `covered:` and `candidates:` print `none` when empty. `complete-eligible:` is
-`yes` only when every ledger line carries a coverage token; a single legacy
-line makes it `no`, because the union is then known to be incomplete and no
-caller may report the spec complete on it.
+`yes` only when every ledger entry carries a coverage token and every entry
+in the section matched the canonical bullet shape; a single legacy entry, or
+a single non-canonical bullet marker, makes it `no`, because the union is
+then known to be incomplete or unverifiable and no caller may report the
+spec complete on it.
+
+A within-entry duplicate identifier (`covers AC1, AC1`) is rejected the same
+way `covers_gate.py` rejects a duplicate in a drafted `--covers` value,
+because both go through the shared `parse_covers`: fail-closed as a
+malformed coverage token, not silently deduplicated.
 
 A `reason:` line printed to stderr may echo raw ledger prose read from the
 spec body. It is for a human reading stderr and is never persisted — only the
@@ -59,7 +79,7 @@ Exit codes:
     2  fail-closed — empty or non-UTF-8 stdin; no `## Acceptance Criteria`
        heading; a spec declaring zero criterion identifiers under that
        heading (reuses `covers_gate.py`'s
-       `reason-code: zero-criterion-identifiers`); or a ledger line whose
+       `reason-code: zero-criterion-identifiers`); or a ledger entry whose
        coverage token does not parse as an identifier list
        (`reason-code: malformed-coverage-token`). NEVER exits 0 when the
        derivation could not be certified.
@@ -85,6 +105,7 @@ from covers_gate import (  # noqa: E402
 
 _SLICES_HEADING_RE = re.compile(r"^## Slices$", re.IGNORECASE)
 _LEDGER_BULLET_RE = re.compile(r"^- ")
+_LEDGER_NONCANONICAL_MARKER_RE = re.compile(r"^\s*[-*]\s")
 _LEDGER_TRAILING_PAREN_RE = re.compile(r"\(([^()]*)\)\s*$")
 _LEDGER_FIELDS_RE = re.compile(r"^`task/[^`]+`, closed [^,]+(?:, covers (?P<covers>.+))?$")
 
@@ -107,9 +128,21 @@ def _err(msg: str) -> None:
 def parse_ledger(spec_body: str, criteria: list[str]) -> tuple[list[str], bool]:
     """Return (covered identifiers in first-seen order, eligible).
 
-    `eligible` is True only when every ledger line found carries a coverage
-    token. A spec with no `## Slices` section, or one with no ledger lines,
-    is an empty ledger: no coverage, eligible.
+    A ledger entry begins at a top-level `- ` bullet within `## Slices` and
+    continues through its continuation lines until the next entry begins or
+    the section ends — an entry is scored as a whole, never one physical
+    line at a time, so a value claim that wraps across several physical
+    lines (the stored ledger shape) is assembled before its trailing
+    parenthetical is read.
+
+    `eligible` is True only when every entry found carries a coverage token
+    and the section holds no other non-blank content. A line that reads as
+    an attempted ledger entry but does not match the canonical `- ` bullet
+    (indented, or marked `* `) is exactly such content: the bullet regex
+    misses it, so it never becomes an entry, but its presence still makes
+    the coverage union unverifiable and is fail-closed here rather than
+    silently ignored. A spec with no `## Slices` section, or one with no
+    ledger entries, is an empty ledger: no coverage, eligible.
 
     Raises UndeclaredCoverageError if a coverage token names an identifier
     not in `criteria`, or MalformedCoverageTokenError if a coverage token
@@ -131,32 +164,62 @@ def parse_ledger(spec_body: str, criteria: list[str]) -> tuple[list[str], bool]:
     covered: list[str] = []
     seen: set[str] = set()
     eligible = True
-    for i in range(start, len(lines)):
-        if fenced[i]:
-            continue
-        line = lines[i]
-        if line.startswith("## "):
-            break
-        if not _LEDGER_BULLET_RE.match(line):
-            continue
-        paren = _LEDGER_TRAILING_PAREN_RE.search(line)
+    entry_lines: list[str] = []
+
+    def finalize_entry() -> None:
+        nonlocal eligible
+        if not entry_lines:
+            return
+        text = " ".join(l.strip() for l in entry_lines)
+        paren = _LEDGER_TRAILING_PAREN_RE.search(text)
         if paren is None:
             eligible = False
-            continue
+            return
         fields = _LEDGER_FIELDS_RE.match(paren.group(1))
         if fields is None or fields.group("covers") is None:
             eligible = False
-            continue
+            return
         try:
             identifiers = parse_covers(fields.group("covers"))
         except ValueError as e:
-            raise MalformedCoverageTokenError(str(e)) from e
+            raise MalformedCoverageTokenError(
+                str(e).replace("--covers value", "ledger coverage token")
+            ) from e
         for identifier in identifiers:
             if identifier not in criteria:
                 raise UndeclaredCoverageError(identifier)
             if identifier not in seen:
                 seen.add(identifier)
                 covered.append(identifier)
+
+    in_noncanonical = False
+    for i in range(start, len(lines)):
+        if fenced[i]:
+            continue
+        line = lines[i]
+        if line.startswith("## "):
+            break
+        if not line.strip():
+            continue
+        if _LEDGER_BULLET_RE.match(line):
+            finalize_entry()
+            entry_lines = [line]
+            in_noncanonical = False
+            continue
+        if _LEDGER_NONCANONICAL_MARKER_RE.match(line):
+            finalize_entry()
+            entry_lines = []
+            eligible = False
+            in_noncanonical = True
+            continue
+        if in_noncanonical or not entry_lines:
+            # Either the continuation of an already-flagged non-canonical
+            # entry, or ordinary prose with no bullet open yet (e.g. a
+            # placeholder line before the first slice ships) — neither is
+            # ledger structure, so neither contributes to an entry.
+            continue
+        entry_lines.append(line)
+    finalize_entry()
     return covered, eligible
 
 
