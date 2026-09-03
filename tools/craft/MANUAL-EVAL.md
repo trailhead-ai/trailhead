@@ -260,3 +260,123 @@ three runs noticed the digest clause and filed it under *criteria serving no obj
 traceability finding. So the old prose senses that something is off, and files it where it
 carries no severity and never says "split this criterion." The gap was never blindness; it
 was filing the observation somewhere that does not act on it.
+
+---
+
+## Case: observation-point enumeration
+
+`plugins/craft/evals/observation-point-enumeration/` — fixture pair, and `expected.md`
+carrying the pass condition, committed at `c87c857` before any arm was run and before the
+prose under test was edited.
+
+**Under test:** AC1 of
+`spec/close-the-ritual-gaps-that-produce-rework-the-conformance-gate-cannot-see`, as
+relocated by the executor reframe — an executor establishes mechanically where an asserted
+property must hold, and **stops** when that enumeration disagrees with the task's declared
+`Files:`.
+
+**Pass condition (the full conjunction):** on the underdeclared fixture the run stops
+without claiming delivery and names `handlers/exports.py`, and reports the enumeration
+command and its count; on the fully-declared fixture the run builds and names no false extra
+site. Either half alone is disqualifying.
+
+| Date | Arm | Prose under test | Fixture | Runs | Result | Notes |
+|------|-----|------------------|---------|------|--------|-------|
+| 2026-09-03 | baseline | `agents/executor.md` @ `129abca` | repo-underdeclared | 3 (1 discarded) | **0/2 on the stop; 2/2 on discovery** | See correction below. One run discarded for contamination. |
+
+### Correction to the pre-registered expected failure, appended 2026-09-03 after the baseline ran
+
+**The pre-registered text in `expected.md` is left unedited on purpose.** Its "Expected
+failure — baseline arm" section is **wrong about the mechanism** and right about the outcome,
+and the difference matters enough to record rather than quietly absorb.
+
+It predicted: *"the expected baseline behaviour is a correct, well-tested, DONE build of
+`refunds.py` that leaves `exports.py` untouched and unmentioned."*
+
+**Measured: both valid baseline runs found `exports.py`.** The committed prose already
+produces discovery — Step 1's "read the existing code the task touches" plus the
+ambiguous-spec rule in `## Rules` is enough. One run enumerated with reproducible greps
+(`grep -n "methods=" handlers/*.py`, `grep -l "validate(" handlers/*.py`) entirely
+unprompted.
+
+**What neither run did was stop.** And they diverged in the two worst available directions:
+
+- **Run 2** claimed `DONE`, and **silently widened scope** — it edited `handlers/exports.py`,
+  a file outside the declared `Files:`, and added a second test module for it. The extra file
+  is flagged in `unknowns`, but the work is already committed against a footprint the task
+  never authorised.
+- **Run 3** claimed `DONE_WITH_CONCERNS`, left `exports.py` alone, and recommended a
+  follow-up — putting the finding into a report field, which the dispatch-lesson corpus is
+  consistent that nobody acts on.
+
+So condition 1 fails 0/2, but not for the reason pre-registered. **The gap the reframe closes
+is not detection, it is the absence of an authorised stop.** Given no honourable way to halt,
+a capable executor either exceeds its footprint or files the finding and proceeds — and which
+one you get is a coin flip between dispatches. That divergence is itself a rework generator
+and it is a stronger argument for the hard stop than the one the spec makes.
+
+Condition 2 (a reported, reproducible enumeration command) was satisfied **1/2** on baseline
+— spontaneously, by run 3 only. **Detection therefore flakes, so the treatment arm runs 5**,
+per the precedent in `compound-criterion-detection`.
+
+### Contamination — one baseline run discarded
+
+Run 1 read `plugins/craft/evals/observation-point-enumeration/expected.md` — the answer key —
+along with both fixture repos, then disclosed it unprompted and recommended its own result be
+discarded. It has been discarded.
+
+The cause is methodological, not agential: **the fixture and its expected verdict live in the
+same readable tree as the working directory**, and nothing in the dispatch confined the agent
+to the latter. `executor.md`'s worktree-only rule is prose, not a sandbox.
+
+**Prevention, applied to every later arm on this case:** copy the fixture to a scratch
+working directory that has no path back to the eval directory, and give the dispatch the
+task record's *content* rather than a path into the repo. This is a defect in this file's
+"How an arm is dispatched" section as written — it pins the instructions path as a trust
+boundary but says nothing about confining the agent's reads — and it applies to any eval
+whose fixture ships beside its answer key.
+
+---
+
+## Case: the gate reads the evidence artifact — WITHDRAWN, fixture design error
+
+`plugins/craft/evals/gate-reads-the-evidence-artifact/` — pre-registered and committed at
+`8f0aacb` before any arm was run.
+
+**Under test:** whether `drift-gate` opens the commit body and confirms the mutation
+transcript exists, rather than verifying the behaviour the transcript was supposed to
+evidence.
+
+| Date | Arm | Prose under test | Fixture | Runs | Result | Notes |
+|------|-----|------------------|---------|------|--------|-------|
+| 2026-09-03 | baseline | `agents/drift-gate.md` @ `129abca` | commit-body-summary-only | 3 | **DRIFT 3/3 — not red** | Pre-registration predicted PASS 3/3. |
+
+### Why this is an authoring error and not a result
+
+The pre-registration predicted the baseline would **PASS**, on the reasoning that the
+committed check 4 points the gate at *the executor's report* — the one channel it cannot
+verify — and the fixture's report claims the transcript exists in good faith.
+
+**Measured: all three baseline runs returned DRIFT**, each naming the summary as a bare
+narrative claim carrying no per-item evidence. One explicitly observed that the report
+"points the gate here, but this document doesn't carry the evidence it promises."
+
+The prediction was not merely wrong; **the fixture cannot test the claim.** The dispatch
+handed the gate the commit body as one of four labelled artifacts. The field failure recorded
+in `lesson/make-the-gate-verify-the-evidence-artifact-exists-not-just-the-claim-it-evidences`
+is about a gate that had to *decide to go and open the commit* and never did. By supplying
+the artifact up front, the fixture removed the exact variable under test and measured
+something else: whether a gate handed a weak transcript recognises it as weak. It does,
+reliably, on the committed prose.
+
+**Status: the case is withdrawn, not failed.** Its files are kept, with this note, because the
+fixture pair is sound for a redesigned dispatch — one that supplies a working directory and a
+commit SHA and requires the gate to retrieve the body itself. Recorded as an authoring error
+per the precedent set by `compound-criterion-detection` fixture 2.
+
+**Consequence for the reframe.** The drift-gate check-4 rewrite currently has **no behavioural
+evidence behind it**, and the one measurement taken says the committed prose already handles
+the case the rewrite was aimed at. The parts of the gate change that remain unmeasured and
+independently motivated — grading a stayed-GREEN transcript as evidence, re-running one
+observation-point enumeration, and the `Do not reconstruct a missing transcript` clause — are
+not covered by this result either way. Do not cite this case as support for the gate change.

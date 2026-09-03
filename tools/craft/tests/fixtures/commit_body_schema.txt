@@ -1,0 +1,20 @@
+## What I built
+<2-3 sentences>
+
+## Observation points
+<per property: the command, its result count, and the sites it enumerated>
+
+## Mutation transcript
+<per test-contract item: test node id; kind applied and the exact edit; the named
+assertion that failed and its message; restore; empty diff against the scratch
+baseline. A stayed-GREEN item records which of the three explanations applies and
+the evidence for it.>
+
+## Files changed
+<git diff --stat output>
+
+## Self-review findings
+<anything you noticed and fixed, or "none">
+
+## Surprises / concerns
+<invalidated assumptions, scope-creep risk, follow-ups>
