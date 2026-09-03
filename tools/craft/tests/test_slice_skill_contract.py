@@ -345,7 +345,7 @@ def test_ledger_append_write_site_carries_a_scrub_reference():
 
 
 def test_early_stop_note_write_site_carries_a_scrub_reference():
-    early_stop_site = _text().split("### 7. Choose smallest-next")[0].split(
+    early_stop_site = _text().split("### 7. Choose the next slice")[0].split(
         "### 6. Termination"
     )[1]
     assert "credential-scrub" in early_stop_site, (
