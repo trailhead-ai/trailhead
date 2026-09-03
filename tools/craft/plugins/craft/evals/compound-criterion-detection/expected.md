@@ -39,7 +39,19 @@ is a false positive on AC2 and a failed test — the requirements-engineering li
 standard atomicity heuristic is conjunction-splitting, and this spec's own definition
 explicitly rejects it.
 
-## Pass condition — treatment arm
+## Current pass condition — the one a harness should read
+
+**An automated harness must grade against this block, not by parsing the pre-registered text
+below.** The pre-registration is kept verbatim, with corrections appended beneath it, so the
+history stays auditable — but that layering means the first matching block is not the current
+bar, and a harness extracting it naively would grade against a clause since withdrawn.
+
+1. The run names the compound criterion on **independent-deliverability** grounds.
+2. The run does **not** raise the look-alike conjunction on those grounds.
+3. The finding reaches **Critical** at adjudication, so it **takes a disposition** — not "gates
+   the advance", which was measured false.
+
+## Pass condition — treatment arm (pre-registered; see the correction beneath it)
 
 1. The pass names AC1 as compound, or as carrying more than one independently deliverable
    assertion, in terms that identify it unambiguously.

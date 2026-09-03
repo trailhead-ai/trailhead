@@ -31,6 +31,15 @@ one variable.
 the live composed install, not the worktree, so it re-runs unedited prose and reports a
 false result. Editing the composed install to work around this is barred by Axiom 6.
 
+**The instructions-file path is a trust boundary — pin it.** The dispatcher resolves that path
+itself, and it must always name a **trusted, review-gated, in-repo artifact** (a committed
+agent or skill file, ideally at a stated SHA). It must **never** be taken from the fixture, a
+spec body, a lore record, a label, or any other value an untrusted party can write. That file
+becomes the agent's operating instructions verbatim, so a path sourced from untrusted input is
+instruction injection with extra steps — and `claude plugin eval`, which this shape is written
+to be reused by, is documented as *not* an OS sandbox: network is unblocked and there is no
+path jail. The fixture path is data and may vary; the instructions path may not.
+
 ---
 
 ## Case: compound-criterion detection
