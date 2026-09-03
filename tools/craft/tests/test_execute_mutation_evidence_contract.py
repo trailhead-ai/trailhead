@@ -72,7 +72,7 @@ NEXT_TASK_HEADING = "### 5. Update the task graph"
 DISPATCH_EXPECTS_START = "The agent expects four things:"
 DISPATCH_EXPECTS_END = "**4. Applicable dispatch lessons**"
 
-STEP3_HEADING = "## Step 3: Enumerate the observation points"
+STEP3_HEADING = "## Step 3: Establish the observation points — and stop if they disagree"
 STEP4_HEADING = "## Step 4: Repo conventions"
 STEP8_HEADING = "## Step 8: Verify, then mutation-check every contract item"
 STEP9_HEADING = "## Step 9: Commit — with the transcript in the body"
@@ -557,7 +557,7 @@ def test_step3_stops_when_the_enumeration_disagrees_with_the_files_list():
     _pin_in(
         _step3_section(),
         "executor.md#step-3",
-        "stop and report\n`NEEDS_CONTEXT`".replace("\n", " "),
+        "**Stop and report `NEEDS_CONTEXT`**",
         "The hard stop is the whole value of the step. Reporting the "
         "disagreement and building anyway leaves the finding competing for "
         "attention in a report, and the lesson corpus is consistent that "
