@@ -112,9 +112,12 @@ from limits import bucket_for
 
 def test_within_budget_is_enqueued():
     q.QUEUE.clear()
+    b = bucket_for("a1")
+    b.tokens = 1
     r = handle_ingest({"account_id": "a1", "payload": "p", "received_at": 0.0})
     assert r["status"] == 202
     assert len(q.QUEUE) == 1
+    assert b.tokens == 0, "bucket not consulted for account a1"
 
 
 def test_exhausted_budget_is_rejected_and_not_enqueued():

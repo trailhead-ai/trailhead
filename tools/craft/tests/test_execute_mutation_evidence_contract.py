@@ -9,11 +9,12 @@ carries a pointer and a summary. Evidence returned only in the reply is
 evidence the gate structurally cannot see, so a correct build reads as
 unevidenced and burns a gate cycle being re-derived — see
 [[lesson/require-the-mutation-transcript-in-the-commit-body-a-conformance-gate-reads-the-commit-never-the-reply]].
-Correspondingly, `drift-gate` is pinned to OPEN the commit body and confirm the
-transcript is there, phrased as its own instruction, because a gate asked only
-to verify the behaviour will verify the behaviour and never notice the evidence
-is missing —
-[[lesson/make-the-gate-verify-the-evidence-artifact-exists-not-just-the-claim-it-evidences]].
+`drift-gate` names the commit body as where it reads that transcript, for
+consistency with where the executor now writes it. It is deliberately **not**
+pinned to be *told* to open the artifact: a pre-registered fixture pair measured
+the committed gate already doing so unprompted, 6/6, so that instruction would
+codify a fix for a gap that does not exist. See the withdrawn-then-narrowed case
+in `MANUAL-EVAL.md`.
 
 **The mutation kind is named, not chosen.** A dispatch that says only "break the
 behaviour" gets deletion every time, because deletion is the cheapest mutation
@@ -681,38 +682,7 @@ def test_review_table_names_the_evidence_check_for_small_slices():
 # --- The gate reads the artifact -------------------------------------------
 
 
-def test_gate_opens_the_commit_body_rather_than_trusting_the_report():
-    _pin_in(
-        _what_you_check_section(),
-        "drift-gate.md#what-you-check",
-        "open the commit body and confirm the",
-        "A gate pointed at the executor's report is pointed at the one channel "
-        "it structurally cannot verify. The instruction must name the artifact "
-        "and the act of opening it.",
-    )
 
-
-def test_gate_is_told_why_the_artifact_check_is_its_own_instruction():
-    _pin_in(
-        _what_you_check_section(),
-        "drift-gate.md#what-you-check",
-        "never notice that the evidence it was supposed to read does not exist",
-        "Measured in the field: a gate asked only to verify the findings "
-        "verified the findings and missed a fabricated evidence location. The "
-        "reason has to travel with the instruction or it reads as redundant "
-        "with check 1 and gets collapsed into it.",
-    )
-
-
-def test_gate_does_not_reconstruct_a_missing_transcript():
-    _pin_in(
-        _what_you_check_section(),
-        "drift-gate.md#what-you-check",
-        "Do not reconstruct a missing transcript",
-        "Re-running the mutations itself converts a reporting defect into a "
-        "silent pass and burns exactly the cycle the transcript exists to "
-        "save. This is the observed baseline behaviour, not a hypothesis.",
-    )
 
 
 def test_gate_grades_a_stayed_green_transcript_as_evidence():
