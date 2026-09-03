@@ -50,8 +50,11 @@ no severity field, so the pass cannot rate its own finding.
 
 | Date | Arm | Prose under test | Runs | Result | Notes |
 |------|-----|------------------|------|--------|-------|
-| 2026-09-03 | baseline | `agents/consistency-auditor.md` @ `60e22bd` | 3 | **RED (0/3 on the full condition; 1/3 on bare detection)** | See below. |
-| — | treatment | pending Tasks 2-4 | 5 | _pending_ | |
+| 2026-09-03 | baseline | `agents/consistency-auditor.md` @ `60e22bd` | 3 | **RED — 0/3 on the full condition; 1/3 on bare detection** | Fixture 1. See below. |
+| 2026-09-03 | treatment | `agents/consistency-auditor.md` @ `e44b49c` | 5 | **5/5 detection — but the fixture was contaminated** | Fixture 1. Recall, not reasoning. See below. |
+| 2026-09-03 | treatment | `agents/consistency-auditor.md` @ `e44b49c` | 3 | **3/3 detection under inverted phrasing** | Fixture 2. Generalization confirmed; its negative case was unsound. |
+| 2026-09-03 | treatment | `agents/consistency-auditor.md` @ `e44b49c` | 3 | **3/3 on the full anti-heuristic condition** | Fixture 3. Both criteria carry "and"; separated correctly every run. |
+| — | severity | `skills/gauntlet/SKILL.md` | — | _pending Task 4_ | 0/11 runs so far — the pass has no severity field by design. |
 
 ### Baseline evidence, 2026-09-03
 
@@ -84,3 +87,77 @@ half is measurable rather than assumed.
 
 **Containment.** Fixture is self-contained — zero `[[wikilink]]`s, no cross-reference
 resolving to a real vault record. Confirmed by grep before the runs.
+
+### Treatment evidence, 2026-09-03 — and two defects in the test material
+
+The treatment arm took three fixtures to produce a trustworthy result. Both intermediate
+failures were defects in the *fixtures*, found by the pass under test. That is worth stating
+plainly rather than smoothing over: the check caught bad material twice before the material
+was good enough to judge the check.
+
+**Fixture 1 — `spec-compound-criterion.md`. 5/5 detection, and not admissible on its own.**
+
+All five runs named the compound criterion in the new output slot on deliverability grounds,
+and all five spared the look-alike. But three runs volunteered that they recognized the
+examples: one called the compound criterion "the spec's own worked example... reproduced
+near-verbatim", another "the pattern's own worked example".
+
+They were right. The fixture's two signal criteria were the auditor prose's own worked pair
+with the nouns swapped, because both were drafted from the same source during the same slice.
+Worse, the surface cues correlated perfectly with the answers — the compound one contained
+"and", the safe one contained "with". A pass keying on surface form scores 5/5 there having
+learned nothing, so **fixture 1 cannot carry the anti-heuristic claim**.
+
+What it does establish, and keeps: the mechanism fires, the output slot is used, and the
+severity field stayed absent.
+
+**Fixture 2 — `spec-inverted-cues.md`. Surface cues inverted against the answers.**
+
+The compound criterion was phrased with "with" (the shape fixture 1 taught as safe); the
+intended-safe one with "and".
+
+- **Compound criterion caught 3/3.** Detection generalizes. Two runs reasoned explicitly
+  against the taught example rather than from it — "unlike the shift-time example, ranking
+  isn't a validation guard on the search, it's an additional, independently useful behavior."
+  That is the rule being applied, not matched.
+- **The intended-safe criterion was flagged 2/3** — and on re-reading, the runs were right
+  and the expected verdict was wrong. "A ticket over the limit is rejected, and the engineer
+  is shown the reason" *is* separable: the gate ships before the message. Poor, but
+  deliverable. It was authored as a clean negative and graded as one; it is a borderline case.
+  **Recorded as an authoring error, not a pass failure.**
+
+**Fixture 3 — `spec-inseparable-conjunction.md`. The anti-heuristic's negative direction.**
+
+Built so splitting the safe criterion is *incoherent* rather than merely undesirable, and so
+**both** signal criteria carry "and" — surface form therefore carries zero information.
+
+- Safe criterion (claiming assigns the engineer *and* removes the ticket from the unassigned
+  queue — one state change described twice): **spared 3/3**.
+- Compound criterion (queue shows the owner *and* sends a daily digest): **caught 3/3**.
+
+Two of three runs recorded the negative decision explicitly rather than omitting it — one
+under a "Considered and rejected" heading: *"surface 'and,' not compound... the removal is
+not separately shippable from the assignment it enacts; one assertion."* A visible negative
+decision is what makes this judgment call auditable by an operator instead of trusted.
+
+One run reached the right answer by a route the prose never taught, noting the compound
+criterion's two halves serve *different objectives* — "which is itself evidence they aren't
+one assertion."
+
+**Read.** Detection generalizes beyond the taught examples, and the anti-heuristic holds when
+surface conjunction is decorrelated from the answer. The false-positive lean behaves as
+designed: it fires on genuinely borderline cases (fixture 2) and not on inseparable pairs
+(fixture 3).
+
+**Limitations, stated rather than buried.**
+- Three fixtures, eleven runs, one model tier. Nothing here speaks to other tiers.
+- The borderline band is real and unmeasured. Fixture 2's rejected-with-reason case split
+  2-1, and no fixture maps where that band begins or ends.
+- Fixture 1 contains an accidental contradiction found during these runs — it requires email
+  notification under a stdlib-only constraint. Harmless to the conditions under test, and
+  left in place: the runs that found it are recorded above, and editing a fixture after it
+  has been run invalidates its own evidence.
+- **Severity remains unproven: 0/11.** No run has rated anything Critical, because the pass
+  structurally cannot. Until Task 4 binds the finding to the Critical bar at adjudication, a
+  detected compound criterion still gates nothing — which is the half of AC1 that makes the
+  other half matter.
