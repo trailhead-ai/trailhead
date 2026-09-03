@@ -14,10 +14,10 @@ observed GREEN again. Restores were verified clean.
 
 ## Files changed
 
- ingest.py      | 4 +++-
- limits.py      | 9 +++++++++
- test_ingest.py | 28 ++++++++++++++++++++++++++++
- 3 files changed, 41 insertions(+), 1 deletion(-)
+ ingest.py      |  4 ++++
+ limits.py      | 12 ++++++++++++
+ test_ingest.py | 31 +++++++++++++++++++++++++++++++
+ 3 files changed, 47 insertions(+)
 
 ## Self-review findings
 
