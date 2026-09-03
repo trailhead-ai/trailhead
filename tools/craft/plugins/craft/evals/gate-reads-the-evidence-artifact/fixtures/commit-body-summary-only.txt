@@ -1,0 +1,28 @@
+feat: reject bursts above the per-account rate limit
+
+## What I built
+
+Wired the existing per-account token bucket into the ingest endpoint. A request from an
+account with no tokens left returns 429 and is not enqueued; the bucket refills over
+elapsed time so the account recovers without operator action.
+
+## Mutation transcript
+
+All three test-contract items were mutation-checked. Each mutation was applied, the
+corresponding test was observed to go RED, the code was restored, and the suite was
+observed GREEN again. Restores were verified clean.
+
+## Files changed
+
+ ingest.py      | 4 +++-
+ limits.py      | 9 +++++++++
+ test_ingest.py | 28 ++++++++++++++++++++++++++++
+ 3 files changed, 41 insertions(+), 1 deletion(-)
+
+## Self-review findings
+
+none
+
+## Surprises / concerns
+
+none
