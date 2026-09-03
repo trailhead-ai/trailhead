@@ -263,11 +263,15 @@ can miss a concurrent pass that has already run its guard.
 
 **The drafted `--covers` value is untrusted input too.** It is derived from the spec's declared
 `## Acceptance Criteria` identifiers — vault-writable, git-synced content — and enters the
-command line below as a `--covers` argument. Step 1's shape check is scoped to `<spec-name>`
-only, so this is a separate site: apply the same precedent `_shared/execute.md` already sets for
-vault-derived content entering a command line — the drafted value is stripped of single quotes,
-newlines, backticks, and `$` before it is quoted, matching the treatment the slice title receives
-below.
+command line below as a `--covers` argument. Unlike the slice title below, `--covers` is not
+free text — its grammar is fixed as comma-separated `ACn` tokens and nothing else — so it does
+not get the free-text scrub the title receives. Step 1's shape check is scoped to `<spec-name>`
+only, so this is a separate site, but the same kind of site: apply that same positive allow-list
+precedent, sized to this value's own grammar. Validate the drafted value, **before any
+substitution**, against the safe-value shape `^AC\d+(, ?AC\d+)*$`. A value that fails the shape
+check is never substituted, quoted, or escaped in — refuse loudly and stop, exactly as step 1
+does, rather than falling back to a scrub-and-substitute that a value outside this shape (a
+stray `"`, prose, anything else) could still slip past.
 
 **Certify the drafted list before writing it.** Pipe the spec body through the covers gate
 against the drafted `--covers` identifier list, before `lore record create` runs:

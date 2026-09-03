@@ -36,6 +36,12 @@ ZERO_CRITERIA_SPEC = (FIXTURES / "spec_zero_criteria.md").read_text(encoding="ut
 LOWERCASE_HEADING_SPEC = (FIXTURES / "spec_heading_case_insensitive.md").read_text(encoding="utf-8")
 FENCED_ABOVE_SPEC = (FIXTURES / "spec_fenced_example_above_section.md").read_text(encoding="utf-8")
 FENCED_INSIDE_SPEC = (FIXTURES / "spec_fenced_criteria_inside_section.md").read_text(encoding="utf-8")
+FORGED_HEADING_SPEC = (
+    FIXTURES / "spec_forged_heading_via_line_separator.md"
+).read_text(encoding="utf-8")
+FORGED_EMPTY_SECTION_SPEC = (
+    FIXTURES / "spec_forged_empty_section_via_line_separator.md"
+).read_text(encoding="utf-8")
 
 _ZERO_CRITERIA_REASON_CODE = "reason-code: zero-criterion-identifiers"
 
@@ -285,3 +291,57 @@ def test_reason_code_absent_on_non_utf8_stdin_exit_2():
     r = subprocess.run(cmd, input=b"\xff\xfe not valid utf-8", capture_output=True)
     assert r.returncode == 2, r.stderr + r.stdout
     assert _ZERO_CRITERIA_REASON_CODE.encode() not in r.stderr, r.stderr
+
+
+# ---- CommonMark line grammar: str.splitlines() over-splits ---------------
+#
+# `str.splitlines()` treats U+2028 LINE SEPARATOR, U+2029 PARAGRAPH
+# SEPARATOR, NEL, \v, and \f as line breaks. CommonMark (and every renderer
+# a human reads the spec in) does not — only \r\n, \r, and \n end a line.
+# A heading or bullet hidden behind one of these characters inside what
+# looks like one ordinary prose paragraph must NOT be treated as real
+# structure by the parser.
+
+
+def test_forged_heading_hidden_behind_line_separator_never_certifies_the_fabricated_id():
+    """The fixture hides a fake `## Acceptance Criteria` heading and a fake
+    `- **AC99.**` bullet behind U+2028 inside a prose paragraph, above the
+    real section which declares only AC1. A parser that treats U+2028 as a
+    line break anchors on the fake heading and wrongly certifies AC99."""
+    r = _run("AC99", FORGED_HEADING_SPEC)
+    assert r.returncode != 0, (
+        "the gate must never certify AC99 — it exists only behind a hidden "
+        f"U+2028 line-separator, not as real CommonMark structure: {r.stdout}"
+    )
+
+
+def test_forged_heading_hidden_behind_line_separator_still_certifies_the_real_id():
+    r = _run("AC1", FORGED_HEADING_SPEC)
+    assert r.returncode == 0, r.stderr + r.stdout
+
+
+def test_forged_empty_section_hidden_behind_paragraph_separator_does_not_trigger_legacy_carveout():
+    """The fixture hides a fake, bullet-less `## Acceptance Criteria`
+    heading behind U+2029 inside a prose paragraph, above the real section
+    which declares AC1 and AC2. A parser that treats U+2029 as a line break
+    anchors on the fake empty heading and wrongly emits the legacy
+    zero-criterion-identifiers carve-out on a spec that really does declare
+    criteria — silently and durably skipping coverage recording."""
+    r = _run("AC1", FORGED_EMPTY_SECTION_SPEC)
+    assert r.returncode == 0, r.stderr + r.stdout
+    assert _ZERO_CRITERIA_REASON_CODE not in r.stderr, r.stderr
+
+
+def test_forged_empty_section_hidden_behind_paragraph_separator_certifies_both_real_ids():
+    r = _run("AC1,AC2", FORGED_EMPTY_SECTION_SPEC)
+    assert r.returncode == 0, r.stderr + r.stdout
+
+
+def test_windows_line_endings_still_parse_correctly():
+    r = _run("AC1,AC2", NINE_CRITERIA_SPEC.replace("\n", "\r\n"))
+    assert r.returncode == 0, r.stderr + r.stdout
+
+
+def test_bare_cr_line_endings_still_parse_correctly():
+    r = _run("AC1,AC2", NINE_CRITERIA_SPEC.replace("\n", "\r"))
+    assert r.returncode == 0, r.stderr + r.stdout

@@ -267,3 +267,63 @@ def test_documented_covers_field_example_certifies_against_the_real_gate():
         f"slice/SKILL.md's documented **Covers:** field example {covers_value!r} "
         f"must certify against a spec declaring those criteria: {result.stderr}{result.stdout}"
     )
+
+
+# ---- --covers gets a strict positive allow-list, not the free-text scrub -----
+#
+# `--covers` is not free-form prose — its grammar is fixed as comma-separated
+# `ACn` tokens and nothing else. Step 9 must validate the drafted value
+# against that grammar's own shape, before substitution, mirroring the
+# `<spec-name>` allow-list precedent (step 1) rather than the free-text scrub
+# the slice title receives below it.
+
+
+def _documented_covers_shape() -> str:
+    step9 = _step("### 9. Materialize the parent task")
+    match = re.search(r"--covers.*?shape `([^`]+)`", step9, re.DOTALL)
+    assert match, (
+        "slice/SKILL.md step 9 must document a positive allow-list shape for "
+        "the drafted --covers value, the way step 1 documents one for "
+        "<spec-name>"
+    )
+    return match.group(1)
+
+
+def test_step9_documents_a_positive_allowlist_shape_for_covers_before_substitution():
+    step9 = _step("### 9. Materialize the parent task")
+    assert re.search(r"before\s+(any\s+)?substitution", step9, re.IGNORECASE), (
+        "slice/SKILL.md step 9 must state the --covers allow-list check runs "
+        "before substitution, mirroring step 1's <spec-name> guard"
+    )
+
+
+def test_covers_allowlist_shape_accepts_the_documented_worked_example():
+    shape = _documented_covers_shape()
+    assert re.match(shape, "AC2, AC5"), (
+        f"the documented --covers allow-list shape {shape!r} must accept the "
+        "worked example value 'AC2, AC5'"
+    )
+
+
+def test_covers_allowlist_shape_rejects_a_value_carrying_an_unescaped_double_quote():
+    """HIGH-3 repro: the call site wraps the value in double quotes
+    (`--covers "AC2, AC5"`), so a value carrying an unescaped `"` terminates
+    the argument early and exposes the rest of the line as unquoted shell
+    tokens. The free-text scrub used for the slice title (strips only `'`,
+    newline, backtick, `$`) never strips `"` and would let this value
+    through untouched — the strict allow-list must reject it outright."""
+    shape = _documented_covers_shape()
+    malicious = 'AC2, AC5"; touch pwned #'
+    assert re.match(shape, malicious) is None, (
+        f"the documented --covers allow-list shape {shape!r} must reject a "
+        f"value carrying an unescaped double quote: {malicious!r}"
+    )
+
+
+def test_covers_allowlist_shape_rejects_free_text_prose():
+    shape = _documented_covers_shape()
+    prose = "this covers the login flow"
+    assert re.match(shape, prose) is None, (
+        f"the documented --covers allow-list shape {shape!r} must reject "
+        f"free-text prose that carries no ACn token: {prose!r}"
+    )

@@ -27,6 +27,12 @@ info string) is invisible to both the heading search and the criterion
 scan, so a worked example anywhere in the spec body can neither forge a
 heading anchor nor contribute a fabricated criterion.
 
+Lines are split on the CommonMark line grammar only — `\r\n`, `\r`, `\n` —
+never on Python's broader `str.splitlines()` set (U+2028, U+2029, NEL, `\v`,
+`\f`, ...). None of those extra characters render as a line break to a human
+or a CommonMark reader, so a heading or bullet hidden behind one inside an
+ordinary prose paragraph is ordinary line content here too, not structure.
+
 Exit codes:
     0  clean   — every covered identifier names a real spec criterion, and
        the `--covers` grammar is valid.
@@ -53,6 +59,13 @@ _CRITERION_RE = re.compile(r"^-\s+\*\*(AC\d+)\.\*\*")
 _COVERS_RE = re.compile(r"\AAC\d+(,\ ?AC\d+)*\Z")
 _FENCE_START_RE = re.compile(r"^(`{3,}|~{3,})")
 _ZERO_CRITERIA_REASON_CODE = "zero-criterion-identifiers"
+# CommonMark line endings only — \r\n, \r, \n — and nothing else. Python's
+# str.splitlines() additionally breaks on \v, \f, \x1c-\x1e, NEL (\x85),
+# U+2028 LINE SEPARATOR, and U+2029 PARAGRAPH SEPARATOR: none of those render
+# as a line break in any CommonMark viewer, so a line split on the broader
+# set can be tricked into anchoring a heading or bullet that is invisible to
+# a human reader of the same spec body.
+_COMMONMARK_LINE_RE = re.compile(r"\r\n|\r|\n")
 
 
 def _err(msg: str) -> None:
@@ -95,7 +108,7 @@ def parse_criteria(spec_body: str) -> list[str]:
     so a worked example cannot forge a heading anchor or contribute a
     fabricated criterion.
     """
-    lines = spec_body.splitlines()
+    lines = _COMMONMARK_LINE_RE.split(spec_body)
     fenced = _mask_fenced_lines(lines)
 
     start = None
