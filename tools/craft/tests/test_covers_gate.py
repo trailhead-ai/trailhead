@@ -11,8 +11,10 @@ Exit-code contract (matches `leak_gate.py`):
   0 → clean (every covered identifier is a real criterion, grammar valid)
   1 → violation (unknown identifier, bad grammar, duplicate — prints a
       `reason:` line)
-  2 → error / fail-closed (empty stdin, no `## Acceptance Criteria` heading,
-      missing `--covers` argument)
+  2 → error / fail-closed (empty or non-UTF-8 stdin, no `## Acceptance
+      Criteria` heading, a spec declaring zero criterion identifiers under
+      that heading — its own distinct `reason-code:` line — or a missing
+      `--covers` argument)
 """
 
 from __future__ import annotations
@@ -31,6 +33,11 @@ INDENTED_HEADING_IN_FENCE_SPEC = (
     FIXTURES / "spec_indented_heading_in_fence.md"
 ).read_text(encoding="utf-8")
 ZERO_CRITERIA_SPEC = (FIXTURES / "spec_zero_criteria.md").read_text(encoding="utf-8")
+LOWERCASE_HEADING_SPEC = (FIXTURES / "spec_heading_case_insensitive.md").read_text(encoding="utf-8")
+FENCED_ABOVE_SPEC = (FIXTURES / "spec_fenced_example_above_section.md").read_text(encoding="utf-8")
+FENCED_INSIDE_SPEC = (FIXTURES / "spec_fenced_criteria_inside_section.md").read_text(encoding="utf-8")
+
+_ZERO_CRITERIA_REASON_CODE = "reason-code: zero-criterion-identifiers"
 
 
 def _run(covers: str | None, spec_body: str) -> subprocess.CompletedProcess:
@@ -195,3 +202,86 @@ def test_covers_value_with_trailing_newline_fails_grammar_not_membership():
     assert r.returncode == 1, r.stderr + r.stdout
     assert "not a valid identifier list" in r.stderr, r.stderr
     assert "unknown criterion identifier" not in r.stderr, r.stderr
+
+
+# ---- heading casing: case-insensitive, still anchored at line start ------
+
+
+def test_lowercase_heading_casing_is_still_the_anchor():
+    """A spec writing `## Acceptance criteria` (lowercase `c`) — the shape
+    several specs in this vault actually use — must still be found as the
+    anchor; the parser must not require exact-case match."""
+    r = _run("AC1", LOWERCASE_HEADING_SPEC)
+    assert r.returncode == 0, r.stderr + r.stdout
+
+
+def test_lowercase_heading_still_rejects_an_unknown_identifier():
+    r = _run("AC12", LOWERCASE_HEADING_SPEC)
+    assert r.returncode == 1, r.stderr + r.stdout
+
+
+# ---- fence-blindness: a fenced example must never certify a fake identifier --
+
+
+def test_fenced_example_above_the_real_section_does_not_certify_its_fake_identifier():
+    """A flush-left (unindented) fenced worked example above the real
+    section declares a fake AC1. A fence-blind parser takes the first
+    line-start heading match — inside the fence — and would wrongly certify
+    AC1. The gate must never exit 0 on a fabricated identifier."""
+    r = _run("AC1", FENCED_ABOVE_SPEC)
+    assert r.returncode == 1, r.stderr + r.stdout
+    assert "AC1" in r.stderr
+
+
+def test_fenced_example_above_the_real_section_still_certifies_the_real_identifier():
+    r = _run("AC2", FENCED_ABOVE_SPEC)
+    assert r.returncode == 0, r.stderr + r.stdout
+
+
+def test_fenced_example_inside_the_real_section_does_not_contribute_its_fake_identifier():
+    """The real `## Acceptance Criteria` section contains a nested fenced
+    worked example whose `- **AC99.**` line must not be counted as a real
+    criterion — the section scan terminates only on `## `, so a fence-blind
+    scanner lets the fenced bullet ride through as though it were real."""
+    r = _run("AC99", FENCED_INSIDE_SPEC)
+    assert r.returncode == 1, r.stderr + r.stdout
+    assert "AC99" in r.stderr
+
+
+def test_fenced_example_inside_the_real_section_still_certifies_real_identifiers():
+    r = _run("AC1,AC2", FENCED_INSIDE_SPEC)
+    assert r.returncode == 0, r.stderr + r.stdout
+
+
+# ---- zero-identifier legacy path: stable machine-readable reason code ----
+
+
+def test_zero_criterion_identifiers_carries_the_stable_reason_code():
+    """Step 9's legacy carve-out in slice/SKILL.md must key on a stable,
+    greppable token rather than the prose reason line, so a reword of the
+    message can never silently break the carve-out."""
+    r = _run("AC1", ZERO_CRITERIA_SPEC)
+    assert r.returncode == 2, r.stderr + r.stdout
+    assert _ZERO_CRITERIA_REASON_CODE in r.stderr, r.stderr
+
+
+def test_reason_code_absent_on_missing_heading_exit_2():
+    """The reason code is unique to the zero-identifier path — it must not
+    appear on any other exit-2 reason, or the carve-out could wrongly widen
+    to swallow an unrelated fail-closed exit."""
+    r = _run("AC2", MISSING_HEADING_SPEC)
+    assert r.returncode == 2, r.stderr + r.stdout
+    assert _ZERO_CRITERIA_REASON_CODE not in r.stderr, r.stderr
+
+
+def test_reason_code_absent_on_empty_stdin_exit_2():
+    r = _run("AC2", "")
+    assert r.returncode == 2, r.stderr + r.stdout
+    assert _ZERO_CRITERIA_REASON_CODE not in r.stderr, r.stderr
+
+
+def test_reason_code_absent_on_non_utf8_stdin_exit_2():
+    cmd = [sys.executable, str(GATE), "--covers", "AC1"]
+    r = subprocess.run(cmd, input=b"\xff\xfe not valid utf-8", capture_output=True)
+    assert r.returncode == 2, r.stderr + r.stdout
+    assert _ZERO_CRITERIA_REASON_CODE.encode() not in r.stderr, r.stderr

@@ -22,6 +22,8 @@ GATE = CRAFT / "scripts" / "covers_gate.py"
 FIXTURES = Path(__file__).parent / "fixtures"
 
 NINE_CRITERIA_SPEC = (FIXTURES / "spec_ac1_to_ac9.md").read_text(encoding="utf-8")
+ZERO_CRITERIA_SPEC = (FIXTURES / "spec_zero_criteria.md").read_text(encoding="utf-8")
+MISSING_HEADING_SPEC = (FIXTURES / "spec_missing_ac_heading.md").read_text(encoding="utf-8")
 
 
 def _skill_text() -> str:
@@ -200,4 +202,68 @@ def test_certify_pipe_precedes_lore_record_create_by_document_position():
     assert certify_match.start() < create_match.start(), (
         "the covers gate certify pipe must be documented, by position, before "
         "the lore record create invocation in slice/SKILL.md step 9"
+    )
+
+
+# ---- the carve-out keys on the real gate's machine token, not on prose ---
+
+
+def test_step9_carveout_reason_code_matches_real_gate_output_and_only_there():
+    """Extract the `reason-code:` token step 9 documents as the carve-out's
+    discriminator, then run the real gate against a zero-identifier spec and
+    a missing-heading spec. The token must appear in the former's stderr and
+    be absent from the latter's — pinning that the documented discriminator
+    is the real gate's own signal, not a copy of its wording, and that it
+    does not also fire on an unrelated exit-2 reason."""
+    step9 = _step("### 9. Materialize the parent task")
+    match = re.search(r"reason-code:\s*([a-z0-9-]+)", step9)
+    assert match, "slice/SKILL.md step 9 must document the machine-readable reason-code token"
+    token_line = f"reason-code: {match.group(1)}"
+
+    zero_result = subprocess.run(
+        [sys.executable, str(GATE), "--covers", "AC1"],
+        input=ZERO_CRITERIA_SPEC,
+        capture_output=True,
+        text=True,
+    )
+    missing_result = subprocess.run(
+        [sys.executable, str(GATE), "--covers", "AC1"],
+        input=MISSING_HEADING_SPEC,
+        capture_output=True,
+        text=True,
+    )
+
+    assert token_line in zero_result.stderr, (
+        f"the documented reason-code {token_line!r} must appear in the real gate's "
+        f"stderr on the zero-identifier spec: {zero_result.stderr}"
+    )
+    assert token_line not in missing_result.stderr, (
+        f"the documented reason-code {token_line!r} must not appear on an unrelated "
+        f"exit-2 reason: {missing_result.stderr}"
+    )
+
+
+# ---- the documented **Covers:** field example is a value the real gate certifies ----
+
+
+def test_documented_covers_field_example_certifies_against_the_real_gate():
+    """Step 9 must show the field's written form — label plus value — the
+    way step 4's ledger-line templates are exemplified. Extract it and run
+    the value through the real gate against a fixture spec declaring those
+    identifiers, so the example is pinned against real grammar rather than
+    left as an unchecked illustration."""
+    step9 = _step("### 9. Materialize the parent task")
+    match = re.search(r"\*\*Covers:\*\*\s*([A-Za-z0-9, ]+)", step9)
+    assert match, "slice/SKILL.md step 9 must show the **Covers:** field's written form"
+    covers_value = match.group(1).strip()
+
+    result = subprocess.run(
+        [sys.executable, str(GATE), "--covers", covers_value],
+        input=NINE_CRITERIA_SPEC,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, (
+        f"slice/SKILL.md's documented **Covers:** field example {covers_value!r} "
+        f"must certify against a spec declaring those criteria: {result.stderr}{result.stdout}"
     )

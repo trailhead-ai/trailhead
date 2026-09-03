@@ -211,7 +211,9 @@ touches no visual surface, to the operator — and, on the same footing as those
 identifier, which spec acceptance criteria the chosen slice makes green; the call is never left
 unstated. On a spec predating the `**ACn.**` convention — one declaring no criterion
 identifiers at all — there is nothing to state by identifier; say so plainly instead, rather
-than inventing one. Whether the slice
+than inventing one. On the enabler path, there is also nothing to state by identifier — an
+enabler makes no criterion green by definition — so state that plainly too, on the same footing
+as the legacy case, rather than naming a criterion it does not cover. Whether the slice
 touches a visual surface is judged against `_shared/slice.md`'s state-coverage reference, a
 judgment call this skill states rather than derives mechanically. Steps 4 and 6 above may
 already have written to the spec record by this point (the
@@ -275,22 +277,42 @@ lore record show spec/<spec-name> | ${CLAUDE_PLUGIN_ROOT}/scripts/covers_gate.py
 ```
 
 A non-zero exit refuses the create — nothing is written until the gate exits 0. Name the remedy
-in the same shape steps 3 and 5 above already use for their own refusals: report which
-identifier failed (the gate's `reason:` line on stderr names it) and that the fix is to correct
-the drafted list against the spec's declared acceptance criteria and re-run the gate.
+in the same shape steps 3 and 5 above already use for their own refusals, scoped to what the exit
+actually names: on exit 1, or on exit 2's zero-identifier reason-code below, the gate's own
+stderr names the identifier or the shape at fault — report it, and that the fix is to correct the
+drafted list against the spec's declared acceptance criteria and re-run the gate. Every other
+exit-2 reason (empty or non-UTF-8 stdin, no `## Acceptance Criteria` heading) names no
+identifier at all — the spec itself is unreadable or malformed, so the remedy is to fix the spec
+record, not the drafted list, before re-running.
 
-**A spec predating the `**ACn.**` convention is a legacy carve-out, not a drafting error.** When
-the spec declares zero criterion identifiers under `## Acceptance Criteria`, the gate above exits
-2 naming exactly that — a reason distinct from every other refusal. On that specific exit-2
-reason, the slice proceeds and the create below writes no `**Covers:**` field at all — not an
-empty one, not a fabricated full-coverage claim — mirroring step 4's legacy ledger line for the
-same case. Any other gate refusal, including every other exit-2 reason on a spec that does
-declare identifiers, still blocks the create exactly as above; only the zero-identifier reason
-gets this latitude.
+**A spec predating the `**ACn.**` convention is a legacy carve-out, not a drafting error.** The
+carve-out keys on a single machine-readable signal and nothing else: when the spec declares zero
+criterion identifiers under `## Acceptance Criteria`, the gate above exits 2 and its stderr
+carries a stable `reason-code: zero-criterion-identifiers` line — unique to this path, printed on
+no other exit-2 reason. On that reason-code, and only on that reason-code, the slice proceeds and
+the create below writes no `**Covers:**` field at all — not an empty one, not a fabricated
+full-coverage claim — mirroring step 4's legacy ledger line for the same case. Never key this
+decision on the prose `reason:` line's wording — that line can be reworded without notice, and a
+truncated stream cut inside the criteria section can otherwise present the same shape. Every
+other exit-2 reason — including every other exit-2 reason on a spec that does declare
+identifiers, and including a zero-identifier spec's own gate call if its stderr somehow lacked
+the reason-code line — still blocks the create exactly as above, with no exceptions.
+
+**An enabler slice (see `_shared/slice.md`'s enabler carve-out) gets the identical latitude, on
+its own footing rather than as a coverage claim.** An enabler slice makes no criterion green by
+definition, so it drafts no `--covers` value and never invokes the gate above — the create below
+writes no `**Covers:**` field, exactly as the zero-identifier legacy case does, but for the
+opposite reason: not because the spec has nothing to certify against, but because this slice
+certifies nothing.
 
 **The value written into the `**Covers:**` field is the exact string the gate just certified** —
 never re-derived, re-typed, or reformatted after the gate exits 0. Nothing between certification
-and the write below is allowed to drift the written string from the certified one.
+and the write below is allowed to drift the written string from the certified one. Written in the
+task body like this:
+
+```
+**Covers:** AC2, AC5
+```
 
 **The slice title is untrusted input too.** It is derived from the spec's acceptance criteria —
 vault-writable, git-synced prose — and enters the command line below as `--title`. Step 1's shape

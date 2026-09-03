@@ -19,8 +19,13 @@ One parser, `parse_criteria`, turns a spec body into its ordered list of
 criterion identifiers: top-level `- ` bullets under a `## Acceptance
 Criteria` heading, each prefixed `**ACn.**`. A `###` sub-heading groups
 criteria without being one; a nested sub-bullet qualifies its parent rather
-than forming its own criterion. The heading is anchored at line start, so an
-inline mid-paragraph mention of `## Acceptance Criteria` does not satisfy it.
+than forming its own criterion. The heading is anchored at line start (case
+-insensitive — `## Acceptance criteria` satisfies it too), so an inline
+mid-paragraph mention of `## Acceptance Criteria` does not satisfy it. The
+parser is fence-aware: a fenced code block (``` or ~~~, with or without an
+info string) is invisible to both the heading search and the criterion
+scan, so a worked example anywhere in the spec body can neither forge a
+heading anchor nor contribute a fabricated criterion.
 
 Exit codes:
     0  clean   — every covered identifier names a real spec criterion, and
@@ -30,8 +35,10 @@ Exit codes:
     2  error   — fail-closed: empty or non-UTF-8 stdin, no `## Acceptance
        Criteria` heading in the spec body, a spec declaring zero criterion
        identifiers under that heading (the legacy shape, distinct reason
-       line), or a missing `--covers` argument. NEVER exits 0 when it could
-       not actually certify the drafted list.
+       line plus a stable `reason-code: zero-criterion-identifiers` line
+       unique to this path — the caller's machine-readable carve-out
+       discriminator), or a missing `--covers` argument. NEVER exits 0 when
+       it could not actually certify the drafted list.
 """
 
 from __future__ import annotations
@@ -41,12 +48,38 @@ import re
 import sys
 
 _AC_HEADING = "## Acceptance Criteria"
+_AC_HEADING_RE = re.compile(r"^## Acceptance Criteria$", re.IGNORECASE)
 _CRITERION_RE = re.compile(r"^-\s+\*\*(AC\d+)\.\*\*")
 _COVERS_RE = re.compile(r"\AAC\d+(,\ ?AC\d+)*\Z")
+_FENCE_START_RE = re.compile(r"^(`{3,}|~{3,})")
+_ZERO_CRITERIA_REASON_CODE = "zero-criterion-identifiers"
 
 
 def _err(msg: str) -> None:
     print(f"covers-gate: {msg}", file=sys.stderr)
+
+
+def _mask_fenced_lines(lines: list[str]) -> list[bool]:
+    """Return one boolean per line — True where the line is a fence marker
+    or falls inside a fenced code block (``` or ~~~, any info string). A
+    fence closes only on a same-character marker at least as long as the
+    one that opened it, per CommonMark."""
+    masked = [False] * len(lines)
+    fence_char: str | None = None
+    fence_len = 0
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        m = _FENCE_START_RE.match(stripped)
+        if fence_char is None:
+            if m:
+                fence_char = m.group(1)[0]
+                fence_len = len(m.group(1))
+                masked[i] = True
+            continue
+        masked[i] = True
+        if m and m.group(1)[0] == fence_char and len(m.group(1)) >= fence_len:
+            fence_char = None
+    return masked
 
 
 def parse_criteria(spec_body: str) -> list[str]:
@@ -56,19 +89,30 @@ def parse_criteria(spec_body: str) -> list[str]:
 
     This is the one parser: a `###` sub-heading is skipped as a grouping
     marker, and an indented sub-bullet is skipped as a qualifier of its
-    parent criterion rather than a criterion of its own.
+    parent criterion rather than a criterion of its own. The heading match
+    is case-insensitive but still anchored at line start. Every fenced code
+    block is invisible to both the heading search and the criterion scan,
+    so a worked example cannot forge a heading anchor or contribute a
+    fabricated criterion.
     """
     lines = spec_body.splitlines()
+    fenced = _mask_fenced_lines(lines)
+
     start = None
     for i, line in enumerate(lines):
-        if line == _AC_HEADING:
+        if fenced[i]:
+            continue
+        if _AC_HEADING_RE.match(line):
             start = i + 1
             break
     if start is None:
         raise ValueError(f"spec body has no {_AC_HEADING!r} heading")
 
     identifiers: list[str] = []
-    for line in lines[start:]:
+    for i in range(start, len(lines)):
+        if fenced[i]:
+            continue
+        line = lines[i]
         if line.startswith("## "):
             break
         if line.startswith("- "):
@@ -124,6 +168,7 @@ def main(argv: list[str]) -> int:
             f"{_AC_HEADING!r} — this is the legacy shape a spec predating the "
             "**ACn.** convention carries"
         )
+        _err(f"reason-code: {_ZERO_CRITERIA_REASON_CODE}")
         return 2
 
     try:
