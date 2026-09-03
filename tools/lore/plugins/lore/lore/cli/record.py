@@ -374,7 +374,7 @@ def _cmd_record_show(args) -> int:
     :func:`_resolve_record_op_vault` scan fallback. This is the read-side fix
     for the same collision ``update --vault`` addresses: a same-named record
     across more than one configured vault, where the cwd-blind scan's first
-    match may not be the vault the caller means (e.g. ranger's queue
+    match may not be the vault the caller means (e.g. a queue
     classification and question extraction, which must read a specific vault's
     body, not whichever vault happens to sort first in config). An unknown
     ``--vault`` name, or a named vault that does not hold the record, errors

@@ -11,10 +11,10 @@ on its own initiative.
 Pinned here, using the wrap-aware `_pin` helper mirrored from `test_drive_portage_tail_contract.py`
 (itself mirrored from `test_drive_build_phase_contract.py`, `test_drive_plan_phase_contract.py`,
 `test_drive_escalation_contract.py`, `test_drive_resume_contract.py`,
-`test_drive_skill_contract.py`, `test_execute_mode_contract.py`, and ranger's
-`tests/test_sweep_contract.py`): every pinned span is asserted as a contiguous substring
-**within one physical line**, so a markdown rewrap that shifts a line break fails loudly as a
-wrap issue rather than reading as "phrase missing".
+`test_drive_skill_contract.py`, and `test_execute_shared_procedure_contract.py`): every pinned
+span is asserted as a contiguous substring **within one physical line**, so a markdown
+rewrap that shifts a line break fails loudly as a wrap issue rather than reading as
+"phrase missing".
 """
 
 from __future__ import annotations

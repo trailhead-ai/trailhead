@@ -3,14 +3,13 @@
 The driver runs craft's shared execute procedure **inline, in its own session**, against
 the slice parent's child task graph — reading `_shared/execute.md` and following it, the
 same read-it-don't-invoke-it deferral the selection phase already applies to
-`../slice/SKILL.md`. Running inline selects the shared procedure's **attended** mode, which
-is the point: a human is present, so every escalation the procedure names asks them rather
-than parking a question no one will read.
+`../slice/SKILL.md`. Running inline is the point: a human is present, so every escalation
+the procedure names asks them rather than recording a question no one will read.
 
 Pinned here, using the wrap-aware `_pin` helper mirrored from
 `test_drive_plan_phase_contract.py` (itself mirrored from `test_drive_escalation_contract.py`,
-`test_drive_resume_contract.py`, `test_drive_skill_contract.py`, `test_execute_mode_contract.py`,
-and ranger's `tests/test_sweep_contract.py`): every pinned span is asserted as a contiguous
+`test_drive_resume_contract.py`, `test_drive_skill_contract.py`, and
+`test_execute_shared_procedure_contract.py`): every pinned span is asserted as a contiguous
 substring **within one physical line**, so a markdown rewrap that shifts a line break fails
 loudly as a wrap issue rather than reading as "phrase missing".
 """
@@ -109,15 +108,6 @@ def test_build_phase_states_it_never_invokes_craft_execute():
         "The build phase must state explicitly that it never invokes `/craft:execute` "
         "— skill-to-skill chaining is unreliable by `/craft:plan`'s own rule, which is "
         "why the procedure is read rather than the skill invoked.",
-    )
-
-
-def test_shared_procedure_attended_row_still_exists_to_be_selected():
-    text = SHARED_EXECUTE.read_text()
-    assert "**attended**" in text, (
-        "the shared execute procedure must still declare an attended mode — the "
-        "driver's inline run selects it, so its removal would silently strand the "
-        "build phase in a mode it never asked for"
     )
 
 

@@ -157,9 +157,7 @@ hits (unfenced, with no `layer=` attribute) are the trusted self-authored channe
 
 **A live candidate produces an inline escalation to the user,** naming both the candidate and the hand-rolled alternative the plan currently carries, stating the choice without arguing for adoption — planning waits for the answer. **This is a `how` decision resolved within planning, not a bounce-back to brainstorming** — library choice is exactly the task-level uncertainty the Clarify step's bounce-back rule already leaves in planning, so this escalation is answered here and does not route back upstream.
 
-**An ambiguous or deferred answer is treated as "build" and recorded as unresolved** — on the parent task record being written, the same durable place the unattended path below uses, never left to the live transcript alone. This holds for the attended path as well as the unattended one.
-
-**An unattended caller does not block** on this escalation: it records the unresolved candidate on the record it is building, proceeds with the hand-rolled path, and reports the deferral in its outcome.
+**An ambiguous or deferred answer is treated as "build" and recorded as unresolved** — on the parent task record being written, never left to the live transcript alone.
 
 ### 4. Design End-to-End
 

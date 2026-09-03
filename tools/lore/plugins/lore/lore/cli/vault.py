@@ -483,7 +483,7 @@ def _cmd_vault_resolve(args) -> int:
     ``_resolve_group_scopes`` (``cli/record.py``) + ``explain_resolution``
     (``vault/resolve.py``) path ``record create`` uses for its own routing —
     with no ``--repo``/``--team``/etc. flags of its own. This is a
-    deliberately minimal surface: it exists for the ranger sweep to shell out
+    deliberately minimal surface: it exists for an external caller to shell out
     to, not as a general routing-preview tool.
 
     Always emits the fixed eight keys ``kind``/``vault``/``path``/``scope``/

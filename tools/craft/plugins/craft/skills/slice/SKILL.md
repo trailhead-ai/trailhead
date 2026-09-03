@@ -258,14 +258,13 @@ step 5's guard queries to tell a slice parent from any other task linking to the
 written a moment later can miss a concurrent pass that has already run its guard, which is the same
 reason `--related spec=` is on this invocation rather than after it.
 
-Written at `in-progress` — never `open` or `ready` — because three automated selectors would
-otherwise reach a slice parent before it has anything decomposed beneath it:
-ranger's refine sweep selects standalone tasks at `open`/`blocked`,
-its execute drain selects them at `ready`, and
-outpost offers its one-click `/craft:execute` on `ready` standalone tasks. All three select
-on "parentless and childless". A slice parent this skill has just materialized has no children
-yet — `/craft:plan`, rooted at it, writes them next — so `in-progress` is the one status
-invisible to all three until that decomposition happens.
+Written at `in-progress` — never `open` or `ready` — because a slice parent at either of those
+statuses is selectable as a standalone task before it has anything decomposed beneath it:
+outpost offers its one-click `/craft:execute` on `ready` standalone tasks, and `open` is the
+status `/craft:refine` promotes from. Both select on "parentless and childless". A slice parent
+this skill has just materialized has no children yet — `/craft:plan`, rooted at it, writes them
+next — so `in-progress` is the status that stays out of that selection until the decomposition
+happens.
 
 Link it to the spec with `--related spec=<spec-name>` in that same `lore record create`
 invocation — never a follow-up write that could land after the record has already moved on.

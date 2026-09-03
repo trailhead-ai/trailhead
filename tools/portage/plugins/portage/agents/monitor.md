@@ -74,7 +74,7 @@ or a key is missing, treat that key as `none`. When both are absent, the summary
 
 When the dispatcher supplies `outcome_file`, monitor is that caller's machine-readable
 completion channel — its own reply is prose a background dispatch may never surface
-synchronously, so an unattended caller (e.g. a ranger drain loop) polls this file instead.
+synchronously, so a caller that cannot wait on the reply polls this file instead.
 
 If `outcome_file` was provided, monitor writes exactly one line to that file.
 
@@ -90,7 +90,7 @@ or blocked after N cycles. The line is one of:
   `STOPPED auto_merge disabled`.
 
 Monitor uses the path verbatim and never creates its parent directory — the caller
-pre-creates it (ranger's 0700 outcomes-directory pattern), so a missing directory means the
+pre-creates it (mode 0700), so a missing directory means the
 caller's contract was violated, not something monitor should paper over with its own mkdir.
 A missing or empty outcome file is the caller's crashed signal; monitor's job is only to
 write the file, never to pre-create or clean it up.

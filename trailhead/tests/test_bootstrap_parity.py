@@ -1,7 +1,7 @@
 """Cross-plugin `_bootstrap.py` parity test.
 
 One independent copy of `_bootstrap.py` exists per CLI-bearing tool (camp, lore,
-portage, ranger) because each one must work *before* `sys.path` is set up — at
+portage) because each one must work *before* `sys.path` is set up — at
 that point none of them can import a shared helper (see each copy's own module
 docstring). That chicken-and-egg necessity means the files can never be
 deduplicated via a shared import, so a bugfix applied to one copy and forgotten
@@ -20,7 +20,6 @@ _BOOTSTRAP_PATHS = {
     "camp": _REPO_ROOT / "tools/camp/plugins/camp/_bootstrap.py",
     "lore": _REPO_ROOT / "tools/lore/plugins/lore/_bootstrap.py",
     "portage": _REPO_ROOT / "tools/portage/plugins/portage/_bootstrap.py",
-    "ranger": _REPO_ROOT / "tools/ranger/plugins/ranger/_bootstrap.py",
 }
 
 # 0-based line indices that legitimately differ per copy: the docstring's

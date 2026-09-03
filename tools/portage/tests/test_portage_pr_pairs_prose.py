@@ -8,8 +8,8 @@ right up until `merge_order` keying is silently guessed wrong from a repo-path
 basename instead of the manifest's real member name.
 
 Every pinned span is asserted as a contiguous substring within one physical
-line, per the wrap-safety lesson the ranger sweep's own pin harness encodes
-([[lesson/phrase-pinned-prose-contracts-break-on-line-wraps]]).
+line, per the wrap-safety lesson at
+[[lesson/phrase-pinned-prose-contracts-break-on-line-wraps]].
 """
 
 from __future__ import annotations

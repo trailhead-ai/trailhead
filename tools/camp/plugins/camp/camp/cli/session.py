@@ -216,7 +216,7 @@ def trigger_activate_phase_work(
     build), matching "triggers ... and returns without waiting for it". This is
     the non-interactive path to the same work `camp activate <member>` triggers
     interactively — the way a consumer that never calls `camp activate`
-    (ranger's execute drain, any other automation that puts an agent straight
+    (any automation that puts an agent straight
     into a worktree) gets its work-enabling tasks run.
 
     An activate-phase task runs inside the member's worktree, which does not

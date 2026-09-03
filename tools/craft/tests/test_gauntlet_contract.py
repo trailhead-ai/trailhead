@@ -1654,30 +1654,21 @@ def test_revise_presence_changing_override_re_presents_before_any_write():
     )
 
 
-def test_resolution_names_its_escalation_points_in_the_execute_style():
-    """Named escalation points are what make a future unattended mode a re-route
-    table rather than a redesign. No unattended mode ships here — the naming is
-    the whole of it.
+def test_resolution_names_its_escalation_points_explicitly():
+    """The places this step waits on a human are a named list, not something a
+    reader has to reconstruct from the prose. There is no auto-accept path.
     """
     step = _flat(_resolution_step(GAUNTLET.read_text()))
     assert "#### Escalation points" in step, (
         "the resolution step must collect its escalation points under a heading"
     )
-    assert "_shared/execute.md" in step, (
-        "the escalation-point naming must cite the shared execute contract it "
-        "follows, rather than inventing a second convention for the same idea"
-    )
-    assert "Two modes, one procedure" in step, (
-        "the citation must name the section, not just the file — a bare file "
-        "reference survives that section being renamed away underneath it"
-    )
     for point in _ESCALATION_POINTS:
         assert point in step, (
             f"escalation point {point!r} must be named in the resolution step"
         )
-    assert "**No unattended mode ships here**" in step, (
-        "the step must state that no unattended caller is wired — naming the "
-        "escalation points is not the same as authorizing an auto-accept path"
+    assert "There is no auto-accept flag" in step, (
+        "the step must state that no auto-accept path is wired — naming the "
+        "escalation points is not the same as authorizing one"
     )
 
 

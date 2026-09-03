@@ -1,5 +1,5 @@
 """Tests for ``lore vault resolve --kind <kind> [--json]`` — the group-aware
-vault-resolution query ranger's sweep shells out to.
+vault-resolution query an external caller shells out to.
 
 Covers the test contract:
 

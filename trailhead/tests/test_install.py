@@ -94,7 +94,6 @@ class TestDetectionDrivenInstall:
             "craft",
             "portage",
             "outpost",
-            "ranger",
             "trailhead",
         }
 
@@ -102,7 +101,7 @@ class TestDetectionDrivenInstall:
         with _patched(detected=True) as m:
             run_install(env=_env(tmp_path), quiet=True)
         cli_tools = m["pathint"].call_args[0][0]
-        assert set(cli_tools) == {"camp", "lore", "portage", "ranger"}
+        assert set(cli_tools) == {"camp", "lore", "portage"}
 
     def test_summary_prints_shellenv_hint(self, tmp_path, capsys):
         with _patched(detected=True):
@@ -164,23 +163,21 @@ class TestCliOverrides:
         assert "lore" in cli_tools
 
     def test_config_can_drop_a_cli_with_no_matching_flag(self, tmp_path):
-        # ranger ships no --no-ranger flag; its install_<name>_cli key is
-        # resolved generically, so the config file is the only way to drop it.
-        cfg_path = tmp_path / "no-ranger.toml"
-        cfg_path.write_text("install_ranger_cli = false\n")
+        # Every CLI-bearing tool's install_<name>_cli key is resolved
+        # generically off its manifest, so a config file can drop a CLI
+        # without going through that tool's dedicated --no-<name> flag.
+        cfg_path = tmp_path / "no-portage.toml"
+        cfg_path.write_text("install_portage_cli = false\n")
         with _patched(detected=True) as m:
             run_install(env=_env(tmp_path), config_arg=str(cfg_path), quiet=True)
         cli_tools = m["pathint"].call_args[0][0]
-        assert "ranger" not in cli_tools
+        assert "portage" not in cli_tools
         assert "camp" in cli_tools
 
     def test_every_cli_disabled_skips_pathint_entirely(self, tmp_path):
-        cfg_path = tmp_path / "no-clis.toml"
-        cfg_path.write_text("install_ranger_cli = false\n")
         with _patched(detected=True) as m:
             run_install(
                 env=_env(tmp_path),
-                config_arg=str(cfg_path),
                 no_camp=True,
                 no_lore=True,
                 no_portage=True,
@@ -250,7 +247,6 @@ class TestJsonOutput:
             "camp": True,
             "lore": True,
             "portage": True,
-            "ranger": True,
         }
 
     def test_json_no_harness_flag(self, tmp_path, capsys):
@@ -357,14 +353,11 @@ class TestLoreInitIntegration:
 
 class TestShellenvGuidance:
     def test_prints_and_names_trailhead_when_all_clis_disabled(self, tmp_path, capsys):
-        cfg_path = tmp_path / "no-clis.toml"
-        cfg_path.write_text("install_ranger_cli = false\n")
         with _patched(detected=True) as m, patch(
             "trailhead.install.trailhead_bin_executable", return_value=True
         ):
             rc = run_install(
                 env=_env(tmp_path),
-                config_arg=str(cfg_path),
                 no_camp=True,
                 no_lore=True,
                 no_portage=True,

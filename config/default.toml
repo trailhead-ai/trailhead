@@ -12,11 +12,10 @@
 install_camp_cli = true
 install_lore_cli = true
 install_portage_cli = true
-install_ranger_cli = true
 
 # Top-level default plugin set, applied to every detected/--harness harness.
 # A [[harness]] block (omitted here) can override this per harness.
-plugins = ["camp", "lore", "craft", "portage", "outpost", "ranger", "trailhead"]
+plugins = ["camp", "lore", "craft", "portage", "outpost", "trailhead"]
 
 # Disable the SessionStart self-update-notice hook the `trailhead` plugin
 # ships (see tools/trailhead/plugins/trailhead/hooks/). Also overridable per

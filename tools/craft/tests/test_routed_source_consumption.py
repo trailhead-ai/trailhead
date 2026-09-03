@@ -1,7 +1,7 @@
 """Consuming a routed task must close the loop on the source record.
 
 Refine writes the `route=plan|brainstorm` sidecar label (see
-test_refine_contract.py); outpost and ranger render it into paste-ready
+test_refine_contract.py); outpost renders it into paste-ready
 `/craft:plan` / `/craft:brainstorm` commands. The only actors that know the
 routing was *acted on* are the consumer skills those commands invoke — so plan
 and brainstorm must supersede the consumed source and clear its label, or the

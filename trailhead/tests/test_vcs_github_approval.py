@@ -245,7 +245,7 @@ class TestApprovalLabelPath:
             "github",
             runner=_make_stub(
                 reviews=[],
-                timeline=[_labeled("ranger-bot", "Bot", "2026-08-01T00:00:00Z")],
+                timeline=[_labeled("review-bot", "Bot", "2026-08-01T00:00:00Z")],
             ),
         )
         result = provider.pr.approval("some/path", "42")

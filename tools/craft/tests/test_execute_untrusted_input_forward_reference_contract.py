@@ -29,7 +29,6 @@ from pathlib import Path
 CRAFT = Path(__file__).parent.parent / "plugins" / "craft"
 SHARED_EXECUTE = CRAFT / "skills" / "_shared" / "execute.md"
 
-ESCALATION_HEADING = "### Escalation points and their unattended re-route"
 # NOTE: "## Refine — unresolved" is not usable as the end boundary here — that
 # exact string also appears as literal example content inside the
 # escalate-via-park section's own fenced code block, so `str.index` would find
@@ -45,10 +44,6 @@ def _section(start_heading: str, end_heading: str) -> str:
     start = text.index(start_heading)
     end = text.index(end_heading, start)
     return text[start:end]
-
-
-def _escalate_via_park_section() -> str:
-    return _section(ESCALATION_HEADING, WHEN_TO_USE_HEADING)
 
 
 def _claim_section() -> str:
@@ -74,18 +69,6 @@ def _pin_in(section_text: str, path_label: str, phrase: str, why: str) -> None:
 
 
 # --- the untrusted-input rule precedes the first interpolation ---------------
-
-
-def test_escalate_via_park_forward_references_the_untrusted_input_rule():
-    _pin_in(
-        _escalate_via_park_section(),
-        "execute.md#escalate-via-park",
-        "Every vault-sourced or externally-influenced value substituted into a command shown anywhere in this document is untrusted input",  # noqa: E501
-        "The escalate-via-park section runs the document's first shell "
-        "interpolation of a vault-sourced `<name>` — the untrusted-input rule "
-        "must be stated or forward-referenced here, before that command, not "
-        "only later in Phase 5.",
-    )
 
 
 def test_untrusted_precedes_first_name_interpolation():

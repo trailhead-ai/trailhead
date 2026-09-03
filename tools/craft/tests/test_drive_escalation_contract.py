@@ -9,7 +9,7 @@ follow; the phases that raise those escalations are pinned by their own contract
 
 Pinned here, using the wrap-aware `_pin` helper mirrored from `test_drive_resume_contract.py`
 (itself mirrored from `test_drive_skill_contract.py`'s own helper, mirrored in turn from
-`test_execute_mode_contract.py`, mirrored from ranger's `tests/test_sweep_contract.py`): every
+`test_execute_shared_procedure_contract.py`): every
 pinned span is asserted as a contiguous substring **within one physical line**, so a markdown
 rewrap that shifts a line break fails loudly as a wrap issue rather than reading as "phrase
 missing".
@@ -57,7 +57,7 @@ def test_escalation_record_create_names_parent_flag():
 def test_escalation_record_is_never_standalone():
     _pin(
         "This parent edge is the entire mechanism keeping the escalation out of "
-        "the automation it exists to interrupt.",
+        "the selection surface it exists to interrupt.",
         "The ritual must state why the parent edge is load-bearing, not just "
         "include the flag incidentally.",
     )
