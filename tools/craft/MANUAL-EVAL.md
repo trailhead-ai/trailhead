@@ -390,7 +390,83 @@ rewriting — worth knowing before reading a stalled run as non-compliance.
 
 ---
 
-## Case: the gate reads the evidence artifact — WITHDRAWN, fixture design error
+## Case: the gate reads the evidence artifact
+
+**Outcome: the change this case was built to justify was dropped.** The gate already did
+the thing. The case ran three times — once against a fixture that could not test the claim,
+once redesigned, and once more after its negative was found unsound — and the section below
+keeps all three in order, oldest first, because the sequence is the evidence.
+
+### Final result
+
+| Date | Arm | Prose under test | Fixture | Runs | Result |
+|------|-----|------------------|---------|------|--------|
+| 2026-09-03 | baseline | `agents/drift-gate.md` @ `origin/main` | summary-only (rev. A) | 6 | **DRIFT 6/6** — predicted PASS |
+| 2026-09-03 | baseline | `agents/drift-gate.md` @ `origin/main` | with-transcript (rev. C) | 3 | **PASS 3/3** |
+| 2026-09-03 | treatment | `agents/drift-gate.md` (narrowed, worktree) | with-transcript (rev. C) | 3 | **PASS 3/3** |
+
+**What this supports.** Dropping the "tell the gate to open the commit body and confirm the
+transcript is there" instruction, and its rationale, and the `Do not reconstruct a missing
+transcript` clause. The committed gate opens the artifact unprompted and grades a
+summary-as-transcript as DRIFT, 6/6, against a pre-registration predicting the opposite.
+Adding that instruction would have codified a fix for a gap that does not exist.
+
+**What this does not support, and must not be read as supporting.** The three clauses that
+were kept — the transcript must name which assertion failed, a stayed-GREEN transcript is
+complete evidence rather than a gap, and the gate re-runs one observation-point enumeration.
+The negative arm returning all-PASS on both prose versions shows only that neither
+false-positives on a sound transcript. **Baseline and treatment are indistinguishable on this
+fixture, which is the expected outcome** — the negative exists to catch a gate that DRIFTs on
+everything, not to demonstrate improvement. The kept clauses remain independently motivated
+and behaviourally unmeasured. A case for them needs a fixture where they can fail.
+
+Two treatment runs did exercise them incidentally, which is worth noting but is not
+measurement: one cited the stayed-GREEN rule by name in its reasoning, and one verified an
+`observation-points: none` claim by searching for call sites rather than accepting it — the
+vacuous-pass case that clause was written for.
+
+### On reconstruction — a pre-registered condition that was right for the wrong reason
+
+Pre-registered condition 2 required that a run not reconstruct missing evidence by re-running
+the mutations and then passing. It held: on the summary-only fixture the gates reconstructed
+**and still returned DRIFT**.
+
+But the framing behind it was wrong. Reconstruction is not a failure mode — it is how these
+gates verify anything. Every arm in every run re-ran the mutations independently rather than
+trusting the transcript, and on the unsound negative (rev. B) that is precisely what caught a
+transcript describing a strengthening absent from the delivered code. A `Do not reconstruct`
+clause would have suppressed the gate's single most effective behaviour. It was dropped.
+
+### Fixture revisions — what changed and why it matters for reading the table
+
+- **rev. A** — the original repo-builder output. The summary-only baseline ran here.
+- **rev. B** — added the strengthened assertion so the transcript's own claim became true.
+  The first with-transcript arms ran here and split 2 PASS / 1 DRIFT.
+- **rev. C** — corrected the transcript's line references (18/28 → 21/31) and reconciled
+  three disagreeing diffstats (65 / 41 / actual 47) to the real diff.
+
+**The rev. A result stands** — its pass condition turned on the absent transcript, which none
+of the later corrections touched — but the fixture it ran against no longer exists, and the
+rev. B split was caused by my bookkeeping rather than by either prose version. Under rev. C no
+arm spent a finding on fixture metadata.
+
+### Three authoring errors, all caught by the gates rather than by me
+
+1. **The fixture could not test the claim.** The first dispatch handed the gate the commit
+   body as a labelled artifact, removing the variable under test. Redesigned as a real
+   repository with base and head SHAs so the gate must retrieve the body itself.
+2. **The negative was unsound.** Its transcript narrated strengthening a test with an
+   assertion that was not in the delivered code. Three gates found it by reproducing the
+   mutation. A negative whose correct answer is "this is fine" cannot contain a real defect.
+3. **The bookkeeping disagreed with itself.** Three different insertion counts for one commit,
+   and line references stale by three. Correct findings, but noise against the variable under
+   test — every confound is a chance for a run to reach the right verdict for the wrong reason.
+
+The withdrawal note below is left unedited, as written before the redesign.
+
+---
+
+## Withdrawal note, written 2026-09-03 before the redesign — kept verbatim
 
 `plugins/craft/evals/gate-reads-the-evidence-artifact/` — pre-registered and committed at
 `8f0aacb` before any arm was run.

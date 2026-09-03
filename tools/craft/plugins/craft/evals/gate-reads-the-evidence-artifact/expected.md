@@ -105,3 +105,49 @@ The dispatch supplies what the loop's review step supplies: the intent document
 (`diff.patch`), and the commit body (one of the two variants) — presented as the artifacts they
 stand for, since the fixture is not a live repository. Nothing in the dispatch may hint that
 the transcript's presence is what is being measured.
+
+---
+
+# Corrections, appended 2026-09-03 after the arms ran
+
+**Everything above is left unedited on purpose.** It is the pre-registration, and its errors
+are part of the record. Read this section for what the case actually measured.
+
+## The dispatch described above cannot test the claim
+
+"How an arm is dispatched" hands the gate the commit body as one of four labelled artifacts,
+and names `fixtures/diff.patch` as the diff. That design **removes the variable under test**:
+the failure this case exists to reproduce is a gate that had to decide to go and open the
+commit and never did. Handing it the body measures something else — whether a gate given a
+weak transcript recognises it as weak. It does, reliably, on the committed prose.
+
+**The live dispatch** points the gate at a **working directory and a base/head SHA pair**, and
+requires it to retrieve the body itself. Build the repository with
+`fixtures/make-fixture-repo.sh <summary-only|with-transcript> <dest>`, which prints the two
+SHAs. `diff.patch` has been deleted: nothing reads it, and a fixture nothing reads is a trap
+for whoever edits it next expecting an effect.
+
+## The expected failure was wrong
+
+The pre-registration predicted the baseline would PASS on `summary-only`. **Measured: DRIFT
+6/6.** The committed gate opens the commit body unprompted. The instruction this case was
+built to justify is therefore dropped, not landed — see `MANUAL-EVAL.md` for the full
+disposition and for what the case does and does not support.
+
+## Condition 2 held, but its reasoning was wrong
+
+Condition 2 forbids reconstructing missing evidence and then passing. It held. But
+reconstruction turned out to be **how these gates verify anything** — every arm re-ran the
+mutations independently rather than trusting the transcript, and that is what caught an
+unsound fixture. A `Do not reconstruct` clause would have suppressed the gate's most effective
+behaviour, so it was dropped too.
+
+## The negative fixture in the pre-registration was unsound
+
+The `commit-body-with-transcript` variant described strengthening a test with an assertion
+that did not exist in the delivered code — so it was not a clean evidence case but a
+transcript that lies about the diff. Three gates caught it by reproducing the mutation. The
+assertion now exists and goes RED under the revert with the message the transcript quotes.
+
+Recorded as an authoring error, not a pass failure, per the precedent in
+`compound-criterion-detection` fixture 2.
