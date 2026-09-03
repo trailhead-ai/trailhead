@@ -22,7 +22,6 @@ testpaths = [
     "tools/camp/tests",
     "tools/portage/tests",
     "tools/outpost/tests",
-    "tools/ranger/tests",
 ]
 # -n auto: parallelize across all available cores (pytest-xdist). The suite is
 # I/O-bound on subprocess + filesystem work, not CPU-bound, so this scales

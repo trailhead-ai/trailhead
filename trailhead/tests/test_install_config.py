@@ -105,7 +105,6 @@ class TestFlagsAndDefaults:
             "install_camp_cli = false\n"
             "install_lore_cli = true\n"
             "install_portage_cli = false\n"
-            "install_ranger_cli = true\n"
             "plugins=[]\n",
         )
         cfg = resolve_config(config_path=path, detected_harnesses=["claude_code"])
@@ -113,19 +112,7 @@ class TestFlagsAndDefaults:
             "camp": False,
             "lore": True,
             "portage": False,
-            "ranger": True,
         }
-
-    def test_ranger_cli_flag_defaults_true(self):
-        # No --no-ranger CLI flag exists: the key is resolved generically off
-        # ranger's cli_bin declaration, so it defaults on with no config at all.
-        cfg = resolve_config(detected_harnesses=["claude_code"])
-        assert cfg.cli_flags["ranger"] is True
-
-    def test_config_can_set_install_ranger_cli(self, tmp_path):
-        path = _write(tmp_path, "install_ranger_cli = false\nplugins=[]\n")
-        cfg = resolve_config(config_path=path, detected_harnesses=["claude_code"])
-        assert cfg.cli_flags["ranger"] is False
 
 
 # ---------------------------------------------------------------------------
@@ -184,7 +171,7 @@ class TestPluginExpansion:
         path = _write(tmp_path, "install_camp_cli = true\n")  # no plugins key
         cfg = resolve_config(config_path=path, detected_harnesses=["claude_code"])
         names = [p.name for p in cfg.harnesses[0].plugins]
-        assert names == ["camp", "lore", "craft", "portage", "outpost", "ranger", "trailhead"]
+        assert names == ["camp", "lore", "craft", "portage", "outpost", "trailhead"]
 
     def test_selecting_trailhead_includes_its_hook(self):
         cfg = resolve_config(cli_harnesses=["claude_code"], cli_plugins=["camp", "trailhead"])
@@ -320,7 +307,7 @@ class TestShippedDefault:
         assert cfg.cli_flags["lore"] is True
         assert cfg.cli_flags["portage"] is True
         names = [p.name for p in cfg.harnesses[0].plugins]
-        assert names == ["camp", "lore", "craft", "portage", "outpost", "ranger", "trailhead"]
+        assert names == ["camp", "lore", "craft", "portage", "outpost", "trailhead"]
 
 
 # ---------------------------------------------------------------------------

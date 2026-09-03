@@ -22,7 +22,7 @@ let tests/experiments touch the live install.
 ## What this repo is
 
 `trailhead` is a **monorepo** shipping a harness-agnostic Python management CLI plus
-six agent-plugins (`lore`, `camp`, `craft`, `portage`, `outpost`, `ranger`). The CLI
+five agent-plugins (`lore`, `camp`, `craft`, `portage`, `outpost`). The CLI
 *composes* and *wires* selected plugin capabilities into whatever AI code harness you
 use; the plugins themselves are the agent-facing product (skills, subagents, hooks).
 **install = clone the repo** — there is no remote fetch, no SHA-pinning manifest, no
@@ -62,8 +62,8 @@ bin/trailhead uninstall           # remove the whole install (keeps your data)
 
 The root `pyproject.toml`'s `addopts` applies `-n auto` (pytest-xdist) whenever
 pytest resolves that file as its config — the whole-suite run, and any path under
-`trailhead/tests`, `tools/outpost/tests`, `tools/portage/tests`, or
-`tools/ranger/tests` (they have no config of their own). `tools/camp`,
+`trailhead/tests`, `tools/outpost/tests`, or `tools/portage/tests` (they have no
+config of their own). `tools/camp`,
 `tools/craft`, and `tools/lore` each carry their own `pyproject.toml` with no
 `addopts`, so a path under `tools/camp/tests` / `tools/craft/tests` /
 `tools/lore/tests` runs serially by default — `--pdb` works there unmodified.

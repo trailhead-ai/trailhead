@@ -56,8 +56,6 @@ Changed, on evidence:
   remain the safety net.
 - **`craft:assumption-prover` effort unset → `medium`.** Narrow contract: write
   one test, run it, report VALIDATED/INVALIDATED.
-- **`ranger:execute`, `ranger:refine` effort unset → `medium`.** Both run a
-  fixed ritual unattended; the judgment is in when to escalate, not in what to do.
 
 Affirmed, with reasons:
 

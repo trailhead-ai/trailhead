@@ -20,7 +20,7 @@ from pathlib import Path
 
 _REPO_ROOT = Path(__file__).parent.parent.parent
 _ROOT_MARKETPLACE = _REPO_ROOT / ".claude-plugin" / "marketplace.json"
-_TOOLS = ["lore", "camp", "craft", "portage", "outpost", "ranger", "trailhead"]
+_TOOLS = ["lore", "camp", "craft", "portage", "outpost", "trailhead"]
 
 
 # ---------------------------------------------------------------------------

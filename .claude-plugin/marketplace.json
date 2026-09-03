@@ -31,11 +31,6 @@
       "description": "Close the human→agent review loop: pick up the human-authored diff reviews in the outpost cockpit and act on them over HTTP."
     },
     {
-      "name": "ranger",
-      "source": "./tools/ranger/plugins/ranger",
-      "description": "Unattended refine sweep: drain a camp group's shaping queue task by task and report what stalled."
-    },
-    {
       "name": "trailhead",
       "source": "./tools/trailhead/plugins/trailhead",
       "description": "Self-update notice: tells a session when its trailhead install is behind its source checkout, with the changelog delta."
