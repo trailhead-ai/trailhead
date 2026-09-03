@@ -1,16 +1,15 @@
 """Contract pin: monitor's machine-readable completion channel.
 
 `monitor` optionally takes an `outcome_file` path from its dispatcher and, on
-reaching a terminal state, writes exactly one line naming that state — the
-same file-based-outcome shape ranger's sweep and drain loops use, so an
-unattended caller (e.g. ranger drain) can poll for monitor's result without
-parsing its prose reply. These are prose-only invariants (nothing but agent
+reaching a terminal state, writes exactly one line naming that state, so a
+caller that cannot wait on monitor's prose reply can poll for its result
+instead. These are prose-only invariants (nothing but agent
 adherence enforces them at runtime), so a pinned literal is the only thing
 keeping them from silently drifting.
 
 Every pinned span is asserted as a contiguous substring within one physical
-line, per the wrap-safety lesson the ranger sweep's own pin harness encodes
-([[lesson/phrase-pinned-prose-contracts-break-on-line-wraps]]).
+line, per the wrap-safety lesson at
+[[lesson/phrase-pinned-prose-contracts-break-on-line-wraps]].
 """
 
 from __future__ import annotations
@@ -77,7 +76,7 @@ def test_monitor_uses_the_callers_path_verbatim_with_no_mkdir():
     _pin(
         MONITOR,
         "uses the path verbatim and never creates its parent directory",
-        "the caller pre-creates the outcome-file directory (ranger's 0700 pattern) — monitor "
+        "the caller pre-creates the outcome-file directory (mode 0700) — monitor "
         "must not mkdir it.",
     )
 

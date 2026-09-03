@@ -3,7 +3,7 @@
 This task ships the driver's PR tail: dispatching portage's `updater` and then `monitor`
 from the driver session itself — never nested inside another subagent, which loses the
 notification channel — deriving `group_toml_path` from camp's own group config rather than a
-ranger artifact, pre-creating the outcome file's parent directory before dispatching `monitor`,
+artifact of another tool, pre-creating the outcome file's parent directory before dispatching `monitor`,
 polling the outcome file against the driver's own deadline rather than waiting on the dispatch
 notification, and mapping portage's four terminal tokens (plus the empty-file case) explicitly
 with no default or fall-through branch. `MERGED`, `READY <reason>`, and
@@ -13,8 +13,8 @@ token map; the slice close it hands off to is pinned by `test_drive_slice_close_
 
 Pinned here, using the wrap-aware `_pin` helper mirrored from `test_drive_build_phase_contract.py`
 (itself mirrored from `test_drive_plan_phase_contract.py`, `test_drive_escalation_contract.py`,
-`test_drive_resume_contract.py`, `test_drive_skill_contract.py`, `test_execute_mode_contract.py`,
-and ranger's `tests/test_sweep_contract.py`): every pinned span is asserted as a contiguous
+`test_drive_resume_contract.py`, `test_drive_skill_contract.py`, and
+`test_execute_shared_procedure_contract.py`): every pinned span is asserted as a contiguous
 substring **within one physical line**, so a markdown rewrap that shifts a line break fails
 loudly as a wrap issue rather than reading as "phrase missing".
 """
@@ -136,7 +136,7 @@ def test_driver_responsibility_ends_at_green():
     )
 
 
-# --- group_toml_path is derived from camp's own group config, not a ranger artifact -----
+# --- group_toml_path is derived from camp's own group config, not another tool's artifact -----
 
 
 def test_group_toml_path_derived_from_camps_own_group_config():

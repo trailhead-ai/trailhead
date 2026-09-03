@@ -417,7 +417,7 @@ def _activate_task(name: str = "npm-ci") -> dict:
 class TestNewActivateFlag:
     """`camp new --activate` hands every member's activate-phase work to the
     detached provisioner and returns without waiting for it — the mechanism a
-    non-interactive consumer (e.g. ranger) uses to get work-enabling tasks run
+    non-interactive consumer uses to get work-enabling tasks run
     without ever calling `camp activate` interactively."""
 
     def test_activate_flag_calls_the_trigger_without_waiting(

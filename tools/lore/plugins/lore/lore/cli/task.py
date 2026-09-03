@@ -8,7 +8,7 @@ the ``--parent``/``--depends-on`` write-time guards in ``record/guards.py``.
 
 ``list`` is a second, sibling verb: a flat per-vault listing (built on
 ``record/tasks.py``) rather than a containment-subtree render, for a caller
-(ranger's sweep) that wants every task in a NAMED vault rather than one
+that wants every task in a NAMED vault rather than one
 task's subtree.
 """
 from __future__ import annotations
@@ -163,7 +163,7 @@ def _cmd_task_list(args) -> int:
     """``lore task list --vault NAME [--status STATUS ...] [--runnable] [--json]``.
 
     Flat listing of every task record in the NAMED vault — the read surface a
-    caller outside this repo (ranger's sweep) shells out to for a queue read,
+    caller outside this repo shells out to for a queue read,
     rather than importing ``record/tasks.py`` directly. ``--vault`` resolves
     through the shared :func:`record._resolve_named_vault` lookup (the same
     locate-by-vault path ``record update --vault`` uses); an unreadable

@@ -6,8 +6,7 @@ records alone. It defines where the checkpoint is written and what resume does w
 phases that write it at their own boundaries are pinned by their own contract files.
 
 Pinned here, using the wrap-aware `_pin` helper mirrored from `test_drive_skill_contract.py`
-(itself mirrored from `test_execute_mode_contract.py`'s own helper, mirrored in turn from
-ranger's `tests/test_sweep_contract.py`): every pinned span is asserted as a contiguous
+(itself mirrored from `test_execute_shared_procedure_contract.py`'s own helper): every pinned span is asserted as a contiguous
 substring **within one physical line**, so a markdown rewrap that shifts a line break fails
 loudly as a wrap issue rather than reading as "phrase missing".
 """

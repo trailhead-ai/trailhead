@@ -4,16 +4,16 @@
 merge: monitor merges a `done` PR without gating on human approval. With
 `auto_merge` unset/false, nothing merges automatically — `portage merge`
 refuses fail-closed and the operator merges by hand. The C3 council pin
-survives in narrowed form: no drain, portage, or dispatched-agent component
-ever applies the approval signal (the signal no longer gates portage's
+survives in narrowed form: no portage or dispatched-agent component ever
+applies the approval signal (the signal no longer gates portage's
 merges, but branch protection or an operator's own review may still consume
 it). These are prose-only invariants (nothing but agent adherence enforces
 them at runtime), so a pinned literal is the only thing keeping them from
 silently drifting.
 
 Every pinned span is asserted as a contiguous substring within one physical
-line, per the wrap-safety lesson the ranger sweep's own pin harness encodes
-([[lesson/phrase-pinned-prose-contracts-break-on-line-wraps]]).
+line, per the wrap-safety lesson at
+[[lesson/phrase-pinned-prose-contracts-break-on-line-wraps]].
 """
 
 from __future__ import annotations
@@ -90,19 +90,6 @@ def test_monitor_anti_pattern_pins_the_prohibition_and_the_manual_bypass_residua
         MONITOR,
         "that residual is accepted as risk",
         "the manual-bypass weakness (operator-credential self-approval) must be documented.",
-    )
-
-
-def test_operator_rituals_pin_the_auto_merge_policy():
-    rituals = (
-        _REPO_ROOT / "tools" / "ranger" / "plugins" / "ranger" / "skills" / "execute"
-        / "operator-rituals.md"
-    )
-    _pin(
-        rituals,
-        "monitor merges a `done` PR without any human-approval check",
-        "the operator rituals must describe the same merge policy monitor enforces, or "
-        "the operator is sent hunting for an approval gate that no longer exists.",
     )
 
 

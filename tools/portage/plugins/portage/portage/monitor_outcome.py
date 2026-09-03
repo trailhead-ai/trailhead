@@ -3,10 +3,8 @@
 `monitor` (see `agents/monitor.md`) may be handed an `outcome_file` path by
 its dispatcher. On reaching a terminal state it writes exactly one line to
 that path, naming the state: `MERGED` | `READY <reason>` | `BLOCKED
-<reason>` | `STOPPED <reason>` — mirroring the outcome-file shape ranger's
-sweep and drain loops already use (`ranger.sweep.report.read_outcome`,
-`ranger.drain.report.parse_drain_outcome`), so an unattended caller can poll
-for monitor's result without parsing its prose reply.
+<reason>` | `STOPPED <reason>`, so a caller that cannot wait on monitor's
+prose reply can poll for its result instead.
 
 This module owns only the read/parse side. Monitor is a prose-driven
 subagent — there is no monitor-side Python that writes the file — so nothing
@@ -36,8 +34,7 @@ def parse_monitor_outcome(line: str) -> tuple[str | None, str]:
     should not have later lines corrupt the result. Returns `(None,
     <line>)` when the first line is not one of `MONITOR_OUTCOME_TOKENS`, or
     when a token that requires an argument (`READY`/`BLOCKED`/`STOPPED`) was
-    given none — the caller treats that as a validation failure, mirroring
-    `ranger.drain.report.parse_drain_outcome`'s shape for the drain grammar.
+    given none — the caller treats that as a validation failure.
     """
     first_line = line.strip().splitlines()[0].strip() if line.strip() else ""
     token, _, argument = first_line.partition(" ")

@@ -1,5 +1,5 @@
 """Tests for ``lore task list --vault <name> [--status ...] [--json]`` — the
-flat task-listing verb ranger's sweep shells out to for a named vault's queue.
+flat task-listing verb an external caller shells out to for a named vault's queue.
 
 Covers the test contract:
 
