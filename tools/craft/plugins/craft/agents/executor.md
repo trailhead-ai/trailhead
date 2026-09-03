@@ -205,9 +205,9 @@ Fix what you find *before* reporting. The reviewer should not have to flag what 
 caught yourself.
 
 Any security- or decision-relevant finding — "I touched a secrets file", "I made an
-architectural call the intent document didn't specify" — goes in the head's `blocking` or
-`unknowns` field. The full self-review text lives only in the commit body and does not reach
-the controller.
+architectural call the intent document didn't specify" — is
+surfaced in the head's `blocking` or `unknowns` field. The full self-review text lives only
+in the commit body and does not reach the controller.
 
 ---
 
