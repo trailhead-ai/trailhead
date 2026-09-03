@@ -7,7 +7,10 @@
 <!-- Measurable outcomes this work achieves. Each bullet is a concrete goal. -->
 
 ## Acceptance Criteria
-<!-- One top-level `- ` bullet per criterion, each prefixed `**ACn.**`. A `###`
+<!-- The bar that must be met for this to be considered done. Specific and
+testable: name the observation that distinguishes pass from fail.
+
+One top-level `- ` bullet per criterion, each prefixed `**ACn.**`. A `###`
 sub-heading may group criteria without itself being one. A nested sub-bullet
 qualifies its parent rather than forming a criterion of its own.
 
