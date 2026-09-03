@@ -12,26 +12,22 @@ is fed through the real script or checked against real gate output.
 from __future__ import annotations
 
 import re
-import subprocess
-import sys
 from pathlib import Path
+
+# The gate runner, its stdout token parser, and the fixture bodies are the
+# same ones the gate's own suite drives, so a change to either the invocation
+# or the token block reaches both suites from one place.
+from test_candidate_set import (
+    FULL_COVERAGE_WITH_LEGACY_LINE,
+    MALFORMED_TOKEN,
+    UNDECLARED_COVERAGE,
+    ZERO_CRITERIA_SPEC,
+    _run,
+    _tokens,
+)
 
 CRAFT = Path(__file__).parent.parent / "plugins" / "craft"
 SLICE_SKILL = CRAFT / "skills" / "slice" / "SKILL.md"
-GATE = CRAFT / "scripts" / "candidate_set.py"
-FIXTURES = Path(__file__).parent / "fixtures"
-
-TWO_LINES_TWO_COVERED = (FIXTURES / "spec_candidate_two_lines_two_covered.md").read_text(
-    encoding="utf-8"
-)
-FULL_COVERAGE_WITH_LEGACY_LINE = (
-    FIXTURES / "spec_candidate_full_coverage_with_legacy_line.md"
-).read_text(encoding="utf-8")
-MALFORMED_TOKEN = (FIXTURES / "spec_candidate_malformed_token.md").read_text(encoding="utf-8")
-UNDECLARED_COVERAGE = (FIXTURES / "spec_candidate_undeclared_coverage.md").read_text(
-    encoding="utf-8"
-)
-ZERO_CRITERIA_SPEC = (FIXTURES / "spec_zero_criteria.md").read_text(encoding="utf-8")
 
 _NINE_CRITERIA_HEADING = "\n".join(
     f"- **AC{n}.** A fixture criterion." for n in range(1, 10)
@@ -49,25 +45,6 @@ def _step(name: str) -> str:
     rest = text[start + len(name):]
     end = re.search(r"\n### \d+\.", rest)
     return rest[: end.start()] if end else rest
-
-
-def _run(spec_body: str) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        [sys.executable, str(GATE)],
-        input=spec_body,
-        capture_output=True,
-        text=True,
-    )
-
-
-def _tokens(stdout: str) -> dict[str, str]:
-    out: dict[str, str] = {}
-    for line in stdout.splitlines():
-        if ":" not in line:
-            continue
-        key, _, value = line.partition(":")
-        out[key.strip()] = value.strip()
-    return out
 
 
 def _reason_code(stderr: str) -> str:

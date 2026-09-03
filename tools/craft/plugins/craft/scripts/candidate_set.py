@@ -12,15 +12,16 @@ takes a flag, a gate that derives a value from a document alone reads stdin
 only. A third gate here should pick the convention that matches which of the
 two it is doing, not copy either example blindly.
 
-Criterion identifiers are derived by importing `parse_criteria` from the
-sibling `covers_gate.py` — never re-derived here, so the two gates cannot
-disagree about what a criterion is. The ledger parser below is new, and
-follows the same document-format discipline `covers_gate.py` already
-establishes: lines are split on the CommonMark line grammar only (`\\r\\n`,
-`\\r`, `\\n` — never Python's broader `str.splitlines()`), fenced code blocks
-(``` or ~~~, any info string) are invisible to both the heading search and the
-ledger scan, and the `## Slices` heading is anchored at line start,
-case-insensitively, so an inline mid-sentence mention does not satisfy it.
+Criterion identifiers, the CommonMark line splitter, and the fenced-block
+masker are all imported from the sibling `covers_gate.py` — never re-derived
+here, so the two gates cannot disagree about what a criterion is or about what
+counts as document structure. The ledger scan below is this gate's only new
+parsing, and it reads through those same primitives: lines are split on the
+CommonMark line grammar only (`\\r\\n`, `\\r`, `\\n` — never Python's broader
+`str.splitlines()`), fenced code blocks (``` or ~~~, any info string) are
+invisible to both the heading search and the ledger scan, and the `## Slices`
+heading is anchored at line start, case-insensitively, so an inline
+mid-sentence mention does not satisfy it.
 
 A `## Slices` ledger line's coverage token is the fifth field of its trailing
 parenthetical:
@@ -75,21 +76,17 @@ if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 
 from covers_gate import (  # noqa: E402
+    _COMMONMARK_LINE_RE,
     _ZERO_CRITERIA_REASON_CODE,
+    _mask_fenced_lines,
     parse_covers,
     parse_criteria,
 )
 
 _SLICES_HEADING_RE = re.compile(r"^## Slices$", re.IGNORECASE)
-_FENCE_START_RE = re.compile(r"^(`{3,}|~{3,})")
 _LEDGER_BULLET_RE = re.compile(r"^- ")
 _LEDGER_TRAILING_PAREN_RE = re.compile(r"\(([^()]*)\)\s*$")
 _LEDGER_FIELDS_RE = re.compile(r"^`task/[^`]+`, closed [^,]+(?:, covers (?P<covers>.+))?$")
-# CommonMark line endings only — see covers_gate.py's identical constant for
-# why str.splitlines() must never be used here: it also breaks on U+2028,
-# U+2029, NEL, \v, and \f, none of which render as a line break to a human
-# or a CommonMark reader.
-_COMMONMARK_LINE_RE = re.compile(r"\r\n|\r|\n")
 
 _UNDECLARED_REASON_CODE = "undeclared-covered-identifier"
 _MALFORMED_TOKEN_REASON_CODE = "malformed-coverage-token"
@@ -105,27 +102,6 @@ class MalformedCoverageTokenError(ValueError):
 
 def _err(msg: str) -> None:
     print(f"candidate-set: {msg}", file=sys.stderr)
-
-
-def _mask_fenced_lines(lines: list[str]) -> list[bool]:
-    """Return one boolean per line — True where the line is a fence marker
-    or falls inside a fenced code block (``` or ~~~, any info string)."""
-    masked = [False] * len(lines)
-    fence_char: str | None = None
-    fence_len = 0
-    for i, line in enumerate(lines):
-        stripped = line.strip()
-        m = _FENCE_START_RE.match(stripped)
-        if fence_char is None:
-            if m:
-                fence_char = m.group(1)[0]
-                fence_len = len(m.group(1))
-                masked[i] = True
-            continue
-        masked[i] = True
-        if m and m.group(1)[0] == fence_char and len(m.group(1)) >= fence_len:
-            fence_char = None
-    return masked
 
 
 def parse_ledger(spec_body: str, criteria: list[str]) -> tuple[list[str], bool]:
