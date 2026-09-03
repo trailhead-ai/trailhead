@@ -40,7 +40,14 @@ the pass condition, written before any arm was run.
 
 **Under test:** AC1 of `spec/acceptance-criteria-are-atomic-assertions-a-slice-carries` — a
 compound acceptance criterion is detected by the gauntlet's consistency pass and rated
-**Critical**, so it takes a disposition and gates the spec's advance to `ready`.
+**Critical**, so it takes a disposition before the spec advances to `ready`.
+
+> **Corrected 2026-09-03.** AC1's own wording says a Critical "gates the advance". Measured
+> false — see the severity section below. Critical does not gate; a Critical dispositioned
+> `resolved` advances, and that is correct, because `resolved` means the adjudicator drafts
+> and applies the fix first. What protects the spec is that the finding **takes a disposition
+> at all** — Important and Minor take none. The framing above is corrected here so the
+> disproved claim is not the first thing a reader takes away.
 
 **Pass condition (the full conjunction):** the run names the compound criterion on
 *independent-deliverability* grounds, does **not** raise the look-alike conjunction on the
@@ -50,9 +57,10 @@ no severity field, so the pass cannot rate its own finding.
 
 | Date | Arm | Prose under test | Runs | Result | Notes |
 |------|-----|------------------|------|--------|-------|
-| 2026-09-03 | baseline | `agents/consistency-auditor.md` @ `60e22bd` | 3 | **RED — 0/3 on the full condition; 1/3 on bare detection** | Fixture 1. See below. |
+| 2026-09-03 | baseline | `agents/consistency-auditor.md` @ `60e22bd` | 3 | **1/3 detection** | Fixture 1 (contaminated). |
+| 2026-09-03 | baseline | `agents/consistency-auditor.md` @ `60e22bd` | 3 | **0/3 detection** | Fixture 3. Run after the correctness review flagged that no baseline existed for this fixture. |
 | 2026-09-03 | treatment | `agents/consistency-auditor.md` @ `e44b49c` | 5 | **5/5 detection — but the fixture was contaminated** | Fixture 1. Recall, not reasoning. See below. |
-| 2026-09-03 | treatment | `agents/consistency-auditor.md` @ `e44b49c` | 3 | **3/3 detection under inverted phrasing** | Fixture 2. Generalization confirmed; its negative case was unsound. |
+| 2026-09-03 | treatment | `agents/consistency-auditor.md` @ `e44b49c` | 3 | **3/3 detection; failed its own negative case** | Fixture 2. Superseded by fixture 3 — its negative was unsound, and by its own pre-registered rule "either error alone is disqualifying". |
 | 2026-09-03 | treatment | `agents/consistency-auditor.md` @ `e44b49c` | 3 | **3/3 on the full anti-heuristic condition** | Fixture 3. Both criteria carry "and"; separated correctly every run. |
 | 2026-09-03 | severity baseline | `skills/gauntlet/SKILL.md` @ `e44b49c` | 6 | **Critical 6/6 — already** | 3 neutral + 3 leading prompt. Not red. |
 | 2026-09-03 | severity, post-bar | `skills/gauntlet/SKILL.md` @ `843100d` | 3 | **Critical 3/3 — no regression** | Bar now cited by name in the output. |
@@ -72,8 +80,9 @@ Three independent runs against the same fixture and the same committed prose.
   objective and never mentioned the email half at all. Worse than a miss: it records the
   compound criterion as cleanly discharged.
 
-**No run assigned severity, in any arm — structurally cannot.** The auditor's output shape
-has seven parts and no severity field.
+**No run assigned severity — structurally cannot.** The pre-change output shape had seven
+parts and no severity field; the post-change shape has eight and still none. Severity is the
+adjudicator's to assign in either case.
 
 **Read.** Today's craft does not reliably detect a compound criterion, and when it does, the
 catch is a by-product of the testability rule rather than the deliverability question, and
@@ -154,14 +163,31 @@ designed: it fires on genuinely borderline cases (fixture 2) and not on insepara
 - Three fixtures, eleven runs, one model tier. Nothing here speaks to other tiers.
 - The borderline band is real and unmeasured. Fixture 2's rejected-with-reason case split
   2-1, and no fixture maps where that band begins or ends.
+- **No arm exercised the criterion unit this slice also delivers.** All three fixtures write
+  criteria as `1.` ordered lists, not the `- **ACn.**` bullet form `templates/spec.md` fixes.
+  The atomicity *rule* is measured; the *unit* is not. Fixtures are left unedited because
+  editing one after it has run invalidates its own evidence — a later fixture should adopt the
+  bullet form so the unit is exercised too.
+- **AC1's stated verification method is not yet met.** The spec records AC1 as
+  *"Verified by: automated assertion"*. This arm is human-triggered, so that obligation is
+  outstanding, tracked on `task/give-craft-s-eval-cases-a-recurring-runner`. A slice-loop pass
+  reading AC1 as automatically verified would be wrong — which is the half-covered-criterion
+  failure this spec exists to prevent, so it is named here rather than left implicit.
+- **The severity arm's own limits.** It rests on a single captured pass report, derived from
+  the fixture this file calls contaminated, at one model tier, on one finding shape. It shows
+  the bar does not regress; it does not establish how severity behaves across finding shapes.
 - Fixture 1 contains an accidental contradiction found during these runs — it requires email
   notification under a stdlib-only constraint. Harmless to the conditions under test, and
   left in place: the runs that found it are recorded above, and editing a fixture after it
   has been run invalidates its own evidence.
-- **Severity remains unproven: 0/11.** No run has rated anything Critical, because the pass
-  structurally cannot. Until Task 4 binds the finding to the Critical bar at adjudication, a
-  detected compound criterion still gates nothing — which is the half of AC1 that makes the
-  other half matter.
+- **Severity is not observable in this arm: 0/11.** No run rated anything Critical, because
+  the auditor's output shape has no severity field and the pass structurally cannot. Severity
+  is measured in its own arm, below, against the adjudication prose.
+
+  > **Superseded.** This bullet originally read that a detected compound criterion "still
+  > gates nothing" until the Critical bar landed. Both halves proved wrong: the finding
+  > already reached Critical 6/6 without the bar, and Critical does not gate the advance in
+  > any case. Left visible rather than deleted, because the correction is the finding.
 
 ### Severity evidence, 2026-09-03 — the arm that did not go red
 
@@ -201,5 +227,27 @@ written as fixing a miss, because there is no miss.**
 each time. That is the intended difference: same outcome, no longer emergent.
 
 **Honest labelling.** This arm is a **no-regression check, not a red-to-green transition**.
-The slice's genuine red-to-green evidence is the detection arm above — 0/3 on the full
-condition at baseline, 3/3 on the fixture built to defeat memorization.
+
+**And the headline number, stated correctly.** An earlier draft of this file claimed
+"0/3 at baseline, 3/3 after" — that compared the *full conjunction* (which includes reaching
+Critical, a condition the auditor arm structurally cannot satisfy) against *detection alone*.
+It penalised the baseline by a condition the treatment arm also fails 0/11. The claim was
+overstated and is withdrawn.
+
+The defensible comparison is **same fixture, same metric, both arms**:
+
+| Metric | Baseline | Treatment |
+|---|---|---|
+| Detection, fixture 3 (uncontaminated, cues decorrelated) | **0/3** | **3/3** |
+| Detection, fixture 1 (contaminated — recall, not reasoning) | 1/3 | 5/5 |
+| Anti-heuristic: inseparable "and" spared, fixture 3 | n/a — no rule to apply | 3/3 |
+| Severity reaches Critical | 6/6 *already, before any bar* | 3/3 |
+
+**Fixture 3 is the load-bearing row**: it is the only fixture that is both uncontaminated and
+run against both arms, so it is the only clean red-to-green evidence in this file.
+
+**What the baseline actually did on fixture 3** is more interesting than a bare miss. All
+three runs noticed the digest clause and filed it under *criteria serving no objective* — a
+traceability finding. So the old prose senses that something is off, and files it where it
+carries no severity and never says "split this criterion." The gap was never blindness; it
+was filing the observation somewhere that does not act on it.

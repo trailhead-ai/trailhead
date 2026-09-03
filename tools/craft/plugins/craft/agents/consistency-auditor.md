@@ -96,6 +96,8 @@ If a finding requires you to know something outside the document, it is not your
 1. **Verdict** — one line: `coherent` | `gaps` | `contradictory`. `contradictory` means at least one pair of statements cannot both be satisfied.
 2. **Coverage matrix** — a table, one row per objective: `Objective | Criteria covering it | Coverage: full / partial / none`. Then a second table, one row per named Required Interface: `Interface | Criteria covering it | Coverage: full / none` — this table is the Required Interfaces coverage extension. Then a short list of any criteria serving no objective. These tables are the deliverable — do not summarize them away.
 3. **Compound criteria** — each criterion carrying more than one independently deliverable assertion, quoted, with the two (or more) assertions it splits into and why each is separately shippable.
+
+   > **Editing this item, or the compound rule in section 2?** Neither is covered by CI — the test suite asserts what this file says, never what it causes. `skills/gauntlet/SKILL.md`'s Critical bar keys on this item by name, so removing or renaming it silently disarms that bar. Re-run the detection arm before trusting such a change; see `tools/craft/MANUAL-EVAL.md`.
 4. **Untestable criteria** — quote each, and name the missing observation.
 5. **Contradictions** — each as a pair: `<statement A>` (section) vs `<statement B>` (section) — why they can't both hold.
 6. **Misplaced requirements** — each smuggled requirement, quoted, with the section it's in and the section it belongs in.

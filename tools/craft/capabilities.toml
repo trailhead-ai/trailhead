@@ -3,6 +3,11 @@
 # selectable subagents from agents/*.md. No capability groups — install selects
 # subagents/skills by name (see trailhead/install_config.py).
 #
+# NOT in base, deliberately: evals/ holds dev-time behavioral eval fixtures and their
+# expected verdicts (see MANUAL-EVAL.md). Nothing a shipped skill or agent reads at
+# runtime lives there, so a composed install has no use for it. Do not "fix" the
+# omission by adding it to base.
+#
 # Three directories ship always (base), because all three hold files that shipped
 # skills/agents READ at runtime — omit any and a selected skill/agent points at a
 # path that is not there:

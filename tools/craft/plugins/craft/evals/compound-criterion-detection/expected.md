@@ -47,6 +47,21 @@ explicitly rejects it.
 3. The finding reaches **Critical** at adjudication, so it takes a disposition and gates
    the advance.
 
+> **Correction, appended 2026-09-03 after the arms ran — the pre-registered text above is
+> left unedited on purpose.** The clause "and gates the advance" is **wrong**, and this file
+> is designated for verbatim reuse by a future `claude plugin eval` case, so the error must
+> not be re-imported into an automated gate. Critical does *not* gate the advance: a record
+> advances when no Critical carries a final disposition of `revise`, and a Critical
+> dispositioned `resolved` advances. That is the correct outcome — `resolved` means the
+> adjudicator drafts and applies the split before advancing. What condition 3 actually
+> requires is that the finding **takes a disposition at all**, since Important and Minor take
+> none and would let the criterion through intact. Measured: 6/6 baseline runs rated it
+> Critical, dispositioned `resolved`, and advanced.
+
+> **Scope of the pre-registration claim.** "Written before any arm was run" applies to the
+> **pass conditions**. The Stability and fixture-rationale sections below were appended after
+> the corresponding arms ran and report observed results; they are labelled where they appear.
+
 Conditions 1 and 2 are observed against the consistency pass. Condition 3 is a **separate
 observation** against the gauntlet's adjudication prose: the auditor's output shape carries
 no severity field at all, so the pass cannot rate its own finding.

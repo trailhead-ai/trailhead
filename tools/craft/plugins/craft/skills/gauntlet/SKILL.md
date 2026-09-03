@@ -174,7 +174,10 @@ adjudication — it is delegation of the work you were dispatched to do.** Conso
    is what keeps the compound criterion from surviving. This bar pins measured behavior, not new
    behavior — under the auditor's current output shape a reported compound criterion already
    reaches Critical here. Write it as a rule so an edit to that output shape, or to this step, does
-   not silently regress it.
+   not silently regress it. **This bar is not subject to item 4's auto-downgrade.** Independent
+   deliverability is a judgment about how work would be sliced, which can read as "guessing about
+   future state" — but it is answered from the criterion's own text, and downgrading it to
+   Important strips the disposition that makes the finding land at all.
 6. **Spot-verify contentious claims.** Any finding that would be expensive to act on, that
    contradicts another pass, or that arrives in a transcript reading anomalously (over-confident,
    thin on evidence, or wandering outside its stated lane) gets checked yourself before it reaches
@@ -574,7 +577,7 @@ shaped to avoid:
 - **The adjudicator is a reviewer, not a router.** Consolidation, spot-verification, and
   the single recommendation built out of them are the job. Thirty findings forwarded verbatim is a
   failed adjudication.
-- **The compound-criterion Critical bar (step 4) is covered by a manual eval, not CI.** CI runs
+- **The compound-criterion Critical bar (step 4, item 5) is covered by a manual eval, not CI.** CI runs
   `ruff` and `pytest` and invokes no eval, so a green suite says nothing about whether this bar, or
   the consistency-auditor check it depends on, still detects a compound criterion — a passing test
   run is a one-time gate, not a standing signal. An edit to either this bar or that check should
