@@ -1,0 +1,86 @@
+# Manual Eval — behavioral gates for craft's own prose
+
+Dev-time acceptance tests for a boundary the pytest suite cannot reach: whether craft's
+**agent and skill prose actually changes agent behavior**. A contract test can assert what a
+document says; only a run can show what it causes.
+
+Same role as `MANUAL-SMOKE.md`, different boundary — that file covers the plugin-system
+boundary (install, agent registration); this one covers the behavioral boundary.
+
+## Why these are run by hand
+
+`claude plugin eval` is the automated harness these cases belong in, and it is **not
+runnable for this account**: `claude plugin eval --help` resolves and prints full flag
+documentation, but every execution path — `init`, `init --bare`, and a direct case run —
+returns `plugin eval is currently in early access` and exits. Verified 2026-09-03 on claude
+2.1.259, first-party client, no gating env vars set, already up to date. Enablement is
+per-organization with no self-service path.
+
+Each case below is therefore authored in the shape a real eval case reuses verbatim — a
+fixture on disk plus a written expected verdict — and dispatched in session until the
+harness opens up. Follow-up: `task/give-craft-s-eval-cases-a-recurring-runner`.
+
+## How an arm is dispatched
+
+Both arms point a generic read-only agent at **two file paths**: the agent prose to run as
+its operating instructions, and the fixture to run it against. Baseline arm points at the
+committed prose; treatment arm points at the edited prose. The arms then differ in exactly
+one variable.
+
+**Do not dispatch `craft:<agent>` for the treatment arm.** That subagent type resolves to
+the live composed install, not the worktree, so it re-runs unedited prose and reports a
+false result. Editing the composed install to work around this is barred by Axiom 6.
+
+---
+
+## Case: compound-criterion detection
+
+`plugins/craft/evals/compound-criterion-detection/` — fixture, and `expected.md` carrying
+the pass condition, written before any arm was run.
+
+**Under test:** AC1 of `spec/acceptance-criteria-are-atomic-assertions-a-slice-carries` — a
+compound acceptance criterion is detected by the gauntlet's consistency pass and rated
+**Critical**, so it takes a disposition and gates the spec's advance to `ready`.
+
+**Pass condition (the full conjunction):** the run names the compound criterion on
+*independent-deliverability* grounds, does **not** raise the look-alike conjunction on the
+same grounds, and the finding reaches Critical at adjudication. Severity is a second
+observation against the gauntlet's adjudication prose — the auditor's output shape carries
+no severity field, so the pass cannot rate its own finding.
+
+| Date | Arm | Prose under test | Runs | Result | Notes |
+|------|-----|------------------|------|--------|-------|
+| 2026-09-03 | baseline | `agents/consistency-auditor.md` @ `60e22bd` | 3 | **RED (0/3 on the full condition; 1/3 on bare detection)** | See below. |
+| — | treatment | pending Tasks 2-4 | 5 | _pending_ | |
+
+### Baseline evidence, 2026-09-03
+
+Three independent runs against the same fixture and the same committed prose.
+
+- **Run 1 — caught it, incidentally.** Named AC1 "compound" and split its coverage credit.
+  But the reasoning was pass/fail ambiguity — *"if approval succeeds but one subscriber
+  isn't notified, is the criterion passed or failed?"* — filed under **untestable criteria**,
+  not independent deliverability. A different rule firing on the same sentence.
+- **Run 2 — missed it.** Built the full matrix, flagged the email clause as serving no
+  objective, and flagged `subscriber` as an undefined term — the undefined noun *inside* the
+  compound half — without ever naming the compound structure. Treated AC1 as testable.
+- **Run 3 — missed it, and hid it.** Credited AC1 as **full** coverage of the sign-off
+  objective and never mentioned the email half at all. Worse than a miss: it records the
+  compound criterion as cleanly discharged.
+
+**No run assigned severity, in any arm — structurally cannot.** The auditor's output shape
+has seven parts and no severity field.
+
+**Read.** Today's craft does not reliably detect a compound criterion, and when it does, the
+catch is a by-product of the testability rule rather than the deliverability question, and
+it gates nothing. The failure mode is not silence — it is *inconsistency*, which is worse for
+an author, who cannot tell whether a clean pass means the spec is atomic or means they drew
+run 3.
+
+**Why the baseline flake does not weaken the gate.** Bare detection at 1/3 would make a
+3-run green arm weak evidence, so the recorded pass condition is the full conjunction above,
+against which the baseline is a clean 0/3. Treatment arm runs 5, not 3, so the detection
+half is measurable rather than assumed.
+
+**Containment.** Fixture is self-contained — zero `[[wikilink]]`s, no cross-reference
+resolving to a real vault record. Confirmed by grep before the runs.
