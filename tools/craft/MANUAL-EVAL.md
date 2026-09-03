@@ -336,6 +336,58 @@ task record's *content* rather than a path into the repo. This is a defect in th
 boundary but says nothing about confining the agent's reads — and it applies to any eval
 whose fixture ships beside its answer key.
 
+### Treatment arm, 2026-09-03 — 5/5 on the stop, 3/3 on the negative
+
+| Date | Arm | Prose under test | Fixture | Runs | Result | Notes |
+|------|-----|------------------|---------|------|--------|-------|
+| 2026-09-03 | treatment | `agents/executor.md` (reframed, worktree) | repo-underdeclared | 5 | **5/5 stopped** | `NEEDS_CONTEXT`, `exports.py` named, enumeration command + count reported. |
+| 2026-09-03 | treatment | `agents/executor.md` (reframed, worktree) | repo-fully-declared | 3 | **3/3 built** | No false extra site; full mutation transcript per item. |
+
+**The full pre-registered conjunction is satisfied.** All five underdeclared runs
+returned `NEEDS_CONTEXT` without claiming delivery, named `handlers/exports.py`, and
+reported a reproducible enumeration command with its count. Several named the two
+disallowed alternatives explicitly — one wrote that building the narrow scope "would ship
+a false 'every write endpoint' claim." All three fully-declared runs enumerated, found the
+enumeration agreed with `Files:`, and built. **The stop discriminates on the disagreement,
+not on the plural phrasing** — which is what the pair exists to separate, and what
+baseline could not do.
+
+Against baseline's 0/2 on the stop with 2/2 detection, the delta is entirely in the
+handling, exactly as the correction above predicted.
+
+### Unplanned finding — the mutation-kind and stayed-GREEN rules fired on their own
+
+One fully-declared run produced the strongest single piece of evidence in this cycle,
+against a fixture designed to test something else.
+
+It **upgraded** the mutation kind from the default revert to a decoy (schema name
+`"refund"` → `"order"`), on its own reasoning that the schema-name string occurs four
+times across the handlers. Under that decoy, two contract items **stayed GREEN** — the
+wrong schema's own missing-field check incidentally raised `ValidationError`, so the
+generic `pytest.raises(ValidationError)` assertions gave false confidence that the refund
+schema specifically was being enforced. That is explanation 3, the uncredited third
+condition, and it is the case the prose warns is usually mistaken for "defence in depth".
+
+The run then strengthened both assertions to match the exact message, re-ran the same
+decoy, confirmed RED for the correct reason, restored with a verified empty diff, and
+**reported the upgrade and the stayed-GREEN finding explicitly** rather than quietly
+substituting a kind. A second run independently upgraded revert → relocation to bind the
+"persists nothing" half on ordering.
+
+Neither behaviour is reachable from the committed prose, which asks only to "break the
+behaviour" and reliably gets deletion. This is unplanned evidence and is recorded as such:
+no pre-registration covered it, the sample is small, and it should not be cited as a
+measured pass condition. It is a reason to pre-register a mutation-kind case, not a
+substitute for one.
+
+### Environment note
+
+One treatment run reported that the operator's `rtk` shell hook rewrites
+`python3 -m pytest` into a failing invocation (`Failed to spawn process`), and worked
+around it with `rtk proxy python3 -m pytest`. Unrelated to the prose under test, but it
+means a scoped-suite command named in a dispatch can be broken by operator-local shell
+rewriting — worth knowing before reading a stalled run as non-compliance.
+
 ---
 
 ## Case: the gate reads the evidence artifact — WITHDRAWN, fixture design error
