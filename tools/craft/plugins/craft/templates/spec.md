@@ -7,7 +7,21 @@
 <!-- Measurable outcomes this work achieves. Each bullet is a concrete goal. -->
 
 ## Acceptance Criteria
-<!-- The bar that must be met for this to be considered done. Specific and testable. -->
+<!-- One top-level `- ` bullet per criterion, each prefixed `**ACn.**`. A `###`
+sub-heading may group criteria without itself being one. A nested sub-bullet
+qualifies its parent rather than forming a criterion of its own.
+
+Atomicity bar: a criterion carries exactly one independently deliverable
+assertion — one half could ship, alone, and be useful. The test is
+deliverability, never surface conjunction: an "and" does not itself make a
+criterion compound, and a criterion with no "and" can still be compound.
+
+  - Compound (split it): "a reviewer can approve a submission, and the
+    submitter is notified." The halves land in different phases and either
+    ships useful without the other — two ACs.
+  - Not compound (leave it): "a manager can change a shift's start and end
+    times, with validation against the store's opening hours." The
+    validation is not separately shippable from the edit it guards — one AC. -->
 
 ## Required Interfaces
 <!-- Name each boundary this spec implies and the acceptance criteria that boundary
