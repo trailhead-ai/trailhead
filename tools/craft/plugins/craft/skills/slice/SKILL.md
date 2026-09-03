@@ -133,10 +133,43 @@ when it is not.
 never a body read earlier in the same pass. This shrinks, but does not close, the concurrent
 lost-update window: a write racing between that fresh read and this write can still be lost.
 
-Only now — with the ledger reconciled — is the candidate set derived: the acceptance criteria
-minus what the ledger records as shipped. This candidate set is derived fresh on every pass and
-written to no record: no record carries a planned sequence of future slices, only the one slice
-chosen this pass.
+Only now — with the ledger reconciled — is the candidate set derived. Pipe the freshly-read spec
+body through the candidate-set gate:
+
+```sh
+lore record show spec/<spec-name> | ${CLAUDE_PLUGIN_ROOT}/scripts/candidate_set.py
+```
+
+Its `candidates:` token, on exit 0, is the candidate set; its `complete-eligible:` token feeds
+step 6's termination guard below. Print the basis this pass derived the candidate set from,
+before continuing — `termination basis: gate-certified` on this exit-0 path — so an operator
+reading the pass's output always knows which guarantee produced the answer.
+
+A non-zero exit refuses this pass, in the same shape steps 3, 5, and 9 already use for their own
+refusals: name the remedy the gate's own `reason-code:` stderr token identifies, scoped to what
+the exit actually names. On exit 1 (`reason-code: undeclared-covered-identifier`), the gate's own
+stderr names the identifier a ledger line attests coverage for that the spec never declares —
+report it, and that the fix is to correct that ledger line or the spec's declared criteria
+before re-running. On exit 2 with `reason-code: malformed-coverage-token`, the gate's own stderr
+names the ledger line whose coverage token does not parse — report it, and that the fix is to
+correct that line's trailing parenthetical before re-running. Every other exit-2 reason (empty or
+non-UTF-8 stdin, no `## Acceptance Criteria` heading) names no identifier or line at all — the
+spec itself is unreadable or malformed, so the remedy is to fix the spec record, not a ledger
+line, before re-running.
+
+**A spec predating the `**ACn.**` convention is a legacy carve-out, not a refusal.** The
+carve-out keys on a single machine-readable signal and nothing else: when the spec declares zero
+criterion identifiers under `## Acceptance Criteria`, the gate exits 2 with
+`reason-code: zero-criterion-identifiers` — unique to this path, printed on no other exit-2
+reason. On that reason-code, and only on that reason-code, this pass falls back to the prose
+matching that exists today instead of refusing — the acceptance criteria minus what the ledger
+records as shipped, read by hand against the spec's `## Acceptance Criteria` prose — and prints
+`termination basis: legacy prose-match, not gate-certified` instead of the gate-certified basis
+line above. Never key this decision on the prose `reason:` line's wording — that line can be
+reworded without notice. Every other exit-2 reason still refuses exactly as above, with no
+exceptions.
+
+This candidate set is derived fresh on every pass and written to no record: no record carries a planned sequence of future slices, only the one slice chosen this pass.
 
 ### 5. Guard — refuse while a slice is already open on this spec
 
@@ -164,9 +197,23 @@ hiccup as "no open slice" produces exactly the duplicate this guard exists to pr
 
 ### 6. Termination — the loop's terminating condition
 
-If the candidate set is empty — every acceptance criterion is already covered by the `## Slices` ledger — the spec's acceptance criteria are met: the pass reports the spec complete, writes
+Termination is gated on two tokens together, never on the candidate set alone: `candidates: none`
+and `complete-eligible: yes`. On the gate-certified basis, both come from step 4's gate output.
+On the legacy prose-match basis (step 4's `zero-criterion-identifiers` carve-out), there is no
+`complete-eligible` token to read — the gate never ran — so the prose-derived candidate set being
+empty is what stands in for it, exactly as it does today.
+
+If both hold — every acceptance criterion is already covered by the `## Slices` ledger, and, on
+the gate-certified basis, every ledger line attesting that coverage carries a coverage token —
+the spec's acceptance criteria are met: the pass reports the spec complete, writes
 `lore record update spec/<spec-name> --label craft/slice-loop=complete`, and stops. Do not
 choose or materialize another slice on this pass.
+
+**An empty candidate set with `complete-eligible: no` does not terminate.** The union is known
+incomplete — some ledger line attesting coverage carries no coverage token — so completion cannot
+be certified from it. Take the early-stop path below instead, naming which ledger lines carry no
+coverage token, so an operator learns the loop stopped on incomplete information rather than
+reading silence as completion.
 
 **Early stop's entry condition:** if the candidate set is non-empty but step 7 below finds
 nothing in it that clears the value floor, and no enabler applies either, the loop cannot choose
