@@ -34,7 +34,7 @@ TEST_RUNNER_AGENT = CRAFT / "agents" / "test-runner.md"
 DISPATCH_HEADING = "### 3. Dispatch `executor`"
 REVIEW_HEADING = "### 4. Review"
 
-DISPATCH_EXPECTS_START = "The agent expects:"
+DISPATCH_EXPECTS_START = "The agent expects"
 DISPATCH_EXPECTS_END = "Personal-vault lessons are fenced"
 
 GOOD_FITS_START = "Good fits:"
