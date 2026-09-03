@@ -42,6 +42,30 @@ For each acceptance criterion, ask: **what observation distinguishes pass from f
 - Watch for criteria whose verb is unobservable: "supports", "handles", "is robust", "works well", "is performant", "gracefully". Each is a criterion-shaped sentence with no bar in it.
 - Watch for criteria with a bar that has no *number* where a number is the whole point ("fast", "at scale", "most cases").
 
+**Compoundness — a second question, asked of the same criterion.** A criterion can name a
+perfectly observable bar and still be compound: testability and atomicity are independent
+checks, and this one is not the mechanical, point-at-two-disagreeing-places shape the rest
+of your lens is. It is the one judgment call in this pass. Make the call as decidable as it
+can be made, and answer it from the criterion's own text alone — never against the codebase
+or outside knowledge.
+
+The bar: a criterion carries exactly one **independently deliverable** assertion — one half
+could ship, alone, and be useful. The test is deliverability, **never surface conjunction**.
+The requirements-engineering literature's standard atomicity heuristic is
+conjunction-splitting — flag any criterion containing "and" — and it is wrong here: an "and"
+does not itself make a criterion compound, and a criterion with no "and" can still be
+compound.
+- Compound: "a reviewer can approve a submission, and the submitter is notified." The halves
+  land in different phases and either ships useful without the other.
+- Not compound: "a manager can change a shift's start and end times, with validation against
+  the store's opening hours." The validation is not separately shippable from the edit it
+  guards — one assertion, stated with its bar.
+
+Prefer a false positive here to a false negative. A false positive costs the operator one
+override round-trip at adjudication. A false negative reproduces the exact failure this
+check exists to catch: a slice ships one half, reports the criterion honestly met, and the
+other half never gets built because nothing ever named it as separate work.
+
 ### 3. Requirements smuggled into the wrong section
 
 This is the failure mode the section headings invite, and it is the one you are most uniquely placed to catch:
@@ -69,10 +93,11 @@ If a finding requires you to know something outside the document, it is not your
 
 1. **Verdict** — one line: `coherent` | `gaps` | `contradictory`. `contradictory` means at least one pair of statements cannot both be satisfied.
 2. **Coverage matrix** — a table, one row per objective: `Objective | Criteria covering it | Coverage: full / partial / none`. Then a second table, one row per named Required Interface: `Interface | Criteria covering it | Coverage: full / none` — this table is the Required Interfaces coverage extension. Then a short list of any criteria serving no objective. These tables are the deliverable — do not summarize them away.
-3. **Untestable criteria** — quote each, and name the missing observation.
-4. **Contradictions** — each as a pair: `<statement A>` (section) vs `<statement B>` (section) — why they can't both hold.
-5. **Misplaced requirements** — each smuggled requirement, quoted, with the section it's in and the section it belongs in.
-6. **Definitional collisions** — terms used inconsistently or never defined.
-7. **Confidence** — `low | medium | high`, one line why. Low confidence here usually means the spec's structure was too loose to enumerate; say so plainly.
+3. **Compound criteria** — each criterion carrying more than one independently deliverable assertion, quoted, with the two (or more) assertions it splits into and why each is separately shippable.
+4. **Untestable criteria** — quote each, and name the missing observation.
+5. **Contradictions** — each as a pair: `<statement A>` (section) vs `<statement B>` (section) — why they can't both hold.
+6. **Misplaced requirements** — each smuggled requirement, quoted, with the section it's in and the section it belongs in.
+7. **Definitional collisions** — terms used inconsistently or never defined.
+8. **Confidence** — `low | medium | high`, one line why. Low confidence here usually means the spec's structure was too loose to enumerate; say so plainly.
 
 Quote the spec verbatim for every finding — a consistency finding the reader has to go hunt for is a consistency finding they will skip. Be exhaustive over the matrix; be terse in your prose. ~400–600 words plus the matrix.
