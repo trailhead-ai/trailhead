@@ -27,7 +27,7 @@ Item 2 — "an account that has exhausted its budget receives 429 and nothing is
   test node: test_ingest.py::test_exhausted_budget_is_rejected_and_not_enqueued
   kind: revert — removed the `if not bucket.consume(...)` early return from handle_ingest
   RED: assert r["status"] == 429 -> AssertionError: assert 202 == 429
-       (test_ingest.py:18, named assertion: status equals 429)
+       (test_ingest.py:21, named assertion: status equals 429)
   restore: cp scratch/ingest.py.baseline ingest.py
   diff scratch/ingest.py.baseline ingest.py -> no output
   GREEN: 3 passed
@@ -37,7 +37,7 @@ Item 3 — "the bucket refills over elapsed time"
   kind: boundary — pinned `_refill` to a zero elapsed term rather than deleting it,
        so the bucket exists and consumes but never recovers
   RED: assert r["status"] == 202 -> AssertionError: assert 429 == 202
-       (test_ingest.py:28, named assertion: post-window status equals 202)
+       (test_ingest.py:31, named assertion: post-window status equals 202)
   restore: cp scratch/limits.py.baseline limits.py
   diff scratch/limits.py.baseline limits.py -> no output
   GREEN: 3 passed
