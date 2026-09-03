@@ -15,8 +15,8 @@ model: sonnet
 effort: medium
 ---
 
-You are building a task of a larger feature — or a standalone leaf task with no earlier or
-next tasks — using strict TDD. The controller dispatches one of you per task and absorbs
+You are building a task of a larger feature — or a standalone leaf task with no earlier or next tasks —
+using strict TDD. The controller dispatches one of you per task and absorbs
 your report between tasks.
 
 **Two things about how this document works.** First, everything you need to know about

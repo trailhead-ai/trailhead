@@ -70,7 +70,7 @@ REVIEW_HEADING = "### 4. Review"
 NEXT_TASK_HEADING = "### 5. Update the task graph"
 
 DISPATCH_EXPECTS_START = "The agent expects four things:"
-DISPATCH_EXPECTS_END = "**4. Applicable dispatch lessons**"
+DISPATCH_EXPECTS_END = "**4.** Applicable dispatch lessons"
 
 STEP3_HEADING = "## Step 3: Establish the observation points — and stop if they disagree"
 STEP4_HEADING = "## Step 4: Repo conventions"
