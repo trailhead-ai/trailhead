@@ -205,5 +205,13 @@ python3 -m pytest -q
 
 Covers manifest validity (`marketplace.json` / `plugin.json`), agent + skill
 frontmatter registrability, and structural genericity (no host-project-specific
-seams). The plugin-system boundary (actual install + dispatch) is covered by
-`MANUAL-SMOKE.md`, which unit tests can't reach.
+seams).
+
+Two boundaries the suite cannot reach are covered by dev-time manual tests
+instead:
+
+- [`MANUAL-SMOKE.md`](MANUAL-SMOKE.md) — the plugin-system boundary: actual
+  marketplace install and agent registration.
+- [`MANUAL-EVAL.md`](MANUAL-EVAL.md) — the behavioral boundary: whether craft's
+  agent and skill *prose* actually changes agent behavior. A contract test can
+  assert what a document says; only a run shows what it causes.

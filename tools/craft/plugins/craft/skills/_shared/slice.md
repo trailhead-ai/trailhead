@@ -21,12 +21,76 @@ The value floor is read against the spec's own consumer, not against an end user
 refactor's consumer is the system or the developer; "all callers migrated" clears the
 floor where "half of them" does not.
 
-## Selection: smallest-next above the value floor
+## Selection: phase, then interface leverage, then smallest-next
 
-Slices are chosen smallest-next above the value floor. The selection question is "what
-is the next smallest thing shippable that still delivers some value," answered against
-current information. This is a per-cycle local choice; a pre-committed global value
-ranking is not the rule.
+Selection is a **three-level judgment, applied in order**. Each level narrows what the
+level below it chooses from, and
+smallest-next decides only what the two above it leave tied.
+Walking a spec's acceptance criteria in the order they happen to be written is
+not selection — it is the failure mode these levels exist to prevent.
+
+### Level 1: phase — read, then create, then mutate, then polish
+
+Work on a surface progresses through four phases, in this order:
+
+- **Read** — the plumbing phase. Every component the slice spans — front end, back
+  end, database, network, credentials, permissions — is
+  connected end to end on the read path, and the slice proves that connection works.
+  A list that
+  renders its zero state against a real query is the whole deliverable; proving the
+  components can talk is the value, and there is no feature yet.
+- **Create** — the first value-add mutation: something can now be brought into
+  existence through the channel the read phase proved.
+- **Mutate** — editing, state changes, deletion; the operations that presuppose
+  something already exists to act on.
+- **Polish** — richer surfaces, chrome, edge cases, and the ancillary features that
+  hang off a core the phases above have already exercised.
+
+Take candidates from the earliest incomplete phase. The ordering is universal but
+scale-relative: it governs a whole system standing up for the first time and a single
+new surface inside a mature one alike, and a system entered mid-flight
+starts at whichever phase it has already reached rather than re-deriving the ones
+behind it.
+
+The phases are not a stored plan. Which phase a surface is in is read fresh from what
+has actually shipped, the same way the candidate set is.
+
+### Level 2: interface leverage — within the phase
+
+Among the candidates in the earliest incomplete phase, prefer the one that establishes or hardest
+exercises the interface later work depends on.
+
+The reason is de-risking, not parallelism. An interface is the highest-blast-radius
+decision in a change, and the only thing that validates one is real usage — so it wants
+to exist early, specifically so the read, create, and mutate slices beat on it while it is still cheap to change. Parallel work on top of an interface becomes safe as a
+consequence, once that churn settles; it is not what the choice optimizes for.
+
+### Level 3: smallest-next above the value floor — the tiebreak
+
+Among what the two levels above leave, slices are chosen smallest-next above the value
+floor. The question is "what is the next smallest thing shippable that still delivers
+some value," answered against current information. This is a per-cycle local choice; a
+pre-committed global value ranking is not the rule.
+
+Ordering within the polish phase gets no derivation beyond this, because it has none:
+it is preferential and externally driven — customer-visible surface usually first, then
+whatever requirements or taste dictate. State a polish-phase pick and its reason to the
+operator as a recommendation rather than
+presenting it as derived.
+
+## The commitment guard: nothing binds to a shape that is still moving
+
+An interface is not locked until the polish phase. The read, create, and mutate slices
+are expected to change it, and that expectation is a licence to churn: do not spend a slice generalizing or hardening an interface before the mutation slices have exercised
+it.
+
+The same guard defers ancillary, cross-cutting features — notifications, audit
+logging, analytics — to the polish phase. Each of them binds another part of the
+system to data models that have not baked yet, and every consumer wired up early pays
+for the churn when they move. **This is an explicit exception to smallest-next**: these
+features are small and independently valuable, they score well on the tiebreak, and so
+they will present themselves as obvious early picks — and choosing them
+early is the mistake the guard exists to prevent.
 
 ## The enabler carve-out
 

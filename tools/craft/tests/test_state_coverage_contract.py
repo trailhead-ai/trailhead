@@ -49,8 +49,15 @@ def _carriers(phrase: str) -> list[Path]:
 
 
 def _archetype_section(name: str) -> str:
+    """The archetype's own bullet, anchored on its bold name.
+
+    Anchoring on the bold form rather than the bare word matters: the selection
+    rule above this reference discusses phases by name (a "value-add write", "the
+    mutate-phase slices"), so a bare-word search finds prose that is not the
+    archetype list at all.
+    """
     normalized = _normalize(SHARED_SLICE.read_text())
-    idx = normalized.index(name)
+    idx = normalized.index(f"**{name}**")
     return normalized[idx : idx + 90]
 
 
@@ -82,7 +89,8 @@ def test_slice_skill_pointer_list_names_state_coverage_and_written_shapes():
     _pin(
         SLICE_SKILL,
         "slice/task vocabulary, the quality bar, the value floor, the "
-        "smallest-next selection rule, the enabler carve-out, the "
+        "three-level selection rule, the commitment guard, the "
+        "enabler carve-out, the "
         "state-coverage reference, and the written shapes it fixes",
         "slice/SKILL.md's early pointer to _shared/slice.md must also name "
         "the state-coverage reference and the written shapes it fixes, "
@@ -250,7 +258,7 @@ def test_design_doc_label_shape_has_a_single_carrier():
 # --- slice/SKILL.md: the two additions ride steps 8 and 9, no step is added ---
 #
 # `test_slice_skill_contract.py` splits slice/SKILL.md on literal step headings
-# (`### 6. Termination`, `### 7. Choose smallest-next`, `### 9. Materialize the
+# (`### 6. Termination`, `### 7. Choose the next slice`, `### 9. Materialize the
 # parent task`, `### 10.`). Inserting or renumbering a whole-numbered step breaks
 # those splits as a confusing failure in a sibling suite — so the inventory itself
 # is pinned here as a list, not just a count.
@@ -262,7 +270,7 @@ SLICE_SKILL_STEP_HEADINGS = [
     "### 4. Reconcile the `## Slices` ledger, then derive the candidate set",
     "### 5. Guard — refuse while a slice is already open on this spec",
     "### 6. Termination — the loop's terminating condition",
-    "### 7. Choose smallest-next above the value floor",
+    "### 7. Choose the next slice",
     "### 8. State the claim before writing anything",
     "### 9. Materialize the parent task",
     "### 10. Re-check for a concurrent duplicate",

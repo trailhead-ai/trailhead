@@ -22,7 +22,8 @@ task — nothing more. Designing and building that slice is `/craft:plan` and `/
 job, run against the parent task this skill writes.
 
 **The definitions live in `../_shared/slice.md`** (a sibling of this skill's directory) — the
-slice/task vocabulary, the quality bar, the value floor, the smallest-next selection rule, the
+slice/task vocabulary, the quality bar, the value floor, the three-level selection rule, the
+commitment guard, the
 enabler carve-out, the state-coverage reference, and the written shapes it fixes. Read it
 before running this procedure. This skill does not restate any of it: a second copy here is
 exactly how the two would drift apart.
@@ -165,12 +166,18 @@ credential-scrub, full-body write step 9 below documents — so the
 next reader — human or the next pass — finds the stop recorded rather than discovering only
 silence.
 
-### 7. Choose smallest-next above the value floor
+### 7. Choose the next slice
 
-Apply `_shared/slice.md`'s selection rule against the candidate set: the next smallest thing
-shippable that still delivers some value, judged against the spec's own consumer. This is a
-per-cycle local choice made against current information, not a lookup against a pre-committed
-ranking.
+Apply `_shared/slice.md`'s selection rule against the candidate set. It is a three-level
+judgment, applied in order — the phase the surface has reached, then interface leverage within
+that phase, then smallest-next above the value floor as the tiebreak. Read those three levels
+and the commitment guard there rather than working from the candidate set's list order: taking
+acceptance criteria in the order the spec happens to write them is the failure mode the levels
+exist to prevent.
+
+The result is a per-cycle local choice made against current information, not a lookup against a
+pre-committed ranking — the phases are read fresh from what has shipped, exactly as the
+candidate set is.
 
 **Enabler path.** A candidate that delivers no consumer value on its own may still be chosen,
 but only carrying a written justification that names what it enables and why that cannot be

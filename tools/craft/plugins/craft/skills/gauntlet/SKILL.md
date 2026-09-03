@@ -165,11 +165,24 @@ adjudication — it is delegation of the work you were dispatched to do.** Conso
    spec defects. Cut them silently.
 4. **Auto-downgrade speculative Criticals**, per the synthesis rules in `_shared/council.md`. State
    which and why.
-5. **Spot-verify contentious claims.** Any finding that would be expensive to act on, that
+5. **Rate a criterion the consistency pass reports as compound Critical.** Not one it merely reads
+   as long or complex — the compound-criteria section of the auditor's output shape (its item 3),
+   naming an assertion the auditor judged independently deliverable. Important and Minor take no
+   disposition — they are only logged for the audit trail — so a compound criterion filed at either
+   severity is noted and the spec advances with it intact. Critical is what forces a disposition:
+   `resolved` means the adjudicator drafts and applies the split before the record advances, which
+   is what keeps the compound criterion from surviving. This bar pins measured behavior, not new
+   behavior — under the auditor's current output shape a reported compound criterion already
+   reaches Critical here. Write it as a rule so an edit to that output shape, or to this step, does
+   not silently regress it. **This bar is not subject to item 4's auto-downgrade.** Independent
+   deliverability is a judgment about how work would be sliced, which can read as "guessing about
+   future state" — but it is answered from the criterion's own text, and downgrading it to
+   Important strips the disposition that makes the finding land at all.
+6. **Spot-verify contentious claims.** Any finding that would be expensive to act on, that
    contradicts another pass, or that arrives in a transcript reading anomalously (over-confident,
    thin on evidence, or wandering outside its stated lane) gets checked yourself before it reaches
    the user. Do not launder an unverified subagent claim into a recommendation.
-6. **Number the surviving Criticals `C1`…`Cn`.** Assign the ids here, at consolidation, in the order
+7. **Number the surviving Criticals `C1`…`Cn`.** Assign the ids here, at consolidation, in the order
    you will present them. An id is **stable for the rest of the run** — the operator names it to
    override, and the audit trail records it — so never renumber after presenting, not even when an
    override collapses a row's relevance.
@@ -564,3 +577,9 @@ shaped to avoid:
 - **The adjudicator is a reviewer, not a router.** Consolidation, spot-verification, and
   the single recommendation built out of them are the job. Thirty findings forwarded verbatim is a
   failed adjudication.
+- **The compound-criterion Critical bar (step 4, item 5) is covered by a manual eval, not CI.** CI runs
+  `ruff` and `pytest` and invokes no eval, so a green suite says nothing about whether this bar, or
+  the consistency-auditor check it depends on, still detects a compound criterion — a passing test
+  run is a one-time gate, not a standing signal. An edit to either this bar or that check should
+  re-run the adjudication arm before trusting the change; see `tools/craft/MANUAL-EVAL.md` for how
+  an arm is dispatched.
