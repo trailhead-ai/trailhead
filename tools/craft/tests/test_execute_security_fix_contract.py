@@ -45,7 +45,6 @@ SHARED_EXECUTE = CRAFT / "skills" / "_shared" / "execute.md"
 
 TASK_SHAPE_HEADING = "### Determine the task shape"
 RESUMING_HEADING = "### Resuming a run"
-ESCALATION_HEADING = "### Escalation points and their unattended re-route"
 # NOTE: "## Refine — unresolved" also appears as literal example content
 # inside the escalate-via-park section's own fenced code block, so it can't
 # be used as the end boundary — see the sibling forward-reference test file
@@ -64,10 +63,6 @@ def _section(start_heading: str, end_heading: str) -> str:
 
 def _task_shape_section() -> str:
     return _section(TASK_SHAPE_HEADING, RESUMING_HEADING)
-
-
-def _escalate_via_park_section() -> str:
-    return _section(ESCALATION_HEADING, WHEN_TO_USE_HEADING)
 
 
 def _claim_section() -> str:
@@ -139,43 +134,6 @@ def test_ambiguous_branch_states_safe_value_shape():
         "^[A-Za-z0-9._/-]+$",
         "The Ambiguous branch must validate `<parent-value>` against the "
         "document's established safe-value shape before substituting it.",
-    )
-
-
-# --- Low: positional identifiers have no valid omit remedy ---------------------
-
-
-def test_escalate_via_park_forward_reference_names_positional_identifier():
-    _pin_in(
-        _escalate_via_park_section(),
-        "execute.md#escalate-via-park",
-        "positional",
-        "The forward reference to Phase 5's omit-on-mismatch remedy must "
-        "note that `<name>` in `lore record update task/<name> --vault "
-        "<elected-vault> --diff` is a positional record identifier, not a "
-        "droppable `--label` clause the omit remedy was written for.",
-    )
-
-
-def test_escalate_via_park_states_no_omit_remedy_for_positional_name():
-    _pin_in(
-        _escalate_via_park_section(),
-        "execute.md#escalate-via-park",
-        'so it has no well-formed "omit it" form',
-        "The forward reference must say plainly that a positional record "
-        "identifier has no valid 'omit' remedy — omitting it yields a "
-        "malformed command, not a safe one.",
-    )
-
-
-def test_escalate_via_park_states_refuse_and_fail_loudly_remedy():
-    _pin_in(
-        _escalate_via_park_section(),
-        "execute.md#escalate-via-park",
-        "refuse to run the command and fail loudly",
-        "The forward reference must name the actual fallback for a "
-        "positional value that fails validation: refuse to run the command "
-        "and fail loudly, rather than silently issuing a mangled write.",
     )
 
 

@@ -201,19 +201,19 @@ If the shared procedure cannot complete the slice — its own escalation contrac
 
 Once step 9 completes, hand the branch to portage from this session itself — never nested inside any subagent, which would lose the notification channel the same way a nested background dispatch would anywhere else in this ritual. The driver's responsibility ends at green: it maps portage's terminal tokens and hands off; it never merges, never orders a merge, and never reverts.
 
-**Derive `group_toml_path` from camp's own group config, never from a ranger artifact.** Read `manifest.json` at the derived camp workspace root again here — a resume re-entering directly at this phase skips step 5 entirely, so step 10 does not assume that read already happened this run — and take the group name from its `group` field; the group's TOML config lives where `camp group <name>` itself writes it — `config_dir("camp")/groups/<group>.toml` (`trailhead/paths.py`'s `config_dir`, mirrored by `camp`'s own `_groups_dir()` helper). Validate the group name against the safe-value shape step 1 states (`^[A-Za-z0-9._/-]+$`) before substituting it below — the group name is file-sourced rather than vault-sourced, but step 1's rule governs every substitution site in this ritual, not only vault-sourced ones. A value that fails the shape check is never substituted; refuse loudly and stop, matching step 1's own refusal, rather than silently building a `GROUP_TOML_PATH` that resolves to nowhere camp actually manages. Compute it from that same convention, honoring the per-app override before the XDG default before the plain fallback:
+**Derive `group_toml_path` from camp's own group config, never from any other tool's artifact.** Read `manifest.json` at the derived camp workspace root again here — a resume re-entering directly at this phase skips step 5 entirely, so step 10 does not assume that read already happened this run — and take the group name from its `group` field; the group's TOML config lives where `camp group <name>` itself writes it — `config_dir("camp")/groups/<group>.toml` (`trailhead/paths.py`'s `config_dir`, mirrored by `camp`'s own `_groups_dir()` helper). Validate the group name against the safe-value shape step 1 states (`^[A-Za-z0-9._/-]+$`) before substituting it below — the group name is file-sourced rather than vault-sourced, but step 1's rule governs every substitution site in this ritual, not only vault-sourced ones. A value that fails the shape check is never substituted; refuse loudly and stop, matching step 1's own refusal, rather than silently building a `GROUP_TOML_PATH` that resolves to nowhere camp actually manages. Compute it from that same convention, honoring the per-app override before the XDG default before the plain fallback:
 
 ```sh
 GROUP_TOML_PATH="${CAMP_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/camp}/groups/<group>.toml"
 ```
 
-**Pre-create the outcome file's parent directory before dispatching `monitor`.** `monitor` does not create it, and its write fails if the directory is absent — a silent way to turn every run into an empty-file escalation, so this gets its own explicit step rather than riding along with anything else: `mkdir -p` the outcome file's parent directory, mode `0700` matching ranger's own outcomes-directory pattern, before the dispatch below, never after.
+**Pre-create the outcome file's parent directory before dispatching `monitor`.** `monitor` does not create it, and its write fails if the directory is absent — a silent way to turn every run into an empty-file escalation, so this gets its own explicit step rather than riding along with anything else: `mkdir -p` the outcome file's parent directory, mode `0700`, before the dispatch below, never after.
 
 Dispatch `updater` first, synchronously, from this session, passing `mode: create`, the camp group, the worktree slug, `manifest_path`, and `group_toml_path`. The branch may already carry commits pushed by the build phase's own close — that is fine: `create` is selected because it is the mode that opens the PR, not because the branch is unpushed. Take the `pr_pairs` it returns. If `updater` instead reports a preflight failure — any repo failed at some step, so no PR was ever opened and no `pr_pairs` line exists — escalate under the `updater-preflight-failed` trigger, following the escalation contract below, with no retry, rather than dispatching `monitor` against a `pr_pairs` that was never returned.
 
 Then dispatch `monitor` **in the background, from this top-level session** — never nested inside any subagent, matching this ritual's top-level-only dispatch rule — passing the camp group, the worktree slug, `manifest_path`, `group_toml_path`, `pr_pairs`, and the outcome file path whose parent directory was just pre-created.
 
-**Poll the outcome file against the driver's own deadline, never wait on the dispatch notification.** The file is the documented contract for an unattended caller; the notification is not, matching the drain precedent at `tools/ranger/plugins/ranger/skills/execute/SKILL.md`, section 6, which ignores the same notification for the same reason. Read the outcome as exactly one line from the file, never from `monitor`'s reply — matching the plan and build phases' own worker-channel rule.
+**Poll the outcome file against the driver's own deadline, never wait on the dispatch notification.** The file is the documented contract a caller can enforce; the dispatch notification is not. Read the outcome as exactly one line from the file, never from `monitor`'s reply — matching the plan and build phases' own worker-channel rule.
 
 **The four-token map is exhaustive — no default or fall-through branch handles anything else:**
 
@@ -291,11 +291,12 @@ printf '%s' "$BODY" | lore record create \
   --parent <slice-parent-name> --vault <elected-vault>
 ```
 
-**This parent edge is the entire mechanism keeping the escalation out of the automation it exists to interrupt.** A standalone `blocked` task enters ranger's refine sweep the moment the
-operator answers it, and is then built outside this loop and off the slice's branch — exactly the
-collision `/craft:slice` already dodges by materializing its own parent `in-progress`
-(`../slice/SKILL.md`, step 9). Never drop the `--parent` flag to "simplify" this write; doing so
-reopens the very automation this record exists to stay outside of.
+**This parent edge is the entire mechanism keeping the escalation out of the selection surface it exists to interrupt.** A standalone `blocked` task becomes a selectable standalone
+the moment the operator answers it and it is promoted, and is then built outside this loop and off
+the slice's branch — exactly the collision `/craft:slice` already dodges by materializing its own
+parent `in-progress` (`../slice/SKILL.md`, step 9).
+Never drop the `--parent` flag to "simplify" this write; doing so reopens the very selection
+this record exists to stay outside of.
 
 `$BODY` names the slice, the typed trigger, and the decision needed — a pointer to where that
 decision actually lives (the plan record's Council Review section, the spec's own escalation

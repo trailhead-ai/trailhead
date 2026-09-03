@@ -141,8 +141,8 @@ def test_driver_responsibility_ends_at_green():
 
 def test_group_toml_path_derived_from_camps_own_group_config():
     _pin(
-        "Derive `group_toml_path` from camp's own group config, never from a ranger artifact.",
-        "group_toml_path must be derived from camp's own group config, never a ranger "
+        "Derive `group_toml_path` from camp's own group config, never from any other tool's artifact.",
+        "group_toml_path must be derived from camp's own group config, never another tool's "
         "artifact.",
     )
 
@@ -225,17 +225,10 @@ def test_outcome_file_polled_against_the_drivers_own_deadline():
 
 def test_outcome_file_is_the_documented_contract_not_the_notification():
     _pin(
-        "The file is the documented contract for an unattended caller; the notification "
-        "is not",
-        "The ritual must state the file, not the notification, is the documented contract "
-        "for an unattended caller.",
-    )
-
-
-def test_polling_precedent_cites_ranger_drain_section_six():
-    _pin(
-        "`tools/ranger/plugins/ranger/skills/execute/SKILL.md`, section 6",
-        "The polling rule must cite ranger's drain precedent at section 6.",
+        "The file is the documented contract a caller can enforce; the dispatch "
+        "notification is not",
+        "The ritual must state the file, not the dispatch notification, is the "
+        "contract a caller can enforce.",
     )
 
 

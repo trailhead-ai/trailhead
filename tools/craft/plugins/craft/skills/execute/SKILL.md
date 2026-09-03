@@ -17,23 +17,14 @@ description: >
 
 # Execute
 
-Execute a plan task-by-task — or a standalone task as its own single slice — in an
-attended session with a human operator.
+Execute a plan task-by-task — or a standalone task as its own single slice, with a
+human operator present to answer escalations.
 
 **The procedure lives in `../_shared/execute.md`** (a sibling of this skill's
-directory). Read it and follow it end to end — the subagent roles, the mode table,
-the task-shape branch, the per-task loop, the end-of-run phase pipeline, and the
-status-handling rules are all defined there. This skill does **not** restate them: an
-unattended caller (a future ranger drain loop) dispatches the same document with no
-human channel, and a second copy here is how the two callers would drift apart.
-
-## Mode
-
-`/craft:execute` always runs **attended** — a human operator is present in this
-session, so every escalation point in `../_shared/execute.md`'s mode table asks the
-user rather than re-routing through escalate-via-park or proceed-per-contract. There
-is no flag here to opt into unattended behavior: that mode is reached only by a
-loop session dispatching the shared procedure directly, never by this wrapper.
+directory). Read it and follow it end to end — the subagent roles, the task-shape
+branch, the per-task loop, the end-of-run phase pipeline, and the status-handling
+rules are all defined there. This skill does **not** restate them: a second copy
+here is how the wrapper and the procedure would drift apart.
 
 ## When to Use
 
@@ -59,4 +50,4 @@ On a standalone task this gate is an explicit judgment, never an automatic one �
 Read `../_shared/execute.md` from the top: subagent roles and model selection, the
 task-shape branch (plan vs. standalone), the per-task Loop, the After All Tasks
 phase pipeline, Handling Assumption-Prover Status, Handling Executor Status, and the
-Red Flags. All of it applies verbatim to an attended run.
+Red Flags. All of it applies verbatim.

@@ -41,8 +41,7 @@ _ESCALATION_NAMES_BOTH = (
 )
 _AMBIGUOUS_ANSWER_RULE = 'treated as "build" and recorded as unresolved'
 _DURABLE_ARTIFACT = "on the parent task record being written"
-_ATTENDED_SYMMETRY = "This holds for the attended path as well as the unattended one."
-_UNATTENDED_RECORD_PROCEED_REPORT = (
+_DISPATCHED_RECORD_PROCEED_REPORT = (
     "records the unresolved candidate on the record it is building, proceeds "
     "with the hand-rolled path, and reports the deferral in its outcome"
 )
@@ -346,7 +345,7 @@ def test_escalation_prompt_names_both_candidate_and_hand_rolled_alternative():
     )
 
 
-def test_ambiguous_answer_rule_names_durable_artifact_for_attended_and_unattended():
+def test_ambiguous_answer_rule_names_the_durable_artifact():
     text = _plan_text()
     assert _AMBIGUOUS_ANSWER_RULE in text, (
         "plan/SKILL.md must state an ambiguous or deferred answer is treated as "
@@ -355,18 +354,6 @@ def test_ambiguous_answer_rule_names_durable_artifact_for_attended_and_unattende
     assert _DURABLE_ARTIFACT in text, (
         "plan/SKILL.md must name the durable artifact the unresolved answer lands "
         f"on, verbatim — {_DURABLE_ARTIFACT!r}"
-    )
-    assert _ATTENDED_SYMMETRY in text, (
-        "plan/SKILL.md must state the ambiguous-answer rule applies to the attended "
-        f"path as well as the unattended one, verbatim — {_ATTENDED_SYMMETRY!r}"
-    )
-
-
-def test_unattended_path_states_record_then_proceed_then_report():
-    assert _UNATTENDED_RECORD_PROCEED_REPORT in _plan_text(), (
-        "plan/SKILL.md must state the unattended path records the unresolved "
-        "candidate, proceeds on the hand-rolled path, and reports the deferral, "
-        f"verbatim — {_UNATTENDED_RECORD_PROCEED_REPORT!r}"
     )
 
 
@@ -736,8 +723,8 @@ def test_planner_closes_the_survey_at_one_pass_with_no_escalation_to_a_deeper_on
 
 def test_planner_escalation_records_and_proceeds_without_blocking():
     """A dispatched planner has no user to answer the escalation, so it takes the
-    same record-then-proceed-then-report path plan/SKILL.md gives its unattended
-    caller."""
+    record-then-proceed-then-report path, because a dispatched planner has no user
+    to answer the escalation."""
     text = _planner_text()
     assert _ESCALATION_NAMES_BOTH in text, (
         "planner.md's escalation must name both the candidate and the hand-rolled "
@@ -747,8 +734,8 @@ def test_planner_escalation_records_and_proceeds_without_blocking():
         "planner.md must treat an ambiguous or deferred answer as build and "
         f"record it as unresolved, verbatim — {_AMBIGUOUS_ANSWER_RULE!r}"
     )
-    assert _UNATTENDED_RECORD_PROCEED_REPORT in _normalize_whitespace(text), (
+    assert _DISPATCHED_RECORD_PROCEED_REPORT in _normalize_whitespace(text), (
         "planner.md must state it records the unresolved candidate, proceeds on "
         "the hand-rolled path, and reports the deferral, verbatim — "
-        f"{_UNATTENDED_RECORD_PROCEED_REPORT!r}"
+        f"{_DISPATCHED_RECORD_PROCEED_REPORT!r}"
     )

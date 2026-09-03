@@ -437,10 +437,10 @@ from that one reply, apply them together, and do not walk back through the table
 
 #### Escalation points
 
-The points where this step hands control to a human are named, following `_shared/execute.md`'s
-"Two modes, one procedure", so that a future unattended caller is a re-route table over these names
-rather than a redesign of the step. **No unattended mode ships here** — there is no re-route table,
-no auto-accept flag, and every point below waits on a human today.
+The points where this step hands control to a human are named explicitly, so that the
+places this step waits are a short list rather than something a reader has to
+reconstruct from the prose. There is no auto-accept flag: every point below waits on
+a human.
 
 | Escalation point | What it waits for |
 |---|---|

@@ -112,15 +112,6 @@ def test_build_phase_states_it_never_invokes_craft_execute():
     )
 
 
-def test_shared_procedure_attended_row_still_exists_to_be_selected():
-    text = SHARED_EXECUTE.read_text()
-    assert "**attended**" in text, (
-        "the shared execute procedure must still declare an attended mode — the "
-        "driver's inline run selects it, so its removal would silently strand the "
-        "build phase in a mode it never asked for"
-    )
-
-
 # --- the checkpoint still brackets the phase -------------------------------------------
 
 

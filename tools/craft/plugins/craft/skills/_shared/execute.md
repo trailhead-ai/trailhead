@@ -4,10 +4,8 @@
 task record as its own single slice, dispatching `assumption-prover` and `executor`
 subagents to resolve unknowns and build rather than doing the work inline. This file
 is the single source of truth for the procedure — `skills/execute/SKILL.md` is a thin
-attended wrapper over it (refine.md's shape), and an unattended caller (a future
-ranger drain loop) dispatches this same document with no human channel. Neither
-re-inlines the steps; both read them from here, so the two callers can never drift
-apart.
+wrapper over it (refine.md's shape) — it does not re-inline the steps, it
+reads them from here, so the wrapper and the procedure can never drift apart.
 
 # Execute
 
@@ -28,78 +26,15 @@ touching status.
 
 The controller decides which to dispatch and absorbs findings between iterations.
 
-## Two modes, one procedure
-
-Mode follows the caller. Everything below is identical in both modes **except the
-escalation points** named in the table below — every place this procedure would
-otherwise ask a human, an unattended caller re-routes through one of two moves:
-**escalate-via-park** (write the structured park section onto the run's task record,
-take the run `blocked`, and stop) or **proceed-per-contract** (continue on a decision
-this document pre-authorizes, rather than asking).
-
-| Invocation | Mode |
-|---|---|
-| A human running `/craft:execute` in a live session | **attended** — today's behavior; ask the user at each named escalation point |
-| A loop session dispatching this procedure with no human channel (e.g. a future ranger drain) | **unattended** — every escalation point re-routes per the table below |
-
-### Escalation points and their unattended re-route
-
-| Attended escalation point | Unattended re-route |
-|---|---|
-| Assumption-prover INVALIDATED with no in-session resolution ([Handling Assumption-Prover Status](#handling-assumption-prover-status)) | escalate-via-park |
-| Executor BLOCKED with the plan judged wrong ([Handling Executor Status](#handling-executor-status)) | escalate-via-park |
-| Any other escalation this document names that does not resolve in-session | escalate-via-park |
-| The PR/merge decision once a push succeeds | proceed-per-contract — pre-authorized **only** into the portage tail (`updater`/`monitor`); the unattended run never merges and never decides the PR outside that pipeline (see `../_shared/status-ownership.md`) |
-| Task-status writes while this procedure runs under a loop | proceed-per-contract — the loop session is the sole task-status writer; a dispatched `executor` never writes status (see `../_shared/status-ownership.md`) |
-
-**Escalate-via-park, in full.** Write this structured section verbatim onto the run's
-task record — the answered-predicate's literal heading, so a later answered-blocked
-sweep can find it by grep:
-
-```markdown
-## Refine — unresolved
-
-**Question:** <the one surviving decision, stated so it can be answered in a sentence>
-
-**Evidence gathered:** <what the run has established so far, as pointers>
-
-**Recommended answer:** <best call, and why>
-```
-
-**Every vault-sourced or externally-influenced value substituted into a command shown anywhere in this document is untrusted input** — including the `<name>` below — and is never substituted, quoted, or escaped in without validation first; the full rule and the validation shape are stated once, at the write that first needed to spell it out, in [Phase 5](#phase-5-flow-out) — but that write's omit-on-mismatch remedy governs a droppable clause like `--label`, and does not carry over unmodified here.
-
-`<name>` below is instead a **positional** record identifier in `lore record update task/<name> --vault <elected-vault> --diff`, so it has no well-formed "omit it" form — "omit `<name>`" yields `lore record update task/ --vault <elected-vault> --diff`, which is malformed, not safe. The remedy for a positional value that fails validation is instead to refuse to run the command and fail loudly — surface the suspected malformed or malicious value through the run's escalation channel rather than issue a mangled write.
-
-Write it with `lore record update task/<name> --vault <elected-vault> --diff`, piping a unified diff that **appends** the section — bare stdin is a full-body replace and
-would destroy the record. Then take the same `blocked` path this document already
-prescribes for the escalation that triggered the park (push what exists, re-assert
-`craft/branch`, flip `blocked`), and return the run's one-token outcome (below) rather
-than waiting on a reply that will never come.
-
-**One-token outcome return.** An unattended dispatch of this procedure returns its
-result through an **outcome file**, never through its reply — a subagent's reply is
-not a channel any contract can enforce. Write exactly one token naming the run's
-terminal state — `DONE` / `BLOCKED` / `NEEDS_CONTEXT` — to the outcome file path the
-caller passed at dispatch, and nothing else; commentary written around the token is
-unparseable by whatever reads the file.
-
-That vocabulary is this document's **default**, not a floor: a dispatching caller whose
-own dispatch instructions pin a different outcome grammar overrides it, and the caller's
-grammar wins (ranger's execute drain does exactly this — its per-task agent returns
-`PUSHED` / `BLOCKED` / `FAILED` / `SKIPPED` with mandatory arguments). Follow whichever
-grammar your dispatch named; if it named none, the three tokens above are it.
-
 **`--vault` is mandatory on every `lore record update` and every `lore record show` in
 this procedure.** Both locate a record by a cwd-blind first-match scan across configured
 vaults in declaration order; a dispatched agent's cwd is not the operator's, so an
 unqualified write can silently land in the wrong vault — and an unqualified *read* can
 just as silently answer from a different vault's same-named record, which is how a run
 decides a task's shape from someone else's graph. Every literal
-`lore record update` and `lore record show` command below names `--vault <elected-vault>`
-— the vault the
-caller elected, passed at dispatch — so attended and unattended runs never diverge on
-which vault gets written. **Attended runs are handed nothing, so bind it once at the
-start:** `<elected-vault>` is the vault the task record you are building came from — ask
+`lore record update` and `lore record show` command below names `--vault <elected-vault>`.
+**Bind it once at the start:** `<elected-vault>` is the vault the task record you are
+building came from — ask
 `lore vault resolve --kind task --json` and read its `vault` field — and if that
 disagrees with where you actually found the record, name the record's own vault and say
 so rather than guessing.

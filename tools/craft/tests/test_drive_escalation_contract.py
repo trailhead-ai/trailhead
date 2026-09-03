@@ -57,7 +57,7 @@ def test_escalation_record_create_names_parent_flag():
 def test_escalation_record_is_never_standalone():
     _pin(
         "This parent edge is the entire mechanism keeping the escalation out of "
-        "the automation it exists to interrupt.",
+        "the selection surface it exists to interrupt.",
         "The ritual must state why the parent edge is load-bearing, not just "
         "include the flag incidentally.",
     )
