@@ -235,6 +235,59 @@ def test_templates_worked_refused_criterion_is_actually_refused():
 
 
 # ---------------------------------------------------------------------------
+# Item 4b — the verification method bar's own worked pair proves the trailer
+# is required unconditionally, even on a criterion an automated assertion
+# already verifies. If the guidance ever regresses to exempting that case,
+# either this pair stops existing (failing the `assert m` below) or an
+# editor who keeps the pair internally consistent with a reverted rule turns
+# the "Conformant" bullet into one the real gate refuses (failing the
+# certifies test below) — both are ways this catches the regression.
+# ---------------------------------------------------------------------------
+
+
+def _worked_verification_refused_criterion() -> str:
+    text = _template_text()
+    m = re.search(
+        r"Refused \(omits the trailer\): \"(- \*\*AC\d+\.\*\*.+?)\"", text, re.DOTALL
+    )
+    assert m, (
+        "templates/spec.md must show a worked example of a criterion refused "
+        "for omitting the verification trailer"
+    )
+    return m.group(1)
+
+
+def _worked_verification_conformant_criterion() -> str:
+    text = _template_text()
+    m = re.search(
+        r"Conformant \(states the method\): \"(- \*\*AC\d+\.\*\*.+?)\"", text, re.DOTALL
+    )
+    assert m, (
+        "templates/spec.md must show a worked example of a criterion made "
+        "conformant by stating the verification method"
+    )
+    return m.group(1)
+
+
+def test_templates_verification_bar_worked_refused_criterion_is_actually_refused():
+    """The 'omits the trailer' example must be a real refusal specifically for
+    lacking a trailer — proving the bar applies even though the criterion is
+    otherwise fine — or the pairing teaches a false contrast."""
+    bullet = _worked_verification_refused_criterion()
+    spec_body = f"## Acceptance Criteria\n\n{bullet}\n"
+    r = _run_gate(spec_body)
+    assert r.returncode == 1, r.stderr + r.stdout
+    assert "carries no verification trailer" in r.stderr
+
+
+def test_templates_verification_bar_worked_conformant_criterion_certifies():
+    bullet = _worked_verification_conformant_criterion()
+    spec_body = f"## Acceptance Criteria\n\n{bullet}\n"
+    r = _run_gate(spec_body)
+    assert r.returncode == 0, r.stderr + r.stdout
+
+
+# ---------------------------------------------------------------------------
 # Item 5 — the legacy carve-out composes with the refusal, both directions —
 # both directions derived from the document's own wiring text, not hardcoded
 # in the test, so a wiring edit that widened or lost the discrimination fails.

@@ -80,6 +80,8 @@ CREDENTIAL_UNSANCTIONED_METHOD = _fixture("crit_credential_unsanctioned_method.m
 CREDENTIAL_UNIDENTIFIED_BULLET = _fixture("crit_credential_unidentified_bullet.md")
 SUBBULLET_IDENTIFIER_LEAK = _fixture("crit_subbullet_identifier_leak.md")
 TWO_TRAILERS = _fixture("crit_two_trailers.md")
+LOOSE_LIST_SUBBULLET_LEAK = _fixture("crit_loose_list_subbullet_leak.md")
+LOOSE_LIST_TRAILER_CONTINUATION = _fixture("crit_loose_list_trailer_continuation.md")
 
 _ZERO_CRITERIA_REASON_CODE = "reason-code: zero-criterion-identifiers"
 _DUPLICATE_HEADING_REASON_CODE = "reason-code: duplicate-acceptance-criteria-heading"
@@ -385,6 +387,28 @@ def test_implementation_identifier_hidden_in_a_sub_bullet_is_refused():
     assert r.returncode == 1, r.stderr + r.stdout
     assert "AC1" in r.stderr
     assert "covers_gate.py:191" in r.stderr
+
+
+def test_implementation_identifier_hidden_in_a_loose_list_sub_bullet_is_refused():
+    """A blank line between a criterion's own line and its sub-bullet does not
+    end the criterion — per CommonMark's loose-list rule, the item continues
+    until the next top-level bullet, a heading, or a dedent to column zero. A
+    sub-bullet separated from its parent by a blank line still qualifies that
+    parent, so its text is still part of what AC3 scans."""
+    r = _run(LOOSE_LIST_SUBBULLET_LEAK)
+    assert r.returncode == 1, r.stderr + r.stdout
+    assert "AC1" in r.stderr
+    assert "covers_gate.py:191" in r.stderr
+
+
+def test_trailer_in_a_loose_list_continuation_paragraph_certifies():
+    """A verification trailer that lives in its own paragraph, separated from
+    the criterion's own line by a blank line, is still part of the criterion
+    block — the same loose-list continuation that keeps a sub-bullet attached
+    to its parent keeps a continuation paragraph attached too."""
+    r = _run(LOOSE_LIST_TRAILER_CONTINUATION)
+    assert r.returncode == 0, r.stderr + r.stdout
+    assert "AC1: automated-assertion" in r.stdout
 
 
 # ---- AC4 "exactly one" holds across separate trailers, not just within one --

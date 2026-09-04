@@ -36,10 +36,16 @@ lives.
   - Conformant (names the role): "- **AC1.** A client creating a user gets a response
     confirming the user was created. *Verified by: automated assertion.*"
 
-Verification method bar: a criterion carrying no automated assertion names exactly one of
-three sanctioned methods, appended as a trailer — `*Verified by: <method>.*` — where
-`<method>` is `automated assertion`, `design doc review`, or `manual check`. Free text
-("verified by: manual testing") is not sanctioned.
+Verification method bar: every criterion names exactly one of three sanctioned
+verification methods, appended as a trailer — `*Verified by: <method>.*` — where
+`<method>` is `automated assertion`, `design doc review`, or `manual check`. The trailer
+is required on every criterion, including one an automated assertion verifies — there is
+no exemption for that case. Free text ("verified by: manual testing") is not sanctioned.
+
+  - Refused (omits the trailer): "- **AC1.** A client creating a user gets a response
+    confirming the user was created."
+  - Conformant (states the method): "- **AC1.** A client creating a user gets a response
+    confirming the user was created. *Verified by: automated assertion.*"
 
 Named limits: the identifier bar above only inspects inline code spans — a path or symbol
 written in bare prose, without backticks, is a false negative it accepts. A spec predating

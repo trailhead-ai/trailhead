@@ -207,13 +207,18 @@ def _iter_criterion_entries(spec_body: str):
     fabricated criterion.
 
     `bullet_text` joins the bullet's own line with every indented line that
-    follows it — wrapped continuation prose and any nested `- ` sub-bullet
-    (plus that sub-bullet's own wrapped continuation), since a sub-bullet
+    follows it — wrapped continuation prose, any nested `- ` sub-bullet (plus
+    that sub-bullet's own wrapped continuation), and an indented continuation
+    paragraph reached across one or more blank lines, since a sub-bullet
     qualifies its parent and its text belongs to the criterion it qualifies.
-    The block ends at the next unmasked top-level (unindented) `- ` bullet, a
-    `##`/`###` heading, or a blank line. A bullet with no `**ACn.**` prefix
-    yields identifier `None` rather than being silently dropped —
-    `parse_criteria` is the one that drops it; this walk does not.
+    A blank line does not by itself end the block: per CommonMark's loose-
+    list rule, a list item continues across a blank line as long as an
+    indented line eventually follows it. The block ends at the next unmasked
+    top-level (unindented) `- ` bullet, a `##`/`###` heading, or a dedent to
+    an unindented, non-blank line (including one preceded by one or more
+    blank lines, which means the item's content is exhausted). A bullet with
+    no `**ACn.**` prefix yields identifier `None` rather than being silently
+    dropped — `parse_criteria` is the one that drops it; this walk does not.
     """
     lines = _COMMONMARK_LINE_RE.split(spec_body)
     masked = _mask_fenced_lines(lines)
@@ -247,6 +252,20 @@ def _iter_criterion_entries(spec_body: str):
                 break
             stripped = nxt.strip()
             if stripped == "":
+                # A blank line does not end a loose list item by itself —
+                # look past it (and any further blank/masked lines) for the
+                # next real line. If it is indented, the blank run is a
+                # loose-list gap inside this same item and folds into the
+                # block; otherwise the item's content ends here, before the
+                # blank run, exactly as if the blank had not been peeked
+                # past.
+                k = j + 1
+                while k < n and (masked[k] or lines[k].strip() == ""):
+                    k += 1
+                if k < n and lines[k][:1] in (" ", "\t"):
+                    block.append(nxt)
+                    j += 1
+                    continue
                 break
             if nxt[:1] in (" ", "\t"):
                 # An indented line here is either a wrapped continuation of
