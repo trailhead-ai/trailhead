@@ -188,6 +188,101 @@ def _find_unique_heading(
     return start
 
 
+def _iter_criterion_entries(spec_body: str):
+    """Yield `(identifier_or_None, bullet_text)` for every top-level `- `
+    bullet under the spec's `## Acceptance Criteria` heading. This is the one
+    walk: `parse_criteria` and `parse_criteria_with_text` both call it rather
+    than each re-deriving the walk from the masking primitives, so the two
+    can never disagree about what a criterion is. Raises ValueError if the
+    heading is not present at line start, or DuplicateHeadingError if a
+    second unmasked occurrence exists.
+
+    A `###` sub-heading is skipped as a grouping marker, and an indented
+    sub-bullet is skipped as a criterion of its own — it qualifies its
+    parent criterion instead, so it never yields its own identifier. The
+    heading match is case-insensitive but still anchored at line start.
+    Every fenced code block and every HTML comment is invisible to both the
+    heading search and the bullet scan, so a worked example or a
+    commented-out draft cannot forge a heading anchor or contribute a
+    fabricated criterion.
+
+    `bullet_text` joins the bullet's own line with every indented line that
+    follows it — wrapped continuation prose, any nested `- ` sub-bullet (plus
+    that sub-bullet's own wrapped continuation), and an indented continuation
+    paragraph reached across one or more blank lines, since a sub-bullet
+    qualifies its parent and its text belongs to the criterion it qualifies.
+    A blank line does not by itself end the block: per CommonMark's loose-
+    list rule, a list item continues across a blank line as long as an
+    indented line eventually follows it. The block ends at the next unmasked
+    top-level (unindented) `- ` bullet, a `##`/`###` heading, or a dedent to
+    an unindented, non-blank line (including one preceded by one or more
+    blank lines, which means the item's content is exhausted). A bullet with
+    no `**ACn.**` prefix yields identifier `None` rather than being silently
+    dropped — `parse_criteria` is the one that drops it; this walk does not.
+    """
+    lines = _COMMONMARK_LINE_RE.split(spec_body)
+    masked = _mask_fenced_lines(lines)
+
+    start = _find_unique_heading(
+        lines, masked, _AC_HEADING_RE, _AC_HEADING, _DUPLICATE_AC_HEADING_REASON_CODE
+    )
+    if start is None:
+        raise ValueError(f"spec body has no {_AC_HEADING!r} heading")
+
+    n = len(lines)
+    i = start
+    while i < n:
+        if masked[i]:
+            i += 1
+            continue
+        line = lines[i]
+        if line.startswith("## "):
+            break
+        if not line.startswith("- "):
+            i += 1
+            continue
+        block = [line]
+        j = i + 1
+        while j < n:
+            if masked[j]:
+                j += 1
+                continue
+            nxt = lines[j]
+            if nxt.startswith("## ") or nxt.startswith("### ") or nxt.startswith("- "):
+                break
+            stripped = nxt.strip()
+            if stripped == "":
+                # A blank line does not end a loose list item by itself —
+                # look past it (and any further blank/masked lines) for the
+                # next real line. If it is indented, the blank run is a
+                # loose-list gap inside this same item and folds into the
+                # block; otherwise the item's content ends here, before the
+                # blank run, exactly as if the blank had not been peeked
+                # past.
+                k = j + 1
+                while k < n and (masked[k] or lines[k].strip() == ""):
+                    k += 1
+                if k < n and lines[k][:1] in (" ", "\t"):
+                    block.append(nxt)
+                    j += 1
+                    continue
+                break
+            if nxt[:1] in (" ", "\t"):
+                # An indented line here is either a wrapped continuation of
+                # the bullet's own prose or a nested sub-bullet (and that
+                # sub-bullet's own wrapped continuation) — both qualify the
+                # parent criterion rather than forming a criterion of their
+                # own, so both fold into this block's text.
+                block.append(nxt)
+                j += 1
+                continue
+            break
+        m = _CRITERION_RE.match(line)
+        identifier = m.group(1) if m else None
+        yield identifier, "\n".join(block)
+        i = j
+
+
 def parse_criteria(spec_body: str) -> list[str]:
     """Return the ordered criterion identifiers declared under the spec's
     top-level `## Acceptance Criteria` heading. Raises ValueError if that
@@ -203,27 +298,24 @@ def parse_criteria(spec_body: str) -> list[str]:
     second unmasked occurrence of the heading raises DuplicateHeadingError
     rather than silently anchoring on the first.
     """
-    lines = _COMMONMARK_LINE_RE.split(spec_body)
-    masked = _mask_fenced_lines(lines)
+    return [
+        identifier
+        for identifier, _text in _iter_criterion_entries(spec_body)
+        if identifier is not None
+    ]
 
-    start = _find_unique_heading(
-        lines, masked, _AC_HEADING_RE, _AC_HEADING, _DUPLICATE_AC_HEADING_REASON_CODE
-    )
-    if start is None:
-        raise ValueError(f"spec body has no {_AC_HEADING!r} heading")
 
-    identifiers: list[str] = []
-    for i in range(start, len(lines)):
-        if masked[i]:
-            continue
-        line = lines[i]
-        if line.startswith("## "):
-            break
-        if line.startswith("- "):
-            m = _CRITERION_RE.match(line)
-            if m:
-                identifiers.append(m.group(1))
-    return identifiers
+def parse_criteria_with_text(spec_body: str) -> list[tuple[str | None, str]]:
+    """Sibling accessor to `parse_criteria`, sharing its exact walk via
+    `_iter_criterion_entries`. Returns every top-level bullet under the
+    criteria heading as `(identifier_or_None, bullet_text)`, in document
+    order — including an unprefixed bullet (`identifier` is `None`), which
+    `parse_criteria` discards. `bullet_text` is the bullet's own line plus
+    every indented line that follows it, including a nested sub-bullet's
+    text — a sub-bullet qualifies its parent criterion, so its text belongs
+    to the criterion it qualifies. Raises the same errors as `parse_criteria`.
+    """
+    return list(_iter_criterion_entries(spec_body))
 
 
 def parse_covers(value: str, flag: str = "--covers") -> list[str]:

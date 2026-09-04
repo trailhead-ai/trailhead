@@ -24,7 +24,35 @@ criterion compound, and a criterion with no "and" can still be compound.
     ships useful without the other — two ACs.
   - Not compound (leave it): "a manager can change a shift's start and end
     times, with validation against the store's opening hours." The
-    validation is not separately shippable from the edit it guards — one AC. -->
+    validation is not separately shippable from the edit it guards — one AC.
+
+No implementation identifier bar: a criterion names the artifact it is about by its role
+or purpose, never by its literal identifier — no function name, file path, endpoint, or
+symbol. One move covers every shape: say what the artifact does or means, not where it
+lives.
+
+  - Refused (names the endpoint): "- **AC1.** The `POST /users` endpoint returns `201`.
+    *Verified by: automated assertion.*"
+  - Conformant (names the role): "- **AC1.** A client creating a user gets a response
+    confirming the user was created. *Verified by: automated assertion.*"
+
+Verification method bar: every criterion names exactly one of three sanctioned
+verification methods, appended as a trailer — `*Verified by: <method>.*` — where
+`<method>` is `automated assertion`, `design doc review`, or `manual check`. The trailer
+is required on every criterion, including one an automated assertion verifies — there is
+no exemption for that case. Free text ("verified by: manual testing") is not sanctioned.
+
+  - Refused (omits the trailer): "- **AC1.** A client creating a user gets a response
+    confirming the user was created."
+  - Conformant (states the method): "- **AC1.** A client creating a user gets a response
+    confirming the user was created. *Verified by: automated assertion.*"
+
+Named limits: the identifier bar above only inspects inline code spans — a path or symbol
+written in bare prose, without backticks, is a false negative it accepts. A spec predating
+the `**ACn.**` identifier convention is exempt from both bars until it adopts identifiers.
+And naming a status or error value by its role trades away the criterion's ability to pin
+that value's exact literal wire spelling — when the literal spelling itself is the
+contract, a human still maps role to literal when writing the assertion. -->
 
 ## Required Interfaces
 <!-- Name each boundary this spec implies and the acceptance criteria that boundary
