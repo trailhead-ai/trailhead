@@ -197,7 +197,7 @@ def parse_ledger(spec_body: str, criteria: list[str]) -> tuple[list[str], bool]:
         nonlocal eligible
         if not entry_lines:
             return
-        text = " ".join(l.strip() for l in entry_lines)
+        text = " ".join(line.strip() for line in entry_lines)
         paren = _LEDGER_TRAILING_PAREN_RE.search(text)
         if paren is None:
             eligible = False
