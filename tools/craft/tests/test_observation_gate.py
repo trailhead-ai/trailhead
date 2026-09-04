@@ -105,6 +105,15 @@ OBSERVATION_UNDER_SUBHEADING = (
 COVERS_FIELD_IN_HTML_COMMENT = (
     FIXTURES / "parent_covers_field_in_html_comment.md"
 ).read_text(encoding="utf-8")
+INVISIBLE_UNICODE_EVIDENCE = (
+    FIXTURES / "parent_invisible_unicode_evidence.md"
+).read_text(encoding="utf-8")
+INVISIBLE_UNICODE_ATTESTATION = (
+    FIXTURES / "parent_invisible_unicode_attestation.md"
+).read_text(encoding="utf-8")
+FULLWIDTH_IDENTIFIER = (FIXTURES / "parent_fullwidth_identifier.md").read_text(
+    encoding="utf-8"
+)
 
 _MALFORMED_COVERS_REASON_CODE = "reason-code: malformed-covers-field"
 _DUPLICATE_OBSERVATIONS_SECTION_REASON_CODE = "reason-code: duplicate-observations-section"
@@ -420,3 +429,41 @@ def test_unterminated_html_comment_exits_2_with_reason_code():
     assert "reason:" in result.stderr
     assert _UNTERMINATED_MASKED_REGION_REASON_CODE in result.stderr
     assert "covers: none" not in result.stdout
+
+
+# ---- item 20: invisible Unicode does not satisfy the emptiness bar --------------
+
+
+def test_invisible_unicode_evidence_exits_1_naming_identifier():
+    # A single U+200B ZERO WIDTH SPACE renders as nothing in any editor or
+    # terminal, but `str.isspace()` is False for it — so `str.strip()` alone
+    # treats it as non-empty evidence. The gate must not certify on that.
+    result = _run(INVISIBLE_UNICODE_EVIDENCE)
+    assert result.returncode == 1, result.stdout
+    assert "AC9" in result.stderr
+
+
+def test_invisible_unicode_attestation_exits_1_naming_criterion():
+    # Same defect on the attestation side: a manual-check discharge must not
+    # be satisfiable by a zero-width character standing in for the operator's
+    # verbatim answer.
+    result = _run(INVISIBLE_UNICODE_ATTESTATION)
+    assert result.returncode == 1, result.stdout
+    assert "AC3" in result.stderr
+
+
+# ---- item 21: identifier patterns are anchored to ASCII digits -----------------
+
+
+def test_fullwidth_digit_identifier_is_not_recognized_as_an_observation():
+    # `**Covers:**` is parsed by the imported, unmodified `_COVERS_RE`, which
+    # is Unicode-`\d`-aware and accepts the fullwidth digit U+FF19 in
+    # `AC９` — this gate cannot change that shared pattern. But this gate's
+    # own observation-line pattern must anchor to ASCII digits, so a bullet
+    # written with the same fullwidth identifier never counts as a
+    # well-formed observation for it — leaving the covered identifier
+    # unobserved, and the gate refuses rather than certifying a non-ASCII
+    # identifier that only visually resembles AC9.
+    result = _run(FULLWIDTH_IDENTIFIER)
+    assert result.returncode == 1, result.stdout
+    assert "AC９" in result.stderr

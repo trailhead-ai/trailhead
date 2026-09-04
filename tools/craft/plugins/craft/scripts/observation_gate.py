@@ -30,7 +30,11 @@ Grammar this gate reads (fixed by the parent plan, not to be re-invented):
 
 Sanctioned method tokens are exactly `automated-assertion`,
 `design-doc-review`, and `manual-check`. Evidence text is required and never
-empty. Each observation line is `- **ACn** — <method> — <evidence>`: the
+empty — where "empty" means carrying no character beyond whitespace and
+Unicode format/control code points (category Cf/Cc), not merely
+`str.strip()` producing an empty string, so an invisible-but-nonempty
+payload (e.g. a lone U+200B ZERO WIDTH SPACE) does not satisfy the bar. Each
+observation line is `- **ACn** — <method> — <evidence>`: the
 identifier and the method are split off the first two `—` (em dash)
 separators; everything after the second separator is evidence verbatim,
 including any further `—` characters it contains, so a design-doc-review
@@ -51,8 +55,10 @@ A `manual-check` observation additionally requires a matching
 
 An unattended run must not be able to discharge a manual check by writing a
 sentence to itself — the same criterion must have both lines, or the
-manual-check observation is refused. The other two methods need no
-attestation line and are unaffected by its absence.
+manual-check observation is refused. The attestation text is held to the
+same non-empty bar as evidence text above (whitespace and Cf/Cc code points
+alone do not count). The other two methods need no attestation line and are
+unaffected by its absence.
 
 The evidence text (and the attestation text) is inert: pattern-matched and
 printed only, never opened as a path and never passed to a subprocess. A
@@ -89,6 +95,7 @@ from __future__ import annotations
 
 import re
 import sys
+import unicodedata
 from pathlib import Path
 
 _SCRIPT_DIR = Path(__file__).resolve().parent
@@ -108,8 +115,16 @@ _OBSERVATIONS_HEADING = "## Criterion observations"
 _OBSERVATIONS_HEADING_RE = re.compile(r"^## Criterion observations$", re.IGNORECASE)
 _ATTESTATIONS_HEADING = "## Operator attestations"
 _ATTESTATIONS_HEADING_RE = re.compile(r"^## Operator attestations$", re.IGNORECASE)
-_OBSERVATION_LINE_RE = re.compile(r"^-\s+\*\*(AC\d+)\*\*\s*—\s*(.*)$")
-_ATTESTATION_LINE_RE = re.compile(r"^-\s+\*\*(AC\d+)\*\*\s*—\s*(.*)$")
+# Anchored to ASCII digits explicitly (`[0-9]`, not `\d`) — Python's `\d` is
+# Unicode-aware by default and matches fullwidth and other non-ASCII decimal
+# digits (category Nd), which would let e.g. `AC９` (U+FF19) parse as a
+# well-formed identifier. `covers_gate._COVERS_RE` carries the same laxity on
+# the `**Covers:**` side and is imported here unmodified rather than
+# re-derived — do not "fix" it by loosening these patterns to match: the
+# asymmetry is fail-closed, since a `**Covers:**` value with a non-ASCII
+# digit then matches no observation line here and the gate refuses.
+_OBSERVATION_LINE_RE = re.compile(r"^-\s+\*\*(AC[0-9]+)\*\*\s*—\s*(.*)$")
+_ATTESTATION_LINE_RE = re.compile(r"^-\s+\*\*(AC[0-9]+)\*\*\s*—\s*(.*)$")
 
 _SANCTIONED_METHODS = {"automated-assertion", "design-doc-review", "manual-check"}
 _MANUAL_CHECK_METHOD = "manual-check"
@@ -132,6 +147,32 @@ _DUPLICATE_OBSERVATION_MESSAGE = "duplicate observation for identifier {identifi
 _DUPLICATE_ATTESTATION_MESSAGE = (
     "duplicate '## Operator attestations' line for identifier {identifier}"
 )
+
+
+# Unicode categories that never carry visible content: Cf (format — e.g.
+# U+200B ZERO WIDTH SPACE, ZWNJ/ZWJ, U+2060 WORD JOINER, U+FEFF BOM) and Cc
+# (control). A string made entirely of these characters renders as nothing in
+# any editor or terminal, but `str.isspace()` is False for them, so
+# `str.strip()` alone treats such a string as non-empty.
+_MEANINGLESS_CATEGORIES = {"Cf", "Cc"}
+
+
+def _is_meaningfully_nonempty(text: str) -> bool:
+    """Return whether `text` carries at least one character that is neither
+    whitespace nor Unicode category Cf or Cc.
+
+    Both "evidence is required and never empty" and the operator-attestation
+    requirement rest on this bar rather than on `bool(text.strip())` alone —
+    a string of invisible format/control code points would satisfy the
+    latter while being, by construction, indistinguishable from nothing. A
+    zero-width character surviving a copy-paste from a chat client, a doc, or
+    a PDF is exactly the accidental-omission case these checks exist to
+    catch, not only a hostile one.
+    """
+    return any(
+        not ch.isspace() and unicodedata.category(ch) not in _MEANINGLESS_CATEGORIES
+        for ch in text
+    )
 
 
 def _err(msg: str) -> None:
@@ -298,7 +339,7 @@ def parse_observations(
             raise ObservationViolation(
                 f"identifier {identifier} carries unsanctioned method token {method!r}"
             )
-        if not evidence:
+        if not _is_meaningfully_nonempty(evidence):
             raise ObservationViolation(f"identifier {identifier} carries empty evidence text")
         observations[identifier] = (method, evidence)
     return observations
@@ -361,7 +402,7 @@ def certify(body: str) -> tuple[list[str], dict[str, tuple[str, str]]]:
         i
         for i in covers
         if observations[i][0] == _MANUAL_CHECK_METHOD
-        and not attestations.get(i, "").strip()
+        and not _is_meaningfully_nonempty(attestations.get(i, ""))
     ]
     if unattested:
         raise ObservationViolation(
