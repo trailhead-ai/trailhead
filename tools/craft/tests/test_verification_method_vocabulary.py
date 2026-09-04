@@ -12,45 +12,14 @@ artifacts actually agree.
 from __future__ import annotations
 
 import re
-import subprocess
-import sys
-from pathlib import Path
 
-REPO_ROOT = Path(__file__).parent.parent
-CRAFT = REPO_ROOT / "plugins" / "craft"
-EXECUTE_MD = CRAFT / "skills" / "_shared" / "execute.md"
-SCRIPTS = CRAFT / "scripts"
-GATE = SCRIPTS / "observation_gate.py"
-
-sys.path.insert(0, str(SCRIPTS))
-from covers_gate import _COMMONMARK_LINE_RE, _mask_fenced_lines  # noqa: E402
-
-
-def _doc_text() -> str:
-    return EXECUTE_MD.read_text(encoding="utf-8")
-
-
-def _phase_spans(text: str) -> dict[str, str]:
-    """{heading text: body text up to the next `##`/`###` heading}, reading
-    only unmasked headings — a `## `/`### ` line inside a fenced code block
-    (the grammar examples this document quotes) is illustration, not a real
-    section boundary. Mirrors test_close_gate_observation_contract.py's
-    helper of the same name."""
-    lines = _COMMONMARK_LINE_RE.split(text)
-    masked = _mask_fenced_lines(lines)
-    heading_re = re.compile(r"^(#{2,3}) (.+)$")
-    headings: list[tuple[int, str]] = []
-    for i, line in enumerate(lines):
-        if masked[i]:
-            continue
-        m = heading_re.match(line)
-        if m:
-            headings.append((i, m.group(2).strip()))
-    spans: dict[str, str] = {}
-    for idx, (line_i, name) in enumerate(headings):
-        end = headings[idx + 1][0] if idx + 1 < len(headings) else len(lines)
-        spans[name] = "\n".join(lines[line_i + 1 : end])
-    return spans
+# The masking-aware span reader over `_shared/execute.md`, the document reader
+# it runs on, and the gate runner are the same ones the Phase 6 wiring contract
+# drives, so a change to the heading grammar or to the gate invocation reaches
+# both suites from one place. Deliberately NOT imported: the gate's own
+# `_SANCTIONED_METHODS` — this suite derives the accepted set by executing the
+# gate, never by comparing a constant to itself.
+from test_close_gate_observation_contract import _doc_text, _phase_spans, _run_gate
 
 
 # Matches the observation grammar's worked-example lines, e.g.
@@ -80,15 +49,6 @@ def _parent_body(method: str, identifier: str = "AC1", evidence: str = "some evi
     if method == "manual-check":
         body += f"\n## Operator attestations\n\n- **{identifier}** — checked by the operator\n"
     return body
-
-
-def _run_gate(stdin_text: str) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        [sys.executable, str(GATE)],
-        input=stdin_text,
-        capture_output=True,
-        text=True,
-    )
 
 
 # ---------------------------------------------------------------------------
