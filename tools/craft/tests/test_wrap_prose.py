@@ -1,0 +1,364 @@
+"""Tests for the greedy-fill prose formatter.
+
+`wrap_prose.py`'s contract is defined against `wrap_gate.py` rather than
+against a wording: for any input, the formatter's output exits the gate
+clean at the same column, and running the formatter on its own output
+changes nothing. The gate is imported and called directly — never
+reimplemented here.
+"""
+
+from __future__ import annotations
+
+import random
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).parent.parent
+SCRIPTS = REPO_ROOT / "plugins" / "craft" / "scripts"
+FORMATTER = SCRIPTS / "wrap_prose.py"
+
+sys.path.insert(0, str(SCRIPTS))
+import wrap_gate  # noqa: E402
+import wrap_prose  # noqa: E402
+
+
+def doc(tmp_path: Path, body: str, name: str = "doc.md") -> Path:
+    path = tmp_path / name
+    path.write_text(body, encoding="utf-8")
+    return path
+
+
+def findings(path: Path, column: int) -> list[wrap_gate.Finding]:
+    return wrap_gate.check(path, column)
+
+
+# Budget of 20 keeps most fixtures readable; wider columns are used where a
+# fixture (a code span) is itself long.
+COL = 20
+
+
+class TestBasicReflow:
+    def test_over_long_paragraph_reflows_clean_at_the_gates_column(self, tmp_path):
+        body = "# Title\n\none two three four five six seven eight nine ten\n"
+        formatted = wrap_prose.format_text(body, COL)
+        out = doc(tmp_path, formatted)
+        assert findings(out, COL) == []
+        # sanity: the paragraph really was rewrapped across multiple lines
+        assert formatted.count("\n") > body.count("\n")
+
+
+class TestCodeSpansNeverSplit:
+    PEM = "`-----BEGIN [A-Z ]*PRIVATE KEY-----`"
+    LORE_CMD = (
+        "`lore record update task/prose-formatter --vault trailhead --status done`"
+    )
+
+    @staticmethod
+    def _assert_span_intact_and_clean(tmp_path, body, span, column):
+        formatted = wrap_prose.format_text(body, column)
+        assert span in formatted, f"span was split:\n{formatted!r}"
+        out = doc(tmp_path, formatted)
+        assert findings(out, column) == []
+
+    def test_pem_span_survives_with_no_filler(self, tmp_path):
+        body = f"# Title\n\nsee {self.PEM} pattern\n"
+        self._assert_span_intact_and_clean(tmp_path, body, self.PEM, 45)
+
+    def test_pem_span_survives_at_every_filler_offset(self, tmp_path):
+        # Vary the amount of preceding filler so the greedy-fill boundary
+        # falls at a different point relative to the span each time —
+        # sometimes just before it, sometimes mid-run.
+        for k in range(6):
+            filler = " ".join(["word"] * k)
+            body = f"# Title\n\n{filler} {self.PEM} tail words after it here\n"
+            self._assert_span_intact_and_clean(tmp_path, body, self.PEM, 40)
+
+    def test_long_lore_command_span_survives(self, tmp_path):
+        body = f"# Title\n\nrun this {self.LORE_CMD} to record it\n"
+        self._assert_span_intact_and_clean(tmp_path, body, self.LORE_CMD, 40)
+
+    def test_span_longer_than_budget_emitted_alone_on_its_own_line(self, tmp_path):
+        span = "`" + ("z" * 30) + "`"
+        body = f"# Title\n\nsee {span} exactly\n"
+        formatted = wrap_prose.format_text(body, COL)
+        assert span in formatted
+        lines = formatted.split("\n")
+        assert any(line.strip() == span for line in lines)
+        out = doc(tmp_path, formatted)
+        assert findings(out, COL) == []
+
+    def test_adjacent_spans_both_survive_intact(self, tmp_path):
+        # Column chosen tight enough that a whitespace-naive fill (ignoring
+        # span atomicity) would break inside one of the spans — proven
+        # empirically: at column 12 a plain `str.split()`-based fill splits
+        # "alpha" from "beta`".
+        s1, s2 = "`alpha beta`", "`gamma delta`"
+        column = 12
+        body = f"# Title\n\nsee {s1} {s2} then more filler words follow after\n"
+        formatted = wrap_prose.format_text(body, column)
+        assert s1 in formatted
+        assert s2 in formatted
+        out = doc(tmp_path, formatted)
+        assert findings(out, column) == []
+
+    def test_double_backtick_delimited_span_survives(self, tmp_path):
+        # Column tight enough (8) that an unprotected fill would break
+        # inside the span's internal space.
+        span = "``a ` b``"
+        column = 8
+        body = f"# Title\n\nsee {span} here and then some more filler words\n"
+        formatted = wrap_prose.format_text(body, column)
+        assert span in formatted
+        out = doc(tmp_path, formatted)
+        assert findings(out, column) == []
+
+    def test_span_containing_a_backtick_survives(self, tmp_path):
+        span = "`` a ` b ``"
+        column = 8
+        body = f"# Title\n\nsee {span} here and then some more filler words\n"
+        formatted = wrap_prose.format_text(body, column)
+        assert span in formatted
+        out = doc(tmp_path, formatted)
+        assert findings(out, column) == []
+
+
+class TestIdempotence:
+    def test_formatting_an_already_formatted_document_is_a_byte_level_no_op(self, tmp_path):
+        body = "# Title\n\none two three four five six seven eight nine ten\n"
+        once = wrap_prose.format_text(body, COL)
+        twice = wrap_prose.format_text(once, COL)
+        assert twice == once
+
+
+class TestPassthroughByteIdentity:
+    _OVER_LONG = "aaaa bbbb cccc dddd eeee ffff gggg"
+
+    def test_fenced_block_contents_byte_identical(self, tmp_path):
+        body = f"# Title\n\n```\n{self._OVER_LONG}\n```\n"
+        assert wrap_prose.format_text(body, COL) == body
+
+    def test_html_comment_contents_byte_identical(self, tmp_path):
+        body = f"# Title\n\n<!-- {self._OVER_LONG} -->\n"
+        assert wrap_prose.format_text(body, COL) == body
+
+    def test_table_row_byte_identical(self, tmp_path):
+        body = f"# Title\n\n| {self._OVER_LONG} | y |\n"
+        assert wrap_prose.format_text(body, COL) == body
+
+    def test_heading_byte_identical(self, tmp_path):
+        body = f"# {self._OVER_LONG}\n\nshort\n"
+        assert wrap_prose.format_text(body, COL) == body
+
+
+class TestListItems:
+    def test_wrapped_list_item_keeps_marker_and_fills_continuation_at_indented_width(
+        self, tmp_path
+    ):
+        body = "# Title\n\n- one two three four five six seven eight nine ten\n"
+        formatted = wrap_prose.format_text(body, COL)
+        lines = formatted.split("\n")
+        assert lines[2].startswith("- ")
+        for line in lines[3:]:
+            if line.strip():
+                assert line.startswith("  ")
+        out = doc(tmp_path, formatted)
+        assert findings(out, COL) == []
+
+    def test_nested_list_item_keeps_its_prefix_on_every_produced_line(self, tmp_path):
+        body = "# Title\n\n  - one two three four five six seven eight nine\n"
+        formatted = wrap_prose.format_text(body, COL)
+        lines = [l for l in formatted.split("\n")[2:] if l.strip()]
+        assert lines[0].startswith("  - ")
+        for line in lines[1:]:
+            assert line.startswith("    ")
+        out = doc(tmp_path, formatted)
+        assert findings(out, COL) == []
+
+    def test_block_quote_keeps_its_prefix_on_every_produced_line(self, tmp_path):
+        # Single physical line only: a multi-line block quote cannot be
+        # made gate-clean by any formatter — see
+        # TestKnownGateLimitationBlockquoteContinuation below for the proof.
+        # This test pins the structural property that IS achievable: the
+        # "> " prefix survives, on the one line produced.
+        body = "# Title\n\n> one two three\n"
+        formatted = wrap_prose.format_text(body, COL)
+        lines = [l for l in formatted.split("\n")[2:] if l.strip()]
+        for line in lines:
+            assert line.startswith("> ")
+        out = doc(tmp_path, formatted)
+        assert findings(out, COL) == []
+
+
+class TestKnownGateLimitationBlockquoteContinuation:
+    """`wrap_gate.py`'s under-fill rule treats every line as flat prose with
+    no notion of block structure: for a block-quote continuation line, the
+    gate tokenizes the line's own "> " marker as a real unit, so it uses
+    that marker's length (always 1 char) as "the next line's first word"
+    when checking whether the *previous* content line was under-filled.
+    That forces every non-final continuation line to land within 1
+    character of the column to avoid a false finding — not achievable by
+    any greedy fill in general, and not a defect in this formatter. This is
+    a discovered gate limitation, reported rather than worked around;
+    `wrap_gate.py` is out of this task's scope to edit. Real craft prose
+    already has multi-line block quotes (e.g. `skills/brainstorm/SKILL.md`
+    lines 332-335), so this blocks the pilot/tree-wide reflow tasks, not
+    this one — this test documents the mechanism with a minimal repro."""
+
+    def test_gate_flags_a_correctly_wrapped_multiline_quote_as_under_filled(self, tmp_path):
+        column = 20
+        body = "# Title\n\n> one two three four five six seven eight nine ten eleven twelve\n"
+        formatted = wrap_prose.format_text(body, column)
+        out = doc(tmp_path, formatted)
+        result = findings(out, column)
+        assert any(f.rule == "under-filled" for f in result), (
+            "expected the gate to (wrongly) flag the wrapped quote as "
+            f"under-filled; got {result} for {formatted!r}"
+        )
+        # Gate-cleanliness is unreachable here, but prefix-preservation on
+        # every produced line is a separate, still-achievable property —
+        # pinned here since the single-line quote test above cannot
+        # exercise more than one produced line.
+        lines = [l for l in formatted.split("\n")[2:] if l.strip()]
+        assert len(lines) > 1
+        for line in lines:
+            assert line.startswith("> ")
+
+
+class TestBlankLineSeparation:
+    def test_blank_line_between_paragraphs_preserved_and_blocks_not_merged(self, tmp_path):
+        body = (
+            "# Title\n\n"
+            "one two three four five six seven\n\n"
+            "eight nine ten eleven twelve thirteen\n"
+        )
+        formatted = wrap_prose.format_text(body, COL)
+        # exactly one blank line still separates the two paragraphs
+        assert "\n\n\n" not in formatted
+        parts = formatted.split("\n\n")
+        assert len(parts) == 3  # title block, paragraph one, paragraph two
+        out = doc(tmp_path, formatted)
+        assert findings(out, COL) == []
+
+
+class TestHardLineBreak:
+    def test_hard_break_line_ends_its_run_and_is_left_untouched(self, tmp_path):
+        body = "# Title\n\none two  \nthree\n"
+        formatted = wrap_prose.format_text(body, COL)
+        lines = formatted.split("\n")
+        assert lines[2] == "one two  "
+        out = doc(tmp_path, formatted)
+        assert findings(out, COL) == []
+
+
+class TestTrailingNewline:
+    def test_file_with_trailing_newline_round_trips_the_property(self, tmp_path):
+        body = "# Title\n\none two three four five six seven eight\n"
+        assert body.endswith("\n")
+        formatted = wrap_prose.format_text(body, COL)
+        assert formatted.endswith("\n")
+
+    def test_file_without_trailing_newline_round_trips_the_property(self, tmp_path):
+        body = "# Title\n\none two three four five six seven eight"
+        assert not body.endswith("\n")
+        formatted = wrap_prose.format_text(body, COL)
+        assert not formatted.endswith("\n")
+
+
+class TestCli:
+    def test_cli_rewrites_the_file_in_place(self, tmp_path):
+        body = "# Title\n\none two three four five six seven eight nine ten\n"
+        path = doc(tmp_path, body)
+        result = subprocess.run(
+            [sys.executable, str(FORMATTER), "--column", str(COL), str(path)],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0
+        rewritten = path.read_text(encoding="utf-8")
+        assert rewritten != body
+        assert findings(path, COL) == []
+
+
+def _code_span_multiset(text: str) -> list[str]:
+    lines = wrap_gate._COMMONMARK_LINE_RE.split(text)
+    spans: list[str] = []
+    for line in lines:
+        for token in wrap_gate._tokenize(line):
+            if token.startswith("`"):
+                spans.append(token)
+    return sorted(spans)
+
+
+def _random_document(rng: random.Random) -> str:
+    words = ["alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta"]
+
+    def paragraph() -> str:
+        n = rng.randint(3, 14)
+        tokens = []
+        for _ in range(n):
+            if rng.random() < 0.15:
+                span_words = rng.randint(1, 3)
+                tokens.append("`" + " ".join(rng.choices(words, k=span_words)) + "`")
+            else:
+                tokens.append(rng.choice(words))
+        return " ".join(tokens)
+
+    def list_item() -> str:
+        marker = rng.choice(["- ", "* ", "1. "])
+        return marker + paragraph()
+
+    def blockquote() -> str:
+        # Capped to a couple of short words so it always fits on one
+        # physical line at the corpus's test column: a multi-line block
+        # quote cannot be made gate-clean by any formatter (see
+        # TestKnownGateLimitationBlockquoteContinuation) — that is a
+        # documented gate limitation, not a property this corpus exercises.
+        return "> " + " ".join(rng.choices(words, k=2))
+
+    blocks = []
+    blocks.append("# Title")
+    for _ in range(rng.randint(2, 5)):
+        kind = rng.choice(["paragraph", "list", "quote", "fence", "heading"])
+        if kind == "paragraph":
+            blocks.append(paragraph())
+        elif kind == "list":
+            blocks.append(list_item())
+        elif kind == "quote":
+            blocks.append(blockquote())
+        elif kind == "fence":
+            blocks.append("```\n" + paragraph() + "\n```")
+        else:
+            blocks.append("## " + paragraph())
+    return "\n\n".join(blocks) + "\n"
+
+
+class TestPropertyCorpus:
+    SEED = 20260904
+
+    def test_generated_corpus_satisfies_the_formatters_contract(self, tmp_path):
+        rng = random.Random(self.SEED)
+        column = 40
+        for trial in range(50):
+            body = _random_document(rng)
+            try:
+                once = wrap_prose.format_text(body, column)
+                out = doc(tmp_path, once, name=f"doc{trial}.md")
+                gate_findings = findings(out, column)
+                assert gate_findings == [], (
+                    f"seed={self.SEED} trial={trial} gate findings={gate_findings}\n"
+                    f"input={body!r}\noutput={once!r}"
+                )
+                assert _code_span_multiset(once) == _code_span_multiset(body), (
+                    f"seed={self.SEED} trial={trial} span multiset changed\n"
+                    f"input={body!r}\noutput={once!r}"
+                )
+                twice = wrap_prose.format_text(once, column)
+                assert twice == once, (
+                    f"seed={self.SEED} trial={trial} second pass not identical\n"
+                    f"once={once!r}\ntwice={twice!r}"
+                )
+            except AssertionError:
+                print(f"property test failed at seed={self.SEED} trial={trial}: {body!r}")
+                raise
