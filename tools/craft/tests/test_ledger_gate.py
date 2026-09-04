@@ -58,6 +58,12 @@ NESTED_LIST_FAKE_ENTRY = (FIXTURES / "ledger_nested_list_fake_entry.md").read_te
 )
 UNTERMINATED_FENCE = (FIXTURES / "ledger_unterminated_fence.md").read_text(encoding="utf-8")
 INVISIBLE_TASK_ID = (FIXTURES / "ledger_invisible_task_id.md").read_text(encoding="utf-8")
+CREDENTIAL_SHAPED_DUPLICATE_TASK_ID = (
+    FIXTURES / "ledger_credential_shaped_duplicate_task_id.md"
+).read_text(encoding="utf-8")
+CONTROL_BYTE_DUPLICATE_TASK_ID = (
+    FIXTURES / "ledger_control_byte_duplicate_task_id.md"
+).read_text(encoding="utf-8")
 
 
 def _run(
@@ -338,6 +344,62 @@ def test_forged_duplicate_in_nested_list_is_invisible():
     assert r.returncode == 0, r.stderr
     tokens = _tokens(r.stdout)
     assert tokens["entries"] == "1"
+
+
+# ---------------------------------------------------------------------------
+# Security obligation — the `reason:` line echoes vault-sourced ledger text
+# (a task id, a coverage identifier), so it must never reproduce a credential-
+# shaped secret or a raw control byte. Matches the established convention in
+# `test_criterion_gate.py`'s `test_credential_shaped_span_refuses_without_
+# reproducing_the_secret` and `test_control_bytes_in_a_refused_call_syntax_
+# span_are_neutralized` — this is a separate obligation from item 4's
+# reason-code-only persistence contract: that one is about what the shipped
+# document tells a session to persist, this one is about the gate itself
+# never reproducing a secret in its own output in the first place.
+# ---------------------------------------------------------------------------
+
+
+def test_credential_shaped_task_id_refuses_without_reproducing_the_secret():
+    r = _run(CREDENTIAL_SHAPED_DUPLICATE_TASK_ID)
+    assert r.returncode == 1, r.stderr + r.stdout
+    assert _reason_code(r.stderr) == "duplicate-ledger-task-id"
+    assert "sk_live_Zq7Kd2" not in r.stderr
+    assert "deploy-" in r.stderr
+
+
+def test_control_byte_in_a_duplicated_task_id_is_neutralized():
+    r = subprocess.run(
+        [sys.executable, str(GATE)],
+        input=CONTROL_BYTE_DUPLICATE_TASK_ID.encode("utf-8"),
+        capture_output=True,
+    )
+    assert r.returncode == 1
+    assert b"\x1b" not in r.stderr
+    assert b"duplicate-ledger-task-id" in r.stderr
+    # the neutralized escape must still be legible as evidence, not dropped
+    assert b"\\x1b" in r.stderr
+
+
+def test_safe_output_boundary_neutralizes_control_bytes_and_scrubs_credentials():
+    """Direct pin on `ledger_gate._safe`, the gate's single output-join point.
+
+    Every reason-message call site in this module wraps its one echoed
+    untrusted field (the task id) in `!r`, and Python's own `repr()` already
+    escapes a raw control byte — so the CLI-level fixture above stays GREEN
+    even with `_safe`'s neutralization pass fully bypassed (verified: with
+    `_safe` short-circuited to `return text`, the CLI-level control-byte test
+    above still passes, `repr()` alone carries it). That is a real,
+    independently-confirmed finding, not a reason to skip pinning `_safe`
+    itself — a future call site echoing raw (non-`!r`) untrusted text would
+    have no such protection, and this is the one test that would catch a
+    regression in `_safe`'s own contract."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("ledger_gate_direct", GATE)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    assert module._safe("secret sk_live_Zq7Kd2 here") == "secret [redacted] here"
+    assert module._safe("raw \x1b escape") == "raw \\x1b escape"
 
 
 # ---------------------------------------------------------------------------

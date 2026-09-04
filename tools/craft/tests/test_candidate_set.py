@@ -194,6 +194,18 @@ def test_full_coverage_with_one_legacy_line_is_not_eligible():
 # ---- 4. coverage is a union across lines, not latest-wins ------------------
 
 
+def _union_covered_via_accessor(spec_body: str) -> set[str]:
+    """The same full-wins-over-partial union `parse_ledger` derives
+    internally, re-derived here from `parse_ledger_entries`'s per-entry
+    structure — so this extension pins the union through Task 1's new
+    accessor too, not only through the frozen `parse_ledger` return."""
+    entries = candidate_set.parse_ledger_entries(spec_body)
+    covered: dict[str, None] = {}
+    for entry in entries:
+        covered.update(dict.fromkeys(entry.covers))
+    return set(covered)
+
+
 def test_coverage_is_the_union_across_disjoint_ledger_lines():
     r = _run(UNION_DISJOINT)
     assert r.returncode == 0, r.stderr + r.stdout
@@ -203,6 +215,33 @@ def test_coverage_is_the_union_across_disjoint_ledger_lines():
     ) == {"AC1", "AC2", "AC3", "AC4"}
     assert set(tokens["candidates"].split(", ")) == {"AC5", "AC6", "AC7", "AC8", "AC9"}
     assert tokens["complete-eligible"] == "yes"
+
+    # The same union, re-derived through parse_ledger_entries: the accessor
+    # this refactor introduces must agree with parse_ledger's own answer.
+    assert _union_covered_via_accessor(UNION_DISJOINT) == {"AC1", "AC2", "AC3", "AC4"}
+    # Order-independence through the accessor too: reversing entry order must
+    # not change the union.
+    reversed_entries = list(reversed(candidate_set.parse_ledger_entries(UNION_DISJOINT)))
+    reversed_covered: dict[str, None] = {}
+    for entry in reversed_entries:
+        reversed_covered.update(dict.fromkeys(entry.covers))
+    assert set(reversed_covered) == {"AC1", "AC2", "AC3", "AC4"}
+
+    # Full winning over partial, independent of entry order, read through the
+    # accessor rather than the gate's own merged output.
+    partial_then_full_entries = candidate_set.parse_ledger_entries(PARTIAL_THEN_FULL)
+    full_then_partial_entries = candidate_set.parse_ledger_entries(FULL_THEN_PARTIAL)
+    for entries in (partial_then_full_entries, full_then_partial_entries):
+        covered: dict[str, None] = {}
+        partial: dict[str, None] = {}
+        for entry in entries:
+            covered.update(dict.fromkeys(entry.covers))
+            partial.update(dict.fromkeys(entry.partial))
+        # Full coverage wins over partial for the same identifier: it is
+        # never left in `partial` once any entry has fully covered it.
+        assert "AC2" in covered
+        final_partial = {i for i in partial if i not in covered}
+        assert "AC2" not in final_partial
 
 
 # ---- 5. no ledger at all, or an empty one, still yields every criterion ----
