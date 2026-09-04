@@ -4,7 +4,8 @@
 task record as its own single slice, dispatching `assumption-prover` and `executor`
 subagents to resolve unknowns and build rather than doing the work inline. This file
 is the single source of truth for the procedure — `skills/execute/SKILL.md` is a thin
-wrapper over it (refine.md's shape) — it does not re-inline the steps, it
+wrapper over it (the same thin-wrapper-over-shared-procedure shape other skills
+in this plugin also follow) — it does not re-inline the steps, it
 reads them from here, so the wrapper and the procedure can never drift apart.
 
 # Execute

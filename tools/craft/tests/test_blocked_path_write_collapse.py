@@ -79,22 +79,17 @@ def test_reference_depth_gate_sees_only_the_untouched_sites():
     """The collapse removed six `status-ownership.md` sites and the canonical
     section added exactly one back, leaving nine flagged lines. A later task
     promoted the three genuinely-needed documents into the reading skills'
-    reference sets and reworded every one of those nine lines except one — the
-    gate must see the net of that: a single surviving mention, the bare
-    `refine.md` comparison the promotion task does not own."""
+    reference sets and reworded every one of those nine lines but one — the
+    bare `refine.md` comparison the promotion task did not own — and a final
+    task reworded that remaining site too, so the gate must now see the net
+    of the whole sequence: zero surviving mentions in `execute.md`."""
     result = gate(EXECUTE_MD)
-    assert result.returncode == 1, (
-        f"expected one finding to remain (the bare refine.md mention):\n"
-        f"{result.stderr}"
+    assert result.returncode == 0, (
+        f"expected no findings left in execute.md:\n{result.stderr}"
     )
     lines = [ln for ln in result.stderr.splitlines() if ": reason:" in ln]
-    flagged_line_numbers = {ln.split("line ")[1].split(" ")[0] for ln in lines}
-    assert flagged_line_numbers == {"7"}, (
-        f"expected only line 7 flagged in execute.md, found "
-        f"{flagged_line_numbers}:\n{result.stderr}"
-    )
-    assert len(lines) == 1, (
-        f"expected exactly 1 mention in execute.md, found {len(lines)}:\n"
+    assert lines == [], (
+        f"expected no remaining mentions in execute.md, found {len(lines)}:\n"
         f"{result.stderr}"
     )
     by_target = Counter(ln.rsplit(" ", 1)[-1] for ln in lines)

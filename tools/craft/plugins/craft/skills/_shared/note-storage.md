@@ -71,7 +71,8 @@ without a `## Flow-out` section gets a non-blocking flow-out reminder.
 
 Under `execute`'s task-status contract, the parent's `ready → in-progress` write happens at
 the first dispatch, paired in the same command with `--label craft/branch=<bare-branch>` —
-see `_shared/status-ownership.md` for the full writer/exit-owner contract.
+this is the one status transition these skills write; ownership of every other status
+value belongs to a separate contract they never need to open.
 
 ### `link(plan → spec)`
 
