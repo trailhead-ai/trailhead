@@ -74,6 +74,7 @@ task came from is the ambiguous case below, not a fact.
   - Phase 5: Flow-out
   - Phase 6: Close and completion report
   - Phase progress and resumability
+- Blocked-Path Write
 - Model Selection
 - Handling Assumption-Prover Status
 - Handling Executor Status
@@ -306,7 +307,7 @@ It returns: VALIDATED / INVALIDATED / NEEDS_CONTEXT / BLOCKED, plus evidence, te
 ### 2. Absorb findings
 
 - **VALIDATED:** update the plan, check off the unknown. Carry the **test files to clean up** from the prover's report into the executor dispatch so it removes them after building proper tests.
-- **INVALIDATED:** pause, report to user, reassess. The design may need to change. Do NOT proceed to build — see [Handling Assumption-Prover Status](#handling-assumption-prover-status). **If the run ends here:** write `blocked` on the plan — `lore record update task/<parent-name> --vault <elected-vault> --status blocked --diff`, piping a unified diff that **appends** the blocked note (bare stdin is a full-body replace and would destroy the record) — plus the [Phase 5](#phase-5-flow-out) scrub and, if commits exist, the [Phase 6](#phase-6-close-and-completion-report) blocked-path push and its standalone `craft/branch` write; body-content contract and full rules in `../_shared/status-ownership.md`.
+- **INVALIDATED:** pause, report to user, reassess. The design may need to change. Do NOT proceed to build — see [Handling Assumption-Prover Status](#handling-assumption-prover-status). **If the run ends here:** write `blocked` on the plan (`task/<parent-name>`) — see [Blocked-Path Write](#blocked-path-write).
 - **Surprises:** if the prover discovered new unknowns, add them to the plan. Decide whether they block the current task or a future one.
 
 ### 3. Dispatch `executor`
@@ -590,6 +591,10 @@ Record phase progress as an `## End Phases` checklist appended to the **parent t
 - **Re-entering any end phase on resume** — at least one `## End Phases` line is already ticked, so a `craft/phase-boundary` label is **expected** to exist by construction — except for a run already in flight when this label mandate landed: its earlier phases ticked before any phase existed to write the label, so its first resume can reach this branch with no boundary yet, a case the fail-closed clause below already covers safely. A dirty tree found here — staged, unstaged, or untracked changes from a mid-mutation crash — is **reverted to the last recorded phase boundary**, read structurally via `lore record show task/<parent-name> --vault <elected-vault> --json` → `.sidecar.labels["craft/phase-boundary"]`, but only once the value clears validation, checked in order — the shape check runs first, and only a shape-valid value is ever passed to any git command, including both `merge-base` probes below: it must match `\A[0-9a-f]{7,40}\Z` before anything else runs, and only after that shape check clears may it resolve to a commit reachable from the task branch (`git merge-base --is-ancestor <sha> HEAD` exits 0 on the checked-out task branch) — the regex match is a precondition of running that git command, since the reachability probe is itself a git command receiving the raw label value — and lie at or after this run's own `base` (`git merge-base --is-ancestor <base> <sha>` exits 0), bounding the revert target to this run's own commit range rather than any older commit merely reachable from `HEAD`. Once validated, the revert itself is `git reset --hard <sha> && git clean -fd` — discarding all staged, unstaged, and untracked drift and leaving the tree clean at the boundary. Neither reachability check is optional — the same untrusted-input rule stated near the top of this document governs this label like any other vault-sourced value substituted into a command shown in this document, and this one feeds a destructive revert. **Absent or invalid fails closed:** if the label is missing, does not match that shape, or does not resolve on the branch — or resolves but lies outside this run's own `base..HEAD` range — resume stops and reports rather than reverting to a guessed target — never substituted into the revert command. **Residual risk, stated plainly:** bounding the target to this run's own range does not make the label trustworthy — a vault writer with shared write access can still set it to any commit within that range, steering a resume into discarding this run's own already-completed phase commits; the bound narrows the blast radius from the whole branch history down to this run's own range, not to zero. This is what prevents footprint corruption: `footprint_guard.py` unions live working-tree drift into its check, so a stray uncommitted edit from a crashed mutation would otherwise false-positive the guard or, worse, get folded into a later commit. Never re-dispatch a phase onto a dirty tree.
 - **The mid-build resume branch** — [No ticked phase line](#determine-the-task-shape), before any phase has ticked — so no boundary label exists yet by construction: Phase 1 is what first writes one. Treating that absence as the fail-closed stop above would deadlock every dirty mid-build resume, since the label the stop waits for cannot exist until the build produces its first tick. Instead, the tree is made clean by discarding uncommitted and untracked changes against the current `HEAD` before the executor is re-dispatched. Reverting to `base` (the pre-execution sha fixed once at the start of the phase pipeline, per [After All Tasks](#after-all-tasks)) would be wrong here: reverting to it would discard whatever task commits the build has already landed, and `base` predates all of them. Discarding drift against `HEAD` instead destroys no committed work and needs no label to be well-defined, so it is not a fail-closed stop.
 
+## Blocked-Path Write
+
+Six escalation sites through this procedure end the same way: the run cannot resolve in-session and something — a task or the parent plan — takes `blocked`. All six write it the same way, against whichever record the escalation is against — `lore record update task/<name> --vault <elected-vault> --status blocked --diff`, piping a unified diff that **appends** the blocked note (bare stdin is a full-body replace and would destroy the record) — plus the [Phase 5](#phase-5-flow-out) scrub and, if commits exist, the [Phase 6](#phase-6-close-and-completion-report) blocked-path push and its standalone `craft/branch` write; body-content contract and full rules in `../_shared/status-ownership.md`.
+
 ## Model Selection
 
 Defaults are baked into each agent's frontmatter. Escalate when signals say you should.
@@ -602,7 +607,7 @@ Defaults are baked into each agent's frontmatter. Escalate when signals say you 
 
 **Escalation signals:**
 
-- Executor returns `BLOCKED` with unclear cause → dispatch `troubleshooter` (Opus/high) to diagnose before re-dispatching the executor. **If the run ends here:** write `blocked` on the task — `lore record update task/<name> --vault <elected-vault> --status blocked --diff`, piping a unified diff that **appends** the blocked note (bare stdin is a full-body replace and would destroy the record) — plus the [Phase 5](#phase-5-flow-out) scrub and, if commits exist, the [Phase 6](#phase-6-close-and-completion-report) blocked-path push and its standalone `craft/branch` write; body-content contract and full rules in `../_shared/status-ownership.md`.
+- Executor returns `BLOCKED` with unclear cause → dispatch `troubleshooter` (Opus/high) to diagnose before re-dispatching the executor. **If the run ends here:** write `blocked` on the task (`task/<name>`) — see [Blocked-Path Write](#blocked-path-write).
 - Executor returns `DONE_WITH_CONCERNS` repeatedly on the same task → re-dispatch with `model: "opus"` or break the task smaller.
 - Assumption-prover returns `NEEDS_CONTEXT` → it's not the model, it's the prompt. Give it more context and re-dispatch at the same tier.
 
@@ -617,13 +622,13 @@ Defaults are baked into each agent's frontmatter. Escalate when signals say you 
 2. **Design change** — the invalidation affects multiple child tasks or the architecture. Re-enter planning: dispatch the `planner` subagent (isolated, Opus) or invoke the `planning` skill inline. Do NOT use `EnterPlanMode` — plan mode blocks writes to the plan vault.
 3. **Drop the task** — the feature doesn't need this part. Reshape the child task record to `superseded` (or `dropped`) via `lore record update`, note why, continue with remaining tasks.
 
-**If the run ends here** (none of the above resolves it in-session): write `blocked` on the plan — `lore record update task/<parent-name> --vault <elected-vault> --status blocked --diff`, piping a unified diff that **appends** the blocked note (bare stdin is a full-body replace and would destroy the record) — plus the [Phase 5](#phase-5-flow-out) scrub and, if commits exist, the [Phase 6](#phase-6-close-and-completion-report) blocked-path push and its standalone `craft/branch` write; body-content contract and full rules in `../_shared/status-ownership.md`.
+**If the run ends here** (none of the above resolves it in-session): write `blocked` on the plan (`task/<parent-name>`) — see [Blocked-Path Write](#blocked-path-write).
 
 If the INVALIDATED result is surprising (behavior you thought was standard turns out to differ), that may also be a `troubleshooter` question: dispatch it to figure out *why* the assumption was wrong before reshaping the plan.
 
 **NEEDS_CONTEXT:** Provide missing context and re-dispatch.
 
-**BLOCKED:** Assess — provide more context, use a more capable model, or escalate to user. **If the run ends here:** write `blocked` on the task — `lore record update task/<name> --vault <elected-vault> --status blocked --diff`, piping a unified diff that **appends** the blocked note (bare stdin is a full-body replace and would destroy the record) — plus the [Phase 5](#phase-5-flow-out) scrub and, if commits exist, the [Phase 6](#phase-6-close-and-completion-report) blocked-path push and its standalone `craft/branch` write; body-content contract and full rules in `../_shared/status-ownership.md`.
+**BLOCKED:** Assess — provide more context, use a more capable model, or escalate to user. **If the run ends here:** write `blocked` on the task (`task/<name>`) — see [Blocked-Path Write](#blocked-path-write).
 
 ## Handling Executor Status
 
@@ -637,10 +642,10 @@ If the INVALIDATED result is surprising (behavior you thought was standard turns
 1. Context problem → provide more context, re-dispatch
 2. Needs more reasoning → re-dispatch with `model: "opus"`
 3. Task too large → break into smaller pieces
-4. Plan is wrong → escalate to user. **If the run ends here:** write `blocked` on the plan — `lore record update task/<parent-name> --vault <elected-vault> --status blocked --diff`, piping a unified diff that **appends** the blocked note (bare stdin is a full-body replace and would destroy the record) — plus the [Phase 5](#phase-5-flow-out) scrub and, if commits exist, the [Phase 6](#phase-6-close-and-completion-report) blocked-path push and its standalone `craft/branch` write; body-content contract and full rules in `../_shared/status-ownership.md`.
+4. Plan is wrong → escalate to user. **If the run ends here:** write `blocked` on the plan (`task/<parent-name>`) — see [Blocked-Path Write](#blocked-path-write).
 5. Cause unclear → dispatch `troubleshooter` to diagnose before re-dispatching the executor. Don't keep re-dispatching the same prompt hoping for a different outcome.
 
-**If the run ends here** (1–3 or 5 above didn't resolve it): write `blocked` on the task — `lore record update task/<name> --vault <elected-vault> --status blocked --diff`, piping a unified diff that **appends** the blocked note (bare stdin is a full-body replace and would destroy the record) — plus the [Phase 5](#phase-5-flow-out) scrub and, if commits exist, the [Phase 6](#phase-6-close-and-completion-report) blocked-path push and its standalone `craft/branch` write; body-content contract and full rules in `../_shared/status-ownership.md`.
+**If the run ends here** (1–3 or 5 above didn't resolve it): write `blocked` on the task (`task/<name>`) — see [Blocked-Path Write](#blocked-path-write).
 
 ## Red Flags
 
