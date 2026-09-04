@@ -234,11 +234,9 @@ def parse_ledger(
 
     def _parse_field(value: str) -> list[str]:
         try:
-            identifiers = parse_covers(value)
+            identifiers = parse_covers(value, flag="ledger coverage token")
         except ValueError as e:
-            raise MalformedCoverageTokenError(
-                str(e).replace("--covers value", "ledger coverage token")
-            ) from e
+            raise MalformedCoverageTokenError(str(e)) from e
         for identifier in identifiers:
             if identifier not in criteria:
                 raise UndeclaredCoverageError(identifier)

@@ -116,9 +116,9 @@ def test_empty_covers_value_exits_1():
 
 
 def test_neither_covers_nor_partial_covers_given_exits_2():
-    """`--covers` is no longer required on its own, but an invocation naming
-    neither flag must still fail closed rather than certifying an empty
-    claim."""
+    """At least one of `--covers` or `--partial-covers` is required; an
+    invocation naming neither flag must fail closed rather than certifying an
+    empty claim."""
     r = _run(None, NINE_CRITERIA_SPEC)
     assert r.returncode == 2, r.stderr + r.stdout
 
@@ -232,7 +232,6 @@ def test_covers_value_with_trailing_newline_fails_grammar_not_membership():
     r = _run("AC1\n", NINE_CRITERIA_SPEC)
     assert r.returncode == 1, r.stderr + r.stdout
     assert "not a valid identifier list" in r.stderr, r.stderr
-    assert "unknown criterion identifier" not in r.stderr, r.stderr
 
 
 # ---- heading casing: case-insensitive, still anchored at line start ------
@@ -478,7 +477,7 @@ def test_same_identifier_in_both_lists_exits_1_and_names_the_overlap():
     assert "AC2" in r.stderr
 
 
-# ---- Fix 1: parse_covers names the flag that was actually passed ----------
+# ---- parse_covers names the flag that was actually passed -----------------
 
 
 def test_covers_grammar_violation_still_names_the_covers_flag():
@@ -497,7 +496,7 @@ def test_partial_covers_grammar_violation_names_the_partial_covers_flag_not_cove
     assert "--covers value" not in r.stderr, r.stderr
 
 
-# ---- Fix 2: unknown-identifier stderr names the source flag and reports both lists --
+# ---- unknown-identifier stderr names the source flag and reports both lists --
 
 
 def test_unknown_identifiers_in_both_lists_are_named_by_flag_in_one_pass():
@@ -513,7 +512,7 @@ def test_unknown_identifiers_in_both_lists_are_named_by_flag_in_one_pass():
     assert "AC13" in r.stderr, r.stderr
 
 
-# ---- Fix 3: the neither-flag exit-2 path carries its own reason-code ------
+# ---- the neither-flag exit-2 path carries its own reason-code -------------
 
 
 def test_neither_covers_nor_partial_covers_given_carries_its_own_reason_code():

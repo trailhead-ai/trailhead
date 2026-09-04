@@ -397,7 +397,12 @@ certifies nothing.
 not the spec record** — the one exit-2 reason above that names no fault in the spec at all.
 Neither `--covers` nor `--partial-covers` was drafted before the gate ran, so draft and pass at
 least one of the two flags and re-run, rather than treating this like every other exit-2 reason's
-"go fix the spec" remedy.
+"go fix the spec" remedy. This guard runs before the gate reads the spec body at all, so it
+cannot yet know whether the spec is the zero-identifier legacy shape above — if the spec turns
+out to be that shape, no real identifier exists to draft, so pass any placeholder `--covers`
+value (its content is irrelevant here) to reach the gate's deeper check and land on the legacy
+carve-out's own `reason-code: zero-criterion-identifiers` instead, rather than treating this
+reason as demanding a value the spec has none of.
 
 **The value written into the `**Covers:**` field is the exact string the gate just certified** —
 never re-derived, re-typed, or reformatted after the gate exits 0. Nothing between certification
@@ -433,7 +438,10 @@ let a certified full-coverage identifier sit adjacent to an uncertified or diffe
 partial one and be word-split at the shell; keeping them as two flags is what lets the gate (and
 a human reading the command) tell which list each identifier belongs to. A non-zero exit refuses
 the create exactly as above, whichever flag or flags produced the failure — the gate's own
-`reason:` and `reason-code:` stderr name what to fix.
+`reason:` stderr line names what to fix. This dual-flag invocation's likeliest failure is exit 1
+(bad grammar, an unknown identifier, or an identifier claimed in both lists), which emits only
+that `reason:` line and no `reason-code:` — a `reason-code:` line accompanies only some of the
+exit-2 reasons.
 
 **The value written into the `**Partially covers:**` field is the exact string the gate just
 certified** — never re-derived, re-typed, or reformatted after the gate exits 0, exactly as

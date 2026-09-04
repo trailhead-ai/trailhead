@@ -325,8 +325,8 @@ def test_four_field_legacy_ledger_line_still_parses_unchanged():
     assert tokens["covered"] == "none", tokens
     assert tokens["partial"] == "none", tokens
     assert tokens["complete-eligible"] == "no", (
-        "a legacy entry (neither coverage field) must still make the union "
-        f"ineligible, exactly as before this change: {tokens}"
+        "a legacy entry (neither coverage field) must make the union "
+        f"ineligible: {tokens}"
     )
 
 

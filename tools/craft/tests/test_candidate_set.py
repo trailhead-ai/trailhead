@@ -636,6 +636,17 @@ def test_malformed_partial_token_exits_2():
     assert _MALFORMED_REASON_CODE in r.stderr, r.stderr
 
 
+def test_malformed_partial_token_remedy_names_the_token_not_a_nonexistent_flag():
+    """Same remedy-naming contract as the full-coverage malformed token
+    above, but for the `partially covers` field: the message must name the
+    ledger coverage token, never `--partial-covers` — a flag this gate
+    accepts under neither name."""
+    r = _run(MALFORMED_PARTIAL_TOKEN)
+    assert r.returncode == 2, r.stderr + r.stdout
+    assert "--partial-covers" not in r.stderr, r.stderr
+    assert "ledger coverage token" in r.stderr, r.stderr
+
+
 def test_wrapped_ledger_entries_with_partial_fields_are_scored_as_logical_entries():
     """Fixture the WRAPPED ledger shape, not only the tidy single-line one — a
     partial-coverage fixture that wraps its value claim across several
