@@ -21,6 +21,7 @@ from pathlib import Path
 from test_ledger_gate import (
     CLEAN_MULTI_ENTRY,
     WIDENED_CONTRADICTS_PARENT,
+    BACKFILL_MONOTONIC,
     GATE as LEDGER_GATE,
     _write_parent_coverage,
 )
@@ -28,6 +29,13 @@ from test_ledger_gate import (
 CRAFT = Path(__file__).parent.parent / "plugins" / "craft"
 SLICE_SKILL = CRAFT / "skills" / "slice" / "SKILL.md"
 SCRIPTS_DIR = CRAFT / "scripts"
+FIXTURES = Path(__file__).parent / "fixtures"
+CANDIDATE_SET = SCRIPTS_DIR / "candidate_set.py"
+
+sys.path.insert(0, str(SCRIPTS_DIR))
+import candidate_set  # noqa: E402
+
+BACKFILL_END_TO_END = (FIXTURES / "ledger_backfill_end_to_end.md").read_text(encoding="utf-8")
 
 
 def _skill_text() -> str:
@@ -321,3 +329,156 @@ def test_exactly_one_documented_ledger_coverage_write_site_in_the_corpus():
         f"expected exactly one documented ledger coverage-write site across the "
         f"craft skill corpus, found {len(hits)}: {hits}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Task 4 — the legacy backfill: an existing no-token line gains a token,
+# exactly once, under the monotonic rule step 4's new clause documents.
+# ---------------------------------------------------------------------------
+
+
+def _backfill(spec_body: str, parent_coverage: dict) -> str:
+    """Test-local embodiment of slice/SKILL.md step 4's documented backfill
+    clause ("Backfilling an existing line under the same rule"): every
+    `## Slices` line carrying no `covers`/`partially covers` token is
+    extended in place with those field(s) from its own named parent
+    (`parent_coverage`, keyed on the bare task id), in the same
+    trailing-parenthetical shape the append-new-line logic already writes.
+    A line that already carries a token is never touched, regardless of
+    what its parent says. This calls the real, frozen `parse_ledger_entries`
+    to find each entry's task id and span rather than re-deriving either."""
+    lines = candidate_set._COMMONMARK_LINE_RE.split(spec_body)
+    for entry in candidate_set.parse_ledger_entries(spec_body):
+        if entry.covers or entry.partial:
+            continue
+        parent = parent_coverage.get(entry.task_id)
+        if not parent:
+            continue
+        covers_val = parent.get("covers")
+        partial_val = parent.get("partially covers")
+        if not covers_val and not partial_val:
+            continue
+        idx = entry.end_line - 1
+        stripped = lines[idx].rstrip()
+        trailing_ws = lines[idx][len(stripped):]
+        assert stripped.endswith(")"), f"entry line must end in its parenthetical: {stripped!r}"
+        insert = ""
+        if covers_val:
+            insert += f", covers {covers_val}"
+        if partial_val:
+            insert += f", partially covers {partial_val}"
+        lines[idx] = stripped[:-1] + insert + ")" + trailing_ws
+    return "\n".join(lines)
+
+
+def _run_candidate_set(spec_body: str) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [sys.executable, str(CANDIDATE_SET)], input=spec_body, capture_output=True, text=True
+    )
+
+
+def _entries_by_id(spec_body: str) -> dict:
+    return {e.task_id: e for e in candidate_set.parse_ledger_entries(spec_body)}
+
+
+def test_backfill_writes_a_no_token_line_s_token_exactly_once_and_is_idempotent():
+    """Contract item 1: a no-token line whose parent carries one is
+    backfilled exactly once — running the backfill twice over the same
+    body is idempotent, producing no second token and no duplicate entry."""
+    parent_coverage = {"legacy": {"covers": "AC1, AC2"}}
+    once = _backfill(BACKFILL_MONOTONIC, parent_coverage)
+    assert "covers AC1, AC2" in once
+
+    before = _entries_by_id(BACKFILL_MONOTONIC)
+    assert before["legacy"].covers == [] and before["legacy"].partial == []
+
+    after_once = _entries_by_id(once)
+    assert after_once["legacy"].covers == ["AC1", "AC2"]
+
+    twice = _backfill(once, parent_coverage)
+    assert twice == once, "a second backfill pass must not change an already-backfilled body"
+
+    after_twice = _entries_by_id(twice)
+    assert len(after_twice) == 1, "backfilling twice must not duplicate the ledger entry"
+    assert after_twice["legacy"].covers == ["AC1", "AC2"]
+
+
+def test_backfill_never_rewrites_a_line_that_already_carries_a_token():
+    """Contract item 2: a line that already carries a token is never
+    rewritten by the backfill, even when its parent disagrees — that case
+    is `coverage-contradicts-parent`, a refusal, not a backfill."""
+    parent_coverage = {"alpha": {"covers": "AC9"}}
+    result = _backfill(WIDENED_CONTRADICTS_PARENT, parent_coverage)
+    assert result == WIDENED_CONTRADICTS_PARENT, (
+        "the backfill must leave a line carrying a token untouched, even "
+        "when its parent's coverage now disagrees with it"
+    )
+
+    # The untouched line still correctly refuses at the ledger gate — this
+    # is the gate's job (coverage-contradicts-parent), never the backfill's.
+    parent_coverage_path = None
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as td:
+        parent_coverage_path = _write_parent_coverage(Path(td), parent_coverage)
+        r = subprocess.run(
+            [sys.executable, str(LEDGER_GATE), "--parent-coverage", parent_coverage_path],
+            input=result,
+            capture_output=True,
+            text=True,
+        )
+    assert r.returncode == 1
+    assert "coverage-contradicts-parent" in r.stderr
+
+
+def test_backfill_leaves_a_line_untouched_when_its_parent_also_carries_no_token():
+    """Contract item 3: a line with no token whose parent also carries none
+    stays legacy and untouched, and the ledger gate still exits 0 on it."""
+    result = _backfill(BACKFILL_MONOTONIC, {})
+    assert result == BACKFILL_MONOTONIC, (
+        "the backfill must leave a no-token line untouched when its parent "
+        "declares no coverage either"
+    )
+    r = subprocess.run(
+        [sys.executable, str(LEDGER_GATE)], input=result, capture_output=True, text=True
+    )
+    assert r.returncode == 0, r.stderr
+
+
+def test_ledger_gate_exits_0_after_a_backfill(tmp_path):
+    """Contract item 4: after a backfill, ledger_gate.py exits 0 on the
+    resulting body — the backfill cannot produce a state its own gate
+    refuses."""
+    parent_coverage = {"legacy": {"covers": "AC1, AC2"}}
+    backfilled = _backfill(BACKFILL_MONOTONIC, parent_coverage)
+    assert _entries_by_id(backfilled)["legacy"].covers == ["AC1", "AC2"], (
+        "the backfill must have actually written the token before this checks the gate"
+    )
+    parent_coverage_path = _write_parent_coverage(tmp_path, parent_coverage)
+    r = subprocess.run(
+        [sys.executable, str(LEDGER_GATE), "--parent-coverage", parent_coverage_path],
+        input=backfilled,
+        capture_output=True,
+        text=True,
+    )
+    assert r.returncode == 0, r.stderr
+
+
+def test_end_to_end_backfill_moves_candidate_set_from_no_to_yes():
+    """Contract item 6: end to end on a fixture reproducing this spec's
+    shape — two legacy entries, parents since given coverage fields —
+    candidate_set.py moves from `complete-eligible: no` to `yes` and the
+    previously-stranded identifiers leave the candidate set."""
+    before = _run_candidate_set(BACKFILL_END_TO_END)
+    assert before.returncode == 0, before.stderr
+    assert "complete-eligible: no" in before.stdout
+    assert "candidates: AC1, AC2" in before.stdout
+
+    parent_coverage = {"legacy-one": {"covers": "AC1"}, "legacy-two": {"covers": "AC2"}}
+    backfilled = _backfill(BACKFILL_END_TO_END, parent_coverage)
+    assert backfilled != BACKFILL_END_TO_END
+
+    after = _run_candidate_set(backfilled)
+    assert after.returncode == 0, after.stderr
+    assert "complete-eligible: yes" in after.stdout
+    assert "candidates: none" in after.stdout
