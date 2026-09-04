@@ -5,9 +5,13 @@ description: Use when completing tasks, implementing major features, or before m
 
 # Review
 
-**Recommended tier:** Sonnet/low for the caller — this skill is a dispatcher. The `code-reviewer` subagent it dispatches is pinned to Opus/high, where the actual review reasoning happens. `/model sonnet` *before* invoking if on Opus. (Advisory — the harness doesn't auto-switch.)
+**Recommended tier:** Sonnet/low for the caller — this skill is a dispatcher. The `code-reviewer`
+subagent it dispatches is pinned to Opus/high, where the actual review reasoning happens.
+`/model sonnet` *before* invoking if on Opus. (Advisory — the harness doesn't auto-switch.)
 
-Dispatch code-reviewer subagent to catch issues before they cascade. The reviewer gets precisely crafted context for evaluation — never your session's history. This keeps the reviewer focused on the work product, not your thought process, and preserves your own context for continued work.
+Dispatch code-reviewer subagent to catch issues before they cascade. The reviewer gets precisely
+crafted context for evaluation — never your session's history. This keeps the reviewer focused on
+the work product, not your thought process, and preserves your own context for continued work.
 
 **Core principle:** Review early, review often.
 
@@ -17,7 +21,8 @@ Dispatch code-reviewer subagent to catch issues before they cascade. The reviewe
 - After completing a whole plan or feature, before merge
 - Before merge to main
 
-Per-task conformance during execute is `drift-gate`'s job, not this skill's — see Integration with Workflows below.
+Per-task conformance during execute is `drift-gate`'s job, not this skill's — see Integration with
+Workflows below.
 
 **Optional but valuable:**
 - When stuck (fresh perspective)
@@ -26,7 +31,8 @@ Per-task conformance during execute is `drift-gate`'s job, not this skill's — 
 
 ## How to Request
 
-**1. Run tests first.** Don't waste a code review on broken code. Dispatch `test-runner` to confirm the suite passes. If anything fails, fix or diagnose (via `troubleshooter`) before proceeding.
+**1. Run tests first.** Don't waste a code review on broken code. Dispatch `test-runner` to confirm
+the suite passes. If anything fails, fix or diagnose (via `troubleshooter`) before proceeding.
 
 **2. Get git SHAs:**
 ```bash
@@ -38,7 +44,9 @@ HEAD_SHA=$(git rev-parse HEAD)
 
 Use Task tool with code-reviewer type, fill template at `code-reviewer.md`
 
-**4. For security-sensitive diffs, also dispatch `security-auditor`.** If the change touches auth, input validation, crypto, secrets, or session handling, run both reviews in parallel — they're complementary.
+**4. For security-sensitive diffs, also dispatch `security-auditor`.** If the change touches auth,
+input validation, crypto, secrets, or session handling, run both reviews in parallel — they're
+complementary.
 
 **Placeholders:**
 - `{WHAT_WAS_IMPLEMENTED}` - What you just built
@@ -82,8 +90,10 @@ You: [Fix progress indicators]
 ## Integration with Workflows
 
 **Execute (task-by-task subagent development):**
-- Per-task conformance is handled inside execute's own step 4, which dispatches `drift-gate` (not this skill) after each medium+ task — see the execute skill.
-- Dispatch `code-reviewer` here once the plan's tasks are all built, for the whole-change/PR pass against the full `base..HEAD` diff.
+- Per-task conformance is handled inside execute's own step 4, which dispatches `drift-gate` (not
+  this skill) after each medium+ task — see the execute skill.
+- Dispatch `code-reviewer` here once the plan's tasks are all built, for the whole-change/PR pass
+  against the full `base..HEAD` diff.
 
 **Ad-Hoc Development:**
 - Review before merge
@@ -91,26 +101,27 @@ You: [Fix progress indicators]
 
 ## Closing handoff
 
-Review sits before distill in the pipeline (brainstorm → gauntlet → (slice → plan → execute → review)* → distill) — merging closes review's own job, not the spec's lifecycle. Under
-the loop, one review closes one slice, not the spec: once the reviewed diff is merged, end
-with a fully-formed handoff back into `/craft:slice` for the spec's next pass — the real
-spec id, never a `<placeholder>`:
+Review sits before distill in the pipeline (brainstorm → gauntlet → (slice → plan → execute →
+review)* → distill) — merging closes review's own job, not the spec's lifecycle. Under the loop, one
+review closes one slice, not the spec: once the reviewed diff is merged, end with a fully-formed
+handoff back into `/craft:slice` for the spec's next pass — the real spec id, never a
+`<placeholder>`:
 
-> "Review passed and the change is merged. Run `/craft:slice spec/streaming-export`
-> to choose the next slice."
+> "Review passed and the change is merged. Run `/craft:slice spec/streaming-export` to choose the
+> next slice."
 
-Hand off to distill instead, fully formed the same way, but only once the slice loop reports
-the spec closed out (`craft/slice-loop=complete`, per `../_shared/status-ownership.md`) —
-never as the unconditional next step from a per-slice review:
+Hand off to distill instead, fully formed the same way, but only once the slice loop reports the
+spec closed out (`craft/slice-loop=complete`, per `../_shared/status-ownership.md`) — never as the
+unconditional next step from a per-slice review:
 
-> "The slice loop reports spec/streaming-export closed out. Run `/craft:distill spec/streaming-export`
-> when you're ready to distill this work into the ADR log."
+> "The slice loop reports spec/streaming-export closed out. Run
+> `/craft:distill spec/streaming-export` when you're ready to distill this work into the ADR log."
 
 **This handoff is carryoutable.** `distill/SKILL.md` enumerates `ready` specs carrying the
 `craft/slice-loop` marker `/craft:slice` writes at its terminating condition, and its completion
-gate accepts `craft/slice-loop=complete` — exactly the shape a spec is in when the loop reports
-it closed out. A spec the loop *stopped* early is queued too, and distill records it without
-claiming it complete.
+gate accepts `craft/slice-loop=complete` — exactly the shape a spec is in when the loop reports it
+closed out. A spec the loop *stopped* early is queued too, and distill records it without claiming
+it complete.
 
 ## Red Flags
 

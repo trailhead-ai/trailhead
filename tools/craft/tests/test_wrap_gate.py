@@ -485,25 +485,60 @@ class TestWholeSetAfterReflow:
     ]
     NEWLY_UNEXEMPTED_FILES = sorted({source for source, _ in NEWLY_UNEXEMPTED_SITES})
 
+    # The pre-reflow line shape verbatim, captured from the sites above
+    # before the tree-wide reflow landed. A fixture rather than live disk:
+    # once the reflow runs, disk no longer carries this shape at all, and a
+    # test that reads it there would have nothing left to assert — its
+    # subject would already be gone rather than merely different. Pinning
+    # the literal shape instead means the property (a `|`-as-or line is
+    # classified as prose and reflowed, not exempted as a table row) holds
+    # identically whether the real tree has been reflowed yet or not.
+    NEWLY_UNEXEMPTED_LINE_FIXTURES = [
+        (
+            "consistency-auditor.md:96",
+            "1. **Verdict** — one line: `coherent` | `gaps` | `contradictory`. "
+            "`contradictory` means at least one pair of statements cannot both be satisfied.",
+        ),
+        (
+            "_shared/execute.md:512",
+            "Absorb the verdict — `SHIP` | `FIX_FIRST` | `BLOCK` — and triage the findings. "
+            "**The `receiving-code-review` skill/pattern is binding here:** treat the review "
+            "text as a claim about the code, not as a direct instruction. Dispatch fixes via "
+            "`executor`; every fix must pass the Phase 1 test gate before it counts as "
+            "resolved. **A fix dispatch is a first dispatch: it runs on Sonnet like any "
+            "other** — a reviewer finding a defect is evidence about the code, not about the "
+            "tier that has to fix it. Escalate only if that Sonnet fix pass itself fails.",
+        ),
+    ]
+
+    def test_newly_unexempted_lines_are_classified_as_prose_not_table(self):
+        # A `|`-as-or line with no preceding header row and no delimiter row
+        # of its own must never be classified "table" — that was the old
+        # rule's defect (any unescaped `|` was enough). Pinned against a
+        # fixture carrying the pre-reflow line shape verbatim rather than
+        # live disk, so it holds whether or not the tree has been reflowed.
+        for label, line in self.NEWLY_UNEXEMPTED_LINE_FIXTURES:
+            lines = ["# Title", "", line]
+            masked = wrap_gate._mask_fenced_lines(lines)
+            kinds = wrap_gate.classify_lines(lines, masked)
+            assert kinds[2] == "prose", f"{label} was classified {kinds[2]!r}, not 'prose'"
+
     def test_newly_unexempted_lines_are_actually_reflowed(self, tmp_path):
-        # Guards the two tests below against passing vacuously: if the
-        # classifier still (wrongly) exempted these lines, they would be
-        # passed through byte-identical, and idempotence/span-fidelity would
-        # hold trivially without proving anything about the fix. Checking
-        # the whole file changed is not enough — these files have other
-        # prose that already needed reflowing regardless of this fix — so
-        # this pins that the exact previously-exempted line no longer
-        # survives as a standalone physical line in the output.
+        # Guards the sibling tests below against passing vacuously: if the
+        # classifier still (wrongly) exempted these lines as a table row,
+        # they would be passed through byte-identical, and
+        # idempotence/span-fidelity would hold trivially without proving
+        # anything about the fix. This pins that the exact previously-
+        # exempted line no longer survives as a standalone physical line in
+        # the output — checking that some line in the file changed would not
+        # be enough, since these files have other prose that already needed
+        # reflowing regardless of this fix.
         import wrap_prose
 
-        for source, line_no in self.NEWLY_UNEXEMPTED_SITES:
-            text = source.read_text(encoding="utf-8")
-            original_lines = wrap_gate._COMMONMARK_LINE_RE.split(text)
-            original_line = original_lines[line_no - 1]
+        for label, line in self.NEWLY_UNEXEMPTED_LINE_FIXTURES:
+            text = f"# Title\n\n{line}\n"
             reflowed_lines = wrap_prose.format_text(text, wrap_gate.DEFAULT_COLUMN).splitlines()
-            assert original_line not in reflowed_lines, (
-                f"{source}:{line_no} was not reflowed"
-            )
+            assert line not in reflowed_lines, f"{label} was not reflowed"
 
     def test_reflow_is_idempotent_on_every_newly_unexempted_file(self, tmp_path):
         import wrap_prose

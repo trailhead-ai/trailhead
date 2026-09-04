@@ -17,27 +17,24 @@ description: >
 
 # Execute
 
-Execute a plan task-by-task — or a standalone task as its own single slice, with a
-human operator present to answer escalations.
+Execute a plan task-by-task — or a standalone task as its own single slice, with a human operator
+present to answer escalations.
 
-**The procedure lives in `../_shared/execute.md`** (a sibling of this skill's
-directory), alongside three documents its rules draw on without naming: `../_shared/status-ownership.md`
-(task-status ownership), `../_shared/refine.md` (the standalone refine
-procedure), and `../_shared/slice.md` (design-doc state coverage). Read all
-four and follow `execute.md` end to end — the subagent roles, the task-shape
-branch, the per-task loop, the end-of-run phase pipeline, and the
-status-handling rules are all defined there, and `execute.md`'s task-shape
-branch decides when each of the other three applies. This skill does **not**
-restate any of it: a second copy here is how the wrapper and the procedure
-would drift apart.
+**The procedure lives in `../_shared/execute.md`** (a sibling of this skill's directory), alongside
+three documents its rules draw on without naming: `../_shared/status-ownership.md` (task-status
+ownership), `../_shared/refine.md` (the standalone refine procedure), and `../_shared/slice.md`
+(design-doc state coverage). Read all four and follow `execute.md` end to end — the subagent roles,
+the task-shape branch, the per-task loop, the end-of-run phase pipeline, and the status-handling
+rules are all defined there, and `execute.md`'s task-shape branch decides when each of the other
+three applies. This skill does **not** restate any of it: a second copy here is how the wrapper and
+the procedure would drift apart.
 
 ## When to Use
 
-- You have an approved implementation plan with tasks and known unknowns, **or** a
-  standalone task record that is itself the whole unit of work (`ready`, or `open` and
-  refinable — the shared procedure's standalone branch)
-- You want to execute in the current session, with a human available to answer
-  escalations
+- You have an approved implementation plan with tasks and known unknowns, **or** a standalone task
+  record that is itself the whole unit of work (`ready`, or `open` and refinable — the shared
+  procedure's standalone branch)
+- You want to execute in the current session, with a human available to answer escalations
 
 ## Skip Gate
 
@@ -52,7 +49,6 @@ On a standalone task this gate is an explicit judgment, never an automatic one �
 
 ## Everything else
 
-Read `../_shared/execute.md` from the top: subagent roles and model selection, the
-task-shape branch (plan vs. standalone), the per-task Loop, the After All Tasks
-phase pipeline, Handling Assumption-Prover Status, Handling Executor Status, and the
-Red Flags. All of it applies verbatim.
+Read `../_shared/execute.md` from the top: subagent roles and model selection, the task-shape branch
+(plan vs. standalone), the per-task Loop, the After All Tasks phase pipeline, Handling
+Assumption-Prover Status, Handling Executor Status, and the Red Flags. All of it applies verbatim.

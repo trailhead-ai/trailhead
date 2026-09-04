@@ -1,12 +1,10 @@
 # Task-status ownership contract (shared reference)
 
-This is the single source of truth for craft's task-status contract: who writes
-each status value, who owns closing out each exit edge, and what a `done` claim
-guarantees. `execute/SKILL.md` references this doc rather than restating it —
-the same reference-rather-than-restate convention already used for other
-shared contracts in this plugin; the standalone-leaf path in the refine skill
-references it too. Read standalone — do not assume you arrived here from
-`execute/SKILL.md`.
+This is the single source of truth for craft's task-status contract: who writes each status value,
+who owns closing out each exit edge, and what a `done` claim guarantees. `execute/SKILL.md`
+references this doc rather than restating it — the same reference-rather-than-restate convention
+already used for other shared contracts in this plugin; the standalone-leaf path in the refine skill
+references it too. Read standalone — do not assume you arrived here from `execute/SKILL.md`.
 
 <!-- toc:start -->
 **Contents**
@@ -25,216 +23,190 @@ references it too. Read standalone — do not assume you arrived here from
 
 ## Contract ownership
 
-The plugin whose ritual acts on a record kind defines what that kind's status
-values mean and when they are written — the *primary contract owner*. For `task`
-records that plugin is craft. No other plugin writes a task status outside
-craft's contract semantics defined below.
+The plugin whose ritual acts on a record kind defines what that kind's status values mean and when
+they are written — the *primary contract owner*. For `task` records that plugin is craft. No other
+plugin writes a task status outside craft's contract semantics defined below.
 
 ## The PR decision belongs to the portage tail
 
-Once a push succeeds, whether and when to open, merge, or otherwise decide a pull
-request is never execute's call to make directly — it belongs **only** to the portage
-tail (`updater`/`monitor`), the pipeline an operator hands a pushed branch to. No
-session and no dispatched agent applies a merge decision itself; the decision is
-`updater`/`monitor`'s once the run's task-status obligations are settled.
+Once a push succeeds, whether and when to open, merge, or otherwise decide a pull request is never
+execute's call to make directly — it belongs **only** to the portage tail (`updater`/`monitor`), the
+pipeline an operator hands a pushed branch to. No session and no dispatched agent applies a merge
+decision itself; the decision is `updater`/`monitor`'s once the run's task-status obligations are
+settled.
 
 ## Write execution: the top-level orchestrating session writes status
 
-The **top-level orchestrating session** is the session that invoked the ritual
-and owns the operator conversation — vanilla usage: the session running
-`/craft:execute`; under a loop: the loop session. That session is the only
-writer of task status.
+The **top-level orchestrating session** is the session that invoked the ritual and owns the operator
+conversation — vanilla usage: the session running `/craft:execute`; under a loop: the loop session.
+That session is the only writer of task status.
 
-A **dispatched agent never writes status.** It reports its outcome in a fixed
-shape and the invoking session performs the write:
+A **dispatched agent never writes status.** It reports its outcome in a fixed shape and the invoking
+session performs the write:
 
-- `PUSHED <branch> <sha>` — the agent's work is committed and (where it owns the
-  push) pushed; the invoker writes `done`.
-- `BLOCKED <reason>` — the run cannot continue; the invoker judges whether to
-  write `blocked` (see below) or resolve inline and continue.
+- `PUSHED <branch> <sha>` — the agent's work is committed and (where it owns the push) pushed; the
+  invoker writes `done`.
+- `BLOCKED <reason>` — the run cannot continue; the invoker judges whether to write `blocked` (see
+  below) or resolve inline and continue.
 
 ## Status vocabulary: writer and exit owner per transition
 
-Every value below names both who writes it and who owns closing out its exit
-edge — a status with no named exit owner is how a value becomes a permanent
-high-water mark instead of current state.
+Every value below names both who writes it and who owns closing out its exit edge — a status with no
+named exit owner is how a value becomes a permanent high-water mark instead of current state.
 
-- **`open → ready`** — writer: the refine ritual (standalone tasks) or the
-  planning ritual (child tasks under a plan). Exit owner: the execute dispatch
-  step, which picks up `ready` leaves and moves them off this value.
-- **`ready → in-progress`** — writer: the orchestrating session, at the run's
-  first dispatch. This value belongs to the **run's task** — a plan's parent, or
-  a standalone leaf run on its own; child tasks under a plan walk
-  `ready → done` and never take it. Exit owner: the two execute exit writes
-  below (done and blocked), plus reconciliation on resume. An escalation
-  *answered* in-session writes no status — the run continues and the task holds
-  `in-progress` until one of those two writes lands.
-- **`(created) → in-progress`** — writer: `/craft:slice`, at slice materialization. This
-  is a **created-at** status, not the `ready → in-progress` transition the entry above
-  covers — the slice parent task record is created directly at `in-progress`, with no
-  `ready` state of its own to leave. Exit owner: not `/craft:plan` — it decomposes the parent
-  into children but writes no status, so it cannot close an exit edge (this section's own rule
-  requires a status write to do that). The real exit owner is the same as the `ready → in-progress`
-  entry above: the two execute exit writes (done and blocked), reached once execute's claim
-  treats the now-decomposed, still-unclaimed parent as its first dispatch.
-- **`in-progress → done`** — writer: the orchestrating session at close,
-  **after push succeeds** (see push guarantee below). `done` is terminal for
-  craft; there is no further exit edge to own.
-- **`* → blocked`** — writer: the orchestrating session, as a judgment call when
-  an escalation ends the run unresolved. Never written mechanically by a
-  dispatched agent. Exit owner: the operator's recorded answer, acted on by hand.
-- **`blocked → open` / `blocked → ready`** — writer: whoever acts on the
-  operator's answer (interim: the operator by hand). `ready` when the answer
-  makes the task workable as-is; `open` when the answer changes its shape enough
-  to need re-refinement first.
+- **`open → ready`** — writer: the refine ritual (standalone tasks) or the planning ritual (child
+  tasks under a plan). Exit owner: the execute dispatch step, which picks up `ready` leaves and
+  moves them off this value.
+- **`ready → in-progress`** — writer: the orchestrating session, at the run's first dispatch. This
+  value belongs to the **run's task** — a plan's parent, or a standalone leaf run on its own; child
+  tasks under a plan walk `ready → done` and never take it. Exit owner: the two execute exit writes
+  below (done and blocked), plus reconciliation on resume. An escalation *answered* in-session
+  writes no status — the run continues and the task holds `in-progress` until one of those two
+  writes lands.
+- **`(created) → in-progress`** — writer: `/craft:slice`, at slice materialization. This is a
+  **created-at** status, not the `ready → in-progress` transition the entry above covers — the slice
+  parent task record is created directly at `in-progress`, with no `ready` state of its own to
+  leave. Exit owner: not `/craft:plan` — it decomposes the parent into children but writes no
+  status, so it cannot close an exit edge (this section's own rule requires a status write to do
+  that). The real exit owner is the same as the `ready → in-progress` entry above: the two execute
+  exit writes (done and blocked), reached once execute's claim treats the now-decomposed,
+  still-unclaimed parent as its first dispatch.
+- **`in-progress → done`** — writer: the orchestrating session at close, **after push succeeds**
+  (see push guarantee below). `done` is terminal for craft; there is no further exit edge to own.
+- **`* → blocked`** — writer: the orchestrating session, as a judgment call when an escalation ends
+  the run unresolved. Never written mechanically by a dispatched agent. Exit owner: the operator's
+  recorded answer, acted on by hand.
+- **`blocked → open` / `blocked → ready`** — writer: whoever acts on the operator's answer (interim:
+  the operator by hand). `ready` when the answer makes the task workable as-is; `open` when the
+  answer changes its shape enough to need re-refinement first.
 
 ## `done` = committed and pushed
 
-Execute's close phase pushes with `git push --set-upstream origin HEAD` for
-every repo in the workspace carrying commits on the task branch (a bare
-`git push origin` never converges without an upstream — always use the
-`--set-upstream` form verbatim). `done` is written only after all such pushes
-succeed; push failure keeps the task `in-progress` — the honest state — with a
-`craft/push=failed` label (see Label conventions) so resume logic skips and
-reports rather than silently re-building.
+Execute's close phase pushes with `git push --set-upstream origin HEAD` for every repo in the
+workspace carrying commits on the task branch (a bare `git push origin` never converges without an
+upstream — always use the `--set-upstream` form verbatim). `done` is written only after all such
+pushes succeed; push failure keeps the task `in-progress` — the honest state — with a
+`craft/push=failed` label (see Label conventions) so resume logic skips and reports rather than
+silently re-building.
 
-**Auto-push covers task branches only.** A run sitting on the repo's default
-branch — one started on `main`/`master` with explicit user consent — is not
-auto-pushed, so its `done` carries no push guarantee. The completion report must
-say so, naming the branch and its unpushed commits, so a `done` whose guarantee
-never applied is not mistaken for one whose guarantee held.
+**Auto-push covers task branches only.** A run sitting on the repo's default branch — one started on
+`main`/`master` with explicit user consent — is not auto-pushed, so its `done` carries no push
+guarantee. The completion report must say so, naming the branch and its unpushed commits, so a
+`done` whose guarantee never applied is not mistaken for one whose guarantee held.
 
-A **child** task's `done` under a plan means only "committed on the task
-branch" — bookkeeping within the run, no durability claim. The push guarantee
-attaches to the root/standalone `done`.
+A **child** task's `done` under a plan means only "committed on the task branch" — bookkeeping
+within the run, no durability claim. The push guarantee attaches to the root/standalone `done`.
 
-Push is idempotent: an already-up-to-date branch counts as success, so a
-status-write failure after a successful push is safe to retry. The status write
-is the completion signal; the push is its precondition.
+Push is idempotent: an already-up-to-date branch counts as success, so a status-write failure after
+a successful push is safe to retry. The status write is the completion signal; the push is its
+precondition.
 
 ## Label conventions
 
 Craft owns the `craft/` label-key namespace for its own lifecycle facts.
 
-- **`craft/branch`** — the bare local branch name (`worktree-foo`, never
-  `origin/worktree-foo`). Written when the task branch is cut / at first
-  dispatch (not only at close — its primary reader is crash-resume logic, which
-  runs on tasks that never reached close) and re-asserted at close. Queried as
-  `label.craft.branch:<name>` — the **key** takes the dot-for-slash spelling,
-  since an unquoted `/` is a lexer error; the match is exact on the value, and a
-  value containing `/` is fine as long as it is quoted
-  (`label.craft.branch:"feat/foo"`).
-- **`craft/slice-loop`** — written on the **spec** record, not a task, by
-  `/craft:slice` at its terminating condition. Two values:
-  `craft/slice-loop=complete` (every acceptance criterion is covered by the
-  `## Slices` ledger — the loop is done) and `craft/slice-loop=stopped` (the
-  pass stopped early with criteria still unmet, alongside a body note
-  explaining why). A later pass selecting again unsets it — the same shape
-  `craft/push` already documents below: the label marks a stopping point, not
-  a permanent verdict, and a fresh selection clears it rather than leaving a
+- **`craft/branch`** — the bare local branch name (`worktree-foo`, never `origin/worktree-foo`).
+  Written when the task branch is cut / at first dispatch (not only at close — its primary reader is
+  crash-resume logic, which runs on tasks that never reached close) and re-asserted at close.
+  Queried as `label.craft.branch:<name>` — the **key** takes the dot-for-slash spelling, since an
+  unquoted `/` is a lexer error; the match is exact on the value, and a value containing `/` is fine
+  as long as it is quoted (`label.craft.branch:"feat/foo"`).
+- **`craft/slice-loop`** — written on the **spec** record, not a task, by `/craft:slice` at its
+  terminating condition. Two values: `craft/slice-loop=complete` (every acceptance criterion is
+  covered by the `## Slices` ledger — the loop is done) and `craft/slice-loop=stopped` (the pass
+  stopped early with criteria still unmet, alongside a body note explaining why). A later pass
+  selecting again unsets it — the same shape `craft/push` already documents below: the label marks a
+  stopping point, not a permanent verdict, and a fresh selection clears it rather than leaving a
   stale value behind.
-- **`craft/slice-parent`** — written on the parent task at materialization by `/craft:slice`,
-  on the same `lore record create` as the record itself. It is a **presence marker**, carrying no
+- **`craft/slice-parent`** — written on the parent task at materialization by `/craft:slice`, on the
+  same `lore record create` as the record itself. It is a **presence marker**, carrying no
   meaningful value; query it as `has:label.craft.slice-parent`. Its readers are `/craft:slice`'s
   open-slice guard and `/craft:plan`'s duplicate-parent cross-check, both of which ask "is a slice
   already open on this spec". Without it those queries match every non-terminal task linked to the
   spec — a cross-repo follow-up, another session's coordination task, a handoff record — and freeze
   selection on a spec with no open slice at all. Never written by a follow-up update: a marker that
   lands after the record can miss a concurrent pass that has already run its guard.
-- **`craft/push=failed`** — written when a push attempt fails at close or at a
-  `blocked` transition with unpushed commits. Lets resume logic distinguish
-  "un-pushable" from "crashed" and skip-and-report instead of re-running the
-  build.
-- All four are **single-valued, last-write-wins** — `craft/slice-parent` is a bare presence
-  marker rather than a key/value pair, and `craft/slice-loop` takes one of its two
-  values (`complete` or `stopped`) at a time, the same single-value shape `craft/branch` and
-  `craft/push` each hold — and last-write-wins applies **per
-  key**: `--label` on `lore record update` is a repeatable upsert that mutates
-  only the keys it names, leaving every other key untouched. Re-asserting
-  `craft/branch` therefore cannot disturb `craft/push` — only another
-  `craft/push=…` write, or an explicit `--unset-label craft/push`, replaces a
-  `craft/push=failed` skip guard, and it does so with no trace that the guard was
-  ever set.
+- **`craft/push=failed`** — written when a push attempt fails at close or at a `blocked` transition
+  with unpushed commits. Lets resume logic distinguish "un-pushable" from "crashed" and
+  skip-and-report instead of re-running the build.
+- All four are **single-valued, last-write-wins** — `craft/slice-parent` is a bare presence marker
+  rather than a key/value pair, and `craft/slice-loop` takes one of its two values (`complete` or
+  `stopped`) at a time, the same single-value shape `craft/branch` and `craft/push` each hold — and
+  last-write-wins applies **per key**: `--label` on `lore record update` is a repeatable upsert that
+  mutates only the keys it names, leaving every other key untouched. Re-asserting `craft/branch`
+  therefore cannot disturb `craft/push` — only another `craft/push=…` write, or an explicit
+  `--unset-label craft/push`, replaces a `craft/push=failed` skip guard, and it does so with no
+  trace that the guard was ever set.
 
 ## `in-progress` is a lease stand-in, not final storage
 
 Per the decision to defer a dedicated operational-state store
 (`decision/task-dispatch-claiming-optimistic-status-as-lease-defer-the-operational-state-store`),
-vault `in-progress` is an **optimistic status-as-lease** — a knowing, temporary
-stand-in. When an operational-state store lands, `in-progress` claims migrate to
-it; this contract is written so that migration changes the storage, not the
-semantics: the writer, exit owner, and reconciliation rules above still hold
-after the move.
+vault `in-progress` is an **optimistic status-as-lease** — a knowing, temporary stand-in. When an
+operational-state store lands, `in-progress` claims migrate to it; this contract is written so that
+migration changes the storage, not the semantics: the writer, exit owner, and reconciliation rules
+above still hold after the move.
 
-Reconciliation: invoking execute against a task already
-`in-progress` resumes it — via `craft/branch` or a locally-present branch —
-rather than refusing or restarting, but only once it carries the `craft/branch`
-label as proof an earlier dispatch claimed it. A childless `in-progress` task with no
-`craft/branch` label was never claimed: `/craft:slice` materializes a parent there directly,
-before `/craft:plan` gives it children, and that task is refused instead, naming
-`/craft:plan <id>` as the remedy. Once `/craft:plan` gives it children,
-a parent-with-children in that same shape is claimed instead, at execute's first
-dispatch — the loop's normal path. An `in-progress` task whose workspace no
-longer exists is resumed (branch recoverable) or released back to `ready`.
-Tasks carrying `craft/push=failed` are skipped-and-reported, never silently
-re-run.
+Reconciliation: invoking execute against a task already `in-progress` resumes it — via
+`craft/branch` or a locally-present branch — rather than refusing or restarting, but only once it
+carries the `craft/branch` label as proof an earlier dispatch claimed it. A childless `in-progress`
+task with no `craft/branch` label was never claimed: `/craft:slice` materializes a parent there
+directly, before `/craft:plan` gives it children, and that task is refused instead, naming
+`/craft:plan <id>` as the remedy. Once `/craft:plan` gives it children, a parent-with-children in
+that same shape is claimed instead, at execute's first dispatch — the loop's normal path. An
+`in-progress` task whose workspace no longer exists is resumed (branch recoverable) or released back
+to `ready`. Tasks carrying `craft/push=failed` are skipped-and-reported, never silently re-run.
 
 ## No PR/merge state in the vault
 
-Per the decision that PR/merge lifecycle is operational machine state, not vault
-state (`decision/observability-seam-lore-operational-state-store-not-sidecar-files`),
-craft never writes PR or merge state to a task record. `done` marks the boundary
-of craft's ownership — push is the last thing craft does. Where completed work
-landed is queryable via `craft/branch`; whether it has since merged is a live
-VCS/portage query (or, later, the operational-state store), never a task label.
+Per the decision that PR/merge lifecycle is operational machine state, not vault state
+(`decision/observability-seam-lore-operational-state-store-not-sidecar-files`), craft never writes
+PR or merge state to a task record. `done` marks the boundary of craft's ownership — push is the
+last thing craft does. Where completed work landed is queryable via `craft/branch`; whether it has
+since merged is a live VCS/portage query (or, later, the operational-state store), never a task
+label.
 
 ## `blocked` body content and the credential scrub
 
-A `blocked` body states: what happened, why it blocks, the specific question or
-condition that would clear it, and the next action.
+A `blocked` body states: what happened, why it blocks, the specific question or condition that would
+clear it, and the next action.
 
 **That text is appended, never substituted.** Write it with
-`lore record update task/<name> --status blocked --diff`, piping a unified diff
-whose hunks add it — the two flags combine in one invocation. Piping the note
-over bare stdin instead is a **full-body replace**: it silently destroys
-everything the task record already held.
+`lore record update task/<name> --status blocked --diff`, piping a unified diff whose hunks add it —
+the two flags combine in one invocation. Piping the note over bare stdin instead is a **full-body
+replace**: it silently destroys everything the task record already held.
 
-If commits exist when a task goes `blocked`, they are pushed on the task's
-branch (same `--set-upstream` rule as `done`) and `craft/branch` is (re-)written
-with its own `lore record update task/<name> --label craft/branch=<bare-branch>`
-— never the close command, which also writes `--status done` — so parked work
-resumes from the remote rather than restarting from zero. A push that fails here
-leaves the task `blocked` and adds `craft/push=failed`; the status is not
-reverted to `in-progress`.
+If commits exist when a task goes `blocked`, they are pushed on the task's branch (same
+`--set-upstream` rule as `done`) and `craft/branch` is (re-)written with its own
+`lore record update task/<name> --label craft/branch=<bare-branch>` — never the close command, which
+also writes `--status done` — so parked work resumes from the remote rather than restarting from
+zero. A push that fails here leaves the task `blocked` and adds `craft/push=failed`; the status is
+not reverted to `in-progress`.
 
-That push carries the same precondition as `done`'s: the outgoing commits are
-scanned against the credential-pattern scrub list in `execute/SKILL.md`'s
-flow-out phase first, and on a hit the repo is not pushed. A task blocked
-*because* that scan hit is therefore **never** pushed — the credential is
-rotated and the history rewritten before any push is attempted. Going `blocked`
-is not a licence to ship flagged commits.
+That push carries the same precondition as `done`'s: the outgoing commits are scanned against the
+credential-pattern scrub list in `execute/SKILL.md`'s flow-out phase first, and on a hit the repo is
+not pushed. A task blocked *because* that scan hit is therefore **never** pushed — the credential is
+rotated and the history rewritten before any push is attempted. Going `blocked` is not a licence to
+ship flagged commits.
 
-**That scan is fail-closed: a scan command that errors is never a clean scan.**
-Empty output clears a repo only when the command also exited successfully — an
-errored command prints nothing either, and the two are indistinguishable by
-output alone. The case that bites is a task branch before its first
-`--set-upstream` push: with no `origin/<branch>` remote-tracking ref to diff
-against, the usual `git log origin/<branch>..HEAD -p` fails outright rather than
-reporting a clean tree. Scan such a branch with
-`git log HEAD --not --remotes=origin -p`, which needs no upstream and covers the
+**That scan is fail-closed: a scan command that errors is never a clean scan.** Empty output clears
+a repo only when the command also exited successfully — an errored command prints nothing either,
+and the two are indistinguishable by output alone. The case that bites is a task branch before its
+first `--set-upstream` push: with no `origin/<branch>` remote-tracking ref to diff against, the
+usual `git log origin/<branch>..HEAD -p` fails outright rather than reporting a clean tree. Scan
+such a branch with `git log HEAD --not --remotes=origin -p`, which needs no upstream and covers the
 whole outgoing history the push is about to publish.
 
-Every body write made during a run — blocked reasons, task-body notes, report
-text captured into records — runs through the credential-pattern scrub already
-mandated at the close phase in `execute/SKILL.md` before it lands in the
-git-backed vault: raw git/auth error text is never captured verbatim.
+Every body write made during a run — blocked reasons, task-body notes, report text captured into
+records — runs through the credential-pattern scrub already mandated at the close phase in
+`execute/SKILL.md` before it lands in the git-backed vault: raw git/auth error text is never
+captured verbatim.
 
 ## Operator-facing: by-hand sweep queries
 
-Until a sweep ritual exists, clearing `blocked` and `craft/push=failed` tasks is
-a by-hand operation. The `label.craft.branch:` / `has:label.` search spellings
-aren't discoverable from CLI help, so the queries aren't otherwise obvious — use
-these directly:
+Until a sweep ritual exists, clearing `blocked` and `craft/push=failed` tasks is a by-hand
+operation. The `label.craft.branch:` / `has:label.` search spellings aren't discoverable from CLI
+help, so the queries aren't otherwise obvious — use these directly:
 
 ```sh
 # find every task record on a given branch (crash-resume / parked-work lookup)
