@@ -7,6 +7,21 @@ guarantees. `execute/SKILL.md` references this doc rather than restating it (the
 references it too. Read standalone — do not assume you arrived here from
 `execute/SKILL.md`.
 
+<!-- toc:start -->
+**Contents**
+
+- Contract ownership
+- The PR decision belongs to the portage tail
+- Write execution: the top-level orchestrating session writes status
+- Status vocabulary: writer and exit owner per transition
+- `done` = committed and pushed
+- Label conventions
+- `in-progress` is a lease stand-in, not final storage
+- No PR/merge state in the vault
+- `blocked` body content and the credential scrub
+- Operator-facing: by-hand sweep queries
+<!-- toc:end -->
+
 ## Contract ownership
 
 The plugin whose ritual acts on a record kind defines what that kind's status
