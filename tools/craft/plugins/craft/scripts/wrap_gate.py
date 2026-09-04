@@ -192,10 +192,10 @@ def _tokenize(line: str) -> list[str]:
 
 # A list marker (bullet or ordinal) plus its trailing whitespace, with any
 # leading indent captured — matched against a whole line, so a nested item
-# ("  - foo") carries its indent into the match. Mirrored by
-# `wrap_prose.py`'s own copy of this pattern: the two must agree on what
-# opens a list item, or a boundary the gate recognizes could be one the
-# formatter's own fill segmentation does not, and vice versa.
+# ("  - foo") carries its indent into the match. `wrap_prose.py` imports this
+# pattern rather than defining its own: the gate and the formatter must agree
+# on what opens a list item, or a boundary the gate recognizes could be one
+# the formatter's own fill segmentation does not, and vice versa.
 _LIST_MARKER_RE = re.compile(r"^(\s*)([-*+]|\d+[.)])( +)")
 
 # One or more ">" quote markers, each optionally followed by one space —
@@ -311,24 +311,38 @@ def classify_lines(lines: list[str], masked: list[bool]) -> list[str]:
     """One of 'masked', 'blank', 'heading', 'table', 'prose' per line.
     Table detection needs the whole document (see `_find_table_lines`), so
     this classifies every line at once rather than one at a time."""
-    n = len(lines)
-    blocked = [
-        masked[i] or not lines[i].strip() or bool(_HEADING_RE.match(lines[i])) for i in range(n)
-    ]
-    table = _find_table_lines(lines, blocked)
-    kinds = []
-    for i in range(n):
+    kinds: list[str] = []
+    for i, line in enumerate(lines):
         if masked[i]:
             kinds.append("masked")
-        elif not lines[i].strip():
+        elif not line.strip():
             kinds.append("blank")
-        elif _HEADING_RE.match(lines[i]):
+        elif _HEADING_RE.match(line):
             kinds.append("heading")
-        elif table[i]:
-            kinds.append("table")
         else:
             kinds.append("prose")
+    # A table row is prose until the whole-document scan says otherwise, and
+    # every other kind blocks a table from opening on or extending across it —
+    # so the kinds assigned above are exactly the `blocked` mask that scan needs.
+    blocked = [kind != "prose" for kind in kinds]
+    for i, is_table in enumerate(_find_table_lines(lines, blocked)):
+        if is_table:
+            kinds[i] = "table"
     return kinds
+
+
+def split_and_classify(text: str) -> tuple[list[str], list[str]]:
+    """Split `text` into physical lines and classify each one. The single
+    place that decides what the gate does not look at: a line is masked when
+    it sits inside a fenced block or HTML comment (`_mask_fenced_lines`) or
+    inside a leading YAML frontmatter block (`_mask_frontmatter_lines`). The
+    gate and `wrap_prose.py` both enter here, so neither can mask a region
+    the other still governs."""
+    lines = _COMMONMARK_LINE_RE.split(text)
+    fenced = _mask_fenced_lines(lines)
+    frontmatter = _mask_frontmatter_lines(lines)
+    masked = [f or fm for f, fm in zip(fenced, frontmatter)]
+    return lines, classify_lines(lines, masked)
 
 
 def _is_hard_break(line: str) -> bool:
@@ -353,11 +367,7 @@ def check(path: Path, column: int = DEFAULT_COLUMN) -> list[Finding]:
     except (OSError, UnicodeDecodeError) as e:
         raise GateError(f"cannot read {path}: {e}") from None
 
-    lines = _COMMONMARK_LINE_RE.split(text)
-    fenced = _mask_fenced_lines(lines)
-    frontmatter = _mask_frontmatter_lines(lines)
-    masked = [fenced[i] or frontmatter[i] for i in range(len(lines))]
-    kinds = classify_lines(lines, masked)
+    lines, kinds = split_and_classify(text)
 
     findings: list[Finding] = []
     n = len(lines)

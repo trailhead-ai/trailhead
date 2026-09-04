@@ -13,8 +13,8 @@ own output changes nothing.
 the reason a plain `textwrap.fill` is not sufficient: `textwrap` splits on
 whitespace, and craft's prose carries backtick spans containing literal
 spaces — copy-and-run commands and credential-scrub patterns a reader
-applies verbatim. The formatter fills over the same span detection
-`wrap_gate` uses (`_scan_code_span`), so a span survives whole; a fill unit
+applies verbatim. The formatter fills over the very tokenizer the gate
+measures with (`wrap_gate._tokenize`), so a span survives whole; a fill unit
 is a maximal non-whitespace run with any embedded span kept intact, which
 also means punctuation glued to a span with no space — `` `spec`). `` — is
 never pulled apart into two units that a plain space-join would then
@@ -50,7 +50,6 @@ UTF-8.
 from __future__ import annotations
 
 import argparse
-import re
 import sys
 from pathlib import Path
 
@@ -58,24 +57,21 @@ _SCRIPT_DIR = Path(__file__).resolve().parent
 if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 
+# Every structural decision the formatter shares with its oracle is imported
+# from the gate rather than restated here — the block-boundary patterns, the
+# atomic-unit tokenizer, the hard-break test, and the masking-plus-
+# classification pass. A second definition of any of them could drift, and a
+# formatter that disagrees with the gate about a boundary or a unit emits
+# output the gate reddens on.
 from wrap_gate import (  # noqa: E402
     DEFAULT_COLUMN,
-    _COMMONMARK_LINE_RE,
+    _BLOCKQUOTE_RE,
     _is_hard_break,
-    _mask_fenced_lines,
-    _mask_frontmatter_lines,
-    _scan_code_span,
-    classify_lines,
+    _LIST_MARKER_RE,
+    _strip_blockquote_prefix,
+    _tokenize,
+    split_and_classify,
 )
-
-# A list marker (bullet or ordinal) plus its trailing whitespace, with any
-# leading indent captured — matched against a whole line, so a nested item
-# ("  - foo") carries its indent into the prefix.
-_LIST_MARKER_RE = re.compile(r"^(\s*)([-*+]|\d+[.)])( +)")
-
-# One or more ">" quote markers, each optionally followed by one space —
-# "> " and the nested "> > " both match in full via group(1).
-_BLOCKQUOTE_RE = re.compile(r"^(\s*(?:>[ \t]?)+)")
 
 
 class FormatError(Exception):
@@ -97,38 +93,11 @@ def _detect_prefix(first_line: str) -> tuple[str, str, str]:
     return ("plain", "", "")
 
 
-def _fill_units(line: str) -> list[str]:
-    """Split `line` into atomic fill units: a maximal run of non-whitespace
-    characters, treating a valid inline code span anywhere inside the run
-    as atomic (its internal spaces never end the run). Unlike a plain
-    whitespace tokenizer, a run that contains a code span glued directly to
-    surrounding punctuation with no space — `` `spec`). `` — stays one unit,
-    so re-joining units with a single space never inserts a space where the
-    source had none."""
-    units: list[str] = []
-    i, n = 0, len(line)
-    while i < n:
-        if line[i].isspace():
-            i += 1
-            continue
-        start = i
-        while i < n and not line[i].isspace():
-            if line[i] == "`":
-                end = _scan_code_span(line, i)
-                if end is not None:
-                    i = end
-                    continue
-            i += 1
-        units.append(line[start:i])
-    return units
-
-
 def _strip_prefix(line: str, kind: str) -> str:
     """Remove this paragraph's structural prefix from one physical line, so
     its remaining words can be re-tokenized and re-filled."""
     if kind == "blockquote":
-        m = _BLOCKQUOTE_RE.match(line)
-        return line[m.end() :] if m else line
+        return _strip_blockquote_prefix(line)
     if kind == "list":
         m = _LIST_MARKER_RE.match(line)
         if m:
@@ -167,13 +136,13 @@ def _fill_paragraph(lines: list[str], column: int) -> list[str]:
     kind, initial_prefix, continuation_prefix = _detect_prefix(lines[0])
     tokens: list[str] = []
     for line in lines:
-        tokens.extend(_fill_units(_strip_prefix(line, kind)))
+        tokens.extend(_tokenize(_strip_prefix(line, kind)))
     if not tokens:
         return list(lines)
     return _fill_tokens(tokens, column, initial_prefix, continuation_prefix)
 
 
-def _segment_block(block_lines: list[str], column: int) -> list[tuple[str, list[str]]]:
+def _segment_block(block_lines: list[str]) -> list[tuple[str, list[str]]]:
     """Split one gate-defined block (a maximal run of prose lines) into
     segments: ('verbatim', [line]) for a line ending in a hard line break,
     and ('fill', [lines]) for a run of lines to be greedy-filled together as
@@ -202,7 +171,7 @@ def _segment_block(block_lines: list[str], column: int) -> list[tuple[str, list[
 
 def _reflow_block(block_lines: list[str], column: int) -> list[str]:
     out: list[str] = []
-    for kind, seg_lines in _segment_block(block_lines, column):
+    for kind, seg_lines in _segment_block(block_lines):
         if kind == "verbatim":
             out.extend(seg_lines)
         else:
@@ -215,12 +184,8 @@ def format_text(text: str, column: int = DEFAULT_COLUMN) -> str:
     Every non-prose line (masked, heading, table, blank) is passed through
     unchanged, so this is the library entry point both the CLI and the
     formatter's own tests call directly."""
-    lines = _COMMONMARK_LINE_RE.split(text)
-    fenced = _mask_fenced_lines(lines)
-    frontmatter = _mask_frontmatter_lines(lines)
+    lines, kinds = split_and_classify(text)
     n = len(lines)
-    masked = [fenced[i] or frontmatter[i] for i in range(n)]
-    kinds = classify_lines(lines, masked)
 
     out: list[str] = []
     i = 0

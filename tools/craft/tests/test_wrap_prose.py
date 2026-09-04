@@ -310,11 +310,10 @@ class TestListItems:
         assert findings(out, COL) == []
 
     def test_block_quote_keeps_its_prefix_on_every_produced_line(self, tmp_path):
-        # Single physical line only: a multi-line block quote cannot be
-        # made gate-clean by any formatter — see
-        # TestKnownGateLimitationBlockquoteContinuation below for the proof.
-        # This test pins the structural property that IS achievable: the
-        # "> " prefix survives, on the one line produced.
+        # Single physical line only, pinning that the "> " prefix survives on
+        # the one line produced. TestMultilineBlockquoteIsGateClean below
+        # covers the multi-line case, where the prefix must survive on every
+        # produced line and the result still exits the gate clean.
         body = "# Title\n\n> one two three\n"
         formatted = wrap_prose.format_text(body, COL)
         lines = [l for l in formatted.split("\n")[2:] if l.strip()]
@@ -429,11 +428,10 @@ def _random_document(rng: random.Random) -> str:
         return marker + paragraph()
 
     def blockquote() -> str:
-        # Capped to a couple of short words so it always fits on one
-        # physical line at the corpus's test column: a multi-line block
-        # quote cannot be made gate-clean by any formatter (see
-        # TestKnownGateLimitationBlockquoteContinuation) — that is a
-        # documented gate limitation, not a property this corpus exercises.
+        # Capped to a couple of short words so it always fits on one physical
+        # line at the corpus's test column. The multi-line case is pinned
+        # directly by TestMultilineBlockquoteIsGateClean rather than left to
+        # the randomized corpus.
         return "> " + " ".join(rng.choices(words, k=2))
 
     blocks = []
