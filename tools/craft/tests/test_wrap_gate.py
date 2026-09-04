@@ -349,6 +349,58 @@ class TestFailClosed:
         assert result.returncode == 2
 
 
+class TestFrontmatterMask:
+    """A `---`-delimited YAML frontmatter block at the very top of a file is
+    masked exactly as a fenced code block already is: the gate never reports
+    a finding inside it, but stays fully alert to the prose that follows."""
+
+    def test_no_finding_inside_frontmatter_block(self, tmp_path):
+        body = (
+            "---\n"
+            "name: x\n"
+            "description: an extremely long line that blows straight past the tiny budget\n"
+            "---\n"
+            "\n"
+            "short and clean\n"
+        )
+        result = wrap_gate.check(doc(tmp_path, body), COL)
+        assert result == []
+
+    def test_over_budget_and_under_filled_prose_after_the_block_still_reported(self, tmp_path):
+        body = (
+            "---\n"
+            "name: x\n"
+            "description: y\n"
+            "---\n"
+            "\n"
+            "one two\n"
+            "three\n"
+            "\n"
+            "aaaa bbbb cccc dddd eeee\n"
+        )
+        result = wrap_gate.check(doc(tmp_path, body), COL)
+        assert any(f.rule == "under-filled" and f.line == 6 for f in result)
+        assert any(f.rule == "over-budget" and f.line == 9 for f in result)
+        # nothing inside the frontmatter block (lines 1-4) is reported
+        assert not any(f.line <= 4 for f in result)
+
+    def test_dashes_not_on_the_first_line_are_an_ordinary_thematic_break(self, tmp_path):
+        # A `---` that doesn't open the file is not a frontmatter delimiter —
+        # it's an ordinary thematic break, and the short line right before it
+        # is still under-filled prose.
+        body = "# Title\n\none two\nthree\n\n---\n"
+        result = wrap_gate.check(doc(tmp_path, body), COL)
+        assert any(f.rule == "under-filled" and f.line == 3 for f in result)
+
+    def test_unterminated_frontmatter_block_fails_closed_not_masked_to_eof(self, tmp_path):
+        # Opens with `---` but never closes. A mask running to EOF would
+        # silently exempt the whole file from the gate; instead this line
+        # (well past the budget) must still be reported.
+        body = "---\nname: x\naaaa bbbb cccc dddd eeee\n"
+        result = wrap_gate.check(doc(tmp_path, body), COL)
+        assert any(f.rule == "over-budget" for f in result)
+
+
 class TestLibraryInterface:
     """The gate is importable as a library, not only a CLI — the formatter
     task uses this to check its own output without shelling out."""

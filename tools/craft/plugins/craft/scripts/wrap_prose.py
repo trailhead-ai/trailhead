@@ -24,11 +24,12 @@ exceeds the budget on its own, and the greedy fill below produces that
 shape without any special case: a unit is always placed even when it alone
 exceeds what remains of the line.
 
-Byte-preserved, never reflowed: masked lines (fenced blocks and HTML
-comments), ATX headings, table rows, and a line ending in a hard line
-break — reflowing across a hard break changes what the document renders,
-so it ends its wrapped run rather than being joined to its neighbours in
-either direction.
+Byte-preserved, never reflowed: masked lines (fenced blocks, HTML comments,
+and a `---`-delimited YAML frontmatter block at the very top of the file),
+ATX headings, table rows, and a line ending in a hard line break —
+reflowing across a hard break changes what the document renders, so it
+ends its wrapped run rather than being joined to its neighbours in either
+direction.
 
 Structure preserved across a reflow: list and block-quote markers with
 their hanging indent, blank-line separation between blocks, and the file's
@@ -63,6 +64,7 @@ from wrap_gate import (  # noqa: E402
     _COMMONMARK_LINE_RE,
     _is_hard_break,
     _mask_fenced_lines,
+    _mask_frontmatter_lines,
     _scan_code_span,
 )
 
@@ -214,9 +216,12 @@ def format_text(text: str, column: int = DEFAULT_COLUMN) -> str:
     unchanged, so this is the library entry point both the CLI and the
     formatter's own tests call directly."""
     lines = _COMMONMARK_LINE_RE.split(text)
-    masked = _mask_fenced_lines(lines)
+    fenced = _mask_fenced_lines(lines)
+    frontmatter = _mask_frontmatter_lines(lines)
     n = len(lines)
-    kinds = ["masked" if masked[i] else _classify(lines[i]) for i in range(n)]
+    kinds = [
+        "masked" if (fenced[i] or frontmatter[i]) else _classify(lines[i]) for i in range(n)
+    ]
 
     out: list[str] = []
     i = 0

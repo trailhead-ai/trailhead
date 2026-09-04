@@ -30,12 +30,14 @@ renders.
 Exempt from both rules, because no wrap can fix them or wrapping them would
 change meaning: a masked line (inside a fenced code block or an HTML
 comment, via the same `covers_gate._mask_fenced_lines` the sibling gates
-share), an ATX heading, a table row, a line whose own longest unit exceeds
-the budget on its own (an unbreakable long word, path, URL, or code span —
-wrapping cannot help a line whose problem is one token, however much
-breakable text sits beside it), and a line ending in a hard line break (two
-or more trailing spaces, or a trailing backslash) — reflowing across a hard
-break changes what the document renders.
+share, or inside a `---`-delimited YAML frontmatter block at the very top
+of the file — see `_mask_frontmatter_lines`), an ATX heading, a table row,
+a line whose own longest unit exceeds the budget on its own (an unbreakable
+long word, path, URL, or code span — wrapping cannot help a line whose
+problem is one token, however much breakable text sits beside it), and a
+line ending in a hard line break (two or more trailing spaces, or a
+trailing backslash) — reflowing across a hard break changes what the
+document renders.
 
 Block structure is measured, not assumed: a "block" is a maximal run of
 consecutive prose lines with no blank line, masked line, heading, or table
@@ -86,6 +88,28 @@ REMEDY = "run wrap_prose.py to reflow this file"
 # Up to three leading spaces still render as a heading (CommonMark).
 _HEADING_RE = re.compile(r"^ {0,3}#{1,6}(?:[ \t]+.*)?[ \t]*$")
 _HARD_BREAK_RE = re.compile(r"(?: {2,}|\\)$")
+
+
+def _mask_frontmatter_lines(lines: list[str]) -> list[bool]:
+    """Return one boolean per line — True where the line is inside a
+    `---`-delimited YAML frontmatter block. Only a `---` on the very first
+    line opens frontmatter; a `---` appearing anywhere later in the document
+    is an ordinary thematic break, not a delimiter, and it (and everything
+    around it) is left unmasked. The block closes on the first subsequent
+    line that is exactly `---`; if none exists before EOF, the whole file is
+    left unmasked rather than masked to EOF — a mask that ran to EOF would
+    silently exempt an entire malformed file from the gate, so an
+    unterminated block fails closed instead of masking anything at all."""
+    n = len(lines)
+    masked = [False] * n
+    if n == 0 or lines[0] != "---":
+        return masked
+    for i in range(1, n):
+        if lines[i] == "---":
+            for k in range(i + 1):
+                masked[k] = True
+            return masked
+    return masked
 
 
 class GateError(Exception):
@@ -246,9 +270,11 @@ def check(path: Path, column: int = DEFAULT_COLUMN) -> list[Finding]:
         raise GateError(f"cannot read {path}: {e}") from None
 
     lines = _COMMONMARK_LINE_RE.split(text)
-    masked = _mask_fenced_lines(lines)
+    fenced = _mask_fenced_lines(lines)
+    frontmatter = _mask_frontmatter_lines(lines)
     kinds = [
-        "masked" if masked[i] else _classify(line) for i, line in enumerate(lines)
+        "masked" if (fenced[i] or frontmatter[i]) else _classify(line)
+        for i, line in enumerate(lines)
     ]
 
     findings: list[Finding] = []

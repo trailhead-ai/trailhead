@@ -152,6 +152,135 @@ class TestPassthroughByteIdentity:
         assert wrap_prose.format_text(body, COL) == body
 
 
+class TestFrontmatterMask:
+    """A `---`-delimited YAML frontmatter block at the very top of a file is
+    masked exactly as a fenced code block already is: the formatter never
+    reflows it, byte-for-byte, including a block-scalar `description:` whose
+    continuation lines are indented and under the column budget."""
+
+    def test_frontmatter_block_round_trips_byte_for_byte(self, tmp_path):
+        frontmatter = (
+            "---\n"
+            "name: slice\n"
+            "description: >\n"
+            "  Choose and materialize the next vertical slice from a spec, then write\n"
+            "  it down.\n"
+            "---\n"
+        )
+        body = frontmatter + "\none two three four five six seven eight nine ten\n"
+        formatted = wrap_prose.format_text(body, COL)
+        assert formatted.startswith(frontmatter)
+        out = doc(tmp_path, formatted)
+        assert findings(out, COL) == []
+
+    def test_dashes_not_on_the_first_line_are_not_frontmatter_and_prose_still_reflows(
+        self, tmp_path
+    ):
+        body = "# Title\n\none two three four five six seven eight nine ten\n\n---\n"
+        formatted = wrap_prose.format_text(body, COL)
+        # the paragraph reflowed — it was not exempted as if it were inside
+        # a frontmatter block
+        assert formatted != body
+        out = doc(tmp_path, formatted)
+        assert findings(out, COL) == []
+
+    def test_unterminated_frontmatter_is_reflowed_not_masked_to_eof(self, tmp_path):
+        # Opens with `---` but never closes. Masking to EOF would silently
+        # exempt the whole file from the formatter; instead the opening
+        # `---` line is ordinary prose and gets folded into the reflow.
+        body = "---\nname: x\none two three four five six seven eight nine ten\n"
+        formatted = wrap_prose.format_text(body, COL)
+        assert formatted.split("\n", 1)[0] != "---"
+        out = doc(tmp_path, formatted)
+        assert findings(out, COL) == []
+
+
+class TestRealSkillAndAgentFrontmatter:
+    """The assertion this task exists for: every markdown file craft ships
+    under skills/ and agents/, copied and reflowed at the tree-wide reflow's
+    column, still parses as valid YAML frontmatter with `name` and
+    `description` unchanged from the original — not one file, the whole
+    set."""
+
+    TARGET_DIRS = [
+        REPO_ROOT / "plugins" / "craft" / "skills",
+        REPO_ROOT / "plugins" / "craft" / "agents",
+    ]
+
+    @classmethod
+    def _target_files(cls) -> list[Path]:
+        files: list[Path] = []
+        for d in cls.TARGET_DIRS:
+            files.extend(sorted(d.rglob("*.md")))
+        return files
+
+    @staticmethod
+    def _frontmatter_fields(text: str) -> dict[str, str] | None:
+        """None if `text` doesn't open with a closed `---` frontmatter
+        block; otherwise a mapping of each top-level key to its full raw
+        value, continuation lines (block scalars) included verbatim."""
+        if not text.startswith("---\n"):
+            return None
+        end = text.find("\n---", 3)
+        if end <= 0:
+            return None
+        fields: dict[str, list[str]] = {}
+        current_key: str | None = None
+        for line in text[4:end].split("\n"):
+            if line and not line[0].isspace() and ":" in line:
+                key, _, value = line.partition(":")
+                current_key = key.strip()
+                fields[current_key] = [value.strip()]
+            elif current_key is not None:
+                fields[current_key].append(line)
+        return {key: "\n".join(vals) for key, vals in fields.items()}
+
+    def test_target_set_has_39_files(self):
+        # find tools/craft/plugins/craft/skills tools/craft/plugins/craft/agents
+        #   -name '*.md' | wc -l  ->  39
+        assert len(self._target_files()) == 39
+
+    def test_every_file_reflows_with_frontmatter_intact(self, tmp_path):
+        for source in self._target_files():
+            original = source.read_text(encoding="utf-8")
+            before = self._frontmatter_fields(original)
+            target = tmp_path / source.name
+            target.write_text(original, encoding="utf-8")
+            wrap_prose.format_path(target, wrap_gate.DEFAULT_COLUMN)
+            reflowed = target.read_text(encoding="utf-8")
+            after = self._frontmatter_fields(reflowed)
+            assert (before is None) == (after is None), source
+            if before is None:
+                continue
+            assert after.get("name") == before.get("name"), source
+            assert after.get("description") == before.get("description"), source
+            result = wrap_gate.check(target, wrap_gate.DEFAULT_COLUMN)
+            assert result == [], (source, [f.message for f in result])
+
+    def test_registrable_frontmatter_check_passes_after_reflow(self, tmp_path):
+        import test_craft_skills_registrable as registrable
+
+        for skill_md in registrable._skill_files():
+            original = skill_md.read_text(encoding="utf-8")
+            target = tmp_path / f"{skill_md.parent.name}.md"
+            target.write_text(original, encoding="utf-8")
+            wrap_prose.format_path(target, wrap_gate.DEFAULT_COLUMN)
+            text = target.read_text(encoding="utf-8")
+            assert text.startswith("---\n"), skill_md
+            end = text.find("\n---", 3)
+            assert end > 0, skill_md
+            frontmatter = text[3:end]
+
+            def _has(field: str) -> bool:
+                return any(
+                    ln.strip().startswith(f"{field}:") and ln.split(":", 1)[1].strip()
+                    for ln in frontmatter.splitlines()
+                )
+
+            assert _has("name"), skill_md
+            assert _has("description"), skill_md
+
+
 class TestListItems:
     def test_wrapped_list_item_keeps_marker_and_fills_continuation_at_indented_width(
         self, tmp_path
