@@ -2,8 +2,9 @@
 
 This is the single source of truth for craft's task-status contract: who writes
 each status value, who owns closing out each exit edge, and what a `done` claim
-guarantees. `execute/SKILL.md` references this doc rather than restating it (the
-`_shared/council.md` precedent); the standalone-leaf path in the refine skill
+guarantees. `execute/SKILL.md` references this doc rather than restating it —
+the same reference-rather-than-restate convention already used for other
+shared contracts in this plugin; the standalone-leaf path in the refine skill
 references it too. Read standalone — do not assume you arrived here from
 `execute/SKILL.md`.
 

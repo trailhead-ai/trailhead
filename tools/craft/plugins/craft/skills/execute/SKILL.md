@@ -21,10 +21,15 @@ Execute a plan task-by-task — or a standalone task as its own single slice, wi
 human operator present to answer escalations.
 
 **The procedure lives in `../_shared/execute.md`** (a sibling of this skill's
-directory). Read it and follow it end to end — the subagent roles, the task-shape
-branch, the per-task loop, the end-of-run phase pipeline, and the status-handling
-rules are all defined there. This skill does **not** restate them: a second copy
-here is how the wrapper and the procedure would drift apart.
+directory), alongside three documents its rules draw on without naming: `../_shared/status-ownership.md`
+(task-status ownership), `../_shared/refine.md` (the standalone refine
+procedure), and `../_shared/slice.md` (design-doc state coverage). Read all
+four and follow `execute.md` end to end — the subagent roles, the task-shape
+branch, the per-task loop, the end-of-run phase pipeline, and the
+status-handling rules are all defined there, and `execute.md`'s task-shape
+branch decides when each of the other three applies. This skill does **not**
+restate any of it: a second copy here is how the wrapper and the procedure
+would drift apart.
 
 ## When to Use
 
