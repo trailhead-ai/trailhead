@@ -198,19 +198,21 @@ def _iter_criterion_entries(spec_body: str):
     second unmasked occurrence exists.
 
     A `###` sub-heading is skipped as a grouping marker, and an indented
-    sub-bullet is skipped as a qualifier of its parent criterion rather than
-    a criterion — or text — of its own. The heading match is case-
-    insensitive but still anchored at line start. Every fenced code block
-    and every HTML comment is invisible to both the heading search and the
-    bullet scan, so a worked example or a commented-out draft cannot forge a
-    heading anchor or contribute a fabricated criterion.
+    sub-bullet is skipped as a criterion of its own — it qualifies its
+    parent criterion instead, so it never yields its own identifier. The
+    heading match is case-insensitive but still anchored at line start.
+    Every fenced code block and every HTML comment is invisible to both the
+    heading search and the bullet scan, so a worked example or a
+    commented-out draft cannot forge a heading anchor or contribute a
+    fabricated criterion.
 
-    `bullet_text` joins the bullet's own line with its wrapped continuation
-    lines — unindented-list prose immediately following the bullet, ending
-    at the next unmasked top-level `- ` bullet, a `##`/`###` heading, a
-    nested `- ` sub-bullet (which qualifies its parent without joining the
-    parent's scanned text), or a blank line. A bullet with no `**ACn.**`
-    prefix yields identifier `None` rather than being silently dropped —
+    `bullet_text` joins the bullet's own line with every indented line that
+    follows it — wrapped continuation prose and any nested `- ` sub-bullet
+    (plus that sub-bullet's own wrapped continuation), since a sub-bullet
+    qualifies its parent and its text belongs to the criterion it qualifies.
+    The block ends at the next unmasked top-level (unindented) `- ` bullet, a
+    `##`/`###` heading, or a blank line. A bullet with no `**ACn.**` prefix
+    yields identifier `None` rather than being silently dropped —
     `parse_criteria` is the one that drops it; this walk does not.
     """
     lines = _COMMONMARK_LINE_RE.split(spec_body)
@@ -244,9 +246,14 @@ def _iter_criterion_entries(spec_body: str):
             if nxt.startswith("## ") or nxt.startswith("### ") or nxt.startswith("- "):
                 break
             stripped = nxt.strip()
-            if stripped == "" or stripped.startswith("- "):
+            if stripped == "":
                 break
             if nxt[:1] in (" ", "\t"):
+                # An indented line here is either a wrapped continuation of
+                # the bullet's own prose or a nested sub-bullet (and that
+                # sub-bullet's own wrapped continuation) — both qualify the
+                # parent criterion rather than forming a criterion of their
+                # own, so both fold into this block's text.
                 block.append(nxt)
                 j += 1
                 continue
@@ -285,8 +292,9 @@ def parse_criteria_with_text(spec_body: str) -> list[tuple[str | None, str]]:
     criteria heading as `(identifier_or_None, bullet_text)`, in document
     order — including an unprefixed bullet (`identifier` is `None`), which
     `parse_criteria` discards. `bullet_text` is the bullet's own line plus
-    its wrapped continuation lines; a nested sub-bullet's text is not
-    folded in. Raises the same errors as `parse_criteria`.
+    every indented line that follows it, including a nested sub-bullet's
+    text — a sub-bullet qualifies its parent criterion, so its text belongs
+    to the criterion it qualifies. Raises the same errors as `parse_criteria`.
     """
     return list(_iter_criterion_entries(spec_body))
 

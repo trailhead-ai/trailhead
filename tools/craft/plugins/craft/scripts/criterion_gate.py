@@ -103,7 +103,11 @@ _ALLOW_SPAN_PATTERNS = [
 ]
 
 _REFUSE_SPAN_PATTERNS = [
-    re.compile(r"^[\w./-]*[\w-]\.[A-Za-z0-9]{1,5}$"),  # path with extension
+    # path with extension — the 1-5-character extension must contain a
+    # letter, so a purely numeric dotted literal (`2.0`, `v2.1`, `1.2.3`) is
+    # not classified as a file path; a real extension (`.py`, `.md`, `.sql`,
+    # `.ts`) always carries one.
+    re.compile(r"^[\w./-]*[\w-]\.(?=[A-Za-z0-9]{1,5}$)[A-Za-z0-9]*[A-Za-z][A-Za-z0-9]*$"),
     re.compile(r"^[\w./-]+:\d+(?:-\d+)?$"),  # path:line or path:line-line
     re.compile(r"^[A-Za-z_][\w.]*\([^)]*\)$"),  # call syntax
     re.compile(r"^(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+/\S*$"),  # HTTP verb + path
@@ -178,7 +182,18 @@ def _normalize_method(token: str) -> str:
 
 def _check_trailer(text: str) -> tuple[str | None, str | None]:
     """Return (problem_message_or_None, normalized_method_or_None)."""
-    m = _TRAILER_RE.search(text)
+    matches = list(_TRAILER_RE.finditer(text))
+    # A second unmasked trailer anywhere in the bullet is refused before a
+    # single trailer's own token count is even considered — the same
+    # find-every-occurrence discipline `observation_gate.find_covers_field`
+    # applies to a duplicate `**Covers:**` line, so "exactly one" holds
+    # across trailers, not just within the first one found.
+    if len(matches) > 1:
+        return (
+            f"criterion carries {len(matches)} verification trailers; "
+            "exactly one is required"
+        ), None
+    m = matches[0] if matches else None
     if not m or not _is_meaningfully_nonempty(m.group(1)):
         return "carries no verification trailer naming a sanctioned method", None
 
@@ -273,9 +288,9 @@ def main(argv: list[str]) -> int:
 
         offending = _offending_spans(text)
         if offending:
-            scrubbed = ", ".join(_scrub_credential_shaped(s) for s in offending)
             violations.append(
-                f"{identifier} carries implementation-identifier span(s): {scrubbed}"
+                f"{identifier} carries implementation-identifier span(s): "
+                f"{', '.join(offending)}"
             )
 
         trailer_problem, method = _check_trailer(text)
@@ -285,7 +300,14 @@ def main(argv: list[str]) -> int:
             certified.append((identifier, method))  # type: ignore[arg-type]
 
     if violations:
-        _err(f"reason: {'; '.join(violations)}")
+        # Every violation message is built from vault-sourced spec text —
+        # an offending span, a raw trailer, a normalized method token, or an
+        # unidentified bullet's snippet — so the scrub is applied once, here,
+        # at the single point refusal text reaches output. Three separate
+        # sites each scrubbing their own fragment is how a fourth message
+        # reintroduces the leak; one scrub at the output boundary cannot be
+        # bypassed by adding a message.
+        _err(f"reason: {_scrub_credential_shaped('; '.join(violations))}")
         return 1
 
     for identifier, method in certified:

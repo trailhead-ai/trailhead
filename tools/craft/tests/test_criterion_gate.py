@@ -29,6 +29,7 @@ Exit-code contract (matches the sibling gates):
 
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -36,6 +37,10 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).parent.parent
 GATE = REPO_ROOT / "plugins" / "craft" / "scripts" / "criterion_gate.py"
 FIXTURES = Path(__file__).parent / "fixtures"
+SCRIPTS = REPO_ROOT / "plugins" / "craft" / "scripts"
+
+sys.path.insert(0, str(SCRIPTS))
+import criterion_gate  # noqa: E402
 
 
 def _fixture(name: str) -> str:
@@ -70,6 +75,11 @@ MULTIPLE_VIOLATIONS = _fixture("crit_multiple_violations.md")
 MIXED_IDENTIFIERS = _fixture("crit_mixed_identifiers.md")
 CREDENTIAL_SPAN = _fixture("crit_credential_span.md")
 CAMELCASE_BOUNDARY = _fixture("crit_camelcase_boundary.md")
+CREDENTIAL_TRAILER = _fixture("crit_credential_trailer.md")
+CREDENTIAL_UNSANCTIONED_METHOD = _fixture("crit_credential_unsanctioned_method.md")
+CREDENTIAL_UNIDENTIFIED_BULLET = _fixture("crit_credential_unidentified_bullet.md")
+SUBBULLET_IDENTIFIER_LEAK = _fixture("crit_subbullet_identifier_leak.md")
+TWO_TRAILERS = _fixture("crit_two_trailers.md")
 
 _ZERO_CRITERIA_REASON_CODE = "reason-code: zero-criterion-identifiers"
 _DUPLICATE_HEADING_REASON_CODE = "reason-code: duplicate-acceptance-criteria-heading"
@@ -334,3 +344,106 @@ def test_camelcase_genuine_alternation_refuses_and_allcaps_certifies():
     assert r.returncode == 1, r.stderr + r.stdout
     assert "AC1" in r.stderr
     assert "AC2" not in r.stderr
+
+
+# ---- credential scrub is a class, applied at the single output point --------
+# Fix for the correctness-review finding: the scrub was applied to the
+# offending-span path only, leaving the two-method trailer message, the
+# unsanctioned-method message, and the unidentified-bullet snippet unscrubbed.
+# Each of these three sites is exercised independently below.
+
+
+def test_two_method_trailer_message_does_not_reproduce_a_credential_token():
+    r = _run(CREDENTIAL_TRAILER)
+    assert r.returncode == 1, r.stderr + r.stdout
+    assert "Kq7Zd2Mx9Vb4Nr6Tj8Wc3Hy5Ps1Lg0Fa7Ue2Sd4R" not in r.stderr
+    assert "AC1" in r.stderr
+
+
+def test_unsanctioned_method_message_does_not_reproduce_a_credential_token():
+    r = _run(CREDENTIAL_UNSANCTIONED_METHOD)
+    assert r.returncode == 1, r.stderr + r.stdout
+    assert "sk_live_zq7kd2" not in r.stderr
+    assert "sk_live_Zq7Kd2" not in r.stderr
+    assert "AC1" in r.stderr
+
+
+def test_unidentified_bullet_snippet_does_not_reproduce_a_credential_token():
+    r = _run(CREDENTIAL_UNIDENTIFIED_BULLET)
+    assert r.returncode == 1, r.stderr + r.stdout
+    assert "password=hunter2supersecretvalue" not in r.stderr
+
+
+# ---- AC3 sub-bullet text is not an escape hatch ------------------------------
+
+
+def test_implementation_identifier_hidden_in_a_sub_bullet_is_refused():
+    """A criterion whose sub-bullet names an implementation identifier must
+    refuse — the spec defines a sub-bullet as qualifying its parent
+    criterion, so its text is part of what AC3 scans."""
+    r = _run(SUBBULLET_IDENTIFIER_LEAK)
+    assert r.returncode == 1, r.stderr + r.stdout
+    assert "AC1" in r.stderr
+    assert "covers_gate.py:191" in r.stderr
+
+
+# ---- AC4 "exactly one" holds across separate trailers, not just within one --
+
+
+def test_two_separate_verification_trailers_on_one_criterion_refuses():
+    r = _run(TWO_TRAILERS)
+    assert r.returncode == 1, r.stderr + r.stdout
+    assert "AC1" in r.stderr
+
+
+# ---- AC3 does not false-positive on a purely numeric dotted literal ---------
+
+
+def _spec_with_span(span_text: str) -> str:
+    return (
+        "## Acceptance Criteria\n\n"
+        f"- **AC1.** A criterion naming `{span_text}`. *Verified by: automated assertion.*\n\n"
+        "## Non-Goals\n\nn/a — fixture only.\n"
+    )
+
+
+def test_purely_numeric_dotted_literals_do_not_false_positive_as_paths():
+    for literal in ("2.0", "3.11", "v2.1", "99.9", "1.2.3"):
+        r = _run(_spec_with_span(literal))
+        assert r.returncode == 0, f"{literal!r} incorrectly refused: {r.stderr}"
+
+
+def test_real_paths_with_extensions_still_refuse():
+    for path in ("main.py", "CLAUDE.md", "migrations/008_streams.sql", "workspace-join.ts"):
+        r = _run(_spec_with_span(path))
+        assert r.returncode == 1, f"{path!r} incorrectly certified: {r.stdout}"
+
+
+# ---- the allow-list wins over a widened refuse pattern (ordering pin) -------
+
+
+def test_widened_refuse_pattern_still_loses_to_the_allow_list():
+    """The allow-list is checked first, by construction. Widen a refuse
+    pattern until it also matches an allow-listed shape (a CLI flag) and
+    confirm the span still classifies as "allow" — the condition under which
+    the inert allow-list is kept, per the plan's End Phases note."""
+    original = list(criterion_gate._REFUSE_SPAN_PATTERNS)
+    criterion_gate._REFUSE_SPAN_PATTERNS.append(re.compile(r".*"))
+    try:
+        assert criterion_gate._classify_span("--related") == "allow"
+    finally:
+        criterion_gate._REFUSE_SPAN_PATTERNS[:] = original
+
+
+# ---- the identifier:method pairing is asserted as a unit --------------------
+
+
+def test_all_clean_spec_pairs_each_identifier_with_its_own_method():
+    """A run pairing AC1 with AC3's method must not satisfy this — assert the
+    exact `<identifier>: <method>` line, not identifier-presence and
+    method-presence independently."""
+    r = _run(ALL_CLEAN)
+    assert r.returncode == 0, r.stderr + r.stdout
+    assert "AC1: automated-assertion" in r.stdout
+    assert "AC2: design-doc-review" in r.stdout
+    assert "AC3: manual-check" in r.stdout

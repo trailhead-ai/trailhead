@@ -123,10 +123,29 @@ def test_documented_invocation_exits_nonzero_against_a_refused_criterion(tmp_pat
 # ---------------------------------------------------------------------------
 
 
-def test_step1_states_exit_0_and_the_gate_agrees():
+def _documented_exit0_code() -> int:
     step1 = _step("### 1. Resolve and read the spec")
-    assert re.search(r"Exit 0 certifies", step1), step1
-    assert _run_gate(ALL_CLEAN).returncode == 0
+    m = re.search(r"Exit (\d+) certifies", step1)
+    assert m, (
+        "gauntlet/SKILL.md step 1 must state, as 'Exit N certifies', which "
+        "exit code certifies a clean spec"
+    )
+    return int(m.group(1))
+
+
+def _documented_exit1_code() -> int:
+    step1 = _normalize(_step("### 1. Resolve and read the spec"))
+    m = re.search(r"exit (\d+) \(integrity violation", step1)
+    assert m, (
+        "gauntlet/SKILL.md step 1 must state, as 'exit N (integrity "
+        "violation', which exit code is the integrity-violation refusal"
+    )
+    return int(m.group(1))
+
+
+def test_step1_states_exit_0_and_the_gate_agrees():
+    assert _documented_exit0_code() == 0
+    assert _run_gate(ALL_CLEAN).returncode == _documented_exit0_code()
 
 
 def test_step1_states_the_carveout_reason_code_proceeds_and_the_gate_agrees():
@@ -139,10 +158,9 @@ def test_step1_states_the_carveout_reason_code_proceeds_and_the_gate_agrees():
 
 
 def test_step1_states_exit_1_blocks_and_the_gate_agrees():
-    step1 = _normalize(_step("### 1. Resolve and read the spec"))
-    assert "exit 1 (integrity violation" in step1
+    assert _documented_exit1_code() == 1
     r = _run_gate(REFUSED_CODE_LOCATION)
-    assert r.returncode == 1
+    assert r.returncode == _documented_exit1_code()
 
 
 def test_step1_states_every_other_exit_2_reason_and_the_gate_agrees():
