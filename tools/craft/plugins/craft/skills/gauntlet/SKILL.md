@@ -74,6 +74,38 @@ prints it). The passes run in isolated contexts and most of them have no `Bash` 
 with `Read`, so an absolute `<spec-path>` is what you hand them, exactly as planning's Council Review
 hands the council its `Spec:` pointer. Never ship a bare record id to a pass that cannot resolve it.
 
+**Certify criterion content before dispatch.** Pipe the spec body through the criterion gate now,
+before any of the eight passes are dispatched — a spec that will refuse must not first burn eight
+parallel agents:
+
+```sh
+lore record show <spec-id> | ${CLAUDE_PLUGIN_ROOT}/scripts/criterion_gate.py
+```
+
+Exit 0 certifies — proceed to step 2. **Exit 2 with `reason-code: zero-criterion-identifiers` is
+the one non-zero exit that proceeds** — the legacy carve-out for a spec predating the `**ACn.**`
+identifier convention. When it fires, report to the operator, before proceeding to step 2, that
+this run's criterion-content bars were not applied — never let the spec reach the passes
+indistinguishably from a certified one.
+
+Every other non-zero exit refuses the run here, in the same refusal shape this skill's other
+guards already use: name the criteria at fault and the offending span or trailer problem from the
+gate's own `reason:` line, name the remedy its `reason-code:` line identifies, and stop — the spec
+stays `draft`, nothing is dispatched, and no writes land. This covers exit 1 (integrity violation —
+a refused implementation-identifier span, or a missing or unsanctioned verification trailer) and
+every other exit-2 reason — `reason-code: duplicate-acceptance-criteria-heading`,
+`reason-code: unterminated-masked-region`, `reason-code: empty-stdin`,
+`reason-code: non-utf8-stdin`, or no `## Acceptance Criteria` heading at all (no reason-code of its
+own). None of these is the carve-out above, and none of them proceeds.
+
+**Named limits.** The gate inspects inline code spans only — a criterion naming an implementation
+detail in bare prose, with no surrounding backticks, is a false negative it accepts. A spec
+predating the `**ACn.**` convention takes the carve-out above and is never subject to either bar.
+And naming a status or error value by its role, per the template's guidance the spec author
+followed, trades away a criterion's ability to pin that value's exact literal wire spelling — when
+the literal spelling itself is the contract, a human still maps role to literal when writing the
+assertion.
+
 ### 2. Decompose the claims (main session, mechanical)
 
 Walk the spec statement by statement and type each one. This is bookkeeping, not judgment — do it
