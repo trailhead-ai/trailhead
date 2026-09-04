@@ -95,11 +95,22 @@ def _run_documented_invocation(fixture_name: str) -> subprocess.CompletedProcess
         f"lore() {{ if [ \"$1\" = record ] && [ \"$2\" = show ] && "
         f"[ \"$3\" = task/foo ]; then cat {fixture_path}; fi; }}; " + invocation
     )
+    # The gate's shebang is `#!/usr/bin/env python3` — putting the running
+    # interpreter's own directory first on PATH means `env python3` resolves
+    # to the same 3.11+ interpreter this suite runs under, not whatever
+    # `python3` the bare system PATH happens to name. Without this, a
+    # 3.11-only construct in the gate would surface only as a SyntaxError in
+    # this one test, on a system interpreter this repository does not
+    # declare support for.
+    interpreter_dir = str(Path(sys.executable).resolve().parent)
     return subprocess.run(
         ["bash", "-c", script],
         capture_output=True,
         text=True,
-        env={"CLAUDE_PLUGIN_ROOT": str(CRAFT), "PATH": "/usr/bin:/bin"},
+        env={
+            "CLAUDE_PLUGIN_ROOT": str(CRAFT),
+            "PATH": f"{interpreter_dir}:/usr/bin:/bin",
+        },
     )
 
 

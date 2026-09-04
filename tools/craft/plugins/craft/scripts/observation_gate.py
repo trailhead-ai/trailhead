@@ -37,6 +37,11 @@ including any further `—` characters it contains, so a design-doc-review
 pointer like `<doc path>#State — <name>` is not truncated at its own
 internal dash.
 
+A section's boundary is closed only by the next unmasked `## ` heading, not
+by a `### ` sub-heading nested inside it — a documented, deliberate choice
+consistent with the sibling gates, not an accident — so an observation bullet
+grouped under a sub-heading inside `## Criterion observations` still counts.
+
 A `manual-check` observation additionally requires a matching
 `## Operator attestations` line naming the same criterion:
 
@@ -67,9 +72,12 @@ Exit codes:
        stderr naming the identifier or token at fault).
     2  could not certify — fail-closed: empty or non-UTF-8 stdin, a
        `**Covers:**` value that does not match `^AC\\d+(, ?AC\\d+)*$`
-       (`reason-code: malformed-covers-field`), or a second unmasked
-       `## Criterion observations` heading
-       (`reason-code: duplicate-observations-section`). NEVER exits 0 when
+       (`reason-code: malformed-covers-field`), a second unmasked
+       `**Covers:**` line (`reason-code: duplicate-covers-field`), a second
+       unmasked `## Criterion observations` heading
+       (`reason-code: duplicate-observations-section`), or a second unmasked
+       `## Operator attestations` heading
+       (`reason-code: duplicate-attestations-section`). NEVER exits 0 when
        it could not actually certify the claim.
 """
 
@@ -104,6 +112,13 @@ _MANUAL_CHECK_METHOD = "manual-check"
 
 _MALFORMED_COVERS_REASON_CODE = "malformed-covers-field"
 _DUPLICATE_OBSERVATIONS_SECTION_REASON_CODE = "duplicate-observations-section"
+_DUPLICATE_ATTESTATIONS_SECTION_REASON_CODE = "duplicate-attestations-section"
+_DUPLICATE_COVERS_FIELD_REASON_CODE = "duplicate-covers-field"
+
+_DUPLICATE_OBSERVATION_MESSAGE = "duplicate observation for identifier {identifier}"
+_DUPLICATE_ATTESTATION_MESSAGE = (
+    "duplicate '## Operator attestations' line for identifier {identifier}"
+)
 
 
 def _err(msg: str) -> None:
@@ -121,16 +136,39 @@ class MalformedCoversField(ValueError):
     code 2, `reason-code: malformed-covers-field`."""
 
 
+class DuplicateCoversFieldError(ValueError):
+    """A second unmasked `**Covers:**` line was found — the claim is not
+    uniquely determined, so certifying against the first occurrence found
+    would silently trust whichever claim a first-match-wins scan happened to
+    see first, and could never check a later, larger claim. Exit code 2,
+    `reason-code: duplicate-covers-field`."""
+
+    reason_code = _DUPLICATE_COVERS_FIELD_REASON_CODE
+
+    def __init__(self) -> None:
+        super().__init__(
+            "a second unmasked '**Covers:**' line was found — the claim is "
+            "not uniquely determined"
+        )
+
+
 def find_covers_field(lines: list[str], masked: list[bool]) -> str | None:
-    """Return the raw value of the first unmasked `**Covers:**` line, or
-    None if the field is absent — the legacy and enabler shape."""
+    """Return the raw value of the sole unmasked `**Covers:**` line, or None
+    if the field is absent — the legacy and enabler shape. Raises
+    DuplicateCoversFieldError if a second unmasked `**Covers:**` line exists
+    anywhere in the document, even one that comes after the first — a
+    first-match-wins scan would silently certify against whichever claim it
+    saw first and never check the other."""
+    value: str | None = None
     for i, line in enumerate(lines):
         if masked[i]:
             continue
         m = _COVERS_FIELD_RE.match(line)
         if m:
-            return m.group(1).strip()
-    return None
+            if value is not None:
+                raise DuplicateCoversFieldError()
+            value = m.group(1).strip()
+    return value
 
 
 def parse_covers_field(value: str) -> list[str]:
@@ -149,11 +187,21 @@ def parse_covers_field(value: str) -> list[str]:
 
 
 def _scan_section(
-    lines: list[str], masked: list[bool], start: int, line_re: re.Pattern[str]
+    lines: list[str],
+    masked: list[bool],
+    start: int,
+    line_re: re.Pattern[str],
+    duplicate_message: str = _DUPLICATE_OBSERVATION_MESSAGE,
 ) -> dict[str, tuple[str, int]]:
     """Return {identifier: (remainder-after-first-dash, line-index)} for
     every unmasked matching bullet from `start` to the next `## ` heading or
-    end of document. Raises ObservationViolation on a duplicate identifier."""
+    end of document. A `### ` sub-heading does not end the section — only a
+    `## ` heading does, matching the sibling gates' behaviour — so a bullet
+    nested under a sub-heading inside the section still counts. Raises
+    ObservationViolation on a duplicate identifier, formatting
+    `duplicate_message` with `identifier=` so a caller scanning the
+    attestations section can name that section in the refusal rather than
+    reusing the observations-section wording."""
     found: dict[str, tuple[str, int]] = {}
     for i in range(start, len(lines)):
         if masked[i]:
@@ -166,7 +214,7 @@ def _scan_section(
             continue
         identifier, remainder = m.group(1), m.group(2)
         if identifier in found:
-            raise ObservationViolation(f"duplicate observation for identifier {identifier}")
+            raise ObservationViolation(duplicate_message.format(identifier=identifier))
         found[identifier] = (remainder, i)
     return found
 
@@ -216,20 +264,22 @@ def parse_attestations(lines: list[str], masked: list[bool]) -> dict[str, str]:
         masked,
         _ATTESTATIONS_HEADING_RE,
         _ATTESTATIONS_HEADING,
-        "duplicate-attestations-section",
+        _DUPLICATE_ATTESTATIONS_SECTION_REASON_CODE,
     )
     if start is None:
         return {}
-    raw = _scan_section(lines, masked, start, _ATTESTATION_LINE_RE)
+    raw = _scan_section(
+        lines, masked, start, _ATTESTATION_LINE_RE, _DUPLICATE_ATTESTATION_MESSAGE
+    )
     return {identifier: remainder.strip() for identifier, (remainder, _i) in raw.items()}
 
 
 def certify(body: str) -> tuple[list[str], dict[str, tuple[str, str]]]:
     """Return (covers, observations) on success. Raises MalformedCoversField,
-    ObservationViolation, or DuplicateHeadingError on failure. `covers` is
-    empty exactly when the `**Covers:**` field is absent — the caller
-    distinguishes that from a present-but-empty field, which
-    parse_covers_field already refuses as malformed."""
+    ObservationViolation, DuplicateHeadingError, or DuplicateCoversFieldError
+    on failure. `covers` is empty exactly when the `**Covers:**` field is
+    absent — the caller distinguishes that from a present-but-empty field,
+    which parse_covers_field already refuses as malformed."""
     lines = _COMMONMARK_LINE_RE.split(body)
     masked = _mask_fenced_lines(lines)
 
@@ -285,6 +335,10 @@ def main(argv: list[str]) -> int:
     try:
         covers, observations = certify(body)
     except DuplicateHeadingError as e:
+        _err(f"reason: {e}")
+        _err(f"reason-code: {e.reason_code}")
+        return 2
+    except DuplicateCoversFieldError as e:
         _err(f"reason: {e}")
         _err(f"reason-code: {e.reason_code}")
         return 2

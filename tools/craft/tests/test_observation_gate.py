@@ -17,9 +17,12 @@ Exit-code contract:
       observation; a duplicated `**Covers:**` identifier; or a manual-check
       observation with no matching attestation (prints a `reason:` line)
   2 → could not certify: empty/non-UTF-8 stdin, a malformed `**Covers:**`
-      value (`reason-code: malformed-covers-field`), or a second unmasked
-      `## Criterion observations` heading
-      (`reason-code: duplicate-observations-section`)
+      value (`reason-code: malformed-covers-field`), a second unmasked
+      `**Covers:**` line (`reason-code: duplicate-covers-field`), a second
+      unmasked `## Criterion observations` heading
+      (`reason-code: duplicate-observations-section`), or a second unmasked
+      `## Operator attestations` heading
+      (`reason-code: duplicate-attestations-section`)
 """
 
 from __future__ import annotations
@@ -69,9 +72,27 @@ MANUAL_CHECK_WITH_ATTESTATION = (
 LIVE_PARTIAL_COVERAGE = (FIXTURES / "parent_live_partial_coverage.md").read_text(
     encoding="utf-8"
 )
+DUPLICATE_COVERS_FIELD = (FIXTURES / "parent_duplicate_covers_field.md").read_text(
+    encoding="utf-8"
+)
+COVERS_FIELD_IN_FENCE = (FIXTURES / "parent_covers_field_in_fence.md").read_text(
+    encoding="utf-8"
+)
+MANUAL_CHECK_WHITESPACE_ATTESTATION = (
+    FIXTURES / "parent_manual_check_whitespace_attestation.md"
+).read_text(encoding="utf-8")
+DUPLICATE_ATTESTATION = (FIXTURES / "parent_duplicate_attestation.md").read_text(
+    encoding="utf-8"
+)
+INERT_EVIDENCE = (FIXTURES / "parent_inert_evidence.md").read_text(encoding="utf-8")
+PARTIALLY_COVERS_ONLY = (FIXTURES / "parent_partially_covers_only.md").read_text(
+    encoding="utf-8"
+)
 
 _MALFORMED_COVERS_REASON_CODE = "reason-code: malformed-covers-field"
 _DUPLICATE_OBSERVATIONS_SECTION_REASON_CODE = "reason-code: duplicate-observations-section"
+_DUPLICATE_COVERS_FIELD_REASON_CODE = "reason-code: duplicate-covers-field"
+_DUPLICATE_ATTESTATIONS_SECTION_REASON_CODE = "reason-code: duplicate-attestations-section"
 
 
 def _run(body: str | bytes) -> subprocess.CompletedProcess:
@@ -249,3 +270,67 @@ def test_live_shape_fixture_parses_and_exits_1_naming_both_identifiers():
     assert result.returncode == 1
     assert "AC5" in result.stderr
     assert "AC6" in result.stderr
+
+
+# ---- item 14: duplicate Covers field must fail closed --------------------------
+
+
+def test_duplicate_unmasked_covers_field_exits_2_with_reason_code():
+    # A first-match-wins scan would certify against the first, smaller
+    # `**Covers:**` line and never check the second, larger claim.
+    result = _run(DUPLICATE_COVERS_FIELD)
+    assert result.returncode == 2
+    assert _DUPLICATE_COVERS_FIELD_REASON_CODE in result.stderr
+
+
+def test_covers_field_inside_fence_is_invisible_to_duplicate_check():
+    result = _run(COVERS_FIELD_IN_FENCE)
+    assert result.returncode == 0, result.stderr
+    assert "AC1" in result.stdout
+
+
+# ---- item 15: empty/whitespace-only attestation guard ---------------------------
+
+
+def test_manual_check_with_whitespace_only_attestation_exits_1_naming_criterion():
+    result = _run(MANUAL_CHECK_WHITESPACE_ATTESTATION)
+    assert result.returncode == 1
+    assert "AC3" in result.stderr
+
+
+# ---- item 16: duplicate attestation names the attestations section ------------
+
+
+def test_duplicate_attestation_for_one_identifier_names_attestations_section():
+    result = _run(DUPLICATE_ATTESTATION)
+    assert result.returncode == 1
+    assert "AC3" in result.stderr
+    assert "Operator attestations" in result.stderr
+    assert "duplicate observation for identifier" not in result.stderr
+
+
+# ---- item 17: evidence text is inert -------------------------------------------
+
+
+def test_evidence_shaped_like_command_substitution_and_traversal_is_inert():
+    marker = Path("/tmp/observation_gate_inertness_marker_test")
+    if marker.exists():
+        marker.unlink()
+    try:
+        result = _run(INERT_EVIDENCE)
+        assert result.returncode == 0, result.stderr
+        assert not marker.exists(), (
+            "evidence text must never be executed as a shell command"
+        )
+    finally:
+        if marker.exists():
+            marker.unlink()
+
+
+# ---- item 18: **Partially covers:** is never read ------------------------------
+
+
+def test_partially_covers_field_alone_is_never_read_and_does_not_refuse():
+    result = _run(PARTIALLY_COVERS_ONLY)
+    assert result.returncode == 0, result.stderr
+    assert "covers: none" in result.stdout
