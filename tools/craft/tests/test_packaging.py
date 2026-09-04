@@ -9,6 +9,7 @@ subdir referenced by `source: "./plugins/craft"`.
 
 import json
 import re
+import shutil
 import tomllib
 from pathlib import Path
 
@@ -94,3 +95,27 @@ def test_plan_template_names_standalone_leaf_usage():
     """plan.md's docstring names the standalone reuse of its Flow-out checklist."""
     path = PLUGIN_ROOT / "templates" / "plan.md"
     assert "standalone" in path.read_text().lower()
+
+
+def test_scripts_directory_installs_as_a_unit_with_the_sibling_import_intact(tmp_path):
+    """`candidate_set.py` imports its sibling `covers_gate.py` at runtime — the
+    first cross-script import in `plugins/craft/scripts/`. `capabilities.toml`
+    declares `scripts` as a whole-directory `base` entry, and trailhead's
+    composer (`trailhead/compose.py`) copies a `base` entry with
+    `shutil.copytree`, the whole directory as one unit, for every install.
+    Reproducing that exact copy here pins the actual mechanism that keeps the
+    import resolvable — a regression that drops `scripts` from `base`, or that
+    moves either script out of this directory, must fail here, at test time,
+    rather than post-install with a bare `ImportError`.
+    """
+    data = tomllib.loads((REPO_ROOT / "capabilities.toml").read_text())
+    assert "scripts" in data["tool"]["base"], (
+        "capabilities.toml must declare 'scripts' as a base directory — without "
+        "it, an install can select a subset that drops the sibling import"
+    )
+
+    dest = tmp_path / "scripts"
+    shutil.copytree(PLUGIN_ROOT / "scripts", dest)
+
+    assert (dest / "covers_gate.py").is_file()
+    assert (dest / "candidate_set.py").is_file()
