@@ -6,4 +6,4 @@ never passed to a subprocess.
 
 ## Criterion observations
 
-- **AC9** — automated-assertion — $(touch /tmp/observation_gate_inertness_marker_test) ../../etc/passwd
+- **AC9** — automated-assertion — $(touch /tmp/observation_gate_inertness_marker_test) ../../nonexistent-path-for-observation-gate-inertness-check-9f31

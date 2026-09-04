@@ -16,13 +16,17 @@ Exit-code contract:
   1 → integrity violation: a missing, duplicated, undeclared, or malformed
       observation; a duplicated `**Covers:**` identifier; or a manual-check
       observation with no matching attestation (prints a `reason:` line)
-  2 → could not certify: empty/non-UTF-8 stdin, a malformed `**Covers:**`
-      value (`reason-code: malformed-covers-field`), a second unmasked
+  2 → could not certify: empty stdin (`reason-code: empty-stdin`), non-UTF-8
+      stdin (`reason-code: non-utf8-stdin`), a malformed `**Covers:**` value
+      (`reason-code: malformed-covers-field`), a second unmasked
       `**Covers:**` line (`reason-code: duplicate-covers-field`), a second
       unmasked `## Criterion observations` heading
-      (`reason-code: duplicate-observations-section`), or a second unmasked
+      (`reason-code: duplicate-observations-section`), a second unmasked
       `## Operator attestations` heading
-      (`reason-code: duplicate-attestations-section`)
+      (`reason-code: duplicate-attestations-section`), or the document ending
+      while still inside an open fenced code block or an open HTML comment
+      (`reason-code: unterminated-masked-region`) — every exit-2 case prints
+      both a `reason:` and a `reason-code:` line
 """
 
 from __future__ import annotations
@@ -88,11 +92,27 @@ INERT_EVIDENCE = (FIXTURES / "parent_inert_evidence.md").read_text(encoding="utf
 PARTIALLY_COVERS_ONLY = (FIXTURES / "parent_partially_covers_only.md").read_text(
     encoding="utf-8"
 )
+UNTERMINATED_FENCE = (FIXTURES / "parent_unterminated_fence.md").read_text(encoding="utf-8")
+UNTERMINATED_HTML_COMMENT = (
+    FIXTURES / "parent_unterminated_html_comment.md"
+).read_text(encoding="utf-8")
+COVERS_FIELD_LOWERCASE = (FIXTURES / "parent_covers_field_lowercase.md").read_text(
+    encoding="utf-8"
+)
+OBSERVATION_UNDER_SUBHEADING = (
+    FIXTURES / "parent_observation_under_subheading.md"
+).read_text(encoding="utf-8")
+COVERS_FIELD_IN_HTML_COMMENT = (
+    FIXTURES / "parent_covers_field_in_html_comment.md"
+).read_text(encoding="utf-8")
 
 _MALFORMED_COVERS_REASON_CODE = "reason-code: malformed-covers-field"
 _DUPLICATE_OBSERVATIONS_SECTION_REASON_CODE = "reason-code: duplicate-observations-section"
 _DUPLICATE_COVERS_FIELD_REASON_CODE = "reason-code: duplicate-covers-field"
 _DUPLICATE_ATTESTATIONS_SECTION_REASON_CODE = "reason-code: duplicate-attestations-section"
+_UNTERMINATED_MASKED_REGION_REASON_CODE = "reason-code: unterminated-masked-region"
+_EMPTY_STDIN_REASON_CODE = "reason-code: empty-stdin"
+_NON_UTF8_STDIN_REASON_CODE = "reason-code: non-utf8-stdin"
 
 
 def _run(body: str | bytes) -> subprocess.CompletedProcess:
@@ -124,6 +144,15 @@ def test_no_covers_field_exits_0_and_reports_none():
     result = _run(NO_COVERS)
     assert result.returncode == 0, result.stderr
     assert "covers: none" in result.stdout
+
+
+def test_covers_field_matches_case_insensitively():
+    # `_OBSERVATIONS_HEADING_RE` and `_ATTESTATIONS_HEADING_RE` are both
+    # case-insensitive; `**Covers:**` must be too, for consistency with its
+    # own siblings in this module.
+    result = _run(COVERS_FIELD_LOWERCASE)
+    assert result.returncode == 0, result.stderr
+    assert "AC9" in result.stdout
 
 
 # ---- item 3: missing observation -----------------------------------------
@@ -185,14 +214,22 @@ def test_malformed_covers_value_exits_2_with_reason_code():
 # ---- item 9: empty / non-UTF-8 stdin -----------------------------------------
 
 
-def test_empty_stdin_exits_2():
+def test_empty_stdin_exits_2_with_reason_code():
+    # Empty stdin is the most likely exit-2 case in practice — an upstream
+    # `lore record show` that produced no output — so it gets the same
+    # reason:/reason-code: pair as every other exit-2 case, not silence.
     result = _run("")
     assert result.returncode == 2
+    assert "reason:" in result.stderr
+    assert _EMPTY_STDIN_REASON_CODE in result.stderr
 
 
-def test_non_utf8_stdin_exits_2():
+def test_non_utf8_stdin_exits_2_with_reason_code():
     result = _run(b"\xff\xfe\x00\x01 not utf-8")
+    stderr = result.stderr.decode("utf-8", errors="replace")
     assert result.returncode == 2
+    assert "reason:" in stderr
+    assert _NON_UTF8_STDIN_REASON_CODE in stderr
 
 
 # ---- item 10: forged-structure class -----------------------------------------
@@ -223,6 +260,15 @@ def test_duplicate_unmasked_observations_heading_exits_2():
     result = _run(DUPLICATE_OBSERVATIONS_HEADING)
     assert result.returncode == 2
     assert _DUPLICATE_OBSERVATIONS_SECTION_REASON_CODE in result.stderr
+
+
+def test_observation_under_subheading_still_counts():
+    # A `### ` sub-heading nested inside `## Criterion observations` does not
+    # close the section — a deliberate, documented choice pinned here so a
+    # future edit cannot silently invert it.
+    result = _run(OBSERVATION_UNDER_SUBHEADING)
+    assert result.returncode == 0, result.stderr
+    assert "AC9" in result.stdout
 
 
 # ---- item 11: manual-check attestation requirement ---------------------------
@@ -289,6 +335,12 @@ def test_covers_field_inside_fence_is_invisible_to_duplicate_check():
     assert "AC1" in result.stdout
 
 
+def test_covers_field_inside_html_comment_is_invisible_to_duplicate_check():
+    result = _run(COVERS_FIELD_IN_HTML_COMMENT)
+    assert result.returncode == 0, result.stderr
+    assert "AC1" in result.stdout
+
+
 # ---- item 15: empty/whitespace-only attestation guard ---------------------------
 
 
@@ -313,6 +365,18 @@ def test_duplicate_attestation_for_one_identifier_names_attestations_section():
 
 
 def test_evidence_shaped_like_command_substitution_and_traversal_is_inert():
+    # The command-substitution half is pinned directly: a `subprocess` mutation
+    # would create the marker file, and its absence catches that.
+    #
+    # The path half's evidence names a file that does not exist
+    # (`../../nonexistent-path-for-observation-gate-inertness-check-9f31`) —
+    # deliberately, so an unguarded `open(evidence)` or `Path(evidence).open()`
+    # raises `FileNotFoundError` and the process crashes (non-zero exit),
+    # which `returncode == 0` then catches. This does NOT make every path-as-
+    # file access falsifiable: a bare `Path(evidence).exists()` whose result is
+    # then discarded with no other effect crashes nothing, changes no output,
+    # and is unfalsifiable by any test — that half of the claim is narrowed
+    # out rather than asserted here.
     marker = Path("/tmp/observation_gate_inertness_marker_test")
     if marker.exists():
         marker.unlink()
@@ -334,3 +398,25 @@ def test_partially_covers_field_alone_is_never_read_and_does_not_refuse():
     result = _run(PARTIALLY_COVERS_ONLY)
     assert result.returncode == 0, result.stderr
     assert "covers: none" in result.stdout
+
+
+# ---- item 19: unterminated masker fails closed ---------------------------------
+
+
+def test_unterminated_fence_exits_2_with_reason_code():
+    # An unclosed ``` fence masks the real **Covers:** line below it to end of
+    # document — the gate must fail closed rather than certify `covers: none`
+    # on a claim it never actually saw.
+    result = _run(UNTERMINATED_FENCE)
+    assert result.returncode == 2
+    assert "reason:" in result.stderr
+    assert _UNTERMINATED_MASKED_REGION_REASON_CODE in result.stderr
+    assert "covers: none" not in result.stdout
+
+
+def test_unterminated_html_comment_exits_2_with_reason_code():
+    result = _run(UNTERMINATED_HTML_COMMENT)
+    assert result.returncode == 2
+    assert "reason:" in result.stderr
+    assert _UNTERMINATED_MASKED_REGION_REASON_CODE in result.stderr
+    assert "covers: none" not in result.stdout

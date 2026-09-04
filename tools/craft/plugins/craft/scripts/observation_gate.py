@@ -70,15 +70,19 @@ Exit codes:
        a duplicated identifier within `**Covers:**`, or a manual-check
        observation with no matching attestation (prints a `reason:` line to
        stderr naming the identifier or token at fault).
-    2  could not certify — fail-closed: empty or non-UTF-8 stdin, a
-       `**Covers:**` value that does not match `^AC\\d+(, ?AC\\d+)*$`
-       (`reason-code: malformed-covers-field`), a second unmasked
-       `**Covers:**` line (`reason-code: duplicate-covers-field`), a second
-       unmasked `## Criterion observations` heading
-       (`reason-code: duplicate-observations-section`), or a second unmasked
-       `## Operator attestations` heading
-       (`reason-code: duplicate-attestations-section`). NEVER exits 0 when
-       it could not actually certify the claim.
+    2  could not certify — fail-closed: empty stdin
+       (`reason-code: empty-stdin`), non-UTF-8 stdin
+       (`reason-code: non-utf8-stdin`), a `**Covers:**` value that does not
+       match `^AC\\d+(, ?AC\\d+)*$` (`reason-code: malformed-covers-field`), a
+       second unmasked `**Covers:**` line (`reason-code:
+       duplicate-covers-field`), a second unmasked `## Criterion observations`
+       heading (`reason-code: duplicate-observations-section`), a second
+       unmasked `## Operator attestations` heading (`reason-code:
+       duplicate-attestations-section`), or the document ending while still
+       inside an open fenced code block or an open HTML comment
+       (`reason-code: unterminated-masked-region`) — every exit-2 case prints
+       both a `reason:` and a `reason-code:` line, uniformly, with no
+       carve-out. NEVER exits 0 when it could not actually certify the claim.
 """
 
 from __future__ import annotations
@@ -99,7 +103,7 @@ from covers_gate import (  # noqa: E402
     _mask_fenced_lines,
 )
 
-_COVERS_FIELD_RE = re.compile(r"^\*\*Covers:\*\*\s*(.*)$")
+_COVERS_FIELD_RE = re.compile(r"^\*\*Covers:\*\*\s*(.*)$", re.IGNORECASE)
 _OBSERVATIONS_HEADING = "## Criterion observations"
 _OBSERVATIONS_HEADING_RE = re.compile(r"^## Criterion observations$", re.IGNORECASE)
 _ATTESTATIONS_HEADING = "## Operator attestations"
@@ -114,6 +118,15 @@ _MALFORMED_COVERS_REASON_CODE = "malformed-covers-field"
 _DUPLICATE_OBSERVATIONS_SECTION_REASON_CODE = "duplicate-observations-section"
 _DUPLICATE_ATTESTATIONS_SECTION_REASON_CODE = "duplicate-attestations-section"
 _DUPLICATE_COVERS_FIELD_REASON_CODE = "duplicate-covers-field"
+_UNTERMINATED_MASKED_REGION_REASON_CODE = "unterminated-masked-region"
+_EMPTY_STDIN_REASON_CODE = "empty-stdin"
+_NON_UTF8_STDIN_REASON_CODE = "non-utf8-stdin"
+
+# An inert probe line appended after the document's real lines to read back
+# the sibling masker's own terminal state — never a marker matched or parsed
+# by this gate's own patterns. It must not itself start a fence (```/~~~) or
+# an HTML comment (<!--), or it would be mistaken for real structure.
+_EOF_PROBE_LINE = "observation-gate: end-of-document probe — matches no gate pattern"
 
 _DUPLICATE_OBSERVATION_MESSAGE = "duplicate observation for identifier {identifier}"
 _DUPLICATE_ATTESTATION_MESSAGE = (
@@ -150,6 +163,42 @@ class DuplicateCoversFieldError(ValueError):
             "a second unmasked '**Covers:**' line was found — the claim is "
             "not uniquely determined"
         )
+
+
+class UnterminatedMaskedRegionError(ValueError):
+    """The document ends while still inside an open fenced code block or an
+    open HTML comment — every line from the opening marker to end of document
+    is masked, so any `**Covers:**` line in that span is invisible to the
+    field search. Certifying `covers: none` against a document that might
+    still carry a real, unseen claim would silently widen the documented
+    fail-open (no `**Covers:**` field) to cover a masked one too. Exit code 2,
+    `reason-code: unterminated-masked-region`."""
+
+    reason_code = _UNTERMINATED_MASKED_REGION_REASON_CODE
+
+    def __init__(self) -> None:
+        super().__init__(
+            "the document ends while still inside an open fenced code block "
+            "or an open HTML comment — cannot certify what a masked "
+            "'**Covers:**' line might claim"
+        )
+
+
+def _ends_inside_masked_region(lines: list[str]) -> bool:
+    """Return whether the document ends while `covers_gate._mask_fenced_lines`
+    still considers itself inside an open fence or an open HTML comment.
+
+    This never re-derives the sibling's fence/comment state machine: it calls
+    the imported masker a second time, on `lines` plus one inert probe line
+    that opens nothing and closes nothing, and reads back whether the masker
+    marked the probe itself as masked. The probe is masked only if the masker
+    carried an open fence or open comment into it from the lines before —
+    exactly the terminal state this gate needs and the masker does not
+    otherwise expose, since it returns only a per-line boolean list, never
+    its own end-of-scan state.
+    """
+    probed = _mask_fenced_lines(lines + [_EOF_PROBE_LINE])
+    return probed[-1]
 
 
 def find_covers_field(lines: list[str], masked: list[bool]) -> str | None:
@@ -283,6 +332,9 @@ def certify(body: str) -> tuple[list[str], dict[str, tuple[str, str]]]:
     lines = _COMMONMARK_LINE_RE.split(body)
     masked = _mask_fenced_lines(lines)
 
+    if _ends_inside_masked_region(lines):
+        raise UnterminatedMaskedRegionError()
+
     covers_value = find_covers_field(lines, masked)
     if covers_value is None:
         return [], {}
@@ -326,10 +378,12 @@ def main(argv: list[str]) -> int:
     try:
         body = sys.stdin.buffer.read().decode("utf-8")
     except UnicodeDecodeError as e:
-        _err(f"parent body on stdin is not valid UTF-8: {e}")
+        _err(f"reason: parent body on stdin is not valid UTF-8: {e}")
+        _err(f"reason-code: {_NON_UTF8_STDIN_REASON_CODE}")
         return 2
     if not body.strip():
-        _err("parent body on stdin is empty")
+        _err("reason: parent body on stdin is empty")
+        _err(f"reason-code: {_EMPTY_STDIN_REASON_CODE}")
         return 2
 
     try:
@@ -339,6 +393,10 @@ def main(argv: list[str]) -> int:
         _err(f"reason-code: {e.reason_code}")
         return 2
     except DuplicateCoversFieldError as e:
+        _err(f"reason: {e}")
+        _err(f"reason-code: {e.reason_code}")
+        return 2
+    except UnterminatedMaskedRegionError as e:
         _err(f"reason: {e}")
         _err(f"reason-code: {e.reason_code}")
         return 2
