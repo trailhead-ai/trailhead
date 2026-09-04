@@ -54,10 +54,16 @@ makes a wrapped value claim's coverage findable also means unmarked prose
 between two entries (an operator note, a stray sub-heading) is read as a
 continuation line of the entry above it: it pushes that entry's trailing
 parenthetical off the end of the joined text, so the whole entry fails to
-parse and that entry's own coverage is dropped. This is fail-closed, not
-unsafe — the union is reported ineligible rather than fabricated complete —
-but it means an entry can lose its coverage even though nothing else about
-it changed, simply because trailing prose followed it in the section.
+parse and that entry's own coverage is dropped. The same merge can also
+re-attribute a coverage token rather than merely drop it: because
+`_LEDGER_TRAILING_PAREN_RE` reads only the last parenthetical in the merged
+text, two ledger entries torn and interleaved by concurrent appends — not
+just unmarked prose — can leave a token one entry actually wrote read as
+belonging to a different entry the merge left in front of it. Either way
+this stays fail-closed, not unsafe — the union is reported ineligible
+rather than fabricated complete — but "fail-closed" means no coverage is
+invented out of nothing, not that a surviving token is always attributed to
+the entry that wrote it.
 
 An entry with neither coverage token (predates both fields) contributes no
 identifier to either set and makes the coverage union unverifiable as
@@ -187,8 +193,14 @@ def parse_ledger(
     unmarked prose trailing a valid entry (an operator note, a stray
     sub-heading) is folded into it as if it were a continuation line, which
     breaks that entry's own trailing-parenthetical match and drops its
-    coverage — fail-closed, not fabricated, but worth knowing before
-    tightening this rule further.
+    coverage. The same fold can also re-attribute a coverage token instead
+    of dropping it: two entries torn and interleaved by concurrent appends
+    merge the same way, and the trailing-parenthetical regex reads only the
+    last parenthetical in the merged text, so a token one entry actually
+    wrote can surface as belonging to a different entry the merge left in
+    front of it — fail-closed (no coverage is invented), not fabrication-
+    proof at the per-entry level, and worth knowing before tightening this
+    rule further.
 
     `eligible` is True only when every entry found carries a coverage token
     and every non-blank line in the section either belongs to a canonical

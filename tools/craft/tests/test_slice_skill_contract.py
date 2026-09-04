@@ -285,18 +285,21 @@ def test_validation_prose_is_count_free():
 
 def test_slice_title_strip_applies_the_execute_md_precedent():
     _pin_normalized(
-        "the title is stripped of single quotes, newlines, backticks, and `$` "
-        "before it is quoted",
+        "the title is stripped of single quotes before it is wrapped in single "
+        "quotes, not double quotes, so the only character that can terminate "
+        "the quoted argument early is the one already stripped",
         "slice/SKILL.md must apply _shared/execute.md's title-stripping precedent "
-        "at the --title substitution site in the parent task create command",
+        "at the --title substitution site in the parent task create command, and "
+        "must wrap the value in single quotes (a double-quoted context has more "
+        "than one character that can terminate the argument early)",
     )
 
 
 def test_slice_title_strip_site_is_co_located_with_the_create_command():
-    title_write_site = _text().split('--title "<slice title>"')[0][-800:]
-    assert "stripped of single quotes, newlines, backticks" in title_write_site, (
+    title_write_site = _text().split("--title '<slice title>'")[0][-800:]
+    assert "stripped of single quotes" in title_write_site, (
         "slice/SKILL.md's title-stripping rule must sit immediately before the "
-        "`lore record create --title \"<slice title>\"` command it governs, not "
+        "`lore record create --title '<slice title>'` command it governs, not "
         "float elsewhere in the file"
     )
 

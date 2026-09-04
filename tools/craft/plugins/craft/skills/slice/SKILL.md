@@ -459,8 +459,9 @@ one, not a fabricated partial-coverage claim — mirroring the legacy and enable
 vault-writable, git-synced prose — and enters the command line below as `--title`. Step 1's shape
 check is scoped to `<spec-name>` only, so this is a separate site: apply the same precedent
 `_shared/execute.md` already sets for a title drawn from generated prose repo content can
-influence — the title is stripped of single quotes, newlines, backticks, and `$` before it is
-quoted.
+influence — the title is stripped of single quotes before it is wrapped in single quotes, not
+double quotes, so the only character that can terminate the quoted argument early is the one
+already stripped.
 
 The value claim, the `## Enumerated states` section (when the slice touches a visual surface),
 the `craft/slice-parent` label, and the `--related spec=` edge all ride this same
@@ -470,7 +471,7 @@ Create the parent `task` record, linking it to the spec on the same write:
 
 ```sh
 printf '%s' "$BODY" | lore record create \
-  --kind task --title "<slice title>" --status in-progress \
+  --kind task --title '<slice title>' --status in-progress \
   --related "spec=$SPEC_NAME" --label craft/slice-parent
 ```
 
