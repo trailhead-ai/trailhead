@@ -100,6 +100,21 @@ situation this slice creates, in scope here rather than deferred to AC5-AC8: wit
 fallback, every parent written before this change would stop reconciling the moment the new
 field exists.
 
+Where the closed slice's parent body carries a `**Partially covers:**` field, extend the line
+further with a `partially covers <value>` token naming it verbatim — after the `covers` token
+when both fields are present, since a parent can carry either field alone or both together:
+
+```
+- **<slice title>** — <value claim>. (`task/<task-id>`, closed <close-date>, partially covers <partially-covers-value>)
+```
+
+```
+- **<slice title>** — <value claim>. (`task/<task-id>`, closed <close-date>, covers <covers-value>, partially covers <partially-covers-value>)
+```
+
+A parent carrying neither `**Covers:**` nor `**Partially covers:**` keeps the four-field legacy
+shape above unchanged.
+
 **This reconcile query is fail-closed too.** If the `lore search` call errors, or its output
 cannot be parsed into a definite list of done slices, treat that as blocking: refuse and report
 the search failure, rather than proceeding as though nothing has shipped — an unreported error
@@ -143,7 +158,10 @@ lore record show spec/<spec-name> | ${CLAUDE_PLUGIN_ROOT}/scripts/candidate_set.
 Its `candidates:` token, on exit 0, is the candidate set; its `complete-eligible:` token feeds
 step 6's termination guard below. Print the basis this pass derived the candidate set from,
 before continuing — `termination basis: gate-certified` on this exit-0 path — so an operator
-reading the pass's output always knows which guarantee produced the answer.
+reading the pass's output always knows which guarantee produced the answer. Surface the gate's
+`partial:` token as part of that same printed basis, whether it lists identifiers or reads
+`none` — without it, a criterion this ledger already covers in part and one no slice has ever
+touched read identically on `candidates:`, and step 7's selection can't tell them apart.
 
 A non-zero exit refuses this pass, in the same shape steps 3, 5, and 9 already use for their own
 refusals: name the remedy the gate's own `reason-code:` stderr token identifies, scoped to what
@@ -274,6 +292,14 @@ asked to accept. Nothing in this procedure writes the parent task record or hand
 `/craft:plan` ahead of that statement: the claim is stated while it is still cheap to reject, not
 discovered after the parent task already exists.
 
+**On the same footing as the full-coverage call above, and never conflated with it,** state by
+identifier which spec acceptance criteria the chosen slice makes only partially green — never
+left unstated, and never folded into the full-coverage list as though the slice finished them.
+A slice claiming no partial coverage states that plainly too, rather than leaving the omission
+ambiguous. On a spec predating the `**ACn.**` convention, or on the enabler path, there is
+nothing to state by identifier here either — say so plainly, on the same footing as the
+legacy and enabler cases above, rather than inventing one.
+
 The value claim is this skill's own summary of why the slice matters —
 **never a verbatim excerpt of the spec's prose**. Copying the spec's own words forward would
 let an imperative or a hedge embedded in that prose ride, unexamined, into a task body that
@@ -368,6 +394,45 @@ task body like this:
 ```
 **Covers:** AC2, AC5
 ```
+
+**The parent body may carry a `**Partially covers:**` field beside `**Covers:**`, on the same
+footing step 8 already stated to the operator.** It names, as a comma-separated identifier list
+and nothing else, the spec acceptance criteria this slice makes green only in part. Like
+`--covers`, this drafted value is untrusted input derived from the spec's declared identifiers:
+validate it, **before any substitution**, against the identical safe-value shape
+`^AC\d+(, ?AC\d+)*$` step 9 already applies to `--covers` above. A value that fails the shape
+check is never substituted, quoted, or escaped in — refuse loudly and stop, exactly as the
+`--covers` check above does.
+
+**Certify the drafted partial list on the same gate invocation that certifies `--covers`** —
+`covers_gate.py` accepts both flags together, so a slice drafting both a full and a partial list
+certifies them in one pipe, each its own individually quoted argument, never one interpolated
+string combining the two lists:
+
+```sh
+lore record show spec/<spec-name> | ${CLAUDE_PLUGIN_ROOT}/scripts/covers_gate.py --covers "AC2, AC5" --partial-covers "AC7"
+```
+
+A slice drafting only a partial list passes `--partial-covers` alone, omitting `--covers` from
+that same invocation; a slice drafting only a full list keeps the single-flag form above
+unchanged. Interpolating the two lists into one string instead — one flag carrying both — would
+let a certified full-coverage identifier sit adjacent to an uncertified or differently-certified
+partial one and be word-split at the shell; keeping them as two flags is what lets the gate (and
+a human reading the command) tell which list each identifier belongs to. A non-zero exit refuses
+the create exactly as above, whichever flag or flags produced the failure — the gate's own
+`reason:` and `reason-code:` stderr name what to fix.
+
+**The value written into the `**Partially covers:**` field is the exact string the gate just
+certified** — never re-derived, re-typed, or reformatted after the gate exits 0, exactly as
+`**Covers:**` above. Written in the task body like this:
+
+```
+**Partially covers:** AC7
+```
+
+A slice drafting no partial list writes no `**Partially covers:**` field at all — not an empty
+one, not a fabricated partial-coverage claim — mirroring the legacy and enabler carve-outs
+`**Covers:**` above already documents.
 
 **The slice title is untrusted input too.** It is derived from the spec's acceptance criteria —
 vault-writable, git-synced prose — and enters the command line below as `--title`. Step 1's shape

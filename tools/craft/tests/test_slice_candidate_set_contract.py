@@ -71,9 +71,10 @@ def _render(template: str, **values: str) -> str:
 def test_documented_covers_ledger_line_derives_the_coverage_the_prose_claims():
     step4 = _step("### 4. Reconcile the `## Slices` ledger, then derive the candidate set")
     templates = _ledger_line_templates(step4)
-    assert len(templates) == 2, (
-        "slice/SKILL.md step 4 must document exactly two ledger-line shapes — "
-        f"one with no coverage field and one carrying it; found {templates}"
+    assert len(templates) == 4, (
+        "slice/SKILL.md step 4 must document exactly four ledger-line shapes — "
+        "no coverage, covers-only, partial-only, and covers-plus-partial; "
+        f"found {templates}"
     )
     covers_shape = templates[1]  # documented second: the fifth-token extension
     rendered = _render(
@@ -225,4 +226,148 @@ def test_zero_identifier_fixture_fires_the_documented_carveout_reason_code():
     assert _reason_code(zero_result.stderr) == carveout_code, (
         "the zero-identifier fixture must be the one that fires the documented "
         "legacy carve-out — this is the fixture reaching the fallback branch"
+    )
+
+
+# ---- 7. partial coverage: a partial ledger line keeps its criterion a candidate ----
+
+
+def _spec_with_slices_body(*ledger_lines: str) -> str:
+    return (
+        "# Fixture spec\n\n## Acceptance Criteria\n\n"
+        f"{_NINE_CRITERIA_HEADING}\n\n## Slices\n\n" + "\n".join(ledger_lines) + "\n"
+    )
+
+
+def test_documented_partial_only_ledger_line_keeps_its_criterion_a_candidate():
+    """The documented partial-only shape, rendered and run through the real
+    gate, must land its identifier on `partial:` and keep it a `candidates:`
+    member — the end-to-end assertion that step 4's documented reconcile
+    shape and the gate agree on one grammar."""
+    step4 = _step("### 4. Reconcile the `## Slices` ledger, then derive the candidate set")
+    templates = _ledger_line_templates(step4)
+    partial_only_shape = templates[2]  # documented third: partial-only extension
+    rendered = _render(
+        partial_only_shape,
+        **{
+            "slice title": "The streaming export slice",
+            "value claim": "Exports stream instead of buffering in memory",
+            "task-id": "the-streaming-export-slice",
+            "close-date": "2026-09-03",
+            "partially-covers-value": "AC7",
+        },
+    )
+
+    result = _run(_spec_with_slices_body(rendered))
+    assert result.returncode == 0, result.stderr + result.stdout
+    tokens = _tokens(result.stdout)
+    assert tokens["partial"] == "AC7", tokens
+    assert tokens["covered"] == "none", tokens
+    assert "AC7" in tokens["candidates"].split(", "), (
+        f"a partially-covered criterion must remain a candidate: {tokens}"
+    )
+
+
+def test_documented_covers_plus_partial_ledger_line_reports_both_fields_correctly():
+    """The documented both-fields shape, rendered and run through the real
+    gate, must report the fully covered identifier on `covered:` (and out of
+    `candidates:`) and the partially covered identifier on `partial:` (and
+    still inside `candidates:`)."""
+    step4 = _step("### 4. Reconcile the `## Slices` ledger, then derive the candidate set")
+    templates = _ledger_line_templates(step4)
+    both_fields_shape = templates[3]  # documented fourth: covers-plus-partial
+    rendered = _render(
+        both_fields_shape,
+        **{
+            "slice title": "The streaming export slice",
+            "value claim": "Exports stream instead of buffering in memory",
+            "task-id": "the-streaming-export-slice",
+            "close-date": "2026-09-03",
+            "covers-value": "AC5",
+            "partially-covers-value": "AC2",
+        },
+    )
+
+    result = _run(_spec_with_slices_body(rendered))
+    assert result.returncode == 0, result.stderr + result.stdout
+    tokens = _tokens(result.stdout)
+    assert tokens["covered"] == "AC5", tokens
+    assert tokens["partial"] == "AC2", tokens
+    candidates = tokens["candidates"].split(", ")
+    assert "AC2" in candidates and "AC5" not in candidates, (
+        f"a fully-covered identifier must leave candidates, a partial one must stay: {tokens}"
+    )
+
+
+# ---- 8. regression: the four-field legacy line still parses unchanged -----
+
+
+def test_four_field_legacy_ledger_line_still_parses_unchanged():
+    """The original no-coverage shape must keep working exactly as before —
+    the regression guard on a mixed ledger, which this spec's own record is:
+    it carries both a legacy slice-1 line and modern covers/partial lines."""
+    step4 = _step("### 4. Reconcile the `## Slices` ledger, then derive the candidate set")
+    templates = _ledger_line_templates(step4)
+    legacy_shape = templates[0]  # documented first: the four-field, no-coverage shape
+    rendered = _render(
+        legacy_shape,
+        **{
+            "slice title": "An early slice",
+            "value claim": "Shipped before the covers field existed",
+            "task-id": "an-early-slice",
+            "close-date": "2026-01-01",
+        },
+    )
+
+    result = _run(_spec_with_slices_body(rendered))
+    assert result.returncode == 0, result.stderr + result.stdout
+    tokens = _tokens(result.stdout)
+    assert tokens["covered"] == "none", tokens
+    assert tokens["partial"] == "none", tokens
+    assert tokens["complete-eligible"] == "no", (
+        "a legacy entry (neither coverage field) must still make the union "
+        f"ineligible, exactly as before this change: {tokens}"
+    )
+
+
+# ---- 9. the gate's partial: token is surfaced in the printed basis, not merely computed ----
+
+
+def test_partial_token_documented_as_surfaced_in_the_printed_basis():
+    """Step 4 must document printing the gate's `partial:` token as part of
+    the derivation basis, after the point the gate pipe is invoked — mirroring
+    the document-order pin already applied to `termination basis:
+    gate-certified`. Also confirm the real gate actually emits a `partial:`
+    token on a spec carrying partial coverage, so the documented claim is
+    pinned against real gate output, not merely against its own wording."""
+    step4 = _step("### 4. Reconcile the `## Slices` ledger, then derive the candidate set")
+    pipe_match = re.search(r"candidate_set\.py", step4)
+    partial_surface_match = re.search(r"`partial:`\s*token", step4)
+    assert pipe_match, "slice/SKILL.md step 4 must document the candidate_set.py pipe"
+    assert partial_surface_match, (
+        "slice/SKILL.md step 4 must document surfacing the gate's `partial:` "
+        "token in the printed basis"
+    )
+    assert pipe_match.start() < partial_surface_match.start(), (
+        "the candidate_set.py pipe must be documented, by position, before "
+        "the instruction to surface its partial: token"
+    )
+
+    templates = _ledger_line_templates(step4)
+    partial_only_shape = templates[2]
+    rendered = _render(
+        partial_only_shape,
+        **{
+            "slice title": "The streaming export slice",
+            "value claim": "Exports stream instead of buffering in memory",
+            "task-id": "the-streaming-export-slice",
+            "close-date": "2026-09-03",
+            "partially-covers-value": "AC7",
+        },
+    )
+    result = _run(_spec_with_slices_body(rendered))
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert re.search(r"^partial: AC7$", result.stdout, re.MULTILINE), (
+        f"the real gate must print a partial: line naming the partially "
+        f"covered criterion, for the documented basis to surface: {result.stdout!r}"
     )
