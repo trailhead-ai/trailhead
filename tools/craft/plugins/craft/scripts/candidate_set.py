@@ -138,6 +138,7 @@ from __future__ import annotations
 import re
 import sys
 from pathlib import Path
+from typing import NamedTuple
 
 _SCRIPT_DIR = Path(__file__).resolve().parent
 if str(_SCRIPT_DIR) not in sys.path:
@@ -160,6 +161,7 @@ _LEDGER_NONCANONICAL_MARKER_RE = re.compile(r"^\s*(?:[-*]|\d+[.)])\s")
 _LEDGER_TRAILING_PAREN_RE = re.compile(r"\(([^()]*)\)\s*$")
 _LEDGER_FIELDS_RE = re.compile(r"^`task/[^`]+`, closed [^,]+(?:, covers (?P<covers>.+))?$")
 _LEDGER_PARTIAL_SPLIT_RE = re.compile(r", partially covers (?P<partial>.+)$")
+_LEDGER_TASK_ID_RE = re.compile(r"^`task/([^`]+)`")
 
 _UNDECLARED_REASON_CODE = "undeclared-covered-identifier"
 _MALFORMED_TOKEN_REASON_CODE = "malformed-coverage-token"
@@ -174,8 +176,78 @@ class MalformedCoverageTokenError(ValueError):
     """A ledger coverage token does not parse as an ACn identifier list."""
 
 
+class LedgerEntry(NamedTuple):
+    """One canonical `## Slices` bullet, as `parse_ledger_entries` reports
+    it: `task_id` (the bare identifier inside `` `task/<id>` ``), `covers`
+    and `partial` (each an ordered list of ACn identifiers — empty when the
+    entry carries neither field), and `start_line`/`end_line` (1-indexed,
+    inclusive, spanning the bullet's own line through the last line this
+    entry folded in) — enough for a caller to name the offending source
+    line without re-parsing the spec body itself."""
+
+    task_id: str
+    covers: list[str]
+    partial: list[str]
+    start_line: int
+    end_line: int
+
+
 def _err(msg: str) -> None:
     print(f"candidate-set: {msg}", file=sys.stderr)
+
+
+def _iter_ledger_entries(lines: list[str], fenced: list[bool], start: int):
+    """Yield `(kind, block_lines)` for every top-level marker-opened block
+    within the `## Slices` section beginning at `start` — a canonical `- `
+    bullet or a non-canonical marker line (indented, `* `, or numbered),
+    each spanning from its own opening line up to (but not including) the
+    next top-level marker, a `##` heading, or the end of the section.
+    `block_lines` is every unmasked line in that span as `(line_index,
+    line_text)` pairs, in document order, blank lines included — the
+    opening bullet or marker line is always `block_lines[0]`.
+
+    This is the one walk: `parse_ledger` and `parse_ledger_entries` both
+    call it rather than each re-deriving where one block ends and the next
+    begins, so the two can never disagree about that. Which of a block's
+    lines actually belong to the *entry* — every one of them, unconditionally
+    (`parse_ledger`'s join, which is what lets unmarked trailing prose or a
+    torn/interleaved concurrent append merge into the entry above it), or
+    only the bullet plus its own indented continuations
+    (`parse_ledger_entries`'s join, which does not) — is each consumer's own
+    decision over this same raw span; it is not decided here.
+    """
+    n = len(lines)
+    i = start
+    current: list[tuple[int, str]] | None = None
+    current_kind: str | None = None
+    while i < n:
+        if fenced[i]:
+            i += 1
+            continue
+        line = lines[i]
+        if line.startswith("## "):
+            break
+        if _LEDGER_BULLET_RE.match(line):
+            if current is not None:
+                yield current_kind, current
+            current = [(i, line)]
+            current_kind = "canonical"
+            i += 1
+            continue
+        if _LEDGER_NONCANONICAL_MARKER_RE.match(line):
+            if current is not None:
+                yield current_kind, current
+            current = [(i, line)]
+            current_kind = "noncanonical"
+            i += 1
+            continue
+        if current is None:
+            i += 1
+            continue
+        current.append((i, line))
+        i += 1
+    if current is not None:
+        yield current_kind, current
 
 
 def parse_ledger(
@@ -200,7 +272,9 @@ def parse_ledger(
     wrote can surface as belonging to a different entry the merge left in
     front of it — fail-closed (no coverage is invented), not fabrication-
     proof at the per-entry level, and worth knowing before tightening this
-    rule further.
+    rule further. `parse_ledger_entries` is the sibling accessor that does
+    not fold this way, so a torn/interleaved pair surfaces there as two
+    distinct entries instead.
 
     `eligible` is True only when every entry found carries a coverage token
     and every non-blank line in the section either belongs to a canonical
@@ -242,7 +316,6 @@ def parse_ledger(
     covered: dict[str, None] = {}
     partial: dict[str, None] = {}
     eligible = True
-    entry_lines: list[str] = []
 
     def _parse_field(value: str) -> list[str]:
         try:
@@ -254,15 +327,15 @@ def parse_ledger(
                 raise UndeclaredCoverageError(identifier)
         return identifiers
 
-    def finalize_entry() -> None:
-        nonlocal eligible
-        if not entry_lines:
-            return
-        text = " ".join(line.strip() for line in entry_lines)
+    for kind, block_lines in _iter_ledger_entries(lines, fenced, start):
+        if kind == "noncanonical":
+            eligible = False
+            continue
+        text = " ".join(line.strip() for _, line in block_lines if line.strip())
         paren = _LEDGER_TRAILING_PAREN_RE.search(text)
         if paren is None:
             eligible = False
-            return
+            continue
         paren_text = paren.group(1)
         partial_match = _LEDGER_PARTIAL_SPLIT_RE.search(paren_text)
         if partial_match is not None:
@@ -274,41 +347,141 @@ def parse_ledger(
         fields = _LEDGER_FIELDS_RE.match(head)
         if fields is None or (fields.group("covers") is None and partial_value is None):
             eligible = False
-            return
+            continue
         if fields.group("covers") is not None:
             covered.update(dict.fromkeys(_parse_field(fields.group("covers"))))
         if partial_value is not None:
             partial.update(dict.fromkeys(_parse_field(partial_value)))
 
-    in_noncanonical = False
-    for i in range(start, len(lines)):
-        if fenced[i]:
-            continue
-        line = lines[i]
-        if line.startswith("## "):
-            break
-        if not line.strip():
-            continue
-        if _LEDGER_BULLET_RE.match(line):
-            finalize_entry()
-            entry_lines = [line]
-            in_noncanonical = False
-            continue
-        if _LEDGER_NONCANONICAL_MARKER_RE.match(line):
-            finalize_entry()
-            entry_lines = []
-            eligible = False
-            in_noncanonical = True
-            continue
-        if in_noncanonical or not entry_lines:
-            # Either the continuation of an already-flagged non-canonical
-            # entry, or ordinary prose with no bullet open yet (e.g. a
-            # placeholder line before the first slice ships) — neither is
-            # ledger structure, so neither contributes to an entry.
-            continue
-        entry_lines.append(line)
-    finalize_entry()
     return list(covered), [i for i in partial if i not in covered], eligible
+
+
+def _select_structured_span(
+    block_lines: list[tuple[int, str]]
+) -> list[tuple[int, str]]:
+    """From a canonical block's raw lines (the bullet's own line first, then
+    every following unmasked line up to the next top-level marker or the
+    end of the section, blanks included), select the subset that forms one
+    un-merged ledger entry for `parse_ledger_entries`: the bullet's own
+    line, plus every immediately indented continuation line — including one
+    reached across a run of blank lines, per CommonMark's loose-list rule,
+    exactly as a wrapped value claim's continuation is not ended by the
+    blank line separating it from its trailing parenthetical.
+
+    The first non-blank, non-indented line ends the span here instead of
+    being folded in — this is the one difference from `parse_ledger`'s own
+    join, and it is what keeps a torn/interleaved concurrent append (or
+    ordinary unmarked trailing prose) from merging into the entry above it.
+    """
+    n = len(block_lines)
+    selected = [block_lines[0]]
+    k = 1
+    while k < n:
+        idx, line = block_lines[k]
+        if not line.strip():
+            j = k + 1
+            while j < n and not block_lines[j][1].strip():
+                j += 1
+            if j < n and block_lines[j][1][:1] in (" ", "\t"):
+                selected.append(block_lines[k])
+                k += 1
+                continue
+            break
+        if line[:1] in (" ", "\t"):
+            selected.append(block_lines[k])
+            k += 1
+            continue
+        break
+    return selected
+
+
+def _parse_entry_fields(text: str) -> tuple[str, list[str], list[str]] | None:
+    """Extract `(task_id, covers, partial)` from one joined ledger-entry
+    text, or None if it does not end in a `` `task/<id>` `` trailing
+    parenthetical whose bare identifier this can read. Shares
+    `_LEDGER_TRAILING_PAREN_RE`, `_LEDGER_PARTIAL_SPLIT_RE`, and
+    `_LEDGER_FIELDS_RE` with `parse_ledger` — the same field grammar, read
+    with no criteria list to check identifiers against, so a malformed
+    `covers` or `partially covers` token still raises via the shared
+    `parse_covers`, while an identifier `parse_ledger` would reject as
+    undeclared is reported here exactly as written."""
+    paren = _LEDGER_TRAILING_PAREN_RE.search(text)
+    if paren is None:
+        return None
+    paren_text = paren.group(1)
+    task_match = _LEDGER_TASK_ID_RE.match(paren_text)
+    if task_match is None:
+        return None
+    task_id = task_match.group(1)
+    partial_match = _LEDGER_PARTIAL_SPLIT_RE.search(paren_text)
+    if partial_match is not None:
+        partial_value = partial_match.group("partial")
+        head = paren_text[: partial_match.start()]
+    else:
+        partial_value = None
+        head = paren_text
+    fields = _LEDGER_FIELDS_RE.match(head)
+    covers_value = fields.group("covers") if fields else None
+    covers = parse_covers(covers_value, flag="ledger coverage token") if covers_value else []
+    partial = parse_covers(partial_value, flag="ledger coverage token") if partial_value else []
+    return task_id, covers, partial
+
+
+def parse_ledger_entries(spec_body: str) -> list[LedgerEntry]:
+    """Sibling accessor to `parse_ledger`, sharing its exact block-splitting
+    walk via `_iter_ledger_entries`. Returns one `LedgerEntry` per canonical
+    `## Slices` bullet, in document order — the per-entry structure
+    `parse_ledger`'s merged `(covered, partial, eligible)` triple cannot
+    express.
+
+    Unlike `parse_ledger`, which joins a bullet with every subsequent
+    non-blank line up to the next top-level marker regardless of
+    indentation, this accessor joins a bullet only with its own indented
+    continuation lines (see `_select_structured_span`). That is the one
+    difference between the two joins, and it is what makes a torn or
+    interleaved concurrent append — two entries `parse_ledger`'s own merge
+    reads as one — surface here as two distinct entries instead.
+
+    Skips a non-canonical marker block (indented / `* ` / numbered) and any
+    canonical entry whose own span does not end in a readable
+    `` `task/<id>` `` parenthetical — neither raises; they simply contribute
+    no entry. A `covers` or `partially covers` field naming a malformed
+    identifier list still raises MalformedCoverageTokenError, via the same
+    `parse_covers` `parse_ledger` uses; this accessor takes no criteria list
+    and so never raises UndeclaredCoverageError — that check stays
+    `parse_ledger`'s alone.
+
+    A spec with no `## Slices` section, an empty one, or one containing only
+    non-canonical marker lines yields an empty list without raising — the
+    same fail-closed-by-omission posture `parse_ledger` takes on the same
+    inputs. Every fenced code block and every HTML comment stays invisible
+    to this walk, exactly as it does to `parse_ledger`'s.
+
+    `start_line`/`end_line` on each entry are 1-indexed and inclusive.
+    """
+    lines = _COMMONMARK_LINE_RE.split(spec_body)
+    fenced = _mask_fenced_lines(lines)
+
+    start = _find_unique_heading(
+        lines, fenced, _SLICES_HEADING_RE, _SLICES_HEADING, _DUPLICATE_SLICES_HEADING_REASON_CODE
+    )
+    if start is None:
+        return []
+
+    entries: list[LedgerEntry] = []
+    for kind, block_lines in _iter_ledger_entries(lines, fenced, start):
+        if kind != "canonical":
+            continue
+        selected = _select_structured_span(block_lines)
+        text = " ".join(line.strip() for _, line in selected if line.strip())
+        parsed = _parse_entry_fields(text)
+        if parsed is None:
+            continue
+        task_id, covers, partial = parsed
+        start_line = selected[0][0] + 1
+        end_line = max(i for i, l in selected if l.strip()) + 1
+        entries.append(LedgerEntry(task_id, covers, partial, start_line, end_line))
+    return entries
 
 
 def main(argv: list[str]) -> int:

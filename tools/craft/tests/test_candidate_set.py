@@ -29,6 +29,9 @@ SCRIPTS_DIR = REPO_ROOT / "plugins" / "craft" / "scripts"
 GATE = SCRIPTS_DIR / "candidate_set.py"
 FIXTURES = Path(__file__).parent / "fixtures"
 
+sys.path.insert(0, str(SCRIPTS_DIR))
+import candidate_set  # noqa: E402
+
 TWO_LINES_TWO_COVERED = (FIXTURES / "spec_candidate_two_lines_two_covered.md").read_text(
     encoding="utf-8"
 )
@@ -126,6 +129,9 @@ FORGED_PARTIAL_IN_HTML_COMMENT = (
 TORN_APPEND_PARTIAL = (FIXTURES / "spec_candidate_torn_append_partial.md").read_text(
     encoding="utf-8"
 )
+LEDGER_ENTRIES_LOOSE_LIST = (
+    FIXTURES / "spec_candidate_ledger_entries_loose_list_continuation.md"
+).read_text(encoding="utf-8")
 
 _UNDECLARED_REASON_CODE = "reason-code: undeclared-covered-identifier"
 _MALFORMED_REASON_CODE = "reason-code: malformed-coverage-token"
@@ -694,3 +700,140 @@ def test_torn_append_over_a_partial_entry_under_reports_rather_than_fabricates()
     assert tokens["partial"] == "none", tokens
     assert "AC2" in tokens["candidates"].split(", "), tokens
     assert tokens["complete-eligible"] == "no", tokens
+
+
+# ---- 17. parse_ledger_entries: the per-entry sibling accessor --------------
+#
+# `parse_ledger_entries` is a new Python API, not a CLI flag, so these tests
+# call it directly rather than through `_run`'s subprocess — matching how
+# `test_criterion_gate.py` calls `criterion_gate` directly for the same
+# reason.
+
+
+def test_parse_ledger_entries_count_matches_canonical_bullets():
+    """Contract item 1: one entry per canonical ledger bullet, the entry
+    count matching the number of canonical bullets in the section."""
+    entries = candidate_set.parse_ledger_entries(TWO_LINES_TWO_COVERED)
+    assert len(entries) == 2, entries
+    assert [e.task_id for e in entries] == ["first", "second"], entries
+
+    entries = candidate_set.parse_ledger_entries(FULL_COVERAGE)
+    assert len(entries) == 2, entries
+
+
+def test_parse_ledger_entries_reports_tokens_per_entry_not_merged_across_section():
+    """Contract item 2: two entries carrying different covers tokens are
+    distinguishable in the return — precisely what `parse_ledger`'s merged
+    triple cannot express."""
+    entries = candidate_set.parse_ledger_entries(UNION_DISJOINT)
+    assert len(entries) == 2, entries
+    assert entries[0].task_id == "first"
+    assert entries[0].covers == ["AC1", "AC3"], entries[0]
+    assert entries[0].partial == [], entries[0]
+    assert entries[1].task_id == "second"
+    assert entries[1].covers == ["AC2", "AC4"], entries[1]
+    assert entries[1].partial == [], entries[1]
+
+
+def test_parse_ledger_entries_surfaces_a_torn_interleaved_pair_as_two_entries():
+    """Contract item 3: a concurrent double-append that tears one entry's
+    parenthetical off and interleaves unmarked prose between two canonical
+    bullets — the shape `parse_ledger`'s own docstring discloses merges into
+    one broken entry — must surface here as two distinct, correctly-parsed
+    entries instead."""
+    entries = candidate_set.parse_ledger_entries(TORN_APPEND_PARTIAL)
+    assert len(entries) == 2, entries
+    assert entries[0].task_id == "first"
+    assert entries[0].covers == [], entries[0]
+    assert entries[0].partial == ["AC2"], entries[0]
+    assert entries[1].task_id == "second"
+    assert entries[1].covers == ["AC3"], entries[1]
+    assert entries[1].partial == [], entries[1]
+
+
+def test_parse_ledger_entries_frozen_parse_ledger_unchanged_on_the_same_fixture():
+    """Contract item 4: `parse_ledger`'s three return values are unchanged —
+    asserted as a relationship against the same fixture `parse_ledger_entries`
+    reads two entries from, not by re-reading the implementation. The merge
+    that drops the torn entry's own coverage is exactly what `parse_ledger`
+    must still do, even though `parse_ledger_entries` sees two entries here."""
+    criteria = [f"AC{n}" for n in range(1, 10)]
+    covered, partial, eligible = candidate_set.parse_ledger(TORN_APPEND_PARTIAL, criteria)
+    assert covered == ["AC3"], (covered, partial, eligible)
+    assert partial == [], (covered, partial, eligible)
+    assert eligible is False, (covered, partial, eligible)
+
+
+_NONCANONICAL_ONLY_SLICES_SECTION = (
+    "# Fixture: a Slices section with only a non-canonical marker line\n\n"
+    "## Acceptance Criteria\n\n- **AC1.** A fixture criterion.\n\n## Slices\n\n"
+    "* **Only entry** — marked with the wrong bullet character. "
+    "(`task/only`, closed 2026-01-01, covers AC1)\n"
+)
+
+
+def test_parse_ledger_entries_empty_slices_section_yields_empty_list_without_raising():
+    """Contract item 5: an absent, empty, or non-canonical-only `## Slices`
+    section yields an empty entry list without raising."""
+    assert candidate_set.parse_ledger_entries(NO_SLICES_SECTION) == []
+    assert candidate_set.parse_ledger_entries(EMPTY_SLICES_SECTION) == []
+    # A section with ONLY non-canonical marker content (no canonical bullet
+    # at all) yields no entries — distinct from the mixed fixture below,
+    # which does carry a real canonical entry alongside the marker line.
+    assert candidate_set.parse_ledger_entries(_NONCANONICAL_ONLY_SLICES_SECTION) == []
+    assert candidate_set.parse_ledger_entries(NUMBERED_MARKER_BEFORE_ENTRY) != []
+
+
+def test_parse_ledger_entries_loose_list_continuation_folds_across_a_blank_line():
+    """Contract item 6 (loose-list half): a blank line inside a list item
+    does not end the entry — an indented continuation reached across a
+    blank line still folds into the same entry, matching `parse_ledger`'s
+    own join on the identical fixture."""
+    entries = candidate_set.parse_ledger_entries(LEDGER_ENTRIES_LOOSE_LIST)
+    assert len(entries) == 2, entries
+    assert entries[0].task_id == "first"
+    assert entries[0].covers == ["AC1", "AC2"], entries[0]
+    assert entries[1].task_id == "second"
+    assert entries[1].covers == ["AC3"], entries[1]
+
+
+def test_parse_ledger_entries_masked_region_content_is_invisible_to_the_walk():
+    """Contract item 6 (masking half): content inside a fenced block or an
+    HTML comment is invisible to the walk, exactly as it is to
+    `parse_ledger`'s. `FORGED_FENCE`'s only ledger content lives inside a
+    fenced worked example, so a masking-blind walk would report one entry
+    instead of zero."""
+    assert candidate_set.parse_ledger_entries(FORGED_FENCE) == []
+
+    entries = candidate_set.parse_ledger_entries(HTML_COMMENT_HIDES_DECOY_SLICES)
+    assert len(entries) == 1, entries
+    assert entries[0].task_id == "real", entries[0]
+    assert entries[0].covers == ["AC1"], entries[0]
+
+
+def test_parse_ledger_entries_start_and_end_line_span_the_entry():
+    """The line span an accessor consumer would use to name the offending
+    source line: 1-indexed, inclusive, and matching the entry's actual
+    physical extent in the fixture body."""
+    lines = TWO_LINES_TWO_COVERED.splitlines()
+    first_bullet_line = next(
+        i for i, line in enumerate(lines, start=1) if line.startswith("- **First slice**")
+    )
+    second_bullet_line = next(
+        i for i, line in enumerate(lines, start=1) if line.startswith("- **Second slice**")
+    )
+
+    entries = candidate_set.parse_ledger_entries(TWO_LINES_TWO_COVERED)
+    assert entries[0].start_line == first_bullet_line == entries[0].end_line, entries[0]
+    assert entries[1].start_line == second_bullet_line == entries[1].end_line, entries[1]
+
+    wrapped = candidate_set.parse_ledger_entries(WRAPPED_ENTRIES)
+    lines = WRAPPED_ENTRIES.splitlines()
+    first_start = next(
+        i for i, line in enumerate(lines, start=1) if line.startswith("- **First slice**")
+    )
+    first_end = next(
+        i for i, line in enumerate(lines, start=1) if "task/first" in line
+    )
+    assert wrapped[0].start_line == first_start, wrapped[0]
+    assert wrapped[0].end_line == first_end, wrapped[0]
