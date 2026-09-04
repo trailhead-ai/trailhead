@@ -20,9 +20,15 @@ from pathlib import Path
 
 from test_ledger_gate import (
     CLEAN_MULTI_ENTRY,
+    COVERAGE_CLAIMED_TWICE,
+    DUPLICATE_TASK_ID,
+    INVISIBLE_TASK_ID,
+    ORPHANED_ENTRY,
+    UNTERMINATED_FENCE,
     WIDENED_CONTRADICTS_PARENT,
     BACKFILL_MONOTONIC,
     GATE as LEDGER_GATE,
+    _run as _run_gate,
     _write_parent_coverage,
 )
 
@@ -157,24 +163,7 @@ def test_documented_exit_2_reason_codes_match_the_gate_s_real_exit_2_codes():
     )
 
 
-def _run_gate(spec_body: str, extra_args: list[str] | None = None) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        [sys.executable, str(LEDGER_GATE), *(extra_args or [])],
-        input=spec_body,
-        capture_output=True,
-        text=True,
-    )
-
-
 def test_each_documented_exit_1_code_actually_produces_exit_1(tmp_path):
-    from test_ledger_gate import (
-        DUPLICATE_TASK_ID,
-        COVERAGE_CLAIMED_TWICE,
-        ORPHANED_ENTRY,
-        WIDENED_CONTRADICTS_PARENT as WCP,
-        INVISIBLE_TASK_ID,
-    )
-
     cases = [
         (DUPLICATE_TASK_ID, None, "duplicate-ledger-task-id"),
         (COVERAGE_CLAIMED_TWICE, None, "coverage-claimed-twice"),
@@ -191,14 +180,12 @@ def test_each_documented_exit_1_code_actually_produces_exit_1(tmp_path):
     assert "orphaned-ledger-entry" in r.stderr
 
     widened_parents = _write_parent_coverage(tmp_path, {"alpha": {"covers": "AC2"}})
-    r = _run_gate(WCP, ["--parent-coverage", widened_parents])
+    r = _run_gate(WIDENED_CONTRADICTS_PARENT, ["--parent-coverage", widened_parents])
     assert r.returncode == 1
     assert "coverage-contradicts-parent" in r.stderr
 
 
 def test_each_documented_exit_2_code_actually_produces_exit_2(tmp_path):
-    from test_ledger_gate import UNTERMINATED_FENCE
-
     r = _run_gate("")
     assert r.returncode == 2 and "empty-stdin" in r.stderr
 
@@ -403,7 +390,7 @@ def test_backfill_writes_a_no_token_line_s_token_exactly_once_and_is_idempotent(
     assert after_twice["legacy"].covers == ["AC1", "AC2"]
 
 
-def test_backfill_never_rewrites_a_line_that_already_carries_a_token():
+def test_backfill_never_rewrites_a_line_that_already_carries_a_token(tmp_path):
     """Contract item 2: a line that already carries a token is never
     rewritten by the backfill, even when its parent disagrees — that case
     is `coverage-contradicts-parent`, a refusal, not a backfill."""
@@ -416,17 +403,8 @@ def test_backfill_never_rewrites_a_line_that_already_carries_a_token():
 
     # The untouched line still correctly refuses at the ledger gate — this
     # is the gate's job (coverage-contradicts-parent), never the backfill's.
-    parent_coverage_path = None
-    import tempfile
-
-    with tempfile.TemporaryDirectory() as td:
-        parent_coverage_path = _write_parent_coverage(Path(td), parent_coverage)
-        r = subprocess.run(
-            [sys.executable, str(LEDGER_GATE), "--parent-coverage", parent_coverage_path],
-            input=result,
-            capture_output=True,
-            text=True,
-        )
+    parent_coverage_path = _write_parent_coverage(tmp_path, parent_coverage)
+    r = _run_gate(result, ["--parent-coverage", parent_coverage_path])
     assert r.returncode == 1
     assert "coverage-contradicts-parent" in r.stderr
 
@@ -439,9 +417,7 @@ def test_backfill_leaves_a_line_untouched_when_its_parent_also_carries_no_token(
         "the backfill must leave a no-token line untouched when its parent "
         "declares no coverage either"
     )
-    r = subprocess.run(
-        [sys.executable, str(LEDGER_GATE)], input=result, capture_output=True, text=True
-    )
+    r = _run_gate(result)
     assert r.returncode == 0, r.stderr
 
 
@@ -455,12 +431,7 @@ def test_ledger_gate_exits_0_after_a_backfill(tmp_path):
         "the backfill must have actually written the token before this checks the gate"
     )
     parent_coverage_path = _write_parent_coverage(tmp_path, parent_coverage)
-    r = subprocess.run(
-        [sys.executable, str(LEDGER_GATE), "--parent-coverage", parent_coverage_path],
-        input=backfilled,
-        capture_output=True,
-        text=True,
-    )
+    r = _run_gate(backfilled, ["--parent-coverage", parent_coverage_path])
     assert r.returncode == 0, r.stderr
 
 
