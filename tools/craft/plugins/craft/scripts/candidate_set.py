@@ -27,10 +27,21 @@ inline mid-sentence mention does not satisfy it; and a second unmasked
 `## Slices` heading is a fail-closed integrity error rather than a silent
 substitution of one ledger for another.
 
-A `## Slices` ledger entry's coverage token is the fifth field of its trailing
-parenthetical:
+A `## Slices` ledger entry's coverage tokens are the trailing fields of its
+parenthetical, after `task/<id>` and `closed <date>`: an optional `covers`
+field, an optional `partially covers` field, or both:
 
     - **<title>** — <value claim>. (`task/<id>`, closed <date>, covers AC2, AC5)
+    - **<title>** — <value claim>. (`task/<id>`, closed <date>, partially covers AC7)
+    - **<title>** — <value claim>. (`task/<id>`, closed <date>, covers AC5, partially covers AC2)
+
+The `partially covers` field is split off the parenthetical text BEFORE the
+`covers` field's regex is applied to what remains — appending an optional
+group to the existing `covers` pattern would let its greedy match swallow
+the trailing `partially covers` field instead of stopping before it. Both
+fields go through the same `parse_covers` used for the drafted
+`--covers`/`--partial-covers` flags in `covers_gate.py`, so a malformed or
+undeclared identifier in either field is rejected identically.
 
 An entry is scored as a whole — a `- ` bullet plus every continuation line up
 to the next entry or the end of the section — never one physical line at a
@@ -48,9 +59,15 @@ unsafe — the union is reported ineligible rather than fabricated complete —
 but it means an entry can lose its coverage even though nothing else about
 it changed, simply because trailing prose followed it in the section.
 
-An entry with no coverage token (predates the field) contributes no
-identifier to the covered set and makes the coverage union unverifiable as
-complete — it is a legacy entry, never a fabricated full-coverage claim. So
+An entry with neither coverage token (predates both fields) contributes no
+identifier to either set and makes the coverage union unverifiable as
+complete — it is a legacy entry, never a fabricated full-coverage claim. An
+entry carrying either field, or both, is a modern entry for eligibility
+purposes: only an entry carrying neither keeps `complete-eligible: no`. Full
+coverage wins over partial for the same identifier regardless of which
+ledger line carries which field — the union across lines is order-free, so a
+later full-coverage entry resolves an earlier partial claim on the same
+identifier the same way an earlier full-coverage entry does. So
 does a line inside `## Slices` that reads as an attempted ledger entry but
 does not match the canonical top-level `- ` bullet — indented, marked with
 `* ` instead of `- `, or using a numbered-list marker (`1.`, `2)`) — since the
@@ -66,20 +83,26 @@ Stdout on success (exit 0), one token per line, in this order:
     criteria: AC1, AC2, ..., AC9
     covered: AC1, AC2
     candidates: AC3, ..., AC9
+    partial: AC7
     complete-eligible: yes
 
-`covered:` and `candidates:` print `none` when empty. `complete-eligible:` is
-`yes` only when every ledger entry carries a coverage token and every
-non-blank line in the section either belongs to a canonical entry (its
-bullet or one of its continuation lines) or is blank; a single legacy entry,
-or a single non-canonical marker line — wherever in the section it sits —
-makes it `no`, because the union is then known to be incomplete or
-unverifiable and no caller may report the spec complete on it.
+`covered:`, `candidates:`, and `partial:` print `none` when empty. `candidates:`
+is computed against the fully covered set alone — a criterion covered only
+partially remains a candidate on every subsequent pass, and it is never
+listed on `partial:` once a later entry fully covers it. `complete-eligible:`
+is `yes` only when every ledger entry carries at least one coverage token
+(`covers`, `partially covers`, or both) and every non-blank line in the
+section either belongs to a canonical entry (its bullet or one of its
+continuation lines) or is blank; a single legacy entry (neither field), or a
+single non-canonical marker line — wherever in the section it sits — makes it
+`no`, because the union is then known to be incomplete or unverifiable and no
+caller may report the spec complete on it.
 
 A within-entry duplicate identifier (`covers AC1, AC1`) is rejected the same
 way `covers_gate.py` rejects a duplicate in a drafted `--covers` value,
 because both go through the shared `parse_covers`: fail-closed as a
-malformed coverage token, not silently deduplicated.
+malformed coverage token, not silently deduplicated. This applies to the
+`partially covers` field identically.
 
 A `reason:` line printed to stderr may echo raw ledger prose read from the
 spec body. It is for a human reading stderr and is never persisted — only the
@@ -88,8 +111,8 @@ body, or a commit message.
 
 Exit codes:
     0  derived cleanly — the token block above is on stdout.
-    1  integrity violation — a ledger coverage token names an identifier the
-       spec does not declare under `## Acceptance Criteria`
+    1  integrity violation — a `covers` or `partially covers` token names an
+       identifier the spec does not declare under `## Acceptance Criteria`
        (`reason-code: undeclared-covered-identifier`).
     2  fail-closed — empty or non-UTF-8 stdin; no `## Acceptance Criteria`
        heading; a spec declaring zero criterion identifiers under that
@@ -98,8 +121,8 @@ Exit codes:
        `## Acceptance Criteria` heading (reuses `covers_gate.py`'s
        `reason-code: duplicate-acceptance-criteria-heading`); a second
        unmasked `## Slices` heading
-       (`reason-code: duplicate-slices-heading`); or a ledger entry whose
-       coverage token does not parse as an identifier list
+       (`reason-code: duplicate-slices-heading`); or a `covers` or
+       `partially covers` token that does not parse as an identifier list
        (`reason-code: malformed-coverage-token`). NEVER exits 0 when the
        derivation could not be certified.
 """
@@ -130,6 +153,7 @@ _LEDGER_BULLET_RE = re.compile(r"^- ")
 _LEDGER_NONCANONICAL_MARKER_RE = re.compile(r"^\s*(?:[-*]|\d+[.)])\s")
 _LEDGER_TRAILING_PAREN_RE = re.compile(r"\(([^()]*)\)\s*$")
 _LEDGER_FIELDS_RE = re.compile(r"^`task/[^`]+`, closed [^,]+(?:, covers (?P<covers>.+))?$")
+_LEDGER_PARTIAL_SPLIT_RE = re.compile(r", partially covers (?P<partial>.+)$")
 
 _UNDECLARED_REASON_CODE = "undeclared-covered-identifier"
 _MALFORMED_TOKEN_REASON_CODE = "malformed-coverage-token"
@@ -148,8 +172,11 @@ def _err(msg: str) -> None:
     print(f"candidate-set: {msg}", file=sys.stderr)
 
 
-def parse_ledger(spec_body: str, criteria: list[str]) -> tuple[list[str], bool]:
-    """Return (covered identifiers in first-seen order, eligible).
+def parse_ledger(
+    spec_body: str, criteria: list[str]
+) -> tuple[list[str], list[str], bool]:
+    """Return (fully covered identifiers, partially covered identifiers,
+    eligible) — both identifier lists in first-seen order.
 
     A ledger entry begins at a top-level `- ` bullet within `## Slices` and
     continues through its continuation lines until the next entry begins,
@@ -175,9 +202,19 @@ def parse_ledger(spec_body: str, criteria: list[str]) -> tuple[list[str], bool]:
     A spec with no `## Slices` section, or one with no ledger entries, is an
     empty ledger: no coverage, eligible.
 
-    Raises UndeclaredCoverageError if a coverage token names an identifier
-    not in `criteria`, or MalformedCoverageTokenError if a coverage token
-    does not parse as an ACn identifier list.
+    An entry's `partially covers` field is split off the joined entry text
+    before `_LEDGER_FIELDS_RE` (which owns only the `covers` field) is
+    applied to what remains — an optional group appended to that pattern
+    instead would let its greedy `covers` match swallow a trailing
+    `partially covers` field rather than stopping before it. Full coverage
+    wins over partial for the same identifier regardless of which line
+    carries which: the returned `partial` list is filtered against the final
+    fully covered set after every entry has been scored, so the result is
+    order-free across the ledger.
+
+    Raises UndeclaredCoverageError if a `covers` or `partially covers` token
+    names an identifier not in `criteria`, or MalformedCoverageTokenError if
+    either does not parse as an ACn identifier list.
     """
     lines = _COMMONMARK_LINE_RE.split(spec_body)
     fenced = _mask_fenced_lines(lines)
@@ -186,12 +223,26 @@ def parse_ledger(spec_body: str, criteria: list[str]) -> tuple[list[str], bool]:
         lines, fenced, _SLICES_HEADING_RE, _SLICES_HEADING, _DUPLICATE_SLICES_HEADING_REASON_CODE
     )
     if start is None:
-        return [], True
+        return [], [], True
 
     covered: list[str] = []
     seen: set[str] = set()
+    partial: list[str] = []
+    partial_seen: set[str] = set()
     eligible = True
     entry_lines: list[str] = []
+
+    def _parse_field(value: str) -> list[str]:
+        try:
+            identifiers = parse_covers(value)
+        except ValueError as e:
+            raise MalformedCoverageTokenError(
+                str(e).replace("--covers value", "ledger coverage token")
+            ) from e
+        for identifier in identifiers:
+            if identifier not in criteria:
+                raise UndeclaredCoverageError(identifier)
+        return identifiers
 
     def finalize_entry() -> None:
         nonlocal eligible
@@ -202,22 +253,28 @@ def parse_ledger(spec_body: str, criteria: list[str]) -> tuple[list[str], bool]:
         if paren is None:
             eligible = False
             return
-        fields = _LEDGER_FIELDS_RE.match(paren.group(1))
-        if fields is None or fields.group("covers") is None:
+        paren_text = paren.group(1)
+        partial_match = _LEDGER_PARTIAL_SPLIT_RE.search(paren_text)
+        if partial_match is not None:
+            partial_value = partial_match.group("partial")
+            head = paren_text[: partial_match.start()]
+        else:
+            partial_value = None
+            head = paren_text
+        fields = _LEDGER_FIELDS_RE.match(head)
+        if fields is None or (fields.group("covers") is None and partial_value is None):
             eligible = False
             return
-        try:
-            identifiers = parse_covers(fields.group("covers"))
-        except ValueError as e:
-            raise MalformedCoverageTokenError(
-                str(e).replace("--covers value", "ledger coverage token")
-            ) from e
-        for identifier in identifiers:
-            if identifier not in criteria:
-                raise UndeclaredCoverageError(identifier)
-            if identifier not in seen:
-                seen.add(identifier)
-                covered.append(identifier)
+        if fields.group("covers") is not None:
+            for identifier in _parse_field(fields.group("covers")):
+                if identifier not in seen:
+                    seen.add(identifier)
+                    covered.append(identifier)
+        if partial_value is not None:
+            for identifier in _parse_field(partial_value):
+                if identifier not in partial_seen:
+                    partial_seen.add(identifier)
+                    partial.append(identifier)
 
     in_noncanonical = False
     for i in range(start, len(lines)):
@@ -247,7 +304,8 @@ def parse_ledger(spec_body: str, criteria: list[str]) -> tuple[list[str], bool]:
             continue
         entry_lines.append(line)
     finalize_entry()
-    return covered, eligible
+    partial_remainder = [i for i in partial if i not in seen]
+    return covered, partial_remainder, eligible
 
 
 def main(argv: list[str]) -> int:
@@ -283,7 +341,7 @@ def main(argv: list[str]) -> int:
         return 2
 
     try:
-        covered, eligible = parse_ledger(spec_body, criteria)
+        covered, partial, eligible = parse_ledger(spec_body, criteria)
     except DuplicateHeadingError as e:
         _err(f"reason: {e}")
         _err(f"reason-code: {e.reason_code}")
@@ -302,6 +360,7 @@ def main(argv: list[str]) -> int:
     print(f"criteria: {', '.join(criteria)}")
     print(f"covered: {', '.join(covered) if covered else 'none'}")
     print(f"candidates: {', '.join(candidates) if candidates else 'none'}")
+    print(f"partial: {', '.join(partial) if partial else 'none'}")
     print(f"complete-eligible: {'yes' if eligible else 'no'}")
     return 0
 
