@@ -1,1 +1,0 @@
-| Task | Band | Dispatches | Status | Drift-Gate | Model | Elapsed |

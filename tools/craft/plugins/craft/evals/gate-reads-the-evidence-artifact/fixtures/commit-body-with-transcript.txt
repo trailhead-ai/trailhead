@@ -1,0 +1,59 @@
+feat: reject bursts above the per-account rate limit
+
+## What I built
+
+Wired the existing per-account token bucket into the ingest endpoint. A request from an
+account with no tokens left returns 429 and is not enqueued; the bucket refills over
+elapsed time so the account recovers without operator action.
+
+## Mutation transcript
+
+Item 1 — "an account within its budget has its request enqueued and receives 202"
+  test node: test_ingest.py::test_within_budget_is_enqueued
+  kind: revert — restored the pre-change `handle_ingest`, dropping the bucket call
+  RED: assert len(q.QUEUE) == 1 held, but the status assertion is the binding one;
+       re-checked by reverting only the 429 early-return —
+       assert r["status"] == 202 still passed. Mutation STAYED GREEN.
+  finding: this item is carried by the pre-existing enqueue path, not by anything this
+       change added. Explanation 2 of 3 — the assertion does not bind new behaviour.
+       Strengthened: added an assertion that bucket.consume was actually called, which
+       now goes RED under the same revert.
+  RED (after strengthening): AssertionError: bucket not consulted for account a1
+  restore: cp scratch/ingest.py.baseline ingest.py
+  diff scratch/ingest.py.baseline ingest.py -> no output
+  GREEN: 3 passed
+
+Item 2 — "an account that has exhausted its budget receives 429 and nothing is enqueued"
+  test node: test_ingest.py::test_exhausted_budget_is_rejected_and_not_enqueued
+  kind: revert — removed the `if not bucket.consume(...)` early return from handle_ingest
+  RED: assert r["status"] == 429 -> AssertionError: assert 202 == 429
+       (test_ingest.py:21, named assertion: status equals 429)
+  restore: cp scratch/ingest.py.baseline ingest.py
+  diff scratch/ingest.py.baseline ingest.py -> no output
+  GREEN: 3 passed
+
+Item 3 — "the bucket refills over elapsed time"
+  test node: test_ingest.py::test_bucket_refills_over_the_window
+  kind: boundary — pinned `_refill` to a zero elapsed term rather than deleting it,
+       so the bucket exists and consumes but never recovers
+  RED: assert r["status"] == 202 -> AssertionError: assert 429 == 202
+       (test_ingest.py:31, named assertion: post-window status equals 202)
+  restore: cp scratch/limits.py.baseline limits.py
+  diff scratch/limits.py.baseline limits.py -> no output
+  GREEN: 3 passed
+
+## Files changed
+
+ ingest.py      |  4 ++++
+ limits.py      | 12 ++++++++++++
+ test_ingest.py | 31 +++++++++++++++++++++++++++++++
+ 3 files changed, 47 insertions(+)
+
+## Self-review findings
+
+Item 1's original assertion did not bind the change; caught during the mutation pass and
+strengthened before committing.
+
+## Surprises / concerns
+
+none

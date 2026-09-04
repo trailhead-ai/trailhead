@@ -3,6 +3,22 @@
 This is the single place craft defines its two units of work and the bar a slice must
 clear. Ritual text elsewhere points here rather than restating the definitions.
 
+<!-- toc:start -->
+**Contents**
+
+- The two units
+- The quality bar: Valuable, Small, Testable
+- The value floor is read against the spec's own consumer
+- Selection: phase, then interface leverage, then smallest-next
+  - Level 1: phase — read, then create, then mutate, then polish
+  - Level 2: interface leverage — within the phase
+  - Level 3: smallest-next above the value floor — the tiebreak
+- The commitment guard: nothing binds to a shape that is still moving
+- The enabler carve-out
+- State coverage: the floor a visual surface owes
+- The three written shapes state coverage depends on
+<!-- toc:end -->
+
 ## The two units
 
 A **slice** is a vertical increment: when it is done, the system is observably more valuable to its consumer, unless it is a declared enabler (below). A **task** is the

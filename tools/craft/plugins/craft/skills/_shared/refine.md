@@ -10,6 +10,26 @@ them from here, so the two callers can never drift apart.
 Refine is **self-serve by default**. It fills gaps from the code and from the vault
 before it ever involves a human. Only an irreducible operator decision escalates.
 
+<!-- toc:start -->
+**Contents**
+
+- Two modes, one procedure, one flag
+- Status gate
+- Step 1 — Triage is the draft attempt
+- Step 2 — Self-serve resolution (mandatory, both modes)
+  - A resolved hedge is a judgment call
+  - The citation rule
+- Step 3 — Citation-resolution gate
+- Step 4 — Write the payload
+- Step 5 — Escalation
+  - Unattended escalation
+  - Interactive escalation
+  - Promotion clears the escalation
+- Outcome report
+- Re-refine
+- Trust boundary
+<!-- toc:end -->
+
 ## Two modes, one procedure, one flag
 
 Mode follows the caller. Everything below is identical in both modes **except the
