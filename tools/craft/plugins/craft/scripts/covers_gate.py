@@ -61,7 +61,9 @@ Exit codes:
        claimed in both `--covers` and `--partial-covers` (prints a
        `reason:` line to stderr).
     2  error   — fail-closed: neither `--covers` nor `--partial-covers`
-       given, empty or non-UTF-8 stdin, no `## Acceptance Criteria` heading
+       given (`reason-code: no-coverage-list-given` — the caller's own
+       invocation is what needs fixing here, not the spec), empty or
+       non-UTF-8 stdin, no `## Acceptance Criteria` heading
        in the spec body, a spec declaring zero criterion identifiers under
        that heading (the legacy shape, distinct reason line plus a stable
        `reason-code: zero-criterion-identifiers` line unique to this path —
@@ -87,6 +89,7 @@ _FENCE_START_RE = re.compile(r"^(`{3,}|~{3,})")
 _HTML_COMMENT_START_RE = re.compile(r"^<!--")
 _ZERO_CRITERIA_REASON_CODE = "zero-criterion-identifiers"
 _DUPLICATE_AC_HEADING_REASON_CODE = "duplicate-acceptance-criteria-heading"
+_NO_COVERAGE_LIST_GIVEN_REASON_CODE = "no-coverage-list-given"
 # CommonMark line endings only — \r\n, \r, \n — and nothing else. Python's
 # str.splitlines() additionally breaks on \v, \f, \x1c-\x1e, NEL (\x85),
 # U+2028 LINE SEPARATOR, and U+2029 PARAGRAPH SEPARATOR: none of those render
@@ -223,19 +226,24 @@ def parse_criteria(spec_body: str) -> list[str]:
     return identifiers
 
 
-def parse_covers(value: str) -> list[str]:
+def parse_covers(value: str, flag: str = "--covers") -> list[str]:
     """Parse the `--covers` grammar: one or more `ACn` tokens separated by
     `,` or `, `, nothing else. Raises ValueError naming the reason on any
-    violation, including a duplicate identifier."""
+    violation, including a duplicate identifier. `flag` names the
+    command-line flag `value` was drafted for in the raised message — it
+    defaults to `--covers`, but a caller parsing a `--partial-covers` value
+    (or a ledger token derived from neither flag) passes its own name so the
+    violation text names the site that actually produced the value, not
+    whichever flag this function happens to default to."""
     if not value:
-        raise ValueError("--covers value is empty")
+        raise ValueError(f"{flag} value is empty")
     if not _COVERS_RE.match(value):
-        raise ValueError(f"--covers value is not a valid identifier list: {value!r}")
+        raise ValueError(f"{flag} value is not a valid identifier list: {value!r}")
     identifiers = [t.lstrip(" ") for t in value.split(",")]
     seen: set[str] = set()
     for identifier in identifiers:
         if identifier in seen:
-            raise ValueError(f"--covers value repeats identifier {identifier!r}")
+            raise ValueError(f"{flag} value repeats identifier {identifier!r}")
         seen.add(identifier)
     return identifiers
 
@@ -256,6 +264,7 @@ def main(argv: list[str]) -> int:
 
     if args.covers is None and args.partial_covers is None:
         _err("reason: at least one of --covers or --partial-covers is required")
+        _err(f"reason-code: {_NO_COVERAGE_LIST_GIVEN_REASON_CODE}")
         _err("failing closed — cannot certify an empty claim")
         return 2
 
@@ -293,22 +302,28 @@ def main(argv: list[str]) -> int:
     # than a separate code path, so the two flags cannot drift apart in what
     # they accept or in how they report a rejection.
     drafted: list[list[str]] = []
-    for value in (args.covers, args.partial_covers):
+    for value, flag in ((args.covers, "--covers"), (args.partial_covers, "--partial-covers")):
         if value is None:
             drafted.append([])
             continue
         try:
-            drafted.append(parse_covers(value))
+            drafted.append(parse_covers(value, flag))
         except ValueError as e:
             _err(f"reason: {e}")
             return 1
     covers, partial_covers = drafted
 
-    for identifiers in (covers, partial_covers):
+    # Both lists are checked before reporting, not short-circuited on the
+    # first, so a caller supplying both flags sees every unknown identifier
+    # in one pass instead of a second round trip per flag.
+    unknown_by_flag = []
+    for identifiers, flag in ((covers, "--covers"), (partial_covers, "--partial-covers")):
         unknown = [c for c in identifiers if c not in criteria]
         if unknown:
-            _err(f"reason: unknown criterion identifier(s): {', '.join(unknown)}")
-            return 1
+            unknown_by_flag.append(f"{flag} names unknown identifier(s): {', '.join(unknown)}")
+    if unknown_by_flag:
+        _err(f"reason: {'; '.join(unknown_by_flag)}")
+        return 1
 
     overlap = [c for c in covers if c in partial_covers]
     if overlap:

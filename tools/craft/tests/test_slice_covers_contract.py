@@ -488,3 +488,41 @@ def test_documented_partially_covers_field_example_certifies_against_the_real_ga
         f"{partial_value!r} must certify against a spec declaring those "
         f"criteria: {result.stderr}{result.stdout}"
     )
+
+
+def test_step9_no_coverage_list_given_reason_code_matches_real_gate_output_and_only_there():
+    """Step 9's exit-2 carve-out distinguishing 'fix this invocation' from
+    'fix the spec record' must key on the real gate's own `no-coverage-list-
+    given` reason-code — present in the real gate's stderr on the
+    neither-flag path, and absent from the zero-identifier carve-out's own
+    exit-2 path, since the two name different faults and different
+    remedies."""
+    step9 = _step("### 9. Materialize the parent task")
+    match = re.search(r"reason-code:\s*(no-coverage-list-given)", step9)
+    assert match, (
+        "slice/SKILL.md step 9 must document the no-coverage-list-given "
+        "reason-code as the neither-flag carve-out's discriminator"
+    )
+    token_line = f"reason-code: {match.group(1)}"
+
+    neither_result = subprocess.run(
+        [sys.executable, str(GATE)],
+        input=NINE_CRITERIA_SPEC,
+        capture_output=True,
+        text=True,
+    )
+    zero_result = subprocess.run(
+        [sys.executable, str(GATE), "--covers", "AC1"],
+        input=ZERO_CRITERIA_SPEC,
+        capture_output=True,
+        text=True,
+    )
+
+    assert token_line in neither_result.stderr, (
+        f"the documented reason-code {token_line!r} must appear in the real "
+        f"gate's stderr when neither flag is given: {neither_result.stderr}"
+    )
+    assert token_line not in zero_result.stderr, (
+        f"the documented reason-code {token_line!r} must not appear on the "
+        f"unrelated zero-identifier exit-2 path: {zero_result.stderr}"
+    )

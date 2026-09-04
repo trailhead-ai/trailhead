@@ -115,6 +115,13 @@ when both fields are present, since a parent can carry either field alone or bot
 A parent carrying neither `**Covers:**` nor `**Partially covers:**` keeps the four-field legacy
 shape above unchanged.
 
+**Known boundary: this copy applies no shape check to `**Partially covers:**` at this site.**
+It is copied into the ledger line verbatim, exactly as `**Covers:**` already is — parity with
+an accepted risk, not a new one. The widened surface is contained downstream: a malformed
+partial-coverage token still fails the candidate-set gate closed
+(`reason-code: malformed-coverage-token`), it does not silently certify. This carve-out adds one
+more field to the same inherited surface, not a new kind of gap.
+
 **This reconcile query is fail-closed too.** If the `lore search` call errors, or its output
 cannot be parsed into a definite list of done slices, treat that as blocking: refuse and report
 the search failure, rather than proceeding as though nothing has shipped — an unreported error
@@ -385,6 +392,12 @@ definition, so it drafts no `--covers` value and never invokes the gate above �
 writes no `**Covers:**` field, exactly as the zero-identifier legacy case does, but for the
 opposite reason: not because the spec has nothing to certify against, but because this slice
 certifies nothing.
+
+**On exit 2 with `reason-code: no-coverage-list-given`, the remedy is to fix this invocation,
+not the spec record** — the one exit-2 reason above that names no fault in the spec at all.
+Neither `--covers` nor `--partial-covers` was drafted before the gate ran, so draft and pass at
+least one of the two flags and re-run, rather than treating this like every other exit-2 reason's
+"go fix the spec" remedy.
 
 **The value written into the `**Covers:**` field is the exact string the gate just certified** —
 never re-derived, re-typed, or reformatted after the gate exits 0. Nothing between certification

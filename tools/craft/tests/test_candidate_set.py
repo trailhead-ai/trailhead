@@ -96,6 +96,9 @@ PARTIAL_ONLY = (FIXTURES / "spec_candidate_partial_only.md").read_text(encoding=
 FULL_AND_PARTIAL_SAME_ENTRY = (
     FIXTURES / "spec_candidate_full_and_partial_same_entry.md"
 ).read_text(encoding="utf-8")
+MULTI_COVERS_WITH_PARTIAL = (
+    FIXTURES / "spec_candidate_multi_covers_with_partial.md"
+).read_text(encoding="utf-8")
 PARTIAL_THEN_FULL = (FIXTURES / "spec_candidate_partial_then_full.md").read_text(
     encoding="utf-8"
 )
@@ -554,6 +557,26 @@ def test_entry_with_both_covers_and_partial_covers_reports_both_correctly():
     assert tokens["partial"] == "AC2", tokens
     assert "AC2" in tokens["candidates"].split(", "), tokens
     assert "AC5" not in tokens["candidates"].split(", "), tokens
+
+
+def test_multi_identifier_covers_list_alongside_a_partial_field_splits_correctly():
+    """An entry carrying `covers AC1, AC2, partially covers AC3` — a
+    multi-identifier `covers` list, comma-separated, immediately followed by
+    the `partially covers` field — must still split the partial field off
+    before the greedy `covers` group is applied to what remains. Every
+    active fixture up to now paired a comma-free `covers` value with a
+    partial field; this is the shape that would break if the split ran
+    the other way around, since a greedy `covers` pattern would otherwise
+    swallow the trailing `partially covers` field as part of its own
+    comma-separated list."""
+    r = _run(MULTI_COVERS_WITH_PARTIAL)
+    assert r.returncode == 0, r.stderr + r.stdout
+    tokens = _tokens(r.stdout)
+    assert tokens["covered"] == "AC1, AC2", tokens
+    assert tokens["partial"] == "AC3", tokens
+    candidates = tokens["candidates"].split(", ")
+    assert "AC3" in candidates, tokens
+    assert "AC1" not in candidates and "AC2" not in candidates, tokens
 
 
 def test_partial_then_full_over_the_same_identifier_reports_it_fully_covered():
