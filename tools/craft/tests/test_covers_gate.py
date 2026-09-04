@@ -62,10 +62,16 @@ _ZERO_CRITERIA_REASON_CODE = "reason-code: zero-criterion-identifiers"
 _DUPLICATE_AC_HEADING_REASON_CODE = "reason-code: duplicate-acceptance-criteria-heading"
 
 
-def _run(covers: str | None, spec_body: str) -> subprocess.CompletedProcess:
+def _run(
+    covers: str | None,
+    spec_body: str,
+    partial_covers: str | None = None,
+) -> subprocess.CompletedProcess:
     cmd = [sys.executable, str(GATE)]
     if covers is not None:
         cmd += ["--covers", covers]
+    if partial_covers is not None:
+        cmd += ["--partial-covers", partial_covers]
     return subprocess.run(cmd, input=spec_body, capture_output=True, text=True)
 
 
@@ -109,7 +115,10 @@ def test_empty_covers_value_exits_1():
     assert r.returncode == 1, r.stderr + r.stdout
 
 
-def test_missing_covers_argument_exits_2():
+def test_neither_covers_nor_partial_covers_given_exits_2():
+    """At least one of `--covers` or `--partial-covers` is required; an
+    invocation naming neither flag must fail closed rather than certifying an
+    empty claim."""
     r = _run(None, NINE_CRITERIA_SPEC)
     assert r.returncode == 2, r.stderr + r.stdout
 
@@ -223,7 +232,6 @@ def test_covers_value_with_trailing_newline_fails_grammar_not_membership():
     r = _run("AC1\n", NINE_CRITERIA_SPEC)
     assert r.returncode == 1, r.stderr + r.stdout
     assert "not a valid identifier list" in r.stderr, r.stderr
-    assert "unknown criterion identifier" not in r.stderr, r.stderr
 
 
 # ---- heading casing: case-insensitive, still anchored at line start ------
@@ -420,3 +428,94 @@ def test_composed_html_comment_hides_its_own_internal_duplicate_heading():
     false duplicate and not anchor on either decoy."""
     r = _run("AC1,AC2", COMPOSED_COMMENT_HIDES_DUPLICATE_AC_HEADING_SPEC)
     assert r.returncode == 0, r.stderr + r.stdout
+
+
+# ---- --partial-covers: a drafted partial-coverage list certifies alongside --covers --
+
+
+def test_partial_covers_naming_declared_identifiers_exits_0():
+    r = _run("AC1", NINE_CRITERIA_SPEC, partial_covers="AC3")
+    assert r.returncode == 0, r.stderr + r.stdout
+
+
+def test_partial_covers_naming_undeclared_identifier_exits_1_and_names_it():
+    r = _run(None, NINE_CRITERIA_SPEC, partial_covers="AC12")
+    assert r.returncode == 1, r.stderr + r.stdout
+    assert "AC12" in r.stderr
+
+
+def test_partial_covers_violating_grammar_exits_1():
+    r = _run(None, NINE_CRITERIA_SPEC, partial_covers="AC3 also partial")
+    assert r.returncode == 1, r.stderr + r.stdout
+
+
+def test_partial_covers_repeating_identifier_exits_1_with_no_covers_given():
+    """The duplicate guard comes from the shared `parse_covers` — asserted at
+    the `--partial-covers` call site specifically, with no `--covers` given,
+    so a future refactor that stops sharing `parse_covers` between the two
+    flags cannot silently drop the check on this path."""
+    r = _run(None, NINE_CRITERIA_SPEC, partial_covers="AC3,AC3")
+    assert r.returncode == 1, r.stderr + r.stdout
+    assert "repeats identifier" in r.stderr, r.stderr
+
+
+def test_partial_covers_alone_with_no_covers_exits_0():
+    """The AC5 case — a slice delivers only part of a criterion and nothing
+    else."""
+    r = _run(None, NINE_CRITERIA_SPEC, partial_covers="AC5")
+    assert r.returncode == 0, r.stderr + r.stdout
+
+
+def test_covers_and_partial_covers_together_over_disjoint_sets_exits_0():
+    r = _run("AC1,AC2", NINE_CRITERIA_SPEC, partial_covers="AC3,AC4")
+    assert r.returncode == 0, r.stderr + r.stdout
+
+
+def test_same_identifier_in_both_lists_exits_1_and_names_the_overlap():
+    r = _run("AC1,AC2", NINE_CRITERIA_SPEC, partial_covers="AC2,AC3")
+    assert r.returncode == 1, r.stderr + r.stdout
+    assert "AC2" in r.stderr
+
+
+# ---- parse_covers names the flag that was actually passed -----------------
+
+
+def test_covers_grammar_violation_still_names_the_covers_flag():
+    r = _run("not-an-id", NINE_CRITERIA_SPEC)
+    assert r.returncode == 1, r.stderr + r.stdout
+    assert "--covers value" in r.stderr, r.stderr
+
+
+def test_partial_covers_grammar_violation_names_the_partial_covers_flag_not_covers():
+    """A grammar violation on the `--partial-covers` path must name
+    `--partial-covers` in its `reason:` text, never the `--covers` flag the
+    caller never passed."""
+    r = _run(None, NINE_CRITERIA_SPEC, partial_covers="not-an-id")
+    assert r.returncode == 1, r.stderr + r.stdout
+    assert "--partial-covers value" in r.stderr, r.stderr
+    assert "--covers value" not in r.stderr, r.stderr
+
+
+# ---- unknown-identifier stderr names the source flag and reports both lists --
+
+
+def test_unknown_identifiers_in_both_lists_are_named_by_flag_in_one_pass():
+    """An invocation with an unknown identifier in each list must not stop
+    after the first — both lists' unknowns are reported together, each
+    named by the flag it came from, so a caller supplying both flags does
+    not need a second round trip."""
+    r = _run("AC12", NINE_CRITERIA_SPEC, partial_covers="AC13")
+    assert r.returncode == 1, r.stderr + r.stdout
+    assert "--covers" in r.stderr, r.stderr
+    assert "--partial-covers" in r.stderr, r.stderr
+    assert "AC12" in r.stderr, r.stderr
+    assert "AC13" in r.stderr, r.stderr
+
+
+# ---- the neither-flag exit-2 path carries its own reason-code -------------
+
+
+def test_neither_covers_nor_partial_covers_given_carries_its_own_reason_code():
+    r = _run(None, NINE_CRITERIA_SPEC)
+    assert r.returncode == 2, r.stderr + r.stdout
+    assert "reason-code: no-coverage-list-given" in r.stderr, r.stderr

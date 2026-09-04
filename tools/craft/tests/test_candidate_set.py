@@ -92,6 +92,40 @@ COMPOSED_COMMENT_HIDES_DUPLICATE_SLICES_HEADING = (
 DUPLICATE_AC_AND_SLICES_HEADINGS = (
     FIXTURES / "spec_duplicate_ac_and_slices_headings.md"
 ).read_text(encoding="utf-8")
+PARTIAL_ONLY = (FIXTURES / "spec_candidate_partial_only.md").read_text(encoding="utf-8")
+FULL_AND_PARTIAL_SAME_ENTRY = (
+    FIXTURES / "spec_candidate_full_and_partial_same_entry.md"
+).read_text(encoding="utf-8")
+MULTI_COVERS_WITH_PARTIAL = (
+    FIXTURES / "spec_candidate_multi_covers_with_partial.md"
+).read_text(encoding="utf-8")
+PARTIAL_THEN_FULL = (FIXTURES / "spec_candidate_partial_then_full.md").read_text(
+    encoding="utf-8"
+)
+FULL_THEN_PARTIAL = (FIXTURES / "spec_candidate_full_then_partial.md").read_text(
+    encoding="utf-8"
+)
+LEGACY_WITH_MODERN_PARTIAL = (
+    FIXTURES / "spec_candidate_legacy_with_modern_partial.md"
+).read_text(encoding="utf-8")
+UNDECLARED_PARTIAL_COVERAGE = (
+    FIXTURES / "spec_candidate_undeclared_partial_coverage.md"
+).read_text(encoding="utf-8")
+MALFORMED_PARTIAL_TOKEN = (
+    FIXTURES / "spec_candidate_malformed_partial_token.md"
+).read_text(encoding="utf-8")
+WRAPPED_LEDGER_PARTIAL = (
+    FIXTURES / "spec_candidate_wrapped_ledger_partial.md"
+).read_text(encoding="utf-8")
+FORGED_PARTIAL_IN_FENCE = (
+    FIXTURES / "spec_candidate_forged_partial_in_fence.md"
+).read_text(encoding="utf-8")
+FORGED_PARTIAL_IN_HTML_COMMENT = (
+    FIXTURES / "spec_candidate_forged_partial_in_html_comment.md"
+).read_text(encoding="utf-8")
+TORN_APPEND_PARTIAL = (FIXTURES / "spec_candidate_torn_append_partial.md").read_text(
+    encoding="utf-8"
+)
 
 _UNDECLARED_REASON_CODE = "reason-code: undeclared-covered-identifier"
 _MALFORMED_REASON_CODE = "reason-code: malformed-coverage-token"
@@ -487,3 +521,176 @@ def test_composed_html_comment_hides_its_own_internal_duplicate_slices_heading()
     assert tokens["covered"] == "AC1", tokens
     assert tokens["candidates"] == "AC2", tokens
     assert tokens["complete-eligible"] == "yes", tokens
+
+
+# ---- 16. partial coverage: a criterion covered only partially stays a candidate --
+
+
+def test_partial_only_entry_reports_partial_and_keeps_the_criterion_a_candidate():
+    """An entry carrying only `partially covers AC2` puts AC2 on the `partial:`
+    line and leaves it in `candidates:` — this is AC6, the criterion the whole
+    slice exists for."""
+    r = _run(PARTIAL_ONLY)
+    assert r.returncode == 0, r.stderr + r.stdout
+    tokens = _tokens(r.stdout)
+    assert tokens["partial"] == "AC2", tokens
+    assert "AC2" in tokens["candidates"].split(", "), tokens
+    assert tokens["covered"] == "none", tokens
+
+
+def test_partial_only_entry_alone_is_modern_and_stays_eligible():
+    """A single entry carrying only a partial field is a modern entry for
+    eligibility purposes — it alone does not force `complete-eligible: no`."""
+    r = _run(PARTIAL_ONLY)
+    assert r.returncode == 0, r.stderr + r.stdout
+    tokens = _tokens(r.stdout)
+    assert tokens["complete-eligible"] == "yes", tokens
+
+
+def test_entry_with_both_covers_and_partial_covers_reports_both_correctly():
+    """An entry carrying `covers AC5, partially covers AC2` reports AC5 covered,
+    AC2 partial, and AC2 still a candidate."""
+    r = _run(FULL_AND_PARTIAL_SAME_ENTRY)
+    assert r.returncode == 0, r.stderr + r.stdout
+    tokens = _tokens(r.stdout)
+    assert tokens["covered"] == "AC5", tokens
+    assert tokens["partial"] == "AC2", tokens
+    assert "AC2" in tokens["candidates"].split(", "), tokens
+    assert "AC5" not in tokens["candidates"].split(", "), tokens
+
+
+def test_multi_identifier_covers_list_alongside_a_partial_field_splits_correctly():
+    """An entry carrying `covers AC1, AC2, partially covers AC3` — a
+    multi-identifier `covers` list, comma-separated, immediately followed by
+    the `partially covers` field — must still split the partial field off
+    before the greedy `covers` group is applied to what remains. Every
+    active fixture up to now paired a comma-free `covers` value with a
+    partial field; this is the shape that would break if the split ran
+    the other way around, since a greedy `covers` pattern would otherwise
+    swallow the trailing `partially covers` field as part of its own
+    comma-separated list."""
+    r = _run(MULTI_COVERS_WITH_PARTIAL)
+    assert r.returncode == 0, r.stderr + r.stdout
+    tokens = _tokens(r.stdout)
+    assert tokens["covered"] == "AC1, AC2", tokens
+    assert tokens["partial"] == "AC3", tokens
+    candidates = tokens["candidates"].split(", ")
+    assert "AC3" in candidates, tokens
+    assert "AC1" not in candidates and "AC2" not in candidates, tokens
+
+
+def test_partial_then_full_over_the_same_identifier_reports_it_fully_covered():
+    """Two entries, one partial and a later one full over the same identifier,
+    report it fully covered and absent from both `partial:` and `candidates:`."""
+    r = _run(PARTIAL_THEN_FULL)
+    assert r.returncode == 0, r.stderr + r.stdout
+    tokens = _tokens(r.stdout)
+    assert tokens["covered"] == "AC2", tokens
+    assert tokens["partial"] == "none", tokens
+    assert "AC2" not in tokens["candidates"].split(", "), tokens
+
+
+def test_full_then_partial_over_the_same_identifier_produces_the_identical_result():
+    """The same pair in the OPPOSITE ledger order produces the identical
+    result — full wins independent of order, per the union invariant."""
+    r = _run(FULL_THEN_PARTIAL)
+    assert r.returncode == 0, r.stderr + r.stdout
+    tokens = _tokens(r.stdout)
+    assert tokens["covered"] == "AC2", tokens
+    assert tokens["partial"] == "none", tokens
+    assert "AC2" not in tokens["candidates"].split(", "), tokens
+
+
+def test_legacy_entry_alongside_a_modern_partial_entry_still_forces_ineligible():
+    """A ledger with a legacy entry (neither field) still reports
+    `complete-eligible: no`, even alongside a modern partial-only entry."""
+    r = _run(LEGACY_WITH_MODERN_PARTIAL)
+    assert r.returncode == 0, r.stderr + r.stdout
+    tokens = _tokens(r.stdout)
+    assert tokens["complete-eligible"] == "no", tokens
+
+
+def test_partial_prints_none_when_no_entry_carries_the_field():
+    """`partial:` prints `none` when no entry carries the field."""
+    r = _run(TWO_LINES_TWO_COVERED)
+    assert r.returncode == 0, r.stderr + r.stdout
+    tokens = _tokens(r.stdout)
+    assert tokens["partial"] == "none", tokens
+
+
+def test_partial_token_naming_undeclared_identifier_exits_1():
+    """A partial token naming an undeclared identifier exits 1 with
+    `reason-code: undeclared-covered-identifier`, matching the full-coverage
+    path."""
+    r = _run(UNDECLARED_PARTIAL_COVERAGE)
+    assert r.returncode == 1, r.stderr + r.stdout
+    assert _UNDECLARED_REASON_CODE in r.stderr, r.stderr
+    assert "AC99" in r.stderr
+
+
+def test_malformed_partial_token_exits_2():
+    """A malformed partial token exits 2 with `reason-code:
+    malformed-coverage-token`."""
+    r = _run(MALFORMED_PARTIAL_TOKEN)
+    assert r.returncode == 2, r.stderr + r.stdout
+    assert _MALFORMED_REASON_CODE in r.stderr, r.stderr
+
+
+def test_malformed_partial_token_remedy_names_the_token_not_a_nonexistent_flag():
+    """Same remedy-naming contract as the full-coverage malformed token
+    above, but for the `partially covers` field: the message must name the
+    ledger coverage token, never `--partial-covers` — a flag this gate
+    accepts under neither name."""
+    r = _run(MALFORMED_PARTIAL_TOKEN)
+    assert r.returncode == 2, r.stderr + r.stdout
+    assert "--partial-covers" not in r.stderr, r.stderr
+    assert "ledger coverage token" in r.stderr, r.stderr
+
+
+def test_wrapped_ledger_entries_with_partial_fields_are_scored_as_logical_entries():
+    """Fixture the WRAPPED ledger shape, not only the tidy single-line one — a
+    partial-coverage fixture that wraps its value claim across several
+    physical lines, with the trailing parenthetical on a continuation line."""
+    r = _run(WRAPPED_LEDGER_PARTIAL)
+    assert r.returncode == 0, r.stderr + r.stdout
+    tokens = _tokens(r.stdout)
+    assert tokens["covered"] == "AC5", tokens
+    assert set(tokens["partial"].split(", ")) == {"AC2", "AC7"}, tokens
+    assert tokens["complete-eligible"] == "yes", tokens
+
+
+def test_forged_partial_token_inside_fenced_block_contributes_nothing():
+    """A partial token inside a fenced code block contributes nothing — only
+    the real ledger entry outside it counts."""
+    r = _run(FORGED_PARTIAL_IN_FENCE)
+    assert r.returncode == 0, r.stderr + r.stdout
+    tokens = _tokens(r.stdout)
+    assert tokens["partial"] == "AC2", tokens
+    assert tokens["covered"] == "none", tokens
+    assert tokens["candidates"] == "AC1, AC2, AC3, AC4, AC5, AC6, AC7, AC8, AC9", tokens
+
+
+def test_forged_partial_token_inside_html_comment_contributes_nothing():
+    """A partial token inside an HTML comment contributes nothing — only the
+    real ledger entry outside the comment counts."""
+    r = _run(FORGED_PARTIAL_IN_HTML_COMMENT)
+    assert r.returncode == 0, r.stderr + r.stdout
+    tokens = _tokens(r.stdout)
+    assert tokens["partial"] == "AC1", tokens
+    assert tokens["covered"] == "none", tokens
+    assert tokens["candidates"] == "AC1, AC2", tokens
+
+
+def test_torn_append_over_a_partial_entry_under_reports_rather_than_fabricates():
+    """A ledger whose entries interleave as a concurrent double-append would —
+    a partial-covering entry torn by an unmarked interleaved line — still
+    fails closed under the dual-field shape: it under-reports coverage rather
+    than fabricating it. The torn entry's own partial coverage is lost, but
+    the second entry's full coverage still counts."""
+    r = _run(TORN_APPEND_PARTIAL)
+    assert r.returncode == 0, r.stderr + r.stdout
+    tokens = _tokens(r.stdout)
+    assert tokens["covered"] == "AC3", tokens
+    assert tokens["partial"] == "none", tokens
+    assert "AC2" in tokens["candidates"].split(", "), tokens
+    assert tokens["complete-eligible"] == "no", tokens

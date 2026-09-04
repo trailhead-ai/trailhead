@@ -1,19 +1,29 @@
 #!/usr/bin/env python3
-"""Covers gate — certifies a drafted `--covers` identifier list against a
-spec's declared acceptance criteria, BEFORE a slice parent record is written.
+"""Covers gate — certifies a drafted `--covers` and/or `--partial-covers`
+identifier list against a spec's declared acceptance criteria, BEFORE a
+slice parent record is written.
 
 Usage:
     lore record show spec/<name> | covers_gate.py --covers "AC2, AC5"
+    lore record show spec/<name> | covers_gate.py --partial-covers "AC7"
+    lore record show spec/<name> | covers_gate.py --covers "AC2" --partial-covers "AC5"
 
-The spec body arrives on stdin; the drafted identifier list is a `--covers`
-argument composed by the caller from identifiers alone, never from vault
-prose. The gate reads no parent record and writes no temp file — it runs
-while the parent body is still a string in hand.
+The spec body arrives on stdin; the drafted identifier list(s) are `--covers`
+and/or `--partial-covers` arguments composed by the caller from identifiers
+alone, never from vault prose. At least one of the two flags is required — a
+gate invoked with neither fails closed rather than certifying an empty
+claim. Both flags share the same grammar and go through the same
+`parse_covers`, so they can never disagree about what a valid identifier
+list looks like. An identifier named in both lists is rejected: a slice
+cannot coherently claim it both fully and partially delivers the same
+criterion. The gate reads no parent record and writes no temp file — it
+runs while the parent body is still a string in hand.
 
-The `--covers` grammar is exact and identifier-only: one or more `ACn`
-tokens, comma-separated, nothing else. This is what discharges "copies no
-criterion prose" — prose cannot enter a field whose grammar admits only
-identifiers — so no similarity heuristic appears anywhere in this gate.
+The `--covers` / `--partial-covers` grammar is exact and identifier-only:
+one or more `ACn` tokens, comma-separated, nothing else. This is what
+discharges "copies no criterion prose" — prose cannot enter a field whose
+grammar admits only identifiers — so no similarity heuristic appears
+anywhere in this gate.
 
 One parser, `parse_criteria`, turns a spec body into its ordered list of
 criterion identifiers: top-level `- ` bullets under a `## Acceptance
@@ -43,20 +53,26 @@ or a CommonMark reader, so a heading or bullet hidden behind one inside an
 ordinary prose paragraph is ordinary line content here too, not structure.
 
 Exit codes:
-    0  clean   — every covered identifier names a real spec criterion, and
-       the `--covers` grammar is valid.
-    1  violation — bad grammar, an unknown identifier, or a duplicate
-       identifier (prints a `reason:` line to stderr).
-    2  error   — fail-closed: empty or non-UTF-8 stdin, no `## Acceptance
-       Criteria` heading in the spec body, a spec declaring zero criterion
-       identifiers under that heading (the legacy shape, distinct reason
-       line plus a stable `reason-code: zero-criterion-identifiers` line
-       unique to this path — the caller's machine-readable carve-out
-       discriminator), a second unmasked `## Acceptance Criteria` heading
+    0  clean   — every identifier in every list given names a real spec
+       criterion, both lists' grammar is valid, and the two lists share no
+       identifier.
+    1  violation — bad grammar in either list, an unknown identifier in
+       either list, a duplicate identifier within a list, or an identifier
+       claimed in both `--covers` and `--partial-covers` (prints a
+       `reason:` line to stderr).
+    2  error   — fail-closed: neither `--covers` nor `--partial-covers`
+       given (`reason-code: no-coverage-list-given` — the caller's own
+       invocation is what needs fixing here, not the spec), empty or
+       non-UTF-8 stdin, no `## Acceptance Criteria` heading
+       in the spec body, a spec declaring zero criterion identifiers under
+       that heading (the legacy shape, distinct reason line plus a stable
+       `reason-code: zero-criterion-identifiers` line unique to this path —
+       the caller's machine-readable carve-out discriminator), or a second
+       unmasked `## Acceptance Criteria` heading
        (`reason-code: duplicate-acceptance-criteria-heading` — a
        first-match-wins scan would silently certify against whichever
-       occurrence it saw first), or a missing `--covers` argument. NEVER
-       exits 0 when it could not actually certify the drafted list.
+       occurrence it saw first). NEVER exits 0 when it could not actually
+       certify the drafted list(s).
 """
 
 from __future__ import annotations
@@ -73,6 +89,7 @@ _FENCE_START_RE = re.compile(r"^(`{3,}|~{3,})")
 _HTML_COMMENT_START_RE = re.compile(r"^<!--")
 _ZERO_CRITERIA_REASON_CODE = "zero-criterion-identifiers"
 _DUPLICATE_AC_HEADING_REASON_CODE = "duplicate-acceptance-criteria-heading"
+_NO_COVERAGE_LIST_GIVEN_REASON_CODE = "no-coverage-list-given"
 # CommonMark line endings only — \r\n, \r, \n — and nothing else. Python's
 # str.splitlines() additionally breaks on \v, \f, \x1c-\x1e, NEL (\x85),
 # U+2028 LINE SEPARATOR, and U+2029 PARAGRAPH SEPARATOR: none of those render
@@ -209,29 +226,47 @@ def parse_criteria(spec_body: str) -> list[str]:
     return identifiers
 
 
-def parse_covers(value: str) -> list[str]:
+def parse_covers(value: str, flag: str = "--covers") -> list[str]:
     """Parse the `--covers` grammar: one or more `ACn` tokens separated by
     `,` or `, `, nothing else. Raises ValueError naming the reason on any
-    violation, including a duplicate identifier."""
+    violation, including a duplicate identifier. `flag` names the
+    command-line flag `value` was drafted for in the raised message — it
+    defaults to `--covers`, but a caller parsing a `--partial-covers` value
+    (or a ledger token derived from neither flag) passes its own name so the
+    violation text names the site that actually produced the value, not
+    whichever flag this function happens to default to."""
     if not value:
-        raise ValueError("--covers value is empty")
+        raise ValueError(f"{flag} value is empty")
     if not _COVERS_RE.match(value):
-        raise ValueError(f"--covers value is not a valid identifier list: {value!r}")
+        raise ValueError(f"{flag} value is not a valid identifier list: {value!r}")
     identifiers = [t.lstrip(" ") for t in value.split(",")]
     seen: set[str] = set()
     for identifier in identifiers:
         if identifier in seen:
-            raise ValueError(f"--covers value repeats identifier {identifier!r}")
+            raise ValueError(f"{flag} value repeats identifier {identifier!r}")
         seen.add(identifier)
     return identifiers
 
 
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(
-        description="Certify a drafted --covers identifier list against a spec's acceptance criteria."
+        description=(
+            "Certify a drafted --covers and/or --partial-covers identifier "
+            "list against a spec's acceptance criteria."
+        )
     )
-    ap.add_argument("--covers", required=True, help="comma-separated ACn identifiers, e.g. 'AC2, AC5'")
+    ap.add_argument("--covers", help="comma-separated ACn identifiers fully covered, e.g. 'AC2, AC5'")
+    ap.add_argument(
+        "--partial-covers",
+        help="comma-separated ACn identifiers partially covered, e.g. 'AC2, AC5'",
+    )
     args = ap.parse_args(argv)
+
+    if args.covers is None and args.partial_covers is None:
+        _err("reason: at least one of --covers or --partial-covers is required")
+        _err(f"reason-code: {_NO_COVERAGE_LIST_GIVEN_REASON_CODE}")
+        _err("failing closed — cannot certify an empty claim")
+        return 2
 
     try:
         spec_body = sys.stdin.buffer.read().decode("utf-8")
@@ -262,15 +297,40 @@ def main(argv: list[str]) -> int:
         _err(f"reason-code: {_ZERO_CRITERIA_REASON_CODE}")
         return 2
 
-    try:
-        covers = parse_covers(args.covers)
-    except ValueError as e:
-        _err(f"reason: {e}")
+    # Both drafted lists go through one grammar pass, then one membership
+    # pass, in that order — a flag omitted contributes an empty list rather
+    # than a separate code path, so the two flags cannot drift apart in what
+    # they accept or in how they report a rejection.
+    drafted: list[list[str]] = []
+    for value, flag in ((args.covers, "--covers"), (args.partial_covers, "--partial-covers")):
+        if value is None:
+            drafted.append([])
+            continue
+        try:
+            drafted.append(parse_covers(value, flag))
+        except ValueError as e:
+            _err(f"reason: {e}")
+            return 1
+    covers, partial_covers = drafted
+
+    # Both lists are checked before reporting, not short-circuited on the
+    # first, so a caller supplying both flags sees every unknown identifier
+    # in one pass instead of a second round trip per flag.
+    unknown_by_flag = []
+    for identifiers, flag in ((covers, "--covers"), (partial_covers, "--partial-covers")):
+        unknown = [c for c in identifiers if c not in criteria]
+        if unknown:
+            unknown_by_flag.append(f"{flag} names unknown identifier(s): {', '.join(unknown)}")
+    if unknown_by_flag:
+        _err(f"reason: {'; '.join(unknown_by_flag)}")
         return 1
 
-    unknown = [c for c in covers if c not in criteria]
-    if unknown:
-        _err(f"reason: unknown criterion identifier(s): {', '.join(unknown)}")
+    overlap = [c for c in covers if c in partial_covers]
+    if overlap:
+        _err(
+            "reason: identifier(s) claimed both fully and partially "
+            f"covered: {', '.join(overlap)}"
+        )
         return 1
 
     return 0

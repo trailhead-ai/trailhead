@@ -130,9 +130,10 @@ def _render(template: str, **values: str) -> str:
 
 def test_legacy_parent_with_no_covers_field_yields_a_ledger_line_with_no_coverage_field():
     templates = _ledger_line_templates()
-    assert len(templates) == 2, (
-        "slice/SKILL.md step 4 must document exactly two ledger-line shapes — "
-        f"one with no coverage field and one carrying it; found {templates}"
+    assert len(templates) == 4, (
+        "slice/SKILL.md step 4 must document exactly four ledger-line shapes — "
+        "no coverage, covers-only, partial-only, and covers-plus-partial; "
+        f"found {templates}"
     )
     legacy = templates[0]  # documented first: the four-field, no-coverage shape
     rendered = _render(
@@ -326,4 +327,202 @@ def test_covers_allowlist_shape_rejects_free_text_prose():
     assert re.match(shape, prose) is None, (
         f"the documented --covers allow-list shape {shape!r} must reject "
         f"free-text prose that carries no ACn token: {prose!r}"
+    )
+
+
+# ---- --partial-covers gets the identical positive allow-list -----------------
+#
+# Step 9 documents `**Partially covers:**` as taking the identical
+# `^AC\d+(, ?AC\d+)*$` shape check `--covers` already takes, validated before
+# any substitution. These tests pin that the documented partial-covers shape
+# is the real gate's own `--partial-covers` grammar, not a copy of the
+# `--covers` wording that happens to look similar.
+
+
+def _documented_partial_covers_shape() -> str:
+    step9 = _step("### 9. Materialize the parent task")
+    match = re.search(
+        r"Partially covers.*?shape\s*\n?`([^`]+)`\s*step 9 already applies to `--covers`",
+        step9,
+        re.DOTALL,
+    )
+    assert match, (
+        "slice/SKILL.md step 9 must document a positive allow-list shape for "
+        "the drafted --partial-covers value"
+    )
+    return match.group(1)
+
+
+def test_step9_documents_before_substitution_for_partial_covers_too():
+    step9 = _step("### 9. Materialize the parent task")
+    partial_section = step9[step9.index("**Partially covers:**") :]
+    assert re.search(r"before\s+any\s+substitution", partial_section, re.IGNORECASE), (
+        "slice/SKILL.md step 9 must state the --partial-covers allow-list "
+        "check runs before substitution, mirroring the --covers guard"
+    )
+
+
+def test_partial_covers_allowlist_shape_is_identical_to_the_covers_shape():
+    """Step 9 states the partial-covers value takes 'the identical' shape —
+    pin that the two documented shapes are literally the same regex, so a
+    future edit that lets them drift apart is caught here rather than only
+    at review time."""
+    assert _documented_partial_covers_shape() == _documented_covers_shape()
+
+
+def test_partial_covers_allowlist_shape_accepts_the_documented_worked_example():
+    shape = _documented_partial_covers_shape()
+    assert re.match(shape, "AC7"), (
+        f"the documented --partial-covers allow-list shape {shape!r} must "
+        "accept the worked example value 'AC7'"
+    )
+
+
+def test_partial_covers_allowlist_shape_rejects_a_value_carrying_an_unescaped_double_quote():
+    shape = _documented_partial_covers_shape()
+    malicious = 'AC7"; touch pwned #'
+    assert re.match(shape, malicious) is None, (
+        f"the documented --partial-covers allow-list shape {shape!r} must "
+        f"reject a value carrying an unescaped double quote: {malicious!r}"
+    )
+
+
+def test_partial_covers_allowlist_shape_rejects_a_value_carrying_a_backtick():
+    shape = _documented_partial_covers_shape()
+    malicious = "AC7`whoami`"
+    assert re.match(shape, malicious) is None, (
+        f"the documented --partial-covers allow-list shape {shape!r} must "
+        f"reject a value carrying a backtick: {malicious!r}"
+    )
+
+
+def test_partial_covers_allowlist_shape_rejects_a_value_carrying_a_newline():
+    shape = _documented_partial_covers_shape()
+    malicious = "AC7\nrm -rf /"
+    assert re.match(shape, malicious) is None, (
+        f"the documented --partial-covers allow-list shape {shape!r} must "
+        f"reject a value carrying a newline: {malicious!r}"
+    )
+
+
+def test_partial_covers_allowlist_shape_rejects_free_text_prose():
+    shape = _documented_partial_covers_shape()
+    prose = "this partially covers the login flow"
+    assert re.match(shape, prose) is None, (
+        f"the documented --partial-covers allow-list shape {shape!r} must "
+        f"reject free-text prose that carries no ACn token: {prose!r}"
+    )
+
+
+# ---- the certify pipe passes --covers and --partial-covers as two distinct
+#      quoted arguments, never one interpolated string ----------------------
+
+
+def _documented_dual_flag_invocation() -> re.Match[str]:
+    step9 = _step("### 9. Materialize the parent task")
+    match = re.search(
+        r'covers_gate\.py --covers "([^"]+)" --partial-covers "([^"]+)"', step9
+    )
+    assert match, (
+        "slice/SKILL.md step 9 must document a certify invocation passing "
+        "both --covers and --partial-covers"
+    )
+    return match
+
+
+def test_step9_documents_covers_and_partial_covers_as_two_distinct_quoted_arguments():
+    """Reject a single interpolated string in place of two flags: a
+    combined value like `--covers "AC2, AC5, partially covers AC7"` would
+    match no `--partial-covers` flag at all and must not satisfy this
+    extraction."""
+    match = _documented_dual_flag_invocation()
+    covers_value, partial_value = match.group(1), match.group(2)
+    assert covers_value == "AC2, AC5"
+    assert partial_value == "AC7"
+    # the two values must never collapse into a single --covers argument
+    assert "partially covers" not in covers_value
+
+
+def test_documented_dual_flag_invocation_certifies_against_the_real_gate():
+    match = _documented_dual_flag_invocation()
+    covers_value, partial_value = match.group(1), match.group(2)
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(GATE),
+            "--covers",
+            covers_value,
+            "--partial-covers",
+            partial_value,
+        ],
+        input=NINE_CRITERIA_SPEC,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, (
+        f"slice/SKILL.md's documented dual-flag invocation "
+        f"(--covers {covers_value!r} --partial-covers {partial_value!r}) must "
+        f"exit 0 against a spec declaring those criteria: {result.stderr}{result.stdout}"
+    )
+
+
+def test_documented_partially_covers_field_example_certifies_against_the_real_gate():
+    """Step 9 must show `**Partially covers:**`'s written form, the same as
+    `**Covers:**`'s. Extract it and run the value through the real gate
+    (as --partial-covers, since --covers is not required for a lone partial
+    list) against a fixture spec declaring those identifiers."""
+    step9 = _step("### 9. Materialize the parent task")
+    match = re.search(r"\*\*Partially covers:\*\*\s*([A-Za-z0-9, ]+)", step9)
+    assert match, "slice/SKILL.md step 9 must show the **Partially covers:** field's written form"
+    partial_value = match.group(1).strip()
+
+    result = subprocess.run(
+        [sys.executable, str(GATE), "--partial-covers", partial_value],
+        input=NINE_CRITERIA_SPEC,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, (
+        f"slice/SKILL.md's documented **Partially covers:** field example "
+        f"{partial_value!r} must certify against a spec declaring those "
+        f"criteria: {result.stderr}{result.stdout}"
+    )
+
+
+def test_step9_no_coverage_list_given_reason_code_matches_real_gate_output_and_only_there():
+    """Step 9's exit-2 carve-out distinguishing 'fix this invocation' from
+    'fix the spec record' must key on the real gate's own `no-coverage-list-
+    given` reason-code — present in the real gate's stderr on the
+    neither-flag path, and absent from the zero-identifier carve-out's own
+    exit-2 path, since the two name different faults and different
+    remedies."""
+    step9 = _step("### 9. Materialize the parent task")
+    match = re.search(r"reason-code:\s*(no-coverage-list-given)", step9)
+    assert match, (
+        "slice/SKILL.md step 9 must document the no-coverage-list-given "
+        "reason-code as the neither-flag carve-out's discriminator"
+    )
+    token_line = f"reason-code: {match.group(1)}"
+
+    neither_result = subprocess.run(
+        [sys.executable, str(GATE)],
+        input=NINE_CRITERIA_SPEC,
+        capture_output=True,
+        text=True,
+    )
+    zero_result = subprocess.run(
+        [sys.executable, str(GATE), "--covers", "AC1"],
+        input=ZERO_CRITERIA_SPEC,
+        capture_output=True,
+        text=True,
+    )
+
+    assert token_line in neither_result.stderr, (
+        f"the documented reason-code {token_line!r} must appear in the real "
+        f"gate's stderr when neither flag is given: {neither_result.stderr}"
+    )
+    assert token_line not in zero_result.stderr, (
+        f"the documented reason-code {token_line!r} must not appear on the "
+        f"unrelated zero-identifier exit-2 path: {zero_result.stderr}"
     )
