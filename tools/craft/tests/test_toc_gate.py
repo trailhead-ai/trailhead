@@ -22,6 +22,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).parent.parent
 GATE = REPO_ROOT / "plugins" / "craft" / "scripts" / "toc_gate.py"
 
@@ -183,7 +185,23 @@ class TestForgedStructure:
         )
         result = run(doc(tmp_path, body))
         assert result.returncode == 2
-        assert "contents block" in result.stderr.lower()
+        # Not merely "contents block" — "empty contents block" also contains that,
+        # and a gate that found the fenced example and then discarded its masked
+        # bullets would pass on the wrong message.
+        assert "no contents block" in result.stderr.lower()
+
+    def test_a_fenced_example_does_not_shadow_the_real_block(self, tmp_path):
+        """A document showing the convention and then using it is consistent.
+
+        Reading the illustration as the block finds one with no live entries,
+        which fails closed on a document that is in fact correct.
+        """
+        body = IN_AGREEMENT.replace(
+            "Opening preamble.",
+            "Opening preamble. The shape is:\n\n"
+            "```markdown\n<!-- toc:start -->\n- Illustration\n<!-- toc:end -->\n```",
+        )
+        assert run(doc(tmp_path, body)).returncode == 0
 
     def test_bullet_inside_a_nested_fence_is_not_an_entry(self, tmp_path):
         body = IN_AGREEMENT.replace(
@@ -219,3 +237,106 @@ class TestForgedStructure:
             "- A preamble bullet that is not an entry",
         )
         assert run(doc(tmp_path, body)).returncode == 0
+
+
+class TestIndentedHeadings:
+    """CommonMark allows up to three leading spaces on an ATX heading.
+
+    A section indented by one space renders identically to one at column 0, so
+    a gate that only matches column 0 lets a whole undeclared section through.
+    """
+
+    @pytest.mark.parametrize("indent", [" ", "  ", "   "])
+    def test_indented_heading_still_needs_an_entry(self, tmp_path, indent):
+        body = IN_AGREEMENT + f"\n{indent}## Undeclared\n\nText.\n"
+        result = run(doc(tmp_path, body))
+        assert result.returncode == 1
+        assert "Undeclared" in result.stderr
+
+    def test_indented_heading_may_be_declared(self, tmp_path):
+        body = IN_AGREEMENT.replace(
+            "  - Beta one\n", "  - Beta one\n- Declared\n"
+        ) + "\n ## Declared\n\nText.\n"
+        assert run(doc(tmp_path, body)).returncode == 0
+
+    def test_four_space_indent_is_a_code_block_not_a_section(self, tmp_path):
+        """At four spaces CommonMark reads an indented code block, not a heading.
+
+        Demanding an entry for it would send a reader to prose that renders as
+        a code sample.
+        """
+        body = IN_AGREEMENT + "\n    ## Not a heading, an indented code block\n"
+        assert run(doc(tmp_path, body)).returncode == 0
+
+
+class TestRepeatedTitles:
+    """Two sections may legitimately share a title; the counts must still line up."""
+
+    def test_a_repeated_section_needs_its_own_entry(self, tmp_path):
+        """Membership alone cannot see this: the title is already in the block."""
+        body = IN_AGREEMENT + "\n## Alpha\n\nA second section with the same title.\n"
+        result = run(doc(tmp_path, body))
+        assert result.returncode == 1
+        assert "Alpha" in result.stderr
+
+    def test_a_repeated_entry_needs_its_own_section(self, tmp_path):
+        body = IN_AGREEMENT.replace("- Beta\n", "- Beta\n- Alpha\n")
+        assert run(doc(tmp_path, body)).returncode == 1
+
+    def test_matching_repeats_are_clean(self, tmp_path):
+        body = IN_AGREEMENT.replace(
+            "  - Beta one\n", "  - Beta one\n- Alpha\n"
+        ) + "\n## Alpha\n\nText.\n"
+        assert run(doc(tmp_path, body)).returncode == 0
+
+
+class TestCommonMarkStructure:
+    """Structure is read with the masker the sibling gates already share.
+
+    A third gate deriving its own idea of what counts as a fence or a comment
+    is how two gates start disagreeing about the same document.
+    """
+
+    def test_tilde_fence_hides_a_template_heading(self, tmp_path):
+        body = IN_AGREEMENT + "\n~~~markdown\n## Findings\n~~~\n"
+        assert run(doc(tmp_path, body)).returncode == 0
+
+    def test_longer_fence_may_wrap_a_shorter_one(self, tmp_path):
+        body = IN_AGREEMENT + "\n````markdown\n```\n## Findings\n```\n````\n"
+        assert run(doc(tmp_path, body)).returncode == 0
+
+    def test_prose_naming_the_comment_opener_does_not_start_a_comment(self, tmp_path):
+        """A document explaining the convention writes `<!--` mid-sentence."""
+        body = IN_AGREEMENT.replace(
+            "Opening preamble.", "Opening preamble. The markers are `<!--` comments."
+        )
+        assert run(doc(tmp_path, body)).returncode == 0
+
+    def test_heading_inside_a_multi_line_comment_is_not_a_section(self, tmp_path):
+        body = IN_AGREEMENT + "\n<!--\n## Commented out\n-->\n"
+        assert run(doc(tmp_path, body)).returncode == 0
+
+    def test_unterminated_comment_exits_two(self, tmp_path):
+        body = IN_AGREEMENT + "\n<!--\nstill open at end of file\n"
+        assert run(doc(tmp_path, body)).returncode == 2
+
+    def test_crlf_input_is_read_the_same(self, tmp_path):
+        path = tmp_path / "crlf.md"
+        path.write_bytes(IN_AGREEMENT.replace("\n", "\r\n").encode("utf-8"))
+        assert run(path).returncode == 0
+
+    def test_closed_atx_heading_keeps_its_title(self, tmp_path):
+        """`## Alpha ##` and `## Alpha` are the same section to a reader."""
+        body = IN_AGREEMENT.replace("## Alpha\n", "## Alpha ##\n")
+        assert run(doc(tmp_path, body)).returncode == 0
+
+    def test_tab_indented_entry_is_a_nested_entry(self, tmp_path):
+        body = IN_AGREEMENT.replace("  - Beta one", "\t- Beta one")
+        assert run(doc(tmp_path, body)).returncode == 0
+
+    def test_a_second_contents_block_exits_two(self, tmp_path):
+        """A stale duplicate left behind by an edit must not pass unnoticed."""
+        body = IN_AGREEMENT + "\n<!-- toc:start -->\n- Alpha\n<!-- toc:end -->\n"
+        result = run(doc(tmp_path, body))
+        assert result.returncode == 2
+        assert "second" in result.stderr.lower() or "duplicate" in result.stderr.lower()

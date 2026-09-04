@@ -23,20 +23,26 @@ Block shape:
 
 Entries are plain bullets, never headings: an entry written as a heading would
 become a section of the document it is describing. A `##` section is a bullet at
-indent 0, a `###` section a bullet at indent 2; the sequence must match the
-document's own headings exactly, in order.
+the left margin and a `###` section an indented one — the documents carry two
+heading levels, so any indent means "nested" and the exact width, spaces or
+tabs, does not matter. The sequence must match the document's own headings
+exactly, in order and in count: two sections may share a title, but then the
+block names that title twice.
 
-Headings and markers inside fenced code blocks or HTML comments are template
-text and illustrations, not sections — they are excluded from both halves. An
-unterminated fence makes every heading below it unclassifiable, so the gate
-fails closed rather than guessing which side of it they fall on.
+Structure is read with `covers_gate._mask_fenced_lines`, the masker the sibling
+gates already share, so all three agree on what counts as a fence, an HTML
+comment, and a line ending. Headings and markers inside either are template
+text and illustrations, not sections. A fence or comment still open at end of
+file makes every line below it unclassifiable, so the gate fails closed rather
+than guessing which side of it they fall on.
 
 Exit codes:
     0  clean — block and headings agree
     1  drift — they disagree (prints a `reason:` line per disagreement)
-    2  error — fail-closed: path missing or unreadable, no contents block, an
-       unterminated contents block or code fence, or an empty block. NEVER
-       exits 0 when it could not actually certify the document.
+    2  error — fail-closed: path missing or unreadable, no contents block, more
+       than one contents block, an unterminated contents block, an unterminated
+       fence or comment, or an empty block. NEVER exits 0 when it could not
+       actually certify the document.
 """
 
 from __future__ import annotations
@@ -44,14 +50,28 @@ from __future__ import annotations
 import argparse
 import re
 import sys
+from collections import Counter
 from pathlib import Path
+
+_SCRIPT_DIR = Path(__file__).resolve().parent
+if str(_SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPT_DIR))
+
+from covers_gate import _COMMONMARK_LINE_RE, _mask_fenced_lines  # noqa: E402
 
 TOC_START = "<!-- toc:start -->"
 TOC_END = "<!-- toc:end -->"
 
-_HEADING_RE = re.compile(r"^(#{2,3}) (.+)$")
-_ENTRY_RE = re.compile(r"^( *)- (.+)$")
-_INDENT_PER_LEVEL = 2
+# Up to three leading spaces still render as a heading, and a closing run of
+# `#` is decoration rather than part of the title.
+_HEADING_RE = re.compile(r"^ {0,3}(#{2,3})[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$")
+_ENTRY_RE = re.compile(r"^([ \t]*)- (.+?)[ \t]*$")
+
+# A marker line stands in as ordinary text while the shared masker runs, so the
+# masker reports whether it sits inside a fence rather than that it is itself a
+# comment. It closes nothing, so substituting it changes no other line's state.
+_MARKER_STANDIN = "toc-marker-standin"
+_EOF_PROBE = "toc-eof-probe"
 
 
 class GateError(Exception):
@@ -62,41 +82,21 @@ def _err(msg: str) -> None:
     print(msg, file=sys.stderr)
 
 
-def _live_lines(text: str) -> list[tuple[int, str, bool]]:
-    """Classify every line as live prose or fenced/commented-out text.
-
-    Returns (line-number, line, is_live). Lines split on "\\n" only: U+2028 and
-    friends end a line for some renderers but are not line breaks here, so a
-    heading forged after one is never seen as a heading.
-    """
-    out: list[tuple[int, str, bool]] = []
-    fenced = False
-    commented = False
-    for lineno, line in enumerate(text.split("\n"), 1):
-        stripped = line.strip()
-        if not commented and stripped.startswith("```"):
-            fenced = not fenced
-            out.append((lineno, line, False))
-            continue
-        live = not fenced and not commented
-        if live and "<!--" in line and "-->" not in line.split("<!--", 1)[1]:
-            commented = True
-        elif commented and "-->" in line:
-            commented = False
-            live = False
-        out.append((lineno, line, live))
-    if fenced:
-        raise GateError("unterminated code fence — cannot classify the headings below it")
-    if commented:
-        raise GateError("unterminated HTML comment — cannot classify the lines below it")
-    return out
+def _read_structure(text: str) -> tuple[list[str], list[bool], list[bool]]:
+    """Split into lines and mask them twice: as written, and with the markers
+    standing in as prose so the masker speaks to whether they are fenced."""
+    lines = _COMMONMARK_LINE_RE.split(text)
+    probe = [_MARKER_STANDIN if ln.strip() in (TOC_START, TOC_END) else ln for ln in lines]
+    if _mask_fenced_lines(probe + [_EOF_PROBE])[-1]:
+        raise GateError("unterminated code fence or HTML comment at end of file")
+    return lines, _mask_fenced_lines(lines), _mask_fenced_lines(probe)
 
 
-def headings(lines: list[tuple[int, str, bool]]) -> list[tuple[int, str]]:
+def headings(lines: list[str], masked: list[bool]) -> list[tuple[int, str]]:
     """The document's own sections, as (level, title)."""
     found = []
-    for _lineno, line, live in lines:
-        if not live:
+    for line, hidden in zip(lines, masked):
+        if hidden:
             continue
         m = _HEADING_RE.match(line)
         if m:
@@ -104,59 +104,75 @@ def headings(lines: list[tuple[int, str, bool]]) -> list[tuple[int, str]]:
     return found
 
 
-def entries(lines: list[tuple[int, str, bool]]) -> list[tuple[int, str]]:
+def entries(
+    lines: list[str], masked: list[bool], marker_masked: list[bool]
+) -> list[tuple[int, str]]:
     """The contents block's entries, as (level, title)."""
-    start = end = None
-    for lineno, line, live in lines:
-        if not live:
-            continue
-        if line.strip() == TOC_START and start is None:
-            start = lineno
-        elif line.strip() == TOC_END and start is not None and end is None:
-            end = lineno
-    if start is None:
+    starts = [i for i, ln in enumerate(lines) if ln.strip() == TOC_START and not marker_masked[i]]
+    ends = [i for i, ln in enumerate(lines) if ln.strip() == TOC_END and not marker_masked[i]]
+    if not starts:
         raise GateError(f"no contents block — expected a {TOC_START} marker in live prose")
-    if end is None:
+    if len(starts) > 1:
+        raise GateError(
+            f"a second contents block opens at line {starts[1] + 1} — a document has one"
+        )
+    start = starts[0]
+    after = [i for i in ends if i > start]
+    if not after:
         raise GateError(f"unterminated contents block — {TOC_START} with no {TOC_END}")
+    end = after[0]
 
     found = []
-    for lineno, line, live in lines:
-        if not (start < lineno < end and live):
+    for i in range(start + 1, end):
+        if masked[i]:
             continue
-        m = _ENTRY_RE.match(line)
+        m = _ENTRY_RE.match(lines[i])
         if m:
-            indent = len(m.group(1))
-            found.append((2 + indent // _INDENT_PER_LEVEL, m.group(2).strip()))
+            found.append((3 if m.group(1) else 2, m.group(2).strip()))
     if not found:
         raise GateError("empty contents block — it names no sections")
     return found
 
 
 def disagreements(want: list[tuple[int, str]], got: list[tuple[int, str]]) -> list[str]:
-    """Every way the block and the headings fail to line up, most specific first."""
+    """Every way the block and the headings fail to line up, most specific first.
+
+    Counted, not merely set-compared: a document that grows a second section
+    sharing an existing title needs a second entry, and membership alone cannot
+    see that.
+    """
     reasons = []
-    want_titles = [t for _, t in want]
-    got_titles = [t for _, t in got]
-    for level, title in want:
-        if title not in got_titles:
-            reasons.append(f"section {title!r} (h{level}) has no entry in the contents block")
-    for level, title in got:
-        if title not in want_titles:
-            reasons.append(f"entry {title!r} names no section in the document")
-    if not reasons:
-        for i, (w, g) in enumerate(zip(want, got)):
-            if w == g:
-                continue
-            if w[1] != g[1]:
-                reasons.append(
-                    f"entry {i + 1} is {g[1]!r} but section {i + 1} is {w[1]!r} — "
-                    "the block is out of order"
-                )
-            else:
-                reasons.append(
-                    f"entry {g[1]!r} is nested as a level-{g[0]} section but the "
-                    f"document declares it at level {w[0]}"
-                )
+    want_counts = Counter(t for _, t in want)
+    got_counts = Counter(t for _, t in got)
+    for title in dict.fromkeys(t for _, t in want):
+        short = want_counts[title] - got_counts[title]
+        if short > 0:
+            reasons.append(
+                f"the document has {want_counts[title]} section(s) titled {title!r} but the "
+                f"contents block names it {got_counts[title]} time(s)"
+            )
+    for title in dict.fromkeys(t for _, t in got):
+        if got_counts[title] - want_counts[title] > 0:
+            reasons.append(
+                f"the contents block names {title!r} {got_counts[title]} time(s) but the "
+                f"document has {want_counts[title]} section(s) with that title"
+            )
+    if reasons:
+        return reasons
+    # Equal multisets, so equal lengths: a positional walk covers the rest.
+    for i, (w, g) in enumerate(zip(want, got)):
+        if w == g:
+            continue
+        if w[1] != g[1]:
+            reasons.append(
+                f"entry {i + 1} is {g[1]!r} but section {i + 1} is {w[1]!r} — "
+                "the block is out of order"
+            )
+        else:
+            reasons.append(
+                f"entry {g[1]!r} is nested as a level-{g[0]} section but the "
+                f"document declares it at level {w[0]}"
+            )
     return reasons
 
 
@@ -168,8 +184,8 @@ def check(path: Path) -> list[str]:
         raise GateError(f"path does not exist: {path}") from None
     except (OSError, UnicodeDecodeError) as e:
         raise GateError(f"cannot read {path}: {e}") from None
-    lines = _live_lines(text)
-    return disagreements(headings(lines), entries(lines))
+    lines, masked, marker_masked = _read_structure(text)
+    return disagreements(headings(lines, masked), entries(lines, masked, marker_masked))
 
 
 def main(argv: list[str]) -> int:

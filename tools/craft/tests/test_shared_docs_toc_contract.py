@@ -30,7 +30,7 @@ def long_documents() -> list[Path]:
     return sorted(
         p
         for p in SHARED.glob("*.md")
-        if len(p.read_text(encoding="utf-8").split("\n")) > LONG_DOCUMENT_LINES
+        if len(p.read_text(encoding="utf-8").splitlines()) > LONG_DOCUMENT_LINES
     )
 
 
