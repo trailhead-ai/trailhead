@@ -39,10 +39,19 @@ break changes what the document renders.
 
 Block structure is measured, not assumed: a "block" is a maximal run of
 consecutive prose lines with no blank line, masked line, heading, or table
-row between them. A wrapped list item's continuation lines carry their own
-hanging indent as literal characters, so measuring each line's raw length
-(indent included) against the same absolute column budget is what "measured
-at its indented width" means — no separate list-marker accounting is needed.
+row between them, further split wherever a line opens a construct its
+predecessor was not already inside — a new list-item marker (bullet,
+ordinal, or nested), or a block quote at a different nesting depth. Two
+sibling list items, or a wrapped item's last continuation line followed by
+the next item's marker, sit in the same run of prose lines but are not the
+same block, and the under-fill rule never compares across that boundary. A
+wrapped list item's continuation lines carry their own hanging indent as
+literal characters, so measuring each line's raw length (indent included)
+against the same absolute column budget is what "measured at its indented
+width" means. A block quote repeats its "> " marker on every line, so when
+the successor continues the same quote at the same depth, its marker is
+stripped before measuring its first word — otherwise the marker itself,
+not the word after it, would be measured as "the next word."
 
 Usage:
     wrap_gate.py [--column N] <markdown-path> [<markdown-path> ...]
@@ -115,27 +124,74 @@ def _scan_code_span(line: str, start: int) -> int | None:
 
 def _tokenize(line: str) -> list[str]:
     """Split a line into its atomic units: a maximal run of non-whitespace
-    characters, except that a valid inline code span (backtick-delimited,
-    matched opening/closing run length) is kept whole as one unit even
-    though it may contain internal spaces."""
+    characters, treating a valid inline code span (backtick-delimited,
+    matched opening/closing run length) anywhere inside the run as atomic
+    — its internal spaces never end the run. Punctuation glued directly to
+    a span with no space — `` `spec`). `` — therefore stays part of the
+    same unit as the span, exactly as `wrap_prose.py`'s fill measures it;
+    splitting them here would measure a shorter "next word" than the
+    formatter ever produces."""
     tokens: list[str] = []
     i, n = 0, len(line)
     while i < n:
         if line[i].isspace():
             i += 1
             continue
-        if line[i] == "`":
-            end = _scan_code_span(line, i)
-            if end is not None:
-                tokens.append(line[i:end])
-                i = end
-                continue
-        j = i
-        while j < n and not line[j].isspace():
-            j += 1
-        tokens.append(line[i:j])
-        i = j
+        start = i
+        while i < n and not line[i].isspace():
+            if line[i] == "`":
+                end = _scan_code_span(line, i)
+                if end is not None:
+                    i = end
+                    continue
+            i += 1
+        tokens.append(line[start:i])
     return tokens
+
+
+# A list marker (bullet or ordinal) plus its trailing whitespace, with any
+# leading indent captured — matched against a whole line, so a nested item
+# ("  - foo") carries its indent into the match. Mirrored by
+# `wrap_prose.py`'s own copy of this pattern: the two must agree on what
+# opens a list item, or a boundary the gate recognizes could be one the
+# formatter's own fill segmentation does not, and vice versa.
+_LIST_MARKER_RE = re.compile(r"^(\s*)([-*+]|\d+[.)])( +)")
+
+# One or more ">" quote markers, each optionally followed by one space —
+# "> " and the nested "> > " both match in full via group(1).
+_BLOCKQUOTE_RE = re.compile(r"^(\s*(?:>[ \t]?)+)")
+
+
+def _starts_new_list_item(line: str) -> bool:
+    return bool(_LIST_MARKER_RE.match(line))
+
+
+def _quote_depth(line: str) -> int:
+    """Number of ">" markers this line opens with — 0 for a non-quote
+    line. Two lines continue the same block-quote only when their depths
+    match; a depth change is a block boundary exactly as a blank line is."""
+    m = _BLOCKQUOTE_RE.match(line)
+    return m.group(1).count(">") if m else 0
+
+
+def _strip_blockquote_prefix(line: str) -> str:
+    """`line` with its leading block-quote marker(s) removed, so its first
+    real word can be measured instead of the marker itself."""
+    m = _BLOCKQUOTE_RE.match(line)
+    return line[m.end() :] if m else line
+
+
+def _continues_same_block(line: str, next_line: str) -> bool:
+    """Whether `next_line` is a continuation of the same block as `line`,
+    for the under-fill rule's purposes. A new list-item marker always
+    starts a fresh block — merging it into its predecessor would merge two
+    separate list items (or a nested item into its outer one) into one. A
+    block-quote depth change is the same kind of boundary: a nested quote,
+    or a return to a shallower one, is not a continuation of the line
+    before it."""
+    if _starts_new_list_item(next_line):
+        return False
+    return _quote_depth(line) == _quote_depth(next_line)
 
 
 def _strip_code_spans(line: str) -> str:
@@ -213,8 +269,17 @@ def check(path: Path, column: int = DEFAULT_COLUMN) -> list[Finding]:
                     f"character(s) (column {column}) — {REMEDY}",
                 )
             )
-        if not exempt and i + 1 < n and kinds[i + 1] == "prose":
-            next_tokens = _tokenize(lines[i + 1])
+        if (
+            not exempt
+            and i + 1 < n
+            and kinds[i + 1] == "prose"
+            and _continues_same_block(line, lines[i + 1])
+        ):
+            next_line = lines[i + 1]
+            depth = _quote_depth(next_line)
+            if depth:
+                next_line = _strip_blockquote_prefix(next_line)
+            next_tokens = _tokenize(next_line)
             if next_tokens:
                 candidate = len(line) + 1 + len(next_tokens[0])
                 if candidate <= column:

@@ -191,35 +191,21 @@ class TestListItems:
         assert findings(out, COL) == []
 
 
-class TestKnownGateLimitationBlockquoteContinuation:
-    """`wrap_gate.py`'s under-fill rule treats every line as flat prose with
-    no notion of block structure: for a block-quote continuation line, the
-    gate tokenizes the line's own "> " marker as a real unit, so it uses
-    that marker's length (always 1 char) as "the next line's first word"
-    when checking whether the *previous* content line was under-filled.
-    That forces every non-final continuation line to land within 1
-    character of the column to avoid a false finding — not achievable by
-    any greedy fill in general, and not a defect in this formatter. This is
-    a discovered gate limitation, reported rather than worked around;
-    `wrap_gate.py` is out of this task's scope to edit. Real craft prose
-    already has multi-line block quotes (e.g. `skills/brainstorm/SKILL.md`
-    lines 332-335), so this blocks the pilot/tree-wide reflow tasks, not
-    this one — this test documents the mechanism with a minimal repro."""
+class TestMultilineBlockquoteIsGateClean:
+    """`wrap_gate.py`'s under-fill rule now measures a block-quote
+    continuation line's real first word, after stripping its "> " marker,
+    and only compares two lines at all when they share the same quote
+    depth. A correctly-wrapped multi-line quote is therefore gate-clean —
+    real craft prose has multi-line block quotes (e.g.
+    `skills/brainstorm/SKILL.md`)."""
 
-    def test_gate_flags_a_correctly_wrapped_multiline_quote_as_under_filled(self, tmp_path):
+    def test_correctly_wrapped_multiline_quote_exits_the_gate_clean(self, tmp_path):
         column = 20
         body = "# Title\n\n> one two three four five six seven eight nine ten eleven twelve\n"
         formatted = wrap_prose.format_text(body, column)
         out = doc(tmp_path, formatted)
         result = findings(out, column)
-        assert any(f.rule == "under-filled" for f in result), (
-            "expected the gate to (wrongly) flag the wrapped quote as "
-            f"under-filled; got {result} for {formatted!r}"
-        )
-        # Gate-cleanliness is unreachable here, but prefix-preservation on
-        # every produced line is a separate, still-achievable property —
-        # pinned here since the single-line quote test above cannot
-        # exercise more than one produced line.
+        assert result == [], f"unexpected finding(s): {result} for {formatted!r}"
         lines = [l for l in formatted.split("\n")[2:] if l.strip()]
         assert len(lines) > 1
         for line in lines:

@@ -136,6 +136,22 @@ class TestCodeSpans:
         result = run(doc(tmp_path, body), column=30)
         assert result.returncode == 0
 
+    def test_punctuation_glued_to_a_code_span_is_measured_with_it(self, tmp_path):
+        # "`ab`," glued with no space is one 5-char unit, exactly as
+        # wrap_prose.py's fill measures it. A tokenizer that treated the
+        # span as its own token, resuming ordinary word-splitting right
+        # after its closing backtick, would see the comma as a separate
+        # 1-char token and measure "`ab`" (4 chars) as the successor's
+        # first unit — 15 + 1 + 4 = 20, fitting the budget and wrongly
+        # calling line 3 under-filled. Measured as the real 5-char glued
+        # unit, 15 + 1 + 5 = 21 does not fit, so line 3 is correctly left
+        # alone.
+        line3 = "one two three a"
+        assert len(line3) == 15
+        body = f"# Title\n\n{line3}\n`ab`, more text\n"
+        result = run(doc(tmp_path, body), column=20)
+        assert result.returncode == 0
+
 
 class TestFencedAndCommentedExemptions:
     # Made of several short words rather than one long token — an
@@ -222,6 +238,90 @@ class TestListContinuationIndent:
         result = run(doc(tmp_path, body), column=COL)
         assert result.returncode == 1
         assert "under-filled" in result.stderr
+
+
+class TestSiblingBlocksAreNotOneBlock:
+    """A line's successor only counts for the under-fill rule when it
+    continues the *same* block. A new list-item marker, a block quote at a
+    different nesting depth, and a fresh paragraph opener each terminate the
+    preceding block exactly as a blank line already does."""
+
+    def test_first_of_two_short_sibling_list_items_is_not_under_filled(self, tmp_path):
+        # "- one two" (9 chars) could absorb "-" (the next item's own
+        # marker) by length alone, but the two are separate list items —
+        # joining them would merge them into one.
+        body = "# Title\n\n- one two\n- three four\n"
+        assert run(doc(tmp_path, body), column=COL).returncode == 0
+
+    def test_wrapped_items_last_continuation_line_not_under_filled_against_next_marker(
+        self, tmp_path
+    ):
+        # "  five" (6 chars) is the last continuation line of the first
+        # item; the next item's marker line follows with no blank line
+        # between. Joining them would merge the continuation into the next
+        # item's own text.
+        body = "# Title\n\n- one two three four\n  five\n- six seven\n"
+        assert run(doc(tmp_path, body), column=COL).returncode == 0
+
+    def test_wrapped_items_last_continuation_line_not_under_filled_against_a_nested_next_marker(
+        self, tmp_path
+    ):
+        body = "# Title\n\n- one two three four\n  five\n  - six seven\n"
+        assert run(doc(tmp_path, body), column=COL).returncode == 0
+
+    def test_inner_list_item_is_not_a_continuation_of_its_outer_item(self, tmp_path):
+        # The outer item's own line, not a continuation line, is followed
+        # directly by a nested item — still not a continuation.
+        body = "# Title\n\n- one two three\n  - four five\n"
+        assert run(doc(tmp_path, body), column=COL).returncode == 0
+
+    def test_paragraph_immediately_followed_by_a_list_item_is_not_under_filled(self, tmp_path):
+        body = "# Title\n\none two three\n- four five\n"
+        assert run(doc(tmp_path, body), column=COL).returncode == 0
+
+    def test_block_quote_line_not_under_filled_against_a_line_at_different_quote_depth(
+        self, tmp_path
+    ):
+        body = "# Title\n\n> one two\n> > three four\n"
+        assert run(doc(tmp_path, body), column=COL).returncode == 0
+
+    def test_block_quote_continuation_at_the_same_depth_is_still_reported_when_under_filled(
+        self, tmp_path
+    ):
+        body = "# Title\n\n> one two\n> three four\n"
+        result = run(doc(tmp_path, body), column=COL)
+        assert result.returncode == 1
+        assert "under-filled" in result.stderr
+
+    def test_block_quote_continuation_at_the_same_depth_measured_by_its_real_word_not_its_marker(
+        self, tmp_path
+    ):
+        # A raw tokenizer would see the next line's "> " marker as "the
+        # next word" (1 char, always fits) and wrongly flag this as
+        # under-filled. The real next word, "seven" (5 chars), does not fit
+        # — 15 + 1 + 5 = 21 > 20 — so this line is correctly left alone.
+        body = "# Title\n\n> one two three\n> seven eight\n"
+        assert run(doc(tmp_path, body), column=COL).returncode == 0
+
+
+class TestRealContentBrainstormSkill:
+    """The assertion that would have caught the original defect: real
+    prose, not a synthetic fixture. Before the boundary fix, reflowing this
+    file at column 100 and gate-checking it produced ~40 findings, nearly
+    all sibling list items wrongly treated as one block."""
+
+    SKILL_SOURCE = REPO_ROOT / "plugins" / "craft" / "skills" / "brainstorm" / "SKILL.md"
+
+    def test_reflowed_brainstorm_skill_exits_the_gate_clean(self, tmp_path):
+        import wrap_prose
+
+        target = tmp_path / "SKILL.md"
+        target.write_text(self.SKILL_SOURCE.read_text(encoding="utf-8"), encoding="utf-8")
+        wrap_prose.format_path(target, wrap_gate.DEFAULT_COLUMN)
+        result = wrap_gate.check(target, wrap_gate.DEFAULT_COLUMN)
+        assert result == [], f"{len(result)} finding(s):\n" + "\n".join(
+            f.message for f in result
+        )
 
 
 class TestColumnOverride:
