@@ -20,11 +20,14 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).parent.parent
 GATE = REPO_ROOT / "plugins" / "craft" / "scripts" / "wrap_gate.py"
 
 sys.path.insert(0, str(GATE.parent))
 import wrap_gate  # noqa: E402
+import wrap_prose  # noqa: E402
 
 
 def run(*paths: Path, column: int | None = None) -> subprocess.CompletedProcess:
@@ -277,6 +280,49 @@ class TestUnbreakableWords:
         result = run(doc(tmp_path, body), column=COL)
         assert result.returncode == 1, result.stderr
         assert "over-budget" in result.stderr
+
+
+class TestPrefixedUnbreakableUnits:
+    """The single-unit exemption must measure a line's content, not its
+    structural prefix. `len(tokens) == 1` on the raw line counts a list
+    marker or block-quote marker as a token, so a prefixed line carrying
+    exactly one over-budget unit fell outside the exemption — the very
+    line `wrap_prose.py` emits (and cannot improve) for that input."""
+
+    def test_list_item_with_single_unbreakable_unit_exits_zero(self, tmp_path):
+        body = "# T\n\n- " + ("a" * 25) + "\n"
+        assert run(doc(tmp_path, body), column=COL).returncode == 0
+
+    def test_blockquote_line_with_single_unbreakable_unit_exits_zero(self, tmp_path):
+        body = "# T\n\n> " + ("a" * 25) + "\n"
+        assert run(doc(tmp_path, body), column=COL).returncode == 0
+
+    def test_nested_list_item_with_single_unbreakable_unit_exits_zero(self, tmp_path):
+        body = "# T\n\n- outer\n  - " + ("a" * 25) + "\n"
+        assert run(doc(tmp_path, body), column=COL).returncode == 0
+
+    def test_list_item_with_unbreakable_unit_plus_breakable_text_is_over_budget(self, tmp_path):
+        # The narrowing from the previous round must survive: a prefixed
+        # line is only exempt when it IS the one over-budget unit, not
+        # whenever it merely contains one alongside breakable text.
+        body = "# T\n\n- " + ("a" * 25) + " and then some more words\n"
+        result = run(doc(tmp_path, body), column=COL)
+        assert result.returncode == 1, result.stderr
+        assert "over-budget" in result.stderr
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            "# T\n\n- `word word word word word word word word word word` alpha beta\n",
+            "# T\n\n> " + ("a" * 25) + "\n",
+            "# T\n\n- outer\n  - " + ("a" * 25) + "\n",
+        ],
+        ids=["list-with-code-span", "blockquote", "nested-list"],
+    )
+    def test_formatters_own_output_exits_the_gate_clean(self, tmp_path, body):
+        formatted = wrap_prose.format_text(body, COL)
+        result = wrap_gate.check(doc(tmp_path, formatted), COL)
+        assert result == [], result
 
 
 class TestHardLineBreak:

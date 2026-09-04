@@ -19,7 +19,8 @@ is a maximal non-whitespace run with any embedded span kept intact, which
 also means punctuation glued to a span with no space — `` `spec`). `` — is
 never pulled apart into two units that a plain space-join would then
 wrongly re-separate. A span longer than the budget is emitted on its own
-line rather than split — the gate exempts a line whose longest unit
+line rather than split — the gate exempts a line whose content (past its
+own list-marker or block-quote prefix, if any) is a single unit that
 exceeds the budget on its own, and the greedy fill below produces that
 shape without any special case: a unit is always placed even when it alone
 exceeds what remains of the line.

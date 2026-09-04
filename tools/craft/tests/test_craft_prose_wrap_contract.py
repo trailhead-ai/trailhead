@@ -7,11 +7,16 @@ prose under `plugins/craft/skills/` (including `_shared/`) and
 new file added without ever being run through `wrap_prose.py` — fails here,
 on the live tree rather than a fixture.
 
-It also carries the tree-wide safety net for the reflow that produced this
-state: every file's inline code spans are unchanged (a corrupted copy-paste
-command or credential-scrub pattern would show up as a changed span
-multiset), no file is unreadable, and no reflow moved content between
-sections (a heading list is unchanged before and after).
+It also pins that the tools have not regressed since: the committed tree is
+`wrap_prose.py`'s own fixed point, so re-running the formatter over it and
+comparing code spans and headings before and after can only ever detect a
+change to the formatter or gate — a reflow that starts moving content
+between sections, or losing or duplicating a code span, on input that is
+already its own fixed point. What this does NOT pin: a hand-edit to the
+prose content itself (a mangled credential-scrub pattern, a rewritten
+sentence) is invisible to it, because both sides of every comparison here
+are derived from the same already-committed text — there is no independent
+reference to catch prose corruption that survives a reflow unchanged.
 """
 
 from __future__ import annotations

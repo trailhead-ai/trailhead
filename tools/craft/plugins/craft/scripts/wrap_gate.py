@@ -32,9 +32,12 @@ change meaning: a masked line (inside a fenced code block or an HTML
 comment, via the same `covers_gate._mask_fenced_lines` the sibling gates
 share, or inside a `---`-delimited YAML frontmatter block at the very top
 of the file — see `_mask_frontmatter_lines`), an ATX heading, a table row,
-a line whose own longest unit exceeds the budget on its own (an unbreakable
-long word, path, URL, or code span — wrapping cannot help a line whose
-problem is one token, however much breakable text sits beside it), and a
+a line whose content — everything past its own list-marker or block-quote
+prefix, if any — is a single unit that exceeds the budget on its own (an
+unbreakable long word, path, URL, or code span — wrapping cannot help a
+line whose problem is one token; a prefixed line still qualifies, since the
+marker is structure, not content, and this is the exact shape
+`wrap_prose.py` itself produces for such a line), and a
 line ending in a hard line break (two or more trailing spaces, or a
 trailing backslash) — reflowing across a hard break changes what the
 document renders.
@@ -222,6 +225,19 @@ def _strip_blockquote_prefix(line: str) -> str:
     return line[m.end() :] if m else line
 
 
+def _strip_structural_prefix(line: str) -> str:
+    """`line` with its list-marker or block-quote prefix removed, if it
+    carries one — so the single-over-budget-unit exemption below can count
+    the line's *content* tokens rather than counting the marker itself as
+    a token. Mirrors the prefix `wrap_prose.py`'s own `_detect_prefix` /
+    `_strip_prefix` strip when it fills a paragraph, so the gate and
+    formatter agree on what is structure versus content."""
+    m = _LIST_MARKER_RE.match(line)
+    if m:
+        return line[m.end() :]
+    return _strip_blockquote_prefix(line)
+
+
 def _continues_same_block(line: str, next_line: str) -> bool:
     """Whether `next_line` is a continuation of the same block as `line`,
     for the under-fill rule's purposes. A new list-item marker always
@@ -388,8 +404,16 @@ def check(path: Path, column: int = DEFAULT_COLUMN) -> list[Finding]:
         # breakable text beside an over-budget unit is one `wrap_prose.py`
         # would still change (isolating the unit, wrapping the rest), so
         # gate-clean would no longer imply formatter-stable if this stayed
-        # exempt too.
-        over_budget_exempt = hard_break or (len(tokens) == 1 and _longest_unit(tokens) > column)
+        # exempt too. The count is taken after stripping the line's own
+        # list-marker or block-quote prefix: that structure is not a
+        # breakable content token, and counting it as one wrongly denied
+        # the exemption to a prefixed line whose content really is one
+        # over-budget unit — exactly the shape `wrap_prose.py` itself
+        # produces and cannot improve on.
+        content_tokens = _tokenize(_strip_structural_prefix(line))
+        over_budget_exempt = hard_break or (
+            len(content_tokens) == 1 and _longest_unit(content_tokens) > column
+        )
         under_filled_exempt = hard_break
         if not over_budget_exempt and len(line) > column:
             over_by = len(line) - column
