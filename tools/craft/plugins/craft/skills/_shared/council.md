@@ -5,6 +5,19 @@ truth for who the members are. `/craft:consult`, the `planning` skill's Council
 Review step, and the `gauntlet` skill's lens pass all read membership from here and
 dispatch the agents **directly** via the Agent tool — none delegates to another.
 
+<!-- toc:start -->
+**Contents**
+
+- Members
+- Dispatch contract
+- Prompt template
+- Per-lens Critical bars
+- Per-lens Critical bars — spec review
+- Synthesis (main session, NOT a subagent)
+  - How the synthesis reads
+  - How a finding reads
+<!-- toc:end -->
+
 ## Members
 
 | Agent | Lens | Reviews for |

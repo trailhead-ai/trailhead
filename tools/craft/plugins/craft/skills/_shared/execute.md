@@ -49,6 +49,37 @@ against `<elected-vault>` before acting on it: a render that does not match the 
 task came from is the ambiguous case below, not a fact.
 
 
+<!-- toc:start -->
+**Contents**
+
+- When to Use
+- Skip Gate
+- The Loop
+  - Determine the task shape
+  - Resuming a run
+  - Claiming the run at first dispatch
+  - 1. Does this task have an unresolved unknown?
+  - 2. Absorb findings
+  - 3. Dispatch `executor`
+  - 4. Review (scaled to change size)
+  - 5. Update the task graph
+  - 6. Next task
+  - Splitting and appending tasks
+- After All Tasks
+  - Standalone task adaptations
+  - Phase 1: Test-runner gate
+  - Phase 2: Simplify
+  - Phase 3: Correctness
+  - Phase 4: Security (conditional)
+  - Phase 5: Flow-out
+  - Phase 6: Close and completion report
+  - Phase progress and resumability
+- Model Selection
+- Handling Assumption-Prover Status
+- Handling Executor Status
+- Red Flags
+<!-- toc:end -->
+
 ## When to Use
 
 - You have an approved implementation plan with tasks and known unknowns, **or** a
