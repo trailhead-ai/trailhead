@@ -77,6 +77,21 @@ NUMBERED_MARKER_AFTER_ENTRY = (
 TRAILING_PROSE_LOSES_ENTRY_COVERAGE = (
     FIXTURES / "spec_candidate_trailing_prose_loses_entry_coverage.md"
 ).read_text(encoding="utf-8")
+HTML_COMMENT_FORGES_COMPLETE_CERTIFICATION = (
+    FIXTURES / "spec_candidate_html_comment_forges_complete_certification.md"
+).read_text(encoding="utf-8")
+DUPLICATE_SLICES_HEADING = (
+    FIXTURES / "spec_candidate_duplicate_slices_heading.md"
+).read_text(encoding="utf-8")
+HTML_COMMENT_HIDES_DECOY_SLICES = (
+    FIXTURES / "spec_candidate_html_comment_hides_decoy_slices.md"
+).read_text(encoding="utf-8")
+COMPOSED_COMMENT_HIDES_DUPLICATE_SLICES_HEADING = (
+    FIXTURES / "spec_candidate_composed_comment_hides_duplicate_slices_heading.md"
+).read_text(encoding="utf-8")
+DUPLICATE_AC_AND_SLICES_HEADINGS = (
+    FIXTURES / "spec_duplicate_ac_and_slices_headings.md"
+).read_text(encoding="utf-8")
 
 _UNDECLARED_REASON_CODE = "reason-code: undeclared-covered-identifier"
 _MALFORMED_REASON_CODE = "reason-code: malformed-coverage-token"
@@ -408,3 +423,67 @@ def test_symlinked_entry_point_still_resolves_the_sibling_import(tmp_path):
     )
     assert r.returncode == 0, r.stderr + r.stdout
     assert "ModuleNotFoundError" not in r.stderr
+
+
+# ---- 14. HTML comment blindness: a payload hidden in a comment must never
+# forge a complete-eligible certification --------------------------------
+
+
+def test_html_comment_forged_structure_never_certifies_complete_eligible():
+    """The fixture's only `## Acceptance Criteria` heading, its only
+    criterion, and its only `## Slices` entry live inside an HTML comment —
+    invisible in every rendered view. A comment-blind gate anchors on the
+    forged heading and reports a fabricated `complete-eligible: yes`. The
+    gate must fail closed with no real heading found."""
+    r = _run(HTML_COMMENT_FORGES_COMPLETE_CERTIFICATION)
+    assert r.returncode == 2, r.stderr + r.stdout
+
+
+def test_html_comment_hides_decoy_slices_entry_without_shadowing_the_real_one():
+    """A decoy `## Slices` section — claiming full coverage — lives inside a
+    comment above the real section. The masked decoy must contribute no
+    coverage and must not be picked as the anchor; only the real entry's
+    coverage counts."""
+    r = _run(HTML_COMMENT_HIDES_DECOY_SLICES)
+    assert r.returncode == 0, r.stderr + r.stdout
+    tokens = _tokens(r.stdout)
+    assert tokens["covered"] == "AC1", tokens
+    assert tokens["candidates"] == "AC2", tokens
+    assert tokens["complete-eligible"] == "yes", tokens
+
+
+# ---- 15. heading uniqueness: a second unmasked heading is fail-closed -----
+
+
+def test_duplicate_unmasked_slices_heading_fails_closed_with_its_own_reason_code():
+    """A visible second `## Slices` heading silently replaces the real
+    ledger for a first-match-wins scanner — the benign-direction variant,
+    where a duplicate section drops a real ledger entry rather than forging
+    one. The gate must detect it and fail closed."""
+    r = _run(DUPLICATE_SLICES_HEADING)
+    assert r.returncode == 2, r.stderr + r.stdout
+    assert "reason-code: duplicate-slices-heading" in r.stderr, r.stderr
+
+
+def test_duplicate_ac_heading_fails_closed_before_reaching_the_ledger():
+    """A spec with both a duplicate `## Acceptance Criteria` heading and a
+    duplicate `## Slices` heading must fail closed on the criteria parse
+    (shared with `covers_gate.py`) — this is the exact repro chaining both
+    findings into one document."""
+    r = _run(DUPLICATE_AC_AND_SLICES_HEADINGS)
+    assert r.returncode == 2, r.stderr + r.stdout
+    assert "reason-code: duplicate-acceptance-criteria-heading" in r.stderr, r.stderr
+
+
+def test_composed_html_comment_hides_its_own_internal_duplicate_slices_heading():
+    """The two findings chained: an HTML comment hides a decoy section that
+    itself contains a duplicate `## Slices` heading. Both decoy occurrences
+    are masked, so the single real `## Slices` section outside the comment
+    remains unique — the gate must derive normally, not report a false
+    duplicate and not count either decoy's coverage."""
+    r = _run(COMPOSED_COMMENT_HIDES_DUPLICATE_SLICES_HEADING)
+    assert r.returncode == 0, r.stderr + r.stdout
+    tokens = _tokens(r.stdout)
+    assert tokens["covered"] == "AC1", tokens
+    assert tokens["candidates"] == "AC2", tokens
+    assert tokens["complete-eligible"] == "yes", tokens

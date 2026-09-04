@@ -12,16 +12,20 @@ takes a flag, a gate that derives a value from a document alone reads stdin
 only. A third gate here should pick the convention that matches which of the
 two it is doing, not copy either example blindly.
 
-Criterion identifiers, the CommonMark line splitter, and the fenced-block
-masker are all imported from the sibling `covers_gate.py` — never re-derived
-here, so the two gates cannot disagree about what a criterion is or about what
-counts as document structure. The ledger scan below is this gate's only new
-parsing, and it reads through those same primitives: lines are split on the
-CommonMark line grammar only (`\\r\\n`, `\\r`, `\\n` — never Python's broader
-`str.splitlines()`), fenced code blocks (``` or ~~~, any info string) are
-invisible to both the heading search and the ledger scan, and the `## Slices`
-heading is anchored at line start, case-insensitively, so an inline
-mid-sentence mention does not satisfy it.
+Criterion identifiers, the CommonMark line splitter, the fenced-block-and
+-HTML-comment masker, and the heading-uniqueness check are all imported from
+the sibling `covers_gate.py` — never re-derived here, so the two gates cannot
+disagree about what a criterion is or about what counts as document
+structure. The ledger scan below is this gate's only new parsing, and it
+reads through those same primitives: lines are split on the CommonMark line
+grammar only (`\\r\\n`, `\\r`, `\\n` — never Python's broader
+`str.splitlines()`); fenced code blocks (``` or ~~~, any info string) and
+CommonMark HTML comments (`<!-- ... -->`, to end of document if never
+closed) are invisible to both the heading search and the ledger scan; the
+`## Slices` heading is anchored at line start, case-insensitively, so an
+inline mid-sentence mention does not satisfy it; and a second unmasked
+`## Slices` heading is a fail-closed integrity error rather than a silent
+substitution of one ledger for another.
 
 A `## Slices` ledger entry's coverage token is the fifth field of its trailing
 parenthetical:
@@ -90,7 +94,11 @@ Exit codes:
     2  fail-closed — empty or non-UTF-8 stdin; no `## Acceptance Criteria`
        heading; a spec declaring zero criterion identifiers under that
        heading (reuses `covers_gate.py`'s
-       `reason-code: zero-criterion-identifiers`); or a ledger entry whose
+       `reason-code: zero-criterion-identifiers`); a second unmasked
+       `## Acceptance Criteria` heading (reuses `covers_gate.py`'s
+       `reason-code: duplicate-acceptance-criteria-heading`); a second
+       unmasked `## Slices` heading
+       (`reason-code: duplicate-slices-heading`); or a ledger entry whose
        coverage token does not parse as an identifier list
        (`reason-code: malformed-coverage-token`). NEVER exits 0 when the
        derivation could not be certified.
@@ -109,11 +117,14 @@ if str(_SCRIPT_DIR) not in sys.path:
 from covers_gate import (  # noqa: E402
     _COMMONMARK_LINE_RE,
     _ZERO_CRITERIA_REASON_CODE,
+    DuplicateHeadingError,
+    _find_unique_heading,
     _mask_fenced_lines,
     parse_covers,
     parse_criteria,
 )
 
+_SLICES_HEADING = "## Slices"
 _SLICES_HEADING_RE = re.compile(r"^## Slices$", re.IGNORECASE)
 _LEDGER_BULLET_RE = re.compile(r"^- ")
 _LEDGER_NONCANONICAL_MARKER_RE = re.compile(r"^\s*(?:[-*]|\d+[.)])\s")
@@ -122,6 +133,7 @@ _LEDGER_FIELDS_RE = re.compile(r"^`task/[^`]+`, closed [^,]+(?:, covers (?P<cove
 
 _UNDECLARED_REASON_CODE = "undeclared-covered-identifier"
 _MALFORMED_TOKEN_REASON_CODE = "malformed-coverage-token"
+_DUPLICATE_SLICES_HEADING_REASON_CODE = "duplicate-slices-heading"
 
 
 class UndeclaredCoverageError(ValueError):
@@ -170,13 +182,9 @@ def parse_ledger(spec_body: str, criteria: list[str]) -> tuple[list[str], bool]:
     lines = _COMMONMARK_LINE_RE.split(spec_body)
     fenced = _mask_fenced_lines(lines)
 
-    start = None
-    for i, line in enumerate(lines):
-        if fenced[i]:
-            continue
-        if _SLICES_HEADING_RE.match(line):
-            start = i + 1
-            break
+    start = _find_unique_heading(
+        lines, fenced, _SLICES_HEADING_RE, _SLICES_HEADING, _DUPLICATE_SLICES_HEADING_REASON_CODE
+    )
     if start is None:
         return [], True
 
@@ -256,6 +264,10 @@ def main(argv: list[str]) -> int:
 
     try:
         criteria = parse_criteria(spec_body)
+    except DuplicateHeadingError as e:
+        _err(f"reason: {e}")
+        _err(f"reason-code: {e.reason_code}")
+        return 2
     except ValueError as e:
         _err(str(e))
         _err("failing closed — cannot derive a candidate set without a criteria list")
@@ -272,6 +284,10 @@ def main(argv: list[str]) -> int:
 
     try:
         covered, eligible = parse_ledger(spec_body, criteria)
+    except DuplicateHeadingError as e:
+        _err(f"reason: {e}")
+        _err(f"reason-code: {e.reason_code}")
+        return 2
     except MalformedCoverageTokenError as e:
         _err(f"reason: {e}")
         _err(f"reason-code: {_MALFORMED_TOKEN_REASON_CODE}")

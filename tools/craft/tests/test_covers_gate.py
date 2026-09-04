@@ -42,8 +42,24 @@ FORGED_HEADING_SPEC = (
 FORGED_EMPTY_SECTION_SPEC = (
     FIXTURES / "spec_forged_empty_section_via_line_separator.md"
 ).read_text(encoding="utf-8")
+HTML_COMMENT_HIDES_FORGED_AC_HEADING_SPEC = (
+    FIXTURES / "spec_html_comment_hides_forged_ac_heading.md"
+).read_text(encoding="utf-8")
+HTML_COMMENT_PRECEDES_REAL_AC_HEADING_SPEC = (
+    FIXTURES / "spec_html_comment_precedes_real_ac_heading.md"
+).read_text(encoding="utf-8")
+UNCLOSED_HTML_COMMENT_SPEC = (
+    FIXTURES / "spec_unclosed_html_comment_masks_to_eof.md"
+).read_text(encoding="utf-8")
+DUPLICATE_AC_HEADING_SPEC = (
+    FIXTURES / "spec_duplicate_ac_and_slices_headings.md"
+).read_text(encoding="utf-8")
+COMPOSED_COMMENT_HIDES_DUPLICATE_AC_HEADING_SPEC = (
+    FIXTURES / "spec_composed_comment_hides_duplicate_ac_heading.md"
+).read_text(encoding="utf-8")
 
 _ZERO_CRITERIA_REASON_CODE = "reason-code: zero-criterion-identifiers"
+_DUPLICATE_AC_HEADING_REASON_CODE = "reason-code: duplicate-acceptance-criteria-heading"
 
 
 def _run(covers: str | None, spec_body: str) -> subprocess.CompletedProcess:
@@ -344,4 +360,63 @@ def test_windows_line_endings_still_parse_correctly():
 
 def test_bare_cr_line_endings_still_parse_correctly():
     r = _run("AC1,AC2", NINE_CRITERIA_SPEC.replace("\n", "\r"))
+    assert r.returncode == 0, r.stderr + r.stdout
+
+
+# ---- HTML comment blindness: a payload hidden in a comment must never certify --
+#
+# A CommonMark HTML comment (`<!-- ... -->`) is dropped entirely from every
+# rendered view of the document, to end of document if never closed. A gate
+# that is blind to that is trusting structure a human reviewer never sees.
+
+
+def test_html_comment_hides_forged_ac_heading_and_never_certifies_it():
+    """The fixture's only `## Acceptance Criteria` heading and only AC1
+    criterion live inside an HTML comment. A comment-blind parser anchors on
+    the forged heading and wrongly certifies AC1. The gate must fail closed
+    with no real heading found."""
+    r = _run("AC1", HTML_COMMENT_HIDES_FORGED_AC_HEADING_SPEC)
+    assert r.returncode == 2, r.stderr + r.stdout
+
+
+def test_html_comment_does_not_shadow_the_real_ac_heading_that_follows():
+    """A decoy `## Acceptance Criteria` heading lives inside a comment above
+    the real section. The masked decoy must not be picked as the anchor —
+    the real section's AC1/AC2 must still certify."""
+    r = _run("AC1,AC2", HTML_COMMENT_PRECEDES_REAL_AC_HEADING_SPEC)
+    assert r.returncode == 0, r.stderr + r.stdout
+
+
+def test_unclosed_html_comment_masks_to_end_of_document():
+    """An unclosed `<!--` masks everything through end of document, per
+    CommonMark — the forged AC2 inside it must never become a real
+    criterion, while the real AC1 declared before the comment opened still
+    certifies."""
+    r = _run("AC1", UNCLOSED_HTML_COMMENT_SPEC)
+    assert r.returncode == 0, r.stderr + r.stdout
+    r = _run("AC2", UNCLOSED_HTML_COMMENT_SPEC)
+    assert r.returncode == 1, r.stderr + r.stdout
+    assert "AC2" in r.stderr
+
+
+# ---- heading uniqueness: a second unmasked heading is a fail-closed error --
+
+
+def test_duplicate_unmasked_ac_heading_fails_closed_with_its_own_reason_code():
+    """A visible second `## Acceptance Criteria` heading silently replaces
+    the real criteria set for a first-match-wins scanner. The gate must
+    detect the second occurrence and fail closed rather than silently
+    picking the first."""
+    r = _run("AC1", DUPLICATE_AC_HEADING_SPEC)
+    assert r.returncode == 2, r.stderr + r.stdout
+    assert _DUPLICATE_AC_HEADING_REASON_CODE in r.stderr, r.stderr
+
+
+def test_composed_html_comment_hides_its_own_internal_duplicate_heading():
+    """The two findings chained: an HTML comment hides a decoy section that
+    itself contains a duplicate `## Acceptance Criteria` heading. Both
+    decoy occurrences are masked, so the single real heading outside the
+    comment remains unique — the gate must certify normally, not report a
+    false duplicate and not anchor on either decoy."""
+    r = _run("AC1,AC2", COMPOSED_COMMENT_HIDES_DUPLICATE_AC_HEADING_SPEC)
     assert r.returncode == 0, r.stderr + r.stdout
