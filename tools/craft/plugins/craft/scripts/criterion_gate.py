@@ -53,7 +53,9 @@ Exit codes:
        least one identifier) a bullet carrying none — prints a `reason:`
        line naming every fault found, not just the first.
     2  could not certify — fail-closed: empty stdin
-       (`reason-code: empty-stdin`), non-UTF-8 stdin
+       (`reason-code: empty-stdin`), stdin over the 256 KiB size cap
+       (`reason-code: stdin-too-large` — never a silent truncation that
+       certifies a partial document), non-UTF-8 stdin
        (`reason-code: non-utf8-stdin`), no `## Acceptance Criteria` heading,
        a spec declaring zero criterion identifiers under that heading — the
        legacy carve-out (`reason-code: zero-criterion-identifiers`), a
@@ -87,6 +89,13 @@ _ZERO_CRITERIA_REASON_CODE = "zero-criterion-identifiers"
 _UNTERMINATED_MASKED_REGION_REASON_CODE = "unterminated-masked-region"
 _EMPTY_STDIN_REASON_CODE = "empty-stdin"
 _NON_UTF8_STDIN_REASON_CODE = "non-utf8-stdin"
+_STDIN_TOO_LARGE_REASON_CODE = "stdin-too-large"
+
+# Fail-closed backstop against a pathologically large vault record, ahead of
+# an eight-agent dispatch that runs this gate first. A real spec body is
+# kilobytes; 256 KiB is generous headroom over that while still bounding the
+# work this gate (and the regex walk over it) will do on a single stdin read.
+_MAX_STDIN_BYTES = 256 * 1024
 
 # ---------------------------------------------------------------------------
 # AC3 — inline code span classification
@@ -169,6 +178,27 @@ def _scrub_credential_shaped(text: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Control-character neutralization — a separate concern from the credential
+# scrub above, applied at the same single output-join site. Several refuse
+# patterns (call syntax, HTTP verb + path, subscript) place no character
+# restriction on part of their match, so a vault-sourced span carrying a raw
+# ESC byte (or any other non-printable code point) is legal input. Echoing it
+# unneutralized is terminal-escape injection into a human's terminal and, per
+# the gauntlet skill's contract to re-quote a refused span verbatim,
+# prompt injection into the operator agent reading this gate's own output.
+# Every non-printable code point (C0 controls except tab/newline/CR, and the
+# C1 range) is escaped to a visible `\xNN` form — legible as evidence, inert
+# as a terminal control sequence.
+# ---------------------------------------------------------------------------
+
+_CONTROL_CHAR_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
+
+
+def _neutralize_control_chars(text: str) -> str:
+    return _CONTROL_CHAR_RE.sub(lambda m: f"\\x{ord(m.group()):02x}", text)
+
+
+# ---------------------------------------------------------------------------
 # AC4 — verification trailer
 # ---------------------------------------------------------------------------
 
@@ -224,7 +254,12 @@ def _check_trailer(text: str) -> tuple[str | None, str | None]:
 
 
 def _snippet(text: str, limit: int = 48) -> str:
-    flat = " ".join(text.split())
+    # Scrub before truncating: a length-anchored credential pattern
+    # (`ghp_[A-Za-z0-9]{36}`, `{32,}`, `{40,}`, …) can straddle the
+    # truncation boundary, leaving only a short non-matching prefix inside
+    # the cut — a scrub that runs afterward, on the already-truncated text,
+    # never sees the whole token and cannot redact it.
+    flat = _scrub_credential_shaped(" ".join(text.split()))
     return flat if len(flat) <= limit else flat[:limit] + "…"
 
 
@@ -235,8 +270,17 @@ def _err(msg: str) -> None:
 def main(argv: list[str]) -> int:
     del argv  # no flags — the whole interface is stdin
 
+    raw = sys.stdin.buffer.read(_MAX_STDIN_BYTES + 1)
+    if len(raw) > _MAX_STDIN_BYTES:
+        _err(
+            f"reason: spec body on stdin exceeds the {_MAX_STDIN_BYTES}-byte "
+            "cap — refusing rather than certifying a truncated document"
+        )
+        _err(f"reason-code: {_STDIN_TOO_LARGE_REASON_CODE}")
+        return 2
+
     try:
-        spec_body = sys.stdin.buffer.read().decode("utf-8")
+        spec_body = raw.decode("utf-8")
     except UnicodeDecodeError as e:
         _err(f"reason: spec body on stdin is not valid UTF-8: {e}")
         _err(f"reason-code: {_NON_UTF8_STDIN_REASON_CODE}")
@@ -306,8 +350,12 @@ def main(argv: list[str]) -> int:
         # at the single point refusal text reaches output. Three separate
         # sites each scrubbing their own fragment is how a fourth message
         # reintroduces the leak; one scrub at the output boundary cannot be
-        # bypassed by adding a message.
-        _err(f"reason: {_scrub_credential_shaped('; '.join(violations))}")
+        # bypassed by adding a message. Control-character neutralization
+        # runs first, over the raw text, so a vault author cannot use a
+        # control byte to split a credential pattern's match and dodge the
+        # scrub that follows.
+        joined = _neutralize_control_chars("; ".join(violations))
+        _err(f"reason: {_scrub_credential_shaped(joined)}")
         return 1
 
     for identifier, method in certified:

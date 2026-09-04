@@ -82,6 +82,8 @@ SUBBULLET_IDENTIFIER_LEAK = _fixture("crit_subbullet_identifier_leak.md")
 TWO_TRAILERS = _fixture("crit_two_trailers.md")
 LOOSE_LIST_SUBBULLET_LEAK = _fixture("crit_loose_list_subbullet_leak.md")
 LOOSE_LIST_TRAILER_CONTINUATION = _fixture("crit_loose_list_trailer_continuation.md")
+CONTROL_BYTE_SPAN = _fixture("crit_control_byte_span.md")
+CREDENTIAL_BOUNDARY_TRUNCATION = _fixture("crit_credential_boundary_truncation.md")
 
 _ZERO_CRITERIA_REASON_CODE = "reason-code: zero-criterion-identifiers"
 _DUPLICATE_HEADING_REASON_CODE = "reason-code: duplicate-acceptance-criteria-heading"
@@ -471,3 +473,130 @@ def test_all_clean_spec_pairs_each_identifier_with_its_own_method():
     assert "AC1: automated-assertion" in r.stdout
     assert "AC2: design-doc-review" in r.stdout
     assert "AC3: manual-check" in r.stdout
+
+
+# ---- Critical: control bytes in a refused span must not reach stderr raw ----
+# A vault record is team-writable, and a refused span is echoed verbatim into
+# the violation message. Three refuse patterns (call syntax, HTTP verb, and
+# subscript) place no character restriction on part of their match, so a raw
+# ESC byte is legal input. The threat is two-fold: terminal-escape injection
+# into a human's terminal, and prompt injection into the operator agent the
+# gauntlet skill directs to re-quote the offending span verbatim.
+
+
+def test_control_bytes_in_a_refused_call_syntax_span_are_neutralized():
+    r = _run(CONTROL_BYTE_SPAN)
+    assert r.returncode == 1, r.stderr + r.stdout
+    assert b"\x1b" not in r.stderr.encode("utf-8", "surrogateescape")
+    assert "AC1" in r.stderr
+    # the neutralized escape must still be legible as evidence, not dropped
+    assert "\\x1b" in r.stderr
+
+
+def _run_bytes(spec_body: bytes) -> subprocess.CompletedProcess:
+    return subprocess.run([sys.executable, str(GATE)], input=spec_body, capture_output=True)
+
+
+def test_control_bytes_anywhere_in_the_refusal_output_are_neutralized():
+    """Pin the property as a class at the output boundary, not just on the one
+    fixture above: no C0/C1 control byte reaches stdout or stderr on any
+    refusal path, using raw bytes on the wire rather than a decoded string so
+    a raw ESC byte cannot hide from the assertion."""
+    r = _run_bytes(CONTROL_BYTE_SPAN.encode("utf-8"))
+    assert r.returncode == 1
+    control_bytes = bytes(b for b in range(0x00, 0x20) if b not in (0x09, 0x0A, 0x0D))
+    for b in control_bytes:
+        assert bytes([b]) not in r.stderr, f"raw control byte {b:#04x} leaked into stderr"
+
+
+# ---- High: the credential scrub must not be defeated by truncate-then-scrub -
+# `_snippet` truncates to 48 chars before the credential scrub ever runs, so a
+# secret positioned to straddle that boundary survives with only its
+# non-matching prefix intact. Every existing credential fixture places its
+# secret at the start of the bullet, inside the 48-char window — this fixture
+# deliberately straddles it.
+
+
+def test_credential_straddling_the_snippet_truncation_boundary_is_still_scrubbed():
+    r = _run(CREDENTIAL_BOUNDARY_TRUNCATION)
+    assert r.returncode == 1, r.stderr + r.stdout
+    assert "Rw5Xn3Qp8Bt1Cv6Km2Zy9Ld4Hg7Jf0Ns5Ar3Ei8T" not in r.stderr
+    # the truncated-but-unscrubbed partial token must not leak either
+    assert "Rw5Xn3Qp8" not in r.stderr
+
+
+# ---- Medium: unbounded stdin ahead of an eight-agent dispatch ---------------
+
+
+def test_stdin_over_the_size_cap_refuses_fail_closed_rather_than_certifying_a_partial_document():
+    oversized = (
+        "## Acceptance Criteria\n\n"
+        "- **AC1.** " + ("x" * (criterion_gate._MAX_STDIN_BYTES + 1)) + " *Verified by: automated assertion.*\n"
+    )
+    r = _run(oversized)
+    assert r.returncode == 2, r.stderr + r.stdout
+    assert "reason-code: stdin-too-large" in r.stderr
+    assert "AC1" not in r.stdout
+
+
+def test_stdin_at_or_under_the_size_cap_is_unaffected():
+    body = _spec_with_span("/craft:slice")
+    assert len(body.encode("utf-8")) <= criterion_gate._MAX_STDIN_BYTES
+    r = _run(body)
+    assert r.returncode == 0, r.stderr + r.stdout
+
+
+def test_stdin_exactly_at_the_size_cap_still_certifies():
+    """The cap is a threshold — pin the boundary itself, not just comfortably
+    inside or outside it: a body whose byte length equals the cap exactly
+    must not refuse."""
+    cap = criterion_gate._MAX_STDIN_BYTES
+    prefix = "## Acceptance Criteria\n\n- **AC1.** "
+    suffix = " *Verified by: automated assertion.*\n"
+    pad = cap - len(prefix.encode("utf-8")) - len(suffix.encode("utf-8"))
+    body = prefix + ("x" * pad) + suffix
+    assert len(body.encode("utf-8")) == cap
+    r = _run(body)
+    assert r.returncode == 0, r.stderr + r.stdout
+
+
+# ---- Low: the credential pattern list must not silently drift from the -----
+# ---- shared skill document it was hand-copied from --------------------------
+
+_SHARED_EXECUTE_MD = REPO_ROOT / "plugins" / "craft" / "skills" / "_shared" / "execute.md"
+
+# A pattern span in the doc's bulleted list always begins with one of these
+# regex-only prefixes; every prose example backtick-span in the same lines
+# (e.g. `SECRET_KEY=`, `[=:]`) begins with a literal character instead, so
+# this discriminates the pattern spans unambiguously without hand-picking
+# line offsets into the bullet text.
+_PATTERN_PREFIXES = ("(?i)", r"\b", "-----BEGIN")
+
+
+def _parse_credential_patterns_from_shared_doc() -> list[str]:
+    text = _SHARED_EXECUTE_MD.read_text(encoding="utf-8")
+    start = text.index("Key-like tokens")
+    end = text.index("Prefer over-matching")
+    section = text[start:end]
+    spans = re.findall(r"`([^`]+)`", section)
+    return [s for s in spans if s.startswith(_PATTERN_PREFIXES)]
+
+
+def _normalize_python_string_literal_escaping(pattern: str) -> str:
+    """`\\"` and `"` are equivalent inside a regex (the escape exists only
+    because the code's source lives in a double-quoted Python string literal
+    and must escape an embedded `"`; the doc's markdown backtick span needs
+    no such escaping). Normalize this one syntactic artifact away so the
+    comparison is over regex semantics, not which quote character the
+    source file happens to use."""
+    return pattern.replace('\\"', '"')
+
+
+def test_credential_pattern_list_matches_the_shared_document_it_was_copied_from():
+    doc_patterns = _parse_credential_patterns_from_shared_doc()
+    assert doc_patterns, "could not parse any credential patterns out of the shared document"
+    code_patterns = [
+        _normalize_python_string_literal_escaping(p.pattern)
+        for p in criterion_gate._CREDENTIAL_PATTERNS
+    ]
+    assert doc_patterns == code_patterns
