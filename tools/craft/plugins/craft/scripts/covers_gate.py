@@ -288,32 +288,27 @@ def main(argv: list[str]) -> int:
         _err(f"reason-code: {_ZERO_CRITERIA_REASON_CODE}")
         return 2
 
-    covers: list[str] = []
-    partial_covers: list[str] = []
-
-    if args.covers is not None:
+    # Both drafted lists go through one grammar pass, then one membership
+    # pass, in that order — a flag omitted contributes an empty list rather
+    # than a separate code path, so the two flags cannot drift apart in what
+    # they accept or in how they report a rejection.
+    drafted: list[list[str]] = []
+    for value in (args.covers, args.partial_covers):
+        if value is None:
+            drafted.append([])
+            continue
         try:
-            covers = parse_covers(args.covers)
+            drafted.append(parse_covers(value))
         except ValueError as e:
             _err(f"reason: {e}")
             return 1
+    covers, partial_covers = drafted
 
-    if args.partial_covers is not None:
-        try:
-            partial_covers = parse_covers(args.partial_covers)
-        except ValueError as e:
-            _err(f"reason: {e}")
+    for identifiers in (covers, partial_covers):
+        unknown = [c for c in identifiers if c not in criteria]
+        if unknown:
+            _err(f"reason: unknown criterion identifier(s): {', '.join(unknown)}")
             return 1
-
-    unknown = [c for c in covers if c not in criteria]
-    if unknown:
-        _err(f"reason: unknown criterion identifier(s): {', '.join(unknown)}")
-        return 1
-
-    unknown_partial = [c for c in partial_covers if c not in criteria]
-    if unknown_partial:
-        _err(f"reason: unknown criterion identifier(s): {', '.join(unknown_partial)}")
-        return 1
 
     overlap = [c for c in covers if c in partial_covers]
     if overlap:

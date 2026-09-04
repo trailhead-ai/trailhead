@@ -225,10 +225,10 @@ def parse_ledger(
     if start is None:
         return [], [], True
 
-    covered: list[str] = []
-    seen: set[str] = set()
-    partial: list[str] = []
-    partial_seen: set[str] = set()
+    # Insertion-ordered sets: a dict keeps first-seen order while making the
+    # repeat check O(1), so neither list needs a parallel `seen` set beside it.
+    covered: dict[str, None] = {}
+    partial: dict[str, None] = {}
     eligible = True
     entry_lines: list[str] = []
 
@@ -266,15 +266,9 @@ def parse_ledger(
             eligible = False
             return
         if fields.group("covers") is not None:
-            for identifier in _parse_field(fields.group("covers")):
-                if identifier not in seen:
-                    seen.add(identifier)
-                    covered.append(identifier)
+            covered.update(dict.fromkeys(_parse_field(fields.group("covers"))))
         if partial_value is not None:
-            for identifier in _parse_field(partial_value):
-                if identifier not in partial_seen:
-                    partial_seen.add(identifier)
-                    partial.append(identifier)
+            partial.update(dict.fromkeys(_parse_field(partial_value)))
 
     in_noncanonical = False
     for i in range(start, len(lines)):
@@ -304,8 +298,7 @@ def parse_ledger(
             continue
         entry_lines.append(line)
     finalize_entry()
-    partial_remainder = [i for i in partial if i not in seen]
-    return covered, partial_remainder, eligible
+    return list(covered), [i for i in partial if i not in covered], eligible
 
 
 def main(argv: list[str]) -> int:
