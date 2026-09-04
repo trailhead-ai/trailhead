@@ -64,6 +64,12 @@ CREDENTIAL_SHAPED_DUPLICATE_TASK_ID = (
 CONTROL_BYTE_DUPLICATE_TASK_ID = (
     FIXTURES / "ledger_control_byte_duplicate_task_id.md"
 ).read_text(encoding="utf-8")
+TORN_INTERLEAVED_NO_MARKER = (
+    FIXTURES / "ledger_torn_interleaved_no_marker.md"
+).read_text(encoding="utf-8")
+CREDENTIAL_SHAPED_TASK_ID_CERTIFIED = (
+    FIXTURES / "ledger_credential_shaped_task_id_certified.md"
+).read_text(encoding="utf-8")
 
 
 def _run(
@@ -181,6 +187,34 @@ def test_invisible_task_id_is_refused_not_certified():
     r = _run(INVISIBLE_TASK_ID)
     assert r.returncode == 1
     assert _reason_code(r.stderr) == "invisible-ledger-task-id"
+
+
+# ---------------------------------------------------------------------------
+# Council-review reproduction — an unmarked trailing line folds into the
+# entries-view join's own bullet-only span invisibly, while `parse_ledger`'s
+# wider join reads its own trailing parenthetical as the entry's, widening
+# coverage the gate never saw. This is the fixture reproduced verbatim in the
+# review that raised this finding; `candidate_set.py` alone (unpatched) still
+# reports `complete-eligible: yes` / `covered: AC1, AC2` on this same body —
+# the gate is the one consumer this fix must close.
+# ---------------------------------------------------------------------------
+
+
+def test_unclaimed_trailing_line_after_a_canonical_entry_is_refused():
+    r = _run(TORN_INTERLEAVED_NO_MARKER)
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert _reason_code(r.stderr) == "unclaimed-ledger-line"
+    # names the offending physical line number (the operator-note line, 1-indexed)
+    assert "20" in r.stderr, r.stderr
+
+
+def test_unclaimed_trailing_line_is_refused_even_without_parent_coverage():
+    """The divergence is a structural property of the document alone — it
+    does not require `--parent-coverage` to detect, unlike
+    `coverage-contradicts-parent` and `orphaned-ledger-entry`."""
+    r = _run(TORN_INTERLEAVED_NO_MARKER)
+    assert r.returncode == 1
+    assert _reason_code(r.stderr) == "unclaimed-ledger-line"
 
 
 # ---------------------------------------------------------------------------
@@ -365,6 +399,18 @@ def test_credential_shaped_task_id_refuses_without_reproducing_the_secret():
     assert _reason_code(r.stderr) == "duplicate-ledger-task-id"
     assert "sk_live_Zq7Kd2" not in r.stderr
     assert "deploy-" in r.stderr
+
+
+def test_credential_shaped_task_id_is_scrubbed_on_the_certified_stdout_path_too():
+    """The module docstring claims `_safe` is this gate's single output
+    boundary — every echoed field passes through it, not just a refusal's
+    `reason:` line. A single (non-duplicated) credential-shaped task id
+    certifies (exit 0), so this pins the CERTIFIED stdout block itself,
+    distinct from the exit-1 `reason:`-line pin above."""
+    r = _run(CREDENTIAL_SHAPED_TASK_ID_CERTIFIED)
+    assert r.returncode == 0, r.stderr
+    assert "sk_live_Zq7Kd2" not in r.stdout
+    assert "deploy-" in r.stdout
 
 
 def test_control_byte_in_a_duplicated_task_id_is_neutralized():

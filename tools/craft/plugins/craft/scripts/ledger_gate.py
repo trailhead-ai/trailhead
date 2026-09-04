@@ -13,20 +13,27 @@ derives its answer from the document alone, the same convention
 `--parent-coverage` flag names a JSON file, read with the stdlib `json`
 module, supplying the one fact this gate cannot derive from the spec body
 alone: what each ledger entry's parent record actually declared. Omitting
-the flag certifies structure only (duplicate task ids, an identifier
-claimed both fully and partially, invisible task-id content) and says so on
-stdout — the gate stays usable standalone, with the parent cross-check as
-an additive, opt-in guarantee.
+the flag certifies structure only (an unclaimed trailing line, duplicate
+task ids, an identifier claimed both fully and partially, invisible task-id
+content) and says so on stdout — the gate stays usable standalone, with the
+parent cross-check as an additive, opt-in guarantee.
 
 Per-entry structure is read via the sibling `candidate_set.py`'s
-`parse_ledger_entries` — never re-derived here, so this gate and
-`candidate_set.py` cannot disagree about where one ledger entry ends and
-the next begins, about the CommonMark line grammar, or about which regions
-(fenced code blocks, HTML comments) are masked. `parse_ledger_entries` folds
-a canonical bullet only with its own indented continuation lines, so two
-entries torn or interleaved by a concurrent append surface here as two
-distinct entries rather than being merged into one — that is what makes
-`duplicate-ledger-task-id` detectable at all.
+`parse_ledger_entries` and `find_unclaimed_ledger_lines` — never re-derived
+here, so this gate and `candidate_set.py` cannot disagree about where one
+ledger entry ends and the next begins, about the CommonMark line grammar, or
+about which regions (fenced code blocks, HTML comments) are masked.
+`parse_ledger_entries` folds a canonical bullet only with its own indented
+continuation lines: a torn or interleaved concurrent append that itself
+opens with a top-level marker becomes its own entry, which is what makes
+`duplicate-ledger-task-id` detectable; one that opens with no marker of its
+own — unmarked prose, or a fragment torn mid-sentence — is invisible to that
+accessor entirely, while `/craft:slice`'s termination decision reads the
+same document through `candidate_set.parse_ledger`'s wider join, which
+folds such a line into the entry above it and reads its trailing
+parenthetical as that entry's own. `find_unclaimed_ledger_lines` is what
+closes that gap: it refuses any such line rather than certifying a body
+whose decided coverage this gate never saw.
 
 `--parent-coverage`'s JSON schema: a top-level JSON object mapping a ledger
 entry's bare task id (the identifier `parse_ledger_entries` reports as
@@ -60,7 +67,8 @@ recovery: correct the *parent* record and re-run the reconcile, which is
 the only documented writer.
 
 Every `reason:` line is built from vault-sourced spec text — a task id, an
-identifier list, an offending parenthetical — so before being printed it is
+identifier list, an offending parenthetical, a line number — so before being
+printed it is
 run once, at this single output boundary, through
 `criterion_gate._neutralize_control_chars` (raw non-printable code points
 first, so a control byte cannot be used to split a credential pattern's
@@ -74,8 +82,16 @@ Exit codes:
        checked` when `--parent-coverage` was supplied and every entry
        passed it; `parent-cross-check: skipped ...` when the flag was
        omitted and only structure was certified.
-    1  integrity violation — every message names the offending task id or
-       identifier and the sanctioned recovery. Stable `reason-code:` tokens:
+    1  integrity violation — every message names the offending task id,
+       identifier, or line number, and the sanctioned recovery. Stable
+       `reason-code:` tokens:
+         unclaimed-ledger-line — a non-blank line inside `## Slices` belongs
+             to a canonical entry's block (per the shared
+             `_iter_ledger_entries` walk) but falls outside that entry's own
+             structured span (per `_select_structured_span`) — the exact
+             divergence between this gate's `parse_ledger_entries` view and
+             `candidate_set.parse_ledger`'s wider join, checked
+             unconditionally, `--parent-coverage` or not.
          invisible-ledger-task-id  — a task id carries no character beyond
              whitespace and Unicode category Cf/Cc (the same non-empty bar
              `observation_gate._is_meaningfully_nonempty` applies to
@@ -130,6 +146,7 @@ if str(_SCRIPT_DIR) not in sys.path:
 from candidate_set import (  # noqa: E402
     LedgerEntry,
     MalformedCoverageTokenError,
+    find_unclaimed_ledger_lines,
     parse_ledger_entries,
 )
 from covers_gate import _COMMONMARK_LINE_RE, DuplicateHeadingError  # noqa: E402
@@ -151,6 +168,7 @@ _DUPLICATE_TASK_ID_REASON_CODE = "duplicate-ledger-task-id"
 _COVERAGE_CLAIMED_TWICE_REASON_CODE = "coverage-claimed-twice"
 _ORPHANED_ENTRY_REASON_CODE = "orphaned-ledger-entry"
 _CONTRADICTS_PARENT_REASON_CODE = "coverage-contradicts-parent"
+_UNCLAIMED_LINE_REASON_CODE = "unclaimed-ledger-line"
 
 # Fail-closed backstop against a pathologically large vault record — a real
 # spec body is kilobytes; 256 KiB is generous headroom while still bounding
@@ -162,6 +180,12 @@ _REMEDY = (
     "under the monotonic coverage rule a ledger line cannot be rewritten "
     "directly — correct the parent record and re-run the reconcile, the "
     "only documented writer"
+)
+
+_UNCLAIMED_LINE_REMEDY = (
+    "under the monotonic coverage rule an entry's span is fixed at append "
+    "time — remove the stray line (or fold its content into a new entry via "
+    "the reconcile, the only documented writer) and re-run the reconcile"
 )
 
 _PARENT_COVERAGE_FIELD_KEYS = ("covers", "partially covers")
@@ -262,11 +286,37 @@ def _load_parent_coverage(path_str: str) -> dict[str, tuple[list[str], list[str]
 def _certify_entries(
     entries: list[LedgerEntry],
     parent_map: dict[str, tuple[list[str], list[str]]] | None,
+    unclaimed_lines: list[int],
 ) -> None:
     """Raise LedgerGateViolation on the first integrity violation found, in
-    a fixed order: invisible task-id content, a duplicated task id,
-    same-entry double-claimed coverage, then — only when `parent_map` is
-    supplied — an orphaned entry or a field that contradicts its parent."""
+    a fixed order: an unclaimed trailing line first (structural, and
+    independent of `entries` itself — see `unclaimed_lines`), then invisible
+    task-id content, a duplicated task id, same-entry double-claimed
+    coverage, then — only when `parent_map` is supplied — an orphaned entry
+    or a field that contradicts its parent.
+
+    `unclaimed_lines` (from `candidate_set.find_unclaimed_ledger_lines`) is
+    checked first and unconditionally, `parent_map` or not: it is what makes
+    this gate incapable of certifying a body whose decided coverage it never
+    saw. `parse_ledger_entries` — the view `entries` and every other check
+    here is built from — folds a canonical bullet only with its own indented
+    continuation lines, while `parse_ledger` (the view `/craft:slice`'s
+    termination decision reads) folds every subsequent line up to the next
+    marker regardless of indentation. A line that diverges between the two
+    joins — an unmarked operator note, a torn or interleaved concurrent
+    append with no marker of its own — is exactly the case where this gate
+    would certify one coverage decision while the termination decision sees
+    a different, wider one; refusing it here closes that gap rather than
+    leaving it for a parent cross-check that may never run."""
+    if unclaimed_lines:
+        lines_str = ", ".join(str(n) for n in unclaimed_lines)
+        raise LedgerGateViolation(
+            f"line(s) {lines_str} in the '## Slices' section fall outside "
+            "every canonical entry's own bullet/continuation span — "
+            f"{_UNCLAIMED_LINE_REMEDY}",
+            _UNCLAIMED_LINE_REASON_CODE,
+        )
+
     for entry in entries:
         if not _is_meaningfully_nonempty(entry.task_id):
             raise LedgerGateViolation(
@@ -391,8 +441,13 @@ def main(argv: list[str]) -> int:
             _err(f"reason-code: {e.reason_code}")
             return 2
 
+    # find_unclaimed_ledger_lines re-derives the same `## Slices` heading
+    # `parse_ledger_entries` already found above without raising — a second
+    # unmasked heading would already have exited 2 there.
+    unclaimed_lines = find_unclaimed_ledger_lines(spec_body)
+
     try:
-        _certify_entries(entries, parent_map)
+        _certify_entries(entries, parent_map, unclaimed_lines)
     except LedgerGateViolation as e:
         _err(f"reason: {_safe(str(e))}")
         _err(f"reason-code: {e.reason_code}")
@@ -402,7 +457,7 @@ def main(argv: list[str]) -> int:
     for entry in entries:
         covers_str = ", ".join(entry.covers) if entry.covers else "none"
         partial_str = ", ".join(entry.partial) if entry.partial else "none"
-        print(f"{entry.task_id}: covers={covers_str}, partial={partial_str}")
+        print(f"{_safe(entry.task_id)}: covers={covers_str}, partial={partial_str}")
     if parent_map is not None:
         print("parent-cross-check: checked")
     else:

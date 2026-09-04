@@ -370,8 +370,18 @@ def _select_structured_span(
 
     The first non-blank, non-indented line ends the span here instead of
     being folded in — this is the one difference from `parse_ledger`'s own
-    join, and it is what keeps a torn/interleaved concurrent append (or
-    ordinary unmarked trailing prose) from merging into the entry above it.
+    join. That keeps such a line out of *this* entry's own fields, but it
+    does not make the line visible anywhere: a torn/interleaved concurrent
+    append (or ordinary unmarked trailing prose) that itself opens with a
+    top-level marker becomes its own block and so its own entry here, the
+    same as any other canonical bullet; one that opens with neither — plain
+    prose continuing the sentence above it, carrying no marker of its own —
+    is simply excluded from every entry's span, contributing no entry at
+    all to this accessor's result. `parse_ledger`'s wider join still folds
+    that second case into the entry above it, reading its trailing
+    parenthetical as that entry's own. This accessor's structural view alone
+    does not surface it — a caller that must catch it walks the same raw
+    blocks separately (see `find_unclaimed_ledger_lines`).
     """
     n = len(block_lines)
     selected = [block_lines[0]]
@@ -482,6 +492,47 @@ def parse_ledger_entries(spec_body: str) -> list[LedgerEntry]:
         end_line = max(i for i, l in selected if l.strip()) + 1
         entries.append(LedgerEntry(task_id, covers, partial, start_line, end_line))
     return entries
+
+
+def find_unclaimed_ledger_lines(spec_body: str) -> list[int]:
+    """Return the 1-indexed physical line numbers, in document order, of
+    every non-blank `## Slices` line that `_iter_ledger_entries` folds into a
+    canonical block yet `_select_structured_span` excludes from that block's
+    own structured span — the exact content `parse_ledger_entries` never
+    sees but `parse_ledger`'s wider join still folds into the entry above it,
+    reading its trailing parenthetical as that entry's own (see
+    `_select_structured_span`'s docstring for the asymmetry this closes).
+
+    Shares `_iter_ledger_entries` with both `parse_ledger` and
+    `parse_ledger_entries` rather than re-deriving where one block ends and
+    the next begins, so this can never disagree with either about that. A
+    non-canonical marker block (indented / `* ` / numbered) contributes no
+    lines here: it never enters a canonical entry's block in the first
+    place, so `parse_ledger` never folds it into one either.
+
+    Empty when the document has no `## Slices` section, no ledger entries,
+    or every canonical entry's block is exactly its own structured span —
+    the common case. Raises DuplicateHeadingError on a second unmasked
+    `## Slices` heading, the same as `parse_ledger` and `parse_ledger_entries`.
+    """
+    lines = _COMMONMARK_LINE_RE.split(spec_body)
+    fenced = _mask_fenced_lines(lines)
+
+    start = _find_unique_heading(
+        lines, fenced, _SLICES_HEADING_RE, _SLICES_HEADING, _DUPLICATE_SLICES_HEADING_REASON_CODE
+    )
+    if start is None:
+        return []
+
+    unclaimed: list[int] = []
+    for kind, block_lines in _iter_ledger_entries(lines, fenced, start):
+        if kind != "canonical":
+            continue
+        selected_indices = {idx for idx, _ in _select_structured_span(block_lines)}
+        for idx, line in block_lines:
+            if idx not in selected_indices and line.strip():
+                unclaimed.append(idx + 1)
+    return unclaimed
 
 
 def main(argv: list[str]) -> int:

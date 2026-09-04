@@ -24,6 +24,7 @@ from test_ledger_gate import (
     DUPLICATE_TASK_ID,
     INVISIBLE_TASK_ID,
     ORPHANED_ENTRY,
+    TORN_INTERLEAVED_NO_MARKER,
     UNTERMINATED_FENCE,
     WIDENED_CONTRADICTS_PARENT,
     BACKFILL_MONOTONIC,
@@ -129,6 +130,7 @@ def _documented_reason_codes(step4: str, exit_label: str) -> set[str]:
 
 
 REAL_EXIT_1_CODES = {
+    "unclaimed-ledger-line",
     "invisible-ledger-task-id",
     "duplicate-ledger-task-id",
     "coverage-claimed-twice",
@@ -168,6 +170,7 @@ def test_each_documented_exit_1_code_actually_produces_exit_1(tmp_path):
         (DUPLICATE_TASK_ID, None, "duplicate-ledger-task-id"),
         (COVERAGE_CLAIMED_TWICE, None, "coverage-claimed-twice"),
         (INVISIBLE_TASK_ID, None, "invisible-ledger-task-id"),
+        (TORN_INTERLEAVED_NO_MARKER, None, "unclaimed-ledger-line"),
     ]
     for body, extra, code in cases:
         r = _run_gate(body, extra)
@@ -230,6 +233,28 @@ def test_ledger_gate_invocation_documented_before_candidate_set_gate():
         "the ledger_gate.py invocation must be documented, by position, before "
         "the candidate_set.py invocation — an unverifiable ledger must refuse "
         "the pass before a candidate set is derived from it"
+    )
+
+
+def test_backfill_clause_documented_before_the_ledger_gate_invocation():
+    """The backfill clause must fold into the SAME full-body write step 4
+    documents for new lines, before that write is certified — not a second
+    write performed after the gate has already certified the pre-backfill
+    body (which would leave the backfilled tokens uncertified this pass and
+    reopen the lost-update window the fresh-read-before-write clause
+    narrows). Documented, by position, before the ledger_gate.py invocation
+    proves a top-down reading performs it as part of the one write, ahead of
+    certification — never after."""
+    step4 = _step4()
+    backfill_match = re.search(r"Backfilling an existing line", step4)
+    ledger_match = re.search(r"ledger_gate\.py", step4)
+    assert backfill_match, "slice/SKILL.md step 4 must document the backfill clause"
+    assert ledger_match, "slice/SKILL.md step 4 must document the ledger_gate.py invocation"
+    assert backfill_match.start() < ledger_match.start(), (
+        "the backfill clause must be documented, by position, before the "
+        "ledger_gate.py invocation — a session executing top-down must fold "
+        "the backfill into the write the gate then certifies, never perform "
+        "it as a second write after the gate has already certified"
     )
 
 
@@ -304,24 +329,79 @@ def test_step4_never_documents_persisting_the_free_text_reason_line():
 # ---------------------------------------------------------------------------
 
 
-def test_exactly_one_documented_ledger_coverage_write_site_in_the_corpus():
-    marker = re.compile(r"Reconcile the `## Slices` ledger")
-    skills_dir = CRAFT / "skills"
+_COVERS_WRITE_SHAPE_RE = re.compile(
+    r"covers <covers-value>|partially covers <partially-covers-value>"
+)
+
+
+def _ledger_coverage_write_sites(skills_dir: Path) -> list[Path]:
+    """Every `.md` file under `skills_dir` documenting the actual shape of a
+    ledger-line coverage write — the `covers <covers-value>` / `partially
+    covers <partially-covers-value>` template tokens step 4 writes into a
+    `## Slices` line's trailing parenthetical — rather than files merely
+    containing step 4's own heading text. A second writer documented under
+    any other heading, anywhere in the corpus, still carries this shape and
+    so is still caught; the heading text is not."""
     hits = []
     for f in sorted(skills_dir.rglob("*.md")):
         text = f.read_text(encoding="utf-8")
-        for _ in marker.finditer(text):
+        if _COVERS_WRITE_SHAPE_RE.search(text):
             hits.append(f)
+    return hits
+
+
+def test_exactly_one_documented_ledger_coverage_write_site_in_the_corpus():
+    hits = _ledger_coverage_write_sites(CRAFT / "skills")
     assert len(hits) == 1, (
         f"expected exactly one documented ledger coverage-write site across the "
         f"craft skill corpus, found {len(hits)}: {hits}"
     )
 
 
+def test_write_site_pin_catches_a_second_site_documented_under_different_wording(
+    tmp_path,
+):
+    """The pin above must key on the actual coverage-write shape, not on step
+    4's own heading text — proven by planting that same write-shape template
+    under an entirely unrelated heading in a throwaway skill tree the real
+    corpus scan never sees, and confirming the scan still finds it."""
+    decoy_dir = tmp_path / "skills" / "decoy"
+    decoy_dir.mkdir(parents=True)
+    (decoy_dir / "SKILL.md").write_text(
+        "### 9. Some entirely unrelated step, never named 'Reconcile'\n\n"
+        "- **<slice title>** — <value claim>. (`task/<task-id>`, closed "
+        "<close-date>, covers <covers-value>)\n",
+        encoding="utf-8",
+    )
+    hits = _ledger_coverage_write_sites(tmp_path / "skills")
+    assert len(hits) == 1
+    assert hits[0].name == "SKILL.md"
+
+
 # ---------------------------------------------------------------------------
 # Task 4 — the legacy backfill: an existing no-token line gains a token,
 # exactly once, under the monotonic rule step 4's new clause documents.
 # ---------------------------------------------------------------------------
+
+
+_LITERAL_TOKEN_RE = re.compile(r"(?:^|,\s*)(?:partially )?covers\b")
+
+
+def _entry_already_carries_a_literal_token(spec_body: str, entry) -> bool:
+    """Whether `entry`'s own trailing parenthetical already contains a
+    literal `covers` or `partially covers` token, read off the raw source
+    lines rather than off `entry.covers`/`entry.partial` — those are
+    `parse_ledger_entries`'s PARSED fields, which read empty for a lenient
+    entry whose parenthetical does not fully match the field grammar (e.g.
+    missing ', closed <date>'), even when the line already carries a
+    literal token. Shares `_LEDGER_TRAILING_PAREN_RE` with `candidate_set`
+    rather than re-deriving where the trailing parenthetical starts."""
+    lines = candidate_set._COMMONMARK_LINE_RE.split(spec_body)
+    joined = " ".join(
+        line.strip() for line in lines[entry.start_line - 1 : entry.end_line] if line.strip()
+    )
+    paren = candidate_set._LEDGER_TRAILING_PAREN_RE.search(joined)
+    return paren is not None and bool(_LITERAL_TOKEN_RE.search(paren.group(1)))
 
 
 def _backfill(spec_body: str, parent_coverage: dict) -> str:
@@ -332,11 +412,15 @@ def _backfill(spec_body: str, parent_coverage: dict) -> str:
     (`parent_coverage`, keyed on the bare task id), in the same
     trailing-parenthetical shape the append-new-line logic already writes.
     A line that already carries a token is never touched, regardless of
-    what its parent says. This calls the real, frozen `parse_ledger_entries`
-    to find each entry's task id and span rather than re-deriving either."""
+    what its parent says — checked by the line's own literal token (see
+    `_entry_already_carries_a_literal_token`), not by `parse_ledger_entries`'s
+    parsed fields, which a lenient entry's malformed parenthetical can read
+    as empty even though the line already carries one. This calls the real,
+    frozen `parse_ledger_entries` to find each entry's task id and span
+    rather than re-deriving either."""
     lines = candidate_set._COMMONMARK_LINE_RE.split(spec_body)
     for entry in candidate_set.parse_ledger_entries(spec_body):
-        if entry.covers or entry.partial:
+        if _entry_already_carries_a_literal_token(spec_body, entry):
             continue
         parent = parent_coverage.get(entry.task_id)
         if not parent:
@@ -433,6 +517,44 @@ def test_ledger_gate_exits_0_after_a_backfill(tmp_path):
     parent_coverage_path = _write_parent_coverage(tmp_path, parent_coverage)
     r = _run_gate(backfilled, ["--parent-coverage", parent_coverage_path])
     assert r.returncode == 0, r.stderr
+
+
+def test_backfill_never_rewrites_a_lenient_entry_that_already_carries_a_literal_token():
+    """`_backfill` must honor the documented clause ("a line that already
+    carries a token is never touched here") by the line's literal token, not
+    by `parse_ledger_entries`'s PARSED `covers`/`partial` fields — those read
+    empty for a lenient entry whose parenthetical is missing ', closed
+    <date>' (see
+    test_lenient_entry_missing_closed_date_is_treated_as_no_token_not_a_violation
+    in test_ledger_gate.py), even though the line already carries a literal
+    'covers AC1' token. Reproduces the reviewer's finding: three backfill
+    passes over such a line, unfixed, stack up
+    'covers AC1, covers AC2, covers AC2, covers AC2'."""
+    lenient_body = (
+        "## Acceptance Criteria\n\n"
+        "- **AC1.** A fixture criterion.\n"
+        "- **AC2.** A fixture criterion.\n\n"
+        "## Slices\n\n"
+        "- **First slice** — a fixture value claim with a malformed "
+        "parenthetical. (`task/lenient`, covers AC1)\n"
+    )
+    entries = candidate_set.parse_ledger_entries(lenient_body)
+    assert entries[0].covers == [] and entries[0].partial == [], (
+        "fixture premise: parse_ledger_entries must report this lenient "
+        "entry's parsed fields as empty for this test to mean anything"
+    )
+
+    parent_coverage = {"lenient": {"covers": "AC2"}}
+    once = _backfill(lenient_body, parent_coverage)
+    assert once == lenient_body, (
+        "the backfill must leave a lenient entry that already carries a "
+        "literal 'covers' token untouched, even though its parsed fields "
+        "read empty"
+    )
+
+    twice = _backfill(once, parent_coverage)
+    thrice = _backfill(twice, parent_coverage)
+    assert thrice == lenient_body, "repeated backfill passes must stay idempotent"
 
 
 def test_end_to_end_backfill_moves_candidate_set_from_no_to_yes():

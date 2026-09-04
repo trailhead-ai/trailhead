@@ -155,6 +155,21 @@ when it is not.
 never a body read earlier in the same pass. This shrinks, but does not close, the concurrent
 lost-update window: a write racing between that fresh read and this write can still be lost.
 
+**Backfilling an existing line under the same rule, in this same write.** The append logic
+above only reaches a done slice with no existing line yet; a line already appended is handled
+here instead, before the write above is made rather than after. For each existing `## Slices`
+line carrying no `covers` and no `partially covers` token, re-read that line's own named
+parent — the same done-parent read this reconcile already performed — and, where that parent
+has since gained a `**Covers:**` and/or `**Partially covers:**` field, extend the existing line
+in place with those token(s), in the same trailing-parenthetical shape the append above writes
+(`covers` before `partially covers` when both are present). A line whose parent still carries
+neither field is left exactly as it is: legacy and untouched, not a refusal. A line that already
+carries a token is never touched here, regardless of what its parent now says — a divergence at
+that line is `coverage-contradicts-parent`, the ledger gate's own refusal, never a backfill this
+reconcile performs. This backfill is folded into the same full-body read-modify-write the append
+logic above makes — one write, not two, and both land before the gate below ever runs — so it
+introduces no second writer and nothing it changes goes uncertified this pass.
+
 **Certify the ledger before deriving anything from it.** Immediately after the reconcile write
 above, pipe the freshly-read spec body through the ledger gate — strictly before the
 candidate-set gate below: an unverifiable ledger must refuse this pass before a candidate set is
@@ -173,10 +188,15 @@ remedy the gate's own `reason-code:` stderr token identifies. **Only the `reason
 ever be copied into this pass's report, a task body, a commit message, or any other durable
 artifact — the `reason:` line is free text built from vault-sourced ledger prose (a task id, a
 coverage token) and is never persisted anywhere beyond this pass's own immediate reading of it.**
-On exit 1 — `invisible-ledger-task-id`, `duplicate-ledger-task-id`, `coverage-claimed-twice`,
-`orphaned-ledger-entry`, or `coverage-contradicts-parent` — the fix is always to correct the
-offending *parent* record and re-run this reconcile from step 4's start: under the append-only
-invariant below, a ledger line is never hand-edited directly. On exit 2 — `empty-stdin`,
+On exit 1 — `unclaimed-ledger-line`, `invisible-ledger-task-id`, `duplicate-ledger-task-id`,
+`coverage-claimed-twice`, `orphaned-ledger-entry`, or `coverage-contradicts-parent` — the fix is
+always to correct the offending record and re-run this reconcile from step 4's start: under the
+append-only invariant below, a ledger line is never hand-edited directly. On the
+`unclaimed-ledger-line` code specifically, the gate's own stderr names the offending line
+number — a non-blank line inside `## Slices` that reads as neither part of any canonical entry's
+own bullet/continuation span nor a new marker (unmarked prose, or a torn/interleaved concurrent
+append with no marker of its own) — and the record to correct is the ledger itself: remove that
+line, or fold its content into a proper entry, before re-running. On exit 2 — `empty-stdin`,
 `non-utf8-stdin`, `stdin-too-large`, `duplicate-slices-heading`, `unterminated-masked-region`,
 `malformed-coverage-token`, or `malformed-parent-coverage` — the gate could not certify at all;
 the remedy is to fix the spec record or the parent-coverage file before re-running.
@@ -197,20 +217,6 @@ catches a line that has drifted from its own parent, but a writer who edits the 
 parent consistently defeats append-only undetected — cryptographic provenance would close this,
 and is out of scope for a markdown section in a git-backed vault. Neither limit is a defect to fix
 here; both are named so a future reader does not mistake either gate for more than it certifies.
-
-**Backfilling an existing line under the same rule.** The append logic above only reaches a
-done slice with no existing line yet; a line already appended is handled here instead. For
-each existing `## Slices` line carrying no `covers` and no `partially covers` token, re-read
-that line's own named parent — the same done-parent read this reconcile already performed —
-and, where that parent has since gained a `**Covers:**` and/or `**Partially covers:**` field,
-extend the existing line in place with those token(s), in the same trailing-parenthetical
-shape the append above writes (`covers` before `partially covers` when both are present). A
-line whose parent still carries neither field is left exactly as it is: legacy and untouched,
-not a refusal. A line that already carries a token is never touched here, regardless of what
-its parent now says — a divergence at that line is `coverage-contradicts-parent`, the ledger
-gate's own refusal, never a backfill this reconcile performs. This backfill folds into the
-same full-body read-modify-write step 4 already makes for new lines — one write, not two — so
-it introduces no second writer.
 
 Only now — with the ledger reconciled and certified — is the candidate set derived. Pipe the
 freshly-read spec body through the candidate-set gate:
