@@ -53,6 +53,9 @@ ZERO_CRITERIA_SPEC = (FIXTURES / "spec_zero_criteria.md").read_text(encoding="ut
 FORGED_FENCE = (FIXTURES / "spec_candidate_forged_slices_in_fence.md").read_text(
     encoding="utf-8"
 )
+FORGED_UNCLOSED_FENCE = (
+    FIXTURES / "spec_candidate_forged_slices_unclosed_fence.md"
+).read_text(encoding="utf-8")
 FORGED_LINE_SEPARATOR = (
     FIXTURES / "spec_candidate_forged_slices_via_line_separator.md"
 ).read_text(encoding="utf-8")
@@ -64,6 +67,15 @@ WRAPPED_ENTRIES = (FIXTURES / "spec_candidate_wrapped_ledger_entries.md").read_t
 )
 NONCANONICAL_BULLET_WITH_FULL_COVERAGE = (
     FIXTURES / "spec_candidate_noncanonical_bullet_with_full_coverage.md"
+).read_text(encoding="utf-8")
+NUMBERED_MARKER_BEFORE_ENTRY = (
+    FIXTURES / "spec_candidate_numbered_marker_before_canonical_entry.md"
+).read_text(encoding="utf-8")
+NUMBERED_MARKER_AFTER_ENTRY = (
+    FIXTURES / "spec_candidate_numbered_marker_after_canonical_entry.md"
+).read_text(encoding="utf-8")
+TRAILING_PROSE_LOSES_ENTRY_COVERAGE = (
+    FIXTURES / "spec_candidate_trailing_prose_loses_entry_coverage.md"
 ).read_text(encoding="utf-8")
 
 _UNDECLARED_REASON_CODE = "reason-code: undeclared-covered-identifier"
@@ -229,6 +241,22 @@ def test_forged_slices_ledger_inside_fenced_block_is_invisible():
     assert tokens["candidates"] == "AC1, AC2, AC3, AC4, AC5, AC6, AC7, AC8, AC9"
 
 
+def test_forged_slices_ledger_behind_unclosed_fence_is_invisible():
+    """The fence inside `## Slices` opens and never closes, so masking must
+    extend to the end of the document. A masker that stops at EOF without
+    keeping the fence open would let the forged full-coverage entry inside
+    it be read as a real ledger entry — the mutation this pins against is
+    disabling fenced-block masking entirely (`fenced = [False] * len(lines)`),
+    which turns this fixture's `candidates: AC1..AC9` into a false
+    `candidates: none, complete-eligible: yes`."""
+    r = _run(FORGED_UNCLOSED_FENCE)
+    assert r.returncode == 0, r.stderr + r.stdout
+    tokens = _tokens(r.stdout)
+    assert tokens["candidates"] != "none"
+    assert tokens["candidates"] == "AC1, AC2, AC3, AC4, AC5, AC6, AC7, AC8, AC9"
+    assert tokens["complete-eligible"] == "yes"
+
+
 def test_forged_slices_ledger_behind_line_separator_is_invisible():
     """The fake heading and line are hidden behind U+2028 inside one ordinary
     prose paragraph, not a real CommonMark line break. A parser that treats
@@ -279,6 +307,59 @@ def test_noncanonical_bullet_marker_forces_ineligible_despite_full_literal_cover
     assert r.returncode == 0, r.stderr + r.stdout
     tokens = _tokens(r.stdout)
     assert tokens["candidates"] == "none"
+    assert tokens["complete-eligible"] == "no"
+
+
+# ---- 11b2. a numbered-marker line forces ineligibility regardless of position ----
+
+
+def test_numbered_marker_before_canonical_entry_forces_ineligible():
+    """A numbered-list-marked line sitting BEFORE the section's only canonical
+    entry must still force ineligibility — the eligibility rule must not be
+    fooled by position, only by whether the section holds a canonical entry
+    or attempted-entry content that isn't one."""
+    r = _run(NUMBERED_MARKER_BEFORE_ENTRY)
+    assert r.returncode == 0, r.stderr + r.stdout
+    tokens = _tokens(r.stdout)
+    assert tokens["candidates"] == "none", (
+        "the canonical entry still covers every criterion literally: " f"{tokens}"
+    )
+    assert tokens["complete-eligible"] == "no", (
+        "a numbered-marker line before the canonical entry must still block "
+        f"eligibility, the same as one placed after it: {tokens}"
+    )
+
+
+def test_numbered_marker_after_canonical_entry_forces_ineligible():
+    """The same numbered-marker content, placed AFTER the canonical entry —
+    pins the mirror direction with a numbered marker specifically, since the
+    existing after-position fixture uses an asterisk bullet instead."""
+    r = _run(NUMBERED_MARKER_AFTER_ENTRY)
+    assert r.returncode == 0, r.stderr + r.stdout
+    tokens = _tokens(r.stdout)
+    assert tokens["candidates"] == "none"
+    assert tokens["complete-eligible"] == "no"
+
+
+# ---- 11b3. unmarked trailing prose swallows the preceding entry, fail-closed ----
+
+
+def test_trailing_prose_after_an_entry_loses_its_coverage_but_stays_fail_closed():
+    """Unmarked prose between two entries (an operator note, a sub-heading) is
+    read as an ordinary continuation line of the entry above it — this is the
+    same mechanism that lets a wrapped value claim's trailing parenthetical
+    land on its own continuation line, so it cannot be special-cased away
+    without breaking that. The affected entry's own coverage is dropped
+    entirely, but the union is reported ineligible rather than fabricated
+    complete: the second entry's coverage is still recognized, and eligible
+    is false because the first entry no longer parses."""
+    r = _run(TRAILING_PROSE_LOSES_ENTRY_COVERAGE)
+    assert r.returncode == 0, r.stderr + r.stdout
+    tokens = _tokens(r.stdout)
+    assert tokens["covered"] == "AC3, AC4", (
+        "the first entry's AC1, AC2 coverage must be lost once trailing "
+        f"prose pushes its parenthetical off the end of the entry text: {tokens}"
+    )
     assert tokens["complete-eligible"] == "no"
 
 

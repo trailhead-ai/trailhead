@@ -5,8 +5,8 @@ These tests bind the skill's prose to something executable — the real gate
 script run as a subprocess against real fixture spec bodies, and the
 document-position of the tokens the prose claims to key on — never to a copy
 of the skill's own wording. A test asserting the skill file merely contains a
-phrase is not acceptable here (spec Constraints), so every extraction below
-is fed through the real script or checked against real gate output.
+phrase is not acceptable here, so every extraction below is fed through the
+real script or checked against real gate output.
 """
 
 from __future__ import annotations

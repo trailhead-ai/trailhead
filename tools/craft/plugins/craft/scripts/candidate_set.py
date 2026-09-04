@@ -34,16 +34,26 @@ time. The stored ledger shape wraps a long value claim across several
 physical lines, with the trailing parenthetical landing on a continuation
 line of its own; scoring physical lines instead of logical entries would read
 every wrapped entry's continuation lines, including its coverage token, as
-unrelated content and lose its coverage outright.
+unrelated content and lose its coverage outright. The same mechanism that
+makes a wrapped value claim's coverage findable also means unmarked prose
+between two entries (an operator note, a stray sub-heading) is read as a
+continuation line of the entry above it: it pushes that entry's trailing
+parenthetical off the end of the joined text, so the whole entry fails to
+parse and that entry's own coverage is dropped. This is fail-closed, not
+unsafe — the union is reported ineligible rather than fabricated complete —
+but it means an entry can lose its coverage even though nothing else about
+it changed, simply because trailing prose followed it in the section.
 
 An entry with no coverage token (predates the field) contributes no
 identifier to the covered set and makes the coverage union unverifiable as
 complete — it is a legacy entry, never a fabricated full-coverage claim. So
 does a line inside `## Slices` that reads as an attempted ledger entry but
-does not match the canonical top-level `- ` bullet — indented, or marked with
-`* ` instead of `- ` — since the bullet regex misses it entirely: this makes
-the union unverifiable too, the same as a legacy entry, rather than leaving
-it invisible to the eligibility rule. A spec with no `## Slices` section, or
+does not match the canonical top-level `- ` bullet — indented, marked with
+`* ` instead of `- `, or using a numbered-list marker (`1.`, `2)`) — since the
+bullet regex misses it entirely: this makes the union unverifiable too, the
+same as a legacy entry, rather than leaving it invisible to the eligibility
+rule, and it does so regardless of whether that line sits before or after
+the canonical entries in the section. A spec with no `## Slices` section, or
 one with no ledger entries yet, is an empty ledger: no coverage, and
 eligible, since there is nothing left unaccounted for.
 
@@ -55,11 +65,12 @@ Stdout on success (exit 0), one token per line, in this order:
     complete-eligible: yes
 
 `covered:` and `candidates:` print `none` when empty. `complete-eligible:` is
-`yes` only when every ledger entry carries a coverage token and every entry
-in the section matched the canonical bullet shape; a single legacy entry, or
-a single non-canonical bullet marker, makes it `no`, because the union is
-then known to be incomplete or unverifiable and no caller may report the
-spec complete on it.
+`yes` only when every ledger entry carries a coverage token and every
+non-blank line in the section either belongs to a canonical entry (its
+bullet or one of its continuation lines) or is blank; a single legacy entry,
+or a single non-canonical marker line — wherever in the section it sits —
+makes it `no`, because the union is then known to be incomplete or
+unverifiable and no caller may report the spec complete on it.
 
 A within-entry duplicate identifier (`covers AC1, AC1`) is rejected the same
 way `covers_gate.py` rejects a duplicate in a drafted `--covers` value,
@@ -105,7 +116,7 @@ from covers_gate import (  # noqa: E402
 
 _SLICES_HEADING_RE = re.compile(r"^## Slices$", re.IGNORECASE)
 _LEDGER_BULLET_RE = re.compile(r"^- ")
-_LEDGER_NONCANONICAL_MARKER_RE = re.compile(r"^\s*[-*]\s")
+_LEDGER_NONCANONICAL_MARKER_RE = re.compile(r"^\s*(?:[-*]|\d+[.)])\s")
 _LEDGER_TRAILING_PAREN_RE = re.compile(r"\(([^()]*)\)\s*$")
 _LEDGER_FIELDS_RE = re.compile(r"^`task/[^`]+`, closed [^,]+(?:, covers (?P<covers>.+))?$")
 
@@ -129,20 +140,28 @@ def parse_ledger(spec_body: str, criteria: list[str]) -> tuple[list[str], bool]:
     """Return (covered identifiers in first-seen order, eligible).
 
     A ledger entry begins at a top-level `- ` bullet within `## Slices` and
-    continues through its continuation lines until the next entry begins or
-    the section ends — an entry is scored as a whole, never one physical
-    line at a time, so a value claim that wraps across several physical
-    lines (the stored ledger shape) is assembled before its trailing
-    parenthetical is read.
+    continues through its continuation lines until the next entry begins,
+    another marker line is seen, or the section ends — an entry is scored as
+    a whole, never one physical line at a time, so a value claim that wraps
+    across several physical lines (the stored ledger shape) is assembled
+    before its trailing parenthetical is read. That same assembly means
+    unmarked prose trailing a valid entry (an operator note, a stray
+    sub-heading) is folded into it as if it were a continuation line, which
+    breaks that entry's own trailing-parenthetical match and drops its
+    coverage — fail-closed, not fabricated, but worth knowing before
+    tightening this rule further.
 
     `eligible` is True only when every entry found carries a coverage token
-    and the section holds no other non-blank content. A line that reads as
-    an attempted ledger entry but does not match the canonical `- ` bullet
-    (indented, or marked `* `) is exactly such content: the bullet regex
-    misses it, so it never becomes an entry, but its presence still makes
-    the coverage union unverifiable and is fail-closed here rather than
-    silently ignored. A spec with no `## Slices` section, or one with no
-    ledger entries, is an empty ledger: no coverage, eligible.
+    and every non-blank line in the section either belongs to a canonical
+    entry (its bullet or a continuation line) or is blank. A line that reads
+    as an attempted ledger entry but does not match the canonical `- `
+    bullet — indented, marked `* `, or numbered (`1.`, `2)`) — is exactly
+    such content: the bullet regex misses it, so it never becomes an entry,
+    but its presence still makes the coverage union unverifiable and is
+    fail-closed here rather than silently ignored, whether it appears before
+    the first canonical entry, between two entries, or after the last one.
+    A spec with no `## Slices` section, or one with no ledger entries, is an
+    empty ledger: no coverage, eligible.
 
     Raises UndeclaredCoverageError if a coverage token names an identifier
     not in `criteria`, or MalformedCoverageTokenError if a coverage token
