@@ -20,7 +20,10 @@ care about order or wording.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
+
+import pytest
 
 SKILLS = Path(__file__).parent.parent / "plugins" / "craft" / "skills"
 
@@ -43,6 +46,13 @@ _READ_DIRECTIVE_ANCHORS = {
 }
 
 
+def _normalize_ws(s: str) -> str:
+    """Collapse a reflowed line wrap to a single space; keep a blank-line
+    paragraph break as its own two-newline marker so the anchor sentence is
+    never located by bridging two different paragraphs."""
+    return re.sub(r"\s+", lambda m: "\n\n" if m.group(0).count("\n") >= 2 else " ", s)
+
+
 def _unconditional_read_clause(text: str, anchor: str) -> str:
     """The portion of the build-phase read directive, starting at `anchor`,
     up to its first em dash — the list of documents the sentence actually
@@ -51,15 +61,22 @@ def _unconditional_read_clause(text: str, anchor: str) -> str:
     above", is a passing mention, not part of the unconditional read: a
     reader who stops at the main clause never learns to open that file at
     all.
+
+    Located in reflow-normalized text so a greedy reflow that breaks the
+    anchor sentence — or a dependency name — across a line does not hide it;
+    normalization preserves blank-line paragraph breaks, so the anchor is
+    never located by bridging two different paragraphs.
     """
-    start = text.index(anchor)
+    normalized = _normalize_ws(text)
+    anchor = _normalize_ws(anchor)
+    start = normalized.index(anchor)
     # Brittle by construction: this measures only up to the *first* em dash
     # after the anchor, so a sentence that legitimately uses one earlier for
     # an unrelated aside would truncate the clause short. Narrower than the
     # name suggests, but it is what catches the real defect this test guards
     # against, so it stays rather than growing a fuller clause-boundary parser.
-    end = text.index("—", start)
-    return text[start:end]
+    end = normalized.index("—", start)
+    return normalized[start:end]
 
 
 def _assert_names_every_dependency_in_its_read_directive(skill_name: str) -> None:
@@ -73,6 +90,47 @@ def _assert_names_every_dependency_in_its_read_directive(skill_name: str) -> Non
         "appearing only after the em dash, in a conditional or 'already "
         "read above' aside, is a passing mention, not an unconditional read"
     )
+
+
+def test_unconditional_read_clause_survives_anchor_reflowed_across_a_line_break():
+    """A greedy reflow can break the anchor sentence itself across a line —
+    the clause must still be located and still carry every dependency name."""
+    text = (
+        "The procedure\nlives in `../_shared/execute.md`, alongside "
+        "`../_shared/status-ownership.md`, `../_shared/refine.md`, and "
+        "`../_shared/slice.md` — read them all."
+    )
+    clause = _unconditional_read_clause(text, "The procedure lives in")
+    for name in EXECUTE_MD_DEPENDENCIES:
+        assert name in clause
+
+
+def test_unconditional_read_clause_does_not_find_missing_dependency():
+    text = (
+        "The procedure lives in `../_shared/execute.md`, alongside "
+        "`../_shared/refine.md`, and `../_shared/slice.md` — read them all."
+    )
+    clause = _unconditional_read_clause(text, "The procedure lives in")
+    assert "status-ownership.md" not in clause
+
+
+def test_unconditional_read_clause_does_not_match_reworded_anchor():
+    text = (
+        "This paragraph never uses the real anchor phrase at all — "
+        "`../_shared/status-ownership.md`, `../_shared/refine.md`, and "
+        "`../_shared/slice.md`."
+    )
+    with pytest.raises(ValueError):
+        _unconditional_read_clause(text, "The procedure lives in")
+
+
+def test_unconditional_read_clause_anchor_split_across_blank_line_is_not_found():
+    """A blank-line paragraph break is not a line wrap: an anchor sentence
+    that is only reachable by bridging two different paragraphs must not be
+    treated as reflowed."""
+    text = "The procedure\n\nlives in `../_shared/execute.md` — done."
+    with pytest.raises(ValueError):
+        _unconditional_read_clause(text, "The procedure lives in")
 
 
 def test_execute_skill_names_every_shared_document_execute_md_needs():

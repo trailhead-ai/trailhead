@@ -246,6 +246,73 @@ _GENERALIZE_REPLACEMENTS: dict[str, list[tuple[str, str]]] = {
 }
 
 
+def _normalize_ws(s: str) -> str:
+    """Collapse a reflowed line wrap to a single space; keep a blank-line
+    paragraph break as its own two-newline marker so a phrase assembled by
+    joining text from two different paragraphs is never treated as one
+    contiguous run of whitespace."""
+    return re.sub(r"\s+", lambda m: "\n\n" if m.group(0).count("\n") >= 2 else " ", s)
+
+
+def _contains_normalized(text: str, phrase: str) -> bool:
+    """Whitespace-insensitive-to-reflow containment check: `phrase` is found
+    in `text` even if a greedy reflow broke one of its interior spaces onto a
+    new line, but not if `phrase`'s words were only assembled by bridging a
+    blank-line paragraph break."""
+    return _normalize_ws(phrase) in _normalize_ws(text)
+
+
+def _reflow_at_first_space(s: str, sep: str = "\n") -> str:
+    idx = s.index(" ")
+    return s[:idx] + sep + s[idx + 1 :]
+
+
+def test_generalize_replacement_phrase_matches_when_reflowed_across_a_line_break():
+    """A greedy reflow can break a multi-word replacement phrase across a
+    line — the presence check must still find it, for every entry in the
+    replacement table, not only the phrase that happens to be multi-word
+    today."""
+    for pairs in _GENERALIZE_REPLACEMENTS.values():
+        for _absent_marker, present_phrase in pairs:
+            if " " not in present_phrase:
+                continue
+            variant = _reflow_at_first_space(present_phrase)
+            document = f"prefix\n\n{variant}\n\nsuffix"
+            assert _contains_normalized(document, present_phrase), (
+                f"reflowed phrase {present_phrase!r} should still be findable"
+            )
+
+
+def test_generalize_replacement_phrase_absent_when_genuinely_missing():
+    for pairs in _GENERALIZE_REPLACEMENTS.values():
+        for _absent_marker, present_phrase in pairs:
+            document = "this document never mentions the replacement phrase."
+            assert not _contains_normalized(document, present_phrase)
+
+
+def test_generalize_replacement_phrase_absent_when_reworded():
+    for pairs in _GENERALIZE_REPLACEMENTS.values():
+        for _absent_marker, present_phrase in pairs:
+            if " " not in present_phrase:
+                continue
+            words = present_phrase.split(" ")
+            reworded = " ".join(["totally", *words[1:]])
+            document = f"prefix\n\n{reworded}\n\nsuffix"
+            assert not _contains_normalized(document, present_phrase)
+
+
+def test_generalize_replacement_phrase_does_not_bridge_a_blank_line():
+    """Reflow-tolerance must stop at a paragraph break: a phrase assembled by
+    joining text from two different paragraphs is not a match."""
+    for pairs in _GENERALIZE_REPLACEMENTS.values():
+        for _absent_marker, present_phrase in pairs:
+            if " " not in present_phrase:
+                continue
+            split = _reflow_at_first_space(present_phrase, sep="\n\n")
+            document = f"prefix\n\n{split}\n\nsuffix"
+            assert not _contains_normalized(document, present_phrase)
+
+
 @pytest.mark.parametrize("stem", sorted(_GENERALIZE_REPLACEMENTS))
 def test_skill_generalize_replacement_landed(stem: str):
     """A genericized seam (generalize flavor) must have its replacement present.
@@ -261,11 +328,11 @@ def test_skill_generalize_replacement_landed(stem: str):
     )
     text = skill_md.read_text()
     for absent_marker, present_phrase in _GENERALIZE_REPLACEMENTS[stem]:
-        assert absent_marker not in text, (
+        assert not _contains_normalized(text, absent_marker), (
             f"{stem}/SKILL.md still contains the private path/token "
             f"{absent_marker!r}. Strip it and replace with the generic phrasing."
         )
-        assert present_phrase in text, (
+        assert _contains_normalized(text, present_phrase), (
             f"{stem}/SKILL.md is missing the generic replacement phrase "
             f"{present_phrase!r}. A silent omission of the private token is "
             "not enough — the replacement must explicitly land."
