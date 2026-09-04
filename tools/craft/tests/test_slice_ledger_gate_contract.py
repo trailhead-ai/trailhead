@@ -243,24 +243,65 @@ def test_ledger_gate_invocation_documented_before_candidate_set_gate():
 # ---------------------------------------------------------------------------
 
 
+def _harvested_gate_tokens() -> set[str]:
+    """The set of `<name>:` output-token names the real gate actually emits,
+    read off a live exit-2 run rather than hardcoded — if the gate ever stops
+    emitting one of `reason:` / `reason-code:` this harvest silently loses it
+    and the assertions below that require both catch that drift."""
+    result = _run_gate("")
+    assert result.returncode == 2, f"expected empty-stdin exit 2: {result.stderr!r}"
+    return {f"{name}:" for name in re.findall(r"^ledger-gate: ([a-z-]+):", result.stderr, re.MULTILINE)}
+
+
+_PERSIST_KEYWORDS = re.compile(r"persist|copied? into|durable artifact", re.I)
+_NEGATION_KEYWORDS = re.compile(r"\bnever\b|\bnot\b|\bno\b", re.I)
+
+
+def _persist_directives(step4: str, tokens: set[str]) -> dict[str, bool]:
+    """For each harvested token mentioned, in the same clause, alongside a
+    persistence-directive keyword, derive whether that clause directs a
+    session to persist it (True) or forbids persisting it (False) — a clause
+    is split on em-dashes and sentence boundaries so this reads the
+    document's own clause structure rather than a fixed phrase's wording."""
+    clauses = re.split(r"\s—\s|(?<=[.:])\s+(?=[A-Z*])", step4)
+    directives: dict[str, bool] = {}
+    for clause in clauses:
+        if not _PERSIST_KEYWORDS.search(clause):
+            continue
+        for tok in tokens:
+            if f"`{tok}`" in clause:
+                directives[tok] = not _NEGATION_KEYWORDS.search(clause)
+    return directives
+
+
 def test_step4_never_documents_persisting_the_free_text_reason_line():
     """Following the document for a refusal must produce a report/body
     carrying only the `reason-code:` token, never the `reason:` free text —
     the shape `lesson/an-agent-retelling-untrusted-content-launders-it-out-of-its-marker`
-    names. This is a positive pin: the document explicitly says only the
-    reason-code may be persisted, and never contradicts that anywhere in
-    step 4's failure-handling prose."""
-    step4 = _step4()
-    assert "reason-code" in step4
-    assert re.search(
-        r"[Oo]nly\s+the\s+`reason-code:`\s+token\s+may\s+ever\s+be\s+copied\s+into", step4
-    ), (
-        "slice/SKILL.md step 4 must explicitly restrict persistence to the "
-        "reason-code token for the ledger gate's refusal, matching the "
-        "reason:-is-never-persisted contract"
+    names.
+
+    This is derived relationally, not by phrase-matching the document's
+    wording: the set of tokens the *real* gate emits is harvested from a live
+    run, then cross-referenced against which of those tokens step 4's own
+    clause structure directs a session to persist. A test asserting the
+    document merely contains a phrase is not acceptable here."""
+    tokens = _harvested_gate_tokens()
+    assert "reason:" in tokens and "reason-code:" in tokens, (
+        "the ledger gate must emit both a `reason:` and a `reason-code:` "
+        f"token for this pin to mean anything; harvested {tokens}"
     )
-    # never a directive telling the reader to persist the free-text reason
-    assert not re.search(r"persist(?:s|ing)? the `reason:`", step4)
+
+    directives = _persist_directives(_step4(), tokens)
+    persist_set = {tok for tok, must_persist in directives.items() if must_persist}
+
+    assert "reason-code:" in persist_set, (
+        "slice/SKILL.md step 4 must direct a session to persist the "
+        "reason-code: token into a durable artifact on the gate's refusal"
+    )
+    assert "reason:" not in persist_set, (
+        "slice/SKILL.md step 4 must never direct a session to persist the "
+        "free-text reason: line into a durable artifact"
+    )
 
 
 # ---------------------------------------------------------------------------
