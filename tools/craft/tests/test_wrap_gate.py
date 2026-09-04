@@ -190,8 +190,56 @@ class TestHeadingsAndTables:
         assert run(doc(tmp_path, body), column=COL).returncode == 0
 
     def test_over_long_table_row_exits_zero(self, tmp_path):
-        body = f"# Title\n\n| {self._OVER_LONG_WORDS} | y |\n"
+        body = f"# Title\n\n| h1 | h2 |\n|----|----|\n| {self._OVER_LONG_WORDS} | y |\n"
         assert run(doc(tmp_path, body), column=COL).returncode == 0
+
+
+class TestTableVsPipeAsOrProse:
+    """A line containing `|` is a table row only when it belongs to a real
+    CommonMark table block (header row + delimiter row, plus contiguous
+    rows after it) — not merely because it contains a pipe character.
+    Craft's prose uses `|` as a plain "or" between short code-quoted
+    alternatives, and those lines must still be wrapped like any other."""
+
+    _OVER_LONG_WORDS = "aaaa bbbb cccc dddd eeee ffff gggg"
+
+    def test_pipe_as_or_prose_is_wrapped_and_reported_when_over_budget(self, tmp_path):
+        body = "# Title\n\naaaa `SHIP` | `FAIL` | `HOLD` bbbb cccc dddd\n"
+        result = run(doc(tmp_path, body), column=COL)
+        assert result.returncode == 1
+        assert "over-budget" in result.stderr
+
+    def test_genuine_table_row_over_budget_still_exempt(self, tmp_path):
+        body = f"# Title\n\n| h1 | h2 |\n|----|----|\n| {self._OVER_LONG_WORDS} | y |\n"
+        assert run(doc(tmp_path, body), column=COL).returncode == 0
+
+    def test_table_row_with_pipe_inside_a_code_span_cell_still_exempt(self, tmp_path):
+        # No single token here is long enough to trip the separate
+        # unbreakable-unit exemption — this row is only exempt because it is
+        # still recognized as a table row despite the pipe inside `a|b`.
+        body = "# Title\n\n| h1 | h2 |\n|----|----|\n| `a|b` cccc dddd eeee ffff gggg | y |\n"
+        assert run(doc(tmp_path, body), column=COL).returncode == 0
+
+    def test_pipe_inside_a_code_span_does_not_make_a_prose_line_a_table_header(self, tmp_path):
+        # This line's only "|" is inside a code span, so it carries no real
+        # cell-delimiting pipe — it must not be mistaken for a header row
+        # just because "----|----" happens to follow it.
+        body = "# Title\n\naaaa `a|b` cccc dddd eeee\n----|----\n"
+        result = wrap_gate.check(doc(tmp_path, body), COL)
+        assert any(f.rule == "over-budget" and f.line == 3 for f in result)
+
+    def test_prose_line_with_a_single_pipe_in_ordinary_text_is_wrapped(self, tmp_path):
+        body = "# Title\n\naaaa bbbb | cccc dddd eeee\n"
+        result = run(doc(tmp_path, body), column=COL)
+        assert result.returncode == 1
+        assert "over-budget" in result.stderr
+
+    def test_escaped_pipe_before_a_dash_line_is_not_treated_as_a_table_header(self, tmp_path):
+        # Without the escape, "----|----" would look like a delimiter row and
+        # this line, its would-be header, would be wrongly exempted.
+        body = "# Title\n\naaaa bbbb \\| cccc dddd eeee\n----|----\n"
+        result = wrap_gate.check(doc(tmp_path, body), COL)
+        assert any(f.rule == "over-budget" and f.line == 3 for f in result)
 
 
 class TestUnbreakableWords:
@@ -322,6 +370,157 @@ class TestRealContentBrainstormSkill:
         assert result == [], f"{len(result)} finding(s):\n" + "\n".join(
             f.message for f in result
         )
+
+
+def _line_code_spans(text: str) -> list[str]:
+    """Every inline code span the tool itself recognizes — matched
+    per physical line via the same `_scan_code_span` the gate and
+    formatter use, never across a line break. A DOTALL regex over the
+    whole file would also match two literal, unrelated backticks that
+    happen to straddle a line break in already-hand-wrapped prose; that
+    is not a span either tool ever treats as atomic, so counting it
+    would flag ordinary whitespace normalization as span corruption."""
+    spans = []
+    for line in text.splitlines():
+        i, n = 0, len(line)
+        while i < n:
+            if line[i] == "`":
+                end = wrap_gate._scan_code_span(line, i)
+                if end is not None:
+                    spans.append(line[i:end])
+                    i = end
+                    continue
+            i += 1
+    return spans
+
+
+class TestWholeSetAfterReflow:
+    """The acceptance gate for the whole slice: with all 39 governed files
+    reflowed at column 100 into a scratch copy, no line exceeds 400
+    characters *and* the gate exits 0 on every one. Either alone is
+    satisfiable by the very defect this task fixes (a line the classifier
+    exempts from the gate can still be long, and the reflow it never
+    receives leaves it that way) — both must hold together."""
+
+    SKILLS = REPO_ROOT / "plugins" / "craft" / "skills"
+    AGENTS = REPO_ROOT / "plugins" / "craft" / "agents"
+    MAX_LINE = 400
+
+    def _governed_files(self) -> list[Path]:
+        return sorted({*self.SKILLS.rglob("*.md"), *self.AGENTS.rglob("*.md")})
+
+    def _reflow_into_scratch(self, tmp_path: Path) -> list[Path]:
+        import wrap_prose
+
+        scratch_skills = tmp_path / "skills"
+        scratch_agents = tmp_path / "agents"
+        targets = []
+        for source in self._governed_files():
+            if self.SKILLS in source.parents or source.parent == self.SKILLS:
+                rel = source.relative_to(self.SKILLS)
+                target = scratch_skills / rel
+            else:
+                rel = source.relative_to(self.AGENTS)
+                target = scratch_agents / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
+            wrap_prose.format_path(target, wrap_gate.DEFAULT_COLUMN)
+            targets.append(target)
+        return targets
+
+    def test_governed_set_has_39_files(self):
+        assert len(self._governed_files()) == 39
+
+    def test_no_reflowed_line_over_400_characters_and_gate_exits_zero(self, tmp_path):
+        # The 400-character ceiling is scoped to lines the gate actually
+        # governs — a masked line (fenced code, HTML comment, or YAML
+        # frontmatter) is never reflowed by design, so a long line inside one
+        # is not evidence of the table/pipe classifier this task fixes, or
+        # of anything a reflow could address. Nine agent files' frontmatter
+        # `description:` fields already exceed 400 characters on the
+        # unreflowed tree today (confirmed via
+        # test_craft_prose_wrap_contract.py::test_no_prose_line_over_400_characters,
+        # e.g. agents/code-reviewer.md, agents/simplifier.md) — a real,
+        # pre-existing, unrelated defect, out of this task's Files and fix
+        # surface, so it is excluded here rather than folded in silently.
+        targets = self._reflow_into_scratch(tmp_path)
+        too_long = []
+        gate_findings = []
+        for target in targets:
+            text = target.read_text(encoding="utf-8")
+            lines = wrap_gate._COMMONMARK_LINE_RE.split(text)
+            fenced = wrap_gate._mask_fenced_lines(lines)
+            frontmatter = wrap_gate._mask_frontmatter_lines(lines)
+            too_long.extend(
+                (str(target), i + 1, len(line))
+                for i, line in enumerate(lines)
+                if not (fenced[i] or frontmatter[i]) and len(line) > self.MAX_LINE
+            )
+            gate_findings.extend(wrap_gate.check(target, wrap_gate.DEFAULT_COLUMN))
+        assert too_long == []
+        assert gate_findings == [], "\n".join(f.message for f in gate_findings)
+
+    # The files this classifier fix newly un-exempts (see the module docstring's
+    # discriminator): idempotence and span fidelity were previously proven only
+    # over lines the old rule already admitted as prose, so these are what needs
+    # re-checking now that these files' pipe-as-or lines are reflowed for the
+    # first time. Scoped to these six rather than all 39: a whole-corpus run also
+    # walks unrelated, pre-existing content this task does not touch — e.g.
+    # `agents/executor.md` already carries a code span hand-wrapped across two
+    # physical lines, which this task's `_scan_code_span` (single-line, unchanged
+    # here) never recognized as one span either before or after a reflow. That is
+    # real, but it is a distinct defect from the one this task fixes, and it is
+    # unaffected by this change — asserting over it here would launder an
+    # unrelated finding into this task's contract.
+    # (file, 1-based source line number) for each line the old any-pipe rule
+    # wrongly exempted as a table row.
+    NEWLY_UNEXEMPTED_SITES = [
+        (AGENTS / "consistency-auditor.md", 96),
+        (AGENTS / "divergence-prober.md", 70),
+        (AGENTS / "premise-attacker.md", 74),
+        (SKILLS / "_shared" / "execute.md", 414),
+        (SKILLS / "_shared" / "execute.md", 512),
+        (SKILLS / "brainstorm" / "SKILL.md", 297),
+        (SKILLS / "plan" / "SKILL.md", 258),
+    ]
+    NEWLY_UNEXEMPTED_FILES = sorted({source for source, _ in NEWLY_UNEXEMPTED_SITES})
+
+    def test_newly_unexempted_lines_are_actually_reflowed(self, tmp_path):
+        # Guards the two tests below against passing vacuously: if the
+        # classifier still (wrongly) exempted these lines, they would be
+        # passed through byte-identical, and idempotence/span-fidelity would
+        # hold trivially without proving anything about the fix. Checking
+        # the whole file changed is not enough — these files have other
+        # prose that already needed reflowing regardless of this fix — so
+        # this pins that the exact previously-exempted line no longer
+        # survives as a standalone physical line in the output.
+        import wrap_prose
+
+        for source, line_no in self.NEWLY_UNEXEMPTED_SITES:
+            text = source.read_text(encoding="utf-8")
+            original_lines = wrap_gate._COMMONMARK_LINE_RE.split(text)
+            original_line = original_lines[line_no - 1]
+            reflowed_lines = wrap_prose.format_text(text, wrap_gate.DEFAULT_COLUMN).splitlines()
+            assert original_line not in reflowed_lines, (
+                f"{source}:{line_no} was not reflowed"
+            )
+
+    def test_reflow_is_idempotent_on_every_newly_unexempted_file(self, tmp_path):
+        import wrap_prose
+
+        for source in self.NEWLY_UNEXEMPTED_FILES:
+            once = wrap_prose.format_text(source.read_text(encoding="utf-8"), wrap_gate.DEFAULT_COLUMN)
+            twice = wrap_prose.format_text(once, wrap_gate.DEFAULT_COLUMN)
+            assert twice == once, f"{source} is not idempotent"
+
+    def test_reflow_preserves_code_span_multiset_on_every_newly_unexempted_file(self, tmp_path):
+        import wrap_prose
+
+        for source in self.NEWLY_UNEXEMPTED_FILES:
+            text = source.read_text(encoding="utf-8")
+            before = _line_code_spans(text)
+            after = _line_code_spans(wrap_prose.format_text(text, wrap_gate.DEFAULT_COLUMN))
+            assert sorted(after) == sorted(before), f"{source} lost or gained a code span"
 
 
 class TestColumnOverride:

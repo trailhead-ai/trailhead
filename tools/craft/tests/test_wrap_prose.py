@@ -144,8 +144,12 @@ class TestPassthroughByteIdentity:
         assert wrap_prose.format_text(body, COL) == body
 
     def test_table_row_byte_identical(self, tmp_path):
-        body = f"# Title\n\n| {self._OVER_LONG} | y |\n"
+        body = f"# Title\n\n| h1 | h2 |\n|----|----|\n| {self._OVER_LONG} | y |\n"
         assert wrap_prose.format_text(body, COL) == body
+
+    def test_pipe_as_or_prose_is_reflowed_not_left_byte_identical(self, tmp_path):
+        body = "# Title\n\naaaa `SHIP` | `FAIL` | `HOLD` bbbb cccc dddd\n"
+        assert wrap_prose.format_text(body, COL) != body
 
     def test_heading_byte_identical(self, tmp_path):
         body = f"# {self._OVER_LONG}\n\nshort\n"

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Wrap gate — is a document's prose wrapped at one consistent column?
+r"""Wrap gate — is a document's prose wrapped at one consistent column?
 
 A reflow tool is only worth having if the tree it produces stays reflowed: an
 editor who touches one paragraph and does not re-run the formatter should not
@@ -38,6 +38,23 @@ problem is one token, however much breakable text sits beside it), and a
 line ending in a hard line break (two or more trailing spaces, or a
 trailing backslash) — reflowing across a hard break changes what the
 document renders.
+
+**A table row is a line that belongs to a real CommonMark table block, never
+merely a line containing a `|`.** Craft's prose uses `|` as a plain "or"
+between short code-quoted alternatives (`` `SHIP` | `FAIL` | `HOLD` ``), and
+those lines must be wrapped like any other prose — exempting every line with
+a pipe would silently exempt them too. The discriminator: a delimiter row
+(a line of dashes and pipes, e.g. `---|---`, optionally colon-flanked for
+alignment, per CommonMark) whose immediately preceding unmasked, non-blank,
+non-heading line carries an unescaped `|` (its header row) opens a table
+block; the header and the delimiter row are both table rows, and every
+contiguous line after the delimiter that still carries an unescaped `|` (a
+body row) extends the same block, stopping at the first blank line, masked
+line, heading, or line with no pipe. A `|` inside an inline code span or
+preceded by a backslash (`` \| ``) is not "unescaped" and does not count toward
+either the header check or the delimiter's own pipe requirement — an escaped
+pipe never turns a prose line into a table header, and a pipe trapped in a
+code-quoted cell (`` | `a|b` | c | ``) never breaks a genuine row.
 
 Block structure is measured, not assumed: a "block" is a maximal run of
 consecutive prose lines with no blank line, masked line, heading, or table
@@ -236,15 +253,82 @@ def _strip_code_spans(line: str) -> str:
     return "".join(out)
 
 
-def _classify(line: str) -> str:
-    """One of 'blank', 'heading', 'table', 'prose' for an unmasked line."""
-    if not line.strip():
-        return "blank"
-    if _HEADING_RE.match(line):
-        return "heading"
-    if "|" in _strip_code_spans(line):
-        return "table"
-    return "prose"
+# A CommonMark table delimiter row: dashes (with optional colon flanks for
+# alignment) in one or more pipe-separated cells, with optional leading and
+# trailing pipes — e.g. "---|---", "|---|---|", "|:--|--:|". Matched only
+# after confirming the line contains an unescaped `|` at all (see
+# `_looks_like_delimiter_row`), since the pattern alone also matches a bare
+# run of dashes with no pipe — an ordinary thematic break, not a delimiter.
+_TABLE_DELIMITER_RE = re.compile(r"^\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)*\|?$")
+
+
+def _has_unescaped_pipe(line: str) -> bool:
+    """Whether `line` carries a `|` that could delimit real table cells —
+    one that is neither inside an inline code span nor escaped with a
+    backslash. Used both to find a table's header/body rows and to confirm
+    a candidate delimiter row is not just a bare thematic break."""
+    stripped = _strip_code_spans(line).replace("\\|", "")
+    return "|" in stripped
+
+
+def _looks_like_delimiter_row(line: str) -> bool:
+    stripped = line.strip()
+    return _has_unescaped_pipe(line) and bool(_TABLE_DELIMITER_RE.match(stripped))
+
+
+def _find_table_lines(lines: list[str], blocked: list[bool]) -> list[bool]:
+    """One boolean per line — True where the line belongs to a table block.
+    A table opens at a delimiter row whose immediately preceding line is not
+    `blocked` (masked, blank, or heading) and itself carries an unescaped
+    pipe (the header row); it then extends through every contiguous,
+    non-`blocked` line after the delimiter that still carries an unescaped
+    pipe (body rows), stopping at the first line that doesn't."""
+    n = len(lines)
+    table = [False] * n
+    i = 1
+    while i < n:
+        if (
+            not blocked[i]
+            and not table[i]
+            and _looks_like_delimiter_row(lines[i])
+            and not blocked[i - 1]
+            and not table[i - 1]
+            and _has_unescaped_pipe(lines[i - 1])
+        ):
+            table[i - 1] = True
+            table[i] = True
+            j = i + 1
+            while j < n and not blocked[j] and _has_unescaped_pipe(lines[j]):
+                table[j] = True
+                j += 1
+            i = j
+        else:
+            i += 1
+    return table
+
+
+def classify_lines(lines: list[str], masked: list[bool]) -> list[str]:
+    """One of 'masked', 'blank', 'heading', 'table', 'prose' per line.
+    Table detection needs the whole document (see `_find_table_lines`), so
+    this classifies every line at once rather than one at a time."""
+    n = len(lines)
+    blocked = [
+        masked[i] or not lines[i].strip() or bool(_HEADING_RE.match(lines[i])) for i in range(n)
+    ]
+    table = _find_table_lines(lines, blocked)
+    kinds = []
+    for i in range(n):
+        if masked[i]:
+            kinds.append("masked")
+        elif not lines[i].strip():
+            kinds.append("blank")
+        elif _HEADING_RE.match(lines[i]):
+            kinds.append("heading")
+        elif table[i]:
+            kinds.append("table")
+        else:
+            kinds.append("prose")
+    return kinds
 
 
 def _is_hard_break(line: str) -> bool:
@@ -272,10 +356,8 @@ def check(path: Path, column: int = DEFAULT_COLUMN) -> list[Finding]:
     lines = _COMMONMARK_LINE_RE.split(text)
     fenced = _mask_fenced_lines(lines)
     frontmatter = _mask_frontmatter_lines(lines)
-    kinds = [
-        "masked" if (fenced[i] or frontmatter[i]) else _classify(line)
-        for i, line in enumerate(lines)
-    ]
+    masked = [fenced[i] or frontmatter[i] for i in range(len(lines))]
+    kinds = classify_lines(lines, masked)
 
     findings: list[Finding] = []
     n = len(lines)

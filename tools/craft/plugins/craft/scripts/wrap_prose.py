@@ -60,12 +60,12 @@ if str(_SCRIPT_DIR) not in sys.path:
 
 from wrap_gate import (  # noqa: E402
     DEFAULT_COLUMN,
-    _classify,
     _COMMONMARK_LINE_RE,
     _is_hard_break,
     _mask_fenced_lines,
     _mask_frontmatter_lines,
     _scan_code_span,
+    classify_lines,
 )
 
 # A list marker (bullet or ordinal) plus its trailing whitespace, with any
@@ -219,9 +219,8 @@ def format_text(text: str, column: int = DEFAULT_COLUMN) -> str:
     fenced = _mask_fenced_lines(lines)
     frontmatter = _mask_frontmatter_lines(lines)
     n = len(lines)
-    kinds = [
-        "masked" if (fenced[i] or frontmatter[i]) else _classify(lines[i]) for i in range(n)
-    ]
+    masked = [fenced[i] or frontmatter[i] for i in range(n)]
+    kinds = classify_lines(lines, masked)
 
     out: list[str] = []
     i = 0
