@@ -66,6 +66,7 @@ if str(_SCRIPT_DIR) not in sys.path:
 from wrap_gate import (  # noqa: E402
     DEFAULT_COLUMN,
     _BLOCKQUOTE_RE,
+    _continues_same_block,
     _is_hard_break,
     _LIST_MARKER_RE,
     _strip_blockquote_prefix,
@@ -147,8 +148,11 @@ def _segment_block(block_lines: list[str]) -> list[tuple[str, list[str]]]:
     segments: ('verbatim', [line]) for a line ending in a hard line break,
     and ('fill', [lines]) for a run of lines to be greedy-filled together as
     one paragraph. A line that opens a new list item (other than the
-    block's very first line) always starts a fresh 'fill' segment, so
-    sibling list items are never merged into each other."""
+    block's very first line), or that changes block-quote nesting depth
+    from its predecessor, always starts a fresh 'fill' segment — reusing
+    `wrap_gate._continues_same_block` rather than restating its notion of a
+    boundary, so sibling list items and different-depth block quotes are
+    never merged into each other or into their neighbour."""
     segments: list[tuple[str, list[str]]] = []
     current: list[str] = []
 
@@ -162,7 +166,7 @@ def _segment_block(block_lines: list[str]) -> list[tuple[str, list[str]]]:
             flush()
             segments.append(("verbatim", [line]))
             continue
-        if index > 0 and _LIST_MARKER_RE.match(line):
+        if index > 0 and not _continues_same_block(block_lines[index - 1], line):
             flush()
         current.append(line)
     flush()

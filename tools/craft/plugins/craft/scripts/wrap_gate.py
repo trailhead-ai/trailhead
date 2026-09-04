@@ -229,8 +229,14 @@ def _continues_same_block(line: str, next_line: str) -> bool:
     separate list items (or a nested item into its outer one) into one. A
     block-quote depth change is the same kind of boundary: a nested quote,
     or a return to a shallower one, is not a continuation of the line
-    before it."""
+    before it. A hard-break successor is a boundary too:
+    `wrap_prose.py`'s `_segment_block` always flushes its fill segment
+    before a hard-break line, so `line` is never re-filled together with
+    it — treating them as the same block here would report a finding the
+    formatter is a no-op against."""
     if _starts_new_list_item(next_line):
+        return False
+    if _is_hard_break(next_line):
         return False
     return _quote_depth(line) == _quote_depth(next_line)
 
@@ -376,8 +382,16 @@ def check(path: Path, column: int = DEFAULT_COLUMN) -> list[Finding]:
             continue
         line = lines[i]
         tokens = _tokenize(line)
-        exempt = _is_hard_break(line) or _longest_unit(tokens) > column
-        if not exempt and len(line) > column:
+        hard_break = _is_hard_break(line)
+        # The unbreakable-unit exemption only applies to the over-budget
+        # rule, and only when the line IS that one unit — a line carrying
+        # breakable text beside an over-budget unit is one `wrap_prose.py`
+        # would still change (isolating the unit, wrapping the rest), so
+        # gate-clean would no longer imply formatter-stable if this stayed
+        # exempt too.
+        over_budget_exempt = hard_break or (len(tokens) == 1 and _longest_unit(tokens) > column)
+        under_filled_exempt = hard_break
+        if not over_budget_exempt and len(line) > column:
             over_by = len(line) - column
             findings.append(
                 Finding(
@@ -388,7 +402,7 @@ def check(path: Path, column: int = DEFAULT_COLUMN) -> list[Finding]:
                 )
             )
         if (
-            not exempt
+            not under_filled_exempt
             and i + 1 < n
             and kinds[i + 1] == "prose"
             and _continues_same_block(line, lines[i + 1])

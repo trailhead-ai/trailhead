@@ -316,11 +316,11 @@ at its own step 8.5 (`plan/SKILL.md:455-476`): a `*Reviewed at:*` timestamp, a
 `*Members dispatched:*` line, then `*Critical:*`, `*Important:*`, and `*Minor:*` lists, one line per
 finding, grouped by severity. When no Critical finding survives synthesis, record an empty Critical
 list explicitly (`*Critical:* none`), matching `plan/SKILL.md`'s own convention
-(`plan/SKILL.md:477`) — so a clean council is distinguishable from a section a skipped review would
-leave behind. Write it whether or not a Critical survives synthesis, exactly as `plan/SKILL.md`
-requires of its own persistence — a run with nothing to escalate leaves this section behind too. The
-driver writes the findings only: no disposition text for any Critical, since disposition is an
-operator judgment it does not make. Append via
+(`plan/SKILL.md:473-475`) — so a clean council is distinguishable from a section a skipped review
+would leave behind. Write it whether or not a Critical survives synthesis, exactly as
+`plan/SKILL.md` requires of its own persistence — a run with nothing to escalate leaves this section
+behind too. The driver writes the findings only: no disposition text for any Critical, since
+disposition is an operator judgment it does not make. Append via
 `lore record update task/<slice-parent-name> --vault <elected-vault> --diff`, piping a unified diff
 the same way the `## Driver run` checkpoint does — bare stdin would replace the whole record body —
 and run the section's text through the credential-pattern scrub before it is written

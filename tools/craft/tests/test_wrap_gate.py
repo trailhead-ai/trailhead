@@ -130,11 +130,28 @@ class TestCodeSpans:
         # (`` `-----BEGIN `` is 11 chars) as the successor's "first unit"
         # and wrongly call line 3 under-filled; measured as one 36-char
         # unit, it does not fit and the line is correctly left alone.
+        #
+        # Line 4 ("{span} exactly") is not itself a single-unit line, so it
+        # is separately over-budget under the narrower exemption scoping
+        # (see `test_span_plus_breakable_word_is_over_budget_not_a_single_unit_exemption`
+        # below) — an unrelated finding this test does not name. The
+        # property this test pins is only about line 3, so it is asserted
+        # directly rather than via the whole file's exit code.
         span = "`-----BEGIN [A-Z ]*PRIVATE KEY-----`"
         assert len(span) == 36
         body = f"# Title\n\nsee\n{span} exactly\n"
+        findings = wrap_gate.check(doc(tmp_path, body), 30)
+        assert not any(f.line == 3 and f.rule == "under-filled" for f in findings), findings
+
+    def test_span_plus_breakable_word_is_over_budget_not_a_single_unit_exemption(self, tmp_path):
+        # Line 4 above ("{span} exactly") is not a genuinely single-unit
+        # line — `wrap_prose.py` isolates the span and wraps "exactly" onto
+        # its own line — so it must be over-budget, not exempt.
+        span = "`-----BEGIN [A-Z ]*PRIVATE KEY-----`"
+        body = f"# Title\n\nsee\n{span} exactly\n"
         result = run(doc(tmp_path, body), column=30)
-        assert result.returncode == 0
+        assert result.returncode == 1, result.stderr
+        assert "over-budget" in result.stderr
 
     def test_punctuation_glued_to_a_code_span_is_measured_with_it(self, tmp_path):
         # "`ab`," glued with no space is one 5-char unit, exactly as
@@ -244,13 +261,22 @@ class TestTableVsPipeAsOrProse:
 
 class TestUnbreakableWords:
     def test_line_with_single_unbreakable_word_longer_than_budget_exits_zero(self, tmp_path):
+        # The legitimate half of the exemption: a line that IS the one
+        # over-budget unit, with nothing breakable beside it, is one the
+        # formatter genuinely cannot help — still exempt.
         body = "# Title\n\nhttps://example.com/" + ("a" * 30) + "\n"
         assert run(doc(tmp_path, body), column=COL).returncode == 0
 
-    def test_same_line_with_breakable_text_appended_past_budget_still_exits_zero(self, tmp_path):
+    def test_breakable_text_beside_an_unbreakable_unit_is_over_budget(self, tmp_path):
+        # Not a genuinely single-unit line: `wrap_prose.py` isolates the
+        # unbreakable unit onto its own line and wraps the rest, so a gate
+        # that stayed exempt here would certify a line the formatter would
+        # still change.
         url = "https://example.com/" + ("a" * 30)
         body = f"# Title\n\n{url} and then some more breakable words after it\n"
-        assert run(doc(tmp_path, body), column=COL).returncode == 0
+        result = run(doc(tmp_path, body), column=COL)
+        assert result.returncode == 1, result.stderr
+        assert "over-budget" in result.stderr
 
 
 class TestHardLineBreak:
@@ -259,6 +285,16 @@ class TestHardLineBreak:
         # would otherwise trigger the under-fill rule.
         body = "# Title\n\none two  \nthree\n"
         assert run(doc(tmp_path, body), column=COL).returncode == 0
+
+    def test_line_before_a_hard_break_successor_is_not_under_filled(self, tmp_path):
+        # `wrap_prose.py`'s `_segment_block` always flushes its fill segment
+        # before a hard-break line, so the line preceding a hard break is
+        # never re-filled together with it — the formatter is a no-op here.
+        # The gate must agree, or it reports a finding `wrap_prose.py` cannot
+        # fix (contradicting this module's own "run wrap_prose.py" remedy).
+        body = "# T\n\none two\nthree four  \nfive\n"
+        result = run(doc(tmp_path, body), column=20)
+        assert result.returncode == 0, result.stderr
 
 
 class TestListContinuationIndent:

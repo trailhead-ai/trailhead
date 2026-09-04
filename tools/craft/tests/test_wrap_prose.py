@@ -344,6 +344,26 @@ class TestMultilineBlockquoteIsGateClean:
             assert line.startswith("> ")
 
 
+class TestNestedBlockQuoteIsASegmentBoundary:
+    """A block-quote depth change is a block boundary to `wrap_gate.py`
+    (`_quote_depth`/`_continues_same_block`), so `_segment_block` must draw
+    the same boundary — otherwise the formatter folds a nested quote's words
+    into its parent quote's fill segment, silently changing what the
+    document renders."""
+
+    def test_nested_quote_is_not_merged_into_its_parent_quote(self, tmp_path):
+        body = "# Title\n\n> one two\n> > three four\n"
+        formatted = wrap_prose.format_text(body, wrap_gate.DEFAULT_COLUMN)
+        lines = formatted.split("\n")
+        assert "> one two" in lines, f"outer quote line lost or changed: {formatted!r}"
+        assert "> > three four" in lines, f"nested quote line lost or merged: {formatted!r}"
+        assert not any(
+            "three" in line and "four" in line and not line.startswith("> >") for line in lines
+        ), f"nested quote's words leaked into the outer quote: {formatted!r}"
+        out = doc(tmp_path, formatted)
+        assert findings(out, wrap_gate.DEFAULT_COLUMN) == []
+
+
 class TestBlankLineSeparation:
     def test_blank_line_between_paragraphs_preserved_and_blocks_not_merged(self, tmp_path):
         body = (
