@@ -28,15 +28,42 @@ def _text(skill_name: str) -> str:
     return (SKILLS / skill_name / "SKILL.md").read_text(encoding="utf-8")
 
 
+# The anchor drive/SKILL.md's build-phase read directive opens with — the
+# sentence that actually tells the reader what to read *now*, as opposed to a
+# trailing aside about what was supposedly read earlier.
+_DRIVE_READ_DIRECTIVE_ANCHOR = "Read `../_shared/execute.md` now"
+
+
+def _unconditional_read_clause(text: str) -> str:
+    """The portion of the build-phase read directive up to its first em
+    dash — the list of documents the sentence actually puts the reader onto
+    reading now. A name that appears only after the em dash, in a
+    parenthetical about a document supposedly "already read above", is a
+    passing mention, not part of the unconditional read: a reader who stops
+    at the main clause never learns to open that file at all.
+    """
+    start = text.index(_DRIVE_READ_DIRECTIVE_ANCHOR)
+    end = text.index("—", start)
+    return text[start:end]
+
+
 def test_execute_skill_names_every_shared_document_execute_md_needs():
     text = _text("execute")
     missing = [name for name in EXECUTE_MD_DEPENDENCIES if name not in text]
     assert not missing, f"skills/execute/SKILL.md never names {missing}"
 
 
-def test_drive_skill_names_every_shared_document_execute_md_needs():
+def test_drive_skill_names_every_shared_document_in_its_unconditional_read_directive():
     """`drive/SKILL.md` reads `_shared/execute.md` end to end at its build
-    phase, so it needs the same reference set `execute/SKILL.md` needs."""
-    text = _text("drive")
-    missing = [name for name in EXECUTE_MD_DEPENDENCIES if name not in text]
-    assert not missing, f"skills/drive/SKILL.md never names {missing}"
+    phase, so it needs the same reference set `execute/SKILL.md` needs —
+    and each name must sit in the directive's own unconditional read
+    clause, not in a conditional aside claiming it was read elsewhere."""
+    clause = _unconditional_read_clause(_text("drive"))
+    missing = [name for name in EXECUTE_MD_DEPENDENCIES if name not in clause]
+    assert not missing, (
+        "skills/drive/SKILL.md's build-phase read directive (the clause "
+        f"before its first em dash) never names {missing} as something to "
+        "read now — a name appearing only after the em dash, in a "
+        "conditional or 'already read above' aside, is a passing mention, "
+        "not an unconditional read"
+    )

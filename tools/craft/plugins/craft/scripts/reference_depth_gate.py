@@ -5,10 +5,13 @@ document by its filename?
 A shared document that names a sibling by filename creates a second-level
 reference: the reader following it lands on a whole other document instead of
 the one line of shared prose the pointer actually needed. This gate reddens on
-any surviving mention of a sibling document's filename, in any of the forms
-prose uses to write it — a parent-relative path, a directory-relative path, or
-a bare filename with no directory at all — so a rewrite of the reference is
-what turns the gate green, not a rewording that keeps naming the file.
+any surviving mention of a sibling document's filename that keeps its literal
+`.md` suffix, however the surrounding path is written — a parent-relative
+path, a directory-relative path, or a bare filename with no directory at all —
+so a rewrite of the reference is what turns the gate green, not a rewording
+that keeps naming the file. A mention that drops the `.md` suffix (a bare stem
+like `status-ownership`, or prose naming "the status-ownership document") is
+outside the matcher's scope and stays invisible to it.
 
 The sibling set for a given document is every other `.md` file in the same
 directory. A document naming its own filename is not a finding — a document

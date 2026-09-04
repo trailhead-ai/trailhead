@@ -44,7 +44,15 @@ def _text() -> str:
 
 
 def test_blocked_path_clause_appears_at_most_once():
-    """The six verbatim repetitions collapse to a single canonical statement."""
+    """The six verbatim repetitions collapse to a single canonical statement.
+
+    Deliberately one-sided: `count <= 1` never checks the clause is present
+    at all (a `== 1` bound would, but only by pinning the captured string
+    verbatim, converting this into a prose pin). That presence property is
+    already held elsewhere — `toc_gate.py`'s contents-entry check — so this
+    test's job is only to catch a reappearing duplicate, not to also stand
+    in for the presence check.
+    """
     text = _text()
     count = text.count(BLOCKED_PATH_CLAUSE)
     assert count <= 1, (
@@ -57,6 +65,6 @@ def test_six_trigger_sites_link_to_the_canonical_section():
     """Every site that used to carry the clause still points at it."""
     text = _text()
     anchors = text.count("(#blocked-path-write)")
-    assert anchors >= 5, (
-        f"expected at least 5 links to the canonical section, found {anchors}"
+    assert anchors >= 6, (
+        f"expected at least 6 links to the canonical section, found {anchors}"
     )
