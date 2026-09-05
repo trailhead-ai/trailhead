@@ -82,18 +82,18 @@ parallel agents:
 lore record show <spec-id> | ${CLAUDE_PLUGIN_ROOT}/scripts/criterion_gate.py
 ```
 
-Exit 0 certifies — proceed to step 2. **Exit 2 with `reason-code: zero-criterion-identifiers` is
-the one non-zero exit that proceeds** — the legacy carve-out for a spec predating the `**ACn.**`
-identifier convention. When it fires, report to the operator, before proceeding to step 2, that
-this run's criterion-content bars were not applied — never let the spec reach the passes
+Exit 0 certifies — proceed to step 2. **Exit 2 with `reason-code: zero-criterion-identifiers` is the
+one non-zero exit that proceeds** — the legacy carve-out for a spec predating the `**ACn.**`
+identifier convention. When it fires, report to the operator, before proceeding to step 2, that this
+run's criterion-content bars were not applied — never let the spec reach the passes
 indistinguishably from a certified one.
 
-Every other non-zero exit refuses the run here, in the same refusal shape this skill's other
-guards already use: name the criteria at fault and the offending span or trailer problem from the
-gate's own `reason:` line, name the remedy its `reason-code:` line identifies, and stop — the spec
-stays `draft`, nothing is dispatched, and no writes land. This covers exit 1 (integrity violation —
-a refused implementation-identifier span, or a missing or unsanctioned verification trailer) and
-every other exit-2 reason — `reason-code: duplicate-acceptance-criteria-heading`,
+Every other non-zero exit refuses the run here, in the same refusal shape this skill's other guards
+already use: name the criteria at fault and the offending span or trailer problem from the gate's
+own `reason:` line, name the remedy its `reason-code:` line identifies, and stop — the spec stays
+`draft`, nothing is dispatched, and no writes land. This covers exit 1 (integrity violation — a
+refused implementation-identifier span, or a missing or unsanctioned verification trailer) and every
+other exit-2 reason — `reason-code: duplicate-acceptance-criteria-heading`,
 `reason-code: unterminated-masked-region`, `reason-code: empty-stdin`,
 `reason-code: non-utf8-stdin`, or no `## Acceptance Criteria` heading at all (no reason-code of its
 own). None of these is the carve-out above, and none of them proceeds.
