@@ -397,7 +397,6 @@ def check(path: Path, column: int = DEFAULT_COLUMN) -> list[Finding]:
         if kinds[i] != "prose":
             continue
         line = lines[i]
-        tokens = _tokenize(line)
         hard_break = _is_hard_break(line)
         # The unbreakable-unit exemption only applies to the over-budget
         # rule, and only when the line IS that one unit — a line carrying

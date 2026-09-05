@@ -10,7 +10,6 @@ reimplemented here.
 from __future__ import annotations
 
 import random
-import re
 import subprocess
 import sys
 from pathlib import Path
@@ -302,7 +301,7 @@ class TestListItems:
     def test_nested_list_item_keeps_its_prefix_on_every_produced_line(self, tmp_path):
         body = "# Title\n\n  - one two three four five six seven eight nine\n"
         formatted = wrap_prose.format_text(body, COL)
-        lines = [l for l in formatted.split("\n")[2:] if l.strip()]
+        lines = [line for line in formatted.split("\n")[2:] if line.strip()]
         assert lines[0].startswith("  - ")
         for line in lines[1:]:
             assert line.startswith("    ")
@@ -316,7 +315,7 @@ class TestListItems:
         # produced line and the result still exits the gate clean.
         body = "# Title\n\n> one two three\n"
         formatted = wrap_prose.format_text(body, COL)
-        lines = [l for l in formatted.split("\n")[2:] if l.strip()]
+        lines = [line for line in formatted.split("\n")[2:] if line.strip()]
         for line in lines:
             assert line.startswith("> ")
         out = doc(tmp_path, formatted)
@@ -338,7 +337,7 @@ class TestMultilineBlockquoteIsGateClean:
         out = doc(tmp_path, formatted)
         result = findings(out, column)
         assert result == [], f"unexpected finding(s): {result} for {formatted!r}"
-        lines = [l for l in formatted.split("\n")[2:] if l.strip()]
+        lines = [line for line in formatted.split("\n")[2:] if line.strip()]
         assert len(lines) > 1
         for line in lines:
             assert line.startswith("> ")
