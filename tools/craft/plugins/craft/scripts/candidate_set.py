@@ -497,7 +497,7 @@ def parse_ledger_entries(spec_body: str) -> list[LedgerEntry]:
             continue
         task_id, covers, partial = parsed
         start_line = selected[0][0] + 1
-        end_line = max(i for i, l in selected if l.strip()) + 1
+        end_line = max(i for i, entry_line in selected if entry_line.strip()) + 1
         entries.append(LedgerEntry(task_id, covers, partial, start_line, end_line))
     return entries
 

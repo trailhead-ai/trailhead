@@ -20,8 +20,12 @@ Exit-code contract:
 
 from __future__ import annotations
 
+import importlib.machinery
+import importlib.util
+import random
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).parent.parent
@@ -893,11 +897,6 @@ def test_parse_ledger_entries_start_and_end_line_span_the_entry():
 # actually exercise the changed code path, and are the ones this must prove
 # pure-performance, zero-behavior-change over.
 # ---------------------------------------------------------------------------
-
-import importlib.machinery
-import importlib.util
-import random
-import time
 
 _BASELINE_CANDIDATE_SET_PATH = Path(
     "/Users/tduffield/.claude/jobs/b689e01f/tmp/candidate_set.py.baseline"
