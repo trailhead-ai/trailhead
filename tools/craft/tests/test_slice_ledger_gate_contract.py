@@ -12,6 +12,7 @@ the document merely contains a phrase is not acceptable here.
 
 from __future__ import annotations
 
+import inspect
 import json
 import re
 import subprocess
@@ -41,6 +42,7 @@ CANDIDATE_SET = SCRIPTS_DIR / "candidate_set.py"
 
 sys.path.insert(0, str(SCRIPTS_DIR))
 import candidate_set  # noqa: E402
+import ledger_gate  # noqa: E402
 
 BACKFILL_END_TO_END = (FIXTURES / "ledger_backfill_end_to_end.md").read_text(encoding="utf-8")
 
@@ -129,24 +131,43 @@ def _documented_reason_codes(step4: str, exit_label: str) -> set[str]:
     return set(re.findall(r"`([a-z0-9-]+)`", match.group(1)))
 
 
-REAL_EXIT_1_CODES = {
-    "unclaimed-ledger-line",
-    "invisible-ledger-task-id",
-    "duplicate-ledger-task-id",
-    "coverage-claimed-twice",
-    "orphaned-ledger-entry",
-    "coverage-contradicts-parent",
-}
+def _real_reason_codes() -> tuple[set[str], set[str]]:
+    """Derive the gate's real reason codes, split by exit level, from
+    `ledger_gate.py` itself rather than from a hand-kept list here — so a
+    reason code added to the module but never wired into `slice/SKILL.md`'s
+    documented set fails this contract instead of silently passing.
 
-REAL_EXIT_2_CODES = {
-    "empty-stdin",
-    "non-utf8-stdin",
-    "stdin-too-large",
-    "duplicate-slices-heading",
-    "unterminated-masked-region",
-    "malformed-coverage-token",
-    "malformed-parent-coverage",
-}
+    Every module-level `*_REASON_CODE` constant `ledger_gate.py` defines is
+    classified exit-1 or exit-2 by whether `_certify_entries` — the sole
+    raiser of `LedgerGateViolation`, exit 1 — references that constant's
+    name in its own source; every other constant is only ever reached from
+    an exit-2 branch of `main()`. This mirrors the module's real control
+    flow rather than re-typing a second copy of the split.
+
+    `duplicate-slices-heading` is the one exception: `ledger_gate.py` never
+    defines a `_REASON_CODE` constant for it at all — it forwards
+    `DuplicateHeadingError.reason_code` from the imported
+    `candidate_set.parse_ledger_entries`, so introspecting `ledger_gate`'s
+    own namespace cannot find it. It is added explicitly, sourced from
+    `candidate_set`'s own constant (the code's one true owner) rather than
+    retyped as a string literal, and is exit-2 by construction — every
+    branch in `main()` that catches `DuplicateHeadingError` returns 2.
+    """
+    certify_src = inspect.getsource(ledger_gate._certify_entries)
+    exit1: set[str] = set()
+    exit2: set[str] = set()
+    for name, value in vars(ledger_gate).items():
+        if not (name.endswith("_REASON_CODE") and isinstance(value, str)):
+            continue
+        if name in certify_src:
+            exit1.add(value)
+        else:
+            exit2.add(value)
+    exit2.add(candidate_set._DUPLICATE_SLICES_HEADING_REASON_CODE)
+    return exit1, exit2
+
+
+REAL_EXIT_1_CODES, REAL_EXIT_2_CODES = _real_reason_codes()
 
 
 def test_documented_exit_1_reason_codes_match_the_gate_s_real_exit_1_codes():

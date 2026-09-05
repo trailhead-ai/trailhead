@@ -70,6 +70,9 @@ TORN_INTERLEAVED_NO_MARKER = (
 CREDENTIAL_SHAPED_TASK_ID_CERTIFIED = (
     FIXTURES / "ledger_credential_shaped_task_id_certified.md"
 ).read_text(encoding="utf-8")
+WRAPPED_MULTI_LINE = (FIXTURES / "ledger_wrapped_multi_line_entries.md").read_text(
+    encoding="utf-8"
+)
 
 
 def _run(
@@ -130,6 +133,52 @@ def test_clean_multi_entry_ledger_exits_0_with_matching_parent_coverage(tmp_path
         },
     )
     r = _run(CLEAN_MULTI_ENTRY, ["--parent-coverage", parent_coverage])
+    assert r.returncode == 0, r.stderr
+    tokens = _tokens(r.stdout)
+    assert tokens["parent-cross-check"] == "checked"
+
+
+# ---------------------------------------------------------------------------
+# Regression pin — a legitimate wrapped multi-line ledger (the shape every
+# entry in the real live spec ledger actually uses, per
+# `spec/acceptance-criteria-are-atomic-assertions-a-slice-carries`) must
+# certify clean. Every other exit-0 fixture in this file is single-line;
+# without this, `unclaimed-ledger-line` firing on a wrapped entry's own
+# continuation lines — the highest-consequence possible regression of this
+# gate — would ship with a fully green suite.
+# ---------------------------------------------------------------------------
+
+
+def test_wrapped_multi_line_ledger_certifies_at_exit_0_no_unclaimed_line():
+    r = _run(WRAPPED_MULTI_LINE)
+    assert r.returncode == 0, r.stderr
+    assert "unclaimed-ledger-line" not in r.stderr
+    tokens = _tokens(r.stdout)
+    assert tokens["entries"] == "3"
+
+
+def test_wrapped_multi_line_ledger_entries_carry_the_expected_fields():
+    r = _run(WRAPPED_MULTI_LINE)
+    assert r.returncode == 0, r.stderr
+    assert "first: covers=AC1, AC2, partial=none" in r.stdout.splitlines()
+    assert "second: covers=none, partial=AC3" in r.stdout.splitlines()
+    assert "third: covers=none, partial=none" in r.stdout.splitlines()
+
+
+def test_wrapped_multi_line_ledger_certifies_at_exit_0_with_matching_parent_coverage(
+    tmp_path,
+):
+    parent_coverage = _write_parent_coverage(
+        tmp_path,
+        {
+            "first": {"covers": "AC1, AC2"},
+            "second": {"partially covers": "AC3"},
+            # the legacy backfill precondition: the ledger line itself
+            # carries no token yet, but its parent already does.
+            "third": {"covers": "AC4"},
+        },
+    )
+    r = _run(WRAPPED_MULTI_LINE, ["--parent-coverage", parent_coverage])
     assert r.returncode == 0, r.stderr
     tokens = _tokens(r.stdout)
     assert tokens["parent-cross-check"] == "checked"
