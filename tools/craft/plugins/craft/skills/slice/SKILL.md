@@ -155,8 +155,71 @@ when it is not.
 never a body read earlier in the same pass. This shrinks, but does not close, the concurrent
 lost-update window: a write racing between that fresh read and this write can still be lost.
 
-Only now — with the ledger reconciled — is the candidate set derived. Pipe the freshly-read spec
-body through the candidate-set gate:
+**Backfilling an existing line under the same rule, in this same write.** The append logic
+above only reaches a done slice with no existing line yet; a line already appended is handled
+here instead, before the write above is made rather than after. For each existing `## Slices`
+line carrying no `covers` and no `partially covers` token, re-read that line's own named
+parent — the same done-parent read this reconcile already performed — and, where that parent
+has since gained a `**Covers:**` and/or `**Partially covers:**` field, extend the existing line
+in place with those token(s), in the same trailing-parenthetical shape the append above writes
+(`covers` before `partially covers` when both are present). A line whose parent still carries
+neither field is left exactly as it is: legacy and untouched, not a refusal. A line that already
+carries a token is never touched here, regardless of what its parent now says — a divergence at
+that line is `coverage-contradicts-parent`, the ledger gate's own refusal, never a backfill this
+reconcile performs. This backfill is folded into the same full-body read-modify-write the append
+logic above makes — one write, not two, and both land before the gate below ever runs — so it
+introduces no second writer and nothing it changes goes uncertified this pass.
+
+**Certify the ledger before deriving anything from it.** Immediately after the reconcile write
+above, pipe the freshly-read spec body through the ledger gate — strictly before the
+candidate-set gate below: an unverifiable ledger must refuse this pass before a candidate set is
+ever derived from it. Build its `--parent-coverage` map from the same done-parent read this
+reconcile already performed: for each linked slice parent read above, key an object on its bare
+task id (never the `task/`-prefixed form) carrying that parent's own `**Covers:**` and
+`**Partially covers:**` fields verbatim, write that JSON object to a temporary file, and pass its
+path as `--parent-coverage`:
+
+```sh
+lore record show spec/<spec-name> | ${CLAUDE_PLUGIN_ROOT}/scripts/ledger_gate.py --parent-coverage <path-to-temp-parent-coverage.json>
+```
+
+A non-zero exit refuses this pass, in the same shape as every other gate in this step: name the
+remedy the gate's own `reason-code:` stderr token identifies. **Only the `reason-code:` token may
+ever be copied into this pass's report, a task body, a commit message, or any other durable
+artifact — the `reason:` line is free text built from vault-sourced ledger prose (a task id, a
+coverage token) and is never persisted anywhere beyond this pass's own immediate reading of it.**
+On exit 1 — `unclaimed-ledger-line`, `invisible-ledger-task-id`, `duplicate-ledger-task-id`,
+`coverage-claimed-twice`, `orphaned-ledger-entry`, or `coverage-contradicts-parent` — the fix is
+always to correct the offending record and re-run this reconcile from step 4's start: under the
+append-only invariant below, a ledger line is never hand-edited directly. On the
+`unclaimed-ledger-line` code specifically, the gate's own stderr names the offending line
+number — a non-blank line inside `## Slices` that reads as neither part of any canonical entry's
+own bullet/continuation span nor a new marker (unmarked prose, or a torn/interleaved concurrent
+append with no marker of its own) — and the record to correct is the ledger itself: remove that
+line, or fold its content into a proper entry, before re-running. On exit 2 — `empty-stdin`,
+`non-utf8-stdin`, `stdin-too-large`, `duplicate-slices-heading`, `unterminated-masked-region`,
+`malformed-coverage-token`, or `malformed-parent-coverage` — the gate could not certify at all;
+the remedy is to fix the spec record or the parent-coverage file before re-running.
+
+**The append-only invariant is monotonic.** A ledger line's coverage token, once written, is
+never changed; a line carrying no token yet may gain one exactly once — this is what licenses
+this spec's own legacy backfill (correcting a `done` parent that predates `**Covers:**`, then
+re-running this reconcile so its line gains a token for the first time under this same rule) as a
+completion of the invariant, not a violation of it.
+
+**Named limits — sole-writer and append-only are tamper-evidence, not tamper-prevention.** This
+reconcile is the sole documented site across the craft skill corpus that writes a coverage token
+into a ledger line; the ledger gate's `--parent-coverage` cross-check above narrows the risk of an
+undocumented second writer considerably — a fabricated line whose parent carries no matching
+coverage is refused — but it does not close it: a writer that creates both a parent record and a
+matching ledger line by hand still looks like a legitimate slice. Likewise, the cross-check
+catches a line that has drifted from its own parent, but a writer who edits the line *and* its
+parent consistently defeats append-only undetected — cryptographic provenance would close this,
+and is out of scope for a markdown section in a git-backed vault. Neither limit is a defect to fix
+here; both are named so a future reader does not mistake either gate for more than it certifies.
+
+Only now — with the ledger reconciled and certified — is the candidate set derived. Pipe the
+freshly-read spec body through the candidate-set gate:
 
 ```sh
 lore record show spec/<spec-name> | ${CLAUDE_PLUGIN_ROOT}/scripts/candidate_set.py
