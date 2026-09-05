@@ -42,6 +42,9 @@ markers = [
 # every carefully-wrapped docstring.
 line-length = 120
 target-version = "py311"
+# Frozen reference snapshots used only as differential-test fixtures, loaded
+# by path rather than imported — not maintained source, so not linted.
+extend-exclude = ["tools/craft/tests/fixtures/candidate_set_pre_linear_fix_baseline.py"]
 
 [tool.ruff.lint]
 # E/W = pycodestyle (the PEP 8 checker), F = pyflakes (unused imports/vars, etc.).

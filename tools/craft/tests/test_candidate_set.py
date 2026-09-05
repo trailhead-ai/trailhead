@@ -898,9 +898,11 @@ def test_parse_ledger_entries_start_and_end_line_span_the_entry():
 # pure-performance, zero-behavior-change over.
 # ---------------------------------------------------------------------------
 
-_BASELINE_CANDIDATE_SET_PATH = Path(
-    "/Users/tduffield/.claude/jobs/b689e01f/tmp/candidate_set.py.baseline"
-)
+# A full copy of `candidate_set.py` carrying `_select_structured_span`'s
+# quadratic blank-run lookahead, vendored as a fixture so the differential
+# comparison below (`_differential_compare`) has a reference implementation
+# to run every corpus body through alongside the module under test.
+_BASELINE_CANDIDATE_SET_PATH = FIXTURES / "candidate_set_pre_linear_fix_baseline.py"
 
 
 def _load_module_from_path(path: Path, name: str):
