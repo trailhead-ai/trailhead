@@ -382,14 +382,6 @@ def _select_structured_span(
     parenthetical as that entry's own. This accessor's structural view alone
     does not surface it — a caller that must catch it walks the same raw
     blocks separately (see `find_unclaimed_ledger_lines`).
-
-    The blank-run lookahead below computes each run's end index `j` once
-    and reuses it for every line in that run, rather than rescanning the
-    remaining run from a fresh inner loop at every `k` — the same run would
-    otherwise be rescanned once per blank line it contains, making the walk
-    quadratic in the run's length for no behavioral difference: `j` (and so
-    whether the run leads to an indented continuation) does not change as
-    `k` advances through blanks that are already known to precede it.
     """
     n = len(block_lines)
     selected = [block_lines[0]]
@@ -401,8 +393,8 @@ def _select_structured_span(
             while j < n and not block_lines[j][1].strip():
                 j += 1
             if j < n and block_lines[j][1][:1] in (" ", "\t"):
-                selected.extend(block_lines[k:j])
-                k = j
+                selected.append(block_lines[k])
+                k += 1
                 continue
             break
         if line[:1] in (" ", "\t"):
@@ -497,7 +489,7 @@ def parse_ledger_entries(spec_body: str) -> list[LedgerEntry]:
             continue
         task_id, covers, partial = parsed
         start_line = selected[0][0] + 1
-        end_line = max(i for i, entry_line in selected if entry_line.strip()) + 1
+        end_line = max(i for i, l in selected if l.strip()) + 1
         entries.append(LedgerEntry(task_id, covers, partial, start_line, end_line))
     return entries
 
