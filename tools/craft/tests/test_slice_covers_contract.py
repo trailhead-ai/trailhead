@@ -16,6 +16,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 CRAFT = Path(__file__).parent.parent / "plugins" / "craft"
 SLICE_SKILL = CRAFT / "skills" / "slice" / "SKILL.md"
 GATE = CRAFT / "scripts" / "covers_gate.py"
@@ -342,7 +344,8 @@ def test_covers_allowlist_shape_rejects_free_text_prose():
 def _documented_partial_covers_shape() -> str:
     step9 = _step("### 9. Materialize the parent task")
     match = re.search(
-        r"Partially covers.*?shape\s*\n?`([^`]+)`\s*step 9 already applies to `--covers`",
+        r"Partially covers.*?shape\s+`([^`]+)`\s+step\s+9\s+already\s+applies\s+to"
+        r"\s+`--covers`",
         step9,
         re.DOTALL,
     )
@@ -412,6 +415,97 @@ def test_partial_covers_allowlist_shape_rejects_free_text_prose():
         f"the documented --partial-covers allow-list shape {shape!r} must "
         f"reject free-text prose that carries no ACn token: {prose!r}"
     )
+
+
+# ---- the extraction survives a greedy-wrap reflow of the phrase it anchors on ----
+#
+# `_documented_partial_covers_shape()`'s regex hardcoded the literal run of
+# spaces in "step 9 already applies to" between the shape backtick and the
+# `--covers` backtick. A column-wrap reflow is free to break a line anywhere
+# a space already sits, including inside that phrase, and a literal-space
+# match then fails to find a shape that is still there. These tests pin
+# that the extraction is insensitive to *where* the line breaks inside that
+# phrase, without becoming insensitive to the phrase itself being changed
+# or removed.
+#
+# The anchor itself must not pin a line layout either — locating it in the
+# real document is done with a whitespace-tolerant pattern (every space in
+# the phrase stands in for `\s+`), never a literal string carrying one
+# hardcoded newline, so these tests hold whether `slice/SKILL.md` is
+# currently wrapped, reflowed, or reflowed differently than it is today.
+
+
+def _partial_covers_anchor_phrase() -> str:
+    return (
+        "against the identical safe-value shape "
+        "`^AC\\d+(, ?AC\\d+)*$` step 9 already applies to `--covers` above."
+    )
+
+
+def _locate_anchor_phrase(text: str) -> re.Match[str]:
+    """Find `_partial_covers_anchor_phrase()` in `text` regardless of where
+    its lines currently break — every literal space in the phrase stands in
+    for `\\s+`, so a wrap anywhere inside it still locates the whole span."""
+    pattern = r"\s+".join(re.escape(token) for token in _partial_covers_anchor_phrase().split(" "))
+    return re.search(pattern, text, re.DOTALL)
+
+
+def test_documented_partial_covers_shape_survives_the_anchor_phrase_reflowed(
+    monkeypatch, tmp_path
+):
+    real_text = _skill_text()
+    match = _locate_anchor_phrase(real_text)
+    assert match, (
+        "fixture assumption: slice/SKILL.md must still carry the anchor "
+        "phrase this test reflows"
+    )
+    reflowed_anchor = (
+        "against the identical safe-value shape\n"
+        "`^AC\\d+(, ?AC\\d+)*$` step 9 already applies\nto `--covers` above."
+    )
+    reflowed_text = real_text[: match.start()] + reflowed_anchor + real_text[match.end() :]
+    fixture = tmp_path / "SKILL.md"
+    fixture.write_text(reflowed_text, encoding="utf-8")
+    monkeypatch.setattr(sys.modules[__name__], "SLICE_SKILL", fixture)
+
+    assert _documented_partial_covers_shape() == "^AC\\d+(, ?AC\\d+)*$", (
+        "reflowing the anchor phrase across a line break must not stop the "
+        "extraction from finding the still-present shape"
+    )
+
+
+def test_documented_partial_covers_shape_still_fails_when_the_shape_is_absent(
+    monkeypatch, tmp_path
+):
+    real_text = _skill_text()
+    match = _locate_anchor_phrase(real_text)
+    assert match
+    stripped_text = real_text[: match.start()] + real_text[match.end() :]
+    fixture = tmp_path / "SKILL.md"
+    fixture.write_text(stripped_text, encoding="utf-8")
+    monkeypatch.setattr(sys.modules[__name__], "SLICE_SKILL", fixture)
+
+    with pytest.raises(AssertionError):
+        _documented_partial_covers_shape()
+
+
+def test_documented_partial_covers_shape_still_fails_when_the_phrase_is_reworded(
+    monkeypatch, tmp_path
+):
+    real_text = _skill_text()
+    match = _locate_anchor_phrase(real_text)
+    assert match
+    reworded_anchor = (
+        "against the identical safe-value shape\n"
+        "`^AC\\d+(, ?AC\\d+)*$` this is described elsewhere for `--covers` above."
+    )
+    reworded_text = real_text[: match.start()] + reworded_anchor + real_text[match.end() :]
+    fixture = tmp_path / "SKILL.md"
+    fixture.write_text(reworded_text, encoding="utf-8")
+    monkeypatch.setattr(sys.modules[__name__], "SLICE_SKILL", fixture)
+
+    with pytest.raises(AssertionError):
+        _documented_partial_covers_shape()
 
 
 # ---- the certify pipe passes --covers and --partial-covers as two distinct

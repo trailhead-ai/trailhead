@@ -19,58 +19,53 @@ description: >
 
 Promote a standalone task to `ready`.
 
-**The procedure lives in `../_shared/refine.md`** (a sibling of this skill's
-directory). Read it and follow it end to end —
-the status gate, the draft attempt, the self-serve resolution passes, the citation
-rules and the resolution gate, the payload shape, the escalation contract, and the
-re-refine rules are all defined there. This skill does **not** restate them: the
-`execute` skill runs the same procedure inline, and a second copy here is how the
-two callers would drift apart.
+**The procedure lives in `../_shared/refine.md`** (a sibling of this skill's directory). Read it and
+follow it end to end — the status gate, the draft attempt, the self-serve resolution passes, the
+citation rules and the resolution gate, the payload shape, the escalation contract, and the
+re-refine rules are all defined there. This skill does **not** restate them: the `execute` skill
+runs the same procedure inline, and a second copy here is how the two callers would drift apart.
 
 ## Argument
 
-The task record to promote — a record id or a bare task name
-(`/craft:refine task/<name>` or `/craft:refine <name>`). If the argument is missing
-or resolves to more than one record, ask which one before doing anything else.
+The task record to promote — a record id or a bare task name (`/craft:refine task/<name>` or
+`/craft:refine <name>`). If the argument is missing or resolves to more than one record, ask which
+one before doing anything else.
 
 ## Modes
 
-- **Bare invocation runs unattended.** This is the default posture: refine drafts
-  what it can, and a decision that survives the self-serve passes is *recorded* for
-  a human rather than asked. It never blocks on an answer, so it is safe to dispatch
-  as a subagent with no channel back to a human.
-- **`--interactive` opts into the question path.** Refine asks one surviving
-  question at a time, each pre-loaded with the evidence and a recommended answer. A
-  deferred question falls back to the unattended behavior for that task.
+- **Bare invocation runs unattended.** This is the default posture: refine drafts what it can, and a
+  decision that survives the self-serve passes is *recorded* for a human rather than asked. It never
+  blocks on an answer, so it is safe to dispatch as a subagent with no channel back to a human.
+- **`--interactive` opts into the question path.** Refine asks one surviving question at a time,
+  each pre-loaded with the evidence and a recommended answer. A deferred question falls back to the
+  unattended behavior for that task.
 
 Everything else is identical between the two — see `../_shared/refine.md`.
 
 ## Reviewing a draft before it reaches a dispatch
 
-`/craft:execute` runs this procedure inline on a standalone `open` task and, if it
-promotes, proceeds straight to dispatching the work. There is no preview step in
-between. When you want to see the drafted payload first, run
-`/craft:refine --interactive` standalone against the task, read what it wrote, then
-hand the task to execute.
+`/craft:execute` runs this procedure inline on a standalone `open` task and, if it promotes,
+proceeds straight to dispatching the work. There is no preview step in between. When you want to see
+the drafted payload first, run `/craft:refine --interactive` standalone against the task, read what
+it wrote, then hand the task to execute.
 
 ## Outcome
 
 Report which of the three landed:
 
-- **Promoted** — the payload was appended and the task is now `ready`. Name the
-  fields filled and the citations behind any derived answer; name any scope
-  folded in beyond the captured claim ("captured: X; also folded in: Y") and any
-  judgment call made — a hedge in the captured prose resolved from prior art
-  rather than asked.
-- **Escalated** — a partial payload was written and the surviving question recorded;
-  the task is still `open`. Name the question.
-- **Routed** — the work is not a leaf. Name the route (`/craft:plan` or
-  `/craft:brainstorm`) and why.
+- **Promoted** — the payload was appended and the task is now `ready`. Name the fields filled and
+  the citations behind any derived answer; name any scope folded in beyond the captured claim
+  ("captured: X; also folded in: Y") and any judgment call made — a hedge in the captured prose
+  resolved from prior art rather than asked.
+- **Escalated** — a partial payload was written and the surviving question recorded; the task is
+  still `open`. Name the question.
+- **Routed** — the work is not a leaf. Name the route (`/craft:plan` or `/craft:brainstorm`) and
+  why.
 
-Every outcome ends by printing `lore record show <record-id>` for the task, so the
-drafted payload — or the escalated question and its evidence — is one command away
-without the operator needing to know the CLI.
+Every outcome ends by printing `lore record show <record-id>` for the task, so the drafted payload —
+or the escalated question and its evidence — is one command away without the operator needing to
+know the CLI.
 
-A `blocked` task can be drafted but never promoted; a task with children is refused
-toward `/craft:plan`, and a task that already has a parent is refused toward that
-parent's plan. All three gates are in `../_shared/refine.md`.
+A `blocked` task can be drafted but never promoted; a task with children is refused toward
+`/craft:plan`, and a task that already has a parent is refused toward that parent's plan. All three
+gates are in `../_shared/refine.md`.

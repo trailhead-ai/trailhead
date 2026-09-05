@@ -126,7 +126,7 @@ def test_documented_invocation_exits_nonzero_on_a_line_contradicting_its_parent(
 
 
 def _documented_reason_codes(step4: str, exit_label: str) -> set[str]:
-    match = re.search(rf"On exit {exit_label} — (.+?) —", step4, re.DOTALL)
+    match = re.search(rf"On exit {exit_label} —\s+(.+?)\s+—", step4, re.DOTALL)
     assert match, f"slice/SKILL.md step 4 must document exit {exit_label}'s reason codes"
     return set(re.findall(r"`([a-z0-9-]+)`", match.group(1)))
 

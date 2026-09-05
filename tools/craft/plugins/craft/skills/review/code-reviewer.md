@@ -19,8 +19,7 @@ You are reviewing code changes for production readiness.
 
 ## Git Range to Review
 
-**Base:** {BASE_SHA}
-**Head:** {HEAD_SHA}
+**Base:** {BASE_SHA} **Head:** {HEAD_SHA}
 
 ```bash
 git diff --stat {BASE_SHA}..{HEAD_SHA}
@@ -62,7 +61,8 @@ git diff {BASE_SHA}..{HEAD_SHA}
 
 ## Output Format
 
-hard cap: 600 words (verdict + all findings combined). Exceed it only if a Critical finding requires more context to act on.
+hard cap: 600 words (verdict + all findings combined). Exceed it only if a Critical finding requires
+more context to act on.
 
 ```
 Verdict: SHIP | FIX_FIRST | BLOCK
@@ -80,12 +80,15 @@ Minor
 Rules:
 - Each bullet: `file:line — one-line ask`. No code blocks inside findings.
 - Omit a severity section entirely if it has no findings (never write "none").
-- `SHIP` — ready as-is or with trivial nits. `FIX_FIRST` — Important or Critical findings must be resolved before merging. `BLOCK` — Critical finding that makes the change unsafe to land.
+- `SHIP` — ready as-is or with trivial nits. `FIX_FIRST` — Important or Critical findings must be
+  resolved before merging. `BLOCK` — Critical finding that makes the change unsafe to land.
 - Categorize by actual severity. Not everything is Critical.
 
 ## Security escalation
 
-If the diff touches auth, input validation, crypto, secrets, or session handling: flag it under Critical or Important **and** recommend the caller also dispatch `security-auditor`. This review covers quality and correctness; security-auditor covers threat modeling.
+If the diff touches auth, input validation, crypto, secrets, or session handling: flag it under
+Critical or Important **and** recommend the caller also dispatch `security-auditor`. This review
+covers quality and correctness; security-auditor covers threat modeling.
 
 ## Critical Rules
 
