@@ -70,12 +70,16 @@ Every `reason:` line is built from vault-sourced spec text — a task id, an
 identifier list, an offending parenthetical, a line number — so before being
 printed it is
 run once, at this single output boundary, through
-`criterion_gate._neutralize_control_chars` (raw non-printable code points
-first, so a control byte cannot be used to split a credential pattern's
-match and dodge the scrub that follows) and then
-`criterion_gate._scrub_credential_shaped`. Reused rather than reimplemented:
-two gates redacting the same pattern family independently is how a third
-divergent variant creeps in.
+`criterion_gate._neutralize_control_chars` and then
+`criterion_gate._scrub_credential_shaped`. Escaping a raw control byte to its
+visible `\\xNN` form ahead of the scrub would, on its own, let that escape
+split a credential pattern's match and dodge the scrub the same way the raw
+byte would — `_scrub_credential_shaped` closes that gap itself, by deciding
+whether a credential-shaped match exists against a collapsed view with every
+raw control byte and every already-escaped `\\xNN` sequence removed, so
+neither form can hide a split from it regardless of ordering. Reused rather
+than reimplemented: two gates redacting the same pattern family
+independently is how a third divergent variant creeps in.
 
 Exit codes:
     0  certified — the token block below is on stdout. `parent-cross-check:
@@ -123,9 +127,12 @@ Exit codes:
              the ledger itself does not parse as an ACn identifier list —
              raised by the shared `parse_ledger_entries` walk),
          malformed-parent-coverage (the file named by `--parent-coverage` is
-             absent, unreadable, not valid UTF-8, not a JSON object, or
-             carries a value outside the schema above — fail closed rather
-             than certify against a map this gate could not read).
+             absent, unreadable, over the same 256 KiB cap stdin carries, not
+             valid UTF-8, not valid JSON (including a document nested too
+             deeply for the decoder's own recursion limit), not a JSON
+             object, or carries a value outside the schema above — fail
+             closed rather than certify against a map this gate could not
+             read).
        Every exit-2 case prints both a `reason:` and a `reason-code:` line,
        uniformly, with no carve-out. NEVER exits 0 when it could not
        actually certify.
@@ -232,11 +239,18 @@ def _load_parent_coverage(path_str: str) -> dict[str, tuple[list[str], list[str]
     `^AC\\d+(, ?AC\\d+)*$`."""
     path = Path(path_str)
     try:
-        raw = path.read_bytes()
+        with path.open("rb") as f:
+            raw = f.read(_MAX_STDIN_BYTES + 1)
     except OSError as e:
         raise MalformedParentCoverageError(
             f"--parent-coverage file {path_str!r} could not be read: {e}"
         ) from e
+
+    if len(raw) > _MAX_STDIN_BYTES:
+        raise MalformedParentCoverageError(
+            f"--parent-coverage file {path_str!r} exceeds the {_MAX_STDIN_BYTES}-byte "
+            "cap — refusing rather than certify against a truncated map"
+        )
 
     try:
         text = raw.decode("utf-8")
@@ -250,6 +264,10 @@ def _load_parent_coverage(path_str: str) -> dict[str, tuple[list[str], list[str]
     except json.JSONDecodeError as e:
         raise MalformedParentCoverageError(
             f"--parent-coverage file {path_str!r} is not valid JSON: {e}"
+        ) from e
+    except RecursionError as e:
+        raise MalformedParentCoverageError(
+            f"--parent-coverage file {path_str!r} is nested too deeply to parse: {e}"
         ) from e
 
     if not isinstance(data, dict):

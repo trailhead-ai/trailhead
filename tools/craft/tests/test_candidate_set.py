@@ -876,3 +876,216 @@ def test_parse_ledger_entries_start_and_end_line_span_the_entry():
     )
     assert wrapped[0].start_line == first_start, wrapped[0]
     assert wrapped[0].end_line == first_end, wrapped[0]
+
+
+# ---------------------------------------------------------------------------
+# Security finding 2 — `_select_structured_span`'s blank-line lookahead was
+# O(n^2): a bullet followed by a long blank run ending in an indented
+# continuation rescanned the whole remaining blank run from a fresh inner
+# loop at every outer `k`. Fixed to compute each blank run's boundary once
+# and reuse it across the whole run.
+#
+# `parse_ledger`'s `(covered, partial, eligible)` return is frozen and does
+# not call `_select_structured_span` at all (it joins every block line
+# unconditionally via `_iter_ledger_entries`), so it is included below only
+# as a sanity check; `parse_ledger_entries`'s `LedgerEntry` shape and
+# `find_unclaimed_ledger_lines`'s results are the two accessors that
+# actually exercise the changed code path, and are the ones this must prove
+# pure-performance, zero-behavior-change over.
+# ---------------------------------------------------------------------------
+
+import importlib.machinery
+import importlib.util
+import random
+import time
+
+_BASELINE_CANDIDATE_SET_PATH = Path(
+    "/Users/tduffield/.claude/jobs/b689e01f/tmp/candidate_set.py.baseline"
+)
+
+
+def _load_module_from_path(path: Path, name: str):
+    loader = importlib.machinery.SourceFileLoader(name, str(path))
+    spec = importlib.util.spec_from_loader(name, loader)
+    module = importlib.util.module_from_spec(spec)
+    loader.exec_module(module)
+    return module
+
+
+_OLD_CANDIDATE_SET = _load_module_from_path(_BASELINE_CANDIDATE_SET_PATH, "candidate_set_baseline")
+
+
+def _make_blank_run_body(n_blanks: int) -> str:
+    return (
+        "## Acceptance Criteria\n\n- **AC1.** A fixture criterion.\n\n"
+        "## Slices\n\n"
+        "- **First slice** — a fixture value claim with a long blank run.\n"
+        + ("\n" * n_blanks)
+        + "  (`task/alpha`, closed 2026-01-01, covers AC1)\n"
+    )
+
+
+def _fuzz_ledger_bodies(seed: int, count: int) -> list[str]:
+    """Deterministic fuzz corpus covering blank runs, loose-list
+    continuations, masked regions (fenced/HTML-comment), non-canonical
+    markers, and torn/interleaved appends — the shapes
+    `_select_structured_span` and its two callers must stay behaviorally
+    identical over."""
+    rng = random.Random(seed)
+    kinds = (
+        "canonical",
+        "canonical_wrapped",
+        "canonical_blank_run",
+        "noncanonical_star",
+        "noncanonical_numbered",
+        "noncanonical_indented",
+        "fenced",
+        "html_comment",
+        "torn",
+    )
+    bodies = []
+    for i in range(count):
+        n_entries = rng.randint(1, 4)
+        lines = ["## Acceptance Criteria", "", "- **AC1.** A fixture criterion.", "", "## Slices", ""]
+        for j in range(n_entries):
+            task_id = f"task{i}-{j}"
+            date = f"2026-01-0{(j % 9) + 1}"
+            kind = rng.choice(kinds)
+            if kind == "canonical":
+                lines.append(
+                    f"- **Slice {j}** — a value claim. (`task/{task_id}`, closed {date}, covers AC1)"
+                )
+            elif kind == "canonical_wrapped":
+                lines.append(f"- **Slice {j}** — a value claim that wraps")
+                lines.append(f"  across a line. (`task/{task_id}`, closed {date}, covers AC1)")
+            elif kind == "canonical_blank_run":
+                n_blanks = rng.randint(0, 6)
+                lines.append(f"- **Slice {j}** — a value claim with a blank run.")
+                lines.extend([""] * n_blanks)
+                lines.append(f"  (`task/{task_id}`, closed {date}, covers AC1)")
+            elif kind == "noncanonical_star":
+                lines.append(
+                    f"* **Slice {j}** — wrong bullet marker. (`task/{task_id}`, closed {date}, covers AC1)"
+                )
+            elif kind == "noncanonical_numbered":
+                lines.append(
+                    f"{j + 1}. **Slice {j}** — numbered marker. (`task/{task_id}`, closed {date}, covers AC1)"
+                )
+            elif kind == "noncanonical_indented":
+                lines.append(
+                    f"  - **Slice {j}** — indented marker. (`task/{task_id}`, closed {date}, covers AC1)"
+                )
+            elif kind == "fenced":
+                lines.append("```")
+                lines.append(
+                    f"- **Fake** — inside a fence. (`task/{task_id}`, closed {date}, covers AC1)"
+                )
+                lines.append("```")
+            elif kind == "html_comment":
+                lines.append(
+                    f"<!-- - **Fake** — inside a comment. (`task/{task_id}`, closed {date}, covers AC1) -->"
+                )
+            elif kind == "torn":
+                lines.append(f"- **Slice {j}a** — a value claim torn by a concurrent append")
+                lines.append("some unmarked interleaved prose with no marker of its own")
+                lines.append(
+                    f"- **Slice {j}b** — the second half. (`task/{task_id}`, closed {date}, covers AC1)"
+                )
+        bodies.append("\n".join(lines) + "\n")
+    return bodies
+
+
+def _real_slices_fixture_bodies() -> list[str]:
+    bodies = []
+    for path in sorted(FIXTURES.glob("*.md")):
+        text = path.read_text(encoding="utf-8")
+        if "## Slices" in text:
+            bodies.append(text)
+    return bodies
+
+
+def _safe_call(module, fn_name: str, *args):
+    try:
+        return ("ok", getattr(module, fn_name)(*args))
+    except Exception as e:  # noqa: BLE001 - comparing exception shape across both modules
+        return ("err", type(e).__name__, str(e))
+
+
+def _differential_compare(body: str) -> tuple[list[str], int]:
+    """Return (names of any accessor whose old-vs-new result diverges on
+    `body`, number of accessor comparisons actually performed). Empty
+    divergence list means the two modules agree completely on this body."""
+    divergences = []
+    comparisons = 0
+
+    try:
+        criteria = candidate_set.parse_criteria(body)
+    except Exception:
+        criteria = None
+
+    if criteria is not None:
+        old_ledger = _safe_call(_OLD_CANDIDATE_SET, "parse_ledger", body, criteria)
+        new_ledger = _safe_call(candidate_set, "parse_ledger", body, criteria)
+        comparisons += 1
+        if old_ledger != new_ledger:
+            divergences.append("parse_ledger")
+
+    old_entries = _safe_call(_OLD_CANDIDATE_SET, "parse_ledger_entries", body)
+    new_entries = _safe_call(candidate_set, "parse_ledger_entries", body)
+    comparisons += 1
+    if old_entries != new_entries:
+        divergences.append("parse_ledger_entries")
+
+    old_unclaimed = _safe_call(_OLD_CANDIDATE_SET, "find_unclaimed_ledger_lines", body)
+    new_unclaimed = _safe_call(candidate_set, "find_unclaimed_ledger_lines", body)
+    comparisons += 1
+    if old_unclaimed != new_unclaimed:
+        divergences.append("find_unclaimed_ledger_lines")
+
+    return divergences, comparisons
+
+
+def test_select_structured_span_fix_is_behaviorally_identical_to_the_baseline():
+    """Pure-performance proof, measured rather than asserted: every real
+    fixture spec body carrying a `## Slices` section, plus a 2,000-case fuzz
+    corpus covering blank runs, loose-list continuations, masked regions,
+    non-canonical markers, and torn appends, run through both the pre-fix
+    (quadratic) and post-fix (linear) implementations of
+    `_select_structured_span`'s two callers — zero divergence required."""
+    real_bodies = _real_slices_fixture_bodies()
+    fuzz_bodies = _fuzz_ledger_bodies(seed=20260904, count=2000)
+    corpus = real_bodies + fuzz_bodies
+
+    divergences: list[tuple[str, str]] = []
+    comparisons = 0
+    for body in corpus:
+        body_divergences, body_comparisons = _differential_compare(body)
+        comparisons += body_comparisons
+        for accessor in body_divergences:
+            divergences.append((accessor, body[:80]))
+
+    assert not divergences, (
+        f"{len(divergences)} divergence(s) out of {comparisons} comparisons across "
+        f"{len(corpus)} bodies ({len(real_bodies)} real, {len(fuzz_bodies)} fuzz): "
+        f"{divergences[:5]}"
+    )
+    print(
+        f"differential: {comparisons} comparisons across {len(corpus)} bodies "
+        f"({len(real_bodies)} real fixtures, {len(fuzz_bodies)} fuzz cases), "
+        f"{len(divergences)} divergences"
+    )
+
+
+def test_select_structured_span_blank_run_lookahead_is_linear_not_quadratic():
+    """Bounded-time pin that would fail under the pre-fix quadratic
+    implementation: measured pre-fix, 8,000 blank lines between a bullet and
+    its indented continuation took ~0.75s, scaling as n^2 (4x per doubling) —
+    20,000 blanks would take ~4.7s under that curve. The linear fix
+    completes well inside the 2s bound."""
+    body = _make_blank_run_body(20_000)
+    start = time.perf_counter()
+    entries = candidate_set.parse_ledger_entries(body)
+    elapsed = time.perf_counter() - start
+    assert len(entries) == 1, entries
+    assert entries[0].task_id == "alpha", entries[0]
+    assert elapsed < 2.0, f"parse_ledger_entries took {elapsed:.3f}s on 20,000 blanks — still quadratic?"

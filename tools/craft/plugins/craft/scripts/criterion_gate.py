@@ -71,6 +71,7 @@ from __future__ import annotations
 
 import re
 import sys
+import unicodedata
 from pathlib import Path
 
 _SCRIPT_DIR = Path(__file__).resolve().parent
@@ -170,11 +171,45 @@ _CREDENTIAL_PATTERNS = [
     re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
 ]
 
+# A raw control byte this gate might scrub before neutralization runs (there
+# is no such call site today, but nothing prevents one), or — the actual
+# vulnerable case — the visible escaped form `_neutralize_control_chars` below
+# produces when it runs first, as every current call site does. Both forms
+# split a fixed-format pattern's match exactly as the raw byte would, for a
+# pattern family whose character classes exclude `\`, `x`/`u`/`U`, and hex
+# digits (AKIA, base64-shaped, hex-shaped, PEM headers). Collapsing both forms
+# away before deciding whether a credential-shaped match exists closes that
+# gap without changing the character range this module neutralizes. Each
+# alternative is a fixed-width match (`\xHH`, `\uHHHH`, `\UHHHHHHHH` — the
+# same three escape widths Python's own string literals use, keyed off the
+# codepoint's own magnitude in `_neutralize_control_chars` below) so a literal
+# hex digit immediately following a genuine escape is never swallowed into it.
+_ESCAPED_CONTROL_CHAR_RE = re.compile(
+    r"\\x[0-9a-fA-F]{2}|\\u[0-9a-fA-F]{4}|\\U[0-9a-fA-F]{8}"
+)
 
-def _scrub_credential_shaped(text: str) -> str:
+
+def _apply_credential_patterns(text: str) -> str:
     for pattern in _CREDENTIAL_PATTERNS:
         text = pattern.sub("[redacted]", text)
     return text
+
+
+def _scrub_credential_shaped(text: str) -> str:
+    """Redact every credential-shaped span in `text`. The match *decision* is
+    made against a collapsed view with every raw control byte and every
+    already-escaped `\\xNN` sequence removed — never against `text` itself —
+    so a control byte (raw or pre-neutralized) cannot split a fixed-format
+    secret's match and dodge the scrub by hiding the split from it. Only when
+    that collapsed view actually contains a credential-shaped match does this
+    return the collapsed, scrubbed result in place of `text`; otherwise `text`
+    is scrubbed and returned unchanged in shape, exactly as before."""
+    collapsed = _ESCAPED_CONTROL_CHAR_RE.sub("", _CONTROL_CHAR_RE.sub("", text))
+    if collapsed != text:
+        scrubbed_collapsed = _apply_credential_patterns(collapsed)
+        if scrubbed_collapsed != collapsed:
+            return scrubbed_collapsed
+    return _apply_credential_patterns(text)
 
 
 # ---------------------------------------------------------------------------
@@ -188,14 +223,41 @@ def _scrub_credential_shaped(text: str) -> str:
 # prompt injection into the operator agent reading this gate's own output.
 # Every non-printable code point (C0 controls except tab/newline/CR, and the
 # C1 range) is escaped to a visible `\xNN` form — legible as evidence, inert
-# as a terminal control sequence.
+# as a terminal control sequence. Unicode category Zl/Zp (U+2028 LINE
+# SEPARATOR, U+2029 PARAGRAPH SEPARATOR — invisible to the CommonMark line
+# grammar this gate parses with, but treated as line breaks by a caller's
+# `str.splitlines()`, which is how a hostile span forges extra lines into
+# this gate's own output) and category Cf (bidi/format controls — U+202E
+# RIGHT-TO-LEFT OVERRIDE and U+202C POP DIRECTIONAL FORMATTING chief among
+# them, the Trojan-Source visual-spoofing pair) are neutralized the same way.
+# The escape width is keyed off the codepoint's own magnitude — `\xHH` (C0/C1,
+# unchanged from before), `\uHHHH` (the rest of the Basic Multilingual Plane,
+# where every Zl/Zp/Cf codepoint below U+10000 lives), `\UHHHHHHHH` (beyond
+# it) — the same three widths Python's own string literals use, so a literal
+# hex digit immediately following a genuine escape is never ambiguous with
+# one more digit of it.
 # ---------------------------------------------------------------------------
 
 _CONTROL_CHAR_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
+_NEUTRALIZE_UNICODE_CATEGORIES = frozenset({"Cf", "Zl", "Zp"})
+
+
+def _escape_one(ch: str) -> str:
+    codepoint = ord(ch)
+    if codepoint <= 0xFF:
+        return f"\\x{codepoint:02x}"
+    if codepoint <= 0xFFFF:
+        return f"\\u{codepoint:04x}"
+    return f"\\U{codepoint:08x}"
 
 
 def _neutralize_control_chars(text: str) -> str:
-    return _CONTROL_CHAR_RE.sub(lambda m: f"\\x{ord(m.group()):02x}", text)
+    return "".join(
+        _escape_one(ch)
+        if _CONTROL_CHAR_RE.match(ch) or unicodedata.category(ch) in _NEUTRALIZE_UNICODE_CATEGORIES
+        else ch
+        for ch in text
+    )
 
 
 # ---------------------------------------------------------------------------

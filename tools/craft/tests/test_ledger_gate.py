@@ -73,6 +73,12 @@ CREDENTIAL_SHAPED_TASK_ID_CERTIFIED = (
 WRAPPED_MULTI_LINE = (FIXTURES / "ledger_wrapped_multi_line_entries.md").read_text(
     encoding="utf-8"
 )
+LINE_SEPARATOR_TASK_ID_CERTIFIED = (
+    FIXTURES / "ledger_line_separator_task_id_certified.md"
+).read_text(encoding="utf-8")
+CONTROL_BYTE_CREDENTIAL_SHAPED_DUPLICATE_TASK_ID = (
+    FIXTURES / "ledger_control_byte_credential_shaped_duplicate_task_id.md"
+).read_text(encoding="utf-8")
 
 
 def _run(
@@ -402,6 +408,45 @@ def test_malformed_parent_coverage_bad_field_shape_exits_2(tmp_path):
     assert _reason_code(r.stderr) == "malformed-parent-coverage"
 
 
+def test_deeply_nested_parent_coverage_json_exits_2_not_an_uncaught_traceback(tmp_path):
+    """A `--parent-coverage` document nested deep enough raises `RecursionError`
+    from `json.loads`, not `json.JSONDecodeError` — the gate must fold that into
+    the same fail-closed `malformed-parent-coverage` exit-2 path rather than let
+    it escape `main()` uncaught (exit 1, no `reason:`/`reason-code:` lines, and a
+    traceback on stderr disclosing filesystem paths)."""
+    path = tmp_path / "parents.json"
+    # Deep enough to overflow the C JSON decoder's recursion limit (measured:
+    # 120,000 triggers it) while the resulting file (2 bytes/level) stays
+    # under the 256 KiB --parent-coverage size cap, so this exercises the
+    # RecursionError path distinctly from the oversized-file path below.
+    depth = 125_000
+    path.write_text("[" * depth + "]" * depth, encoding="utf-8")
+    assert path.stat().st_size < 256 * 1024
+    r = _run(CLEAN_MULTI_ENTRY, ["--parent-coverage", str(path)])
+    assert r.returncode == 2, r.stderr + r.stdout
+    assert "Traceback" not in r.stderr
+    assert _reason_code(r.stderr) == "malformed-parent-coverage"
+
+
+def test_oversized_parent_coverage_file_exits_2_fail_closed(tmp_path):
+    """`ledger_gate.py` caps stdin at 256 KiB before parsing, but the
+    `--parent-coverage` file read carried no equivalent bound — an
+    oversized file must be refused, checked before `json.loads`, routed to
+    the same fail-closed exit-2 path as every other malformed-parent-coverage
+    case."""
+    path = tmp_path / "parents.json"
+    matching_data = {
+        "alpha": {"covers": "AC1, AC2"},
+        "beta": {"partially covers": "AC3"},
+        "gamma": {"covers": "AC4", "partially covers": "AC5"},
+    }
+    oversized = json.dumps(matching_data) + (" " * (256 * 1024 + 1))
+    path.write_text(oversized, encoding="utf-8")
+    r = _run(CLEAN_MULTI_ENTRY, ["--parent-coverage", str(path)])
+    assert r.returncode == 2, r.stderr + r.stdout
+    assert _reason_code(r.stderr) == "malformed-parent-coverage"
+
+
 # ---------------------------------------------------------------------------
 # Contract item 6 — forged structure never falsely violates; an unterminated
 # masked region fails closed (covered above)
@@ -495,6 +540,43 @@ def test_safe_output_boundary_neutralizes_control_bytes_and_scrubs_credentials()
     spec.loader.exec_module(module)
     assert module._safe("secret sk_live_Zq7Kd2 here") == "secret [redacted] here"
     assert module._safe("raw \x1b escape") == "raw \\x1b escape"
+
+
+# ---------------------------------------------------------------------------
+# Security audit findings — reproduced against a completed slice, fixed here
+# ---------------------------------------------------------------------------
+
+
+def test_line_and_paragraph_separators_in_a_task_id_do_not_forge_extra_stdout_lines():
+    """U+2028 LINE SEPARATOR and U+2029 PARAGRAPH SEPARATOR are invisible to
+    the CommonMark line grammar this gate parses with, but Python's own
+    `str.splitlines()` treats them as line breaks — so a caller (or an
+    operator agent) that reads this gate's CERTIFIED stdout with
+    `splitlines()` must see exactly the lines the gate printed via `print()`,
+    never additional ones a hostile task id spliced in. Comparing the
+    `splitlines()` count against the `\\n`-only split count is the relational
+    pin: they diverge exactly when an unescaped line/paragraph separator
+    survived to stdout."""
+    r = _run(LINE_SEPARATOR_TASK_ID_CERTIFIED)
+    assert r.returncode == 0, r.stderr
+    assert " " not in r.stdout
+    assert " " not in r.stdout
+    stripped = r.stdout.rstrip("\n")
+    assert len(stripped.splitlines()) == len(stripped.split("\n"))
+
+
+def test_control_byte_splitting_a_credential_shaped_task_id_is_still_scrubbed():
+    """`_neutralize_control_chars` escapes a raw control byte to the literal
+    text `\\xNN` before the credential scrub runs. For a pattern family whose
+    character classes exclude `\\`, `x`, and hex digits (the AKIA-shaped AWS
+    access key here), that escape splits the match exactly as the raw byte
+    would, so the un-redacted secret reaches the gate's own `reason:` line
+    unless the scrub's match decision is made against a collapsed view."""
+    r = _run(CONTROL_BYTE_CREDENTIAL_SHAPED_DUPLICATE_TASK_ID)
+    assert r.returncode == 1, r.stderr + r.stdout
+    assert "AKIA1234" not in r.stderr
+    assert "567890ABCDEF" not in r.stderr
+    assert "duplicate-ledger-task-id" in r.stderr
 
 
 # ---------------------------------------------------------------------------
