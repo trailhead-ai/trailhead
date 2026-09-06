@@ -27,9 +27,9 @@ import pytest
 
 SKILLS = Path(__file__).parent.parent / "plugins" / "craft" / "skills"
 
-# The three sibling `_shared` documents `execute.md`'s rules draw on without
+# The sibling `_shared` documents `execute.md`'s rules draw on without
 # naming any of them by path.
-EXECUTE_MD_DEPENDENCIES = ("status-ownership.md", "refine.md", "slice.md")
+EXECUTE_MD_DEPENDENCIES = ("status-ownership.md", "refine.md", "slice.md", "security.md")
 
 
 def _text(skill_name: str) -> str:
@@ -97,8 +97,8 @@ def test_unconditional_read_clause_survives_anchor_reflowed_across_a_line_break(
     the clause must still be located and still carry every dependency name."""
     text = (
         "The procedure\nlives in `../_shared/execute.md`, alongside "
-        "`../_shared/status-ownership.md`, `../_shared/refine.md`, and "
-        "`../_shared/slice.md` — read them all."
+        "`../_shared/status-ownership.md`, `../_shared/refine.md`, "
+        "`../_shared/slice.md`, and `../_shared/security.md` — read them all."
     )
     clause = _unconditional_read_clause(text, "The procedure lives in")
     for name in EXECUTE_MD_DEPENDENCIES:

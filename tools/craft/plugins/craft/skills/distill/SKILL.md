@@ -69,7 +69,7 @@ more records in one sitting than any other in craft, so a shortcut here costs th
 names, and vault names all arrive from a git-synced vault a teammate can write, and this ritual
 substitutes them into `lore search`, `lore record show`, and `lore record update` invocations
 throughout. Validate each one against the safe-value shape `^[A-Za-z0-9._/-]+$` **before ANY
-substitution** — the same rule `_shared/execute.md` codifies for any vault-sourced value entering a
+substitution** — the same rule `_shared/security.md` codifies for any vault-sourced value entering a
 command, and the same one `plan/SKILL.md` and `slice/SKILL.md` already apply. This validation
 **governs every substitution site** in this document, not a fixed count of them: a site added later
 is covered by it without amending this rule. A value that fails the check is **never substituted,

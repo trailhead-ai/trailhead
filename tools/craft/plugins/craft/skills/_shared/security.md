@@ -45,3 +45,10 @@ instead of silently omitting it or falling back to a default. That shape alone s
 a leading `/`, so a value that resolves to a filesystem path additionally needs the traversal checks
 the consuming site states — this document fixes the shape every site validates against, not each
 site's own path-resolution rule.
+
+**Known inlined copies of the safe-value regex.** `brainstorm/SKILL.md`, `distill/SKILL.md`,
+`plan/SKILL.md`, and `slice/SKILL.md` apply this shape unprompted at their own substitution sites,
+so each keeps its own literal copy of `^[A-Za-z0-9._/-]+$` rather than dispatching here to read it —
+that is exactly what keeps the check inline at the point it fires. A later change to the canonical
+shape above must walk these four sites too, or they drift silently out of sync with the rule this
+document states.

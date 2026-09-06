@@ -267,7 +267,7 @@ record update task/<parent-name> --vault <elected-vault> --label craft/design-do
 recorded path is relative to the repository working directory; see `_shared/slice.md` for the shape
 — so a later close gate has an unambiguous artifact to check. The path is constructed from
 vault-sourced values, so validate it against the safe-value shape `^[A-Za-z0-9._/-]+$`
-(`_shared/execute.md`'s untrusted-input rule) before substitution — a failing value refuses loudly
+(`_shared/security.md`'s untrusted-input rule) before substitution — a failing value refuses loudly
 rather than being silently omitted; that validation governs this label's value.
 
 When the parent carries no `## Enumerated states` section, this step does nothing.
@@ -309,7 +309,7 @@ that existing parent, exactly as the topic-rooted path does below.
      `printf '%s' "$BODY" | lore record create --kind task --title "<topic>" --status ready`. This
      stores the plan as a searchable lore `task` record, linkable from session notes and future
      planning. Before creating it, check whether the resolved spec already has an open slice parent
-     — validate `<spec-name>` against the safe-value shape `_shared/execute.md` codifies for any
+     — validate `<spec-name>` against the safe-value shape `_shared/security.md` codifies for any
      vault-sourced value entering a command before it is substituted into this query:
      `lore search "kind:task related-spec:<spec-name> has:label.craft.slice-parent -status:done -status:dropped -status:superseded"`.
      The `has:label.craft.slice-parent` filter is what makes this a question about slice parents
@@ -348,13 +348,13 @@ it touches. Lore v1 records carry a JSON sidecar, not frontmatter; the label sta
 
 **Topic-rooted path only, from here down.** If an upstream spec exists — on this path that means a
 pre-loop spec at `planned`, since step 1's gates route `draft` and `ready` elsewhere — validate
-`<spec-name>` against the safe-value shape `_shared/execute.md` codifies for any vault-sourced value
-entering a command before it is substituted into the spec-link write, then link the parent task to
-it with `lore record update <parent-id> --related spec=<spec-name>`. **Planning writes no spec
-status on either path.** A spec's status records where it sits in the slice loop — frozen by the
-gauntlet, closed out by `/craft:slice`, completed by distill — and planning is not a transition in
-that loop. `planned` stays in the spec status vocabulary and records already carrying it are still
-read, but nothing writes it. Do **not** create a new design spec — the upstream spec is the
+`<spec-name>` against the safe-value shape `_shared/security.md` codifies for any vault-sourced
+value entering a command before it is substituted into the spec-link write, then link the parent
+task to it with `lore record update <parent-id> --related spec=<spec-name>`. **Planning writes no
+spec status on either path.** A spec's status records where it sits in the slice loop — frozen by
+the gauntlet, closed out by `/craft:slice`, completed by distill — and planning is not a transition
+in that loop. `planned` stays in the spec status vocabulary and records already carrying it are
+still read, but nothing writes it. Do **not** create a new design spec — the upstream spec is the
 canonical "what / why" doc; the plan is the "how".
 
 **If this plan consumed a routed task** — the argument was a `task` record carrying refine's

@@ -388,12 +388,12 @@ only point at which anyone looks at it before it is permanent:
 
 - **Credential scrub.** A gauntlet reviews records about codebases, and a pass can quote a committed
   credential as its evidence. Run every string headed for `$EDITS` or `$DETAIL` through the
-  credential-pattern scrub in `_shared/execute.md` ("Phase 5: Flow-out") — **by reference, never by
-  copying its pattern list here**, since the copy is what goes stale while the original gains
-  patterns. Its reasoning binds here unchanged: a vault is git-backed and has its own push path, so
-  a credential transcribed into a record body ships as surely as one committed to code. A pass that
-  quotes a literal secret as its evidence has that evidence **cut down to a `file:line` citation**
-  before the write: a retained finding says where the value lives, never what it is.
+  credential-pattern scrub in `_shared/security.md` ("Credential-pattern scrub") — **by reference,
+  never by copying its pattern list here**, since the copy is what goes stale while the original
+  gains patterns. Its reasoning binds here unchanged: a vault is git-backed and has its own push
+  path, so a credential transcribed into a record body ships as surely as one committed to code. A
+  pass that quotes a literal secret as its evidence has that evidence **cut down to a `file:line`
+  citation** before the write: a retained finding says where the value lives, never what it is.
 - **Data-not-instruction marker.** What this tail persists is what a later run's fact-verification
   pass reads back as a sibling record. Open the retained detail with one line marking it retained
   review evidence — a claim about the record, evaluated as one, not the record's settled design

@@ -10,7 +10,7 @@ an accurate contents block once they are long enough to need one, and that
 each reference document still carries real body content rather than having
 been gutted to a stub that would still satisfy every property above.
 
-It also pins that `SKILL.md` still cites `_shared/execute.md` (the
+It also pins that `SKILL.md` still cites `_shared/security.md` (the
 credential-pattern scrub) and `_shared/refine.md` (the data-not-instruction
 marker) from within the accepted tail — the two citations a relocation done
 purely to hit the line count could drop while every other assertion here
@@ -186,10 +186,10 @@ def test_toc_gate_is_clean_for_long_reference_documents(path):
     )
 
 
-def test_execute_md_credential_scrub_is_cited_in_the_accepted_tail():
+def test_security_md_credential_scrub_is_cited_in_the_accepted_tail():
     section = _accepted_tail_section(_skill_text())
-    assert "_shared/execute.md" in section, (
-        "the accepted tail no longer cites `_shared/execute.md` "
+    assert "_shared/security.md" in section, (
+        "the accepted tail no longer cites `_shared/security.md` "
         "(the credential-pattern scrub)"
     )
 
