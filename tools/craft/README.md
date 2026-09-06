@@ -210,11 +210,20 @@ declaration convention:
 production
 ```
 
+The section body is everything after the heading line up to the next real `##`
+or `#` (H1) heading, or the end of the document, whichever comes first — a
+heading-looking line inside a fenced code block (e.g. an illustrative example)
+is not a boundary and does not end the section early.
+
 The closed vocabulary is exactly `prototype` / `early` / `production` — matched
 case-insensitively, anywhere in the section body. A missing section, or a
-declared value outside the vocabulary, resolves to `production`. Brainstorm's
-framing step resolves this for every repository the work touches, before
-grilling begins:
+declared value outside the vocabulary, resolves to `production`. A section
+body naming **more than one** distinct vocabulary word is ambiguous, not a
+declaration of whichever word appears first, and also resolves to
+`production` — reported through its own `reason: ambiguous-value` token so it
+is never confused with either the missing-section or the out-of-vocabulary
+case. Brainstorm's framing step resolves this for every repository the work
+touches, before grilling begins:
 
 ```sh
 cat <repo-root>/CLAUDE.md | plugins/craft/scripts/maturity_resolve.py

@@ -105,6 +105,51 @@ PRODUCTION_DECLARED_WITH_SURROUNDING_PROSE = """\
 This repository is at the Production level of maturity, per the last review.
 """
 
+# ---- fixtures for defects surfaced by whole-change review ----
+
+AMBIGUOUS_TWO_WORDS_DECLARED = """\
+# Some Repo
+
+## Project Maturity
+
+No longer a prototype; this is production.
+"""
+
+WHITESPACE_ONLY_STDIN = "\n   \n\t\n"
+
+FENCED_HEADING_INSIDE_SECTION = """\
+# Some Repo
+
+## Project Maturity
+
+Some prose.
+
+```
+## Not A Heading
+```
+
+prototype
+"""
+
+H1_TERMINATES_SECTION = """\
+# Some Repo
+
+## Project Maturity
+
+Some prose with no vocabulary word here.
+
+# A Top-Level Heading
+
+production
+"""
+
+LONG_INVALID_VALUE = "# Some Repo\n\n## Project Maturity\n\n" + ("gibberish " * 40) + "\n"
+
+BIDI_OVERRIDE_IN_INVALID_VALUE = (
+    "# Some Repo\n\n## Project Maturity\n\n"
+    "bad‮value‬ here\n"
+)
+
 
 def _run(stdin_bytes: bytes) -> subprocess.CompletedProcess:
     return subprocess.run(
@@ -211,6 +256,115 @@ def test_conjunction_only_a_declared_section_matches_not_the_word_alone():
     assert "level: production" in inside_section
     assert "reason: declared" in inside_section
     assert "reason: section-absent" not in inside_section
+
+
+# ---- defect 1: multiple distinct vocabulary words is ambiguous, not first-match --
+
+
+def test_section_body_with_two_distinct_vocabulary_words_resolves_to_production_ambiguous():
+    """A section body containing more than one distinct vocabulary word must
+    never resolve to whichever word appears first — that is the exact
+    fail-UNSAFE direction (a `production` repository graded as `prototype`)
+    this feature exists to prevent."""
+    result = _run(AMBIGUOUS_TWO_WORDS_DECLARED.encode("utf-8"))
+    assert result.returncode == 0
+    lines = _lines(result)
+    assert "level: production" in lines
+    assert "reason: ambiguous-value" in lines
+    assert "reason: declared" not in lines
+    assert "level: prototype" not in lines
+
+
+def test_ambiguous_value_reason_is_distinct_from_invalid_value_reason():
+    ambiguous = _lines(_run(AMBIGUOUS_TWO_WORDS_DECLARED.encode("utf-8")))
+    invalid = _lines(_run(INVALID_VALUE_DECLARED.encode("utf-8")))
+    assert "reason: ambiguous-value" in ambiguous
+    assert "reason: invalid-value" not in ambiguous
+    assert "reason: invalid-value" in invalid
+    assert "reason: ambiguous-value" not in invalid
+
+
+def test_ambiguous_value_report_carries_the_conflicting_values():
+    result = _run(AMBIGUOUS_TWO_WORDS_DECLARED.encode("utf-8"))
+    lines = _lines(result)
+    offending = [line for line in lines if line.startswith("offending-value:")]
+    assert offending, "ambiguous-value must report an offending-value line"
+    assert "prototype" in offending[0]
+    assert "production" in offending[0]
+
+
+# ---- defect 2: a present-but-whitespace-only file is section-absent, not fail-closed --
+
+
+def test_whitespace_only_stdin_from_an_existing_file_resolves_to_production_section_absent():
+    """A file that EXISTS but is empty or whitespace-only declares nothing —
+    per AC2, that resolves to production via the ordinary absence path, exit
+    0. This must not be confused with a failed read (zero bytes), which
+    stays fail-closed."""
+    result = _run(WHITESPACE_ONLY_STDIN.encode("utf-8"))
+    assert result.returncode == 0
+    lines = _lines(result)
+    assert "level: production" in lines
+    assert "reason: section-absent" in lines
+
+
+def test_genuinely_zero_byte_stdin_still_fails_closed():
+    """The no-bytes-at-all case must keep failing closed — this is what a
+    broken read produces, and it must never be mistaken for a deliberate
+    declaration of anything, including the section-absent default."""
+    result = _run(b"")
+    assert result.returncode == 2
+    assert b"level:" not in result.stdout
+
+
+# ---- defect 5: offending-value is bounded and stripped of format/bidi controls --
+
+
+def test_offending_value_is_bounded_in_length():
+    result = _run(LONG_INVALID_VALUE.encode("utf-8"))
+    assert result.returncode == 0
+    lines = _lines(result)
+    offending = next(line for line in lines if line.startswith("offending-value:"))
+    assert len(offending) < len(LONG_INVALID_VALUE)
+    assert len(offending) <= 220, f"offending-value line not bounded: {len(offending)} chars"
+
+
+def test_offending_value_strips_unicode_bidi_override_characters():
+    result = _run(BIDI_OVERRIDE_IN_INVALID_VALUE.encode("utf-8"))
+    assert result.returncode == 0
+    lines = _lines(result)
+    offending = next(line for line in lines if line.startswith("offending-value:"))
+    assert "‮" not in offending
+    assert "‬" not in offending
+
+
+# ---- defect 7: section terminator is fence-aware and stops at an H1 too --------
+
+
+def test_heading_looking_line_inside_a_fenced_code_block_is_not_a_section_terminator():
+    """A `## `-looking line inside a fenced example must not truncate the
+    real section — agent-instruction files are full of fenced examples that
+    themselves illustrate this convention."""
+    result = _run(FENCED_HEADING_INSIDE_SECTION.encode("utf-8"))
+    assert result.returncode == 0
+    lines = _lines(result)
+    assert "level: prototype" in lines
+    assert "reason: declared" in lines
+
+
+def test_h1_heading_terminates_the_section_body():
+    """The section body must not swallow the rest of the document past an
+    H1 heading. The vocabulary word appears only AFTER the H1 here, so a
+    terminator blind to H1 headings would incorrectly pull it into the
+    section and report `declared`; the correct section body (ending at the
+    H1) contains no vocabulary word at all, so this must resolve
+    `invalid-value` instead."""
+    result = _run(H1_TERMINATES_SECTION.encode("utf-8"))
+    assert result.returncode == 0
+    lines = _lines(result)
+    assert "level: production" in lines
+    assert "reason: invalid-value" in lines
+    assert "reason: declared" not in lines
 
 
 # ---- fail-closed on stdin that cannot be resolved at all -----------------

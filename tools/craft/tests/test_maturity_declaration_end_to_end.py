@@ -102,14 +102,17 @@ def test_readme_documents_the_heading_and_vocabulary_the_resolver_itself_matches
     readme_text = README.read_text(encoding="utf-8")
     lines = readme_text.splitlines()
 
-    assert re.search(r"^##\s+Project Maturity\s*$", readme_text, re.MULTILINE), (
-        "tools/craft/README.md must document the exact `## Project Maturity` "
-        "heading the resolver's own _HEADING_RE matches"
+    # Derived from the resolver's own `_HEADING_RE` constant, never a copy of
+    # its pattern text, so renaming the parser's heading cannot leave this
+    # check silently matching stale README prose.
+    assert any(module._HEADING_RE.match(line) for line in lines), (
+        "tools/craft/README.md must document the exact heading the resolver's "
+        "own _HEADING_RE matches"
     )
 
     heading_lines = _outside_fence_heading_line_indices(readme_text)
     own_heading_positions = [
-        i for i in heading_lines if re.match(r"^##\s+Project Maturity\s*$", lines[i])
+        i for i in heading_lines if module._HEADING_RE.match(lines[i])
     ]
     assert own_heading_positions, (
         "the real (non-fenced) `## Project Maturity` heading must exist in README.md"
@@ -127,6 +130,39 @@ def test_readme_documents_the_heading_and_vocabulary_the_resolver_itself_matches
             f"tools/craft/README.md's Project Maturity section must name the "
             f"resolver's own vocabulary word {level!r}"
         )
+
+
+def _readme_maturity_section_text() -> str:
+    readme_text = README.read_text(encoding="utf-8")
+    lines = readme_text.splitlines()
+    module = _resolver_module()
+    heading_lines = _outside_fence_heading_line_indices(readme_text)
+    own_heading_positions = [i for i in heading_lines if module._HEADING_RE.match(lines[i])]
+    start = own_heading_positions[0]
+    later_headings = [i for i in heading_lines if i > start]
+    end = later_headings[0] if later_headings else len(lines)
+    return "\n".join(lines[start:end])
+
+
+def test_readme_documents_the_section_boundary_and_ambiguous_value_behaviour():
+    """Defect 9: the README must document the section-boundary rule (a
+    fenced code block does not end the section; the next real H1 or H2
+    heading does) and the multiple-vocabulary-word behaviour (ambiguous,
+    resolves to production), not just the plain case-insensitive-anywhere
+    rule."""
+    section_text = _readme_maturity_section_text()
+    assert re.search(r"fenc", section_text, re.IGNORECASE), (
+        "README's Project Maturity section must document that a fenced code "
+        f"block does not terminate the section: {section_text!r}"
+    )
+    assert re.search(r"\bh1\b|top-level heading|# heading", section_text, re.IGNORECASE), (
+        "README's Project Maturity section must document the H1 heading as a "
+        f"section terminator: {section_text!r}"
+    )
+    assert re.search(r"more than one|ambiguous|multiple.{0,20}word", section_text, re.IGNORECASE), (
+        "README's Project Maturity section must document that more than one "
+        f"distinct vocabulary word is ambiguous, not first-match: {section_text!r}"
+    )
 
 
 # ---- 3. the compose plan carries the resolver script and the edited skill ----

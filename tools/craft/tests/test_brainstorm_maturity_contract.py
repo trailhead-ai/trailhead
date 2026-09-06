@@ -71,9 +71,13 @@ def test_maturity_resolution_is_documented_inside_step_1_before_step_2_heading()
 
 def test_frame_step_names_the_closed_vocabulary_and_no_other_level():
     frame_step = _step("### 1. Frame")
-    assert "prototype" in frame_step
-    assert "early" in frame_step
-    assert "production" in frame_step
+    # Word-boundary matches, not bare substring checks — "early" bare would
+    # be satisfiable by "clearly"/"nearly"/"yearly" appearing anywhere in
+    # this multi-thousand-character step, without the vocabulary word itself
+    # ever being named.
+    assert re.search(r"\bprototype\b", frame_step)
+    assert re.search(r"\bearly\b", frame_step)
+    assert re.search(r"\bproduction\b", frame_step)
     # No fourth level word slips in beside the closed three.
     for off_vocab in ("spike", "throwaway", "mature", "stable", "beta"):
         assert off_vocab not in frame_step.lower(), (
@@ -121,13 +125,22 @@ def test_out_of_vocabulary_declaration_resolves_to_production_via_the_real_resol
 
 def test_frame_step_documents_reporting_the_offending_value_and_the_valid_ones():
     frame_step = _step("### 1. Frame")
-    assert "offending-value" in frame_step or "offending value" in frame_step, (
-        "step 1 must document reporting the offending value on an "
-        "out-of-vocabulary declaration"
+    # Anchored to the invalid-value clause itself (from the reason token
+    # through the terminating '.'), not the whole multi-thousand-character
+    # step — an unscoped search would be satisfied by "offending-value" or
+    # "valid level" appearing in an unrelated clause elsewhere in step 1.
+    clause_match = re.search(r"invalid-value`?\)[^.]*\.", frame_step)
+    assert clause_match, (
+        "step 1 must have an invalid-value clause terminated by '.'"
     )
-    assert re.search(r"valid (level|value)", frame_step, re.IGNORECASE), (
-        "step 1 must document naming the valid levels alongside the offending "
-        "value"
+    clause = clause_match.group(0)
+    assert "offending-value" in clause or "offending value" in clause, (
+        "the invalid-value clause must document reporting the offending "
+        f"value: {clause!r}"
+    )
+    assert re.search(r"valid (level|value)", clause, re.IGNORECASE), (
+        "the invalid-value clause must document naming the valid levels "
+        f"alongside the offending value: {clause!r}"
     )
 
 
@@ -178,4 +191,51 @@ def test_resolver_invoked_by_the_same_absolute_path_convention_as_other_gates():
     ), (
         "the maturity resolver invocation must also be piped input, matching "
         "the established gate-invocation shape"
+    )
+
+
+# ---- 7. behaviour is named for a non-zero resolver exit on an existing file ----
+
+
+def test_frame_step_names_behaviour_on_a_non_zero_resolver_exit():
+    """A resolver invocation can exit non-zero (fail-closed) even for a
+    repository whose agent-instruction file exists — non-UTF-8 content, or a
+    read failure mid-pipe. Step 1 must say what happens then, or a
+    repository can silently end up with no level stated at all (AC3/AC3b)."""
+    frame_step = _step("### 1. Frame")
+    # Scoped to the resolver's OWN non-zero exit (a fail-closed read failure
+    # on an existing file), not the neighbouring "leak a non-zero exit"
+    # clause about the absence-path guard, which is a different case.
+    assert re.search(r"resolver.{0,20}exits? non-zero", frame_step, re.IGNORECASE), (
+        "step 1 must name the resolver's own non-zero-exit case explicitly"
+    )
+    clause_match = re.search(
+        r"resolver.{0,20}exits? non-zero[^.]*\.", frame_step, re.IGNORECASE
+    )
+    assert clause_match, "step 1 must have a non-zero-exit clause terminated by '.'"
+    clause = clause_match.group(0)
+    assert "production" in clause, (
+        f"the non-zero-exit clause must still state a level (production): {clause!r}"
+    )
+
+
+# ---- 8. the unreachable-repository case is named, not silently omitted ----
+
+
+def test_frame_step_names_the_case_where_repositories_cannot_be_enumerated():
+    """Beyond the camp-workspace and single-current-repo cases, a session
+    rooted above several repositories with no camp manifest to enumerate
+    them must be named explicitly — never silently folded into the
+    single-current-repo fallback, which would omit sibling repos this work
+    touches."""
+    frame_step = _step("### 1. Frame")
+    assert re.search(r"neither", frame_step, re.IGNORECASE), (
+        "step 1 must name the case where neither the camp-workspace nor the "
+        "single-current-repo enumeration applies"
+    )
+    clause_match = re.search(r"neither[^.]*\.", frame_step, re.IGNORECASE)
+    assert clause_match, "step 1 must have a 'neither applies' clause terminated by '.'"
+    clause = clause_match.group(0)
+    assert re.search(r"explicit|state|cannot", clause, re.IGNORECASE), (
+        f"the 'neither applies' clause must require stating the case explicitly: {clause!r}"
     )
