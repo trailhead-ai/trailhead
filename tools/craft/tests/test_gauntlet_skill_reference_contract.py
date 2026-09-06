@@ -124,6 +124,7 @@ def gate(*paths: Path) -> subprocess.CompletedProcess:
     )
 
 
+
 def test_skill_md_stays_within_the_500_line_guidance():
     lines = _skill_text().splitlines()
     assert len(lines) <= LINE_LIMIT, (
@@ -225,4 +226,29 @@ def test_reference_document_is_not_gutted_to_a_stub(path):
     assert word_count >= minimum, (
         f"{path.name} is {word_count} words, under its {minimum}-word floor — the "
         "relocated control this file exists to hold may have been gutted"
+    )
+
+
+@pytest.mark.parametrize("path", reference_documents(), ids=lambda p: p.name)
+def test_reference_documents_name_no_other_reference_document(path):
+    """A reference document naming *another* reference document puts that one
+    two hops from the `SKILL.md` an agent actually loads, which is the depth
+    the split exists to avoid.
+
+    `reference_depth_gate.py` checks this property for `_shared/*.md`, and
+    `test_shared_docs_reference_depth_contract.py` runs it there. That script
+    is deliberately not reused here: it treats every `.md` in the directory as
+    a sibling, and in a skill directory that set includes `SKILL.md` itself.
+    A reference document naming its own entrypoint is a back-reference to
+    level zero, not a second-level reference, so the gate reports it as a
+    finding when it is not one. The entrypoint is excluded below for that
+    reason, and only reference-document-to-reference-document mentions count.
+    """
+    others = [p for p in reference_documents() if p != path]
+    if not others:
+        pytest.skip("only one reference document — no sibling to name")
+    text = path.read_text(encoding="utf-8")
+    named = [p.name for p in others if _stem_pattern(p.stem).search(text)]
+    assert not named, (
+        f"{path.name} names {named}, putting them two hops from SKILL.md"
     )

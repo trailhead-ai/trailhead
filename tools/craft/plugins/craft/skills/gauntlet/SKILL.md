@@ -333,7 +333,11 @@ that was already done, none of which a missed line ever required.
 `accepted-as-risk: <reason>`, `disputed: <reason>`, and `answered: <reason>` are **operator-only
 overrides**. All three are judgments about what this project is willing to live with, or knows that
 the passes did not, and their reason text is the operator's own — quote it, **never drafted for
-them**. Do not propose any of the three, and do not offer a reason the operator did not say.
+them**. Do not propose any of the three, and do not offer a reason the operator did not say — and
+never record one with the reason slot empty either: "dispute C3", with nothing said about why, is
+not yet a disposition. Ask, and record nothing until the operator answers. A drafted reason and a
+blank one are the same failure, and both put text you are responsible for into the permanent trail
+under the operator's signature.
 
 **Read `gauntlet/dispositions.md` now and follow it in full.** It defines what each of the five
 terms — `resolved`, `revise` and its two scopes, `accepted-as-risk`, `disputed`, and `answered` —
