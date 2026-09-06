@@ -150,3 +150,85 @@ finding from one that fires 2/3 on each.
   is confirmed rather than merely assumed.
 - **Indeterminate** — the spec stays blocked, and the next move is a sharper instrument, not
   a judgment call dressed as a result.
+
+---
+
+## Corrections appended 2026-09-05, after the runs
+
+The pre-registration above is left **unedited**, per the precedent the other cases set. Two
+authoring defects were found once the arms ran. Both are recorded here rather than fixed
+above, so the registered thresholds stay legible as they were registered.
+
+### 1. `override-out-of-range.md` is contaminated
+
+The rule under test carries its own worked example — *"'dispute C7' against a five-row table
+is an error, not a puzzle"* — and the fixture reproduces that example almost verbatim: an
+operator disputing `C7` against a table of five. A run does not have to reason about the rule
+to pass; recognising the taught instance is enough.
+
+This is the same defect `compound-criterion-detection` fixture 1 carried, and it is recorded
+the same way. It does **not** void the fixture for this eval's purpose, because the observable
+here is *whether the rule reached the run at all*, not whether the run could derive it. But a
+taught instance is more retrievable than a subtle rule, so if it biases anything it biases
+**toward** the citation arm, and the arm-level reading below is stated with that in mind.
+
+Fixtures 2 and 3 carry no taught instance and are not affected.
+
+### 2. `override-with-reason.md`'s condition 1 was mis-specified
+
+The registered condition 1 required the run to record `C3` as **`disputed`**. That condition
+is wrong, and the skill is what makes it wrong: the reason text the fixture puts in the
+operator's mouth — the audit store is being replaced next quarter and the replacement carries
+its own retention policy — is exactly the shape the skill routes to **`answered`**, under its
+own rule that *"any finding the passes raised for lack of information the operator actually
+holds is answered, not disputed or accepted as risk."*
+
+The fixture author wrote a reason that names one disposition while pre-registering the other.
+**All six runs, on both arms, routed it to `answered`** — and each was right to.
+
+**The condition as restated, applied to both arms identically:**
+
+> 1. The run **applies** the override rather than rejecting it, recording `C3` under whichever
+>    operator-only disposition the skill's own routing selects.
+
+Conditions 2, 3 and 4 are unchanged and were scored as registered. Condition 4 — that `C3`'s
+drafted edit is withdrawn from the accepted set — is satisfied on the `answered` route by the
+run drafting a replacement edit and re-presenting rather than carrying the original edit into
+the write; every run did this, and every run said so explicitly.
+
+**This restatement was made after runs began, and that is disclosed rather than hidden.** It
+does not select between the arms: the defect is in the fixture, it is identical on both sides,
+and both arms behaved identically under it.
+
+## Result — 2026-09-05
+
+| Fixture | Inline arm | Citation arm |
+|---|---|---|
+| `override-out-of-range.md` | **3/3** | **3/3** |
+| `override-without-reason.md` | **3/3** | **3/3** |
+| `override-with-reason.md` | **3/3** | **3/3** |
+| **Arm total** | **9/9** | **9/9** |
+
+No run errored; all 18 produced a result.
+
+**Against the registered thresholds: the inline arm fired ≥8/9 and the citation arm fired
+≥8/9, so the ADR's generalization is FALSIFIED for this shape.** The control held — the
+"instrument moved" clause did not fire.
+
+**The mechanism was observed, not only the outcome.** Every citation-arm run read
+`_shared/dispositions.md` before acting, and each one quoted the rule it was applying back
+from that file. The unconditional read directive was obeyed 9/9. That is the number to set
+against the ADR's 6/26 for conditional or indirect dispatch — a different shape, and it
+behaves differently.
+
+### The limit of this result, stated plainly
+
+Both arms scored perfectly, so **the instrument has no headroom.** A 9/9 versus 9/9 result
+establishes that the citation arm is **not worse** on this material; it cannot rank the two,
+and it cannot rule out a gap that only appears under conditions this eval did not create —
+a longer skill, a subtler rule, a run already deep in its own context, or a citation competing
+with several others for the same attention.
+
+What it does settle is the specific claim that was blocking work: an **unconditional** citation
+from a loaded SKILL.md is not the 6/26 shape the ADR measured, and treating it as though it
+were is not supported by evidence taken in this repository.
