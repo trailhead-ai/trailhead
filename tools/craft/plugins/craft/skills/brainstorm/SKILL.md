@@ -104,6 +104,25 @@ reads as an ordinary result, which is exactly the wrong report for a name that c
 - Never modify a prior spec. If this work supersedes one, link it from the new spec's `Related`
   section.
 
+**Resolve maturity for every repository the work touches, before grilling begins.** Enumerate those
+repositories the same way `_shared/execute.md`'s push mechanics and `drive/SKILL.md` step 5 already
+do: in a camp workspace they are the member worktrees of the current workspace as listed in its camp
+manifest (`manifest.json`); in vanilla usage the set is the single current repo. For each
+repository, pipe its agent-instruction file (e.g. `CLAUDE.md`) into the resolver, by the same
+absolute-path convention the existing gate invocations use (`slice/SKILL.md`, `gauntlet/SKILL.md`):
+
+```sh
+cat <repo-root>/CLAUDE.md | ${CLAUDE_PLUGIN_ROOT}/scripts/maturity_resolve.py
+```
+
+The closed vocabulary is exactly `prototype` / `early` / `production`, and no other level. A missing
+`## Project Maturity` section (`reason: section-absent`) resolves to `production`; a declared value
+outside the vocabulary (`reason: invalid-value`) also resolves to `production` and is additionally
+reported to the operator, naming the offending value (the resolver's `offending-value:` line) and
+the valid levels — `prototype`, `early`, `production`. State the resolved level per repository in
+the session before moving to step 2, e.g. `trailhead: production (declared)`, `lookout: production
+(no declaration — defaults to production)`.
+
 <!-- prior-art-survey:start -->
 **Prior-art survey — mandatory, run now, inline in this session, never dispatched to a subagent:**
 
