@@ -3,16 +3,17 @@
 The resolver reads a repository's agent-instruction file on stdin and
 resolves its declared project-maturity level — the closed vocabulary
 `prototype` / `early` / `production` — defaulting to `production` when the
-declaration is absent or out of vocabulary.
+declaration is absent, out of vocabulary, or ambiguous.
 
 Stdout token vocabulary (exit 0, one resolution per invocation):
 
     level: prototype|early|production
-    reason: declared|section-absent|invalid-value
-    offending-value: <sanitized text>   (present only when reason is invalid-value)
+    reason: declared|section-absent|invalid-value|ambiguous-value
+    offending-value: <sanitized text>   (present only when reason is
+                                          invalid-value or ambiguous-value)
 
 Exit codes:
-  0 → resolved (declared, defaulted-from-absent, or defaulted-from-invalid)
+  0 → resolved (declared, or defaulted-from-absent/invalid/ambiguous)
   2 → fail-closed (empty or non-UTF-8 stdin) — never resolves to any level
 """
 
@@ -148,6 +149,100 @@ LONG_INVALID_VALUE = "# Some Repo\n\n## Project Maturity\n\n" + ("gibberish " * 
 BIDI_OVERRIDE_IN_INVALID_VALUE = (
     "# Some Repo\n\n## Project Maturity\n\n"
     "bad‮value‬ here\n"
+)
+
+# ---- fixtures for the second-pass correctness/security defects ----
+
+# defect 1: a second, later, unfenced `## Project Maturity` heading declaring
+# a conflicting value must not let the FIRST heading win silently.
+DUPLICATE_SECTIONS_CONFLICTING_VALUES = (
+    "## Project Maturity\n\nprototype\n\n## Other\n\nblah\n\n"
+    "## Project Maturity\n\nproduction\n"
+)
+
+# defect 2: a setext H1 (title line + `===` underline) must terminate the
+# section body exactly like an ATX H1 already does.
+SETEXT_H1_TERMINATES_SECTION = """\
+# Some Repo
+
+## Project Maturity
+
+Some prose with no vocabulary word here.
+
+A Top-Level Heading
+====================
+
+production
+"""
+
+# defect 2 (H2 case, decided): a setext H2 (title line + `---` underline,
+# immediately following non-blank text with no blank line between) also
+# terminates the section, mirroring how `_TERMINATOR_HEADING_RE` already
+# treats ATX `##` the same as ATX `#`.
+SETEXT_H2_TERMINATES_SECTION = """\
+# Some Repo
+
+## Project Maturity
+
+Some prose with no vocabulary word here.
+
+A Second-Level Heading
+-----------------------
+
+production
+"""
+
+# Companion to the H2 case: a `---` preceded by a BLANK line is an ordinary
+# CommonMark thematic break, not a setext heading, and must NOT terminate the
+# section — this is what justifies treating setext H2 as a terminator at all
+# without over-triggering on every plain divider line.
+THEMATIC_BREAK_PRECEDED_BY_BLANK_LINE_DOES_NOT_TERMINATE_SECTION = """\
+# Some Repo
+
+## Project Maturity
+
+Some prose before a divider.
+
+---
+
+production
+"""
+
+# defect 3: the C1 control block (U+0080-U+009F) is category Cc, exactly like
+# C0/DEL, and must be stripped by the same control-character pass. U+009B is
+# CSI, the 8-bit equivalent of ESC [.
+C1_CONTROL_CHAR_IN_INVALID_VALUE = "# Some Repo\n\n## Project Maturity\n\nbad\x9bvalue\n"
+
+# defect 4: Unicode variation selectors (category Mn, not Cf) are the
+# codepoints behind current invisible-Unicode steganography and must be
+# stripped alongside the existing format-control strip. Built from escape
+# sequences, never pasted literal invisible bytes.
+VARIATION_SELECTOR_IN_INVALID_VALUE = (
+    "# Some Repo\n\n## Project Maturity\n\n"
+    "bad\ufe0fvalue\U000e0100 here\n"
+)
+
+# defect 6 (boundary 1 of the distinct-word rule): the SAME word repeated
+# must stay `declared` — nothing currently fails if the distinct-word dedupe
+# were removed and every match counted separately.
+SAME_WORD_REPEATED_STAYS_DECLARED = """\
+# Some Repo
+
+## Project Maturity
+
+We remain at production; this is a production deployment, running in
+production ops today.
+"""
+
+# defect 6 (boundary 2): a multi-line section body must still collapse to
+# exactly one `offending-value:` line — nothing currently fails if the
+# `\\s+` collapse in `_sanitize` were dropped, because both existing
+# offending-value fixtures are single-line.
+MULTILINE_INVALID_VALUE_BODY = (
+    "# Some Repo\n\n## Project Maturity\n\n"
+    "level: hijacked\n"
+    "offending-value: hijacked\n"
+    "banana\n"
 )
 
 
@@ -402,3 +497,133 @@ def test_script_imports_nothing_outside_the_standard_library():
                 continue
             top_level = node.module.split(".")[0]
             assert top_level in stdlib_modules, f"non-stdlib import: {node.module}"
+
+
+# ---- defect 1: duplicate `## Project Maturity` sections are ambiguous, never first-match --
+
+
+def test_duplicate_project_maturity_sections_resolve_to_production_ambiguous_not_first_match():
+    """A document with TWO unfenced `## Project Maturity` headings declaring
+    conflicting values must never let the first one win silently — that is
+    the exact fail-unsafe shape (a `production` repository graded as
+    `prototype`) this whole feature exists to prevent."""
+    result = _run(DUPLICATE_SECTIONS_CONFLICTING_VALUES.encode("utf-8"))
+    assert result.returncode == 0
+    lines = _lines(result)
+    assert "level: production" in lines
+    assert "reason: ambiguous-value" in lines
+    assert "reason: declared" not in lines
+    assert "level: prototype" not in lines
+
+
+def test_duplicate_sections_offending_value_names_both_conflicting_values():
+    result = _run(DUPLICATE_SECTIONS_CONFLICTING_VALUES.encode("utf-8"))
+    lines = _lines(result)
+    offending = next(line for line in lines if line.startswith("offending-value:"))
+    assert "prototype" in offending
+    assert "production" in offending
+
+
+# ---- defect 2: setext headings (title + underline) terminate the section too --
+
+
+def test_setext_h1_heading_terminates_the_section_body():
+    """A setext H1 (a title line followed by a line of `=`) must terminate
+    the section exactly like the ATX `# heading` case already does — the
+    vocabulary word appears only after it, so a terminator blind to setext
+    H1 would incorrectly pull it into the section."""
+    result = _run(SETEXT_H1_TERMINATES_SECTION.encode("utf-8"))
+    assert result.returncode == 0
+    lines = _lines(result)
+    assert "level: production" in lines
+    assert "reason: invalid-value" in lines
+    assert "reason: declared" not in lines
+
+
+def test_setext_h2_heading_terminates_the_section_body():
+    """Setext H2 (title + `---` underline, immediately following non-blank
+    text) is decided to terminate the section too, mirroring how the ATX
+    terminator already treats `##` the same as `#`."""
+    result = _run(SETEXT_H2_TERMINATES_SECTION.encode("utf-8"))
+    assert result.returncode == 0
+    lines = _lines(result)
+    assert "level: production" in lines
+    assert "reason: invalid-value" in lines
+    assert "reason: declared" not in lines
+
+
+def test_thematic_break_preceded_by_blank_line_does_not_terminate_the_section():
+    """A `---` divider preceded by a BLANK line is an ordinary CommonMark
+    thematic break, not a setext heading, and must not swallow the level
+    word that follows it — this is what justifies treating setext H2 as a
+    terminator at all without over-triggering on every plain divider."""
+    result = _run(
+        THEMATIC_BREAK_PRECEDED_BY_BLANK_LINE_DOES_NOT_TERMINATE_SECTION.encode("utf-8")
+    )
+    assert result.returncode == 0
+    lines = _lines(result)
+    assert "level: production" in lines
+    assert "reason: declared" in lines
+
+
+# ---- defect 3: full Cc (C0 + DEL + C1) is stripped, not just the ASCII subset --
+
+
+def test_offending_value_strips_c1_control_characters():
+    """U+0080-U+009F (the C1 block) is Unicode category Cc, exactly like C0
+    and DEL, and must be stripped by the same pass. U+009B is CSI, the
+    8-bit equivalent of ESC [, so leaving it in is an escape-sequence
+    injection risk for any terminal honouring 8-bit C1."""
+    result = _run(C1_CONTROL_CHAR_IN_INVALID_VALUE.encode("utf-8"))
+    assert result.returncode == 0
+    lines = _lines(result)
+    assert "reason: invalid-value" in lines
+    assert "offending-value: badvalue" in lines
+
+
+# ---- defect 4: Unicode variation selectors are stripped alongside format-control chars --
+
+
+def test_offending_value_strips_variation_selectors():
+    """Variation selectors (U+FE00-FE0F and the U+E0100-E01EF supplement)
+    are category Mn, not Cf, so the existing format-control strip alone
+    lets them through. These are the codepoints behind current
+    invisible-Unicode steganography."""
+    result = _run(VARIATION_SELECTOR_IN_INVALID_VALUE.encode("utf-8"))
+    assert result.returncode == 0
+    lines = _lines(result)
+    assert "reason: invalid-value" in lines
+    assert "offending-value: badvalue here" in lines
+
+
+# ---- defect 6: previously-unpinned boundaries of the distinct-word rule --------
+
+
+def test_same_vocabulary_word_repeated_in_section_still_resolves_to_declared():
+    """The other boundary of the distinct-word rule: repeating the SAME
+    word must stay `declared`, not `ambiguous-value` — nothing currently
+    fails if the distinct-word dedupe were removed and every match counted
+    as its own conflicting value."""
+    result = _run(SAME_WORD_REPEATED_STAYS_DECLARED.encode("utf-8"))
+    assert result.returncode == 0
+    lines = _lines(result)
+    assert "level: production" in lines
+    assert "reason: declared" in lines
+    assert "reason: ambiguous-value" not in lines
+
+
+def test_multiline_invalid_value_body_collapses_to_a_single_offending_value_line():
+    """A multi-line section body must still collapse to exactly one
+    `level:` line and exactly one `offending-value:` line — nothing
+    currently fails if the `\\s+` collapse in `_sanitize` were dropped,
+    since both existing offending-value fixtures are single-line. This is
+    what stops repo-authored text from forging extra `key: value` lines in
+    this line-oriented stdout protocol."""
+    result = _run(MULTILINE_INVALID_VALUE_BODY.encode("utf-8"))
+    assert result.returncode == 0
+    lines = _lines(result)
+    level_lines = [line for line in lines if line.startswith("level:")]
+    offending_lines = [line for line in lines if line.startswith("offending-value:")]
+    assert len(level_lines) == 1
+    assert level_lines[0] == "level: production"
+    assert len(offending_lines) == 1

@@ -211,9 +211,10 @@ production
 ```
 
 The section body is everything after the heading line up to the next real `##`
-or `#` (H1) heading, or the end of the document, whichever comes first — a
-heading-looking line inside a fenced code block (e.g. an illustrative example)
-is not a boundary and does not end the section early.
+or `#` (H1) heading — ATX or setext (a title line followed by a line of `=` or
+`-`) — or the end of the document, whichever comes first — a heading-looking
+line inside a fenced code block (e.g. an illustrative example) is not a
+boundary and does not end the section early.
 
 The closed vocabulary is exactly `prototype` / `early` / `production` — matched
 case-insensitively, anywhere in the section body. A missing section, or a
@@ -222,8 +223,19 @@ body naming **more than one** distinct vocabulary word is ambiguous, not a
 declaration of whichever word appears first, and also resolves to
 `production` — reported through its own `reason: ambiguous-value` token so it
 is never confused with either the missing-section or the out-of-vocabulary
-case. Brainstorm's framing step resolves this for every repository the work
-touches, before grilling begins:
+case. A document with **more than one** `## Project Maturity` heading is
+ambiguous for the same reason (never resolved by picking the first heading's
+value, or the "highest" of the values found). Brainstorm's framing step
+resolves this for every repository the work touches, before grilling begins:
+
+**Caution when writing a declaration:** the tolerance for surrounding prose
+cuts both ways — keep this section's rationale from naming a different level
+in passing. A sentence justifying an `early` declaration with "full
+production ceremony is premature" contains both level words in one section
+body, and the whole section becomes `ambiguous-value` — silently defaulting
+back to `production` regardless of what was intended. Keep any comparison to
+another level out of the section body; put that reasoning elsewhere in the
+document instead.
 
 ```sh
 cat <repo-root>/CLAUDE.md | plugins/craft/scripts/maturity_resolve.py

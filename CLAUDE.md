@@ -50,6 +50,10 @@ agreement — the standard-of-care level craft's rituals calibrate their rigor
 against (backwards compatibility, migration paths, rollback, blast radius) for
 work that touches this repository.
 
+Caution for future edits to this section: keep this rationale from naming a
+different level in passing — doing so makes the whole declaration ambiguous
+and silently defaults back to production regardless of intent.
+
 ## Commands
 
 Requires **Python 3.11+**, **zero third-party runtime deps** (stdlib only; system

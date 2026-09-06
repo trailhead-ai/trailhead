@@ -165,6 +165,48 @@ def test_readme_documents_the_section_boundary_and_ambiguous_value_behaviour():
     )
 
 
+# ---- defect 8: authoring-site caution against naming a second level word ----
+
+
+def test_readme_project_maturity_section_cautions_authors_about_naming_a_second_level_word():
+    """The README documents the ambiguous-value rule (previous test), but an
+    author writing a declaration needs the caution AT THE SITE where they'd
+    trip it: the tolerance for surrounding prose (`"This repository is at
+    the Production level, per the last review."`) means a rationale
+    sentence naming a second level word — the spec's own `early` example,
+    "full production ceremony is premature" — silently becomes
+    ambiguous-value."""
+    section_text = _readme_maturity_section_text()
+    assert re.search(r"naming\s+a\s+(different|second)\s+level", section_text, re.IGNORECASE), (
+        "README's Project Maturity section must caution an author against "
+        f"naming a second level word in the rationale prose: {section_text!r}"
+    )
+
+
+def test_claude_md_project_maturity_section_cautions_against_naming_a_second_level_word():
+    """trailhead's own declaration models a rationale paragraph; the caution
+    belongs at this declaration site too, not just in the README's general
+    convention doc. Phrased WITHOUT literally naming a second vocabulary
+    word, since doing so would itself make this very section ambiguous."""
+    module = _resolver_module()
+    claude_md_text = CLAUDE_MD.read_text(encoding="utf-8")
+    sections = module._extract_sections(claude_md_text)
+    assert len(sections) == 1, (
+        f"trailhead's own CLAUDE.md must declare exactly one Project Maturity "
+        f"section, got: {sections}"
+    )
+    section_text = sections[0]
+    assert re.search(r"naming\s+a\s+(different|second)\s+level", section_text, re.IGNORECASE), (
+        "CLAUDE.md's Project Maturity section must caution against naming a "
+        f"second level word in its own rationale: {section_text!r}"
+    )
+    # The caution itself must not trip the very rule it warns about.
+    distinct = module._distinct_levels(section_text)
+    assert distinct == ["production"], (
+        f"the caution text must not itself name a second vocabulary word: {distinct}"
+    )
+
+
 # ---- 3. the compose plan carries the resolver script and the edited skill ----
 
 

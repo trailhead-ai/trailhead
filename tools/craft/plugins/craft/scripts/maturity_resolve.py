@@ -16,13 +16,25 @@ The declaration lives in a `## Project Maturity` section, beside the
 declaration precedent in this repository's own agent-instruction file. The
 heading is matched case-insensitively at line start (a mid-paragraph mention
 does not satisfy it), and the section's body is everything after that
-heading line up to the next `##` or `#` heading, or the end of the document —
-whichever comes first. A heading-looking line found inside a fenced code
-block (``` or ~~~, any info string) is never treated as that terminator:
-agent-instruction files are full of fenced examples that themselves
-illustrate this very convention, and a fence-blind scan would let an
-illustrative `##` inside someone's example truncate — or, worse, extend past
-an unmasked H1 into — the real section.
+heading line up to the next terminator heading, or the end of the document —
+whichever comes first. A terminator heading is an ATX `##` or `#` heading,
+OR a setext heading (a non-blank title line immediately followed, with no
+blank line between, by a line of only `=` for an H1 or only `-` for an H2 —
+the CommonMark disambiguation that keeps a bare `---` divider preceded by a
+blank line from being mistaken for a heading boundary). A heading-looking
+line found inside a fenced code block (``` or ~~~, any info string) is never
+treated as that terminator: agent-instruction files are full of fenced
+examples that themselves illustrate this very convention, and a fence-blind
+scan would let an illustrative `##` inside someone's example truncate — or,
+worse, extend past an unmasked H1 into — the real section.
+
+A document may contain more than one unfenced `## Project Maturity` heading
+(a rebase artifact, a copy-pasted reference block from another repository's
+agent-instruction file). This is itself an ambiguous declaration, routed the
+same as multiple distinct vocabulary words within one section — never
+resolved by picking the first heading's value, or the "highest" of the
+values found, both of which risk understating what the repository actually
+declared.
 
 The closed vocabulary is exactly three words — `prototype`, `early`,
 `production` — matched case-insensitively, on a word boundary, anywhere
@@ -32,7 +44,12 @@ level word appearing anywhere OUTSIDE the section — in ordinary prose
 elsewhere in the file — is not a declaration and never matches: only a word
 found inside the section body counts, which is what lets an absent section
 and a declared one resolve differently even when the same word appears
-somewhere in either document.
+somewhere in either document. CAUTION for anyone authoring a declaration:
+this same tolerance for surrounding prose means a rationale sentence that
+happens to name a SECOND vocabulary word (e.g. explaining an `early`
+declaration by saying full production ceremony is premature) makes the
+whole section ambiguous — keep any comparison to another level out of the
+section body.
 
 A `## Project Maturity` section whose body contains none of the three words
 is an invalid declaration, not an absence. A section whose body contains
@@ -41,19 +58,22 @@ declaration of whichever word happens to appear first: first-match-wins over
 free-form prose would let a body like "No longer a prototype; this is
 production." resolve to `prototype` — the fail-UNSAFE direction (declaring a
 lower level than what was actually stated) this feature exists to prevent.
-All three outcomes — absent, invalid, ambiguous — default to the same
-`production` level, but are reported through three distinct reason tokens
-(`section-absent` / `invalid-value` / `ambiguous-value`) so a caller never
-has to guess which happened from the resolved level alone. The offending
-value reported alongside `invalid-value` (the section body's own text) or
-`ambiguous-value` (the conflicting words found, in order of first
-appearance) is, in both cases, sanitized before being reported: since it is
-repo content an arbitrary contributor can author and it is about to be
-echoed into session prose, it is collapsed to a single line, stripped of
-C0/DEL control characters and of Unicode format/bidi-control characters
-(zero-width joiners, bidi overrides and isolates, invisible "tag"
-characters, and the like — the categories abused to smuggle instructions
-into text that renders as innocuous), and bounded to a fixed maximum length.
+All outcomes other than a single unambiguous declared word — absent,
+invalid, ambiguous — default to the same `production` level, but are
+reported through three distinct reason tokens (`section-absent` /
+`invalid-value` / `ambiguous-value`) so a caller never has to guess which
+happened from the resolved level alone. The offending value reported
+alongside `invalid-value` (the section body's own text) or `ambiguous-value`
+(the conflicting words found, in order of first appearance, or — for
+multiple headings with no vocabulary word at all — the combined body text)
+is, in both cases, sanitized before being reported: since it is repo content
+an arbitrary contributor can author and it is about to be echoed into
+session prose, it is collapsed to a single line, stripped of the full Cc
+control-character category (C0, DEL, and the C1 block) and of Unicode
+format/bidi-control characters and variation selectors (zero-width joiners,
+bidi overrides and isolates, invisible "tag" characters, variation
+selectors, and the like — the categories abused to smuggle instructions into
+text that renders as innocuous), and bounded to a fixed maximum length.
 
 Stdout on success (exit 0), two or three lines:
 
@@ -69,22 +89,30 @@ Exit codes:
        an absent section, or defaulted from an invalid or ambiguous declared
        value. NEVER exits 0 without printing a `level:` line.
     2  fail-closed — no bytes at all on stdin, or stdin that is not valid
-       UTF-8. This never resolves to any level: a repository with no
-       agent-instruction file at all is mapped to the absence path by the
-       caller before invocation, and is never expected to reach this script
-       as zero-byte stdin.
+       UTF-8. This never resolves to any level.
        (`reason-code: empty-stdin` / `reason-code: invalid-utf8-stdin`,
        printed to stderr.)
 
-       A file that EXISTS but is empty or whitespace-only is NOT this
-       fail-closed case — it has bytes (even if only whitespace), decodes
-       fine, and simply declares nothing: it resolves via the ordinary
-       section-absent path to `production`, exit 0, same as any other file
-       with no `## Project Maturity` section. Only a read that produced zero
-       bytes at all — the signature of a failed read, never a real empty
-       file's content — fails closed; that distinction is why the check
-       below is on the raw byte count, not on whether the decoded text is
-       blank.
+       Zero-byte stdin fails closed unconditionally, and DOES reach this
+       script in practice: a genuinely empty (0-byte) agent-instruction file
+       piped straight in (`cat CLAUDE.md | maturity_resolve.py`) produces
+       exactly this input, and this script cannot tell that apart from a
+       failed read that produced no bytes for some other reason — so both
+       are treated identically, fail-closed, rather than risking either
+       being read as a deliberate (if empty) declaration. A repository with
+       no agent-instruction file at all is a separate case, handled by the
+       caller before invocation (it never invokes this script), not by this
+       exit path.
+
+       A file that EXISTS and has at least one byte of content — even if
+       that content is only whitespace, e.g. a single trailing newline — is
+       NOT this fail-closed case: it decodes fine and simply declares
+       nothing, resolving via the ordinary section-absent path to
+       `production`, exit 0, same as any other file with no `##
+       Project Maturity` section. The distinction that matters is the raw
+       byte count being exactly zero, not whether the decoded text is
+       blank — a whitespace-only file has bytes; only a truly empty read
+       does not.
 """
 
 from __future__ import annotations
@@ -97,15 +125,29 @@ _DEFAULT_LEVEL = "production"
 
 _HEADING_RE = re.compile(r"^##\s+Project Maturity\s*$", re.IGNORECASE)
 _TERMINATOR_HEADING_RE = re.compile(r"^#{1,2}\s")
+_SETEXT_H1_UNDERLINE_RE = re.compile(r"^=+\s*$")
+_SETEXT_H2_UNDERLINE_RE = re.compile(r"^-+\s*$")
 _FENCE_START_RE = re.compile(r"^(`{3,}|~{3,})")
 _LEVEL_WORD_RE = re.compile(r"\b(?:" + "|".join(_LEVELS) + r")\b", re.IGNORECASE)
-_CONTROL_CHAR_RE = re.compile(r"[\x00-\x1f\x7f]")
+# Full Cc (control) category: C0 (U+0000-U+001F), DEL (U+007F), and the C1
+# block (U+0080-U+009F) — all three are category Cc, not just the ASCII
+# subset. U+009B (CSI) is the 8-bit equivalent of ESC [, so leaving the C1
+# block unstripped is an escape-sequence injection risk for any terminal
+# that honours 8-bit C1.
+_CONTROL_CHAR_RE = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 # Unicode format-control (category Cf) code points relevant to text-smuggled
 # instructions: zero-width joiners/spaces, bidi marks/embeddings/overrides/
 # isolates, the BOM, interlinear annotation marks, and the invisible Unicode
 # "tag" block used for steganographic prompt injection. Hand-enumerated by
 # codepoint rather than looked up via `unicodedata`, which this script's
 # stdlib-only import allowlist ({__future__, re, sys}) does not admit.
+#
+# Also strips the Unicode variation selectors (U+FE00-FE0F and the
+# supplement U+E0100-E01EF) alongside the Cf strip above: these are category
+# Mn, not Cf, so the format-control pass alone would miss them, but ~190 of
+# them fit inside the offending-value length bound and are exactly the
+# codepoints behind current invisible-Unicode steganography (one hidden
+# selector attached to an innocuous visible character).
 _FORMAT_CONTROL_CHAR_RE = re.compile(
     "["
     "­"
@@ -127,6 +169,8 @@ _FORMAT_CONTROL_CHAR_RE = re.compile(
     "\U0001d173-\U0001d17a"
     "\U000e0001"
     "\U000e0020-\U000e007f"
+    "\ufe00-\ufe0f"
+    "\U000e0100-\U000e01ef"
     "]"
 )
 _MAX_OFFENDING_VALUE_LEN = 200
@@ -166,31 +210,58 @@ def _fence_mask(lines: list[str]) -> list[bool]:
     return masked
 
 
-def _extract_section(text: str) -> str | None:
-    """Return the `## Project Maturity` section body, or None if no such
-    (unfenced) heading is present. The body spans every line after the
-    heading line up to (but not including) the next unfenced `##` or `#`
-    heading, or the end of the document."""
+def _is_terminator_start(lines: list[str], fenced: list[bool], i: int) -> bool:
+    """True when line `i` (already known unfenced) begins a heading that
+    terminates a section: an ATX `#`/`##` heading on that line itself, or a
+    setext heading — a non-blank title line immediately followed (no blank
+    line between) by an unfenced line of only `=` (setext H1) or only `-`
+    (setext H2).
+
+    Setext H2 is included deliberately: a `---`/`===` underline immediately
+    below prose is, per CommonMark, indistinguishable from a real heading
+    boundary, and the ATX terminator already treats `##` the same as `#`.
+    Requiring the title line to be non-blank is what keeps an ordinary
+    thematic break (a bare `---` preceded by a blank line, a common plain
+    divider) from being mistaken for a setext H2 — CommonMark applies the
+    same disambiguation."""
+    if _TERMINATOR_HEADING_RE.match(lines[i]):
+        return True
+    if lines[i].strip() == "":
+        return False
+    if i + 1 >= len(lines) or fenced[i + 1]:
+        return False
+    nxt = lines[i + 1]
+    return bool(_SETEXT_H1_UNDERLINE_RE.match(nxt) or _SETEXT_H2_UNDERLINE_RE.match(nxt))
+
+
+def _extract_sections(text: str) -> list[str]:
+    """Return the body of every unfenced `## Project Maturity` heading in
+    the document, in order — not just the first. A document with more than
+    one such heading is caught by the caller as ambiguous rather than
+    letting the first heading win silently. Each body spans every line
+    after its heading line up to (but not including) the next unfenced
+    terminator heading (ATX `##`/`#`, or setext H1/H2), or the end of the
+    document."""
     lines = re.split(r"\r\n|\r|\n", text)
     fenced = _fence_mask(lines)
 
-    start = None
-    for i, line in enumerate(lines):
-        if fenced[i]:
-            continue
-        if _HEADING_RE.match(line):
-            start = i + 1
-            break
-    if start is None:
-        return None
-
-    body_lines: list[str] = []
-    for i in range(start, len(lines)):
-        line = lines[i]
-        if not fenced[i] and _TERMINATOR_HEADING_RE.match(line):
-            break
-        body_lines.append(line)
-    return "\n".join(body_lines)
+    sections: list[str] = []
+    i = 0
+    n = len(lines)
+    while i < n:
+        if not fenced[i] and _HEADING_RE.match(lines[i]):
+            j = i + 1
+            body_lines: list[str] = []
+            while j < n:
+                if not fenced[j] and _is_terminator_start(lines, fenced, j):
+                    break
+                body_lines.append(lines[j])
+                j += 1
+            sections.append("\n".join(body_lines))
+            i = j
+        else:
+            i += 1
+    return sections
 
 
 def _sanitize(raw: str) -> str:
@@ -203,19 +274,39 @@ def _sanitize(raw: str) -> str:
     return stripped
 
 
+def _distinct_levels(section_text: str) -> list[str]:
+    """Return the distinct vocabulary words found in `section_text`, in
+    order of first appearance, case-normalized. Repeating the SAME word
+    does not add a second entry — only genuinely differing words do."""
+    distinct_levels: list[str] = []
+    for raw_match in _LEVEL_WORD_RE.findall(section_text):
+        level = raw_match.lower()
+        if level not in distinct_levels:
+            distinct_levels.append(level)
+    return distinct_levels
+
+
 def resolve(text: str) -> tuple[str, str, str | None]:
     """Return (level, reason, offending_value) for an agent-instruction
     file's body. `offending_value` is None unless `reason` is
     `invalid-value` or `ambiguous-value`."""
-    section = _extract_section(text)
-    if section is None:
+    sections = _extract_sections(text)
+    if not sections:
         return _DEFAULT_LEVEL, "section-absent", None
 
-    distinct_levels: list[str] = []
-    for raw_match in _LEVEL_WORD_RE.findall(section):
-        level = raw_match.lower()
-        if level not in distinct_levels:
-            distinct_levels.append(level)
+    if len(sections) > 1:
+        # More than one unfenced `## Project Maturity` heading is itself an
+        # ambiguous declaration — the same routing as multiple distinct
+        # vocabulary words within one section, and for the same reason:
+        # picking whichever heading appears first (or "highest") would be
+        # the fail-UNSAFE direction this whole feature exists to prevent.
+        combined = "\n".join(sections)
+        distinct = _distinct_levels(combined)
+        offending = ", ".join(distinct) if distinct else combined
+        return _DEFAULT_LEVEL, "ambiguous-value", _sanitize(offending)
+
+    section = sections[0]
+    distinct_levels = _distinct_levels(section)
 
     if not distinct_levels:
         return _DEFAULT_LEVEL, "invalid-value", _sanitize(section)
