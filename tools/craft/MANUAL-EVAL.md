@@ -466,6 +466,82 @@ The withdrawal note below is left unedited, as written before the redesign.
 
 ---
 
+## Case: unconditional citation vs. inline
+
+`plugins/craft/evals/unconditional-citation-vs-inline/` — pre-registered and committed at
+`81e61062`, before any arm was run.
+
+**Under test:** whether a mandatory rule reached through **one unconditional `_shared`
+citation** fires as reliably as the same rule **inlined** in a loaded SKILL.md — and so whether
+`adr/prescribed-agent-recipes-are-inlined-verbatim-into-every-surface-held-by-byte-equality-tests`
+governs shared reference documents, or only the conditional dispatch it actually measured.
+
+The ADR measured inline commands at 26/26 and conditional-or-indirect dispatch at 6/26, then
+generalized the second row to cover "extract to a shared file each surface references". That
+generalization is the unverified step, and it is what this case measures.
+
+**The arms.** Frozen snapshots of `skills/gauntlet/SKILL.md` @ `1dba2b88`, differing in exactly
+one diff hunk: the `#### Accepting, and overriding in one round-trip` section is either inline,
+or moved byte-for-byte into `_shared/dispositions.md` and replaced by one unconditional read
+directive. Byte-preservation below the promoted heading is verified by diff, not asserted.
+
+**The fixtures.** Three gauntlet runs paused at the accept step, sharing a byte-identical
+presented deliverable (`C1`–`C5`, four `resolved` and one `revise`) and differing only in the
+operator's reply. `revise`-presence is held constant across all three so the re-present rules
+that fire on a revise-presence change never confound the observables.
+
+| Date | Arm | Prose under test | Fixture | Runs | Result | Notes |
+|------|-----|------------------|---------|------|--------|-------|
+| 2026-09-05 | inline | `gauntlet/SKILL.md` @ `1dba2b88` | override-out-of-range | 3 | **3/3 fired** | Contaminated fixture — see below. |
+| 2026-09-05 | citation | same, section moved | override-out-of-range | 3 | **3/3 fired** | Contaminated fixture — see below. |
+| 2026-09-05 | inline | `gauntlet/SKILL.md` @ `1dba2b88` | override-without-reason | 3 | **3/3 fired** | No taught instance. |
+| 2026-09-05 | citation | same, section moved | override-without-reason | 3 | **3/3 fired** | No taught instance. |
+| 2026-09-05 | inline | `gauntlet/SKILL.md` @ `1dba2b88` | override-with-reason | 3 | **3/3 fired** | Scored on the restated condition 1. |
+| 2026-09-05 | citation | same, section moved | override-with-reason | 3 | **3/3 fired** | Scored on the restated condition 1. |
+
+**Result: 9/9 both arms. The ADR's generalization is falsified for this shape**, against
+thresholds registered before any run (falsified iff both arms ≥8/9; upheld iff inline ≥8/9 and
+citation ≤5/9; indeterminate at 6–7/9; void if the inline control itself fell below 8/9).
+
+**The mechanism was observed, not inferred.** Every citation-arm run read the shared document
+before acting and quoted back the rule it applied from that file. The unconditional read
+directive was obeyed 9/9 — set against 6/26 for the conditional dispatch the ADR measured.
+
+### The ceiling, and why it bounds the claim
+
+Both arms scored perfectly, so the instrument has no headroom. This establishes that an
+unconditional citation is **not worse** on this material; it cannot rank the two arms, and it
+cannot exclude a gap appearing under conditions this case did not create — a longer skill, a
+subtler rule, a run already deep in its own context, or several citations competing for the
+same attention. A follow-up wanting a ranking needs a harder instrument, not more runs of this
+one.
+
+### Two authoring errors, both recorded rather than repaired in place
+
+1. **`override-out-of-range` is contaminated.** The rule under test carries its own worked
+   example — "'dispute C7' against a five-row table" — and the fixture reproduces it almost
+   verbatim, so recognition suffices where reasoning was intended. Same defect as
+   `compound-criterion-detection` fixture 1. It does not void the fixture here, because the
+   observable is whether the rule *reached* the run rather than whether the run could derive
+   it — but a taught instance is more retrievable than a subtle one, so any bias it introduces
+   runs **toward** the citation arm.
+2. **`override-with-reason`'s condition 1 was mis-specified.** It required `C3` to be recorded
+   `disputed`, but the reason text the fixture puts in the operator's mouth is exactly the shape
+   the skill routes to `answered`. All six runs routed it to `answered`, and each was right to.
+   The condition was restated — apply the override under whichever operator-only disposition the
+   skill's own routing selects — after runs began, which is disclosed in `expected.md` rather
+   than hidden. The defect is identical on both arms and selects between neither.
+
+### What this unblocks
+
+`spec/relocate-the-shared-prose-so-a-skill-loads-what-binds-it` was blocked outright on this
+question, with AC1 and AC5 both gated on it. Both gates clear. The ADR is not withdrawn — its
+measured rows stand — but its generalization to unconditional shared-file citations is not
+supported by evidence taken in this repository, and should be narrowed to the conditional
+dispatch it actually measured.
+
+---
+
 ## Withdrawal note, written 2026-09-03 before the redesign — kept verbatim
 
 `plugins/craft/evals/gate-reads-the-evidence-artifact/` — pre-registered and committed at
