@@ -264,6 +264,39 @@ def test_related_notakind_field_is_unknown(kql):
 
 
 # ---------------------------------------------------------------------------
+# supersedes / superseded-by — the supersession edge, queryable both ways
+# ---------------------------------------------------------------------------
+
+
+def test_supersedes_field_parses_as_facet_membership(kql):
+    # A <kind>/<name> value contains '/', which the tokenizer requires quoted
+    # (same rule that forces repo:"trailhead-ai/trailhead").
+    ast = kql.parse('supersedes:"adr/foo"')
+    assert isinstance(ast, kql.FacetMembership)
+    assert ast.facet == "supersedes"
+    assert ast.value == "adr/foo"
+
+
+def test_superseded_by_field_parses_as_facet_membership(kql):
+    ast = kql.parse('superseded-by:"adr/bar"')
+    assert isinstance(ast, kql.FacetMembership)
+    assert ast.facet == "superseded-by"
+    assert ast.value == "adr/bar"
+
+
+def test_supersedes_and_superseded_by_are_valid_fields(kql):
+    assert "supersedes" in kql.VALID_FIELDS
+    assert "superseded-by" in kql.VALID_FIELDS
+
+
+def test_unknown_field_adjacent_to_supersedes_still_raises(kql):
+    # The allowlist widens by exactly two names (supersedes, superseded-by) —
+    # an adjacent unknown field must still be a hard error.
+    with pytest.raises(kql.KqlParseError, match=r"unknown field"):
+        kql.parse('supersedes-notreal:"adr/foo"')
+
+
+# ---------------------------------------------------------------------------
 # Error cases — each must raise KqlParseError
 # ---------------------------------------------------------------------------
 

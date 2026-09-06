@@ -280,6 +280,22 @@ class TestLockedCompileTable:
         assert "related-task" in cq.params
         assert "my-task" in cq.params
 
+    def test_supersedes_field_compiles_no_sql_changes(self, kql, compiler):
+        """``supersedes`` compiles exactly like ``related-<kind>`` real-key
+        fields — a plain facet-name param, no compiler code required."""
+        cq = compiler.compile(kql.parse('supersedes:"adr/foo"'))
+        assert "EXISTS" in cq.where
+        assert "record_facet" in cq.where
+        assert "supersedes" in cq.params
+        assert "adr/foo" in cq.params
+
+    def test_superseded_by_field_compiles_no_sql_changes(self, kql, compiler):
+        cq = compiler.compile(kql.parse('superseded-by:"adr/bar"'))
+        assert "EXISTS" in cq.where
+        assert "record_facet" in cq.where
+        assert "superseded-by" in cq.params
+        assert "adr/bar" in cq.params
+
     def test_compare_gte_created_at(self, kql, compiler):
         cq = compiler.compile(kql.parse('created-at >= "2026-01-01"'))
         assert "records.created_at >= ?" in cq.where

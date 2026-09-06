@@ -436,6 +436,26 @@ def test_related_kind_field_json_reverse_edge_alias_true(tmp_path):
     assert payload["reverse_edge_alias"] is True
 
 
+def test_superseded_by_field_query_prints_reindex_note(tmp_path):
+    """``superseded-by:`` is materialized in ``reindex`` pass 2 (same as the
+    ``related-<kind>`` reverse edges), so it gets the completeness footer."""
+    personal, shared, state = _make_fixture(tmp_path)
+    r = run_cli(
+        ["search", 'superseded-by:"adr/anything"'], vault=personal, state_dir=state
+    )
+    assert r.returncode == 0, r.stderr
+    assert "reindex" in r.stdout.lower()
+
+
+def test_supersedes_field_query_prints_no_reindex_note(tmp_path):
+    """``supersedes:`` is a plain forward facet, written incrementally on every
+    write — no reindex-only reverse-edge gap, so no completeness footer."""
+    personal, shared, state = _make_fixture(tmp_path)
+    r = run_cli(["search", 'supersedes:"adr/anything"'], vault=personal, state_dir=state)
+    assert r.returncode == 0, r.stderr
+    assert "full membership" not in r.stdout.lower()
+
+
 def test_old_equals_label_form_errors_with_guidance(tmp_path):
     vault, state = _make_label_fixture(tmp_path)
     r = _run(["label:worktree=s5"], vault=vault, state=state)

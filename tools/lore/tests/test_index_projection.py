@@ -65,6 +65,7 @@ def _sidecar(
     related_phases=None,
     related_files=None,
     related_urls=None,
+    supersedes=None,
     team=None,
     labels=None,
     annotations=None,
@@ -93,6 +94,8 @@ def _sidecar(
         s["related-files-or-folders"] = related_files
     if related_urls is not None:
         s["related-urls"] = related_urls
+    if supersedes is not None:
+        s["supersedes"] = supersedes
     if labels is not None:
         s["labels"] = labels
     if annotations is not None:
@@ -467,6 +470,172 @@ def test_reverse_edge_cross_vault_target_ingested_second(env, tmp_path):
     assert "marco" in rev, (
         "cross-vault reverse edge missing — marco (vault B) should link back to penny"
     )
+
+
+# ---------------------------------------------------------------------------
+# supersedes / superseded-by — the supersession edge, queryable both ways.
+# Forward is a plain top-level list facet (indexed like keywords/related-urls);
+# the reverse (superseded-by) is materialized in reindex pass 2 like related-<kind>,
+# but under a DIFFERENT facet name (asymmetric, unlike related's same-name mirror).
+# ---------------------------------------------------------------------------
+
+
+def _facet_members(conn, facet, value):
+    return {
+        r[0]
+        for r in conn.execute(
+            "SELECT records.name FROM records WHERE EXISTS ("
+            "SELECT 1 FROM record_facet f WHERE f.id = records.id "
+            "AND f.facet=? AND f.value=?)",
+            (facet, value),
+        ).fetchall()
+    }
+
+
+def test_supersedes_forward_facet_row_on_reindex(env, tmp_path):
+    """A record's own `supersedes` list becomes a forward `supersedes` facet row."""
+    mod = load_index_store()
+    vault = tmp_path / "vault"
+    _write_record(
+        vault, "adr", "foo", _sidecar(kind="adr", title="Foo"), "body",
+    )
+    _write_record(
+        vault,
+        "adr",
+        "bar",
+        _sidecar(kind="adr", title="Bar", supersedes=["adr/foo"]),
+        "body",
+    )
+
+    conn = mod.open_index(env=env)
+    try:
+        mod.rebuild([str(vault)], conn)
+        conn.commit()
+        members = _facet_members(conn, "supersedes", "adr/foo")
+    finally:
+        conn.close()
+    assert members == {"bar"}, "supersedes:adr/foo should find only the record naming it"
+
+
+def test_superseded_by_reverse_edge_materialized_on_target(env, tmp_path):
+    """`superseded-by:<id>` finds the records `<id>` supersedes — the reverse
+    direction, materialized on the TARGET record by reindex pass 2 (not a scan)."""
+    mod = load_index_store()
+    vault = tmp_path / "vault"
+    _write_record(
+        vault, "adr", "foo", _sidecar(kind="adr", title="Foo"), "body",
+    )
+    _write_record(
+        vault,
+        "adr",
+        "bar",
+        _sidecar(kind="adr", title="Bar", supersedes=["adr/foo"]),
+        "body",
+    )
+
+    conn = mod.open_index(env=env)
+    try:
+        mod.rebuild([str(vault)], conn)
+        conn.commit()
+        members = _facet_members(conn, "superseded-by", "adr/bar")
+    finally:
+        conn.close()
+    assert members == {"foo"}, "superseded-by:adr/bar should find what adr/bar supersedes"
+
+
+def test_superseded_by_reverse_edge_not_materialized_by_incremental_upsert(env, tmp_path):
+    """The incremental ``update_index``/``upsert_row`` path emits forward edges
+    only — full reverse symmetry (including superseded-by) is a reindex-only
+    property, matching the documented related-<kind> gap."""
+    mod = load_index_store()
+    conn = mod.open_index(env=env)
+    try:
+        mod.upsert_row(
+            conn,
+            vault="v",
+            kind="adr",
+            name="foo",
+            sidecar=_sidecar(kind="adr", title="Foo"),
+            body="body",
+            shared=0,
+        )
+        mod.upsert_row(
+            conn,
+            vault="v",
+            kind="adr",
+            name="bar",
+            sidecar=_sidecar(kind="adr", title="Bar", supersedes=["adr/foo"]),
+            body="body",
+            shared=0,
+        )
+        conn.commit()
+        forward = _facet_members(conn, "supersedes", "adr/foo")
+        reverse = _facet_members(conn, "superseded-by", "adr/bar")
+    finally:
+        conn.close()
+    assert forward == {"bar"}, "forward supersedes edge is written incrementally"
+    assert reverse == set(), "reverse superseded-by edge is reindex-only, not incremental"
+
+
+def _record_id(conn, kind, name):
+    row = conn.execute(
+        "SELECT id FROM records WHERE kind=? AND name=?", (kind, name)
+    ).fetchone()
+    return row[0]
+
+
+def test_record_with_no_supersession_edge_matches_neither_field(env, tmp_path):
+    mod = load_index_store()
+    vault = tmp_path / "vault"
+    _write_record(vault, "adr", "lonely", _sidecar(kind="adr", title="Lonely"), "body")
+
+    conn = mod.open_index(env=env)
+    try:
+        mod.rebuild([str(vault)], conn)
+        conn.commit()
+        as_superseded_by_target = _facet_members(conn, "superseded-by", "adr/lonely")
+        lonely_id = _record_id(conn, "adr", "lonely")
+        supersedes_anything = conn.execute(
+            "SELECT COUNT(*) FROM record_facet WHERE id=? "
+            "AND facet IN ('supersedes','superseded-by')",
+            (lonely_id,),
+        ).fetchone()[0]
+    finally:
+        conn.close()
+    assert as_superseded_by_target == set()
+    assert supersedes_anything == 0
+
+
+def test_reindex_twice_does_not_duplicate_reverse_supersedes_edges(env, tmp_path):
+    """Reindexing a vault twice does not duplicate the materialized
+    ``superseded-by`` reverse edge (reindex drops + rebuilds, never appends)."""
+    mod = load_index_store()
+    vault = tmp_path / "vault"
+    _write_record(vault, "adr", "foo", _sidecar(kind="adr", title="Foo"), "body")
+    _write_record(
+        vault,
+        "adr",
+        "bar",
+        _sidecar(kind="adr", title="Bar", supersedes=["adr/foo"]),
+        "body",
+    )
+
+    conn = mod.open_index(env=env)
+    try:
+        mod.rebuild([str(vault)], conn)
+        conn.commit()
+        first_count = conn.execute(
+            "SELECT COUNT(*) FROM record_facet WHERE facet='superseded-by'"
+        ).fetchone()[0]
+        mod.rebuild([str(vault)], conn)
+        conn.commit()
+        second_count = conn.execute(
+            "SELECT COUNT(*) FROM record_facet WHERE facet='superseded-by'"
+        ).fetchone()[0]
+    finally:
+        conn.close()
+    assert first_count == 1
+    assert second_count == 1, "reindexing twice must not duplicate the reverse edge"
 
 
 # ---------------------------------------------------------------------------
