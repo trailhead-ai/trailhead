@@ -90,11 +90,15 @@ def _accepted_tail_section(text: str) -> str:
     citation dropped or moved out of the accepted tail apart from one that is
     merely reworded in place.
     """
-    heading = "#### The accepted tail"
-    start = text.index(heading)
-    later_heading = re.search(r"^#{1,6} ", text[start + len(heading) :], re.MULTILINE)
-    end = start + len(heading) + later_heading.start() if later_heading else len(text)
-    return text[start:end]
+    opening = re.search(r"^#{1,6} The accepted tail *$", text, re.MULTILINE)
+    assert opening, (
+        "SKILL.md has no `The accepted tail` heading at any level, so the two "
+        "citation checks below have no section to scope to"
+    )
+    rest = text[opening.end() :]
+    later_heading = re.search(r"^#{1,6} ", rest, re.MULTILINE)
+    end = opening.end() + (later_heading.start() if later_heading else len(rest))
+    return text[opening.start() : end]
 
 
 def gate(*paths: Path) -> subprocess.CompletedProcess:
@@ -120,6 +124,17 @@ def test_there_is_a_reference_document_beside_skill_md():
     """
     assert reference_documents(), (
         f"no reference document beside SKILL.md found in {GAUNTLET}"
+    )
+    # Both relational tests must be guarded, and they read different sources:
+    # the no-orphan test parametrizes over files on disk, the pointer-resolution
+    # test over the names SKILL.md's prose actually mentions in a gauntlet-local
+    # form. A document on disk mentioned only in some other form (`docs/x.md`)
+    # satisfies the first assertion while leaving the second test's parameter
+    # list empty, so guarding disk state alone leaves that hole open.
+    assert gauntlet_local_targets(_skill_text()), (
+        "SKILL.md names no gauntlet-local `.md` target, so "
+        "test_every_gauntlet_local_pointer_resolves would parametrize over "
+        "nothing and report clean while proving nothing at all"
     )
 
 
