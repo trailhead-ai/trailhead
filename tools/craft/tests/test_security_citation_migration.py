@@ -37,6 +37,7 @@ import pytest
 # document at a time, which is the distinction it exists to draw.
 from test_security_attribution_citations import (
     SKILLS,
+    _regex_bearing_skills,
     _rule_source_pattern,
     _skill_md_files,
     _units,
@@ -68,6 +69,28 @@ def test_pattern_still_finds_live_security_md_attributions():
             if _LIVE_SECURITY_MD_ATTRIBUTION.search(unit):
                 hits.append((path.parent.name, unit))
     assert hits, "expected at least one live rule-source citation of `_shared/security.md`"
+
+
+def test_live_security_md_attribution_covers_every_regex_bearing_skill():
+    """Coverage guard: the non-vacuity check above (>=1 live citation anywhere)
+    can stay green while a narrowed `_rule_source_pattern` alternative drops
+    most skills' citations out of the scan — exactly the hole this suite
+    inherits from `test_security_attribution_citations.py` by sharing its
+    pattern. Every skill that inlines the safe-value regex must have a live
+    `_shared/security.md` rule-source citation, derived independently of the
+    pattern being checked."""
+    attributed_skills: set[str] = set()
+    for path in _skill_md_files():
+        text = path.read_text(encoding="utf-8")
+        for unit in _units(text):
+            if _LIVE_SECURITY_MD_ATTRIBUTION.search(unit):
+                attributed_skills.add(path.parent.name)
+    missing = _regex_bearing_skills() - attributed_skills
+    assert not missing, (
+        "these skills inline the safe-value regex but no live rule-source citation of "
+        f"`_shared/security.md` was found for them: {sorted(missing)} — the rule-source "
+        "relation may have been narrowed"
+    )
 
 
 @pytest.mark.parametrize("path", _skill_md_files(), ids=lambda p: p.parent.name)

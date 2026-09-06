@@ -27,8 +27,16 @@ would catch a newly-added attribution anywhere in the corpus.
 
 This suite derives the site set empirically by scanning every
 `plugins/craft/skills/*/SKILL.md` for units matching that relation, never from
-a hardcoded file or line list. A non-vacuity guard covers the derived set, so
-a scan that matches nothing does not report clean.
+a hardcoded file or line list. A bare "the derived set is non-empty" guard is
+not enough — narrowing the relation (dropping one of its two alternatives, say)
+can silently shrink the site set from many skills down to one and still pass
+that guard, since one surviving site still satisfies "non-empty". The coverage
+guard below closes that hole: it independently derives, by a plain substring
+scan that shares no regex with `_RULE_SOURCE_ROLE`, the set of skills that
+inline the safe-value regex `^[A-Za-z0-9._/-]+$` at all, and requires every one
+of those skills to have at least one rule-source attribution site. A relation
+narrowed enough to drop a whole skill out of the derived set — exactly the
+failure mode a bare non-vacuity check misses — now fails this guard by name.
 """
 
 from __future__ import annotations
@@ -57,6 +65,14 @@ def _rule_source_pattern(document: str) -> re.Pattern[str]:
 
 _ATTRIBUTION_PATTERN = _rule_source_pattern("(?:execute|security)")
 
+# The literal safe-value regex this corpus's untrusted-vault-value rule requires
+# at each substitution site. A skill that inlines this string is, by the
+# corpus's own convention, applying the rule and must attribute it somewhere in
+# the same file. Matched by plain substring search — no dependency on
+# `_RULE_SOURCE_ROLE` or `_ATTRIBUTION_PATTERN` — so narrowing the rule-source
+# relation cannot narrow this reference set along with it.
+_SAFE_VALUE_REGEX_LITERAL = r"^[A-Za-z0-9._/-]+$"
+
 
 def _units(text: str) -> list[str]:
     """Blank-line-delimited blocks, further split at each new bullet or
@@ -84,12 +100,36 @@ def _attribution_sites() -> list[tuple[str, str]]:
     return hits
 
 
-def test_attribution_site_set_is_non_empty():
-    """Non-vacuity guard: a scan matching nothing must not report clean."""
-    sites = _attribution_sites()
-    assert sites, (
-        "expected at least one attribution site — a unit citing a shared document "
-        "as the source of an untrusted-value rule"
+def _regex_bearing_skills() -> set[str]:
+    """Skills whose SKILL.md inlines the safe-value regex literally, derived by
+    a plain substring scan independent of `_ATTRIBUTION_PATTERN`."""
+    return {
+        path.parent.name
+        for path in _skill_md_files()
+        if _SAFE_VALUE_REGEX_LITERAL in path.read_text(encoding="utf-8")
+    }
+
+
+def test_regex_bearing_skill_set_is_non_empty():
+    """Non-vacuity guard on the reference set: if it were empty, the coverage
+    assertion below would pass trivially and prove nothing."""
+    assert _regex_bearing_skills(), (
+        f"expected at least one skill to inline the safe-value regex "
+        f"{_SAFE_VALUE_REGEX_LITERAL!r}"
+    )
+
+
+def test_every_regex_bearing_skill_has_an_attribution_site():
+    """Coverage guard: every skill that inlines the safe-value regex must have
+    at least one rule-source attribution site, so a relation narrowed enough to
+    drop a skill's citations out of the derived set is caught by name — not
+    masked by some other skill's site keeping the set merely non-empty."""
+    attributed_skills = {name for name, _ in _attribution_sites()}
+    missing = _regex_bearing_skills() - attributed_skills
+    assert not missing, (
+        "these skills inline the safe-value regex but the rule-source scan found no "
+        f"attribution site for them: {sorted(missing)} — the rule-source relation may "
+        "have been narrowed"
     )
 
 
