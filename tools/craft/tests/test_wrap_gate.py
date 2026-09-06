@@ -477,7 +477,7 @@ def _line_code_spans(text: str) -> list[str]:
 
 
 class TestWholeSetAfterReflow:
-    """The acceptance gate for the whole slice: with all 39 governed files
+    """The acceptance gate for the whole slice: with all 40 governed files
     reflowed at column 100 into a scratch copy, no line exceeds 400
     characters *and* the gate exits 0 on every one. Either alone is
     satisfiable by the very defect this task fixes (a line the classifier
@@ -510,8 +510,8 @@ class TestWholeSetAfterReflow:
             targets.append(target)
         return targets
 
-    def test_governed_set_has_39_files(self):
-        assert len(self._governed_files()) == 39
+    def test_governed_set_has_40_files(self):
+        assert len(self._governed_files()) == 40
 
     def test_no_reflowed_line_over_400_characters_and_gate_exits_zero(self, tmp_path):
         # The 400-character ceiling is scoped to lines the gate actually
@@ -546,7 +546,7 @@ class TestWholeSetAfterReflow:
     # discriminator): idempotence and span fidelity were previously proven only
     # over lines the old rule already admitted as prose, so these are what needs
     # re-checking now that these files' pipe-as-or lines are reflowed for the
-    # first time. Scoped to these six rather than all 39: a whole-corpus run also
+    # first time. Scoped to these six rather than all 40: a whole-corpus run also
     # walks unrelated, pre-existing content this task does not touch — e.g.
     # `agents/executor.md` already carries a code span hand-wrapped across two
     # physical lines, which this task's `_scan_code_span` (single-line, unchanged
