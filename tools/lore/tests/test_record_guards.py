@@ -931,6 +931,84 @@ def test_dispatcher_is_a_noop_for_an_unrelated_kind(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# supersedes: self-edge + malformed-reference guard, ungated — runs for every
+# kind, unlike the task/design dispatch above. No multi-hop cycle guard: a
+# mutual pair is individually valid at write time (that is the contract this
+# task pins — a downstream reader owns the cycle guard).
+# ---------------------------------------------------------------------------
+
+
+def test_supersedes_self_edge_is_rejected(tmp_path):
+    g = _guards()
+    errors, _ = _dispatch(
+        g, tmp_path, kind="adr", name="foo", sidecar={"supersedes": ["adr/foo"]},
+    )
+    assert any("[supersedes-self-edge]" in e for e in errors)
+
+
+def test_supersedes_self_edge_rejection_names_nothing_written(tmp_path):
+    g = _guards()
+    errors, _ = _dispatch(
+        g, tmp_path, kind="adr", name="foo", sidecar={"supersedes": ["adr/foo"]},
+    )
+    assert errors  # non-empty errors is the "nothing written" contract upstream
+
+
+@pytest.mark.parametrize("entry", ["", "adr", "/foo", "adr/"])
+def test_supersedes_malformed_reference_is_rejected(tmp_path, entry):
+    g = _guards()
+    errors, _ = _dispatch(
+        g, tmp_path, kind="adr", name="foo", sidecar={"supersedes": [entry]},
+    )
+    assert any("[supersedes-reference]" in e for e in errors), errors
+
+
+def test_supersedes_valid_distinct_reference_is_accepted(tmp_path):
+    g = _guards()
+    errors, _ = _dispatch(
+        g, tmp_path, kind="adr", name="foo", sidecar={"supersedes": ["adr/bar"]},
+    )
+    assert errors == []
+
+
+def test_supersedes_runs_for_a_kind_with_no_other_graph(tmp_path):
+    """Unlike depends-on/parent, supersedes is ungated — a plain 'decision'
+    record still gets the self-edge check even though it carries no task or
+    design graph of its own."""
+    g = _guards()
+    errors, _ = _dispatch(
+        g, tmp_path, kind="decision", name="foo", sidecar={"supersedes": ["decision/foo"]},
+    )
+    assert any("[supersedes-self-edge]" in e for e in errors)
+
+
+def test_supersedes_mutual_pair_is_accepted_by_both_writes(tmp_path):
+    """No multi-hop cycle guard: A -> B and, separately, B -> A each validate
+    on their own — the cycle is writable so a downstream reader has something
+    to defend against. A self-edge (the ONE thing that IS rejected) proves
+    this isn't just 'accepts everything'."""
+    g = _guards()
+    errors_a, _ = _dispatch(
+        g, tmp_path, kind="adr", name="a", sidecar={"supersedes": ["adr/b"]},
+    )
+    assert errors_a == []
+    errors_b, _ = _dispatch(
+        g, tmp_path, kind="adr", name="b", sidecar={"supersedes": ["adr/a"]},
+    )
+    assert errors_b == []
+    # the guard is not a no-op — a self-edge in the same shape IS rejected
+    errors_self, _ = _dispatch(
+        g, tmp_path, kind="adr", name="a", sidecar={"supersedes": ["adr/a"]},
+    )
+    assert errors_self != []
+
+
+def test_supersedes_absent_key_is_a_noop(tmp_path):
+    g = _guards()
+    assert _dispatch(g, tmp_path, kind="adr", name="foo", sidecar={}) == ([], [])
+
+
+# ---------------------------------------------------------------------------
 # active-adr body immutability
 # ---------------------------------------------------------------------------
 

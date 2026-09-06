@@ -815,6 +815,86 @@ def test_depends_on_help_names_both_task_and_design_forms(tmp_path):
     assert "STAGE" in r.stdout
 
 
+# ---------------------------------------------------------------------------
+# supersedes: a typed <kind>/<name> edge, ungated (valid on every kind), no
+# multi-hop cycle guard — only format and self-edge are checked at write time.
+# ---------------------------------------------------------------------------
+
+
+def test_supersedes_flag_round_trips(tmp_path):
+    """--supersedes stores a list of <kind>/<name> references, in order."""
+    vault, state = _make_vault(tmp_path)
+    r = _create_design(
+        vault, state, "adr", "successor",
+        extra=["--supersedes", "adr/foo", "--supersedes", "adr/bar"],
+    )
+    assert r.returncode == 0, r.stderr
+    sidecar = _find_sidecar(vault, r.stdout.strip())
+    assert sidecar["supersedes"] == ["adr/foo", "adr/bar"]
+
+
+def test_supersedes_accepted_on_a_kind_with_no_graph(tmp_path):
+    """Unlike --depends-on/--parent, --supersedes is ungated: it works on a
+    plain 'decision' record, which carries no task or design graph at all."""
+    vault, state = _make_vault(tmp_path)
+    r = _create_design(
+        vault, state, "decision", "supersedes-old-call",
+        extra=["--supersedes", "decision/old-call"],
+    )
+    assert r.returncode == 0, r.stderr
+    sidecar = _find_sidecar(vault, r.stdout.strip())
+    assert sidecar["supersedes"] == ["decision/old-call"]
+
+
+def test_supersedes_self_edge_rejected_at_create(tmp_path):
+    """A record whose --supersedes names its own kind/name is rejected — the
+    title determines the stem, so the target names the record's own stem."""
+    vault, state = _make_vault(tmp_path)
+    r = _create_design(vault, state, "adr", "loop-me", extra=["--supersedes", "adr/loop-me"])
+    assert r.returncode != 0
+    assert "graph-guard [supersedes-self-edge]" in r.stderr
+    assert not (vault / "adr" / "loop-me.md").exists()
+
+
+def test_supersedes_malformed_reference_rejected_at_create(tmp_path):
+    vault, state = _make_vault(tmp_path)
+    r = _create_design(vault, state, "adr", "successor", extra=["--supersedes", "no-slash"])
+    assert r.returncode != 0
+    assert "graph-guard [supersedes-reference]" in r.stderr
+    assert not (vault / "adr" / "successor.md").exists()
+
+
+def test_supersedes_mutual_pair_accepted_by_both_writes(tmp_path):
+    """No multi-hop cycle guard: A supersedes B, then B supersedes A, both land."""
+    vault, state = _make_vault(tmp_path)
+    r1 = _create_design(vault, state, "adr", "a", extra=["--supersedes", "adr/b"])
+    assert r1.returncode == 0, r1.stderr
+    r2 = _create_design(vault, state, "adr", "b", extra=["--supersedes", "adr/a"])
+    assert r2.returncode == 0, r2.stderr
+    assert _find_sidecar(vault, r1.stdout.strip())["supersedes"] == ["adr/b"]
+    assert _find_sidecar(vault, r2.stdout.strip())["supersedes"] == ["adr/a"]
+
+
+def test_supersedes_absent_carries_no_sidecar_key(tmp_path):
+    """A record with no --supersedes carries no such key at all — never []."""
+    vault, state = _make_vault(tmp_path)
+    r = _create_design(vault, state, "adr", "plain")
+    assert r.returncode == 0, r.stderr
+    sidecar = _find_sidecar(vault, r.stdout.strip())
+    assert "supersedes" not in sidecar
+
+
+def test_record_show_renders_a_stored_supersedes_edge(tmp_path):
+    vault, state = _make_vault(tmp_path)
+    r = _create_design(vault, state, "adr", "successor", extra=["--supersedes", "adr/foo"])
+    assert r.returncode == 0, r.stderr
+    record_id = r.stdout.strip()
+    show = _run(["record", "show", record_id, "--json"], vault=vault, state_dir=state)
+    assert show.returncode == 0, show.stderr
+    payload = json.loads(show.stdout)
+    assert payload["sidecar"]["supersedes"] == ["adr/foo"]
+
+
 def test_search_is_a_registered_command(tmp_path):
     """``search`` is a real command, not an unknown-command hint.
 
@@ -1874,7 +1954,7 @@ def test_existing_numbered_adr_record_remains_readable_and_updatable(tmp_path):
 # from being met by hiding flags (``argparse.SUPPRESS``) rather than by writing
 # the prose once.
 
-_HELP_BYTE_BUDGETS = {"record create": 3200, "record update": 3550}
+_HELP_BYTE_BUDGETS = {"record create": 3300, "record update": 3650}
 
 # Every long option rendered in each verb's ``--help`` today. A trim may
 # reword a help string but may not remove a flag from the listing.
@@ -1883,18 +1963,20 @@ _VISIBLE_LONG_OPTIONS = {
         "--annotation", "--depends-on", "--help", "--keyword", "--kind",
         "--label", "--parent", "--product", "--related", "--related-file",
         "--related-phase", "--related-url", "--repo", "--status", "--suite",
-        "--team", "--title", "--unset-annotation", "--unset-depends-on",
-        "--unset-keyword", "--unset-label", "--unset-parent", "--unset-related",
-        "--unset-related-file", "--unset-related-phase", "--unset-related-url",
+        "--supersedes", "--team", "--title", "--unset-annotation",
+        "--unset-depends-on", "--unset-keyword", "--unset-label",
+        "--unset-parent", "--unset-related", "--unset-related-file",
+        "--unset-related-phase", "--unset-related-url", "--unset-supersedes",
         "--vault",
     ),
     "record update": (
         "--annotation", "--depends-on", "--diff", "--help", "--keyword",
         "--label", "--parent", "--product", "--related", "--related-file",
         "--related-phase", "--related-url", "--repo", "--status", "--suite",
-        "--team", "--title", "--unset-annotation", "--unset-depends-on",
-        "--unset-keyword", "--unset-label", "--unset-parent", "--unset-related",
-        "--unset-related-file", "--unset-related-phase", "--unset-related-url",
+        "--supersedes", "--team", "--title", "--unset-annotation",
+        "--unset-depends-on", "--unset-keyword", "--unset-label",
+        "--unset-parent", "--unset-related", "--unset-related-file",
+        "--unset-related-phase", "--unset-related-url", "--unset-supersedes",
         "--vault",
     ),
 }

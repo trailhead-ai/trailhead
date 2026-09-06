@@ -14,7 +14,10 @@ graph (bare task names, ``depends-on`` plus ``parent`` containment) and
 ``kind/name[@stage]`` dependencies, no containment).
 :func:`evaluate_graph_guards` is the dispatcher every caller uses — it routes by
 kind and is a ``([], [])`` no-op for a kind that carries neither graph. No kind
-carries both, so exactly one policy ever runs.
+carries both, so exactly one policy ever runs. :func:`evaluate_supersedes_guard`
+runs unconditionally alongside that dispatch, for every kind: unlike
+``depends-on``/``parent``, ``supersedes`` is ungated and carries no cycle guard
+of its own — only format and self-edge are checked here.
 
 Guard-message shape: every line — blocking error, non-blocking warning, ritual
 reminder — is formatted through :func:`graph.format_guard_message` so agents
@@ -659,6 +662,59 @@ def check_active_adr_body_immutable(
     )
 
 
+def _split_supersedes_entry(entry: object) -> tuple[str, str] | None:
+    """Split one ``supersedes`` entry into ``(kind, name)``; ``None`` when malformed.
+
+    Format is ``<kind>/<name>`` — a first-``/`` split, same shape as a design
+    ``depends-on`` entry but with no ``@stage`` tail. An empty kind or empty
+    name (including a bare string with no ``/`` at all) is malformed.
+    """
+    if not isinstance(entry, str) or "/" not in entry:
+        return None
+    kind_part, _, name_part = entry.partition("/")
+    if not kind_part or not name_part:
+        return None
+    return kind_part, name_part
+
+
+def evaluate_supersedes_guard(*, kind: str, name: str, sidecar: dict) -> list[str]:
+    """Validate the ``supersedes`` edge: format and self-edge only, no cycle check.
+
+    Unlike ``depends-on``, ``supersedes`` carries no runnability semantics to
+    protect, so this is intentionally a shallow guard: each entry must split
+    into a non-empty ``kind/name`` and must not name the record's own
+    ``kind/name``. A mutual pair (``A`` supersedes ``B``, then separately ``B``
+    supersedes ``A``) is deliberately NOT rejected here — each write is judged
+    on its own, so the chain reaches a downstream reader that owns the
+    multi-hop cycle guard. Ungated: this runs for every kind, not routed
+    through the task/design dispatch below.
+    """
+    errors: list[str] = []
+    entries = sidecar.get("supersedes")
+    if not isinstance(entries, list):
+        return errors
+    for entry in entries:
+        split = _split_supersedes_entry(entry)
+        if split is None:
+            errors.append(
+                graph_mod.format_guard_message(
+                    "supersedes-reference",
+                    f"malformed supersedes entry {entry!r}: must be KIND/NAME with a"
+                    " non-empty kind and name",
+                )
+            )
+            continue
+        entry_kind, entry_name = split
+        if entry_kind == kind and entry_name == name:
+            errors.append(
+                graph_mod.format_guard_message(
+                    "supersedes-self-edge",
+                    f"{graph_mod.format_node(f'{kind}/{name}')} cannot supersede itself",
+                )
+            )
+    return errors
+
+
 def evaluate_design_guards(
     *,
     kind: str,
@@ -827,8 +883,9 @@ def evaluate_graph_guards(
     enforcement, never a false rejection, on that seam. See
     :func:`check_active_adr_body_immutable`.
     """
+    supersedes_errors = evaluate_supersedes_guard(kind=kind, name=name, sidecar=sidecar)
     if kind == "task":
-        return evaluate_task_guards(
+        errors, notices = evaluate_task_guards(
             kind=kind,
             name=name,
             sidecar=sidecar,
@@ -839,8 +896,8 @@ def evaluate_graph_guards(
             supplied_depends_on=supplied_depends_on,
             parent_supplied=parent_supplied,
         )
-    if kind in graph_mod.DESIGN_KINDS:
-        return evaluate_design_guards(
+    elif kind in graph_mod.DESIGN_KINDS:
+        errors, notices = evaluate_design_guards(
             kind=kind,
             name=name,
             sidecar=sidecar,
@@ -851,4 +908,6 @@ def evaluate_graph_guards(
             prior_status=prior_status,
             prior_body=prior_body,
         )
-    return [], []
+    else:
+        errors, notices = [], []
+    return supersedes_errors + errors, notices

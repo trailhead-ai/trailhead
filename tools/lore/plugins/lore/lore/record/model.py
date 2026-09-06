@@ -28,6 +28,10 @@ Invariants:
   but in ``v1`` all kinds share one global field schema (``FIELDS_V1``).
 - ``status`` is drawn from the kind's ordered vocab; the **first** element is the
   initial/default value applied when ``status`` is omitted on create.
+- ``supersedes`` is a ``list[str]`` edge of ``<kind>/<name>`` references, ungated
+  (valid on any kind, unlike ``depends-on``/``parent``). Shape and self-edge/format
+  checks live at the write-time guard layer, not here — this module only fixes its
+  key's type.
 - ``depends-on`` and ``parent`` are gated per field (``KIND_GATED_FIELDS``):
   ``depends-on`` is accepted on ``task``, ``spec``, and ``adr``; ``parent`` on
   ``task`` alone. Present on any other kind, they are rejected naming both the
@@ -179,6 +183,7 @@ FIELDS_V1: dict[str, FieldSpec] = {
     "annotations": FieldSpec(required=False, type_tag=_MAP_STR_STR),
     "depends-on": FieldSpec(required=False, type_tag=_LIST_STR),
     "parent": FieldSpec(required=False, type_tag=_STR),
+    "supersedes": FieldSpec(required=False, type_tag=_LIST_STR),
 }
 
 #: Schema registry keyed by version (only ``v1`` exists today).
