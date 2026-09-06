@@ -238,12 +238,12 @@ credential-pattern scrub applied before a `lore session candidate`, and drop or 
 rather than writing it. In scope: the payload fields, the escalation section's free-text ones
 (`**Evidence gathered:**`, `**Recommended answer:**`), and the escalated question text itself
 (`**Question:**` and any `**Answer:**` an operator adds) — none of which the pointer-only citation
-rule constrains. Quote only a `file:line` pointer for anything caught. The four categories are
-key-like `name=value` tokens, bearer/api-key shapes, high-entropy base64/hex literals, and PEM
-private-key headers — but **the credential-pattern scrub's own canonical pattern list is the
-canonical set**; the categories named here are a reading convenience that must track it, and it wins
-when the two disagree. The vault is git-backed and syncs to a remote, so a credential written here
-has already left the machine.
+rule constrains. Quote only a `file:line` pointer for anything caught. **The credential-pattern
+scrub's own canonical pattern list is the set** — apply it as stated there rather than from a
+summary. This document deliberately restates none of its categories: a partial list reads as
+exhaustive, and a reader who takes four of five as the set drops a whole credential family. Every
+skill reaching this procedure loads that list before it runs. The vault is git-backed and syncs to a
+remote, so a credential written here has already left the machine.
 
 **Write through the CLI.** Every body change goes through `lore record update <record-id>`
 (full-replace body on stdin, or `--diff` for a unified diff), and every status flip through `lore

@@ -97,3 +97,62 @@ def test_security_document_content_floor():
     assert "Prefer over-matching to under-matching" in text
     assert "Known blind spot" in text
     assert "binary" in text.lower()
+
+
+# --- Partial restatements of the category list -----------------------------
+#
+# A document may summarise the scrub's categories for a reader instead of
+# dispatching to the canonical list. That convenience is only safe while the
+# summary is complete: a four-of-five summary reads as exhaustive and silently
+# drops a whole credential family, which is how a vendor fixed-prefix token
+# ("ghp_...", "AKIA...") slips past a surface whose reader took the summary as
+# the set.
+#
+# So the invariant is stated positively and derived from the corpus: any
+# `_shared` document that enumerates the scrub's categories at all must
+# enumerate every one of them. It pins no phrasing and no count -- both sides
+# come from the canonical document -- and it never asserts that any document
+# stopped saying something. A document is free to name none of them, and free
+# to name all of them; naming only some is the defect.
+
+_ENUMERATION_THRESHOLD = 2
+
+
+def _category_keywords() -> list[str]:
+    """The canonical categories' distinguishing keywords, read off the
+    document that states the full list rather than hardcoded here."""
+    canonical = _small_docs_stating_full_scrub_list()
+    assert canonical, "no canonical scrub document found to derive categories from"
+    text = canonical[0].read_text(encoding="utf-8")
+    keywords = []
+    for marker in _SCRUB_CATEGORY_MARKERS:
+        assert marker in text, f"{canonical[0].name} lost the {marker} bullet"
+        label = marker.strip("*")
+        keywords.append(label.split()[0].strip("*").lower())
+    return keywords
+
+
+def test_category_keyword_set_is_non_empty():
+    """Non-vacuity guard: the scan below proves nothing on an empty set."""
+    keywords = _category_keywords()
+    assert len(keywords) == len(_SCRUB_CATEGORY_MARKERS), keywords
+
+
+def test_every_partial_category_enumeration_is_complete():
+    keywords = _category_keywords()
+    canonical = {p.name for p in _small_docs_stating_full_scrub_list()}
+    offenders = {}
+    for path in _shared_docs():
+        if path.name in canonical:
+            continue
+        lowered = path.read_text(encoding="utf-8").lower()
+        present = [k for k in keywords if k in lowered]
+        if len(present) >= _ENUMERATION_THRESHOLD:
+            missing = [k for k in keywords if k not in present]
+            if missing:
+                offenders[path.name] = missing
+    assert not offenders, (
+        "these _shared documents summarise the credential-scrub categories but "
+        f"omit some, so the summary reads as exhaustive while it is not: {offenders} "
+        "-- name every category or name none and point at the canonical list"
+    )
