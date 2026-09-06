@@ -140,10 +140,11 @@ without the marker is not a slice and gets no line.
 A slice ending `dropped` or `blocked` writes no line: abandoned work is never mistaken for covered
 criteria, which is the entire point of a written ledger over a live status query.
 
-**Credential-pattern scrub, before this append too.** The appended line's text — the slice title and
-the value claim (or `**Goal:**` fallback), both read out of another record's body — is run through
-`_shared/security.md`'s credential-pattern scrub before this write, the same scrub step 9 below
-documents for the parent task write.
+**Credential-pattern scrub, before this append too.** **Read `../_shared/security.md` now and follow
+it in full.** It defines the credential-pattern scrub regex list and the untrusted-value rule. The
+appended line's text — the slice title and the value claim (or `**Goal:**` fallback), both read out
+of another record's body — is run through the scrub before this write, the same scrub step 9 below
+applies for the parent task write.
 
 **The append is a full-body read-modify-write of the spec, not `lore record update --diff`.** Read
 the spec fresh immediately before this write — never the body read back in step 2, which may already
@@ -397,10 +398,11 @@ archetype — a minimum, not a ceiling; the slice's actual states govern beyond 
 pass, clear it here** — this pass is selecting again, so an earlier stopping point is no longer the
 loop's live status: `lore record update spec/<spec-name> --unset-label craft/slice-loop`.
 
-**Credential-pattern scrub, before any write.** Run the drafted body — the value claim or enabler
-justification, and anything else composed into it — through `_shared/security.md`'s
-credential-pattern scrub before any write. This precedes every body write this skill makes, not only
-the first.
+**Credential-pattern scrub, before any write.** **Read `../_shared/security.md` now and follow it in
+full.** It defines the credential-pattern scrub regex list and the untrusted-value rule. Run the
+drafted body — the value claim or enabler justification, and anything else composed into it —
+through the scrub before any write. This precedes every body write this skill makes, not only the
+first.
 
 The `**Covers:**` field rides the same `lore record create` invocation the value claim, the
 `## Enumerated states` section, the `craft/slice-parent` label, and the `--related spec=` edge

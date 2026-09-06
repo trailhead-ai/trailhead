@@ -167,10 +167,10 @@ overwritten. The block carries:
 - **PR tail outcome file:** <path, or `(not yet reached)`>
 ```
 
-Run the block's text through the credential-pattern scrub before it is written
-(`_shared/execute.md`, [Phase 5](../_shared/execute.md#phase-5-flow-out)) — exactly like any other
-write to a record body, since the branch name or an outcome-file path could carry something that
-shouldn't ship to a git-backed vault.
+**Read `../_shared/security.md` now and follow it in full.** It defines the credential-pattern scrub
+regex list and the untrusted-value rule. Run the block's text through the scrub before it is written
+— exactly like any other write to a record body, since the branch name or an outcome-file path could
+carry something that shouldn't ship to a git-backed vault.
 
 Resume reads the **last** `## Driver run` block in the parent body, never the first: each boundary
 appends its own block rather than editing the previous one in place, so the most recent block is the
@@ -322,10 +322,10 @@ would leave behind. Write it whether or not a Critical survives synthesis, exact
 behind too. The driver writes the findings only: no disposition text for any Critical, since
 disposition is an operator judgment it does not make. Append via
 `lore record update task/<slice-parent-name> --vault <elected-vault> --diff`, piping a unified diff
-the same way the `## Driver run` checkpoint does — bare stdin would replace the whole record body —
-and run the section's text through the credential-pattern scrub before it is written
-(`_shared/execute.md`, [Phase 5](../_shared/execute.md#phase-5-flow-out)), exactly like every other
-write to a record body in this ritual.
+the same way the `## Driver run` checkpoint does — bare stdin would replace the whole record body.
+**Read `../_shared/security.md` now and follow it in full.** It defines the credential-pattern scrub
+regex list and the untrusted-value rule. Run the section's text through the scrub before it is
+written, exactly like every other write to a record body in this ritual.
 
 **A council Critical escalates.** Any Critical surviving synthesis is an escalation under the
 `plan-critical` trigger, following the escalation contract below. Before writing the escalation
@@ -567,13 +567,12 @@ or wherever the judgment call belongs), never a drafted disposition or a recomme
 driver never authors the operator's judgment for them** — it gathers the evidence and points at
 where the decision gets made, and stops there.
 
-`$BODY` is bound by the same rule Phase 5 states for any record body (`_shared/execute.md`, [Phase
-5](../_shared/execute.md#phase-5-flow-out)) — so it names pointers into the failed build's worker
-output or CI text rather than pasting them in. Run `$BODY` through the credential-pattern scrub
-before this write regardless: the scrub is the second line of defense against a stray secret
-surviving into a pointer, never a license to paste verbatim output because the scrub will catch it —
-exactly like the `## Driver run` checkpoint block above (`_shared/execute.md`, [Phase
-5](../_shared/execute.md#phase-5-flow-out)).
+**Read `../_shared/security.md` now and follow it in full.** It defines the credential-pattern scrub
+regex list and the untrusted-value rule. `$BODY` is bound by the same rule it states for any record
+body — so it names pointers into the failed build's worker output or CI text rather than pasting
+them in. Run `$BODY` through the scrub before this write regardless: the scrub is the second line of
+defense against a stray secret surviving into a pointer, never a license to paste verbatim output
+because the scrub will catch it — exactly like the `## Driver run` checkpoint block above.
 
 ### Pushing work in flight
 

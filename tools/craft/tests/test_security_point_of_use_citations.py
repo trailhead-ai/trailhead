@@ -20,6 +20,20 @@ list item inside one) that names `security.md` alongside the phrase
 (which cites the rule without naming the scrub procedure itself). Never a
 hardcoded file or line list. A non-vacuity guard covers the derived set, so a
 scan that matches nothing does not report clean.
+
+**A bare "matches anything, anywhere" non-vacuity check is not enough.**
+`execute/SKILL.md` names `security.md` alongside "credential-pattern scrub"
+in its own read-directive paragraph — a promoted-dependency mention that
+reads all five `_shared` documents together, not a per-site dispatch fired
+at the point the scrub is actually applied. That single unit alone satisfies
+a bare non-vacuity guard, so `gauntlet/SKILL.md`'s and `slice/SKILL.md`'s
+real dispatch sites — the ones this module actually exists to pin — could
+all revert to attribution or disappear entirely and the suite would still
+report clean. The coverage guard below closes that hole: it requires an
+imperative "read `_shared/security.md` now" directive — the mark of a
+genuine per-site dispatch, distinct from a promoted-dependency mention that
+merely lists the document among several to read — from each of `gauntlet`
+and `slice`, this corpus's known genuine dispatch sites.
 """
 
 from __future__ import annotations
@@ -41,6 +55,20 @@ _CONDITIONAL_MARKERS = re.compile(
     re.IGNORECASE,
 )
 
+# The mark of a genuine per-site dispatch, as opposed to a promoted-dependency
+# mention like execute/SKILL.md's "Read all five and follow `execute.md` end
+# to end" paragraph, which names `security.md` alongside the scrub phrase
+# without ever directing the reader to open `security.md` itself, now, on its
+# own.
+_DISPATCH_DIRECTIVE = re.compile(r"Read\s+`(?:\.\./)?_shared/security\.md`\s+now")
+
+# The two skills this corpus's own module docstring names as genuine
+# point-of-use dispatch sites — see `test_security_point_of_use_citations.py`
+# module docstring and `test_security_citation_migration.py`'s account of
+# `drive/SKILL.md`'s unrepointed attribution. Coverage against this known set
+# is what a bare non-vacuity check on "matches anywhere" cannot provide.
+_KNOWN_DISPATCH_SKILLS = {"gauntlet", "slice"}
+
 
 def _point_of_use_sites() -> list[tuple[str, str]]:
     hits: list[tuple[str, str]] = []
@@ -52,12 +80,41 @@ def _point_of_use_sites() -> list[tuple[str, str]]:
     return hits
 
 
+def _genuine_dispatch_sites() -> list[tuple[str, str]]:
+    """The subset of `_point_of_use_sites()` that is an actual per-site
+    dispatch — an imperative "read `_shared/security.md` now" directive —
+    rather than a promoted-dependency mention that merely lists the document
+    among several to read."""
+    return [
+        (name, unit)
+        for name, unit in _point_of_use_sites()
+        if _DISPATCH_DIRECTIVE.search(unit)
+    ]
+
+
 def test_point_of_use_site_set_is_non_empty():
     """Non-vacuity guard: a scan matching nothing must not report clean."""
     sites = _point_of_use_sites()
     assert sites, (
         "expected at least one point-of-use citation to `security.md` — a unit "
         "naming it alongside 'credential-pattern scrub'"
+    )
+
+
+def test_genuine_dispatch_sites_cover_the_known_dispatch_skills():
+    """Coverage guard: the bare non-vacuity check above can be satisfied by a
+    single promoted-dependency mention anywhere in the corpus — including
+    execute/SKILL.md's own "read all five" paragraph — so gauntlet's and
+    slice's real dispatch sites could all revert to attribution, or vanish
+    outright, and the suite above would still report clean. This requires an
+    actual imperative dispatch directive from each of the known dispatch
+    skills."""
+    skills_with_a_genuine_dispatch = {name for name, _ in _genuine_dispatch_sites()}
+    missing = _KNOWN_DISPATCH_SKILLS - skills_with_a_genuine_dispatch
+    assert not missing, (
+        "expected an imperative 'Read `_shared/security.md` now' dispatch directive "
+        f"in: {sorted(missing)} — a point-of-use citation reverted to attribution, or "
+        "was removed"
     )
 
 

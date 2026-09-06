@@ -110,12 +110,45 @@ def _regex_bearing_skills() -> set[str]:
     }
 
 
+# The five skills this file's own module docstring names as keeping their own
+# inlined copy of the safe-value regex rather than dispatching elsewhere to
+# read it — `security.md`'s own "Known inlined copies" section names this same
+# set. Pinned directly, rather than left to emerge only from
+# `_regex_bearing_skills()`, because a skill that stops inlining the regex in
+# favor of a lookup silently exits that derived set — and every guard built on
+# top of it (the coverage guard below, and `test_security_point_of_use_citations.py`'s
+# reliance on `_regex_bearing_skills()`) goes vacuous for that skill instead of
+# red. Comparing against this fixed set catches the drift by name instead.
+_KNOWN_ATTRIBUTION_SKILLS = {"brainstorm", "distill", "plan", "slice", "drive"}
+
+
 def test_regex_bearing_skill_set_is_non_empty():
     """Non-vacuity guard on the reference set: if it were empty, the coverage
     assertion below would pass trivially and prove nothing."""
     assert _regex_bearing_skills(), (
         f"expected at least one skill to inline the safe-value regex "
         f"{_SAFE_VALUE_REGEX_LITERAL!r}"
+    )
+
+
+def test_regex_bearing_skill_set_matches_the_known_attribution_skills():
+    """Pins the property this file is named for: these five skills keep their
+    own inlined copy of the safe-value regex, full stop — not merely "whichever
+    skills happen to inline it today". A skill that converts its site to a
+    `security.md` lookup instead of keeping the regex inline silently exits
+    `_regex_bearing_skills()`, and every coverage guard built on that derived
+    set (here and in `test_security_point_of_use_citations.py`) would then
+    require nothing of it and report clean. Comparing against the fixed set
+    the module docstring and `security.md` itself name catches that drift by
+    skill name instead of letting it disappear."""
+    current = _regex_bearing_skills()
+    missing = _KNOWN_ATTRIBUTION_SKILLS - current
+    extra = current - _KNOWN_ATTRIBUTION_SKILLS
+    assert not missing and not extra, (
+        f"expected exactly {sorted(_KNOWN_ATTRIBUTION_SKILLS)} to inline the safe-value "
+        f"regex {_SAFE_VALUE_REGEX_LITERAL!r} — missing: {sorted(missing)}, unexpected: "
+        f"{sorted(extra)}. A skill that converted its site to a `security.md` lookup "
+        "instead of keeping the regex inline would show up here as missing."
     )
 
 

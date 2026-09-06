@@ -23,6 +23,23 @@ This suite derives the site set empirically, never from a hardcoded count or
 list of citing filenames — a scan that matched nothing would report clean
 while proving nothing, so a non-vacuity guard covers both the whole-corpus
 scan and the pattern's own discriminating power.
+
+**The attribution-shaped relation above cannot see a stale *dispatch*.**
+`_rule_source_pattern` only matches "codifies" and "'s ...rule" constructions.
+A point-of-use dispatch reads differently — "run the text through the
+credential-pattern scrub … (`_shared/execute.md`, [Phase
+5](../_shared/execute.md#phase-5-flow-out))" — naming the scrub procedure by
+name and pointing the reader at `execute.md`'s numbered phase for it, with no
+"codifies" or possessive noun phrase anywhere in the unit. That shape passed
+this suite fully green while `drive/SKILL.md` carried four such leftovers
+after the migration, because Phase 5 no longer holds the pattern list and,
+at three of those four sites, no other citation earlier in the document had
+introduced `security.md` yet either. A second, independent scan below closes
+this gap: any unit that names the credential-pattern scrub procedure *and*
+still cites `execute.md`, without also citing `security.md` in the same unit,
+is a stale dispatch — the scrub only lives in `security.md` now, so a
+same-unit citation of `execute.md` alone for it is never correct, regardless
+of grammatical shape.
 """
 
 from __future__ import annotations
@@ -51,6 +68,32 @@ _STALE_EXECUTE_MD_ATTRIBUTION = _rule_source_pattern("execute")
 # rule-source citations of `security.md`, so a pattern that matches nothing
 # (e.g. a typo'd regex) is not mistaken for a clean scan.
 _LIVE_SECURITY_MD_ATTRIBUTION = _rule_source_pattern("security")
+
+# The mark of a *dispatch* to the credential-pattern scrub, as opposed to an
+# attribution — the same substring `test_security_point_of_use_citations.py`
+# uses to derive its own dispatch-site set, reused here so both suites read
+# one definition of "this unit names the scrub procedure."
+_SCRUB_PROCEDURE_MARKER = "credential-pattern scrub"
+
+
+def _scrub_dispatch_stale_to_execute_md_sites() -> list[tuple[str, str]]:
+    """Units that name the credential-pattern scrub procedure and still cite
+    `execute.md`, without also citing `security.md` in the same unit — a
+    dispatch left pointing at the file the scrub no longer lives in. Derived
+    independently of `_rule_source_pattern`, so narrowing that grammar cannot
+    narrow this scan along with it."""
+    hits: list[tuple[str, str]] = []
+    for path in _skill_md_files():
+        text = path.read_text(encoding="utf-8")
+        for unit in _units(text):
+            unit_lower = unit.lower()
+            if (
+                _SCRUB_PROCEDURE_MARKER in unit_lower
+                and "execute.md" in unit
+                and "security.md" not in unit
+            ):
+                hits.append((path.parent.name, unit))
+    return hits
 
 
 def test_skill_md_corpus_is_non_empty():
@@ -103,3 +146,22 @@ def test_skill_does_not_credit_execute_md_as_rule_source(path):
             f"security rule ({match.group(0)!r}) — its citation must repoint to "
             "`_shared/security.md`"
         )
+
+
+@pytest.mark.parametrize(
+    "skill_name,unit",
+    _scrub_dispatch_stale_to_execute_md_sites(),
+    ids=[
+        f"{name}[{i}]"
+        for i, (name, _) in enumerate(_scrub_dispatch_stale_to_execute_md_sites())
+    ],
+)
+def test_scrub_dispatch_does_not_still_point_at_execute_md(skill_name, unit):
+    """A unit that names the credential-pattern scrub procedure and cites
+    `execute.md` for it, without also citing `security.md`, is a stale
+    dispatch — a shape the attribution-only grammar above cannot see."""
+    pytest.fail(
+        f"{skill_name}/SKILL.md names the credential-pattern scrub and still points at "
+        f"`execute.md` for it (no `security.md` citation in the same unit): {unit!r} — "
+        "repoint this dispatch to `_shared/security.md`"
+    )

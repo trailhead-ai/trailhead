@@ -544,8 +544,8 @@ dispatch it actually measured.
 
 ## Case: scrub citation vs. inline
 
-`plugins/craft/evals/scrub-citation-vs-inline/` — pre-registered and committed at `c19bb6f6`,
-before any arm was run.
+`plugins/craft/evals/scrub-citation-vs-inline/` — pre-registered and committed at `378adcdb`,
+before any arm was run; the result below was committed at `6d20e0e6`.
 
 **Under test:** AC1's own behavioural gate, distinct from `unconditional-citation-vs-inline`
 above — that case measured whether an unconditional shared-file citation fires *at all*, using

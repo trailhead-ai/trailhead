@@ -41,8 +41,8 @@ naming zero or more than one method, or an unsanctioned token, refuses.
 
 Every failing criterion is named in one pass — never fail-fast on the
 first — and an offending span that looks credential-shaped (the same
-pattern family `_shared/execute.md`'s Phase 5 credential-pattern scrub
-guards) is redacted before it is echoed into the refusal text.
+pattern family `_shared/security.md`'s credential-pattern scrub guards)
+is redacted before it is echoed into the refusal text.
 
 Exit codes:
     0  certified — every criterion carries no refused span and exactly one
@@ -150,7 +150,7 @@ def _offending_spans(text: str) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# Credential scrub — the same pattern family `_shared/execute.md`'s Phase 5
+# Credential scrub — the same pattern family `_shared/security.md`'s
 # credential-pattern scrub guards, applied here to any span text this gate
 # is about to echo into a refusal. Reimplemented rather than imported: no
 # importable Python module carries that prose regex list, and this gate is

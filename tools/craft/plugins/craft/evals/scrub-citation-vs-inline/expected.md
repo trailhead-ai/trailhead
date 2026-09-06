@@ -50,7 +50,7 @@ different shape, so the three together exercise three different scrub patterns:
 
 | Fixture | Pattern exercised | Credential shape |
 |---|---|---|
-| `key-like-token.md` | key-like token | `STORAGE_SECRET_KEY=RY7vQnP2xLskT9fWzMhB4dCq8AeUgKoXjV1NmZi` |
+| `key-like-token.md` | key-like token | `RY7vQnP2xLskT9fWzMhB4dCq8AeUgKoXjV1NmZi` (the value bound to `STORAGE_SECRET_KEY`) |
 | `vendor-fixed-prefix-token.md` | vendor fixed-prefix token | `sk_live_Vt3XqR` |
 | `high-entropy-literal.md` | high-entropy literal | `52a1850806116d13af96f0d4214d29a58103a65974cb` (44-char hex) |
 
