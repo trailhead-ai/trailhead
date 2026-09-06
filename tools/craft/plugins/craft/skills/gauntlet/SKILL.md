@@ -37,16 +37,9 @@ until the user has accepted that recommendation.
 
 ## Two independent failure axes
 
-This is the calibration that justifies the cost, and it is not obvious:
-
-**A spec can be wrong about the world, or underdetermined about the design — and these are
-independent.** A spec can have every factual claim confirmed and still be a bad spec, because
-"correct about what exists" and "sufficient to build from" are different properties. In the pilot
-that established this protocol, **every one of the spec's factual claims verified clean — and the
-other passes still produced seven design-changing findings.** A clean fact pass is not evidence the
-spec is sound; it is evidence of exactly one thing.
-
-Both axes need passes pointed at them. That's why the roster is what it is.
+**Read `gauntlet/calibration.md` now and follow it in full.** Before adjudicating anything, it
+establishes why a spec can be wrong about the world and underdetermined about the design
+independently — so a clean fact pass is never read as evidence the spec is sound.
 
 ## Mandatory
 
@@ -345,23 +338,25 @@ them**. Do not propose any of the three, and do not offer a reason the operator 
 **Read `gauntlet/dispositions.md` now and follow it in full.** It defines what each of the five
 terms — `resolved`, `revise` and its two scopes, `accepted-as-risk`, `disputed`, and `answered` —
 means and requires. The propose-only rule, the edit-first test, and the never-draft-the-operator's-
-reason rule above stay inline because this skill must apply them unprompted, not by accident —
-`dispositions.md` holds the rest.
+reason rule above stay inline because this skill must apply them unprompted. The reference document
+defines all five terms in full, the parts restated here included — that overlap is deliberate.
 
 #### Advancing, revise rounds, and runs
 
 **Read `gauntlet/dispositions.md` now and follow it in full.** It defines when a record advances,
 the run/revise-round distinction, why a revise round still lands its `resolved` edits and
 provenance, and why `answered` blocks the advance check until re-adjudicated. The `revise`
-prescription and `reaches-downstream` above, the prescription-specificity bar in step 4, and step
-6's advance condition below stay inline — each fires unprompted, not by accident.
+prescription-specificity bar in step 4, step 6's advance condition below, and the shape a
+prescription and a `reaches-downstream` scope must take all stay inline — each fires unprompted. Two
+they only summarise: the downstream evidence bar, and that a `reaches-downstream` prescription
+writes nothing to the specs it names.
 
 #### Zero Criticals is still a decision
 
 **Read `gauntlet/dispositions.md` now and follow it in full.** It defines why a clean run still
 presents the deliverable — minus the per-Critical table, since there are no Critical rows to hold
-one — and still gates on operator acceptance. Nothing here is stated inline for this topic: none of
-it fires until a run has already gone clean, which is the point this pointer exists for.
+one — and still gates on operator acceptance. Beyond that minus-the-table rule, also named in step
+5's deliverable list, nothing on this topic is inline: none of it fires until a run has gone clean.
 
 #### Accepting, and overriding in one round-trip
 
@@ -374,9 +369,9 @@ never-draft-the-operator's-reason rule above stays inline — it fires unprompte
 #### Escalation points
 
 **Read `gauntlet/dispositions.md` now and follow it in full.** It defines every point where this
-step hands control to a human and what each point waits for. Nothing here is stated inline for this
-topic: every escalation point it names is already a point where this skill has stopped and is
-waiting, not a rule it must fire unprompted.
+step hands control to a human and what each waits for. Only the failed-write report's behaviour is
+inline below, being a fail-closed rule this skill fires unprompted; at every other point it names,
+this skill has already stopped and is waiting.
 
 #### The accepted tail
 
@@ -468,8 +463,10 @@ carries the provenance stamp in its next bullet, and holds the detail in the rem
 printf '%s' "$EDITS" | lore record update <spec-id> --diff
 ```
 
-**Then, and only once that write has succeeded, check the advance condition.** If no Critical
-carries a final disposition of `revise`:
+**Then, and only once that write has succeeded, check the advance condition.** A Critical sitting at
+`answered` is a request for re-adjudication, not its outcome, so **the advance condition may not be
+evaluated while any Critical remains at `answered`** — re-adjudicate each to `resolved` or `revise`
+first. Once every Critical carries a final disposition, and none is `revise`:
 
 ```
 lore record update <spec-id> --status ready
@@ -493,4 +490,6 @@ writes no status for "still revising."
 
 **Read `gauntlet/calibration.md` now and follow it in full.** It holds the provenance and tuning
 notes from the pilot runs that established this protocol. It is consulted after a run, not applied
-unprompted during one, which is why none of it is restated here.
+unprompted during one, which is why none of it is restated here. One pointer stays here to keep it
+one hop away: the compound-criterion Critical bar is covered by `tools/craft/MANUAL-EVAL.md`'s
+manual eval, not by CI.
