@@ -148,20 +148,26 @@ def test_skill_does_not_credit_execute_md_as_rule_source(path):
         )
 
 
-@pytest.mark.parametrize(
-    "skill_name,unit",
-    _scrub_dispatch_stale_to_execute_md_sites(),
-    ids=[
-        f"{name}[{i}]"
-        for i, (name, _) in enumerate(_scrub_dispatch_stale_to_execute_md_sites())
-    ],
-)
-def test_scrub_dispatch_does_not_still_point_at_execute_md(skill_name, unit):
+@pytest.mark.parametrize("path", _skill_md_files(), ids=lambda p: p.parent.name)
+def test_scrub_dispatch_does_not_still_point_at_execute_md(path):
     """A unit that names the credential-pattern scrub procedure and cites
     `execute.md` for it, without also citing `security.md`, is a stale
-    dispatch — a shape the attribution-only grammar above cannot see."""
-    pytest.fail(
-        f"{skill_name}/SKILL.md names the credential-pattern scrub and still points at "
-        f"`execute.md` for it (no `security.md` citation in the same unit): {unit!r} — "
-        "repoint this dispatch to `_shared/security.md`"
+    dispatch — a shape the attribution-only grammar above cannot see.
+
+    Parametrized over the whole corpus rather than over the derived stale-site
+    set: a set-parametrized version reports an empty parameter set as a skip on
+    a clean tree, so narrowing the derivation would silently stop testing
+    instead of failing."""
+    text = path.read_text(encoding="utf-8")
+    stale = [
+        unit
+        for unit in _units(text)
+        if _SCRUB_PROCEDURE_MARKER in unit.lower()
+        and "execute.md" in unit
+        and "security.md" not in unit
+    ]
+    assert not stale, (
+        f"{path.parent.name}/SKILL.md names the credential-pattern scrub and still "
+        f"points at `execute.md` for it (no `security.md` citation in the same unit): "
+        f"{stale!r} — repoint this dispatch to `_shared/security.md`"
     )
