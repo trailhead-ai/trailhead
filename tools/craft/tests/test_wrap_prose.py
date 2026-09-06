@@ -238,10 +238,10 @@ class TestRealSkillAndAgentFrontmatter:
                 fields[current_key].append(line)
         return {key: "\n".join(vals) for key, vals in fields.items()}
 
-    def test_target_set_has_39_files(self):
+    def test_target_set_has_41_files(self):
         # find tools/craft/plugins/craft/skills tools/craft/plugins/craft/agents
-        #   -name '*.md' | wc -l  ->  39
-        assert len(self._target_files()) == 39
+        #   -name '*.md' | wc -l  ->  41
+        assert len(self._target_files()) == 41
 
     def test_every_file_reflows_with_frontmatter_intact(self, tmp_path):
         for source in self._target_files():
