@@ -27,45 +27,29 @@ scan and the pattern's own discriminating power.
 
 from __future__ import annotations
 
-import re
-from pathlib import Path
-
 import pytest
 
-REPO_ROOT = Path(__file__).parent.parent
-SKILLS = REPO_ROOT / "plugins" / "craft" / "skills"
-
-# Mirrors test_security_attribution_citations.py's _ATTRIBUTION_PATTERN,
-# narrowed to `execute.md` specifically: any unit citing `execute.md` in the
-# rule-source role is a leftover citation this migration must have repointed.
-_STALE_EXECUTE_MD_ATTRIBUTION = re.compile(
-    r"`(?:\.\./)?_shared/execute\.md`"
-    r"(?:'s\s+[\w-]*untrusted[\w-]*\s+rule|\s+codifies)"
+# The rule-source relation, the unit splitter, and the corpus enumeration are
+# the same ones test_security_attribution_citations.py defines, so the two
+# suites read one grammar of "cited as the source of a rule" rather than two
+# hand-copied ones that can drift apart. Deliberately NOT imported: that
+# suite's `_ATTRIBUTION_PATTERN` — this suite narrows the same relation to one
+# document at a time, which is the distinction it exists to draw.
+from test_security_attribution_citations import (
+    SKILLS,
+    _rule_source_pattern,
+    _skill_md_files,
+    _units,
 )
 
-# Proves the pattern actually discriminates: it must still find genuine
-# rule-source citations of `security.md` post-migration, so a pattern that
-# matches nothing (e.g. a typo'd regex) is not mistaken for a clean scan.
-_LIVE_SECURITY_MD_ATTRIBUTION = re.compile(
-    r"`(?:\.\./)?_shared/security\.md`"
-    r"(?:'s\s+[\w-]*untrusted[\w-]*\s+rule|\s+codifies)"
-)
+# Any unit citing `execute.md` in the rule-source role is a leftover citation
+# this migration must have repointed.
+_STALE_EXECUTE_MD_ATTRIBUTION = _rule_source_pattern("execute")
 
-
-def _units(text: str) -> list[str]:
-    """Blank-line-delimited blocks, further split at each new bullet or
-    numbered list item, so two adjacent list items under one intro paragraph
-    are checked as separate units rather than one combined block."""
-    blocks = re.split(r"\n\s*\n", text)
-    units: list[str] = []
-    for block in blocks:
-        items = re.split(r"\n(?=[-*] |\d+\. )", block)
-        units.extend(items)
-    return units
-
-
-def _skill_md_files() -> list[Path]:
-    return sorted(SKILLS.glob("*/SKILL.md"))
+# Proves the relation actually discriminates: it must still find genuine
+# rule-source citations of `security.md`, so a pattern that matches nothing
+# (e.g. a typo'd regex) is not mistaken for a clean scan.
+_LIVE_SECURITY_MD_ATTRIBUTION = _rule_source_pattern("security")
 
 
 def test_skill_md_corpus_is_non_empty():

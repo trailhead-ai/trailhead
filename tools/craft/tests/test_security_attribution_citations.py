@@ -46,10 +46,16 @@ SKILLS = REPO_ROOT / "plugins" / "craft" / "skills"
 # constructions this corpus uses to credit a document as where a rule is
 # canonically stated. Naming the document as the *target* of a read/dispatch
 # verb, or alongside a numbered phase anchor, never matches this pattern.
-_ATTRIBUTION_PATTERN = re.compile(
-    r"`(?:\.\./)?_shared/(?:execute|security)\.md`"
-    r"(?:'s\s+[\w-]*untrusted[\w-]*\s+rule|\s+codifies)"
-)
+_RULE_SOURCE_ROLE = r"(?:'s\s+[\w-]*untrusted[\w-]*\s+rule|\s+codifies)"
+
+
+def _rule_source_pattern(document: str) -> re.Pattern[str]:
+    """A pattern matching `document` cited in the rule-source role, where
+    `document` is the `_shared/<name>.md` stem or an alternation of stems."""
+    return re.compile(rf"`(?:\.\./)?_shared/{document}\.md`" + _RULE_SOURCE_ROLE)
+
+
+_ATTRIBUTION_PATTERN = _rule_source_pattern("(?:execute|security)")
 
 
 def _units(text: str) -> list[str]:
@@ -64,9 +70,13 @@ def _units(text: str) -> list[str]:
     return units
 
 
+def _skill_md_files() -> list[Path]:
+    return sorted(SKILLS.glob("*/SKILL.md"))
+
+
 def _attribution_sites() -> list[tuple[str, str]]:
     hits: list[tuple[str, str]] = []
-    for path in sorted(SKILLS.glob("*/SKILL.md")):
+    for path in _skill_md_files():
         text = path.read_text(encoding="utf-8")
         for unit in _units(text):
             if _ATTRIBUTION_PATTERN.search(unit):

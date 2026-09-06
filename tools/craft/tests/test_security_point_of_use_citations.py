@@ -25,12 +25,14 @@ scan that matches nothing does not report clean.
 from __future__ import annotations
 
 import re
-from pathlib import Path
 
 import pytest
 
-REPO_ROOT = Path(__file__).parent.parent
-SKILLS = REPO_ROOT / "plugins" / "craft" / "skills"
+# The unit splitter and the corpus enumeration are the same ones
+# test_security_attribution_citations.py defines, so both citation shapes are
+# read out of one segmentation of the prose rather than two hand-copied ones
+# that can drift apart.
+from test_security_attribution_citations import _skill_md_files, _units
 
 # A directive is conditional if its unit is governed by one of these — a
 # branch, a hedge, or an aside that makes reading the citation optional.
@@ -40,21 +42,9 @@ _CONDITIONAL_MARKERS = re.compile(
 )
 
 
-def _units(text: str) -> list[str]:
-    """Blank-line-delimited blocks, further split at each new bullet or
-    numbered list item, so two adjacent list items under one intro paragraph
-    are checked as separate units rather than one combined block."""
-    blocks = re.split(r"\n\s*\n", text)
-    units: list[str] = []
-    for block in blocks:
-        items = re.split(r"\n(?=[-*] |\d+\. )", block)
-        units.extend(items)
-    return units
-
-
 def _point_of_use_sites() -> list[tuple[str, str]]:
     hits: list[tuple[str, str]] = []
-    for path in sorted(SKILLS.glob("*/SKILL.md")):
+    for path in _skill_md_files():
         text = path.read_text(encoding="utf-8")
         for unit in _units(text):
             if "security.md" in unit and "credential-pattern scrub" in unit.lower():
