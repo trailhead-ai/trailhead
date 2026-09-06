@@ -19,11 +19,14 @@ description: >
 
 Promote a standalone task to `ready`.
 
-**The procedure lives in `../_shared/refine.md`** (a sibling of this skill's directory). Read it and
-follow it end to end — the status gate, the draft attempt, the self-serve resolution passes, the
-citation rules and the resolution gate, the payload shape, the escalation contract, and the
-re-refine rules are all defined there. This skill does **not** restate them: the `execute` skill
-runs the same procedure inline, and a second copy here is how the two callers would drift apart.
+**The procedure lives in `../_shared/refine.md`** (a sibling of this skill's directory), alongside
+`../_shared/security.md` (the credential-pattern scrub's canonical pattern list and the
+untrusted-value validation rule that `refine.md`'s own mandatory scrub step draws on without naming
+it). Read both and follow `refine.md` end to end — the status gate, the draft attempt, the
+self-serve resolution passes, the citation rules and the resolution gate, the payload shape, the
+escalation contract, and the re-refine rules are all defined there. This skill does **not** restate
+them: the `execute` skill runs the same procedure inline, and a second copy here is how the two
+callers would drift apart.
 
 ## Argument
 

@@ -550,14 +550,22 @@ before any arm was run; the result below was committed at `6d20e0e6`.
 **Under test:** AC1's own behavioural gate, distinct from `unconditional-citation-vs-inline`
 above — that case measured whether an unconditional shared-file citation fires *at all*, using
 the gauntlet override-round-trip rule as its material. This case measures the **specific
-payload AC1 relocates**, the credential-pattern scrub, reached through the **composition task 2
-will actually ship**: a `_shared/security.md` holding the scrub's pattern list *and* the
-untrusted-value rule together, not the scrub alone.
+payload AC1 relocates**, the credential-pattern scrub, reached through a citation-arm
+`_shared/security.md` holding the scrub's pattern list *and* the untrusted-value rule together,
+not the scrub alone. **Composition parity with what task 2 actually shipped is partial, not
+full:** the citation arm's pattern list is byte-identical to the shipped document, but its
+untrusted-value half is a shorter draft — missing the shared-write rationale, the
+no-quotes/whitespace/metacharacter clause, the refuse-loudly sentence, and the "Known inlined
+copies" section the shipped `_shared/security.md` carries. The result below stands on the half
+that does match; it is not evidence about the half that doesn't.
 
-**The arms.** Both built from `plugins/craft/skills/gauntlet/SKILL.md` @ `de7fbbde`, differing
-in exactly one diff hunk: the `**Credential scrub.**` bullet is either inline, with the full
-pattern list stated in the bullet, or replaced by one unconditional read directive to
-`../_shared/security.md`.
+**The arms.** The gauntlet SKILL.md scaffolding for both arms starts from
+`plugins/craft/skills/gauntlet/SKILL.md` @ `de7fbbde`, differing in exactly one diff hunk: the
+`**Credential scrub.**` bullet is either inline, with the full pattern list stated in the
+bullet (the inline arm), or replaced by one unconditional read directive to
+`../_shared/security.md` plus that citation-arm draft document (the citation arm). Only the
+inline arm is byte-identical to `de7fbbde` itself; the citation arm is that commit modified by
+the one hunk just described.
 
 **The fixtures.** Three gauntlet runs paused immediately before the "Two treatments run before
 either payload is assembled" step writes a pass's raw finding text into `$DETAIL`. Each fixture

@@ -1,12 +1,12 @@
 """Point-of-use citations to `_shared/security.md` are unconditional.
 
-`gauntlet/SKILL.md` and `slice/SKILL.md` dispatch to the credential-pattern
-scrub at the point they actually need it applied — a genuinely different
-citation shape from an attribution that merely credits where a rule is
-stated. Each such dispatch must be a plain, unconditional directive: read the
-document now and follow it in full. Never a branch, never "consult if
-relevant", never conditional dispatch — that shape measured at 6/26 against
-9/9 for the unconditional one.
+`gauntlet/SKILL.md`, `slice/SKILL.md`, and `drive/SKILL.md` dispatch to the
+credential-pattern scrub at the point they actually need it applied — a
+genuinely different citation shape from an attribution that merely credits
+where a rule is stated. Each such dispatch must be a plain, unconditional
+directive: read the document now and follow it in full. Never a branch,
+never "consult if relevant", never conditional dispatch — that shape
+measured at 6/26 against 9/9 for the unconditional one.
 
 This suite asserts the *structural* property only — the citing unit is not
 governed by a conditional-dispatch marker — never a particular phrasing. It
@@ -26,14 +26,23 @@ scan that matches nothing does not report clean.
 in its own read-directive paragraph — a promoted-dependency mention that
 reads all five `_shared` documents together, not a per-site dispatch fired
 at the point the scrub is actually applied. That single unit alone satisfies
-a bare non-vacuity guard, so `gauntlet/SKILL.md`'s and `slice/SKILL.md`'s
-real dispatch sites — the ones this module actually exists to pin — could
-all revert to attribution or disappear entirely and the suite would still
-report clean. The coverage guard below closes that hole: it requires an
-imperative "read `_shared/security.md` now" directive — the mark of a
-genuine per-site dispatch, distinct from a promoted-dependency mention that
-merely lists the document among several to read — from each of `gauntlet`
-and `slice`, this corpus's known genuine dispatch sites.
+a bare non-vacuity guard, so `gauntlet/SKILL.md`'s, `slice/SKILL.md`'s, and
+`drive/SKILL.md`'s real dispatch sites — the ones this module actually
+exists to pin — could all revert to attribution or disappear entirely and
+the suite would still report clean.
+
+**A bare per-skill membership check is not enough either.** `drive/SKILL.md`
+carries three independent dispatch sites (its step-1 shape check, its
+slice-ritual append, and its PR-tail secret scan). A check that only asks
+"does `drive` have at least one surviving dispatch" cannot distinguish all
+three surviving from two of the three being silently deleted — exactly the
+defect a prior review round introduced and every citation suite missed. The
+coverage guard below closes both holes: it requires an imperative "read
+`_shared/security.md` now" directive — the mark of a genuine per-site
+dispatch, distinct from a promoted-dependency mention that merely lists the
+document among several to read — and counts them per skill against a pinned
+expected count, so a deleted site is caught even when its siblings in the
+same file survive.
 """
 
 from __future__ import annotations
@@ -62,12 +71,17 @@ _CONDITIONAL_MARKERS = re.compile(
 # own.
 _DISPATCH_DIRECTIVE = re.compile(r"Read\s+`(?:\.\./)?_shared/security\.md`\s+now")
 
-# The two skills this corpus's own module docstring names as genuine
-# point-of-use dispatch sites — see `test_security_point_of_use_citations.py`
-# module docstring and `test_security_citation_migration.py`'s account of
-# `drive/SKILL.md`'s unrepointed attribution. Coverage against this known set
-# is what a bare non-vacuity check on "matches anywhere" cannot provide.
-_KNOWN_DISPATCH_SKILLS = {"gauntlet", "slice"}
+# The three skills this corpus's own module docstring names as genuine
+# point-of-use dispatch sites, and how many independent dispatch sites each
+# one carries — see `test_security_point_of_use_citations.py` module
+# docstring and `test_security_citation_migration.py`'s account of
+# `drive/SKILL.md`'s unrepointed attribution. `drive/SKILL.md` dispatches at
+# three separate points of use (its step-1 shape check, its slice-ritual
+# append, and its PR-tail secret scan); a per-skill "at least one survives"
+# check cannot tell two of those three being silently deleted from all three
+# surviving, so counts are pinned per skill, not membership in a set — a
+# count is what actually proves nothing was deleted.
+_KNOWN_DISPATCH_SITE_COUNTS = {"gauntlet": 1, "slice": 2, "drive": 3}
 
 
 def _point_of_use_sites() -> list[tuple[str, str]]:
@@ -104,17 +118,31 @@ def test_point_of_use_site_set_is_non_empty():
 def test_genuine_dispatch_sites_cover_the_known_dispatch_skills():
     """Coverage guard: the bare non-vacuity check above can be satisfied by a
     single promoted-dependency mention anywhere in the corpus — including
-    execute/SKILL.md's own "read all five" paragraph — so gauntlet's and
-    slice's real dispatch sites could all revert to attribution, or vanish
-    outright, and the suite above would still report clean. This requires an
-    actual imperative dispatch directive from each of the known dispatch
-    skills."""
-    skills_with_a_genuine_dispatch = {name for name, _ in _genuine_dispatch_sites()}
-    missing = _KNOWN_DISPATCH_SKILLS - skills_with_a_genuine_dispatch
-    assert not missing, (
+    execute/SKILL.md's own "read all five" paragraph — so gauntlet's,
+    slice's, and drive's real dispatch sites could all revert to attribution,
+    or vanish outright, and the suite above would still report clean.
+
+    A per-skill "at least one survives" membership check is not enough
+    either: `drive/SKILL.md` carries three independent dispatch sites, and
+    deleting any one or two of them (a *missing* dispatch, as opposed to a
+    stale or misdirected one) leaves `drive` still present in a bare
+    membership set — exactly the gap that let a prior round delete
+    `drive/SKILL.md`'s step-1 dispatch while every citation suite stayed
+    green. This counts each known skill's genuine dispatch sites and
+    requires the full pinned count, so a deleted site fails here even when
+    its siblings in the same file survive."""
+    counts: dict[str, int] = {}
+    for name, _ in _genuine_dispatch_sites():
+        counts[name] = counts.get(name, 0) + 1
+    shortfalls = {
+        name: (expected, counts.get(name, 0))
+        for name, expected in _KNOWN_DISPATCH_SITE_COUNTS.items()
+        if counts.get(name, 0) < expected
+    }
+    assert not shortfalls, (
         "expected an imperative 'Read `_shared/security.md` now' dispatch directive "
-        f"in: {sorted(missing)} — a point-of-use citation reverted to attribution, or "
-        "was removed"
+        f"at every known site, but found fewer than expected (skill: (expected, found)): "
+        f"{shortfalls} — a point-of-use dispatch reverted to attribution, or was deleted"
     )
 
 
