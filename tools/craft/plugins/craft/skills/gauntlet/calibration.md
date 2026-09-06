@@ -11,8 +11,8 @@ shaped to avoid:
 - **The premise attack and the divergence probe are the highest-yield passes.** They are also the
   two a naive "just run the council on the spec" version omits. If the budget ever has to shrink,
   these are the last two to go, not the first.
-- **A clean fact pass proves one thing only.** See the two-axes section above. Do not let it soften
-  the adjudication of the other seven.
+- **A clean fact pass proves one thing only.** See `SKILL.md`'s "Two independent failure axes"
+  section. Do not let it soften the adjudication of the other seven.
 - **Convergence beats confidence.** A finding two blind passes reached independently outranks a
   finding one pass asserted forcefully.
 - **The adjudicator is a reviewer, not a router.** Consolidation, spot-verification, and the single
