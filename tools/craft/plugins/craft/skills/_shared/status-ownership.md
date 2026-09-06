@@ -184,10 +184,9 @@ zero. A push that fails here leaves the task `blocked` and adds `craft/push=fail
 not reverted to `in-progress`.
 
 That push carries the same precondition as `done`'s: the outgoing commits are scanned against the
-credential-pattern scrub list in `execute/SKILL.md`'s flow-out phase first, and on a hit the repo is
-not pushed. A task blocked *because* that scan hit is therefore **never** pushed — the credential is
-rotated and the history rewritten before any push is attempted. Going `blocked` is not a licence to
-ship flagged commits.
+credential-pattern scrub's pattern list first, and on a hit the repo is not pushed. A task blocked
+*because* that scan hit is therefore **never** pushed — the credential is rotated and the history
+rewritten before any push is attempted. Going `blocked` is not a licence to ship flagged commits.
 
 **That scan is fail-closed: a scan command that errors is never a clean scan.** Empty output clears
 a repo only when the command also exited successfully — an errored command prints nothing either,
@@ -198,9 +197,8 @@ such a branch with `git log HEAD --not --remotes=origin -p`, which needs no upst
 whole outgoing history the push is about to publish.
 
 Every body write made during a run — blocked reasons, task-body notes, report text captured into
-records — runs through the credential-pattern scrub already mandated at the close phase in
-`execute/SKILL.md` before it lands in the git-backed vault: raw git/auth error text is never
-captured verbatim.
+records — runs through the credential-pattern scrub already mandated at the close phase before it
+lands in the git-backed vault: raw git/auth error text is never captured verbatim.
 
 ## Operator-facing: by-hand sweep queries
 

@@ -40,7 +40,7 @@ one before doing anything else.
 Resolve the argument to a bare spec name, `<spec-name>`. It is vault-sourced, and it is substituted
 into commands throughout the rest of this procedure. Validate it once, **before ANY substitution**,
 against the safe-value shape `^[A-Za-z0-9._/-]+$` — this is the same untrusted-vault-value rule
-`_shared/execute.md` codifies for any vault-sourced value entering a command, and this validation
+`_shared/security.md` codifies for any vault-sourced value entering a command, and this validation
 governs every substitution site below, not a fixed count of them. A value that fails the shape check
 is never substituted, quoted, or escaped in: this skill refuses loudly and stops, rather than
 silently omitting the value — an omission would return zero hits from the query and read as "nothing
@@ -140,10 +140,11 @@ without the marker is not a slice and gets no line.
 A slice ending `dropped` or `blocked` writes no line: abandoned work is never mistaken for covered
 criteria, which is the entire point of a written ledger over a live status query.
 
-**Credential-pattern scrub, before this append too.** The appended line's text — the slice title and
-the value claim (or `**Goal:**` fallback), both read out of another record's body — is run through
-`_shared/execute.md`'s Phase 5 credential-pattern scrub before this write, the same scrub step 9
-below documents for the parent task write.
+**Credential-pattern scrub, before this append too.** **Read `../_shared/security.md` now and follow
+it in full.** It defines the credential-pattern scrub regex list and the untrusted-value rule. The
+appended line's text — the slice title and the value claim (or `**Goal:**` fallback), both read out
+of another record's body — is run through the scrub before this write, the same scrub step 9 below
+applies for the parent task write.
 
 **The append is a full-body read-modify-write of the spec, not `lore record update --diff`.** Read
 the spec fresh immediately before this write — never the body read back in step 2, which may already
@@ -397,10 +398,11 @@ archetype — a minimum, not a ceiling; the slice's actual states govern beyond 
 pass, clear it here** — this pass is selecting again, so an earlier stopping point is no longer the
 loop's live status: `lore record update spec/<spec-name> --unset-label craft/slice-loop`.
 
-**Credential-pattern scrub, before any write.** Run the drafted body — the value claim or enabler
-justification, and anything else composed into it — through `_shared/execute.md`'s Phase 5
-credential-pattern scrub before any write. This precedes every body write this skill makes, not only
-the first.
+**Credential-pattern scrub, before any write.** **Read `../_shared/security.md` now and follow it in
+full.** It defines the credential-pattern scrub regex list and the untrusted-value rule. Run the
+drafted body — the value claim or enabler justification, and anything else composed into it —
+through the scrub before any write. This precedes every body write this skill makes, not only the
+first.
 
 The `**Covers:**` field rides the same `lore record create` invocation the value claim, the
 `## Enumerated states` section, the `craft/slice-parent` label, and the `--related spec=` edge
@@ -520,7 +522,7 @@ above already documents.
 **The slice title is untrusted input too.** It is derived from the spec's acceptance criteria —
 vault-writable, git-synced prose — and enters the command line below as `--title`. Step 1's shape
 check is scoped to `<spec-name>` only, so this is a separate site: apply the same precedent
-`_shared/execute.md` already sets for a title drawn from generated prose repo content can influence
+`_shared/security.md` already sets for a title drawn from generated prose repo content can influence
 — the title is stripped of single quotes before it is wrapped in single quotes, not double quotes,
 so the only character that can terminate the quoted argument early is the one already stripped.
 

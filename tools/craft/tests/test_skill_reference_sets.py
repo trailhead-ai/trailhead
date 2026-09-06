@@ -27,9 +27,26 @@ import pytest
 
 SKILLS = Path(__file__).parent.parent / "plugins" / "craft" / "skills"
 
-# The three sibling `_shared` documents `execute.md`'s rules draw on without
+# The sibling `_shared` documents `execute.md`'s rules draw on without
 # naming any of them by path.
-EXECUTE_MD_DEPENDENCIES = ("status-ownership.md", "refine.md", "slice.md")
+EXECUTE_MD_DEPENDENCIES = ("status-ownership.md", "refine.md", "slice.md", "security.md")
+
+# `refine.md` mandates the credential-pattern scrub (Step 4) without naming
+# `security.md` by path — `reference_depth_gate.py` bars a `_shared` document
+# from naming a sibling `_shared` document by filename, so `refine.md` itself
+# never can. `refine/SKILL.md`'s own read directive is the only place left
+# that can promote the dependency into one hop.
+REFINE_MD_DEPENDENCIES = ("security.md",)
+
+# Per-skill dependency set: `execute` and `drive` both read `execute.md` end
+# to end and need its full reference set; `refine` reads `refine.md` end to
+# end and needs only the one dependency that document draws on without
+# naming.
+_SKILL_DEPENDENCIES = {
+    "execute": EXECUTE_MD_DEPENDENCIES,
+    "drive": EXECUTE_MD_DEPENDENCIES,
+    "refine": REFINE_MD_DEPENDENCIES,
+}
 
 
 def _text(skill_name: str) -> str:
@@ -43,6 +60,7 @@ def _text(skill_name: str) -> str:
 _READ_DIRECTIVE_ANCHORS = {
     "execute": "The procedure lives in",
     "drive": "Read `../_shared/execute.md` now",
+    "refine": "The procedure lives in",
 }
 
 
@@ -82,7 +100,7 @@ def _unconditional_read_clause(text: str, anchor: str) -> str:
 def _assert_names_every_dependency_in_its_read_directive(skill_name: str) -> None:
     text = _text(skill_name)
     clause = _unconditional_read_clause(text, _READ_DIRECTIVE_ANCHORS[skill_name])
-    missing = [name for name in EXECUTE_MD_DEPENDENCIES if name not in clause]
+    missing = [name for name in _SKILL_DEPENDENCIES[skill_name] if name not in clause]
     assert not missing, (
         f"skills/{skill_name}/SKILL.md's build-phase read directive (the "
         f"clause from {_READ_DIRECTIVE_ANCHORS[skill_name]!r} to its first "
@@ -97,8 +115,8 @@ def test_unconditional_read_clause_survives_anchor_reflowed_across_a_line_break(
     the clause must still be located and still carry every dependency name."""
     text = (
         "The procedure\nlives in `../_shared/execute.md`, alongside "
-        "`../_shared/status-ownership.md`, `../_shared/refine.md`, and "
-        "`../_shared/slice.md` — read them all."
+        "`../_shared/status-ownership.md`, `../_shared/refine.md`, "
+        "`../_shared/slice.md`, and `../_shared/security.md` — read them all."
     )
     clause = _unconditional_read_clause(text, "The procedure lives in")
     for name in EXECUTE_MD_DEPENDENCIES:
@@ -148,3 +166,14 @@ def test_drive_skill_names_every_shared_document_in_its_unconditional_read_direc
     and each name must sit in the directive's own unconditional read
     clause, not in a conditional aside claiming it was read elsewhere."""
     _assert_names_every_dependency_in_its_read_directive("drive")
+
+
+def test_refine_skill_names_security_md_in_its_unconditional_read_directive():
+    """`refine/SKILL.md` reads `_shared/refine.md` end to end, and `refine.md`
+    mandates the credential-pattern scrub (Step 4) without ever naming
+    `security.md` by path — it cannot, since `reference_depth_gate.py` bars a
+    `_shared` document from naming a sibling `_shared` document's filename. A
+    reader who opens only `refine/SKILL.md` must still be put onto
+    `security.md` in the same hop, exactly as `execute/SKILL.md`'s and
+    `drive/SKILL.md`'s own read directives already are."""
+    _assert_names_every_dependency_in_its_read_directive("refine")

@@ -523,8 +523,7 @@ breaks (handoff, new session):
   unknown discovered during the task, noting which child task it blocks.
 - **Design changes.** Note any design change a finding forced — in the parent body, and by
   re-shaping child tasks per the split/append ritual below. Body text written here is record text:
-  run it through the [Phase 5](#phase-5-flow-out) credential scrub first, exactly as a session
-  candidate would be.
+  run it through the credential-pattern scrub first, exactly as a session candidate would be.
 
 **Parent-body writes in this step** — the metrics row, unknowns, and design notes — use
 `lore record update task/<parent-name> --vault <elected-vault> --diff`, piping a unified diff that
@@ -677,35 +676,6 @@ path) when it returns actionable items.
 
 The parent carries a `## Flow-out` checklist — work it *before* the parent goes `done`, not after.
 
-**Credential-pattern scrub (mechanical, runs first).** This is the general rule for the whole run,
-not one phase's step: **any finding or note text entering a record body or a report — session
-candidates, `blocked` bodies, task-body notes from the per-task loop, raw command stderr quoted into
-either — runs through this list first.** A vault is git-backed and has its own push path, so a
-credential transcribed into a task body ships as surely as one committed to code. Report bodies are
-**summarized, never captured verbatim** — quote only `file:line` references for anything caught. Run
-the text through this credential-pattern scrub regex list and drop/redact any match rather than
-capturing it:
-
-- **Key-like tokens** — `(?i)(secret|token|passwd|password|api[_-]?key)[A-Za-z0-9_-]*\s*[=:]\s*\S+`
-  — the trailing character class is load-bearing: it lets the keyword carry qualifier text before
-  the separator, which is what catches `SECRET_KEY=`, `AWS_SECRET_ACCESS_KEY=`, and `API_KEY_ID=`. A
-  keyword anchored straight to `[=:]` walks past every compound name.
-- **Vendor fixed-prefix tokens** —
-  `(?i)\b(AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{36}|gho_[A-Za-z0-9]{36}|glpat-[A-Za-z0-9_-]{20}|xox[baprs]-[A-Za-z0-9-]+|sk_live_[A-Za-z0-9]+|AIza[0-9A-Za-z_-]{35})\b`
-  — issuer-shaped credentials identifiable on their own, with no `key=` preamble to trip the pattern
-  above
-- **Bearer / api-key shapes** — `(?i)bearer\s+[A-Za-z0-9._\-]+`,
-  `(?i)api[_-]?key['"]?\s*[:=]\s*['"]?[A-Za-z0-9._\-]{16,}`
-- **High-entropy literals** — `\b[A-Za-z0-9+/]{32,}={0,2}\b` (base64/hex-shaped secrets),
-  `\b[A-Fa-f0-9]{40,}\b`
-- **PEM private-key blocks** — `-----BEGIN [A-Z ]*PRIVATE KEY-----` (the high-entropy pattern
-  catches the body but not this header, so pin it separately)
-
-Prefer over-matching to under-matching: this list is a tripwire, and a false hit costs one manual
-look. **Known blind spot:** a binary file's diff renders as `Binary files … differ` rather than
-content, so a credential inside a binary artifact is invisible to every pattern above — a change
-that adds binary files needs a manual look regardless of what the patterns return.
-
 Then complete the ritual:
 
 - **Update touched area/subsystem profiles** with what actually changed (via the `lore` CLI), so the
@@ -817,8 +787,7 @@ that started on `main`/`master` with explicit user consent — do not auto-push 
 and its unpushed commits in the completion report and leave the push to the user.
 
 Before pushing a repo with unpushed commits, run the pre-push secret scan: check
-`git log origin/<branch>..HEAD -p` for that repo against the credential-pattern scrub list ([Phase
-5](#phase-5-flow-out)).
+`git log origin/<branch>..HEAD -p` for that repo against the credential-pattern scrub list.
 
 **The scan is fail-closed: a command that errors is never a clean scan.** Empty output counts as
 "clean" only when the command also exited successfully. The trap is the first push of every task
@@ -1105,7 +1074,7 @@ something — a task or the parent plan — takes `blocked`. Each one writes it 
 whichever record the escalation is against —
 `lore record update task/<name> --vault <elected-vault> --status blocked --diff`, piping a unified
 diff that **appends** the blocked note (bare stdin is a full-body replace and would destroy the
-record) — plus the [Phase 5](#phase-5-flow-out) scrub and, if commits exist, the [Phase
+record) — plus the credential-pattern scrub and, if commits exist, the [Phase
 6](#phase-6-close-and-completion-report) blocked-path push and its standalone `craft/branch` write;
 body-content contract and full rules govern this write, exactly as they govern every other status
 write.
@@ -1141,8 +1110,8 @@ troubleshooting, architecture) where fresh eyes matter.
 **INVALIDATED:** Do NOT build. Report to user with the evidence. Options:
 1. **Minor adjustment** — the design holds, just one child task changes. Update the affected child
    task record (`lore record update task/<name> --vault <elected-vault> …`), note what changed and
-   why — running that note through the [Phase 5](#phase-5-flow-out) credential scrub, since it lands
-   in a record body — and continue.
+   why — running that note through the credential-pattern scrub, since it lands in a record body —
+   and continue.
 2. **Design change** — the invalidation affects multiple child tasks or the architecture. Re-enter
    planning: dispatch the `planner` subagent (isolated, Opus) or invoke the `planning` skill inline.
    Do NOT use `EnterPlanMode` — plan mode blocks writes to the plan vault.

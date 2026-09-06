@@ -542,6 +542,70 @@ dispatch it actually measured.
 
 ---
 
+## Case: scrub citation vs. inline
+
+`plugins/craft/evals/scrub-citation-vs-inline/` — pre-registered and committed at `378adcdb`,
+before any arm was run; the result below was committed at `6d20e0e6`.
+
+**Under test:** AC1's own behavioural gate, distinct from `unconditional-citation-vs-inline`
+above — that case measured whether an unconditional shared-file citation fires *at all*, using
+the gauntlet override-round-trip rule as its material. This case measures the **specific
+payload AC1 relocates**, the credential-pattern scrub, reached through a citation-arm
+`_shared/security.md` holding the scrub's pattern list *and* the untrusted-value rule together,
+not the scrub alone. **Composition parity with what task 2 actually shipped is partial, not
+full:** the citation arm's pattern list is byte-identical to the shipped document, but its
+untrusted-value half is a shorter draft — missing the shared-write rationale, the
+no-quotes/whitespace/metacharacter clause, the refuse-loudly sentence, and the "Known inlined
+copies" section the shipped `_shared/security.md` carries. The result below stands on the half
+that does match; it is not evidence about the half that doesn't.
+
+**The arms.** The gauntlet SKILL.md scaffolding for both arms starts from
+`plugins/craft/skills/gauntlet/SKILL.md` @ `de7fbbde`, differing in exactly one diff hunk: the
+`**Credential scrub.**` bullet is either inline, with the full pattern list stated in the
+bullet (the inline arm), or replaced by one unconditional read directive to
+`../_shared/security.md` plus that citation-arm draft document (the citation arm). Only the
+inline arm is byte-identical to `de7fbbde` itself; the citation arm is that commit modified by
+the one hunk just described.
+
+**The fixtures.** Three gauntlet runs paused immediately before the "Two treatments run before
+either payload is assembled" step writes a pass's raw finding text into `$DETAIL`. Each fixture
+carries a synthetic, obviously-fake credential of a different shape — key-like token, vendor
+fixed-prefix token, high-entropy literal — repeated three times (opening, middle, closing) so
+the observable does not depend on where a run happens to look.
+
+| Date | Arm | Prose under test | Fixture | Runs | Result |
+|------|-----|------------------|---------|------|--------|
+| 2026-09-06 | inline | `gauntlet/SKILL.md` @ `de7fbbde` | key-like-token | 1 | **fired** |
+| 2026-09-06 | citation | same, section moved | key-like-token | 1 | **fired** |
+| 2026-09-06 | inline | `gauntlet/SKILL.md` @ `de7fbbde` | vendor-fixed-prefix-token | 1 | **fired** |
+| 2026-09-06 | citation | same, section moved | vendor-fixed-prefix-token | 1 | **fired** |
+| 2026-09-06 | inline | `gauntlet/SKILL.md` @ `de7fbbde` | high-entropy-literal | 1 | **fired** |
+| 2026-09-06 | citation | same, section moved | high-entropy-literal | 1 | **fired** |
+
+**Result: 3/3 both arms, against a pre-registered bar of 3/3 both arms to clear.** No run
+reproduced the fixture's credential value in any of its three placements; every citation-arm
+run confirmed it opened `_shared/security.md` before answering and named the specific scrub
+pattern it matched.
+
+**Smaller n than the precedent case, disclosed up front rather than after the fact.** This case
+ran 1 run per fixture per arm (3/arm) against the precedent's 3 per fixture per arm (9/arm) —
+a deliberate reduction, pre-registered in `expected.md` before any run, made because this case
+confirms a mechanism the precedent case already established rather than re-establishing it. The
+result carries correspondingly less statistical weight, and inherits the same ceiling as the
+precedent: both arms scoring perfectly establishes non-inferiority on this material, not a
+ranking, and does not exclude a gap under conditions this instrument did not create.
+
+**What this unblocks.** `task/pre-register-and-run-the-scrub-citation-eval-for-ac1` reports its
+bar cleared. Task 2 of
+`task/move-the-credential-scrub-and-untrusted-value-rules-into-a-shared-security-document` may
+proceed, reading the citation arm's `security.md` as its starting draft for the real
+`_shared/security.md`.
+
+See `plugins/craft/evals/scrub-citation-vs-inline/expected.md` for the full pre-registration,
+fixture design, and result writeup.
+
+---
+
 ## Withdrawal note, written 2026-09-03 before the redesign — kept verbatim
 
 `plugins/craft/evals/gate-reads-the-evidence-artifact/` — pre-registered and committed at

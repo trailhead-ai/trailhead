@@ -31,7 +31,7 @@ This stop writes nothing — nothing is resolved yet to write against.
 
 Resolve the argument to a bare spec name, `<spec-name>`. It is vault-sourced, and it is substituted
 into every command below. Validate it once, **before any substitution**, against the safe-value
-shape `^[A-Za-z0-9._/-]+$` — the same untrusted-vault-value rule `_shared/execute.md` codifies for
+shape `^[A-Za-z0-9._/-]+$` — the same untrusted-vault-value rule `_shared/security.md` codifies for
 any vault-sourced value entering a command, governing every substitution site below, not a fixed
 count of them. A value that fails the shape check is never substituted, quoted, or escaped in: this
 skill refuses loudly and stops, rather than silently omitting the value — an omission would return
@@ -167,10 +167,10 @@ overwritten. The block carries:
 - **PR tail outcome file:** <path, or `(not yet reached)`>
 ```
 
-Run the block's text through the credential-pattern scrub before it is written
-(`_shared/execute.md`, [Phase 5](../_shared/execute.md#phase-5-flow-out)) — exactly like any other
-write to a record body, since the branch name or an outcome-file path could carry something that
-shouldn't ship to a git-backed vault.
+**Read `../_shared/security.md` now and follow it in full.** It defines the credential-pattern scrub
+regex list and the untrusted-value rule. Run the block's text through the scrub before it is written
+— exactly like any other write to a record body, since the branch name or an outcome-file path could
+carry something that shouldn't ship to a git-backed vault.
 
 Resume reads the **last** `## Driver run` block in the parent body, never the first: each boundary
 appends its own block rather than editing the previous one in place, so the most recent block is the
@@ -322,10 +322,10 @@ would leave behind. Write it whether or not a Critical survives synthesis, exact
 behind too. The driver writes the findings only: no disposition text for any Critical, since
 disposition is an operator judgment it does not make. Append via
 `lore record update task/<slice-parent-name> --vault <elected-vault> --diff`, piping a unified diff
-the same way the `## Driver run` checkpoint does — bare stdin would replace the whole record body —
-and run the section's text through the credential-pattern scrub before it is written
-(`_shared/execute.md`, [Phase 5](../_shared/execute.md#phase-5-flow-out)), exactly like every other
-write to a record body in this ritual.
+the same way the `## Driver run` checkpoint does — bare stdin would replace the whole record body.
+**Read `../_shared/security.md` now and follow it in full.** It defines the credential-pattern scrub
+regex list and the untrusted-value rule. Run the section's text through the scrub before it is
+written, exactly like every other write to a record body in this ritual.
 
 **A council Critical escalates.** Any Critical surviving synthesis is an escalation under the
 `plan-critical` trigger, following the escalation contract below. Before writing the escalation
@@ -355,12 +355,13 @@ graph by running craft's shared execute procedure against it.
 
 **Read it, don't invoke it** — the same deferral step 7 above applies to `../plan/SKILL.md` and step
 4 applies to `../slice/SKILL.md`. Read `../_shared/execute.md` now, in full, alongside
-`../_shared/refine.md`, `../_shared/slice.md`, and `../_shared/status-ownership.md` — the three
-documents its rules draw on without naming — and follow `execute.md` inline in this session, running
-its controller loop against the slice parent's children. This skill never restates that procedure: a
-second copy here is exactly how the two would drift apart. The driver never invokes `/craft:execute`
-either — a skill-to-skill chain is unreliable by the same rule, so the shared procedure is read
-directly rather than reached through the skill that wraps it.
+`../_shared/refine.md`, `../_shared/slice.md`, `../_shared/status-ownership.md`, and
+`../_shared/security.md` — the four documents its rules draw on without naming — and follow
+`execute.md` inline in this session, running its controller loop against the slice parent's
+children. This skill never restates that procedure: a second copy here is exactly how the two would
+drift apart. The driver never invokes `/craft:execute` either — a skill-to-skill chain is unreliable
+by the same rule, so the shared procedure is read directly rather than reached through the skill
+that wraps it.
 
 Running it inline in this session selects the shared procedure's **attended** mode, per
 `../_shared/execute.md`'s own two-mode table — and that is deliberate, not incidental: a human is
@@ -566,13 +567,12 @@ or wherever the judgment call belongs), never a drafted disposition or a recomme
 driver never authors the operator's judgment for them** — it gathers the evidence and points at
 where the decision gets made, and stops there.
 
-`$BODY` is bound by the same rule Phase 5 states for any record body (`_shared/execute.md`, [Phase
-5](../_shared/execute.md#phase-5-flow-out)) — so it names pointers into the failed build's worker
-output or CI text rather than pasting them in. Run `$BODY` through the credential-pattern scrub
-before this write regardless: the scrub is the second line of defense against a stray secret
-surviving into a pointer, never a license to paste verbatim output because the scrub will catch it —
-exactly like the `## Driver run` checkpoint block above (`_shared/execute.md`, [Phase
-5](../_shared/execute.md#phase-5-flow-out)).
+**Read `../_shared/security.md` now and follow it in full.** It defines the credential-pattern scrub
+regex list and the untrusted-value rule. `$BODY` is bound by the same rule it states for any record
+body — so it names pointers into the failed build's worker output or CI text rather than pasting
+them in. Run `$BODY` through the scrub before this write regardless: the scrub is the second line of
+defense against a stray secret surviving into a pointer, never a license to paste verbatim output
+because the scrub will catch it — exactly like the `## Driver run` checkpoint block above.
 
 ### Pushing work in flight
 

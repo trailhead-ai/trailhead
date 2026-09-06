@@ -563,7 +563,7 @@ def test_stdin_exactly_at_the_size_cap_still_certifies():
 # ---- Low: the credential pattern list must not silently drift from the -----
 # ---- shared skill document it was hand-copied from --------------------------
 
-_SHARED_EXECUTE_MD = REPO_ROOT / "plugins" / "craft" / "skills" / "_shared" / "execute.md"
+_SHARED_SECURITY_MD = REPO_ROOT / "plugins" / "craft" / "skills" / "_shared" / "security.md"
 
 # A pattern span in the doc's bulleted list always begins with one of these
 # regex-only prefixes; every prose example backtick-span in the same lines
@@ -574,7 +574,7 @@ _PATTERN_PREFIXES = ("(?i)", r"\b", "-----BEGIN")
 
 
 def _parse_credential_patterns_from_shared_doc() -> list[str]:
-    text = _SHARED_EXECUTE_MD.read_text(encoding="utf-8")
+    text = _SHARED_SECURITY_MD.read_text(encoding="utf-8")
     start = text.index("Key-like tokens")
     end = text.index("Prefer over-matching")
     section = text[start:end]
