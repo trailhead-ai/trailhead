@@ -31,7 +31,7 @@ This stop writes nothing — nothing is resolved yet to write against.
 
 Resolve the argument to a bare spec name, `<spec-name>`. It is vault-sourced, and it is substituted
 into every command below. Validate it once, **before any substitution**, against the safe-value
-shape `^[A-Za-z0-9._/-]+$` — the same untrusted-vault-value rule `_shared/execute.md` codifies for
+shape `^[A-Za-z0-9._/-]+$` — the same untrusted-vault-value rule `_shared/security.md` codifies for
 any vault-sourced value entering a command, governing every substitution site below, not a fixed
 count of them. A value that fails the shape check is never substituted, quoted, or escaped in: this
 skill refuses loudly and stops, rather than silently omitting the value — an omission would return

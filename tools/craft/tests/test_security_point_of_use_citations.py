@@ -10,12 +10,16 @@ relevant", never conditional dispatch — that shape measured at 6/26 against
 
 This suite asserts the *structural* property only — the citing unit is not
 governed by a conditional-dispatch marker — never a particular phrasing. It
-derives the site set empirically: it scans every migrated skill for a unit
-(a paragraph, or a single list item inside one) that names `security.md`
-alongside the phrase "credential-pattern scrub", the mark of a dispatch
-rather than an attribution (which cites the rule without naming the scrub
-procedure itself). Never a hardcoded file or line list. A non-vacuity guard
-covers the derived set, so a scan that matches nothing does not report clean.
+derives the site set empirically: it scans every skill's `SKILL.md`, `drive`
+and `execute` included (a per-file exclusion would only hide a genuine site
+sitting among their legitimate build-procedure reads, the way one previously
+hid `drive/SKILL.md`'s unrepointed attribution — see
+`test_security_citation_migration.py`), for a unit (a paragraph, or a single
+list item inside one) that names `security.md` alongside the phrase
+"credential-pattern scrub", the mark of a dispatch rather than an attribution
+(which cites the rule without naming the scrub procedure itself). Never a
+hardcoded file or line list. A non-vacuity guard covers the derived set, so a
+scan that matches nothing does not report clean.
 """
 
 from __future__ import annotations
@@ -27,8 +31,6 @@ import pytest
 
 REPO_ROOT = Path(__file__).parent.parent
 SKILLS = REPO_ROOT / "plugins" / "craft" / "skills"
-
-_LEGITIMATE_EXECUTE_MD_READERS = {"execute", "drive"}
 
 # A directive is conditional if its unit is governed by one of these — a
 # branch, a hedge, or an aside that makes reading the citation optional.
@@ -53,8 +55,6 @@ def _units(text: str) -> list[str]:
 def _point_of_use_sites() -> list[tuple[str, str]]:
     hits: list[tuple[str, str]] = []
     for path in sorted(SKILLS.glob("*/SKILL.md")):
-        if path.parent.name in _LEGITIMATE_EXECUTE_MD_READERS:
-            continue
         text = path.read_text(encoding="utf-8")
         for unit in _units(text):
             if "security.md" in unit and "credential-pattern scrub" in unit.lower():
