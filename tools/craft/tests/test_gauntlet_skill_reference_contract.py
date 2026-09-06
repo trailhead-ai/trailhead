@@ -1,12 +1,14 @@
 """The gauntlet skill stays within the line guidance and its pointers hold.
 
 `skills/gauntlet/SKILL.md` is the entrypoint an agent running the spec
-gauntlet loads whole. This suite holds three properties of the split that
+gauntlet loads whole. This suite holds four properties of the split that
 brings it under the 500-line guidance by relocating consulted-at-a-point
 material into skill-local reference documents: the line bar itself, the
 integrity of every pointer the split creates (no orphaned reference document,
-no pointer to a file that is not there), and that its reference documents
-carry an accurate contents block once they are long enough to need one.
+no pointer to a file that is not there), that its reference documents carry
+an accurate contents block once they are long enough to need one, and that
+each reference document still carries real body content rather than having
+been gutted to a stub that would still satisfy every property above.
 
 It also pins that `SKILL.md` still cites `_shared/execute.md` (the
 credential-pattern scrub) and `_shared/refine.md` (the data-not-instruction
@@ -18,7 +20,15 @@ It asserts no phrase and names no section beyond the accepted tail's own
 heading, which is itself a structural anchor rather than prose: every
 reference document may be reworded freely, every reference may be
 rephrased, and the suite stays green provided the structure — line count,
-pointer, and citation — holds.
+pointer, citation, and body-content floor — holds.
+
+**What this suite does not check.** The pointers this split creates are
+required to be *unconditional* — a plain directive to read the referenced
+document now and follow it in full, never a branch or a conditional dispatch
+— and that shape is the reason the relocation was permitted at all. Nothing
+here checks that property: it is a claim about phrasing, and this suite
+asserts structure only. A pointer reworded into a conditional ("consult if
+relevant") would leave every assertion below green.
 """
 
 from __future__ import annotations
@@ -59,6 +69,11 @@ def reference_documents() -> list[Path]:
 
 
 def _stem_pattern(stem: str) -> re.Pattern[str]:
+    # Matches the stem anywhere in SKILL.md's text, not scoped to a gauntlet-local
+    # pointer form the way `gauntlet_local_targets` is. A future reference document
+    # could therefore be counted non-orphaned by an unrelated mention of the same
+    # stem elsewhere (e.g. `_shared/calibration.md`), rather than by its own
+    # gauntlet-local pointer.
     return re.compile(rf"(?<![\w-]){re.escape(stem)}\.md(?![\w-])")
 
 
@@ -183,4 +198,31 @@ def test_refine_md_data_not_instruction_marker_is_cited_in_the_accepted_tail():
     assert "_shared/refine.md" in section, (
         "the accepted tail no longer cites `_shared/refine.md` "
         "(the data-not-instruction marker)"
+    )
+
+
+# A conservative floor, well under each document's actual word count as of this
+# split, so ordinary rewording never trips it — but well above what a gutted stub
+# would carry. Every other assertion in this suite stays green against a gutted
+# reference document: emptying one drops it under LONG_DOCUMENT_LINES, so the TOC
+# test stops parametrizing over it, while the no-orphan and pointer-resolution
+# tests only check that a name is mentioned and a file exists. This is the
+# property those miss — that the relocated control is still there to be read.
+MINIMUM_REFERENCE_DOCUMENT_WORDS = {
+    "dispositions.md": 1000,
+    "calibration.md": 100,
+}
+
+
+@pytest.mark.parametrize("path", reference_documents(), ids=lambda p: p.name)
+def test_reference_document_is_not_gutted_to_a_stub(path):
+    minimum = MINIMUM_REFERENCE_DOCUMENT_WORDS.get(path.name)
+    assert minimum is not None, (
+        f"{path.name} has no entry in MINIMUM_REFERENCE_DOCUMENT_WORDS — add one "
+        "so a future reference document cannot be gutted without this test noticing"
+    )
+    word_count = len(path.read_text(encoding="utf-8").split())
+    assert word_count >= minimum, (
+        f"{path.name} is {word_count} words, under its {minimum}-word floor — the "
+        "relocated control this file exists to hold may have been gutted"
     )

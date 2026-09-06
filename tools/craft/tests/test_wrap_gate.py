@@ -510,8 +510,8 @@ class TestWholeSetAfterReflow:
             targets.append(target)
         return targets
 
-    def test_governed_set_has_40_files(self):
-        assert len(self._governed_files()) == 40
+    def test_governed_set_has_41_files(self):
+        assert len(self._governed_files()) == 41
 
     def test_no_reflowed_line_over_400_characters_and_gate_exits_zero(self, tmp_path):
         # The 400-character ceiling is scoped to lines the gate actually

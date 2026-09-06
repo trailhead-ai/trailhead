@@ -211,11 +211,15 @@ adjudication — it is delegation of the work you were dispatched to do.** Conso
    deliverability is a judgment about how work would be sliced, which can read as "guessing about
    future state" — but it is answered from the criterion's own text, and downgrading it to Important
    strips the disposition that makes the finding land at all.
-6. **Spot-verify contentious claims.** Any finding that would be expensive to act on, that
+6. **Hold every `revise` finding to the prescription-specificity bar.** A finding that cannot
+   produce a prescription this specific is not a Critical — a severity bar applied here, at
+   consolidation, before a finding is numbered, not a step-5 consult. `dispositions.md`'s `revise`
+   glossary entry restates it beside the term it defines, downstream of this decision.
+7. **Spot-verify contentious claims.** Any finding that would be expensive to act on, that
    contradicts another pass, or that arrives in a transcript reading anomalously (over-confident,
    thin on evidence, or wandering outside its stated lane) gets checked yourself before it reaches
    the user. Do not launder an unverified subagent claim into a recommendation.
-7. **Number the surviving Criticals `C1`…`Cn`.** Assign the ids here, at consolidation, in the order
+8. **Number the surviving Criticals `C1`…`Cn`.** Assign the ids here, at consolidation, in the order
    you will present them. An id is **stable for the rest of the run** — the operator names it to
    override, and the audit trail records it — so never renumber after presenting, not even when an
    override collapses a row's relevance.
@@ -231,8 +235,8 @@ compact deliverable — target one terminal screen (~40 lines) for a typical run
 is a complete answer to it.
 
 The deliverable is these four parts, in this order — all four whenever there is a Critical to
-disposition, and the same parts minus the table on a run that produced none ("Zero Criticals is
-still a decision", below):
+disposition, and the same parts minus the table on a run that produced none (`dispositions.md`'s
+"Zero Criticals is still a decision"):
 
 1. **The narrative synthesis** — prose, and the part that carries the deliverable. Three movements,
    one short paragraph each — what the passes found, whether it holds and where it came from, and
@@ -250,7 +254,7 @@ still a decision", below):
      is positioned to make. Making it is movement two's whole job; the shared contract names what
      stays forbidden.
 2. **The recommended outcome**, on its own line — whether the record advances this round, or which
-   revise round it continues into (below).
+   revise round it continues into (`dispositions.md`'s "Advancing, revise rounds, and runs").
 3. **The per-Critical table** — supporting detail, not the explanation. The synthesis has already
    said what the findings mean and what you propose doing; the table is the row-level view for
    checking that against the findings, and the handle the operator names to override — into
@@ -338,33 +342,41 @@ overrides**. All three are judgments about what this project is willing to live 
 the passes did not, and their reason text is the operator's own — quote it, **never drafted for
 them**. Do not propose any of the three, and do not offer a reason the operator did not say.
 
-**Read `dispositions.md` now and follow it in full.** It defines what each of the five terms —
-`resolved`, `revise` and its two scopes, `accepted-as-risk`, `disputed`, and `answered` — means and
-requires. This skill does not restate any of it.
+**Read `gauntlet/dispositions.md` now and follow it in full.** It defines what each of the five
+terms — `resolved`, `revise` and its two scopes, `accepted-as-risk`, `disputed`, and `answered` —
+means and requires. The propose-only rule, the edit-first test, and the never-draft-the-operator's-
+reason rule above stay inline because this skill must apply them unprompted, not by accident —
+`dispositions.md` holds the rest.
 
 #### Advancing, revise rounds, and runs
 
-**Read `dispositions.md` now and follow it in full.** It defines when a record advances, the
-distinction between a run and a revise round, why a revise round still lands its `resolved` edits
-and provenance, and why an `answered` Critical blocks the advance check until it is re-adjudicated.
-This skill does not restate any of it: a second copy here is how the two would drift apart.
+**Read `gauntlet/dispositions.md` now and follow it in full.** It defines when a record advances,
+the run/revise-round distinction, why a revise round still lands its `resolved` edits and
+provenance, and why `answered` blocks the advance check until re-adjudicated. The `revise`
+prescription and `reaches-downstream` above, the prescription-specificity bar in step 4, and step
+6's advance condition below stay inline — each fires unprompted, not by accident.
 
 #### Zero Criticals is still a decision
 
-**Read `dispositions.md` now and follow it in full.** It defines why a clean run still presents the
-full deliverable and still gates on operator acceptance. This skill does not restate any of it.
+**Read `gauntlet/dispositions.md` now and follow it in full.** It defines why a clean run still
+presents the deliverable — minus the per-Critical table, since there are no Critical rows to hold
+one — and still gates on operator acceptance. Nothing here is stated inline for this topic: none of
+it fires until a run has already gone clean, which is the point this pointer exists for.
 
 #### Accepting, and overriding in one round-trip
 
-**Read `dispositions.md` now and follow it in full.** It defines how the operator's acceptance and
-overrides are taken and applied — the one-round-trip rule, the post-override echo, what makes an
-override incomplete or out of range, and what an override withdraws. This skill does not restate any
-of it: a second copy here is how the two would drift apart.
+**Read `gauntlet/dispositions.md` now and follow it in full.** It defines how the operator's
+acceptance and overrides are taken and applied, including the one-round-trip rule, the post-override
+echo, what makes an override incomplete or out of range, what an override withdraws, when a
+re-present is forced before anything is written, and the round-number rule. The
+never-draft-the-operator's-reason rule above stays inline — it fires unprompted, not by accident.
 
 #### Escalation points
 
-**Read `dispositions.md` now and follow it in full.** It defines every point where this step hands
-control to a human and what each point waits for. This skill does not restate any of it.
+**Read `gauntlet/dispositions.md` now and follow it in full.** It defines every point where this
+step hands control to a human and what each point waits for. Nothing here is stated inline for this
+topic: every escalation point it names is already a point where this skill has stopped and is
+waiting, not a rule it must fire unprompted.
 
 #### The accepted tail
 
@@ -479,22 +491,6 @@ writes no status for "still revising."
 
 ## Calibration
 
-Held from the pilot runs that established this protocol — these are the failure modes the skill is
-shaped to avoid:
-
-- **The premise attack and the divergence probe are the highest-yield passes.** They are also the
-  two a naive "just run the council on the spec" version omits. If the budget ever has to shrink,
-  these are the last two to go, not the first.
-- **A clean fact pass proves one thing only.** See the two-axes section above. Do not let it soften
-  the adjudication of the other seven.
-- **Convergence beats confidence.** A finding two blind passes reached independently outranks a
-  finding one pass asserted forcefully.
-- **The adjudicator is a reviewer, not a router.** Consolidation, spot-verification, and the single
-  recommendation built out of them are the job. Thirty findings forwarded verbatim is a failed
-  adjudication.
-- **The compound-criterion Critical bar (step 4, item 5) is covered by a manual eval, not CI.** CI
-  runs `ruff` and `pytest` and invokes no eval, so a green suite says nothing about whether this
-  bar, or the consistency-auditor check it depends on, still detects a compound criterion — a
-  passing test run is a one-time gate, not a standing signal. An edit to either this bar or that
-  check should re-run the adjudication arm before trusting the change; see
-  `tools/craft/MANUAL-EVAL.md` for how an arm is dispatched.
+**Read `gauntlet/calibration.md` now and follow it in full.** It holds the provenance and tuning
+notes from the pilot runs that established this protocol. It is consulted after a run, not applied
+unprompted during one, which is why none of it is restated here.
