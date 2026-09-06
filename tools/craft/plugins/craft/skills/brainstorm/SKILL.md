@@ -108,8 +108,13 @@ reads as an ordinary result, which is exactly the wrong report for a name that c
 repositories the same way `_shared/execute.md`'s push mechanics and `drive/SKILL.md` step 5 already
 do: in a camp workspace they are the member worktrees of the current workspace as listed in its camp
 manifest (`manifest.json`); in vanilla usage the set is the single current repo. For each
-repository, pipe its agent-instruction file (e.g. `CLAUDE.md`) into the resolver, by the same
-absolute-path convention the existing gate invocations use (`slice/SKILL.md`, `gauntlet/SKILL.md`):
+repository, first check whether its agent-instruction file exists at all. When it does not exist,
+skip invoking the resolver entirely and take the absence path directly, stating `production` for
+that repository — piping a nonexistent file yields empty stdin, and empty stdin is the resolver's
+own fail-closed path (exit 2, `reason-code: empty-stdin`), never the absence path, so invoking the
+resolver on it would leak a non-zero exit into the session instead of resolving a level. When the
+file exists, pipe it into the resolver, by the same absolute-path convention the existing gate
+invocations use (`slice/SKILL.md`, `gauntlet/SKILL.md`):
 
 ```sh
 cat <repo-root>/CLAUDE.md | ${CLAUDE_PLUGIN_ROOT}/scripts/maturity_resolve.py

@@ -197,6 +197,29 @@ The installer is idempotent and chain-safe — an existing pre-commit hook is
 preserved and run first. `.git/hooks/` is never committed, so the absolute paths
 baked into the generated hook stay machine-local.
 
+## Project Maturity
+
+A repository declares its standard-of-care level in a `## Project Maturity`
+section of its agent-instruction file (e.g. `CLAUDE.md`), beside the
+`## Dependency Posture` block that already establishes the per-repository
+declaration convention:
+
+```
+## Project Maturity
+
+production
+```
+
+The closed vocabulary is exactly `prototype` / `early` / `production` — matched
+case-insensitively, anywhere in the section body. A missing section, or a
+declared value outside the vocabulary, resolves to `production`. Brainstorm's
+framing step resolves this for every repository the work touches, before
+grilling begins:
+
+```sh
+cat <repo-root>/CLAUDE.md | plugins/craft/scripts/maturity_resolve.py
+```
+
 ## Tests
 
 ```bash

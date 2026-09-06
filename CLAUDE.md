@@ -41,6 +41,15 @@ art as design input rather than adoption candidates. This declaration is scoped 
 this repository only — a vault serving several repositories does not inherit this
 posture for any sibling repository.
 
+## Project Maturity
+
+production
+
+This repository has real users and real data, reachable from outside any preview
+agreement — the standard-of-care level craft's rituals calibrate their rigor
+against (backwards compatibility, migration paths, rollback, blast radius) for
+work that touches this repository.
+
 ## Commands
 
 Requires **Python 3.11+**, **zero third-party runtime deps** (stdlib only; system
