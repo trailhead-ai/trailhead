@@ -27,14 +27,19 @@ from __future__ import annotations
 
 import importlib.util
 import re
-import subprocess
 import sys
 from pathlib import Path
 
+# The resolver's path and subprocess runner, and the `### N.` step reader over
+# brainstorm's SKILL.md, are the same ones the resolver suite and the
+# framing-step contract suite drive, so a change to the invocation or to the
+# step grammar reaches every suite from one place.
+from test_brainstorm_maturity_contract import _step
+from test_maturity_resolve import RESOLVER
+from test_maturity_resolve import _run as _run_resolver
+
 REPO_ROOT = Path(__file__).parent.parent.parent.parent
 CRAFT_TOOL_ROOT = REPO_ROOT / "tools" / "craft"
-RESOLVER = CRAFT_TOOL_ROOT / "plugins" / "craft" / "scripts" / "maturity_resolve.py"
-BRAINSTORM_SKILL = CRAFT_TOOL_ROOT / "plugins" / "craft" / "skills" / "brainstorm" / "SKILL.md"
 README = CRAFT_TOOL_ROOT / "README.md"
 CLAUDE_MD = REPO_ROOT / "CLAUDE.md"
 
@@ -50,27 +55,6 @@ def _resolver_module():
     assert spec.loader is not None
     spec.loader.exec_module(module)
     return module
-
-
-def _run_resolver(stdin_bytes: bytes) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        [sys.executable, str(RESOLVER)],
-        input=stdin_bytes,
-        capture_output=True,
-    )
-
-
-def _skill_text() -> str:
-    return BRAINSTORM_SKILL.read_text(encoding="utf-8")
-
-
-def _frame_step() -> str:
-    """Step 1 ("Frame")'s body, up to the next `### N.` heading."""
-    text = _skill_text()
-    start = text.index("### 1. Frame")
-    rest = text[start + len("### 1. Frame"):]
-    end = re.search(r"\n### \d+\.", rest)
-    return rest[: end.start()] if end else rest
 
 
 # ---- 1. resolving against this repository's own agent-instruction file ----
@@ -184,7 +168,7 @@ def test_empty_stdin_is_the_resolvers_fail_closed_path_not_the_absence_path():
 
 
 def test_frame_step_checks_file_existence_before_invoking_resolver():
-    frame_step = _frame_step()
+    frame_step = _step("### 1. Frame")
     assert re.search(r"(does\s+not\s+exist|no.{0,20}agent-instruction file)", frame_step, re.IGNORECASE), (
         "step 1 must check whether the agent-instruction file exists before "
         "invoking the resolver"
@@ -192,7 +176,7 @@ def test_frame_step_checks_file_existence_before_invoking_resolver():
 
 
 def test_frame_step_takes_absence_path_directly_stating_production_without_invoking_resolver():
-    frame_step = _frame_step()
+    frame_step = _step("### 1. Frame")
     # Scoped to the file-existence guard's own clause (terminated by '.'), so a
     # `production` mention belonging to the resolver's own section-absent
     # clause elsewhere in step 1 can never satisfy this — a decoy an unscoped

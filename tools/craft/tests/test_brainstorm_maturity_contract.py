@@ -159,9 +159,10 @@ def test_resolver_invoked_by_the_same_absolute_path_convention_as_other_gates():
         "covers_gate.py, criterion_gate.py) already use"
     )
 
+    slice_skill_text = (CRAFT / "skills" / "slice" / "SKILL.md").read_text(encoding="utf-8")
     other_gate_invocations = re.findall(
         r"\$\{CLAUDE_PLUGIN_ROOT\}/scripts/\S+\.py",
-        (CRAFT / "skills" / "slice" / "SKILL.md").read_text(encoding="utf-8"),
+        slice_skill_text,
     )
     assert other_gate_invocations, "fixture assumption: slice/SKILL.md invokes gates this way"
     # Every existing invocation is piped input, never a bare invocation with
@@ -169,9 +170,7 @@ def test_resolver_invoked_by_the_same_absolute_path_convention_as_other_gates():
     # "pipe content in" shape rather than a flag-based interface.
     for invocation in other_gate_invocations:
         assert re.search(
-            r"\|\s*" + re.escape(invocation), (CRAFT / "skills" / "slice" / "SKILL.md").read_text(
-                encoding="utf-8"
-            )
+            r"\|\s*" + re.escape(invocation), slice_skill_text
         ), f"existing gate invocation {invocation!r} must be piped, not standalone"
 
     assert re.search(
