@@ -172,6 +172,21 @@ it; do not re-inline the roster, prompt template, or bars here. Fill the substit
   `_shared/council.md`. **Not** the plan bars — a spec has no tasks, and the plan bars fire on
   things that don't exist yet.
 - `<cross-cutting>` → the empty string (the plan-drift block is planning-only).
+- `<maturity-calibration>` → the calibration block `scripts/maturity_bars.py` renders for the spec
+  under review. Pipe the spec body into the renderer, naming the current repository's
+  agent-instruction file so the absent-stamp fallback is reachable:
+  ```sh
+  lore record show <spec-name> --vault <vault> | \
+    ${CLAUDE_PLUGIN_ROOT}/scripts/maturity_bars.py --agent-instruction-file <repo-root>/CLAUDE.md
+  ```
+  **A non-zero exit refuses the lens dispatch** — do not review at an uncalibrated severity. Read
+  the `reason-code:` stderr line and refuse with the remedy the code names — mirror
+  `plan/SKILL.md`'s step 8.5 remedy table and worked refusal example rather than re-deriving a
+  second one.
+
+  **Surface the resolved level and its basis** in the recommendation you print — restate the
+  renderer's own `maturity: <level> (basis: <basis>)` line, so the operator can tell a read stamp
+  from a silent default without re-deriving it.
 
 **Passes 7–8 — consistency audit and divergence probe.** Dispatch `consistency-auditor` and
 `divergence-prober` with the spec path. Their prompts are self-contained; they need no extra
@@ -451,8 +466,9 @@ count (see above):
 
 - Retained review evidence — a later reader evaluates what follows as a claim about this spec, not
   as its settled design content (`skills/receiving-code-review/SKILL.md`).
-- Adversarial spec review (gauntlet, <date>): 8 passes — facts <n>/<n> confirmed; <n> design-changing
-  findings folded in (<one-clause each>). Criticals dispositioned: C1 `resolved` (from proposal),
+- Adversarial spec review (gauntlet, <date>): 8 passes — maturity: production (basis: stamp); facts
+  <n>/<n> confirmed; <n> design-changing findings folded in (<one-clause each>). Criticals
+  dispositioned: C1 `resolved` (from proposal),
   C2 `disputed` (operator override — "<their reason, quoted>"), C3 `resolved` (operator override —
   answered: "<their counterargument, quoted>"), … — <n> from proposal, <n> operator overrides.
   Important <n>, Minor <n>, detail below.

@@ -426,6 +426,42 @@ re-inline them here. Fill the template's substitution tokens BEFORE sending each
   - Hidden scope expansion: plan touches a subsystem the spec didn't claim
   - Reversibility unnamed: plan deploys something hard to roll back without naming rollback path
   ```
+- `<maturity-calibration>` → the calibration block `scripts/maturity_bars.py` renders for the plan's
+  linked spec. Pipe the spec body into the renderer, naming the current repository's
+  agent-instruction file so the absent-stamp fallback is reachable:
+  ```sh
+  lore record show <spec-name> --vault <vault> | \
+    ${CLAUDE_PLUGIN_ROOT}/scripts/maturity_bars.py --agent-instruction-file <repo-root>/CLAUDE.md
+  ```
+  **A non-zero exit refuses the dispatch** — do not review at an uncalibrated severity. Read the
+  `reason-code:` stderr line and refuse with the remedy it names, never proceeding without a
+  resolved level:
+
+  | reason-code | remedy |
+  |---|---|
+  | `agent-instruction-file-unreadable` | the `--agent-instruction-file` path doesn't exist or can't be read — fix the path or restore the file, then retry |
+  | `invalid-utf8-stdin` | the piped spec body isn't valid UTF-8 — fix the spec record's encoding, then retry |
+  | `duplicate-section` | the spec has more than one `## Maturity` heading — remove the duplicate, then retry |
+  | `empty-section` | the `## Maturity` heading names zero repositories — fill in `- <repo>: <level>` entries (or re-run brainstorm's stamping step), then retry |
+  | `unresolved-enumeration` | the stamp explicitly declares the touched repositories couldn't be enumerated — enumerate them and stamp each, then retry |
+  | `malformed-entry` | an entry line doesn't match `- <member-name>: <level>` — correct it, then retry |
+  | `invalid-level` | an entry's level is outside `prototype` / `early` / `production` — correct it, then retry |
+  | `duplicate-member` | the same repository is stamped twice — remove the duplicate, keep one entry per repository, then retry |
+
+  Worked example, refusing on `empty-section`:
+  ```text
+  Council dispatch refused: `maturity_bars.py` exited 2 (reason-code: empty-section). The spec's
+  `## Maturity` section names zero repositories — the stamp was left unfilled. Fix: add
+  `- <repo>: <level>` entries for every repository this spec touches (or re-run brainstorm's
+  stamping step to populate them), then retry the dispatch.
+  ```
+
+  The other three dispatchers (`gauntlet`, `consult`, `drive`) mirror this refusal shape rather than
+  restating it — do not re-derive a second remedy table.
+
+  **Surface the resolved level and its basis** in the review you print — restate the renderer's own
+  `maturity: <level> (basis: <basis>)` line, so the operator can tell a read stamp from a silent
+  default without re-deriving it.
 
 Then synthesize per `_shared/council.md` (de-duplicate by issue, auto-downgrade speculative
 Criticals, lead with the narrative synthesis in the shape "How the synthesis reads" defines there,
@@ -457,6 +493,7 @@ this populated shape:
 
 *Reviewed at:* 2026-05-22T19:42:11Z
 *Members dispatched:* builder, breaker, attacker, advocate
+*Maturity:* production (basis: stamp)
 
 *Critical:*
 - Task 2 producer contract isn't tested but Task 3 consumer depends on it (raised by: Builder) — *Disposition:* `resolved`
