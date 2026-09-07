@@ -2127,3 +2127,72 @@ def test_unset_pairing_rule_does_not_claim_a_uniform_value_shape(leaf, monkeypat
     # The metavars that make the rule's redirect truthful must actually render.
     assert "--unset-label KEY" in help_text
     assert "--unset-annotation KEY" in help_text
+
+
+# ---------------------------------------------------------------------------
+# Reader URL on stderr
+#
+# Covers the test contract:
+#   - stdout stays exactly one line, the bare id, with the URL feature added.
+#   - stderr carries the URL the record_url contract module builds for the
+#     vault the record was routed to.
+#   - the URL is plain visible text (no OSC 8 escape).
+#   - the URL prints with no reader daemon running anywhere reachable.
+# ---------------------------------------------------------------------------
+
+
+def test_create_stdout_stays_exactly_one_line_with_url_added(tmp_path):
+    """create's stdout is still the bare ``kind/name`` id and nothing else."""
+    vault, state = _make_vault(tmp_path)
+    r = _run(_BASE_ARGS, vault=vault, state_dir=state, stdin_text="body\n")
+    assert r.returncode == 0, r.stderr
+    lines = r.stdout.splitlines()
+    assert len(lines) == 1
+    assert lines[0].startswith("spec/")
+
+
+def test_create_stderr_carries_the_record_url_contract_modules_url(tmp_path):
+    """stderr's URL line is exactly the URL ``record_url.build_record_url`` builds
+    for the vault the record was routed to — derived from the producer module,
+    not a hand-typed string."""
+    vault, state = _make_vault(tmp_path)
+    r = _run(_BASE_ARGS, vault=vault, state_dir=state, stdin_text="body\n")
+    assert r.returncode == 0, r.stderr
+    record_id = r.stdout.strip()
+    kind, name = record_id.split("/", 1)
+
+    record_url_mod = load_script("lore.record_url")
+    # The seeded config (write_default_config, via run_cli) names the routed
+    # vault "default" and carries no record_url_base, so the module falls
+    # through to its own built-in default base.
+    expected_url = record_url_mod.build_record_url("default", kind, name)
+    assert expected_url in r.stderr
+
+
+def test_create_url_line_has_no_osc8_escape(tmp_path):
+    """The URL is printed as visible plain text, never an OSC 8 hyperlink escape."""
+    vault, state = _make_vault(tmp_path)
+    r = _run(_BASE_ARGS, vault=vault, state_dir=state, stdin_text="body\n")
+    assert r.returncode == 0, r.stderr
+    assert "\x1b]8" not in r.stderr
+
+
+def test_create_prints_url_with_no_reader_daemon_running(tmp_path):
+    """The URL is constructed offline: pointing the base at a closed local port
+    (nothing is listening — this harness never starts a reader daemon) still
+    succeeds quickly, because construction never reaches for the network."""
+    import time
+
+    vault, state = _make_vault(tmp_path)
+    started = time.monotonic()
+    r = _run(
+        _BASE_ARGS,
+        vault=vault,
+        state_dir=state,
+        stdin_text="body\n",
+        env_extra={"LORE_RECORD_URL_BASE": "http://127.0.0.1:1"},
+    )
+    elapsed = time.monotonic() - started
+    assert r.returncode == 0, r.stderr
+    assert elapsed < 5, f"took {elapsed}s — construction should never touch the network"
+    assert "http://127.0.0.1:1/records/" in r.stderr
