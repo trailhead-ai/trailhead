@@ -686,12 +686,16 @@ def evaluate_supersedes_guard(*, kind: str, name: str, sidecar: dict) -> list[st
     into a non-empty ``kind/name`` whose kind segment is one of the closed
     record kinds (the same vocabulary ``related`` validates against in
     ``record.model._check_related``), and must not name the record's own
-    ``kind/name``. The kind check is what stops a path-traversal sequence
-    (``../../etc/passwd``, which first-``/``-splits into kind ``..``) from
-    being written verbatim: this value is later resolved to a filesystem path
-    by a downstream consumer, and the vault is a shared, syncing artifact, so
-    this is defense in depth rather than reliance on that consumer's own
-    path-safety check alone. A mutual pair (``A`` supersedes ``B``, then
+    ``kind/name``. The kind check stops a traversal sequence in the *kind*
+    segment (``../../etc/passwd``, which first-``/``-splits into kind ``..``)
+    from being written verbatim: this value is later resolved to a filesystem
+    path by a downstream consumer, and the vault is a shared, syncing artifact,
+    so this is defense in depth rather than reliance on that consumer's own
+    path-safety check alone. It does **not** validate the name segment, so
+    ``adr/../../x`` still writes — the same shape ``related`` and ``depends-on``
+    accept today, since neither constrains a name either. Closing that is a
+    repo-wide change to the edge vocabulary, not a property of this edge, and
+    the downstream consumer's own path guard remains the check that rejects it. A mutual pair (``A`` supersedes ``B``, then
     separately ``B`` supersedes ``A``) is deliberately NOT rejected here — each
     write is judged on its own, so the chain reaches a downstream reader that
     owns the multi-hop cycle guard. Ungated: this runs for every kind, not
