@@ -2643,13 +2643,18 @@ def test_update_draft_adr_may_still_be_promoted_and_edited(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def _create_decision(vault: Path, state: Path, *, title: str = "T") -> str:
+def _create_decision(vault: Path, state: Path):
+    """Create a decision record and return the whole completed ``create`` run.
+
+    Returns the run rather than just the id because one caller asserts on
+    create's own stderr line, not only on the record it produced.
+    """
     r = _run(
-        ["record", "create", "--kind", "decision", "--title", title, "--keyword", "k"],
+        ["record", "create", "--kind", "decision", "--title", "T", "--keyword", "k"],
         vault=vault, state_dir=state, stdin_text="orig body\n",
     )
     assert r.returncode == 0, r.stderr
-    return r.stdout.strip()
+    return r
 
 
 def test_update_no_move_stdout_unchanged_stderr_carries_url(tmp_path):
@@ -2657,7 +2662,7 @@ def test_update_no_move_stdout_unchanged_stderr_carries_url(tmp_path):
     bare id (no ``moved:`` line), and stderr carries the URL for the vault the
     record already lives in — derived from the record_url contract module."""
     vault, state = _make_vault(tmp_path)
-    rid = _create_decision(vault, state)
+    rid = _create_decision(vault, state).stdout.strip()
     kind, name = rid.split("/", 1)
 
     r = _run(
@@ -2702,11 +2707,7 @@ def test_create_and_update_emit_the_identical_url_line_format(tmp_path):
     record_cli = load_script("lore.cli.record")
     record_url_mod = load_script("lore.record_url")
 
-    create_r = _run(
-        ["record", "create", "--kind", "decision", "--title", "T", "--keyword", "k"],
-        vault=vault, state_dir=state, stdin_text="body\n",
-    )
-    assert create_r.returncode == 0, create_r.stderr
+    create_r = _create_decision(vault, state)
     rid = create_r.stdout.strip()
     kind, name = rid.split("/", 1)
     create_url = record_url_mod.build_record_url("default", kind, name)

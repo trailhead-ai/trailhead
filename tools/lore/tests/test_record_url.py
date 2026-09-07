@@ -24,6 +24,10 @@ import socket
 import pytest
 
 from conftest import load_script
+# The XDG-env and config.json writers these tests need are the same ones the
+# vault-config tests already use; the config layout is one contract, so both
+# suites arrange it through one pair of helpers.
+from test_vault_config import _make_env, _write_lore_config
 
 
 def ru():
@@ -32,20 +36,6 @@ def ru():
 
 def vc():
     return load_script("lore.vault.config")
-
-
-def _make_env(tmp_path) -> dict:
-    return {
-        "XDG_CONFIG_HOME": str(tmp_path / "config"),
-        "XDG_STATE_HOME": str(tmp_path / "state"),
-        "HOME": str(tmp_path),
-    }
-
-
-def _write_lore_config(tmp_path, data: dict) -> None:
-    config_lore_dir = tmp_path / "config" / "lore"
-    config_lore_dir.mkdir(parents=True, exist_ok=True)
-    (config_lore_dir / "config.json").write_text(json.dumps(data))
 
 
 # ---------------------------------------------------------------------------
