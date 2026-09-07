@@ -485,3 +485,68 @@ def test_maturity_nested_inside_slices_diverges_from_the_ledger_positive_control
         "(silent ledger truncation) — if it doesn't, the inertness tests above "
         "are not actually sensitive to placement"
     )
+
+
+# ---- the unresolved-enumeration case must not deadlock the write -----------
+#
+# Step 6a instructs writing an explicit note when step 1's enumeration could not
+# reach the repositories at all, and separately gates `lore record create` on the
+# reader exiting 0. Those two instructions are only compatible if the note's
+# prescribed shape is one the reader tolerates AND the resulting non-zero outcome
+# is named as sanctioned. Otherwise the skill instructs a spec that can never be
+# written. These bind to the real reader, not to the skill's wording.
+
+_UNRESOLVED_ENUMERATION_BODY = """# X
+
+## Maturity
+<!-- unresolved-enumeration: step 1 could not enumerate the repositories this
+work touches; no level is claimed for any repository. -->
+
+## Acceptance Criteria
+
+- **AC1.** thing
+"""
+
+
+def test_unresolved_enumeration_note_does_not_read_as_a_malformed_entry():
+    """A prose sentence under the heading trips `malformed-entry`; a comment does
+    not. The skill must prescribe the shape that survives, or its own certify step
+    rejects the note it just told the author to write."""
+    result = _run_script(STAMP, _UNRESOLVED_ENUMERATION_BODY)
+    err = result.stderr.decode("utf-8")
+    assert "reason-code: malformed-entry" not in err, err
+    assert "reason-code: empty-section" in err, err
+
+
+def test_skill_prescribes_a_comment_shaped_unresolved_enumeration_note():
+    text = BRAINSTORM_SKILL.read_text()
+    section = text[text.index("**Fill `## Maturity`") : text.index("**Certify the drafted body")]
+    assert "<!--" in section, (
+        "step 6a must prescribe a comment-shaped unresolved-enumeration note — a bare "
+        f"sentence under the heading is rejected by the certify step it feeds: {section!r}"
+    )
+
+
+def test_skill_names_the_unresolved_enumeration_case_as_a_sanctioned_empty_section():
+    """`empty-section` is the one reader outcome with two causes — a stamp the author
+    forgot to fill, and an enumeration that genuinely reached no repository. The skill
+    must distinguish them, or the unresolved case has no way past the gate."""
+    text = BRAINSTORM_SKILL.read_text()
+    bullet = re.search(r"- `empty-section`[^\n]*(?:\n  [^\n]*)*", text)
+    assert bullet, "the `empty-section` remedy bullet must exist"
+    assert re.search(r"unresolved.enumeration", bullet.group(0), re.IGNORECASE), (
+        "the `empty-section` remedy must name the unresolved-enumeration case as its "
+        f"sanctioned second cause: {bullet.group(0)!r}"
+    )
+
+
+def test_skill_instructs_retaining_the_keep_marked_reminder_comment():
+    """The template's keep-marker is only half the mechanism — the step that fills
+    the section has to honour it. Without this, the reminder survives by convention
+    alone, which is the failure the reminder exists to prevent."""
+    text = BRAINSTORM_SKILL.read_text()
+    section = text[text.index("**Fill `## Maturity`") : text.index("**Certify the drafted body")]
+    assert re.search(r"\bkeep\b", section, re.IGNORECASE), (
+        "step 6a must instruct keeping the template's keep-marked reminder comment "
+        f"when the section is filled: {section!r}"
+    )

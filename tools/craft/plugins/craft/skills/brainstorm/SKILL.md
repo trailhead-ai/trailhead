@@ -353,10 +353,17 @@ the body sections.
 
 **Fill `## Maturity` from step 1's own resolution** — one `- <camp member name>: <level>` line per
 repository step 1's enumeration reached, naming the level resolved there, whether declared or
-defaulted. Where step 1's enumeration could not reach the repositories at all (the
-unresolved-enumeration case), state that explicitly as the section's content rather than writing a
-stamp that reads as complete — a single sentence naming the enumeration failure, never a fabricated
-per-repository list standing in for it.
+defaulted. Keep the template's keep-marked reminder comment in the filled section; strip only the
+longer pre-fill comment above it. The reminder is what tells an operator hand-correcting a stamp
+months later which levels they may type, and it is a comment because the reader rejects any
+non-bullet prose under this heading.
+
+Where step 1's enumeration could not reach the repositories at all (the unresolved-enumeration
+case), state that explicitly as the section's content rather than writing a stamp that reads as
+complete — never a fabricated per-repository list standing in for it. Write that note **as an HTML
+comment**, not as a bare sentence — `<!-- unresolved-enumeration: <what failed> -->` — because a
+sentence under this heading is rejected by the certify step below as `malformed-entry`, so an
+uncommented note produces a spec that can never be written.
 
 **Certify the drafted body before writing it.** Pipe the filled body through the stamp reader,
 before `lore record create` runs:
@@ -365,8 +372,9 @@ before `lore record create` runs:
 printf '%s' "$BODY" | ${CLAUDE_PLUGIN_ROOT}/scripts/maturity_stamp.py
 ```
 
-A non-zero exit refuses the write — nothing is created until the reader exits 0. Name the remedy the
-reader's own `reason-code:` stderr token identifies, one per code, mirroring the framing step's own
+A non-zero exit refuses the write — nothing is created until the reader exits 0, with the single
+sanctioned exception the `empty-section` remedy below names. Name the remedy the reader's own
+`reason-code:` stderr token identifies, one per code, mirroring the framing step's own
 per-reason-code translation above rather than reporting the bare code:
 
 - `empty-stdin` — the drafted body is empty; re-render the template and fill it in before retrying.
@@ -376,8 +384,12 @@ per-reason-code translation above rather than reporting the bare code:
   before retrying.
 - `duplicate-section` — the drafted body carries a second `## Maturity` heading; delete the
   duplicate before retrying.
-- `empty-section` — the heading exists but declares zero entries; add at least one
-  `- <camp member name>: <level>` line before retrying.
+- `empty-section` — the heading exists but declares zero entries. This code has two causes and only
+  one of them refuses the write. Ordinarily it means the stamp was left unfilled: add at least one
+  `- <camp member name>: <level>` line before retrying. In the unresolved-enumeration case above it
+  is the **sanctioned** outcome — the section truthfully declares no level for any repository, and
+  the create proceeds on that basis. Say which of the two applies before continuing; never claim the
+  unresolved case to get an unfilled stamp past this gate.
 - `malformed-entry` — a line under the heading is not a valid `- <camp member name>: <level>`
   bullet; correct that line's shape before retrying.
 - `invalid-level` — an entry's level falls outside the closed vocabulary (`prototype` / `early` /
@@ -385,8 +397,8 @@ per-reason-code translation above rather than reporting the bare code:
 - `duplicate-member` — the same camp member name appears twice under the heading; remove or merge
   the duplicate entry before retrying.
 
-Only once the reader exits 0 does the create proceed — pipe the same certified body to
-`lore record create`:
+Once the reader exits 0 — or reports the sanctioned `empty-section` outcome above — the create
+proceeds; pipe the same certified body to `lore record create`:
 
 ```sh
 printf '%s' "$BODY" | lore record create --kind spec --title "<topic>" --status draft

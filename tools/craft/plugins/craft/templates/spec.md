@@ -14,7 +14,7 @@ framing step (never invented here). This section must remain a top-level sibling
 section, never nested inside `## Slices` below: a `## ` heading wedged between the
 `## Slices` heading and its first ledger bullet truncates that section's ledger
 scan silently, at exit 0, with no error. -->
-<!-- Allowed levels: prototype | early | production. -->
+<!-- keep this line in the written spec: allowed levels are prototype | early | production. -->
 
 ## Acceptance Criteria
 <!-- The bar that must be met for this to be considered done. Specific and

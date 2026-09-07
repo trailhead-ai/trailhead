@@ -257,25 +257,29 @@ def test_spec_template_maturity_comment_states_the_slices_sibling_constraint():
     )
 
 
-def test_spec_template_maturity_grammar_reminder_survives_stripping_the_pre_fill_comment():
-    """A template comment is stripped once an author fills in a section — established
-    convention this template already relies on elsewhere. The vocabulary reminder must
-    still be legible in the rendered section after that strip, not only in the
-    pre-fill comment, so an operator hand-correcting a stamp months later doesn't have
-    to go find the reader's source to learn what they may type."""
+def test_spec_template_maturity_reminder_comment_is_marked_to_be_kept():
+    """A template comment is stripped once an author fills in a section. The
+    vocabulary reminder must therefore carry its own keep-marker, so an author or
+    agent filling the section can tell which comment goes and which stays — a
+    reminder that survives only by convention survives nothing, and the operator
+    hand-correcting a stamp months later is the one who pays.
+
+    The reminder cannot be ordinary prose: a non-bullet line under the heading is
+    rejected by `maturity_stamp.py` as `malformed-entry`, so a comment is the only
+    carrier the reader tolerates. That makes the keep-marker load-bearing rather
+    than decorative."""
     section = _maturity_section_text()
     comments = re.findall(r"<!--.*?-->", section, re.DOTALL)
     assert len(comments) >= 2, (
         "the `## Maturity` section must carry a full instructional comment plus a "
-        f"separate, shorter reminder comment that survives the former's removal: {section!r}"
+        f"separate, shorter reminder comment: {section!r}"
     )
-    # Simulate an author stripping only the first (longest) pre-fill comment, as the
-    # rest of this template's sections are conventionally treated once filled in.
-    pre_fill_comment = max(comments, key=len)
-    stripped = section.replace(pre_fill_comment, "")
-    assert re.search(r"\bprototype\b", stripped)
-    assert re.search(r"\bearly\b", stripped)
-    assert re.search(r"\bproduction\b", stripped), (
-        "the closed vocabulary must remain legible in the section even after the "
-        f"pre-fill comment is stripped: {stripped!r}"
+    reminder = min(comments, key=len)
+    assert re.search(r"\bkeep\b", reminder, re.IGNORECASE), (
+        "the surviving reminder comment must mark itself as keep-worthy, so it is "
+        f"distinguishable from the pre-fill comment that is stripped: {reminder!r}"
     )
+    for level in ("prototype", "early", "production"):
+        assert re.search(rf"\b{level}\b", reminder), (
+            f"the keep-marked reminder must name the closed vocabulary: {reminder!r}"
+        )
