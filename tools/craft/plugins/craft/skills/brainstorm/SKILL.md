@@ -407,7 +407,16 @@ per-reason-code translation above rather than reporting the bare code:
   repository, or escalate to the operator for the touched repositories) before retrying. The marker
   documents why the certify gate refused; it is not itself a path past it.
 - `malformed-entry` — a line under the heading is not a valid `- <camp member name>: <level>`
-  bullet; correct that line's shape before retrying.
+  bullet; correct that line's shape before retrying. When the offending text is the member name
+  itself, no shape correction can fix it: camp validates member names only as non-empty strings, so
+  a name like `my repo` can never satisfy the reader's safe grammar (`[A-Za-z0-9._-]`) no matter how
+  the line is reshaped. Normalize it before writing instead: replace every character outside
+  `[A-Za-z0-9._-]` with `-`, collapse consecutive `-` into one, and strip leading and trailing `-`;
+  if that leaves nothing, or exactly `.` or `..`, prefix `member-`. Before writing, check the
+  normalized key against every other touched repository's own key (normalized or already safe) — a
+  collision (two distinct member names normalizing to the same key) is unresolvable here: name both
+  original member names and treat those repositories as `unresolved-enumeration` rather than write
+  one entry to silently shadow the other.
 - `invalid-level` — an entry's level falls outside the closed vocabulary (`prototype` / `early` /
   `production`); correct that entry's level before retrying.
 - `duplicate-member` — the same camp member name appears twice under the heading; remove or merge

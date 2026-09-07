@@ -160,6 +160,27 @@ Restate the idea in one paragraph using your own words. Confirm with the user be
 - Pull related prior art for reference only: specs, decisions, and dropped tasks in your vault
 - Never modify a prior spec — if this supersedes one, link it from the new spec's `Related` section
 
+**Resolve maturity for every repository the work touches, before Poke at Edges begins** — the same
+enumeration and resolution `brainstorm/SKILL.md` step 1 runs, so step 5 below has a real resolution
+to fill from. Enumerate repositories the same way: in a camp workspace, the member worktrees listed
+in its camp manifest (`manifest.json`); in vanilla usage, the single current repo. A session rooted
+above several repositories with no camp manifest to enumerate them cannot resolve at all — name that
+case explicitly as unresolved-enumeration (step 5 below), never folded silently into the single-repo
+fallback. For each repository the enumeration does reach: when its agent-instruction file does not
+exist, skip the resolver and state `production` directly (piping a nonexistent file yields empty
+stdin, the resolver's own unrelated fail-closed path); when it exists, pipe it into
+`${CLAUDE_PLUGIN_ROOT}/scripts/maturity_resolve.py`. A resolver exit 2 on a file that does exist
+states that repository as `production (resolver failed — treated as unresolved, not a declaration)`
+and continues the rest of the enumeration. State the resolved level per repository before
+continuing.
+
+A dispatched planner run has no user to escalate an unresolved-enumeration to, unlike brainstorm's
+operator escalation. Follow this file's own convention for a dead end an isolated run cannot ask
+about (Orient, "A live candidate produces an escalation"): write the
+`<!-- unresolved-enumeration: ... -->` marker into the drafted spec's `## Maturity` section (step 5
+below), proceed with whatever repositories did resolve, and report the deferral in your returned
+summary rather than blocking on an answer this run cannot get.
+
 ### 2. Poke at Edges
 
 Surface the questions that *would shape the design if answered differently*. Batch them, rank by
@@ -197,16 +218,40 @@ Iterate until the user is satisfied. Skip for backend-only or infra changes.
 
 ### 5. Write the Spec
 
-Persist the spec with `lore record create` (see `skills/_shared/note-storage.md`): render craft's
-spec body template (`${CLAUDE_PLUGIN_ROOT}/templates/spec.md`), fill in the sections, then pipe the
-filled body to it —
-`printf '%s' "$BODY" | lore record create --kind spec --title "<topic>" --status draft`.
+Render craft's spec body template (`${CLAUDE_PLUGIN_ROOT}/templates/spec.md`) and fill in the
+sections (see `skills/_shared/note-storage.md` for the underlying `lore record create` mechanics).
 
 Fill in: **Problem** (real problem, why now) · **Objectives** (bulleted, outcome-framed) ·
-**Acceptance Criteria** (testable, observable) · **Required Interfaces** (each boundary the spec
-implies, and the criteria it must satisfy — not its shape) · **Non-Goals** (explicit scope bounds) ·
-**Constraints** (technical/business/timing) · **UI Direction** (omit if no UI surface) · **Open
-Questions / Risks** · **Related**
+**Maturity** (below) · **Acceptance Criteria** (testable, observable) · **Required Interfaces**
+(each boundary the spec implies, and the criteria it must satisfy — not its shape) · **Non-Goals**
+(explicit scope bounds) · **Constraints** (technical/business/timing) · **UI Direction** (omit if no
+UI surface) · **Open Questions / Risks** · **Related**
+
+**Fill `## Maturity` from step 1's own resolution** — one `- <camp member name>: <level>` line per
+repository this work touches, naming the level step 1 already resolved for it. Keep the template's
+keep-marked reminder comment in the filled section; strip only the longer pre-fill comment above it.
+Where step 1's enumeration could not reach the repositories at all, write that as the section's
+content instead of a fabricated list — as an HTML comment, not bare prose (bare prose under this
+heading is `malformed-entry`): `<!-- unresolved-enumeration: <what failed> -->`.
+
+**Certify the drafted body before writing it — mirroring `skills/brainstorm/SKILL.md` step 6a
+exactly, not a second dialect of the same check.** Pipe the filled body through the stamp reader
+before `lore record create` runs:
+
+```sh
+printf '%s' "$BODY" | ${CLAUDE_PLUGIN_ROOT}/scripts/maturity_stamp.py
+```
+
+**A non-zero exit refuses the write, always** — nothing is created until the reader exits 0. Name
+the remedy the reader's `reason-code:` stderr token identifies, exactly as `brainstorm/SKILL.md`
+step 6a's own per-reason-code table states it (`empty-stdin`, `invalid-utf8-stdin`,
+`section-absent`, `duplicate-section`, `empty-section`, `unresolved-enumeration`, `malformed-entry`,
+`invalid-level`, `duplicate-member`) — read that table rather than duplicating it here. Once the
+reader exits 0, pipe the same certified body to `lore record create`:
+
+```sh
+printf '%s' "$BODY" | lore record create --kind spec --title "<topic>" --status draft
+```
 
 ### 6. Brainstorming Exit Gate
 

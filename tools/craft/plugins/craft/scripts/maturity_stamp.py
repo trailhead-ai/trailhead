@@ -112,6 +112,8 @@ if str(_SCRIPT_DIR) not in sys.path:
 
 from covers_gate import (  # noqa: E402
     _COMMONMARK_LINE_RE,
+    _FENCE_START_RE,
+    _HTML_COMMENT_START_RE,
     DuplicateHeadingError,
     _find_unique_heading,
     _mask_fenced_lines,
@@ -122,7 +124,7 @@ _MATURITY_HEADING = "## Maturity"
 _MATURITY_HEADING_RE = re.compile(r"^## Maturity$", re.IGNORECASE)
 _MEMBER_RE = re.compile(r"^(?!\.{1,2}$)[A-Za-z0-9._-]+$")
 _ENTRY_RE = re.compile(r"^-\s+([^:]*):\s*(.*)$")
-_UNRESOLVED_ENUMERATION_MARKER_RE = re.compile(r"^<!--\s*unresolved-enumeration:.*-->\s*$")
+_UNRESOLVED_ENUMERATION_MARKER_RE = re.compile(r"^\s*<!--\s*unresolved-enumeration:.*-->\s*$")
 
 _EMPTY_STDIN_REASON_CODE = "empty-stdin"
 _INVALID_UTF8_STDIN_REASON_CODE = "invalid-utf8-stdin"
@@ -150,19 +152,62 @@ class StampError(Exception):
         super().__init__(reason_code)
 
 
+def _mask_reasons(lines: list[str]) -> list[str]:
+    """Mirror `covers_gate._mask_fenced_lines`'s state machine exactly, but
+    record *why* each line is masked ("fence" or "comment") instead of a
+    single boolean. `_extract_section_lines` below needs the distinction: a
+    masked HTML comment is the one place the unresolved-enumeration marker
+    can legitimately live, but a masked fenced-code line is ordinary code
+    content — a marker-shaped string typed inside a fence must never be read
+    as a genuine declaration, which a single `masked` boolean cannot
+    distinguish."""
+    reasons = [""] * len(lines)
+    fence_char: str | None = None
+    fence_len = 0
+    in_comment = False
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if in_comment:
+            reasons[i] = "comment"
+            if "-->" in line:
+                in_comment = False
+            continue
+        if fence_char is None:
+            if _HTML_COMMENT_START_RE.match(stripped):
+                reasons[i] = "comment"
+                if "-->" not in stripped:
+                    in_comment = True
+                continue
+            m = _FENCE_START_RE.match(stripped)
+            if m:
+                fence_char = m.group(1)[0]
+                fence_len = len(m.group(1))
+                reasons[i] = "fence"
+            continue
+        reasons[i] = "fence"
+        m = _FENCE_START_RE.match(stripped)
+        if m and m.group(1)[0] == fence_char and len(m.group(1)) >= fence_len:
+            fence_char = None
+    return reasons
+
+
 def _extract_section_lines(text: str) -> tuple[list[str], list[str]]:
     """Return `(body, raw)` for the sole unmasked `## Maturity` heading:
     `body` is everything after the heading line up to (but not including) the
     next unmasked top-level `## ` heading, with masked lines (fenced code,
     HTML comments) omitted — this is what `parse_entries` scans for bullets,
-    unchanged from before. `raw` is the same range with masked lines kept, so
-    a caller can still observe an HTML comment that `body` makes invisible —
-    the one place the unresolved-enumeration marker (necessarily a comment,
-    since bare prose under this heading is `malformed-entry`) can be read at
-    all. Raises StampError(section-absent) if no such heading exists, or
-    StampError(duplicate-section) if a second unmasked occurrence exists."""
+    unchanged from before. `raw` is the same range with comment-masked lines
+    kept but fence-masked lines still omitted, so a caller can observe an
+    HTML comment that `body` makes invisible — the one place the
+    unresolved-enumeration marker (necessarily a comment, since bare prose
+    under this heading is `malformed-entry`) can be read at all — without a
+    marker-shaped string typed inside a fenced code block being read as a
+    genuine one. Raises StampError(section-absent) if no such heading exists,
+    or StampError(duplicate-section) if a second unmasked occurrence exists.
+    """
     lines = _COMMONMARK_LINE_RE.split(text)
     masked = _mask_fenced_lines(lines)
+    mask_reasons = _mask_reasons(lines)
 
     try:
         start = _find_unique_heading(
@@ -183,7 +228,8 @@ def _extract_section_lines(text: str) -> tuple[list[str], list[str]]:
     i = start
     while i < n:
         if masked[i]:
-            raw.append(lines[i])
+            if mask_reasons[i] == "comment":
+                raw.append(lines[i])
             i += 1
             continue
         if lines[i].startswith("## "):
@@ -207,10 +253,20 @@ def parse_entries(text: str) -> dict[str, str]:
     `unresolved-enumeration` — a deliberate statement that no level is
     claimed for any repository. Otherwise `empty-section` — an unfilled
     stamp. The two are not interchangeable: `empty-section` always means the
-    stamp was left blank."""
+    stamp was left blank.
+
+    Duplicate detection is case-fold based, not merely exact-string: two
+    member names differing only by case (`LOOKOUT` / `lookout`) resolve to
+    the same path segment on a case-insensitive filesystem (macOS APFS
+    default, Windows) once a downstream AC7 consumer treats the member name
+    as a path segment, so they are rejected here as the same
+    `duplicate-member` violation an exact-string repeat already is, rather
+    than silently accepted as three distinct entries that later collapse
+    into whichever one a case-insensitive lookup happens to read."""
     body_lines, raw_lines = _extract_section_lines(text)
 
     entries: dict[str, str] = {}
+    seen_casefold: dict[str, str] = {}
     for line in body_lines:
         if line.strip() == "":
             continue
@@ -223,8 +279,10 @@ def parse_entries(text: str) -> dict[str, str]:
             raise StampError(_MALFORMED_ENTRY_REASON_CODE, name)
         if level not in _LEVELS:
             raise StampError(_INVALID_LEVEL_REASON_CODE, level)
-        if name in entries:
+        folded = name.casefold()
+        if folded in seen_casefold:
             raise StampError(_DUPLICATE_MEMBER_REASON_CODE, name)
+        seen_casefold[folded] = name
         entries[name] = level
 
     if not entries:

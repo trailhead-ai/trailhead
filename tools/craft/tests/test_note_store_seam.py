@@ -234,6 +234,19 @@ def _maturity_section_text() -> str:
     return text[start:end]
 
 
+def _select_keep_marked_reminder(comments: list[str]) -> str:
+    """Select the reminder comment by its literal `keep this line` marker,
+    never by an incidental convention like comment length — a template edit
+    that makes the pre-fill comment shorter than the reminder must not
+    silently flip which comment this test is actually checking."""
+    matches = [c for c in comments if "keep this line" in c]
+    assert len(matches) == 1, (
+        f"expected exactly one comment carrying the 'keep this line' marker, "
+        f"found {len(matches)}: {comments!r}"
+    )
+    return matches[0]
+
+
 def test_spec_template_maturity_comment_states_closed_vocabulary_and_grammar():
     section = _maturity_section_text()
     assert re.search(r"\bprototype\b", section)
@@ -274,7 +287,7 @@ def test_spec_template_maturity_reminder_comment_is_marked_to_be_kept():
         "the `## Maturity` section must carry a full instructional comment plus a "
         f"separate, shorter reminder comment: {section!r}"
     )
-    reminder = min(comments, key=len)
+    reminder = _select_keep_marked_reminder(comments)
     assert re.search(r"\bkeep\b", reminder, re.IGNORECASE), (
         "the surviving reminder comment must mark itself as keep-worthy, so it is "
         f"distinguishable from the pre-fill comment that is stripped: {reminder!r}"
@@ -283,3 +296,19 @@ def test_spec_template_maturity_reminder_comment_is_marked_to_be_kept():
         assert re.search(rf"\b{level}\b", reminder), (
             f"the keep-marked reminder must name the closed vocabulary: {reminder!r}"
         )
+
+
+def test_select_keep_marked_reminder_ignores_comment_length():
+    """Regression pin: selection must be anchored on the literal `keep this
+    line` marker, not on which comment happens to be shortest. This fixture
+    inverts the real template's incidental lengths — the pre-fill-shaped
+    comment is the short one here — so a length-based selector would pick
+    the wrong comment while the marker-based one still picks correctly."""
+    inverted_length_comments = [
+        "<!-- short filler, not the reminder -->",
+        "<!-- keep this line in the written spec: allowed levels are "
+        "prototype | early | production, and this comment is deliberately "
+        "made the longer of the two to invert the real template's lengths -->",
+    ]
+    selected = _select_keep_marked_reminder(inverted_length_comments)
+    assert selected == inverted_length_comments[1]

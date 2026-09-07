@@ -711,3 +711,50 @@ def test_fill_step_defines_the_vanilla_single_repo_stamp_key():
         "step 6a must define the vanilla single-repo stamp key concretely "
         f"(e.g. the repository directory's basename): {section!r}"
     )
+
+
+# ---- the malformed-entry remedy is actionable even when the offending text
+#      is the member name itself, un-representable in the safe grammar -----
+
+
+def _malformed_entry_bullet() -> str:
+    text = BRAINSTORM_SKILL.read_text()
+    bullet = re.search(r"- `malformed-entry`[^\n]*(?:\n  [^\n]*)*", text)
+    assert bullet, "the `malformed-entry` remedy bullet must exist"
+    return bullet.group(0)
+
+
+def test_malformed_entry_remedy_names_normalization_for_an_unrepresentable_member_name():
+    """Camp validates member names only as non-empty strings — no character
+    restriction — so a name like `my repo` can never satisfy the reader's
+    safe grammar (`^(?!\\.{1,2}$)[A-Za-z0-9._-]+$`) no matter how its shape is
+    corrected. 'correct that line's shape' alone is not actionable for that
+    case; the remedy must name a real normalization."""
+    bullet = _malformed_entry_bullet()
+    assert re.search(r"normali[sz]e", bullet, re.IGNORECASE), (
+        f"the `malformed-entry` remedy must name normalizing an un-representable "
+        f"member name, not just 'correct that line's shape': {bullet!r}"
+    )
+
+
+def test_malformed_entry_remedy_names_collision_detection_for_normalized_keys():
+    """A normalization that can map two distinct member names to the same
+    safe-grammar key must say how that collision is caught — never a silent
+    one-shadows-the-other write."""
+    bullet = _malformed_entry_bullet()
+    assert re.search(r"collid|collision", bullet, re.IGNORECASE), (
+        f"the `malformed-entry` remedy must name collision detection for the "
+        f"normalized key: {bullet!r}"
+    )
+
+
+def test_malformed_entry_remedy_normalization_is_a_defined_deterministic_transform():
+    """The normalization must be spelled out concretely (which characters are
+    replaced, and with what) rather than left to an author's own judgment call
+    each time — an undefined 'pick something reasonable' produces a different
+    key for the same member name on a later retry."""
+    bullet = _malformed_entry_bullet()
+    assert re.search(r"\[A-Za-z0-9._-\]", bullet), (
+        f"the `malformed-entry` remedy must cite the reader's own safe-grammar "
+        f"character class it normalizes into: {bullet!r}"
+    )

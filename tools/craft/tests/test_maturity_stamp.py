@@ -15,7 +15,8 @@ Exit codes:
   0 → every entry resolved cleanly
   2 → fail-closed, with a `reason-code:` line on stderr naming one of:
       empty-stdin, invalid-utf8-stdin, section-absent, duplicate-section,
-      malformed-entry, invalid-level, duplicate-member, empty-section
+      empty-section, unresolved-enumeration, malformed-entry, invalid-level,
+      duplicate-member
 """
 
 from __future__ import annotations
@@ -232,6 +233,70 @@ blah
 ## Maturity
 
 - lookout: prototype
+"""
+
+CASE_VARIANT_MEMBER_NAMES = """\
+# Some Spec
+
+## Maturity
+
+- LOOKOUT: production
+- lookout: early
+- Lookout: prototype
+"""
+
+CASE_VARIANT_AGAINST_FIRST_DECLARATION = """\
+# Some Spec
+
+## Maturity
+
+- lookout: production
+- LOOKOUT: prototype
+"""
+
+DISTINCT_NAMES_DIFFER_BY_MORE_THAN_CASE = """\
+# Some Spec
+
+## Maturity
+
+- lookout: production
+- Trailhead: early
+"""
+
+MARKER_INSIDE_FENCED_CODE_BLOCK = """\
+# Some Spec
+
+## Maturity
+
+```
+<!-- unresolved-enumeration: this is code, not a real marker -->
+```
+
+## Other Section
+
+irrelevant
+"""
+
+INDENTED_UNRESOLVED_ENUMERATION_MARKER = """\
+# Some Spec
+
+## Maturity
+
+  <!-- unresolved-enumeration: indented but still the real marker -->
+
+## Other Section
+
+irrelevant
+"""
+
+MARKER_ALONGSIDE_VALID_ENTRIES = """\
+# Some Spec
+
+## Maturity
+
+- lookout: prototype
+<!-- unresolved-enumeration: leftover note, entries exist so this is not the empty case -->
+- trailhead: production
 """
 
 
@@ -468,3 +533,90 @@ def test_duplicate_section_and_invalid_level_reports_one_deterministic_reason_co
 def test_module_docstring_cross_references_the_open_prompt_injection_channel_task():
     text = STAMP.read_text(encoding="utf-8")
     assert "task/the-offending-value-echo-is-an-unclosed-prompt-injection-channel" in text
+
+
+_NINE_REASON_CODES = (
+    "empty-stdin",
+    "invalid-utf8-stdin",
+    "section-absent",
+    "duplicate-section",
+    "empty-section",
+    "unresolved-enumeration",
+    "malformed-entry",
+    "invalid-level",
+    "duplicate-member",
+)
+
+
+def test_this_test_module_docstring_lists_all_nine_reason_codes():
+    """This test module's own contract docstring (top of file) must stay in
+    sync with the reader's actual reason-code vocabulary — a stale list here
+    misdescribes the contract this file's tests actually pin."""
+    with open(__file__, "r", encoding="utf-8") as f:
+        module_docstring = f.read().split('"""')[1]
+    for code in _NINE_REASON_CODES:
+        assert code in module_docstring, (
+            f"this test module's docstring must list reason-code {code!r}: "
+            f"{module_docstring!r}"
+        )
+
+
+# ---- case-fold collisions on member names are rejected, never silently folded --
+
+
+def test_case_variant_member_names_are_rejected_as_duplicate_member():
+    """LOOKOUT / lookout / Lookout would resolve to one path segment on a
+    case-insensitive filesystem (macOS APFS default, Windows) once an AC7
+    attribution consumer treats the member name as a path segment — reject the
+    collision here rather than silently writing three distinct entries that
+    later collapse into one, whichever the consumer happens to read last."""
+    result = _run(CASE_VARIANT_MEMBER_NAMES.encode("utf-8"))
+    assert result.returncode == 2
+    assert not any(line.startswith("maturity:") for line in _lines(result))
+    assert "reason-code: duplicate-member" in result.stderr.decode("utf-8")
+
+
+def test_case_variant_against_a_single_earlier_declaration_is_also_rejected():
+    result = _run(CASE_VARIANT_AGAINST_FIRST_DECLARATION.encode("utf-8"))
+    assert result.returncode == 2
+    assert "reason-code: duplicate-member" in result.stderr.decode("utf-8")
+
+
+def test_names_differing_by_more_than_case_still_resolve_cleanly():
+    """The collision check is scoped to case-only collisions — two genuinely
+    distinct member names must still resolve, so the fix cannot be a blanket
+    case-fold-everything that would reject legitimate distinct repositories."""
+    result = _run(DISTINCT_NAMES_DIFFER_BY_MORE_THAN_CASE.encode("utf-8"))
+    assert result.returncode == 0
+    assert _lines(result) == ["maturity: Trailhead=early, lookout=production"]
+
+
+# ---- the unresolved-enumeration marker scan is fence-aware and not column-anchored
+
+
+def test_marker_inside_fenced_code_block_is_not_read_as_a_genuine_declaration():
+    """A marker-shaped string typed inside a fenced code block under the
+    heading is code content, not a real declaration — the section still has
+    zero real entries and no genuine marker, so it is plain `empty-section`,
+    matching what an unfenced twin with no marker at all would report."""
+    result = _run(MARKER_INSIDE_FENCED_CODE_BLOCK.encode("utf-8"))
+    assert result.returncode == 2
+    assert "reason-code: empty-section" in result.stderr.decode("utf-8")
+
+
+def test_indented_marker_is_still_recognized_as_the_real_marker():
+    """The marker regex must not be column-anchored — an indented marker is
+    still the genuine unresolved-enumeration statement, not a degraded
+    empty-section."""
+    result = _run(INDENTED_UNRESOLVED_ENUMERATION_MARKER.encode("utf-8"))
+    assert result.returncode == 2
+    assert "reason-code: unresolved-enumeration" in result.stderr.decode("utf-8")
+
+
+def test_marker_alongside_valid_entries_is_ignored_and_exits_zero():
+    """The marker only settles what an otherwise-empty section means. A
+    section with real entries plus a leftover marker comment is not the
+    empty case at all — the entries win and the comment is inert."""
+    result = _run(MARKER_ALONGSIDE_VALID_ENTRIES.encode("utf-8"))
+    assert result.returncode == 0
+    assert _lines(result) == ["maturity: lookout=prototype, trailhead=production"]
