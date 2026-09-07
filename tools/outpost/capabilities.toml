@@ -1,10 +1,10 @@
-# outpost — the human→agent review loop over the local outpost cockpit daemon.
+# outpost — publishing static sites into a shared lore vault, for the local
+# outpost cockpit daemon to serve.
 # tool.name MUST equal the plugins/<name>/ dir ("outpost").
 # No python package, no subagents, no always-on base. The skills (skills/*/) are
-# discovered on disk by name — mostly HTTP contracts against the cockpit daemon,
-# plus `publish-site`, which runs a script bundled beside it; `ruleset` carries the
-# always-loaded publish posture that makes the sites capability discoverable
-# before a user thinks to ask for it.
+# discovered on disk by name: `publish-site` runs a script bundled beside it, and
+# `ruleset` carries the always-loaded publish posture that makes the sites
+# capability discoverable before a user thinks to ask for it.
 
 [tool]
 name = "outpost"
