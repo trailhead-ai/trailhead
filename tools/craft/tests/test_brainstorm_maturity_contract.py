@@ -6,11 +6,22 @@ These tests bind the skill's prose to something executable — the real
 `maturity_resolve.py` resolver run as a subprocess against real fixture
 agent-instruction bodies — never to a copy of the skill's own wording, mirroring
 `test_slice_candidate_set_contract.py`'s established pattern for this repo.
+
+The second half of this module (below the "Write path" banner) covers
+brainstorm's spec-write step (step "6a. Write the Spec"): it fills the spec
+template's `## Maturity` section from step 1's resolution and certifies the
+drafted body through `maturity_stamp.py` before `lore record create` runs —
+per `task/brainstorm-stamps-the-spec-and-the-template-carries-the-section`.
+Those tests bind to the real `maturity_stamp.py`, `candidate_set.py`, and
+`covers_gate.py` scripts run as subprocesses against real fixture spec
+bodies, never to a copy of the skill's own wording.
 """
 
 from __future__ import annotations
 
 import re
+import subprocess
+import sys
 from pathlib import Path
 
 # The resolver runner and fixture bodies are the same ones the resolver's own
@@ -25,6 +36,11 @@ from test_maturity_resolve import (
 
 CRAFT = Path(__file__).parent.parent / "plugins" / "craft"
 BRAINSTORM_SKILL = CRAFT / "skills" / "brainstorm" / "SKILL.md"
+SCRIPTS_DIR = CRAFT / "scripts"
+STAMP = SCRIPTS_DIR / "maturity_stamp.py"
+CANDIDATE_SET = SCRIPTS_DIR / "candidate_set.py"
+COVERS_GATE = SCRIPTS_DIR / "covers_gate.py"
+SPEC_TEMPLATE = CRAFT / "templates" / "spec.md"
 
 
 def _skill_text() -> str:
@@ -238,4 +254,234 @@ def test_frame_step_names_the_case_where_repositories_cannot_be_enumerated():
     clause = clause_match.group(0)
     assert re.search(r"explicit|state|cannot", clause, re.IGNORECASE), (
         f"the 'neither applies' clause must require stating the case explicitly: {clause!r}"
+    )
+
+
+# ===========================================================================
+# Write path — step "6a. Write the Spec" fills `## Maturity` and certifies it
+# through `maturity_stamp.py` before `lore record create` runs.
+# ===========================================================================
+
+_STAMP_REASON_CODES = [
+    "empty-stdin",
+    "invalid-utf8-stdin",
+    "section-absent",
+    "duplicate-section",
+    "empty-section",
+    "malformed-entry",
+    "invalid-level",
+    "duplicate-member",
+]
+
+
+def _write_step() -> str:
+    return _step("### 6a. Write the Spec")
+
+
+def _run_script(
+    script: Path, body: str, extra_args: list[str] | None = None
+) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [sys.executable, str(script), *(extra_args or [])],
+        input=body.encode("utf-8"),
+        capture_output=True,
+    )
+
+
+# ---- 9. the spec template's `## Maturity` section, filled in, round-trips
+#         through the real stamp reader at exit 0 ----------------------------
+
+
+def _render_template_with_maturity_entries(entries: dict[str, str]) -> str:
+    """Render `templates/spec.md` with the given `{member: level}` entries filled
+    into its `## Maturity` section — the same shape brainstorm's write step
+    produces from step 1's resolution."""
+    text = SPEC_TEMPLATE.read_text(encoding="utf-8")
+    marker = "## Acceptance Criteria"
+    idx = text.index(marker)
+    bullet_lines = "\n".join(f"- {name}: {level}" for name, level in entries.items())
+    return text[:idx] + bullet_lines + "\n\n" + text[idx:]
+
+
+def test_template_rendered_with_two_repository_maturity_section_accepted_at_exit_0():
+    body = _render_template_with_maturity_entries(
+        {"trailhead": "production", "lookout": "prototype"}
+    )
+    result = _run_script(STAMP, body)
+    assert result.returncode == 0, result.stderr.decode("utf-8")
+    assert result.stdout.decode("utf-8") == "maturity: lookout=prototype, trailhead=production\n"
+
+
+# ---- 5. the write step instructs writing the section, by heading, keyed by
+#         camp member name ---------------------------------------------------
+
+
+def test_write_step_instructs_writing_the_maturity_section_keyed_by_member_name():
+    step = _write_step()
+    assert "## Maturity" in step, (
+        "step 6a must instruct writing the `## Maturity` section by its heading"
+    )
+    assert re.search(r"camp member name", step, re.IGNORECASE), (
+        "step 6a must name the camp member name as the section's key"
+    )
+
+
+# ---- 6. the write step instructs certifying via the real reader before
+#         `lore record create`, and refusing on a non-zero exit -------------
+
+
+def test_write_step_instructs_certifying_via_maturity_stamp_before_create():
+    step = _write_step()
+    assert "maturity_stamp.py" in step, (
+        "step 6a must instruct piping the drafted body through maturity_stamp.py"
+    )
+    assert re.search(r"non-zero exit", step, re.IGNORECASE), (
+        "step 6a must name the non-zero-exit refusal case explicitly"
+    )
+    refusal_clause_match = re.search(r"non-zero exit[^.]*\.", step, re.IGNORECASE)
+    assert refusal_clause_match, "step 6a must have a non-zero-exit clause terminated by '.'"
+    assert re.search(r"refus", refusal_clause_match.group(0), re.IGNORECASE), (
+        "the non-zero-exit clause must instruct refusing the write, not proceeding: "
+        f"{refusal_clause_match.group(0)!r}"
+    )
+
+
+def test_maturity_certify_precedes_the_record_create_it_guards():
+    step = _write_step()
+    certify_at = step.index("maturity_stamp.py")
+    create_at = step.index("lore record create --kind spec")
+    assert certify_at < create_at, (
+        "the maturity_stamp.py certify instruction must appear before the "
+        "`lore record create --kind spec` call it guards within step 6a"
+    )
+
+
+# ---- 7. every reason-code the reader can emit gets its own named remedy ----
+
+
+def test_write_step_names_a_distinct_remedy_for_every_stamp_reason_code():
+    step = _write_step()
+    clauses: dict[str, str] = {}
+    for code in _STAMP_REASON_CODES:
+        # Scoped to the bullet line naming this reason-code, from just past its
+        # backticked token through the terminating '.' — captured as its own
+        # group so the code token itself (always distinct) never masks two
+        # codes sharing identical remedy prose.
+        pattern = re.escape(f"`{code}`") + r"\s*—\s*([^.]*\.)"
+        match = re.search(pattern, step)
+        assert match, f"step 6a must name a remedy for reason-code `{code}`"
+        clauses[code] = match.group(1)
+    # A shared boilerplate sentence copy-pasted under all eight codes would
+    # satisfy the loop above without translating any of them individually —
+    # guard against that by requiring eight *distinct* remedy clauses.
+    assert len(set(clauses.values())) == len(_STAMP_REASON_CODES), (
+        f"each reason-code must get its own distinct remedy clause, not a shared "
+        f"boilerplate line: {clauses!r}"
+    )
+
+
+# ---- 8. the unresolved-enumeration case is named, not silently completed ---
+
+
+def test_write_step_names_the_unresolved_enumeration_case():
+    step = _write_step()
+    assert re.search(r"unresolved-enumeration", step, re.IGNORECASE), (
+        "step 6a must name the unresolved-enumeration case (step 1's own term "
+        "for when repositories could not be enumerated at all)"
+    )
+    clause_match = re.search(r"unresolved-enumeration[^.]*\.", step, re.IGNORECASE)
+    assert clause_match, "step 6a must have an unresolved-enumeration clause terminated by '.'"
+    assert re.search(r"complete", clause_match.group(0), re.IGNORECASE), (
+        "the unresolved-enumeration clause must contrast against a stamp that "
+        f"reads as complete: {clause_match.group(0)!r}"
+    )
+
+
+# ---- Slices-sibling hard constraint: the template's placement is inert to
+#      both spec-reading gates, for a spec that carries a real `## Slices`
+#      ledger and one that carries none — a permanent, narrower successor to
+#      the assumption-prover's own four-placement probe. -------------------
+
+_HEAD = "# Fixture Spec\n\n## Problem\nSome problem text.\n\n## Objectives\n- Objective one.\n\n"
+_AC_SECTION = (
+    "## Acceptance Criteria\n\n"
+    "- **AC1.** A fixture criterion.\n"
+    "- **AC2.** A fixture criterion.\n"
+    "- **AC3.** A fixture criterion.\n\n"
+)
+_SLICES_SECTION = (
+    "## Slices\n\n"
+    "- **First slice** — a fixture value claim. "
+    "(`task/first`, closed 2026-01-01, covers AC1, AC2)\n"
+    "- **Second slice** — a fixture value claim. "
+    "(`task/second`, closed 2026-01-02, covers AC3)\n\n"
+)
+_TAIL = "## Non-Goals\nNothing else in scope.\n\n## Related\nn/a\n"
+_MATURITY_SECTION = "## Maturity\n\n- trailhead: production\n- lookout: prototype\n\n"
+
+_BASE_WITH_LEDGER = _HEAD + _AC_SECTION + _SLICES_SECTION + _TAIL
+_TEMPLATE_PLACEMENT_WITH_LEDGER = _HEAD + _MATURITY_SECTION + _AC_SECTION + _SLICES_SECTION + _TAIL
+_BASE_NO_LEDGER = _HEAD + _AC_SECTION + _TAIL
+_TEMPLATE_PLACEMENT_NO_LEDGER = _HEAD + _MATURITY_SECTION + _AC_SECTION + _TAIL
+# The hazard the prover found: a heading wedged between the `## Slices` heading
+# and its first ledger bullet — never the template's own placement, but the
+# fixture that proves the inertness assertions below are actually sensitive
+# to placement rather than vacuously true.
+_HAZARD_MATURITY_NESTED_IN_SLICES = (
+    _HEAD
+    + _AC_SECTION
+    + "## Slices\n\n"
+    + _MATURITY_SECTION
+    + "- **First slice** — a fixture value claim. "
+    "(`task/first`, closed 2026-01-01, covers AC1, AC2)\n"
+    "- **Second slice** — a fixture value claim. "
+    "(`task/second`, closed 2026-01-02, covers AC3)\n\n"
+    + _TAIL
+)
+
+
+def test_template_placement_is_inert_to_candidate_set_with_ledger():
+    base = _run_script(CANDIDATE_SET, _BASE_WITH_LEDGER)
+    variant = _run_script(CANDIDATE_SET, _TEMPLATE_PLACEMENT_WITH_LEDGER)
+    assert variant.returncode == base.returncode
+    assert variant.stdout == base.stdout, (base.stdout, variant.stdout)
+
+
+def test_template_placement_is_inert_to_candidate_set_without_ledger():
+    base = _run_script(CANDIDATE_SET, _BASE_NO_LEDGER)
+    variant = _run_script(CANDIDATE_SET, _TEMPLATE_PLACEMENT_NO_LEDGER)
+    assert variant.returncode == base.returncode
+    assert variant.stdout == base.stdout, (base.stdout, variant.stdout)
+
+
+def test_template_placement_is_inert_to_covers_gate_with_ledger():
+    args = ["--covers", "AC1, AC2, AC3"]
+    base = _run_script(COVERS_GATE, _BASE_WITH_LEDGER, args)
+    variant = _run_script(COVERS_GATE, _TEMPLATE_PLACEMENT_WITH_LEDGER, args)
+    assert variant.returncode == base.returncode
+    assert variant.stdout == base.stdout, (base.stdout, variant.stdout)
+
+
+def test_template_placement_is_inert_to_covers_gate_without_ledger():
+    args = ["--covers", "AC1, AC2, AC3"]
+    base = _run_script(COVERS_GATE, _BASE_NO_LEDGER, args)
+    variant = _run_script(COVERS_GATE, _TEMPLATE_PLACEMENT_NO_LEDGER, args)
+    assert variant.returncode == base.returncode
+    assert variant.stdout == base.stdout, (base.stdout, variant.stdout)
+
+
+def test_maturity_nested_inside_slices_diverges_from_the_ledger_positive_control():
+    """Positive control for the four tests above: proves they are actually
+    sensitive to placement rather than passing vacuously. The hazard placement
+    (heading nested between `## Slices` and its first bullet) must NOT be
+    inert — `candidate_set.py` regresses `candidates` to the full criteria set
+    and reports `complete-eligible: yes` at exit 0, silently losing the
+    ledger's two entries."""
+    base = _run_script(CANDIDATE_SET, _BASE_WITH_LEDGER)
+    hazard = _run_script(CANDIDATE_SET, _HAZARD_MATURITY_NESTED_IN_SLICES)
+    assert hazard.returncode == 0, hazard.stderr.decode("utf-8")
+    assert hazard.stdout != base.stdout, (
+        "the nested-in-Slices hazard placement must diverge from the base body "
+        "(silent ledger truncation) — if it doesn't, the inertness tests above "
+        "are not actually sensitive to placement"
     )

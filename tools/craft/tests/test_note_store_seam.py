@@ -52,6 +52,7 @@ _TASK_SECTIONS = [
 _SPEC_SECTIONS = [
     "Problem",
     "Objectives",
+    "Maturity",
     "Acceptance Criteria",
     "Required Interfaces",
     "Non-Goals",
@@ -198,4 +199,83 @@ def test_note_storage_documents_link_op():
     )
     assert "lore record update" in text, (
         "the link op must name the concrete record-provider command `lore record update`."
+    )
+
+
+# ---------------------------------------------------------------------------
+# The spec template's `## Maturity` section: placement, grammar comment, and a
+# grammar reminder that survives even once that comment is stripped.
+# ---------------------------------------------------------------------------
+
+
+def _spec_template_text() -> str:
+    return (TEMPLATES_DIR / "spec.md").read_text(encoding="utf-8")
+
+
+def test_spec_template_maturity_is_a_sibling_directly_after_objectives_before_acceptance_criteria():
+    """The assumption-prover proved all four probed placements inert; the template fixes
+    the one that matches when the level is known and keeps the section permanently away
+    from `## Slices` (appended later, near `## Acceptance Criteria`, never near the top)."""
+    text = _spec_template_text()
+    objectives_at = text.index("## Objectives")
+    maturity_at = text.index("## Maturity")
+    ac_at = text.index("## Acceptance Criteria")
+    assert objectives_at < maturity_at < ac_at, (
+        "`## Maturity` must sit directly after `## Objectives` and before "
+        f"`## Acceptance Criteria`: objectives={objectives_at} maturity={maturity_at} "
+        f"ac={ac_at}"
+    )
+
+
+def _maturity_section_text() -> str:
+    text = _spec_template_text()
+    start = text.index("## Maturity")
+    end = text.index("## Acceptance Criteria")
+    return text[start:end]
+
+
+def test_spec_template_maturity_comment_states_closed_vocabulary_and_grammar():
+    section = _maturity_section_text()
+    assert re.search(r"\bprototype\b", section)
+    assert re.search(r"\bearly\b", section)
+    assert re.search(r"\bproduction\b", section)
+    assert re.search(r"-\s*<[^>]*member[^>]*>\s*:\s*<[^>]*level[^>]*>", section), (
+        "the `## Maturity` section comment must state the per-line grammar "
+        f"(`- <member-name>: <level>`): {section!r}"
+    )
+
+
+def test_spec_template_maturity_comment_states_the_slices_sibling_constraint():
+    """The narrow guard the prover's hard-constraint finding requires: the template's own
+    comment must state that `## Maturity` must never be nested inside `## Slices`."""
+    section = _maturity_section_text()
+    assert re.search(r"Slices", section), (
+        f"the `## Maturity` comment must mention `## Slices` by name: {section!r}"
+    )
+    assert re.search(r"never|must not|not nested|sibling", section, re.IGNORECASE), (
+        f"the `## Maturity` comment must state the sibling/never-nested constraint: {section!r}"
+    )
+
+
+def test_spec_template_maturity_grammar_reminder_survives_stripping_the_pre_fill_comment():
+    """A template comment is stripped once an author fills in a section — established
+    convention this template already relies on elsewhere. The vocabulary reminder must
+    still be legible in the rendered section after that strip, not only in the
+    pre-fill comment, so an operator hand-correcting a stamp months later doesn't have
+    to go find the reader's source to learn what they may type."""
+    section = _maturity_section_text()
+    comments = re.findall(r"<!--.*?-->", section, re.DOTALL)
+    assert len(comments) >= 2, (
+        "the `## Maturity` section must carry a full instructional comment plus a "
+        f"separate, shorter reminder comment that survives the former's removal: {section!r}"
+    )
+    # Simulate an author stripping only the first (longest) pre-fill comment, as the
+    # rest of this template's sections are conventionally treated once filled in.
+    pre_fill_comment = max(comments, key=len)
+    stripped = section.replace(pre_fill_comment, "")
+    assert re.search(r"\bprototype\b", stripped)
+    assert re.search(r"\bearly\b", stripped)
+    assert re.search(r"\bproduction\b", stripped), (
+        "the closed vocabulary must remain legible in the section even after the "
+        f"pre-fill comment is stripped: {stripped!r}"
     )

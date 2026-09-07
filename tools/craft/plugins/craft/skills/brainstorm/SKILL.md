@@ -342,18 +342,55 @@ Then go to **6a** — the only exit.
 
 ### 6a. Write the Spec
 
-Persist the spec with `lore record create` (`../_shared/note-storage.md`): render craft's spec body
-template (`${CLAUDE_PLUGIN_ROOT}/templates/spec.md`), fill in the sections, then pipe the filled
-body to it — `printf '%s' "$BODY" | lore record create --kind spec --title "<topic>" --status
-draft`.
+Render craft's spec body template (`${CLAUDE_PLUGIN_ROOT}/templates/spec.md`) and fill in the
+sections (`../_shared/note-storage.md` documents the underlying `lore record create` mechanics):
+**Problem** (situation / gap, why now) · **Objectives** (measurable, outcome-framed) · **Maturity**
+(below) · **Acceptance Criteria** (bulleted, testable) · **Required Interfaces** (each boundary the
+spec implies, and the criteria it must satisfy — not its shape) · **Non-Goals** (explicit scope
+bounds) · **Constraints** (technical / business / timing) · **UI Direction** (verbal, or `n/a`) ·
+**Open Questions / Risks** · **Related** (prior specs, decisions). Then open the file and fill in
+the body sections.
 
-The spec body template (`${CLAUDE_PLUGIN_ROOT}/templates/spec.md`) carries these canonical sections
-— fill each in: **Problem** (situation / gap, why now) · **Objectives** (measurable, outcome-framed)
-· **Acceptance Criteria** (bulleted, testable) · **Required Interfaces** (each boundary the spec
-implies, and the criteria it must satisfy — not its shape) · **Non-Goals** (explicit scope bounds) ·
-**Constraints** (technical / business / timing) · **UI Direction** (verbal, or `n/a`) · **Open
-Questions / Risks** · **Related** (prior specs, decisions). Then open the file and fill in the body
-sections.
+**Fill `## Maturity` from step 1's own resolution** — one `- <camp member name>: <level>` line per
+repository step 1's enumeration reached, naming the level resolved there, whether declared or
+defaulted. Where step 1's enumeration could not reach the repositories at all (the
+unresolved-enumeration case), state that explicitly as the section's content rather than writing a
+stamp that reads as complete — a single sentence naming the enumeration failure, never a fabricated
+per-repository list standing in for it.
+
+**Certify the drafted body before writing it.** Pipe the filled body through the stamp reader,
+before `lore record create` runs:
+
+```sh
+printf '%s' "$BODY" | ${CLAUDE_PLUGIN_ROOT}/scripts/maturity_stamp.py
+```
+
+A non-zero exit refuses the write — nothing is created until the reader exits 0. Name the remedy the
+reader's own `reason-code:` stderr token identifies, one per code, mirroring the framing step's own
+per-reason-code translation above rather than reporting the bare code:
+
+- `empty-stdin` — the drafted body is empty; re-render the template and fill it in before retrying.
+- `invalid-utf8-stdin` — the drafted body is not valid UTF-8; find and remove the invalid bytes
+  before retrying.
+- `section-absent` — the `## Maturity` heading itself is missing from the drafted body; add it
+  before retrying.
+- `duplicate-section` — the drafted body carries a second `## Maturity` heading; delete the
+  duplicate before retrying.
+- `empty-section` — the heading exists but declares zero entries; add at least one
+  `- <camp member name>: <level>` line before retrying.
+- `malformed-entry` — a line under the heading is not a valid `- <camp member name>: <level>`
+  bullet; correct that line's shape before retrying.
+- `invalid-level` — an entry's level falls outside the closed vocabulary (`prototype` / `early` /
+  `production`); correct that entry's level before retrying.
+- `duplicate-member` — the same camp member name appears twice under the heading; remove or merge
+  the duplicate entry before retrying.
+
+Only once the reader exits 0 does the create proceed — pipe the same certified body to
+`lore record create`:
+
+```sh
+printf '%s' "$BODY" | lore record create --kind spec --title "<topic>" --status draft
+```
 
 **If this brainstorm consumed a routed task** — the entry point was a `task` record carrying
 refine's `route=brainstorm` sidecar label (and its `## Refine — unresolved` section) — close the
