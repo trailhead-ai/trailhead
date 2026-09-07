@@ -33,11 +33,13 @@ from test_maturity_resolve import (
     _lines,
     _run,
 )
+# The reader's own suite owns its script path, so the two suites can never
+# drift onto different files.
+from test_maturity_stamp import STAMP
 
 CRAFT = Path(__file__).parent.parent / "plugins" / "craft"
 BRAINSTORM_SKILL = CRAFT / "skills" / "brainstorm" / "SKILL.md"
 SCRIPTS_DIR = CRAFT / "scripts"
-STAMP = SCRIPTS_DIR / "maturity_stamp.py"
 CANDIDATE_SET = SCRIPTS_DIR / "candidate_set.py"
 COVERS_GATE = SCRIPTS_DIR / "covers_gate.py"
 SPEC_TEMPLATE = CRAFT / "templates" / "spec.md"

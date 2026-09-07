@@ -4,66 +4,52 @@ markdown (via the real `templates/spec.md` `## Maturity` section) and is read
 back out of that markdown alone (`maturity_stamp.py`), by a reader holding
 nothing else.
 
-Every fixture agent-instruction body is imported from `test_maturity_resolve`
-— the resolver's own producer fixtures — rather than re-typed here, and every
-stamped spec body is rendered through `test_brainstorm_maturity_contract`'s
-own template-rendering helper, so this file never invents a wire shape of its
-own for either seam. All three scripts run as real subprocesses.
+Nothing here is re-derived: the fixture agent-instruction bodies and the
+resolver runner come from `test_maturity_resolve`, the stamp-reader runner
+from `test_maturity_stamp`, and the template rendering from
+`test_brainstorm_maturity_contract` — each from the suite that produces it, so
+this file never invents a wire shape of its own for any seam. All three
+scripts still run as real subprocesses.
 
 Inertness (a `## Maturity` section not perturbing `candidate_set.py` or
 `covers_gate.py`, with and without a `## Slices` ledger) is NOT retested here:
 `test_brainstorm_maturity_contract.py`'s
 `test_template_placement_is_inert_to_candidate_set_with_ledger` /
-`_without_ledger` (lines 443-454) already assert byte-identical
-`candidate_set.py` stdout between a stamped body and its unstamped twin, in
-both ledger shapes, and `test_template_placement_is_inert_to_covers_gate_with_ledger`
-/ `_without_ledger` (lines 457-470) already assert identical `covers_gate.py`
-exit codes (and stdout) for the same `--covers` list between a stamped body
-and its unstamped twin, in both ledger shapes. Those are exactly this task's
-two inertness contract items — re-asserting them here would be a
-near-duplicate of already-landed coverage, not new proof.
+`_without_ledger` already assert byte-identical `candidate_set.py` stdout
+between a stamped body and its unstamped twin, in both ledger shapes, and
+`test_template_placement_is_inert_to_covers_gate_with_ledger` /
+`_without_ledger` already assert identical `covers_gate.py` exit codes (and
+stdout) for the same `--covers` list between a stamped body and its unstamped
+twin, in both ledger shapes. Those are exactly this task's two inertness
+contract items — re-asserting them here would be a near-duplicate of
+already-landed coverage, not new proof.
 """
 
 from __future__ import annotations
 
-import subprocess
-import sys
-from pathlib import Path
-
-from test_brainstorm_maturity_contract import (
-    STAMP,
-    _render_template_with_maturity_entries,
-)
+from test_brainstorm_maturity_contract import _render_template_with_maturity_entries
 from test_maturity_resolve import (
     EARLY_DECLARED,
     NO_SECTION_AT_ALL,
     PRODUCTION_DECLARED,
     PROTOTYPE_DECLARED,
+    _lines,
 )
-
-REPO_ROOT = Path(__file__).parent.parent
-RESOLVER = REPO_ROOT / "plugins" / "craft" / "scripts" / "maturity_resolve.py"
+from test_maturity_resolve import _run as _run_resolver
+from test_maturity_stamp import _run as _stamp_bytes
 
 
 def _resolve(body: str) -> str:
     """Run the real resolver as a subprocess and return the resolved level."""
-    result = subprocess.run(
-        [sys.executable, str(RESOLVER)],
-        input=body.encode("utf-8"),
-        capture_output=True,
-    )
+    result = _run_resolver(body.encode("utf-8"))
     assert result.returncode == 0, result.stderr.decode("utf-8")
-    lines = result.stdout.decode("utf-8").splitlines()
-    level_line = next(line for line in lines if line.startswith("level: "))
+    level_line = next(line for line in _lines(result) if line.startswith("level: "))
     return level_line.removeprefix("level: ")
 
 
-def _stamp(body: str) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        [sys.executable, str(STAMP)],
-        input=body.encode("utf-8"),
-        capture_output=True,
-    )
+def _stamp(body: str):
+    """Run the real stamp reader as a subprocess over a rendered spec body."""
+    return _stamp_bytes(body.encode("utf-8"))
 
 
 # ---- round trip: a declared level survives resolve -> stamp -> read -------
