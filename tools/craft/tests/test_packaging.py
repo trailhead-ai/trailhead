@@ -141,3 +141,47 @@ def test_scripts_directory_installs_as_a_unit_with_the_sibling_import_intact(tmp
         f"directory — stderr: {result.stderr.decode('utf-8')!r}"
     )
     assert result.stdout.decode("utf-8") == "maturity: trailhead=production\n"
+
+
+# A skill document that pipes into `${CLAUDE_PLUGIN_ROOT}/scripts/<name>.py`
+# is telling an agent to execute that path directly. Without the executable
+# bit the documented command exits 126 before the script's own code runs, and
+# the dispatchers' "a non-zero exit refuses the dispatch" rule then turns every
+# review into a refusal. Nothing else in the suite executes a script the way
+# its own documentation says to.
+_BARE_INVOCATION_RE = re.compile(r"CLAUDE_PLUGIN_ROOT\}/scripts/([a-z_]+\.py)")
+
+
+def _bare_invoked_script_names():
+    names = set()
+    for path in (PLUGIN_ROOT / "skills").rglob("*.md"):
+        names.update(_BARE_INVOCATION_RE.findall(path.read_text(encoding="utf-8")))
+    return sorted(names)
+
+
+def test_every_bare_invoked_script_is_executable():
+    names = _bare_invoked_script_names()
+    assert names, (
+        "no bare `${CLAUDE_PLUGIN_ROOT}/scripts/<name>.py` invocation found in "
+        "any skill document — the scan itself is broken, so this test would "
+        "pass vacuously"
+    )
+    not_executable = [
+        name
+        for name in names
+        if not (PLUGIN_ROOT / "scripts" / name).stat().st_mode & 0o111
+    ]
+    assert not not_executable, (
+        f"{not_executable} are invoked directly by a skill document but are not "
+        "executable — the documented command exits 126 before the script runs"
+    )
+
+
+def test_a_bare_invoked_script_actually_runs_as_documented():
+    """The mode-bit check above is a proxy; this executes one for real."""
+    script = PLUGIN_ROOT / "scripts" / "maturity_bars.py"
+    result = subprocess.run([str(script)], input=b"", capture_output=True)
+    assert result.returncode == 0, (
+        f"{script} could not be executed directly: exit {result.returncode}, "
+        f"stderr={result.stderr.decode('utf-8', 'replace')[:200]}"
+    )

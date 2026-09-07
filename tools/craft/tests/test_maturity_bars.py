@@ -28,6 +28,7 @@ Exit codes:
 from __future__ import annotations
 
 import itertools
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -369,6 +370,11 @@ def test_directory_as_agent_instruction_file_exits_nonzero_same_reason_code(tmp_
     assert "reason-code: agent-instruction-file-unreadable" in err
 
 
+@pytest.mark.skipif(
+    hasattr(os, "geteuid") and os.geteuid() == 0,
+    reason="root bypasses mode bits, so chmod(0o000) leaves this test "
+    "unable to observe its own subject and it would pass vacuously",
+)
 def test_unreadable_agent_instruction_file_exits_nonzero_same_reason_code(tmp_path):
     agent_file = tmp_path / "CLAUDE.md"
     agent_file.write_text(AGENT_FILE_PRODUCTION, encoding="utf-8")
@@ -498,3 +504,53 @@ def test_unreadable_agent_instruction_file_writes_no_block_to_stdout(tmp_path):
     )
     assert result.returncode != 0
     assert _stdout(result) == ""
+
+
+# ---- the block carries the rules its reader must follow --------------------
+#
+# The rendered block is the ONLY maturity text a lens subagent ever sees. A
+# rule that lives solely in `_shared/council.md` never reaches the actor that
+# writes findings, so the two rules below have to travel in the block itself.
+
+
+@pytest.mark.parametrize("level", ["prototype", "early", "production"])
+def test_block_states_the_calibration_governs_severity_over_the_lens_bars(level):
+    """Three of the five concerns also appear verbatim as per-lens Critical
+    bars. Without a stated tiebreak the lens receives two contradictory
+    severities at `prototype` and `early`."""
+    spec = f"# S\n\n## Maturity\n\n- lookout: {level}\n"
+    out = _stdout(_run(spec.encode("utf-8")))
+    assert "severity" in out.lower()
+    assert "Critical bars" in out or "critical bars" in out
+
+
+@pytest.mark.parametrize("level", ["prototype", "early"])
+def test_block_instructs_a_downgraded_finding_to_restate_concern_and_level(level):
+    """The operator override this slice exists to enable needs the finding to
+    say which level downgraded it."""
+    spec = f"# S\n\n## Maturity\n\n- lookout: {level}\n"
+    out = _stdout(_run(spec.encode("utf-8")))
+    assert "downgrad" in out.lower()
+    assert level in out
+
+
+def test_highest_stamped_block_states_it_is_not_a_general_highest_wins_rule():
+    spec = "# S\n\n## Maturity\n\n- lookout: prototype\n- trailhead: production\n"
+    out = _stdout(_run(spec.encode("utf-8")))
+    assert "not a general highest-wins rule" in out
+
+
+@pytest.mark.parametrize(
+    "fixture",
+    [MALFORMED_ENTRY, INVALID_LEVEL, DUPLICATE_MEMBER],
+)
+def test_no_refusal_echoes_the_offending_value_at_any_reason_code(fixture):
+    """The contract says "at any reason-code" — `malformed-entry` and
+    `duplicate-member` carry offending text through `StampError` too."""
+    marked = fixture.replace("lookout", "MARKER_7c1e").replace(
+        "XTREME_HAXOR_MARKER_9f3a", "MARKER_7c1e"
+    )
+    result = _run(marked.encode("utf-8"))
+    assert result.returncode != 0
+    assert "MARKER_7c1e" not in _stdout(result)
+    assert "MARKER_7c1e" not in _stderr(result)

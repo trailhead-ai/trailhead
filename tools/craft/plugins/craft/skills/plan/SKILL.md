@@ -433,9 +433,12 @@ re-inline them here. Fill the template's substitution tokens BEFORE sending each
   lore record show <spec-name> --vault <vault> | \
     ${CLAUDE_PLUGIN_ROOT}/scripts/maturity_bars.py --agent-instruction-file <repo-root>/CLAUDE.md
   ```
-  **A non-zero exit refuses the dispatch** — do not review at an uncalibrated severity. Read the
-  `reason-code:` stderr line and refuse with the remedy it names, never proceeding without a
-  resolved level:
+A plan with no `related-spec` frontmatter — the same case the `Spec:` line above handles — pipes
+nothing and calibrates from the agent-instruction file alone: `printf '' |
+${CLAUDE_PLUGIN_ROOT}/scripts/maturity_bars.py --agent-instruction-file <repo-root>/CLAUDE.md`.
+Empty input is a legitimate exit-0 case, not a refusal. **A non-zero exit refuses the dispatch** —
+do not review at an uncalibrated severity. Read the `reason-code:` stderr line and refuse with the
+remedy it names, never proceeding without a resolved level:
 
   | reason-code | remedy |
   |---|---|
@@ -448,7 +451,7 @@ re-inline them here. Fill the template's substitution tokens BEFORE sending each
   | `invalid-level` | an entry's level is outside `prototype` / `early` / `production` — correct it, then retry |
   | `duplicate-member` | the same repository is stamped twice — remove the duplicate, keep one entry per repository, then retry |
 
-  Worked example, refusing on `empty-section`:
+Worked example, refusing on `empty-section`:
   ```text
   Council dispatch refused: `maturity_bars.py` exited 2 (reason-code: empty-section). The spec's
   `## Maturity` section names zero repositories — the stamp was left unfilled. Fix: add
@@ -456,12 +459,12 @@ re-inline them here. Fill the template's substitution tokens BEFORE sending each
   stamping step to populate them), then retry the dispatch.
   ```
 
-  The other three dispatchers (`gauntlet`, `consult`, `drive`) mirror this refusal shape rather than
-  restating it — do not re-derive a second remedy table.
+The other three dispatchers (`gauntlet`, `consult`, `drive`) mirror this refusal shape rather than
+restating it — do not re-derive a second remedy table.
 
-  **Surface the resolved level and its basis** in the review you print — restate the renderer's own
-  `maturity: <level> (basis: <basis>)` line, so the operator can tell a read stamp from a silent
-  default without re-deriving it.
+**Surface the resolved level and its basis** in the review you print — restate the renderer's own
+`maturity: <level> (basis: <basis>)` line, so the operator can tell a read stamp from a silent
+default without re-deriving it.
 
 Then synthesize per `_shared/council.md` (de-duplicate by issue, auto-downgrade speculative
 Criticals, lead with the narrative synthesis in the shape "How the synthesis reads" defines there,

@@ -171,6 +171,20 @@ def render(level: str, basis: str) -> str:
         "Every concern above is reported at its mapped severity and is "
         "never filtered out."
     )
+    lines.append(
+        "Where a concern above also appears in your per-lens Critical bars, "
+        "the severity above governs — the bars say what to look for, this "
+        "block says how severely to rate it."
+    )
+    if level != _DEFAULT_LEVEL:
+        lines.append(
+            f"A finding downgraded by this calibration restates the concern "
+            f"and the deciding level in its own text (for example "
+            f"\"migration and backfill — {_SEVERITY_BY_LEVEL[level]}, "
+            f"downgraded by this spec's {level} maturity level\"), so the "
+            f"operator can tell a calibrated downgrade from noise and has "
+            f"something concrete to override."
+        )
     return "\n".join(lines) + "\n"
 
 
