@@ -1030,6 +1030,34 @@ def test_supersedes_path_traversal_kind_is_rejected(tmp_path):
     assert any("[supersedes-reference]" in e for e in errors), errors
 
 
+def test_supersedes_path_traversal_name_is_rejected(tmp_path):
+    """A traversal sequence in the NAME segment must be rejected too.
+
+    ``adr/../../x`` carries a valid kind, so the kind check above passes it
+    through; the containment breach is entirely in the name half. ``depends-on``
+    and ``parent`` already reject this shape via ``confine_edge_reference``, and
+    a downstream consumer resolves a supersedes reference to a filesystem path
+    the same way it resolves those — so this edge is confined against the same
+    surface rather than relying on that consumer's own guard alone.
+    """
+    g = _guards()
+    errors, _ = _dispatch(
+        g, tmp_path, kind="adr", name="foo", sidecar={"supersedes": ["adr/../../x"]},
+    )
+    assert any("[edge-reference]" in e or "[supersedes-reference]" in e for e in errors), errors
+
+
+def test_supersedes_ordinary_name_survives_confinement(tmp_path):
+    """The confinement must not reject an ordinary reference — the positive
+    control that keeps the test above from passing against a guard that rejects
+    everything."""
+    g = _guards()
+    errors, _ = _dispatch(
+        g, tmp_path, kind="adr", name="foo", sidecar={"supersedes": ["adr/a-real-successor"]},
+    )
+    assert not any("[edge-reference]" in e or "[supersedes-reference]" in e for e in errors), errors
+
+
 # ---------------------------------------------------------------------------
 # active-adr body immutability
 # ---------------------------------------------------------------------------

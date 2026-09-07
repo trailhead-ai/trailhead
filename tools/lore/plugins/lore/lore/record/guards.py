@@ -678,7 +678,7 @@ def _split_supersedes_entry(entry: object) -> tuple[str, str] | None:
     return kind_part, name_part
 
 
-def evaluate_supersedes_guard(*, kind: str, name: str, sidecar: dict) -> list[str]:
+def evaluate_supersedes_guard(*, kind: str, name: str, sidecar: dict, vault_root: str) -> list[str]:
     """Validate the ``supersedes`` edge: format and self-edge only, no cycle check.
 
     Unlike ``depends-on``, ``supersedes`` carries no runnability semantics to
@@ -691,11 +691,10 @@ def evaluate_supersedes_guard(*, kind: str, name: str, sidecar: dict) -> list[st
     from being written verbatim: this value is later resolved to a filesystem
     path by a downstream consumer, and the vault is a shared, syncing artifact,
     so this is defense in depth rather than reliance on that consumer's own
-    path-safety check alone. It does **not** validate the name segment, so
-    ``adr/../../x`` still writes — the same shape ``related`` and ``depends-on``
-    accept today, since neither constrains a name either. Closing that is a
-    repo-wide change to the edge vocabulary, not a property of this edge, and
-    the downstream consumer's own path guard remains the check that rejects it. A mutual pair (``A`` supersedes ``B``, then
+    path-safety check alone. The name segment is then confined through
+    :func:`confine_edge_reference`, the same helper ``--parent`` and
+    ``--depends-on`` already use, so ``adr/../../x`` is rejected as the
+    containment breach it is rather than written and left to that consumer. A mutual pair (``A`` supersedes ``B``, then
     separately ``B`` supersedes ``A``) is deliberately NOT rejected here — each
     write is judged on its own, so the chain reaches a downstream reader that
     owns the multi-hop cycle guard. Ungated: this runs for every kind, not
@@ -725,6 +724,15 @@ def evaluate_supersedes_guard(*, kind: str, name: str, sidecar: dict) -> list[st
                     " valid kind",
                 )
             )
+            continue
+        # Confine the NAME segment against the same surface `--parent` and
+        # `--depends-on` are confined against. The kind check above satisfies
+        # confine_edge_reference's ordering contract: the entry is split and
+        # its kind validated before the name half is confined, so a rejection
+        # names the part that was actually unsafe.
+        msg = confine_edge_reference(entry_name, vault_root, kind=entry_kind)
+        if msg is not None:
+            errors.append(msg)
             continue
         if entry_kind == kind and entry_name == name:
             errors.append(
@@ -904,7 +912,9 @@ def evaluate_graph_guards(
     enforcement, never a false rejection, on that seam. See
     :func:`check_active_adr_body_immutable`.
     """
-    supersedes_errors = evaluate_supersedes_guard(kind=kind, name=name, sidecar=sidecar)
+    supersedes_errors = evaluate_supersedes_guard(
+        kind=kind, name=name, sidecar=sidecar, vault_root=vault_root
+    )
     if kind == "task":
         errors, notices = evaluate_task_guards(
             kind=kind,
