@@ -2196,3 +2196,25 @@ def test_create_prints_url_with_no_reader_daemon_running(tmp_path):
     assert r.returncode == 0, r.stderr
     assert elapsed < 5, f"took {elapsed}s — construction should never touch the network"
     assert "http://127.0.0.1:1/records/" in r.stderr
+
+
+def test_create_surfaces_an_invalid_base_as_a_plain_lore_line(tmp_path):
+    """A rejected ``record_url_base`` reaches the operator as a plain ``lore: ``
+    notice in the stderr trailer — not as Python's multi-line
+    ``file:lineno: RuntimeWarning`` render — and the command still exits 0 with
+    a working default-base URL rather than no URL at all."""
+    vault, state = _make_vault(tmp_path)
+    r = _run(
+        _BASE_ARGS,
+        vault=vault,
+        state_dir=state,
+        stdin_text="body\n",
+        env_extra={"LORE_RECORD_URL_BASE": "javascript:alert(1)"},
+    )
+    assert r.returncode == 0, r.stderr
+    assert "lore: ignoring invalid record_url_base" in r.stderr
+    assert "RuntimeWarning" not in r.stderr
+    assert "warnings.warn" not in r.stderr
+
+    record_url_mod = load_script("lore.record_url")
+    assert f"{record_url_mod.DEFAULT_BASE}/records/" in r.stderr
