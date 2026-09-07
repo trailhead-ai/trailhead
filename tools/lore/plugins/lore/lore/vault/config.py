@@ -294,6 +294,34 @@ def resolve_active_vault(env: dict | None = None) -> Path:
 
 
 # ---------------------------------------------------------------------------
+# read_record_url_base
+# ---------------------------------------------------------------------------
+
+
+def read_record_url_base(env: dict | None = None) -> str | None:
+    """Return the top-level ``record_url_base`` string from config.json, or ``None``.
+
+    ``load_config`` validates ``config.json`` into a ``list[Vault]`` and
+    surfaces no other top-level key, so this is a separate, permissive read of
+    the same file for the one additive key it does not carry forward.
+    ``None`` covers every case that isn't a present string value: the file is
+    missing, unreadable, not valid JSON, or valid JSON with the key absent or
+    holding a non-string value.
+
+    Args:
+        env: Optional ``{str: str}`` XDG environment override, forwarded to
+             :func:`_resolve_config_path` (see that function's ``env`` docs).
+    """
+    try:
+        config_path = _resolve_config_path(env=env)
+        data = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    value = data.get("record_url_base") if isinstance(data, dict) else None
+    return value if isinstance(value, str) else None
+
+
+# ---------------------------------------------------------------------------
 # load_config
 # ---------------------------------------------------------------------------
 
