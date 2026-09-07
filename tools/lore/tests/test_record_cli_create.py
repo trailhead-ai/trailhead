@@ -2296,12 +2296,13 @@ def test_vault_name_for_root_path_aliased_entries_returns_first_config_order_mat
     assert result == "first-alias"
 
 
-def test_print_record_url_omits_line_when_vault_name_is_none(capsys):
-    """`_print_record_url(None, ...)` prints nothing — the caller's signal for
-    "no trustworthy vault name" must not fall back to a misleading link."""
-    from lore.cli.record import _print_record_url
+def test_print_record_url_omits_line_when_vault_name_is_none(capsys, monkeypatch):
+    """A root that resolves to no trustworthy vault name prints nothing, rather
+    than falling back to a misleading link."""
+    import lore.cli.record as cli_record
 
-    _print_record_url(None, "spec/some-record")
+    monkeypatch.setattr(cli_record, "_vault_name_for_root", lambda root: None)
+    cli_record._print_record_url("/some/root", "spec/some-record")
     captured = capsys.readouterr()
     assert captured.err == ""
     assert captured.out == ""

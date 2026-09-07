@@ -295,7 +295,7 @@ def _print_guard_notices(notices: list[str]) -> None:
 _RECORD_URL_LINE_FORMAT = "Reader: {url}"
 
 
-def _print_record_url(vault_name: str | None, record_id: str) -> None:
+def _print_record_url(vault_root, record_id: str) -> None:
     """Print *record_id*'s reader URL to stderr, in the shared line format.
 
     Joins the existing stderr trailer (routing confirmation, then
@@ -304,10 +304,16 @@ def _print_record_url(vault_name: str | None, record_id: str) -> None:
     record's final vault is known. On an update that relocates the record,
     *vault_name* is the DESTINATION vault, never the one it moved out of.
 
-    *vault_name* is ``None`` when :func:`_vault_name_for_root` could not
-    determine a trustworthy name (``config.json`` is loaded but no entry's
-    path matches the record's root) — the URL line is omitted entirely in
-    that case. A missing line is honest; a link naming the wrong vault is not.
+    Takes the record's vault ROOT and resolves the vault name itself, inside
+    its own guard. Resolution runs in the same post-commit position as building
+    the URL and carries the same obligation, so evaluating it at the call site
+    would leave the trailer non-fatal only for the half of its work that
+    happened to sit inside the guard.
+
+    :func:`_vault_name_for_root` returns ``None`` when it cannot determine a
+    trustworthy name (``config.json`` is loaded but no entry's path matches the
+    record's root) — the URL line is omitted entirely in that case. A missing
+    line is honest; a link naming the wrong vault is not.
 
     Construction (:func:`lore.record_url.build_record_url`) reads
     configuration only and performs no network I/O, so this prints the same
@@ -324,12 +330,12 @@ def _print_record_url(vault_name: str | None, record_id: str) -> None:
     re-emitted via :func:`warnings.warn` rather than discarded, so it still
     reaches its normal destination.
     """
-    if vault_name is None:
-        return
-
     from .. import record_url as record_url_mod
 
     try:
+        vault_name = _vault_name_for_root(vault_root)
+        if vault_name is None:
+            return
         _emit_record_url(record_url_mod, vault_name, record_id)
     except Exception:
         # The reader link is a convenience printed after the record is written
@@ -977,7 +983,7 @@ def _cmd_record_create(args) -> int:
     _print_guard_notices(guard_notices)
     # The reader URL for the vault the record actually landed in — last in the
     # stderr trailer (what happened, then warnings, then where to read it).
-    _print_record_url(_vault_name_for_root(vault_root), record_id)
+    _print_record_url(vault_root, record_id)
 
     # Print the vault-relative RECORD_ID on stdout.
     print(record_id)
@@ -1589,7 +1595,7 @@ def _cmd_record_update(args) -> int:
     _print_guard_notices(guard_notices)
     # The reader URL for the DESTINATION vault — the one the record now lives
     # in, which on a relocation is not the vault it started this call in.
-    _print_record_url(_vault_name_for_root(dest_root), new_id)
+    _print_record_url(dest_root, new_id)
 
     # The relocation signal (no silent move) precedes the
     # RECORD_ID so the existing stdout contract for the no-move case is unchanged

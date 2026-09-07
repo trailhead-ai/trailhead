@@ -267,6 +267,27 @@ def test_printing_the_url_never_fails_the_write_verb(tmp_path, monkeypatch):
     cli_record._print_record_url("demo", "decision/some-slug")
 
 
+def test_the_trailer_resolves_the_vault_name_inside_its_own_guard(tmp_path, monkeypatch, capsys):
+    """The trailer takes the record's vault ROOT and resolves the name itself.
+
+    Resolution runs in the same post-commit position as building the URL, so it
+    carries the same obligation: a failure there costs the reader line and
+    nothing else. Taking an already-resolved name as an argument would evaluate
+    resolution at the call site, outside the guard — leaving the trailer
+    non-fatal only for the half of its work that happens to sit inside it."""
+    cli_record = load_script("lore.cli.record")
+
+    monkeypatch.setattr(cli_record, "_vault_name_for_root", lambda root: "demo")
+    cli_record._print_record_url(tmp_path, "decision/some-slug")
+    assert "/records/demo/decision/some-slug" in capsys.readouterr().err
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("unforeseen")
+
+    monkeypatch.setattr(cli_record, "_vault_name_for_root", _boom)
+    cli_record._print_record_url(tmp_path, "decision/some-slug")
+
+
 # ---------------------------------------------------------------------------
 # 7. Percent-encoding of every segment
 # ---------------------------------------------------------------------------
