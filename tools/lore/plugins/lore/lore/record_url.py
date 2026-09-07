@@ -77,6 +77,11 @@ def _validate_base(base: str) -> str:
         reason = "scheme must be http or https"
     elif not parsed.netloc:
         reason = "no host in the URL"
+    elif "@" in parsed.netloc:
+        # Userinfo makes the authority the text AFTER the "@", so a base like
+        # http://127.0.0.1:7313@evil.test reads as local and resolves
+        # elsewhere. A reader base never needs credentials.
+        reason = "credentials in the URL"
     else:
         return base
     warnings.warn(
@@ -86,6 +91,19 @@ def _validate_base(base: str) -> str:
         stacklevel=3,
     )
     return DEFAULT_BASE
+
+
+def _quote_segment(part: str) -> str:
+    """Percent-encode one path segment, dot-segments included.
+
+    ``quote`` leaves ``.`` unescaped — it is unreserved in RFC 3986 — so a
+    segment that is exactly ``.`` or ``..`` would survive into the path and be
+    collapsed by any client that normalizes dot segments, resolving the URL to
+    a different record. Escaping the dots keeps the segment opaque.
+    """
+    if part in (".", ".."):
+        return part.replace(".", "%2E")
+    return quote(part, safe="")
 
 
 def build_record_url(vault: str, kind: str, slug: str, *, env: dict | None = None) -> str:
@@ -107,5 +125,5 @@ def build_record_url(vault: str, kind: str, slug: str, *, env: dict | None = Non
                :func:`resolve_base`.
     """
     base = resolve_base(env=env).rstrip("/")
-    segments = "/".join(quote(part, safe="") for part in (vault, kind, slug))
+    segments = "/".join(_quote_segment(part) for part in (vault, kind, slug))
     return f"{base}/records/{segments}"

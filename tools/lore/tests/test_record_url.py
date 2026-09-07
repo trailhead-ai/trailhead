@@ -196,6 +196,36 @@ def test_rejection_message_names_the_reason_that_actually_fired(tmp_path):
     assert "scheme must be http or https" not in message
 
 
+def test_userinfo_in_the_base_is_rejected(tmp_path):
+    """A netloc carrying userinfo is rejected. ``http://127.0.0.1:7313@evil.test``
+    has a real scheme and a non-empty netloc, but its authority is
+    ``evil.test`` — the trusted-looking prefix is userinfo. A reader base has
+    no legitimate use for credentials, and a printed link that reads as local
+    while resolving elsewhere is the exact outcome base validation exists to
+    prevent."""
+    env = _make_env(tmp_path)
+    env["LORE_RECORD_URL_BASE"] = "http://127.0.0.1:7313@evil.test"
+    mod = ru()
+    with pytest.warns(RuntimeWarning):
+        result = mod.build_record_url("v", "task", "s", env=env)
+    assert result.startswith("http://127.0.0.1:7313/")
+    assert "evil.test" not in result
+
+
+def test_a_dot_only_segment_cannot_be_normalized_away(tmp_path):
+    """A segment that is exactly ``.`` or ``..`` is escaped so dot-segment
+    normalization cannot collapse the path. ``quote`` leaves ``.`` alone as an
+    unreserved character, so an RFC 3986 client would resolve
+    ``/records/v/../s`` to ``/records/s`` — a different record. Today's kind,
+    slug and vault-name validators all happen to exclude such a segment; this
+    keeps the guarantee inside the function that advertises it."""
+    env = _make_env(tmp_path)
+    mod = ru()
+    url = mod.build_record_url("v", "..", "s", env=env)
+    assert "/.." not in url
+    assert url.endswith("/records/v/%2E%2E/s")
+
+
 # ---------------------------------------------------------------------------
 # 7. Percent-encoding of every segment
 # ---------------------------------------------------------------------------
