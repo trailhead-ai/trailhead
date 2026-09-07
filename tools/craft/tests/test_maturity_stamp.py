@@ -322,10 +322,10 @@ def test_section_terminates_at_next_top_level_heading():
 def test_heading_present_with_zero_entries_is_its_own_distinct_reason_code():
     result = _run(ZERO_ENTRIES.encode("utf-8"))
     assert result.returncode == 2
-    err = result.stderr.decode("utf-8")
-    assert "reason-code: section-absent" not in err
-    assert "reason-code: malformed-entry" not in err
-    assert "reason-code:" in err
+    err = _err_lines(result)
+    reason_code_lines = [line for line in err if "reason-code:" in line]
+    assert len(reason_code_lines) == 1
+    assert reason_code_lines[0].endswith("reason-code: empty-section")
 
 
 # ---- double-defect determinism ---------------------------------------------
