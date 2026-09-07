@@ -226,6 +226,47 @@ def test_a_dot_only_segment_cannot_be_normalized_away(tmp_path):
     assert url.endswith("/records/v/%2E%2E/s")
 
 
+def test_an_unparseable_base_falls_back_instead_of_raising(tmp_path):
+    """A base ``urlsplit`` itself refuses to parse is rejected like any other
+    invalid base. ``urlsplit("http://[oops")`` raises ValueError on the
+    unclosed IPv6 bracket; letting that escape would abort a write verb that
+    has already committed its record."""
+    env = _make_env(tmp_path)
+    env["LORE_RECORD_URL_BASE"] = "http://[oops"
+    mod = ru()
+    with pytest.warns(RuntimeWarning):
+        result = mod.build_record_url("v", "task", "s", env=env)
+    assert result.startswith("http://127.0.0.1:7313/")
+
+
+def test_a_base_carrying_a_query_or_fragment_is_rejected(tmp_path):
+    """A base with a query or fragment is rejected. Appending the record path
+    after one yields ``http://host#x/records/...`` or ``http://host/?a=1/records/...``
+    — links that open the reader's home page rather than the record, which is
+    the garbled-but-plausible link base validation exists to catch."""
+    mod = ru()
+    for bad in ("http://127.0.0.1:7313#x", "http://127.0.0.1:7313/?a=1"):
+        env = _make_env(tmp_path)
+        env["LORE_RECORD_URL_BASE"] = bad
+        with pytest.warns(RuntimeWarning):
+            result = mod.build_record_url("v", "task", "s", env=env)
+        assert result.startswith("http://127.0.0.1:7313/records/"), bad
+
+
+def test_printing_the_url_never_fails_the_write_verb(tmp_path, monkeypatch):
+    """The reader link is a convenience printed after the record is already
+    written and committed, so no failure constructing it may propagate. Even an
+    unforeseen error inside URL construction leaves the verb's own outcome
+    unchanged."""
+    cli_record = load_script("lore.cli.record")
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("unforeseen")
+
+    monkeypatch.setattr(ru(), "build_record_url", _boom)
+    cli_record._print_record_url("demo", "decision/some-slug")
+
+
 # ---------------------------------------------------------------------------
 # 7. Percent-encoding of every segment
 # ---------------------------------------------------------------------------

@@ -2325,3 +2325,24 @@ def test_print_record_url_reemits_non_runtime_warning():
             _print_record_url("v", "spec/s")
     finally:
         record_url_mod.build_record_url = original
+
+
+def test_create_survives_an_unparseable_base_with_its_stdout_contract_intact(tmp_path):
+    """The reader link is printed after the record is written and committed, so
+    no base — however malformed — may cost the verb its exit code or its stdout
+    id. ``urlsplit`` raises on an unclosed IPv6 bracket, and a caller doing
+    ``$(lore record create …)`` would otherwise capture an empty string for a
+    record that exists on disk."""
+    vault, state = _make_vault(tmp_path)
+    r = _run(
+        _BASE_ARGS,
+        vault=vault,
+        state_dir=state,
+        stdin_text="body\n",
+        env_extra={"LORE_RECORD_URL_BASE": "http://[oops"},
+    )
+    assert r.returncode == 0, r.stderr
+    lines = r.stdout.splitlines()
+    assert len(lines) == 1
+    assert lines[0].startswith("spec/")
+    assert "Traceback" not in r.stderr

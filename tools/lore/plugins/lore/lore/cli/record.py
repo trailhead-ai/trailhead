@@ -329,6 +329,17 @@ def _print_record_url(vault_name: str | None, record_id: str) -> None:
 
     from .. import record_url as record_url_mod
 
+    try:
+        _emit_record_url(record_url_mod, vault_name, record_id)
+    except Exception:
+        # The reader link is a convenience printed after the record is written
+        # and committed. Nothing about constructing it may change the verb's
+        # outcome, so an unforeseen failure costs the line and nothing else.
+        pass
+
+
+def _emit_record_url(record_url_mod, vault_name: str, record_id: str) -> None:
+    """Build and print the reader-URL line. See :func:`_print_record_url`."""
     kind, _, slug = record_id.partition("/")
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always", RuntimeWarning)

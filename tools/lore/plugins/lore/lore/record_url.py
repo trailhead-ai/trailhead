@@ -72,11 +72,27 @@ def _validate_base(base: str) -> str:
     rather than swallowed — a caller that wants to know why its configured
     base was ignored can capture it.
     """
-    parsed = urlsplit(base)
+    try:
+        parsed = urlsplit(base)
+    except ValueError as exc:
+        # urlsplit raises on some malformed authorities (an unclosed IPv6
+        # bracket, say). A base is operator-supplied text; it may not abort a
+        # write verb that has already committed its record.
+        warnings.warn(
+            f"lore: ignoring invalid record_url_base {base!r} "
+            f"({exc}); falling back to {DEFAULT_BASE!r}",
+            RuntimeWarning,
+            stacklevel=3,
+        )
+        return DEFAULT_BASE
     if parsed.scheme not in _ALLOWED_SCHEMES:
         reason = "scheme must be http or https"
     elif not parsed.netloc:
         reason = "no host in the URL"
+    elif parsed.query or parsed.fragment:
+        # The record path is appended to the base, so anything after a "?" or
+        # "#" swallows it: the link opens the reader's home page, not a record.
+        reason = "query or fragment in the URL"
     elif "@" in parsed.netloc:
         # Userinfo makes the authority the text AFTER the "@", so a base like
         # http://127.0.0.1:7313@evil.test reads as local and resolves
