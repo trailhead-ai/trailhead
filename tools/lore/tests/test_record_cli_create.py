@@ -45,6 +45,7 @@ config.json (isolated XDG_CONFIG_HOME) and XDG_STATE_HOME is fenced too.
 from __future__ import annotations
 
 import json
+import warnings
 from pathlib import Path
 
 import pytest
@@ -2218,3 +2219,109 @@ def test_create_surfaces_an_invalid_base_as_a_plain_lore_line(tmp_path):
 
     record_url_mod = load_script("lore.record_url")
     assert f"{record_url_mod.DEFAULT_BASE}/records/" in r.stderr
+
+
+# ---------------------------------------------------------------------------
+# _vault_name_for_root / _print_record_url — unit-level coverage of the
+# helpers behind the stderr trailer above.
+#
+# Covers the test contract:
+#   - no config.json loaded → "default" (matches resolve_active_vault's own
+#     floor-path fallback).
+#   - config.json loaded but no entry's path matches the record's root →
+#     None, so the caller omits the URL line rather than naming a vault the
+#     record is not in.
+#   - two config entries aliasing one path → the first config-order match's
+#     name, deterministically.
+#   - a non-RuntimeWarning raised during URL construction is re-emitted
+#     (reaches its normal destination) rather than swallowed.
+# ---------------------------------------------------------------------------
+
+
+def test_vault_name_for_root_no_config_returns_default(tmp_path):
+    """No config.json anywhere on the (isolated) XDG path → "default"."""
+    from lore.cli.record import _vault_name_for_root
+
+    result = _vault_name_for_root(tmp_path / "some-vault-dir")
+    assert result == "default"
+
+
+def test_vault_name_for_root_loaded_but_unmatched_returns_none(tmp_path, monkeypatch):
+    """config.json IS loaded but no vault entry's path matches vault_root ->
+    None, never a name for a vault the record isn't actually in."""
+    from lore.cli.record import _vault_name_for_root
+
+    config_home = tmp_path / "config"
+    lore_cfg = config_home / "lore"
+    lore_cfg.mkdir(parents=True)
+    other_vault = tmp_path / "other-vault"
+    other_vault.mkdir()
+    (lore_cfg / "config.json").write_text(
+        json.dumps({"vaults": [{"name": "default", "scope": "default", "path": str(other_vault)}]})
+    )
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(config_home))
+
+    unmatched_root = tmp_path / "not-configured-anywhere"
+    unmatched_root.mkdir()
+    result = _vault_name_for_root(unmatched_root)
+    assert result is None
+
+
+def test_vault_name_for_root_path_aliased_entries_returns_first_config_order_match(
+    tmp_path, monkeypatch
+):
+    """Two entries aliasing the same path (config.json enforces unique names,
+    not unique paths) -> the first config-order match's name, deterministically."""
+    from lore.cli.record import _vault_name_for_root
+
+    config_home = tmp_path / "config"
+    lore_cfg = config_home / "lore"
+    lore_cfg.mkdir(parents=True)
+    shared = tmp_path / "shared-vault"
+    shared.mkdir()
+    (lore_cfg / "config.json").write_text(
+        json.dumps(
+            {
+                "vaults": [
+                    {"name": "default", "scope": "default"},
+                    {"name": "first-alias", "scope": "team", "path": str(shared)},
+                    {"name": "second-alias", "scope": "product", "path": str(shared)},
+                ]
+            }
+        )
+    )
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(config_home))
+
+    result = _vault_name_for_root(shared)
+    assert result == "first-alias"
+
+
+def test_print_record_url_omits_line_when_vault_name_is_none(capsys):
+    """`_print_record_url(None, ...)` prints nothing — the caller's signal for
+    "no trustworthy vault name" must not fall back to a misleading link."""
+    from lore.cli.record import _print_record_url
+
+    _print_record_url(None, "spec/some-record")
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert captured.out == ""
+
+
+def test_print_record_url_reemits_non_runtime_warning():
+    """A non-RuntimeWarning raised during URL construction reaches its normal
+    destination (re-emitted via warnings.warn) instead of being swallowed by
+    the RuntimeWarning-only catch."""
+    import lore.record_url as record_url_mod
+    from lore.cli.record import _print_record_url
+
+    def _fake_build_record_url(*args, **kwargs):
+        warnings.warn("some other warning", UserWarning)
+        return "http://127.0.0.1:7313/records/v/spec/s"
+
+    original = record_url_mod.build_record_url
+    record_url_mod.build_record_url = _fake_build_record_url
+    try:
+        with pytest.warns(UserWarning, match="some other warning"):
+            _print_record_url("v", "spec/s")
+    finally:
+        record_url_mod.build_record_url = original

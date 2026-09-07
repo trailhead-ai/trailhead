@@ -63,14 +63,17 @@ def resolve_base(env: dict | None = None) -> str:
 
 
 def _validate_base(base: str) -> str:
-    """Return *base* if it carries an http(s) scheme, else the default.
+    """Return *base* if it carries an http(s) scheme AND a netloc, else the default.
 
-    Rejection is surfaced as a :class:`RuntimeWarning` rather than swallowed —
-    a caller that wants to know why its configured base was ignored can
-    capture it.
+    A scheme alone is not enough: ``urlsplit("http:nonsense")`` parses to
+    scheme ``"http"`` with an empty netloc, and joining that with the record
+    path would print ``http:nonsense/records/...`` — a broken link that looks
+    superficially valid. Rejection is surfaced as a :class:`RuntimeWarning`
+    rather than swallowed — a caller that wants to know why its configured
+    base was ignored can capture it.
     """
-    scheme = urlsplit(base).scheme
-    if scheme not in _ALLOWED_SCHEMES:
+    parsed = urlsplit(base)
+    if parsed.scheme not in _ALLOWED_SCHEMES or not parsed.netloc:
         warnings.warn(
             f"lore: ignoring invalid record_url_base {base!r} "
             f"(scheme must be http or https); falling back to {DEFAULT_BASE!r}",

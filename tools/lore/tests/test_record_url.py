@@ -168,6 +168,19 @@ def test_unsupported_scheme_base_rejected_and_default_used(tmp_path):
     assert result.startswith("http://127.0.0.1:7313/")
 
 
+def test_scheme_without_netloc_base_rejected_and_default_used(tmp_path):
+    """A base with an allowed scheme but no netloc (e.g. ``http:nonsense``,
+    which urlsplit parses as scheme "http" with an empty netloc) is rejected
+    the same way a missing/unsupported scheme is — never yielding a link like
+    ``http:nonsense/records/...``."""
+    env = _make_env(tmp_path)
+    env["LORE_RECORD_URL_BASE"] = "http:nonsense"
+    mod = ru()
+    with pytest.warns(RuntimeWarning):
+        result = mod.build_record_url("v", "task", "s", env=env)
+    assert result.startswith("http://127.0.0.1:7313/")
+
+
 # ---------------------------------------------------------------------------
 # 7. Percent-encoding of every segment
 # ---------------------------------------------------------------------------

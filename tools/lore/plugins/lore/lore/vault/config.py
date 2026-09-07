@@ -6,8 +6,11 @@ vaults. It exposes a ``Vault`` NamedTuple, ``load_config`` for parse+validate,
 the lightweight query helpers ``is_shared`` / ``is_configured_vault``, the
 **config-based active-vault resolver** ``resolve_active_vault`` (returns the
 ``default``-scope vault path, or the floor ``state_dir("lore")/vaults/default``),
-and the **config-mutation API:** ``add_vault_entry``, ``remove_vault_entry``,
-``write_config_atomic``.
+the **config-mutation API:** ``add_vault_entry``, ``remove_vault_entry``,
+``write_config_atomic``, and ``read_record_url_base`` — a separate, permissive
+read of the optional top-level ``record_url_base`` string key, the one
+additive key ``load_config``'s validated ``list[Vault]`` does not carry
+forward.
 
 **Mutation API:**
 

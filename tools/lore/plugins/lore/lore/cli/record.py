@@ -295,7 +295,7 @@ def _print_guard_notices(notices: list[str]) -> None:
 _RECORD_URL_LINE_FORMAT = "Reader: {url}"
 
 
-def _print_record_url(vault_name: str, record_id: str) -> None:
+def _print_record_url(vault_name: str | None, record_id: str) -> None:
     """Print *record_id*'s reader URL to stderr, in the shared line format.
 
     Joins the existing stderr trailer (routing confirmation, then
@@ -303,6 +303,11 @@ def _print_record_url(vault_name: str, record_id: str) -> None:
     called last, by both ``record create`` and ``record update``, once the
     record's final vault is known. On an update that relocates the record,
     *vault_name* is the DESTINATION vault, never the one it moved out of.
+
+    *vault_name* is ``None`` when :func:`_vault_name_for_root` could not
+    determine a trustworthy name (``config.json`` is loaded but no entry's
+    path matches the record's root) — the URL line is omitted entirely in
+    that case. A missing line is honest; a link naming the wrong vault is not.
 
     Construction (:func:`lore.record_url.build_record_url`) reads
     configuration only and performs no network I/O, so this prints the same
@@ -315,8 +320,13 @@ def _print_record_url(vault_name: str, record_id: str) -> None:
     caught here and re-printed as a plain ``lore: `` line matching every
     other rejection notice this CLI prints (e.g. :func:`_resolve_named_vault`),
     instead of leaking Python's multi-line ``file:lineno`` warning format
-    into the trailer.
+    into the trailer. Any other warning category raised during construction is
+    re-emitted via :func:`warnings.warn` rather than discarded, so it still
+    reaches its normal destination.
     """
+    if vault_name is None:
+        return
+
     from .. import record_url as record_url_mod
 
     kind, _, slug = record_id.partition("/")
@@ -326,24 +336,37 @@ def _print_record_url(vault_name: str, record_id: str) -> None:
     for w in caught:
         if issubclass(w.category, RuntimeWarning):
             print(str(w.message), file=sys.stderr)
+        else:
+            warnings.warn(w.message, w.category)
     print(_RECORD_URL_LINE_FORMAT.format(url=url), file=sys.stderr)
 
 
-def _vault_name_for_root(vault_root) -> str:
+def _vault_name_for_root(vault_root) -> str | None:
     """Return the configured vault name whose path resolves to *vault_root*.
 
     Falls back to ``"default"`` — the name ``lore init`` seeds for the sole
     default-scope vault — when no ``config.json`` is loaded, matching
     :func:`vault_config.resolve_active_vault`'s own floor-path fallback.
+
+    Returns ``None`` when ``config.json`` IS loaded but no entry's path
+    resolves to *vault_root* — the caller must not print a URL naming a vault
+    the record is not actually in.
+
+    ``config.json`` enforces unique vault *names*, not unique vault *paths*,
+    so two entries may alias one directory. When more than one entry matches,
+    this returns the first match in config order, deterministically — not
+    because one alias is more "correct" than another, but because a
+    deterministic pick beats an arbitrary one.
     """
     loaded = _load_vault_config()
-    if loaded is not None:
-        _, vaults = loaded
-        target = Path(vault_root).resolve()
-        for v in vaults:
-            if Path(v.path).resolve() == target:
-                return v.name
-    return "default"
+    if loaded is None:
+        return "default"
+    _, vaults = loaded
+    target = Path(vault_root).resolve()
+    for v in vaults:
+        if Path(v.path).resolve() == target:
+            return v.name
+    return None
 
 
 def cmd_record(args) -> int:
