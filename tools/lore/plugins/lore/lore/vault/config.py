@@ -6,8 +6,11 @@ vaults. It exposes a ``Vault`` NamedTuple, ``load_config`` for parse+validate,
 the lightweight query helpers ``is_shared`` / ``is_configured_vault``, the
 **config-based active-vault resolver** ``resolve_active_vault`` (returns the
 ``default``-scope vault path, or the floor ``state_dir("lore")/vaults/default``),
-and the **config-mutation API:** ``add_vault_entry``, ``remove_vault_entry``,
-``write_config_atomic``.
+the **config-mutation API:** ``add_vault_entry``, ``remove_vault_entry``,
+``write_config_atomic``, and ``read_record_url_base`` — a separate, permissive
+read of the optional top-level ``record_url_base`` string key, the one
+additive key ``load_config``'s validated ``list[Vault]`` does not carry
+forward.
 
 **Mutation API:**
 
@@ -291,6 +294,34 @@ def resolve_active_vault(env: dict | None = None) -> Path:
         return next(v.path for v in vaults if v.scope == "default")
     except Exception:
         return floor
+
+
+# ---------------------------------------------------------------------------
+# read_record_url_base
+# ---------------------------------------------------------------------------
+
+
+def read_record_url_base(env: dict | None = None) -> str | None:
+    """Return the top-level ``record_url_base`` string from config.json, or ``None``.
+
+    ``load_config`` validates ``config.json`` into a ``list[Vault]`` and
+    surfaces no other top-level key, so this is a separate, permissive read of
+    the same file for the one additive key it does not carry forward.
+    ``None`` covers every case that isn't a present string value: the file is
+    missing, unreadable, not valid JSON, or valid JSON with the key absent or
+    holding a non-string value.
+
+    Args:
+        env: Optional ``{str: str}`` XDG environment override, forwarded to
+             :func:`_resolve_config_path` (see that function's ``env`` docs).
+    """
+    try:
+        config_path = _resolve_config_path(env=env)
+        data = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    value = data.get("record_url_base") if isinstance(data, dict) else None
+    return value if isinstance(value, str) else None
 
 
 # ---------------------------------------------------------------------------

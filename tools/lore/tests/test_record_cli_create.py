@@ -45,6 +45,7 @@ config.json (isolated XDG_CONFIG_HOME) and XDG_STATE_HOME is fenced too.
 from __future__ import annotations
 
 import json
+import warnings
 from pathlib import Path
 
 import pytest
@@ -2127,3 +2128,222 @@ def test_unset_pairing_rule_does_not_claim_a_uniform_value_shape(leaf, monkeypat
     # The metavars that make the rule's redirect truthful must actually render.
     assert "--unset-label KEY" in help_text
     assert "--unset-annotation KEY" in help_text
+
+
+# ---------------------------------------------------------------------------
+# Reader URL on stderr
+#
+# Covers the test contract:
+#   - stdout stays exactly one line, the bare id, with the URL feature added.
+#   - stderr carries the URL the record_url contract module builds for the
+#     vault the record was routed to.
+#   - the URL is plain visible text (no OSC 8 escape).
+#   - the URL prints with no reader daemon running anywhere reachable.
+# ---------------------------------------------------------------------------
+
+
+def test_create_stdout_stays_exactly_one_line_with_url_added(tmp_path):
+    """create's stdout is still the bare ``kind/name`` id and nothing else."""
+    vault, state = _make_vault(tmp_path)
+    r = _run(_BASE_ARGS, vault=vault, state_dir=state, stdin_text="body\n")
+    assert r.returncode == 0, r.stderr
+    lines = r.stdout.splitlines()
+    assert len(lines) == 1
+    assert lines[0].startswith("spec/")
+
+
+def test_create_stderr_carries_the_record_url_contract_modules_url(tmp_path):
+    """stderr's URL line is exactly the URL ``record_url.build_record_url`` builds
+    for the vault the record was routed to — derived from the producer module,
+    not a hand-typed string."""
+    vault, state = _make_vault(tmp_path)
+    r = _run(_BASE_ARGS, vault=vault, state_dir=state, stdin_text="body\n")
+    assert r.returncode == 0, r.stderr
+    record_id = r.stdout.strip()
+    kind, name = record_id.split("/", 1)
+
+    record_url_mod = load_script("lore.record_url")
+    # The seeded config (write_default_config, via run_cli) names the routed
+    # vault "default" and carries no record_url_base, so the module falls
+    # through to its own built-in default base.
+    expected_url = record_url_mod.build_record_url("default", kind, name)
+    assert expected_url in r.stderr
+
+
+def test_create_url_line_has_no_osc8_escape(tmp_path):
+    """The URL is printed as visible plain text, never an OSC 8 hyperlink escape."""
+    vault, state = _make_vault(tmp_path)
+    r = _run(_BASE_ARGS, vault=vault, state_dir=state, stdin_text="body\n")
+    assert r.returncode == 0, r.stderr
+    assert "\x1b]8" not in r.stderr
+
+
+def test_create_prints_url_with_no_reader_daemon_running(tmp_path):
+    """The URL is constructed offline: pointing the base at a closed local port
+    (nothing is listening — this harness never starts a reader daemon) still
+    succeeds quickly, because construction never reaches for the network."""
+    import time
+
+    vault, state = _make_vault(tmp_path)
+    started = time.monotonic()
+    r = _run(
+        _BASE_ARGS,
+        vault=vault,
+        state_dir=state,
+        stdin_text="body\n",
+        env_extra={"LORE_RECORD_URL_BASE": "http://127.0.0.1:1"},
+    )
+    elapsed = time.monotonic() - started
+    assert r.returncode == 0, r.stderr
+    assert elapsed < 5, f"took {elapsed}s — construction should never touch the network"
+    assert "http://127.0.0.1:1/records/" in r.stderr
+
+
+def test_create_surfaces_an_invalid_base_as_a_plain_lore_line(tmp_path):
+    """A rejected ``record_url_base`` reaches the operator as a plain ``lore: ``
+    notice in the stderr trailer — not as Python's multi-line
+    ``file:lineno: RuntimeWarning`` render — and the command still exits 0 with
+    a working default-base URL rather than no URL at all."""
+    vault, state = _make_vault(tmp_path)
+    r = _run(
+        _BASE_ARGS,
+        vault=vault,
+        state_dir=state,
+        stdin_text="body\n",
+        env_extra={"LORE_RECORD_URL_BASE": "javascript:alert(1)"},
+    )
+    assert r.returncode == 0, r.stderr
+    assert "lore: ignoring invalid record_url_base" in r.stderr
+    assert "RuntimeWarning" not in r.stderr
+    assert "warnings.warn" not in r.stderr
+
+    record_url_mod = load_script("lore.record_url")
+    assert f"{record_url_mod.DEFAULT_BASE}/records/" in r.stderr
+
+
+# ---------------------------------------------------------------------------
+# _vault_name_for_root / _print_record_url — unit-level coverage of the
+# helpers behind the stderr trailer above.
+#
+# Covers the test contract:
+#   - no config.json loaded → "default" (matches resolve_active_vault's own
+#     floor-path fallback).
+#   - config.json loaded but no entry's path matches the record's root →
+#     None, so the caller omits the URL line rather than naming a vault the
+#     record is not in.
+#   - two config entries aliasing one path → the first config-order match's
+#     name, deterministically.
+#   - a non-RuntimeWarning raised during URL construction is re-emitted
+#     (reaches its normal destination) rather than swallowed.
+# ---------------------------------------------------------------------------
+
+
+def test_vault_name_for_root_no_config_returns_default(tmp_path):
+    """No config.json anywhere on the (isolated) XDG path → "default"."""
+    from lore.cli.record import _vault_name_for_root
+
+    result = _vault_name_for_root(tmp_path / "some-vault-dir")
+    assert result == "default"
+
+
+def test_vault_name_for_root_loaded_but_unmatched_returns_none(tmp_path, monkeypatch):
+    """config.json IS loaded but no vault entry's path matches vault_root ->
+    None, never a name for a vault the record isn't actually in."""
+    from lore.cli.record import _vault_name_for_root
+
+    config_home = tmp_path / "config"
+    lore_cfg = config_home / "lore"
+    lore_cfg.mkdir(parents=True)
+    other_vault = tmp_path / "other-vault"
+    other_vault.mkdir()
+    (lore_cfg / "config.json").write_text(
+        json.dumps({"vaults": [{"name": "default", "scope": "default", "path": str(other_vault)}]})
+    )
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(config_home))
+
+    unmatched_root = tmp_path / "not-configured-anywhere"
+    unmatched_root.mkdir()
+    result = _vault_name_for_root(unmatched_root)
+    assert result is None
+
+
+def test_vault_name_for_root_path_aliased_entries_returns_first_config_order_match(
+    tmp_path, monkeypatch
+):
+    """Two entries aliasing the same path (config.json enforces unique names,
+    not unique paths) -> the first config-order match's name, deterministically."""
+    from lore.cli.record import _vault_name_for_root
+
+    config_home = tmp_path / "config"
+    lore_cfg = config_home / "lore"
+    lore_cfg.mkdir(parents=True)
+    shared = tmp_path / "shared-vault"
+    shared.mkdir()
+    (lore_cfg / "config.json").write_text(
+        json.dumps(
+            {
+                "vaults": [
+                    {"name": "default", "scope": "default"},
+                    {"name": "first-alias", "scope": "team", "path": str(shared)},
+                    {"name": "second-alias", "scope": "product", "path": str(shared)},
+                ]
+            }
+        )
+    )
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(config_home))
+
+    result = _vault_name_for_root(shared)
+    assert result == "first-alias"
+
+
+def test_print_record_url_omits_line_when_vault_name_is_none(capsys, monkeypatch):
+    """A root that resolves to no trustworthy vault name prints nothing, rather
+    than falling back to a misleading link."""
+    import lore.cli.record as cli_record
+
+    monkeypatch.setattr(cli_record, "_vault_name_for_root", lambda root: None)
+    cli_record._print_record_url("/some/root", "spec/some-record")
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert captured.out == ""
+
+
+def test_print_record_url_reemits_non_runtime_warning():
+    """A non-RuntimeWarning raised during URL construction reaches its normal
+    destination (re-emitted via warnings.warn) instead of being swallowed by
+    the RuntimeWarning-only catch."""
+    import lore.record_url as record_url_mod
+    from lore.cli.record import _print_record_url
+
+    def _fake_build_record_url(*args, **kwargs):
+        warnings.warn("some other warning", UserWarning)
+        return "http://127.0.0.1:7313/records/v/spec/s"
+
+    original = record_url_mod.build_record_url
+    record_url_mod.build_record_url = _fake_build_record_url
+    try:
+        with pytest.warns(UserWarning, match="some other warning"):
+            _print_record_url("v", "spec/s")
+    finally:
+        record_url_mod.build_record_url = original
+
+
+def test_create_survives_an_unparseable_base_with_its_stdout_contract_intact(tmp_path):
+    """The reader link is printed after the record is written and committed, so
+    no base — however malformed — may cost the verb its exit code or its stdout
+    id. ``urlsplit`` raises on an unclosed IPv6 bracket, and a caller doing
+    ``$(lore record create …)`` would otherwise capture an empty string for a
+    record that exists on disk."""
+    vault, state = _make_vault(tmp_path)
+    r = _run(
+        _BASE_ARGS,
+        vault=vault,
+        state_dir=state,
+        stdin_text="body\n",
+        env_extra={"LORE_RECORD_URL_BASE": "http://[oops"},
+    )
+    assert r.returncode == 0, r.stderr
+    lines = r.stdout.splitlines()
+    assert len(lines) == 1
+    assert lines[0].startswith("spec/")
+    assert "Traceback" not in r.stderr

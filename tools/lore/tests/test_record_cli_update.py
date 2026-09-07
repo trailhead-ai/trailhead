@@ -2629,3 +2629,94 @@ def test_update_draft_adr_may_still_be_promoted_and_edited(tmp_path):
     )
     assert promote.returncode == 0, promote.stderr
     assert _find_sidecar(vault, rid)["status"] == "active"
+
+
+# ---------------------------------------------------------------------------
+# Reader URL on stderr
+#
+# Covers the test contract:
+#   - update's stdout unchanged (bare id, no move), stderr carries the URL.
+#   - a cross-vault move names the DESTINATION vault in the printed URL.
+#   - create and update emit the identical line format — pinned against the
+#     same shared constant, so a future edit to one cannot drift from the
+#     other.
+# ---------------------------------------------------------------------------
+
+
+def _create_decision(vault: Path, state: Path):
+    """Create a decision record and return the whole completed ``create`` run.
+
+    Returns the run rather than just the id because one caller asserts on
+    create's own stderr line, not only on the record it produced.
+    """
+    r = _run(
+        ["record", "create", "--kind", "decision", "--title", "T", "--keyword", "k"],
+        vault=vault, state_dir=state, stdin_text="orig body\n",
+    )
+    assert r.returncode == 0, r.stderr
+    return r
+
+
+def test_update_no_move_stdout_unchanged_stderr_carries_url(tmp_path):
+    """A metadata-only update with no scope flag: stdout is still exactly the
+    bare id (no ``moved:`` line), and stderr carries the URL for the vault the
+    record already lives in — derived from the record_url contract module."""
+    vault, state = _make_vault(tmp_path)
+    rid = _create_decision(vault, state).stdout.strip()
+    kind, name = rid.split("/", 1)
+
+    r = _run(
+        ["record", "update", rid, "--status", "active"],
+        vault=vault, state_dir=state, stdin_text="",
+    )
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.strip() == rid
+    assert "moved:" not in r.stdout
+
+    record_url_mod = load_script("lore.record_url")
+    expected_url = record_url_mod.build_record_url("default", kind, name)
+    assert expected_url in r.stderr
+
+
+def test_update_move_prints_destination_vault_url_not_source(tmp_path):
+    """A cross-vault move names the DESTINATION vault in the printed URL, not
+    the vault the record moved out of."""
+    vault_a, vault_b, state, config_home = _two_team_config(tmp_path)
+    rid = _create_routed(vault_a, state, config_home, scope_args=["--team", "alpha"])
+    kind, name = rid.split("/", 1)
+
+    r = _run_cfg(
+        ["record", "update", rid, "--team", "beta"],
+        vault=vault_a, state=state, config_home=config_home, stdin_text="",
+    )
+    assert r.returncode == 0, r.stderr
+    assert f"moved: {rid} →" in r.stdout
+
+    record_url_mod = load_script("lore.record_url")
+    dest_url = record_url_mod.build_record_url("beta", kind, name)
+    source_url = record_url_mod.build_record_url("alpha", kind, name)
+    assert dest_url in r.stderr
+    assert source_url not in r.stderr
+
+
+def test_create_and_update_emit_the_identical_url_line_format(tmp_path):
+    """create's and update's URL lines are both rendered from the SAME shared
+    format constant in cli/record — a future edit to one verb's phrasing that
+    does not touch the other's would fail this."""
+    vault, state = _make_vault(tmp_path)
+    record_cli = load_script("lore.cli.record")
+    record_url_mod = load_script("lore.record_url")
+
+    create_r = _create_decision(vault, state)
+    rid = create_r.stdout.strip()
+    kind, name = rid.split("/", 1)
+    create_url = record_url_mod.build_record_url("default", kind, name)
+    assert record_cli._RECORD_URL_LINE_FORMAT.format(url=create_url) in create_r.stderr.splitlines()
+
+    update_r = _run(
+        ["record", "update", rid, "--status", "active"],
+        vault=vault, state_dir=state, stdin_text="",
+    )
+    assert update_r.returncode == 0, update_r.stderr
+    update_url = record_url_mod.build_record_url("default", kind, name)
+    assert record_cli._RECORD_URL_LINE_FORMAT.format(url=update_url) in update_r.stderr.splitlines()

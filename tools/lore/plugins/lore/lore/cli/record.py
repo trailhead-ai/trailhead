@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import warnings
 from pathlib import Path
 from typing import Any
 
@@ -285,6 +286,104 @@ def _print_guard_notices(notices: list[str]) -> None:
     """
     for msg in notices:
         print(msg, file=sys.stderr)
+
+
+#: The record-URL line format, shared by ``record create`` and ``record
+#: update``. A single constant rendered by one helper (below) — never two
+#: independently-phrased ``print`` statements — so the two verbs cannot drift
+#: apart on label text or position.
+_RECORD_URL_LINE_FORMAT = "Reader: {url}"
+
+
+def _print_record_url(vault_root, record_id: str) -> None:
+    """Print *record_id*'s reader URL to stderr, in the shared line format.
+
+    Joins the existing stderr trailer (routing confirmation, then
+    :func:`_print_guard_notices`) rather than opening a second channel —
+    called last, by both ``record create`` and ``record update``, once the
+    record's final vault is known. On an update that relocates the record,
+    *vault_name* is the DESTINATION vault, never the one it moved out of.
+
+    Takes the record's vault ROOT and resolves the vault name itself, inside
+    its own guard. Resolution runs in the same post-commit position as building
+    the URL and carries the same obligation, so evaluating it at the call site
+    would leave the trailer non-fatal only for the half of its work that
+    happened to sit inside the guard.
+
+    :func:`_vault_name_for_root` returns ``None`` when it cannot determine a
+    trustworthy name (``config.json`` is loaded but no entry's path matches the
+    record's root) — the URL line is omitted entirely in that case. A missing
+    line is honest; a link naming the wrong vault is not.
+
+    Construction (:func:`lore.record_url.build_record_url`) reads
+    configuration only and performs no network I/O, so this prints the same
+    line whether or not a reader daemon is actually running.
+
+    A rejected configured base (see ``record_url.resolve_base``) is surfaced
+    by that module as a :class:`RuntimeWarning` rather than a plain stderr
+    line — no CLI-level stderr-notice convention existed yet at the module's
+    layer. This function is that convention's layer, so the warning is
+    caught here and re-printed as a plain ``lore: `` line matching every
+    other rejection notice this CLI prints (e.g. :func:`_resolve_named_vault`),
+    instead of leaking Python's multi-line ``file:lineno`` warning format
+    into the trailer. Any other warning category raised during construction is
+    re-emitted via :func:`warnings.warn` rather than discarded, so it still
+    reaches its normal destination.
+    """
+    from .. import record_url as record_url_mod
+
+    try:
+        vault_name = _vault_name_for_root(vault_root)
+        if vault_name is None:
+            return
+        _emit_record_url(record_url_mod, vault_name, record_id)
+    except Exception:
+        # The reader link is a convenience printed after the record is written
+        # and committed. Nothing about constructing it may change the verb's
+        # outcome, so an unforeseen failure costs the line and nothing else.
+        pass
+
+
+def _emit_record_url(record_url_mod, vault_name: str, record_id: str) -> None:
+    """Build and print the reader-URL line. See :func:`_print_record_url`."""
+    kind, _, slug = record_id.partition("/")
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always", RuntimeWarning)
+        url = record_url_mod.build_record_url(vault_name, kind, slug)
+    for w in caught:
+        if issubclass(w.category, RuntimeWarning):
+            print(str(w.message), file=sys.stderr)
+        else:
+            warnings.warn(w.message, w.category)
+    print(_RECORD_URL_LINE_FORMAT.format(url=url), file=sys.stderr)
+
+
+def _vault_name_for_root(vault_root) -> str | None:
+    """Return the configured vault name whose path resolves to *vault_root*.
+
+    Falls back to ``"default"`` — the name ``lore init`` seeds for the sole
+    default-scope vault — when no ``config.json`` is loaded, matching
+    :func:`vault_config.resolve_active_vault`'s own floor-path fallback.
+
+    Returns ``None`` when ``config.json`` IS loaded but no entry's path
+    resolves to *vault_root* — the caller must not print a URL naming a vault
+    the record is not actually in.
+
+    ``config.json`` enforces unique vault *names*, not unique vault *paths*,
+    so two entries may alias one directory. When more than one entry matches,
+    this returns the first match in config order, deterministically — not
+    because one alias is more "correct" than another, but because a
+    deterministic pick beats an arbitrary one.
+    """
+    loaded = _load_vault_config()
+    if loaded is None:
+        return "default"
+    _, vaults = loaded
+    target = Path(vault_root).resolve()
+    for v in vaults:
+        if Path(v.path).resolve() == target:
+            return v.name
+    return None
 
 
 def cmd_record(args) -> int:
@@ -882,6 +981,9 @@ def _cmd_record_create(args) -> int:
     # Non-blocking graph notices (dependent-warning, flow-out reminder) — stderr,
     # so stdout stays the sole parseable RECORD_ID line.
     _print_guard_notices(guard_notices)
+    # The reader URL for the vault the record actually landed in — last in the
+    # stderr trailer (what happened, then warnings, then where to read it).
+    _print_record_url(vault_root, record_id)
 
     # Print the vault-relative RECORD_ID on stdout.
     print(record_id)
@@ -1491,6 +1593,9 @@ def _cmd_record_update(args) -> int:
     # Non-blocking graph notices (dependent-warning, flow-out reminder) — stderr,
     # so the stdout RECORD_ID/moved contract is unchanged.
     _print_guard_notices(guard_notices)
+    # The reader URL for the DESTINATION vault — the one the record now lives
+    # in, which on a relocation is not the vault it started this call in.
+    _print_record_url(dest_root, new_id)
 
     # The relocation signal (no silent move) precedes the
     # RECORD_ID so the existing stdout contract for the no-move case is unchanged

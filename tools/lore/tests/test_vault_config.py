@@ -552,3 +552,65 @@ def test_resolve_active_vault_no_default_scope_returns_floor(tmp_path):
     result = cfg.resolve_active_vault(env=env)
     expected = tmp_path / "state" / "lore" / "vaults" / "default"
     assert result == expected
+
+
+# ---------------------------------------------------------------------------
+# 7. read_record_url_base
+# ---------------------------------------------------------------------------
+
+
+def test_read_record_url_base_present_returns_value(tmp_path):
+    """config.json carrying record_url_base returns that value."""
+    cfg = vc()
+    env = _make_env(tmp_path)
+    _write_lore_config(
+        tmp_path,
+        {"vaults": [{"name": "default", "scope": "default"}], "record_url_base": "http://example.test:9999"},
+    )
+    result = cfg.read_record_url_base(env=env)
+    assert result == "http://example.test:9999"
+
+
+def test_read_record_url_base_key_absent_returns_none(tmp_path):
+    """config.json present but with no record_url_base key returns None."""
+    cfg = vc()
+    env = _make_env(tmp_path)
+    _write_lore_config(
+        tmp_path,
+        {"vaults": [{"name": "default", "scope": "default"}]},
+    )
+    result = cfg.read_record_url_base(env=env)
+    assert result is None
+
+
+def test_read_record_url_base_no_config_file_returns_none(tmp_path):
+    """No config.json at all returns None."""
+    cfg = vc()
+    env = _make_env(tmp_path)
+    result = cfg.read_record_url_base(env=env)
+    assert result is None
+
+
+def test_read_record_url_base_malformed_json_returns_none(tmp_path):
+    """Malformed JSON in config.json returns None (matches the docstring's
+    "unreadable, or not valid JSON" branch)."""
+    cfg = vc()
+    env = _make_env(tmp_path)
+    config_lore_dir = tmp_path / "config" / "lore"
+    config_lore_dir.mkdir(parents=True, exist_ok=True)
+    (config_lore_dir / "config.json").write_text("{ not valid json }")
+    result = cfg.read_record_url_base(env=env)
+    assert result is None
+
+
+def test_read_record_url_base_non_string_value_returns_none(tmp_path):
+    """A ``record_url_base`` key holding a non-string value returns None
+    (matches the docstring's "holding a non-string value" branch)."""
+    cfg = vc()
+    env = _make_env(tmp_path)
+    _write_lore_config(
+        tmp_path,
+        {"vaults": [{"name": "default", "scope": "default"}], "record_url_base": 12345},
+    )
+    result = cfg.read_record_url_base(env=env)
+    assert result is None
