@@ -352,18 +352,28 @@ bounds) · **Constraints** (technical / business / timing) · **UI Direction** (
 the body sections.
 
 **Fill `## Maturity` from step 1's own resolution** — one `- <camp member name>: <level>` line per
-repository step 1's enumeration reached, naming the level resolved there, whether declared or
-defaulted. Keep the template's keep-marked reminder comment in the filled section; strip only the
-longer pre-fill comment above it. The reminder is what tells an operator hand-correcting a stamp
-months later which levels they may type, and it is a comment because the reader rejects any
-non-bullet prose under this heading.
+repository this work touches, naming the level step 1 already resolved for it, whether declared or
+defaulted. This may be a subset of step 1's enumeration: step 1 resolves a level for every
+camp-workspace member so the session states each one, but the stamp is scoped to the repositories
+this work actually touches, matching the template's own comment and AC5 — stamping every enumerated
+member reimports production ceremony onto a prototype repository the work never reaches. In vanilla
+usage — no camp manifest, so no camp member name exists to key on — key the single entry by the
+repository directory's basename, the same value a camp member name holds for that repository under a
+camp workspace.
+
+Keep the template's keep-marked reminder comment in the filled section; strip only the longer
+pre-fill comment above it. The reminder is what tells an operator hand-correcting a stamp months
+later which levels they may type, and it is a comment because the reader rejects any non-bullet
+prose under this heading.
 
 Where step 1's enumeration could not reach the repositories at all (the unresolved-enumeration
 case), state that explicitly as the section's content rather than writing a stamp that reads as
 complete — never a fabricated per-repository list standing in for it. Write that note **as an HTML
 comment**, not as a bare sentence — `<!-- unresolved-enumeration: <what failed> -->` — because a
 sentence under this heading is rejected by the certify step below as `malformed-entry`, so an
-uncommented note produces a spec that can never be written.
+uncommented note produces a spec that can never be written. The note documents the failure for the
+operator; it does not get the write past the certify gate below — see `unresolved-enumeration` in
+that gate's reason-code list.
 
 **Certify the drafted body before writing it.** Pipe the filled body through the stamp reader,
 before `lore record create` runs:
@@ -372,24 +382,30 @@ before `lore record create` runs:
 printf '%s' "$BODY" | ${CLAUDE_PLUGIN_ROOT}/scripts/maturity_stamp.py
 ```
 
-A non-zero exit refuses the write — nothing is created until the reader exits 0, with the single
-sanctioned exception the `empty-section` remedy below names. Name the remedy the reader's own
-`reason-code:` stderr token identifies, one per code, mirroring the framing step's own
+**A non-zero exit refuses the write, always.** Nothing is created until the reader exits 0 — there
+is no code among the nine below that lets a create proceed on a non-zero exit. Name the remedy the
+reader's own `reason-code:` stderr token identifies, one per code, mirroring the framing step's own
 per-reason-code translation above rather than reporting the bare code:
 
 - `empty-stdin` — the drafted body is empty; re-render the template and fill it in before retrying.
 - `invalid-utf8-stdin` — the drafted body is not valid UTF-8; find and remove the invalid bytes
   before retrying.
 - `section-absent` — the `## Maturity` heading itself is missing from the drafted body; add it
-  before retrying.
+  before retrying. This also fires on a near-miss heading — a trailing space after `Maturity`, or an
+  extra space between `##` and `Maturity` — since the heading matcher requires an exact match; check
+  for a near-miss heading and fix its spelling rather than adding a second one, which would produce
+  `duplicate-section` on retry.
 - `duplicate-section` — the drafted body carries a second `## Maturity` heading; delete the
   duplicate before retrying.
-- `empty-section` — the heading exists but declares zero entries. This code has two causes and only
-  one of them refuses the write. Ordinarily it means the stamp was left unfilled: add at least one
-  `- <camp member name>: <level>` line before retrying. In the unresolved-enumeration case above it
-  is the **sanctioned** outcome — the section truthfully declares no level for any repository, and
-  the create proceeds on that basis. Say which of the two applies before continuing; never claim the
-  unresolved case to get an unfilled stamp past this gate.
+- `empty-section` — the heading exists but declares zero entries. This always means the stamp was
+  left unfilled: add at least one `- <camp member name>: <level>` line before retrying. It refuses,
+  with no exception.
+- `unresolved-enumeration` — the heading exists, declares zero entries, and carries the
+  unresolved-enumeration marker written above: step 1's enumeration could not reach the repositories
+  this work touches at all. This still refuses the write like every other non-zero exit — resolve
+  the enumeration (rerun step 1, e.g. from a session rooted inside the camp workspace or a single
+  repository, or escalate to the operator for the touched repositories) before retrying. The marker
+  documents why the certify gate refused; it is not itself a path past it.
 - `malformed-entry` — a line under the heading is not a valid `- <camp member name>: <level>`
   bullet; correct that line's shape before retrying.
 - `invalid-level` — an entry's level falls outside the closed vocabulary (`prototype` / `early` /
@@ -397,8 +413,7 @@ per-reason-code translation above rather than reporting the bare code:
 - `duplicate-member` — the same camp member name appears twice under the heading; remove or merge
   the duplicate entry before retrying.
 
-Once the reader exits 0 — or reports the sanctioned `empty-section` outcome above — the create
-proceeds; pipe the same certified body to `lore record create`:
+Once the reader exits 0, the create proceeds; pipe the same certified body to `lore record create`:
 
 ```sh
 printf '%s' "$BODY" | lore record create --kind spec --title "<topic>" --status draft

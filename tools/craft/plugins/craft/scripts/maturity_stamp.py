@@ -20,11 +20,14 @@ kind — so this reader anchors on the generic heading finder against its own
 `## Maturity` pattern rather than reusing that heading regex.
 
 The entry grammar is one top-level `- <member-name>: <level>` bullet per
-repository. `<member-name>` matches `^[A-Za-z0-9._-]+$` and `<level>` is
-drawn from the closed vocabulary `prototype` / `early` / `production` and
-nothing else. The section body runs from the line after the sole unmasked
-`## Maturity` heading up to (but not including) the next unmasked top-level
-`## ` heading, or the end of the document.
+repository. `<member-name>` matches `^[A-Za-z0-9._-]+$` and is additionally
+never exactly `.` or `..` — a downstream AC7 attribution consumer treats the
+member name as a path segment, so those two values are rejected here rather
+than read back as a legitimate repository key. `<level>` is drawn from the
+closed vocabulary `prototype` / `early` / `production` and nothing else. The
+section body runs from the line after the sole unmasked `## Maturity`
+heading up to (but not including) the next unmasked top-level `## ` heading,
+or the end of the document.
 
 Where a rejection names offending text — a malformed member name or an
 out-of-vocabulary level value — that text is repo-authored, untrusted
@@ -63,6 +66,23 @@ Exit codes:
                                  entries, distinct from `section-absent` so
                                  a caller never has to infer "declared
                                  nothing" from "declared nothing at all".
+                                 This means exactly one thing: the stamp was
+                                 left unfilled. It carries no exception —
+                                 see unresolved-enumeration below for the
+                                 one case that looks similar but isn't.
+       unresolved-enumeration — the heading exists, its body names zero
+                                 entries, AND the body carries the exact
+                                 `<!-- unresolved-enumeration: ... -->`
+                                 marker (a single-line HTML comment starting
+                                 with that token). Distinguishes "the author
+                                 could not enumerate the repositories this
+                                 work touches at all" from "the author left
+                                 the stamp unfilled" (empty-section) — the
+                                 two would otherwise be byte-identical after
+                                 masking, since a caller sees only that the
+                                 body has zero parseable entries either way.
+                                 Still a fail-closed exit: no `maturity:`
+                                 line is printed for this code either.
        malformed-entry        — a line in the section body is not a valid
                                  `- <member-name>: <level>` bullet, or its
                                  member name falls outside the safe shape.
@@ -100,14 +120,16 @@ from maturity_resolve import _LEVELS, _sanitize  # noqa: E402
 
 _MATURITY_HEADING = "## Maturity"
 _MATURITY_HEADING_RE = re.compile(r"^## Maturity$", re.IGNORECASE)
-_MEMBER_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+_MEMBER_RE = re.compile(r"^(?!\.{1,2}$)[A-Za-z0-9._-]+$")
 _ENTRY_RE = re.compile(r"^-\s+([^:]*):\s*(.*)$")
+_UNRESOLVED_ENUMERATION_MARKER_RE = re.compile(r"^<!--\s*unresolved-enumeration:.*-->\s*$")
 
 _EMPTY_STDIN_REASON_CODE = "empty-stdin"
 _INVALID_UTF8_STDIN_REASON_CODE = "invalid-utf8-stdin"
 _SECTION_ABSENT_REASON_CODE = "section-absent"
 _DUPLICATE_SECTION_REASON_CODE = "duplicate-section"
 _EMPTY_SECTION_REASON_CODE = "empty-section"
+_UNRESOLVED_ENUMERATION_REASON_CODE = "unresolved-enumeration"
 _MALFORMED_ENTRY_REASON_CODE = "malformed-entry"
 _INVALID_LEVEL_REASON_CODE = "invalid-level"
 _DUPLICATE_MEMBER_REASON_CODE = "duplicate-member"
@@ -128,11 +150,16 @@ class StampError(Exception):
         super().__init__(reason_code)
 
 
-def _extract_section_lines(text: str) -> list[str]:
-    """Return the body lines of the sole unmasked `## Maturity` heading —
-    everything after the heading line up to (but not including) the next
-    unmasked top-level `## ` heading, or the end of the document. Raises
-    StampError(section-absent) if no such heading exists, or
+def _extract_section_lines(text: str) -> tuple[list[str], list[str]]:
+    """Return `(body, raw)` for the sole unmasked `## Maturity` heading:
+    `body` is everything after the heading line up to (but not including) the
+    next unmasked top-level `## ` heading, with masked lines (fenced code,
+    HTML comments) omitted — this is what `parse_entries` scans for bullets,
+    unchanged from before. `raw` is the same range with masked lines kept, so
+    a caller can still observe an HTML comment that `body` makes invisible —
+    the one place the unresolved-enumeration marker (necessarily a comment,
+    since bare prose under this heading is `malformed-entry`) can be read at
+    all. Raises StampError(section-absent) if no such heading exists, or
     StampError(duplicate-section) if a second unmasked occurrence exists."""
     lines = _COMMONMARK_LINE_RE.split(text)
     masked = _mask_fenced_lines(lines)
@@ -151,17 +178,20 @@ def _extract_section_lines(text: str) -> list[str]:
         raise StampError(_SECTION_ABSENT_REASON_CODE)
 
     body: list[str] = []
+    raw: list[str] = []
     n = len(lines)
     i = start
     while i < n:
         if masked[i]:
+            raw.append(lines[i])
             i += 1
             continue
         if lines[i].startswith("## "):
             break
         body.append(lines[i])
+        raw.append(lines[i])
         i += 1
-    return body
+    return body, raw
 
 
 def parse_entries(text: str) -> dict[str, str]:
@@ -170,8 +200,15 @@ def parse_entries(text: str) -> dict[str, str]:
     the appropriate reason-code and offending text on any violation; scans
     the section body in document order and raises on the first violation
     found, so a body malformed in more than one way reports exactly one
-    reason-code deterministically."""
-    body_lines = _extract_section_lines(text)
+    reason-code deterministically.
+
+    A section with zero entries reports one of two reason-codes: if the raw
+    section carries the exact `<!-- unresolved-enumeration: ... -->` marker,
+    `unresolved-enumeration` — a deliberate statement that no level is
+    claimed for any repository. Otherwise `empty-section` — an unfilled
+    stamp. The two are not interchangeable: `empty-section` always means the
+    stamp was left blank."""
+    body_lines, raw_lines = _extract_section_lines(text)
 
     entries: dict[str, str] = {}
     for line in body_lines:
@@ -191,6 +228,8 @@ def parse_entries(text: str) -> dict[str, str]:
         entries[name] = level
 
     if not entries:
+        if any(_UNRESOLVED_ENUMERATION_MARKER_RE.match(line) for line in raw_lines):
+            raise StampError(_UNRESOLVED_ENUMERATION_REASON_CODE)
         raise StampError(_EMPTY_SECTION_REASON_CODE)
 
     return entries

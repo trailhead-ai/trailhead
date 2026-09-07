@@ -114,6 +114,30 @@ MALFORMED_MEMBER_NAME = """\
 - look/out: prototype
 """
 
+MEMBER_NAME_SINGLE_DOT = """\
+# Some Spec
+
+## Maturity
+
+- .: production
+"""
+
+MEMBER_NAME_DOUBLE_DOT = """\
+# Some Spec
+
+## Maturity
+
+- ..: production
+"""
+
+MEMBER_NAME_EMBEDS_DOTS_BUT_IS_NOT_JUST_DOTS = """\
+# Some Spec
+
+## Maturity
+
+- ..lookout: production
+"""
+
 DUPLICATE_MEMBER = """\
 # Some Spec
 
@@ -146,6 +170,44 @@ ZERO_ENTRIES = """\
 
 ## Maturity
 
+
+## Other Section
+
+irrelevant
+"""
+
+UNRESOLVED_ENUMERATION_MARKER = """\
+# Some Spec
+
+## Maturity
+
+<!-- unresolved-enumeration: step 1 could not enumerate the repositories this work touches -->
+
+## Other Section
+
+irrelevant
+"""
+
+ZERO_ENTRIES_WITH_UNRELATED_COMMENT = """\
+# Some Spec
+
+## Maturity
+
+<!-- TODO: fill this in later -->
+
+## Other Section
+
+irrelevant
+"""
+
+UNRESOLVED_ENUMERATION_MARKER_MID_SECTION = """\
+# Some Spec
+
+## Maturity
+
+Some text before.
+
+<!-- unresolved-enumeration: could not enumerate -->
 
 ## Other Section
 
@@ -271,6 +333,32 @@ def test_member_name_outside_safe_shape_is_rejected_as_malformed_entry():
     assert "reason-code: malformed-entry" in result.stderr.decode("utf-8")
 
 
+def test_member_name_single_dot_is_rejected_as_malformed_entry():
+    """A bare `.` as the whole member name would later be treated as a path
+    segment by an AC7 attribution consumer; reject it here rather than let it
+    read back as a legitimate repository key."""
+    result = _run(MEMBER_NAME_SINGLE_DOT.encode("utf-8"))
+    assert result.returncode == 2
+    assert "reason-code: malformed-entry" in result.stderr.decode("utf-8")
+
+
+def test_member_name_double_dot_is_rejected_as_malformed_entry():
+    """A bare `..` as the whole member name is the same path-segment hazard as
+    `.`, one directory level up."""
+    result = _run(MEMBER_NAME_DOUBLE_DOT.encode("utf-8"))
+    assert result.returncode == 2
+    assert "reason-code: malformed-entry" in result.stderr.decode("utf-8")
+
+
+def test_member_name_containing_dots_but_not_only_dots_still_accepted():
+    """The rejection is scoped to the whole name being exactly `.` or `..` —
+    a name that merely contains dots (a legitimate shape under the existing
+    `[A-Za-z0-9._-]+` grammar) must still resolve cleanly."""
+    result = _run(MEMBER_NAME_EMBEDS_DOTS_BUT_IS_NOT_JUST_DOTS.encode("utf-8"))
+    assert result.returncode == 0
+    assert _lines(result) == ["maturity: ..lookout=production"]
+
+
 def test_same_member_named_twice_exits_two_with_duplicate_member_regardless_of_agreement():
     result = _run(DUPLICATE_MEMBER.encode("utf-8"))
     assert result.returncode == 2
@@ -326,6 +414,40 @@ def test_heading_present_with_zero_entries_is_its_own_distinct_reason_code():
     reason_code_lines = [line for line in err if "reason-code:" in line]
     assert len(reason_code_lines) == 1
     assert reason_code_lines[0].endswith("reason-code: empty-section")
+
+
+# ---- the unresolved-enumeration marker is machine-distinguishable ---------
+
+
+def test_unresolved_enumeration_marker_exits_two_with_its_own_reason_code():
+    result = _run(UNRESOLVED_ENUMERATION_MARKER.encode("utf-8"))
+    assert result.returncode == 2
+    assert not any(line.startswith("maturity:") for line in _lines(result))
+    err = _err_lines(result)
+    reason_code_lines = [line for line in err if "reason-code:" in line]
+    assert len(reason_code_lines) == 1
+    assert reason_code_lines[0].endswith("reason-code: unresolved-enumeration")
+
+
+def test_zero_entries_with_an_unrelated_comment_is_still_plain_empty_section():
+    """An HTML comment that is not the exact unresolved-enumeration marker must
+    not be mistaken for it — the marker is a specific string, not any comment
+    at all under the heading."""
+    result = _run(ZERO_ENTRIES_WITH_UNRELATED_COMMENT.encode("utf-8"))
+    assert result.returncode == 2
+    err = _err_lines(result)
+    reason_code_lines = [line for line in err if "reason-code:" in line]
+    assert len(reason_code_lines) == 1
+    assert reason_code_lines[0].endswith("reason-code: empty-section")
+
+
+def test_stray_prose_before_the_marker_is_still_malformed_entry():
+    """The marker only settles what an otherwise-empty section means; it does
+    not let a non-bullet line elsewhere in the section skip the ordinary
+    entry grammar check."""
+    result = _run(UNRESOLVED_ENUMERATION_MARKER_MID_SECTION.encode("utf-8"))
+    assert result.returncode == 2
+    assert "reason-code: malformed-entry" in result.stderr.decode("utf-8")
 
 
 # ---- double-defect determinism ---------------------------------------------

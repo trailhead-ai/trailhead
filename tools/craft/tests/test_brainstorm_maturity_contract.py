@@ -270,6 +270,7 @@ _STAMP_REASON_CODES = [
     "section-absent",
     "duplicate-section",
     "empty-section",
+    "unresolved-enumeration",
     "malformed-entry",
     "invalid-level",
     "duplicate-member",
@@ -328,6 +329,34 @@ def test_write_step_instructs_writing_the_maturity_section_keyed_by_member_name(
     )
 
 
+def test_write_step_stamps_repositories_the_work_touches_not_every_enumerated_member():
+    """AC5 and the template both scope the stamp to 'every repository this work
+    touches' — a possible subset of step 1's enumeration, which resolves a level
+    for every camp-workspace member regardless of whether the work touches it.
+    Stamping the full enumeration reimports exactly the production-ceremony-on-
+    a-prototype failure this spec exists to prevent (AC8 rates an unattributable
+    finding at the highest stamped level)."""
+    step = _write_step()
+    assert re.search(r"repositor(?:y|ies) this work touches", step, re.IGNORECASE), (
+        "step 6a must scope the stamp to the repositories this work touches, "
+        f"matching AC5's own wording: {step!r}"
+    )
+    assert "step 1's enumeration reached" not in step, (
+        "step 6a must not instruct stamping every repository step 1's enumeration "
+        f"reached — that over-stamps relative to AC5: {step!r}"
+    )
+
+
+def test_template_names_the_same_scope_as_the_write_step():
+    """The template's own `## Maturity` comment already says 'this work touches' —
+    the write step's instruction must agree with it, not merely with AC5."""
+    template_text = SPEC_TEMPLATE.read_text(encoding="utf-8")
+    assert re.search(r"repositor(?:y|ies) this work touches", template_text, re.IGNORECASE), (
+        "fixture assumption: templates/spec.md's Maturity comment scopes to "
+        "repositories this work touches"
+    )
+
+
 # ---- 6. the write step instructs certifying via the real reader before
 #         `lore record create`, and refusing on a non-zero exit -------------
 
@@ -344,6 +373,24 @@ def test_write_step_instructs_certifying_via_maturity_stamp_before_create():
     assert refusal_clause_match, "step 6a must have a non-zero-exit clause terminated by '.'"
     assert re.search(r"refus", refusal_clause_match.group(0), re.IGNORECASE), (
         "the non-zero-exit clause must instruct refusing the write, not proceeding: "
+        f"{refusal_clause_match.group(0)!r}"
+    )
+
+
+def test_write_step_names_no_exception_to_the_non_zero_exit_refusal():
+    """A non-zero exit always refuses the write. There is no longer a
+    sanctioned exception — `empty-section` and `unresolved-enumeration` are
+    now two distinct, both-refusing codes, so no reason-code lets a create
+    proceed on a non-zero exit."""
+    step = _write_step()
+    assert "sanctioned exception" not in step.lower(), (
+        "step 6a must not carry a sanctioned-exception clause — every "
+        f"non-zero exit refuses the write: {step!r}"
+    )
+    refusal_clause_match = re.search(r"non-zero exit[^.]*\.", step, re.IGNORECASE)
+    assert refusal_clause_match, "step 6a must have a non-zero-exit clause terminated by '.'"
+    assert "exception" not in refusal_clause_match.group(0).lower(), (
+        "the non-zero-exit clause itself must not name an exception: "
         f"{refusal_clause_match.group(0)!r}"
     )
 
@@ -489,20 +536,21 @@ def test_maturity_nested_inside_slices_diverges_from_the_ledger_positive_control
     )
 
 
-# ---- the unresolved-enumeration case must not deadlock the write -----------
+# ---- the unresolved-enumeration case has its own reason-code, and it still
+#      refuses the write like every other non-zero exit -----------------------
 #
 # Step 6a instructs writing an explicit note when step 1's enumeration could not
 # reach the repositories at all, and separately gates `lore record create` on the
-# reader exiting 0. Those two instructions are only compatible if the note's
-# prescribed shape is one the reader tolerates AND the resulting non-zero outcome
-# is named as sanctioned. Otherwise the skill instructs a spec that can never be
-# written. These bind to the real reader, not to the skill's wording.
+# reader exiting 0. `empty-section` used to double as this case's outcome too —
+# byte-identical to a stamp the author simply forgot to fill — which is why the
+# reader now emits a ninth, distinct reason-code for it. It still refuses: the
+# bright line ("a non-zero exit always refuses the write") holds with no
+# exception. These bind to the real reader, not to the skill's wording.
 
 _UNRESOLVED_ENUMERATION_BODY = """# X
 
 ## Maturity
-<!-- unresolved-enumeration: step 1 could not enumerate the repositories this
-work touches; no level is claimed for any repository. -->
+<!-- unresolved-enumeration: step 1 could not enumerate the repositories this work touches -->
 
 ## Acceptance Criteria
 
@@ -510,14 +558,16 @@ work touches; no level is claimed for any repository. -->
 """
 
 
-def test_unresolved_enumeration_note_does_not_read_as_a_malformed_entry():
-    """A prose sentence under the heading trips `malformed-entry`; a comment does
-    not. The skill must prescribe the shape that survives, or its own certify step
-    rejects the note it just told the author to write."""
+def test_unresolved_enumeration_note_reads_as_its_own_reason_code():
+    """A prose sentence under the heading trips `malformed-entry`; the prescribed
+    comment-shaped note must trip neither that nor the generic `empty-section` —
+    it gets its own code, and still exits non-zero."""
     result = _run_script(STAMP, _UNRESOLVED_ENUMERATION_BODY)
+    assert result.returncode == 2
     err = result.stderr.decode("utf-8")
     assert "reason-code: malformed-entry" not in err, err
-    assert "reason-code: empty-section" in err, err
+    assert "reason-code: empty-section" not in err, err
+    assert "reason-code: unresolved-enumeration" in err, err
 
 
 def test_skill_prescribes_a_comment_shaped_unresolved_enumeration_note():
@@ -529,16 +579,33 @@ def test_skill_prescribes_a_comment_shaped_unresolved_enumeration_note():
     )
 
 
-def test_skill_names_the_unresolved_enumeration_case_as_a_sanctioned_empty_section():
-    """`empty-section` is the one reader outcome with two causes — a stamp the author
-    forgot to fill, and an enumeration that genuinely reached no repository. The skill
-    must distinguish them, or the unresolved case has no way past the gate."""
+def test_skill_names_empty_section_as_meaning_only_an_unfilled_stamp():
+    """`empty-section` no longer has a second, sanctioned cause — it means one
+    thing, and it always refuses. The unresolved-enumeration case now has its
+    own code and is not mentioned in this bullet."""
     text = BRAINSTORM_SKILL.read_text()
     bullet = re.search(r"- `empty-section`[^\n]*(?:\n  [^\n]*)*", text)
     assert bullet, "the `empty-section` remedy bullet must exist"
-    assert re.search(r"unresolved.enumeration", bullet.group(0), re.IGNORECASE), (
-        "the `empty-section` remedy must name the unresolved-enumeration case as its "
-        f"sanctioned second cause: {bullet.group(0)!r}"
+    assert not re.search(r"unresolved.enumeration", bullet.group(0), re.IGNORECASE), (
+        "the `empty-section` remedy must no longer name the unresolved-enumeration "
+        f"case — that case now has its own reason-code: {bullet.group(0)!r}"
+    )
+    assert re.search(r"refus", bullet.group(0), re.IGNORECASE), (
+        "the `empty-section` remedy must state that it refuses, with no exception: "
+        f"{bullet.group(0)!r}"
+    )
+
+
+def test_skill_names_a_remedy_for_the_unresolved_enumeration_reason_code_that_refuses():
+    """The new code gets its own remedy bullet, and that remedy still refuses the
+    write — resolving the enumeration (not proceeding on the marked note) is the
+    only path back to a create."""
+    text = BRAINSTORM_SKILL.read_text()
+    bullet = re.search(r"- `unresolved-enumeration`[^\n]*(?:\n  [^\n]*)*", text)
+    assert bullet, "an `unresolved-enumeration` remedy bullet must exist"
+    assert re.search(r"resolv", bullet.group(0), re.IGNORECASE), (
+        "the `unresolved-enumeration` remedy must instruct resolving the "
+        f"enumeration before retrying: {bullet.group(0)!r}"
     )
 
 
@@ -551,4 +618,96 @@ def test_skill_instructs_retaining_the_keep_marked_reminder_comment():
     assert re.search(r"\bkeep\b", section, re.IGNORECASE), (
         "step 6a must instruct keeping the template's keep-marked reminder comment "
         f"when the section is filled: {section!r}"
+    )
+
+
+# ---- the near-miss heading (trailing/doubled whitespace) is named in the
+#      section-absent remedy, not just "add it" -----------------------------
+
+
+def test_section_absent_remedy_names_the_near_miss_heading_case():
+    """A heading with trailing or doubled whitespace (`## Maturity `,
+    `##  Maturity`) also exits `section-absent`, because the heading matcher
+    requires an exact match. Following the bare "add it" remedy on that body
+    produces a *second* heading and `duplicate-section` on retry — the remedy
+    must name the near-miss case so an author checks for it first."""
+    text = BRAINSTORM_SKILL.read_text()
+    bullet = re.search(r"- `section-absent`[^\n]*(?:\n  [^\n]*)*", text)
+    assert bullet, "the `section-absent` remedy bullet must exist"
+    assert re.search(r"whitespace|near.miss", bullet.group(0), re.IGNORECASE), (
+        "the `section-absent` remedy must name the near-miss-heading case (trailing "
+        f"or doubled whitespace): {bullet.group(0)!r}"
+    )
+
+
+def test_section_absent_fixture_heading_with_trailing_space_reproduces_the_near_miss():
+    """Fixture proof the near-miss case is real: a heading with a trailing space
+    exits `section-absent`, not some other code — grounding the remedy-text
+    assertion above in actual reader behaviour."""
+    body = "# X\n\n## Maturity \n\n- lookout: prototype\n\n## Acceptance Criteria\n"
+    result = _run_script(STAMP, body)
+    assert result.returncode == 2
+    assert "reason-code: section-absent" in result.stderr.decode("utf-8")
+
+
+# ---- the vanilla single-repo path has a defined stamp key -------------------
+
+
+# ---- the keep-marked reminder survives the transformation the skill actually
+#      prescribes: strip the pre-fill comment, keep the keep-marked one --------
+
+
+def _apply_skill_prescribed_fill_transformation(section_text: str) -> str:
+    """Strip the longer pre-fill comment, keep the keep-marked reminder
+    comment — the exact transformation step 6a's own prose prescribes
+    ("Keep the template's keep-marked reminder comment in the filled
+    section; strip only the longer pre-fill comment above it.")."""
+    comments = re.findall(r"<!--.*?-->", section_text, re.DOTALL)
+    assert len(comments) == 2, (
+        "fixture assumption: the template's Maturity section carries exactly "
+        f"two HTML comments (pre-fill + keep-marked): {comments!r}"
+    )
+    prefill, keep_marked = comments
+    assert "keep this line" in keep_marked, (
+        "fixture assumption: the second comment is the keep-marked reminder: "
+        f"{keep_marked!r}"
+    )
+    return section_text.replace(prefill, "")
+
+
+def test_keep_marked_reminder_survives_pre_fill_strip_with_vocabulary_intact():
+    """Task 2's contract: the grammar reminder must survive into a rendered
+    spec body — a body with the pre-fill comment stripped still tells a later
+    hand-editor what it may contain. This observes an actual rendered body,
+    not just that a marker string and the word 'keep' each exist somewhere."""
+    template_text = SPEC_TEMPLATE.read_text(encoding="utf-8")
+    start = template_text.index("## Maturity")
+    end = template_text.index("## Acceptance Criteria")
+    section = template_text[start:end]
+
+    rendered = _apply_skill_prescribed_fill_transformation(section)
+
+    assert "prototype" in rendered
+    assert "early" in rendered
+    assert "production" in rendered
+    # The pre-fill comment's own distinguishing prose is gone — proof the
+    # vocabulary above survived via the keep-marked comment, not a fluke of
+    # the pre-fill comment being left in place.
+    assert "never invented here" not in rendered
+
+
+def test_fill_step_defines_the_vanilla_single_repo_stamp_key():
+    """Step 1's enumeration has a single-current-repo path outside a camp
+    workspace (no camp manifest, no camp member name to key on). Step 6a's
+    fill instruction must define what key that entry uses, or a vanilla
+    single-repo write has no defined `## Maturity` bullet to produce."""
+    text = BRAINSTORM_SKILL.read_text()
+    section = text[text.index("**Fill `## Maturity`") : text.index("**Certify the drafted body")]
+    assert re.search(r"vanilla", section, re.IGNORECASE), (
+        "step 6a must name the vanilla (no camp manifest) single-repo case "
+        f"explicitly: {section!r}"
+    )
+    assert re.search(r"basename|directory name", section, re.IGNORECASE), (
+        "step 6a must define the vanilla single-repo stamp key concretely "
+        f"(e.g. the repository directory's basename): {section!r}"
     )
