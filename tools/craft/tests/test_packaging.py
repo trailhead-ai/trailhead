@@ -10,6 +10,8 @@ subdir referenced by `source: "./plugins/craft"`.
 import json
 import re
 import shutil
+import subprocess
+import sys
 import tomllib
 from pathlib import Path
 
@@ -107,6 +109,13 @@ def test_scripts_directory_installs_as_a_unit_with_the_sibling_import_intact(tmp
     import resolvable — a regression that drops `scripts` from `base`, or that
     moves either script out of this directory, must fail here, at test time,
     rather than post-install with a bare `ImportError`.
+
+    `maturity_stamp.py` is the first script importing from *two* siblings
+    (`covers_gate.py` and `maturity_resolve.py`) rather than one, so it is the
+    case most likely to break on a partial install — this test executes the
+    copied script as a subprocess, not merely checks the file is present, so a
+    broken sibling import surfaces here as a real `ImportError` rather than
+    passing on file existence alone.
     """
     data = tomllib.loads((REPO_ROOT / "capabilities.toml").read_text())
     assert "scripts" in data["tool"]["base"], (
@@ -119,3 +128,16 @@ def test_scripts_directory_installs_as_a_unit_with_the_sibling_import_intact(tmp
 
     assert (dest / "covers_gate.py").is_file()
     assert (dest / "candidate_set.py").is_file()
+    assert (dest / "maturity_resolve.py").is_file()
+    assert (dest / "maturity_stamp.py").is_file()
+
+    result = subprocess.run(
+        [sys.executable, str(dest / "maturity_stamp.py")],
+        input=b"# X\n\n## Maturity\n\n- trailhead: production\n",
+        capture_output=True,
+    )
+    assert result.returncode == 0, (
+        "maturity_stamp.py must run cleanly from a copied-as-a-unit scripts/ "
+        f"directory — stderr: {result.stderr.decode('utf-8')!r}"
+    )
+    assert result.stdout.decode("utf-8") == "maturity: trailhead=production\n"

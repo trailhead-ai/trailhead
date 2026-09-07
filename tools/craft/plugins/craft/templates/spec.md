@@ -6,6 +6,16 @@
 ## Objectives
 <!-- Measurable outcomes this work achieves. Each bullet is a concrete goal. -->
 
+## Maturity
+<!-- One top-level `- <member-name>: <level>` bullet per repository this work touches,
+keyed by the camp member name. `<level>` is drawn from the closed vocabulary —
+`prototype` / `early` / `production` — and nothing else, resolved by brainstorm's
+framing step (never invented here). This section must remain a top-level sibling
+section, never nested inside `## Slices` below: a `## ` heading wedged between the
+`## Slices` heading and its first ledger bullet truncates that section's ledger
+scan silently, at exit 0, with no error. -->
+<!-- keep this line in the written spec: allowed levels are prototype | early | production. -->
+
 ## Acceptance Criteria
 <!-- The bar that must be met for this to be considered done. Specific and
 testable: name the observation that distinguishes pass from fail.

@@ -342,18 +342,91 @@ Then go to **6a** — the only exit.
 
 ### 6a. Write the Spec
 
-Persist the spec with `lore record create` (`../_shared/note-storage.md`): render craft's spec body
-template (`${CLAUDE_PLUGIN_ROOT}/templates/spec.md`), fill in the sections, then pipe the filled
-body to it — `printf '%s' "$BODY" | lore record create --kind spec --title "<topic>" --status
-draft`.
+Render craft's spec body template (`${CLAUDE_PLUGIN_ROOT}/templates/spec.md`) and fill in the
+sections (`../_shared/note-storage.md` documents the underlying `lore record create` mechanics):
+**Problem** (situation / gap, why now) · **Objectives** (measurable, outcome-framed) · **Maturity**
+(below) · **Acceptance Criteria** (bulleted, testable) · **Required Interfaces** (each boundary the
+spec implies, and the criteria it must satisfy — not its shape) · **Non-Goals** (explicit scope
+bounds) · **Constraints** (technical / business / timing) · **UI Direction** (verbal, or `n/a`) ·
+**Open Questions / Risks** · **Related** (prior specs, decisions). Then open the file and fill in
+the body sections.
 
-The spec body template (`${CLAUDE_PLUGIN_ROOT}/templates/spec.md`) carries these canonical sections
-— fill each in: **Problem** (situation / gap, why now) · **Objectives** (measurable, outcome-framed)
-· **Acceptance Criteria** (bulleted, testable) · **Required Interfaces** (each boundary the spec
-implies, and the criteria it must satisfy — not its shape) · **Non-Goals** (explicit scope bounds) ·
-**Constraints** (technical / business / timing) · **UI Direction** (verbal, or `n/a`) · **Open
-Questions / Risks** · **Related** (prior specs, decisions). Then open the file and fill in the body
-sections.
+**Fill `## Maturity` from step 1's own resolution** — one `- <camp member name>: <level>` line per
+repository this work touches, naming the level step 1 already resolved for it, whether declared or
+defaulted. This may be a subset of step 1's enumeration: step 1 resolves a level for every
+camp-workspace member so the session states each one, but the stamp is scoped to the repositories
+this work actually touches, matching the template's own comment and AC5 — stamping every enumerated
+member reimports production ceremony onto a prototype repository the work never reaches. In vanilla
+usage — no camp manifest, so no camp member name exists to key on — key the single entry by the
+repository directory's basename, the same value a camp member name holds for that repository under a
+camp workspace.
+
+Keep the template's keep-marked reminder comment in the filled section; strip only the longer
+pre-fill comment above it. The reminder is what tells an operator hand-correcting a stamp months
+later which levels they may type, and it is a comment because the reader rejects any non-bullet
+prose under this heading.
+
+Where step 1's enumeration could not reach the repositories at all (the unresolved-enumeration
+case), state that explicitly as the section's content rather than writing a stamp that reads as
+complete — never a fabricated per-repository list standing in for it. Write that note **as an HTML
+comment**, not as a bare sentence — `<!-- unresolved-enumeration: <what failed> -->` — because a
+sentence under this heading is rejected by the certify step below as `malformed-entry`, so an
+uncommented note produces a spec that can never be written. The note documents the failure for the
+operator; it does not get the write past the certify gate below — see `unresolved-enumeration` in
+that gate's reason-code list.
+
+**Certify the drafted body before writing it.** Pipe the filled body through the stamp reader,
+before `lore record create` runs:
+
+```sh
+printf '%s' "$BODY" | ${CLAUDE_PLUGIN_ROOT}/scripts/maturity_stamp.py
+```
+
+**A non-zero exit refuses the write, always.** Nothing is created until the reader exits 0 — there
+is no code among the nine below that lets a create proceed on a non-zero exit. Name the remedy the
+reader's own `reason-code:` stderr token identifies, one per code, mirroring the framing step's own
+per-reason-code translation above rather than reporting the bare code:
+
+- `empty-stdin` — the drafted body is empty; re-render the template and fill it in before retrying.
+- `invalid-utf8-stdin` — the drafted body is not valid UTF-8; find and remove the invalid bytes
+  before retrying.
+- `section-absent` — the `## Maturity` heading itself is missing from the drafted body; add it
+  before retrying. This also fires on a near-miss heading — a trailing space after `Maturity`, or an
+  extra space between `##` and `Maturity` — since the heading matcher requires an exact match; check
+  for a near-miss heading and fix its spelling rather than adding a second one, which would produce
+  `duplicate-section` on retry.
+- `duplicate-section` — the drafted body carries a second `## Maturity` heading; delete the
+  duplicate before retrying.
+- `empty-section` — the heading exists but declares zero entries. This always means the stamp was
+  left unfilled: add at least one `- <camp member name>: <level>` line before retrying. It refuses,
+  with no exception.
+- `unresolved-enumeration` — the heading exists, declares zero entries, and carries the
+  unresolved-enumeration marker written above: step 1's enumeration could not reach the repositories
+  this work touches at all. This still refuses the write like every other non-zero exit — resolve
+  the enumeration (rerun step 1, e.g. from a session rooted inside the camp workspace or a single
+  repository, or escalate to the operator for the touched repositories) before retrying. The marker
+  documents why the certify gate refused; it is not itself a path past it.
+- `malformed-entry` — a line under the heading is not a valid `- <camp member name>: <level>`
+  bullet; correct that line's shape before retrying. When the offending text is the member name
+  itself, no shape correction can fix it: camp validates member names only as non-empty strings, so
+  a name like `my repo` can never satisfy the reader's safe grammar (`[A-Za-z0-9._-]`) no matter how
+  the line is reshaped. Normalize it before writing instead: replace every character outside
+  `[A-Za-z0-9._-]` with `-`, collapse consecutive `-` into one, and strip leading and trailing `-`;
+  if that leaves nothing, or exactly `.` or `..`, prefix `member-`. Before writing, check the
+  normalized key against every other touched repository's own key (normalized or already safe) — a
+  collision (two distinct member names normalizing to the same key) is unresolvable here: name both
+  original member names and treat those repositories as `unresolved-enumeration` rather than write
+  one entry to silently shadow the other.
+- `invalid-level` — an entry's level falls outside the closed vocabulary (`prototype` / `early` /
+  `production`); correct that entry's level before retrying.
+- `duplicate-member` — the same camp member name appears twice under the heading; remove or merge
+  the duplicate entry before retrying.
+
+Once the reader exits 0, the create proceeds; pipe the same certified body to `lore record create`:
+
+```sh
+printf '%s' "$BODY" | lore record create --kind spec --title "<topic>" --status draft
+```
 
 **If this brainstorm consumed a routed task** — the entry point was a `task` record carrying
 refine's `route=brainstorm` sidecar label (and its `## Refine — unresolved` section) — close the

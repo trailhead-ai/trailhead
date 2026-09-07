@@ -52,6 +52,7 @@ _TASK_SECTIONS = [
 _SPEC_SECTIONS = [
     "Problem",
     "Objectives",
+    "Maturity",
     "Acceptance Criteria",
     "Required Interfaces",
     "Non-Goals",
@@ -199,3 +200,115 @@ def test_note_storage_documents_link_op():
     assert "lore record update" in text, (
         "the link op must name the concrete record-provider command `lore record update`."
     )
+
+
+# ---------------------------------------------------------------------------
+# The spec template's `## Maturity` section: placement, grammar comment, and a
+# grammar reminder that survives even once that comment is stripped.
+# ---------------------------------------------------------------------------
+
+
+def _spec_template_text() -> str:
+    return (TEMPLATES_DIR / "spec.md").read_text(encoding="utf-8")
+
+
+def test_spec_template_maturity_is_a_sibling_directly_after_objectives_before_acceptance_criteria():
+    """The assumption-prover proved all four probed placements inert; the template fixes
+    the one that matches when the level is known and keeps the section permanently away
+    from `## Slices` (appended later, near `## Acceptance Criteria`, never near the top)."""
+    text = _spec_template_text()
+    objectives_at = text.index("## Objectives")
+    maturity_at = text.index("## Maturity")
+    ac_at = text.index("## Acceptance Criteria")
+    assert objectives_at < maturity_at < ac_at, (
+        "`## Maturity` must sit directly after `## Objectives` and before "
+        f"`## Acceptance Criteria`: objectives={objectives_at} maturity={maturity_at} "
+        f"ac={ac_at}"
+    )
+
+
+def _maturity_section_text() -> str:
+    text = _spec_template_text()
+    start = text.index("## Maturity")
+    end = text.index("## Acceptance Criteria")
+    return text[start:end]
+
+
+def _select_keep_marked_reminder(comments: list[str]) -> str:
+    """Select the reminder comment by its literal `keep this line` marker,
+    never by an incidental convention like comment length — a template edit
+    that makes the pre-fill comment shorter than the reminder must not
+    silently flip which comment this test is actually checking."""
+    matches = [c for c in comments if "keep this line" in c]
+    assert len(matches) == 1, (
+        f"expected exactly one comment carrying the 'keep this line' marker, "
+        f"found {len(matches)}: {comments!r}"
+    )
+    return matches[0]
+
+
+def test_spec_template_maturity_comment_states_closed_vocabulary_and_grammar():
+    section = _maturity_section_text()
+    assert re.search(r"\bprototype\b", section)
+    assert re.search(r"\bearly\b", section)
+    assert re.search(r"\bproduction\b", section)
+    assert re.search(r"-\s*<[^>]*member[^>]*>\s*:\s*<[^>]*level[^>]*>", section), (
+        "the `## Maturity` section comment must state the per-line grammar "
+        f"(`- <member-name>: <level>`): {section!r}"
+    )
+
+
+def test_spec_template_maturity_comment_states_the_slices_sibling_constraint():
+    """The narrow guard the prover's hard-constraint finding requires: the template's own
+    comment must state that `## Maturity` must never be nested inside `## Slices`."""
+    section = _maturity_section_text()
+    assert re.search(r"Slices", section), (
+        f"the `## Maturity` comment must mention `## Slices` by name: {section!r}"
+    )
+    assert re.search(r"never|must not|not nested|sibling", section, re.IGNORECASE), (
+        f"the `## Maturity` comment must state the sibling/never-nested constraint: {section!r}"
+    )
+
+
+def test_spec_template_maturity_reminder_comment_is_marked_to_be_kept():
+    """A template comment is stripped once an author fills in a section. The
+    vocabulary reminder must therefore carry its own keep-marker, so an author or
+    agent filling the section can tell which comment goes and which stays — a
+    reminder that survives only by convention survives nothing, and the operator
+    hand-correcting a stamp months later is the one who pays.
+
+    The reminder cannot be ordinary prose: a non-bullet line under the heading is
+    rejected by `maturity_stamp.py` as `malformed-entry`, so a comment is the only
+    carrier the reader tolerates. That makes the keep-marker load-bearing rather
+    than decorative."""
+    section = _maturity_section_text()
+    comments = re.findall(r"<!--.*?-->", section, re.DOTALL)
+    assert len(comments) >= 2, (
+        "the `## Maturity` section must carry a full instructional comment plus a "
+        f"separate, shorter reminder comment: {section!r}"
+    )
+    reminder = _select_keep_marked_reminder(comments)
+    assert re.search(r"\bkeep\b", reminder, re.IGNORECASE), (
+        "the surviving reminder comment must mark itself as keep-worthy, so it is "
+        f"distinguishable from the pre-fill comment that is stripped: {reminder!r}"
+    )
+    for level in ("prototype", "early", "production"):
+        assert re.search(rf"\b{level}\b", reminder), (
+            f"the keep-marked reminder must name the closed vocabulary: {reminder!r}"
+        )
+
+
+def test_select_keep_marked_reminder_ignores_comment_length():
+    """Regression pin: selection must be anchored on the literal `keep this
+    line` marker, not on which comment happens to be shortest. This fixture
+    inverts the real template's incidental lengths — the pre-fill-shaped
+    comment is the short one here — so a length-based selector would pick
+    the wrong comment while the marker-based one still picks correctly."""
+    inverted_length_comments = [
+        "<!-- short filler, not the reminder -->",
+        "<!-- keep this line in the written spec: allowed levels are "
+        "prototype | early | production, and this comment is deliberately "
+        "made the longer of the two to invert the real template's lengths -->",
+    ]
+    selected = _select_keep_marked_reminder(inverted_length_comments)
+    assert selected == inverted_length_comments[1]
