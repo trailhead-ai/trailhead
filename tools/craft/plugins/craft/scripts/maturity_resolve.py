@@ -120,7 +120,8 @@ from __future__ import annotations
 import re
 import sys
 
-_LEVELS = ("prototype", "early", "production")
+LEVELS = ("prototype", "early", "production")
+_LEVELS = LEVELS  # back-compat alias — maturity_stamp.py imports this name
 _DEFAULT_LEVEL = "production"
 
 _HEADING_RE = re.compile(r"^##\s+Project Maturity\s*$", re.IGNORECASE)

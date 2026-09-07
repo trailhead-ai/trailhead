@@ -60,6 +60,24 @@ sending each member its prompt (never ship a literal `<token>`):
   question.
 - `<cross-cutting>` → the empty string (the cross-cutting plan-drift block is planning-only; consult
   reviews a standalone question, not a plan)
+- `<maturity-calibration>` → the calibration block `scripts/maturity_bars.py` renders. `consult` has
+  no spec pointer to review — **it pipes nothing on stdin, and an empty pipe is a legitimate exit-0
+  case here, not an error**: the renderer reads empty stdin the same way it reads a spec with no
+  `## Maturity` section, and falls through to the agent-instruction-file input. Name the current
+  repository's agent-instruction file so that fallback is reachable:
+  ```sh
+  : | ${CLAUDE_PLUGIN_ROOT}/scripts/maturity_bars.py --agent-instruction-file <repo-root>/CLAUDE.md
+  ```
+**A non-zero exit still refuses the dispatch** — do not review at an uncalibrated severity. Read the
+`reason-code:` stderr line and refuse with the remedy the code names — mirror `plan/SKILL.md`'s step
+8.5 remedy table and worked refusal example rather than re-deriving a second one. The only
+reason-codes reachable here are the agent-instruction-file ones
+(`agent-instruction-file-unreadable`) plus whatever `maturity_resolve.py` reports as ITS reason for
+that file, since there is no spec body to carry the other stamp-grammar violations.
+
+**Surface the resolved level and its basis** in the synthesis you present — restate the renderer's
+own `maturity: <level> (basis: <basis>)` line, so the user can tell a read agent-instruction-file
+declaration from a silent default without re-deriving it.
 
 The shared template's "the synthesizer may strip your role label" line applies here: members write
 in a voice that stands on content, not on the role tag.

@@ -298,6 +298,24 @@ step, and `<cross-cutting>` with `plan/SKILL.md`'s own plan-altitude cross-cutti
 planning's: the dropped "plan's tasks, summed, don't satisfy spec's acceptance criteria" Critical is
 the single check a driver-run council most needs.
 
+Fill `<maturity-calibration>` with the calibration block `scripts/maturity_bars.py` renders for the
+linked spec — pipe the spec body into the renderer, naming the current repository's
+agent-instruction file so the absent-stamp fallback is reachable:
+```sh
+lore record show spec/<spec-name> --vault <elected-vault> | \
+  ${CLAUDE_PLUGIN_ROOT}/scripts/maturity_bars.py --agent-instruction-file <repo-root>/CLAUDE.md
+```
+**A non-zero exit refuses the dispatch** — do not review at an uncalibrated severity. Read the
+`reason-code:` stderr line and refuse with the remedy the code names — mirror `plan/SKILL.md`'s step
+8.5 remedy table and worked refusal example rather than re-deriving a second one. A council refusal
+here is a `plan-failed`-shaped escalation: the driver has not produced a review at all, so it
+escalates under the same no-retry contract as an operator declining approval, rather than proceeding
+to synthesize findings at an uncalibrated severity.
+
+**Surface the resolved level and its basis** in the persisted findings below — restate the
+renderer's own `maturity: <level> (basis: <basis>)` line, so a resumed run or a later reader can
+tell a read stamp from a silent default without re-deriving it.
+
 ```text
 
 Cross-cutting Critical you may also raise (any lens):
@@ -313,14 +331,15 @@ synthesis rules.
 **Persist the findings before escalating.** Append a `## Council Review` section to the slice parent
 — the plan record chosen or resumed at step 4 above — mirroring the schema `plan/SKILL.md` defines
 at its own step 8.5 (`plan/SKILL.md:455-476`): a `*Reviewed at:*` timestamp, a
-`*Members dispatched:*` line, then `*Critical:*`, `*Important:*`, and `*Minor:*` lists, one line per
-finding, grouped by severity. When no Critical finding survives synthesis, record an empty Critical
-list explicitly (`*Critical:* none`), matching `plan/SKILL.md`'s own convention
-(`plan/SKILL.md:473-475`) — so a clean council is distinguishable from a section a skipped review
-would leave behind. Write it whether or not a Critical survives synthesis, exactly as
-`plan/SKILL.md` requires of its own persistence — a run with nothing to escalate leaves this section
-behind too. The driver writes the findings only: no disposition text for any Critical, since
-disposition is an operator judgment it does not make. Append via
+`*Members dispatched:*` line, a `*Maturity:*` line (the renderer's own `<level> (basis: <basis>)`),
+then `*Critical:*`, `*Important:*`, and `*Minor:*` lists, one line per finding, grouped by severity.
+When no Critical finding survives synthesis, record an empty Critical list explicitly
+(`*Critical:* none`), matching `plan/SKILL.md`'s own convention (`plan/SKILL.md:473-475`) — so a
+clean council is distinguishable from a section a skipped review would leave behind. Write it
+whether or not a Critical survives synthesis, exactly as `plan/SKILL.md` requires of its own
+persistence — a run with nothing to escalate leaves this section behind too. The driver writes the
+findings only: no disposition text for any Critical, since disposition is an operator judgment it
+does not make. Append via
 `lore record update task/<slice-parent-name> --vault <elected-vault> --diff`, piping a unified diff
 the same way the `## Driver run` checkpoint does — bare stdin would replace the whole record body.
 **Read `../_shared/security.md` now and follow it in full.** It defines the credential-pattern scrub

@@ -1,9 +1,9 @@
 # Council membership — shared reference
 
 The **council** is a four-agent review panel. This file is the single source of truth for who the
-members are. `/craft:consult`, the `planning` skill's Council Review step, and the `gauntlet`
-skill's lens pass all read membership from here and dispatch the agents **directly** via the Agent
-tool — none delegates to another.
+members are. `/craft:consult`, the `planning` skill's Council Review step, the `gauntlet` skill's
+lens pass, and the `drive` skill's council review step all read membership from here and dispatch
+the agents **directly** via the Agent tool — none delegates to another.
 
 <!-- toc:start -->
 **Contents**
@@ -13,6 +13,8 @@ tool — none delegates to another.
 - Prompt template
 - Per-lens Critical bars
 - Per-lens Critical bars — spec review
+- Maturity calibration
+  - Filling the calibration token
 - Synthesis (main session, NOT a subagent)
   - How the synthesis reads
   - How a finding reads
@@ -43,11 +45,13 @@ Each member resolves to `agents/<stem>.md` in this plugin. The stems are exactly
 ## Prompt template
 
 The dispatching skill fills the per-skill substitution tokens (`<lens>`, the context-pointer line,
-`<lens-critical-bars>`, and `<cross-cutting>`) **before** sending each member its prompt — never
-ship a literal `<token>` to a subagent. `<lens>` is one of `Builder` / `Reliability` / `Security` /
-`Advocate`; the context-pointer line is whatever the dispatching skill supplies (a `Plan:`/`Spec:`
-pair for planning, a `Question:`/`Context to read:` pair for consult); `<lens-critical-bars>` is the
-matching block from "Per-lens Critical bars" below; `<cross-cutting>` is an optional extra Critical
+`<lens-critical-bars>`, `<maturity-calibration>`, and `<cross-cutting>`) **before** sending each
+member its prompt — never ship a literal `<token>` to a subagent. `<lens>` is one of `Builder` /
+`Reliability` / `Security` / `Advocate`; the context-pointer line is whatever the dispatching skill
+supplies (a `Plan:`/`Spec:` pair for planning, a `Question:`/`Context to read:` pair for consult);
+`<lens-critical-bars>` is the matching block from "Per-lens Critical bars" below;
+`<maturity-calibration>` is the calibration block `scripts/maturity_bars.py` renders for the spec
+under review, per "Maturity calibration" below; `<cross-cutting>` is an optional extra Critical
 block (planning supplies one; consult substitutes the empty string).
 
 ```text
@@ -65,6 +69,9 @@ Output shape — REPLACE your usual ~400-600 word output with this constrained s
 
 Your lens (<lens>) Critical bar:
 <lens-critical-bars>
+
+Maturity calibration for this review:
+<maturity-calibration>
 <cross-cutting>
 Required output format:
 
@@ -174,6 +181,44 @@ belongs to that pass and should not be raised here.
 - The spec names a user-facing surface but gives no direction for its error or empty states
 - Success is defined only in system terms, with no outcome a user would notice
 - The UI Direction contradicts an acceptance criterion
+
+## Maturity calibration
+
+Five concerns are maturity-sensitive: backwards compatibility, migration and backfill, rollback and
+reversibility, production failure visibility, and cross-consumer blast radius. Each carries a
+severity drawn from the reviewed spec's resolved maturity level, rendered by
+`scripts/maturity_bars.py` into the `<maturity-calibration>` block the prompt template names above.
+
+| Concern | prototype | early | production |
+|---|---|---|---|
+| backwards compatibility | Minor | Important | Critical |
+| migration and backfill | Minor | Important | Critical |
+| rollback and reversibility | Minor | Important | Critical |
+| production failure visibility | Minor | Important | Critical |
+| cross-consumer blast radius | Minor | Important | Critical |
+
+Every concern above is reported at its mapped severity and is never filtered out — a level
+downgrades a concern's severity, it never removes the concern from the review. A finding downgraded
+by level restates the concern and the deciding level in its own text (for example "migration and
+backfill — Minor, downgraded by this spec's prototype maturity level"), so the operator reading
+`Minor` can tell a calibrated downgrade from noise and has something concrete to override.
+
+This calibration governs severity for the five named concerns only. The **Per-lens Critical bars**
+above are not rewritten per level — they keep saying what to look for, and this section sits beside
+them rather than replacing them.
+
+Craft's severity vocabulary stays exactly Critical / Important / Minor; this table introduces no
+fourth tier.
+
+### Filling the calibration token
+
+Pipe the reviewed spec's body into `scripts/maturity_bars.py`, naming the reviewed repository's
+agent-instruction file (`--agent-instruction-file <repo-root>/CLAUDE.md`) so a spec carrying no
+`## Maturity` section still resolves. A non-zero exit refuses the dispatch — never review at an
+uncalibrated severity; the `reason-code:` line on stderr names the remedy, and `plan/SKILL.md`'s
+step 8.5 carries the remedy table and one worked refusal message the other dispatchers mirror.
+Surface the resolved level and its basis in the review you print, restating the renderer's own
+`maturity: <level> (basis: <basis>)` line so a read stamp is distinguishable from a silent default.
 
 ## Synthesis (main session, NOT a subagent)
 
