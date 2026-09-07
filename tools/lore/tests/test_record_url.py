@@ -181,6 +181,21 @@ def test_scheme_without_netloc_base_rejected_and_default_used(tmp_path):
     assert result.startswith("http://127.0.0.1:7313/")
 
 
+def test_rejection_message_names_the_reason_that_actually_fired(tmp_path):
+    """The warning states why THIS base was rejected. A base carrying an
+    allowed scheme but no host fails the netloc check, not the scheme check,
+    so a message blaming the scheme sends the operator to fix a setting that
+    is already correct."""
+    env = _make_env(tmp_path)
+    env["LORE_RECORD_URL_BASE"] = "http:nonsense"
+    mod = ru()
+    with pytest.warns(RuntimeWarning) as caught:
+        mod.build_record_url("v", "task", "s", env=env)
+    message = str(caught[0].message)
+    assert "host" in message
+    assert "scheme must be http or https" not in message
+
+
 # ---------------------------------------------------------------------------
 # 7. Percent-encoding of every segment
 # ---------------------------------------------------------------------------

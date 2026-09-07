@@ -73,15 +73,19 @@ def _validate_base(base: str) -> str:
     base was ignored can capture it.
     """
     parsed = urlsplit(base)
-    if parsed.scheme not in _ALLOWED_SCHEMES or not parsed.netloc:
-        warnings.warn(
-            f"lore: ignoring invalid record_url_base {base!r} "
-            f"(scheme must be http or https); falling back to {DEFAULT_BASE!r}",
-            RuntimeWarning,
-            stacklevel=3,
-        )
-        return DEFAULT_BASE
-    return base
+    if parsed.scheme not in _ALLOWED_SCHEMES:
+        reason = "scheme must be http or https"
+    elif not parsed.netloc:
+        reason = "no host in the URL"
+    else:
+        return base
+    warnings.warn(
+        f"lore: ignoring invalid record_url_base {base!r} "
+        f"({reason}); falling back to {DEFAULT_BASE!r}",
+        RuntimeWarning,
+        stacklevel=3,
+    )
+    return DEFAULT_BASE
 
 
 def build_record_url(vault: str, kind: str, slug: str, *, env: dict | None = None) -> str:
