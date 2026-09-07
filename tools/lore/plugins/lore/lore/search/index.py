@@ -26,9 +26,14 @@ migration cost (``reindex`` repopulates):
 - ``record_facet(id REFERENCES records(id) ON DELETE CASCADE, facet, value)`` +
   ``idx_facet`` — list-valued facets, one row per value (``keywords``,
   ``related-<kind>``, ``related-phases``, ``related-files-or-folders``,
-  ``related-urls``). The sidecar's nested ``related`` map flattens to forward
-  ``facet='related-<kind>', value=<target name>`` rows; reverse rows are materialized
-  in ``reindex`` pass 2.
+  ``related-urls``, ``supersedes``). The sidecar's nested ``related`` map flattens to
+  forward ``facet='related-<kind>', value=<target name>`` rows; reverse rows are
+  materialized in ``reindex`` pass 2. The top-level ``supersedes`` list (each entry a
+  ``<kind>/<name>`` reference) indexes forward the same way as any other list facet;
+  its reverse edge is materialized in ``reindex`` pass 2 too, but under the
+  DIFFERENT facet name ``superseded-by`` (asymmetric — unlike ``related``'s
+  same-name mirror, ``superseded-by:<id>`` finds what ``<id>`` supersedes, not what
+  supersedes ``<id>``).
 - ``record_labels(id REFERENCES records(id) ON DELETE CASCADE, key, value)`` +
   ``idx_labels`` — the indexed ``labels`` sidecar map, one row per ``(key, value)``
   pair. Unlike ``record_facet``/``record_fts``, this table uses **FK
@@ -225,12 +230,17 @@ _SCHEMA_OBJECTS: frozenset[str] = frozenset(
 )
 
 # The forward list-valued facets and the sidecar keys / facet names they project to.
-# ``related`` (the nested kind -> [names] map) is handled separately.
+# ``related`` (the nested kind -> [names] map) is handled separately. ``supersedes``
+# is a top-level ``list[str]`` of ``<kind>/<name>`` references, indexed forward like
+# any other list facet; its reverse edge (``superseded-by``, under a DIFFERENT facet
+# name — asymmetric, unlike ``related``'s same-name mirror) is materialized only in
+# ``reindex`` pass 2, same reindex-only gap as the ``related-<kind>`` reverse edges.
 _LIST_FACETS: tuple[tuple[str, str], ...] = (
     ("keywords", "keywords"),
     ("related-phases", "related-phases"),
     ("related-files-or-folders", "related-files-or-folders"),
     ("related-urls", "related-urls"),
+    ("supersedes", "supersedes"),
 )
 
 # ---------------------------------------------------------------------------
@@ -691,6 +701,10 @@ def rebuild(
     # Forward related edges, deferred to pass 2 so all records exist first:
     #   (source_id, source_name, rel_kind, target_name)
     forward_related: list[tuple[str, str, str, str]] = []
+    # Forward supersedes edges, deferred to pass 2 so all records exist first:
+    #   (source_id, source_kind, source_name, target_ref) — target_ref is the raw
+    #   "<kind>/<name>" string from the sidecar's `supersedes` list.
+    forward_supersedes: list[tuple[str, str, str, str]] = []
 
     count = 0
     for vault_str in vaults:
@@ -743,6 +757,13 @@ def rebuild(
                             continue
                         for target_name in names:
                             forward_related.append((record_id, name, rel_kind, target_name))
+
+                supersedes = sidecar.get("supersedes")
+                if isinstance(supersedes, list):
+                    for target_ref in supersedes:
+                        if not isinstance(target_ref, str):
+                            continue  # corrupt entry: skip it, not the whole record
+                        forward_supersedes.append((record_id, kind, name, target_ref))
                 count += 1
 
     # Pass 2 — reverse edges. For each forward ``related-<kind>`` edge whose target
@@ -757,6 +778,22 @@ def rebuild(
         conn.execute(
             "INSERT INTO record_facet(id, facet, value) VALUES (?, ?, ?)",
             (target_id, f"related-{rel_kind}", source_name),
+        )
+
+    # Pass 2 — reverse supersedes edges. For each forward ``supersedes`` edge whose
+    # target resolves to a real record, emit a ``superseded-by`` row on the TARGET
+    # (an asymmetric facet name, unlike related's same-name mirror): the target is
+    # what the source superseded, so it is findable via ``superseded-by:<source>``.
+    for source_id, source_kind, source_name, target_ref in forward_supersedes:
+        target_kind, _, target_name = target_ref.partition("/")
+        target_id = name_index.get((target_kind, target_name))
+        if target_id is None:
+            continue  # dangling reference — forward edge stands, no reverse target
+        if target_id == source_id:
+            continue  # self-edge; write-time guard rejects this, defensive here too
+        conn.execute(
+            "INSERT INTO record_facet(id, facet, value) VALUES (?, ?, ?)",
+            (target_id, "superseded-by", f"{source_kind}/{source_name}"),
         )
 
     return count

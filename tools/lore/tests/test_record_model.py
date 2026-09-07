@@ -1197,3 +1197,33 @@ def test_adr_off_vocab_status_rejected(status):
     sidecar = _base_adr_sidecar_with(status=status)
     result = rm().validate(sidecar)
     assert any("invalid status" in e and status in e for e in result.errors)
+
+
+# --- supersedes: an ungated list[str] edge (peer of depends-on) ------------
+
+
+def test_supersedes_in_fields_v1_as_list_str():
+    fields = rm().FIELDS_V1
+    assert fields["supersedes"].type_tag == "list[str]"
+    assert fields["supersedes"].required is False
+
+
+def test_supersedes_not_in_kind_gated_fields():
+    """Unlike ``depends-on``/``parent``, ``supersedes`` carries no runnability
+    semantics to protect, so it is valid on every kind, not just a subset."""
+    assert "supersedes" not in rm().KIND_GATED_FIELDS
+
+
+@pytest.mark.parametrize("kind", ["adr", "decision", "area", "lesson"])
+def test_supersedes_accepted_on_any_kind(kind):
+    sidecar = _base_sidecar_with(kind=kind, **{"supersedes": ["adr/foo"]})
+    del sidecar["status"]
+    result = rm().validate(sidecar, kind=kind)
+    assert result.errors == []
+    assert result.sidecar["supersedes"] == ["adr/foo"]
+
+
+def test_supersedes_absent_when_omitted():
+    sidecar = _base_sidecar_with()
+    result = rm().validate(sidecar)
+    assert "supersedes" not in result.sidecar

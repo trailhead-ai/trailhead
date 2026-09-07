@@ -50,9 +50,9 @@ never mutates the index:
       ``SELECT COUNT(*)`` over the same WHERE (without LIMIT) to report M.
   (c) a one-line "reverse edges reflect last reindex — run ``lore reindex`` for
       full membership" note when the query used a reverse-edge alias
-      (``area:``/``phase:``/``keyword:``, or any ``related-<kind>`` facet field —
-      ``kql.kind_related_fields()`` names them without this module importing
-      ``record.model`` itself).
+      (``area:``/``phase:``/``keyword:``/``superseded-by:``, or any ``related-<kind>``
+      facet field — ``kql.kind_related_fields()`` names them without this module
+      importing ``record.model`` itself).
 
 **tty param:** ``tty`` is accepted by ``run_search`` for render-time
 detection (not cached at import) but is not yet wired into the renderer. Detection
@@ -73,8 +73,13 @@ from .xml_escape import wrap_shared, xml_body_escape
 # reindex pass 2; a query using them gets the "run lore reindex" completeness note).
 # The kind-derived ``related-<kind>`` fields (one per ``record.model.KINDS`` member)
 # join this set via ``kql.kind_related_fields()`` rather than being hand-listed here
-# — see ``_uses_reverse_edge_alias``.
-_REVERSE_EDGE_ALIASES = frozenset({"area", "phase", "keyword"})
+# — see ``_uses_reverse_edge_alias``. ``superseded-by`` joins this hand-listed set
+# (not the kind-derived one) because it is a single static field, materialized on
+# the target record only by reindex pass 2 — same reindex-only gap, different facet
+# name than its forward counterpart. ``supersedes`` itself is NOT here: it is a
+# plain forward facet, written incrementally on every record write, with no
+# reindex-only gap to warn about.
+_REVERSE_EDGE_ALIASES = frozenset({"area", "phase", "keyword", "superseded-by"})
 
 # Snippet excerpt length (chars) for the per-hit match preview.
 _SNIPPET_MAX = 160

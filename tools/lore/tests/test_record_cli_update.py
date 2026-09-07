@@ -1698,6 +1698,63 @@ def test_unset_depends_on_and_parent_round_trip(tmp_path):
     assert "parent" not in after
 
 
+# ---------------------------------------------------------------------------
+# supersedes: --supersedes / --unset-supersedes at update time
+# ---------------------------------------------------------------------------
+
+
+def _mk_adr(vault, state, title, *, extra=None, body="body\n"):
+    """Create an ``adr`` record and return its RECORD_ID."""
+    args = ["record", "create", "--kind", "adr", "--title", title]
+    if extra:
+        args += extra
+    r = _run(args, vault=vault, state_dir=state, stdin_text=body)
+    assert r.returncode == 0, r.stderr
+    return r.stdout.strip()
+
+
+def test_unset_supersedes_omits_key_when_it_empties(tmp_path):
+    vault, state = _make_vault(tmp_path)
+    rid = _mk_adr(vault, state, "successor", extra=["--supersedes", "adr/foo"])
+    assert _find_sidecar(vault, rid)["supersedes"] == ["adr/foo"]
+
+    u = _run(
+        ["record", "update", rid, "--unset-supersedes", "adr/foo"],
+        vault=vault, state_dir=state,
+    )
+    assert u.returncode == 0, u.stderr
+    assert "supersedes" not in _find_sidecar(vault, rid)
+
+
+def test_supersedes_survives_an_unrelated_status_update(tmp_path):
+    """Round-trip: a record carrying supersedes survives an unrelated
+    --status update without losing the key."""
+    vault, state = _make_vault(tmp_path)
+    rid = _mk_adr(vault, state, "successor", extra=["--supersedes", "adr/foo"])
+    assert _find_sidecar(vault, rid)["supersedes"] == ["adr/foo"]
+
+    u = _run(
+        ["record", "update", rid, "--status", "active"],
+        vault=vault, state_dir=state,
+    )
+    assert u.returncode == 0, u.stderr
+    after = _find_sidecar(vault, rid)
+    assert after["status"] == "active"
+    assert after["supersedes"] == ["adr/foo"]
+
+
+def test_supersedes_self_edge_rejected_at_update(tmp_path):
+    vault, state = _make_vault(tmp_path)
+    rid = _mk_adr(vault, state, "foo")
+    u = _run(
+        ["record", "update", rid, "--supersedes", rid],
+        vault=vault, state_dir=state,
+    )
+    assert u.returncode != 0
+    assert "graph-guard [supersedes-self-edge]" in u.stderr
+    assert "supersedes" not in _find_sidecar(vault, rid)
+
+
 def _stamp_stored_depends_on(vault: Path, record_id: str, entries) -> None:
     """Write *entries* straight into the sidecar, bypassing the CLI's guards.
 
@@ -2330,6 +2387,9 @@ def test_update_body_change_against_active_non_adr_kind_is_unaffected(tmp_path):
 
 
 def test_update_guard_message_parses_and_names_the_remedy(tmp_path):
+    """The remedy names ``--supersedes`` — the typed supersession edge — not
+    ``--related``, the see-also edge this task's supersedes-writer replaces
+    for exactly this case (an ADR naming its own successor)."""
     vault, state = _make_vault(tmp_path)
     body = "# Decision\n\nOriginal text.\n"
     rid = _create_adr(vault, state, title="Original Decision Seven", status="active", body=body)
@@ -2344,7 +2404,7 @@ def test_update_guard_message_parses_and_names_the_remedy(tmp_path):
     assert "supersede" in line.lower()
     assert "do not edit" in line.lower()
     assert "--status superseded" in line
-    assert "--related adr=" in line
+    assert "--supersedes adr/" in line
 
 
 def test_update_move_path_rejects_body_changing_write_against_active_adr(tmp_path):

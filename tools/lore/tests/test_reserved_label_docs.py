@@ -59,6 +59,31 @@ def test_record_skill_documents_the_full_mechanism_rule():
     )
 
 
+def test_record_skill_documents_supersedes_distinctly_from_related():
+    """A supersession must be written with the typed --supersedes edge, not
+    the untyped --related see-also edge this task's writer replaces for that
+    case. Both flags must appear, and the doc must distinguish which is which
+    (not just mention --supersedes in passing alongside an unchanged --related
+    section that still calls it out as the general answer for "names another
+    record")."""
+    text = RECORD_SKILL.read_text()
+    assert "--supersedes KIND/NAME" in text, (
+        "record/SKILL.md must document --supersedes KIND/NAME for a "
+        "supersession edge"
+    )
+    assert "--unset-supersedes KIND/NAME" in text, (
+        "record/SKILL.md must document --unset-supersedes KIND/NAME"
+    )
+    assert "supersession" in text.lower(), (
+        "record/SKILL.md must name the supersession case explicitly, not just "
+        "list the flag"
+    )
+    assert "see-also" in text.lower(), (
+        "record/SKILL.md must contrast --supersedes against --related as the "
+        "see-also edge, so the two are not interchangeable in an agent's mind"
+    )
+
+
 def test_record_create_help_documents_the_mechanism_rule():
     """lore record create --help must carry the mechanism rule too — rendered
     from the real parser, not read off the source string, so a change to the

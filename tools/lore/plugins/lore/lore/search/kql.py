@@ -54,8 +54,12 @@ distributed over the OR. This is the simplest form for the compiler to pattern-m
 **Known fields (hard error on anything else):**
 - Facet aliases: ``area``, ``phase``, ``keyword``
 - Facet real keys: ``related-area``, ``related-phases``, ``keywords``,
-  and ``related-<kind>`` for every kind in ``record.model.KINDS`` (``related-task``,
-  ``related-spec``, ``related-adr``, …) — see **Kind-derived facet fields** below.
+  ``supersedes``, ``superseded-by``, and ``related-<kind>`` for every kind in
+  ``record.model.KINDS`` (``related-task``, ``related-spec``, ``related-adr``, …) —
+  see **Kind-derived facet fields** below. ``supersedes`` matches a record's own
+  forward edge (read straight from its sidecar); ``superseded-by`` is the reverse
+  direction, materialized on the target record by ``lore reindex`` pass 2 — see
+  ``search.index``'s reverse-edge documentation.
 - Scalar direct: ``kind``, ``status``, ``repo``, ``team``, ``product``, ``suite``
 - Comparison: ``created-at``, ``updated-at``, ``last-referenced-at``
 
@@ -103,6 +107,8 @@ _FACET_ALIASES = frozenset(
         "related-area",
         "related-phases",
         "keywords",
+        "supersedes",
+        "superseded-by",
     }
 )
 

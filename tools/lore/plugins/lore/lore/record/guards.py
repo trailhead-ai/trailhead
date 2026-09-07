@@ -14,7 +14,10 @@ graph (bare task names, ``depends-on`` plus ``parent`` containment) and
 ``kind/name[@stage]`` dependencies, no containment).
 :func:`evaluate_graph_guards` is the dispatcher every caller uses — it routes by
 kind and is a ``([], [])`` no-op for a kind that carries neither graph. No kind
-carries both, so exactly one policy ever runs.
+carries both, so exactly one policy ever runs. :func:`evaluate_supersedes_guard`
+runs unconditionally alongside that dispatch, for every kind: unlike
+``depends-on``/``parent``, ``supersedes`` is ungated and carries no cycle guard
+of its own — only format and self-edge are checked here.
 
 Guard-message shape: every line — blocking error, non-blocking warning, ritual
 reminder — is formatted through :func:`graph.format_guard_message` so agents
@@ -65,6 +68,7 @@ import re
 from pathlib import Path
 
 from . import graph as graph_mod
+from . import model as record_model
 from . import store as record_store_mod
 
 # A ``## Flow-out`` markdown heading (the completion-ritual section). Matched
@@ -654,9 +658,90 @@ def check_active_adr_body_immutable(
         "adr-active-immutable",
         f"{graph_mod.format_node(f'{kind}/{name}')} is {prior_status} — its body is "
         "immutable. Supersede it; do not edit it directly. Flip --status "
-        "superseded with --related adr=<successor> naming the record that "
+        "superseded with --supersedes adr/<successor> naming the record that "
         "replaces it.",
     )
+
+
+def _split_supersedes_entry(entry: object) -> tuple[str, str] | None:
+    """Split one ``supersedes`` entry into ``(kind, name)``; ``None`` when malformed.
+
+    Format is ``<kind>/<name>`` — a first-``/`` split, same shape as a design
+    ``depends-on`` entry but with no ``@stage`` tail. An empty kind or empty
+    name (including a bare string with no ``/`` at all) is malformed.
+    """
+    if not isinstance(entry, str) or "/" not in entry:
+        return None
+    kind_part, _, name_part = entry.partition("/")
+    if not kind_part or not name_part:
+        return None
+    return kind_part, name_part
+
+
+def evaluate_supersedes_guard(*, kind: str, name: str, sidecar: dict, vault_root: str) -> list[str]:
+    """Validate the ``supersedes`` edge: format and self-edge only, no cycle check.
+
+    Unlike ``depends-on``, ``supersedes`` carries no runnability semantics to
+    protect, so this is intentionally a shallow guard: each entry must split
+    into a non-empty ``kind/name`` whose kind segment is one of the closed
+    record kinds (the same vocabulary ``related`` validates against in
+    ``record.model._check_related``), and must not name the record's own
+    ``kind/name``. The kind check stops a traversal sequence in the *kind*
+    segment (``../../etc/passwd``, which first-``/``-splits into kind ``..``)
+    from being written verbatim: this value is later resolved to a filesystem
+    path by a downstream consumer, and the vault is a shared, syncing artifact,
+    so this is defense in depth rather than reliance on that consumer's own
+    path-safety check alone. The name segment is then confined through
+    :func:`confine_edge_reference`, the same helper ``--parent`` and
+    ``--depends-on`` already use, so ``adr/../../x`` is rejected as the
+    containment breach it is rather than written and left to that consumer. A mutual pair (``A`` supersedes ``B``, then
+    separately ``B`` supersedes ``A``) is deliberately NOT rejected here — each
+    write is judged on its own, so the chain reaches a downstream reader that
+    owns the multi-hop cycle guard. Ungated: this runs for every kind, not
+    routed through the task/design dispatch below.
+    """
+    errors: list[str] = []
+    entries = sidecar.get("supersedes")
+    if not isinstance(entries, list):
+        return errors
+    for entry in entries:
+        split = _split_supersedes_entry(entry)
+        if split is None:
+            errors.append(
+                graph_mod.format_guard_message(
+                    "supersedes-reference",
+                    f"malformed supersedes entry {entry!r}: must be KIND/NAME with a"
+                    " non-empty kind and name",
+                )
+            )
+            continue
+        entry_kind, entry_name = split
+        if not record_model.is_valid_kind(entry_kind):
+            errors.append(
+                graph_mod.format_guard_message(
+                    "supersedes-reference",
+                    f"malformed supersedes entry {entry!r}: {entry_kind!r} is not a"
+                    " valid kind",
+                )
+            )
+            continue
+        # Confine the NAME segment against the same surface `--parent` and
+        # `--depends-on` are confined against. The kind check above satisfies
+        # confine_edge_reference's ordering contract: the entry is split and
+        # its kind validated before the name half is confined, so a rejection
+        # names the part that was actually unsafe.
+        msg = confine_edge_reference(entry_name, vault_root, kind=entry_kind)
+        if msg is not None:
+            errors.append(msg)
+            continue
+        if entry_kind == kind and entry_name == name:
+            errors.append(
+                graph_mod.format_guard_message(
+                    "supersedes-self-edge",
+                    f"{graph_mod.format_node(f'{kind}/{name}')} cannot supersede itself",
+                )
+            )
+    return errors
 
 
 def evaluate_design_guards(
@@ -827,8 +912,11 @@ def evaluate_graph_guards(
     enforcement, never a false rejection, on that seam. See
     :func:`check_active_adr_body_immutable`.
     """
+    supersedes_errors = evaluate_supersedes_guard(
+        kind=kind, name=name, sidecar=sidecar, vault_root=vault_root
+    )
     if kind == "task":
-        return evaluate_task_guards(
+        errors, notices = evaluate_task_guards(
             kind=kind,
             name=name,
             sidecar=sidecar,
@@ -839,8 +927,8 @@ def evaluate_graph_guards(
             supplied_depends_on=supplied_depends_on,
             parent_supplied=parent_supplied,
         )
-    if kind in graph_mod.DESIGN_KINDS:
-        return evaluate_design_guards(
+    elif kind in graph_mod.DESIGN_KINDS:
+        errors, notices = evaluate_design_guards(
             kind=kind,
             name=name,
             sidecar=sidecar,
@@ -851,4 +939,6 @@ def evaluate_graph_guards(
             prior_status=prior_status,
             prior_body=prior_body,
         )
-    return [], []
+    else:
+        errors, notices = [], []
+    return supersedes_errors + errors, notices

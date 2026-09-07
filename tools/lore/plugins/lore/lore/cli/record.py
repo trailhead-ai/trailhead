@@ -166,6 +166,18 @@ def _add_record_field_flags(parser) -> None:
         "--unset-depends-on", dest="unset_depends_on", action="append", default=[],
         metavar="TASK|KIND/NAME[@STAGE]",
     )
+    # supersedes: a `<kind>/<name>` reference, valid on any kind (ungated,
+    # unlike --depends-on/--parent). No stage tail, no cycle guard — only a
+    # malformed reference or a self-edge is rejected at write time.
+    parser.add_argument(
+        "--supersedes", dest="supersedes", action="append", default=[],
+        metavar="KIND/NAME",
+        help="Append a supersession edge: this record supersedes KIND/NAME.",
+    )
+    parser.add_argument(
+        "--unset-supersedes", dest="unset_supersedes", action="append", default=[],
+        metavar="KIND/NAME",
+    )
     parser.add_argument(
         "--parent", dest="parent", default=None, metavar="TASK",
         help="Set this task's parent: a bare TASK name (task-only).",

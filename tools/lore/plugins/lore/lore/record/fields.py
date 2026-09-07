@@ -12,8 +12,9 @@ Two intentionally separate branches:
 
   - :func:`apply_record_fields` — scalars (``--status``/``--title``/``--parent``),
     repeatable list flags (``--keyword``/``--related-*``/``--depends-on`` with
-    per-item ``--unset-*`` removers), and the ``--related``/``--unset-related
-    KIND=NAME`` map builder/remover.
+    per-item ``--unset-*`` removers), the ``--related``/``--unset-related
+    KIND=NAME`` map builder/remover, and the ``--supersedes``/``--unset-supersedes``
+    list pair (omit-when-empty removal, unlike the other repeatable list flags).
   - :func:`apply_map_labels_annotations` — the ``--label``/``--annotation`` maps
     with upsert-or-remove-with-omit-when-empty semantics.
 """
@@ -135,6 +136,25 @@ def apply_record_fields(
             result["related"] = related
         else:
             result.pop("related", None)
+
+    # --- --supersedes / --unset-supersedes ---------------------------------
+    # A list field like the ones in ``_LIST_FIELD_FLAGS``, but with omit-when-
+    # empty removal (matching ``--unset-related``'s map-value treatment)
+    # instead of leaving an emptied list in place — the sidecar carries no
+    # ``supersedes`` key at all once its last entry is unset.
+    supersedes_values = getattr(args, "supersedes", None) or []
+    unset_supersedes = getattr(args, "unset_supersedes", None) or []
+    if supersedes_values or unset_supersedes:
+        current = result.get("supersedes", [])
+        if not isinstance(current, list):
+            current = []
+        current = current + list(supersedes_values)
+        for value in unset_supersedes:
+            current = [v for v in current if v != value]
+        if current:
+            result["supersedes"] = current
+        else:
+            result.pop("supersedes", None)
 
     return result, errors
 

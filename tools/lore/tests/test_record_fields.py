@@ -110,6 +110,76 @@ def test_depends_on_list_flag_appends():
 
 
 # ---------------------------------------------------------------------------
+# apply_record_fields — --supersedes / --unset-supersedes
+#
+# Unlike the plain repeatable list flags above (--keyword/--depends-on/etc,
+# which leave an emptied list in place), --unset-supersedes omits the key
+# entirely once the list empties — matching --unset-related's map-value
+# treatment, per the task contract.
+# ---------------------------------------------------------------------------
+
+
+def test_supersedes_list_flag_appends_preserving_order():
+    f = _fields()
+    result, errors = f.apply_record_fields({}, _args(supersedes=["adr/a", "adr/b"]))
+    assert errors == []
+    assert result["supersedes"] == ["adr/a", "adr/b"]
+
+
+def test_unset_supersedes_removes_exactly_that_entry():
+    f = _fields()
+    result, errors = f.apply_record_fields(
+        {"supersedes": ["adr/a", "adr/b"]}, _args(unset_supersedes=["adr/a"])
+    )
+    assert errors == []
+    assert result["supersedes"] == ["adr/b"]
+
+
+def test_unset_supersedes_omits_key_entirely_when_list_empties():
+    f = _fields()
+    result, errors = f.apply_record_fields(
+        {"supersedes": ["adr/a"]}, _args(unset_supersedes=["adr/a"])
+    )
+    assert errors == []
+    assert "supersedes" not in result
+
+
+def test_unset_supersedes_absent_value_is_a_silent_noop():
+    f = _fields()
+    result, errors = f.apply_record_fields(
+        {"supersedes": ["adr/a"]}, _args(unset_supersedes=["adr/ghost"])
+    )
+    assert errors == []
+    assert result["supersedes"] == ["adr/a"]
+
+
+def test_supersedes_append_over_a_non_list_stored_value_does_not_explode_into_chars():
+    """A stored non-list ``supersedes`` (e.g. a hand-corrupted sidecar carrying
+    a bare string) must not be ``list()``-exploded into single characters
+    before appending — that produces a misleading ``malformed supersedes
+    entry 'a'`` downstream, naming a single-letter entry that was never
+    written, rather than the actual non-list value. Matches the
+    ``isinstance(current, list)`` guard the ``_LIST_FIELD_FLAGS`` branch
+    already applies three lines above this one."""
+    f = _fields()
+    result, errors = f.apply_record_fields(
+        {"supersedes": "adr/a"}, _args(supersedes=["adr/b"])
+    )
+    assert errors == []
+    assert result["supersedes"] == ["adr/b"]
+
+
+def test_supersedes_and_unset_supersedes_compose_in_the_same_call():
+    f = _fields()
+    result, errors = f.apply_record_fields(
+        {"supersedes": ["adr/a"]},
+        _args(supersedes=["adr/b"], unset_supersedes=["adr/a"]),
+    )
+    assert errors == []
+    assert result["supersedes"] == ["adr/b"]
+
+
+# ---------------------------------------------------------------------------
 # apply_record_fields — --related KIND=NAME map
 # ---------------------------------------------------------------------------
 

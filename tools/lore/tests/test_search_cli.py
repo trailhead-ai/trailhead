@@ -436,6 +436,108 @@ def test_related_kind_field_json_reverse_edge_alias_true(tmp_path):
     assert payload["reverse_edge_alias"] is True
 
 
+def test_superseded_by_field_query_prints_reindex_note(tmp_path):
+    """``superseded-by:`` is materialized in ``reindex`` pass 2 (same as the
+    ``related-<kind>`` reverse edges), so it gets the completeness footer."""
+    personal, shared, state = _make_fixture(tmp_path)
+    r = run_cli(
+        ["search", 'superseded-by:"adr/anything"'], vault=personal, state_dir=state
+    )
+    assert r.returncode == 0, r.stderr
+    assert "reindex" in r.stdout.lower()
+
+
+def test_supersedes_field_query_prints_no_reindex_note(tmp_path):
+    """``supersedes:`` is a plain forward facet, written incrementally on every
+    write — no reindex-only reverse-edge gap, so no completeness footer."""
+    personal, shared, state = _make_fixture(tmp_path)
+    r = run_cli(["search", 'supersedes:"adr/anything"'], vault=personal, state_dir=state)
+    assert r.returncode == 0, r.stderr
+    assert "full membership" not in r.stdout.lower()
+
+
+def test_supersedes_query_returns_only_the_record_naming_the_target(tmp_path):
+    """``supersedes:"<id>"`` returns exactly the records whose sidecar names
+    ``<id>`` — end to end through the real CLI, not the raw ``record_facet``
+    SQL the index-projection tests use. No reindex is needed: the forward
+    facet is written incrementally by ``record create``."""
+    vault, state = make_vault(tmp_path)
+
+    target = run_cli(
+        ["record", "create", "--kind", "adr", "--title", "Old Decision"],
+        vault=vault, state_dir=state, stdin_text="old body\n",
+    )
+    assert target.returncode == 0, target.stderr
+    target_name = target.stdout.strip().split("/", 1)[1]
+
+    successor = run_cli(
+        [
+            "record", "create", "--kind", "adr", "--title", "New Decision",
+            "--supersedes", f"adr/{target_name}",
+        ],
+        vault=vault, state_dir=state, stdin_text="new body\n",
+    )
+    assert successor.returncode == 0, successor.stderr
+    successor_name = successor.stdout.strip().split("/", 1)[1]
+
+    unrelated = run_cli(
+        ["record", "create", "--kind", "adr", "--title", "Unrelated Decision"],
+        vault=vault, state_dir=state, stdin_text="unrelated body\n",
+    )
+    assert unrelated.returncode == 0, unrelated.stderr
+    unrelated_name = unrelated.stdout.strip().split("/", 1)[1]
+
+    search = run_cli(
+        ["search", f'supersedes:"adr/{target_name}"'], vault=vault, state_dir=state,
+    )
+    assert search.returncode == 0, search.stderr
+    assert successor_name in search.stdout
+    assert target_name not in search.stdout
+    assert unrelated_name not in search.stdout
+
+
+def test_superseded_by_query_returns_only_what_the_target_supersedes(tmp_path):
+    """``superseded-by:"<id>"`` returns the records ``<id>`` supersedes — the
+    reverse direction, materialized only by ``lore reindex`` pass 2. End to
+    end through the real CLI, not raw ``record_facet`` SQL."""
+    vault, state = make_vault(tmp_path)
+
+    target = run_cli(
+        ["record", "create", "--kind", "adr", "--title", "Old Decision Two"],
+        vault=vault, state_dir=state, stdin_text="old body\n",
+    )
+    assert target.returncode == 0, target.stderr
+    target_name = target.stdout.strip().split("/", 1)[1]
+
+    successor = run_cli(
+        [
+            "record", "create", "--kind", "adr", "--title", "New Decision Two",
+            "--supersedes", f"adr/{target_name}",
+        ],
+        vault=vault, state_dir=state, stdin_text="new body\n",
+    )
+    assert successor.returncode == 0, successor.stderr
+    successor_name = successor.stdout.strip().split("/", 1)[1]
+
+    unrelated = run_cli(
+        ["record", "create", "--kind", "adr", "--title", "Unrelated Decision Two"],
+        vault=vault, state_dir=state, stdin_text="unrelated body\n",
+    )
+    assert unrelated.returncode == 0, unrelated.stderr
+    unrelated_name = unrelated.stdout.strip().split("/", 1)[1]
+
+    reindex = run_cli(["reindex"], vault=vault, state_dir=state)
+    assert reindex.returncode == 0, reindex.stderr
+
+    search = run_cli(
+        ["search", f'superseded-by:"adr/{successor_name}"'], vault=vault, state_dir=state,
+    )
+    assert search.returncode == 0, search.stderr
+    assert target_name in search.stdout
+    assert successor_name not in search.stdout
+    assert unrelated_name not in search.stdout
+
+
 def test_old_equals_label_form_errors_with_guidance(tmp_path):
     vault, state = _make_label_fixture(tmp_path)
     r = _run(["label:worktree=s5"], vault=vault, state=state)
