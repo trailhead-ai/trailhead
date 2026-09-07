@@ -638,6 +638,36 @@ def test_reindex_twice_does_not_duplicate_reverse_supersedes_edges(env, tmp_path
     assert second_count == 1, "reindexing twice must not duplicate the reverse edge"
 
 
+def test_reindex_skips_non_string_supersedes_entry_without_aborting(env, tmp_path):
+    """A non-string ``supersedes`` entry (e.g. an int, from a hand-edited or
+    corrupted sidecar) must not abort the whole rebuild in pass 2's reverse-edge
+    materialization — ``target_ref.partition("/")`` raises AttributeError on a
+    non-str value, which is not caught by pass 1's per-record try/except since
+    the sidecar itself is otherwise well-formed and projects fine in pass 1.
+    The documented invariant is "skip that one record"; this pins that it
+    actually holds for this corruption, not just for a pass-1 IntegrityError."""
+    mod = load_index_store()
+    vault = tmp_path / "vault"
+    _write_record(vault, "adr", "good", _sidecar(kind="adr", title="Good"), "body")
+    _write_record(
+        vault,
+        "adr",
+        "corrupt",
+        _sidecar(kind="adr", title="Corrupt", supersedes=[123]),
+        "body",
+    )
+
+    conn = mod.open_index(env=env)
+    try:
+        count = mod.rebuild([str(vault)], conn)  # must not raise
+        conn.commit()
+        names = {r[0] for r in conn.execute("SELECT name FROM records").fetchall()}
+    finally:
+        conn.close()
+    assert count == 2, "both records project fine in pass 1; only pass 2 sees the bad entry"
+    assert names == {"good", "corrupt"}
+
+
 # ---------------------------------------------------------------------------
 # BM25 sort direction
 # ---------------------------------------------------------------------------

@@ -864,6 +864,21 @@ def test_supersedes_malformed_reference_rejected_at_create(tmp_path):
     assert not (vault / "adr" / "successor.md").exists()
 
 
+def test_supersedes_path_traversal_reference_rejected_at_create(tmp_path):
+    """``../../etc/passwd`` first-``/``-splits into kind ``..`` and name
+    ``../etc/passwd`` — a well-formed-looking KIND/NAME pair that must still be
+    rejected because ``..`` is not a real record kind. The sibling repo resolves
+    a stored ``supersedes`` string to a filesystem path, so a traversal sequence
+    written here verbatim is a path-traversal vector, not just a query miss."""
+    vault, state = _make_vault(tmp_path)
+    r = _create_design(
+        vault, state, "adr", "successor", extra=["--supersedes", "../../etc/passwd"],
+    )
+    assert r.returncode != 0
+    assert "graph-guard [supersedes-reference]" in r.stderr
+    assert not (vault / "adr" / "successor.md").exists()
+
+
 def test_supersedes_mutual_pair_accepted_by_both_writes(tmp_path):
     """No multi-hop cycle guard: A supersedes B, then B supersedes A, both land."""
     vault, state = _make_vault(tmp_path)

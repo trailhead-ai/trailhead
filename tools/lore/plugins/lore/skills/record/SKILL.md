@@ -62,9 +62,12 @@ lore record create --kind <kind> --title "<title>"
 Set sidecar metadata with the dedicated per-field flags — `--status` (scalar),
 the repeatable list flags `--keyword` / `--related-file` / `--related-url` /
 `--related-phase` (each with a matching `--unset-<field> VALUE` that removes
-every matching entry), and `--related KIND=NAME` (with `--unset-related
-KIND=NAME` to remove it) — and route to a specific vault with the
-routing flags (`--repo`, `--product`, `--suite`, `--team`):
+every matching entry), `--related KIND=NAME` (with `--unset-related
+KIND=NAME` to remove it) for a see-also edge, and `--supersedes KIND/NAME`
+(with `--unset-supersedes KIND/NAME` to remove it) for the typed supersession
+edge — see the next section for when to reach for which — and route to a
+specific vault with the routing flags (`--repo`, `--product`, `--suite`,
+`--team`):
 
 ```bash
 lore record create --kind decision --title "Use frontmatter for session status" \
@@ -79,8 +82,14 @@ Run `lore record create --help` for the full flag set. Related sub-actions:
 A sidecar value falls into one of three shapes — pick the flag by shape, not by
 habit:
 
-- **The value names another record** — a task, a decision, an area — it's an
-  **edge**, not an attribute. Use `--related KIND=NAME`.
+- **The value names another record as a supersession** — this record replaces
+  that one, and the old one should be found from the new one and vice versa —
+  it's a **typed edge**. Use `--supersedes KIND/NAME` (`--unset-supersedes
+  KIND/NAME` to remove it). This is what marking a decision, ADR, or task
+  `superseded` is *for*: flip `--status superseded` and pair it with
+  `--supersedes` naming the successor, not a plain `--related`.
+- **The value names another record as a see-also** — related, but not a
+  replacement — it's an **edge**, not an attribute. Use `--related KIND=NAME`.
 - **The value is a free attribute** with no natural-key collision (e.g.
   `worktree=s5`, `claude-code/model=opus`) — it's a **label**. Use
   `--label KEY=VALUE`.

@@ -2387,6 +2387,9 @@ def test_update_body_change_against_active_non_adr_kind_is_unaffected(tmp_path):
 
 
 def test_update_guard_message_parses_and_names_the_remedy(tmp_path):
+    """The remedy names ``--supersedes`` — the typed supersession edge — not
+    ``--related``, the see-also edge this task's supersedes-writer replaces
+    for exactly this case (an ADR naming its own successor)."""
     vault, state = _make_vault(tmp_path)
     body = "# Decision\n\nOriginal text.\n"
     rid = _create_adr(vault, state, title="Original Decision Seven", status="active", body=body)
@@ -2401,7 +2404,7 @@ def test_update_guard_message_parses_and_names_the_remedy(tmp_path):
     assert "supersede" in line.lower()
     assert "do not edit" in line.lower()
     assert "--status superseded" in line
-    assert "--related adr=" in line
+    assert "--supersedes adr/" in line
 
 
 def test_update_move_path_rejects_body_changing_write_against_active_adr(tmp_path):

@@ -22,6 +22,15 @@ The query is a facet-filter string. The supported facets and operators:
 - `label.<key>:<value>` — exact match on an indexed label (e.g.
   `label.worktree:s5`). `has:label.<key>` checks the key exists, with no
   value match (e.g. `has:label.worktree`).
+- `supersedes:<id>` — restrict to records whose sidecar names `<id>` in its
+  `supersedes` list (the forward edge, written incrementally on every write).
+- `superseded-by:<id>` — the reverse direction: records that `<id>` supersedes.
+  Materialized only by `lore reindex` pass 2, like the `related-<kind>` reverse
+  edges — a query run before a `reindex` may miss a row written since the last
+  one.
+- A value containing `/` must be quoted, e.g. `supersedes:"adr/foo"` (matching
+  the existing `repo:"trailhead-ai/trailhead"` precedent) — the bare,
+  unquoted form does not parse.
 - boolean `and` / `or` — combine facets, e.g. `kind:spec and area:billing`.
 
 A namespaced label key is queried with the **dot-for-slash** convention: a key

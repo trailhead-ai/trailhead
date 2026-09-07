@@ -145,7 +145,10 @@ def apply_record_fields(
     supersedes_values = getattr(args, "supersedes", None) or []
     unset_supersedes = getattr(args, "unset_supersedes", None) or []
     if supersedes_values or unset_supersedes:
-        current = list(result.get("supersedes") or []) + list(supersedes_values)
+        current = result.get("supersedes", [])
+        if not isinstance(current, list):
+            current = []
+        current = current + list(supersedes_values)
         for value in unset_supersedes:
             current = [v for v in current if v != value]
         if current:

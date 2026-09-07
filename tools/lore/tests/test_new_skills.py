@@ -124,6 +124,28 @@ def test_search_documents_kql_subset_query_shape():
     )
 
 
+def test_search_documents_supersedes_and_superseded_by_facets():
+    """The queryable reader for the supersession edge is `lore search` itself —
+    a field absent from this facet list is not discoverable by that reader, so
+    both directions and the quoting rule for a `/`-bearing value must be
+    documented here, not just implemented in the KQL parser."""
+    text = _skill_text("search")
+    assert "supersedes:" in text, (
+        "search/SKILL.md must document the `supersedes:<id>` facet"
+    )
+    assert "superseded-by:" in text, (
+        "search/SKILL.md must document the `superseded-by:<id>` facet"
+    )
+    assert 'supersedes:"adr/foo"' in text, (
+        'search/SKILL.md must show the quoted form (`supersedes:"adr/foo"`) — '
+        "a value containing `/` does not parse unquoted"
+    )
+    assert 'repo:"trailhead-ai/trailhead"' in text, (
+        "search/SKILL.md must cite the existing repo:\"trailhead-ai/trailhead\" "
+        "quoting precedent, not introduce an unrelated example"
+    )
+
+
 def test_search_json_field_is_shared_not_layer():
     """search/SKILL.md must describe the real `shared` (0/1) field a `--json`
     hit carries, and must NOT tell an agent to inspect a nonexistent `layer`

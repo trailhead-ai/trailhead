@@ -1008,6 +1008,28 @@ def test_supersedes_absent_key_is_a_noop(tmp_path):
     assert _dispatch(g, tmp_path, kind="adr", name="foo", sidecar={}) == ([], [])
 
 
+def test_supersedes_unknown_kind_is_rejected(tmp_path):
+    """The kind segment of a supersedes reference must be a real record kind —
+    the same vocabulary ``related`` validates against in ``model.py``."""
+    g = _guards()
+    errors, _ = _dispatch(
+        g, tmp_path, kind="adr", name="foo", sidecar={"supersedes": ["notakind/whatever"]},
+    )
+    assert any("[supersedes-reference]" in e for e in errors), errors
+
+
+def test_supersedes_path_traversal_kind_is_rejected(tmp_path):
+    """A traversal sequence in the kind segment (e.g. from ``../../etc/passwd``,
+    which first-``/``-splits into kind ``..`` and name ``../etc/passwd``) must
+    be rejected here, not merely tolerated until a downstream consumer's own
+    path-safety check catches it — the vault is the shared, syncing artifact."""
+    g = _guards()
+    errors, _ = _dispatch(
+        g, tmp_path, kind="adr", name="foo", sidecar={"supersedes": ["../../etc/passwd"]},
+    )
+    assert any("[supersedes-reference]" in e for e in errors), errors
+
+
 # ---------------------------------------------------------------------------
 # active-adr body immutability
 # ---------------------------------------------------------------------------
@@ -1024,6 +1046,9 @@ def test_active_adr_immutable_check_blocks_body_change_against_active_status():
 
 
 def test_active_adr_immutable_check_message_parses_and_names_the_remedy():
+    """The remedy names ``--supersedes`` — the typed supersession edge — not
+    ``--related``, the see-also edge this task's supersedes-writer replaces
+    for exactly this case (an ADR naming its own successor)."""
     g = _guards()
     msg = g.check_active_adr_body_immutable(
         kind="adr", name="foo", prior_status="active",
@@ -1034,7 +1059,7 @@ def test_active_adr_immutable_check_message_parses_and_names_the_remedy():
     assert "supersede" in msg.lower()
     assert "do not edit" in msg.lower()
     assert "--status superseded" in msg
-    assert "--related adr=" in msg
+    assert "--supersedes adr/" in msg
 
 
 def test_active_adr_immutable_check_allows_unchanged_body():

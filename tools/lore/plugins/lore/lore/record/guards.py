@@ -68,6 +68,7 @@ import re
 from pathlib import Path
 
 from . import graph as graph_mod
+from . import model as record_model
 from . import store as record_store_mod
 
 # A ``## Flow-out`` markdown heading (the completion-ritual section). Matched
@@ -657,7 +658,7 @@ def check_active_adr_body_immutable(
         "adr-active-immutable",
         f"{graph_mod.format_node(f'{kind}/{name}')} is {prior_status} — its body is "
         "immutable. Supersede it; do not edit it directly. Flip --status "
-        "superseded with --related adr=<successor> naming the record that "
+        "superseded with --supersedes adr/<successor> naming the record that "
         "replaces it.",
     )
 
@@ -682,12 +683,19 @@ def evaluate_supersedes_guard(*, kind: str, name: str, sidecar: dict) -> list[st
 
     Unlike ``depends-on``, ``supersedes`` carries no runnability semantics to
     protect, so this is intentionally a shallow guard: each entry must split
-    into a non-empty ``kind/name`` and must not name the record's own
-    ``kind/name``. A mutual pair (``A`` supersedes ``B``, then separately ``B``
-    supersedes ``A``) is deliberately NOT rejected here — each write is judged
-    on its own, so the chain reaches a downstream reader that owns the
-    multi-hop cycle guard. Ungated: this runs for every kind, not routed
-    through the task/design dispatch below.
+    into a non-empty ``kind/name`` whose kind segment is one of the closed
+    record kinds (the same vocabulary ``related`` validates against in
+    ``record.model._check_related``), and must not name the record's own
+    ``kind/name``. The kind check is what stops a path-traversal sequence
+    (``../../etc/passwd``, which first-``/``-splits into kind ``..``) from
+    being written verbatim: this value is later resolved to a filesystem path
+    by a downstream consumer, and the vault is a shared, syncing artifact, so
+    this is defense in depth rather than reliance on that consumer's own
+    path-safety check alone. A mutual pair (``A`` supersedes ``B``, then
+    separately ``B`` supersedes ``A``) is deliberately NOT rejected here — each
+    write is judged on its own, so the chain reaches a downstream reader that
+    owns the multi-hop cycle guard. Ungated: this runs for every kind, not
+    routed through the task/design dispatch below.
     """
     errors: list[str] = []
     entries = sidecar.get("supersedes")
@@ -705,6 +713,15 @@ def evaluate_supersedes_guard(*, kind: str, name: str, sidecar: dict) -> list[st
             )
             continue
         entry_kind, entry_name = split
+        if not record_model.is_valid_kind(entry_kind):
+            errors.append(
+                graph_mod.format_guard_message(
+                    "supersedes-reference",
+                    f"malformed supersedes entry {entry!r}: {entry_kind!r} is not a"
+                    " valid kind",
+                )
+            )
+            continue
         if entry_kind == kind and entry_name == name:
             errors.append(
                 graph_mod.format_guard_message(

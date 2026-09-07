@@ -761,6 +761,8 @@ def rebuild(
                 supersedes = sidecar.get("supersedes")
                 if isinstance(supersedes, list):
                     for target_ref in supersedes:
+                        if not isinstance(target_ref, str):
+                            continue  # corrupt entry: skip it, not the whole record
                         forward_supersedes.append((record_id, kind, name, target_ref))
                 count += 1
 
