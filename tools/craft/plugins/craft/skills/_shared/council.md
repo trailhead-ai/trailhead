@@ -14,6 +14,7 @@ the agents **directly** via the Agent tool — none delegates to another.
 - Per-lens Critical bars
 - Per-lens Critical bars — spec review
 - Maturity calibration
+  - Filling the calibration token
 - Synthesis (main session, NOT a subagent)
   - How the synthesis reads
   - How a finding reads
@@ -208,6 +209,16 @@ them rather than replacing them.
 
 Craft's severity vocabulary stays exactly Critical / Important / Minor; this table introduces no
 fourth tier.
+
+### Filling the calibration token
+
+Pipe the reviewed spec's body into `scripts/maturity_bars.py`, naming the reviewed repository's
+agent-instruction file (`--agent-instruction-file <repo-root>/CLAUDE.md`) so a spec carrying no
+`## Maturity` section still resolves. A non-zero exit refuses the dispatch — never review at an
+uncalibrated severity; the `reason-code:` line on stderr names the remedy, and `plan/SKILL.md`'s
+step 8.5 carries the remedy table and one worked refusal message the other dispatchers mirror.
+Surface the resolved level and its basis in the review you print, restating the renderer's own
+`maturity: <level> (basis: <basis>)` line so a read stamp is distinguishable from a silent default.
 
 ## Synthesis (main session, NOT a subagent)
 
