@@ -28,7 +28,7 @@
     {
       "name": "outpost",
       "source": "./tools/outpost/plugins/outpost",
-      "description": "Close the human→agent review loop: pick up the human-authored diff reviews in the outpost cockpit and act on them over HTTP."
+      "description": "Publish multi-file static sites into a shared lore vault's sites/ tree, so every teammate can view them from their own local Outpost."
     },
     {
       "name": "trailhead",
