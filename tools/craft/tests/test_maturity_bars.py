@@ -470,3 +470,46 @@ def test_block_states_resolved_level_and_basis():
     out = _stdout(result)
     assert "early" in out
     assert "(basis: stamp)" in out
+
+
+# ---- undecodable stdin fails closed ----------------------------------------
+
+
+def test_non_utf8_stdin_refuses_with_the_stamp_readers_own_reason_code():
+    """Undecodable stdin is unreadable input, and unreadable input fails
+    closed — it is never silently read as an absent `## Maturity` section.
+    The reason-code is the one `maturity_stamp.py` already raises for this
+    input rather than a second vocabulary."""
+    result = _run(b"\xff\xfe\x00garbage")
+    assert result.returncode != 0
+    assert "reason-code: invalid-utf8-stdin" in _stderr(result)
+
+
+def test_non_utf8_stdin_refuses_even_with_an_agent_instruction_file():
+    """The fallback to the agent-instruction file is for a spec that carries
+    no section — not for one whose bytes could not be read at all."""
+    result = _run(
+        b"\xff\xfe\x00garbage",
+        ["--agent-instruction-file", str(BARS)],
+    )
+    assert result.returncode != 0
+    assert "reason-code: invalid-utf8-stdin" in _stderr(result)
+
+
+def test_non_utf8_stdin_writes_no_calibration_block_to_stdout():
+    result = _run(b"\xff\xfe\x00garbage")
+    assert result.returncode != 0
+    assert _stdout(result) == ""
+
+
+def test_unreadable_agent_instruction_file_writes_no_block_to_stdout(tmp_path):
+    """Completes the "at any reason-code" property for the seventh
+    reason-code — the one this renderer owns rather than forwards."""
+    directory = tmp_path / "a-directory"
+    directory.mkdir()
+    result = _run(
+        NO_MATURITY_SECTION.encode("utf-8"),
+        ["--agent-instruction-file", str(directory)],
+    )
+    assert result.returncode != 0
+    assert _stdout(result) == ""

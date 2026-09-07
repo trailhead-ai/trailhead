@@ -50,11 +50,7 @@ Every other stamp violation refuses, carrying the reason-code
 missing agent-instruction file, an unreadable one, or a path naming a
 directory is a distinct case this renderer owns (the resolver's own
 contract punts "no agent-instruction file at all" to its caller): reason-
-code `agent-instruction-file-unreadable`. Stdin that does not decode as
-UTF-8 is unreadable input rather than an absent section, and refuses with
-`maturity_stamp.py`'s own `invalid-utf8-stdin` reason-code: only a spec
-that carries no `## Maturity` section falls through to the agent-
-instruction file.
+code `agent-instruction-file-unreadable`.
 
 No refusal ever writes the offending value carried by a `StampError` to
 stdout or stderr: the stamp is vault-writable content and this refusal is
