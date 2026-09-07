@@ -15,11 +15,7 @@ Every primitive here is imported from a sibling script rather than
 re-derived: `parse_entries` and `StampError` come from `maturity_stamp.py`
 (the stamp grammar), `resolve` and the closed level vocabulary `LEVELS` come
 from `maturity_resolve.py` (the agent-instruction-file declaration and its
-own `production` default). This renderer is the first caller across that
-module boundary, so `maturity_resolve.py` promotes its level vocabulary from
-the module-private `_LEVELS` to the public `LEVELS` rather than being
-imported across its own privacy boundary; `_LEVELS` remains as an alias so
-`maturity_stamp.py`'s existing import keeps working unchanged.
+own `production` default).
 
 Resolution order, and the basis reported alongside the resolved level:
 

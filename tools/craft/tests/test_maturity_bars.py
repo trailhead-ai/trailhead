@@ -27,9 +27,12 @@ Exit codes:
 
 from __future__ import annotations
 
+import itertools
 import subprocess
 import sys
 from pathlib import Path
+
+import pytest
 
 REPO_ROOT = Path(__file__).parent.parent
 BARS = REPO_ROOT / "plugins" / "craft" / "scripts" / "maturity_bars.py"
@@ -124,14 +127,6 @@ UNRESOLVED_ENUMERATION = """\
 ## Maturity
 
 <!-- unresolved-enumeration: cannot enumerate repos touched -->
-"""
-
-MALFORMED_LEVEL_WITH_DISTINCTIVE_STRING = """\
-# Some Spec
-
-## Maturity
-
-- lookout: XTREME_HAXOR_MARKER_9f3a
 """
 
 AGENT_FILE_PROTOTYPE = """\
@@ -264,18 +259,12 @@ def test_single_repository_stamp_wins_over_conflicting_agent_instruction_file(tm
 # ---- basis: highest-stamped -------------------------------------------------
 
 
-import itertools  # noqa: E402
-
-
 def _two_repo_stamp(level_a: str, level_b: str) -> str:
     return (
         "# Some Spec\n\n## Maturity\n\n"
         f"- repo-a: {level_a}\n"
         f"- repo-b: {level_b}\n"
     )
-
-
-import pytest  # noqa: E402
 
 
 @pytest.mark.parametrize("level_a,level_b", list(itertools.permutations(_LEVEL_ORDER, 2)))
@@ -428,12 +417,8 @@ def test_each_remaining_stamp_violation_exits_nonzero_with_stamp_readers_reason_
 # ---- no offending value ever echoed ----------------------------------------
 
 
-@pytest.mark.parametrize(
-    "fixture",
-    [MALFORMED_LEVEL_WITH_DISTINCTIVE_STRING],
-)
-def test_no_refusal_writes_offending_value_to_stdout_or_stderr(fixture):
-    result = _run(fixture.encode("utf-8"))
+def test_no_refusal_writes_offending_value_to_stdout_or_stderr():
+    result = _run(INVALID_LEVEL.encode("utf-8"))
     assert result.returncode != 0
     assert "XTREME_HAXOR_MARKER_9f3a" not in _stdout(result)
     assert "XTREME_HAXOR_MARKER_9f3a" not in _stderr(result)
