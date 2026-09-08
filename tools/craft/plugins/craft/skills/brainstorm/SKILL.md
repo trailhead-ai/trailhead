@@ -268,6 +268,34 @@ differently*. Cover at minimum, picking the dimensions with real ambiguity for *
 - **Blast radius:** Who else is affected — other teams, other surfaces, other code paths, other
   clients?
 
+**The last four bullets above are maturity-sensitive — Reversibility, Migration / backfill, Failure
+visibility, Blast radius — and only those four; the first four (Boundaries, Failure modes, Hidden
+assumptions, Scope) are grilled in full at every level, `prototype` included.** Before opening any
+of the last four as branches, confirm them through the renderer rather than re-resolving them:
+compose the bare `- <camp member name>: <level>` lines step 1 already resolved, stripping any
+parenthetical annotation — step 1's own example,
+`lookout: production (no declaration — defaults to production)`, composes as bare
+`lookout: production` — wrap them in a `## Maturity` heading, and pipe that block to the renderer,
+by the same absolute-path convention the existing gate invocations use:
+
+```sh
+printf '%s\n' "## Maturity" "" "- trailhead: prototype" \
+  | ${CLAUDE_PLUGIN_ROOT}/scripts/edge_confirmations.py
+```
+
+When the renderer exits 0 and every repository resolved `prototype`, its stdout opens with
+`maturity: prototype — edge checklist confirmed, not interrogated` followed by one confirmation line
+per suppressed dimension. Put those four lines to the operator as **one exchange** — a single reopen
+instruction spanning all four dimensions together, never one prompt per dimension. Any dimension the
+operator names in reply is grilled as a full branch exactly as it would be at any other level; a
+confirmation only defaults an answer, it never suppresses the concern.
+
+When the renderer exits non-zero, or any repository resolved a level other than `prototype`, grill
+all four dimensions in full rather than proceeding — the safe direction. On a non-zero exit, state
+the renderer's own `reason-code:` to the operator: that vocabulary is authored by this script, not
+read from repository content, so surfacing it does not reopen the untrusted-value channel step 1's
+own resolver guards against.
+
 Lead with the highest-ambiguity question, and track what stays open as you go so nothing silently
 drops into step 3.
 
