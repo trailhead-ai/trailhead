@@ -188,17 +188,19 @@ def test_decline_clause_states_writing_nothing():
     )
 
 
-def test_declining_leaves_a_real_fixture_byte_for_byte_unchanged(tmp_path):
-    """A decline means the writer is never invoked. Proven by driving the
-    fixture through the whole no-op path: nothing is called, and the bytes
-    that would have been the writer's input are the bytes still on disk."""
-    target = tmp_path / "CLAUDE.md"
-    target.write_text(NO_SECTION_AT_ALL, encoding="utf-8")
-    original = target.read_bytes()
-
-    # Decline: the writer is deliberately never invoked here.
-
-    assert target.read_bytes() == original
+def test_decline_branch_documents_no_write_invocation():
+    """AC4b requires a declined answer to write nothing, so the documented
+    decline branch must not carry a writer invocation. Asserted against the
+    live skill text: everything from the decline sentence to the end of the
+    ask is the branch an agent follows on a decline, and a `maturity_declare`
+    invocation appearing there would direct the write AC4b forbids."""
+    ask = _ask_clause()
+    decline_start = ask.index("On a declined or absent answer")
+    decline_branch = ask[decline_start:]
+    assert "maturity_declare" not in decline_branch, (
+        "the decline branch must direct no write, but it names the writer: "
+        f"{decline_branch!r}"
+    )
 
 
 # ---- 5. the writer-refusal path is pinned, not just promised ---------------
