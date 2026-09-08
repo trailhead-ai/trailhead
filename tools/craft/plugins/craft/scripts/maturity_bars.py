@@ -74,6 +74,16 @@ two. See `task/the-offending-value-echo-is-an-unclosed-prompt-injection-
 channel` — the same open channel `maturity_stamp.py` itself narrows but does
 not close for ITS caller; this renderer's caller gets the reason-code alone.
 
+On the success path, the `highest-stamped` block embeds the `## Maturity`
+section's own declared member names verbatim, as the matrix's column
+headers and per-concern cells, and that block is substituted whole into a
+lens subagent's prompt. A member name reaching this renderer has already
+passed `maturity_stamp.py`'s grammar (`^[A-Za-z0-9._-]+$`, never exactly
+`.` or `..`, length-bounded), so it carries no quotes, whitespace, or
+newlines that could reshape the block around it — but nothing else about
+the text a spec author chose for a member name is sanitized before it
+reaches the subagent prompt.
+
 Stdout on success (exit 0), the calibration block: the resolved level and
 its basis, the five maturity-sensitive concerns each rated at the severity
 the resolved level maps to (Critical at `production`, Important at `early`,
@@ -180,16 +190,27 @@ def resolve_level(
 
 
 def render(level: str, basis: str, entries: dict[str, str] | None = None) -> str:
+    if basis == "highest-stamped" and entries is None:
+        raise AssertionError(
+            "render() called with basis 'highest-stamped' but entries=None: "
+            "the per-repository matrix requires the stamped levels, and "
+            "silently falling back to the flat highest-wins block would "
+            "reproduce the exact output this basis exists to replace"
+        )
     lines = [f"maturity: {level} (basis: {basis})"]
-    per_repository = basis == "highest-stamped" and entries is not None
+    per_repository = basis == "highest-stamped"
     if per_repository:
         lines.append(
             "highest-stamped is the sanctioned fallback for a finding no "
             "repository can be attributed to — not a general highest-wins rule."
         )
         lines.append(
-            "A finding is located by the leading camp member name segment "
-            "of the path it cites."
+            "A finding is rated at a repository's column when it locates to "
+            "a single repository: match the leading camp member name "
+            "segment of the path it cites, exactly and case-sensitively, "
+            "against the columns above. No match, two or more distinct "
+            "matches, or no cited path at all — each takes the fallback "
+            "instead."
         )
     lines.append("")
     if per_repository:

@@ -21,12 +21,12 @@ marker standing in for the whole paragraph — and each gates only the branch
 of `documented_severity()` that depends on it. Removing or contradicting a
 single property in the document must turn red only the test(s) that
 property actually governs, proven per-property by the mutation transcript
-in the commit body (properties 4 and 6 are genuinely independent boundaries;
-properties 2 and 3 are governed by one shared bullet in the document but
-gated as two independent code-level flags here; properties 4-and-6, being
-the two sides of the same "how many matched" decision as property 5's
-positive counterpart, cannot be separated by any single external
-observation — see the commit body for why).
+in the commit body — with two named exceptions, neither separable by any
+single external observation: properties 2 and 3 are governed by one shared
+bullet in the document but gated as two independent code-level flags here;
+properties 4 and 6, being the positive and negative statements of the same
+"how many matched" boundary, only ever turn red together (see the commit
+body for why).
 """
 
 from __future__ import annotations
@@ -163,7 +163,7 @@ def documented_severity(
         return fallback_severity if markers["fallback_no_match"] else severities[members[0]]
 
     if len(matched) >= 2:
-        # properties 4 (exactly-one) and 5 (fallback-on-multiple) are the
+        # properties 4 (exactly-one) and 6 (fallback-on-multiple) are the
         # positive and negative statements of the same boundary — either
         # one's absence must flip this branch.
         if markers["fallback_multiple"] and markers["exactly_one"]:
@@ -257,10 +257,19 @@ def discover_maturity_calibration_producers(skills_dir: Path = SKILLS_DIR) -> li
     )
 
 
+_DEFERS_TO_RENDERER_MARKER = "`scripts/maturity_bars.py` renders"
+
+
 def producer_defers(path: Path) -> bool:
-    """A producer defers when it does not restate the attribution rule's own
-    marker phrase itself — the single source of truth stays `council.md`."""
-    return "own severity" not in path.read_text(encoding="utf-8")
+    """A producer defers when it hands the `<maturity-calibration>` token's
+    content to the renderer itself — naming `scripts/maturity_bars.py` as
+    what renders the block — rather than authoring or restating the
+    attribution rule's rating logic in its own prose. Unlike an absence
+    check, this is a positive statement of what a deferring producer's text
+    actually says, so a producer that restates the rule in ANY wording
+    (not just the literal phrase this test module used to gate on) fails
+    it: it names no renderer to defer to."""
+    return _DEFERS_TO_RENDERER_MARKER in path.read_text(encoding="utf-8")
 
 
 def test_every_discovered_producer_defers_to_council_rather_than_restating_the_rule():
@@ -268,8 +277,9 @@ def test_every_discovered_producer_defers_to_council_rather_than_restating_the_r
     assert producers, "producer scan found no dispatcher filling <maturity-calibration>"
     for path in producers:
         assert producer_defers(path), (
-            f"{path} restates the attribution rule ('own severity') instead of deferring to "
-            "council.md's \"Filling the calibration token\""
+            f"{path} does not name `scripts/maturity_bars.py` as what renders the "
+            "calibration block — it may be restating the attribution rule instead of "
+            "deferring to council.md's \"Filling the calibration token\""
         )
 
 

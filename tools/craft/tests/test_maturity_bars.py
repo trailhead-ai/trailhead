@@ -39,7 +39,11 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).parent.parent
-BARS = REPO_ROOT / "plugins" / "craft" / "scripts" / "maturity_bars.py"
+SCRIPTS_DIR = REPO_ROOT / "plugins" / "craft" / "scripts"
+BARS = SCRIPTS_DIR / "maturity_bars.py"
+
+sys.path.insert(0, str(SCRIPTS_DIR))
+import maturity_bars  # noqa: E402
 
 CONCERNS = (
     "backwards compatibility",
@@ -323,13 +327,15 @@ def test_two_repo_stamp_renders_each_repositorys_own_severity_basis_highest_stam
     higher = level_a if _LEVEL_ORDER.index(level_a) > _LEVEL_ORDER.index(level_b) else level_b
     assert f"maturity: {higher} (basis: highest-stamped)" in out
     for concern in CONCERNS:
+        # This exact-cell assertion already pins that the two repositories'
+        # rendered severities differ whenever `_SEVERITY_BY_LEVEL[level_a]`
+        # and `_SEVERITY_BY_LEVEL[level_b]` differ — a separate assertion on
+        # the two dict lookups themselves would prove only a property of
+        # this parametrization, never of the renderer's output.
         assert (
             f"- {concern}: repo-a={_SEVERITY_BY_LEVEL[level_a]}, "
             f"repo-b={_SEVERITY_BY_LEVEL[level_b]}"
         ) in out
-        # two repositories at different stamped levels must render two
-        # different severities for the same concern.
-        assert _SEVERITY_BY_LEVEL[level_a] != _SEVERITY_BY_LEVEL[level_b]
 
 
 def test_two_repo_stamp_at_same_level_still_renders_the_full_matrix():
@@ -370,6 +376,17 @@ def test_highest_stamped_block_states_the_path_attribution_rule():
     out = _stdout(_run(MIXED_TWO_REPO_STAMP.encode("utf-8")))
     assert "leading camp member name segment" in out
     assert "path" in out
+
+
+def test_highest_stamped_block_states_all_four_attribution_cases_decidably():
+    """The rendered block is the only maturity text a lens subagent ever
+    sees, so it — not just council.md — must decide all four cases a
+    finding's cited paths can present, using AC8's own term "single" to
+    settle the two-or-more-match case unambiguously."""
+    out = _stdout(_run(MIXED_TWO_REPO_STAMP.encode("utf-8")))
+    assert "single repository" in out
+    assert "two or more distinct matches" in out
+    assert "no cited path at all" in out
 
 
 def test_three_repo_stamp_carries_all_five_concerns_for_every_repository():
@@ -557,6 +574,39 @@ def test_unreadable_agent_instruction_file_raises_no_traceback(tmp_path):
         ["--agent-instruction-file", "/does/not/exist/CLAUDE.md"],
     )
     assert "Traceback" not in _stderr(result)
+
+
+# ---- render() invariant: highest-stamped basis requires entries -----------
+
+
+def test_render_raises_on_highest_stamped_basis_with_no_entries():
+    """`render()` must never silently fall back to the flat highest-wins
+    block for `highest-stamped` — the matrix output this change exists to
+    produce. A caller that loses `entries` for this basis is an invariant
+    violation, not a degraded-but-valid output."""
+    with pytest.raises(AssertionError):
+        maturity_bars.render("production", "highest-stamped", None)
+
+
+# ---- member-name length bound reaches this renderer too -------------------
+
+
+def test_member_name_at_the_length_bound_renders_through_this_renderer():
+    name = "a" * 100
+    spec = f"# Some Spec\n\n## Maturity\n\n- {name}: production\n"
+    result = _run(spec.encode("utf-8"))
+    assert result.returncode == 0
+    assert "maturity: production (basis: stamp)" in _stdout(result)
+
+
+def test_member_name_over_the_length_bound_refuses_with_its_own_reason_code():
+    name = "a" * 101
+    spec = f"# Some Spec\n\n## Maturity\n\n- {name}: production\n"
+    result = _run(spec.encode("utf-8"))
+    assert result.returncode != 0
+    assert "reason-code: member-name-too-long" in _stderr(result)
+    assert _stdout(result) == ""
+    assert name not in _stderr(result)
 
 
 # ---- remaining stamp violations pass through their own reason-code --------
