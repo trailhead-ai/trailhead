@@ -293,6 +293,8 @@ def test_compare_and_swap_refuses_a_real_concurrent_write(tmp_path):
     result_a = result_holder["a"]
     assert result_a.returncode == 2
     assert _reason_code(result_a) == "already-declared"
+    assert MARKER not in _stdout(result_a)
+    assert MARKER not in _stderr(result_a)
 
     final_bytes = target.read_bytes()
     assert final_bytes == winning_content.encode("utf-8")
@@ -326,6 +328,8 @@ def test_replace_failure_is_caught_and_original_is_intact(tmp_path):
         assert result.returncode == 2
         assert _reason_code(result) == "write-failed"
         assert "Traceback" not in _stderr(result)
+        assert MARKER not in _stdout(result)
+        assert MARKER not in _stderr(result)
         assert target.read_bytes() == original
     finally:
         os.chflags(str(target), 0)
@@ -388,6 +392,14 @@ def _refusal_cases(tmp_path):
 
 
 def test_no_refusal_path_echoes_file_content(tmp_path):
+    # The compare-and-swap race (already-declared) and the os.replace
+    # write-failure (write-failed) are the two remaining refusal paths in
+    # the reason-code vocabulary. Each already has a dedicated test that
+    # drives it with a real interleaving / a real replace failure —
+    # test_compare_and_swap_refuses_a_real_concurrent_write and
+    # test_replace_failure_is_caught_and_original_is_intact — so the
+    # marker-absence assertion for those two lives there instead of being
+    # re-driven through a synthetic case here.
     for path_str, level in _refusal_cases(tmp_path):
         result = _run(path_str, level)
         assert result.returncode == 2, f"expected refusal for {path_str}"
