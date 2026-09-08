@@ -21,7 +21,6 @@ from pathlib import Path
 # Shared fixture bodies and runners, reused rather than re-derived, so a
 # change to either the fixtures or the invocation shape reaches every suite
 # that depends on them from one place.
-from test_maturity_bars import BARS
 from test_maturity_bars import CONCERNS as BARS_CONCERNS
 from test_maturity_bars import _run as _run_bars
 from test_maturity_declare import ALREADY_DECLARED_EARLY  # noqa: F401 (documented for readers)
@@ -129,8 +128,8 @@ def test_documented_declare_snippet_wrong_is_caught_by_the_check_above(tmp_path)
     (naming the wrong script) must fail this same check, proving it can
     actually go red rather than passing regardless of what the doc says."""
     wrong_snippet = (
-        f"${{CLAUDE_PLUGIN_ROOT}}/scripts/maturity_resolve.py "
-        f"<repo-root>/CLAUDE.md <level>"
+        "${CLAUDE_PLUGIN_ROOT}/scripts/maturity_resolve.py "
+        "<repo-root>/CLAUDE.md <level>"
     )
     substituted = wrong_snippet.replace(
         "${CLAUDE_PLUGIN_ROOT}/scripts", str(SCRIPTS_DIR)
