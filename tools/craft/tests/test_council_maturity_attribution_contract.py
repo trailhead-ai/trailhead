@@ -183,15 +183,6 @@ def _fixture(tmp_path: Path) -> tuple[list[str], dict[str, str], str, dict[str, 
     markers = extract_property_markers(filling_section(council_text()))
     return members, severities, fallback_severity, markers
 
-
-import tempfile  # noqa: E402
-
-
-def _fixture_no_tmp():
-    with tempfile.TemporaryDirectory() as d:
-        return _fixture(Path(d))
-
-
 # ---- contract item 1: relational binding, for both members ---------------
 
 
@@ -219,36 +210,36 @@ def test_path_matching_exactly_one_member_selects_that_members_severity(tmp_path
     assert selected == severities[_MEMBER_A]
 
 
-def test_paths_matching_two_members_falls_back():
-    members, severities, fallback_severity, markers = _fixture_no_tmp()
+def test_paths_matching_two_members_falls_back(tmp_path):
+    members, severities, fallback_severity, markers = _fixture(tmp_path)
     selected = documented_severity(
         [f"{_MEMBER_A}/x", f"{_MEMBER_B}/y"], members, severities, fallback_severity, markers
     )
     assert selected == fallback_severity
 
 
-def test_path_matching_no_member_falls_back():
-    members, severities, fallback_severity, markers = _fixture_no_tmp()
+def test_path_matching_no_member_falls_back(tmp_path):
+    members, severities, fallback_severity, markers = _fixture(tmp_path)
     selected = documented_severity(["some-unrelated-repo/x"], members, severities, fallback_severity, markers)
     assert selected == fallback_severity
 
 
-def test_no_path_at_all_falls_back():
-    members, severities, fallback_severity, markers = _fixture_no_tmp()
+def test_no_path_at_all_falls_back(tmp_path):
+    members, severities, fallback_severity, markers = _fixture(tmp_path)
     selected = documented_severity([], members, severities, fallback_severity, markers)
     assert selected == fallback_severity
 
 
-def test_case_mismatched_path_falls_back_rather_than_matching():
-    members, severities, fallback_severity, markers = _fixture_no_tmp()
+def test_case_mismatched_path_falls_back_rather_than_matching(tmp_path):
+    members, severities, fallback_severity, markers = _fixture(tmp_path)
     mismatched = _MEMBER_A[0].upper() + _MEMBER_A[1:]
     assert mismatched != _MEMBER_A
     selected = documented_severity([f"{mismatched}/x"], members, severities, fallback_severity, markers)
     assert selected == fallback_severity
 
 
-def test_path_with_member_name_as_a_prefix_falls_back_rather_than_matching():
-    members, severities, fallback_severity, markers = _fixture_no_tmp()
+def test_path_with_member_name_as_a_prefix_falls_back_rather_than_matching(tmp_path):
+    members, severities, fallback_severity, markers = _fixture(tmp_path)
     prefixed = f"{_MEMBER_A}2"
     assert prefixed != _MEMBER_A and prefixed.startswith(_MEMBER_A)
     selected = documented_severity([f"{prefixed}/x"], members, severities, fallback_severity, markers)

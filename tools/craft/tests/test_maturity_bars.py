@@ -7,8 +7,10 @@ spec body on stdin and accepts an optional `--agent-instruction-file <path>`.
 Resolution order:
   - a `## Maturity` section naming exactly one repository -> that
     repository's level, basis `stamp`
-  - a section naming more than one repository -> the highest level among
-    them, basis `highest-stamped`
+  - a section naming more than one repository -> a concern-by-repository
+    matrix, each stamped repository rated at its own declared level, basis
+    `highest-stamped`, with the highest stamped level reported as the
+    fallback for a finding no repository can be attributed to
   - a section absent (including empty stdin) -> `maturity_resolve.resolve()`
     against the agent-instruction file, basis `agent-instruction-file`; with
     no such flag, `production`, basis `default`
@@ -18,7 +20,8 @@ Resolution order:
 Stdout on success (exit 0) is the calibration block: the resolved level and
 its basis, plus all five maturity-sensitive concerns each rated at the
 severity the resolved level maps to (Critical at production, Important at
-early, Minor at prototype).
+early, Minor at prototype) — or, at basis `highest-stamped`, one severity
+per stamped repository for each of those concerns.
 
 Exit codes:
   0 -> resolved, block printed
@@ -302,6 +305,16 @@ def _two_repo_stamp(level_a: str, level_b: str) -> str:
     )
 
 
+MIXED_TWO_REPO_STAMP = "# S\n\n## Maturity\n\n- lookout: prototype\n- trailhead: production\n"
+
+THREE_REPO_STAMP = (
+    "# Some Spec\n\n## Maturity\n\n"
+    "- alpha: prototype\n"
+    "- mango: early\n"
+    "- zebra: production\n"
+)
+
+
 @pytest.mark.parametrize("level_a,level_b", list(itertools.permutations(_LEVEL_ORDER, 2)))
 def test_two_repo_stamp_renders_each_repositorys_own_severity_basis_highest_stamped(level_a, level_b):
     result = _run(_two_repo_stamp(level_a, level_b).encode("utf-8"))
@@ -314,8 +327,8 @@ def test_two_repo_stamp_renders_each_repositorys_own_severity_basis_highest_stam
             f"- {concern}: repo-a={_SEVERITY_BY_LEVEL[level_a]}, "
             f"repo-b={_SEVERITY_BY_LEVEL[level_b]}"
         ) in out
-        # the whole point of AC7: the two repositories' severities differ
-        # for a concern whenever their stamped levels differ.
+        # two repositories at different stamped levels must render two
+        # different severities for the same concern.
         assert _SEVERITY_BY_LEVEL[level_a] != _SEVERITY_BY_LEVEL[level_b]
 
 
@@ -348,27 +361,19 @@ def test_three_repo_stamp_orders_columns_by_member_name_not_write_order():
 
 
 def test_highest_stamped_names_the_fallback_level_explicitly():
-    spec = "# S\n\n## Maturity\n\n- lookout: prototype\n- trailhead: production\n"
-    out = _stdout(_run(spec.encode("utf-8")))
+    out = _stdout(_run(MIXED_TWO_REPO_STAMP.encode("utf-8")))
     assert "maturity: production (basis: highest-stamped)" in out
     assert "not a general highest-wins rule" in out
 
 
 def test_highest_stamped_block_states_the_path_attribution_rule():
-    spec = "# S\n\n## Maturity\n\n- lookout: prototype\n- trailhead: production\n"
-    out = _stdout(_run(spec.encode("utf-8")))
+    out = _stdout(_run(MIXED_TWO_REPO_STAMP.encode("utf-8")))
     assert "leading camp member name segment" in out
     assert "path" in out
 
 
 def test_three_repo_stamp_carries_all_five_concerns_for_every_repository():
-    spec = (
-        "# Some Spec\n\n## Maturity\n\n"
-        "- alpha: prototype\n"
-        "- mango: early\n"
-        "- zebra: production\n"
-    )
-    lines = _stdout(_run(spec.encode("utf-8"))).splitlines()
+    lines = _stdout(_run(THREE_REPO_STAMP.encode("utf-8"))).splitlines()
     for concern in CONCERNS:
         assert (
             f"- {concern}: alpha=Minor, mango=Important, zebra=Critical"
@@ -376,13 +381,7 @@ def test_three_repo_stamp_carries_all_five_concerns_for_every_repository():
 
 
 def test_highest_stamped_severity_vocabulary_is_exactly_three_words():
-    spec = (
-        "# Some Spec\n\n## Maturity\n\n"
-        "- alpha: prototype\n"
-        "- mango: early\n"
-        "- zebra: production\n"
-    )
-    out = _stdout(_run(spec.encode("utf-8")))
+    out = _stdout(_run(THREE_REPO_STAMP.encode("utf-8")))
     found = {word for word in ("Critical", "Important", "Minor", "Major", "Severe", "Blocker") if word in out}
     assert found <= set(SEVERITIES)
     for concern in CONCERNS:
@@ -394,11 +393,8 @@ def test_highest_stamped_severity_vocabulary_is_exactly_three_words():
 
 
 def test_highest_stamped_downgrade_restatement_names_repository_and_level():
-    spec = "# S\n\n## Maturity\n\n- lookout: prototype\n- trailhead: production\n"
-    out = _stdout(_run(spec.encode("utf-8")))
+    out = _stdout(_run(MIXED_TWO_REPO_STAMP.encode("utf-8")))
     assert "downgraded by lookout's prototype maturity level" in out
-    assert "lookout" in out
-    assert "prototype" in out
 
 
 def test_single_repository_stamp_renders_byte_for_byte_unchanged():
@@ -419,8 +415,7 @@ def test_single_repository_stamp_renders_byte_for_byte_unchanged():
 
 
 def test_matrix_header_and_per_repository_line_shape_are_pinned():
-    spec = "# S\n\n## Maturity\n\n- lookout: prototype\n- trailhead: production\n"
-    lines = _stdout(_run(spec.encode("utf-8"))).splitlines()
+    lines = _stdout(_run(MIXED_TWO_REPO_STAMP.encode("utf-8"))).splitlines()
     assert "concern x repository: lookout, trailhead" in lines
     assert "- backwards compatibility: lookout=Minor, trailhead=Critical" in lines
 
@@ -697,12 +692,6 @@ def test_block_instructs_a_downgraded_finding_to_restate_concern_and_level(level
     out = _stdout(_run(spec.encode("utf-8")))
     assert "downgrad" in out.lower()
     assert level in out
-
-
-def test_highest_stamped_block_states_it_is_not_a_general_highest_wins_rule():
-    spec = "# S\n\n## Maturity\n\n- lookout: prototype\n- trailhead: production\n"
-    out = _stdout(_run(spec.encode("utf-8")))
-    assert "not a general highest-wins rule" in out
 
 
 @pytest.mark.parametrize(
