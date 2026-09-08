@@ -220,6 +220,15 @@ step 8.5 carries the remedy table and one worked refusal message the other dispa
 Surface the resolved level and its basis in the review you print, restating the renderer's own
 `maturity: <level> (basis: <basis>)` line so a read stamp is distinguishable from a silent default.
 
+When the basis is `highest-stamped`, the block is a concern-by-repository matrix rather than a
+single severity, and rating a finding is attribution, not the fallback. Take the leading camp member
+name segment of a path the finding cites and match it exactly, case-sensitive, against the matrix's
+own column names. Exactly one match: rate the finding at that repository's own severity for the
+concern, read straight from its column. No match, two or more distinct matches across the finding's
+cited paths, or no cited path at all: rate the finding at the fallback severity the header line
+names instead — the sanctioned answer for a finding that cannot be attributed to a single
+repository, never a general highest-wins rule applied to every finding.
+
 ## Synthesis (main session, NOT a subagent)
 
 After all four members return:
