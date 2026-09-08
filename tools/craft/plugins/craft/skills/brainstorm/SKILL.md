@@ -279,7 +279,7 @@ parenthetical annotation — step 1's own example,
 by the same absolute-path convention the existing gate invocations use:
 
 ```sh
-printf '%s\n' "## Maturity" "" "- trailhead: prototype" \
+printf '%s\n' "## Maturity" "" "- <camp member name>: <level>" \
   | ${CLAUDE_PLUGIN_ROOT}/scripts/edge_confirmations.py
 ```
 

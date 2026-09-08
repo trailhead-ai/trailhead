@@ -1,6 +1,6 @@
 """Cross-derivation contract binding brainstorm's grill step (step 2, "Grill
-for Clarity") to the real `edge_confirmations.py` renderer (task 1) — so the
-skill's prose and the renderer's behaviour cannot drift apart.
+for Clarity") to the real `edge_confirmations.py` renderer — so the skill's
+prose and the renderer's behaviour cannot drift apart.
 
 These tests bind to the real renderer run as a subprocess against real
 input, and to real edge-checklist bullet text parsed out of SKILL.md, never
@@ -23,11 +23,11 @@ RENDERER = SCRIPTS_DIR / "edge_confirmations.py"
 
 ALL_PROTOTYPE_SINGLE = b"## Maturity\n\n- trailhead: prototype\n"
 
-# The exact worked example brainstorm's own framing step (step 1) documents
-# for its own annotated output — SKILL.md:280-281 quotes this literally as
-# `lookout: production (no declaration -- defaults to production)`. C1's
-# premise: the grill step must instruct stripping the annotation before this
-# reaches the renderer, and that stripped form must actually parse.
+# The exact worked example the "Frame" step documents for its own annotated
+# output, quoted literally as
+# `lookout: production (no declaration — defaults to production)`. The
+# grill step must instruct stripping the annotation before this reaches the
+# renderer, and that stripped form must actually parse.
 FRAMING_STEP_WORKED_EXAMPLE_ANNOTATED = (
     "lookout: production (no declaration — defaults to production)"
 )
@@ -48,6 +48,10 @@ def _step(name: str) -> str:
 
 def _grill_step() -> str:
     return _step("### 2. Grill for Clarity")
+
+
+def _frame_step() -> str:
+    return _step("### 1. Frame")
 
 
 def _run_renderer(stdin_bytes: bytes) -> subprocess.CompletedProcess:
@@ -77,8 +81,8 @@ def _renderer_dimension_names(stdout: str) -> list[str]:
     ]
 
 
-# ---- test-contract item 1: every renderer dimension name is a literal
-#      edge-checklist bullet label in SKILL.md -------------------------------
+# ---- every renderer dimension name is a literal edge-checklist bullet label
+#      in SKILL.md ------------------------------------------------------------
 
 
 def test_every_renderer_dimension_corresponds_to_a_literal_edge_checklist_bullet_label():
@@ -95,8 +99,8 @@ def test_every_renderer_dimension_corresponds_to_a_literal_edge_checklist_bullet
         )
 
 
-# ---- test-contract item 2: the invocation is documented, and the script it
-#      names exists and is executable ----------------------------------------
+# ---- the invocation is documented, and the script it names exists and is
+#      executable -------------------------------------------------------------
 
 
 def test_grill_step_documents_the_invocation_and_the_script_exists_executable():
@@ -114,8 +118,7 @@ def test_grill_step_documents_the_invocation_and_the_script_exists_executable():
     )
 
 
-# ---- test-contract item 3: the non-zero-exit rule is stated as grilling in
-#      full, not skipping ----------------------------------------------------
+# ---- the non-zero-exit rule is stated as grilling in full, not skipping ----
 
 
 def test_grill_step_states_non_zero_exit_grills_all_four_in_full():
@@ -132,8 +135,8 @@ def test_grill_step_states_non_zero_exit_grills_all_four_in_full():
     )
 
 
-# ---- test-contract item 4: a reopened dimension is grilled as a full branch
-#      (never-suppressed-only-downgraded, at this surface) -------------------
+# ---- a reopened dimension is grilled as a full branch (never
+#      suppressed-only-downgraded, at this surface) ---------------------------
 
 
 def test_grill_step_states_a_reopened_dimension_is_grilled_as_a_full_branch():
@@ -147,10 +150,10 @@ def test_grill_step_states_a_reopened_dimension_is_grilled_as_a_full_branch():
     )
 
 
-# ---- test-contract item 5: the four confirmation defaults, if restated in
-#      the skill prose at all, match the renderer's own text; here, the
-#      prose points at the renderer's summary line rather than restating the
-#      defaults, and that pointer is pinned to the renderer's real output ---
+# ---- the four confirmation defaults, if restated in the skill prose at
+#      all, match the renderer's own text; here, the prose points at the
+#      renderer's summary line rather than restating the defaults, and that
+#      pointer is pinned to the renderer's real output -----------------------
 
 
 def test_skill_quotes_the_renderers_own_summary_line_verbatim():
@@ -165,15 +168,18 @@ def test_skill_quotes_the_renderers_own_summary_line_verbatim():
     )
 
 
-# ---- Council item C1 (Builder) — composition seam: the framing step's own
-#      worked example, stripped of its annotation, actually parses ----------
+# ---- composition seam: the framing step's own worked example, stripped of
+#      its annotation, actually parses ---------------------------------------
 
 
 def test_framing_step_worked_example_is_present_and_annotated():
-    """Fixture ground truth: step 1's own documented worked example carries a
-    parenthetical annotation the renderer's grammar cannot accept bare."""
-    text = _skill_text()
-    assert FRAMING_STEP_WORKED_EXAMPLE_ANNOTATED in text, (
+    """Fixture ground truth: step 1's own body documents a worked example
+    carrying a parenthetical annotation the renderer's grammar cannot accept
+    bare. Scoped to step 1's own body — not the whole file — so that this
+    fixture assumption cannot be satisfied by step 2 merely re-quoting the
+    same string."""
+    frame = _frame_step()
+    assert FRAMING_STEP_WORKED_EXAMPLE_ANNOTATED in frame, (
         "fixture assumption: step 1 documents this annotated worked example verbatim"
     )
 
@@ -198,9 +204,8 @@ def test_stripped_framing_step_worked_example_parses_and_resolves_through_the_re
     assert "no dimension suppressed" in result.stdout.decode("utf-8").lower()
 
 
-# ---- Council item C2 (Reliability) — failure seam: the non-zero exit states
-#      the renderer's own reason-code to the operator, and distinguishes it
-#      from repo-authored content --------------------------------------------
+# ---- failure seam: the non-zero exit states the renderer's own reason-code
+#      to the operator, and distinguishes it from repo-authored content -----
 
 
 def test_grill_step_states_surfacing_the_renderers_reason_code_on_non_zero_exit():
@@ -241,9 +246,35 @@ def test_grill_step_distinguishes_the_reason_code_from_untrusted_repo_content():
     )
 
 
-# ---- Council item C3 (Advocate) — exchange seam: the confirmations reach the
-#      operator as ONE exchange spanning all four dimensions, not one prompt
-#      per dimension (positive assertion, never an absence assertion) -------
+# ---- the dimension-set rule: the first four edge-checklist bullets stay
+#      grilled in full at every level, prototype included -------------------
+
+
+def test_grill_step_states_the_first_four_bullets_stay_grilled_at_every_level():
+    grill = _grill_step()
+    clause_match = re.search(
+        r"the first four \([^)]*\)[^.]*grilled in full at every level[^.]*\.",
+        grill,
+        re.IGNORECASE,
+    )
+    assert clause_match, (
+        "step 2 must have a 'the first four (...) ... grilled in full at every "
+        "level' clause terminated by '.'"
+    )
+    clause = " ".join(clause_match.group(0).split())
+    assert re.search(r"\bprototype\b", clause, re.IGNORECASE), (
+        f"the clause must name `prototype` as included in every level: {clause!r}"
+    )
+    for bullet_label in ("Boundaries", "Failure modes", "Hidden assumptions", "Scope"):
+        assert bullet_label in clause, (
+            f"the clause must name the first-four bullet label {bullet_label!r} "
+            f"as staying grilled in full: {clause!r}"
+        )
+
+
+# ---- exchange seam: the confirmations reach the operator as ONE exchange
+#      spanning all four dimensions, not one prompt per dimension (positive
+#      assertion, never an absence assertion) --------------------------------
 
 
 def test_grill_step_states_confirmations_are_put_as_one_exchange_spanning_all_four():

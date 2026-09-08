@@ -106,7 +106,7 @@ def _err(msg: str) -> None:
 
 
 def _all_prototype(entries: dict[str, str]) -> bool:
-    return all(level == _PROTOTYPE_LEVEL for level in entries.values())
+    return bool(entries) and all(level == _PROTOTYPE_LEVEL for level in entries.values())
 
 
 def render(entries: dict[str, str]) -> str:

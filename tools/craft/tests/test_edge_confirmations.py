@@ -94,13 +94,29 @@ def test_each_confirmation_line_names_its_dimension():
 
 
 def test_confirmation_lines_state_the_concrete_default_not_a_bare_label():
-    """Council rider (C3, Advocate): each line states the assumption it is
-    defaulting to, not a bare 'defaulted' label — the operator must be able
-    to judge whether to reopen the dimension without re-deriving what the
-    default meant."""
+    """Each confirmation line states the concrete assumption it defaults to,
+    not a bare 'defaulted' label, so the operator can judge whether to
+    reopen the dimension without re-deriving what the default meant. Every
+    one of the four dimensions is pinned independently — a default that
+    regresses to a bare label on any one of them must fail this test."""
     result = _run(ALL_PROTOTYPE_SINGLE.encode("utf-8"))
     stdout = result.stdout.decode("utf-8")
-    assert "Migration / backfill: assumed none; prototype state is disposable" in stdout
+    assert (
+        "Reversibility: assumed acceptable to flag-day; prototype state is disposable, "
+        "so no rollback path is needed." in stdout
+    )
+    assert (
+        "Migration / backfill: assumed none; prototype state is disposable, so there is "
+        "nothing to migrate." in stdout
+    )
+    assert (
+        "Failure visibility: assumed operator-only; the only consumer is the operator "
+        "running this themselves." in stdout
+    )
+    assert (
+        "Blast radius: assumed confined to the operator; there are no other consumers "
+        "to affect." in stdout
+    )
     assert "defaulted" not in stdout.lower()
 
 
@@ -177,6 +193,17 @@ def test_invalid_level_never_echoes_offending_text_on_either_stream():
     result = _run(INVALID_LEVEL.encode("utf-8"))
     combined = result.stdout + result.stderr
     assert b"banana" not in combined
+
+
+def test_all_prototype_predicate_does_not_vacuously_suppress_an_empty_mapping():
+    """The suppression predicate must be locally safe: an empty mapping must
+    not read as 'every entry is prototype'. Exercises the predicate directly
+    rather than through `parse_entries`'s `empty-section` guard, so the
+    decision does not depend on that upstream invariant to stay safe."""
+    sys.path.insert(0, str(SCRIPT.parent))
+    from edge_confirmations import _all_prototype
+
+    assert _all_prototype({}) is False
 
 
 def test_render_error_is_structurally_unable_to_carry_offending_text():
