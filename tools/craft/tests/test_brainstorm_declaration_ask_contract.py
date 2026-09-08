@@ -128,6 +128,26 @@ def test_documented_declare_snippet_executed_as_written_writes_the_answered_leve
     _execute_snippet_and_confirm_declared(argv, target, "early")
 
 
+def test_documented_declare_snippet_handles_a_repo_root_containing_a_space(tmp_path):
+    """The snippet substitutes a real absolute path for `<repo-root>`, and a
+    real repo-root can contain a space — an unquoted snippet breaks the
+    invocation as written (shlex splits the path in two)."""
+    snippet = _declare_snippet()
+
+    spacey_root = tmp_path / "repo with space"
+    spacey_root.mkdir()
+    target = spacey_root / "CLAUDE.md"
+    target.write_text(NO_SECTION_AT_ALL, encoding="utf-8")
+
+    argv = _substitute_snippet(snippet, target, "early")
+    assert argv[0] == str(DECLARE)
+    assert argv[1] == str(target), (
+        f"the repo-root path must survive as a single argv token: {argv!r}"
+    )
+
+    _execute_snippet_and_confirm_declared(argv, target, "early")
+
+
 def test_documented_declare_snippet_wrong_is_caught_by_the_check_above(tmp_path):
     """Positive control for the check above: drives the exact same
     execute-then-confirm-declared check (`_execute_snippet_and_confirm_declared`,
@@ -165,6 +185,25 @@ def test_declare_snippet_carries_only_placeholders_no_hardcoded_level_or_repo():
     assert "<level>" in snippet, f"the snippet must carry a <level> placeholder: {snippet!r}"
     assert "<repo-root>" in snippet, (
         f"the snippet must carry a <repo-root> placeholder, not a real path: {snippet!r}"
+    )
+
+
+def test_ask_states_the_answer_is_normalized_before_it_reaches_a_command_line():
+    """The operator's answer is free text, but the command line only ever
+    sees one of the three closed-vocabulary words — the ask must say so."""
+    ask = _ask_clause()
+    normalize_match = re.search(r"normalized[^.]*\.", ask, re.IGNORECASE)
+    assert normalize_match, (
+        f"the ask must state the answer is normalized before reaching a "
+        f"command line: {ask!r}"
+    )
+    clause = normalize_match.group(0)
+    assert re.search(r"one of the three closed-vocabulary words", clause), (
+        f"the normalization clause must name the closed vocabulary: {clause!r}"
+    )
+    assert re.search(r"command line", clause, re.IGNORECASE), (
+        f"the normalization clause must say where the normalized word ends "
+        f"up: {clause!r}"
     )
 
 

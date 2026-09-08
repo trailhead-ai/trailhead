@@ -163,10 +163,12 @@ which prints the five maturity-sensitive concerns and the severity each level ma
 re-list that mapping in this skill's own prose, since a copy drifts from the renderer the moment
 either changes.
 
-On an answer naming a level — the recommendation or another — write it:
+On an answer naming a level — the recommendation or another — the operator's answer is normalized to
+exactly one of the three closed-vocabulary words before it reaches the command line below, then
+write it:
 
 ```sh
-${CLAUDE_PLUGIN_ROOT}/scripts/maturity_declare.py <repo-root>/CLAUDE.md <level>
+${CLAUDE_PLUGIN_ROOT}/scripts/maturity_declare.py "<repo-root>/CLAUDE.md" <level>
 ```
 
 If the writer refuses (exit 2, a `reason-code:` on stderr), report the refusal to the operator and

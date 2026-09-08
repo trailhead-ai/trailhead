@@ -570,20 +570,27 @@ def test_usage_error_exits_2_with_a_reason_code():
 # ---------------------------------------------------------------------------
 
 
-def test_declare_writes_through_a_symlink_to_the_real_target(tmp_path):
-    real = tmp_path / "REAL_CLAUDE.md"
-    real.write_text(NO_SECTION_AT_ALL, encoding="utf-8")
-    link = tmp_path / "CLAUDE.md"
-    link.symlink_to(real)
+def test_declare_refuses_a_symlinked_target_and_leaves_the_real_target_untouched(tmp_path):
+    other_repo = tmp_path / "other"
+    other_repo.mkdir()
+    sibling = other_repo / "REAL_CLAUDE.md"
+    sibling.write_text(NO_SECTION_AT_ALL, encoding="utf-8")
+    original_sibling = sibling.read_bytes()
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    link = repo / "CLAUDE.md"
+    link.symlink_to(sibling)
 
     result = _run(str(link), "early")
 
-    assert result.returncode == 0, _stderr(result)
-    assert link.is_symlink(), "the symlink itself must survive the declare"
-    assert os.readlink(str(link)) == str(real)
-    got_level, got_reason = _resolver_level_and_reason(real.read_bytes())
-    assert got_level == "early"
-    assert got_reason == "declared"
+    assert result.returncode == 2
+    assert _reason_code(result) == "target-is-symlink"
+    assert link.is_symlink(), "the symlink itself must be left exactly as it was"
+    assert os.readlink(str(link)) == str(sibling)
+    assert sibling.read_bytes() == original_sibling, (
+        "a different repository's agent-instruction file must never be modified"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -626,3 +633,62 @@ def test_success_token_on_stdout_nothing_on_stderr(tmp_path, level):
     assert result.returncode == 0
     assert _stdout(result) == f"declared: {level}\n"
     assert _stderr(result) == ""
+
+
+# ---------------------------------------------------------------------------
+# A permission change landing inside the locked section (between the
+# initial read and the compare-and-swap re-read) is caught, not an
+# unhandled traceback leaking the absolute path
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(
+    hasattr(os, "geteuid") and os.geteuid() == 0,
+    reason="root bypasses mode bits, so chmod(0o000) leaves this test "
+    "unable to observe its own subject and it would pass vacuously",
+)
+def test_permission_change_inside_the_locked_section_refuses_without_a_traceback(tmp_path):
+    from maturity_declare import lock_path_for  # noqa: PLC0415
+
+    target = tmp_path / "CLAUDE.md"
+    target.write_text(NO_SECTION_AT_ALL, encoding="utf-8")
+    original = target.read_bytes()
+
+    lock_path = lock_path_for(target)
+    lock_fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o644)
+    fcntl.flock(lock_fd, fcntl.LOCK_EX)
+
+    result_holder: dict[str, subprocess.CompletedProcess] = {}
+
+    def run_writer_a():
+        result_holder["a"] = _run(str(target), "prototype")
+
+    thread = threading.Thread(target=run_writer_a)
+    thread.start()
+
+    # Give writer A a real chance to complete its initial read and self-check
+    # (both happen before the lock is even attempted) and block on the lock,
+    # before we revoke read permission on the target out from under it — the
+    # exact race window between the initial read and the compare-and-swap
+    # re-read that happens once the lock is acquired.
+    time.sleep(0.3)
+    assert thread.is_alive(), "writer A finished before we could interleave — test is not real"
+
+    target.chmod(0o000)
+    try:
+        fcntl.flock(lock_fd, fcntl.LOCK_UN)
+        os.close(lock_fd)
+
+        thread.join(timeout=10)
+        assert not thread.is_alive(), "writer A never woke up after the lock was released"
+
+        result_a = result_holder["a"]
+        assert result_a.returncode == 2
+        assert "Traceback" not in _stderr(result_a)
+        assert _reason_code(result_a) == "write-failed"
+        assert MARKER not in _stdout(result_a)
+        assert MARKER not in _stderr(result_a)
+        assert str(target) not in _stderr(result_a)
+    finally:
+        target.chmod(0o644)
+    assert target.read_bytes() == original

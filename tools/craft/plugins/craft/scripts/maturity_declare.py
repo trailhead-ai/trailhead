@@ -46,6 +46,17 @@ refuses with `concurrent-modification` rather than clobbering whatever the other
 writer just wrote — the losing session sees the refusal instead of a
 silently discarded write.
 
+If the target path is itself a symlink at the moment of that re-read, the
+write refuses with `target-is-symlink` rather than following the link:
+this script is always invoked against a concrete `<repo-root>/CLAUDE.md`,
+so there is no legitimate reason for that path to be a symlink, and a
+symlink there can only redirect the write to a file this invocation was
+never authorized to touch (e.g. a sibling repository's own
+agent-instruction file, silently changing what maturity level that other
+repository declares). Because the writer never resolves through a
+symlink, the lock is always keyed on the same path it ultimately writes
+to — there is no separate "resolved target" for the lock to miss.
+
 Stdout on success (exit 0), one stable line naming what was written:
 
     declared: <level>
@@ -65,6 +76,8 @@ Exit codes:
                                  UTF-8.
        already-declared       — an unfenced `## Project Maturity` heading
                                  already exists.
+       target-is-symlink      — `<agent-instruction-file>` is itself a
+                                 symlink; refused rather than followed.
        concurrent-modification
                                — the file's bytes changed between the
                                  initial read and the compare-and-swap
@@ -119,6 +132,7 @@ _INVALID_LEVEL_REASON_CODE = "invalid-level"
 _PATH_IS_DIRECTORY_REASON_CODE = "path-is-directory"
 _INVALID_UTF8_FILE_REASON_CODE = "invalid-utf8-file"
 _ALREADY_DECLARED_REASON_CODE = "already-declared"
+_TARGET_IS_SYMLINK_REASON_CODE = "target-is-symlink"
 _CONCURRENT_MODIFICATION_REASON_CODE = "concurrent-modification"
 _SELF_CHECK_FAILED_REASON_CODE = "self-check-failed"
 _WRITE_FAILED_REASON_CODE = "write-failed"
@@ -189,33 +203,35 @@ def _write_with_compare_and_swap(path: Path, initial_bytes: bytes, new_content: 
         raise DeclareError(_WRITE_FAILED_REASON_CODE) from e
     try:
         fcntl.flock(lock_fd, fcntl.LOCK_EX)
-        current = path.read_bytes() if path.exists() else b""
-        if current != initial_bytes:
-            raise DeclareError(_CONCURRENT_MODIFICATION_REASON_CODE)
-
-        # Write through a symlinked agent-instruction file rather than
-        # replacing the symlink itself with a regular file — `os.replace`
-        # operates on the path entry, not what it points at.
-        write_target = path.resolve() if path.is_symlink() else path
-        mode = (
-            stat.S_IMODE(write_target.stat().st_mode)
-            if write_target.exists()
-            else _default_new_file_mode()
-        )
-
-        tmp_fd, tmp_name = tempfile.mkstemp(
-            dir=str(write_target.parent), prefix=write_target.name + "."
-        )
         try:
-            os.fchmod(tmp_fd, mode)
-            with os.fdopen(tmp_fd, "wb") as f:
-                f.write(new_content)
-            os.replace(tmp_name, str(write_target))
-        except OSError as e:
+            current = path.read_bytes() if path.exists() else b""
+            if current != initial_bytes:
+                raise DeclareError(_CONCURRENT_MODIFICATION_REASON_CODE)
+
+            # Refuse rather than follow: the caller always passes a concrete
+            # `<repo-root>/CLAUDE.md`, so there is no legitimate symlink case
+            # to preserve, and a symlink here can only redirect the write to
+            # a file this invocation was never authorized to touch.
+            if path.is_symlink():
+                raise DeclareError(_TARGET_IS_SYMLINK_REASON_CODE)
+
+            mode = (
+                stat.S_IMODE(path.stat().st_mode) if path.exists() else _default_new_file_mode()
+            )
+
+            tmp_fd, tmp_name = tempfile.mkstemp(dir=str(path.parent), prefix=path.name + ".")
             try:
-                os.unlink(tmp_name)
-            except OSError:
-                pass
+                os.fchmod(tmp_fd, mode)
+                with os.fdopen(tmp_fd, "wb") as f:
+                    f.write(new_content)
+                os.replace(tmp_name, str(path))
+            except OSError as e:
+                try:
+                    os.unlink(tmp_name)
+                except OSError:
+                    pass
+                raise DeclareError(_WRITE_FAILED_REASON_CODE) from e
+        except OSError as e:
             raise DeclareError(_WRITE_FAILED_REASON_CODE) from e
     finally:
         fcntl.flock(lock_fd, fcntl.LOCK_UN)
