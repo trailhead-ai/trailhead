@@ -303,14 +303,145 @@ def _two_repo_stamp(level_a: str, level_b: str) -> str:
 
 
 @pytest.mark.parametrize("level_a,level_b", list(itertools.permutations(_LEVEL_ORDER, 2)))
-def test_two_repo_stamp_resolves_to_higher_level_basis_highest_stamped(level_a, level_b):
+def test_two_repo_stamp_renders_each_repositorys_own_severity_basis_highest_stamped(level_a, level_b):
     result = _run(_two_repo_stamp(level_a, level_b).encode("utf-8"))
     assert result.returncode == 0
     out = _stdout(result)
     higher = level_a if _LEVEL_ORDER.index(level_a) > _LEVEL_ORDER.index(level_b) else level_b
-    assert "highest-stamped" in out
+    assert f"maturity: {higher} (basis: highest-stamped)" in out
     for concern in CONCERNS:
-        assert f"{concern}: {_SEVERITY_BY_LEVEL[higher]}" in out
+        assert (
+            f"- {concern}: repo-a={_SEVERITY_BY_LEVEL[level_a]}, "
+            f"repo-b={_SEVERITY_BY_LEVEL[level_b]}"
+        ) in out
+        # the whole point of AC7: the two repositories' severities differ
+        # for a concern whenever their stamped levels differ.
+        assert _SEVERITY_BY_LEVEL[level_a] != _SEVERITY_BY_LEVEL[level_b]
+
+
+def test_two_repo_stamp_at_same_level_still_renders_the_full_matrix():
+    spec = "# Some Spec\n\n## Maturity\n\n- repo-a: early\n- repo-b: early\n"
+    result = _run(spec.encode("utf-8"))
+    assert result.returncode == 0
+    out = _stdout(result)
+    assert "maturity: early (basis: highest-stamped)" in out
+    assert "concern x repository: repo-a, repo-b" in out
+    for concern in CONCERNS:
+        assert f"- {concern}: repo-a=Important, repo-b=Important" in out
+
+
+def test_three_repo_stamp_orders_columns_by_member_name_not_write_order():
+    spec = (
+        "# Some Spec\n\n## Maturity\n\n"
+        "- zebra: production\n"
+        "- alpha: prototype\n"
+        "- mango: early\n"
+    )
+    result = _run(spec.encode("utf-8"))
+    assert result.returncode == 0
+    out = _stdout(result)
+    assert "concern x repository: alpha, mango, zebra" in out
+    for concern in CONCERNS:
+        assert (
+            f"- {concern}: alpha=Minor, mango=Important, zebra=Critical"
+        ) in out
+
+
+def test_highest_stamped_names_the_fallback_level_explicitly():
+    spec = "# S\n\n## Maturity\n\n- lookout: prototype\n- trailhead: production\n"
+    out = _stdout(_run(spec.encode("utf-8")))
+    assert "maturity: production (basis: highest-stamped)" in out
+    assert "not a general highest-wins rule" in out
+
+
+def test_highest_stamped_block_states_the_path_attribution_rule():
+    spec = "# S\n\n## Maturity\n\n- lookout: prototype\n- trailhead: production\n"
+    out = _stdout(_run(spec.encode("utf-8")))
+    assert "leading camp member name segment" in out
+    assert "path" in out
+
+
+def test_three_repo_stamp_carries_all_five_concerns_for_every_repository():
+    spec = (
+        "# Some Spec\n\n## Maturity\n\n"
+        "- alpha: prototype\n"
+        "- mango: early\n"
+        "- zebra: production\n"
+    )
+    lines = _stdout(_run(spec.encode("utf-8"))).splitlines()
+    for concern in CONCERNS:
+        assert (
+            f"- {concern}: alpha=Minor, mango=Important, zebra=Critical"
+        ) in lines, f"{concern!r} missing its full per-repository row"
+
+
+def test_highest_stamped_severity_vocabulary_is_exactly_three_words():
+    spec = (
+        "# Some Spec\n\n## Maturity\n\n"
+        "- alpha: prototype\n"
+        "- mango: early\n"
+        "- zebra: production\n"
+    )
+    out = _stdout(_run(spec.encode("utf-8")))
+    found = {word for word in ("Critical", "Important", "Minor", "Major", "Severe", "Blocker") if word in out}
+    assert found <= set(SEVERITIES)
+    for concern in CONCERNS:
+        for line in out.splitlines():
+            if line.strip().startswith(f"- {concern}:"):
+                for cell in line.split(":", 1)[1].split(","):
+                    severity = cell.split("=", 1)[1].strip()
+                    assert severity in SEVERITIES
+
+
+def test_highest_stamped_downgrade_restatement_names_repository_and_level():
+    spec = "# S\n\n## Maturity\n\n- lookout: prototype\n- trailhead: production\n"
+    out = _stdout(_run(spec.encode("utf-8")))
+    assert "downgraded by lookout's prototype maturity level" in out
+    assert "lookout" in out
+    assert "prototype" in out
+
+
+def test_single_repository_stamp_renders_byte_for_byte_unchanged():
+    out = _stdout(_run(SINGLE_REPO_EARLY.encode("utf-8")))
+    assert out == (
+        "maturity: early (basis: stamp)\n\n"
+        + "".join(f"- {concern}: Important\n" for concern in CONCERNS)
+        + "\nEvery concern above is reported at its mapped severity and is "
+        "never filtered out.\nWhere a concern above also appears in your "
+        "per-lens Critical bars, the severity above governs — the bars say "
+        "what to look for, this block says how severely to rate it.\n"
+        "A finding downgraded by this calibration restates the concern "
+        "and the deciding level in its own text (for example "
+        "\"migration and backfill — Important, downgraded by this spec's "
+        "early maturity level\"), so the operator can tell a calibrated "
+        "downgrade from noise and has something concrete to override.\n"
+    )
+
+
+def test_matrix_header_and_per_repository_line_shape_are_pinned():
+    spec = "# S\n\n## Maturity\n\n- lookout: prototype\n- trailhead: production\n"
+    lines = _stdout(_run(spec.encode("utf-8"))).splitlines()
+    assert "concern x repository: lookout, trailhead" in lines
+    assert "- backwards compatibility: lookout=Minor, trailhead=Critical" in lines
+
+
+@pytest.mark.parametrize(
+    "fixture,reason_code",
+    [
+        (MALFORMED_ENTRY, "malformed-entry"),
+        (INVALID_LEVEL, "invalid-level"),
+        (DUPLICATE_MEMBER, "duplicate-member"),
+        (DUPLICATE_SECTION, "duplicate-section"),
+        (EMPTY_SECTION, "empty-section"),
+        (UNRESOLVED_ENUMERATION, "unresolved-enumeration"),
+    ],
+)
+def test_fail_closed_stamp_violations_still_write_no_block_after_matrix_rendering(fixture, reason_code):
+    result = _run(fixture.encode("utf-8"))
+    assert result.returncode == 2
+    err = _stderr(result)
+    assert f"reason-code: {reason_code}" in err
+    assert _stdout(result) == ""
 
 
 # ---- basis: agent-instruction-file / default -------------------------------
