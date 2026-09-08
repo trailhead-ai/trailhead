@@ -231,6 +231,40 @@ def test_severity_vocabulary_is_exactly_three_words_no_fourth_tier():
                     assert severity in SEVERITIES
 
 
+# ---- --level flag: preview any level's block, default output untouched ----
+
+
+@pytest.mark.parametrize("level", ["prototype", "early", "production"])
+def test_level_flag_renders_that_levels_block_regardless_of_stdin(level):
+    result = _run(b"", ["--level", level])
+    assert result.returncode == 0, _stderr(result)
+    out = _stdout(result)
+    assert f"maturity: {level} (basis: requested)" in out
+    for concern in CONCERNS:
+        assert f"{concern}: {_SEVERITY_BY_LEVEL[level]}" in out
+
+
+def test_level_flag_ignores_a_conflicting_maturity_stamp_on_stdin():
+    result = _run(SINGLE_REPO_PROTOTYPE.encode("utf-8"), ["--level", "production"])
+    assert result.returncode == 0, _stderr(result)
+    out = _stdout(result)
+    assert "maturity: production (basis: requested)" in out
+    for concern in CONCERNS:
+        assert f"{concern}: Critical" in out
+
+
+def test_default_output_is_byte_for_byte_unchanged_without_the_level_flag():
+    with_flag_absent = _stdout(_run(b""))
+    assert with_flag_absent == "maturity: production (basis: default)\n\n" + "".join(
+        f"- {concern}: Critical\n" for concern in CONCERNS
+    ) + (
+        "\nEvery concern above is reported at its mapped severity and is "
+        "never filtered out.\nWhere a concern above also appears in your "
+        "per-lens Critical bars, the severity above governs — the bars say "
+        "what to look for, this block says how severely to rate it.\n"
+    )
+
+
 # ---- basis: stamp ----------------------------------------------------------
 
 

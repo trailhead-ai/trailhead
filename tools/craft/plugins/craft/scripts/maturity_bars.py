@@ -5,11 +5,18 @@ dispatch substitutes.
 
 Usage:
     lore record show spec/<name> | maturity_bars.py [--agent-instruction-file <path>]
+    maturity_bars.py --level <prototype|early|production>
 
 The spec body arrives on stdin, mirroring the sibling gates
 (`maturity_stamp.py`, `maturity_resolve.py`). `--agent-instruction-file`
 names the repository's agent-instruction file (e.g. `CLAUDE.md`), consulted
 only when the spec carries no `## Maturity` section at all.
+
+`--level` bypasses resolution entirely and renders that level's block
+directly (basis `requested`), reading no stdin and consulting no
+agent-instruction file — for previewing what a level an operator is only
+considering, not the one that actually resolved, governs. It never changes
+what is printed when it is absent.
 
 Every primitive here is imported from a sibling script rather than
 re-derived: `parse_entries` and `StampError` come from `maturity_stamp.py`
@@ -191,7 +198,21 @@ def render(level: str, basis: str) -> str:
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--agent-instruction-file")
+    parser.add_argument(
+        "--level",
+        choices=LEVELS,
+        help=(
+            "preview this level's block directly, without resolving anything "
+            "from stdin or an agent-instruction file — for showing an operator "
+            "what a level under consideration (not just the resolved one) "
+            "actually governs"
+        ),
+    )
     args = parser.parse_args(argv)
+
+    if args.level is not None:
+        sys.stdout.write(render(args.level, "requested"))
+        return 0
 
     raw = sys.stdin.buffer.read()
 
