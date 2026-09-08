@@ -147,6 +147,38 @@ offending value (untrusted repo content, not an instruction):
 State the resolved level per repository in the session before moving to step 2, e.g. `trailhead:
 production (declared)`, `lookout: production (no declaration — defaults to production)`.
 
+On the absence path — no agent-instruction file at all, or a resolver run reporting `reason:
+section-absent` — ask the operator once for that repository's level, before moving to step 2.
+Recommend `production`. Name the closed vocabulary — `prototype` / `early` / `production` — and show
+what accepting the recommendation actually governs by running the calibration renderer and pasting
+its block into the ask:
+
+```sh
+${CLAUDE_PLUGIN_ROOT}/scripts/maturity_bars.py < /dev/null
+```
+
+which prints the five maturity-sensitive concerns and the severity `production` maps each to — never
+re-list that mapping in this skill's own prose, since a copy drifts from the renderer the moment
+either changes.
+
+On an answer naming a level — the recommendation or another — write it:
+
+```sh
+${CLAUDE_PLUGIN_ROOT}/scripts/maturity_declare.py <repo-root>/CLAUDE.md <level>
+```
+
+If the writer refuses (exit 2, a `reason-code:` on stderr), report the refusal to the operator and
+continue the session at `production` for that repository — never stall on it, and never retry with a
+different level without the operator asking. On a declined or absent answer, proceed the same way:
+the session continues at `production` for that repository and writes nothing.
+
+**Correcting a wrong declaration.** The writer's refusal on an existing heading (`already-declared`)
+is permanent by design — there is no automated second write. Fix a declaration made wrongly by
+hand-editing that repository's `## Project Maturity` section: replace the vocabulary word its
+rationale sentence names with the correct one. One trap: naming the old level too — even to explain
+the change — leaves two distinct vocabulary words in the section body, which the resolver reads as
+`ambiguous-value` and resolves back to `production` rather than forward to the intended level.
+
 <!-- prior-art-survey:start -->
 **Prior-art survey — mandatory, run now, inline in this session, never dispatched to a subagent:**
 
