@@ -18,6 +18,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 # Shared fixture bodies and runners, reused rather than re-derived, so a
 # change to either the fixtures or the invocation shape reaches every suite
 # that depends on them from one place.
@@ -72,7 +74,39 @@ def _declare_snippet() -> str:
     return matches[0].strip()
 
 
+def _bars_snippet() -> str:
+    ask = _ask_clause()
+    blocks = re.findall(r"```sh\n(.*?)\n```", ask, re.DOTALL)
+    matches = [b for b in blocks if "maturity_bars.py" in b]
+    assert matches, f"the ask must carry a fenced maturity_bars.py invocation: {ask!r}"
+    assert len(matches) == 1, f"expected exactly one bars invocation block: {matches!r}"
+    return matches[0].strip()
+
+
 # ---- 1. the documented invocation snippet is executed as written -----------
+
+
+def _substitute_snippet(snippet: str, target: Path, level: str) -> list[str]:
+    substituted = (
+        snippet.replace("${CLAUDE_PLUGIN_ROOT}/scripts", str(SCRIPTS_DIR))
+        .replace("<repo-root>/CLAUDE.md", str(target))
+        .replace("<level>", level)
+    )
+    return shlex.split(substituted)
+
+
+def _execute_snippet_and_confirm_declared(argv: list[str], target: Path, level: str) -> None:
+    """The check the documented invocation snippet must pass: run it exactly
+    as substituted, then confirm the real resolver reads the target back as
+    `declared` at `level`. Shared verbatim between the real test below and
+    its positive control, so the control genuinely drives this check rather
+    than a copy of it."""
+    result = subprocess.run(argv, input=b"", capture_output=True)
+    assert result.returncode == 0, result.stderr.decode("utf-8")
+
+    got_level, reason = _resolver_level_and_reason(target.read_bytes())
+    assert got_level == level
+    assert reason == "declared"
 
 
 def test_documented_declare_snippet_executed_as_written_writes_the_answered_level(
@@ -83,12 +117,7 @@ def test_documented_declare_snippet_executed_as_written_writes_the_answered_leve
     target = tmp_path / "CLAUDE.md"
     target.write_text(NO_SECTION_AT_ALL, encoding="utf-8")
 
-    substituted = (
-        snippet.replace("${CLAUDE_PLUGIN_ROOT}/scripts", str(SCRIPTS_DIR))
-        .replace("<repo-root>/CLAUDE.md", str(target))
-        .replace("<level>", "early")
-    )
-    argv = shlex.split(substituted)
+    argv = _substitute_snippet(snippet, target, "early")
     # Bare invocation via the script's own shebang, exactly as documented —
     # never rewritten as `python3 maturity_declare.py`, which would leave the
     # mode bit untested.
@@ -96,29 +125,30 @@ def test_documented_declare_snippet_executed_as_written_writes_the_answered_leve
         f"the snippet's first token must be the writer itself: {argv!r}"
     )
 
-    result = subprocess.run(argv, capture_output=True)
-    assert result.returncode == 0, result.stderr.decode("utf-8")
-
-    level, reason = _resolver_level_and_reason(target.read_bytes())
-    assert level == "early"
-    assert reason == "declared"
+    _execute_snippet_and_confirm_declared(argv, target, "early")
 
 
 def test_documented_declare_snippet_wrong_is_caught_by_the_check_above(tmp_path):
-    """Positive control for the check above: a documented-but-wrong snippet
-    (naming the wrong script) must fail this same check, proving it can
-    actually go red rather than passing regardless of what the doc says."""
+    """Positive control for the check above: drives the exact same
+    execute-then-confirm-declared check (`_execute_snippet_and_confirm_declared`,
+    not a copy of it) against a documented-but-wrong snippet naming the
+    resolver instead of the writer, and observes it actually go red — the
+    resolver ignores argv and reads stdin, so with no stdin content the
+    round-trip check's own `returncode == 0` assertion is what fails."""
     wrong_snippet = (
         "${CLAUDE_PLUGIN_ROOT}/scripts/maturity_resolve.py "
         "<repo-root>/CLAUDE.md <level>"
     )
-    substituted = wrong_snippet.replace(
-        "${CLAUDE_PLUGIN_ROOT}/scripts", str(SCRIPTS_DIR)
-    )
-    argv = shlex.split(substituted)
+    target = tmp_path / "CLAUDE.md"
+    target.write_text(NO_SECTION_AT_ALL, encoding="utf-8")
+
+    argv = _substitute_snippet(wrong_snippet, target, "early")
     assert argv[0] != str(DECLARE), (
         "fixture assumption: the wrong snippet must name a different script"
     )
+
+    with pytest.raises(AssertionError, match="returncode"):
+        _execute_snippet_and_confirm_declared(argv, target, "early")
 
 
 # ---- 2. the snippet carries no hardcoded level and no hardcoded repository -
@@ -256,6 +286,19 @@ def test_ask_instructs_invoking_the_renderer_for_the_recommended_level():
     )
     match = re.search(r"```sh\n(.*maturity_bars\.py.*)\n```", ask, re.DOTALL)
     assert match, f"the renderer invocation must be fenced: {ask!r}"
+
+
+def test_ask_shows_all_three_levels_consequences_via_the_level_flag():
+    """AC4/AC4b's Delivers requires the ask to state what the CHOSEN level
+    does — but the operator is choosing among three words, so seeing only
+    the recommended level's block leaves the other two invisible at the
+    moment of choosing. The ask must run the renderer once per vocabulary
+    word via its `--level` flag, never re-listing the mapping itself."""
+    block = _bars_snippet()
+    for level in ("prototype", "early", "production"):
+        assert re.search(rf"--level[= ]{level}\b", block), (
+            f"the ask must invoke maturity_bars.py --level {level!r}: {block!r}"
+        )
 
 
 def test_ask_does_not_carry_a_second_copy_of_the_concern_mapping():

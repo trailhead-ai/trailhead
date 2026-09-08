@@ -292,7 +292,7 @@ def test_compare_and_swap_refuses_a_real_concurrent_write(tmp_path):
 
     result_a = result_holder["a"]
     assert result_a.returncode == 2
-    assert _reason_code(result_a) == "already-declared"
+    assert _reason_code(result_a) == "concurrent-modification"
     assert MARKER not in _stdout(result_a)
     assert MARKER not in _stderr(result_a)
 
@@ -405,6 +405,185 @@ def test_no_refusal_path_echoes_file_content(tmp_path):
         assert result.returncode == 2, f"expected refusal for {path_str}"
         assert MARKER not in _stdout(result)
         assert MARKER not in _stderr(result)
+
+
+# ---------------------------------------------------------------------------
+# Mode preservation across the atomic replace
+# ---------------------------------------------------------------------------
+
+
+def test_declare_preserves_an_existing_files_mode(tmp_path):
+    target = tmp_path / "CLAUDE.md"
+    target.write_text(NO_SECTION_AT_ALL, encoding="utf-8")
+    target.chmod(0o644)
+
+    result = _run(str(target), "early")
+
+    assert result.returncode == 0, _stderr(result)
+    assert stat.S_IMODE(target.stat().st_mode) == 0o644
+
+
+def test_declare_preserves_an_unusual_existing_mode_not_just_0644(tmp_path):
+    target = tmp_path / "CLAUDE.md"
+    target.write_text(NO_SECTION_AT_ALL, encoding="utf-8")
+    target.chmod(0o664)
+
+    result = _run(str(target), "early")
+
+    assert result.returncode == 0, _stderr(result)
+    assert stat.S_IMODE(target.stat().st_mode) == 0o664
+
+
+def test_declare_creating_a_new_file_gets_the_normal_default_mode(tmp_path):
+    control = tmp_path / "a_normal_new_file"
+    control.write_text("x", encoding="utf-8")
+    expected_mode = stat.S_IMODE(control.stat().st_mode)
+
+    target = tmp_path / "CLAUDE.md"
+    assert not target.exists()
+
+    result = _run(str(target), "early")
+
+    assert result.returncode == 0, _stderr(result)
+    assert stat.S_IMODE(target.stat().st_mode) == expected_mode
+    assert stat.S_IMODE(target.stat().st_mode) != 0o600
+
+
+# ---------------------------------------------------------------------------
+# No litter left behind on a successful declaration
+# ---------------------------------------------------------------------------
+
+
+def test_successful_declaration_leaves_no_other_file_in_the_directory(tmp_path):
+    target = tmp_path / "CLAUDE.md"
+    target.write_text(NO_SECTION_AT_ALL, encoding="utf-8")
+
+    result = _run(str(target), "early")
+
+    assert result.returncode == 0, _stderr(result)
+    assert list(tmp_path.iterdir()) == [target]
+
+
+# ---------------------------------------------------------------------------
+# PermissionError paths funnel into the fail-closed path, not a traceback
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(
+    hasattr(os, "geteuid") and os.geteuid() == 0,
+    reason="root bypasses mode bits, so chmod(0o000) leaves this test "
+    "unable to observe its own subject and it would pass vacuously",
+)
+def test_existing_unreadable_file_refuses_without_a_traceback(tmp_path):
+    target = tmp_path / "CLAUDE.md"
+    target.write_text(NO_SECTION_AT_ALL, encoding="utf-8")
+    original = target.read_bytes()
+    target.chmod(0o000)
+    try:
+        result = _run(str(target), "early")
+
+        assert result.returncode == 2
+        assert "Traceback" not in _stderr(result)
+        assert _reason_code(result) != ""
+    finally:
+        target.chmod(0o644)
+    assert target.read_bytes() == original
+
+
+@pytest.mark.skipif(
+    hasattr(os, "geteuid") and os.geteuid() == 0,
+    reason="root bypasses directory write-permission enforcement, so this "
+    "test would pass vacuously",
+)
+def test_read_only_parent_directory_refuses_without_a_traceback(tmp_path):
+    target = tmp_path / "CLAUDE.md"
+    target.write_text(NO_SECTION_AT_ALL, encoding="utf-8")
+    original = target.read_bytes()
+    tmp_path.chmod(0o555)
+    try:
+        result = _run(str(target), "early")
+
+        assert result.returncode == 2
+        assert "Traceback" not in _stderr(result)
+        assert _reason_code(result) != ""
+    finally:
+        tmp_path.chmod(0o755)
+    assert target.read_bytes() == original
+
+
+# ---------------------------------------------------------------------------
+# The concurrent-modification race gets its own reason-code
+# ---------------------------------------------------------------------------
+
+
+def test_concurrent_modification_race_uses_its_own_reason_code_not_already_declared(
+    tmp_path,
+):
+    from maturity_declare import lock_path_for  # noqa: PLC0415
+
+    target = tmp_path / "CLAUDE.md"
+    target.write_text(NO_SECTION_AT_ALL, encoding="utf-8")
+
+    lock_path = lock_path_for(target)
+    lock_fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o644)
+    fcntl.flock(lock_fd, fcntl.LOCK_EX)
+
+    result_holder: dict[str, subprocess.CompletedProcess] = {}
+
+    def run_writer_a():
+        result_holder["a"] = _run(str(target), "prototype")
+
+    thread = threading.Thread(target=run_writer_a)
+    thread.start()
+
+    time.sleep(0.3)
+    assert thread.is_alive(), "writer A finished before we could interleave — test is not real"
+
+    target.write_text("# Some Repo\n\n## Project Maturity\n\nearly\n", encoding="utf-8")
+
+    fcntl.flock(lock_fd, fcntl.LOCK_UN)
+    os.close(lock_fd)
+
+    thread.join(timeout=10)
+    assert not thread.is_alive(), "writer A never woke up after the lock was released"
+
+    result_a = result_holder["a"]
+    assert result_a.returncode == 2
+    assert _reason_code(result_a) == "concurrent-modification"
+    assert _reason_code(result_a) != "already-declared"
+
+
+# ---------------------------------------------------------------------------
+# Usage error exits 2 with a reason-code, per the documented contract
+# ---------------------------------------------------------------------------
+
+
+def test_usage_error_exits_2_with_a_reason_code():
+    result = subprocess.run([str(DECLARE)], capture_output=True)
+
+    assert result.returncode == 2
+    assert _reason_code(result) == "usage-error"
+
+
+# ---------------------------------------------------------------------------
+# Writing through a symlinked agent-instruction file
+# ---------------------------------------------------------------------------
+
+
+def test_declare_writes_through_a_symlink_to_the_real_target(tmp_path):
+    real = tmp_path / "REAL_CLAUDE.md"
+    real.write_text(NO_SECTION_AT_ALL, encoding="utf-8")
+    link = tmp_path / "CLAUDE.md"
+    link.symlink_to(real)
+
+    result = _run(str(link), "early")
+
+    assert result.returncode == 0, _stderr(result)
+    assert link.is_symlink(), "the symlink itself must survive the declare"
+    assert os.readlink(str(link)) == str(real)
+    got_level, got_reason = _resolver_level_and_reason(real.read_bytes())
+    assert got_level == "early"
+    assert got_reason == "declared"
 
 
 # ---------------------------------------------------------------------------

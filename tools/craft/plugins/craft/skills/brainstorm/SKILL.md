@@ -150,14 +150,16 @@ production (declared)`, `lookout: production (no declaration — defaults to pro
 On the absence path — no agent-instruction file at all, or a resolver run reporting `reason:
 section-absent` — ask the operator once for that repository's level, before moving to step 2.
 Recommend `production`. Name the closed vocabulary — `prototype` / `early` / `production` — and show
-what accepting the recommendation actually governs by running the calibration renderer and pasting
-its block into the ask:
+what each of the three words being chosen among actually governs by running the calibration renderer
+once per word and pasting all three blocks into the ask:
 
 ```sh
-${CLAUDE_PLUGIN_ROOT}/scripts/maturity_bars.py < /dev/null
+${CLAUDE_PLUGIN_ROOT}/scripts/maturity_bars.py --level prototype
+${CLAUDE_PLUGIN_ROOT}/scripts/maturity_bars.py --level early
+${CLAUDE_PLUGIN_ROOT}/scripts/maturity_bars.py --level production
 ```
 
-which prints the five maturity-sensitive concerns and the severity `production` maps each to — never
+which prints the five maturity-sensitive concerns and the severity each level maps them to — never
 re-list that mapping in this skill's own prose, since a copy drifts from the renderer the moment
 either changes.
 

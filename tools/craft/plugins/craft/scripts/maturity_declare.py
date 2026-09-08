@@ -21,9 +21,11 @@ it is imported here, unmodified, both for its closed vocabulary and its
 fenced-block-aware heading extraction (so this writer's own "does a
 declaration already exist" guard agrees exactly with what the resolver
 itself will read back) and is also invoked as a subprocess for the
-post-write self-check, so a bug in the resolver's own sanitization or
-parsing is caught by the same path a caller would hit, not bypassed by a
-shortcut internal call.
+self-check, so a bug in the resolver's own sanitization or parsing is
+caught by the same path a caller would hit, not bypassed by a shortcut
+internal call. The self-check runs before the file is ever touched — it
+resolves the composed in-memory bytes, not a re-read of anything written
+— so no refusal path ever leaves a partial write behind.
 
 Refuses, writing nothing, whenever an unfenced `## Project Maturity`
 heading already exists in the file — this is the guard that keeps a
@@ -40,7 +42,7 @@ time immediately before the atomic replace, under an `flock` (on a
 sibling `.maturity-declare.lock` file, so the target file itself is never
 touched until the moment of the real write) held across that re-read and
 the replace. If the bytes changed since the initial read, the write
-refuses with `already-declared` rather than clobbering whatever the other
+refuses with `concurrent-modification` rather than clobbering whatever the other
 writer just wrote — the losing session sees the refusal instead of a
 silently discarded write.
 
@@ -62,19 +64,30 @@ Exit codes:
        invalid-utf8-file      — the file's existing bytes do not decode as
                                  UTF-8.
        already-declared       — an unfenced `## Project Maturity` heading
-                                 already exists, OR the file's bytes
-                                 changed between the initial read and the
-                                 compare-and-swap re-read (a concurrent
-                                 writer won the race).
+                                 already exists.
+       concurrent-modification
+                               — the file's bytes changed between the
+                                 initial read and the compare-and-swap
+                                 re-read (a concurrent writer won the
+                                 race) — distinct from `already-declared`:
+                                 no `## Project Maturity` heading need be
+                                 involved, only some other change to the
+                                 file in that window.
        self-check-failed      — the composed bytes, re-resolved through
                                  `maturity_resolve.py`, did not read back
                                  as `level: <level>` / `reason: declared`
                                  (e.g. the file ends inside an unclosed
                                  fence that swallows the appended
                                  heading).
-       write-failed           — the atomic replace itself failed (e.g. the
-                                 filesystem refused it) — the original
-                                 file is left exactly as it was.
+       write-failed           — the atomic replace itself failed (e.g.
+                                 the filesystem refused it), the existing
+                                 file could not be read (e.g. permission
+                                 denied), or the sibling lock file could
+                                 not be opened (e.g. a read-only parent
+                                 directory) — the original file is left
+                                 exactly as it was.
+       usage-error            — called with the wrong number of
+                                 arguments.
 
        No refusal path ever writes the file's existing content to stdout
        or stderr: the file is repo content an arbitrary contributor can
@@ -87,6 +100,7 @@ from __future__ import annotations
 
 import fcntl
 import os
+import stat
 import subprocess
 import sys
 import tempfile
@@ -105,8 +119,10 @@ _INVALID_LEVEL_REASON_CODE = "invalid-level"
 _PATH_IS_DIRECTORY_REASON_CODE = "path-is-directory"
 _INVALID_UTF8_FILE_REASON_CODE = "invalid-utf8-file"
 _ALREADY_DECLARED_REASON_CODE = "already-declared"
+_CONCURRENT_MODIFICATION_REASON_CODE = "concurrent-modification"
 _SELF_CHECK_FAILED_REASON_CODE = "self-check-failed"
 _WRITE_FAILED_REASON_CODE = "write-failed"
+_USAGE_REASON_CODE = "usage-error"
 
 
 def _err(msg: str) -> None:
@@ -155,20 +171,46 @@ def _self_check(new_text: str, level: str) -> None:
         raise DeclareError(_SELF_CHECK_FAILED_REASON_CODE)
 
 
+def _default_new_file_mode() -> int:
+    """The mode a brand-new file would get from a plain `open()` call,
+    honoring the process umask — never `tempfile.mkstemp`'s hardened
+    0600, which is right for a throwaway temp file but wrong for the
+    agent-instruction file a declare of a nonexistent path creates."""
+    mask = os.umask(0)
+    os.umask(mask)
+    return 0o666 & ~mask
+
+
 def _write_with_compare_and_swap(path: Path, initial_bytes: bytes, new_content: bytes) -> None:
     lock_path = lock_path_for(path)
-    lock_fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o644)
+    try:
+        lock_fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o644)
+    except OSError as e:
+        raise DeclareError(_WRITE_FAILED_REASON_CODE) from e
     try:
         fcntl.flock(lock_fd, fcntl.LOCK_EX)
         current = path.read_bytes() if path.exists() else b""
         if current != initial_bytes:
-            raise DeclareError(_ALREADY_DECLARED_REASON_CODE)
+            raise DeclareError(_CONCURRENT_MODIFICATION_REASON_CODE)
 
-        tmp_fd, tmp_name = tempfile.mkstemp(dir=str(path.parent), prefix=path.name + ".")
+        # Write through a symlinked agent-instruction file rather than
+        # replacing the symlink itself with a regular file — `os.replace`
+        # operates on the path entry, not what it points at.
+        write_target = path.resolve() if path.is_symlink() else path
+        mode = (
+            stat.S_IMODE(write_target.stat().st_mode)
+            if write_target.exists()
+            else _default_new_file_mode()
+        )
+
+        tmp_fd, tmp_name = tempfile.mkstemp(
+            dir=str(write_target.parent), prefix=write_target.name + "."
+        )
         try:
+            os.fchmod(tmp_fd, mode)
             with os.fdopen(tmp_fd, "wb") as f:
                 f.write(new_content)
-            os.replace(tmp_name, str(path))
+            os.replace(tmp_name, str(write_target))
         except OSError as e:
             try:
                 os.unlink(tmp_name)
@@ -178,6 +220,10 @@ def _write_with_compare_and_swap(path: Path, initial_bytes: bytes, new_content: 
     finally:
         fcntl.flock(lock_fd, fcntl.LOCK_UN)
         os.close(lock_fd)
+        try:
+            os.unlink(str(lock_path))
+        except OSError:
+            pass
 
 
 def declare(path: Path, level: str) -> None:
@@ -190,7 +236,10 @@ def declare(path: Path, level: str) -> None:
     if path.exists() and path.is_dir():
         raise DeclareError(_PATH_IS_DIRECTORY_REASON_CODE)
 
-    initial_bytes = path.read_bytes() if path.exists() else b""
+    try:
+        initial_bytes = path.read_bytes() if path.exists() else b""
+    except OSError as e:
+        raise DeclareError(_WRITE_FAILED_REASON_CODE) from e
     try:
         initial_text = initial_bytes.decode("utf-8")
     except UnicodeDecodeError as e:
@@ -208,6 +257,7 @@ def declare(path: Path, level: str) -> None:
 def main(argv: list[str]) -> int:
     if len(argv) != 2:
         _err("usage: maturity_declare.py <agent-instruction-file> <level>")
+        _err(f"reason-code: {_USAGE_REASON_CODE}")
         return 2
 
     path = Path(argv[0])
