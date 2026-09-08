@@ -23,30 +23,20 @@ from pathlib import Path
 # that depends on them from one place.
 from test_maturity_bars import CONCERNS as BARS_CONCERNS
 from test_maturity_bars import _run as _run_bars
-from test_maturity_declare import ALREADY_DECLARED_EARLY  # noqa: F401 (documented for readers)
+from test_maturity_declare import ALREADY_DECLARED_EARLY as VALID_DECLARED_EARLY
 from test_maturity_declare import (
     MARKER,
     NO_SECTION_AT_ALL,
     UNCLOSED_FENCE,
 )
+from test_maturity_declare import _resolver_level_and_reason
 from test_maturity_declare import _run as _run_declare
 from test_maturity_resolve import INVALID_VALUE_DECLARED
-from test_maturity_resolve import _lines as _resolve_lines
-from test_maturity_resolve import _run as _run_resolve
 
 CRAFT = Path(__file__).parent.parent / "plugins" / "craft"
 BRAINSTORM_SKILL = CRAFT / "skills" / "brainstorm" / "SKILL.md"
 SCRIPTS_DIR = CRAFT / "scripts"
 DECLARE = SCRIPTS_DIR / "maturity_declare.py"
-RESOLVER = SCRIPTS_DIR / "maturity_resolve.py"
-
-VALID_DECLARED_EARLY = """\
-# Some Repo
-
-## Project Maturity
-
-early
-"""
 
 
 def _skill_text() -> str:
@@ -82,14 +72,6 @@ def _declare_snippet() -> str:
     return matches[0].strip()
 
 
-def _resolve_reason(body: str) -> str:
-    result = _run_resolve(body.encode("utf-8"))
-    assert result.returncode == 0, result.stderr
-    lines = _resolve_lines(result)
-    reason_line = next(line for line in lines if line.startswith("reason:"))
-    return reason_line.split(": ", 1)[1]
-
-
 # ---- 1. the documented invocation snippet is executed as written -----------
 
 
@@ -117,10 +99,9 @@ def test_documented_declare_snippet_executed_as_written_writes_the_answered_leve
     result = subprocess.run(argv, capture_output=True)
     assert result.returncode == 0, result.stderr.decode("utf-8")
 
-    reason = _resolve_reason(target.read_text(encoding="utf-8"))
+    level, reason = _resolver_level_and_reason(target.read_bytes())
+    assert level == "early"
     assert reason == "declared"
-    level_result = _run_resolve(target.read_bytes())
-    assert "level: early" in _resolve_lines(level_result)
 
 
 def test_documented_declare_snippet_wrong_is_caught_by_the_check_above(tmp_path):
@@ -161,13 +142,13 @@ def test_declare_snippet_carries_only_placeholders_no_hardcoded_level_or_repo():
 
 
 def test_declared_level_fixture_does_not_resolve_as_section_absent():
-    reason = _resolve_reason(VALID_DECLARED_EARLY)
+    _, reason = _resolver_level_and_reason(VALID_DECLARED_EARLY.encode("utf-8"))
     assert reason != "section-absent"
     assert reason == "declared"
 
 
 def test_invalid_value_fixture_does_not_resolve_as_section_absent():
-    reason = _resolve_reason(INVALID_VALUE_DECLARED)
+    _, reason = _resolver_level_and_reason(INVALID_VALUE_DECLARED.encode("utf-8"))
     assert reason != "section-absent"
     assert reason == "invalid-value"
 
@@ -300,9 +281,8 @@ def _apply_documented_correction(declared_body: str, old_level: str, new_level: 
 
 def test_correction_path_recipe_resolves_to_the_new_level():
     corrected = _apply_documented_correction(VALID_DECLARED_EARLY, "early", "production")
-    reason = _resolve_reason(corrected)
-    level_result = _run_resolve(corrected.encode("utf-8"))
-    assert "level: production" in _resolve_lines(level_result)
+    level, reason = _resolver_level_and_reason(corrected.encode("utf-8"))
+    assert level == "production"
     assert reason == "declared"
 
 
@@ -318,10 +298,9 @@ def test_correction_path_trap_naming_the_old_level_too_is_ambiguous():
 
 No longer early — this repository is now at the production level.
 """
-    reason = _resolve_reason(trap_body)
+    level, reason = _resolver_level_and_reason(trap_body.encode("utf-8"))
     assert reason == "ambiguous-value"
-    level_result = _run_resolve(trap_body.encode("utf-8"))
-    assert "level: production" in _resolve_lines(level_result)
+    assert level == "production"
 
 
 def test_correction_path_clause_names_the_trap():

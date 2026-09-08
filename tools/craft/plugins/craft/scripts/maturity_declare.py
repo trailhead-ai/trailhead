@@ -96,7 +96,7 @@ _SCRIPT_DIR = Path(__file__).resolve().parent
 if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 
-from maturity_resolve import _LEVELS, _extract_sections  # noqa: E402
+from maturity_resolve import LEVELS, _extract_sections  # noqa: E402
 
 _RESOLVER = _SCRIPT_DIR / "maturity_resolve.py"
 _LOCK_SUFFIX = ".maturity-declare.lock"
@@ -184,7 +184,7 @@ def declare(path: Path, level: str) -> None:
     """Append a `## Project Maturity` declaration of `level` to `path`,
     creating it if absent. Raises `DeclareError` on any refusal; the file
     is guaranteed unchanged on every refusal path."""
-    if level not in _LEVELS:
+    if level not in LEVELS:
         raise DeclareError(_INVALID_LEVEL_REASON_CODE)
 
     if path.exists() and path.is_dir():
