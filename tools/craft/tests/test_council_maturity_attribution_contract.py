@@ -261,14 +261,12 @@ _DEFERS_TO_RENDERER_MARKER = "`scripts/maturity_bars.py` renders"
 
 
 def producer_defers(path: Path) -> bool:
-    """A producer defers when it hands the `<maturity-calibration>` token's
-    content to the renderer itself — naming `scripts/maturity_bars.py` as
-    what renders the block — rather than authoring or restating the
-    attribution rule's rating logic in its own prose. Unlike an absence
-    check, this is a positive statement of what a deferring producer's text
-    actually says, so a producer that restates the rule in ANY wording
-    (not just the literal phrase this test module used to gate on) fails
-    it: it names no renderer to defer to."""
+    """A producer defers when its text names `scripts/maturity_bars.py` as
+    what renders the calibration block. This is a positive presence check
+    for that one marker phrase, not a scan for the absence of restated
+    rating logic: a producer that both names the renderer AND separately
+    restates the attribution rule in its own prose still passes this check,
+    since it names a renderer to defer to either way."""
     return _DEFERS_TO_RENDERER_MARKER in path.read_text(encoding="utf-8")
 
 
@@ -314,3 +312,24 @@ def test_ladder_table_still_maps_all_five_concerns_across_all_three_levels():
     ]
     for row in expected_rows:
         assert row in section, f"ladder table row changed or missing: {row!r}"
+
+
+# ---- contract item 6: the fallback-severity pointer names a severity, ----
+#      not the header line, which only ever names a level -----------------
+
+
+def test_filling_section_never_claims_the_header_line_names_the_fallback_severity():
+    """`maturity: <level> (basis: <basis>)` names a level, never a severity
+    — `scripts/maturity_bars.py`'s `render()` states the fallback severity
+    itself in the block's own disclaimer line, so this section must point a
+    reader there rather than at a header line that cannot answer it.
+    Whitespace-normalized before matching (matching this file's own
+    `extract_property_markers` convention) so a line-wrapped rendering of
+    the offending phrase cannot slip past a literal-newline check."""
+    section = re.sub(r"\s+", " ", filling_section(council_text()))
+    assert "the header line names" not in section
+
+
+def test_filling_section_points_to_where_the_block_states_the_fallback_severity():
+    section = re.sub(r"\s+", " ", filling_section(council_text()))
+    assert "the fallback severity the block states" in section

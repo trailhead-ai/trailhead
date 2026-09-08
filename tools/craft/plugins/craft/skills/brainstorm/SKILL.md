@@ -447,7 +447,7 @@ printf '%s' "$BODY" | ${CLAUDE_PLUGIN_ROOT}/scripts/maturity_stamp.py
 ```
 
 **A non-zero exit refuses the write, always.** Nothing is created until the reader exits 0 — there
-is no code among the nine below that lets a create proceed on a non-zero exit. Name the remedy the
+is no code among the ten below that lets a create proceed on a non-zero exit. Name the remedy the
 reader's own `reason-code:` stderr token identifies, one per code, mirroring the framing step's own
 per-reason-code translation above rather than reporting the bare code:
 
@@ -485,6 +485,10 @@ per-reason-code translation above rather than reporting the bare code:
   `production`); correct that entry's level before retrying.
 - `duplicate-member` — the same camp member name appears twice under the heading; remove or merge
   the duplicate entry before retrying.
+- `member-name-too-long` — an entry's camp member name exceeds the 100-character bound (GitHub's own
+  repository name length limit); shorten that entry's member name to 100 characters or fewer before
+  retrying. Stderr never names the offending value for this code, so find the long name by scanning
+  the drafted body's entries directly rather than searching for a value the refusal doesn't echo.
 
 Once the reader exits 0, the create proceeds; pipe the same certified body to `lore record create`:
 

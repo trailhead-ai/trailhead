@@ -264,17 +264,18 @@ def test_frame_step_names_the_case_where_repositories_cannot_be_enumerated():
 # through `maturity_stamp.py` before `lore record create` runs.
 # ===========================================================================
 
-_STAMP_REASON_CODES = [
-    "empty-stdin",
-    "invalid-utf8-stdin",
-    "section-absent",
-    "duplicate-section",
-    "empty-section",
-    "unresolved-enumeration",
-    "malformed-entry",
-    "invalid-level",
-    "duplicate-member",
-]
+sys.path.insert(0, str(SCRIPTS_DIR))
+import maturity_stamp  # noqa: E402
+
+# Scanned from the reader's own module namespace rather than hand-listed here:
+# a hardcoded copy of this list is exactly the staleness this reader's tenth
+# reason-code (`member-name-too-long`) already exposed once — a new eleventh
+# code must fail this test until documented, not silently pass a frozen list.
+_STAMP_REASON_CODES = sorted(
+    value
+    for name, value in vars(maturity_stamp).items()
+    if name.endswith("_REASON_CODE")
+)
 
 
 def _write_step() -> str:

@@ -450,6 +450,7 @@ remedy it names, never proceeding without a resolved level:
   | `malformed-entry` | an entry line doesn't match `- <member-name>: <level>` — correct it, then retry |
   | `invalid-level` | an entry's level is outside `prototype` / `early` / `production` — correct it, then retry |
   | `duplicate-member` | the same repository is stamped twice — remove the duplicate, keep one entry per repository, then retry |
+  | `member-name-too-long` | an entry's member name exceeds the 100-character bound — shorten it in the spec's `## Maturity` section, then retry |
 
 Worked example, refusing on `empty-section`:
   ```text

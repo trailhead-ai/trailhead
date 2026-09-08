@@ -372,10 +372,47 @@ def test_highest_stamped_names_the_fallback_level_explicitly():
     assert "not a general highest-wins rule" in out
 
 
+@pytest.mark.parametrize("level_a,level_b", list(itertools.permutations(_LEVEL_ORDER, 2)))
+def test_highest_stamped_block_states_the_fallback_severity_itself(level_a, level_b):
+    """The header names a level (`maturity: <level> (basis: highest-stamped)`),
+    never a severity — a lens rating an unattributable finding needs the
+    fallback severity spelled out in the block itself, not derived from a
+    ladder table (`_shared/council.md`) it is never shown."""
+    out = _stdout(_run(_two_repo_stamp(level_a, level_b).encode("utf-8")))
+    higher = level_a if _LEVEL_ORDER.index(level_a) > _LEVEL_ORDER.index(level_b) else level_b
+    assert f"maturity: {higher} (basis: highest-stamped)" in out
+    fallback_line = next(line for line in out.splitlines() if "sanctioned fallback" in line)
+    assert _SEVERITY_BY_LEVEL[higher] in fallback_line
+
+
 def test_highest_stamped_block_states_the_path_attribution_rule():
     out = _stdout(_run(MIXED_TWO_REPO_STAMP.encode("utf-8")))
     assert "leading camp member name segment" in out
     assert "path" in out
+
+
+def test_attribution_pointer_names_the_columns_below_not_above():
+    """The attribution rule renders before the matrix's column header in
+    every rendered block (the rule is fixed prose that always precedes the
+    per-repository section), so a pointer reading "above" is wrong as
+    rendered no matter which repository the columns name."""
+    out = _stdout(_run(MIXED_TWO_REPO_STAMP.encode("utf-8")))
+    lines = out.splitlines()
+    rule_idx = next(i for i, line in enumerate(lines) if "against the columns" in line)
+    header_idx = next(i for i, line in enumerate(lines) if line.startswith("concern x repository:"))
+    assert rule_idx < header_idx, "attribution rule must render before the columns it points at"
+    assert "against the columns below" in lines[rule_idx]
+    assert "against the columns above" not in out
+
+
+def test_attribution_rule_states_the_multi_match_trigger_over_multiple_cited_paths():
+    """A single cited path's leading segment can never produce "two or more
+    distinct matches" — only multiple cited paths can. The block's own text
+    must carry that plural qualifier (mirroring `_shared/council.md`'s
+    "across the finding's cited paths") so the multi-match case is reachable
+    as written, not merely as intended."""
+    out = _stdout(_run(MIXED_TWO_REPO_STAMP.encode("utf-8")))
+    assert "the paths it cites" in out
 
 
 def test_highest_stamped_block_states_all_four_attribution_cases_decidably():

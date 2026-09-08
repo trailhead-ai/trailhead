@@ -97,8 +97,9 @@ Exit codes:
     0  resolved — a calibration block is printed, exactly once.
     2  fail-closed — no calibration block is printed, and stderr names a
        stable `reason-code:` — either a `maturity_stamp.py` reason-code
-       (section-absent is not fail-closed here; the other seven are), or
-       this renderer's own `agent-instruction-file-unreadable`.
+       (section-absent is not fail-closed here; every other reason-code the
+       stamp reader can raise while parsing entries is), or this renderer's
+       own `agent-instruction-file-unreadable`.
 """
 
 from __future__ import annotations
@@ -200,17 +201,19 @@ def render(level: str, basis: str, entries: dict[str, str] | None = None) -> str
     lines = [f"maturity: {level} (basis: {basis})"]
     per_repository = basis == "highest-stamped"
     if per_repository:
+        fallback_severity = _SEVERITY_BY_LEVEL[level]
         lines.append(
-            "highest-stamped is the sanctioned fallback for a finding no "
-            "repository can be attributed to — not a general highest-wins rule."
+            f"highest-stamped is the sanctioned fallback ({fallback_severity}) for "
+            "a finding no repository can be attributed to — not a general "
+            "highest-wins rule."
         )
         lines.append(
             "A finding is rated at a repository's column when it locates to "
             "a single repository: match the leading camp member name "
-            "segment of the path it cites, exactly and case-sensitively, "
-            "against the columns above. No match, two or more distinct "
-            "matches, or no cited path at all — each takes the fallback "
-            "instead."
+            "segment of each path it cites, exactly and case-sensitively, "
+            "against the columns below. No match, two or more distinct "
+            "matches across the paths it cites, or no cited path at all — "
+            "each takes the fallback instead."
         )
     lines.append("")
     if per_repository:

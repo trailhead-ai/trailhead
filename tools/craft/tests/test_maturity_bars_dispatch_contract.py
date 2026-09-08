@@ -19,12 +19,15 @@ carry.
 from __future__ import annotations
 
 import re
+import subprocess
+import sys
 from pathlib import Path
 
 from test_maturity_bars_council_contract import discover_council_dispatchers
 
 REPO_ROOT = Path(__file__).parent.parent
 SKILLS_DIR = REPO_ROOT / "plugins" / "craft" / "skills"
+BARS = REPO_ROOT / "plugins" / "craft" / "scripts" / "maturity_bars.py"
 
 PLAN_MD = SKILLS_DIR / "plan" / "SKILL.md"
 GAUNTLET_MD = SKILLS_DIR / "gauntlet" / "SKILL.md"
@@ -253,3 +256,58 @@ def test_maturity_calibration_never_drops_a_lens_or_a_gauntlet_pass():
     assert "Passes 7–8 — consistency audit and divergence probe" in _text(GAUNTLET_MD), (
         "gauntlet/SKILL.md no longer runs both passes 7 and 8"
     )
+
+
+# ---- contract item 9: plan's remedy table names every reason-code -----
+#       `scripts/maturity_bars.py` can actually exit non-zero with -----
+#
+# Fixtures trigger each reachable refusal; the reason-code compared against
+# the table is read back from the renderer's own stderr, never hand-typed —
+# so a mutation that renames a reason-code fails here on the new name it
+# actually emits, not the old one this test happened to be written against.
+
+
+def _run_bars(stdin_bytes: bytes, extra_args: list[str] | None = None) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [sys.executable, str(BARS), *(extra_args or [])],
+        input=stdin_bytes,
+        capture_output=True,
+    )
+
+
+def _observed_reason_code(result: subprocess.CompletedProcess) -> str:
+    assert result.returncode != 0, result.stdout
+    match = re.search(rb"reason-code: ([\w-]+)", result.stderr)
+    assert match, f"no reason-code on stderr: {result.stderr!r}"
+    return match.group(1).decode("utf-8")
+
+
+def _reachable_reason_codes() -> set[str]:
+    fixtures = [
+        "# S\n\n## Maturity\n\n- bad line\n",
+        "# S\n\n## Maturity\n\n- repo: bogus\n",
+        "# S\n\n## Maturity\n\n- repo: early\n- repo: production\n",
+        "# S\n\n## Maturity\n\n- a: early\n\n## Maturity\n\n- b: production\n",
+        "# S\n\n## Maturity\n\n",
+        "# S\n\n## Maturity\n\n<!-- unresolved-enumeration: x -->\n",
+        "# S\n\n## Maturity\n\n- " + "a" * 101 + ": early\n",
+    ]
+    codes = {_observed_reason_code(_run_bars(f.encode("utf-8"))) for f in fixtures}
+    codes.add(_observed_reason_code(_run_bars(b"# S\n\n## Maturity\n\n- repo: \xff\n")))
+    codes.add(
+        _observed_reason_code(
+            _run_bars(b"", ["--agent-instruction-file", "/does/not/exist"])
+        )
+    )
+    return codes
+
+
+def test_plan_remedy_table_names_every_reason_code_the_renderer_can_actually_emit():
+    reachable = _reachable_reason_codes()
+    assert len(reachable) >= 9, f"fixtures should reach at least nine distinct codes: {reachable!r}"
+    table = _text(PLAN_MD)
+    for code in reachable:
+        assert f"`{code}`" in table, (
+            f"plan/SKILL.md's step 8.5 remedy table never names reason-code `{code}`, "
+            "which scripts/maturity_bars.py can actually exit non-zero with"
+        )
