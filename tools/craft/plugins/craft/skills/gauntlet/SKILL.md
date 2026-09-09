@@ -170,28 +170,30 @@ sending each member its prompt (never ship a literal `<token>`):
 - `<cross-cutting>` → the empty string (the plan-drift block is planning-only).
 - `<maturity-calibration>` → the block `scripts/maturity_bars.py` renders, per **"Filling the
   calibration token"** in `_shared/council.md`: pipe the spec body in with `--agent-instruction-file
-  <repo-root>/CLAUDE.md` and print the resolved level and its basis. **A non-zero exit refuses the
-  dispatch** — its `reason-code:` names the remedy.
+  <repo-root>/CLAUDE.md`, printing the resolved level and its basis, plus any `stand-down:` /
+  `waiver-not-recognised:` line. **Non-zero exit refuses the dispatch** — `reason-code:` names the
+  remedy.
 
 **Passes 7–8 — consistency audit and divergence probe.** Dispatch `consistency-auditor` and
-`divergence-prober` with the spec path. Their prompts are self-contained; they need no extra
-framing.
+`divergence-prober` with the spec path — their prompts are self-contained and need no extra framing.
 
 ### 4. Adjudicate (main session, NOT a subagent)
 
 Eight passes return on the order of thirty raw findings. **Handing that list to the user is not
 adjudication — it is delegation of the work you were dispatched to do.** Consolidate first:
 
-1. **De-duplicate by issue, not by pass.** Two of the passes reaching the same finding from
+1. **Reconcile stand-downs first.** Drop any finding on a concern the block marked `stand-down:` —
+   it governs. A `waiver-not-recognised:` concern keeps its normal severity (`_shared/council.md`).
+2. **De-duplicate by issue, not by pass.** Two of the passes reaching the same finding from
    different angles is one finding, annotated with both.
-2. **Weight cross-pass convergence.** When independent passes — which could not see each other's
+3. **Weight cross-pass convergence.** When independent passes — which could not see each other's
    work — converge on the same issue, that is the **strongest severity signal available to you**.
    Rank convergent findings above single-pass findings of nominally equal severity.
-3. **Drop the editorial.** Wording preferences, section-ordering suggestions, and style notes are
+4. **Drop the editorial.** Wording preferences, section-ordering suggestions, and style notes are
    not spec defects. Cut them silently.
-4. **Auto-downgrade speculative Criticals**, per the synthesis rules in `_shared/council.md`. State
+5. **Auto-downgrade speculative Criticals**, per the synthesis rules in `_shared/council.md`. State
    which and why.
-5. **Rate a criterion the consistency pass reports as compound Critical.** Not one it merely reads
+6. **Rate a criterion the consistency pass reports as compound Critical.** Not one it merely reads
    as long or complex — the compound-criteria section of the auditor's output shape (its item 3),
    naming an assertion the auditor judged independently deliverable. Important and Minor take no
    disposition — they are only logged for the audit trail — so a compound criterion filed at either
@@ -200,19 +202,19 @@ adjudication — it is delegation of the work you were dispatched to do.** Conso
    is what keeps the compound criterion from surviving. This bar pins measured behavior, not new
    behavior — under the auditor's current output shape a reported compound criterion already reaches
    Critical here. Write it as a rule so an edit to that output shape, or to this step, does not
-   silently regress it. **This bar is not subject to item 4's auto-downgrade.** Independent
+   silently regress it. **This bar is not subject to item 5's auto-downgrade.** Independent
    deliverability is a judgment about how work would be sliced, which can read as "guessing about
    future state" — but it is answered from the criterion's own text, and downgrading it to Important
    strips the disposition that makes the finding land at all.
-6. **Hold every `revise` finding to the prescription-specificity bar.** A finding that cannot
+7. **Hold every `revise` finding to the prescription-specificity bar.** A finding that cannot
    produce a prescription this specific is not a Critical — a severity bar applied here, at
    consolidation, before a finding is numbered, not a step-5 consult. `dispositions.md`'s `revise`
    glossary entry restates it beside the term it defines, downstream of this decision.
-7. **Spot-verify contentious claims.** Any finding that would be expensive to act on, that
+8. **Spot-verify contentious claims.** Any finding that would be expensive to act on, that
    contradicts another pass, or that arrives in a transcript reading anomalously (over-confident,
    thin on evidence, or wandering outside its stated lane) gets checked yourself before it reaches
    the user. Do not launder an unverified subagent claim into a recommendation.
-8. **Number the surviving Criticals `C1`…`Cn`.** Assign the ids here, at consolidation, in the order
+9. **Number the surviving Criticals `C1`…`Cn`.** Assign the ids here, at consolidation, in the order
    you will present them. An id is **stable for the rest of the run** — the operator names it to
    override, and the audit trail records it — so never renumber after presenting, not even when an
    override collapses a row's relevance.
@@ -492,8 +494,6 @@ writes no status for "still revising."
 
 ## Calibration
 
-**Read `gauntlet/calibration.md` now and follow it in full.** It holds the provenance and tuning
-notes from the pilot runs that established this protocol. It is consulted after a run, not applied
-unprompted during one, which is why none of it is restated here. One pointer stays here to keep it
-one hop away: the compound-criterion Critical bar is covered by `tools/craft/MANUAL-EVAL.md`'s
-manual eval, not by CI.
+**Read `gauntlet/calibration.md` now and follow it in full.** It holds pilot-run provenance and
+tuning notes, consulted after a run rather than restated here; the compound-criterion Critical bar
+is covered by `tools/craft/MANUAL-EVAL.md`'s manual eval, not CI.

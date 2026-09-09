@@ -77,7 +77,9 @@ that file, since there is no spec body to carry the other stamp-grammar violatio
 
 **Surface the resolved level and its basis** in the synthesis you present — restate the renderer's
 own `maturity: <level> (basis: <basis>)` line, so the user can tell a read agent-instruction-file
-declaration from a silent default without re-deriving it.
+declaration from a silent default without re-deriving it. Restate any `stand-down:` and
+`waiver-not-recognised:` lines the block carries beside it too, so the user sees a waiver was
+exercised without opening the block itself.
 
 The shared template's "the synthesizer may strip your role label" line applies here: members write
 in a voice that stands on content, not on the role tag.

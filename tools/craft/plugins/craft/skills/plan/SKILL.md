@@ -465,7 +465,9 @@ restating it — do not re-derive a second remedy table.
 
 **Surface the resolved level and its basis** in the review you print — restate the renderer's own
 `maturity: <level> (basis: <basis>)` line, so the operator can tell a read stamp from a silent
-default without re-deriving it.
+default without re-deriving it. Restate any `stand-down:` and `waiver-not-recognised:` lines the
+block carries beside it too, so the operator sees a waiver was exercised without opening the block
+itself.
 
 Then synthesize per `_shared/council.md` (de-duplicate by issue, auto-downgrade speculative
 Criticals, lead with the narrative synthesis in the shape "How the synthesis reads" defines there,

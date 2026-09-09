@@ -439,6 +439,32 @@ uncommented note produces a spec that can never be written. The note documents t
 operator; it does not get the write past the certify gate below — see `unresolved-enumeration` in
 that gate's reason-code list.
 
+**Waive a maturity-sensitive concern in `## Non-Goals`.** A Non-Goal bullet that begins with the
+marker `Waives:` followed by exactly one of the five canonical concern phrases — backwards
+compatibility, migration and backfill, rollback and reversibility, production failure visibility,
+cross-consumer blast radius — removes that concern from the rated finding list and reports it
+instead as a stand-down naming the concern and this Non-Goal. State the reason after the phrase:
+
+```
+- Waives: migration and backfill — this spec does not touch backfill logic.
+```
+
+Write the marker and the exact phrase, never the bare phrase alone. A Non-Goal that merely mentions
+a concern in passing, with no `Waives:` marker, is not recognised as a waiver and the concern stays
+rated at full severity — teaching authors to write the bare phrase instead of the marker would raise
+the rate of accidental matches, the exact failure the recognition rule exists to prevent. A bullet
+marked `Waives:` that names zero or more than one of the five phrases waives nothing and is reported
+as an unrecognised waiver instead of a stand-down.
+
+Recognition requires the exact shape above and nothing looser: a `* ` bullet instead of `- `, bold
+Markdown emphasis around the word (`**Waives:**`), and a lowercase or otherwise cased variant
+(`waives:`) are each NOT recognised — none of them waives the concern, even though each earns its
+own unrecognised-waiver notice rather than reading as though nothing was attempted.
+
+The waiver applies to this spec alone, never to the repository it touches — a different spec
+reviewing the same repository still rates the concern at full severity unless it declares its own
+`Waives:` bullet.
+
 **Certify the drafted body before writing it.** Pipe the filled body through the stamp reader,
 before `lore record create` runs:
 

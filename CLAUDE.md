@@ -101,6 +101,18 @@ fallback, no GNU `readlink -f`, macOS-safe).
 
 - Commit subjects are scoped conventional commits: `feat(trailhead):`, `fix(craft):`,
   `refactor(camp):`, `docs(...)`, `test(...)`.
+- **Never write a test whose subject is the text of a prose document.** Agent-facing
+  prose — `SKILL.md`, `agents/*.md`, templates, this file — is authored, not
+  generated, and a test asserting it contains a phrase proves only that the string is
+  present. It cannot show the prose changed what an agent did, which is the only claim
+  worth making about it, and it goes red on a reword while a meaning-changing edit
+  passes. Behavioral claims about prose belong in an A/B eval that actually runs an
+  agent: a case under `plugins/<tool>/evals/`, per `tools/craft/MANUAL-EVAL.md` and the
+  active `decision/verify-craft-prose-changes-with-an-in-session-a-b-eval` in the lore
+  vault. The one thing that stays an ordinary test is a **deterministic
+  code-vs-document consistency check** — a document must name a token, reason-code, or
+  constant the code actually emits, with the expected set derived from the module rather
+  than retyped. That is wiring, not behavior, and an eval is the wrong instrument for it.
 - Comments, docstrings, and tests must stand on their own — explain intent and
   contracts in terms a reader of the code can verify directly. Do **not** reference
   internal planning artifacts (development "slices", lettered "specs" or invariant
