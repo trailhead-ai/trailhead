@@ -138,7 +138,11 @@ def test_sessions_path_resolves_addressable_harnesses(monkeypatch) -> None:
     group = {"group": {"name": "g"}}
     stores = cli_session._addressable_harnesses([group])
     assert [s.harness for s in stores] == [harness]
-    assert seen == [group]
+    # The default (no-account) store is always probed too, alongside
+    # every declared group's store — it dedupes against `group`'s own
+    # store here because `fake_harness_for` answers the SAME harness
+    # for both calls, so `stores` still holds exactly one entry.
+    assert seen == [group, {}]
 
 
 def test_resume_path_resolves_the_group_harness(monkeypatch) -> None:
@@ -164,4 +168,7 @@ def test_resume_path_resolves_the_group_harness(monkeypatch) -> None:
     )
     assert live == [record]
     assert [store.harness for store in answered] == [harness]
-    assert seen == [group]
+    # Same dedupe as above: the always-probed default store collapses
+    # into `group`'s own entry since `fake_harness_for` answers the
+    # same harness for both.
+    assert seen == [group, {}]
