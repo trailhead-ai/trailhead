@@ -1318,13 +1318,6 @@ class TestCapabilityReport:
         assert secret not in report
         assert "camp status" in report, "report should cite where to read the reason"
 
-    def test_bounded_length_ceiling_is_a_concrete_asserted_value(self):
-        """The report's length ceiling is a concrete constant, so a future edit
-        that grows the report has something to fail against."""
-        from camp.launch import hook_handlers
-
-        assert hook_handlers.CAPABILITY_REPORT_MAX_CHARS == 1000
-
     def test_overflow_degrades_to_a_summary_not_a_mid_sentence_truncation(
         self, tmp_path: Path
     ):

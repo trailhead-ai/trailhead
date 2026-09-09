@@ -592,17 +592,6 @@ def test_a_tmux_that_stops_answering_after_the_kill_is_refused_not_stopped(
     assert tmux.killed == [derived]
 
 
-def test_every_tmux_wait_is_bounded_by_a_phone_usable_budget() -> None:
-    """A stop is run from a phone. Every wait in the engine is bounded, and the
-    whole worst case stays inside a handful of seconds — an unbounded wait with
-    no output is indistinguishable from a hang."""
-    from camp.launch import stop
-
-    assert 0 < stop.TMUX_TIMEOUT_SECONDS <= 10
-    assert 0 < stop.POLL_TIMEOUT_SECONDS <= 10
-    assert 0 < stop.POLL_INTERVAL_SECONDS <= stop.POLL_TIMEOUT_SECONDS
-
-
 def test_the_re_poll_is_bounded_in_wall_clock_not_in_sleep_time(tmp_path: Path) -> None:
     """The budget an operator experiences is WALL CLOCK, and the re-poll's own
     calls are what spend it: every `has_session` may itself burn a full

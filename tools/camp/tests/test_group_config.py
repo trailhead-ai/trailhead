@@ -334,20 +334,11 @@ def test_load_all_groups_loads_files(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_groups_example_trailhead_toml_exists() -> None:
-    """The groups.example/trailhead.toml example file exists."""
-    assert (_GROUPS_EXAMPLE_DIR / "trailhead.toml").is_file(), (
-        f"groups.example/trailhead.toml not found at {_GROUPS_EXAMPLE_DIR}"
-    )
-
-
 def test_groups_example_trailhead_toml_loads() -> None:
     """The groups.example/trailhead.toml example loads as the 3-member fleet group."""
     from camp.group.config import load_group
 
     f = _GROUPS_EXAMPLE_DIR / "trailhead.toml"
-    if not f.is_file():
-        pytest.skip("groups.example/trailhead.toml not yet created")
     cfg = load_group(f)
     assert cfg["group"]["name"] == "trailhead"
     # The trailhead fleet group spans exactly three sibling repos.

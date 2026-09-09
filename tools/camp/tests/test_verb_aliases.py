@@ -8,9 +8,9 @@ new aliases (rm→remove, ls→list) resolve to their canonical verbs.
 Contract:
 - VERB_ALIASES maps the short aliases rm→remove, ls→list.
 - canonical_verb normalizes an alias to its canonical verb (identity otherwise).
-- NEEDS_GROUP_VERBS is the canonical set {new, remove, pwd, activate, setup,
-  launch, sessions} — `kill` is absent because it addresses a session by ref and
-  is served from any cwd.
+- Every canonical needs-group verb reaches the needs-group path from a cwd where
+  no group resolves, and `kill` reaches its own handler there instead — it
+  addresses a session by ref and is served from any cwd.
 - LEGACY_REDIRECTS points directly at the renamed canonicals (open→new,
   break→remove, init→group, ai→new, enter→activate) — never at a removed verb
   (the dispatcher does not support chained redirects).
@@ -96,13 +96,19 @@ def test_needs_group_verb_asks_for_a_group_rather_than_erroring_as_a_slug(
     assert "group" in text, f"{verb!r} did not reach the needs-group path: {text!r}"
 
 
-def test_kill_is_not_a_needs_group_verb() -> None:
+def test_kill_reaches_its_handler_from_a_cwd_where_no_group_resolves(
+    groupless_env,
+) -> None:
     """`camp kill <ref>` names a session, and the session names everything else,
-    so gating it on a group resolving from cwd would break the ref's whole
-    purpose."""
-    from camp.workspace.verb_taxonomy import NEEDS_GROUP_VERBS
-
-    assert "kill" not in NEEDS_GROUP_VERBS
+    so a group resolving from cwd is not a precondition. Driven through the CLI:
+    the two ways this breaks — a needs-group refusal, or falling through to the
+    bare-slug error — are both invisible to a table-membership assertion.
+    """
+    out = _run(["kill", "no-such-ref"], env=groupless_env)
+    combined = out.stdout + out.stderr
+    assert "bare slug dispatch is no longer supported" not in combined, combined
+    assert "no camp group" not in combined and "no group resolved" not in combined, combined
+    assert combined.startswith("camp kill:"), combined
 
 
 # ---------------------------------------------------------------------------
