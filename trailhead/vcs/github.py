@@ -586,33 +586,32 @@ _MERGE_METHOD_FLAGS = {"merge": "--merge", "squash": "--squash", "rebase": "--re
 def _load_merge_method(toml_path: str | None) -> str | None:
     """Return the configured merge_method.
 
-    A missing toml_path, an unreadable/malformed file, or a [release] block
-    that isn't a table all fall back to "merge" — mirroring
-    ``_load_merge_order``/``_load_auto_merge``'s handling of those same three
-    shapes, and preserving pre-this-feature behaviour when there is no
-    [release] table to consult at all.
-
-    ``None`` is returned only when a valid [release] table is present but the
-    ``merge_method`` key itself is absent — distinct from the three shapes
-    above, because the caller resolves that case to the new "squash" default
-    and announces it (an operator who has engaged with [release] config gets
-    the new default; one with no [release] table at all keeps "merge").
+    ``None`` is returned for every unconfigured shape — a missing toml_path,
+    an unreadable/malformed file, a [release] block that isn't a table, or a
+    valid [release] table with the ``merge_method`` key absent — so the
+    caller resolves all of them to the SAME single default ("squash") and
+    announces it. ``_load_merge_order``/``_load_auto_merge`` are precedent
+    for handling the first three shapes gracefully, not for the value
+    returned: for those two the fallback is also the neutral, fail-closed
+    value, whereas "merge" is neither neutral nor the stated default here —
+    mirroring their mechanism (returning "merge") would put two different
+    defaults into one function.
 
     Raises MergeMethodInvalidError if the key is present but not one of
     merge/squash/rebase — fail-closed, same posture as auto_merge.
     """
     if not toml_path:
-        return "merge"
+        return None
     p = Path(toml_path)
     if not p.is_file():
-        return "merge"
+        return None
     try:
         raw = tomllib.loads(p.read_text(encoding="utf-8"))
     except tomllib.TOMLDecodeError:
-        return "merge"
+        return None
     release = raw.get("release")
     if not isinstance(release, dict):
-        return "merge"
+        return None
     value = release.get("merge_method")
     if value is None:
         return None

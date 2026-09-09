@@ -915,31 +915,41 @@ class TestMergeMethod:
         assert "sqush" in msg
         assert "merge" in msg and "squash" in msg and "rebase" in msg
 
-    def test_missing_release_block_falls_back_to_merge_in_loader(
+    def test_unconfigured_release_shapes_share_one_default(
         self, tmp_path: Path
     ) -> None:
-        """`_load_merge_method` itself defaults to "merge" for a missing,
-        unparseable, or non-table [release] block — mirroring
-        `_load_merge_order`/`_load_auto_merge`'s handling of those same three
-        shapes. Unlike the top-level "key absent from a valid table" case
-        (which resolves to squash-with-notice one layer up), these three
-        shapes are unreachable through `pr.merge` itself because the
-        `auto_merge` gate already requires a valid `[release]` table with
-        `auto_merge = true` before merge_method is ever consulted — so the
-        loader is exercised directly, as `_GitHubPR` subclassing already is
-        elsewhere in this file.
+        """`_load_merge_method` resolves every unconfigured shape — absent
+        toml_path, missing file, unparseable TOML, non-table [release], and a
+        valid table with the key absent — to the SAME single result. There is
+        exactly one default in this function, not two: a second, different
+        fallback among the malformed shapes would pass unnoticed if each
+        shape were only compared against its own literal, so this pins them
+        as one set collapsing to one value instead.
         """
         from trailhead.vcs.github import _load_merge_method
 
-        no_toml = _load_merge_method(None)
-        missing_file = _load_merge_method(str(tmp_path / "does-not-exist.toml"))
-        unparseable = _write_toml(tmp_path, "not valid toml [[[")
-        non_table = _write_toml(tmp_path, "release = 1\n")
+        # _write_toml always writes to "<tmp_path>/group.toml" — each shape
+        # needs its own directory so the three files on disk stay distinct
+        # rather than the later writes clobbering the earlier ones.
+        unparseable_dir = tmp_path / "unparseable"
+        unparseable_dir.mkdir()
+        non_table_dir = tmp_path / "non-table"
+        non_table_dir.mkdir()
+        valid_absent_dir = tmp_path / "valid-absent"
+        valid_absent_dir.mkdir()
 
-        assert no_toml == "merge"
-        assert missing_file == "merge"
-        assert _load_merge_method(str(unparseable)) == "merge"
-        assert _load_merge_method(str(non_table)) == "merge"
+        unparseable = _write_toml(unparseable_dir, "not valid toml [[[")
+        non_table = _write_toml(non_table_dir, "release = 1\n")
+        valid_table_absent_key = _write_toml(valid_absent_dir, "[release]\nauto_merge = true\n")
+
+        results = {
+            _load_merge_method(None),
+            _load_merge_method(str(tmp_path / "does-not-exist.toml")),
+            _load_merge_method(str(unparseable)),
+            _load_merge_method(str(non_table)),
+            _load_merge_method(str(valid_table_absent_key)),
+        }
+        assert results == {None}
 
 
 # ---------------------------------------------------------------------------
