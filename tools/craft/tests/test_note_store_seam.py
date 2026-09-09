@@ -306,6 +306,7 @@ def test_the_note_store_contract_states_a_status_chain_for_both_kinds():
 
 
 @pytest.mark.parametrize("kind,chain", _documented_chains(), ids=lambda v: v if isinstance(v, str) else "")
+# inert-gate: allow graded against STATUS_VOCAB imported from lore itself
 def test_every_status_the_contract_teaches_is_real_and_in_lores_own_order(kind: str, chain: list[str]):
     """The chain is the order a skill walks a record through. Checking it against
     lore's own vocabulary catches both a status lore never had and one whose

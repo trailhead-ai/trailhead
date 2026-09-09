@@ -1,0 +1,102 @@
+# Eval protocol — measuring what a tool's prose actually causes
+
+A skill, agent definition, ruleset, or template is **source, not behaviour**. The
+testing ruleset bars asserting on its text, and `scripts/inert-test-gate` enforces
+that: a test that reads a markdown file and checks a sentence is present has
+observed that someone typed it, not that an agent read it, understood it, or
+obeyed it — which was the entire question.
+
+That leaves exactly two honest ways to test prose. The first is to **run it
+through its consumer** — the composer, the manifest loader, the front-matter
+parser — and assert on what the consumer produced. Cheap, mechanical, and where
+most prose testing belongs; the tool suites already do this.
+
+This document is about the second: **run the agent against a scenario and judge
+the outcome**. It is expensive, so it is reserved for the instructions that
+actually decide something.
+
+## Why these are run by hand
+
+`claude plugin eval` is the automated harness these cases belong in, and it is
+**not runnable for this account**. `claude plugin eval --help` resolves and prints
+full flag documentation, but every execution path — `init`, `init --bare`, and a
+direct case run — returns `plugin eval is currently in early access` and exits.
+Enablement is per-organization with no self-service path.
+
+Each case is therefore authored in the shape a real eval case reuses verbatim — a
+fixture on disk plus a written expected verdict — and dispatched in session until
+the harness opens up. Nothing about the authoring changes when it does; only the
+dispatch does.
+
+## Corpus layout
+
+Each tool keeps its cases under its own plugin root, so they travel with the prose
+they measure:
+
+```
+tools/<tool>/plugins/<tool>/evals/<case-name>/
+    expected.md      the pass condition, written BEFORE any arm is run
+    fixtures/        self-contained inputs the run is pointed at
+    arms/            optional: edited copies of prose, for a treatment arm
+tools/<tool>/MANUAL-EVAL.md   the results log for that tool's cases
+```
+
+`expected.md` is the load-bearing artifact. Writing it first is what stops a
+result being retrofitted into a pass — a verdict authored after seeing the runs
+is not evidence, and there is no way to tell the two apart later.
+
+## How an arm is dispatched
+
+Both arms point a **generic read-only agent** at two file paths: the prose to run
+as its operating instructions, and the fixture to run it against. The baseline arm
+points at the committed prose; the treatment arm points at the edited copy under
+`arms/`. The arms then differ in exactly one variable.
+
+**Do not dispatch `<tool>:<agent>` for the treatment arm.** That subagent type
+resolves to the live composed install, not the worktree, so it re-runs unedited
+prose and reports a false result. Editing the composed install to work around this
+is barred by Axiom 6 (never touch the developer's real install from a test).
+
+**The instructions-file path is a trust boundary — pin it.** The dispatcher
+resolves that path itself, and it must always name a trusted, review-gated,
+in-repo artifact — a committed agent or skill file, ideally at a stated SHA. It
+must **never** be taken from the fixture, a spec body, a lore record, a label, or
+any other value an untrusted party can write. That file becomes the agent's
+operating instructions verbatim, so a path sourced from untrusted input is
+instruction injection with extra steps. `claude plugin eval`, which this shape is
+written to be reused by, is documented as *not* an OS sandbox: network is
+unblocked and there is no path jail. The fixture path is data and may vary; the
+instructions path may not.
+
+## Reading a result honestly
+
+These are the rules that make a recorded result worth trusting later. Each exists
+because ignoring it produced a wrong read at least once.
+
+- **Run the baseline too.** A treatment arm that scores 3/3 proves nothing without
+  a baseline, because the behaviour may already have been there. A change measured
+  only after the fact has measured nothing.
+- **More than one run per arm.** Agent behaviour varies between runs. A single run
+  is an anecdote; the failure mode that matters is usually *inconsistency*, which
+  one run cannot show.
+- **Check the fixture for contamination.** If the fixture reproduces the prose's
+  own worked example, a run can score full marks by recall rather than reasoning.
+  Vary the surface cues against the answers so surface form carries no
+  information, and confirm the fixture is self-contained — no `[[wikilink]]` or
+  cross-reference that resolves to a real record.
+- **Record authoring errors as authoring errors.** When a run disagrees with the
+  expected verdict and the run is right, that is a defect in the test material,
+  not a result. Say so in the log rather than quietly repairing the fixture.
+- **State the limitations.** Number of fixtures, number of runs, and the one model
+  tier they ran on. A result that does not say what it does not cover will be read
+  as covering more than it does.
+
+## Corpus hygiene
+
+`trailhead/tests/test_eval_corpus.py` runs over every tool: each case directory
+must carry an `expected.md` and a non-empty `fixtures/`, and each `expected.md`
+must state what is under test and its pass condition. That is structure only — it
+cannot tell you a case is worth running, and it deliberately does not try.
+
+A tool with no cases yet is not a failure. An empty corpus is an honest report
+that nobody has written an eval for that tool.

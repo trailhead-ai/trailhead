@@ -82,6 +82,7 @@ def test_the_eval_ships_fixtures_to_grade():
 
 
 @pytest.mark.parametrize("fixture_path", _fixture_paths(), ids=lambda p: p.name)
+# inert-gate: allow eval-fixture hygiene, graded against the gate's real pattern list
 def test_fixture_contains_a_scrubbable_pattern(fixture_path: Path):
     """Every fixture must contain at least one string matching the scrub's own
     pattern list, so a fixture that would pass vacuously — nothing to redact —

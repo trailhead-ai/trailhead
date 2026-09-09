@@ -80,9 +80,18 @@ _ALLOW_RE = re.compile(r"#\s*inert-gate:\s*allow\b[ \t]*(?P<reason>.*)$")
 
 
 def _executable_names(node: ast.AST) -> set[str]:
-    """Every call name and import inside `node`. An import runs the module."""
+    """Every call name and import inside `node`. An import runs the module.
+
+    For a function, only the body is walked. A decorator lives on the function
+    node but is not the test running anything — counting `@pytest.mark.parametrize`
+    as execution would exempt every parametrized test in the repo.
+    """
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        roots: list[ast.AST] = list(node.body)
+    else:
+        roots = [node]
     out: set[str] = set()
-    for child in ast.walk(node):
+    for child in (c for root in roots for c in ast.walk(root)):
         if isinstance(child, (ast.Import, ast.ImportFrom)):
             out.add("<import>")
         elif isinstance(child, ast.Call):

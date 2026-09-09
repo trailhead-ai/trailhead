@@ -892,21 +892,6 @@ class TestLoreRecallHonestyGuards:
       - Not present Tier-2 semantic/embedding recall as a built feature.
     """
 
-class TestNoToolReadmePypiLine:
-    """None of the three tool READMEs may contain a 'pip install trailhead' line."""
-
-    @pytest.mark.parametrize("readme", _TOOL_READMES, ids=lambda p: p.parent.name)
-    def test_no_pip_install_trailhead_line(self, readme):
-        """Tool README must not contain 'pip install trailhead' (name-squat exposure)."""
-        assert readme.exists(), f"README not found at {readme}"
-        text = readme.read_text(encoding="utf-8")
-        assert "pip install trailhead" not in text, (
-            f"{readme.parent.name}/README.md must not contain 'pip install trailhead' — "
-            "the public PyPI install does not exist yet (lands with the org/repo-homing work); "
-            "showing it implies a live install that would 404"
-        )
-
-
 # ---------------------------------------------------------------------------
 # Root README honesty + structural guards
 # ---------------------------------------------------------------------------

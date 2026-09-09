@@ -67,6 +67,15 @@ import mod
 def test_it_defines_resolve():
     assert hasattr(mod, "resolve")
 ''',
+    # A decorator lives on the function node but is not the test running
+    # anything; counting it as execution would exempt every parametrized test.
+    "parametrized": '''
+from pathlib import Path
+import pytest
+@pytest.mark.parametrize("name", ["a.md", "b.md"])
+def test_doc_mentions_the_rule(name):
+    assert "never do X" in Path(name).read_text()
+''',
     "absence": '''
 from pathlib import Path
 def test_the_thing_is_gone():
