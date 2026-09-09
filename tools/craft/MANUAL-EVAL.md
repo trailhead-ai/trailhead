@@ -732,3 +732,30 @@ its two affected fixtures. Its differential largely collapsed — baseline 1/6 t
 unchanged at 6/6 — because the baseline improved, not because the treatment regressed. See that
 case's own `expected.md` for the full reading; it should no longer be cited as a strong
 demonstration of the reconciliation rule's marginal value.
+
+---
+
+## Case: prototype plan carries no migration
+
+`plugins/craft/evals/prototype-plan-carries-no-migration/` — pre-registered before any arm was
+run; committed in the same commit as the arms and fixtures, so the ordering rests on the
+authoring record, per the sibling case's own stated convention.
+
+**Under test:** whether planning's step 7 ("Define Tasks"), reading
+`scripts/migration_bar.py`'s suppression block, actually decomposes a plan carrying no
+migration or backfill task for a `prototype`-stamped target repository, while still
+decomposing one normally when an acceptance criterion requires preserving existing state.
+
+**The arms.** `arms/baseline.md` reproduces step 7 as it stood before this run's parent plan
+touched it (`afd96268`); `arms/treatment.md` reproduces step 7 at this task's `HEAD`. `diff`
+between them shows exactly the five migration-bar paragraphs plus two framing-label lines —
+see `expected.md` for the full diff.
+
+**The fixtures.** `positive.md` (prototype stamp, AC3 waives preservation), `negative.md`
+(same stamp, AC3 requires preservation — the load-bearing fixture), `control.md` (production
+stamp). Each fixture's "Migration bar (rendered)" section is `migration_bar.py`'s real,
+directly-run output for that fixture's own `## Maturity` section.
+
+See `plugins/craft/evals/prototype-plan-carries-no-migration/expected.md` for the full
+pre-registration, pass conditions, and thresholds. Results are recorded there once runs
+complete.
