@@ -1532,22 +1532,6 @@ def _cmd_sessions_group_cli(
             except OSError:
                 pass
 
-    all_groups_configs: list[dict] | None = None
-    all_groups_unparsable: list[str] = []
-    all_groups_no_groups_configured = False
-    if all_groups:
-        from ..provision.lifecycle import answerable_groups_or_refuse
-        from .common import _groups_dir
-
-        all_groups_configs, all_groups_unparsable = answerable_groups_or_refuse(
-            _groups_dir(), verb="sessions"
-        )
-        # An empty list is the ONE case that helper returns rather than
-        # refusing: no group configs at all. Stated below rather than here,
-        # because `--recoverable` returns before that point and answers from
-        # the harness's default store without it.
-        all_groups_no_groups_configured = not all_groups_configs
-
     if recoverable:
         if slug:
             where = f" in workspace {slug!r}"
@@ -1563,6 +1547,25 @@ def _cmd_sessions_group_cli(
             where=where,
         )
         return
+
+    # NOT read on the `recoverable` path above (it returns before this
+    # point): `_list_recoverable` answers from its own strict
+    # `load_all_groups` rather than this degraded loader, so running this
+    # here for `--recoverable` would print a "— skipping" notice promising
+    # every other group still answers, immediately followed by
+    # `_list_recoverable` refusing outright on that very same broken
+    # config — a promise and its own contradiction in the same invocation.
+    all_groups_configs: list[dict] | None = None
+    all_groups_unparsable: list[str] = []
+    all_groups_no_groups_configured = False
+    if all_groups:
+        from ..provision.lifecycle import answerable_groups_or_refuse
+        from .common import _groups_dir
+
+        all_groups_configs, all_groups_unparsable = answerable_groups_or_refuse(
+            _groups_dir(), verb="sessions"
+        )
+        all_groups_no_groups_configured = not all_groups_configs
 
     def _described() -> str:
         if slug:

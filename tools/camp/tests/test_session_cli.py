@@ -2270,6 +2270,27 @@ def test_camp_sessions_all_groups_one_unparsable_group_the_others_still_answer(
     assert str(broken) in failure_rows[0]["reason"]
 
 
+def test_camp_sessions_all_groups_recoverable_with_an_unparsable_sibling_does_not_promise_then_refuse(
+    cli_env,
+) -> None:
+    """`--recoverable` never reads `answerable_groups_or_refuse`'s degraded
+    answer (see `_list_recoverable`'s own strict `load_all_groups` call), so
+    a broken sibling config must not ALSO get the "— skipping" notice that
+    promises the other groups will still answer — that promise is what the
+    following refusal on the very same config would contradict.
+    """
+    broken = cli_env["config_dir"] / "groups" / "brokengroup.toml"
+    broken.write_text("this is not [ valid toml")
+
+    result = _camp(cli_env, "sessions", "--all-groups", "--recoverable")
+
+    assert result.returncode != 0
+    assert result.stdout == ""
+    assert "skipping" not in result.stderr, result.stderr
+    assert "camp: config error:" in result.stderr
+    assert str(broken) in result.stderr
+
+
 def test_camp_sessions_all_groups_every_group_unparsable_states_reason_nonzero(
     tmp_path,
 ) -> None:
