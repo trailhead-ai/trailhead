@@ -18,6 +18,11 @@ declaration, or the resolved default). The human-readable line is unchanged.
 
 Workspace rows already carry `group`; nothing about their shape changes.
 
+The `account` value is a credential-store directory path, written verbatim as the group
+declared it. That makes `--json` output a description of this machine's filesystem layout
+across every configured group, not just the one the operator asked about — worth a glance
+before it is pasted into a shared bug report.
+
 ## State — zero
 
 No configured group has a workspace, and no session is running. Both verbs print nothing
