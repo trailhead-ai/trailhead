@@ -29,7 +29,7 @@ The seam boundary. camp core spells exactly two things: `tmux` and `env -u`.
 Every harness literal — the binary, its flags, the names of the variables to
 scrub — comes from the trailhead harness seam (`harness_for` → `session_launch` /
 `session_resume` / `session_launch_env_unset` / `session_enumerate`) and is placed
-into argv whole. `tools/camp/tests/test_seam_removal.py` enforces this.
+into argv whole.
 
 Refusal posture. A refusal raises :class:`LaunchError` and guarantees no process
 was started: an unresolvable or ineligible launch directory, a harness camp cannot

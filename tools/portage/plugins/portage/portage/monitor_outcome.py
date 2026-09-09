@@ -9,7 +9,7 @@ prose reply can poll for its result instead.
 This module owns only the read/parse side. Monitor is a prose-driven
 subagent — there is no monitor-side Python that writes the file — so nothing
 here writes an outcome file; that contract lives in `agents/monitor.md`
-itself, pinned by `tests/test_portage_monitor_outcome_prose.py`.
+itself.
 """
 
 from __future__ import annotations
