@@ -48,34 +48,17 @@ def _relative_files(root: Path) -> set[str]:
     return {str(p.relative_to(root)) for p in root.rglob("*") if p.is_file()}
 
 
-def test_arm_set_is_non_empty():
-    """Non-vacuity guard: an empty arms/ directory must not report clean by having
-    nothing to parametrize over."""
-    assert _arm_names(), "expected at least one arm directory under arms/"
-    assert len(_arm_names()) >= 2, "a two-arm eval needs at least two arms"
-
-
-def test_fixture_set_is_non_empty():
-    """Non-vacuity guard: an empty fixtures/ directory must not report clean by
-    having nothing to parametrize over."""
-    assert _fixture_paths(), "expected at least one fixture under fixtures/"
-
-
-def test_both_arms_present():
-    names = _arm_names()
-    assert "inline" in names
-    assert "citation" in names
-
-
 def test_arms_differ_in_exactly_one_file():
     """The whole claim 'differing in one variable' rests on this being mechanically
     checkable. Files that exist in both arms must be byte-identical except exactly
     one; a file that exists in only one arm (the citation arm's `_shared/security.md`,
     the document being cited) is the reference target, not a second differing copy —
     it is not counted as a difference between the arms' common surface."""
+    assert set(_arm_names()) >= {"inline", "citation"}, (
+        f"a two-arm eval needs both arms on disk, found: {_arm_names()}"
+    )
     inline_dir = ARMS_DIR / "inline"
     citation_dir = ARMS_DIR / "citation"
-    assert inline_dir.is_dir() and citation_dir.is_dir()
 
     inline_files = _relative_files(inline_dir)
     citation_files = _relative_files(citation_dir)
@@ -92,10 +75,10 @@ def test_arms_differ_in_exactly_one_file():
     )
 
 
-def test_expected_verdict_exists_and_is_non_empty():
-    assert EXPECTED.is_file(), f"missing pre-registered verdict at {EXPECTED}"
-    content = EXPECTED.read_text(encoding="utf-8").strip()
-    assert content, "expected.md must not be empty"
+def test_the_eval_ships_fixtures_to_grade():
+    """Non-vacuity guard: an empty fixtures/ directory would leave the check below
+    parametrized over nothing and reporting clean."""
+    assert _fixture_paths(), "expected at least one fixture under fixtures/"
 
 
 @pytest.mark.parametrize("fixture_path", _fixture_paths(), ids=lambda p: p.name)

@@ -15,13 +15,93 @@ import sys
 import tomllib
 from pathlib import Path
 
+import pytest
+
+from trailhead.capabilities import load_manifest
+
 REPO_ROOT = Path(__file__).parent.parent
 PLUGIN_ROOT = REPO_ROOT / "plugins" / "craft"
+MANIFEST = load_manifest(REPO_ROOT / "capabilities.toml")
 
-# Every runtime reference to a craft template, anywhere in the prose the shipped
-# skills and agents read.
-_TEMPLATE_REF = re.compile(r"templates/(plan|task|spec)\.md")
+# Every runtime path the shipped prose tells an agent to open, and the bare form
+# that only resolves when the reader's cwd happens to be the plugin root.
 _PLUGIN_ROOT_VAR = "${CLAUDE_PLUGIN_ROOT}/"
+_RUNTIME_REF = re.compile(re.escape(_PLUGIN_ROOT_VAR) + r"([A-Za-z0-9_./-]+)")
+_BARE_REF = re.compile(r"(?<!/)\b(?:templates|scripts)/[A-Za-z0-9_.-]+\.(?:md|py)")
+# Only a reference an agent would *run* is a hazard. Naming a script in prose
+# ("the block `scripts/maturity_bars.py` renders") is ordinary writing; a bare
+# path inside a fenced command block is the thing that resolves against whatever
+# cwd the agent happens to have.
+_FENCE = re.compile(r"```[a-zA-Z]*\n(.*?)```", re.DOTALL)
+
+
+def _shipped_prose() -> list[Path]:
+    return sorted(
+        [*(PLUGIN_ROOT / "skills").rglob("*.md"), *(PLUGIN_ROOT / "agents").rglob("*.md")]
+    )
+
+
+def _runtime_references() -> dict[str, set[str]]:
+    """referenced path (relative to the plugin root) -> the documents that open it."""
+    found: dict[str, set[str]] = {}
+    for path in _shipped_prose():
+        for ref in _RUNTIME_REF.findall(path.read_text(encoding="utf-8")):
+            ref = ref.rstrip(".,)`")
+            if not ref or ref.endswith("/"):
+                continue
+            found.setdefault(ref, set()).add(str(path.relative_to(PLUGIN_ROOT)))
+    return found
+
+
+def test_the_shipped_prose_names_runtime_paths_to_check():
+    """Non-vacuity guard: an extraction that stops matching would leave the two
+    checks below iterating over nothing."""
+    assert len(_runtime_references()) >= 10, sorted(_runtime_references())
+
+
+@pytest.mark.parametrize("ref", sorted(_runtime_references()), ids=lambda r: r)
+def test_every_runtime_path_the_prose_opens_is_one_a_composed_install_ships(ref: str):
+    """A skill telling an agent to run `${CLAUDE_PLUGIN_ROOT}/scripts/foo.py` needs two
+    things to be true of a composed install: the file exists, and its directory is in
+    the manifest's always-on `base` set. A runtime input that is not in `base` is
+    dropped by any selection that does not happen to pull it in, leaving the
+    instruction pointing at a path that is not there.
+
+    The `base` set comes from the real manifest loader, so shrinking `base` fails here
+    by naming the reference it orphaned — rather than needing a hand-written comment
+    listing every reader to stay in step.
+    """
+    target = MANIFEST.plugin_root / ref
+    assert target.exists(), (
+        f"{sorted(_runtime_references()[ref])} tell an agent to open {ref!r}, which does "
+        "not exist in the plugin"
+    )
+    covered = [entry for entry in MANIFEST.base if ref == entry or ref.startswith(f"{entry}/")]
+    assert covered, (
+        f"{sorted(_runtime_references()[ref])} open {ref!r} at runtime, but no `base` entry "
+        f"in craft's manifest ships it — a selection that drops it leaves the path "
+        f"unresolvable. base={MANIFEST.base}"
+    )
+
+
+def test_no_runtime_path_is_spelled_bare():
+    """A bare `templates/plan.md` resolves only when the reader's cwd happens to be
+    the plugin root, which is never guaranteed. Every such reference must go through
+    `${CLAUDE_PLUGIN_ROOT}`."""
+    offenders: list[str] = []
+    for path in _shipped_prose():
+        text = path.read_text(encoding="utf-8")
+        for block in _FENCE.finditer(text):
+            for match in _BARE_REF.finditer(block.group(1)):
+                absolute = block.start(1) + match.start()
+                if text[:absolute].endswith(_PLUGIN_ROOT_VAR):
+                    continue
+                line = text[:absolute].count("\n") + 1
+                offenders.append(f"{path.relative_to(PLUGIN_ROOT)}:{line}: {match.group(0)}")
+    assert not offenders, (
+        "These runtime references are spelled bare and will not resolve unless the "
+        f"reader's cwd is the plugin root — prefix each with {_PLUGIN_ROOT_VAR!r}: {offenders}"
+    )
 
 
 def test_plugin_json_parses_and_has_required_keys():
@@ -39,64 +119,6 @@ def test_plugin_json_parses_and_has_required_keys():
 # dev marketplace consolidated into the repo-root `trailhead-local` marketplace.
 # The marketplace shape and the `source: "."` regression guard now live in
 # trailhead/tests/test_dev_marketplace.py at the monorepo level.
-
-
-def test_capabilities_toml_base_includes_templates():
-    """`templates` ships in craft's always-on base set.
-
-    Without it, `${CLAUDE_PLUGIN_ROOT}/templates/*.md` never lands in the
-    installed plugin, so every runtime reference to it (planning, refine)
-    resolves to a missing path.
-    """
-    path = REPO_ROOT / "capabilities.toml"
-    data = tomllib.loads(path.read_text())
-    assert "templates" in data["tool"]["base"]
-
-
-def test_capabilities_comment_names_every_template_reader():
-    """The base comment is the "why this ships" note; a missed reader invites a trim.
-
-    `agents/planner.md` renders all three templates, so a hand-picked selection that
-    drops `templates` on the strength of an incomplete reader list breaks it.
-    """
-    text = (REPO_ROOT / "capabilities.toml").read_text()
-    assert "agents/planner.md" in text, (
-        "capabilities.toml's `templates` base comment must name agents/planner.md "
-        "among the runtime readers — it renders spec.md, plan.md, and task.md"
-    )
-
-
-def test_template_references_resolve_through_the_plugin_root():
-    """A bare `templates/plan.md` only resolves when cwd happens to be the plugin root.
-
-    The composition repair puts `templates/` in the installed plugin; a reference that
-    does not go through `${CLAUDE_PLUGIN_ROOT}` still fails to find it.
-    """
-    offenders: list[str] = []
-    for directory in ("skills", "agents"):
-        for path in sorted((PLUGIN_ROOT / directory).rglob("*.md")):
-            text = path.read_text()
-            for match in _TEMPLATE_REF.finditer(text):
-                if not text[: match.start()].endswith(_PLUGIN_ROOT_VAR):
-                    line = text[: match.start()].count("\n") + 1
-                    offenders.append(f"{path.relative_to(PLUGIN_ROOT)}:{line}")
-    assert not offenders, (
-        "These template references are spelled bare and will not resolve unless the "
-        f"reader's cwd is the plugin root — prefix each with {_PLUGIN_ROOT_VAR!r}: "
-        f"{offenders}"
-    )
-
-
-def test_task_template_names_standalone_leaf_usage():
-    """task.md's docstring names the standalone-leaf reuse of its payload shape."""
-    path = PLUGIN_ROOT / "templates" / "task.md"
-    assert "standalone" in path.read_text().lower()
-
-
-def test_plan_template_names_standalone_leaf_usage():
-    """plan.md's docstring names the standalone reuse of its Flow-out checklist."""
-    path = PLUGIN_ROOT / "templates" / "plan.md"
-    assert "standalone" in path.read_text().lower()
 
 
 def test_scripts_directory_installs_as_a_unit_with_the_sibling_import_intact(tmp_path):

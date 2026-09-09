@@ -261,9 +261,11 @@ class TestRealSkillAndAgentFrontmatter:
             assert result == [], (source, [f.message for f in result])
 
     def test_registrable_frontmatter_check_passes_after_reflow(self, tmp_path):
-        import test_craft_skills_registrable as registrable
+        # The skills the manifest loader actually registers, so a skill added or
+        # dropped moves this check with it rather than needing a second inventory.
+        from test_craft_capability_references import _PLUGIN, _SKILLS
 
-        for skill_md in registrable._skill_files():
+        for skill_md in sorted((_PLUGIN / "skills" / name / "SKILL.md") for name in _SKILLS):
             original = skill_md.read_text(encoding="utf-8")
             target = tmp_path / f"{skill_md.parent.name}.md"
             target.write_text(original, encoding="utf-8")

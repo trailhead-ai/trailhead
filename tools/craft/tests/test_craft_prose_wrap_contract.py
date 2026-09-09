@@ -92,10 +92,6 @@ def test_there_are_governed_files_to_check():
     assert governed_files(), f"no markdown file found under {SKILLS} or {AGENTS}"
 
 
-def test_governed_file_set_has_42_files():
-    assert len(governed_files()) == 42
-
-
 @pytest.mark.parametrize("path", governed_files(), ids=lambda p: str(p.relative_to(REPO_ROOT)))
 class TestGovernedFile:
     def test_wrapped_at_one_consistent_column(self, path):

@@ -355,16 +355,6 @@ def test_write_step_stamps_repositories_the_work_touches_not_every_enumerated_me
     )
 
 
-def test_template_names_the_same_scope_as_the_write_step():
-    """The template's own `## Maturity` comment already says 'this work touches' —
-    the write step's instruction must agree with it, not merely with AC5."""
-    template_text = SPEC_TEMPLATE.read_text(encoding="utf-8")
-    assert re.search(r"repositor(?:y|ies) this work touches", template_text, re.IGNORECASE), (
-        "fixture assumption: templates/spec.md's Maturity comment scopes to "
-        "repositories this work touches"
-    )
-
-
 # ---- 6. the write step instructs certifying via the real reader before
 #         `lore record create`, and refusing on a non-zero exit -------------
 

@@ -1,55 +1,43 @@
-"""Every shipped craft skill must be generic — zero brain-vault structural
-strings and zero app-flavored seam tokens.
+"""craft's shipped skills carry no app-flavored seam token — proved by running the gate.
 
-This test enforces the mechanical definition of "generic" via two forbidden
-bands, parametrized over skills discovered in plugins/craft/skills/*/SKILL.md.
+The structural brain seams this module used to scan for a second time
+(``mcp__brain__``, ``code/brain``) are now carried by
+``scripts/leak-gate-seams.denylist`` and enforced by ``scripts/leak-gate`` over
+every tool's shippable surface on every commit, through
+``.pre-commit-config.yaml``. Re-implementing that scan here duplicated the gate's
+matching logic in a form that only ran under pytest.
 
-## Band 1: Structural brain seams (literal strings — never denylisted)
-These strings definitionally belong to brain's private infrastructure. They are
-safe to embed as literals here because they do NOT appear in the machine-local
-leak-gate.denylist (the denylist carries identifying tokens; "mcp__brain__" and
-"code/brain" are structural — deliberately kept off the denylist so THIS file
-can reference them without tripping the gate).
+The app-flavored tokens below are a different case: they name a private product's
+vendors, schema, and tooling, so unlike the structural seams they are identifying
+and are deliberately NOT committed to the seams denylist. This module is the only
+place they are enforced. It keeps them — assembled at runtime, never as a source
+literal, so this file cannot trip the gate on itself — and hands them to the
+**real** leak gate as a denylist. What runs is the enforcement path that ships.
 
-  - "mcp__brain__"  — brain MCP tool prefix
-  - "code/brain"    — matches ~/code/brain and /Users/.../code/brain
-
-## Band 2: App-flavored seam tokens (runtime-constructed — no source literal)
-These tokens name the app-specific seams that the genericized skills strip
-(observability vendor, flag-provider skill, schema name, build/test CLIs, issue
-tracker, cost-history report). Building each at runtime (via string-join) keeps
-this test source leak-gate-clean regardless of future denylist evolution — the
-self-referential trap: a test file carrying a forbidden literal can block
-commits to its own fix. The module self-check below enforces that none of the
-joined results appears verbatim as a contiguous source literal here.
-
-Identifying tokens (developer handle / org name / machine path) are NOT checked
-here — those are the leak gate's exclusive responsibility. Adding them here as
-literals would trip the gate on this file itself.
-
-`skills/_shared/` is a reference doc, not a skill, and is exempt.
+Scope is ``skills/``, which is what these tokens were stripped out of. The rest of
+the plugin is not clean under them and cannot be added without a judgment call
+this module should not make: the deliberately broad build-tool token matches an
+ordinary English word in one agent's prose, and the gate's own docstring spells a
+token as its documented example. Both are false positives of tokens kept broad on
+purpose, and the fix for either is to special-case the word, never to weaken the
+token.
 """
 
 from __future__ import annotations
 
 import re
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
-SKILLS_DIR = Path(__file__).parent.parent / "plugins" / "craft" / "skills"
+_CRAFT_ROOT = Path(__file__).parent.parent
+SKILLS_DIR = _CRAFT_ROOT / "plugins" / "craft" / "skills"
+_LEAK_GATE = _CRAFT_ROOT / "plugins" / "craft" / "scripts" / "leak_gate.py"
 
 # ---------------------------------------------------------------------------
-# Band 1: Structural brain seams (safe to embed as literals — never denylisted)
-# ---------------------------------------------------------------------------
-
-STRUCTURAL_SEAMS: list[str] = [
-    "mcp__brain__",
-    "code/brain",
-]
-
-# ---------------------------------------------------------------------------
-# Band 2: App-flavored seam tokens (runtime-constructed — no source literal)
+# App-flavored seam tokens.
 #
 # Each token is assembled from a character list so it never appears as a
 # contiguous string literal in this source file. The self-check below verifies
@@ -111,12 +99,11 @@ APP_SEAM_TOKENS: list[str] = [
 # ---------------------------------------------------------------------------
 # Self-check: INVARIANT — no app-seam token appears as a contiguous source
 # literal outside of the join-list expressions above. Verified at module-load
-# (pytest collection) so an accidental edit is caught immediately. Mirrors the
-# self-check in test_agents_generic.py — keep each join on one canonical
-# single-line `"".join([...])` so the strip regex finds it.
+# (pytest collection) so an accidental edit is caught immediately. Keep each
+# join on one canonical single-line `"".join([...])` so the strip regex finds it.
 # ---------------------------------------------------------------------------
 _OWN_SOURCE = Path(__file__).read_text()
-_SOURCE_WITHOUT_JOINS = re.sub(r'"".join\(\[.*?\]\)', "", _OWN_SOURCE)
+_SOURCE_WITHOUT_JOINS = re.sub(r'"".join\(\[.*?\]\)', "", _OWN_SOURCE, flags=re.DOTALL)
 for _tok in APP_SEAM_TOKENS:
     assert _tok not in _SOURCE_WITHOUT_JOINS, (
         f"INVARIANT VIOLATION: app-seam token {_tok!r} appears as a source "
@@ -125,258 +112,50 @@ for _tok in APP_SEAM_TOKENS:
     )
 
 
-def _skill_files() -> list[Path]:
-    if not SKILLS_DIR.is_dir():
-        return []
-    return sorted(
-        d / "SKILL.md"
-        for d in SKILLS_DIR.iterdir()
-        if d.is_dir() and d.name != "_shared" and (d / "SKILL.md").exists()
+@pytest.fixture(scope="module")
+def denylist(tmp_path_factory) -> Path:
+    """The app-seam tokens as a denylist the real gate can load.
+
+    Escaped, so a token carrying a regex metacharacter (the dotted metric
+    namespace prefix does) matches the literal the skills were stripped of
+    rather than a wider pattern.
+    """
+    path = tmp_path_factory.mktemp("leak-gate") / "app-seams.denylist"
+    path.write_text("\n".join(re.escape(token) for token in APP_SEAM_TOKENS) + "\n")
+    return path
+
+
+def _gate(tree: Path, denylist: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, str(_LEAK_GATE), str(tree), "--denylist", str(denylist)],
+        capture_output=True,
+        text=True,
     )
 
 
-@pytest.mark.parametrize("skill_md", _skill_files(), ids=lambda p: p.parent.name)
-def test_skill_has_no_structural_brain_seams(skill_md: Path):
-    """Skill must contain no structural brain-vault strings."""
-    text = skill_md.read_text()
-    for seam in STRUCTURAL_SEAMS:
-        assert seam not in text, (
-            f"{skill_md.parent.name}/SKILL.md contains the structural brain seam "
-            f"{seam!r}. Genericize: drop mcp__brain__ tools, strip code/brain paths."
-        )
-
-
-@pytest.mark.parametrize("skill_md", _skill_files(), ids=lambda p: p.parent.name)
-def test_skill_has_no_app_seam_tokens(skill_md: Path):
-    """Skill must contain no app-flavored seam tokens.
-
-    Case-insensitive substring match (not word-boundary): some tokens — the
-    dotted metric prefix and the issue-tracker vendor — are meant to catch any
-    occurrence, including when they appear as the prefix of a longer dotted
-    metric name or a hyphenated/underscored compound. The genericized skills
-    replace these with provider-agnostic phrasing + a visible-skip notice.
-
-    Footgun note: substring matching makes the short build-tool and
-    issue-tracker tokens intentionally broad — a future skill whose innocent
-    prose happens to contain one as a substring will trip this. That asymmetry
-    is deliberate: a false positive fails loud and cheap (rephrase one word), a
-    false negative leaks a private token. If an innocent word ever trips it,
-    special-case THAT word — do not weaken the token to word-boundary.
-    (Avoid spelling the tokens themselves in this docstring — the module
-    self-check below scans this file's own source.)
-    """
-    text = skill_md.read_text().lower()
-    for token in APP_SEAM_TOKENS:
-        assert token.lower() not in text, (
-            f"{skill_md.parent.name}/SKILL.md contains the app-flavored seam token "
-            f"{token!r}. Genericize: replace vendor/stack-specific names with "
-            "provider-agnostic phrasing and a visible-skip notice."
-        )
-
-
-# ---------------------------------------------------------------------------
-# Visible-skip assertions: a stripped seam must announce itself, never silently
-# vanish. A tokens-absent-only test would pass a skill that simply deleted the
-# step — the exact silent-degradation the spec forbids. Each strip → a paired
-# present-assertion on a distinctive CONTIGUOUS notice substring.
-# ---------------------------------------------------------------------------
-
-# skill stem -> list of contiguous visible-skip phrases that MUST be present
-_VISIBLE_SKIP_PHRASES: dict[str, list[str]] = {
-    # The feature_flags, issue_tracker, and observability extension points were
-    # all removed from the craft skills, so no skill carries a visible-skip
-    # phrase anymore. Entries are re-added here if a degrading seam returns.
-}
-
-
-@pytest.mark.parametrize("stem", sorted(_VISIBLE_SKIP_PHRASES))
-def test_skill_visible_skip_phrases_present(stem: str):
-    """A genericized skill that strips a seam must print a visible-skip notice.
-
-    Asserts each distinctive contiguous phrase appears verbatim — a silently
-    dropped step (no notice) fails here even though it would pass a
-    tokens-absent-only scan.
-    """
-    skill_md = SKILLS_DIR / stem / "SKILL.md"
-    assert skill_md.exists(), (
-        f"Expected skill {stem}/SKILL.md to exist in {SKILLS_DIR}. "
-        "Add the genericized skill before this test can pass."
+def test_the_shipped_skills_carry_no_app_seam_token(denylist: Path):
+    """The gate itself grades craft's skills, rather than this module re-deriving
+    what a match is. A token that creeps back into a skill blocks here the same way
+    it would block a commit."""
+    result = _gate(SKILLS_DIR, denylist)
+    assert result.returncode == 0, (
+        "the leak gate found an app-flavored seam token on craft's shipped skills. "
+        "Genericize: replace vendor/stack-specific names with provider-agnostic "
+        f"phrasing.\n{result.stdout}{result.stderr}"
     )
-    text = skill_md.read_text()
-    for phrase in _VISIBLE_SKIP_PHRASES[stem]:
-        assert phrase in text, (
-            f"{stem}/SKILL.md is missing the visible-skip phrase {phrase!r}. "
-            "A stripped seam must announce itself, not silently disappear."
-        )
 
 
-# ---------------------------------------------------------------------------
-# Generalize-replacement assertions: a genericize (not a degrade) must land
-# the provider-agnostic replacement, not just drop the original. A
-# tokens-absent-only test would pass a skill that simply deleted the example
-# without replacing it — exactly the silent omission the spec forbids.
-# Each entry: skill stem -> list of (absent_marker, present_phrase) pairs.
-#   absent_marker  — the private literal that must NOT appear (Band-1 catches
-#                    "code/brain" already; this is an extra named check for
-#                    clarity in error messages).
-#   present_phrase — a distinctive contiguous substring that MUST appear,
-#                    confirming the generic replacement actually landed.
-# ---------------------------------------------------------------------------
-
-_GENERALIZE_REPLACEMENTS: dict[str, list[tuple[str, str]]] = {
-    # skill stems renamed (followup→polish; the old code-review
-    # request skill → review).
-    "polish": [
-        # brief persistence goes through the note_store seam, not `lore new plan`.
-        (
-            "brain/plans/",
-            "_shared/note-storage.md",
-        ),
-        (
-            "lore new plan",
-            "_shared/note-storage.md",
-        ),
-    ],
-    "review": [
-        (
-            "brain/plans/",
-            "the plan/requirements the caller provides",
-        ),
-    ],
-}
-
-
-def _normalize_ws(s: str) -> str:
-    """Collapse a reflowed line wrap to a single space; keep a blank-line
-    paragraph break as its own two-newline marker so a phrase assembled by
-    joining text from two different paragraphs is never treated as one
-    contiguous run of whitespace."""
-    return re.sub(r"\s+", lambda m: "\n\n" if m.group(0).count("\n") >= 2 else " ", s)
-
-
-def _contains_normalized(text: str, phrase: str) -> bool:
-    """Whitespace-insensitive-to-reflow containment check: `phrase` is found
-    in `text` even if a greedy reflow broke one of its interior spaces onto a
-    new line, but not if `phrase`'s words were only assembled by bridging a
-    blank-line paragraph break."""
-    return _normalize_ws(phrase) in _normalize_ws(text)
-
-
-def _reflow_at_first_space(s: str, sep: str = "\n") -> str:
-    idx = s.index(" ")
-    return s[:idx] + sep + s[idx + 1 :]
-
-
-def test_generalize_replacement_phrase_matches_when_reflowed_across_a_line_break():
-    """A greedy reflow can break a multi-word replacement phrase across a
-    line — the presence check must still find it, for every entry in the
-    replacement table, not only the phrase that happens to be multi-word
-    today."""
-    for pairs in _GENERALIZE_REPLACEMENTS.values():
-        for _absent_marker, present_phrase in pairs:
-            if " " not in present_phrase:
-                continue
-            variant = _reflow_at_first_space(present_phrase)
-            document = f"prefix\n\n{variant}\n\nsuffix"
-            assert _contains_normalized(document, present_phrase), (
-                f"reflowed phrase {present_phrase!r} should still be findable"
-            )
-
-
-def test_generalize_replacement_phrase_absent_when_genuinely_missing():
-    for pairs in _GENERALIZE_REPLACEMENTS.values():
-        for _absent_marker, present_phrase in pairs:
-            document = "this document never mentions the replacement phrase."
-            assert not _contains_normalized(document, present_phrase)
-
-
-def test_generalize_replacement_phrase_absent_when_reworded():
-    for pairs in _GENERALIZE_REPLACEMENTS.values():
-        for _absent_marker, present_phrase in pairs:
-            if " " not in present_phrase:
-                continue
-            words = present_phrase.split(" ")
-            reworded = " ".join(["totally", *words[1:]])
-            document = f"prefix\n\n{reworded}\n\nsuffix"
-            assert not _contains_normalized(document, present_phrase)
-
-
-def test_generalize_replacement_phrase_does_not_bridge_a_blank_line():
-    """Reflow-tolerance must stop at a paragraph break: a phrase assembled by
-    joining text from two different paragraphs is not a match."""
-    for pairs in _GENERALIZE_REPLACEMENTS.values():
-        for _absent_marker, present_phrase in pairs:
-            if " " not in present_phrase:
-                continue
-            split = _reflow_at_first_space(present_phrase, sep="\n\n")
-            document = f"prefix\n\n{split}\n\nsuffix"
-            assert not _contains_normalized(document, present_phrase)
-
-
-@pytest.mark.parametrize("stem", sorted(_GENERALIZE_REPLACEMENTS))
-def test_skill_generalize_replacement_landed(stem: str):
-    """A genericized seam (generalize flavor) must have its replacement present.
-
-    Checks that the private path/token is gone AND the provider-agnostic
-    replacement phrase is present. Both halves must hold — absence of the
-    private token does not prove the replacement arrived.
-    """
-    skill_md = SKILLS_DIR / stem / "SKILL.md"
-    assert skill_md.exists(), (
-        f"Expected skill {stem}/SKILL.md to exist in {SKILLS_DIR}. "
-        "Add the genericized skill before this test can pass."
+@pytest.mark.parametrize("index", range(len(APP_SEAM_TOKENS)), ids=lambda i: f"token{i}")
+def test_the_gate_catches_every_token_the_denylist_carries(index: int, denylist: Path, tmp_path):
+    """Anti-vacuity, per token: a clean scan proves nothing unless the gate would
+    actually have failed on each token it was handed. A denylist entry mangled by a
+    bad escape, or a token silently reduced to the empty string by an edit to its
+    join list, would otherwise leave the scan above passing on a token it can no
+    longer match."""
+    tree = tmp_path / f"seeded{index}"
+    tree.mkdir()
+    (tree / "SKILL.md").write_text(f"A skill that mentions {APP_SEAM_TOKENS[index]} in passing.\n")
+    result = _gate(tree, denylist)
+    assert result.returncode == 1, (
+        f"the gate did not catch seeded app-seam token {index}:\n{result.stdout}{result.stderr}"
     )
-    text = skill_md.read_text()
-    for absent_marker, present_phrase in _GENERALIZE_REPLACEMENTS[stem]:
-        assert not _contains_normalized(text, absent_marker), (
-            f"{stem}/SKILL.md still contains the private path/token "
-            f"{absent_marker!r}. Strip it and replace with the generic phrasing."
-        )
-        assert _contains_normalized(text, present_phrase), (
-            f"{stem}/SKILL.md is missing the generic replacement phrase "
-            f"{present_phrase!r}. A silent omission of the private token is "
-            "not enough — the replacement must explicitly land."
-        )
-
-
-# ---------------------------------------------------------------------------
-# Inlined-value assertions: when a generic table/value is RELOCATED inline from
-# an external doc (rather than degraded or path-genericized), a tokens-absent
-# scan can't tell a faithful copy from a copy-paste corruption. The
-# execute review-threshold table was relocated inline from
-# the host project's CLAUDE.md — guard its boundary values so a future edit
-# that scrambles them fails loud.
-#
-# skill stem -> list of substrings that MUST be present verbatim
-# ---------------------------------------------------------------------------
-
-_INLINED_VALUES: dict[str, list[str]] = {
-    "execute": [
-        "30",  # Small/Medium line boundary (≤30 lines)
-        "200",  # Medium/Large line boundary (30-200 lines)
-        "5+",  # Large file-count threshold (5+ files)
-    ],
-}
-
-
-@pytest.mark.parametrize("stem", sorted(_INLINED_VALUES))
-def test_skill_inlined_values_present(stem: str):
-    """A relocated-inline table must retain its boundary values verbatim.
-
-    Guards against a copy-paste corruption of the review-threshold boundaries
-    (Small ≤30 / Medium 30-200 / Large 200+ or 5+ files) that no
-    tokens-absent or visible-skip check would catch.
-    """
-    # execute's review-threshold table lives in `_shared/execute.md` (the single
-    # source of truth `execute/SKILL.md` wraps) since the shared-procedure extraction.
-    skill_md = SKILLS_DIR / "_shared" / "execute.md" if stem == "execute" else SKILLS_DIR / stem / "SKILL.md"
-    assert skill_md.exists(), (
-        f"Expected skill {stem}/SKILL.md to exist in {SKILLS_DIR}. "
-        "Add the genericized skill before this test can pass."
-    )
-    text = skill_md.read_text()
-    for value in _INLINED_VALUES[stem]:
-        assert value in text, (
-            f"{stem}/SKILL.md is missing the inlined boundary value {value!r}. "
-            "The relocated review-threshold table must keep its values intact."
-        )

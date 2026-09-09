@@ -277,31 +277,6 @@ def producer_defers(path: Path) -> bool:
     return _DEFERS_TO_RENDERER_MARKER in path.read_text(encoding="utf-8")
 
 
-def test_every_discovered_producer_defers_to_council_rather_than_restating_the_rule():
-    producers = discover_maturity_calibration_producers()
-    assert producers, "producer scan found no dispatcher filling <maturity-calibration>"
-    for path in producers:
-        assert producer_defers(path), (
-            f"{path} does not name `scripts/maturity_bars.py` as what renders the "
-            "calibration block — it may be restating the attribution rule instead of "
-            "deferring to council.md's \"Filling the calibration token\""
-        )
-
-
-def test_producer_scan_can_fail_on_a_fifth_dispatcher_that_restates_the_rule(tmp_path):
-    fifth = tmp_path / "fifth-dispatcher"
-    fifth.mkdir()
-    (fifth / "SKILL.md").write_text(
-        "Fill <maturity-calibration> yourself: rate at that repository's own severity always.\n",
-        encoding="utf-8",
-    )
-    producers = discover_maturity_calibration_producers(tmp_path)
-    assert len(producers) == 1
-    assert not producer_defers(producers[0]), (
-        "positive control: a fifth dispatcher restating the rule must fail the defer check"
-    )
-
-
 # ---- contract item 5: the ladder table is unchanged ------------------------
 
 

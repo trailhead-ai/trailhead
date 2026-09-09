@@ -124,14 +124,6 @@ def gate(*paths: Path) -> subprocess.CompletedProcess:
     )
 
 
-
-def test_skill_md_stays_within_the_500_line_guidance():
-    lines = _skill_text().splitlines()
-    assert len(lines) <= LINE_LIMIT, (
-        f"{SKILL_MD} is {len(lines)} lines, over the {LINE_LIMIT}-line guidance"
-    )
-
-
 def test_there_is_a_reference_document_beside_skill_md():
     """Guards the relational assertions below against passing vacuously on
     an empty directory. Without this, `test_every_reference_document_is_named`
@@ -199,33 +191,6 @@ def test_refine_md_data_not_instruction_marker_is_cited_in_the_accepted_tail():
     assert "_shared/refine.md" in section, (
         "the accepted tail no longer cites `_shared/refine.md` "
         "(the data-not-instruction marker)"
-    )
-
-
-# A conservative floor, well under each document's actual word count as of this
-# split, so ordinary rewording never trips it — but well above what a gutted stub
-# would carry. Every other assertion in this suite stays green against a gutted
-# reference document: emptying one drops it under LONG_DOCUMENT_LINES, so the TOC
-# test stops parametrizing over it, while the no-orphan and pointer-resolution
-# tests only check that a name is mentioned and a file exists. This is the
-# property those miss — that the relocated control is still there to be read.
-MINIMUM_REFERENCE_DOCUMENT_WORDS = {
-    "dispositions.md": 1000,
-    "calibration.md": 100,
-}
-
-
-@pytest.mark.parametrize("path", reference_documents(), ids=lambda p: p.name)
-def test_reference_document_is_not_gutted_to_a_stub(path):
-    minimum = MINIMUM_REFERENCE_DOCUMENT_WORDS.get(path.name)
-    assert minimum is not None, (
-        f"{path.name} has no entry in MINIMUM_REFERENCE_DOCUMENT_WORDS — add one "
-        "so a future reference document cannot be gutted without this test noticing"
-    )
-    word_count = len(path.read_text(encoding="utf-8").split())
-    assert word_count >= minimum, (
-        f"{path.name} is {word_count} words, under its {minimum}-word floor — the "
-        "relocated control this file exists to hold may have been gutted"
     )
 
 

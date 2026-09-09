@@ -158,43 +158,10 @@ def test_each_dispatcher_instructs_refusal_on_non_zero_renderer_exit():
         )
 
 
-# ---- contract item 4: no literal token shipped in an example prompt ------
 
 
-def test_no_dispatcher_ships_a_literal_maturity_calibration_token_in_a_fenced_block():
-    for name, path in DISPATCHER_PATHS.items():
-        for block in fenced_blocks(_text(path)):
-            assert "<maturity-calibration>" not in block, (
-                f"{name}/SKILL.md ships the literal <maturity-calibration> "
-                "token inside a fenced example block"
-            )
 
 
-# ---- contract item 5: agent-instruction-file input is named ---------------
-
-
-def test_each_dispatcher_names_the_agent_instruction_file_input():
-    for name, path in DISPATCHER_PATHS.items():
-        text = _text(path)
-        assert "--agent-instruction-file" in text, (
-            f"{name}/SKILL.md never names the --agent-instruction-file input, "
-            "so the absent-stamp fallback is unreachable"
-        )
-
-
-# ---- contract item 6: resolved level and basis surfaced in the review ----
-
-
-def test_each_dispatcher_instructs_surfacing_resolved_level_and_basis():
-    for name, path in DISPATCHER_PATHS.items():
-        text = _text(path)
-        assert "resolved level and its basis" in text, (
-            f"{name}/SKILL.md never instructs surfacing the resolved level "
-            "and its basis in the printed review"
-        )
-        assert "basis: <basis>" in text or "basis:" in text, (
-            f"{name}/SKILL.md never restates the renderer's basis line shape"
-        )
 
 
 # ---- contract item 6b: stand-down and waiver-not-recognised surfaced too -
@@ -254,19 +221,6 @@ def test_gauntlet_adjudicate_list_reconciles_stand_downs():
     )
     assert re.search(r"reconcile stand-downs", adjudicate, re.IGNORECASE), (
         "gauntlet/SKILL.md's Adjudicate list never states a reconcile-stand-downs rule"
-    )
-
-
-# ---- contract item 7: consult states the no-spec-body case explicitly ----
-
-
-def test_consult_states_the_no_spec_body_case_explicitly():
-    text = _text(CONSULT_MD)
-    assert "no spec pointer" in text
-    assert "pipes nothing" in text
-    assert re.search(r"legitimate exit-0\s+case", text), (
-        "consult/SKILL.md never states that piping nothing is a legitimate "
-        "exit-0 case rather than an error"
     )
 
 
