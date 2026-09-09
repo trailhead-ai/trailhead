@@ -1646,8 +1646,83 @@ def test_camp_sessions_json_uses_normalized_fields_only(cli_env) -> None:
         "name",
         "pid",
         "started_at",
+        "group",
+        "account",
     }
     assert records[0]["ok"] is True
+    assert isinstance(records[0]["session_id"], str)
+    assert isinstance(records[0]["cwd"], str)
+    assert isinstance(records[0]["kind"], str)
+    assert isinstance(records[0]["controllable"], bool)
+    assert isinstance(records[0]["pid"], (int, type(None)))
+    # mygroup declares no [launch] account — the row states the group it
+    # resolved into and a null account, never a blank string.
+    assert records[0]["group"] == "mygroup"
+    assert records[0]["account"] is None
+
+
+def test_camp_sessions_json_carries_a_declared_account_verbatim(cli_env) -> None:
+    """A session whose cwd resolves into a group declaring an account carries
+    that exact declared string — byte for byte, not expanded or normalized.
+    """
+    account = cli_env["tmp_path"] / "verbatim-account"
+    repo = cli_env["tmp_path"] / "repo-verbatim"
+    _add_account_group(cli_env, "verbatim", account, repo)
+    _register_live_at(account, "verbatim-sess", repo)
+
+    env = _env_without_shared_claude_dir(cli_env)
+    result = subprocess.run(
+        [sys.executable, str(_CLI_CAMP), "sessions", "--group", "verbatim", "--json"],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(cli_env["tmp_path"]),
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert len(payload) == 1
+    assert payload[0]["group"] == "verbatim"
+    assert payload[0]["account"] == str(account)
+
+
+def test_camp_sessions_json_nulls_group_and_account_outside_every_group(cli_env) -> None:
+    """A session whose cwd resolves into no configured group is still listed,
+    with a null group and a null account — never dropped, never a raised error.
+    """
+    outside = cli_env["tmp_path"] / "not-a-member-repo"
+    outside.mkdir()
+    _new_workspace(cli_env, "feat-null")
+    _register_live(cli_env, "outside-sess", outside)
+
+    result = _camp(cli_env, "sessions", "--group", "mygroup", "--json")
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    row = next(r for r in payload if r["session_id"] == "outside-sess")
+    assert row["group"] is None
+    assert row["account"] is None
+
+
+def test_camp_sessions_json_attributes_member_repo_cwd_same_as_workspace_cwd(
+    cli_env,
+) -> None:
+    """Group attribution uses the SAME resolver the dispatcher uses: a session
+    rooted in a member repository checkout (the resolver's step-2 fallback)
+    attributes to its group exactly like one rooted in a workspace (step 1).
+    """
+    launch_dir = _workspace_launch_dir(cli_env, "feat-attr")
+    _register_live(cli_env, "workspace-sess", launch_dir)
+    # repo_a is mygroup's configured member repo root (see cli_env fixture).
+    _register_live(cli_env, "repo-sess", cli_env["tmp_path"] / "repo_a")
+
+    result = _camp(cli_env, "sessions", "--group", "mygroup", "--json")
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    by_id = {row["session_id"]: row for row in payload}
+    assert by_id["workspace-sess"]["group"] == "mygroup"
+    assert by_id["repo-sess"]["group"] == "mygroup"
 
 
 @pytest.mark.parametrize("mode", ["fail", "missing", "none"])
@@ -1842,6 +1917,22 @@ def test_camp_sessions_one_store_failing_json_carries_the_failure_in_band(cli_en
     assert len(failed_rows) == 1
     assert failed_rows[0]["account"] == str(account_b)
     assert failed_rows[0]["reason"]
+    assert set(ok_rows[0]) == {
+        "ok",
+        "session_id",
+        "cwd",
+        "kind",
+        "controllable",
+        "name",
+        "pid",
+        "started_at",
+        "group",
+        "account",
+    }
+    # A partial-failure row is distinguishable from a session row by testing
+    # ONE field (`ok`), and never grows a `group` key — it has no cwd to
+    # resolve a group from, so it must not invent session attribution.
+    assert set(failed_rows[0]) == {"ok", "account", "reason"}
 
 
 # ---------------------------------------------------------------------------

@@ -1028,7 +1028,42 @@ def _cmd_launch_group_cli(
     _report_launched(launched, as_json=as_json)
 
 
-def _session_payload(record) -> dict:
+def _attribute_session(cwd: Path, groups: list[dict], *, env: dict[str, str]) -> dict:
+    """Resolve the group and declared account *cwd* belongs to.
+
+    Uses :func:`camp.group.resolve.resolve_from_cwd` — the SAME resolver the
+    dispatcher applies to the invoking process's own cwd
+    (``cli/dispatch.py``'s ``_resolve_group_for_command``) — so a session
+    rooted in a member repository checkout attributes exactly like one rooted
+    in a workspace, and the group name returned here is spelled exactly as
+    ``--group`` accepts it and ``resolve_from_cwd`` returns it: a later filter
+    over these rows compares against this value directly, with no
+    normalization step of its own.
+
+    A *cwd* no configured group's resolver recognizes raises
+    ``GroupResolutionError`` from ``resolve_from_cwd`` — an ordinary, expected
+    outcome here, degraded to a null group and a null account rather than
+    propagated or dropping the row: enumeration already found and reported
+    this session, so a row naming no home is a real answer, not a failure.
+
+    ``account`` is the resolved group's ``[launch] account`` exactly as
+    declared — carried verbatim, like :class:`~camp.launch.profile.HarnessStore`'s
+    own ``account`` field, never expanded, normalized, or resolved — and
+    ``None`` wherever the group declares none.
+    """
+    from ..group.resolve import GroupResolutionError, resolve_from_cwd
+
+    try:
+        group_name, _slug = resolve_from_cwd(cwd, groups, env=env)
+    except GroupResolutionError:
+        return {"group": None, "account": None}
+
+    group = next((cfg for cfg in groups if cfg["group"]["name"] == group_name), None)
+    account = (group.get("launch") or {}).get("account") if group is not None else None
+    return {"group": group_name, "account": account}
+
+
+def _session_payload(record, *, group: str | None, account: str | None) -> dict:
     """One :class:`SessionRecord` as JSON-ready data — normalized fields only.
 
     The seam already drops harness-native fields beyond the normalized set; this
@@ -1038,6 +1073,11 @@ def _session_payload(record) -> dict:
     machine-readable consumer can tell a session row from a partial-failure
     row (see :func:`_store_failure_payload`) with ONE field test, on every row
     in the list, rather than by the row's shape or the absence of a key.
+
+    ``group`` and ``account`` come from :func:`_attribute_session`, resolved
+    from ``record.cwd`` — not from which credential store's enumeration
+    produced this record, which can differ from the group the session's
+    working directory actually belongs to.
     """
     return {
         "ok": True,
@@ -1048,6 +1088,8 @@ def _session_payload(record) -> dict:
         "name": record.name,
         "pid": record.pid,
         "started_at": record.started_at.isoformat() if record.started_at else None,
+        "group": group,
+        "account": account,
     }
 
 
@@ -1400,7 +1442,17 @@ def _cmd_sessions_group_cli(
             )
 
     if as_json:
-        payload = [_session_payload(record) for record in records]
+        from ..group.config import load_all_groups
+        from .common import _groups_dir
+
+        resolved_env = dict(env) if env is not None else dict(os.environ)
+        all_groups = load_all_groups(_groups_dir())
+        payload = [
+            _session_payload(
+                record, **_attribute_session(record.cwd, all_groups, env=resolved_env)
+            )
+            for record in records
+        ]
         payload += [_store_failure_payload(failure) for failure in failures]
         print(json.dumps(payload))
         return
