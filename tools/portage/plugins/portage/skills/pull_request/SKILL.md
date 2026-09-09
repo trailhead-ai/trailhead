@@ -261,6 +261,10 @@ No issue tracker configured — status transitions skipped. Configure
   default none (CI-only mode). No configured review bot — no review action is emitted.
 - Merge order: configured in `[release].merge_order` of the group TOML; absent for
   single-PR groups (no order needed); required for >1 PR to avoid silent mis-merges.
+- Merge method: configured in `[release].merge_method` of the group TOML — `merge`,
+  `squash`, or `rebase`; absent defaults to `squash` and prints a notice naming the
+  method used, since that changes what lands on `main`. An unrecognized value
+  refuses before any merge call.
 - No issue tracker configured — status transitions skipped. Configure
   `[release].external_tracker` in the group TOML to wire a tracker.
 - The `portage` CLI is on `$PATH` via trailhead's CLI shim dir (same mechanism as

@@ -68,3 +68,8 @@ merge_order = [
 # deciding. `portage merge` is fail-closed on this key, so leaving it false
 # keeps the refusal even if a caller asks for an automatic merge.
 auto_merge = false
+
+# Strategy `portage merge` hands `gh pr merge`: merge / squash / rebase.
+# Omitting the key selects `squash`, so a group that wants merge commits
+# must say so here.
+merge_method = "squash"

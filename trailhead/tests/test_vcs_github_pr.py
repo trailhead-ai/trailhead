@@ -19,6 +19,7 @@ from trailhead.vcs.github import (
     PRPair,
     MergeOrderRequiredError,
     MergeConfigError,
+    MergeMethodInvalidError,
     InvalidInputError,
 )
 
@@ -430,7 +431,10 @@ class TestPrMerge:
                 {"name": "beta", "repo_root": str(tmp_path), "worktree_path": str(wt_b)},
             ],
         )
-        toml = _write_toml(tmp_path, '[release]\nauto_merge = true\nmerge_order = ["beta", "alpha"]\n')
+        toml = _write_toml(
+            tmp_path,
+            '[release]\nauto_merge = true\nmerge_order = ["beta", "alpha"]\nmerge_method = "merge"\n',
+        )
         merge_calls: list[str] = []
 
         def stub(cmd, **kwargs):
@@ -474,7 +478,9 @@ class TestPrMerge:
         provider.pr.merge(pr_pairs, str(manifest), toml_path=str(toml))
         assert merge_calls.index("20") < merge_calls.index("10")
 
-    def test_multiple_prs_no_merge_order_refuses(self, tmp_path: Path) -> None:
+    def test_multiple_prs_no_merge_order_refuses(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         wt_a = tmp_path / "wt" / "alpha"
         wt_b = tmp_path / "wt" / "beta"
         wt_a.mkdir(parents=True)
@@ -497,8 +503,13 @@ class TestPrMerge:
         msg = str(exc_info.value)
         assert "merge_order" in msg
         assert "[release]" in msg
+        # merge_method is never used on a refused run — the notice announcing
+        # its (unused) default must not print here.
+        assert capsys.readouterr().err == ""
 
-    def test_merge_order_names_nonexistent_member_raises(self, tmp_path: Path) -> None:
+    def test_merge_order_names_nonexistent_member_raises(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         wt = tmp_path / "wt" / "alpha"
         wt.mkdir(parents=True)
         manifest = _write_manifest(
@@ -515,6 +526,9 @@ class TestPrMerge:
         with pytest.raises(MergeConfigError) as exc_info:
             provider.pr.merge(pr_pairs, str(manifest), toml_path=str(toml))
         assert "nonexistent" in str(exc_info.value)
+        # Same as above: a refused run must not announce a merge method it
+        # never used.
+        assert capsys.readouterr().err == ""
 
     def test_partial_merge_pr1_merges_pr2_fails(self, tmp_path: Path) -> None:
         wt_a = tmp_path / "wt" / "alpha"
@@ -797,6 +811,183 @@ class TestPrMerge:
         pr_pairs = [PRPair(repo_path=str(wt), pr_number="42", member_name="alpha")]
         provider.pr.merge(pr_pairs, str(manifest), toml_path=str(toml))
         assert delete_calls == []
+
+
+# ---------------------------------------------------------------------------
+# pr.merge — merge_method selection ([release].merge_method)
+# ---------------------------------------------------------------------------
+
+
+class TestMergeMethod:
+    def _run_merge_capture_argv(
+        self, tmp_path: Path, release_toml_body: str
+    ) -> list[list[str]]:
+        wt = tmp_path / "wt" / "alpha"
+        wt.mkdir(parents=True)
+        manifest = _write_manifest(
+            tmp_path,
+            [{"name": "alpha", "repo_root": str(tmp_path), "worktree_path": str(wt)}],
+        )
+        toml = _write_toml(tmp_path, release_toml_body)
+        merge_argv: list[list[str]] = []
+        answer = _make_pr_stub({"7": "MERGEABLE_CLEAN"})
+
+        def stub(cmd, **kwargs):
+            if "pr" in cmd and "merge" in cmd:
+                merge_argv.append(list(cmd))
+            return answer(cmd, **kwargs)
+
+        provider = get_provider("github", runner=stub)
+        pr_pairs = [PRPair(repo_path=str(wt), pr_number="7", member_name="alpha")]
+        provider.pr.merge(pr_pairs, str(manifest), toml_path=str(toml))
+        return merge_argv
+
+    def test_merge_method_squash_flag(self, tmp_path: Path) -> None:
+        argv = self._run_merge_capture_argv(
+            tmp_path, '[release]\nauto_merge = true\nmerge_method = "squash"\n'
+        )
+        assert len(argv) == 1
+        assert "--squash" in argv[0]
+        assert "--merge" not in argv[0]
+        assert "--rebase" not in argv[0]
+
+    def test_merge_method_rebase_flag(self, tmp_path: Path) -> None:
+        argv = self._run_merge_capture_argv(
+            tmp_path, '[release]\nauto_merge = true\nmerge_method = "rebase"\n'
+        )
+        assert len(argv) == 1
+        assert "--rebase" in argv[0]
+        assert "--squash" not in argv[0]
+        assert "--merge" not in argv[0]
+        assert "--author-email" in argv[0]
+
+    def test_merge_method_merge_flag(self, tmp_path: Path) -> None:
+        argv = self._run_merge_capture_argv(
+            tmp_path, '[release]\nauto_merge = true\nmerge_method = "merge"\n'
+        )
+        assert len(argv) == 1
+        assert "--merge" in argv[0]
+        assert "--squash" not in argv[0]
+        assert "--rebase" not in argv[0]
+
+    def test_absent_merge_method_defaults_to_squash_and_warns(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        argv = self._run_merge_capture_argv(tmp_path, "[release]\nauto_merge = true\n")
+        assert len(argv) == 1
+        assert "--squash" in argv[0]
+        assert "--merge" not in argv[0]
+        assert "--rebase" not in argv[0]
+        err = capsys.readouterr().err
+        assert "squash" in err
+        assert 'merge_method = "merge"' in err
+
+    def test_configured_merge_method_prints_no_notice(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """An operator who HAS set merge_method must not be told the key is
+        unset — the notice exists only for the absent-key path."""
+        argv = self._run_merge_capture_argv(
+            tmp_path, '[release]\nauto_merge = true\nmerge_method = "squash"\n'
+        )
+        assert len(argv) == 1
+        err = capsys.readouterr().err
+        assert "not set" not in err
+        assert "defaulting" not in err
+
+    def test_unrecognized_merge_method_raises_before_any_gh_call(
+        self, tmp_path: Path
+    ) -> None:
+        wt = tmp_path / "wt" / "alpha"
+        wt.mkdir(parents=True)
+        manifest = _write_manifest(
+            tmp_path,
+            [{"name": "alpha", "repo_root": str(tmp_path), "worktree_path": str(wt)}],
+        )
+        toml = _write_toml(
+            tmp_path, '[release]\nauto_merge = true\nmerge_method = "sqush"\n'
+        )
+        calls: list[list[str]] = []
+
+        def stub(cmd, **kwargs):
+            calls.append(list(cmd))
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+
+        provider = get_provider("github", runner=stub)
+        pr_pairs = [PRPair(repo_path=str(wt), pr_number="7", member_name="alpha")]
+        with pytest.raises(MergeMethodInvalidError) as exc_info:
+            provider.pr.merge(pr_pairs, str(manifest), toml_path=str(toml))
+        assert calls == []
+        msg = str(exc_info.value)
+        assert "sqush" in msg
+        assert "merge" in msg and "squash" in msg and "rebase" in msg
+
+    def test_non_string_merge_method_raises_before_any_gh_call(
+        self, tmp_path: Path
+    ) -> None:
+        """A TOML value like `merge_method = ["squash"]` reaches the
+        `value not in _MERGE_METHOD_FLAGS` membership check as an unhashable
+        list, which raises TypeError rather than the contracted
+        MergeMethodInvalidError. A non-string value is an invalid value, not
+        a crash."""
+        wt = tmp_path / "wt" / "alpha"
+        wt.mkdir(parents=True)
+        manifest = _write_manifest(
+            tmp_path,
+            [{"name": "alpha", "repo_root": str(tmp_path), "worktree_path": str(wt)}],
+        )
+        toml = _write_toml(
+            tmp_path, '[release]\nauto_merge = true\nmerge_method = ["squash"]\n'
+        )
+        calls: list[list[str]] = []
+
+        def stub(cmd, **kwargs):
+            calls.append(list(cmd))
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+
+        provider = get_provider("github", runner=stub)
+        pr_pairs = [PRPair(repo_path=str(wt), pr_number="7", member_name="alpha")]
+        with pytest.raises(MergeMethodInvalidError) as exc_info:
+            provider.pr.merge(pr_pairs, str(manifest), toml_path=str(toml))
+        assert calls == []
+        msg = str(exc_info.value)
+        assert "merge" in msg and "squash" in msg and "rebase" in msg
+
+    def test_unconfigured_release_shapes_share_one_default(
+        self, tmp_path: Path
+    ) -> None:
+        """`_load_merge_method` resolves every unconfigured shape — absent
+        toml_path, missing file, unparseable TOML, non-table [release], and a
+        valid table with the key absent — to the SAME single result. There is
+        exactly one default in this function, not two: a second, different
+        fallback among the malformed shapes would pass unnoticed if each
+        shape were only compared against its own literal, so this pins them
+        as one set collapsing to one value instead.
+        """
+        from trailhead.vcs.github import _load_merge_method
+
+        # _write_toml always writes to "<tmp_path>/group.toml" — each shape
+        # needs its own directory so the three files on disk stay distinct
+        # rather than the later writes clobbering the earlier ones.
+        unparseable_dir = tmp_path / "unparseable"
+        unparseable_dir.mkdir()
+        non_table_dir = tmp_path / "non-table"
+        non_table_dir.mkdir()
+        valid_absent_dir = tmp_path / "valid-absent"
+        valid_absent_dir.mkdir()
+
+        unparseable = _write_toml(unparseable_dir, "not valid toml [[[")
+        non_table = _write_toml(non_table_dir, "release = 1\n")
+        valid_table_absent_key = _write_toml(valid_absent_dir, "[release]\nauto_merge = true\n")
+
+        results = {
+            _load_merge_method(None),
+            _load_merge_method(str(tmp_path / "does-not-exist.toml")),
+            _load_merge_method(str(unparseable)),
+            _load_merge_method(str(non_table)),
+            _load_merge_method(str(valid_table_absent_key)),
+        }
+        assert results == {None}
 
 
 # ---------------------------------------------------------------------------

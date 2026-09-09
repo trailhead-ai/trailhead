@@ -49,12 +49,12 @@ class _SpyRunner:
                 "headRefName": "feat",
             }
             return subprocess.CompletedProcess(cmd, 0, json.dumps(payload), "")
-        if "merge" in cmd_str and "--merge" in cmd_str:
+        if "pr" in cmd_str and "merge" in cmd_str:
             return subprocess.CompletedProcess(cmd, 0, "merged\n", "")
         return subprocess.CompletedProcess(cmd, 0, "", "")
 
     def merge_attempted(self) -> bool:
-        return any("merge" in c and "--merge" in c for c in self.calls)
+        return any("pr" in c and "merge" in c for c in self.calls)
 
 
 def _make_manifest(tmp_path: Path, wt: Path) -> Path:

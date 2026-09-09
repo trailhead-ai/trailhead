@@ -38,7 +38,8 @@ profile, so invoke it as bare `portage <subcommand>`.
 - `slug` — the worktree slug within the group
 - `manifest_path` — absolute path to the camp central manifest JSON for this worktree
 - `group_toml_path` — absolute path to the group TOML file (used for `[release]` config including
-  `review_bot_login`, `external_tracker`, `merge_order`, and `green_driver_agent`)
+  `review_bot_login`, `external_tracker`, `merge_order`, `merge_method`, and
+  `green_driver_agent`)
 - `pr_pairs` — comma-separated `<repo_path>:<pr_number>:<member_name>` list (optional — detected if absent)
 - `outcome_file` — absolute path to a machine-readable completion channel (optional — see
   "Outcome file" below)
@@ -217,6 +218,15 @@ call `portage merge` as usual and honor its exit code:
   Stop here — do **not** retry or bypass it — and report:
   `STOPPED: all PRs are ready to merge, but auto_merge is unset/false — add [release] auto_merge = true to the group TOML to merge automatically.`
 - Exit 0/1: proceed as below (all merged, or partial-merge failure).
+
+`portage merge` also reads `merge_method` from the same `[release]` block — the strategy passed to
+`gh pr merge` (`merge` / `squash` / `rebase`). **Default: `squash`.** When `merge_method` is unset,
+`portage merge` prints a notice on stderr naming the method it chose and the remediation to restore
+merge commits (`add [release] merge_method = "merge" to the group TOML`) — surface that notice
+verbatim rather than swallowing it, so the operator sees the behaviour before it lands on `main`.
+When `merge_method` is set to a value other than `merge`/`squash`/`rebase`, `portage merge` refuses
+with exit 2 before any `gh` call — honor that exit code and surface it as
+`BLOCKED: portage merge refused — [release].merge_method is invalid; see stderr for the accepted values.`
 
 `portage merge` exits nonzero on any partial-merge. The agent relies on that exit code, not JSON
 parsing, to detect failure.
