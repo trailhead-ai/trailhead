@@ -1707,13 +1707,19 @@ def test_camp_sessions_json_carries_a_declared_account_verbatim(cli_env) -> None
 def test_camp_sessions_json_nulls_group_and_account_outside_every_group(cli_env) -> None:
     """A session whose cwd resolves into no configured group is still listed,
     with a null group and a null account — never dropped, never a raised error.
+
+    Scoped by `--dir`, not by a bare group name: `--dir` narrows the pool by
+    path, not by group attribution, so this listing is not subject to the
+    group-name filter a group-named query applies — the one context where an
+    unattributable row is still observable on the live listing.
     """
     outside = cli_env["tmp_path"] / "not-a-member-repo"
     outside.mkdir()
-    _new_workspace(cli_env, "feat-null")
     _register_live(cli_env, "outside-sess", outside)
 
-    result = _camp(cli_env, "sessions", "--group", "mygroup", "--json")
+    result = _camp(
+        cli_env, "sessions", "--group", "mygroup", "--dir", str(outside), "--json"
+    )
 
     assert result.returncode == 0, result.stderr
     payload = json.loads(result.stdout)
@@ -1741,6 +1747,124 @@ def test_camp_sessions_json_attributes_member_repo_cwd_same_as_workspace_cwd(
     by_id = {row["session_id"]: row for row in payload}
     assert by_id["workspace-sess"]["group"] == "mygroup"
     assert by_id["repo-sess"]["group"] == "mygroup"
+
+
+def test_camp_sessions_group_named_answer_excludes_the_default_stores_session(
+    cli_env,
+) -> None:
+    """The recorded reproduction, pinned: naming a group that declares its own
+    account must return that group's sessions and NONE of the sessions running
+    under the shell's ambient (default) credential store — the measured defect
+    where `camp sessions --group <name>` answered with another group's
+    sessions because the named group was consumed to pick a config and then
+    discarded rather than narrowing the answer.
+    """
+    account = cli_env["tmp_path"] / "repro-account"
+    _add_account_group(cli_env, "repro", account, cli_env["tmp_path"] / "repo-repro")
+    _register_live_at(account, "repro-session", cli_env["tmp_path"] / "repo-repro")
+    # mygroup declares no account, so its session is read from the DEFAULT
+    # store this ambient env resolves to — the store the shell is "bound to".
+    _register_live(cli_env, "default-store-session", cli_env["tmp_path"] / "repo_a")
+
+    env = _env_without_shared_claude_dir(cli_env)
+    result = subprocess.run(
+        [sys.executable, str(_CLI_CAMP), "sessions", "--group", "repro"],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(cli_env["tmp_path"]),
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "repro-session" in result.stdout
+    assert "default-store-session" not in result.stdout
+
+
+def test_camp_sessions_group_named_answer_is_empty_when_nothing_runs_there(
+    cli_env,
+) -> None:
+    """Naming a group with nothing running returns an empty answer — the SAME
+    store's session, running under a DIFFERENT configured group, must not
+    fill in for it.
+    """
+    repo_empty = cli_env["tmp_path"] / "repo-emptygroup"
+    _init_git_repo(repo_empty)
+    result = _camp(cli_env, "group", "emptygroup", "--member", f"member={repo_empty}")
+    assert result.returncode == 0, result.stderr
+    _set_harness_binary(cli_env["config_dir"], "emptygroup", "fakeharness")
+    # emptygroup declares no account, so it shares mygroup's default store —
+    # the session below is real and enumerable, just attributed elsewhere.
+    _register_live(cli_env, "mygroup-sess", cli_env["tmp_path"] / "repo_a")
+
+    result = _camp(cli_env, "sessions", "--group", "emptygroup")
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == ""
+
+
+def test_camp_sessions_json_group_named_answer_carries_no_foreign_group_attribution(
+    cli_env,
+) -> None:
+    """Every row a group-named JSON answer carries is attributed to the NAMED
+    group — checked over the WHOLE returned set, not by the absence of one
+    known-foreign row, so a filter that drops everything cannot pass this
+    vacuously.
+    """
+    account = cli_env["tmp_path"] / "foreign-account"
+    _add_account_group(cli_env, "foreign", account, cli_env["tmp_path"] / "repo-foreign")
+    _register_live_at(account, "foreign-sess", cli_env["tmp_path"] / "repo-foreign")
+    # Same pool, DIFFERENT group's store.
+    _register_live(cli_env, "mygroup-sess", cli_env["tmp_path"] / "repo_a")
+
+    env = _env_without_shared_claude_dir(cli_env)
+    result = subprocess.run(
+        [sys.executable, str(_CLI_CAMP), "sessions", "--group", "mygroup", "--json"],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(cli_env["tmp_path"]),
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    ok_rows = [row for row in payload if row["ok"] is True]
+    # A vacuous (empty) filtered answer would satisfy "no foreign row" too —
+    # guard against that by requiring the named group's own row to be present.
+    assert ok_rows
+    assert all(row["group"] == "mygroup" for row in ok_rows)
+    assert {row["session_id"] for row in ok_rows} == {"mygroup-sess"}
+
+
+def test_camp_sessions_json_excludes_a_session_outside_every_group(cli_env) -> None:
+    """A session outside every group is excluded from a group-named answer —
+    naming a group narrows the answer to that group's rows, it does not add
+    an unattributable row alongside them.
+    """
+    outside = cli_env["tmp_path"] / "not-a-member-repo"
+    outside.mkdir()
+    _register_live(cli_env, "outside-sess", outside)
+    _register_live(cli_env, "inside-sess", cli_env["tmp_path"] / "repo_a")
+
+    result = _camp(cli_env, "sessions", "--group", "mygroup", "--json")
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    ids = {row["session_id"] for row in payload}
+    assert "outside-sess" not in ids
+    assert "inside-sess" in ids
+
+
+def test_camp_sessions_group_named_via_cwd_refuses_unconfigured_group(cli_env) -> None:
+    """Naming an unconfigured group refuses with a stated reason rather than
+    answering from anywhere — exercised through the real CLI dispatch path
+    (`cli/dispatch.py`'s group resolution), not a direct call into this
+    module.
+    """
+    result = _camp(
+        cli_env, "sessions", "--group", "totallyunconfigured", cwd=cli_env["tmp_path"]
+    )
+
+    _assert_clean_refusal(result, needle="no group resolved", verb="sessions")
 
 
 @pytest.mark.parametrize("mode", ["fail", "missing", "none"])
@@ -1818,11 +1942,8 @@ def test_camp_sessions_lists_a_session_running_under_a_non_default_credential_st
     store instead of whichever one the shell happens to carry.
     """
     account = cli_env["tmp_path"] / "nondefault-account"
-    _add_account_group(
-        cli_env, "nondefault", account, cli_env["tmp_path"] / "repo-nondefault"
-    )
-    launch_dir = cli_env["tmp_path"] / "nondefault-workspace"
-    launch_dir.mkdir()
+    launch_dir = cli_env["tmp_path"] / "repo-nondefault"
+    _add_account_group(cli_env, "nondefault", account, launch_dir)
     _register_live_at(account, "nondefault-session", launch_dir)
 
     env = _env_without_shared_claude_dir(cli_env)
@@ -1842,6 +1963,11 @@ def test_camp_sessions_lists_a_session_running_under_a_non_default_credential_st
 def test_camp_sessions_merges_two_stores_each_holding_a_session(cli_env) -> None:
     """Two stores, each running a session under a DIFFERENT declared account,
     produce ONE merged answer containing both.
+
+    Scoped by `--dir` over their shared parent rather than by a group name:
+    the two sessions belong to two DIFFERENT groups, so a group-named query
+    would correctly narrow to one of them — this test's subject is the
+    merge across stores, which `--dir` observes without that narrowing.
     """
     account_a = cli_env["tmp_path"] / "merge-account-a"
     account_b = cli_env["tmp_path"] / "merge-account-b"
@@ -1856,7 +1982,10 @@ def test_camp_sessions_merges_two_stores_each_holding_a_session(cli_env) -> None
 
     env = _env_without_shared_claude_dir(cli_env)
     result = subprocess.run(
-        [sys.executable, str(_CLI_CAMP), "sessions", "--group", "mergea", "--json"],
+        [
+            sys.executable, str(_CLI_CAMP), "sessions",
+            "--group", "mergea", "--dir", str(cli_env["tmp_path"]), "--json",
+        ],
         capture_output=True,
         text=True,
         env=env,
@@ -1877,10 +2006,9 @@ def test_camp_sessions_one_store_failing_still_returns_the_others_rows(cli_env) 
     """
     account_a = cli_env["tmp_path"] / "partial-account-a"
     account_b = cli_env["tmp_path"] / "partial-account-b"
-    _add_account_group(cli_env, "partiala", account_a, cli_env["tmp_path"] / "repo-partiala")
+    root_a = cli_env["tmp_path"] / "repo-partiala"
+    _add_account_group(cli_env, "partiala", account_a, root_a)
     _add_account_group(cli_env, "partialb", account_b, cli_env["tmp_path"] / "repo-partialb")
-    root_a = cli_env["tmp_path"] / "partial-root-a"
-    root_a.mkdir()
     _register_live_at(account_a, "partial-sess-aaa", root_a)
     _poison_enumerate_at(account_b)
 
@@ -1907,14 +2035,11 @@ def test_camp_sessions_one_store_failing_json_carries_the_failure_in_band(cli_en
     """
     account_a = cli_env["tmp_path"] / "partial-json-account-a"
     account_b = cli_env["tmp_path"] / "partial-json-account-b"
-    _add_account_group(
-        cli_env, "partialjsona", account_a, cli_env["tmp_path"] / "repo-partialjsona"
-    )
+    root_a = cli_env["tmp_path"] / "repo-partialjsona"
+    _add_account_group(cli_env, "partialjsona", account_a, root_a)
     _add_account_group(
         cli_env, "partialjsonb", account_b, cli_env["tmp_path"] / "repo-partialjsonb"
     )
-    root_a = cli_env["tmp_path"] / "partial-json-root-a"
-    root_a.mkdir()
     _register_live_at(account_a, "partial-json-sess-aaa", root_a)
     _poison_enumerate_at(account_b)
 

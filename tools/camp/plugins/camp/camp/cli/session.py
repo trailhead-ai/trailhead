@@ -1063,6 +1063,30 @@ def _attribute_session(cwd: Path, groups: list[dict], *, env: dict[str, str]) ->
     return {"group": group_name, "account": account}
 
 
+def _sessions_for_group(
+    attributed: list[tuple], group_name: str
+) -> list[tuple]:
+    """Narrow an attributed ``(record, attribution)`` set to one group's rows.
+
+    *attributed* is the whole cross-store, cross-group answer — every store's
+    records, each already paired with :func:`_attribute_session`'s result — so
+    this is a pure filter over an answer that already exists, never a second
+    enumeration. A row whose attribution has no group (an unresolvable *cwd*,
+    or a store-failure row this function never receives) never matches any
+    name and is dropped, never kept as "unattributed but maybe relevant".
+
+    This is the ONE seam a caller narrows the live answer through. Asking for
+    every group at once is a DIFFERENT caller of the same *attributed* set —
+    it bypasses this function rather than this function growing a condition
+    to widen through.
+    """
+    return [
+        (record, attribution)
+        for record, attribution in attributed
+        if attribution["group"] == group_name
+    ]
+
+
 def _session_payload(record, *, group: str | None, account: str | None) -> dict:
     """One :class:`SessionRecord` as JSON-ready data — normalized fields only.
 
@@ -1326,13 +1350,32 @@ def _cmd_sessions_group_cli(
     than a failure a script has to special-case — but malformed input (a `--limit`
     that cannot mean anything) and a harness that keeps no transcripts at all are
     refusals, because neither has an empty listing as its honest answer.
+
+    The LIVE listing's pool spans every configured group's store (see
+    :func:`_enumerate_live_sessions_pool`), so a BARE group-named query — no
+    `--dir`, no resolved workspace slug, i.e. `scope is None` — narrows that
+    cross-group answer to *group*'s own rows via :func:`_sessions_for_group`,
+    applied to every store's records ALREADY attributed by
+    :func:`_attribute_session`. A `--dir` or slug scope has already narrowed
+    the pool by PATH before this point (`_enumerate_live_sessions_pool` is
+    itself called with that scope), so this filter is not applied again on
+    top of it: a `--dir` scope answers about a directory, not a group, and is
+    not eligibility-gated by group membership either (see above) — narrowing
+    it further by group name would silently drop a session `--dir` was asked
+    to describe. A store-failure row carries no `cwd` and so no group; it is
+    never filtered by group name and is always included, because a group-named
+    answer must still tell the operator a store failed rather than silently
+    reading as complete.
     """
     from ..group.manifest import workspace_dir
     from ..spine import _consume_flag_value, _die
     from .dispatch import _slug_from_args_or_cwd
 
     rest = list(args)
-    _consume_flag_value(rest, "--group")  # already resolved upstream; drop it
+    # Already resolved upstream to select `group`, so consuming it here is
+    # just removing it from `rest` — the resolved name (`group["group"]["name"]`)
+    # is what the live listing filters by below, not this raw flag value.
+    _consume_flag_value(rest, "--group")
     as_json = _consume_flag(rest, "--json")
     recoverable = _consume_flag(rest, "--recoverable")
     show_all = _consume_flag(rest, "--all")
@@ -1441,24 +1484,28 @@ def _cmd_sessions_group_cli(
                 file=sys.stderr,
             )
 
-    if as_json:
-        from ..group.config import load_all_groups
-        from .common import _groups_dir
+    from ..group.config import load_all_groups
+    from .common import _groups_dir
 
-        resolved_env = dict(env) if env is not None else dict(os.environ)
-        all_groups = load_all_groups(_groups_dir())
+    resolved_env = dict(env) if env is not None else dict(os.environ)
+    all_groups = load_all_groups(_groups_dir())
+    attributed = [
+        (record, _attribute_session(record.cwd, all_groups, env=resolved_env))
+        for record in records
+    ]
+    if scope is None:
+        attributed = _sessions_for_group(attributed, group["group"]["name"])
+
+    if as_json:
         payload = [
-            _session_payload(
-                record, **_attribute_session(record.cwd, all_groups, env=resolved_env)
-            )
-            for record in records
+            _session_payload(record, **attribution) for record, attribution in attributed
         ]
         payload += [_store_failure_payload(failure) for failure in failures]
         print(json.dumps(payload))
         return
     from ..launch.recovery import printable_path
 
-    for record in records:
+    for record, _attribution in attributed:
         label = f" ({record.name})" if record.name else ""
         print(f"{record.session_id}  {record.kind}  {printable_path(record.cwd)}{label}")
 
