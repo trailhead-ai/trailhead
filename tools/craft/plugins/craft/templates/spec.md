@@ -70,7 +70,13 @@ must satisfy. This section does not define an interface's shape — a boundary i
 named here and defined at slice time, once a slice actually needs to build it. -->
 
 ## Non-Goals
-<!-- Explicitly out of scope. Prevents scope creep and clarifies boundaries. -->
+<!-- Explicitly out of scope. Prevents scope creep and clarifies boundaries.
+
+A bullet here can also waive one of the five maturity-sensitive concerns for this
+spec alone: `- Waives: <concern> <reason>`, naming exactly one of backwards
+compatibility, migration and backfill, rollback and reversibility, production
+failure visibility, or cross-consumer blast radius. See brainstorm's SKILL.md
+step 6a for the marker's shape and why the bare phrase alone is never enough. -->
 
 ## Constraints
 <!-- Hard limits: time, cost, compatibility, team capacity, external dependencies. -->

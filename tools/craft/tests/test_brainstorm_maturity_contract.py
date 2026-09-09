@@ -44,6 +44,13 @@ CANDIDATE_SET = SCRIPTS_DIR / "candidate_set.py"
 COVERS_GATE = SCRIPTS_DIR / "covers_gate.py"
 SPEC_TEMPLATE = CRAFT / "templates" / "spec.md"
 
+# The waiver-discoverability tests below bind the guidance to the real
+# renderer, never to a retyped copy of `_CONCERNS` or the guidance's own
+# wording — mirroring this module's established pattern.
+BARS = SCRIPTS_DIR / "maturity_bars.py"
+sys.path.insert(0, str(SCRIPTS_DIR))
+import maturity_bars  # noqa: E402
+
 
 def _skill_text() -> str:
     return BRAINSTORM_SKILL.read_text(encoding="utf-8")
@@ -758,4 +765,83 @@ def test_malformed_entry_remedy_normalization_is_a_defined_deterministic_transfo
     assert re.search(r"\[A-Za-z0-9._-\]", bullet), (
         f"the `malformed-entry` remedy must cite the reader's own safe-grammar "
         f"character class it normalizes into: {bullet!r}"
+    )
+
+
+# ---- Waiver discoverability — step 6a names the `Waives:` marker where an
+#      author actually writes Non-Goals (task/waiver-is-discoverable-where-
+#      non-goals-are-authored) ---------------------------------------------
+
+
+def _waiver_guidance_section() -> str:
+    text = BRAINSTORM_SKILL.read_text()
+    start = text.index("**Waive a maturity-sensitive concern")
+    end = text.index("**Certify the drafted body")
+    return text[start:end]
+
+
+def test_every_waivable_concern_is_named_in_the_waiver_guidance():
+    """The authoring guidance must name every concern the renderer can
+    waive. The expected list is derived from `maturity_bars._CONCERNS` at
+    test time, never retyped: a hardcoded list here is exactly how a
+    sibling guard in this suite went silently false when the module gained
+    another constant."""
+    # Whitespace-collapsed because the prose-wrap gate may line-wrap a
+    # multi-word phrase between its words — a formatting artifact, not a
+    # content defect — and the phrase must still be findable across it.
+    section = " ".join(_waiver_guidance_section().split())
+    for concern in maturity_bars._CONCERNS:
+        assert concern in section, (
+            f"waiver guidance must name canonical concern {concern!r}, "
+            f"derived from maturity_bars._CONCERNS: {section!r}"
+        )
+
+
+def _guidance_example_bullet() -> str:
+    # Deliberately not anchored on the literal `Waives:` marker itself — the
+    # marker's presence is exactly what the round-trip below must prove by
+    # running the extracted bullet through the real renderer, not by a regex
+    # here standing in for that check.
+    section = _waiver_guidance_section()
+    match = re.search(r"```\n(- [^\n]+)\n```", section)
+    assert match, f"waiver guidance must show a fenced example bullet: {section!r}"
+    return match.group(1)
+
+
+def test_guidance_example_bullet_round_trips_through_the_real_renderer():
+    """The exact bullet the guidance shows an author, extracted from the
+    guidance text and run through the real renderer, must actually waive
+    its concern and produce a stand-down — proving documentation and
+    mechanism cannot drift apart."""
+    bullet = _guidance_example_bullet()
+    matched_concerns = [concern for concern in maturity_bars._CONCERNS if concern in bullet]
+    assert len(matched_concerns) == 1, (
+        f"guidance example bullet must name exactly one canonical concern: {bullet!r}"
+    )
+    concern = matched_concerns[0]
+
+    spec_text = f"""\
+# Some Spec
+
+## Maturity
+
+- lookout: production
+
+## Non-Goals
+
+{bullet}
+"""
+    result = subprocess.run(
+        [sys.executable, str(BARS)],
+        input=spec_text.encode("utf-8"),
+        capture_output=True,
+    )
+    assert result.returncode == 0, result.stderr.decode("utf-8")
+    out = result.stdout.decode("utf-8")
+    assert f"stand-down: {concern} — waived by Non-Goal:" in out, (
+        f"guidance example bullet did not waive {concern!r} through the real "
+        f"renderer: {out!r}"
+    )
+    assert f"- {concern}: Critical" not in out, (
+        f"waived concern {concern!r} must not still be rated: {out!r}"
     )
