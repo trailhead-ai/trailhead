@@ -212,7 +212,7 @@ def main() -> None:
         _cmd_version()
         return
 
-    if argv and argv[0] == "--which":
+    if argv and argv[0] in ("--which", "which"):
         from .status import _cmd_which
         _cmd_which()
         return

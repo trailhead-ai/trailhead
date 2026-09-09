@@ -224,7 +224,7 @@ def test_no_reserved_token_is_dispatched_as_a_bare_slug(groupless_env) -> None:
 
     assert RESERVED, "RESERVED is empty — nothing under test"
     offenders = []
-    for token in sorted(RESERVED - {"which"}):  # see the xfail below
+    for token in sorted(RESERVED):
         out = _run([token], env=groupless_env)
         if "bare slug dispatch is no longer supported" in (out.stdout + out.stderr):
             offenders.append(token)
@@ -251,16 +251,25 @@ def test_every_taxonomy_token_is_protected_from_bare_slug_dispatch(groupless_env
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "`which` is in RESERVED and in the dispatcher's skip-group-resolve set, "
-        "but only the `--which` FLAG has a handler. The bare token falls through "
-        "every branch to the bare-slug error (and exits 0 while printing it). "
-        "Membership in RESERVED never made the dispatcher route it. Remove this "
-        "xfail when `camp which` dispatches."
-    ),
-)
-def test_which_is_not_dispatched_as_a_bare_slug(groupless_env) -> None:
+def test_which_dispatches_as_a_bare_verb_like_its_meta_siblings(groupless_env) -> None:
+    """`which` is a meta verb, and both its siblings answer in bare form.
+
+    `version` and `help` each dispatch as a bare token, and `which` sits beside
+    them in `_STATIC_RESERVED` under the same "Meta verbs" comment. It was
+    reserved but never routed: only the `--which` FLAG had a handler, so the bare
+    token fell through every branch to the bare-slug error. Membership in RESERVED
+    never made the dispatcher route it.
+
+    Asserts the answer, not merely the absence of the error — a token that
+    dispatched to nothing at all would satisfy a negative check.
+    """
     out = _run(["which"], env=groupless_env)
+    flag = _run(["--which"], env=groupless_env)
+
     assert "bare slug dispatch is no longer supported" not in (out.stdout + out.stderr)
+    assert out.returncode == 0, (out.stdout + out.stderr)
+    assert out.stdout.strip(), "`camp which` printed nothing"
+    assert out.stdout == flag.stdout, (
+        "`camp which` and `camp --which` must name the same binary; got "
+        f"{out.stdout!r} vs {flag.stdout!r}"
+    )
