@@ -738,7 +738,7 @@ class TestListAllGroupsNarrows:
         env["WORKSPACE_ROOT"] = str(workspace_root)
         env_dict = {"env": env}
 
-        ws = _seed_manifest_raw("onlygroup", "ws-only", state_dir=state_dir)
+        _seed_manifest_raw("onlygroup", "ws-only", state_dir=state_dir)
 
         # Prove the legacy row is reachable at all: from a cwd outside every
         # group, without the option, it appears.
