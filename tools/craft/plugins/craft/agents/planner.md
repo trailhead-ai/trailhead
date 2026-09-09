@@ -368,7 +368,9 @@ When the renderer's block opens with the literal token `— suppressed: migratio
 define no migration or backfill task for this plan — unless an acceptance criterion requires
 preserving existing state, in which case name which criterion and keep the task, decomposed
 normally. When the block opens with `— not-suppressed: migration and backfill`, decompose migration
-and backfill work normally.
+and backfill work normally. Match the whole token, including the `not-` prefix — a check for the
+bare substring `suppressed: migration and backfill` matches both tokens and misroutes the
+not-suppressed case into suppression.
 
 Both safe directions: on a non-zero exit, decompose migration work normally, and state the
 renderer's own `reason-code:` in your returned summary — that vocabulary is authored by this script,

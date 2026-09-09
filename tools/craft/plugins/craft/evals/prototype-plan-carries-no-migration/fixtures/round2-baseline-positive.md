@@ -4,12 +4,6 @@ A planning session paused at step 7 ("Define Tasks"), immediately before the fea
 broken into tasks. The spec under review follows. Read this file in full, then perform
 step 7 on it.
 
-This is `positive.md`'s spec, byte-identical, but carries **no** "Migration bar (rendered)"
-section — it is the second-round baseline-arm material. A real baseline planning session
-never runs the renderer and never sees a block, so this fixture no longer hands that answer
-to the baseline arm the way the shared first-round fixture did. The treatment arm keeps
-reading `positive.md` unchanged — only the baseline arm's material changes for this round.
-
 ## Spec under review
 
 # Spec — replace the widget's category field with a tags list

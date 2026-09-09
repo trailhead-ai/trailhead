@@ -162,6 +162,12 @@ Registered thresholds, decided now:
 
 ## Result — 2026-09-09
 
+**Reproducibility note, added retroactively.** The same commit that pre-registers Round Two
+(below) also rewords `control.md`'s AC3 and refreshes both arms to their current revisions (see
+Round Two's own "What changed in the instrument" section). The Round One results below are
+therefore not reproducible by re-running against the fixtures and arms as they now stand in this
+tree — they were produced against the wording in force at the time each run was dispatched.
+
 All 18 runs (3 per fixture per arm) produced a result; none errored.
 
 | Fixture | Baseline arm (full conjunction) | Treatment arm (full conjunction) |
@@ -186,11 +192,15 @@ standing:
 **The suppression claim — FALSIFIED.** Every baseline run independently declined to add a
 migration/backfill task, reading AC3's own "no automated preservation ... required" and the
 fixture's embedded "Migration bar (rendered)" section as informative even though baseline's own
-instructions never mention the renderer — so the block's own legible text, not the routing this
-task adds, is what suppressed the task on this fixture. Registering the bar against condition 1
-alone (rather than the full conjunction) exists exactly to catch this: a baseline that reaches
-the right task-decomposition answer by reading the fixture's embedded block does not show the
-prose change did anything.
+step 7 body — the reproduced ritual text itself — never routes on it. (This is narrower than
+"baseline's instructions never mention the renderer": `arms/baseline.md:5-11`'s own wrapper does
+name `scripts/migration_bar.py` and the "Migration bar (rendered)" section explicitly, and tells
+the reader to treat that section, when present, as the renderer's real output already run — see
+the confound recorded under Round Two's result, below.) So the block's own legible text, not the
+routing this task's step 7 change adds, is what suppressed the task on this fixture. Registering
+the bar against condition 1 alone (rather than the full conjunction) exists exactly to catch
+this: a baseline that reaches the right task-decomposition answer by reading the fixture's
+embedded block does not show the prose change did anything.
 
 **The durable-trace claim — UPHELD.** This is a separate, independently observed dimension, not
 a substitute for the falsified one, and it carries no pre-registered numbered bar of its own —
@@ -206,10 +216,10 @@ level, basis, and the suppression — in a dedicated `Given Axioms` section on 3
 on whether a migration task gets added on this fixture (falsified — the fixture's own embedded
 block already carries enough signal for a migration-bar-unaware baseline to suppress) — but it
 did prove out on whether the suppression decision leaves a durable, checkable trace an operator
-or a later slice-loop pass can read back (upheld, cleanly, 0/3 vs 3/3). Finding 2 below identifies
-why the suppression half could not be measured cleanly on this fixture — the same embedded block
-that lets treatment route correctly also hands baseline the answer — and registers a second
-measurement round that removes it from baseline's material.
+or a later slice-loop pass can read back (upheld, cleanly, 0/3 vs 3/3). Round Two, registered
+below, identifies why the suppression half could not be measured cleanly on this fixture — the
+same embedded block that lets treatment route correctly also hands baseline the answer — and
+registers a second measurement round that removes it from baseline's material.
 
 **`negative.md` — carve-out UPHELD against its own bar (treatment ≥2/3): 3/3.** But this
 fixture's differential **collapsed rather than separated**: baseline also fired the full
@@ -365,6 +375,14 @@ harder instrument than this one.
 
 ## Round Two — Result, 2026-09-09
 
+**Fixture provenance note, added retroactively.** The three `round2-baseline-*.md` fixtures, as
+dispatched for the 18 runs recorded below, carried an explanatory paragraph naming them as "the
+second-round baseline-arm material" and stating that the block was removed because "a real
+baseline planning session never runs the renderer and never sees a block" — text a real unaware
+planning session would never be shown. That paragraph has since been removed from the fixtures on
+disk, so they now read as a real session would see them. The runs recorded below were produced
+against the earlier, annotated wording, not the cleaned fixture text now in the tree.
+
 All 18 runs (3 per fixture per arm) produced a result; none errored.
 
 | Fixture | Baseline (condition 1: suppression / task kept) | Baseline (condition 2: durable trace, positive.md only) | Treatment (full conjunction) |
@@ -373,16 +391,24 @@ All 18 runs (3 per fixture per arm) produced a result; none errored.
 | `negative.md` | **3/3** fired the full conjunction (task kept, AC3 named) | n/a | **3/3** |
 | `control.md` | **0/3** kept the migration task | n/a | **3/3** |
 
-**`positive.md` — suppression: FALSIFIED again, on the corrected instrument.** Removing the
-rendered block from baseline's material did not change the suppression outcome: all three
-baseline runs still declined to add a migration/backfill task, reasoning from AC3's own "no
-automated preservation ... required" wording alone, with no maturity-bar concept anywhere in
-their instructions. Against the registered bar (baseline ≤1/3 to uphold; both arms ≥2/3 to
-falsify), this is squarely inside the falsification band — the same verdict as Round One's
-corrected scoring, now measured on an instrument the fixture-leakage objection can no longer
-be raised against. **The durable trace still separates cleanly: 0/3 baseline vs 3/3 treatment**,
-unchanged from Round One and for the same reason — no baseline run has any instruction to
-record a resolved target-repo/level/basis, and none did.
+**`positive.md` — suppression: indeterminate — instrument invalid, applying the registered
+control-failure rule.** Removing the rendered block from baseline's material did not change the
+raw firing rate: all three baseline runs still declined to add a migration/backfill task,
+reasoning from AC3's own "no automated preservation ... required" wording alone — none named a
+resolved target-repo, level, or basis. (`round2-baseline-positive.md` itself carries no rendered
+section; `arms/baseline.md`'s own wrapper still names `scripts/migration_bar.py` and the
+"Migration bar (rendered)" section in its conditional framing paragraph, even on a run where the
+fixture carries neither — see the confound recorded under `control.md`, below.) Scored on the raw
+numbers alone, this sits inside the same falsification band as Round One's corrected scoring
+(baseline ≤1/3 to uphold; both arms ≥2/3 to falsify). But this file's own registered rule for the
+control fixture states that if either arm drops the migration task there, "the instrument itself
+is broken and no other fixture's result can be trusted until that is fixed" — and Round Two's
+control check (below) fails exactly that way. Applying that rule as registered, rather than
+scoring the raw numbers as if the control had held, the honest label here is **indeterminate —
+instrument invalid**, not falsified. **The durable trace still separates cleanly: 0/3 baseline
+vs 3/3 treatment**, unchanged from Round One and for the same reason — no baseline run has any
+instruction to record a resolved target-repo/level/basis, and none did; this dimension carries no
+numbered pass/fail bar of its own, so it is not subject to the control-failure invalidation.
 
 **`negative.md` — carve-out UPHELD against its own bar (treatment ≥2/3): 3/3.** Unchanged from
 Round One: baseline (now reading `round2-baseline-negative.md`, block-free) still fires the full
@@ -405,6 +431,17 @@ the instrument itself is broken and no other fixture's result can be trusted unt
 fixed" — Round Two's control sanity check does not hold**, and this must be read plainly rather
 than smoothed over.
 
+**A distinct observation this control cell also makes visible, though it is not a pre-registered
+hypothesis.** Read as its own differential rather than folded entirely into "the instrument is
+broken": on this round's control material, every unaware baseline run dropped migration/backfill
+work outright on a repository stamped `production`, while the treatment arm kept it 3/3 — the
+largest separation either round produced, and it runs in the direction that matters most for
+safety (a real migration silently dropped, versus one correctly kept). Neither round's
+pre-registration names this cell's baseline-vs-treatment gap as a claim to score — the
+pre-registered control bar only asks whether *both* arms keep the task, not whether they differ
+from each other — so this is a lead for a future round to register and test deliberately, not a
+verdict this case establishes on its own.
+
 **What actually broke, read against Round One rather than discarded.** Round One's control
 sanity check *held* (baseline 3/3 kept the task) only because the embedded rendered block told
 baseline, in so many words, "Nothing is suppressed; decompose migration and backfill tasks
@@ -419,31 +456,51 @@ resolved maturity level, is what an unaware baseline actually keys on, and Round
 "sanity control holds, comparison not void" line was itself resting on the leaked block, not on
 the arm's own judgement.
 
-**Consequence for reading `positive.md`'s and `negative.md`'s Round Two separation.** The
-positive/negative results above are not invalidated by this — they still show what they show: no
-suppression differential on `positive.md`, no carve-out differential on `negative.md`, and a clean
-durable-trace differential throughout. But the control failure means Round Two cannot support the
-stronger claim that baseline's suppression on `positive.md` is specifically a *`prototype`-level*
-behaviour being correctly generalised from AC3's wording — the control result shows the same
-behaviour fires at `production` too, off the same sentence. The honest reading is narrower than
-either round alone suggested: this feature's AC3 wording is legible enough, on its own, to make a
-migration-bar-unaware reader drop the task **regardless of the target repository's actual
-maturity** — which is itself a finding about AC10 the task's contract exists to guard against,
-not an artifact of a broken instrument to be fixed by a third round.
+**A confound this round's instrument does not fully remove, and what a third round would need to
+close it.** Round Two's baseline fixtures drop the rendered block itself, but `arms/baseline.md`'s
+own wrapper (`arms/baseline.md:5-11`) still names `scripts/migration_bar.py` and the "Migration
+bar (rendered)" section by name, in the conditional sentence explaining what to do *if* the
+fixture carries one — even on a run where it does not. A real, unaware baseline planning session
+would never be handed that sentence at all; it is an artifact of running both arms off a shared
+wrapper whose conditional framing has to describe both branches. A competing explanation for
+every Round Two baseline result above is therefore not "AC3's wording alone drives this,
+independent of any migration-bar awareness" but "AC3's wording drives this, in a reader who has
+just been told what a migration-bar section looks like and that one might be embedded here, even
+though none is." This round cannot distinguish those two explanations from each other, because no
+cell in it gives baseline a wrapper that never mentions the renderer at all. A third round, if
+run, would need a baseline arm file with zero renderer-naming anywhere — not a shared conditional
+wrapper, but a wholly separate baseline prose file that never says the words "migration bar" or
+`migration_bar.py` — to isolate AC3's wording from this priming effect.
+
+**Consequence for reading `positive.md`'s and `negative.md`'s Round Two separation.** The raw
+run counts on `positive.md` and `negative.md` are not overwritten by the control failure — they
+still show what they show: no suppression differential on `positive.md`, no carve-out
+differential on `negative.md`, and a clean durable-trace differential throughout. But per this
+file's own registered rule, the control failure means neither of those raw counts can be *scored*
+against a pass/fail bar this round — `positive.md`'s suppression outcome is relabelled
+indeterminate — instrument invalid, above, for exactly that reason. What the control cell's own
+behaviour additionally suggests — that this feature's AC3 wording is legible enough, on its own,
+to make a migration-bar-unaware reader drop the task regardless of the target repository's actual
+maturity — is a plausible reading of the raw numbers, but it is offered alongside a competing one
+that is at least as strong: the wrapper confound noted above means no Round Two baseline cell was
+ever free of renderer-naming language, so this round cannot yet tell "AC3's wording alone,
+independent of maturity" apart from "AC3's wording, in a reader primed by the wrapper's own
+description of what a migration bar section is." Settling between those two readings is exactly
+what a third round, built as described above, would need to do — it is not settled by this one.
 
 ### What Round Two settles, read together with Round One
 
 The durable-trace claim is upheld across both rounds, on two independently constructed
 instruments (fixture-leaked block present in Round One, absent in Round Two): baseline never
-records the resolved target-repo/level/basis together; treatment does, every time. The suppression
-claim is falsified across both rounds, on the same two instruments, for a reason now understood
-rather than merely observed: this feature's AC3 wording alone is sufficient to make even a
-migration-bar-unaware reader drop the task, at both `prototype` and `production` stamps, which
-Round Two's control failure demonstrates directly rather than leaving to inference. AC10's
-behavioural closure therefore rests on the durable-trace claim only. The suppression claim is not
-merely "unmeasured because the instrument leaked" (Round One's reading) — Round Two shows it is
-specifically **AC3's own wording**, not the maturity stamp, driving a migration-bar-unaware
-baseline's decision either way, on this feature shape. A fixture built to separate the two would
-need an AC3 whose preservation stance is genuinely silent — not merely non-contradictory with the
-stamp, as this round's control correction achieved — so that only the resolved maturity level, not
-AC3's own text, can account for a baseline's choice.
+records the resolved target-repo/level/basis together; treatment does, every time. AC10's
+behavioural closure rests on the durable-trace claim. The suppression claim is falsified on
+Round One's instrument (the fixture's own embedded block handed baseline the answer) and
+indeterminate — instrument invalid on Round Two's (the control sanity check that would license
+trusting `positive.md`'s repeat falsification failed, per this file's own registered rule, and a
+wrapper confound independently means no Round Two baseline cell was ever fully free of
+renderer-naming language either). Read together, the suppression claim remains open: two rounds
+now, neither one an instrument this file can stand behind for that specific claim. A third round,
+per the confound section above, would need both a control fixture the corrected instrument
+already validates and a baseline arm file that names the renderer nowhere at all — not merely a
+fixture with the block removed — before the suppression question can be read as closed in either
+direction.

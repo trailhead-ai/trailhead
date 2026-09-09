@@ -127,13 +127,22 @@ def test_migration_bar_instruction_lives_inside_step_7_and_precedes_step_8(doc_p
     step8_start = text.index("### 8. Write the Plan")
     assert step7_start < step8_start
 
-    invocation_index = text.index(
-        "${CLAUDE_PLUGIN_ROOT}/scripts/migration_bar.py", step7_start
-    )
+    # Derived from the renderer's own file on disk, not retyped, so a renamed
+    # renderer (or a documented invocation that drifts from it) is caught here
+    # rather than only by the shebang-execution test above.
+    renderer_name = Path(migration_bar.__file__).name
+    invocation_marker = f"${{CLAUDE_PLUGIN_ROOT}}/scripts/{renderer_name}"
+    invocation_index = text.index(invocation_marker, step7_start)
     assert step7_start < invocation_index < step8_start, (
         "the migration-bar invocation must be documented inside step 7, "
         "ahead of step 8"
     )
+
+    # The position check alone inspects text; run the documented invocation
+    # too, so this test exercises the renderer it pins rather than only
+    # grepping prose for where its name appears.
+    result = _run_extracted_renderer(doc_path, PROTOTYPE_FIXTURE)
+    assert result.returncode == 0, result.stderr.decode("utf-8")
 
 
 def _concern_word(doc_path: Path, fixture: bytes, state: str) -> str:

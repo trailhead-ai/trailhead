@@ -4,10 +4,6 @@ A planning session paused at step 7 ("Define Tasks"), immediately before the fea
 broken into tasks. The spec under review follows. Read this file in full, then perform
 step 7 on it.
 
-This is the corrected `control.md`'s spec, byte-identical, but carries **no** "Migration bar
-(rendered)" section — the second-round baseline-arm material for the control fixture. The
-treatment arm keeps reading `control.md` unchanged.
-
 ## Spec under review
 
 # Spec — replace the widget's category field with a tags list

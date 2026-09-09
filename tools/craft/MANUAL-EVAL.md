@@ -791,28 +791,32 @@ made `positive.md`'s Round One suppression score misleading.
 could reach the "right" answer from the block's own legible text even under baseline's
 unmodified prose — which is exactly what `positive.md`'s corrected scoring shows happened.
 Round Two removes the block from baseline's material entirely (three new
-`round2-baseline-*.md` fixtures, block-free but otherwise byte-identical to their Round One
-counterparts) and corrects a second, independent defect in `control.md` (AC3 called the target
-"a disposable-state prototype" while the stamp said `production`). Pre-registered before any
-Round Two arm ran; 18 more runs, none errored.
+`round2-baseline-*.md` fixtures, byte-identical over the spec, criteria and stamp to their
+Round One counterparts) and corrects a second, independent defect in `control.md` (AC3 called
+the target "a disposable-state prototype" while the stamp said `production`). Pre-registered
+before any Round Two arm ran; 18 more runs, none errored.
 
 | Fixture | Baseline (condition 1 / task kept) | Treatment (full conjunction) |
 |---|---|---|
-| `positive.md` | 3/3 — still falsified on the corrected instrument | 3/3 |
+| `positive.md` | 3/3 — indeterminate (instrument invalid, see below) | 3/3 |
 | `negative.md` | 3/3 — carve-out still collapses against baseline | 3/3 |
 | `control.md` | **0/3 — sanity control FAILS on the corrected instrument** | 3/3 |
 
-**The control failure is the load-bearing finding.** Every Round Two baseline run dropped the
-migration task at `production`, reading AC3's "no automated preservation ... required" wording
-exactly as it does at `prototype` — one run used nearly the identical sentence against both
-stamps. Round One's control check only *held* because the leaked block told baseline outright
-to "decompose migration and backfill tasks normally," an instruction baseline's own prose never
-gave it. With that channel closed, the real finding is sharper and more concerning than either
-round alone suggested: **this feature's AC3 wording alone, not the resolved maturity level, is
-what a migration-bar-unaware reader keys on — at both stamps.** The durable-trace claim is
-UPHELD across both rounds on two independently constructed instruments; the suppression claim
-is FALSIFIED across both, now for an understood reason rather than a suspected fixture leak.
-AC10's behavioural closure rests on the durable-trace claim.
+**The control failure is the load-bearing finding, and it invalidates the round's own suppression
+scoring.** Every Round Two baseline run dropped the migration task at `production`, reading AC3's
+"no automated preservation ... required" wording exactly as it does at `prototype` — one run used
+nearly the identical sentence against both stamps. Round One's control check only *held* because
+the leaked block told baseline outright to "decompose migration and backfill tasks normally," an
+instruction baseline's own prose never gave it. Per this file's own registered rule — if either
+arm drops the migration task on the control fixture, the instrument is broken and no other
+fixture's result can be trusted until that is fixed — `positive.md`'s repeat of Round One's
+falsification band is relabelled **indeterminate — instrument invalid**, not falsified, applying
+that rule rather than reading the raw count as if the control had held. A wrapper confound
+independently means no Round Two baseline cell was ever fully free of renderer-naming language
+either (the shared arm file still names `migration_bar.py` in its conditional framing, even when
+a fixture carries no block) — so the suppression question remains open rather than settled either
+way. The durable-trace claim is UPHELD across both rounds on two independently constructed
+instruments. AC10's behavioural closure rests on the durable-trace claim.
 
 See `plugins/craft/evals/prototype-plan-carries-no-migration/expected.md` for the full
 pre-registration (both rounds), pass conditions, thresholds, and result writeup.
