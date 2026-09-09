@@ -41,6 +41,15 @@ def _run(args: list[str], *, env: dict | None = None) -> subprocess.CompletedPro
 class _FakeHarness:
     name = "fake"
 
+    def session_launch_env_unset(self):
+        return []
+
+    def session_launch_env_set(self, account, *, env=None):
+        return {}
+
+    def session_transcripts(self, workspace=None, *, env=None):
+        return []
+
 
 # ---------------------------------------------------------------------------
 # the bookmark surface is gone
@@ -127,16 +136,22 @@ def test_sessions_path_resolves_addressable_harnesses(monkeypatch) -> None:
     monkeypatch.setattr(cli_session, "_harness_display_name", lambda h: "fake")
 
     group = {"group": {"name": "g"}}
-    assert cli_session._addressable_harnesses([group]) == [harness]
-    assert seen == [group]
+    stores = cli_session._addressable_harnesses([group])
+    assert [s.harness for s in stores] == [harness]
+    # The default (no-account) store is always probed too, alongside
+    # every declared group's store — it dedupes against `group`'s own
+    # store here because `fake_harness_for` answers the SAME harness
+    # for both calls, so `stores` still holds exactly one entry.
+    assert seen == [group, {}]
 
 
 def test_resume_path_resolves_the_group_harness(monkeypatch) -> None:
-    """`camp launch --resume`'s enumeration asks the group's harness (cli.session:_enumerate_sessions)."""
+    """`camp launch --resume`'s pool asks the group's harness (cli.session:_session_pool)."""
     import camp.cli.session as cli_session
 
     harness = _FakeHarness()
     seen: list[dict] = []
+    record = type("SessionRecord", (), {"session_id": "sess-1"})()
 
     def fake_harness_for(group):
         seen.append(group)
@@ -144,9 +159,16 @@ def test_resume_path_resolves_the_group_harness(monkeypatch) -> None:
 
     monkeypatch.setattr("camp.launch.profile.harness_for", fake_harness_for)
     monkeypatch.setattr(
-        "camp.launch.session.enumerate_records", lambda h, ws, env: ["record"]
+        "camp.launch.session.enumerate_records", lambda h, ws, env: [record]
     )
 
     group = {"group": {"name": "g"}}
-    assert cli_session._enumerate_sessions(group, None, {}) == ["record"]
-    assert seen == [group]
+    _transcripts, live, answered, _accounts = cli_session._session_pool(
+        [group], verb="launch", env={}
+    )
+    assert live == [record]
+    assert [store.harness for store in answered] == [harness]
+    # Same dedupe as above: the always-probed default store collapses
+    # into `group`'s own entry since `fake_harness_for` answers the
+    # same harness for both.
+    assert seen == [group, {}]

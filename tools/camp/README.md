@@ -81,7 +81,7 @@ paste-ready `tmux attach -t <name>` on stderr.
 camp launch <slug> [--json]                 # start one; stdout is the session id
 camp launch --dir <path> --group <name>     # start one at a named directory
 camp launch --resume <ref> [--group <name>] # bring a dead one back
-camp sessions [<slug>] [--dir <path>] [--json]              # what is live
+camp sessions [<slug>] [--dir <path>] [--all-groups|-g] [--json]  # what is live
 camp sessions --recoverable [<slug>] [--dir <path>]         # what is dead
                           [--limit <n>|--all] [--json]
 camp new <slug> --launch [--no-wait] [--json]
@@ -97,6 +97,14 @@ stdout is its id. `1` means camp refused, nothing was started, and stdout is
 empty — the reason is on stderr. `2` means a `--resume` reference matched more
 than one session: the candidates are printed on stdout to choose between, so it
 is an answer to narrow, not a command that broke.
+
+`camp list` and `camp sessions` both take `--all-groups` (short: `-g`), which
+answers for every configured group in one invocation instead of one — every
+group's worktrees for `list`, every group's stores for `sessions` — ordered by
+group. It refuses alongside a named group rather than picking one; naming a
+group with plain `camp sessions --group <name>` (or from inside a workspace)
+does the opposite, narrowing the live listing to that group's own rows rather
+than the ordinary cross-store answer.
 
 The launch is confirmed, not assumed: camp polls harness enumeration until the
 new session id appears and refuses (killing the pane) if it never does — a

@@ -11,12 +11,25 @@ Two deliberately different postures:
 stderr line, empty stdout, non-zero exit. That includes a launch that spawned but
 never registered: an unconfirmable session is not a success with a caveat.
 
-``sessions`` is a QUESTION, so every failure DEGRADES — a stderr notice, an empty
+``sessions`` is a QUESTION, so most failures DEGRADE — a stderr notice, an empty
 list on stdout, exit 0. A caller asking what is running can act on "nothing" and
 on "I could not tell" the same way (there is nothing to attach to either way), and
 exiting non-zero for the second would make a read-only query a scripting hazard.
-The two are still distinguishable: the degraded answer carries a notice naming
-what could not be determined, and an honestly-empty one is silent.
+An honestly-empty answer stays silent.
+
+The live listing asks every (harness, credential store) candidate in the pool —
+never only the group the invocation happened to resolve — and merges what comes
+back (see ``_enumerate_live_sessions_pool``). A store that cannot be read
+degrades to a stderr notice naming the ACCOUNT it could not reach while the
+stores that answered still contribute their rows, exit 0 — the read-only,
+partial-information case above. But when EVERY addressable store fails, "nothing
+to attach to" is no longer true: something might well be running under a store
+camp simply could not ask, so that case is a REFUSAL — non-zero exit, no rows,
+a stated reason — never an empty answer indistinguishable from "nothing is
+running". The `--json` form carries the same partial/total distinction IN BAND:
+every row (session or not) carries `"ok"`, so a parser sorts a mixed answer
+without touching stderr, and a total failure prints no array at all rather than
+an empty one a parser could read as complete.
 
 ``camp new --launch`` reuses this module rather than re-deriving the flow, so a
 launch means the same thing and refuses the same way at both entry points.
@@ -387,33 +400,118 @@ def _retention_hint(harness, env: dict[str, str]) -> str:
 
 def _harness_display_name(harness) -> str:
     """The name to put in a refusal about *harness*."""
-    return harness.name or type(harness).__name__
+    underlying = getattr(harness, "harness", harness)
+    return harness.name or type(underlying).__name__
 
 
-def _addressable_harnesses(groups) -> list:
-    """Every harness camp can ask about sessions — one entry per distinct harness.
+def _account_label(account: str | None) -> str:
+    """How to name *account* in operator-facing text — never a bare ``None``."""
+    return f"account {account!r}" if account is not None else "the default account"
+
+
+def _addressable_harnesses(
+    groups, *, env: dict[str, str] | None = None, on_drop=None
+) -> list:
+    """Every (harness, credential store) camp can ask about sessions.
 
     A reference addresses a SESSION, not a group. Naming a group, or standing in
     one, does not change which sessions exist, so the pool spans every configured
     group's harness rather than whichever one the invocation happened to resolve
     — the same reason a resume needs no ``--group`` in the first place.
-    Deduplicated by name, because groups routinely share a harness and one store
-    must never be read twice into the same pool.
+
+    Keyed by (harness display name, declared account) — NOT by harness name
+    alone. Two groups sharing a harness but declaring different accounts are
+    two entries: each names a different credential store, and collapsing them
+    was the exact bug that let a reference resolve against whichever store
+    happened to win the collapse while a matching session sat unreferenced in
+    the other. Two groups sharing a harness AND declaring the same account (or
+    both declaring none) are one entry — the same store must never be read
+    twice into the pool.
+
+    Each entry is a :class:`~camp.launch.profile.HarnessStore`: every ordinary
+    ``Harness`` method still works on it (it proxies through), plus ``.account``
+    (the declaring group's ``[launch] account``, exactly as written, or
+    ``None``) and ``.env`` (the environment this store's queries must run
+    under). camp names no credential location of its own to build either —
+    both come from :func:`camp.launch.profile.harness_store_for`, which asks
+    the harness.
 
     A group whose harness camp cannot name contributes nothing rather than
-    failing the lookup: one unrecognized group must not make every other group's
-    sessions unaddressable. With no groups configured at all, camp's default
-    harness profile is the one thing left to ask.
-    """
-    from ..launch.profile import harness_for
+    failing the lookup: one bad group must not make every other group's
+    sessions unaddressable. A group whose harness DID resolve but whose
+    declared account the harness refuses to bind is different — that store
+    was a real candidate a moment ago, so dropping it is never silent: see
+    *on_drop*.
 
-    found: dict[str, object] = {}
-    for config in groups or [{}]:
-        harness = harness_for(config)
-        if harness is None:
+    The default (no-account) store is ALWAYS a member of the pool, regardless
+    of what any configured group declares — including when every configured
+    group declares its own account. A session running under the default
+    store must stay addressable no matter how the rest of the machine's
+    groups are configured; the dedupe above already keys the pool by
+    (harness, account), so a group that itself declares no account still
+    contributes the default store exactly once.
+
+    *on_drop*, when given, is called with ``(group_config, error)`` for every
+    group whose store :func:`~camp.launch.profile.harness_store_for` raised
+    :class:`~camp.launch.profile.StoreBindingError` for, INSTEAD OF this
+    function's own default notice — the fail-closed ``camp remove`` guard
+    passes one that refuses outright rather than degrading, because a store
+    camp cannot bind is a session it cannot see, and a removal guard must
+    never read that as "nothing to block on".
+    """
+    from ..launch.profile import harness_store_for, StoreBindingError
+
+    resolved_env = dict(env) if env is not None else dict(os.environ)
+    found: dict[tuple[str, tuple[tuple[str, str], ...]], object] = {}
+    for config in groups or []:
+        try:
+            store = harness_store_for(config, env=resolved_env)
+        except StoreBindingError as e:
+            if on_drop is not None:
+                on_drop(config, e)
+            else:
+                name = (config.get("group") or {}).get("name", "?")
+                print(
+                    f"camp: could not address group {name!r}'s credential "
+                    f"store — {e}",
+                    file=sys.stderr,
+                )
             continue
-        found.setdefault(_harness_display_name(harness), harness)
+        if store is None:
+            continue
+        key = (_harness_display_name(store), _store_binding_key(store))
+        found.setdefault(key, store)
+
+    try:
+        default_store = harness_store_for({}, env=resolved_env)
+    except StoreBindingError:
+        # No declaring group to name for the anonymous default probe — a
+        # bind failure here degrades exactly like the harness-unnameable
+        # case it sits alongside.
+        default_store = None
+    if default_store is not None:
+        key = (_harness_display_name(default_store), _store_binding_key(default_store))
+        found.setdefault(key, default_store)
+
     return list(found.values())
+
+
+def _store_binding_key(store) -> tuple[tuple[str, str], ...]:
+    """The dedupe key for *store*: its BOUND environment, not the raw declared
+    account string.
+
+    Two groups can declare the same credential-store directory under two
+    different spellings (``/acct/w`` vs. ``/acct/w/``, or ``~/x`` vs. its
+    expansion) — textually different, but the harness binds both to the same
+    resolved store, so ``store.env`` (the environment queries against this
+    store actually run under, per :func:`~camp.launch.profile.harness_store_for`)
+    is byte-identical between them. Keying on that resolved binding rather than
+    on ``store.account`` collapses such spellings to one pool entry, so the
+    same store is never read twice and its sessions never listed twice.
+    ``store.account`` itself is untouched by this — it still carries the
+    declaring group's string verbatim.
+    """
+    return tuple(sorted(store.env.items()))
 
 
 def _parsable_groups() -> list[dict]:
@@ -450,11 +548,16 @@ def _session_pool(
     verb: str,
     env: dict[str, str],
     live_required: bool = False,
-) -> tuple[list, list, list]:
-    """The addressable pool: (transcripts, live records, harnesses that answered).
+) -> tuple[list, list, list, dict[str, str | None]]:
+    """The addressable pool: (transcripts, live records, stores that answered,
+    session id -> declaring account).
 
-    Every addressable harness's on-disk transcripts UNION its live sessions. A
-    harness with no transcript concept — or one whose store camp cannot read at
+    Every addressable STORE's on-disk transcripts UNION its live sessions, each
+    queried under its OWN environment — a store whose declared account differs
+    from another's must be read from its own credential directory, never from
+    whichever store the pool happened to query first, or a session sitting in
+    the unqueried store is invisible to every reference that would otherwise
+    match it. A store with no transcript concept — or one camp cannot read at
     all, which the seam contract forbids but a third-party harness may still do
     — contributes no transcripts, and if NONE of them has one the reference is
     unanswerable and camp refuses naming them: an unanswerable seam is a
@@ -473,11 +576,18 @@ def _session_pool(
 
     *verb* is the name to put in either refusal, because both are read verbatim
     off a relayed stderr line and have to name the command the operator typed.
+
+    The returned mapping is session id -> the account that store declared (or
+    ``None``), first-write-wins across stores. It exists so a refusal that
+    turns out ambiguous ACROSS stores can name the account each match came
+    from, without :class:`~camp.launch.recovery.SessionCandidate` — which is
+    shared by every session surface, not just the ref-addressed ones — having
+    to carry a field only this refusal reads.
     """
     from ..launch.session import enumerate_records
     from ..spine import _die
 
-    harnesses = _addressable_harnesses(groups)
+    harnesses = _addressable_harnesses(groups, env=env)
     if not harnesses:
         _die(
             f"camp {verb}: camp cannot name a harness for any configured group, so "
@@ -487,9 +597,11 @@ def _session_pool(
     transcripts: list = []
     live: list = []
     answered: list = []
+    accounts: dict[str, str | None] = {}
     for harness in harnesses:
+        store_env = getattr(harness, "env", env)
         try:
-            records = enumerate_records(harness, None, env)
+            records = enumerate_records(harness, None, store_env)
         except Exception as exc:  # noqa: BLE001 — posture below, never a traceback
             records = None
             detail = str(exc)
@@ -503,13 +615,17 @@ def _session_pool(
                 "already down or still holding its memory — re-run once the "
                 "harness answers"
             )
+        for record in records or ():
+            accounts.setdefault(record.session_id, getattr(harness, "account", None))
         live.extend(records or [])
         try:
-            rows = harness.session_transcripts(env=env)
+            rows = harness.session_transcripts(env=store_env)
         except Exception:  # noqa: BLE001 — a harness camp cannot read contributes nothing
             rows = None
         if rows is not None:
             answered.append(harness)
+            for row in rows:
+                accounts.setdefault(row.session_id, getattr(harness, "account", None))
             transcripts.extend(rows)
 
     if not answered:
@@ -518,7 +634,7 @@ def _session_pool(
             f"camp {verb}: harness {names} keeps no session transcripts camp can "
             "read, so its sessions cannot be addressed by reference"
         )
-    return transcripts, live, answered
+    return transcripts, live, answered, accounts
 
 
 def _die_unresolved(
@@ -529,6 +645,7 @@ def _die_unresolved(
     harness,
     env: dict[str, str],
     as_json: bool,
+    accounts: dict[str, str | None] | None = None,
 ) -> NoReturn:
     """Refuse a *ref* that did not address exactly one session, in *verb*'s terms.
 
@@ -546,15 +663,33 @@ def _die_unresolved(
     the same reference at two of them is told the same thing and only the
     command name differs. *verb* is that name, and *harness* is the one whose
     retention window explains an empty pool.
+
+    An ambiguous match spanning more than one credential store is not a second
+    refusal shape — it is this same one, with *accounts* (session id -> the
+    account that store declared) letting the message name which store each
+    match came from, so an operator is never left guessing which of two
+    same-named sessions on different accounts a longer prefix would even
+    disambiguate. That detail is added ONLY when the matches actually span more
+    than one account — an ambiguity inside a single store names nothing new.
     """
     from ..launch.recovery import Ambiguous, NoMatch
     from ..spine import _die
 
     if isinstance(outcome, Ambiguous):
         _print_candidates(outcome.candidates, as_json=as_json)
+        by_account = ""
+        if accounts:
+            matched_accounts = {accounts.get(c.session_id) for c in outcome.candidates}
+            if len(matched_accounts) > 1:
+                by_account = " — " + "; ".join(
+                    f"{candidate.derived_name} in "
+                    f"{_account_label(accounts.get(candidate.session_id))}"
+                    for candidate in outcome.candidates
+                )
         _die(
             f"camp {verb}: {ref!r} matches {len(outcome.candidates)} sessions "
-            "(listed above) — re-run with a longer prefix naming exactly one",
+            f"(listed above){by_account} — re-run with a longer prefix naming "
+            "exactly one",
             code=_AMBIGUOUS_EXIT_CODE,
         )
 
@@ -584,7 +719,7 @@ def _resolve_session_reference(ref: str, *, env: dict[str, str], as_json: bool):
     from .common import _groups_dir
 
     groups = load_all_groups(_groups_dir())
-    transcripts, live, answered = _session_pool(groups, verb="launch", env=env)
+    transcripts, live, answered, accounts = _session_pool(groups, verb="launch", env=env)
 
     outcome = resolve_session_ref(
         ref, transcripts=transcripts, live_records=live, groups=groups, env=env
@@ -594,7 +729,13 @@ def _resolve_session_reference(ref: str, *, env: dict[str, str], as_json: bool):
         return outcome.candidate, groups
 
     _die_unresolved(
-        outcome, ref, verb="launch", harness=answered[0], env=env, as_json=as_json
+        outcome,
+        ref,
+        verb="launch",
+        harness=answered[0],
+        env=env,
+        as_json=as_json,
+        accounts=accounts,
     )
 
 
@@ -948,13 +1089,83 @@ def _cmd_launch_group_cli(
     _report_launched(launched, as_json=as_json)
 
 
-def _session_payload(record) -> dict:
+def _attribute_session(cwd: Path, groups: list[dict], *, env: dict[str, str]) -> dict:
+    """Resolve the group and declared account *cwd* belongs to.
+
+    Uses :func:`camp.group.resolve.resolve_from_cwd` — the SAME resolver the
+    dispatcher applies to the invoking process's own cwd
+    (``cli/dispatch.py``'s ``_resolve_group_for_command``) — so a session
+    rooted in a member repository checkout attributes exactly like one rooted
+    in a workspace, and the group name returned here is spelled exactly as
+    ``--group`` accepts it and ``resolve_from_cwd`` returns it: a later filter
+    over these rows compares against this value directly, with no
+    normalization step of its own.
+
+    A *cwd* no configured group's resolver recognizes raises
+    ``GroupResolutionError`` from ``resolve_from_cwd`` — an ordinary, expected
+    outcome here, degraded to a null group and a null account rather than
+    propagated or dropping the row: enumeration already found and reported
+    this session, so a row naming no home is a real answer, not a failure.
+
+    ``account`` is the resolved group's ``[launch] account`` exactly as
+    declared — carried verbatim, like :class:`~camp.launch.profile.HarnessStore`'s
+    own ``account`` field, never expanded, normalized, or resolved — and
+    ``None`` wherever the group declares none.
+    """
+    from ..group.resolve import GroupResolutionError, resolve_from_cwd
+
+    try:
+        group_name, _slug = resolve_from_cwd(cwd, groups, env=env)
+    except GroupResolutionError:
+        return {"group": None, "account": None}
+
+    group = next((cfg for cfg in groups if cfg["group"]["name"] == group_name), None)
+    account = (group.get("launch") or {}).get("account") if group is not None else None
+    return {"group": group_name, "account": account}
+
+
+def _sessions_for_group(
+    attributed: list[tuple], group_name: str
+) -> list[tuple]:
+    """Narrow an attributed ``(record, attribution)`` set to one group's rows.
+
+    *attributed* is the whole cross-store, cross-group answer — every store's
+    records, each already paired with :func:`_attribute_session`'s result — so
+    this is a pure filter over an answer that already exists, never a second
+    enumeration. A row whose attribution has no group (an unresolvable *cwd*,
+    or a store-failure row this function never receives) never matches any
+    name and is dropped, never kept as "unattributed but maybe relevant".
+
+    This is the ONE seam a caller narrows the live answer through. Asking for
+    every group at once is a DIFFERENT caller of the same *attributed* set —
+    it bypasses this function rather than this function growing a condition
+    to widen through.
+    """
+    return [
+        (record, attribution)
+        for record, attribution in attributed
+        if attribution["group"] == group_name
+    ]
+
+
+def _session_payload(record, *, group: str | None, account: str | None) -> dict:
     """One :class:`SessionRecord` as JSON-ready data — normalized fields only.
 
     The seam already drops harness-native fields beyond the normalized set; this
     keeps camp from re-widening the surface it just narrowed.
+
+    ``ok`` is ``True`` on every row this function builds. It exists so a
+    machine-readable consumer can tell a session row from a partial-failure
+    row (see :func:`_store_failure_payload`) with ONE field test, on every row
+    in the list, rather than by the row's shape or the absence of a key.
+
+    ``group`` and ``account`` come from :func:`_attribute_session`, resolved
+    from ``record.cwd`` — not from which credential store's enumeration
+    produced this record, which can differ from the group the session's
+    working directory actually belongs to.
     """
     return {
+        "ok": True,
         "session_id": record.session_id,
         "cwd": str(record.cwd),
         "kind": record.kind,
@@ -962,30 +1173,107 @@ def _session_payload(record) -> dict:
         "name": record.name,
         "pid": record.pid,
         "started_at": record.started_at.isoformat() if record.started_at else None,
+        "group": group,
+        "account": account,
     }
 
 
-def _enumerate_sessions(group: dict, workspace: Path | None, env: dict[str, str] | None):
-    """Return the live session records, or None when they cannot be determined.
+def _store_failure_payload(failure: dict) -> dict:
+    """One unreadable-store entry as JSON-ready data.
 
-    None is the honest "I could not tell" — a harness camp cannot name, a harness
-    with no enumeration concept, a missing binary, a non-zero exit, or output the
-    seam refuses to decode. It is deliberately distinct from `[]`, which is the
-    equally honest "nothing is running": the caller prints a notice for the first
-    and stays silent for the second.
+    ``ok`` is ``False`` — the same field :func:`_session_payload` sets ``True``
+    on every session row, so a consumer tests one field to sort a mixed list
+    into rows it can use and rows it cannot. The row carries only what a
+    failed enumeration actually knows: which account it was asking about, and
+    why the answer never came back. It invents no session attribution — no
+    ``cwd``, no ``pid`` — because none was ever read.
     """
-    from ..launch.profile import harness_for
+    return {"ok": False, "account": failure["account"], "reason": failure["reason"]}
+
+
+def _group_config_failure_payload(detail: str) -> dict:
+    """One unparsable-group-config entry as JSON-ready data.
+
+    ``ok`` is ``False`` — the same discriminator :func:`_store_failure_payload`
+    carries for a store that failed to answer, one level down. *detail* is
+    the same ``camp <verb>: <detail> — skipping`` text already printed to
+    stderr by :func:`~camp.provision.lifecycle.answerable_groups_or_refuse`
+    (naming the config file, since a config that failed to parse has no
+    reliable group name to attribute instead). No ``account`` — this group
+    never got far enough to declare one.
+    """
+    return {"ok": False, "group": None, "reason": detail}
+
+
+def _enumerate_live_sessions_pool(
+    scope: Path | None,
+    *,
+    env: dict[str, str] | None,
+    groups: list[dict],
+) -> tuple[list, list[dict], int]:
+    """Enumerate live sessions once per (harness, credential store) candidate.
+
+    A reference addresses a SESSION, not a group, and a session can be running
+    under any account any configured group declares — not only the account the
+    invoking group happens to bind. So this asks every candidate in
+    :func:`_addressable_harnesses`'s pool, scoped by *scope*, EACH UNDER ITS
+    OWN store's environment (``store.env``, never the caller's ambient one),
+    and merges what comes back. This is what makes a session launched under a
+    non-default credential store visible from a shell bound to the default
+    one.
+
+    Returns ``(records, failures, stores_total)``:
+
+    * ``records`` — every live :class:`~trailhead.harness.base.SessionRecord`
+      across every store that answered, in pool order.
+    * ``failures`` — one ``{"account": ..., "reason": ...}`` entry per store
+      whose enumeration could not be completed: an exception, a non-zero
+      exit, a missing enumeration concept, or the per-call timeout expiring
+      (:data:`camp.launch.session._ENUMERATE_TIMEOUT_SECONDS` bounds each
+      store in turn, so a hanging store degrades exactly like a failing one
+      rather than blocking the others). Never a silent omission — a store
+      that could not be read always contributes exactly one entry here.
+    * ``stores_total`` — how many candidates were queried. ``0`` means the
+      pool itself was empty (no configured group's harness could be named at
+      all); the caller's degrade for THAT case is unchanged from before this
+      merge existed. A caller distinguishes "every store failed" from "no
+      store was addressable" by comparing ``len(failures)`` to
+      ``stores_total``, not by ``stores_total`` alone.
+
+    Each store is asked exactly once — the pool is already deduplicated by
+    (harness, account) in :func:`_addressable_harnesses`, and this walks it
+    once, so no store is ever enumerated twice.
+
+    *groups* is supplied by the caller rather than loaded here, and is the SAME
+    list the caller attributes the returned records against — one load per
+    invocation, so the pool and the attribution can never be built from two
+    different readings of the config directory. It also lets a caller pass a
+    list that has already degraded (the `--all-groups` seam skips an unparsable
+    sibling BY NAME before calling), which a load performed in here would have
+    no way to report.
+    """
     from ..launch.session import enumerate_records
 
-    harness = harness_for(group)
-    if harness is None:
-        return None
-    try:
-        return enumerate_records(
-            harness, workspace, dict(env) if env is not None else dict(os.environ)
-        )
-    except Exception:  # noqa: BLE001 — every failure of a read-only query degrades
-        return None
+    resolved_env = dict(env) if env is not None else dict(os.environ)
+    stores = _addressable_harnesses(groups, env=resolved_env)
+
+    records: list = []
+    failures: list[dict] = []
+    for store in stores:
+        try:
+            rows = enumerate_records(store, scope, store.env)
+        except Exception:  # noqa: BLE001 — a store camp cannot read degrades, not fails
+            rows = None
+        if rows is None:
+            failures.append(
+                {
+                    "account": store.account,
+                    "reason": "sessions could not be enumerated for this credential store",
+                }
+            )
+            continue
+        records.extend(rows)
+    return records, failures, len(stores)
 
 
 def _list_recoverable(
@@ -1031,7 +1319,7 @@ def _list_recoverable(
 
     resolved_env = dict(env) if env is not None else dict(os.environ)
     groups = load_all_groups(_groups_dir())
-    harnesses = _addressable_harnesses(groups)
+    harnesses = _addressable_harnesses(groups, env=resolved_env)
     if not harnesses:
         _die(
             "camp sessions: camp cannot name a harness for any configured group, "
@@ -1043,8 +1331,9 @@ def _list_recoverable(
     answered: list = []
     live_known = True
     for harness in harnesses:
+        store_env = getattr(harness, "env", resolved_env)
         try:
-            rows = harness.session_transcripts(scope, env=resolved_env)
+            rows = harness.session_transcripts(scope, env=store_env)
         except Exception:  # noqa: BLE001 — a harness camp cannot read contributes nothing
             rows = None
         if rows is None:
@@ -1052,7 +1341,7 @@ def _list_recoverable(
         answered.append(harness)
         transcripts.extend(rows)
         try:
-            records = enumerate_records(harness, scope, resolved_env)
+            records = enumerate_records(harness, scope, store_env)
         except Exception:  # noqa: BLE001 — an unanswerable probe is undeterminable, not empty
             records = None
         if records is None:
@@ -1098,10 +1387,32 @@ def _list_recoverable(
 
 def _cmd_sessions_group_cli(
     args: list[str],
-    group: dict,
+    group: dict | None,
     env: dict[str, str] | None,
+    *,
+    all_groups: bool = False,
 ) -> None:
     """camp sessions [<slug>] [--dir <path>] [--recoverable [--limit <n>|--all]] [--json].
+
+    `all_groups=True` is the `--all-groups`/`-g` seam: reached only from
+    ``cli/dispatch.py``'s early handling of that option, with `group=None`
+    (there is no single resolved group to narrow by — `--all-groups` and
+    `--group` are refused together before this function is ever called). A
+    `--dir` scope still works unchanged (it never depended on `group`); with
+    no `--dir` and no positional slug it skips the cwd-relative slug
+    resolution `group` would otherwise be needed for and leaves `scope` (and
+    therefore the narrowing below) at `None` — the whole cross-store pool.
+
+    Under `all_groups=True`, group configs are loaded once through
+    :func:`~camp.provision.lifecycle.answerable_groups_or_refuse`, which degrades a
+    config camp cannot parse instead of failing the whole answer: one broken
+    sibling is skipped BY NAME on stderr while every other group still
+    answers, exit 0. Every group unparsable is a refusal (nonzero exit, a
+    stated reason) — never an answer that reads as "nothing configured". No
+    groups configured at all states that on stderr and answers with an empty
+    list, exit 0; it never falls through to the legacy standalone-worktree
+    source (that fallback belongs to `spine.main`'s no-group `cmd_ls`, which
+    `--all-groups` never reaches).
 
     Two listings behind one verb, over the same scope. The LIVE listing answers
     what is running; `--recoverable` answers what is dead and could be brought
@@ -1116,18 +1427,39 @@ def _cmd_sessions_group_cli(
     exist either: a torn-down root is precisely the scope a recovery listing is
     asked about.
 
-    Always exits 0 with ONE exception each side of the split. This is a question,
-    so "I could not tell" degrades to a stderr notice plus an empty list rather
-    than a failure a script has to special-case — but malformed input (a `--limit`
-    that cannot mean anything) and a harness that keeps no transcripts at all are
-    refusals, because neither has an empty listing as its honest answer.
+    Always exits 0 with ONE exception each side of the split (plus, under
+    `all_groups=True`, every configured group failing to parse — see above).
+    This is a question, so "I could not tell" degrades to a stderr notice plus
+    an empty list rather than a failure a script has to special-case — but
+    malformed input (a `--limit` that cannot mean anything) and a harness that
+    keeps no transcripts at all are refusals, because neither has an empty
+    listing as its honest answer.
+
+    The LIVE listing's pool spans every configured group's store (see
+    :func:`_enumerate_live_sessions_pool`), so a BARE group-named query — no
+    `--dir`, no resolved workspace slug, i.e. `scope is None` — narrows that
+    cross-group answer to *group*'s own rows via :func:`_sessions_for_group`,
+    applied to every store's records ALREADY attributed by
+    :func:`_attribute_session`. A `--dir` or slug scope has already narrowed
+    the pool by PATH before this point (`_enumerate_live_sessions_pool` is
+    itself called with that scope), so this filter is not applied again on
+    top of it: a `--dir` scope answers about a directory, not a group, and is
+    not eligibility-gated by group membership either (see above) — narrowing
+    it further by group name would silently drop a session `--dir` was asked
+    to describe. A store-failure row carries no `cwd` and so no group; it is
+    never filtered by group name and is always included, because a group-named
+    answer must still tell the operator a store failed rather than silently
+    reading as complete.
     """
     from ..group.manifest import workspace_dir
     from ..spine import _consume_flag_value, _die
     from .dispatch import _slug_from_args_or_cwd
 
     rest = list(args)
-    _consume_flag_value(rest, "--group")  # already resolved upstream; drop it
+    # Already resolved upstream to select `group`, so consuming it here is
+    # just removing it from `rest` — the resolved name (`group["group"]["name"]`)
+    # is what the live listing filters by below, not this raw flag value.
+    _consume_flag_value(rest, "--group")
     as_json = _consume_flag(rest, "--json")
     recoverable = _consume_flag(rest, "--recoverable")
     show_all = _consume_flag(rest, "--all")
@@ -1174,6 +1506,17 @@ def _cmd_sessions_group_cli(
         # about, and is the whole reason the recoverable listing marks rows
         # root-missing rather than hiding them.
         scope = Path(directory).expanduser().resolve()
+    elif all_groups:
+        # A leftover positional here is a workspace slug --all-groups never
+        # consumes (unlike the narrow path just below) — the same
+        # narrow-vs-widen contradiction `cli/dispatch.py` refuses for
+        # `--group` alongside `--all-groups`, refused here before a group is
+        # loaded or a store is read (both happen further down this function).
+        if rest:
+            _die(
+                "camp sessions: --all-groups and a workspace slug name every "
+                "group and one workspace at once — pass one or the other"
+            )
     else:
         slug = _slug_from_args_or_cwd(
             rest, group, verb="sessions", consume_positional=True, allow_none=True, env=env
@@ -1205,27 +1548,133 @@ def _cmd_sessions_group_cli(
         )
         return
 
-    records = _enumerate_sessions(group, scope, env)
-    if records is None:
+    # NOT read on the `recoverable` path above (it returns before this
+    # point): `_list_recoverable` answers from its own strict
+    # `load_all_groups` rather than this degraded loader, so running this
+    # here for `--recoverable` would print a "— skipping" notice promising
+    # every other group still answers, immediately followed by
+    # `_list_recoverable` refusing outright on that very same broken
+    # config — a promise and its own contradiction in the same invocation.
+    all_groups_configs: list[dict] | None = None
+    all_groups_unparsable: list[str] = []
+    all_groups_no_groups_configured = False
+    if all_groups:
+        from ..provision.lifecycle import answerable_groups_or_refuse
+        from .common import _groups_dir
+
+        all_groups_configs, all_groups_unparsable = answerable_groups_or_refuse(
+            _groups_dir(), verb="sessions"
+        )
+        all_groups_no_groups_configured = not all_groups_configs
+
+    def _described() -> str:
         if slug:
-            described = f"workspace {slug!r}"
-        elif directory is not None:
-            described = f"directory {str(scope)!r}"
-        else:
-            described = f"group {group['group']['name']!r}"
+            return f"workspace {slug!r}"
+        if directory is not None:
+            return f"directory {str(scope)!r}"
+        if all_groups:
+            return "every configured group"
+        return f"group {group['group']['name']!r}"
+
+    # ONE reading of the config directory per invocation, shared by the
+    # enumeration pool below and by the attribution that pairs each returned
+    # record with a group: two loads could disagree about which groups exist,
+    # and a row would then be attributed against a different set than the pool
+    # that produced it.
+    if all_groups:
+        session_groups = all_groups_configs or []
+    else:
+        from ..group.config import load_all_groups
+        from .common import _groups_dir
+
+        session_groups = load_all_groups(_groups_dir())
+
+    already_notified_unanswerable = False
+    if all_groups_no_groups_configured:
         print(
-            f"camp sessions: could not determine the live sessions for {described} — "
-            "reporting none",
+            "camp sessions: no groups configured — nothing to answer for",
             file=sys.stderr,
         )
-        records = []
+        records, failures = [], []
+    else:
+        records, failures, stores_total = _enumerate_live_sessions_pool(
+            scope, env=env, groups=session_groups
+        )
+
+        if stores_total == 0:
+            print(
+                f"camp sessions: could not determine the live sessions for {_described()} — "
+                "reporting none",
+                file=sys.stderr,
+            )
+            records = []
+            failures = []
+            already_notified_unanswerable = True
+        elif failures and len(failures) == stores_total:
+            accounts = ", ".join(_account_label(failure["account"]) for failure in failures)
+            _die(
+                f"camp sessions: could not enumerate live sessions for {_described()} — "
+                f"every credential store failed ({accounts}) — check each store's "
+                "credentials and re-run"
+            )
+        else:
+            for failure in failures:
+                print(
+                    "camp sessions: could not enumerate sessions for "
+                    f"{_account_label(failure['account'])}",
+                    file=sys.stderr,
+                )
+
+    resolved_env = dict(env) if env is not None else dict(os.environ)
+    attributed = [
+        (record, _attribute_session(record.cwd, session_groups, env=resolved_env))
+        for record in records
+    ]
+    if scope is None:
+        if all_groups:
+            # Widened rather than narrowed: every store's rows, ordered by
+            # group so the merged answer is stable across invocations. A
+            # stable sort keeps each group's OWN rows in the enumeration
+            # order _enumerate_live_sessions_pool already produced them in.
+            attributed = sorted(attributed, key=lambda pair: pair[1]["group"] or "")
+        else:
+            attributed = _sessions_for_group(attributed, group["group"]["name"])
+            if not already_notified_unanswerable:
+                from ..launch.profile import StoreBindingError, harness_store_for
+
+                try:
+                    group_store_unaddressable = (
+                        harness_store_for(group, env=resolved_env) is None
+                    )
+                except StoreBindingError:
+                    group_store_unaddressable = True
+
+                if group_store_unaddressable:
+                    # This group's own credential store never entered the
+                    # pool at all — distinct from the pool answering with
+                    # zero rows for it, which is a legitimate empty listing.
+                    # An operator reading silence here as "nothing running"
+                    # is exactly the confident-wrong-answer this listing
+                    # exists to avoid.
+                    print(
+                        f"camp sessions: could not determine the live sessions for "
+                        f"{_described()} — reporting none",
+                        file=sys.stderr,
+                    )
 
     if as_json:
-        print(json.dumps([_session_payload(record) for record in records]))
+        payload = [
+            _session_payload(record, **attribution) for record, attribution in attributed
+        ]
+        payload += [_store_failure_payload(failure) for failure in failures]
+        payload += [
+            _group_config_failure_payload(detail) for detail in all_groups_unparsable
+        ]
+        print(json.dumps(payload))
         return
     from ..launch.recovery import printable_path
 
-    for record in records:
+    for record, _attribution in attributed:
         label = f" ({record.name})" if record.name else ""
         print(f"{record.session_id}  {record.kind}  {printable_path(record.cwd)}{label}")
 
@@ -1367,18 +1816,21 @@ def _cmd_kill_cli(args: list[str], env: dict[str, str] | None = None) -> None:
 
     resolved_env = dict(env) if env is not None else dict(os.environ)
     groups = _parsable_groups()
-    transcripts, live, answered = _session_pool(
+    transcripts, live, answered, accounts = _session_pool(
         groups, verb="kill", env=resolved_env, live_required=True
     )
 
     outcome = stop_session(
         ref,
         # The ownership check asks a harness which pane commands IT composes, so
-        # it needs one harness rather than the pool. Groups routinely share a
-        # harness and `_addressable_harnesses` already deduplicates, so this is
-        # the only one on all but a mixed-harness machine — where a foreign
-        # harness's session is REFUSED rather than mis-signalled, which is the
-        # direction this check is supposed to fail in.
+        # it needs one harness rather than the pool. Groups sharing a harness
+        # but declaring different accounts are now separate pool entries, so
+        # this picks the first store that answered — the composed commands are
+        # a property of the harness TYPE, not of which account it is bound to,
+        # so any answering store's shapes are the right ones to compare against
+        # on all but a mixed-harness machine, where a foreign harness's session
+        # is REFUSED rather than mis-signalled, the direction this check is
+        # supposed to fail in.
         harness=answered[0],
         transcripts=transcripts,
         live_records=live,
@@ -1394,6 +1846,7 @@ def _cmd_kill_cli(args: list[str], env: dict[str, str] | None = None) -> None:
             harness=answered[0],
             env=resolved_env,
             as_json=as_json,
+            accounts=accounts,
         )
 
     candidate = outcome.candidate

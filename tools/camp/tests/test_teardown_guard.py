@@ -439,3 +439,170 @@ def test_the_guard_module_neither_prints_nor_exits() -> None:
     }
     assert "sys.exit" not in attrs
     assert "os.environ" not in attrs
+
+
+# ---------------------------------------------------------------------------
+# camp remove's collision with the store-keyed pool (cli.session integration)
+# ---------------------------------------------------------------------------
+
+
+class _AccountAwareHarness:
+    """A harness stand-in whose transcripts differ per the bound account —
+    read through the `env` binding `_addressable_harnesses` composes, never
+    through a key the harness contract does not define."""
+
+    name = "acctharness"
+
+    def __init__(self, transcripts_by_account, live_by_account=None):
+        self._by_account = transcripts_by_account
+        self._live_by_account = live_by_account or {}
+
+    def session_launch_env_unset(self):
+        return []
+
+    def session_launch_env_set(self, account, *, env=None):
+        return {} if account is None else {"FAKE_STORE_KEY": account}
+
+    def session_transcripts(self, workspace=None, *, env=None):
+        return list(self._by_account.get((env or {}).get("FAKE_STORE_KEY"), []))
+
+    def session_enumerate(self, workspace=None):
+        return ["probe"]
+
+    def parse_session_list(self, output):
+        records = []
+        for line in output.splitlines():
+            if "\t" not in line:
+                continue
+            session_id, cwd = line.split("\t", 1)
+            records.append(_record(session_id, Path(cwd)))
+        return records
+
+
+def _live_probe_run(harness):
+    """A `guard.subprocess.run` stand-in whose answer depends on which
+    STORE'S environment the probe was actually run under — proving the live
+    probe reads `harness.env` rather than broadcasting one shared environment
+    to every store.
+    """
+
+    def run(argv, **kwargs):
+        account = (kwargs.get("env") or {}).get("FAKE_STORE_KEY")
+        rows = harness._live_by_account.get(account, [])
+        stdout = "".join(f"{session_id}\t{cwd}\n" for session_id, cwd in rows)
+        return subprocess.CompletedProcess(argv, 0, stdout, "")
+
+    return run
+
+
+def test_a_session_in_the_second_declared_store_still_blocks_removal(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The pinned regression for `camp remove`: before the pool camp gathers
+    was keyed by (harness, store), two groups sharing a harness collapsed to
+    ONE queried store, so `gather_pool` never saw a session sitting in the
+    account the collapse discarded — and removal proceeded over it. Feeding
+    `_addressable_harnesses`'s own output into `gather_pool` proves the
+    workspace is still recognized as blocked once both stores answer.
+    """
+    import camp.cli.session as cli_session
+    import camp.launch.profile as profile
+    import camp.launch.teardown_guard as guard
+
+    ws = _workspace(tmp_path, "g", "ws")
+    harness = _AccountAwareHarness({
+        None: [],
+        "/acct/b": [_transcript(_UUID_A, ws)],
+    })
+    monkeypatch.setattr(profile, "harness_for", lambda group: harness)
+    monkeypatch.setattr(guard.subprocess, "run", _ok())
+
+    groups = [
+        {"group": {"name": "g1"}},
+        {"group": {"name": "g2"}, "launch": {"account": "/acct/b"}},
+    ]
+    stores = cli_session._addressable_harnesses(groups, env={})
+
+    transcripts, live = guard.gather_pool(stores, env={})
+    blocking = guard.blocking_sessions(
+        ws, transcripts=transcripts, live_records=live, groups=groups, env={}, now=_NOW
+    )
+
+    assert [c.session_id for c in blocking] == [_UUID_A]
+
+
+def test_a_session_in_the_default_store_still_blocks_removal_when_every_group_declares_an_account(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The pinned regression for `camp remove`: `_addressable_harnesses` only
+    ever supplied the default (no-account) store when the group list was
+    EMPTY. On a machine where every configured group declares an account —
+    the case here, both `g1` and `g2` do — the default store never entered
+    the pool at all, so a session running under it was invisible to
+    `gather_pool` and a removal of the workspace it was rooted in would
+    proceed without being blocked. Feeding `_addressable_harnesses`'s own
+    output into `gather_pool` proves the default store is queried and the
+    workspace is recognized as blocked.
+    """
+    import camp.cli.session as cli_session
+    import camp.launch.profile as profile
+    import camp.launch.teardown_guard as guard
+
+    ws = _workspace(tmp_path, "g", "ws")
+    harness = _AccountAwareHarness({
+        None: [_transcript(_UUID_A, ws)],
+        "/acct/a": [],
+        "/acct/b": [],
+    })
+    monkeypatch.setattr(profile, "harness_for", lambda group: harness)
+    monkeypatch.setattr(guard.subprocess, "run", _ok())
+
+    groups = [
+        {"group": {"name": "g1"}, "launch": {"account": "/acct/a"}},
+        {"group": {"name": "g2"}, "launch": {"account": "/acct/b"}},
+    ]
+    stores = cli_session._addressable_harnesses(groups, env={})
+
+    transcripts, live = guard.gather_pool(stores, env={})
+    blocking = guard.blocking_sessions(
+        ws, transcripts=transcripts, live_records=live, groups=groups, env={}, now=_NOW
+    )
+
+    assert [c.session_id for c in blocking] == [_UUID_A]
+
+
+def test_a_session_in_the_second_declared_store_still_blocks_removal_when_live(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The LIVE-probe half of the regression above: `_probe_transcripts`
+    already reads each store's own environment through
+    `HarnessStore.session_transcripts`'s override, but the live probe built
+    its OWN subprocess environment from the caller's ambient *env* and
+    broadcast it to every store — so a session running RIGHT NOW under a
+    second declared account was invisible to the guard, and a removal of the
+    workspace it was rooted in was not yet guaranteed to be blocked.
+    """
+    import camp.cli.session as cli_session
+    import camp.launch.profile as profile
+    import camp.launch.teardown_guard as guard
+
+    ws = _workspace(tmp_path, "g", "ws")
+    harness = _AccountAwareHarness(
+        {None: [], "/acct/b": []},
+        live_by_account={None: [], "/acct/b": [(_UUID_A, str(ws))]},
+    )
+    monkeypatch.setattr(profile, "harness_for", lambda group: harness)
+    monkeypatch.setattr(guard.subprocess, "run", _live_probe_run(harness))
+
+    groups = [
+        {"group": {"name": "g1"}},
+        {"group": {"name": "g2"}, "launch": {"account": "/acct/b"}},
+    ]
+    stores = cli_session._addressable_harnesses(groups, env={})
+
+    transcripts, live = guard.gather_pool(stores, env={})
+    blocking = guard.blocking_sessions(
+        ws, transcripts=transcripts, live_records=live, groups=groups, env={}, now=_NOW
+    )
+
+    assert [c.session_id for c in blocking] == [_UUID_A]

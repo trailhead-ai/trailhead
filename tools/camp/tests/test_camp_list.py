@@ -241,7 +241,12 @@ class TestListJson:
     Covers the group --json path and the convergence (both entry points emit
     the SAME key set)."""
 
-    _FIXED_KEYS = {"slug", "branch", "workspace_path", "group"}
+    # Every row carries `ok` — a success row states `ok: true` alongside the
+    # already-existing keys, so `ok` alone distinguishes a success row from
+    # an unparsable-group failure row (`{"ok": False, "group": None,
+    # "reason": ...}`) and a consumer never has to test for a key's absence.
+    # See docs/design/cross-group-cross-account-listing.md, lines 165-170.
+    _FIXED_KEYS = {"slug", "branch", "workspace_path", "group", "ok"}
 
     def test_json_carries_workspace_path(self, camp_cli, tmp_path, capsys):
         group = _make_group("listgrp")
@@ -267,6 +272,7 @@ class TestListJson:
             "camp list --json must emit exactly the shared schema"
         )
         assert rows[0]["group"] == "listgrp"
+        assert rows[0]["ok"] is True
 
     def test_json_empty_group_is_empty_array(self, camp_cli, tmp_path, capsys):
         group = _make_group("listgrp")
@@ -375,13 +381,24 @@ class TestListPureRead:
 # ---------------------------------------------------------------------------
 
 
-def _write_group_toml(groups_dir: Path, group_name: str) -> None:
-    """Write a minimal group config TOML with a non-existent (fake) repo_root."""
-    (groups_dir / f"{group_name}.toml").write_text(
+def _write_group_toml_named(
+    groups_dir: Path, *, file_stem: str, group_name: str
+) -> None:
+    """Write a minimal group config TOML whose FILENAME may differ from the
+    `[group].name` it declares — the general form, used directly to prove
+    ordering is by the declared group name and not by config-file load order
+    (which `load_all_groups` walks alphabetically by FILENAME)."""
+    (groups_dir / f"{file_stem}.toml").write_text(
         f'[group]\nname = "{group_name}"\n\n'
         f"[[members]]\nname = \"repo_a\"\nrepo_root = \"/nonexistent/repo\"\n\n"
         f'[branch]\npattern = "worktree-{{slug}}"\n'
     )
+
+
+def _write_group_toml(groups_dir: Path, group_name: str) -> None:
+    """Write a minimal group config TOML with a non-existent (fake) repo_root,
+    in the ordinary shape where the filename matches the declared name."""
+    _write_group_toml_named(groups_dir, file_stem=group_name, group_name=group_name)
 
 
 def _seed_manifest_raw(group_name: str, slug: str, *, state_dir: Path) -> Path:
@@ -513,3 +530,315 @@ class TestListEmptySubprocess:
         assert r.stdout == "", (
             f"empty group list must produce no stdout, got {r.stdout!r}"
         )
+
+
+# ---------------------------------------------------------------------------
+# camp list --all-groups / -g — every configured group's workspaces, merged.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def two_group_list_cli_env(tmp_path):
+    """Two configured groups, each with one seeded workspace, and a cwd
+    (tmp_path itself) from which NEITHER group resolves."""
+    config_dir = tmp_path / "camp-config"
+    groups_dir = config_dir / "groups"
+    groups_dir.mkdir(parents=True, exist_ok=True)
+    state_dir = tmp_path / "camp-state"
+    state_dir.mkdir(parents=True, exist_ok=True)
+
+    _write_group_toml(groups_dir, "groupa")
+    _write_group_toml(groups_dir, "groupb")
+
+    env = {**os.environ}
+    env["CAMP_CONFIG_DIR"] = str(config_dir)
+    env["CAMP_STATE_DIR"] = str(state_dir)
+
+    ws_a = _seed_manifest_raw("groupa", "ws-a", state_dir=state_dir)
+    ws_b = _seed_manifest_raw("groupb", "ws-b", state_dir=state_dir)
+
+    return {
+        "env": env,
+        "tmp_path": tmp_path,
+        "ws_a": ws_a,
+        "ws_b": ws_b,
+    }
+
+
+def _camp_from(env_dict: dict, cwd: Path, *args) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [sys.executable, str(_CLI_CAMP), *args],
+        capture_output=True,
+        text=True,
+        env=env_dict["env"],
+        cwd=str(cwd),
+    )
+
+
+class TestListAllGroups:
+    def test_merges_every_configured_groups_workspaces(
+        self, two_group_list_cli_env
+    ) -> None:
+        r = _camp_from(
+            two_group_list_cli_env, two_group_list_cli_env["tmp_path"], "list",
+            "--all-groups",
+        )
+        assert r.returncode == 0, f"stdout: {r.stdout}\nstderr: {r.stderr}"
+        lines = [ln for ln in r.stdout.splitlines() if ln]
+        slugs = {ln.split(None, 1)[0] for ln in lines}
+        assert slugs == {"ws-a", "ws-b"}
+
+    def test_json_carries_the_group_each_row_belongs_to(
+        self, two_group_list_cli_env
+    ) -> None:
+        r = _camp_from(
+            two_group_list_cli_env, two_group_list_cli_env["tmp_path"], "list",
+            "--all-groups", "--json",
+        )
+        assert r.returncode == 0, r.stderr
+        rows = json.loads(r.stdout)
+        assert {row["group"] for row in rows} == {"groupa", "groupb"}
+        assert {row["slug"] for row in rows} == {"ws-a", "ws-b"}
+        assert set(rows[0].keys()) == {"ok", "slug", "branch", "workspace_path", "group"}
+        assert rows[0]["ok"] is True
+
+    def test_short_and_long_spellings_produce_byte_identical_output(
+        self, two_group_list_cli_env
+    ) -> None:
+        """Compares TWO REAL invocations' captured stdout — not two calls into
+        the same formatting helper — so a spelling that silently diverged in
+        argv handling would actually be caught."""
+        long_form = _camp_from(
+            two_group_list_cli_env, two_group_list_cli_env["tmp_path"], "list",
+            "--all-groups",
+        )
+        short_form = _camp_from(
+            two_group_list_cli_env, two_group_list_cli_env["tmp_path"], "list", "-g",
+        )
+        assert long_form.returncode == 0, long_form.stderr
+        assert short_form.returncode == 0, short_form.stderr
+        assert long_form.stdout == short_form.stdout
+        assert long_form.stdout != ""
+
+    def test_rows_are_ordered_by_group_name_not_by_config_file_load_order(
+        self, tmp_path
+    ) -> None:
+        """`load_all_groups` walks config files alphabetically by FILENAME.
+        Here the file that sorts FIRST declares the group that sorts LAST by
+        NAME, so a merge that forgot to sort by group would print zzzgroup
+        before aaagroup — the opposite of what this asserts."""
+        config_dir = tmp_path / "camp-config"
+        groups_dir = config_dir / "groups"
+        groups_dir.mkdir(parents=True, exist_ok=True)
+        state_dir = tmp_path / "camp-state"
+        state_dir.mkdir(parents=True, exist_ok=True)
+
+        _write_group_toml_named(groups_dir, file_stem="aaa-file", group_name="zzzgroup")
+        _write_group_toml_named(groups_dir, file_stem="zzz-file", group_name="aaagroup")
+
+        env = {**os.environ}
+        env["CAMP_CONFIG_DIR"] = str(config_dir)
+        env["CAMP_STATE_DIR"] = str(state_dir)
+        env_dict = {"env": env}
+
+        _seed_manifest_raw("zzzgroup", "slug-in-zzz", state_dir=state_dir)
+        _seed_manifest_raw("aaagroup", "slug-in-aaa", state_dir=state_dir)
+
+        r = _camp_from(env_dict, tmp_path, "list", "--all-groups", "--json")
+        assert r.returncode == 0, r.stderr
+        rows = json.loads(r.stdout)
+        assert [row["group"] for row in rows] == ["aaagroup", "zzzgroup"]
+
+    def test_absent_the_option_output_is_unchanged(self, list_cli_env) -> None:
+        """No `--all-groups`/`-g` anywhere → identical to the pre-existing
+        single-group `camp list` surface."""
+        r = _camp(list_cli_env, "list", "--group", "listgroup")
+        assert r.returncode == 0, r.stderr
+        lines = {ln.split(None, 1)[0] for ln in r.stdout.splitlines() if ln}
+        assert lines == {"ws-alpha", "ws-beta"}
+
+    def test_all_groups_with_a_named_group_refuses(self, two_group_list_cli_env) -> None:
+        r = _camp_from(
+            two_group_list_cli_env, two_group_list_cli_env["tmp_path"],
+            "list", "--all-groups", "--group", "groupa",
+        )
+        assert r.returncode != 0, r.stdout
+        assert r.stdout == ""
+        assert "camp list: " in r.stderr
+        assert "--all-groups" in r.stderr
+
+
+# ---------------------------------------------------------------------------
+# camp list --all-groups — narrowed answers say why: no groups configured,
+# legacy suppression, unparsable sibling configs, and the silent empty case.
+# ---------------------------------------------------------------------------
+
+
+def _seed_legacy_worktree(workspace_root: Path, slug: str) -> Path:
+    """Populate the LEGACY standalone worktree registry `spine.py`'s no-group
+    `cmd_ls` reads — a row with no group, distinct from every group-config row."""
+    wt = workspace_root / "trailhead" / ".claude" / "worktrees" / slug
+    wt.mkdir(parents=True, exist_ok=True)
+    (wt / ".workspace-manifest.json").write_text(
+        json.dumps({"name": slug, "branch": f"worktree-{slug}"})
+    )
+    return wt
+
+
+@pytest.fixture()
+def no_group_env(tmp_path):
+    """No group config directory at all, plus a populated legacy registry, and
+    a cwd from which no group would resolve anyway."""
+    config_dir = tmp_path / "camp-config"
+    state_dir = tmp_path / "camp-state"
+    state_dir.mkdir(parents=True, exist_ok=True)
+    workspace_root = tmp_path / "workspace-root"
+    _seed_legacy_worktree(workspace_root, "legacy-slug")
+
+    env = {**os.environ}
+    env["CAMP_CONFIG_DIR"] = str(config_dir)
+    env["CAMP_STATE_DIR"] = str(state_dir)
+    env["WORKSPACE_ROOT"] = str(workspace_root)
+
+    return {"env": env, "tmp_path": tmp_path}
+
+
+class TestListAllGroupsNarrows:
+    def test_no_groups_configured_states_that_and_emits_no_legacy_rows(
+        self, no_group_env
+    ) -> None:
+        # Prove the fixture is capable of showing the row it denies: without
+        # the option, cwd resolves no group, so spine's legacy fallback
+        # answers with the seeded legacy row.
+        without_option = _camp_from(no_group_env, no_group_env["tmp_path"], "list")
+        assert without_option.returncode == 0, without_option.stderr
+        assert "legacy-slug" in without_option.stdout
+
+        r = _camp_from(no_group_env, no_group_env["tmp_path"], "list", "--all-groups", "--json")
+        assert r.returncode == 0, f"stdout: {r.stdout}\nstderr: {r.stderr}"
+        assert json.loads(r.stdout) == []
+        assert "no groups configured" in r.stderr
+
+    def test_legacy_registry_populated_no_row_from_it_appears_under_all_groups(
+        self, tmp_path
+    ) -> None:
+        config_dir = tmp_path / "camp-config"
+        groups_dir = config_dir / "groups"
+        groups_dir.mkdir(parents=True, exist_ok=True)
+        state_dir = tmp_path / "camp-state"
+        state_dir.mkdir(parents=True, exist_ok=True)
+        workspace_root = tmp_path / "workspace-root"
+
+        _write_group_toml(groups_dir, "onlygroup")
+        _seed_legacy_worktree(workspace_root, "legacy-slug")
+
+        env = {**os.environ}
+        env["CAMP_CONFIG_DIR"] = str(config_dir)
+        env["CAMP_STATE_DIR"] = str(state_dir)
+        env["WORKSPACE_ROOT"] = str(workspace_root)
+        env_dict = {"env": env}
+
+        _seed_manifest_raw("onlygroup", "ws-only", state_dir=state_dir)
+
+        # Prove the legacy row is reachable at all: from a cwd outside every
+        # group, without the option, it appears.
+        without_option = _camp_from(env_dict, tmp_path, "list")
+        assert without_option.returncode == 0, without_option.stderr
+        assert "legacy-slug" in without_option.stdout
+
+        r = _camp_from(env_dict, tmp_path, "list", "--all-groups", "--json")
+        assert r.returncode == 0, f"stdout: {r.stdout}\nstderr: {r.stderr}"
+        rows = json.loads(r.stdout)
+        assert {row["slug"] for row in rows} == {"ws-only"}
+        assert {row["group"] for row in rows} == {"onlygroup"}
+
+    def test_one_unparsable_group_among_several_the_others_still_answer(
+        self, tmp_path
+    ) -> None:
+        config_dir = tmp_path / "camp-config"
+        groups_dir = config_dir / "groups"
+        groups_dir.mkdir(parents=True, exist_ok=True)
+        state_dir = tmp_path / "camp-state"
+        state_dir.mkdir(parents=True, exist_ok=True)
+
+        _write_group_toml(groups_dir, "goodgroup")
+        broken = groups_dir / "brokengroup.toml"
+        broken.write_text("this is not [ valid toml")
+
+        env = {**os.environ}
+        env["CAMP_CONFIG_DIR"] = str(config_dir)
+        env["CAMP_STATE_DIR"] = str(state_dir)
+        env_dict = {"env": env}
+
+        _seed_manifest_raw("goodgroup", "ws-good", state_dir=state_dir)
+
+        r = _camp_from(env_dict, tmp_path, "list", "--all-groups", "--json")
+        assert r.returncode == 0, f"stdout: {r.stdout}\nstderr: {r.stderr}"
+        rows = json.loads(r.stdout)
+        # Every row carries `ok` — a consumer distinguishes a workspace row
+        # from a failure row by that one field alone, never by testing
+        # whether `row["slug"]` would raise.
+        ok_rows = [row for row in rows if row["ok"]]
+        failure_rows = [row for row in rows if row["ok"] is False]
+        assert {row["slug"] for row in ok_rows} == {"ws-good"}
+        assert {row["group"] for row in ok_rows} == {"goodgroup"}
+        assert str(broken) in r.stderr
+        assert "camp list: " in r.stderr
+
+        # The parser-visible half of the same defect: an unparsable group
+        # must not disappear from a --json array that otherwise looks
+        # complete — it gets an in-band ok:false row naming the config file.
+        assert len(failure_rows) == 1
+        assert str(broken) in failure_rows[0]["reason"]
+        assert failure_rows[0]["group"] is None
+
+    def test_every_group_unparsable_states_reason_and_exits_nonzero(
+        self, tmp_path
+    ) -> None:
+        config_dir = tmp_path / "camp-config"
+        groups_dir = config_dir / "groups"
+        groups_dir.mkdir(parents=True, exist_ok=True)
+        state_dir = tmp_path / "camp-state"
+        state_dir.mkdir(parents=True, exist_ok=True)
+
+        broken_a = groups_dir / "brokena.toml"
+        broken_a.write_text("not [ valid")
+        broken_b = groups_dir / "brokenb.toml"
+        broken_b.write_text("also not ] valid")
+
+        env = {**os.environ}
+        env["CAMP_CONFIG_DIR"] = str(config_dir)
+        env["CAMP_STATE_DIR"] = str(state_dir)
+        env_dict = {"env": env}
+
+        r = _camp_from(env_dict, tmp_path, "list", "--all-groups", "--json")
+        assert r.returncode != 0
+        assert r.stdout == ""
+        assert "camp list: " in r.stderr
+        assert str(broken_a) in r.stderr
+        assert str(broken_b) in r.stderr
+
+    def test_group_with_no_workspaces_contributes_no_rows_and_no_notice(
+        self, tmp_path
+    ) -> None:
+        config_dir = tmp_path / "camp-config"
+        groups_dir = config_dir / "groups"
+        groups_dir.mkdir(parents=True, exist_ok=True)
+        state_dir = tmp_path / "camp-state"
+        state_dir.mkdir(parents=True, exist_ok=True)
+
+        _write_group_toml(groups_dir, "populated")
+        _write_group_toml(groups_dir, "empty")
+        _seed_manifest_raw("populated", "ws-pop", state_dir=state_dir)
+
+        env = {**os.environ}
+        env["CAMP_CONFIG_DIR"] = str(config_dir)
+        env["CAMP_STATE_DIR"] = str(state_dir)
+        env_dict = {"env": env}
+
+        r = _camp_from(env_dict, tmp_path, "list", "--all-groups", "--json")
+        assert r.returncode == 0, f"stdout: {r.stdout}\nstderr: {r.stderr}"
+        rows = json.loads(r.stdout)
+        assert {row["slug"] for row in rows} == {"ws-pop"}
+        assert {row["group"] for row in rows} == {"populated"}
+        assert r.stderr == ""

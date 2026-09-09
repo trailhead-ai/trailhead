@@ -450,6 +450,87 @@ def test_a_group_taking_verb_still_surfaces_the_corrupt_sibling_group_toml(
 
 
 # ---------------------------------------------------------------------------
+# --all-groups / -g refusal ordering.
+#
+# `corrupt_sibling_env` carries a group toml (badgroup) that fails to load —
+# if the refusal below ran AFTER _resolve_group_for_command's config load, it
+# would surface as "camp: config error: ..." instead of the refusal itself,
+# because load_all_groups raises on the FIRST malformed file it walks past.
+# That makes this a real regression check on WHERE the refusal sits, not just
+# on whether it fires.
+# ---------------------------------------------------------------------------
+
+
+def test_all_groups_and_a_named_group_refuse_before_any_config_loads(
+    corrupt_sibling_env: dict[str, str],
+) -> None:
+    result = _run(
+        ["sessions", "--all-groups", "--group", "testgrp"], env=corrupt_sibling_env
+    )
+    _assert_clean_refusal(result, needle="--all-groups", verb="sessions")
+    assert "config error" not in (result.stdout + result.stderr)
+
+
+def test_all_groups_short_spelling_and_a_named_group_also_refuse(
+    corrupt_sibling_env: dict[str, str],
+) -> None:
+    result = _run(["sessions", "-g", "--group", "testgrp"], env=corrupt_sibling_env)
+    _assert_clean_refusal(result, needle="--all-groups", verb="sessions")
+    assert "config error" not in (result.stdout + result.stderr)
+
+
+def test_all_groups_has_no_meaning_for_a_verb_that_does_not_read_it(
+    corrupt_sibling_env: dict[str, str],
+) -> None:
+    """`--all-groups` is rejected outright where it has no meaning, rather than
+    being silently ignored — checked on a verb that reaches this refusal
+    before group config is ever loaded, same as the mutual-exclusion case."""
+    result = _run(["status", "--all-groups"], env=corrupt_sibling_env)
+    _assert_clean_refusal(result, needle="--all-groups", verb="status")
+    assert "config error" not in (result.stdout + result.stderr)
+
+
+def test_camp_foreach_passes_a_payload_flag_named_like_all_groups_through_unchanged(
+    tmp_path: Path,
+) -> None:
+    """`camp foreach <cmd…>` forwards EVERYTHING after the verb (and its own
+    `--name`/`--fail-fast`/`--json` flags) to the wrapped command verbatim —
+    `-g`/`--all-groups` there belongs to that command, not to camp. The
+    pinned regression: `--all-groups`/`-g` used to be scanned for across the
+    WHOLE of argv before the verb was even classified, so `camp foreach git
+    log -g` died with "--all-groups has no meaning here" instead of ever
+    reaching `git log`.
+    """
+    worktree = tmp_path / "trailhead" / ".claude" / "worktrees" / "myslug"
+    worktree.mkdir(parents=True)
+    (worktree / ".workspace-manifest.json").write_text(
+        '{"name": "myslug", "repos": [{"name": "repo-a"}]}', encoding="utf-8"
+    )
+    env = {
+        "WORKSPACE_ROOT": str(tmp_path),
+        "CAMP_CONFIG_DIR": str(tmp_path / "config"),
+        "CAMP_STATE_DIR": str(tmp_path / "state"),
+    }
+
+    result = _run(
+        ["foreach", "--name", "myslug", "echo", "-g", "--all-groups"], env=env
+    )
+
+    assert "has no meaning here" not in result.stderr
+    assert result.returncode == 0, result.stderr
+    assert "-g --all-groups" in result.stdout
+
+
+def _assert_clean_refusal(result, *, needle: str, verb: str) -> None:
+    assert result.returncode != 0, result.stdout
+    assert result.stdout == ""
+    lines = [line for line in result.stderr.strip().splitlines() if line.strip()]
+    assert len(lines) == 1, result.stderr
+    assert lines[0].startswith(f"camp {verb}: "), lines[0]
+    assert needle in lines[0], lines[0]
+
+
+# ---------------------------------------------------------------------------
 # camp help — the launch surface's addressing forms and exit-code contract.
 #
 # The help menu is the operator's index of what camp can do, and `camp launch`
@@ -498,7 +579,7 @@ def test_help_names_the_recoverable_listing_and_its_flags(help_text: str) -> Non
 
 def test_help_names_the_live_sessions_dir_scope(help_text: str) -> None:
     """`--dir` scopes the LIVE listing too, not only the recoverable one."""
-    live_line = "camp sessions [<slug>] [--dir <path>] [--json]"
+    live_line = "camp sessions [<slug>] [--dir <path>] [--all-groups|-g] [--json]"
     assert live_line in help_text
 
 

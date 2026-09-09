@@ -108,22 +108,41 @@ from trailhead.harness.claude_code import ClaudeCodeHarness
 #: seam's subtree scoping (a row is in scope when its cwd is EQUAL TO or UNDER
 #: the scope path, on resolved paths) so the fake answers a scoped enumeration
 #: the way the contract says a harness must.
+#:
+#: The sessions file is read from THIS PROCESS's own environment
+#: (CAMP_FAKE_SESSIONS_FILE), not from argv — so the SAME script, run under
+#: two different stores' bound environments, reads two different files. That
+#: is what lets a store-scoped enumeration really differ per store rather
+#: than every invocation reading whichever file the parent process happened
+#: to have ambient. An ENUMERATE_FAIL marker beside that file makes just THIS
+#: store's enumeration fail, without touching CAMP_FAKE_ENUMERATE (which is
+#: read once, in the parent process, and so is the same for every store).
 _ENUMERATE_FILTER = """
+import os
 import sys
 from pathlib import Path
 
-rows_path = sys.argv[1]
-scope = sys.argv[2]
+calls_file = os.environ.get("CAMP_FAKE_ENUMERATE_CALLS_FILE")
+if calls_file:
+    with open(calls_file, "a") as _calls_handle:
+        print("1", file=_calls_handle)
+
+rows_path = os.environ.get("CAMP_FAKE_SESSIONS_FILE")
+scope = sys.argv[1]
 scope_path = Path(scope).resolve() if scope else None
-for line in Path(rows_path).read_text().splitlines():
-    if not line.strip():
-        continue
-    session_id, cwd = line.split("\\t", 1)
-    if scope_path is not None:
-        resolved = Path(cwd).resolve()
-        if resolved != scope_path and scope_path not in resolved.parents:
+marker_dir = Path(rows_path).parent if rows_path else None
+if marker_dir is not None and (marker_dir / "ENUMERATE_FAIL").exists():
+    sys.exit(1)
+if rows_path and Path(rows_path).exists():
+    for line in Path(rows_path).read_text().splitlines():
+        if not line.strip():
             continue
-    print(line)
+        session_id, cwd = line.split("\\t", 1)
+        if scope_path is not None:
+            resolved = Path(cwd).resolve()
+            if resolved != scope_path and scope_path not in resolved.parents:
+                continue
+        print(line)
 """
 
 
@@ -142,6 +161,24 @@ class FakeHarness(ClaudeCodeHarness):
 
     def session_launch_env_unset(self):
         return []
+
+    def session_launch_env_set(self, account, *, env=None):
+        """Bind CAMP_FAKE_SESSIONS_FILE to a per-account file alongside the
+        real CLAUDE_CONFIG_DIR binding, so two groups declaring different
+        accounts really do read and write two different fake session tables
+        — the same way two accounts read and write two different real Claude
+        Code config dirs.
+        """
+        binding = dict(super().session_launch_env_set(account, env=env))
+        config_dir = binding.get("CLAUDE_CONFIG_DIR")
+        if config_dir is not None:
+            account_dir = Path(config_dir)
+            account_dir.mkdir(parents=True, exist_ok=True)
+            sessions_file = account_dir / "sessions.tsv"
+            if not sessions_file.exists():
+                sessions_file.write_text("", encoding="utf-8")
+            binding["CAMP_FAKE_SESSIONS_FILE"] = str(sessions_file)
+        return binding
 
     def session_transcripts(self, workspace=None, *, env=None):
         mode = os.environ.get("CAMP_FAKE_TRANSCRIPTS")
@@ -170,7 +207,6 @@ class FakeHarness(ClaudeCodeHarness):
             sys.executable,
             "-c",
             _ENUMERATE_FILTER,
-            os.environ["CAMP_FAKE_SESSIONS_FILE"],
             str(workspace) if workspace is not None else "",
         ]
 
@@ -195,6 +231,15 @@ class FakeHarness(ClaudeCodeHarness):
 
 
 _registry._HARNESSES[FakeHarness.name] = FakeHarness
+# `_addressable_harnesses` always probes camp's baked-in default binary
+# ("claude") alongside every configured group's own store — registering the
+# fake under that canonical name too means the always-present default store
+# resolves to the SAME controllable stand-in every declared no-account group
+# already uses, so it dedupes against a no-account fakeharness group exactly
+# as camp's own keying intends, rather than silently substituting a real,
+# environment-dependent `claude` binary into this suite's total-failure
+# scenarios.
+_registry._HARNESSES["claude_code"] = FakeHarness
 '''
 
 _TMUX_STUB = '''#!/usr/bin/env python3
@@ -903,6 +948,75 @@ def _register_live(cli_env, session_id: str, cwd: Path) -> None:
         handle.write(f"{session_id}\t{cwd}\n")
 
 
+def _register_live_at(account: Path, session_id: str, cwd: Path) -> None:
+    """Add a row to a per-account fake sessions table — a credential store
+    OTHER than the fixture's shared default, for tests spanning more than
+    one store. Mirrors `_register_live`, at the file
+    `FakeHarness.session_launch_env_set` binds a declared account to.
+    """
+    account.mkdir(parents=True, exist_ok=True)
+    with (account / "sessions.tsv").open("a", encoding="utf-8") as handle:
+        handle.write(f"{session_id}\t{cwd}\n")
+
+
+def _poison_enumerate_at(account: Path) -> None:
+    """Make the fake harness's enumeration fail for just THIS account's
+    store, without affecting any other store's answer.
+    """
+    account.mkdir(parents=True, exist_ok=True)
+    (account / "ENUMERATE_FAIL").touch()
+
+
+def _seed_transcript_at(claude_dir: Path, session_id: str, cwd: Path) -> Path:
+    """Author one harness transcript directly under *claude_dir* — a credential
+    store OTHER than the fixture's shared TRAILHEAD_CLAUDE_DIR, for tests
+    spanning more than one store.
+    """
+    munged = str(cwd).replace("/", "-").replace(".", "-")
+    directory = claude_dir / "projects" / munged
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / f"{session_id}.jsonl"
+    path.write_text(json.dumps({"type": "user", "cwd": str(cwd)}) + "\n", encoding="utf-8")
+    return path
+
+
+def _add_account_group(
+    cli_env, name: str, account: Path, repo: Path, *, declared: str | None = None
+) -> None:
+    """Author a fresh fakeharness group declaring `[launch] account`.
+
+    `declared` overrides the literal string written into the config when the
+    test needs the declaration to differ textually from the directory it names
+    — a non-canonical spelling of the same path, used to prove camp carries the
+    declaration through rather than a canonicalized form of it.
+    """
+    _init_git_repo(repo)
+    result = _camp(cli_env, "group", name, "--member", f"member={repo}")
+    assert result.returncode == 0, result.stderr
+    _set_harness_binary(cli_env["config_dir"], name, "fakeharness")
+    path = cli_env["config_dir"] / "groups" / f"{name}.toml"
+    written = str(account) if declared is None else declared
+    path.write_text(
+        path.read_text(encoding="utf-8") + f'\n[launch]\naccount = "{written}"\n',
+        encoding="utf-8",
+    )
+
+
+def _env_without_shared_claude_dir(cli_env) -> dict[str, str]:
+    """The fixture's env, minus TRAILHEAD_CLAUDE_DIR and with a safe HOME.
+
+    Every OTHER test in this file relies on TRAILHEAD_CLAUDE_DIR pinning every
+    declared-nothing store to one shared, hermetic directory. Proving that two
+    DECLARED accounts resolve to two DIFFERENT stores needs the opposite: each
+    account's own `CLAUDE_CONFIG_DIR` binding, uncontested by that override —
+    Axiom 6 is kept instead by pointing HOME at a tmp_path directory nothing
+    else in the suite reads or writes.
+    """
+    env = {k: v for k, v in cli_env["env"].items() if k != "TRAILHEAD_CLAUDE_DIR"}
+    env["HOME"] = str(cli_env["tmp_path"] / "safe-home")
+    return env
+
+
 def _workspace_launch_dir(cli_env, slug: str) -> Path:
     """The directory a slug launch resolves to — the transcript's recorded cwd."""
     return Path(_new_workspace(cli_env, slug)).resolve()
@@ -1291,6 +1405,48 @@ def test_camp_launch_resume_ambiguous_json_rows_carry_the_candidate_key_set(
     assert _state_tree(cli_env) == before
 
 
+def test_camp_launch_resume_refuses_a_ref_matching_under_two_credential_stores(
+    cli_env,
+) -> None:
+    """The same collision `camp kill` refuses is refused on the resume path too:
+    both stores answer, the match is ambiguous, and nothing is spawned.
+    """
+    account_a = cli_env["tmp_path"] / "resume-account-a"
+    account_b = cli_env["tmp_path"] / "resume-account-b"
+    _add_account_group(
+        cli_env, "resumea", account_a, cli_env["tmp_path"] / "repo-resumea"
+    )
+    _add_account_group(
+        cli_env, "resumeb", account_b, cli_env["tmp_path"] / "repo-resumeb"
+    )
+
+    root_a = cli_env["tmp_path"] / "resume-root-a"
+    root_b = cli_env["tmp_path"] / "resume-root-b"
+    root_a.mkdir()
+    root_b.mkdir()
+    _seed_transcript_at(account_a, "resume-shared-aaa", root_a)
+    _seed_transcript_at(account_b, "resume-shared-bbb", root_b)
+
+    env = _env_without_shared_claude_dir(cli_env)
+    result = subprocess.run(
+        [sys.executable, str(_CLI_CAMP), "launch", "--resume", "resume-shared-"],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(cli_env["tmp_path"]),
+    )
+
+    assert result.returncode == 2, result.stderr
+    rows = [line for line in result.stdout.splitlines() if line.strip()]
+    assert len(rows) == 2, result.stdout
+    ids = {row.split()[1] for row in rows}
+    assert ids == {"resume-shared-aaa", "resume-shared-bbb"}
+    message = result.stderr.strip()
+    assert message.startswith("camp launch: 'resume-shared-' matches 2 sessions")
+    assert str(account_a) in message
+    assert str(account_b) in message
+
+
 def test_camp_launch_resume_zero_match_messages_differ_by_whether_the_pool_is_empty(
     cli_env,
 ) -> None:
@@ -1505,6 +1661,7 @@ def test_camp_sessions_json_uses_normalized_fields_only(cli_env) -> None:
     records = json.loads(result.stdout)
     assert len(records) == 1
     assert set(records[0]) == {
+        "ok",
         "session_id",
         "cwd",
         "kind",
@@ -1512,21 +1669,276 @@ def test_camp_sessions_json_uses_normalized_fields_only(cli_env) -> None:
         "name",
         "pid",
         "started_at",
+        "group",
+        "account",
     }
+    assert records[0]["ok"] is True
+    assert isinstance(records[0]["session_id"], str)
+    assert isinstance(records[0]["cwd"], str)
+    assert isinstance(records[0]["kind"], str)
+    assert isinstance(records[0]["controllable"], bool)
+    assert isinstance(records[0]["pid"], (int, type(None)))
+    # mygroup declares no [launch] account — the row states the group it
+    # resolved into and a null account, never a blank string.
+    assert records[0]["group"] == "mygroup"
+    assert records[0]["account"] is None
+
+
+def test_camp_sessions_json_carries_a_declared_account_verbatim(cli_env) -> None:
+    """A session whose cwd resolves into a group declaring an account carries
+    that exact declared string — byte for byte, not expanded or normalized.
+    """
+    account = cli_env["tmp_path"] / "verbatim-account"
+    # Declared in a deliberately NON-canonical spelling of the very same
+    # directory: absolute, so the harness still binds it, but carrying a
+    # redundant "/." segment that `Path.resolve()` would silently collapse.
+    # A canonical probe would read identically before and after normalization
+    # and so could never show whether camp normalizes what it carries.
+    declared = f"{account}/."
+    repo = cli_env["tmp_path"] / "repo-verbatim"
+    _add_account_group(cli_env, "verbatim", account, repo, declared=declared)
+    _register_live_at(account, "verbatim-sess", repo)
+
+    env = _env_without_shared_claude_dir(cli_env)
+    result = subprocess.run(
+        [sys.executable, str(_CLI_CAMP), "sessions", "--group", "verbatim", "--json"],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(cli_env["tmp_path"]),
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert len(payload) == 1
+    assert payload[0]["group"] == "verbatim"
+    assert payload[0]["account"] == declared
+    # The declaration is carried, not canonicalized: the collapsed form is what
+    # any expansion/resolution step would have produced instead.
+    assert payload[0]["account"] != str(account)
+
+
+def test_camp_sessions_two_spellings_of_the_same_account_dedupe_to_one_store(
+    cli_env,
+) -> None:
+    """Two groups declaring the SAME credential-store directory under two
+    different spellings must be one pool entry, not two — a session sitting
+    in that shared store must appear exactly once, not once per spelling.
+    """
+    account = cli_env["tmp_path"] / "shared-account"
+    repo_a = cli_env["tmp_path"] / "repo-dedupe-a"
+    repo_b = cli_env["tmp_path"] / "repo-dedupe-b"
+    _add_account_group(cli_env, "dedupea", account, repo_a, declared=str(account))
+    # Deliberately a non-canonical spelling of the identical directory a
+    # different group already declared canonically — the same collapsing
+    # form `test_camp_sessions_json_carries_a_declared_account_verbatim`
+    # uses to prove the verbatim pin, reused here to prove two spellings of
+    # one directory still bind to one physical store.
+    _add_account_group(cli_env, "dedupeb", account, repo_b, declared=f"{account}/.")
+    _register_live_at(account, "dedupe-sess", repo_a)
+
+    env = _env_without_shared_claude_dir(cli_env)
+    result = subprocess.run(
+        [sys.executable, str(_CLI_CAMP), "sessions", "--group", "dedupea", "--json"],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(cli_env["tmp_path"]),
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert [row["session_id"] for row in payload] == ["dedupe-sess"]
+    # The surviving pool entry keeps the FIRST-declared spelling — "dedupea"
+    # loads before "dedupeb" (config files are read in filename order) and
+    # declared the canonical form, so that is what the row carries, not the
+    # collapsing "/." spelling declared second.
+    assert payload[0]["account"] == str(account)
+
+
+def test_camp_sessions_json_nulls_group_and_account_outside_every_group(cli_env) -> None:
+    """A session whose cwd resolves into no configured group is still listed,
+    with a null group and a null account — never dropped, never a raised error.
+
+    Scoped by `--dir`, not by a bare group name: `--dir` narrows the pool by
+    path, not by group attribution, so this listing is not subject to the
+    group-name filter a group-named query applies — the one context where an
+    unattributable row is still observable on the live listing.
+    """
+    outside = cli_env["tmp_path"] / "not-a-member-repo"
+    outside.mkdir()
+    _register_live(cli_env, "outside-sess", outside)
+
+    result = _camp(
+        cli_env, "sessions", "--group", "mygroup", "--dir", str(outside), "--json"
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    row = next(r for r in payload if r["session_id"] == "outside-sess")
+    assert row["group"] is None
+    assert row["account"] is None
+
+
+def test_camp_sessions_json_attributes_member_repo_cwd_same_as_workspace_cwd(
+    cli_env,
+) -> None:
+    """Group attribution uses the SAME resolver the dispatcher uses: a session
+    rooted in a member repository checkout (the resolver's step-2 fallback)
+    attributes to its group exactly like one rooted in a workspace (step 1).
+    """
+    launch_dir = _workspace_launch_dir(cli_env, "feat-attr")
+    _register_live(cli_env, "workspace-sess", launch_dir)
+    # repo_a is mygroup's configured member repo root (see cli_env fixture).
+    _register_live(cli_env, "repo-sess", cli_env["tmp_path"] / "repo_a")
+
+    result = _camp(cli_env, "sessions", "--group", "mygroup", "--json")
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    by_id = {row["session_id"]: row for row in payload}
+    assert by_id["workspace-sess"]["group"] == "mygroup"
+    assert by_id["repo-sess"]["group"] == "mygroup"
+
+
+def test_camp_sessions_group_named_answer_excludes_the_default_stores_session(
+    cli_env,
+) -> None:
+    """The recorded reproduction, pinned: naming a group that declares its own
+    account must return that group's sessions and NONE of the sessions running
+    under the shell's ambient (default) credential store — the measured defect
+    where `camp sessions --group <name>` answered with another group's
+    sessions because the named group was consumed to pick a config and then
+    discarded rather than narrowing the answer.
+    """
+    account = cli_env["tmp_path"] / "repro-account"
+    _add_account_group(cli_env, "repro", account, cli_env["tmp_path"] / "repo-repro")
+    _register_live_at(account, "repro-session", cli_env["tmp_path"] / "repo-repro")
+    # mygroup declares no account, so its session is read from the DEFAULT
+    # store this ambient env resolves to — the store the shell is "bound to".
+    _register_live(cli_env, "default-store-session", cli_env["tmp_path"] / "repo_a")
+
+    env = _env_without_shared_claude_dir(cli_env)
+    result = subprocess.run(
+        [sys.executable, str(_CLI_CAMP), "sessions", "--group", "repro"],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(cli_env["tmp_path"]),
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "repro-session" in result.stdout
+    assert "default-store-session" not in result.stdout
+
+
+def test_camp_sessions_group_named_answer_is_empty_when_nothing_runs_there(
+    cli_env,
+) -> None:
+    """Naming a group with nothing running returns an empty answer — the SAME
+    store's session, running under a DIFFERENT configured group, must not
+    fill in for it.
+    """
+    repo_empty = cli_env["tmp_path"] / "repo-emptygroup"
+    _init_git_repo(repo_empty)
+    result = _camp(cli_env, "group", "emptygroup", "--member", f"member={repo_empty}")
+    assert result.returncode == 0, result.stderr
+    _set_harness_binary(cli_env["config_dir"], "emptygroup", "fakeharness")
+    # emptygroup declares no account, so it shares mygroup's default store —
+    # the session below is real and enumerable, just attributed elsewhere.
+    _register_live(cli_env, "mygroup-sess", cli_env["tmp_path"] / "repo_a")
+
+    result = _camp(cli_env, "sessions", "--group", "emptygroup")
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == ""
+
+
+def test_camp_sessions_json_group_named_answer_carries_no_foreign_group_attribution(
+    cli_env,
+) -> None:
+    """Every row a group-named JSON answer carries is attributed to the NAMED
+    group — checked over the WHOLE returned set, not by the absence of one
+    known-foreign row, so a filter that drops everything cannot pass this
+    vacuously.
+    """
+    account = cli_env["tmp_path"] / "foreign-account"
+    _add_account_group(cli_env, "foreign", account, cli_env["tmp_path"] / "repo-foreign")
+    _register_live_at(account, "foreign-sess", cli_env["tmp_path"] / "repo-foreign")
+    # Same pool, DIFFERENT group's store.
+    _register_live(cli_env, "mygroup-sess", cli_env["tmp_path"] / "repo_a")
+
+    env = _env_without_shared_claude_dir(cli_env)
+    result = subprocess.run(
+        [sys.executable, str(_CLI_CAMP), "sessions", "--group", "mygroup", "--json"],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(cli_env["tmp_path"]),
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    ok_rows = [row for row in payload if row["ok"] is True]
+    # A vacuous (empty) filtered answer would satisfy "no foreign row" too —
+    # guard against that by requiring the named group's own row to be present.
+    assert ok_rows
+    assert all(row["group"] == "mygroup" for row in ok_rows)
+    assert {row["session_id"] for row in ok_rows} == {"mygroup-sess"}
+
+
+def test_camp_sessions_json_excludes_a_session_outside_every_group(cli_env) -> None:
+    """A session outside every group is excluded from a group-named answer —
+    naming a group narrows the answer to that group's rows, it does not add
+    an unattributable row alongside them.
+    """
+    outside = cli_env["tmp_path"] / "not-a-member-repo"
+    outside.mkdir()
+    _register_live(cli_env, "outside-sess", outside)
+    _register_live(cli_env, "inside-sess", cli_env["tmp_path"] / "repo_a")
+
+    result = _camp(cli_env, "sessions", "--group", "mygroup", "--json")
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    ids = {row["session_id"] for row in payload}
+    assert "outside-sess" not in ids
+    assert "inside-sess" in ids
+
+
+def test_camp_sessions_group_named_via_cwd_refuses_unconfigured_group(cli_env) -> None:
+    """Naming an unconfigured group refuses with a stated reason rather than
+    answering from anywhere — exercised through the real CLI dispatch path
+    (`cli/dispatch.py`'s group resolution), not a direct call into this
+    module.
+    """
+    result = _camp(
+        cli_env, "sessions", "--group", "totallyunconfigured", cwd=cli_env["tmp_path"]
+    )
+
+    _assert_clean_refusal(result, needle="no group resolved", verb="sessions")
 
 
 @pytest.mark.parametrize("mode", ["fail", "missing", "none"])
-def test_camp_sessions_degrades_to_a_stderr_notice_and_exit_zero(cli_env, mode: str) -> None:
+def test_camp_sessions_every_store_failing_exits_nonzero_with_no_rows(
+    cli_env, mode: str
+) -> None:
+    """Every addressable store failing is a REFUSAL, not an empty answer.
+
+    `--group mygroup` puts exactly one store in the pool (badgroup's harness is
+    unnameable and contributes nothing), so making that one store's enumeration
+    fail — however it fails — is the total-failure case: no rows, a stated
+    reason, and a non-zero exit, so a script cannot read "nothing running" off
+    what is actually "camp could not tell".
+    """
     result = _camp(
         cli_env, "sessions", "--group", "mygroup", extra_env={"CAMP_FAKE_ENUMERATE": mode}
     )
 
-    assert result.returncode == 0, result.stderr
-    assert result.stdout == ""
-    assert "camp sessions: could not determine" in result.stderr
+    _assert_clean_refusal(result, needle="every credential store failed", verb="sessions")
 
 
-def test_camp_sessions_degraded_json_still_prints_an_empty_list(cli_env) -> None:
+def test_camp_sessions_total_failure_json_emits_no_array_at_all(cli_env) -> None:
     result = _camp(
         cli_env,
         "sessions",
@@ -1536,17 +1948,468 @@ def test_camp_sessions_degraded_json_still_prints_an_empty_list(cli_env) -> None
         extra_env={"CAMP_FAKE_ENUMERATE": "fail"},
     )
 
-    assert result.returncode == 0, result.stderr
-    assert json.loads(result.stdout) == []
-    assert "camp sessions: could not determine" in result.stderr
+    assert result.returncode != 0, result.stdout
+    assert result.stdout == ""
+    with pytest.raises(json.JSONDecodeError):
+        json.loads(result.stdout)
+    assert "camp sessions: could not enumerate" in result.stderr
 
 
-def test_camp_sessions_unknown_harness_degrades(cli_env) -> None:
+def test_camp_sessions_survives_a_group_whose_harness_camp_cannot_name(cli_env) -> None:
+    """`badgroup`'s harness never becomes a pool candidate at all — it is not
+    a failing store, it is one that was never addressable. This is a
+    corrected pin: an earlier version of this test asserted the listing
+    answered silently in this case, which reads as "nothing is running" when
+    the true answer is "camp could not tell" — exactly the confident-wrong
+    answer this whole listing exists to remove. The corrected contract is a
+    notice naming the group, an empty stdout, and a clean (zero) exit — a
+    degrade, not a refusal, because a named group whose sessions cannot be
+    determined is still a question the caller can move past.
+    """
     result = _camp(cli_env, "sessions", "--group", "badgroup")
 
     assert result.returncode == 0, result.stderr
     assert result.stdout == ""
+    assert "camp sessions: could not determine the live sessions for group 'badgroup'" in result.stderr
+
+
+def test_camp_sessions_with_no_addressable_store_at_all_degrades(cli_env) -> None:
+    """Every configured group's harness is unnameable → the pool itself is
+    empty, distinct from every store in a non-empty pool failing to answer.
+    """
+    mygroup_toml = cli_env["config_dir"] / "groups" / "mygroup.toml"
+    mygroup_toml.write_text(
+        mygroup_toml.read_text(encoding="utf-8").replace("fakeharness", "alsonosuchharness"),
+        encoding="utf-8",
+    )
+
+    result = _camp(cli_env, "sessions", "--group", "mygroup")
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == ""
     assert "camp sessions: could not determine" in result.stderr
+
+
+def test_camp_sessions_lists_a_session_running_under_a_non_default_credential_store(
+    cli_env,
+) -> None:
+    """A shell bound to the default credential store still sees a session
+    running under a group's OWN declared account: the listing asks every
+    declared store, not whichever one the shell happens to carry.
+    """
+    account = cli_env["tmp_path"] / "nondefault-account"
+    launch_dir = cli_env["tmp_path"] / "repo-nondefault"
+    _add_account_group(cli_env, "nondefault", account, launch_dir)
+    _register_live_at(account, "nondefault-session", launch_dir)
+
+    env = _env_without_shared_claude_dir(cli_env)
+    result = subprocess.run(
+        [sys.executable, str(_CLI_CAMP), "sessions", "--group", "nondefault"],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(cli_env["tmp_path"]),
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "nondefault-session" in result.stdout
+    assert str(launch_dir) in result.stdout
+
+
+def test_camp_sessions_merges_two_stores_each_holding_a_session(cli_env) -> None:
+    """Two stores, each running a session under a DIFFERENT declared account,
+    produce ONE merged answer containing both.
+
+    Scoped by `--dir` over their shared parent rather than by a group name:
+    the two sessions belong to two DIFFERENT groups, so a group-named query
+    would correctly narrow to one of them — this test's subject is the
+    merge across stores, which `--dir` observes without that narrowing.
+    """
+    account_a = cli_env["tmp_path"] / "merge-account-a"
+    account_b = cli_env["tmp_path"] / "merge-account-b"
+    _add_account_group(cli_env, "mergea", account_a, cli_env["tmp_path"] / "repo-mergea")
+    _add_account_group(cli_env, "mergeb", account_b, cli_env["tmp_path"] / "repo-mergeb")
+    root_a = cli_env["tmp_path"] / "merge-root-a"
+    root_b = cli_env["tmp_path"] / "merge-root-b"
+    root_a.mkdir()
+    root_b.mkdir()
+    _register_live_at(account_a, "merge-sess-aaa", root_a)
+    _register_live_at(account_b, "merge-sess-bbb", root_b)
+
+    env = _env_without_shared_claude_dir(cli_env)
+    result = subprocess.run(
+        [
+            sys.executable, str(_CLI_CAMP), "sessions",
+            "--group", "mergea", "--dir", str(cli_env["tmp_path"]), "--json",
+        ],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(cli_env["tmp_path"]),
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    ids = {row["session_id"] for row in payload}
+    assert ids == {"merge-sess-aaa", "merge-sess-bbb"}
+    assert all(row["ok"] is True for row in payload)
+
+
+def test_camp_sessions_all_groups_merges_every_configured_groups_sessions(cli_env) -> None:
+    """`--all-groups` widens rather than narrows: two DIFFERENT groups' sessions
+    both come back in ONE answer, with no `--group` and no cwd that resolves
+    to either — the opposite of the ordinary bare-group-named query, which
+    would narrow to one of them.
+    """
+    account_a = cli_env["tmp_path"] / "allgroups-account-a"
+    account_b = cli_env["tmp_path"] / "allgroups-account-b"
+    _add_account_group(cli_env, "allgroupsa", account_a, cli_env["tmp_path"] / "repo-agsa")
+    _add_account_group(cli_env, "allgroupsb", account_b, cli_env["tmp_path"] / "repo-agsb")
+    _register_live_at(account_a, "ag-sess-aaa", cli_env["tmp_path"] / "repo-agsa")
+    _register_live_at(account_b, "ag-sess-bbb", cli_env["tmp_path"] / "repo-agsb")
+
+    env = _env_without_shared_claude_dir(cli_env)
+    result = subprocess.run(
+        [sys.executable, str(_CLI_CAMP), "sessions", "--all-groups", "--json"],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(cli_env["tmp_path"]),
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    ok_rows = [row for row in payload if row["ok"] is True]
+    ids = {row["session_id"] for row in ok_rows}
+    assert ids == {"ag-sess-aaa", "ag-sess-bbb"}
+    groups = {row["group"] for row in ok_rows}
+    assert groups == {"allgroupsa", "allgroupsb"}
+
+
+def test_camp_sessions_all_groups_short_and_long_spellings_are_byte_identical(
+    cli_env,
+) -> None:
+    """Compares stdout from TWO REAL invocations, not two calls into the same
+    formatting helper."""
+    account_a = cli_env["tmp_path"] / "spelling-account-a"
+    _add_account_group(cli_env, "spellinga", account_a, cli_env["tmp_path"] / "repo-spa")
+    _register_live_at(account_a, "spelling-sess", cli_env["tmp_path"] / "repo-spa")
+
+    env = _env_without_shared_claude_dir(cli_env)
+    long_form = subprocess.run(
+        [sys.executable, str(_CLI_CAMP), "sessions", "--all-groups"],
+        capture_output=True, text=True, env=env, cwd=str(cli_env["tmp_path"]),
+    )
+    short_form = subprocess.run(
+        [sys.executable, str(_CLI_CAMP), "sessions", "-g"],
+        capture_output=True, text=True, env=env, cwd=str(cli_env["tmp_path"]),
+    )
+
+    assert long_form.returncode == 0, long_form.stderr
+    assert short_form.returncode == 0, short_form.stderr
+    assert long_form.stdout == short_form.stdout
+    assert "spelling-sess" in long_form.stdout
+
+
+def test_camp_sessions_all_groups_orders_rows_by_group_then_within_group_order(
+    cli_env,
+) -> None:
+    """The pool is walked in config-FILE load order (alphabetical by filename),
+    while the answer must be ordered by declared group NAME — so this test
+    names the group whose config file loads FIRST such that its group NAME
+    sorts LAST, and vice versa, and asserts the printed order follows the
+    NAME, not the file load order.
+    """
+    account_first_file = cli_env["tmp_path"] / "order-account-aaa-file"
+    account_second_file = cli_env["tmp_path"] / "order-account-zzz-file"
+    # File "aaa-order.toml" loads FIRST but declares group "zzzorder".
+    _add_account_group(
+        cli_env, "aaa-order", account_first_file, cli_env["tmp_path"] / "repo-order-1"
+    )
+    _add_account_group(
+        cli_env, "zzz-order", account_second_file, cli_env["tmp_path"] / "repo-order-2"
+    )
+    # Rewrite the two just-authored configs so their FILE STEM and their
+    # declared [group].name diverge from each other and from one another's
+    # original names, without touching how `_add_account_group` wired them.
+    aaa_path = cli_env["config_dir"] / "groups" / "aaa-order.toml"
+    zzz_path = cli_env["config_dir"] / "groups" / "zzz-order.toml"
+    aaa_path.write_text(
+        aaa_path.read_text(encoding="utf-8").replace(
+            'name = "aaa-order"', 'name = "zzzorder"'
+        ),
+        encoding="utf-8",
+    )
+    zzz_path.write_text(
+        zzz_path.read_text(encoding="utf-8").replace(
+            'name = "zzz-order"', 'name = "aaaorder"'
+        ),
+        encoding="utf-8",
+    )
+    _register_live_at(account_first_file, "order-sess-in-zzzorder", cli_env["tmp_path"] / "repo-order-1")
+    _register_live_at(account_second_file, "order-sess-in-aaaorder", cli_env["tmp_path"] / "repo-order-2")
+
+    env = _env_without_shared_claude_dir(cli_env)
+    result = subprocess.run(
+        [sys.executable, str(_CLI_CAMP), "sessions", "--all-groups", "--json"],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(cli_env["tmp_path"]),
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    ok_rows = [row for row in payload if row["ok"] is True]
+    assert [row["group"] for row in ok_rows] == ["aaaorder", "zzzorder"]
+
+
+def test_camp_sessions_all_groups_with_a_named_group_refuses_with_zero_enumerations(
+    cli_env,
+) -> None:
+    """Naming a single group alongside `--all-groups` refuses before a single
+    harness is ever asked anything — proven by a counter the fake harness's
+    enumeration subprocess itself increments on every invocation, which must
+    stay at zero.
+    """
+    calls_file = cli_env["tmp_path"] / "enumerate-calls.tsv"
+
+    result = _camp(
+        cli_env,
+        "sessions",
+        "--all-groups",
+        "--group",
+        "mygroup",
+        extra_env={"CAMP_FAKE_ENUMERATE_CALLS_FILE": str(calls_file)},
+    )
+
+    _assert_clean_refusal(result, needle="--all-groups", verb="sessions")
+    assert not calls_file.exists() or calls_file.read_text() == ""
+
+
+def test_camp_sessions_all_groups_with_a_positional_slug_refuses_with_zero_enumerations(
+    cli_env,
+) -> None:
+    """`camp sessions -g <slug>` names one workspace alongside the option that
+    widens to every group — the same narrow-vs-widen contradiction as naming
+    `--group`, refused the same way and before a single harness is asked
+    anything, proven by the same enumeration-call counter staying at zero.
+    """
+    calls_file = cli_env["tmp_path"] / "enumerate-calls-slug.tsv"
+
+    result = _camp(
+        cli_env,
+        "sessions",
+        "-g",
+        "somelug",
+        extra_env={"CAMP_FAKE_ENUMERATE_CALLS_FILE": str(calls_file)},
+    )
+
+    _assert_clean_refusal(result, needle="--all-groups", verb="sessions")
+    assert not calls_file.exists() or calls_file.read_text() == ""
+
+
+def test_camp_sessions_absent_all_groups_output_is_unchanged(cli_env) -> None:
+    """No `--all-groups`/`-g` anywhere → the pre-existing default surface,
+    unaffected by the new option's presence in the CLI."""
+    result = _camp(cli_env, "sessions", "--group", "mygroup")
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == ""
+
+
+# ---------------------------------------------------------------------------
+# camp sessions --all-groups — narrowed answers say why.
+# ---------------------------------------------------------------------------
+
+
+def test_camp_sessions_all_groups_no_groups_configured_states_that(tmp_path) -> None:
+    config_dir = tmp_path / "camp-config"
+    (config_dir / "groups").mkdir(parents=True, exist_ok=True)
+    state_dir = tmp_path / "camp-state"
+    state_dir.mkdir(parents=True, exist_ok=True)
+
+    env = {**os.environ}
+    env["CAMP_CONFIG_DIR"] = str(config_dir)
+    env["CAMP_STATE_DIR"] = str(state_dir)
+
+    result = subprocess.run(
+        [sys.executable, str(_CLI_CAMP), "sessions", "--all-groups", "--json"],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(tmp_path),
+    )
+    assert result.returncode == 0, f"stdout: {result.stdout}\nstderr: {result.stderr}"
+    assert json.loads(result.stdout) == []
+    assert "no groups configured" in result.stderr
+
+
+def test_camp_sessions_all_groups_one_unparsable_group_the_others_still_answer(
+    cli_env,
+) -> None:
+    broken = cli_env["config_dir"] / "groups" / "brokengroup.toml"
+    broken.write_text("this is not [ valid toml")
+    _register_live(cli_env, "mygroup-sess", cli_env["tmp_path"] / "repo_a")
+
+    result = _camp(cli_env, "sessions", "--all-groups", "--json")
+
+    assert result.returncode == 0, f"stdout: {result.stdout}\nstderr: {result.stderr}"
+    payload = json.loads(result.stdout)
+    ok_rows = [row for row in payload if row["ok"] is True]
+    assert {row["session_id"] for row in ok_rows} == {"mygroup-sess"}
+    assert {row["group"] for row in ok_rows} == {"mygroup"}
+    assert str(broken) in result.stderr
+    assert "camp sessions: " in result.stderr
+
+    # The parser-visible half of the same defect: the unparsable group must
+    # not vanish from a --json array that otherwise looks complete — it gets
+    # an in-band ok:false row naming the config file, the same discriminator
+    # a failed credential store's row already carries.
+    failure_rows = [row for row in payload if row["ok"] is False]
+    assert len(failure_rows) == 1
+    assert str(broken) in failure_rows[0]["reason"]
+
+
+def test_camp_sessions_all_groups_recoverable_with_an_unparsable_sibling_does_not_promise_then_refuse(
+    cli_env,
+) -> None:
+    """`--recoverable` never reads `answerable_groups_or_refuse`'s degraded
+    answer (see `_list_recoverable`'s own strict `load_all_groups` call), so
+    a broken sibling config must not ALSO get the "— skipping" notice that
+    promises the other groups will still answer — that promise is what the
+    following refusal on the very same config would contradict.
+    """
+    broken = cli_env["config_dir"] / "groups" / "brokengroup.toml"
+    broken.write_text("this is not [ valid toml")
+
+    result = _camp(cli_env, "sessions", "--all-groups", "--recoverable")
+
+    assert result.returncode != 0
+    assert result.stdout == ""
+    assert "skipping" not in result.stderr, result.stderr
+    assert "camp: config error:" in result.stderr
+    assert str(broken) in result.stderr
+
+
+def test_camp_sessions_all_groups_every_group_unparsable_states_reason_nonzero(
+    tmp_path,
+) -> None:
+    config_dir = tmp_path / "camp-config"
+    groups_dir = config_dir / "groups"
+    groups_dir.mkdir(parents=True, exist_ok=True)
+    state_dir = tmp_path / "camp-state"
+    state_dir.mkdir(parents=True, exist_ok=True)
+
+    broken_a = groups_dir / "brokena.toml"
+    broken_a.write_text("not [ valid")
+    broken_b = groups_dir / "brokenb.toml"
+    broken_b.write_text("also not ] valid")
+
+    env = {**os.environ}
+    env["CAMP_CONFIG_DIR"] = str(config_dir)
+    env["CAMP_STATE_DIR"] = str(state_dir)
+
+    result = subprocess.run(
+        [sys.executable, str(_CLI_CAMP), "sessions", "--all-groups", "--json"],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(tmp_path),
+    )
+    assert result.returncode != 0
+    assert result.stdout == ""
+    assert "camp sessions: " in result.stderr
+    assert str(broken_a) in result.stderr
+    assert str(broken_b) in result.stderr
+
+
+def test_camp_sessions_all_groups_group_with_no_sessions_contributes_no_rows_no_notice(
+    cli_env,
+) -> None:
+    result = _camp(cli_env, "sessions", "--all-groups", "--json")
+
+    assert result.returncode == 0, f"stdout: {result.stdout}\nstderr: {result.stderr}"
+    assert json.loads(result.stdout) == []
+    assert result.stderr == ""
+
+
+def test_camp_sessions_one_store_failing_still_returns_the_others_rows(cli_env) -> None:
+    """One store failing degrades to a stderr notice naming the ACCOUNT that
+    failed — not the group — while the other store's rows still come back on
+    stdout, exit 0.
+    """
+    account_a = cli_env["tmp_path"] / "partial-account-a"
+    account_b = cli_env["tmp_path"] / "partial-account-b"
+    root_a = cli_env["tmp_path"] / "repo-partiala"
+    _add_account_group(cli_env, "partiala", account_a, root_a)
+    _add_account_group(cli_env, "partialb", account_b, cli_env["tmp_path"] / "repo-partialb")
+    _register_live_at(account_a, "partial-sess-aaa", root_a)
+    _poison_enumerate_at(account_b)
+
+    env = _env_without_shared_claude_dir(cli_env)
+    result = subprocess.run(
+        [sys.executable, str(_CLI_CAMP), "sessions", "--group", "partiala"],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(cli_env["tmp_path"]),
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "partial-sess-aaa" in result.stdout
+    assert str(account_b) in result.stderr
+    assert "camp sessions: could not enumerate sessions for" in result.stderr
+    assert "partialb" not in result.stderr
+
+
+def test_camp_sessions_one_store_failing_json_carries_the_failure_in_band(cli_env) -> None:
+    """The `--json` form of the partial-failure case: the failing store
+    contributes one row distinguishable from a session row by `ok`, never a
+    silent omission a parser could mistake for a complete answer.
+    """
+    account_a = cli_env["tmp_path"] / "partial-json-account-a"
+    account_b = cli_env["tmp_path"] / "partial-json-account-b"
+    root_a = cli_env["tmp_path"] / "repo-partialjsona"
+    _add_account_group(cli_env, "partialjsona", account_a, root_a)
+    _add_account_group(
+        cli_env, "partialjsonb", account_b, cli_env["tmp_path"] / "repo-partialjsonb"
+    )
+    _register_live_at(account_a, "partial-json-sess-aaa", root_a)
+    _poison_enumerate_at(account_b)
+
+    env = _env_without_shared_claude_dir(cli_env)
+    result = subprocess.run(
+        [sys.executable, str(_CLI_CAMP), "sessions", "--group", "partialjsona", "--json"],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(cli_env["tmp_path"]),
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    ok_rows = [row for row in payload if row["ok"] is True]
+    failed_rows = [row for row in payload if row["ok"] is False]
+    assert [row["session_id"] for row in ok_rows] == ["partial-json-sess-aaa"]
+    assert len(failed_rows) == 1
+    assert failed_rows[0]["account"] == str(account_b)
+    assert failed_rows[0]["reason"]
+    assert set(ok_rows[0]) == {
+        "ok",
+        "session_id",
+        "cwd",
+        "kind",
+        "controllable",
+        "name",
+        "pid",
+        "started_at",
+        "group",
+        "account",
+    }
+    # A partial-failure row is distinguishable from a session row by testing
+    # ONE field (`ok`), and never grows a `group` key — it has no cwd to
+    # resolve a group from, so it must not invent session attribution.
+    assert set(failed_rows[0]) == {"ok", "account", "reason"}
 
 
 # ---------------------------------------------------------------------------
@@ -2568,6 +3431,47 @@ def test_camp_kill_with_an_ambiguous_ref_exits_two_and_lists_candidates(cli_env)
         "a longer prefix naming exactly one"
     ]
     assert _tmux_calls(cli_env, "kill-session") == []
+
+
+def test_camp_kill_refuses_a_ref_matching_under_two_credential_stores(cli_env) -> None:
+    """The pinned regression: before the pool was keyed by (harness, store), two
+    groups sharing a harness with different accounts collapsed to ONE queried
+    store, so a session sitting in the unqueried account was invisible and a
+    ref could resolve straight to the queried one. Re-keying makes both stores
+    answer, so the match is ambiguous — never a silent resolve.
+    """
+    account_a = cli_env["tmp_path"] / "account-a"
+    account_b = cli_env["tmp_path"] / "account-b"
+    _add_account_group(cli_env, "accta", account_a, cli_env["tmp_path"] / "repo-accta")
+    _add_account_group(cli_env, "acctb", account_b, cli_env["tmp_path"] / "repo-acctb")
+
+    root_a = cli_env["tmp_path"] / "root-a"
+    root_b = cli_env["tmp_path"] / "root-b"
+    root_a.mkdir()
+    root_b.mkdir()
+    _seed_transcript_at(account_a, "sess-shared-aaa", root_a)
+    _seed_transcript_at(account_b, "sess-shared-bbb", root_b)
+
+    env = _env_without_shared_claude_dir(cli_env)
+    result = subprocess.run(
+        [sys.executable, str(_CLI_CAMP), "kill", "sess-shared-"],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(cli_env["tmp_path"]),
+    )
+
+    assert result.returncode == 2, result.stderr
+    rows = result.stdout.strip().splitlines()
+    assert len(rows) == 2, result.stdout
+    assert {row.split()[1] for row in rows} == {"sess-shared-aaa", "sess-shared-bbb"}
+    message = result.stderr.strip()
+    assert message.startswith(
+        "camp kill: 'sess-shared-' matches 2 sessions (listed above) — "
+    )
+    assert str(account_a) in message
+    assert str(account_b) in message
+    assert message.endswith("re-run with a longer prefix naming exactly one")
 
 
 def test_camp_kill_of_a_session_still_present_after_the_kill_fails(cli_env) -> None:

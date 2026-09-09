@@ -301,3 +301,71 @@ class TestPretrustScoping:
         )
         assert p.is_claude_launch() is False
         assert p.should_pretrust() is False
+
+
+# ---------------------------------------------------------------------------
+# harness_store_for — a nameable harness whose store still can't be bound
+# ---------------------------------------------------------------------------
+
+
+class _RaisingHarness:
+    """A harness camp CAN name, whose account binding refuses — standing in
+    for a relative/control-character account or a TRAILHEAD_CLAUDE_DIR
+    conflict, both of which the real ClaudeCodeHarness raises HarnessError
+    for from inside `session_launch_env_set`."""
+
+    name = "raisingharness"
+
+    def session_launch_env_set(self, account, *, env=None):
+        raise ValueError("account 'rel/path' is not absolute")
+
+    def session_launch_env_unset(self):
+        return []
+
+
+class _NoLaunchSeamHarness:
+    """A harness camp CAN name that states no launch support at all —
+    `session_launch_env_set`/`session_launch_env_unset` answering `None`."""
+
+    name = "enumeronly"
+
+    def session_launch_env_set(self, account, *, env=None):
+        return None
+
+    def session_launch_env_unset(self):
+        return None
+
+
+class TestHarnessStoreForBindingFailures:
+    """A nameable harness whose store cannot be bound raises, naming why —
+    distinct from `harness_for` answering `None` (an unnameable harness),
+    which `harness_store_for` still degrades to a plain `None` for."""
+
+    def test_a_harness_that_raises_binding_the_account_surfaces_as_store_binding_error(
+        self, monkeypatch
+    ):
+        import camp.launch.profile as profile
+
+        monkeypatch.setattr(profile, "harness_for", lambda group: _RaisingHarness())
+
+        with pytest.raises(profile.StoreBindingError, match="not absolute"):
+            profile.harness_store_for(
+                {"group": {"name": "g"}, "launch": {"account": "rel/path"}}, env={}
+            )
+
+    def test_a_harness_with_no_launch_seam_surfaces_as_store_binding_error(
+        self, monkeypatch
+    ):
+        import camp.launch.profile as profile
+
+        monkeypatch.setattr(profile, "harness_for", lambda group: _NoLaunchSeamHarness())
+
+        with pytest.raises(profile.StoreBindingError, match="no launch support"):
+            profile.harness_store_for({"group": {"name": "g"}}, env={})
+
+    def test_an_unnameable_harness_still_degrades_to_plain_none(self, monkeypatch):
+        import camp.launch.profile as profile
+
+        monkeypatch.setattr(profile, "harness_for", lambda group: None)
+
+        assert profile.harness_store_for({"group": {"name": "g"}}, env={}) is None

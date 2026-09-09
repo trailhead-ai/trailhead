@@ -166,6 +166,22 @@ def _cmd_sync_group_cli(
         print(f"  {name}: {info.get('action', '?')}")
 
 
+def _refuse_on_dropped_store(config: dict, error: Exception) -> None:
+    """The `_addressable_harnesses` ``on_drop`` callback `camp remove`'s
+    session guard passes: a store camp cannot bind is a session it cannot
+    see, so it must be raised into the SAME fail-closed refusal
+    `gather_pool` reaches on a store it cannot READ — never degraded to a
+    notice-and-continue the way a fail-open listing (`camp sessions`,
+    `camp kill`) is allowed to.
+    """
+    from ..launch import teardown_guard
+
+    name = (config.get("group") or {}).get("name", "?")
+    raise teardown_guard.EnumerationUnavailable(
+        f"group {name!r}'s credential store could not be bound — {error}"
+    )
+
+
 def _cmd_remove_group_cli(
     args: list[str],
     group: dict,
@@ -226,9 +242,13 @@ def _cmd_remove_group_cli(
         from .session import _addressable_harnesses, _parsable_groups
 
         session_groups = _parsable_groups()
+
         try:
             transcripts, live = teardown_guard.gather_pool(
-                _addressable_harnesses(session_groups), env=resolved_env
+                _addressable_harnesses(
+                    session_groups, env=resolved_env, on_drop=_refuse_on_dropped_store
+                ),
+                env=resolved_env,
             )
             holding = teardown_guard.blocking_sessions(
                 ws_dir,

@@ -166,10 +166,15 @@ def cmd_ls_group(
 
 # Fixed JSON schema for `camp list --json`, emitted identically by BOTH entry
 # points so a parser never KeyErrors switching between them.
-_LIST_JSON_KEYS = ("slug", "branch", "workspace_path", "group")
+_LIST_JSON_KEYS = ("ok", "slug", "branch", "workspace_path", "group")
 
 
-def render_workspace_list(entries: list[dict[str, Any]], *, as_json: bool) -> None:
+def render_workspace_list(
+    entries: list[dict[str, Any]],
+    *,
+    as_json: bool,
+    group_failures: list[str] | None = None,
+) -> None:
     """Single renderer for `camp list`/`ls` output — consulted by BOTH dispatchers
     (cli/camp's group-aware `_cmd_ls_group_cli` and spine.main's no-group `cmd_ls`)
     so the human + --json surface is identical regardless of cwd.
@@ -177,18 +182,34 @@ def render_workspace_list(entries: list[dict[str, Any]], *, as_json: bool) -> No
     Each entry must carry `slug` and `workspace_path`; `branch` and `group` are
     optional (group is None for the standalone fallback). Output:
       - human: one `slug workspace_path` line per entry; empty → no stdout.
-      - --json: a list of {slug, branch, workspace_path, group} dicts (the fixed
-        _LIST_JSON_KEYS schema); empty → `[]`.
+      - --json: a list of {ok, slug, branch, workspace_path, group} dicts (the
+        fixed _LIST_JSON_KEYS schema), every success row carrying `ok: true`;
+        empty → `[]`.
 
     The renderer PROJECTS each entry onto the fixed schema (ignoring any
     source-specific extras like manifest_path), so the two data models — group
     central manifests vs. the legacy worktree registry — surface one stable shape.
+
+    *group_failures* — the `--all-groups` caller's unparsable-config detail
+    strings (already stated on stderr by
+    :func:`answerable_groups_or_refuse`) — appends one ``{"ok": False,
+    "group": None, "reason": detail}`` row per entry to the JSON array ONLY:
+    a parser reading a complete-looking array would otherwise be silently
+    missing a group. Every row in the array carries `ok`, so a consumer
+    distinguishes a workspace row from a failure row by that one field
+    alone, never by testing whether `row["slug"]` would raise — the same
+    discriminator a failed credential store's row uses in
+    `camp sessions --json`. Never rendered on the human path, which already
+    has the same information on stderr; folding it into the
+    `slug workspace_path` lines would have nothing to print a slug or path
+    for.
     """
     import json as _json
 
     if as_json:
         rows = [
             {
+                "ok": True,
                 "slug": e["slug"],
                 "branch": e.get("branch", ""),
                 "workspace_path": e["workspace_path"],
@@ -196,11 +217,99 @@ def render_workspace_list(entries: list[dict[str, Any]], *, as_json: bool) -> No
             }
             for e in entries
         ]
+        rows += [
+            {"ok": False, "group": None, "reason": detail}
+            for detail in (group_failures or [])
+        ]
         print(_json.dumps(rows))
         return
 
     for e in entries:
         print(f"{e['slug']} {e['workspace_path']}")
+
+
+def load_answerable_groups(groups_dir: Path) -> tuple[list[dict[str, Any]], list[str]]:
+    """Load every ``*.toml`` in *groups_dir*, degrading a config that fails to
+    parse instead of failing the whole load.
+
+    Shared by the two ``--all-groups`` verbs (`camp list`, `camp sessions`) so
+    a widened answer never falls back to zero rows over ONE sibling group's
+    broken config — mirrors `cli/group.py`'s `_cmd_groups_cli` degrade idiom,
+    generalized here since both cross-group callers need it.
+
+    Returns ``(groups, skipped)``: `groups` is every config that parsed, in
+    filename order; `skipped` is one already-formatted ``"<path>: <detail>"``
+    string per config that failed to load — malformed TOML, non-UTF-8 bytes, a
+    directory wearing a `.toml` name, or an unreadable file — so a caller can
+    print its own ``camp <verb>: <detail> — skipping`` notice without
+    reimplementing the load-failure classification.
+
+    An empty or missing *groups_dir* returns ``([], [])`` — no groups
+    configured is not a load failure; the caller states that itself.
+    """
+    from ..group.config import GroupConfigError, GroupConfigNotFound, load_group
+
+    groups: list[dict[str, Any]] = []
+    skipped: list[str] = []
+    if not groups_dir.is_dir():
+        return groups, skipped
+
+    for toml_file in sorted(groups_dir.glob("*.toml")):
+        try:
+            groups.append(load_group(toml_file))
+        except (
+            GroupConfigError,
+            GroupConfigNotFound,
+            UnicodeDecodeError,
+            OSError,
+        ) as e:
+            message = str(e).strip()
+            detail = message.splitlines()[0] if message else e.__class__.__name__
+            if str(toml_file) not in detail:
+                detail = f"{toml_file}: {detail}"
+            skipped.append(detail)
+    return groups, skipped
+
+
+def answerable_groups_or_refuse(
+    groups_dir: Path, *, verb: str
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """:func:`load_answerable_groups`, plus the two notices a cross-group answer owes.
+
+    The cross-group verbs (`camp list`, `camp sessions`) narrow their answer
+    for the same reasons and must say so in the same words, so both the
+    per-config skip line and the every-config-unparsable refusal are stated
+    here once rather than at each verb:
+
+    * one ``camp <verb>: <detail> — skipping`` line per config that failed to
+      parse, naming it, while every group that DID parse still answers;
+    * a refusal — nonzero exit, a stated reason — when configs were present
+      and NONE of them parsed. Zero rows would be indistinguishable from "no
+      groups are configured", which is a different and false statement, so
+      this case must not answer at all.
+
+    Returns ``(groups, skipped)`` — the groups that parsed, and the SAME
+    per-config detail strings already printed to stderr above, so a `--json`
+    caller can also fold each one into an in-band ``ok: false`` row instead
+    of leaving it stderr-only: a parser reading a complete-looking array is
+    otherwise silently missing a group, exactly the gap the `ok`
+    discriminator exists to close for a failed credential store one level
+    down. An EMPTY *groups* list is therefore exactly one situation:
+    *groups_dir* holds no configs at all (``skipped`` is then empty too).
+    That case is left to the caller to state, because the two verbs word it
+    differently and reach it at different points in their own flow.
+    """
+    groups, skipped = load_answerable_groups(groups_dir)
+    for detail in skipped:
+        print(f"camp {verb}: {detail} — skipping", file=sys.stderr)
+    if not groups and skipped:
+        print(
+            f"camp {verb}: could not answer for any configured group — "
+            "every group config failed to parse; fix a config above and re-run",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    return groups, skipped
 
 
 def _provision_member_and_flip(
