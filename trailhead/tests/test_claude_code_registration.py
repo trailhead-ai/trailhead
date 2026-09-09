@@ -19,7 +19,6 @@ Contract (HERMETICITY):
     composed_root and shells the CLI (which the test stubs).
 """
 
-import inspect
 import json
 import subprocess
 from unittest.mock import patch
@@ -385,22 +384,6 @@ class TestRewireTool:
         with patch("subprocess.run") as mock_run:
             _harness().rewire_tool("lore", composed_root, runner=lambda args, **kw: None)
             mock_run.assert_not_called()
-
-
-# ---------------------------------------------------------------------------
-# injectable runner — method signatures expose runner
-# ---------------------------------------------------------------------------
-
-
-class TestInjectableRunner:
-    def test_register_has_injectable_runner(self):
-        assert "runner" in inspect.signature(ClaudeCodeHarness.register).parameters
-
-    def test_install_tool_has_injectable_runner(self):
-        assert "runner" in inspect.signature(ClaudeCodeHarness.install_tool).parameters
-
-    def test_rewire_tool_has_injectable_runner(self):
-        assert "runner" in inspect.signature(ClaudeCodeHarness.rewire_tool).parameters
 
 
 # ---------------------------------------------------------------------------

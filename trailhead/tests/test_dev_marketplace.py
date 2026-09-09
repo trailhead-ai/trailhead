@@ -29,12 +29,6 @@ _TOOLS = ["lore", "camp", "craft", "portage", "outpost", "trailhead"]
 
 
 class TestRootMarketplaceShape:
-    def test_root_marketplace_exists(self):
-        assert _ROOT_MARKETPLACE.exists(), (
-            f"Root marketplace not found: {_ROOT_MARKETPLACE}\n"
-            "Expected /.claude-plugin/marketplace.json at repo root"
-        )
-
     def test_root_marketplace_parses(self):
         data = json.loads(_ROOT_MARKETPLACE.read_text())
         assert isinstance(data, dict), "marketplace.json must be a JSON object"

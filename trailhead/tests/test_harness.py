@@ -1,7 +1,6 @@
 """Tests for trailhead/harness/ — the harness interface, factory, and detection."""
 
 import dataclasses
-import inspect
 import json
 import os
 from datetime import datetime, timezone
@@ -247,14 +246,6 @@ class TestBareHarnessTracksTheSeam:
     field — on the first real ``wire()`` run — rather than at definition time.
     This pins the exemplar to the seam so it cannot drift silently.
     """
-
-    def test_every_seam_method_takes_the_seam_parameters(self):
-        for name in sorted(Harness.__abstractmethods__):
-            declared = inspect.signature(getattr(Harness, name))
-            implemented = inspect.signature(getattr(_BareHarness, name))
-            assert list(implemented.parameters) == list(declared.parameters), name
-            for pname, param in declared.parameters.items():
-                assert implemented.parameters[pname].kind == param.kind, f"{name}.{pname}"
 
     def test_the_core_can_call_every_seam_method_with_env(self):
         """The calls ``wire()`` makes, with the keywords it actually passes."""
@@ -846,10 +837,12 @@ class TestLaunchEnumerationBaseDefaults:
 
 
 class TestModalityVocabulary:
+    # inert-gate: allow pins caller-visible wire vocabulary other code compares against
     def test_constants_have_exact_spec_values(self):
         assert MODALITY_TTY_REQUIRED == "tty-required"
         assert MODALITY_DETACHED_GUI == "detached-gui"
 
+    # inert-gate: allow pins the closed modality vocabulary itself
     def test_modalities_frozenset_is_exactly_the_two_constants(self):
         assert MODALITIES == {MODALITY_TTY_REQUIRED, MODALITY_DETACHED_GUI}
         assert isinstance(MODALITIES, frozenset)

@@ -44,6 +44,17 @@ repos:
         entry: scripts/agent-tier-gate
         files: ^tools/[^/]+/plugins/[^/]+/agents/.*\.md$
 
+  # Inert-test gate — refuse a test that asserts without running its subject.
+  # Runs only on the test files a commit touches; the whole-tree run lives in
+  # trailhead/tests/test_inert_test_gate.py, so a commit and a suite run agree.
+  - repo: local
+    hooks:
+      - id: inert-test-gate
+        name: inert test gate (every test executes its subject)
+        language: system
+        entry: scripts/inert-test-gate
+        files: (^|/)test_[^/]*\.py$
+
   # PEP 8 style enforcement via ruff (pycodestyle E/W + pyflakes F).
   # Rules and line-length are configured in pyproject.toml ([tool.ruff]).
   - repo: https://github.com/astral-sh/ruff-pre-commit

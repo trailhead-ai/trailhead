@@ -467,14 +467,3 @@ class TestSummaryInputsWrapsStatusCheckRollupFreeText:
         assert entry["startedAt"] == "2026-06-26T23:07:30Z"
         assert entry["completedAt"] == "2026-06-26T23:08:00Z"
         assert entry["__typename"] == "CheckRun"
-
-
-class TestSummarizerHasNoDirectGhBypass:
-    def test_summarizer_routes_through_the_cli(self) -> None:
-        text = _SUMMARIZER.read_text(encoding="utf-8")
-        assert "portage summarize" in text
-
-    def test_summarizer_carries_no_direct_gh_pr_read(self) -> None:
-        text = _SUMMARIZER.read_text(encoding="utf-8")
-        for forbidden in ("gh pr view", "gh pr diff", "gh pr checks", "gh api"):
-            assert forbidden not in text, f"summarizer.md still bypasses the marker with `{forbidden}`"

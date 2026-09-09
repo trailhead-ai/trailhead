@@ -102,6 +102,7 @@ def _cases() -> list[tuple[str, str, str]]:
 _CASES = _cases()
 
 
+# inert-gate: allow guards the parametrization below, which load_manifest builds at import time
 def test_the_inventory_is_not_empty():
     """Anti-vacuity: a manifest-loading change that silently discovered nothing
     would leave the parametrization below empty and green.

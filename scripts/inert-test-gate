@@ -1,0 +1,201 @@
+#!/usr/bin/env python3
+"""inert-test-gate — refuse a test that never executes the thing it tests.
+
+The rule, from the trailhead testing ruleset: *if nothing was executed before the
+assertion, it is not a test.* A test whose body only reads files, inspects paths,
+matches regexes and shapes data has observed the repo as checked out — it passes
+on a codebase where the subject is present and broken, and fails on a correct
+rename that changed nothing.
+
+This gate implements exactly that rule and nothing more. For each `test_*`
+function it collects every call the body makes, follows one hop into module-local
+helpers and same-module fixtures, and reports the function when every one of
+those calls is in `INERT_CALLS` — the closed set of operations that observe
+rather than execute. An `import` inside the body counts as execution, because
+importing the module under test runs it.
+
+What it deliberately does NOT do: judge whether an assertion is *about* the right
+thing. A test that runs a CLI and then asserts something trivial passes this gate.
+The gate catches the one mechanical property that can be checked mechanically.
+
+## Allowing a case
+
+A handful of tests legitimately assert without calling: pinning a closed
+vocabulary of caller-visible constants, or guarding a parametrization built at
+import time. Mark those with a trailing comment on the `def` line:
+
+    def test_modalities_is_the_closed_vocabulary():  # inert-gate: allow <reason>
+
+The reason is required and is printed by `--list-allowed`, so the exemptions stay
+reviewable rather than becoming an invisible backlog.
+
+Usage:
+  scripts/inert-test-gate                 # every test_*.py under the repo
+  scripts/inert-test-gate <path> [...]    # the given files or directories
+  scripts/inert-test-gate --list-allowed  # every current exemption and its reason
+
+Exit: 0 clean · 1 one or more findings (prints relpath:lineno: name).
+"""
+
+from __future__ import annotations
+
+import ast
+import re
+import sys
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+
+#: Operations that observe the tree rather than run its behaviour. A test whose
+#: every call is drawn from this set executed nothing. Parsers are deliberately
+#: absent — `json.loads` / `tomllib.load` run a real loader, which the ruleset
+#: counts as execution ("load the file through its real loader").
+INERT_CALLS = frozenset(
+    {
+        # path construction and filesystem inspection. `Path(...)` is a
+        # constructor, not a call into the subject — without it here, every
+        # `Path("x").read_text()` reads as execution and the commonest inert
+        # form walks straight through the gate.
+        "Path", "PurePath", "PosixPath",
+        "read_text", "read_bytes", "exists", "is_file", "is_dir", "is_symlink",
+        "glob", "rglob", "iterdir", "resolve", "relative_to", "joinpath", "open",
+        "stat", "mkdir", "write_text", "write_bytes", "touch", "samefile",
+        # reflection — the banned forms in the ruleset
+        "hasattr", "getattr", "isinstance", "callable", "dir", "vars", "type",
+        "signature", "getmembers", "isclass", "isfunction",
+        # text, regex and collection shaping — pure data movement
+        "search", "match", "findall", "finditer", "fullmatch", "sub", "split",
+        "splitlines", "strip", "lstrip", "rstrip", "lower", "upper", "title",
+        "startswith", "endswith", "join", "replace", "count", "index", "format",
+        "escape", "compile", "encode", "decode", "removeprefix", "removesuffix",
+        "sorted", "set", "len", "list", "dict", "tuple", "frozenset", "str",
+        "int", "float", "bool", "any", "all", "add", "append", "extend", "items",
+        "keys", "values", "get", "update", "pop", "print", "enumerate", "zip",
+        "range", "reversed", "min", "max", "sum", "next", "iter", "repr",
+        "difference", "union", "intersection", "issubset", "issuperset",
+    }
+)
+
+_ALLOW_RE = re.compile(r"#\s*inert-gate:\s*allow\b[ \t]*(?P<reason>.*)$")
+
+
+def _executable_names(node: ast.AST) -> set[str]:
+    """Every call name and import inside `node`. An import runs the module."""
+    out: set[str] = set()
+    for child in ast.walk(node):
+        if isinstance(child, (ast.Import, ast.ImportFrom)):
+            out.add("<import>")
+        elif isinstance(child, ast.Call):
+            func = child.func
+            if isinstance(func, ast.Name):
+                out.add(func.id)
+            elif isinstance(func, ast.Attribute):
+                out.add(func.attr)
+    return out
+
+
+def _allow_reason(source_lines: list[str], node: ast.FunctionDef) -> str | None:
+    """The reason on an `# inert-gate: allow` comment for this def, if present.
+
+    Read off the `def` line, its decorator lines, and the comment lines
+    immediately above them — so a long reason can sit on its own line rather than
+    overflowing the `def`.
+    """
+    first = min([node.lineno] + [d.lineno for d in node.decorator_list])
+    while first > 1 and source_lines[first - 2].lstrip().startswith("#"):
+        first -= 1
+    for lineno in range(first, node.body[0].lineno):
+        if match := _ALLOW_RE.search(source_lines[lineno - 1]):
+            return match.group("reason").strip() or "(no reason given)"
+    return None
+
+
+def findings_for(path: Path) -> tuple[list[tuple[int, str]], list[tuple[int, str, str]]]:
+    """(findings, allowed) for one test module.
+
+    findings: (lineno, test name) that executed nothing and are not allowed.
+    allowed:  (lineno, test name, reason) carrying an allow marker.
+    """
+    text = path.read_text(encoding="utf-8")
+    lines = text.splitlines()
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return [], []
+
+    functions: dict[str, ast.FunctionDef] = {
+        node.name: node
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+
+    findings: list[tuple[int, str]] = []
+    allowed: list[tuple[int, str, str]] = []
+    for node in functions.values():
+        if not node.name.startswith("test_"):
+            continue
+        names = _executable_names(node)
+        # One hop into module-local helpers and same-module fixtures: a test that
+        # delegates its run to a helper still ran something.
+        referenced = (names | {a.arg for a in node.args.args}) & set(functions)
+        for helper in referenced:
+            names |= _executable_names(functions[helper])
+        if names - INERT_CALLS:
+            continue
+        if (reason := _allow_reason(lines, node)) is not None:
+            allowed.append((node.lineno, node.name, reason))
+        else:
+            findings.append((node.lineno, node.name))
+    return findings, allowed
+
+
+def test_modules(paths: list[Path]) -> list[Path]:
+    out: set[Path] = set()
+    for path in paths:
+        if path.is_dir():
+            out.update(path.rglob("test_*.py"))
+        elif path.name.startswith("test_") and path.suffix == ".py":
+            out.add(path)
+    return sorted(out)
+
+
+def main(argv: list[str]) -> int:
+    args = argv[1:]
+    list_allowed = args[:1] == ["--list-allowed"]
+    if list_allowed:
+        args = args[1:]
+
+    roots = [Path(a).resolve() for a in args] or [REPO_ROOT]
+    modules = test_modules(roots)
+
+    total_findings = 0
+    for path in modules:
+        findings, allowed = findings_for(path)
+        try:
+            shown = path.relative_to(REPO_ROOT)
+        except ValueError:
+            shown = path
+        if list_allowed:
+            for lineno, name, reason in allowed:
+                print(f"{shown}:{lineno}: {name} — {reason}")
+            continue
+        for lineno, name in findings:
+            print(f"{shown}:{lineno}: {name} executes nothing before asserting", file=sys.stderr)
+            total_findings += 1
+
+    if list_allowed:
+        return 0
+
+    if total_findings:
+        print(
+            f"\ninert-test-gate: {total_findings} test(s) assert without running their "
+            f"subject. Find the consumer and run it, or mark a deliberate exemption "
+            f"with `# inert-gate: allow <reason>` on the def line.",
+            file=sys.stderr,
+        )
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv))

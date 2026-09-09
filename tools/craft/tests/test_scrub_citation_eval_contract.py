@@ -91,6 +91,7 @@ def test_fixture_contains_a_scrubbable_pattern(fixture_path: Path):
     assert matched, f"{fixture_path.name} contains no string matching the scrub's pattern list"
 
 
+# inert-gate: allow eval-arm input hygiene; the arm is a fixture, not a subject
 def test_citation_arm_shared_document_holds_both_halves():
     """The treatment arm's shared document must hold BOTH halves — the scrub's
     pattern list AND a general statement of the untrusted-value / safe-value-shape
