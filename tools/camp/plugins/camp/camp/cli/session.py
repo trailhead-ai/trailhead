@@ -1488,7 +1488,18 @@ def _cmd_sessions_group_cli(
         # about, and is the whole reason the recoverable listing marks rows
         # root-missing rather than hiding them.
         scope = Path(directory).expanduser().resolve()
-    elif not all_groups:
+    elif all_groups:
+        # A leftover positional here is a workspace slug --all-groups never
+        # consumes (unlike the narrow path just below) — the same
+        # narrow-vs-widen contradiction `cli/dispatch.py` refuses for
+        # `--group` alongside `--all-groups`, refused here before a group is
+        # loaded or a store is read (both happen further down this function).
+        if rest:
+            _die(
+                "camp sessions: --all-groups and a workspace slug name every "
+                "group and one workspace at once — pass one or the other"
+            )
+    else:
         slug = _slug_from_args_or_cwd(
             rest, group, verb="sessions", consume_positional=True, allow_none=True, env=env
         )

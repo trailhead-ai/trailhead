@@ -2149,6 +2149,28 @@ def test_camp_sessions_all_groups_with_a_named_group_refuses_with_zero_enumerati
     assert not calls_file.exists() or calls_file.read_text() == ""
 
 
+def test_camp_sessions_all_groups_with_a_positional_slug_refuses_with_zero_enumerations(
+    cli_env,
+) -> None:
+    """`camp sessions -g <slug>` names one workspace alongside the option that
+    widens to every group — the same narrow-vs-widen contradiction as naming
+    `--group`, refused the same way and before a single harness is asked
+    anything, proven by the same enumeration-call counter staying at zero.
+    """
+    calls_file = cli_env["tmp_path"] / "enumerate-calls-slug.tsv"
+
+    result = _camp(
+        cli_env,
+        "sessions",
+        "-g",
+        "somelug",
+        extra_env={"CAMP_FAKE_ENUMERATE_CALLS_FILE": str(calls_file)},
+    )
+
+    _assert_clean_refusal(result, needle="--all-groups", verb="sessions")
+    assert not calls_file.exists() or calls_file.read_text() == ""
+
+
 def test_camp_sessions_absent_all_groups_output_is_unchanged(cli_env) -> None:
     """No `--all-groups`/`-g` anywhere → the pre-existing default surface,
     unaffected by the new option's presence in the CLI."""
