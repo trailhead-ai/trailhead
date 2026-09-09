@@ -24,11 +24,13 @@ REPO_ROOT = Path(__file__).parent.parent
 GATE = REPO_ROOT / "plugins" / "craft" / "scripts" / "leak_gate.py"
 
 
-def _run(tree, denylist: Path | None) -> subprocess.CompletedProcess:
+def _run(tree, denylist: Path | None, *optional: Path) -> subprocess.CompletedProcess:
     trees = tree if isinstance(tree, (list, tuple)) else [tree]
     cmd = [sys.executable, str(GATE), *[str(t) for t in trees]]
     if denylist is not None:
         cmd += ["--denylist", str(denylist)]
+    for extra in optional:
+        cmd += ["--optional-denylist", str(extra)]
     return subprocess.run(cmd, capture_output=True, text=True)
 
 
@@ -175,6 +177,58 @@ def test_empty_denylist_exits_2(tmp_path: Path):
 def test_missing_tree_exits_2(tmp_path: Path, denylist: Path):
     r = _run(tmp_path / "nope", denylist)
     assert r.returncode == 2
+
+
+# ---- optional denylists -----------------------------------------------------
+#
+# The repo-wide pre-commit hook enforces a committed pattern file on every
+# machine and layers the machine-local denylist on top. The machine-local file
+# is absent on a fresh clone and on CI, so it is passed as *optional*: its
+# absence must not block a commit the committed patterns already certify.
+
+
+def test_an_absent_optional_denylist_does_not_fail_closed(tmp_path: Path, denylist: Path):
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    _write(tree, "ok.md", "nothing forbidden here\n")
+    r = _run(tree, denylist, tmp_path / "not-on-this-machine.denylist")
+    assert r.returncode == 0, r.stderr + r.stdout
+
+
+def test_an_optional_denylist_is_enforced_when_it_is_present(tmp_path: Path, denylist: Path):
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    _write(tree, "bad.md", "mentions localonlytoken here\n")
+    extra = tmp_path / "machine-local.denylist"
+    extra.write_text("localonlytoken\n", encoding="utf-8")
+    r = _run(tree, denylist, extra)
+    assert r.returncode == 1, r.stderr + r.stdout
+    assert "localonlytoken" in r.stdout
+
+
+def test_patterns_from_both_denylists_are_enforced_together(tmp_path: Path, denylist: Path):
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    _write(tree, "a.md", "sekritcorp\n")
+    _write(tree, "b.md", "localonlytoken\n")
+    extra = tmp_path / "machine-local.denylist"
+    extra.write_text("localonlytoken\n", encoding="utf-8")
+    r = _run(tree, denylist, extra)
+    assert r.returncode == 1
+    assert "sekritcorp" in r.stdout and "localonlytoken" in r.stdout
+
+
+def test_an_empty_optional_denylist_is_not_an_error(tmp_path: Path, denylist: Path):
+    """Pattern-empty is fail-closed for the required denylist because it means
+    the gate can certify nothing. An optional one contributing no patterns is
+    the ordinary case, not an error."""
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    _write(tree, "ok.md", "harmless\n")
+    empty = tmp_path / "empty.denylist"
+    empty.write_text("# only comments\n\n", encoding="utf-8")
+    r = _run(tree, denylist, empty)
+    assert r.returncode == 0, r.stderr + r.stdout
 
 
 # ---- real shippable surfaces are clean (skip if denylist absent) ------------

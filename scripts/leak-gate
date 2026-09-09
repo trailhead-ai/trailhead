@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# leak-gate — block a commit that would ship a private string.
+#
+# Wired as a `repo: local` hook in .pre-commit-config.yaml, so `pre-commit
+# install` is the only setup step. Run it directly to check the tree by hand.
+#
+# Usage:
+#   scripts/leak-gate                 # scan every shippable plugin surface
+#   scripts/leak-gate <tree> [...]    # scan the given trees instead
+#
+# Two denylists feed the gate:
+#   scripts/leak-gate-seams.denylist  committed structural seams, enforced
+#                                     everywhere including CI
+#   $LEAK_GATE_LOCAL_DENYLIST         identifying tokens, never tracked in any
+#     (default ~/.claude/leak-gate.denylist)
+#
+# The machine-local one is layered on as OPTIONAL: a fresh clone or a CI runner
+# without it still gets the committed patterns rather than being blocked. The
+# committed one is required and fails closed, so the gate never exits 0 when it
+# could not certify the tree.
+#
+# Exit: 0 clean · 1 leak (prints relpath:lineno:token) · 2 fail-closed error.
+
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+GATE="$REPO_ROOT/tools/craft/plugins/craft/scripts/leak_gate.py"
+SEAMS="$REPO_ROOT/scripts/leak-gate-seams.denylist"
+LOCAL_DENYLIST="${LEAK_GATE_LOCAL_DENYLIST:-$HOME/.claude/leak-gate.denylist}"
+
+if [ "$#" -gt 0 ]; then
+    trees=("$@")
+else
+    # Every tool's shippable plugin surface — what a release actually publishes.
+    trees=("$REPO_ROOT"/tools/*/plugins/*)
+fi
+
+exec python3 "$GATE" "${trees[@]}" \
+    --denylist "$SEAMS" \
+    --optional-denylist "$LOCAL_DENYLIST"

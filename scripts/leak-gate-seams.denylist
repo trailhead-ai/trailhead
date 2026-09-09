@@ -1,0 +1,16 @@
+# Structural seams — committed on purpose.
+#
+# These are paths and tool prefixes belonging to a private tree that must never
+# be referenced from a shippable plugin surface. They identify no person, org,
+# or product, so tracking them here leaks nothing — which is why they are
+# deliberately absent from the machine-local denylist that carries identifying
+# tokens.
+#
+# One Python regex per line; `#` starts a comment; matching is
+# case-insensitive. Use \b anchors for word-boundary tokens.
+#
+# This file is never itself scanned: `scripts/leak-gate` points only at the
+# shippable plugin surfaces under tools/, and this lives outside them.
+
+mcp__brain__
+code/brain
