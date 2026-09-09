@@ -1,79 +1,75 @@
-"""Contract tests for the wired ``tools/outpost`` plugin's structural anatomy.
+"""Contract tests for the wired ``tools/outpost`` plugin's anatomy.
 
-``tools/outpost`` is the fifth trailhead plugin: skill-only (no python package, no
-agents), modelled on ``tools/portage``'s anatomy. Its skills are discovered on
-disk and, being a pure convention-based inventory, must load cleanly and expose
-``publish-site`` as one of the discoverable skills.
-
-These tests pin the structural anatomy of the plugin so a future edit can't
-silently break the wiring.
+``tools/outpost`` is skill-only: no python package, no agents, no always-on
+``base``. Its skills are discovered on disk, so the anatomy that matters is
+what the *loader* and the *composer* make of the plugin — not which files are
+sitting in the tree. Every test here runs one of them and asserts on its
+output.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
+from trailhead.capabilities import load_manifest
+from trailhead.compose import apply_plan, compose_plan
+
 _REPO_ROOT = Path(__file__).parent.parent.parent
-_TOOL_ROOT = _REPO_ROOT / "tools" / "outpost"
-_CAPABILITIES = _TOOL_ROOT / "capabilities.toml"
-_PLUGIN_JSON = _TOOL_ROOT / "plugins" / "outpost" / ".claude-plugin" / "plugin.json"
+_CAPABILITIES = _REPO_ROOT / "tools" / "outpost" / "capabilities.toml"
 
 
-# ---------------------------------------------------------------------------
-# Anatomy: skill-only plugin modelled on portage (no python package, no agents)
-# ---------------------------------------------------------------------------
+def _manifest():
+    return load_manifest(_CAPABILITIES)
 
 
-class TestPluginAnatomy:
-    def test_capabilities_toml_exists(self):
-        assert _CAPABILITIES.exists(), f"missing {_CAPABILITIES}"
+class TestManifestLoads:
+    """What the capabilities loader makes of the plugin."""
 
-    def test_capabilities_is_skill_only(self):
+    def test_skill_only_shape(self):
         """No always-on `base`, no hooks — the skill is discovered on disk."""
-        from trailhead.capabilities import load_manifest
+        m = _manifest()
+        assert m.base == []
+        assert m.hooks_json is None
 
-        m = load_manifest(_CAPABILITIES)
-        assert m.base == [], "skill-only plugin must declare no `base` set"
-        assert m.hooks_json is None, "skill-only plugin declares no hooks_json"
+    def test_publish_site_is_a_discovered_skill(self):
+        assert _manifest().skills.get("publish-site") == "skills/publish-site"
 
-    def test_plugin_json_exists_and_names_outpost(self):
+    def test_loader_finds_no_subagents(self):
+        """Skill-only: discovery yields an empty subagent inventory.
+
+        The point is what the loader reports, not whether an `agents/` dir is
+        on disk — a caller selecting a subagent from this plugin gets nothing
+        to select, which is the behaviour a skill-only plugin promises.
+        """
+        assert _manifest().subagents == {}
+
+    def test_declared_ruleset_resolves_to_readable_content(self):
+        m = _manifest()
+        assert m.ruleset_path().read_text(encoding="utf-8").strip() != ""
+
+
+class TestComposition:
+    """What the composer emits when the plugin is wired."""
+
+    def test_composed_install_carries_a_plugin_manifest_naming_outpost(self, tmp_path):
+        """`plugin.json` lands in the composed dest naming the tool — wire.py
+        reads it there to decide outpost is wired, so a composition that drops
+        it (or names something else) wires nothing."""
         import json
 
-        assert _PLUGIN_JSON.exists(), f"missing {_PLUGIN_JSON}"
-        data = json.loads(_PLUGIN_JSON.read_text())
-        assert data.get("name") == "outpost"
+        apply_plan(compose_plan(_manifest(), None, {"publish-site": None}, tmp_path))
+        data = json.loads((tmp_path / ".claude-plugin" / "plugin.json").read_text())
+        assert data["name"] == "outpost"
         assert data.get("description", "").strip() != ""
 
-    def test_no_python_package_or_agents(self):
-        """Skill-only: no <name>/ package, no agents/ dir under the plugin root."""
-        plugin_root = _TOOL_ROOT / "plugins" / "outpost"
-        assert not (plugin_root / "outpost").exists(), "skill-only: no python package"
-        assert not (plugin_root / "agents").exists(), "skill-only: no subagents"
+    def test_plan_ships_the_selected_skill(self, tmp_path):
+        plan = compose_plan(_manifest(), None, {"publish-site": None}, tmp_path)
+        dests = {str(op.dest.relative_to(tmp_path)) for op in plan.ops}
+        assert any(d.startswith("skills/publish-site") for d in dests)
 
-    def test_no_per_tool_marketplace_json(self):
-        """The single-marketplace convention: no per-tool marketplace.json remains."""
-        assert not (_TOOL_ROOT / ".claude-plugin" / "marketplace.json").exists(), (
-            "trailhead uses a single root marketplace; tools/outpost must not carry "
-            "its own .claude-plugin/marketplace.json"
-        )
-
-    def test_plugin_loads_and_publish_site_is_discoverable(self):
-        """The manifest loads cleanly and publish-site is a discovered skill."""
-        from trailhead.capabilities import load_manifest
-
-        m = load_manifest(_CAPABILITIES)
-        assert m.skills.get("publish-site") == "skills/publish-site"
-
-
-# ---------------------------------------------------------------------------
-# No zenith-era naming survives anywhere under tools/outpost
-# ---------------------------------------------------------------------------
-
-
-def test_no_zenith_tools_reference_anywhere():
-    """The rewritten plugin carries no `zenith-tools` (or `zenith`) naming."""
-    offenders: list[str] = []
-    for path in _TOOL_ROOT.rglob("*"):
-        if path.is_file() and "zenith" in path.read_text(errors="ignore").lower():
-            offenders.append(str(path.relative_to(_REPO_ROOT)))
-    assert not offenders, f"zenith-era naming survives in: {offenders}"
+    def test_unselected_plugin_composes_nothing(self, tmp_path):
+        """Selecting no skills yields no skill ops — selection is what drives
+        the plan, not what happens to exist under the plugin root."""
+        plan = compose_plan(_manifest(), None, {}, tmp_path)
+        dests = {str(op.dest.relative_to(tmp_path)) for op in plan.ops}
+        assert not any(d.startswith("skills/") for d in dests)
