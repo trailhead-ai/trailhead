@@ -456,6 +456,11 @@ the rate of accidental matches, the exact failure the recognition rule exists to
 marked `Waives:` that names zero or more than one of the five phrases waives nothing and is reported
 as an unrecognised waiver instead of a stand-down.
 
+Recognition requires the exact shape above and nothing looser: a `* ` bullet instead of `- `, bold
+Markdown emphasis around the word (`**Waives:**`), and a lowercase or otherwise cased variant
+(`waives:`) are each NOT recognised — none of them waives the concern, even though each earns its
+own unrecognised-waiver notice rather than reading as though nothing was attempted.
+
 The waiver applies to this spec alone, never to the repository it touches — a different spec
 reviewing the same repository still rates the concern at full severity unless it declares its own
 `Waives:` bullet.

@@ -199,11 +199,10 @@ def test_each_dispatcher_instructs_surfacing_resolved_level_and_basis():
 
 # ---- contract item 6b: stand-down and waiver-not-recognised surfaced too -
 #
-# Only plan, consult, and drive carry their own restatement instruction — gauntlet's own
-# `<maturity-calibration>` instruction names "Filling the calibration token" in
-# `_shared/council.md` directly rather than duplicating it, so it inherits that section's
-# stand-down restatement by reference and needs no separate pin here. The expected tokens are
-# imported from the renderer rather than retyped, the same discipline contract item 11 below
+# Every dispatcher — including gauntlet, whose own `<maturity-calibration>` instruction names
+# "Filling the calibration token" in `_shared/council.md` directly rather than duplicating it —
+# carries its own restatement instruction naming both prefixes explicitly. The expected tokens
+# are imported from the renderer rather than retyped, the same discipline contract item 11 below
 # applies to the concern vocabulary.
 
 sys.path.insert(0, str(REPO_ROOT / "plugins" / "craft" / "scripts"))
@@ -211,12 +210,13 @@ from maturity_bars import _STAND_DOWN_PREFIX, _WAIVER_NOT_RECOGNISED_PREFIX  # n
 
 _OWN_RESTATEMENT_DISPATCHERS = {
     "plan": PLAN_MD,
+    "gauntlet": GAUNTLET_MD,
     "consult": CONSULT_MD,
     "drive": DRIVE_MD,
 }
 
 
-def test_plan_consult_and_drive_instruct_restating_stand_down_and_waiver_not_recognised():
+def test_each_dispatcher_instructs_restating_stand_down_and_waiver_not_recognised():
     for name, path in _OWN_RESTATEMENT_DISPATCHERS.items():
         text = _text(path)
         assert _STAND_DOWN_PREFIX in text, (
@@ -227,6 +227,34 @@ def test_plan_consult_and_drive_instruct_restating_stand_down_and_waiver_not_rec
             f"{name}/SKILL.md's own restatement instruction never mentions restating a "
             f"`{_WAIVER_NOT_RECOGNISED_PREFIX}` line the calibration block can carry"
         )
+
+
+# ---- contract item 6c: gauntlet's Adjudicate list reconciles stand-downs --
+#
+# gauntlet is the one dispatcher whose consolidation step is a fully self-contained numbered
+# list rather than a pointer to `_shared/council.md`'s Synthesis section (plan, consult, and
+# drive each say "synthesize per `_shared/council.md`", which pulls in that section's own
+# "Reconcile stand-downs first" rule by reference) — so gauntlet's own list must state the rule
+# itself, scoped to its own "### 4. Adjudicate" step so a rule appearing only in some other
+# section does not count.
+
+_ADJUDICATE_BOUNDS = ("### 4. Adjudicate", "### 5. Recommend")
+
+
+def test_gauntlet_adjudicate_list_reconciles_stand_downs():
+    text = _text(GAUNTLET_MD)
+    adjudicate = _section(text, *_ADJUDICATE_BOUNDS)
+    assert _STAND_DOWN_PREFIX in adjudicate, (
+        "gauntlet/SKILL.md's Adjudicate list never mentions dropping a "
+        f"`{_STAND_DOWN_PREFIX}` finding"
+    )
+    assert _WAIVER_NOT_RECOGNISED_PREFIX in adjudicate, (
+        "gauntlet/SKILL.md's Adjudicate list never mentions that a "
+        f"`{_WAIVER_NOT_RECOGNISED_PREFIX}` concern keeps its normal severity"
+    )
+    assert re.search(r"reconcile stand-downs", adjudicate, re.IGNORECASE), (
+        "gauntlet/SKILL.md's Adjudicate list never states a reconcile-stand-downs rule"
+    )
 
 
 # ---- contract item 7: consult states the no-spec-body case explicitly ----

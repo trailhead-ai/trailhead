@@ -6,8 +6,8 @@ were given, along with the spec under review and the maturity calibration block 
 it. Read the fixture file in full, then perform synthesis on it exactly as the instructions
 below direct, and present your consolidated findings list.
 
-The instructions below are `_shared/council.md`'s own Synthesis section, reproduced verbatim,
-at the revision committed before this task's change.
+The instructions below are `_shared/council.md`'s own Synthesis section, reproduced, less the
+cross-reference clauses, at the revision committed before this task's change.
 
 ---
 

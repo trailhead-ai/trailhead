@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import itertools
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -1105,7 +1106,19 @@ def test_duplicated_non_goals_yields_zero_waivers_at_exit_zero_with_a_notice():
     out = _stdout(result)
     assert "stand-down:" not in out
     assert out.count("waiver-not-recognised:") == 1
-    assert "waiver-not-recognised: `## Non-Goals section duplicated" in out
+    assert "waiver-not-recognised: ## Non-Goals section duplicated" in out
+
+
+def test_duplicated_non_goals_notice_carries_no_excerpt_framing():
+    """S5: the duplicate-heading notice is renderer-authored text, not a
+    spec excerpt — it must not be backtick-quoted (that framing is reserved
+    for text taken from the spec under review) and the rendered block must
+    not claim it is "quoted verbatim from the spec under review", since
+    attributing craft's own words to the spec is exactly the
+    misattribution this fix closes."""
+    out = _stdout(_run(DUPLICATE_NON_GOALS.encode("utf-8")))
+    assert "waiver-not-recognised: `" not in out
+    assert "quoted verbatim from the spec" not in out
     assert _rated_lines(out) == [f"- {concern}: Critical" for concern in CONCERNS]
 
 
@@ -1169,18 +1182,6 @@ def test_level_flag_reads_no_stdin_and_renders_no_stand_down_even_with_a_waiver(
 
 # ---- F1: the downgrade worked example never contradicts a stand-down ----
 
-WAIVED_MIGRATION_EARLY = """\
-# Some Spec
-
-## Maturity
-
-- lookout: early
-
-## Non-Goals
-
-- Waives: migration and backfill — this spec does not touch backfill logic.
-"""
-
 ALL_FIVE_WAIVED_EARLY = ALL_FIVE_WAIVED.replace("lookout: production", "lookout: early")
 
 ALL_FIVE_WAIVED_MATRIX = (
@@ -1193,23 +1194,58 @@ ALL_FIVE_WAIVED_MATRIX = (
     "- Waives: cross-consumer blast radius because reasons.\n"
 )
 
-
-def test_downgrade_worked_example_never_names_a_concern_this_block_just_stood_down():
-    out = _stdout(_run(WAIVED_MIGRATION_EARLY.encode("utf-8")))
-    assert "stand-down: migration and backfill" in out
-    assert "for example \"migration and backfill" not in out
-    assert "for example \"backwards compatibility — Important, downgraded by" in out
+_WORKED_EXAMPLE_RE = re.compile(r'for example "(.+?) — ')
 
 
-def test_downgrade_worked_example_falls_back_to_the_first_rated_concern_in_the_matrix():
-    matrix_waived = (
-        "# Some Spec\n\n## Maturity\n\n- lookout: prototype\n- trailhead: production\n\n"
-        "## Non-Goals\n\n- Waives: migration and backfill because reasons.\n"
+def _waiver_bullets(subset: tuple[str, ...]) -> str:
+    return "".join(f"- Waives: {concern} because reasons.\n" for concern in subset)
+
+
+@pytest.mark.parametrize(
+    "subset",
+    [c for r in range(len(CONCERNS) + 1) for c in itertools.combinations(CONCERNS, r)],
+)
+def test_downgrade_worked_example_never_names_a_concern_this_block_just_stood_down(subset):
+    """Property, over the full 32-subset waiver space, not a single fallback
+    concern's literal name: the flat-basis worked example never names a
+    concern this same block just stood down."""
+    spec = (
+        "# Some Spec\n\n## Maturity\n\n- lookout: early\n\n"
+        f"## Non-Goals\n\n{_waiver_bullets(subset)}"
     )
-    out = _stdout(_run(matrix_waived.encode("utf-8")))
-    assert "stand-down: migration and backfill" in out
-    assert "for example \"migration and backfill" not in out
-    assert "for example \"backwards compatibility — `lookout`" in out
+    out = _stdout(_run(spec.encode("utf-8")))
+    for concern in subset:
+        assert f"stand-down: {concern}" in out
+    match = _WORKED_EXAMPLE_RE.search(out)
+    if match:
+        assert match.group(1) not in subset, (
+            f"worked example named {match.group(1)!r}, a concern this block "
+            f"stood down: {subset!r}"
+        )
+
+
+@pytest.mark.parametrize(
+    "subset",
+    [c for r in range(len(CONCERNS) + 1) for c in itertools.combinations(CONCERNS, r)],
+)
+def test_downgrade_worked_example_never_names_a_concern_this_block_just_stood_down_in_the_matrix(
+    subset,
+):
+    """The matrix-basis sibling of the property above, over the same
+    32-subset space."""
+    spec = (
+        "# Some Spec\n\n## Maturity\n\n- lookout: prototype\n- trailhead: production\n\n"
+        f"## Non-Goals\n\n{_waiver_bullets(subset)}"
+    )
+    out = _stdout(_run(spec.encode("utf-8")))
+    for concern in subset:
+        assert f"stand-down: {concern}" in out
+    match = _WORKED_EXAMPLE_RE.search(out)
+    if match:
+        assert match.group(1) not in subset, (
+            f"worked example named {match.group(1)!r}, a concern this block "
+            f"stood down: {subset!r}"
+        )
 
 
 def test_all_five_concerns_waived_at_a_downgraded_level_renders_no_worked_example_and_does_not_crash():
@@ -1353,3 +1389,109 @@ def test_waiver_not_recognised_excerpt_in_the_rendered_block_is_also_sanitized()
     excerpt = line[len(prefix) : -1]
     assert "`" not in excerpt
     assert len(excerpt) == 200
+
+
+# ---- S1: the blank-line lookahead is linear, not quadratic -----------------
+
+
+def _blank_run_fixture(blank_line_count: int) -> str:
+    return (
+        "# Some Spec\n\n## Maturity\n\n- lookout: production\n\n## Non-Goals\n\n"
+        "- Waives: migration and backfill because a distant continuation "
+        "still folds in.\n"
+        + ("\n" * blank_line_count)
+        + "  distant continuation reached across blank lines.\n"
+    )
+
+
+def test_blank_line_lookahead_completes_a_large_blank_run_well_within_bound():
+    """A `- ` bullet followed by many blank lines and one indented
+    continuation used to re-scan the whole forward blank run on every one of
+    those blank lines (O(N^2)); this fixture's blank run alone took ~17s
+    under the quadratic walk, so 5s is a generous bound for the linear one on
+    a loaded machine."""
+    import time
+
+    fixture = _blank_run_fixture(16000)
+    start = time.monotonic()
+    result = _run(fixture.encode("utf-8"))
+    elapsed = time.monotonic() - start
+    assert result.returncode == 0, _stderr(result)
+    assert elapsed < 5.0, f"took {elapsed:.2f}s — blank-line lookahead is not linear"
+
+
+def test_blank_line_lookahead_still_folds_a_continuation_reached_across_blank_lines():
+    """The performance fix must preserve exact folding semantics: a
+    continuation line reached across a run of blank lines still folds into
+    the same bullet, and its text still reaches the rendered stand-down
+    excerpt."""
+    fixture = _blank_run_fixture(50)
+    out = _stdout(_run(fixture.encode("utf-8")))
+    stand_down_lines = [line for line in out.splitlines() if line.startswith("stand-down:")]
+    assert len(stand_down_lines) == 1
+    assert "distant continuation reached across blank lines" in stand_down_lines[0]
+
+
+# ---- S4: near-miss notice also catches a space-before-colon marker and a --
+# ---- nested/indented `- Waives:` bullet ------------------------------------
+
+SPACE_BEFORE_COLON_NON_GOAL = """\
+# Some Spec
+
+## Maturity
+
+- lookout: production
+
+## Non-Goals
+
+- Waives : migration and backfill because a space before the colon.
+"""
+
+NESTED_MARKER_NON_GOAL = """\
+# Some Spec
+
+## Maturity
+
+- lookout: production
+
+## Non-Goals
+
+- This spec covers something.
+  - Waives: migration and backfill because nested.
+"""
+
+
+@pytest.mark.parametrize("fixture", [SPACE_BEFORE_COLON_NON_GOAL, NESTED_MARKER_NON_GOAL])
+def test_near_miss_marker_shapes_from_s4_waive_nothing_but_emit_a_notice(fixture):
+    result = _run(fixture.encode("utf-8"))
+    assert result.returncode == 0, _stderr(result)
+    out = _stdout(result)
+    assert "stand-down:" not in out
+    assert out.count("waiver-not-recognised:") == 1
+    assert _rated_lines(out) == [f"- {concern}: Critical" for concern in CONCERNS]
+
+
+# ---- S6: sanitizer also strips zero-width, variation-selector, and soft- --
+# ---- hyphen invisible characters -------------------------------------------
+
+
+def test_sanitize_excerpt_strips_zero_width_characters():
+    text = (
+        "Waives: migration and backfill because​ hidden‌zero‍width"
+        "⁠joiner text."
+    )
+    excerpt = maturity_bars._sanitize_excerpt(text)
+    for char in ("​", "‌", "‍", "⁠"):
+        assert char not in excerpt
+
+
+def test_sanitize_excerpt_strips_variation_selectors():
+    text = "Waives: migration and backfill️ because a variation selector."
+    excerpt = maturity_bars._sanitize_excerpt(text)
+    assert "️" not in excerpt
+
+
+def test_sanitize_excerpt_strips_soft_hyphen():
+    text = "Waives: migra­tion and backfill because a soft hyphen."
+    excerpt = maturity_bars._sanitize_excerpt(text)
+    assert "­" not in excerpt
