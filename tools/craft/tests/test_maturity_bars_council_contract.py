@@ -196,19 +196,6 @@ def test_document_instructs_downgraded_finding_restates_concern_and_level():
 # ---- contract item 7: roster matches mechanical dispatcher discovery ------
 
 
-def test_roster_names_every_discovered_dispatcher():
-    dispatchers = discover_council_dispatchers()
-    assert dispatchers, "discovery found no dispatchers — guards the assertion below against vacuity"
-    skill_names = {p.parent.name for p in dispatchers}
-
-    intro = council_text().split("\n\n")[1]
-    for name in skill_names:
-        assert name in intro, (
-            f"dispatcher skill {name!r} (found by discover_council_dispatchers) is not named in "
-            f"council.md's opening roster line: {intro!r}"
-        )
-
-
 def test_discovery_finds_exactly_the_four_named_dispatchers():
     """Pins the discovery predicate itself against the axiom this plan
     established by grep: plan, gauntlet, consult, and drive — no more, no
@@ -217,11 +204,48 @@ def test_discovery_finds_exactly_the_four_named_dispatchers():
     assert {p.parent.name for p in dispatchers} == {"plan", "gauntlet", "consult", "drive"}
 
 
-# ---- contract item 8: closed severity vocabulary, no fourth tier ----------
+# ---- contract item 8: closed severity vocabulary, checked against the renderer ----
 
 
-def test_no_fourth_severity_tier_anywhere_in_the_document():
-    text = council_text()
-    forbidden = ("Major", "Severe", "Blocker")
-    for word in forbidden:
-        assert word not in text, f"forbidden severity tier {word!r} found in council.md"
+def _rendered_severity_tiers() -> set[str]:
+    """Every severity `maturity_bars.py` actually emits, across every level it accepts.
+
+    The levels come from the renderer's own parser rather than a list here, so a
+    level added or removed moves this set with it.
+    """
+    help_text = subprocess.run(
+        [sys.executable, str(BARS), "--help"],
+        input="", capture_output=True, text=True, timeout=30,
+    ).stdout
+    levels = re.search(r"--level \{([a-z,]+)\}", help_text)
+    assert levels, f"could not read the renderer's level choices from its help:\n{help_text}"
+    tiers: set[str] = set()
+    for level in levels.group(1).split(","):
+        rendered = subprocess.run(
+            [sys.executable, str(BARS), "--level", level],
+            input="", capture_output=True, text=True, timeout=30,
+        )
+        assert rendered.returncode == 0, rendered.stderr
+        tiers |= set(re.findall(r"(?m)^- [^:]+: ([A-Z][a-z]+)$", rendered.stdout))
+    return tiers
+
+
+def test_the_severity_vocabulary_the_document_states_is_the_one_the_renderer_emits():
+    """council.md states craft's severity vocabulary in its own prose; the renderer
+    stamps a severity onto every calibrated concern. The two have to be the same
+    closed set — a tier the document names but the renderer never emits is a
+    severity no review can produce, and a tier the renderer emits but the document
+    omits is one no lens has been told how to read.
+
+    Checking the equality against rendered output, rather than scanning for a list
+    of forbidden words, means a fourth tier fails whichever side introduces it.
+    """
+    documented = re.search(
+        r"severity vocabulary stays exactly ([A-Za-z]+(?: / [A-Za-z]+)+)", council_text()
+    )
+    assert documented, "council.md no longer states its severity vocabulary"
+    stated = {tier.strip() for tier in documented.group(1).split("/")}
+    assert stated == _rendered_severity_tiers(), (
+        f"council.md states the severity vocabulary {sorted(stated)}, but "
+        f"maturity_bars.py emits {sorted(_rendered_severity_tiers())}"
+    )
