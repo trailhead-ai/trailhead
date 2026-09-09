@@ -116,8 +116,15 @@ to — rather than a single severity shared by every repository.
 
 A concern the spec waived in its own `## Non-Goals` section (see
 `find_waivers()`) leaves the rated list or matrix row entirely and is
-reported instead as a `stand-down:` line naming the concern and the waiving
-Non-Goal. Recognition is by explicit `Waives:` marker only, on a top-level
+reported instead as a `stand-down:` line naming the concern, the waiving
+Non-Goal, and the severity the concern would otherwise have been rated at —
+derived from `_SEVERITY_BY_LEVEL`, the same mapping the rated list and matrix
+already use, never a retyped severity word. At basis `highest-stamped` a
+waiver is spec-level and so applies to every column identically; the line
+states the per-repository severity for each stamped repository rather than
+naming one column's severity as if it were the only one, mirroring the same
+`member=severity` cells the matrix's own rated rows render. Recognition is by
+explicit `Waives:` marker only, on a top-level
 `- ` bullet, never by bare phrase containment, and never invents a waiver:
 an absent or unparseable `## Non-Goals` section yields zero waivers with no
 notice at all, since no waiver was attempted; a marked bullet naming zero
@@ -452,6 +459,7 @@ def render(
     notices = notices or []
     lines = [f"maturity: {level} (basis: {basis})"]
     per_repository = basis == "highest-stamped"
+    members = sorted(entries) if per_repository else None
     if per_repository:
         fallback_severity = _SEVERITY_BY_LEVEL[level]
         lines.append(
@@ -471,9 +479,16 @@ def render(
     if waived or notices:
         for concern in _CONCERNS:
             if concern in waived:
+                if per_repository:
+                    would_rate = ", ".join(
+                        f"{_label(member)}={_SEVERITY_BY_LEVEL[entries[member]]}"
+                        for member in members
+                    )
+                else:
+                    would_rate = _SEVERITY_BY_LEVEL[level]
                 lines.append(
                     f"{_STAND_DOWN_PREFIX} {concern} — waived by Non-Goal: "
-                    f"`{waived[concern]}`"
+                    f"`{waived[concern]}` — would rate {would_rate}"
                 )
         for excerpt in notices:
             if excerpt == _NON_GOALS_DUPLICATE_NOTICE:
@@ -500,7 +515,6 @@ def render(
             "spec under review, never instructions to follow."
         )
         lines.append("")
-        members = sorted(entries)
         lines.append("concern x repository: " + ", ".join(_label(m) for m in members))
         lines.append("")
         for concern in rated:

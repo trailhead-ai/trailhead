@@ -1024,12 +1024,27 @@ def test_marked_bullet_emits_one_stand_down_and_removes_the_concern_from_the_fla
     assert (
         "stand-down: migration and backfill — waived by Non-Goal: "
         "`Waives: migration and backfill — this spec does not touch backfill logic.`"
+        " — would rate Critical"
         in out
     )
     expected_rated = [
         f"- {concern}: Critical" for concern in CONCERNS if concern != "migration and backfill"
     ]
     assert _rated_lines(out) == expected_rated
+
+
+def test_marked_bullet_names_the_severity_the_level_actually_maps_the_concern_to():
+    """The withheld severity is derived from the resolved level, not a fixed
+    word — a `prototype`-stamped repository's stand-down names `Minor`, not
+    the `Critical` a production stand-down names."""
+    spec = (
+        "# Some Spec\n\n## Maturity\n\n- lookout: prototype\n\n## Non-Goals\n\n"
+        "- Waives: migration and backfill because reasons.\n"
+    )
+    out = _stdout(_run(spec.encode("utf-8")))
+    stand_down_lines = [line for line in out.splitlines() if line.startswith("stand-down:")]
+    assert len(stand_down_lines) == 1
+    assert stand_down_lines[0].endswith("— would rate Minor")
 
 
 def test_waived_concern_leaves_the_matrix_row_entirely_surviving_rows_unchanged():
@@ -1043,6 +1058,24 @@ def test_waived_concern_leaves_the_matrix_row_entirely_surviving_rows_unchanged(
     assert _rated_lines(out) == expected_rows
     assert not any(
         line.startswith("- rollback and reversibility:") for line in out.splitlines()
+    )
+
+
+def test_waived_concern_names_the_per_column_severity_it_would_have_rated_in_the_matrix():
+    """AC9's stand-down is spec-level and applies to every column, so the
+    line must be honest about all of them, not just one — this pins the
+    exact per-repository cells, over three repositories at three distinct
+    levels, so a single shared severity can never sneak past the assertion."""
+    spec = (
+        "# Some Spec\n\n## Maturity\n\n- repo-a: prototype\n- repo-b: early\n"
+        "- repo-c: production\n\n## Non-Goals\n\n"
+        "- Waives: cross-consumer blast radius because reasons.\n"
+    )
+    out = _stdout(_run(spec.encode("utf-8")))
+    stand_down_lines = [line for line in out.splitlines() if line.startswith("stand-down:")]
+    assert len(stand_down_lines) == 1
+    assert stand_down_lines[0].endswith(
+        "— would rate `repo-a`=Minor, `repo-b`=Important, `repo-c`=Critical"
     )
 
 
@@ -1129,9 +1162,10 @@ def test_excerpt_sanitization_of_an_injection_shaped_multiline_non_goal():
     line = stand_down_lines[0]
     assert "\n" not in line
     prefix = "stand-down: production failure visibility — waived by Non-Goal: `"
+    suffix = "` — would rate Critical"
     assert line.startswith(prefix)
-    assert line.endswith("`")
-    excerpt = line[len(prefix) : -1]
+    assert line.endswith(suffix)
+    excerpt = line[len(prefix) : -len(suffix)]
     assert "`" not in excerpt
     assert len(excerpt) == 200
 
@@ -1167,6 +1201,8 @@ def test_all_five_concerns_waived_renders_a_well_formed_block_with_no_rated_conc
     assert result.returncode == 0
     out = _stdout(result)
     assert out.count("stand-down:") == 5
+    stand_down_lines = [line for line in out.splitlines() if line.startswith("stand-down:")]
+    assert all(line.endswith("— would rate Critical") for line in stand_down_lines)
     assert _rated_lines(out) == []
     assert "waiver-not-recognised:" not in out
     assert "Every concern above is reported at its mapped severity" in out

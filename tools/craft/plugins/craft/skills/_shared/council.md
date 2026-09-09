@@ -213,11 +213,14 @@ fourth tier.
 A concern above can be waived for this spec alone: a `## Non-Goals` bullet marked `Waives:
 <concern>`, naming exactly one of backwards compatibility, migration and backfill, rollback and
 reversibility, production failure visibility, or cross-consumer blast radius, removes that concern
-from the rated list or matrix row and reports it instead as a `stand-down:` line naming the concern
-and the waiving Non-Goal — recognised only by that explicit marker, never by a Non-Goal that merely
-mentions a concern in passing. A marked bullet naming zero or more than one of the five phrases
-waives nothing and reports a `waiver-not-recognised:` notice instead, so a failed match reads
-differently from a concern nobody tried to waive.
+from the rated list or matrix row and reports it instead as a `stand-down:` line naming the concern,
+the waiving Non-Goal, and the severity the concern would otherwise have been rated at — recognised
+only by that explicit marker, never by a Non-Goal that merely mentions a concern in passing. At
+basis `highest-stamped` a waiver applies to every stamped repository alike, so the line names each
+repository's own would-have-been severity rather than one column's as if it were the only one. A
+marked bullet naming zero or more than one of the five phrases waives nothing and reports a
+`waiver-not-recognised:` notice instead, so a failed match reads differently from a concern nobody
+tried to waive.
 
 A stand-down is not a filter. The concern is still reported at every level — the guarantee two
 paragraphs up, that a level never removes a concern from review, still holds; a stand-down is a
