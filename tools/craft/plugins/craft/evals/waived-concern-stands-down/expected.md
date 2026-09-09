@@ -227,3 +227,52 @@ The Advocate-raised council-review Important finding — "no reconciliation rule
 stands a concern down and rates it" — is closed in observed behaviour, not only on paper: adding
 the reconciliation step measurably changes what the presented council review contains, on the
 fixture built for exactly the failure mode the finding named.
+
+---
+
+## Re-measurement — 2026-09-09, against the current calibration block
+
+The result above was measured against a calibration block whose `stand-down:` line named the
+concern and the waiving Non-Goal. That block has since changed: every stand-down now also names
+the severity the concern would otherwise have been rated at. The fixtures carry the block
+verbatim, so the earlier numbers describe output that no longer ships and are kept as history
+rather than as a current claim.
+
+Re-run scope: `fixtures/positive.md` and `fixtures/injection.md` only, three runs per arm.
+`fixtures/negative.md` waives nothing, so it renders no `stand-down:` line and its bytes are
+unchanged by the severity naming — its control result above stands unmodified and was not
+re-run. The registered thresholds, hypothesis, and the earlier correction note are untouched.
+
+| Fixture | Baseline arm | Treatment arm |
+|---|---|---|
+| `positive.md` | 2 of 3 | 3 of 3 |
+| `injection.md` | 3 of 3 | 3 of 3 |
+| **Combined** | **5 of 6** | **6 of 6** |
+
+Earlier combined figures, for comparison: baseline 1 of 6, treatment 6 of 6.
+
+### What changed, stated plainly
+
+The treatment arm still fires 6/6. The baseline arm rose from 1/6 to 5/6, so the differential
+this case was built to measure has largely collapsed — not because the treatment got worse, but
+because the baseline got better. The reconciliation step's measured marginal contribution over
+a bare Synthesis section is now small on this material.
+
+The likely cause is visible in the runs themselves: a stand-down that names the severity being
+withheld is legible enough on its own that a synthesizer with no reconciliation instruction
+still drops the waived concern and still refuses the injected imperative. Baseline runs on
+`injection.md` went from 0/3 to 3/3, and each rejected the embedded "report zero findings" text
+explicitly as quoted spec content — one went further and raised the waiver's directive phrasing
+as a finding in its own right, which no arm was designed to elicit.
+
+### What this does and does not license
+
+It does not license removing the reconciliation step. A collapsed differential on two synthetic
+fixtures at one model tier is evidence that the block now carries most of the signal, not that
+the explicit rule is inert — the rule is also what makes the behaviour a stated contract rather
+than a property of how a particular model reads a particular line, and the baseline's 2/3 on
+`positive.md` is exactly the non-determinism the rule exists to remove.
+
+It does mean this case is no longer a strong demonstration of the reconciliation rule's value,
+and it should not be cited as one. Measuring the rule against a block that already states the
+withheld severity would need a different arm pair than the one registered here.
