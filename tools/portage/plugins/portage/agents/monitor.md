@@ -38,7 +38,8 @@ profile, so invoke it as bare `portage <subcommand>`.
 - `slug` — the worktree slug within the group
 - `manifest_path` — absolute path to the camp central manifest JSON for this worktree
 - `group_toml_path` — absolute path to the group TOML file (used for `[release]` config including
-  `review_bot_login`, `external_tracker`, `merge_order`, and `green_driver_agent`)
+  `review_bot_login`, `external_tracker`, `merge_order`, `merge_method`, and
+  `green_driver_agent`)
 - `pr_pairs` — comma-separated `<repo_path>:<pr_number>:<member_name>` list (optional — detected if absent)
 - `outcome_file` — absolute path to a machine-readable completion channel (optional — see
   "Outcome file" below)

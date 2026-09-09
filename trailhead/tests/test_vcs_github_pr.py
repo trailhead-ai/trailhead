@@ -19,6 +19,7 @@ from trailhead.vcs.github import (
     PRPair,
     MergeOrderRequiredError,
     MergeConfigError,
+    MergeMethodInvalidError,
     InvalidInputError,
 )
 
@@ -430,7 +431,10 @@ class TestPrMerge:
                 {"name": "beta", "repo_root": str(tmp_path), "worktree_path": str(wt_b)},
             ],
         )
-        toml = _write_toml(tmp_path, '[release]\nauto_merge = true\nmerge_order = ["beta", "alpha"]\n')
+        toml = _write_toml(
+            tmp_path,
+            '[release]\nauto_merge = true\nmerge_order = ["beta", "alpha"]\nmerge_method = "merge"\n',
+        )
         merge_calls: list[str] = []
 
         def stub(cmd, **kwargs):
@@ -797,6 +801,145 @@ class TestPrMerge:
         pr_pairs = [PRPair(repo_path=str(wt), pr_number="42", member_name="alpha")]
         provider.pr.merge(pr_pairs, str(manifest), toml_path=str(toml))
         assert delete_calls == []
+
+
+# ---------------------------------------------------------------------------
+# pr.merge — merge_method selection ([release].merge_method)
+# ---------------------------------------------------------------------------
+
+
+class TestMergeMethod:
+    def _run_merge_capture_argv(
+        self, tmp_path: Path, release_toml_body: str
+    ) -> list[list[str]]:
+        wt = tmp_path / "wt" / "alpha"
+        wt.mkdir(parents=True)
+        manifest = _write_manifest(
+            tmp_path,
+            [{"name": "alpha", "repo_root": str(tmp_path), "worktree_path": str(wt)}],
+        )
+        toml = _write_toml(tmp_path, release_toml_body)
+        merge_argv: list[list[str]] = []
+
+        def stub(cmd, **kwargs):
+            if "config" in cmd and "user.email" in cmd:
+                return subprocess.CompletedProcess(cmd, 0, "test@example.com\n", "")
+            if "view" in cmd and "--json" in cmd:
+                return subprocess.CompletedProcess(
+                    cmd,
+                    0,
+                    json.dumps(
+                        {
+                            "state": "OPEN",
+                            "mergeable": "MERGEABLE",
+                            "mergeStateStatus": "CLEAN",
+                            "isDraft": False,
+                            "headRefName": "feat",
+                        }
+                    ),
+                    "",
+                )
+            if "pr" in cmd and "merge" in cmd:
+                merge_argv.append(list(cmd))
+                return subprocess.CompletedProcess(cmd, 0, "merged\n", "")
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+
+        provider = get_provider("github", runner=stub)
+        pr_pairs = [PRPair(repo_path=str(wt), pr_number="7", member_name="alpha")]
+        provider.pr.merge(pr_pairs, str(manifest), toml_path=str(toml))
+        return merge_argv
+
+    def test_merge_method_squash_flag(self, tmp_path: Path) -> None:
+        argv = self._run_merge_capture_argv(
+            tmp_path, '[release]\nauto_merge = true\nmerge_method = "squash"\n'
+        )
+        assert len(argv) == 1
+        assert "--squash" in argv[0]
+        assert "--merge" not in argv[0]
+        assert "--rebase" not in argv[0]
+
+    def test_merge_method_rebase_flag(self, tmp_path: Path) -> None:
+        argv = self._run_merge_capture_argv(
+            tmp_path, '[release]\nauto_merge = true\nmerge_method = "rebase"\n'
+        )
+        assert len(argv) == 1
+        assert "--rebase" in argv[0]
+        assert "--squash" not in argv[0]
+        assert "--merge" not in argv[0]
+        assert "--author-email" in argv[0]
+
+    def test_merge_method_merge_flag(self, tmp_path: Path) -> None:
+        argv = self._run_merge_capture_argv(
+            tmp_path, '[release]\nauto_merge = true\nmerge_method = "merge"\n'
+        )
+        assert len(argv) == 1
+        assert "--merge" in argv[0]
+        assert "--squash" not in argv[0]
+        assert "--rebase" not in argv[0]
+
+    def test_absent_merge_method_defaults_to_squash_and_warns(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        argv = self._run_merge_capture_argv(tmp_path, "[release]\nauto_merge = true\n")
+        assert len(argv) == 1
+        assert "--squash" in argv[0]
+        assert "--merge" not in argv[0]
+        assert "--rebase" not in argv[0]
+        err = capsys.readouterr().err
+        assert "squash" in err
+
+    def test_unrecognized_merge_method_raises_before_any_gh_call(
+        self, tmp_path: Path
+    ) -> None:
+        wt = tmp_path / "wt" / "alpha"
+        wt.mkdir(parents=True)
+        manifest = _write_manifest(
+            tmp_path,
+            [{"name": "alpha", "repo_root": str(tmp_path), "worktree_path": str(wt)}],
+        )
+        toml = _write_toml(
+            tmp_path, '[release]\nauto_merge = true\nmerge_method = "sqush"\n'
+        )
+        calls: list[list[str]] = []
+
+        def stub(cmd, **kwargs):
+            calls.append(list(cmd))
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+
+        provider = get_provider("github", runner=stub)
+        pr_pairs = [PRPair(repo_path=str(wt), pr_number="7", member_name="alpha")]
+        with pytest.raises(MergeMethodInvalidError) as exc_info:
+            provider.pr.merge(pr_pairs, str(manifest), toml_path=str(toml))
+        assert calls == []
+        msg = str(exc_info.value)
+        assert "sqush" in msg
+        assert "merge" in msg and "squash" in msg and "rebase" in msg
+
+    def test_missing_release_block_falls_back_to_merge_in_loader(
+        self, tmp_path: Path
+    ) -> None:
+        """`_load_merge_method` itself defaults to "merge" for a missing,
+        unparseable, or non-table [release] block — mirroring
+        `_load_merge_order`/`_load_auto_merge`'s handling of those same three
+        shapes. Unlike the top-level "key absent from a valid table" case
+        (which resolves to squash-with-notice one layer up), these three
+        shapes are unreachable through `pr.merge` itself because the
+        `auto_merge` gate already requires a valid `[release]` table with
+        `auto_merge = true` before merge_method is ever consulted — so the
+        loader is exercised directly, as `_GitHubPR` subclassing already is
+        elsewhere in this file.
+        """
+        from trailhead.vcs.github import _load_merge_method
+
+        no_toml = _load_merge_method(None)
+        missing_file = _load_merge_method(str(tmp_path / "does-not-exist.toml"))
+        unparseable = _write_toml(tmp_path, "not valid toml [[[")
+        non_table = _write_toml(tmp_path, "release = 1\n")
+
+        assert no_toml == "merge"
+        assert missing_file == "merge"
+        assert _load_merge_method(str(unparseable)) == "merge"
+        assert _load_merge_method(str(non_table)) == "merge"
 
 
 # ---------------------------------------------------------------------------

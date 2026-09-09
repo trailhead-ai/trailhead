@@ -27,6 +27,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import sys
 import tempfile
 import time
 import tomllib
@@ -70,6 +71,15 @@ class AutoMergeDisabledError(Exception):
 
     Fail-closed default: existing installs that never opted into auto_merge
     must not silently keep merging once this gate lands.
+    """
+
+
+class MergeMethodInvalidError(Exception):
+    """Raised when merge_method in the [release] block is not merge/squash/rebase.
+
+    Fail-closed, same posture as AutoMergeDisabledError: a merge is not
+    reversible, so an unrecognized value refuses rather than falling back to
+    a default.
     """
 
 
@@ -566,6 +576,54 @@ def _load_auto_merge(toml_path: str | None) -> bool:
     return release.get("auto_merge") is True
 
 
+#: One-for-one with the three strategy flags `gh pr merge` itself exposes
+#: (`-m`/`--merge`, `-s`/`--squash`, `-r`/`--rebase`). `--author-email` is not
+#: scoped to a strategy in that flag list, so it stays on the argv unchanged
+#: for all three.
+_MERGE_METHOD_FLAGS = {"merge": "--merge", "squash": "--squash", "rebase": "--rebase"}
+
+
+def _load_merge_method(toml_path: str | None) -> str | None:
+    """Return the configured merge_method.
+
+    A missing toml_path, an unreadable/malformed file, or a [release] block
+    that isn't a table all fall back to "merge" — mirroring
+    ``_load_merge_order``/``_load_auto_merge``'s handling of those same three
+    shapes, and preserving pre-this-feature behaviour when there is no
+    [release] table to consult at all.
+
+    ``None`` is returned only when a valid [release] table is present but the
+    ``merge_method`` key itself is absent — distinct from the three shapes
+    above, because the caller resolves that case to the new "squash" default
+    and announces it (an operator who has engaged with [release] config gets
+    the new default; one with no [release] table at all keeps "merge").
+
+    Raises MergeMethodInvalidError if the key is present but not one of
+    merge/squash/rebase — fail-closed, same posture as auto_merge.
+    """
+    if not toml_path:
+        return "merge"
+    p = Path(toml_path)
+    if not p.is_file():
+        return "merge"
+    try:
+        raw = tomllib.loads(p.read_text(encoding="utf-8"))
+    except tomllib.TOMLDecodeError:
+        return "merge"
+    release = raw.get("release")
+    if not isinstance(release, dict):
+        return "merge"
+    value = release.get("merge_method")
+    if value is None:
+        return None
+    if value not in _MERGE_METHOD_FLAGS:
+        raise MergeMethodInvalidError(
+            f"invalid [release] merge_method {value!r} — accepted values are "
+            f"'merge', 'squash', 'rebase'"
+        )
+    return value
+
+
 def validate_pr_number(pr_number: str) -> None:
     """Validate ``pr_number`` is all-digits; raise InvalidInputError otherwise.
 
@@ -670,10 +728,11 @@ def _get_stack_entry(repo_path: str, pr_number: str, runner: rp.Runner) -> dict 
 
 
 def _do_merge(
-    repo_path: str, pr_number: str, author_email: str, runner: rp.Runner
+    repo_path: str, pr_number: str, author_email: str, merge_method: str, runner: rp.Runner
 ) -> tuple[bool, str]:
+    flag = _MERGE_METHOD_FLAGS[merge_method]
     r = rp.run(
-        ["gh", "pr", "merge", pr_number, "--merge", "--author-email", author_email],
+        ["gh", "pr", "merge", pr_number, flag, "--author-email", author_email],
         cwd=repo_path,
         runner=runner,
     )
@@ -727,6 +786,17 @@ def _merge_prs(
         raise AutoMergeDisabledError(
             "refusing to merge — auto_merge is unset/false — "
             "add `[release] auto_merge = true` to the group TOML to merge automatically."
+        )
+
+    # merge_method gate — fail-closed on an unrecognized value, before any
+    # subprocess call. An absent key changes behaviour (new default: squash)
+    # so it announces itself on stderr rather than switching silently.
+    merge_method = _load_merge_method(toml_path)
+    if merge_method is None:
+        merge_method = "squash"
+        print(
+            "portage merge: [release].merge_method not set — defaulting to squash",
+            file=sys.stderr,
         )
 
     # Merge safety gate
@@ -801,7 +871,7 @@ def _merge_prs(
             _skip_remaining(ordered, merged, failed, skipped, pair)
             break
 
-        ok, err = _do_merge(pair.repo_path, pair.pr_number, author_email, runner)
+        ok, err = _do_merge(pair.repo_path, pair.pr_number, author_email, merge_method, runner)
         if not ok:
             failed[key] = err
             _skip_remaining(ordered, merged, failed, skipped, pair)
