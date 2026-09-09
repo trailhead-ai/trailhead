@@ -87,7 +87,10 @@ class TestSessionsSlugScopingResolvesTheWorkspace:
 
         seen: dict[str, Path | None] = {}
 
-        def fake_enumerate(scope, *, env):
+        def fake_enumerate(scope, *, env, groups=None):
+            # Mirrors the production signature rather than absorbing unknown
+            # keywords: a double that swallowed **kwargs would keep passing
+            # while drifting out of step with the function it stands in for.
             seen["workspace"] = scope
             return [], [], 1
 
