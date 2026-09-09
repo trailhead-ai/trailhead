@@ -109,17 +109,26 @@ def test_migration_bar_instruction_lives_inside_step_7_and_precedes_step_8():
     step8_start = text.index("### 8. Write the Plan")
     assert step7_start < step8_start
 
-    step7 = _define_tasks_step()
-    invocation_index = step7.index("${CLAUDE_PLUGIN_ROOT}/scripts/migration_bar.py")
-
-    full_invocation_index = text.index(
+    invocation_index = text.index(
         "${CLAUDE_PLUGIN_ROOT}/scripts/migration_bar.py", step7_start
     )
-    assert step7_start < full_invocation_index < step8_start, (
+    assert step7_start < invocation_index < step8_start, (
         "the migration-bar invocation must be documented inside step 7, "
         "ahead of step 8"
     )
-    assert invocation_index >= 0
+
+
+def _concern_word(fixture: bytes, state: str) -> str:
+    """The first word of the concern phrase the renderer's own block names
+    after `state`, captured from an actual run rather than retyped."""
+    result = _run_extracted_renderer(fixture)
+    assert result.returncode == 0, result.stderr.decode("utf-8")
+    first_line = result.stdout.decode("utf-8").splitlines()[0]
+    match = re.search(rf"{state}: (.+)$", first_line)
+    assert match, (
+        f"renderer block must state a {state} concern phrase: {first_line!r}"
+    )
+    return match.group(1).split()[0]
 
 
 def _reopening_condition_phrase(stdout: str) -> str:
@@ -150,15 +159,7 @@ def test_step7_names_safe_direction_for_non_zero_exit():
     )
     reason_marker = reason_marker_match.group(0)
 
-    success = _run_extracted_renderer(PROTOTYPE_FIXTURE)
-    assert success.returncode == 0, success.stderr.decode("utf-8")
-    concern_match = re.search(
-        r"suppressed: (.+)$", success.stdout.decode("utf-8").splitlines()[0]
-    )
-    assert concern_match, (
-        f"suppression block must state a concern phrase: {success.stdout!r}"
-    )
-    concern_word = concern_match.group(1).split()[0]
+    concern_word = _concern_word(PROTOTYPE_FIXTURE, "suppressed")
 
     assert re.search(rf"decompose {re.escape(concern_word)}.*normally", clause, re.IGNORECASE), (
         f"the non-zero-exit clause must decompose {concern_word} work normally: {clause!r}"
@@ -184,15 +185,7 @@ def test_step7_names_safe_direction_for_non_prototype_level():
     )
     clause = " ".join(clause_match.group(0).split())
 
-    result = _run_extracted_renderer(PRODUCTION_FIXTURE)
-    assert result.returncode == 0, result.stderr.decode("utf-8")
-    concern_match = re.search(
-        r"not-suppressed: (.+)$", result.stdout.decode("utf-8").splitlines()[0]
-    )
-    assert concern_match, (
-        f"non-prototype block must state a not-suppressed concern phrase: {result.stdout!r}"
-    )
-    concern_word = concern_match.group(1).split()[0]
+    concern_word = _concern_word(PRODUCTION_FIXTURE, "not-suppressed")
 
     assert re.search(rf"decompose {re.escape(concern_word)}.*normally", clause, re.IGNORECASE), (
         f"the non-prototype-level clause must decompose {concern_word} work "
