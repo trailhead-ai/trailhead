@@ -631,6 +631,11 @@ def test_json_shape_matches_banner_fields(tmp_path):
         assert "status" in h and "shared" in h and "snippet" in h
         # The shared field is a 0/1 boolean a JSON consumer reads directly.
         assert h["shared"] in (0, 1)
+        # `shared` is the ONLY trust discriminator a --json hit carries; the
+        # layer= attribute exists solely on the human banner's
+        # <external-memory> fence, so a consumer told to read `layer` off a hit
+        # would read nothing.
+        assert "layer" not in h, sorted(h)
     # Footer signals are structured fields, not interleaved prose.
     assert "stale" in payload
     assert "showing" in payload and "total" in payload

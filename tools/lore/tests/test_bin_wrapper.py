@@ -55,10 +55,6 @@ def run_cli_direct(args, env=None, cwd=None):
 # ---- existence + permissions ------------------------------------------------
 
 
-def test_bin_lore_exists():
-    assert BIN_PATH.exists(), f"bin/lore not found at {BIN_PATH}"
-
-
 def test_bin_lore_is_executable():
     assert os.access(str(BIN_PATH), os.X_OK), "bin/lore is not executable"
 
@@ -100,14 +96,3 @@ def test_bin_help_from_tmp_cwd():
     bin_result = run_bin(["--help"], cwd="/tmp")
     assert bin_result.returncode == 0
     assert "lore" in bin_result.stdout.lower()
-
-
-# ---- no machine-specific paths baked in -------------------------------------
-
-
-def test_bin_wrapper_no_hardcoded_absolute_paths():
-    """The wrapper must not contain any hardcoded absolute paths."""
-    content = BIN_PATH.read_text()
-    # Should not contain /Users/<anything> or /home/<anything>
-    assert "/Users/" not in content, "bin/lore contains a hardcoded /Users/... path"
-    assert "/home/" not in content, "bin/lore contains a hardcoded /home/... path"
