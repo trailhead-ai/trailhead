@@ -1,6 +1,6 @@
 # trailhead eval corpus
 
-Behavioural eval cases for trailhead's own prose — install/compose/wire and the session-start hook.
+Behavioural eval cases for trailhead's own prose.
 
 Each case is a directory here:
 
@@ -15,5 +15,13 @@ The authoring rules, the dispatch shape, and the trust boundary on the
 instructions path are in `docs/eval-protocol.md` — read it before adding a case.
 Results go in `tools/trailhead/MANUAL-EVAL.md`.
 
-This corpus is currently empty. That is an honest report, not a gap being hidden:
-no eval has been written for trailhead yet.
+**This corpus stays empty, and that is structural rather than pending.** A
+behavioural eval measures what prose causes an agent to do, and this plugin
+ships no prose an agent reads: no skills, no agents, no ruleset. Its whole
+capability surface is one SessionStart hook script and a plugin manifest, both
+of which have real consumers and are tested by running them — which is the
+cheaper and more honest of the two ways to test prose, and the right one here.
+
+An empty corpus elsewhere means nobody has got to it. Here it means there is
+nothing to measure. If this plugin ever grows a skill, an agent, or a ruleset,
+delete this paragraph and write a case.

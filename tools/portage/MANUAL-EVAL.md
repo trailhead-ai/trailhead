@@ -20,7 +20,7 @@ Cases live in `plugins/portage/evals/<case-name>/`.
 ## Case: the approval signal is human-only
 
 `plugins/portage/evals/approval-is-human-only/` — five fixtures, two arms, and
-`expected.md` carrying the pass condition, committed in `d0e4a8` before any arm
+`expected.md` carrying the pass condition, committed in `e16022ec` before any arm
 or fixture existed.
 
 **Under test:** one paragraph of `agents/monitor.md` at
