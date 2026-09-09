@@ -966,15 +966,24 @@ def _seed_transcript_at(claude_dir: Path, session_id: str, cwd: Path) -> Path:
     return path
 
 
-def _add_account_group(cli_env, name: str, account: Path, repo: Path) -> None:
-    """Author a fresh fakeharness group declaring `[launch] account = account`."""
+def _add_account_group(
+    cli_env, name: str, account: Path, repo: Path, *, declared: str | None = None
+) -> None:
+    """Author a fresh fakeharness group declaring `[launch] account`.
+
+    `declared` overrides the literal string written into the config when the
+    test needs the declaration to differ textually from the directory it names
+    — a non-canonical spelling of the same path, used to prove camp carries the
+    declaration through rather than a canonicalized form of it.
+    """
     _init_git_repo(repo)
     result = _camp(cli_env, "group", name, "--member", f"member={repo}")
     assert result.returncode == 0, result.stderr
     _set_harness_binary(cli_env["config_dir"], name, "fakeharness")
     path = cli_env["config_dir"] / "groups" / f"{name}.toml"
+    written = str(account) if declared is None else declared
     path.write_text(
-        path.read_text(encoding="utf-8") + f'\n[launch]\naccount = "{account}"\n',
+        path.read_text(encoding="utf-8") + f'\n[launch]\naccount = "{written}"\n',
         encoding="utf-8",
     )
 
@@ -1666,8 +1675,14 @@ def test_camp_sessions_json_carries_a_declared_account_verbatim(cli_env) -> None
     that exact declared string — byte for byte, not expanded or normalized.
     """
     account = cli_env["tmp_path"] / "verbatim-account"
+    # Declared in a deliberately NON-canonical spelling of the very same
+    # directory: absolute, so the harness still binds it, but carrying a
+    # redundant "/." segment that `Path.resolve()` would silently collapse.
+    # A canonical probe would read identically before and after normalization
+    # and so could never show whether camp normalizes what it carries.
+    declared = f"{account}/."
     repo = cli_env["tmp_path"] / "repo-verbatim"
-    _add_account_group(cli_env, "verbatim", account, repo)
+    _add_account_group(cli_env, "verbatim", account, repo, declared=declared)
     _register_live_at(account, "verbatim-sess", repo)
 
     env = _env_without_shared_claude_dir(cli_env)
@@ -1683,7 +1698,10 @@ def test_camp_sessions_json_carries_a_declared_account_verbatim(cli_env) -> None
     payload = json.loads(result.stdout)
     assert len(payload) == 1
     assert payload[0]["group"] == "verbatim"
-    assert payload[0]["account"] == str(account)
+    assert payload[0]["account"] == declared
+    # The declaration is carried, not canonicalized: the collapsed form is what
+    # any expansion/resolution step would have produced instead.
+    assert payload[0]["account"] != str(account)
 
 
 def test_camp_sessions_json_nulls_group_and_account_outside_every_group(cli_env) -> None:
