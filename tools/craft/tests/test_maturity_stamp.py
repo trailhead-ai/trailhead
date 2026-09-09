@@ -16,7 +16,7 @@ Exit codes:
   2 → fail-closed, with a `reason-code:` line on stderr naming one of:
       empty-stdin, invalid-utf8-stdin, section-absent, duplicate-section,
       empty-section, unresolved-enumeration, malformed-entry, invalid-level,
-      duplicate-member
+      duplicate-member, member-name-too-long
 """
 
 from __future__ import annotations
@@ -430,6 +430,36 @@ def test_same_member_named_twice_exits_two_with_duplicate_member_regardless_of_a
     assert "reason-code: duplicate-member" in result.stderr.decode("utf-8")
 
 
+# ---- member-name length bound ----------------------------------------------
+
+
+def test_member_name_at_the_length_bound_still_resolves():
+    name = "a" * 100
+    spec = f"# Some Spec\n\n## Maturity\n\n- {name}: production\n"
+    result = _run(spec.encode("utf-8"))
+    assert result.returncode == 0
+    assert _lines(result) == [f"maturity: {name}=production"]
+
+
+def test_member_name_one_character_over_the_length_bound_refuses():
+    name = "a" * 101
+    spec = f"# Some Spec\n\n## Maturity\n\n- {name}: production\n"
+    result = _run(spec.encode("utf-8"))
+    assert result.returncode == 2
+    err = result.stderr.decode("utf-8")
+    assert "reason-code: member-name-too-long" in err
+
+
+def test_member_name_over_the_length_bound_never_echoes_the_offending_value():
+    name = "a" * 101
+    spec = f"# Some Spec\n\n## Maturity\n\n- {name}: production\n"
+    result = _run(spec.encode("utf-8"))
+    assert result.returncode == 2
+    err = result.stderr.decode("utf-8")
+    assert name not in err
+    assert "offending-value:" not in err
+
+
 # ---- sanitization of offending text ---------------------------------------
 
 
@@ -535,7 +565,7 @@ def test_module_docstring_cross_references_the_open_prompt_injection_channel_tas
     assert "task/the-offending-value-echo-is-an-unclosed-prompt-injection-channel" in text
 
 
-_NINE_REASON_CODES = (
+_TEN_REASON_CODES = (
     "empty-stdin",
     "invalid-utf8-stdin",
     "section-absent",
@@ -545,16 +575,17 @@ _NINE_REASON_CODES = (
     "malformed-entry",
     "invalid-level",
     "duplicate-member",
+    "member-name-too-long",
 )
 
 
-def test_this_test_module_docstring_lists_all_nine_reason_codes():
+def test_this_test_module_docstring_lists_all_ten_reason_codes():
     """This test module's own contract docstring (top of file) must stay in
     sync with the reader's actual reason-code vocabulary — a stale list here
     misdescribes the contract this file's tests actually pin."""
     with open(__file__, "r", encoding="utf-8") as f:
         module_docstring = f.read().split('"""')[1]
-    for code in _NINE_REASON_CODES:
+    for code in _TEN_REASON_CODES:
         assert code in module_docstring, (
             f"this test module's docstring must list reason-code {code!r}: "
             f"{module_docstring!r}"

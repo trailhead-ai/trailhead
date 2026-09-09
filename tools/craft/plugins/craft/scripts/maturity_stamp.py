@@ -23,7 +23,11 @@ The entry grammar is one top-level `- <member-name>: <level>` bullet per
 repository. `<member-name>` matches `^[A-Za-z0-9._-]+$` and is additionally
 never exactly `.` or `..` — a downstream AC7 attribution consumer treats the
 member name as a path segment, so those two values are rejected here rather
-than read back as a legitimate repository key. `<level>` is drawn from the
+than read back as a legitimate repository key. A member name is further
+bounded to 100 characters, GitHub's own repository name length limit — the
+shape check alone admits arbitrarily long hyphen-separated text, and a
+member name reaches a rendered calibration block that is pasted verbatim
+into a lens subagent's prompt. `<level>` is drawn from the
 closed vocabulary `prototype` / `early` / `production` and nothing else. The
 section body runs from the line after the sole unmasked `## Maturity`
 heading up to (but not including) the next unmasked top-level `## ` heading,
@@ -92,6 +96,13 @@ Exit codes:
        duplicate-member       — the same member name appears twice in the
                                  section, whether or not the two lines
                                  agree on the level.
+       member-name-too-long   — an otherwise well-shaped member name exceeds
+                                 the 100-character bound. Unlike the other
+                                 entry violations above, stderr never names
+                                 the offending value here: the value itself
+                                 reaches a rendered calibration block, and
+                                 knowing it is too long needs no look at what
+                                 it actually says.
 
        A body malformed in more than one way reports exactly one
        reason-code, deterministically: the section-structure check (heading
@@ -123,6 +134,7 @@ from maturity_resolve import _LEVELS, _sanitize  # noqa: E402
 _MATURITY_HEADING = "## Maturity"
 _MATURITY_HEADING_RE = re.compile(r"^## Maturity$", re.IGNORECASE)
 _MEMBER_RE = re.compile(r"^(?!\.{1,2}$)[A-Za-z0-9._-]+$")
+_MAX_MEMBER_NAME_LEN = 100
 _ENTRY_RE = re.compile(r"^-\s+([^:]*):\s*(.*)$")
 _UNRESOLVED_ENUMERATION_MARKER_RE = re.compile(r"^\s*<!--\s*unresolved-enumeration:.*-->\s*$")
 
@@ -135,6 +147,7 @@ _UNRESOLVED_ENUMERATION_REASON_CODE = "unresolved-enumeration"
 _MALFORMED_ENTRY_REASON_CODE = "malformed-entry"
 _INVALID_LEVEL_REASON_CODE = "invalid-level"
 _DUPLICATE_MEMBER_REASON_CODE = "duplicate-member"
+_MEMBER_NAME_TOO_LONG_REASON_CODE = "member-name-too-long"
 
 
 def _err(msg: str) -> None:
@@ -277,6 +290,8 @@ def parse_entries(text: str) -> dict[str, str]:
         level = m.group(2).strip()
         if not _MEMBER_RE.match(name):
             raise StampError(_MALFORMED_ENTRY_REASON_CODE, name)
+        if len(name) > _MAX_MEMBER_NAME_LEN:
+            raise StampError(_MEMBER_NAME_TOO_LONG_REASON_CODE)
         if level not in _LEVELS:
             raise StampError(_INVALID_LEVEL_REASON_CODE, level)
         folded = name.casefold()

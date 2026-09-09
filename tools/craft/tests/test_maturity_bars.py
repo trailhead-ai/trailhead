@@ -7,8 +7,10 @@ spec body on stdin and accepts an optional `--agent-instruction-file <path>`.
 Resolution order:
   - a `## Maturity` section naming exactly one repository -> that
     repository's level, basis `stamp`
-  - a section naming more than one repository -> the highest level among
-    them, basis `highest-stamped`
+  - a section naming more than one repository -> a concern-by-repository
+    matrix, each stamped repository rated at its own declared level, basis
+    `highest-stamped`, with the highest stamped level reported as the
+    fallback for a finding no repository can be attributed to
   - a section absent (including empty stdin) -> `maturity_resolve.resolve()`
     against the agent-instruction file, basis `agent-instruction-file`; with
     no such flag, `production`, basis `default`
@@ -18,7 +20,8 @@ Resolution order:
 Stdout on success (exit 0) is the calibration block: the resolved level and
 its basis, plus all five maturity-sensitive concerns each rated at the
 severity the resolved level maps to (Critical at production, Important at
-early, Minor at prototype).
+early, Minor at prototype) — or, at basis `highest-stamped`, one severity
+per stamped repository for each of those concerns.
 
 Exit codes:
   0 -> resolved, block printed
@@ -36,7 +39,11 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).parent.parent
-BARS = REPO_ROOT / "plugins" / "craft" / "scripts" / "maturity_bars.py"
+SCRIPTS_DIR = REPO_ROOT / "plugins" / "craft" / "scripts"
+BARS = SCRIPTS_DIR / "maturity_bars.py"
+
+sys.path.insert(0, str(SCRIPTS_DIR))
+import maturity_bars  # noqa: E402
 
 CONCERNS = (
     "backwards compatibility",
@@ -302,15 +309,221 @@ def _two_repo_stamp(level_a: str, level_b: str) -> str:
     )
 
 
+MIXED_TWO_REPO_STAMP = "# S\n\n## Maturity\n\n- lookout: prototype\n- trailhead: production\n"
+
+THREE_REPO_STAMP = (
+    "# Some Spec\n\n## Maturity\n\n"
+    "- alpha: prototype\n"
+    "- mango: early\n"
+    "- zebra: production\n"
+)
+
+SEVERITY_COLLISION_STAMP = (
+    "# S\n\n## Maturity\n\n- lookout: production\n- Critical: prototype\n"
+)
+
+
 @pytest.mark.parametrize("level_a,level_b", list(itertools.permutations(_LEVEL_ORDER, 2)))
-def test_two_repo_stamp_resolves_to_higher_level_basis_highest_stamped(level_a, level_b):
+def test_two_repo_stamp_renders_each_repositorys_own_severity_basis_highest_stamped(level_a, level_b):
     result = _run(_two_repo_stamp(level_a, level_b).encode("utf-8"))
     assert result.returncode == 0
     out = _stdout(result)
     higher = level_a if _LEVEL_ORDER.index(level_a) > _LEVEL_ORDER.index(level_b) else level_b
-    assert "highest-stamped" in out
+    assert f"maturity: {higher} (basis: highest-stamped)" in out
     for concern in CONCERNS:
-        assert f"{concern}: {_SEVERITY_BY_LEVEL[higher]}" in out
+        # This exact-cell assertion already pins that the two repositories'
+        # rendered severities differ whenever `_SEVERITY_BY_LEVEL[level_a]`
+        # and `_SEVERITY_BY_LEVEL[level_b]` differ — a separate assertion on
+        # the two dict lookups themselves would prove only a property of
+        # this parametrization, never of the renderer's output.
+        assert (
+            f"- {concern}: `repo-a`={_SEVERITY_BY_LEVEL[level_a]}, "
+            f"`repo-b`={_SEVERITY_BY_LEVEL[level_b]}"
+        ) in out
+
+
+def test_two_repo_stamp_at_same_level_still_renders_the_full_matrix():
+    spec = "# Some Spec\n\n## Maturity\n\n- repo-a: early\n- repo-b: early\n"
+    result = _run(spec.encode("utf-8"))
+    assert result.returncode == 0
+    out = _stdout(result)
+    assert "maturity: early (basis: highest-stamped)" in out
+    assert "concern x repository: `repo-a`, `repo-b`" in out
+    for concern in CONCERNS:
+        assert f"- {concern}: `repo-a`=Important, `repo-b`=Important" in out
+
+
+def test_three_repo_stamp_orders_columns_by_member_name_not_write_order():
+    spec = (
+        "# Some Spec\n\n## Maturity\n\n"
+        "- zebra: production\n"
+        "- alpha: prototype\n"
+        "- mango: early\n"
+    )
+    result = _run(spec.encode("utf-8"))
+    assert result.returncode == 0
+    out = _stdout(result)
+    assert "concern x repository: `alpha`, `mango`, `zebra`" in out
+    for concern in CONCERNS:
+        assert (
+            f"- {concern}: `alpha`=Minor, `mango`=Important, `zebra`=Critical"
+        ) in out
+
+
+def test_highest_stamped_names_the_fallback_level_explicitly():
+    out = _stdout(_run(MIXED_TWO_REPO_STAMP.encode("utf-8")))
+    assert "maturity: production (basis: highest-stamped)" in out
+    assert "not a general highest-wins rule" in out
+
+
+@pytest.mark.parametrize("level_a,level_b", list(itertools.permutations(_LEVEL_ORDER, 2)))
+def test_highest_stamped_block_states_the_fallback_severity_itself(level_a, level_b):
+    """The header names a level (`maturity: <level> (basis: highest-stamped)`),
+    never a severity — a lens rating an unattributable finding needs the
+    fallback severity spelled out in the block itself, not derived from a
+    ladder table (`_shared/council.md`) it is never shown."""
+    out = _stdout(_run(_two_repo_stamp(level_a, level_b).encode("utf-8")))
+    higher = level_a if _LEVEL_ORDER.index(level_a) > _LEVEL_ORDER.index(level_b) else level_b
+    assert f"maturity: {higher} (basis: highest-stamped)" in out
+    fallback_line = next(line for line in out.splitlines() if "sanctioned fallback" in line)
+    assert _SEVERITY_BY_LEVEL[higher] in fallback_line
+
+
+def test_highest_stamped_block_states_the_path_attribution_rule():
+    out = _stdout(_run(MIXED_TWO_REPO_STAMP.encode("utf-8")))
+    assert "leading camp member name segment" in out
+    assert "path" in out
+
+
+def test_attribution_pointer_names_the_columns_below_not_above():
+    """The attribution rule renders before the matrix's column header in
+    every rendered block (the rule is fixed prose that always precedes the
+    per-repository section), so a pointer reading "above" is wrong as
+    rendered no matter which repository the columns name."""
+    out = _stdout(_run(MIXED_TWO_REPO_STAMP.encode("utf-8")))
+    lines = out.splitlines()
+    rule_idx = next(i for i, line in enumerate(lines) if "against the columns" in line)
+    header_idx = next(i for i, line in enumerate(lines) if line.startswith("concern x repository:"))
+    assert rule_idx < header_idx, "attribution rule must render before the columns it points at"
+    assert "against the columns below" in lines[rule_idx]
+    assert "against the columns above" not in out
+
+
+def test_attribution_rule_states_the_multi_match_trigger_over_multiple_cited_paths():
+    """A single cited path's leading segment can never produce "two or more
+    distinct matches" — only multiple cited paths can. The block's own text
+    must carry that plural qualifier (mirroring `_shared/council.md`'s
+    "across the finding's cited paths") so the multi-match case is reachable
+    as written, not merely as intended."""
+    out = _stdout(_run(MIXED_TWO_REPO_STAMP.encode("utf-8")))
+    assert "the paths it cites" in out
+
+
+def test_highest_stamped_block_states_all_four_attribution_cases_decidably():
+    """The rendered block is the only maturity text a lens subagent ever
+    sees, so it — not just council.md — must decide all four cases a
+    finding's cited paths can present, using AC8's own term "single" to
+    settle the two-or-more-match case unambiguously."""
+    out = _stdout(_run(MIXED_TWO_REPO_STAMP.encode("utf-8")))
+    assert "single repository" in out
+    assert "two or more distinct matches" in out
+    assert "no cited path at all" in out
+
+
+def test_three_repo_stamp_carries_all_five_concerns_for_every_repository():
+    lines = _stdout(_run(THREE_REPO_STAMP.encode("utf-8"))).splitlines()
+    for concern in CONCERNS:
+        assert (
+            f"- {concern}: `alpha`=Minor, `mango`=Important, `zebra`=Critical"
+        ) in lines, f"{concern!r} missing its full per-repository row"
+
+
+def test_highest_stamped_severity_vocabulary_is_exactly_three_words():
+    out = _stdout(_run(THREE_REPO_STAMP.encode("utf-8")))
+    found = {word for word in ("Critical", "Important", "Minor", "Major", "Severe", "Blocker") if word in out}
+    assert found <= set(SEVERITIES)
+    for concern in CONCERNS:
+        for line in out.splitlines():
+            if line.strip().startswith(f"- {concern}:"):
+                for cell in line.split(":", 1)[1].split(","):
+                    severity = cell.split("=", 1)[1].strip()
+                    assert severity in SEVERITIES
+
+
+def test_highest_stamped_downgrade_restatement_names_repository_and_level():
+    out = _stdout(_run(MIXED_TWO_REPO_STAMP.encode("utf-8")))
+    assert "downgraded by `lookout`'s prototype maturity level" in out
+
+
+def test_single_repository_stamp_renders_byte_for_byte_unchanged():
+    out = _stdout(_run(SINGLE_REPO_EARLY.encode("utf-8")))
+    assert out == (
+        "maturity: early (basis: stamp)\n\n"
+        + "".join(f"- {concern}: Important\n" for concern in CONCERNS)
+        + "\nEvery concern above is reported at its mapped severity and is "
+        "never filtered out.\nWhere a concern above also appears in your "
+        "per-lens Critical bars, the severity above governs — the bars say "
+        "what to look for, this block says how severely to rate it.\n"
+        "A finding downgraded by this calibration restates the concern "
+        "and the deciding level in its own text (for example "
+        "\"migration and backfill — Important, downgraded by this spec's "
+        "early maturity level\"), so the operator can tell a calibrated "
+        "downgrade from noise and has something concrete to override.\n"
+    )
+
+
+def test_matrix_header_and_per_repository_line_shape_are_pinned():
+    lines = _stdout(_run(MIXED_TWO_REPO_STAMP.encode("utf-8"))).splitlines()
+    assert "concern x repository: `lookout`, `trailhead`" in lines
+    assert "- backwards compatibility: `lookout`=Minor, `trailhead`=Critical" in lines
+
+
+# ---- a member name colliding with the severity vocabulary --------------
+
+
+def test_severity_colliding_member_name_renders_delimited_in_the_header():
+    out = _stdout(_run(SEVERITY_COLLISION_STAMP.encode("utf-8")))
+    assert "concern x repository: `Critical`, `lookout`" in out
+
+
+def test_severity_colliding_member_name_renders_delimited_not_as_a_bare_token():
+    out = _stdout(_run(SEVERITY_COLLISION_STAMP.encode("utf-8")))
+    assert "`Critical`=Minor" in out
+    assert "Critical=Minor" not in out
+
+
+def test_severity_colliding_member_name_stays_delimited_in_the_downgrade_example():
+    out = _stdout(_run(SEVERITY_COLLISION_STAMP.encode("utf-8")))
+    assert "migration and backfill — `Critical`, Minor, downgraded by " in out
+    assert "downgraded by `Critical`'s prototype maturity level" in out
+
+
+# ---- treat-as-data framing for interpolated repository names -----------
+
+
+def test_matrix_block_states_repository_names_are_labels_not_instructions():
+    out = _stdout(_run(MIXED_TWO_REPO_STAMP.encode("utf-8")))
+    assert "labels" in out.lower()
+    assert "never instructions" in out.lower() or "not instructions" in out.lower()
+
+
+@pytest.mark.parametrize(
+    "fixture,reason_code",
+    [
+        (MALFORMED_ENTRY, "malformed-entry"),
+        (INVALID_LEVEL, "invalid-level"),
+        (DUPLICATE_MEMBER, "duplicate-member"),
+        (DUPLICATE_SECTION, "duplicate-section"),
+        (EMPTY_SECTION, "empty-section"),
+        (UNRESOLVED_ENUMERATION, "unresolved-enumeration"),
+    ],
+)
+def test_fail_closed_stamp_violations_still_write_no_block_after_matrix_rendering(fixture, reason_code):
+    result = _run(fixture.encode("utf-8"))
+    assert result.returncode == 2
+    err = _stderr(result)
+    assert f"reason-code: {reason_code}" in err
+    assert _stdout(result) == ""
 
 
 # ---- basis: agent-instruction-file / default -------------------------------
@@ -431,6 +644,39 @@ def test_unreadable_agent_instruction_file_raises_no_traceback(tmp_path):
         ["--agent-instruction-file", "/does/not/exist/CLAUDE.md"],
     )
     assert "Traceback" not in _stderr(result)
+
+
+# ---- render() invariant: highest-stamped basis requires entries -----------
+
+
+def test_render_raises_on_highest_stamped_basis_with_no_entries():
+    """`render()` must never silently fall back to the flat highest-wins
+    block for `highest-stamped` — the matrix output this change exists to
+    produce. A caller that loses `entries` for this basis is an invariant
+    violation, not a degraded-but-valid output."""
+    with pytest.raises(AssertionError):
+        maturity_bars.render("production", "highest-stamped", None)
+
+
+# ---- member-name length bound reaches this renderer too -------------------
+
+
+def test_member_name_at_the_length_bound_renders_through_this_renderer():
+    name = "a" * 100
+    spec = f"# Some Spec\n\n## Maturity\n\n- {name}: production\n"
+    result = _run(spec.encode("utf-8"))
+    assert result.returncode == 0
+    assert "maturity: production (basis: stamp)" in _stdout(result)
+
+
+def test_member_name_over_the_length_bound_refuses_with_its_own_reason_code():
+    name = "a" * 101
+    spec = f"# Some Spec\n\n## Maturity\n\n- {name}: production\n"
+    result = _run(spec.encode("utf-8"))
+    assert result.returncode != 0
+    assert "reason-code: member-name-too-long" in _stderr(result)
+    assert _stdout(result) == ""
+    assert name not in _stderr(result)
 
 
 # ---- remaining stamp violations pass through their own reason-code --------
@@ -566,12 +812,6 @@ def test_block_instructs_a_downgraded_finding_to_restate_concern_and_level(level
     out = _stdout(_run(spec.encode("utf-8")))
     assert "downgrad" in out.lower()
     assert level in out
-
-
-def test_highest_stamped_block_states_it_is_not_a_general_highest_wins_rule():
-    spec = "# S\n\n## Maturity\n\n- lookout: prototype\n- trailhead: production\n"
-    out = _stdout(_run(spec.encode("utf-8")))
-    assert "not a general highest-wins rule" in out
 
 
 @pytest.mark.parametrize(
