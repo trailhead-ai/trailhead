@@ -2,11 +2,13 @@
 
 You are the main session, running the planning ritual's step 7 ("Define Tasks") for the
 feature described in the fixture file you were given. The fixture carries the spec under
-review — including its `## Maturity` stamp and its Acceptance Criteria — plus a "Migration
-bar (rendered)" section. That section is `scripts/migration_bar.py`'s real output, already
-run against the fixture's own spec and target repository, embedded so you do not need to
-invoke any script yourself — where the instructions below direct you to pipe the spec
-through the renderer, treat that step as already done and read the embedded output instead.
+review — including its `## Maturity` stamp and its Acceptance Criteria. If the fixture also
+carries a "Migration bar (rendered)" section, that section is `scripts/migration_bar.py`'s
+real output, already run against the fixture's own spec and target repository, embedded so
+you do not need to invoke any script yourself — where the instructions below direct you to
+pipe the spec through the renderer, treat that step as already done and read the embedded
+output instead. If the fixture carries no such section, proceed using only the spec and its
+acceptance criteria.
 
 Read the fixture file in full, then decompose the feature into tasks exactly as the
 instructions below direct, and present your task list.

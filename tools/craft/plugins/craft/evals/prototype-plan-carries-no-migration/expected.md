@@ -260,3 +260,103 @@ decision from the embedded block's own text even under baseline's unmodified pro
 result is strongest on the durable-trace claim, where the fixture's material cannot substitute for
 an instruction the reader was never given, and weakest on `negative.md`'s carve-out-survives
 claim, where it cannot yet.
+
+---
+
+## Round Two — pre-registration, written and committed before any Round Two arm is run
+
+Round One's own limits section named the defect this round exists to close: every fixture
+embeds `migration_bar.py`'s real output as material available to **both** arms, so a capable
+reader can reach the "right" migration-task decision from the embedded block's own text even
+under baseline's unmodified prose — and `positive.md`'s corrected scoring above shows this is
+not hypothetical: baseline suppressed condition 1 on 3/3 runs while its own instructions never
+mention the renderer at all. That is not evidence the prose change does nothing; it is evidence
+the fixture handed baseline the answer through a channel neither arm's instructions describe as
+data. A real baseline planning session never runs the renderer and never sees a block — so
+Round Two removes the block from the baseline arm's material entirely, and fixes a second,
+independent defect in `control.md`.
+
+### What changed in the instrument, and what did not
+
+- **The rendered block now reaches only the treatment arm's material.** Three new fixtures —
+  `fixtures/round2-baseline-positive.md`, `fixtures/round2-baseline-negative.md`,
+  `fixtures/round2-baseline-control.md` — carry the same spec, the same Acceptance Criteria, and
+  the same `## Maturity` stamp as `positive.md` / `negative.md` / `control.md` respectively,
+  verified byte-identical over that shared content by diff, but omit the "## Migration bar
+  (rendered)" section outright. The treatment arm keeps reading the original three fixtures
+  unchanged — they still carry the block, which treatment's own instructions still direct it to
+  read.
+- **`arms/baseline.md` and `arms/treatment.md`'s shared wrapper paragraph was reworded to be
+  conditional** ("If the fixture also carries a … section … If the fixture carries no such
+  section, proceed using only the spec and its acceptance criteria"), applied identically to
+  both arm files so the two still differ only in the step 7 body — verified by `diff
+  arms/baseline.md arms/treatment.md`, pasted in the executor's report. This is the
+  "mechanically necessary framing" the diff check already tolerated in Round One, extended to
+  cover a fixture that may or may not carry the section, rather than a per-arm asymmetry.
+- **`control.md`'s AC3 was reworded** to drop "This is a disposable-state prototype with no
+  deployed consumers", which contradicted the fixture's own `production` stamp, while keeping
+  the same waived-preservation requirement the sentence also stated. `round2-baseline-control.md`
+  carries the corrected wording too. `positive.md` and `negative.md` needed no such fix — their
+  AC3 prototype framing agrees with their `prototype` stamp.
+- **Both arms' step 7 body were refreshed** to the current revisions: `arms/baseline.md`
+  reproduces `skills/plan/SKILL.md`'s step 7 at `afd96268` (unchanged from Round One — verified
+  identical by diff); `arms/treatment.md` reproduces step 7 at this task's `HEAD`, picking up the
+  durable-trace clause's current wording ("write the decision into the plan's `Given Axioms` in
+  step 8, **as an axiom citing the spec's own `## Maturity` section**"), which a sibling pass
+  changed after Round One ran.
+- **Round One's fixtures, arms, results, and scoring are left exactly as they now stand** (Round
+  One's own scoring corrected against its registered rule, above) — nothing in this section
+  edits them further.
+
+### Dispatch for Round Two
+
+Six cells, three runs each (18 runs total), matching Round One's run count:
+
+| Cell | Instructions path | Material path |
+|---|---|---|
+| baseline × positive | `arms/baseline.md` | `fixtures/round2-baseline-positive.md` |
+| baseline × negative | `arms/baseline.md` | `fixtures/round2-baseline-negative.md` |
+| baseline × control | `arms/baseline.md` | `fixtures/round2-baseline-control.md` |
+| treatment × positive | `arms/treatment.md` | `fixtures/positive.md` |
+| treatment × negative | `arms/treatment.md` | `fixtures/negative.md` |
+| treatment × control | `arms/treatment.md` | `fixtures/control.md` |
+
+Each run is dispatched to a generic read-only agent, pointed at exactly the two paths in its
+row. Runs are independent; no run sees another's output. `craft:planner` or any `craft:`
+subagent is never dispatched for either cell, for the same reason as Round One.
+
+### Pass conditions, scored as two separate dimensions this time
+
+Round One's authoring error was scoring the full three-condition conjunction against a bar the
+pre-registration wrote for condition 1 alone. Round Two registers both dimensions explicitly and
+separately, so no future reading can re-conflate them:
+
+- **Suppression (condition 1 alone) — the pre-registered pass/fail bar.** On `positive.md`,
+  upheld if baseline fires condition 1 (no migration task) on **≤1/3** runs and treatment fires
+  it on **≥3/3**; falsified if **both** arms fire condition 1 on **≥2/3** runs each; indeterminate
+  otherwise.
+- **Durable trace (condition 2 alone) — reported, not scored against a numbered bar**, exactly as
+  in the corrected Round One reading: whichever way suppression falls, record separately whether
+  each arm's runs name the resolved target-repo, level, and basis (and the literal word
+  "suppressed") together. This is descriptive, per the corrected Round One reading, not a second
+  pass/fail bar — Round One already showed this dimension can be cleanly measured without one.
+- **`negative.md` carve-out — same bar as Round One.** Upheld if treatment fires the full
+  conjunction (migration task present **and** AC3 named) on **≥2/3** runs. No baseline pass/fail
+  bar — Round One's own reading already explains why (AC3's plain-English legibility on this
+  fixture, independent of any migration-bar routing).
+- **`control.md` sanity control — same bar as Round One.** Holds if **both** arms keep the
+  migration task on **3/3** runs each.
+- **A collapsed differential is a result, not a failure to re-run** — recorded verbatim, per
+  fixture, exactly as Round One's `negative.md` result was, and per
+  `35d0616b test(craft): record both eval results, including a collapsed differential`. This
+  round is not re-tuned a third time if it also fails to separate; that would itself be a finding
+  about AC10, reported plainly.
+
+### What this round settles either way
+
+An upheld suppression bar on `positive.md` closes the one claim Round One's instrument could not
+measure: that the treatment prose's explicit migration-bar routing, not the fixture's own legible
+block text, is what suppresses the task. A falsified or indeterminate result here — with the
+durable trace still separating as it did in Round One — means AC10's behavioural closure rests
+entirely on the durable-trace claim, and the suppression claim itself remains open pending a
+harder instrument than this one.
