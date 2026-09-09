@@ -132,6 +132,16 @@ a reason to stop looking:
   reports a URL may have published somewhere else entirely. Both cases produced a
   first grading pass that was wrong because it trusted captured output over the
   tree on disk.
+- **Grade only finished runs, and make finishing observable.** A run directory
+  exists from the moment the run starts, so counting directories does not tell
+  you the batch is done — it tells you the batch has been *dispatched*. Grading
+  an in-flight run reads a half-written log as a clean one, which scores a
+  compliant arm as a refusal. Have the runner write a completion marker as its
+  last act and have the grader skip any run without one.
+
+Three of the first four cases produced a wrong first grading pass, each in a
+different way, and none of them was visible in the run output. Assume the
+grader is wrong until its verdict and a hand-read log agree on a sample.
 - **Never point a fixture at a real vault, repo, or config**, even read-only. The
   fixture is data; live infrastructure is not part of it.
 
