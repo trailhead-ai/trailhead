@@ -87,11 +87,11 @@ class TestSessionsSlugScopingResolvesTheWorkspace:
 
         seen: dict[str, Path | None] = {}
 
-        def fake_enumerate(group, workspace, env):
-            seen["workspace"] = workspace
-            return []
+        def fake_enumerate(scope, *, env):
+            seen["workspace"] = scope
+            return [], [], 1
 
-        monkeypatch.setattr(cli_session, "_enumerate_sessions", fake_enumerate)
+        monkeypatch.setattr(cli_session, "_enumerate_live_sessions_pool", fake_enumerate)
 
         cli_session._cmd_sessions_group_cli(["feat-x"], GROUP, {})
 
@@ -335,3 +335,91 @@ class TestAddressableHarnessesStoreKeying:
         assert by_account == {"/acct/a": "/acct/a", "/acct/b": "/acct/b"}
         for store in stores:
             assert store.env["BASE"] == "1"
+
+
+class TestLiveSessionPoolQueriesEachStoreExactlyOnce:
+    """`_enumerate_live_sessions_pool` walks the (harness, store) pool once —
+    the pool itself is already deduplicated, and this proves the WALK adds no
+    second visit of its own. The counted quantity — how many times each store
+    was actually asked — is owned by `fake_enumerate_records`'s call log
+    below, which the test reads back; nothing here is a derived guess.
+    """
+
+    def test_each_store_is_enumerated_exactly_once(self, monkeypatch):
+        import camp.cli.session as cli_session
+        import camp.group.config as group_config
+        import camp.launch.profile as profile
+        import camp.launch.session as launch_session
+
+        monkeypatch.setattr(profile, "harness_for", lambda group: _AccountAwareHarness())
+        groups = [
+            {"group": {"name": "g1"}, "launch": {"account": "/acct/a"}},
+            {"group": {"name": "g2"}, "launch": {"account": "/acct/b"}},
+            {"group": {"name": "g3"}},
+        ]
+        monkeypatch.setattr(group_config, "load_all_groups", lambda *a, **k: groups)
+
+        calls: list = []
+
+        def fake_enumerate_records(store, scope, env):
+            calls.append(store.env.get("FAKE_STORE_DIR"))
+            return []
+
+        monkeypatch.setattr(launch_session, "enumerate_records", fake_enumerate_records)
+
+        records, failures, total = cli_session._enumerate_live_sessions_pool(None, env={})
+
+        assert total == 3
+        assert len(calls) == 3
+        assert calls.count("/acct/a") == 1
+        assert calls.count("/acct/b") == 1
+        assert calls.count(None) == 1
+
+
+class TestLiveSessionPoolBoundsAHangingStore:
+    """A store whose enumeration hits the existing per-call timeout must
+    degrade exactly like a failing store, not block the pool's answer.
+    """
+
+    def test_a_store_that_times_out_degrades_like_a_failing_one(self, monkeypatch):
+        import subprocess
+
+        import camp.cli.session as cli_session
+        import camp.group.config as group_config
+        import camp.launch.profile as profile
+        import camp.launch.session as launch_session
+        from datetime import datetime, timezone
+        from trailhead.harness.base import SessionRecord
+
+        monkeypatch.setattr(profile, "harness_for", lambda group: _AccountAwareHarness())
+        groups = [
+            {"group": {"name": "g1"}, "launch": {"account": "/acct/hangs"}},
+            {"group": {"name": "g2"}, "launch": {"account": "/acct/answers"}},
+        ]
+        monkeypatch.setattr(group_config, "load_all_groups", lambda *a, **k: groups)
+
+        answer = [
+            SessionRecord(
+                session_id="s1",
+                cwd=Path("/x"),
+                kind="agent",
+                controllable=True,
+                name=None,
+                pid=None,
+                started_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            )
+        ]
+
+        def fake_enumerate_records(store, scope, env):
+            if store.env.get("FAKE_STORE_DIR") == "/acct/hangs":
+                raise subprocess.TimeoutExpired(cmd=["fake"], timeout=10)
+            return answer
+
+        monkeypatch.setattr(launch_session, "enumerate_records", fake_enumerate_records)
+
+        records, failures, total = cli_session._enumerate_live_sessions_pool(None, env={})
+
+        assert total == 2
+        assert records == answer
+        assert len(failures) == 1
+        assert failures[0]["account"] == "/acct/hangs"

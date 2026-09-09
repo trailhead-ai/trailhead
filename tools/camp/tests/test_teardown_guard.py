@@ -453,8 +453,9 @@ class _AccountAwareHarness:
 
     name = "acctharness"
 
-    def __init__(self, transcripts_by_account):
+    def __init__(self, transcripts_by_account, live_by_account=None):
         self._by_account = transcripts_by_account
+        self._live_by_account = live_by_account or {}
 
     def session_launch_env_unset(self):
         return []
@@ -469,7 +470,29 @@ class _AccountAwareHarness:
         return ["probe"]
 
     def parse_session_list(self, output):
-        return []
+        records = []
+        for line in output.splitlines():
+            if "\t" not in line:
+                continue
+            session_id, cwd = line.split("\t", 1)
+            records.append(_record(session_id, Path(cwd)))
+        return records
+
+
+def _live_probe_run(harness):
+    """A `guard.subprocess.run` stand-in whose answer depends on which
+    STORE'S environment the probe was actually run under — proving the live
+    probe reads `harness.env` rather than broadcasting one shared environment
+    to every store.
+    """
+
+    def run(argv, **kwargs):
+        account = (kwargs.get("env") or {}).get("FAKE_STORE_KEY")
+        rows = harness._live_by_account.get(account, [])
+        stdout = "".join(f"{session_id}\t{cwd}\n" for session_id, cwd in rows)
+        return subprocess.CompletedProcess(argv, 0, stdout, "")
+
+    return run
 
 
 def test_a_session_in_the_second_declared_store_still_blocks_removal(
@@ -493,6 +516,43 @@ def test_a_session_in_the_second_declared_store_still_blocks_removal(
     })
     monkeypatch.setattr(profile, "harness_for", lambda group: harness)
     monkeypatch.setattr(guard.subprocess, "run", _ok())
+
+    groups = [
+        {"group": {"name": "g1"}},
+        {"group": {"name": "g2"}, "launch": {"account": "/acct/b"}},
+    ]
+    stores = cli_session._addressable_harnesses(groups, env={})
+
+    transcripts, live = guard.gather_pool(stores, env={})
+    blocking = guard.blocking_sessions(
+        ws, transcripts=transcripts, live_records=live, groups=groups, env={}, now=_NOW
+    )
+
+    assert [c.session_id for c in blocking] == [_UUID_A]
+
+
+def test_a_session_in_the_second_declared_store_still_blocks_removal_when_live(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The LIVE-probe half of the regression above: `_probe_transcripts`
+    already reads each store's own environment through
+    `HarnessStore.session_transcripts`'s override, but the live probe built
+    its OWN subprocess environment from the caller's ambient *env* and
+    broadcast it to every store — so a session running RIGHT NOW under a
+    second declared account was invisible to the guard, and a removal of the
+    workspace it was rooted in was not yet guaranteed to be blocked.
+    """
+    import camp.cli.session as cli_session
+    import camp.launch.profile as profile
+    import camp.launch.teardown_guard as guard
+
+    ws = _workspace(tmp_path, "g", "ws")
+    harness = _AccountAwareHarness(
+        {None: [], "/acct/b": []},
+        live_by_account={None: [], "/acct/b": [(_UUID_A, str(ws))]},
+    )
+    monkeypatch.setattr(profile, "harness_for", lambda group: harness)
+    monkeypatch.setattr(guard.subprocess, "run", _live_probe_run(harness))
 
     groups = [
         {"group": {"name": "g1"}},

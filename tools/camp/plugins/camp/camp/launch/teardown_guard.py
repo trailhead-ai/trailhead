@@ -125,12 +125,21 @@ def _probe_live(harness, env: Mapping[str, str]) -> list:
             f"harness {_display_name(harness)} has no way to report its live "
             "sessions, so camp cannot tell whether one is running here"
         )
+    # A `camp.launch.profile.HarnessStore` carries the environment ITS store's
+    # queries must run under (`.env`) — the same binding `_probe_transcripts`
+    # already gets for free through `session_transcripts`'s override. This is
+    # the live probe's half of that: without reading `.env` here, every store
+    # would be probed under the one shared *env* the caller passed in, so a
+    # session running right now under a SECOND declared account would never
+    # be seen. A bare `Harness` with no `.env` (every other caller of this
+    # module) falls back to *env* unchanged.
+    store_env = getattr(harness, "env", env)
     try:
         completed = subprocess.run(
             argv,
             capture_output=True,
             text=True,
-            env=dict(env),
+            env=dict(store_env),
             timeout=PROBE_TIMEOUT_SECONDS,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:

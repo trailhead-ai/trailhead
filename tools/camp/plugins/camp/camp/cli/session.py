@@ -11,12 +11,25 @@ Two deliberately different postures:
 stderr line, empty stdout, non-zero exit. That includes a launch that spawned but
 never registered: an unconfirmable session is not a success with a caveat.
 
-``sessions`` is a QUESTION, so every failure DEGRADES — a stderr notice, an empty
+``sessions`` is a QUESTION, so most failures DEGRADE — a stderr notice, an empty
 list on stdout, exit 0. A caller asking what is running can act on "nothing" and
 on "I could not tell" the same way (there is nothing to attach to either way), and
 exiting non-zero for the second would make a read-only query a scripting hazard.
-The two are still distinguishable: the degraded answer carries a notice naming
-what could not be determined, and an honestly-empty one is silent.
+An honestly-empty answer stays silent.
+
+The live listing asks every (harness, credential store) candidate in the pool —
+never only the group the invocation happened to resolve — and merges what comes
+back (see ``_enumerate_live_sessions_pool``). A store that cannot be read
+degrades to a stderr notice naming the ACCOUNT it could not reach while the
+stores that answered still contribute their rows, exit 0 — the read-only,
+partial-information case above. But when EVERY addressable store fails, "nothing
+to attach to" is no longer true: something might well be running under a store
+camp simply could not ask, so that case is a REFUSAL — non-zero exit, no rows,
+a stated reason — never an empty answer indistinguishable from "nothing is
+running". The `--json` form carries the same partial/total distinction IN BAND:
+every row (session or not) carries `"ok"`, so a parser sorts a mixed answer
+without touching stderr, and a total failure prints no array at all rather than
+an empty one a parser could read as complete.
 
 ``camp new --launch`` reuses this module rather than re-deriving the flow, so a
 launch means the same thing and refuses the same way at both entry points.
@@ -1020,8 +1033,14 @@ def _session_payload(record) -> dict:
 
     The seam already drops harness-native fields beyond the normalized set; this
     keeps camp from re-widening the surface it just narrowed.
+
+    ``ok`` is ``True`` on every row this function builds. It exists so a
+    machine-readable consumer can tell a session row from a partial-failure
+    row (see :func:`_store_failure_payload`) with ONE field test, on every row
+    in the list, rather than by the row's shape or the absence of a key.
     """
     return {
+        "ok": True,
         "session_id": record.session_id,
         "cwd": str(record.cwd),
         "kind": record.kind,
@@ -1030,6 +1049,19 @@ def _session_payload(record) -> dict:
         "pid": record.pid,
         "started_at": record.started_at.isoformat() if record.started_at else None,
     }
+
+
+def _store_failure_payload(failure: dict) -> dict:
+    """One unreadable-store entry as JSON-ready data.
+
+    ``ok`` is ``False`` — the same field :func:`_session_payload` sets ``True``
+    on every session row, so a consumer tests one field to sort a mixed list
+    into rows it can use and rows it cannot. The row carries only what a
+    failed enumeration actually knows: which account it was asking about, and
+    why the answer never came back. It invents no session attribution — no
+    ``cwd``, no ``pid`` — because none was ever read.
+    """
+    return {"ok": False, "account": failure["account"], "reason": failure["reason"]}
 
 
 def _enumerate_sessions(group: dict, workspace: Path | None, env: dict[str, str] | None):
@@ -1053,6 +1085,69 @@ def _enumerate_sessions(group: dict, workspace: Path | None, env: dict[str, str]
         )
     except Exception:  # noqa: BLE001 — every failure of a read-only query degrades
         return None
+
+
+def _enumerate_live_sessions_pool(
+    scope: Path | None, *, env: dict[str, str] | None
+) -> tuple[list, list[dict], int]:
+    """Enumerate live sessions once per (harness, credential store) candidate.
+
+    A reference addresses a SESSION, not a group, and a session can be running
+    under any account any configured group declares — not only the account the
+    invoking group happens to bind. So this asks every candidate in
+    :func:`_addressable_harnesses`'s pool, scoped by *scope*, EACH UNDER ITS
+    OWN store's environment (``store.env``, never the caller's ambient one),
+    and merges what comes back. This is what makes a session launched under a
+    non-default credential store visible from a shell bound to the default
+    one.
+
+    Returns ``(records, failures, stores_total)``:
+
+    * ``records`` — every live :class:`~trailhead.harness.base.SessionRecord`
+      across every store that answered, in pool order.
+    * ``failures`` — one ``{"account": ..., "reason": ...}`` entry per store
+      whose enumeration could not be completed: an exception, a non-zero
+      exit, a missing enumeration concept, or the per-call timeout expiring
+      (:data:`camp.launch.session._ENUMERATE_TIMEOUT_SECONDS` bounds each
+      store in turn, so a hanging store degrades exactly like a failing one
+      rather than blocking the others). Never a silent omission — a store
+      that could not be read always contributes exactly one entry here.
+    * ``stores_total`` — how many candidates were queried. ``0`` means the
+      pool itself was empty (no configured group's harness could be named at
+      all); the caller's degrade for THAT case is unchanged from before this
+      merge existed. A caller distinguishes "every store failed" from "no
+      store was addressable" by comparing ``len(failures)`` to
+      ``stores_total``, not by ``stores_total`` alone.
+
+    Each store is asked exactly once — the pool is already deduplicated by
+    (harness, account) in :func:`_addressable_harnesses`, and this walks it
+    once, so no store is ever enumerated twice.
+    """
+    from ..group.config import load_all_groups
+    from ..launch.session import enumerate_records
+    from .common import _groups_dir
+
+    resolved_env = dict(env) if env is not None else dict(os.environ)
+    groups = load_all_groups(_groups_dir())
+    stores = _addressable_harnesses(groups, env=resolved_env)
+
+    records: list = []
+    failures: list[dict] = []
+    for store in stores:
+        try:
+            rows = enumerate_records(store, scope, store.env)
+        except Exception:  # noqa: BLE001 — a store camp cannot read degrades, not fails
+            rows = None
+        if rows is None:
+            failures.append(
+                {
+                    "account": store.account,
+                    "reason": "sessions could not be enumerated for this credential store",
+                }
+            )
+            continue
+        records.extend(rows)
+    return records, failures, len(stores)
 
 
 def _list_recoverable(
@@ -1273,23 +1368,41 @@ def _cmd_sessions_group_cli(
         )
         return
 
-    records = _enumerate_sessions(group, scope, env)
-    if records is None:
+    def _described() -> str:
         if slug:
-            described = f"workspace {slug!r}"
-        elif directory is not None:
-            described = f"directory {str(scope)!r}"
-        else:
-            described = f"group {group['group']['name']!r}"
+            return f"workspace {slug!r}"
+        if directory is not None:
+            return f"directory {str(scope)!r}"
+        return f"group {group['group']['name']!r}"
+
+    records, failures, stores_total = _enumerate_live_sessions_pool(scope, env=env)
+
+    if stores_total == 0:
         print(
-            f"camp sessions: could not determine the live sessions for {described} — "
+            f"camp sessions: could not determine the live sessions for {_described()} — "
             "reporting none",
             file=sys.stderr,
         )
         records = []
+        failures = []
+    elif failures and len(failures) == stores_total:
+        accounts = ", ".join(_account_label(failure["account"]) for failure in failures)
+        _die(
+            f"camp sessions: could not enumerate live sessions for {_described()} — "
+            f"every credential store failed ({accounts})"
+        )
+    else:
+        for failure in failures:
+            print(
+                "camp sessions: could not enumerate sessions for "
+                f"{_account_label(failure['account'])}",
+                file=sys.stderr,
+            )
 
     if as_json:
-        print(json.dumps([_session_payload(record) for record in records]))
+        payload = [_session_payload(record) for record in records]
+        payload += [_store_failure_payload(failure) for failure in failures]
+        print(json.dumps(payload))
         return
     from ..launch.recovery import printable_path
 
