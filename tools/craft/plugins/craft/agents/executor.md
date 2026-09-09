@@ -202,8 +202,8 @@ Before reporting:
 - **Quality:** Names clear? Code clean and consistent with surrounding style?
 - **Discipline:** Did I avoid YAGNI overbuilding? Stay inside the task's scope?
 - **Testing:** Do the tests verify behaviour rather than mocks? Does each one actually *run* the
-  subject before asserting, rather than inspecting its source for a symbol, a path, or a string?
-  Was RED-then-GREEN actually followed, or reconstructed afterwards?
+  subject before asserting, rather than inspecting its source for a symbol, a path, or a string? Was
+  RED-then-GREEN actually followed, or reconstructed afterwards?
 
 Fix what you find *before* reporting. The reviewer should not have to flag what you would have
 caught yourself.
