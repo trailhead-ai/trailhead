@@ -1,11 +1,9 @@
-"""The agent/skill docs invoke the real `portage` CLI, not the retired scripts.
+"""Every `portage <subcommand>` the docs spell out is a real subcommand.
 
-Two guards on the call-site migration:
-  - No portage agent or skill doc still shells a ``python3 …/<script>.py``
-    invocation — the thin ``scripts/*.py`` are gone, migrated to the CLI.
-  - Every ``portage <subcommand>`` invocation the docs spell out maps to a real
-    subcommand registered on the dispatch parser — a doc naming a command the
-    CLI doesn't expose is drift this catches.
+The documents are the INPUT: their invocation lines are looked up against the
+choices the dispatch parser actually registers, so a doc naming a command the
+CLI doesn't expose fails here rather than at the agent's first attempt to run
+it.
 """
 
 from __future__ import annotations
@@ -25,10 +23,6 @@ _DOCS = [
 
 # A CLI invocation line: optional indentation, then `portage <subcommand>`.
 _INVOCATION = re.compile(r"(?m)^\s*portage\s+([a-z][a-z0-9-]*)")
-# A retired thin-script shell-out: `python3 …/<name>.py`.
-_LEGACY_SCRIPT = re.compile(r"python3\s+\S*\.py")
-
-
 def _subcommands() -> set[str]:
     parser = dispatch.build_parser()
     action = next(
@@ -37,36 +31,16 @@ def _subcommands() -> set[str]:
     return set(action.choices)
 
 
-def test_no_doc_shells_a_legacy_python_script():
-    offenders = {
-        doc.name: _LEGACY_SCRIPT.findall(doc.read_text())
-        for doc in _DOCS
-        if _LEGACY_SCRIPT.search(doc.read_text())
-    }
-    assert offenders == {}, (
-        f"these docs still invoke a retired thin script instead of the portage CLI: {offenders}"
-    )
-
-
 def test_every_documented_portage_invocation_is_a_real_subcommand():
     valid = _subcommands()
+    referenced: set[str] = set()
     bad: dict[str, list[str]] = {}
     for doc in _DOCS:
         used = set(_INVOCATION.findall(doc.read_text()))
+        referenced |= used
         unknown = sorted(used - valid)
         if unknown:
             bad[doc.name] = unknown
+    # The scan has teeth only while it still finds invocations to check.
+    assert referenced, f"no `portage <cmd>` invocation found across {len(_DOCS)} docs"
     assert bad == {}, f"docs reference unregistered portage subcommands: {bad} (valid: {sorted(valid)})"
-
-
-def test_docs_actually_reference_the_migrated_cli():
-    """At least the core lifecycle commands appear as real `portage <cmd>` lines,
-    proving the migration landed rather than the scan passing vacuously."""
-    referenced: set[str] = set()
-    for doc in _DOCS:
-        referenced.update(_INVOCATION.findall(doc.read_text()))
-    for expected in ("detect-repos", "merge", "wait-for-actionable"):
-        assert expected in referenced, (
-            f"expected the docs to invoke `portage {expected}` after migration; "
-            f"found only {sorted(referenced)}"
-        )

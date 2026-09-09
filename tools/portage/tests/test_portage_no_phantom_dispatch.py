@@ -1,47 +1,80 @@
-"""Regression guard: no portage skill or agent dispatches a phantom target.
+"""Every subagent portage's docs dispatch resolves to one a tool actually ships.
 
-`code-simplifier` was never a real subagent — repo-wide grep turns up only the
-one dispatch site that named it. `skills/review/code-reviewer.md` resolves
-inside the craft plugin, not portage, so a portage doc pointing at that path
-is a cross-plugin leak that breaks the moment craft isn't installed alongside
-portage. Both are silent failure modes: the dispatch instruction reads fine
-but resolves to nothing at runtime.
+A dispatch instruction naming an agent nobody installs reads fine and resolves
+to nothing at runtime — a silent failure. The names are extracted from the docs
+and looked up through ``load_manifest``, the same discovery the harness uses, so
+the check is against what is really installed rather than a denylist of the
+phantoms someone happened to notice.
 
-This scans every skill/agent doc portage ships and asserts neither phantom
-target is referenced anywhere.
+Portage's docs legitimately dispatch craft's agents (green-driver hands CI
+triage to ``code-reviewer`` / ``log-sifter``), so the allowlist spans every
+tool's manifest, not just portage's — which is the same sibling-plugin lookup
+``monitor.md`` tells the agent to perform before dispatching.
 """
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
-PORTAGE_PLUGIN_ROOT = Path(__file__).resolve().parents[1] / "plugins" / "portage"
+from trailhead.capabilities import load_manifest
+
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_TOOLS_DIR = _REPO_ROOT / "tools"
+_PORTAGE_PLUGIN_ROOT = _REPO_ROOT / "tools" / "portage" / "plugins" / "portage"
+
+# The two ways a portage doc names a dispatch target: the structured
+# `subagent_type:` field of an Agent() call, and prose ("dispatch `updater`").
+_DISPATCH_PATTERNS = (
+    re.compile(r'subagent_type:\s*"([A-Za-z0-9_-]+)"'),
+    re.compile(r"[Dd]ispatch(?:es|ing|ed)?\s+`([a-z][a-z0-9-]*)`"),
+)
 
 
-def _portage_docs() -> list[Path]:
-    docs: list[Path] = []
-    for subdir in ("skills", "agents"):
-        docs.extend((PORTAGE_PLUGIN_ROOT / subdir).rglob("*.md"))
-    return docs
+def _installed_subagents() -> dict[str, str]:
+    """Every subagent every tool declares, name → the tool that ships it."""
+    installed: dict[str, str] = {}
+    for manifest in sorted(_TOOLS_DIR.glob("*/capabilities.toml")):
+        for name in load_manifest(manifest).subagents:
+            installed[name] = manifest.parent.name
+    return installed
 
 
-def test_no_portage_doc_references_code_simplifier():
-    offenders = [
-        doc for doc in _portage_docs() if "code-simplifier" in doc.read_text()
+def _dispatched_names() -> dict[str, set[str]]:
+    """Every agent name portage's shipped docs dispatch, name → doc filenames."""
+    docs = [
+        *(_PORTAGE_PLUGIN_ROOT / "agents").rglob("*.md"),
+        *(_PORTAGE_PLUGIN_ROOT / "skills").rglob("*.md"),
     ]
+    dispatched: dict[str, set[str]] = {}
+    for doc in docs:
+        text = doc.read_text()
+        for pattern in _DISPATCH_PATTERNS:
+            for name in pattern.findall(text):
+                dispatched.setdefault(name, set()).add(doc.name)
+    return dispatched
 
-    assert offenders == [], (
-        "code-simplifier is not a real subagent; these docs still dispatch it: "
-        f"{offenders}"
+
+def test_every_dispatched_agent_resolves_to_an_installed_subagent():
+    installed = _installed_subagents()
+    dispatched = _dispatched_names()
+    phantom = {
+        name: sorted(docs)
+        for name, docs in dispatched.items()
+        if name not in installed
+    }
+    assert phantom == {}, (
+        f"these portage docs dispatch agents no tool installs: {phantom} "
+        f"(installed: {sorted(installed)})"
     )
 
 
-def test_no_portage_doc_references_craft_review_path():
-    offenders = [
-        doc for doc in _portage_docs() if "skills/review/" in doc.read_text()
-    ]
+def test_the_scan_finds_the_dispatches_portage_is_built_around():
+    """The check above has teeth only while the extraction still sees dispatches.
 
-    assert offenders == [], (
-        "skills/review/ resolves inside craft, not portage; these docs still "
-        f"reference it: {offenders}"
-    )
+    Both of portage's own lifecycle agents are dispatched by name from the
+    ``pull_request`` skill; if the scan stops finding them, it has stopped
+    reading the docs and would pass over any phantom.
+    """
+    dispatched = _dispatched_names()
+    assert {"updater", "monitor"} <= set(dispatched), sorted(dispatched)

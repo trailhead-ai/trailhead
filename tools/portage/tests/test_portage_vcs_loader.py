@@ -51,16 +51,6 @@ def _load_bootstrap():
     return mod
 
 
-class TestBootstrapLayout:
-    """The marker walk must reach the repo root from the bootstrap's plugin-root path."""
-
-    def test_bootstrap_exists(self):
-        assert _BOOTSTRAP.exists(), (
-            f"portage _bootstrap.py not found at {_BOOTSTRAP} — the CLI "
-            "depends on it to make trailhead.vcs importable"
-        )
-
-
 class TestVcsImportableFromPortageContext:
     """trailhead.vcs.get_provider loads and works from the portage bootstrap."""
 

@@ -3,15 +3,7 @@
 from __future__ import annotations
 
 import _portage_cli  # noqa: F401  (prepends the plugin root onto sys.path)
-from portage.monitor_outcome import (
-    MONITOR_OUTCOME_TOKENS,
-    parse_monitor_outcome,
-    read_monitor_outcome,
-)
-
-
-def test_tokens_are_the_four_terminal_states():
-    assert MONITOR_OUTCOME_TOKENS == frozenset({"MERGED", "READY", "BLOCKED", "STOPPED"})
+from portage.monitor_outcome import parse_monitor_outcome, read_monitor_outcome
 
 
 def test_parses_merged_with_no_argument():

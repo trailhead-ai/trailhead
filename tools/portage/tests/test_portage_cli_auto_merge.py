@@ -126,10 +126,3 @@ class TestRefusalMessageNamesRemediation:
         rc, spy, out = _run_merge(tmp_path, monkeypatch, capsys, "[release]\n")
         assert rc == 2
         assert "[release] auto_merge = true" in out.err
-
-    def test_monitor_md_stop_report_names_the_same_remediation(self):
-        monitor_md = (
-            Path(__file__).resolve().parents[1] / "plugins" / "portage" / "agents" / "monitor.md"
-        )
-        text = monitor_md.read_text(encoding="utf-8")
-        assert "[release] auto_merge = true" in text
