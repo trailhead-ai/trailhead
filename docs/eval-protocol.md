@@ -80,6 +80,33 @@ Two consequences, both of which belong in the case's limitations:
 - Grade an `Edit`-tool write separately from a shell write. They say different
   things about a system whose hook covers one and not the other.
 
+### The clean room is not a sandbox
+
+`--setting-sources project` isolates **settings, not the filesystem**. It keeps a
+user-level ruleset out of the baseline arm, and that is all it does. An arm with
+shell access can still read the developer's real repos, find the installed plugin
+cache under `~/.claude/plugins/`, and invoke the genuine CLI against live data.
+
+Both cases written so far escaped their fixture this way. `bash-write-gate`
+mutated the developer's real lore config; `publish-routing` published into a real
+vault and pushed the commit to origin. In each case the agent behaved sensibly —
+it was handed a task it could not complete the sanctioned way, so it went and
+found the machinery that would work. A stub on `PATH` is a decoy, not a boundary.
+
+Until these cases run under real isolation — a container, or at minimum a
+scrubbed `PATH` and `HOME` with the plugin cache and real vaults out of reach —
+treat every run with shell access as capable of touching live infrastructure:
+
+- **Diff the developer's real state after every batch.** `~/.config/`, the real
+  vaults, and any repo the fixture names. Escapes are silent; nothing in the run
+  output announces them, and the arm will report success either way.
+- **Grade from the fixture's filesystem, not from a log line.** A run that
+  reports a URL may have published somewhere else entirely. Both cases produced a
+  first grading pass that was wrong because it trusted captured output over the
+  tree on disk.
+- **Never point a fixture at a real vault, repo, or config**, even read-only. The
+  fixture is data; live infrastructure is not part of it.
+
 ### A fixture must let the sanctioned path succeed
 
 If a case forbids one mechanism, the fixture has to make the permitted mechanism
