@@ -768,10 +768,19 @@ class TestListAllGroupsNarrows:
         r = _camp_from(env_dict, tmp_path, "list", "--all-groups", "--json")
         assert r.returncode == 0, f"stdout: {r.stdout}\nstderr: {r.stderr}"
         rows = json.loads(r.stdout)
-        assert {row["slug"] for row in rows} == {"ws-good"}
-        assert {row["group"] for row in rows} == {"goodgroup"}
+        ok_rows = [row for row in rows if row.get("ok", True)]
+        failure_rows = [row for row in rows if row.get("ok") is False]
+        assert {row["slug"] for row in ok_rows} == {"ws-good"}
+        assert {row["group"] for row in ok_rows} == {"goodgroup"}
         assert str(broken) in r.stderr
         assert "camp list: " in r.stderr
+
+        # The parser-visible half of the same defect: an unparsable group
+        # must not disappear from a --json array that otherwise looks
+        # complete — it gets an in-band ok:false row naming the config file.
+        assert len(failure_rows) == 1
+        assert str(broken) in failure_rows[0]["reason"]
+        assert failure_rows[0]["group"] is None
 
     def test_every_group_unparsable_states_reason_and_exits_nonzero(
         self, tmp_path

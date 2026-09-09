@@ -2202,6 +2202,14 @@ def test_camp_sessions_all_groups_one_unparsable_group_the_others_still_answer(
     assert str(broken) in result.stderr
     assert "camp sessions: " in result.stderr
 
+    # The parser-visible half of the same defect: the unparsable group must
+    # not vanish from a --json array that otherwise looks complete — it gets
+    # an in-band ok:false row naming the config file, the same discriminator
+    # a failed credential store's row already carries.
+    failure_rows = [row for row in payload if row["ok"] is False]
+    assert len(failure_rows) == 1
+    assert str(broken) in failure_rows[0]["reason"]
+
 
 def test_camp_sessions_all_groups_every_group_unparsable_states_reason_nonzero(
     tmp_path,

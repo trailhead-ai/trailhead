@@ -169,7 +169,12 @@ def cmd_ls_group(
 _LIST_JSON_KEYS = ("slug", "branch", "workspace_path", "group")
 
 
-def render_workspace_list(entries: list[dict[str, Any]], *, as_json: bool) -> None:
+def render_workspace_list(
+    entries: list[dict[str, Any]],
+    *,
+    as_json: bool,
+    group_failures: list[str] | None = None,
+) -> None:
     """Single renderer for `camp list`/`ls` output — consulted by BOTH dispatchers
     (cli/camp's group-aware `_cmd_ls_group_cli` and spine.main's no-group `cmd_ls`)
     so the human + --json surface is identical regardless of cwd.
@@ -183,6 +188,15 @@ def render_workspace_list(entries: list[dict[str, Any]], *, as_json: bool) -> No
     The renderer PROJECTS each entry onto the fixed schema (ignoring any
     source-specific extras like manifest_path), so the two data models — group
     central manifests vs. the legacy worktree registry — surface one stable shape.
+
+    *group_failures* — the `--all-groups` caller's unparsable-config detail
+    strings (already stated on stderr by
+    :func:`answerable_groups_or_refuse`) — appends one ``{"ok": False,
+    "group": None, "reason": detail}`` row per entry to the JSON array ONLY:
+    a parser reading a complete-looking array would otherwise be silently
+    missing a group. Never rendered on the human path, which already has the
+    same information on stderr; folding it into the `slug workspace_path`
+    lines would have nothing to print a slug or path for.
     """
     import json as _json
 
@@ -195,6 +209,10 @@ def render_workspace_list(entries: list[dict[str, Any]], *, as_json: bool) -> No
                 "group": e.get("group"),
             }
             for e in entries
+        ]
+        rows += [
+            {"ok": False, "group": None, "reason": detail}
+            for detail in (group_failures or [])
         ]
         print(_json.dumps(rows))
         return
@@ -246,7 +264,9 @@ def load_answerable_groups(groups_dir: Path) -> tuple[list[dict[str, Any]], list
     return groups, skipped
 
 
-def answerable_groups_or_refuse(groups_dir: Path, *, verb: str) -> list[dict[str, Any]]:
+def answerable_groups_or_refuse(
+    groups_dir: Path, *, verb: str
+) -> tuple[list[dict[str, Any]], list[str]]:
     """:func:`load_answerable_groups`, plus the two notices a cross-group answer owes.
 
     The cross-group verbs (`camp list`, `camp sessions`) narrow their answer
@@ -261,10 +281,16 @@ def answerable_groups_or_refuse(groups_dir: Path, *, verb: str) -> list[dict[str
       groups are configured", which is a different and false statement, so
       this case must not answer at all.
 
-    Returns the groups that parsed. An EMPTY list is therefore exactly one
-    situation: *groups_dir* holds no configs. That case is left to the caller
-    to state, because the two verbs word it differently and reach it at
-    different points in their own flow.
+    Returns ``(groups, skipped)`` — the groups that parsed, and the SAME
+    per-config detail strings already printed to stderr above, so a `--json`
+    caller can also fold each one into an in-band ``ok: false`` row instead
+    of leaving it stderr-only: a parser reading a complete-looking array is
+    otherwise silently missing a group, exactly the gap the `ok`
+    discriminator exists to close for a failed credential store one level
+    down. An EMPTY *groups* list is therefore exactly one situation:
+    *groups_dir* holds no configs at all (``skipped`` is then empty too).
+    That case is left to the caller to state, because the two verbs word it
+    differently and reach it at different points in their own flow.
     """
     groups, skipped = load_answerable_groups(groups_dir)
     for detail in skipped:
@@ -276,7 +302,7 @@ def answerable_groups_or_refuse(groups_dir: Path, *, verb: str) -> list[dict[str
             file=sys.stderr,
         )
         sys.exit(1)
-    return groups
+    return groups, skipped
 
 
 def _provision_member_and_flip(

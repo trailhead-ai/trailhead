@@ -68,11 +68,11 @@ def _cmd_ls_all_groups_cli(args: list[str], env: dict[str, str] | None) -> None:
     from .common import _groups_dir
 
     as_json = "--json" in args
-    groups = answerable_groups_or_refuse(_groups_dir(), verb="list")
+    groups, unparsable = answerable_groups_or_refuse(_groups_dir(), verb="list")
 
     if not groups:
         print("camp list: no groups configured — nothing to list", file=sys.stderr)
-        render_workspace_list([], as_json=as_json)
+        render_workspace_list([], as_json=as_json, group_failures=unparsable)
         return
 
     entries: list[dict] = []
@@ -80,7 +80,7 @@ def _cmd_ls_all_groups_cli(args: list[str], env: dict[str, str] | None) -> None:
         entries.extend(cmd_ls_group(group, env=env))
     entries.sort(key=lambda e: e.get("group") or "")
 
-    render_workspace_list(entries, as_json=as_json)
+    render_workspace_list(entries, as_json=as_json, group_failures=unparsable)
 
 
 def _cmd_activate_group_cli(

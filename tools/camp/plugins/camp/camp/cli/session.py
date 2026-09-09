@@ -1173,6 +1173,20 @@ def _store_failure_payload(failure: dict) -> dict:
     return {"ok": False, "account": failure["account"], "reason": failure["reason"]}
 
 
+def _group_config_failure_payload(detail: str) -> dict:
+    """One unparsable-group-config entry as JSON-ready data.
+
+    ``ok`` is ``False`` — the same discriminator :func:`_store_failure_payload`
+    carries for a store that failed to answer, one level down. *detail* is
+    the same ``camp <verb>: <detail> — skipping`` text already printed to
+    stderr by :func:`~camp.provision.lifecycle.answerable_groups_or_refuse`
+    (naming the config file, since a config that failed to parse has no
+    reliable group name to attribute instead). No ``account`` — this group
+    never got far enough to declare one.
+    """
+    return {"ok": False, "group": None, "reason": detail}
+
+
 def _enumerate_live_sessions_pool(
     scope: Path | None,
     *,
@@ -1490,12 +1504,15 @@ def _cmd_sessions_group_cli(
                 pass
 
     all_groups_configs: list[dict] | None = None
+    all_groups_unparsable: list[str] = []
     all_groups_no_groups_configured = False
     if all_groups:
         from ..provision.lifecycle import answerable_groups_or_refuse
         from .common import _groups_dir
 
-        all_groups_configs = answerable_groups_or_refuse(_groups_dir(), verb="sessions")
+        all_groups_configs, all_groups_unparsable = answerable_groups_or_refuse(
+            _groups_dir(), verb="sessions"
+        )
         # An empty list is the ONE case that helper returns rather than
         # refusing: no group configs at all. Stated below rather than here,
         # because `--recoverable` returns before that point and answers from
@@ -1618,6 +1635,9 @@ def _cmd_sessions_group_cli(
             _session_payload(record, **attribution) for record, attribution in attributed
         ]
         payload += [_store_failure_payload(failure) for failure in failures]
+        payload += [
+            _group_config_failure_payload(detail) for detail in all_groups_unparsable
+        ]
         print(json.dumps(payload))
         return
     from ..launch.recovery import printable_path
