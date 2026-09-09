@@ -662,3 +662,167 @@ class TestListAllGroups:
         assert r.stdout == ""
         assert "camp list: " in r.stderr
         assert "--all-groups" in r.stderr
+
+
+# ---------------------------------------------------------------------------
+# camp list --all-groups — narrowed answers say why: no groups configured,
+# legacy suppression, unparsable sibling configs, and the silent empty case.
+# ---------------------------------------------------------------------------
+
+
+def _seed_legacy_worktree(workspace_root: Path, slug: str) -> Path:
+    """Populate the LEGACY standalone worktree registry `spine.py`'s no-group
+    `cmd_ls` reads — a row with no group, distinct from every group-config row."""
+    wt = workspace_root / "trailhead" / ".claude" / "worktrees" / slug
+    wt.mkdir(parents=True, exist_ok=True)
+    (wt / ".workspace-manifest.json").write_text(
+        json.dumps({"name": slug, "branch": f"worktree-{slug}"})
+    )
+    return wt
+
+
+@pytest.fixture()
+def no_group_env(tmp_path):
+    """No group config directory at all, plus a populated legacy registry, and
+    a cwd from which no group would resolve anyway."""
+    config_dir = tmp_path / "camp-config"
+    state_dir = tmp_path / "camp-state"
+    state_dir.mkdir(parents=True, exist_ok=True)
+    workspace_root = tmp_path / "workspace-root"
+    _seed_legacy_worktree(workspace_root, "legacy-slug")
+
+    env = {**os.environ}
+    env["CAMP_CONFIG_DIR"] = str(config_dir)
+    env["CAMP_STATE_DIR"] = str(state_dir)
+    env["WORKSPACE_ROOT"] = str(workspace_root)
+
+    return {"env": env, "tmp_path": tmp_path}
+
+
+class TestListAllGroupsNarrows:
+    def test_no_groups_configured_states_that_and_emits_no_legacy_rows(
+        self, no_group_env
+    ) -> None:
+        # Prove the fixture is capable of showing the row it denies: without
+        # the option, cwd resolves no group, so spine's legacy fallback
+        # answers with the seeded legacy row.
+        without_option = _camp_from(no_group_env, no_group_env["tmp_path"], "list")
+        assert without_option.returncode == 0, without_option.stderr
+        assert "legacy-slug" in without_option.stdout
+
+        r = _camp_from(no_group_env, no_group_env["tmp_path"], "list", "--all-groups", "--json")
+        assert r.returncode == 0, f"stdout: {r.stdout}\nstderr: {r.stderr}"
+        assert json.loads(r.stdout) == []
+        assert "no groups configured" in r.stderr
+
+    def test_legacy_registry_populated_no_row_from_it_appears_under_all_groups(
+        self, tmp_path
+    ) -> None:
+        config_dir = tmp_path / "camp-config"
+        groups_dir = config_dir / "groups"
+        groups_dir.mkdir(parents=True, exist_ok=True)
+        state_dir = tmp_path / "camp-state"
+        state_dir.mkdir(parents=True, exist_ok=True)
+        workspace_root = tmp_path / "workspace-root"
+
+        _write_group_toml(groups_dir, "onlygroup")
+        _seed_legacy_worktree(workspace_root, "legacy-slug")
+
+        env = {**os.environ}
+        env["CAMP_CONFIG_DIR"] = str(config_dir)
+        env["CAMP_STATE_DIR"] = str(state_dir)
+        env["WORKSPACE_ROOT"] = str(workspace_root)
+        env_dict = {"env": env}
+
+        ws = _seed_manifest_raw("onlygroup", "ws-only", state_dir=state_dir)
+
+        # Prove the legacy row is reachable at all: from a cwd outside every
+        # group, without the option, it appears.
+        without_option = _camp_from(env_dict, tmp_path, "list")
+        assert without_option.returncode == 0, without_option.stderr
+        assert "legacy-slug" in without_option.stdout
+
+        r = _camp_from(env_dict, tmp_path, "list", "--all-groups", "--json")
+        assert r.returncode == 0, f"stdout: {r.stdout}\nstderr: {r.stderr}"
+        rows = json.loads(r.stdout)
+        assert {row["slug"] for row in rows} == {"ws-only"}
+        assert {row["group"] for row in rows} == {"onlygroup"}
+
+    def test_one_unparsable_group_among_several_the_others_still_answer(
+        self, tmp_path
+    ) -> None:
+        config_dir = tmp_path / "camp-config"
+        groups_dir = config_dir / "groups"
+        groups_dir.mkdir(parents=True, exist_ok=True)
+        state_dir = tmp_path / "camp-state"
+        state_dir.mkdir(parents=True, exist_ok=True)
+
+        _write_group_toml(groups_dir, "goodgroup")
+        broken = groups_dir / "brokengroup.toml"
+        broken.write_text("this is not [ valid toml")
+
+        env = {**os.environ}
+        env["CAMP_CONFIG_DIR"] = str(config_dir)
+        env["CAMP_STATE_DIR"] = str(state_dir)
+        env_dict = {"env": env}
+
+        _seed_manifest_raw("goodgroup", "ws-good", state_dir=state_dir)
+
+        r = _camp_from(env_dict, tmp_path, "list", "--all-groups", "--json")
+        assert r.returncode == 0, f"stdout: {r.stdout}\nstderr: {r.stderr}"
+        rows = json.loads(r.stdout)
+        assert {row["slug"] for row in rows} == {"ws-good"}
+        assert {row["group"] for row in rows} == {"goodgroup"}
+        assert str(broken) in r.stderr
+        assert "camp list: " in r.stderr
+
+    def test_every_group_unparsable_states_reason_and_exits_nonzero(
+        self, tmp_path
+    ) -> None:
+        config_dir = tmp_path / "camp-config"
+        groups_dir = config_dir / "groups"
+        groups_dir.mkdir(parents=True, exist_ok=True)
+        state_dir = tmp_path / "camp-state"
+        state_dir.mkdir(parents=True, exist_ok=True)
+
+        broken_a = groups_dir / "brokena.toml"
+        broken_a.write_text("not [ valid")
+        broken_b = groups_dir / "brokenb.toml"
+        broken_b.write_text("also not ] valid")
+
+        env = {**os.environ}
+        env["CAMP_CONFIG_DIR"] = str(config_dir)
+        env["CAMP_STATE_DIR"] = str(state_dir)
+        env_dict = {"env": env}
+
+        r = _camp_from(env_dict, tmp_path, "list", "--all-groups", "--json")
+        assert r.returncode != 0
+        assert r.stdout == ""
+        assert "camp list: " in r.stderr
+        assert str(broken_a) in r.stderr
+        assert str(broken_b) in r.stderr
+
+    def test_group_with_no_workspaces_contributes_no_rows_and_no_notice(
+        self, tmp_path
+    ) -> None:
+        config_dir = tmp_path / "camp-config"
+        groups_dir = config_dir / "groups"
+        groups_dir.mkdir(parents=True, exist_ok=True)
+        state_dir = tmp_path / "camp-state"
+        state_dir.mkdir(parents=True, exist_ok=True)
+
+        _write_group_toml(groups_dir, "populated")
+        _write_group_toml(groups_dir, "empty")
+        _seed_manifest_raw("populated", "ws-pop", state_dir=state_dir)
+
+        env = {**os.environ}
+        env["CAMP_CONFIG_DIR"] = str(config_dir)
+        env["CAMP_STATE_DIR"] = str(state_dir)
+        env_dict = {"env": env}
+
+        r = _camp_from(env_dict, tmp_path, "list", "--all-groups", "--json")
+        assert r.returncode == 0, f"stdout: {r.stdout}\nstderr: {r.stderr}"
+        rows = json.loads(r.stdout)
+        assert {row["slug"] for row in rows} == {"ws-pop"}
+        assert {row["group"] for row in rows} == {"populated"}
+        assert r.stderr == ""

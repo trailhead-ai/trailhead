@@ -203,6 +203,49 @@ def render_workspace_list(entries: list[dict[str, Any]], *, as_json: bool) -> No
         print(f"{e['slug']} {e['workspace_path']}")
 
 
+def load_answerable_groups(groups_dir: Path) -> tuple[list[dict[str, Any]], list[str]]:
+    """Load every ``*.toml`` in *groups_dir*, degrading a config that fails to
+    parse instead of failing the whole load.
+
+    Shared by the two ``--all-groups`` verbs (`camp list`, `camp sessions`) so
+    a widened answer never falls back to zero rows over ONE sibling group's
+    broken config — mirrors `cli/group.py`'s `_cmd_groups_cli` degrade idiom,
+    generalized here since both cross-group callers need it.
+
+    Returns ``(groups, skipped)``: `groups` is every config that parsed, in
+    filename order; `skipped` is one already-formatted ``"<path>: <detail>"``
+    string per config that failed to load — malformed TOML, non-UTF-8 bytes, a
+    directory wearing a `.toml` name, or an unreadable file — so a caller can
+    print its own ``camp <verb>: <detail> — skipping`` notice without
+    reimplementing the load-failure classification.
+
+    An empty or missing *groups_dir* returns ``([], [])`` — no groups
+    configured is not a load failure; the caller states that itself.
+    """
+    from ..group.config import GroupConfigError, GroupConfigNotFound, load_group
+
+    groups: list[dict[str, Any]] = []
+    skipped: list[str] = []
+    if not groups_dir.is_dir():
+        return groups, skipped
+
+    for toml_file in sorted(groups_dir.glob("*.toml")):
+        try:
+            groups.append(load_group(toml_file))
+        except (
+            GroupConfigError,
+            GroupConfigNotFound,
+            UnicodeDecodeError,
+            OSError,
+        ) as e:
+            message = str(e).strip()
+            detail = message.splitlines()[0] if message else e.__class__.__name__
+            if str(toml_file) not in detail:
+                detail = f"{toml_file}: {detail}"
+            skipped.append(detail)
+    return groups, skipped
+
+
 def _provision_member_and_flip(
     group: dict[str, Any],
     slug: str,

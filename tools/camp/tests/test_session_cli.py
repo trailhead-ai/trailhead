@@ -2144,6 +2144,93 @@ def test_camp_sessions_absent_all_groups_output_is_unchanged(cli_env) -> None:
     assert result.stdout == ""
 
 
+# ---------------------------------------------------------------------------
+# camp sessions --all-groups — narrowed answers say why.
+# ---------------------------------------------------------------------------
+
+
+def test_camp_sessions_all_groups_no_groups_configured_states_that(tmp_path) -> None:
+    config_dir = tmp_path / "camp-config"
+    (config_dir / "groups").mkdir(parents=True, exist_ok=True)
+    state_dir = tmp_path / "camp-state"
+    state_dir.mkdir(parents=True, exist_ok=True)
+
+    env = {**os.environ}
+    env["CAMP_CONFIG_DIR"] = str(config_dir)
+    env["CAMP_STATE_DIR"] = str(state_dir)
+
+    result = subprocess.run(
+        [sys.executable, str(_CLI_CAMP), "sessions", "--all-groups", "--json"],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(tmp_path),
+    )
+    assert result.returncode == 0, f"stdout: {result.stdout}\nstderr: {result.stderr}"
+    assert json.loads(result.stdout) == []
+    assert "no groups configured" in result.stderr
+
+
+def test_camp_sessions_all_groups_one_unparsable_group_the_others_still_answer(
+    cli_env,
+) -> None:
+    broken = cli_env["config_dir"] / "groups" / "brokengroup.toml"
+    broken.write_text("this is not [ valid toml")
+    _register_live(cli_env, "mygroup-sess", cli_env["tmp_path"] / "repo_a")
+
+    result = _camp(cli_env, "sessions", "--all-groups", "--json")
+
+    assert result.returncode == 0, f"stdout: {result.stdout}\nstderr: {result.stderr}"
+    payload = json.loads(result.stdout)
+    ok_rows = [row for row in payload if row["ok"] is True]
+    assert {row["session_id"] for row in ok_rows} == {"mygroup-sess"}
+    assert {row["group"] for row in ok_rows} == {"mygroup"}
+    assert str(broken) in result.stderr
+    assert "camp sessions: " in result.stderr
+
+
+def test_camp_sessions_all_groups_every_group_unparsable_states_reason_nonzero(
+    tmp_path,
+) -> None:
+    config_dir = tmp_path / "camp-config"
+    groups_dir = config_dir / "groups"
+    groups_dir.mkdir(parents=True, exist_ok=True)
+    state_dir = tmp_path / "camp-state"
+    state_dir.mkdir(parents=True, exist_ok=True)
+
+    broken_a = groups_dir / "brokena.toml"
+    broken_a.write_text("not [ valid")
+    broken_b = groups_dir / "brokenb.toml"
+    broken_b.write_text("also not ] valid")
+
+    env = {**os.environ}
+    env["CAMP_CONFIG_DIR"] = str(config_dir)
+    env["CAMP_STATE_DIR"] = str(state_dir)
+
+    result = subprocess.run(
+        [sys.executable, str(_CLI_CAMP), "sessions", "--all-groups", "--json"],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(tmp_path),
+    )
+    assert result.returncode != 0
+    assert result.stdout == ""
+    assert "camp sessions: " in result.stderr
+    assert str(broken_a) in result.stderr
+    assert str(broken_b) in result.stderr
+
+
+def test_camp_sessions_all_groups_group_with_no_sessions_contributes_no_rows_no_notice(
+    cli_env,
+) -> None:
+    result = _camp(cli_env, "sessions", "--all-groups", "--json")
+
+    assert result.returncode == 0, f"stdout: {result.stdout}\nstderr: {result.stderr}"
+    assert json.loads(result.stdout) == []
+    assert result.stderr == ""
+
+
 def test_camp_sessions_one_store_failing_still_returns_the_others_rows(cli_env) -> None:
     """One store failing degrades to a stderr notice naming the ACCOUNT that
     failed — not the group — while the other store's rows still come back on

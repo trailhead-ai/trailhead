@@ -1154,7 +1154,10 @@ def _enumerate_sessions(group: dict, workspace: Path | None, env: dict[str, str]
 
 
 def _enumerate_live_sessions_pool(
-    scope: Path | None, *, env: dict[str, str] | None
+    scope: Path | None,
+    *,
+    env: dict[str, str] | None,
+    groups: list[dict] | None = None,
 ) -> tuple[list, list[dict], int]:
     """Enumerate live sessions once per (harness, credential store) candidate.
 
@@ -1188,13 +1191,22 @@ def _enumerate_live_sessions_pool(
     Each store is asked exactly once — the pool is already deduplicated by
     (harness, account) in :func:`_addressable_harnesses`, and this walks it
     once, so no store is ever enumerated twice.
+
+    *groups* lets a caller supply an already-loaded (and possibly
+    already-degraded) config list instead of this function loading it fresh —
+    the `--all-groups` seam uses this to reuse a single load that has already
+    skipped an unparsable sibling by name, rather than re-loading here with no
+    chance to degrade. ``None`` (every other caller) preserves the original
+    behavior: load every configured group itself.
     """
-    from ..group.config import load_all_groups
     from ..launch.session import enumerate_records
-    from .common import _groups_dir
 
     resolved_env = dict(env) if env is not None else dict(os.environ)
-    groups = load_all_groups(_groups_dir())
+    if groups is None:
+        from ..group.config import load_all_groups
+        from .common import _groups_dir
+
+        groups = load_all_groups(_groups_dir())
     stores = _addressable_harnesses(groups, env=resolved_env)
 
     records: list = []
@@ -1343,6 +1355,17 @@ def _cmd_sessions_group_cli(
     resolution `group` would otherwise be needed for and leaves `scope` (and
     therefore the narrowing below) at `None` — the whole cross-store pool.
 
+    Under `all_groups=True`, group configs are loaded once through
+    :func:`~camp.provision.lifecycle.load_answerable_groups`, which degrades a
+    config camp cannot parse instead of failing the whole answer: one broken
+    sibling is skipped BY NAME on stderr while every other group still
+    answers, exit 0. Every group unparsable is a refusal (nonzero exit, a
+    stated reason) — never an answer that reads as "nothing configured". No
+    groups configured at all states that on stderr and answers with an empty
+    list, exit 0; it never falls through to the legacy standalone-worktree
+    source (that fallback belongs to `spine.main`'s no-group `cmd_ls`, which
+    `--all-groups` never reaches).
+
     Two listings behind one verb, over the same scope. The LIVE listing answers
     what is running; `--recoverable` answers what is dead and could be brought
     back. Scope is the workspace when a slug is given or resolves from cwd, the
@@ -1356,11 +1379,13 @@ def _cmd_sessions_group_cli(
     exist either: a torn-down root is precisely the scope a recovery listing is
     asked about.
 
-    Always exits 0 with ONE exception each side of the split. This is a question,
-    so "I could not tell" degrades to a stderr notice plus an empty list rather
-    than a failure a script has to special-case — but malformed input (a `--limit`
-    that cannot mean anything) and a harness that keeps no transcripts at all are
-    refusals, because neither has an empty listing as its honest answer.
+    Always exits 0 with ONE exception each side of the split (plus, under
+    `all_groups=True`, every configured group failing to parse — see above).
+    This is a question, so "I could not tell" degrades to a stderr notice plus
+    an empty list rather than a failure a script has to special-case — but
+    malformed input (a `--limit` that cannot mean anything) and a harness that
+    keeps no transcripts at all are refusals, because neither has an empty
+    listing as its honest answer.
 
     The LIVE listing's pool spans every configured group's store (see
     :func:`_enumerate_live_sessions_pool`), so a BARE group-named query — no
@@ -1448,6 +1473,22 @@ def _cmd_sessions_group_cli(
             except OSError:
                 pass
 
+    all_groups_configs: list[dict] | None = None
+    all_groups_no_groups_configured = False
+    if all_groups:
+        from ..provision.lifecycle import load_answerable_groups
+        from .common import _groups_dir
+
+        all_groups_configs, skipped_configs = load_answerable_groups(_groups_dir())
+        for detail in skipped_configs:
+            print(f"camp sessions: {detail} — skipping", file=sys.stderr)
+        if not all_groups_configs and skipped_configs:
+            _die(
+                "camp sessions: could not answer for any configured group — "
+                "every group config failed to parse; fix a config above and re-run"
+            )
+        all_groups_no_groups_configured = not all_groups_configs and not skipped_configs
+
     if recoverable:
         if slug:
             where = f" in workspace {slug!r}"
@@ -1473,37 +1514,50 @@ def _cmd_sessions_group_cli(
             return "every configured group"
         return f"group {group['group']['name']!r}"
 
-    records, failures, stores_total = _enumerate_live_sessions_pool(scope, env=env)
-
-    if stores_total == 0:
+    if all_groups_no_groups_configured:
         print(
-            f"camp sessions: could not determine the live sessions for {_described()} — "
-            "reporting none",
+            "camp sessions: no groups configured — nothing to answer for",
             file=sys.stderr,
         )
-        records = []
-        failures = []
-    elif failures and len(failures) == stores_total:
-        accounts = ", ".join(_account_label(failure["account"]) for failure in failures)
-        _die(
-            f"camp sessions: could not enumerate live sessions for {_described()} — "
-            f"every credential store failed ({accounts})"
-        )
+        records, failures = [], []
     else:
-        for failure in failures:
+        records, failures, stores_total = _enumerate_live_sessions_pool(
+            scope, env=env, groups=all_groups_configs
+        )
+
+        if stores_total == 0:
             print(
-                "camp sessions: could not enumerate sessions for "
-                f"{_account_label(failure['account'])}",
+                f"camp sessions: could not determine the live sessions for {_described()} — "
+                "reporting none",
                 file=sys.stderr,
             )
-
-    from ..group.config import load_all_groups
-    from .common import _groups_dir
+            records = []
+            failures = []
+        elif failures and len(failures) == stores_total:
+            accounts = ", ".join(_account_label(failure["account"]) for failure in failures)
+            _die(
+                f"camp sessions: could not enumerate live sessions for {_described()} — "
+                f"every credential store failed ({accounts}) — check each store's "
+                "credentials and re-run"
+            )
+        else:
+            for failure in failures:
+                print(
+                    "camp sessions: could not enumerate sessions for "
+                    f"{_account_label(failure['account'])}",
+                    file=sys.stderr,
+                )
 
     resolved_env = dict(env) if env is not None else dict(os.environ)
-    all_group_configs = load_all_groups(_groups_dir())
+    if all_groups:
+        attribution_groups = all_groups_configs or []
+    else:
+        from ..group.config import load_all_groups
+        from .common import _groups_dir
+
+        attribution_groups = load_all_groups(_groups_dir())
     attributed = [
-        (record, _attribute_session(record.cwd, all_group_configs, env=resolved_env))
+        (record, _attribute_session(record.cwd, attribution_groups, env=resolved_env))
         for record in records
     ]
     if scope is None:
