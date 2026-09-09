@@ -41,7 +41,7 @@ answer at all, and from the case where no groups are configured, which says so:
 
 ```
 $ camp list -g
-camp: no groups are configured — nothing to list
+camp list: no groups configured — nothing to list
 ```
 
 ## State — one
@@ -59,7 +59,7 @@ $ camp sessions -g
 
 ```
 $ camp sessions -g --json
-[{"session_id": "09d79961-8036-4350-bd38-351ff97d9eea",
+[{"ok": true, "session_id": "09d79961-8036-4350-bd38-351ff97d9eea",
   "cwd": "/Users/tduffield/.local/state/camp/levr/worktrees/audio-real-day",
   "kind": "interactive", "controllable": true, "name": "audio-real-day-c4",
   "pid": 15134, "started_at": "2026-09-09T01:25:41.077000+00:00",
@@ -78,19 +78,19 @@ narrow answers concatenated in a stable sequence rather than interleaved by disc
 
 ```
 $ camp list -g
-audio-real-day    /Users/tduffield/.local/state/camp/levr/worktrees/audio-real-day
-e2e-test          /Users/tduffield/.local/state/camp/levr/worktrees/e2e-test
-staging-to-prod   /Users/tduffield/.local/state/camp/levr/worktrees/staging-to-prod
-project-maturity  /Users/tduffield/.local/state/camp/trailhead/worktrees/project-maturity
+audio-real-day /Users/tduffield/.local/state/camp/levr/worktrees/audio-real-day
+e2e-test /Users/tduffield/.local/state/camp/levr/worktrees/e2e-test
+staging-to-prod /Users/tduffield/.local/state/camp/levr/worktrees/staging-to-prod
+project-maturity /Users/tduffield/.local/state/camp/trailhead/worktrees/project-maturity
 testing-practices /Users/tduffield/.local/state/camp/trailhead/worktrees/testing-practices
 ```
 
-The session listing is the state this slice exists for: two accounts, one answer.
+The session listing is the state this design exists for: two accounts, one answer.
 
 ```
 $ camp sessions -g --json
-[{"session_id": "09d79961-...", "group": "levr",      "account": "~/.claude-levr", ...},
- {"session_id": "177a2259-...", "group": "trailhead", "account": null, ...}]
+[{"ok": true, "session_id": "09d79961-...", "group": "levr",      "account": "~/.claude-levr", ...},
+ {"ok": true, "session_id": "177a2259-...", "group": "trailhead", "account": null, ...}]
 ```
 
 `account: null` is the trailhead row's honest answer under the *group declaring no
@@ -111,7 +111,7 @@ fails, or the output cannot be decoded.
 
 This is deliberately distinct from *zero*: camp does not know that nothing is running, it
 knows it could not find out. Silence would be a confident wrong answer, which is the
-failure this whole slice exists to remove.
+failure this whole design exists to remove.
 
 ```
 $ camp sessions -g
@@ -158,13 +158,16 @@ absence:
 
 ```
 $ camp sessions -g --json
-[{"session_id": "09d79961-...", "group": "levr", "account": "~/.claude-levr", ...},
- {"unreadable": "~/.claude-levr", "reason": "the harness did not answer"}]
+[{"ok": true,  "session_id": "09d79961-...", "group": "levr", "account": "~/.claude-levr", ...},
+ {"ok": false, "account": "~/.claude-levr", "reason": "the harness did not answer"}]
 ```
 
-A session row never carries `unreadable`, so one field distinguishes the two. This is the
-same shape the cross-host work will need for a host that does not answer, which is why it
-is settled here rather than invented twice.
+Every row carries `ok`, so one field distinguishes the two and a consumer never has to
+test for a key's absence — the weaker check, and the one that would not extend to the
+cross-host case. A failure row carries only what it can support: the account that failed
+and the reason, never session attribution it does not have. This is the same shape the
+cross-host work will need for a host that does not answer, which is why it is settled here
+rather than invented twice.
 
 The same shape covers a group configuration camp cannot parse: that group is skipped, by
 name, and every other group still answers.
@@ -176,7 +179,7 @@ camp: cannot read group config home-manager.toml — skipping
 ```
 
 An unreadable group is a *narrower* answer than the operator asked for, so it must be
-visible. A silent skip here would reproduce the defect this slice is fixing, one level up.
+visible. A silent skip here would reproduce the defect this design closes, one level up.
 
 ## State — group declaring no account
 
@@ -208,14 +211,14 @@ means the operator gets an answer to a question they did not ask.
 
 ```
 $ camp list --group levr --all-groups
-camp: --group and --all-groups contradict — pass one or the other
+camp list: --all-groups and --group name every group and one group at once — pass one or the other
 $ echo $status
-2
+1
 ```
 
 ```
 $ camp sessions --group levr -g
-camp: --group and --all-groups contradict — pass one or the other
+camp sessions: --all-groups and --group name every group and one group at once — pass one or the other
 ```
 
 The refusal is identical for both verbs and for both spellings of the short option, and it
