@@ -10,6 +10,12 @@ tokens they must not leak.
 
 Usage:
     leak_gate.py <tree-path> [<tree-path> ...] [--denylist <path>]
+                 [--optional-denylist <path> ...]
+
+``--denylist`` is required to load: a missing or pattern-empty file fails
+closed. ``--optional-denylist`` layers extra patterns on top and is skipped
+silently when absent, so a denylist that only some machines carry can be
+enforced without blocking the machines that do not.
 
 Multiple trees may be scanned in one invocation (e.g. a plugin's shippable
 surface AND its tests/ dir — both go public, but tests/ often sits outside a
@@ -61,9 +67,19 @@ def _err(msg: str) -> None:
     print(f"leak-gate: {msg}", file=sys.stderr)
 
 
-def _load_denylist(path: Path) -> list[re.Pattern]:
-    """Load and compile denylist regexes. Raises ValueError on any failure so
-    the caller can fail closed (exit 2)."""
+def _load_denylist(path: Path, *, required: bool = True) -> list[re.Pattern]:
+    """Load and compile denylist regexes.
+
+    Raises ValueError on any failure so the caller can fail closed (exit 2).
+    An *optional* denylist (``required=False``) that is absent, or that
+    contributes no patterns, returns an empty list instead: it layers extra
+    patterns on top of the required one and its absence is the ordinary case,
+    not a failure to certify. An optional file that exists but is unreadable or
+    carries an invalid regex still raises — that is a real error, not an
+    absence.
+    """
+    if not required and not path.exists():
+        return []
     if not path.exists():
         raise ValueError(f"denylist not found: {path}")
     try:
@@ -79,6 +95,8 @@ def _load_denylist(path: Path) -> list[re.Pattern]:
             patterns.append(re.compile(stripped, re.IGNORECASE))
         except re.error as e:
             raise ValueError(f"invalid regex in denylist line {lineno}: {stripped!r} ({e})")
+    if not patterns and not required:
+        return []
     if not patterns:
         raise ValueError(f"denylist has no patterns: {path}")
     return patterns
@@ -125,6 +143,17 @@ def main(argv: list[str]) -> int:
         default=os.environ.get("LEAK_GATE_DENYLIST", str(DEFAULT_DENYLIST)),
         help="path to denylist file (default: $LEAK_GATE_DENYLIST or ~/.claude/leak-gate.denylist)",
     )
+    ap.add_argument(
+        "--optional-denylist",
+        action="append",
+        default=[],
+        metavar="PATH",
+        help=(
+            "extra denylist layered on top of --denylist; skipped silently when "
+            "absent. Repeatable. Use for a machine-local denylist that a fresh "
+            "clone or a CI runner will not have."
+        ),
+    )
     args = ap.parse_args(argv)
 
     trees = [Path(t) for t in args.trees]
@@ -135,6 +164,8 @@ def main(argv: list[str]) -> int:
 
     try:
         patterns = _load_denylist(Path(args.denylist).expanduser())
+        for extra in args.optional_denylist:
+            patterns += _load_denylist(Path(extra).expanduser(), required=False)
     except ValueError as e:
         _err(str(e))
         _err("failing closed — cannot certify the tree clean without a denylist")

@@ -172,12 +172,24 @@ plugins/craft/scripts/install-hooks.sh    # chain-safe pre-commit installer
 ~/.claude/leak-gate.denylist              # machine-local denylist (UNTRACKED)
 ```
 
+In this monorepo the gate is wired as a `repo: local` hook in
+`.pre-commit-config.yaml`, so `pre-commit install` is the only setup step and
+`install-hooks.sh` is not used here. The installer remains the path for an
+adopter repo that does not use the pre-commit framework.
+
 Run it directly:
 
 ```bash
 python3 plugins/craft/scripts/leak_gate.py <tree> --denylist ~/.claude/leak-gate.denylist
 # exit 0 clean · 1 leak (prints relpath:lineno:token) · 2 fail-closed
 ```
+
+**Layering.** `--denylist` is required and fails closed. `--optional-denylist`
+(repeatable) layers extra patterns on top and is skipped silently when the file
+is absent — that is how a denylist only some machines carry gets enforced
+without blocking the machines that lack it. Pair a committed file of
+non-identifying patterns with a machine-local file of identifying ones, so the
+gate still enforces something on a fresh clone and on CI.
 
 **Fail-closed:** a missing, unreadable, or pattern-empty denylist makes the gate
 exit `2` (error) — it never exits `0` when it could not actually certify the

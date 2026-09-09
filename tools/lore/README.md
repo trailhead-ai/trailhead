@@ -152,17 +152,15 @@ python -m pytest tests/
 ```
 
 A **pre-commit leak gate** keeps project- or machine-specific tokens out of the
-shipped plugin surface. Install the generic, denylist-driven gate from the
-[craft](../craft) plugin — it reads a machine-local denylist
-(`~/.claude/leak-gate.denylist`, untracked) so no private token lives in this
-tracked repo:
+shipped plugin surface, lore's included. It is wired for the whole monorepo, so
+there is nothing lore-specific to install:
 
 ```bash
-craft/plugins/craft/scripts/install-hooks.sh "$(pwd)" plugins/lore tests docs
+pre-commit install     # from the repo root, once per clone
 ```
 
-The `docs` tree is included so adopter-facing docs (e.g. `EXTENDING.md`) are
-gated too — they ship publicly and must stay leak-clean.
+See the Contributing section of the repo root [README](../../README.md) for
+what it scans and which denylists feed it.
 
 See `MANUAL-SMOKE.md` for the plugin-system boundary smoke test (hook
 registration, `${CLAUDE_PLUGIN_ROOT}`, skill namespacing).

@@ -5,6 +5,14 @@ format described by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+- The leak gate now runs as a pre-commit hook for this repo. `pre-commit
+  install` wires it alongside ruff and the Conventional Commits check, so a
+  private string on a shippable plugin surface is refused at commit time
+  rather than after it ships. A committed denylist of structural seams gives
+  the gate a floor that holds on every machine and on CI; the machine-local
+  denylist of identifying tokens layers on top through the gate's new
+  `--optional-denylist`, which is skipped silently when absent so a fresh
+  clone is not blocked. Run it by hand with `scripts/leak-gate`.
 - `trailhead update` refuses a tracked upstream branch whose name is
   option-shaped. Reading the branch from git rather than from a file is not
   on its own enough to make it safe as a git argument: only `git branch`

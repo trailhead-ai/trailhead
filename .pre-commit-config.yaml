@@ -19,6 +19,19 @@ repos:
       - id: conventional-pre-commit
         stages: [commit-msg]
 
+  # Leak gate — refuse a commit that would ship a private string on a plugin
+  # surface. Structural seams are committed (scripts/leak-gate-seams.denylist);
+  # identifying tokens live in a machine-local denylist that is layered on when
+  # present, so a fresh clone without one is not blocked.
+  - repo: local
+    hooks:
+      - id: leak-gate
+        name: leak gate (no private strings on the shippable surface)
+        language: system
+        entry: scripts/leak-gate
+        pass_filenames: false
+        always_run: true
+
   # PEP 8 style enforcement via ruff (pycodestyle E/W + pyflakes F).
   # Rules and line-length are configured in pyproject.toml ([tool.ruff]).
   - repo: https://github.com/astral-sh/ruff-pre-commit

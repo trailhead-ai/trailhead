@@ -187,6 +187,19 @@ on your PATH.
 
 If you (or your agent) are contributing, read [`docs/vision.md`](docs/vision.md) first.
 
+Wire up the commit hooks once per clone:
+
+```bash
+pip install pre-commit && pre-commit install
+```
+
+That installs all three: `ruff` on the staged Python, a Conventional Commits
+check on the message, and the **leak gate**, which refuses a commit that would
+ship a private string on a plugin surface. The gate reads
+`scripts/leak-gate-seams.denylist` (committed — structural seams that identify
+nobody) and layers on `~/.claude/leak-gate.denylist` when that machine-local
+file of identifying tokens is present. Run it by hand with `scripts/leak-gate`.
+
 Every user-visible change gets a [`CHANGELOG.md`](CHANGELOG.md) entry under
 `## [Unreleased]`, in [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 format, as part of the same change.
