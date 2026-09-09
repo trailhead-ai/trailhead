@@ -241,7 +241,12 @@ class TestListJson:
     Covers the group --json path and the convergence (both entry points emit
     the SAME key set)."""
 
-    _FIXED_KEYS = {"slug", "branch", "workspace_path", "group"}
+    # Every row carries `ok` — a success row states `ok: true` alongside the
+    # already-existing keys, so `ok` alone distinguishes a success row from
+    # an unparsable-group failure row (`{"ok": False, "group": None,
+    # "reason": ...}`) and a consumer never has to test for a key's absence.
+    # See docs/design/cross-group-cross-account-listing.md, lines 165-170.
+    _FIXED_KEYS = {"slug", "branch", "workspace_path", "group", "ok"}
 
     def test_json_carries_workspace_path(self, camp_cli, tmp_path, capsys):
         group = _make_group("listgrp")
@@ -267,6 +272,7 @@ class TestListJson:
             "camp list --json must emit exactly the shared schema"
         )
         assert rows[0]["group"] == "listgrp"
+        assert rows[0]["ok"] is True
 
     def test_json_empty_group_is_empty_array(self, camp_cli, tmp_path, capsys):
         group = _make_group("listgrp")
@@ -593,7 +599,8 @@ class TestListAllGroups:
         rows = json.loads(r.stdout)
         assert {row["group"] for row in rows} == {"groupa", "groupb"}
         assert {row["slug"] for row in rows} == {"ws-a", "ws-b"}
-        assert set(rows[0].keys()) == {"slug", "branch", "workspace_path", "group"}
+        assert set(rows[0].keys()) == {"ok", "slug", "branch", "workspace_path", "group"}
+        assert rows[0]["ok"] is True
 
     def test_short_and_long_spellings_produce_byte_identical_output(
         self, two_group_list_cli_env
@@ -768,8 +775,11 @@ class TestListAllGroupsNarrows:
         r = _camp_from(env_dict, tmp_path, "list", "--all-groups", "--json")
         assert r.returncode == 0, f"stdout: {r.stdout}\nstderr: {r.stderr}"
         rows = json.loads(r.stdout)
-        ok_rows = [row for row in rows if row.get("ok", True)]
-        failure_rows = [row for row in rows if row.get("ok") is False]
+        # Every row carries `ok` — a consumer distinguishes a workspace row
+        # from a failure row by that one field alone, never by testing
+        # whether `row["slug"]` would raise.
+        ok_rows = [row for row in rows if row["ok"]]
+        failure_rows = [row for row in rows if row["ok"] is False]
         assert {row["slug"] for row in ok_rows} == {"ws-good"}
         assert {row["group"] for row in ok_rows} == {"goodgroup"}
         assert str(broken) in r.stderr

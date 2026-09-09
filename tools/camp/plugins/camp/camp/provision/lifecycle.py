@@ -166,7 +166,7 @@ def cmd_ls_group(
 
 # Fixed JSON schema for `camp list --json`, emitted identically by BOTH entry
 # points so a parser never KeyErrors switching between them.
-_LIST_JSON_KEYS = ("slug", "branch", "workspace_path", "group")
+_LIST_JSON_KEYS = ("ok", "slug", "branch", "workspace_path", "group")
 
 
 def render_workspace_list(
@@ -182,8 +182,9 @@ def render_workspace_list(
     Each entry must carry `slug` and `workspace_path`; `branch` and `group` are
     optional (group is None for the standalone fallback). Output:
       - human: one `slug workspace_path` line per entry; empty → no stdout.
-      - --json: a list of {slug, branch, workspace_path, group} dicts (the fixed
-        _LIST_JSON_KEYS schema); empty → `[]`.
+      - --json: a list of {ok, slug, branch, workspace_path, group} dicts (the
+        fixed _LIST_JSON_KEYS schema), every success row carrying `ok: true`;
+        empty → `[]`.
 
     The renderer PROJECTS each entry onto the fixed schema (ignoring any
     source-specific extras like manifest_path), so the two data models — group
@@ -194,15 +195,21 @@ def render_workspace_list(
     :func:`answerable_groups_or_refuse`) — appends one ``{"ok": False,
     "group": None, "reason": detail}`` row per entry to the JSON array ONLY:
     a parser reading a complete-looking array would otherwise be silently
-    missing a group. Never rendered on the human path, which already has the
-    same information on stderr; folding it into the `slug workspace_path`
-    lines would have nothing to print a slug or path for.
+    missing a group. Every row in the array carries `ok`, so a consumer
+    distinguishes a workspace row from a failure row by that one field
+    alone, never by testing whether `row["slug"]` would raise — the same
+    discriminator a failed credential store's row uses in
+    `camp sessions --json`. Never rendered on the human path, which already
+    has the same information on stderr; folding it into the
+    `slug workspace_path` lines would have nothing to print a slug or path
+    for.
     """
     import json as _json
 
     if as_json:
         rows = [
             {
+                "ok": True,
                 "slug": e["slug"],
                 "branch": e.get("branch", ""),
                 "workspace_path": e["workspace_path"],
