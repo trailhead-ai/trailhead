@@ -93,9 +93,37 @@ vault and pushed the commit to origin. In each case the agent behaved sensibly �
 it was handed a task it could not complete the sanctioned way, so it went and
 found the machinery that would work. A stub on `PATH` is a decoy, not a boundary.
 
-Until these cases run under real isolation — a container, or at minimum a
-scrubbed `PATH` and `HOME` with the plugin cache and real vaults out of reach —
-treat every run with shell access as capable of touching live infrastructure:
+`scripts/eval-sandbox` is that boundary, and every arm with shell access runs
+inside it:
+
+```
+scripts/eval-sandbox <run-dir> -- claude --setting-sources project ...
+```
+
+It confines the process and everything it spawns with a macOS seatbelt profile:
+writes go nowhere but the run directory, and reads under `$HOME` are denied by
+default with a narrow allow-list for what the harness itself needs to
+authenticate and run. The plugin cache, the user ruleset, and the real user
+config are closed even though the profile could reach them — those are the
+answer key, not the fixture.
+
+Default-deny on the read side is the point. A blocklist naming the paths that
+leaked last time leaves every path nobody has thought of yet reachable, which is
+the same mistake as a stub on `PATH` one layer down.
+
+A container was the other candidate and does not work here: Claude Code reads
+its credentials from the macOS Keychain, so a container has no way to
+authenticate without an API key, which would also move these runs off the
+subscription and onto API billing.
+
+Two holes stay open deliberately, because closing either stops the arm rather
+than confining it — the harness's own session state under `~/.claude`, and the
+Bash tool's scratch root under `/tmp/claude-<uid>`. The auto-memory subtree is
+denied within the first, since a planted memory would be read back by a later
+real session.
+
+The grading discipline below still applies, because a boundary that holds is not
+a reason to stop looking:
 
 - **Diff the developer's real state after every batch.** `~/.config/`, the real
   vaults, and any repo the fixture names. Escapes are silent; nothing in the run
@@ -104,6 +132,16 @@ treat every run with shell access as capable of touching live infrastructure:
   reports a URL may have published somewhere else entirely. Both cases produced a
   first grading pass that was wrong because it trusted captured output over the
   tree on disk.
+- **Grade only finished runs, and make finishing observable.** A run directory
+  exists from the moment the run starts, so counting directories does not tell
+  you the batch is done — it tells you the batch has been *dispatched*. Grading
+  an in-flight run reads a half-written log as a clean one, which scores a
+  compliant arm as a refusal. Have the runner write a completion marker as its
+  last act and have the grader skip any run without one.
+
+Three of the first four cases produced a wrong first grading pass, each in a
+different way, and none of them was visible in the run output. Assume the
+grader is wrong until its verdict and a hand-read log agree on a sample.
 - **Never point a fixture at a real vault, repo, or config**, even read-only. The
   fixture is data; live infrastructure is not part of it.
 

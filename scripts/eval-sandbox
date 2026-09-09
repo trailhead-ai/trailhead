@@ -1,0 +1,149 @@
+#!/usr/bin/env bash
+# eval-sandbox — run one eval arm inside a kernel-enforced boundary.
+#
+# An eval arm is a full agent with shell access. Pointing it at a fixture does
+# not keep it there: handed a task it cannot finish through the fixture, it goes
+# looking for the machinery that will work, and on this machine that machinery
+# is the installed plugin cache, the real user config, and the real vaults. A
+# stub on PATH is a decoy. This wrapper is the boundary.
+#
+# Usage:
+#   scripts/eval-sandbox <run-dir> -- <command> [args...]
+#
+# <run-dir> becomes the working directory and the only writable location. The
+# command runs under a macOS seatbelt profile that:
+#
+#   - denies every write except <run-dir>, the harness's own session state, and
+#     the three device nodes a shell needs;
+#   - denies every read under $HOME by default, then re-opens only what the
+#     harness itself needs to authenticate and run.
+#
+# The read rule is default-deny on purpose. A blocklist of the paths that leaked
+# last time leaves every path nobody has thought of yet reachable.
+#
+# Residual holes, both documented rather than closed:
+#   - the harness's session-state directories under ~/.claude stay writable,
+#     because the run has to record its own transcript. The auto-memory subtree
+#     is denied within them, since a planted memory would reach later sessions.
+#   - reads outside $HOME are unrestricted. A vault or checkout kept outside the
+#     home directory is not covered; pass it in DENY_EXTRA.
+#   - /tmp/claude-<uid> stays writable. The Bash tool creates its per-session
+#     scratch directory there before it will run anything, so closing it stops
+#     the arm from executing a single command — and the run then reports every
+#     probe as blocked, which reads as a clean containment result.
+#
+# Environment:
+#   DENY_EXTRA   colon-separated absolute paths to additionally deny reads on.
+
+set -euo pipefail
+
+die() { printf 'eval-sandbox: %s\n' "$*" >&2; exit 2; }
+
+[ "$(uname -s)" = "Darwin" ] || die "requires macOS (seatbelt); this is $(uname -s)"
+
+run_dir="${1:-}"
+[ -n "$run_dir" ] || die "usage: eval-sandbox <run-dir> -- <command> [args...]"
+shift
+
+[ "${1:-}" = "--" ] || die "expected '--' between the run directory and the command"
+shift
+
+[ "$#" -gt 0 ] || die "no command given"
+[ -d "$run_dir" ] || die "run directory does not exist: $run_dir"
+
+# Resolve to a physical path: the profile matches on real paths, so a symlinked
+# or relative run directory would be jailed somewhere other than where the
+# command actually writes.
+run_dir="$(cd "$run_dir" && pwd -P)"
+home="$(cd "$HOME" && pwd -P)"
+
+# A run directory inside the harness's own state would be write-allowed as the
+# jail and read-allowed as harness state, punching through both rules at once.
+case "$run_dir/" in
+  "$home"/.claude/*|"$home"/.config/*|"$home"/.local/*)
+    die "run directory must not live inside the harness's own state: $run_dir" ;;
+  "$home"/) die "run directory must not be the home directory itself" ;;
+esac
+
+# The run directory is what a case is graded from, so the wrapper keeps its own
+# working files out of it: a profile or a temp directory beside the fixture reads
+# as a difference in the tree, and as plausible arm output.
+work="$(mktemp -d "${TMPDIR:-/tmp}/eval-sandbox.XXXXXX")"
+profile="$work/profile.sb"
+
+{
+  cat <<'PROFILE'
+(version 1)
+(allow default)
+
+;; ---- writes: deny everything, then open the jail ----------------------
+(deny file-write*)
+(allow file-write* (subpath (param "JAIL")))
+PROFILE
+
+  # The harness records its own transcript and scratch state here. Narrow to the
+  # specific directories rather than all of ~/.claude, so an escaped run cannot
+  # reach settings, rules, or the installed plugins.
+  for d in projects todos shell-snapshots statsig file-history logs; do
+    printf '(allow file-write* (subpath (string-append (param "HOME") "/.claude/%s")))\n' "$d"
+  done
+
+  cat <<'PROFILE'
+;; A planted auto-memory would be read back by a later real session, so the one
+;; subtree inside the harness's state that outlives the run stays closed.
+(deny file-write* (regex #"/\.claude/projects/[^/]+/memory(/|$)"))
+
+(allow file-write* (literal "/dev/null") (literal "/dev/tty") (literal "/dev/dtracehelper"))
+PROFILE
+
+  # The Bash tool creates a per-session scratch directory here during start-up
+  # and refuses to run any command until it exists. Denying it does not confine
+  # the arm — it stops the arm, while the run still reports as if every probe had
+  # been blocked by the boundary.
+  printf '(allow file-write* (subpath "/private/tmp/claude-%s"))\n' "$(id -u)"
+
+  # The Bash tool also keeps a cwd marker at /tmp/claude-<id>-cwd. Denying it
+  # does not block the command, but every shell call then emits a permission
+  # warning into the transcript a grader reads.
+  printf '(allow file-write* (regex #"^/private/tmp/claude-[0-9a-f]+-cwd$"))\n'
+
+  cat <<'PROFILE'
+
+;; ---- reads: deny the home directory, then re-open what the harness needs
+(deny file-read* (subpath (param "HOME")))
+(allow file-read*
+  (subpath (string-append (param "HOME") "/.claude"))
+  (subpath (string-append (param "HOME") "/.local/bin"))
+  (subpath (string-append (param "HOME") "/.local/share/claude"))
+  (subpath (string-append (param "HOME") "/.cache"))
+  (subpath (string-append (param "HOME") "/Library"))
+  (subpath (param "JAIL")))
+
+;; Re-closed after the allow-list above: last matching rule wins. These are the
+;; prose and the installed plugins under test — an arm that reads them is
+;; reading the answer key, not the fixture.
+(deny file-read*
+  (subpath (string-append (param "HOME") "/.claude/plugins"))
+  (subpath (string-append (param "HOME") "/.claude/rules"))
+  (subpath (string-append (param "HOME") "/.claude/projects")))
+PROFILE
+
+  if [ -n "${DENY_EXTRA:-}" ]; then
+    printf '%s' "$DENY_EXTRA" | tr ':' '\n' | while IFS= read -r extra; do
+      [ -n "$extra" ] || continue
+      printf '(deny file-read* (subpath "%s"))\n' "$extra"
+    done
+  fi
+} > "$profile"
+
+# Point the confined process at a temp directory of its own inside the scratch
+# root the profile already opens, rather than at the jail (which a grader reads)
+# or at the shared system temp directory (which other runs also reach).
+run_tmp="/private/tmp/claude-$(id -u)/eval-sandbox-tmp.$$"
+mkdir -p "$run_tmp"
+
+cd "$run_dir"
+exec sandbox-exec -f "$profile" \
+  -D JAIL="$run_dir" \
+  -D HOME="$home" \
+  env TMPDIR="$run_tmp" "$@"

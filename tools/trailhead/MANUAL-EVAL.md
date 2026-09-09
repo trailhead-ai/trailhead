@@ -17,18 +17,10 @@ Cases live in `plugins/trailhead/evals/<case-name>/`.
 
 ## Cases
 
-None yet. Trailhead's prose has not been measured behaviourally.
+None, and none are expected. This plugin ships no prose an agent reads — no
+skills, no agents, no ruleset — so there is no behaviour for a case to measure.
+Its capability surface is one SessionStart hook script and a plugin manifest,
+both tested by running them.
 
-When the first case lands, record it here as:
-
-```
-## Case: <name>
-
-`plugins/trailhead/evals/<name>/` — fixture, and `expected.md` carrying the pass
-condition, written before any arm was run.
-
-**Under test:** <the claim, and where it is written down>
-
-| Date | Arm | Prose under test | Runs | Result | Notes |
-|------|-----|------------------|------|--------|-------|
-```
+See `plugins/trailhead/evals/README.md`. If this plugin grows a skill, an agent,
+or a ruleset, that changes and a case belongs here.
