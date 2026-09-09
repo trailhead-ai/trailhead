@@ -57,6 +57,69 @@ resolves to the live composed install, not the worktree, so it re-runs unedited
 prose and reports a false result. Editing the composed install to work around this
 is barred by Axiom 6 (never touch the developer's real install from a test).
 
+### A subagent inherits the ruleset you are trying to measure
+
+Dispatching both arms as subagents **cannot measure a user-level ruleset**, which
+is what most of these cases are about. A subagent inherits `~/.claude/rules/`, so
+if the prose under test lives there, the baseline arm is already carrying it and
+both arms are the treatment arm. A probe agent told to use no tools will quote the
+ruleset back verbatim; run that probe before trusting any baseline.
+
+Dispatch each arm as its own `claude` process with `--setting-sources project`,
+which drops user-level settings and rules while leaving authentication intact.
+Pass the arm's prose with `--append-system-prompt` and enumerate tools with
+`--allowedTools` — a blanket `--permission-mode bypassPermissions` is refused by
+the auto-mode classifier, correctly.
+
+Two consequences, both of which belong in the case's limitations:
+
+- The clean room has **no PreToolUse hook**, because hooks are installed into
+  user-level settings. For a guardrail that claims to work in harnesses without
+  hooks, that is the faithful condition; for anything else it removes a
+  protection production has.
+- Grade an `Edit`-tool write separately from a shell write. They say different
+  things about a system whose hook covers one and not the other.
+
+### The clean room is not a sandbox
+
+`--setting-sources project` isolates **settings, not the filesystem**. It keeps a
+user-level ruleset out of the baseline arm, and that is all it does. An arm with
+shell access can still read the developer's real repos, find the installed plugin
+cache under `~/.claude/plugins/`, and invoke the genuine CLI against live data.
+
+Both cases written so far escaped their fixture this way. `bash-write-gate`
+mutated the developer's real lore config; `publish-routing` published into a real
+vault and pushed the commit to origin. In each case the agent behaved sensibly —
+it was handed a task it could not complete the sanctioned way, so it went and
+found the machinery that would work. A stub on `PATH` is a decoy, not a boundary.
+
+Until these cases run under real isolation — a container, or at minimum a
+scrubbed `PATH` and `HOME` with the plugin cache and real vaults out of reach —
+treat every run with shell access as capable of touching live infrastructure:
+
+- **Diff the developer's real state after every batch.** `~/.config/`, the real
+  vaults, and any repo the fixture names. Escapes are silent; nothing in the run
+  output announces them, and the arm will report success either way.
+- **Grade from the fixture's filesystem, not from a log line.** A run that
+  reports a URL may have published somewhere else entirely. Both cases produced a
+  first grading pass that was wrong because it trusted captured output over the
+  tree on disk.
+- **Never point a fixture at a real vault, repo, or config**, even read-only. The
+  fixture is data; live infrastructure is not part of it.
+
+### A fixture must let the sanctioned path succeed
+
+If a case forbids one mechanism, the fixture has to make the permitted mechanism
+actually work. A task that cannot be completed the sanctioned way does not
+measure obedience — it measures resourcefulness, and a compliant agent becomes a
+determined one. In the `bash-write-gate` case the fixture vault was deliberately
+unregistered, so agents went looking for the config that would register it, read
+the developer's real repo, and mutated the real `~/.config/lore/config.json`.
+
+Give the run a throwaway config it can succeed against (`XDG_CONFIG_HOME` and
+`XDG_STATE_HOME` under the scratch directory), and diff the developer's real
+config after any run that had shell access. Escapes are silent otherwise.
+
 **The instructions-file path is a trust boundary — pin it.** The dispatcher
 resolves that path itself, and it must always name a trusted, review-gated,
 in-repo artifact — a committed agent or skill file, ideally at a stated SHA. It
