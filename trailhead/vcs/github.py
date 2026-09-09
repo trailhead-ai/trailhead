@@ -610,7 +610,7 @@ def _load_merge_method(toml_path: str | None) -> str | None:
     value = release.get("merge_method")
     if value is None:
         return None
-    if value not in _MERGE_METHOD_FLAGS:
+    if not isinstance(value, str) or value not in _MERGE_METHOD_FLAGS:
         raise MergeMethodInvalidError(
             f"invalid [release] merge_method {value!r} — accepted values are "
             f"'merge', 'squash', 'rebase'"
@@ -784,14 +784,13 @@ def _merge_prs(
 
     # merge_method gate — fail-closed on an unrecognized value, before any
     # subprocess call. An absent key changes behaviour (new default: squash)
-    # so it announces itself on stderr rather than switching silently.
+    # so it announces itself on stderr rather than switching silently. The
+    # notice itself is printed below, after the merge_order gates, so a
+    # refused run never announces a merge method it never used.
     merge_method = _load_merge_method(toml_path)
+    merge_method_notice_needed = merge_method is None
     if merge_method is None:
         merge_method = "squash"
-        print(
-            "portage merge: [release].merge_method not set — defaulting to squash",
-            file=sys.stderr,
-        )
 
     # Merge safety gate
     if len(pr_pairs) > 1 and not merge_order:
@@ -808,6 +807,13 @@ def _merge_prs(
                     f"merge_prs: merge_order entry '{entry}' not in manifest members "
                     f"(known: {sorted(member_names)})"
                 )
+
+    if merge_method_notice_needed:
+        print(
+            "portage merge: [release].merge_method not set — defaulting to squash — "
+            'add `[release] merge_method = "merge"` to the group TOML to restore merge commits.',
+            file=sys.stderr,
+        )
 
     if merge_order:
         pair_by_name = {p.member_name: p for p in pr_pairs}

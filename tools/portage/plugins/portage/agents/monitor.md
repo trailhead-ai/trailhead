@@ -219,6 +219,15 @@ call `portage merge` as usual and honor its exit code:
   `STOPPED: all PRs are ready to merge, but auto_merge is unset/false — add [release] auto_merge = true to the group TOML to merge automatically.`
 - Exit 0/1: proceed as below (all merged, or partial-merge failure).
 
+`portage merge` also reads `merge_method` from the same `[release]` block — the strategy passed to
+`gh pr merge` (`merge` / `squash` / `rebase`). **Default: `squash`.** When `merge_method` is unset,
+`portage merge` prints a notice on stderr naming the method it chose and the remediation to restore
+merge commits (`add [release] merge_method = "merge" to the group TOML`) — surface that notice
+verbatim rather than swallowing it, so the operator sees the behaviour before it lands on `main`.
+When `merge_method` is set to a value other than `merge`/`squash`/`rebase`, `portage merge` refuses
+with exit 2 before any `gh` call — honor that exit code and surface it as
+`BLOCKED: portage merge refused — [release].merge_method is invalid; see stderr for the accepted values.`
+
 `portage merge` exits nonzero on any partial-merge. The agent relies on that exit code, not JSON
 parsing, to detect failure.
 

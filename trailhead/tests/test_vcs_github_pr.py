@@ -478,7 +478,9 @@ class TestPrMerge:
         provider.pr.merge(pr_pairs, str(manifest), toml_path=str(toml))
         assert merge_calls.index("20") < merge_calls.index("10")
 
-    def test_multiple_prs_no_merge_order_refuses(self, tmp_path: Path) -> None:
+    def test_multiple_prs_no_merge_order_refuses(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         wt_a = tmp_path / "wt" / "alpha"
         wt_b = tmp_path / "wt" / "beta"
         wt_a.mkdir(parents=True)
@@ -501,8 +503,13 @@ class TestPrMerge:
         msg = str(exc_info.value)
         assert "merge_order" in msg
         assert "[release]" in msg
+        # merge_method is never used on a refused run — the notice announcing
+        # its (unused) default must not print here.
+        assert capsys.readouterr().err == ""
 
-    def test_merge_order_names_nonexistent_member_raises(self, tmp_path: Path) -> None:
+    def test_merge_order_names_nonexistent_member_raises(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         wt = tmp_path / "wt" / "alpha"
         wt.mkdir(parents=True)
         manifest = _write_manifest(
@@ -519,6 +526,9 @@ class TestPrMerge:
         with pytest.raises(MergeConfigError) as exc_info:
             provider.pr.merge(pr_pairs, str(manifest), toml_path=str(toml))
         assert "nonexistent" in str(exc_info.value)
+        # Same as above: a refused run must not announce a merge method it
+        # never used.
+        assert capsys.readouterr().err == ""
 
     def test_partial_merge_pr1_merges_pr2_fails(self, tmp_path: Path) -> None:
         wt_a = tmp_path / "wt" / "alpha"
@@ -870,6 +880,20 @@ class TestMergeMethod:
         assert "--rebase" not in argv[0]
         err = capsys.readouterr().err
         assert "squash" in err
+        assert 'merge_method = "merge"' in err
+
+    def test_configured_merge_method_prints_no_notice(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """An operator who HAS set merge_method must not be told the key is
+        unset — the notice exists only for the absent-key path."""
+        argv = self._run_merge_capture_argv(
+            tmp_path, '[release]\nauto_merge = true\nmerge_method = "squash"\n'
+        )
+        assert len(argv) == 1
+        err = capsys.readouterr().err
+        assert "not set" not in err
+        assert "defaulting" not in err
 
     def test_unrecognized_merge_method_raises_before_any_gh_call(
         self, tmp_path: Path
@@ -896,6 +920,37 @@ class TestMergeMethod:
         assert calls == []
         msg = str(exc_info.value)
         assert "sqush" in msg
+        assert "merge" in msg and "squash" in msg and "rebase" in msg
+
+    def test_non_string_merge_method_raises_before_any_gh_call(
+        self, tmp_path: Path
+    ) -> None:
+        """A TOML value like `merge_method = ["squash"]` reaches the
+        `value not in _MERGE_METHOD_FLAGS` membership check as an unhashable
+        list, which raises TypeError rather than the contracted
+        MergeMethodInvalidError. A non-string value is an invalid value, not
+        a crash."""
+        wt = tmp_path / "wt" / "alpha"
+        wt.mkdir(parents=True)
+        manifest = _write_manifest(
+            tmp_path,
+            [{"name": "alpha", "repo_root": str(tmp_path), "worktree_path": str(wt)}],
+        )
+        toml = _write_toml(
+            tmp_path, '[release]\nauto_merge = true\nmerge_method = ["squash"]\n'
+        )
+        calls: list[list[str]] = []
+
+        def stub(cmd, **kwargs):
+            calls.append(list(cmd))
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+
+        provider = get_provider("github", runner=stub)
+        pr_pairs = [PRPair(repo_path=str(wt), pr_number="7", member_name="alpha")]
+        with pytest.raises(MergeMethodInvalidError) as exc_info:
+            provider.pr.merge(pr_pairs, str(manifest), toml_path=str(toml))
+        assert calls == []
+        msg = str(exc_info.value)
         assert "merge" in msg and "squash" in msg and "rebase" in msg
 
     def test_unconfigured_release_shapes_share_one_default(
