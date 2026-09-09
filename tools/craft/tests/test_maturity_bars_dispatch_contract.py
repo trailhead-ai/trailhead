@@ -197,6 +197,38 @@ def test_each_dispatcher_instructs_surfacing_resolved_level_and_basis():
         )
 
 
+# ---- contract item 6b: stand-down and waiver-not-recognised surfaced too -
+#
+# Only plan, consult, and drive carry their own restatement instruction — gauntlet's own
+# `<maturity-calibration>` instruction names "Filling the calibration token" in
+# `_shared/council.md` directly rather than duplicating it, so it inherits that section's
+# stand-down restatement by reference and needs no separate pin here. The expected tokens are
+# imported from the renderer rather than retyped, the same discipline contract item 11 below
+# applies to the concern vocabulary.
+
+sys.path.insert(0, str(REPO_ROOT / "plugins" / "craft" / "scripts"))
+from maturity_bars import _STAND_DOWN_PREFIX, _WAIVER_NOT_RECOGNISED_PREFIX  # noqa: E402
+
+_OWN_RESTATEMENT_DISPATCHERS = {
+    "plan": PLAN_MD,
+    "consult": CONSULT_MD,
+    "drive": DRIVE_MD,
+}
+
+
+def test_plan_consult_and_drive_instruct_restating_stand_down_and_waiver_not_recognised():
+    for name, path in _OWN_RESTATEMENT_DISPATCHERS.items():
+        text = _text(path)
+        assert _STAND_DOWN_PREFIX in text, (
+            f"{name}/SKILL.md's own restatement instruction never mentions restating a "
+            f"`{_STAND_DOWN_PREFIX}` line the calibration block can carry"
+        )
+        assert _WAIVER_NOT_RECOGNISED_PREFIX in text, (
+            f"{name}/SKILL.md's own restatement instruction never mentions restating a "
+            f"`{_WAIVER_NOT_RECOGNISED_PREFIX}` line the calibration block can carry"
+        )
+
+
 # ---- contract item 7: consult states the no-spec-body case explicitly ----
 
 

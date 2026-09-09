@@ -314,7 +314,9 @@ to synthesize findings at an uncalibrated severity.
 
 **Surface the resolved level and its basis** in the persisted findings below — restate the
 renderer's own `maturity: <level> (basis: <basis>)` line, so a resumed run or a later reader can
-tell a read stamp from a silent default without re-deriving it.
+tell a read stamp from a silent default without re-deriving it. Restate any `stand-down:` and
+`waiver-not-recognised:` lines the block carries beside it too, so a resumed run or a later reader
+sees a waiver was exercised without opening the block itself.
 
 ```text
 

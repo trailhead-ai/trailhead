@@ -608,8 +608,9 @@ fixture design, and result writeup.
 
 ## Case: waived concern stands down
 
-`plugins/craft/evals/waived-concern-stands-down/` — pre-registered and committed at
-`a18d8150`, before any arm was run. Linked to
+`plugins/craft/evals/waived-concern-stands-down/` — pre-registered before any arm was run, but
+committed afterward, in a single commit (`a18d8150`, since amended into `e3cf7f2a`), so the
+ordering rests on the authoring record rather than on the commit graph. Linked to
 `task/give-craft-s-eval-cases-a-recurring-runner` for a recurring, CI-backed run.
 
 **Under test:** `scripts/maturity_bars.py` already recognises a spec's `Waives:` marker and

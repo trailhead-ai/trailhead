@@ -1085,13 +1085,28 @@ ABSENT_NON_GOALS = SINGLE_REPO_PRODUCTION
 
 @pytest.mark.parametrize(
     "fixture",
-    [ABSENT_NON_GOALS, DUPLICATE_NON_GOALS, EMPTY_NON_GOALS],
+    [ABSENT_NON_GOALS, EMPTY_NON_GOALS],
 )
-def test_absent_duplicated_and_empty_non_goals_each_yield_zero_waivers_at_exit_zero(fixture):
+def test_absent_and_empty_non_goals_each_yield_zero_waivers_at_exit_zero(fixture):
     result = _run(fixture.encode("utf-8"))
     assert result.returncode == 0
     assert _stderr(result) == ""
     assert _stdout(result) == _PRODUCTION_BASELINE
+
+
+def test_duplicated_non_goals_yields_zero_waivers_at_exit_zero_with_a_notice():
+    """Unlike an absent or empty `## Non-Goals` section (silent — no waiver
+    was ever attempted), a duplicated heading makes every bullet under it
+    unreachable, so it earns its own visible notice rather than reading
+    identically to a spec that never tried to waive anything."""
+    result = _run(DUPLICATE_NON_GOALS.encode("utf-8"))
+    assert result.returncode == 0
+    assert _stderr(result) == ""
+    out = _stdout(result)
+    assert "stand-down:" not in out
+    assert out.count("waiver-not-recognised:") == 1
+    assert "waiver-not-recognised: `## Non-Goals section duplicated" in out
+    assert _rated_lines(out) == [f"- {concern}: Critical" for concern in CONCERNS]
 
 
 def test_excerpt_sanitization_of_an_injection_shaped_multiline_non_goal():
@@ -1105,7 +1120,7 @@ def test_excerpt_sanitization_of_an_injection_shaped_multiline_non_goal():
     assert line.endswith("`")
     excerpt = line[len(prefix) : -1]
     assert "`" not in excerpt
-    assert len(excerpt) <= 200
+    assert len(excerpt) == 200
 
 
 def test_spec_with_no_marked_bullet_renders_byte_for_byte_unchanged_flat_basis():
@@ -1150,3 +1165,191 @@ def test_level_flag_reads_no_stdin_and_renders_no_stand_down_even_with_a_waiver(
     with_empty_stdin = _stdout(_run(b"", ["--level", "production"]))
     assert with_waiver == with_empty_stdin
     assert "stand-down:" not in with_waiver
+
+
+# ---- F1: the downgrade worked example never contradicts a stand-down ----
+
+WAIVED_MIGRATION_EARLY = """\
+# Some Spec
+
+## Maturity
+
+- lookout: early
+
+## Non-Goals
+
+- Waives: migration and backfill — this spec does not touch backfill logic.
+"""
+
+ALL_FIVE_WAIVED_EARLY = ALL_FIVE_WAIVED.replace("lookout: production", "lookout: early")
+
+ALL_FIVE_WAIVED_MATRIX = (
+    "# Some Spec\n\n## Maturity\n\n- repo-a: prototype\n- repo-b: production\n\n"
+    "## Non-Goals\n\n"
+    "- Waives: backwards compatibility because reasons.\n"
+    "- Waives: migration and backfill because reasons.\n"
+    "- Waives: rollback and reversibility because reasons.\n"
+    "- Waives: production failure visibility because reasons.\n"
+    "- Waives: cross-consumer blast radius because reasons.\n"
+)
+
+
+def test_downgrade_worked_example_never_names_a_concern_this_block_just_stood_down():
+    out = _stdout(_run(WAIVED_MIGRATION_EARLY.encode("utf-8")))
+    assert "stand-down: migration and backfill" in out
+    assert "for example \"migration and backfill" not in out
+    assert "for example \"backwards compatibility — Important, downgraded by" in out
+
+
+def test_downgrade_worked_example_falls_back_to_the_first_rated_concern_in_the_matrix():
+    matrix_waived = (
+        "# Some Spec\n\n## Maturity\n\n- lookout: prototype\n- trailhead: production\n\n"
+        "## Non-Goals\n\n- Waives: migration and backfill because reasons.\n"
+    )
+    out = _stdout(_run(matrix_waived.encode("utf-8")))
+    assert "stand-down: migration and backfill" in out
+    assert "for example \"migration and backfill" not in out
+    assert "for example \"backwards compatibility — `lookout`" in out
+
+
+def test_all_five_concerns_waived_at_a_downgraded_level_renders_no_worked_example_and_does_not_crash():
+    result = _run(ALL_FIVE_WAIVED_EARLY.encode("utf-8"))
+    assert result.returncode == 0, _stderr(result)
+    out = _stdout(result)
+    assert out.count("stand-down:") == 5
+    assert "for example" not in out
+
+
+def test_all_five_concerns_waived_in_the_matrix_renders_no_worked_example_and_does_not_crash():
+    result = _run(ALL_FIVE_WAIVED_MATRIX.encode("utf-8"))
+    assert result.returncode == 0, _stderr(result)
+    out = _stdout(result)
+    assert out.count("stand-down:") == 5
+    assert "for example" not in out
+
+
+# ---- F5: sanitized excerpts also strip control and bidi format characters ----
+
+
+def test_sanitize_excerpt_strips_control_characters():
+    text = "Waives: migration and backfill because \x1b[31mred\x07"
+    excerpt = maturity_bars._sanitize_excerpt(text)
+    assert "\x1b" not in excerpt
+    assert "\x07" not in excerpt
+
+
+def test_sanitize_excerpt_strips_bidi_override_characters():
+    text = "Waives: migration and backfill ‮hidden reversed text‬"
+    excerpt = maturity_bars._sanitize_excerpt(text)
+    assert "‮" not in excerpt
+    assert "‬" not in excerpt
+
+
+CONTROL_CHAR_WAIVE = (
+    "# Some Spec\n\n## Maturity\n\n- lookout: production\n\n## Non-Goals\n\n"
+    "- Waives: migration and backfill because \x1b[31mescape\x07bell and "
+    "‮override‬ text.\n"
+)
+
+
+def test_stand_down_excerpt_in_the_rendered_block_carries_no_control_or_bidi_characters():
+    out = _stdout(_run(CONTROL_CHAR_WAIVE.encode("utf-8")))
+    stand_down_lines = [line for line in out.splitlines() if line.startswith("stand-down:")]
+    assert len(stand_down_lines) == 1
+    line = stand_down_lines[0]
+    for banned in ("\x1b", "\x07", "‮", "‬"):
+        assert banned not in line
+
+
+# ---- F6: near-miss marker shapes earn a notice without waiving anything ----
+
+BOLD_MARKER_NON_GOAL = """\
+# Some Spec
+
+## Maturity
+
+- lookout: production
+
+## Non-Goals
+
+- **Waives:** migration and backfill because bold emphasis.
+"""
+
+STAR_BULLET_NON_GOAL = """\
+# Some Spec
+
+## Maturity
+
+- lookout: production
+
+## Non-Goals
+
+* Waives: migration and backfill because a star bullet.
+"""
+
+LOWERCASE_MARKER_NON_GOAL = """\
+# Some Spec
+
+## Maturity
+
+- lookout: production
+
+## Non-Goals
+
+- waives: migration and backfill because lowercase.
+"""
+
+
+@pytest.mark.parametrize(
+    "fixture",
+    [BOLD_MARKER_NON_GOAL, STAR_BULLET_NON_GOAL, LOWERCASE_MARKER_NON_GOAL],
+)
+def test_near_miss_marker_shapes_waive_nothing_but_emit_a_notice(fixture):
+    result = _run(fixture.encode("utf-8"))
+    assert result.returncode == 0, _stderr(result)
+    out = _stdout(result)
+    assert "stand-down:" not in out
+    assert out.count("waiver-not-recognised:") == 1
+    assert _rated_lines(out) == [f"- {concern}: Critical" for concern in CONCERNS]
+
+
+# ---- F8: the excerpt cap is pinned exactly, with boundary cases ----
+
+
+def test_sanitize_excerpt_leaves_a_200_character_source_untruncated():
+    text = "x" * 200
+    excerpt = maturity_bars._sanitize_excerpt(text)
+    assert excerpt == text
+    assert len(excerpt) == 200
+
+
+def test_sanitize_excerpt_truncates_a_201_character_source_to_200():
+    text = "x" * 201
+    excerpt = maturity_bars._sanitize_excerpt(text)
+    assert len(excerpt) == 200
+    assert excerpt == "x" * 200
+
+
+LONG_UNRECOGNISED_NON_GOAL = (
+    "# Some Spec\n\n## Maturity\n\n- lookout: production\n\n## Non-Goals\n\n"
+    "- Waives: something unrelated entirely, and `` also very very very very "
+    "very very very very very very very very very very very very very very "
+    "very very very long past two hundred characters for sure absolutely "
+    "certainly definitely yes indeed without question truly.\n"
+)
+
+
+def test_waiver_not_recognised_excerpt_in_the_rendered_block_is_also_sanitized():
+    """The `waiver-not-recognised:` excerpt is the same unconstrained channel
+    as the stand-down excerpt and gets the same cap and backtick-stripping —
+    previously only exercised with short benign fixtures."""
+    out = _stdout(_run(LONG_UNRECOGNISED_NON_GOAL.encode("utf-8")))
+    notice_lines = [line for line in out.splitlines() if line.startswith("waiver-not-recognised:")]
+    assert len(notice_lines) == 1
+    line = notice_lines[0]
+    prefix = "waiver-not-recognised: `"
+    assert line.startswith(prefix)
+    assert line.endswith("`")
+    excerpt = line[len(prefix) : -1]
+    assert "`" not in excerpt
+    assert len(excerpt) == 200

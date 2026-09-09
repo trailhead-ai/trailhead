@@ -1,7 +1,8 @@
 # Expected verdict — waived concern stands down
 
 Written **before** any arm was run, so it cannot be retrofitted to an observed result. The
-commit that adds this file also adds the arms and fixtures, and lands before the first run.
+commit that adds this file also adds the arms and fixtures, but was committed after the runs,
+in a single commit — the ordering rests on the authoring record, not on the commit graph.
 
 ## What is under test
 
