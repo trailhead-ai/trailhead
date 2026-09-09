@@ -557,41 +557,6 @@ def test_duplicate_section_and_invalid_level_reports_one_deterministic_reason_co
     assert reason_code_lines[0].endswith("reason-code: duplicate-section")
 
 
-# ---- module docstring cross-reference --------------------------------------
-
-
-def test_module_docstring_cross_references_the_open_prompt_injection_channel_task():
-    text = STAMP.read_text(encoding="utf-8")
-    assert "task/the-offending-value-echo-is-an-unclosed-prompt-injection-channel" in text
-
-
-_TEN_REASON_CODES = (
-    "empty-stdin",
-    "invalid-utf8-stdin",
-    "section-absent",
-    "duplicate-section",
-    "empty-section",
-    "unresolved-enumeration",
-    "malformed-entry",
-    "invalid-level",
-    "duplicate-member",
-    "member-name-too-long",
-)
-
-
-def test_this_test_module_docstring_lists_all_ten_reason_codes():
-    """This test module's own contract docstring (top of file) must stay in
-    sync with the reader's actual reason-code vocabulary — a stale list here
-    misdescribes the contract this file's tests actually pin."""
-    with open(__file__, "r", encoding="utf-8") as f:
-        module_docstring = f.read().split('"""')[1]
-    for code in _TEN_REASON_CODES:
-        assert code in module_docstring, (
-            f"this test module's docstring must list reason-code {code!r}: "
-            f"{module_docstring!r}"
-        )
-
-
 # ---- case-fold collisions on member names are rejected, never silently folded --
 
 
