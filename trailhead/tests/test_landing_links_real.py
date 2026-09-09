@@ -159,12 +159,9 @@ def check_claim(claim: dict, anchor_set: dict[str, dict[str, set[str]]]) -> None
 class TestClaimsManifestSchema:
     """Pin the claim TOML schema before building the resolver."""
 
-    def test_claims_file_exists(self):
-        """landing_claims.toml must exist at trailhead/landing_claims.toml."""
-        assert _CLAIMS_FILE.exists(), (
-            f"trailhead/landing_claims.toml not found at {_CLAIMS_FILE}; "
-            "create it with at least one [[claim]] entry"
-        )
+    # A bare existence check on _CLAIMS_FILE is deliberately absent: every test
+    # below opens the file, so a missing one fails them all with the path in the
+    # traceback rather than passing an existence assertion and nothing else.
 
     def test_claims_file_parses_as_toml(self):
         """landing_claims.toml must be valid TOML."""

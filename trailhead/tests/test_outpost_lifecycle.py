@@ -659,9 +659,30 @@ def test_outpost_verbs_parse():
         assert args.outpost_command == verb
 
 
-def test_named_error_registered_for_clean_cli_output():
-    # The top-level guard converts these into a clean 'trailhead: <msg>' line.
-    assert OutpostLifecycleError in cli._TRAILHEAD_ERRORS
+def test_a_lifecycle_error_reaches_the_operator_as_one_clean_line(monkeypatch, capsys):
+    """Raise the real error through the real CLI and read what an operator sees.
+
+    Membership in `cli._TRAILHEAD_ERRORS` is the mechanism; the clean one-line
+    refusal is the behaviour. Asserting the membership passes just as well when
+    the guard around it has been removed, so this drives `cli.main` instead and
+    reads stderr — the same route `test_orchestration_hardening.py` uses for the
+    install-side errors.
+    """
+
+    def boom(*args, **kwargs):
+        raise OutpostLifecycleError("the daemon refused to start")
+
+    # `cli` imports `start` by name at module import, so its own binding is the
+    # one the dispatch table holds — patching `outpost_lifecycle.start` would
+    # leave the real daemon spawn in place.
+    monkeypatch.setattr(cli, "start", boom)
+    monkeypatch.setattr(sys, "argv", ["trailhead", "outpost", "start"])
+    code = cli.main()
+    err = capsys.readouterr().err
+
+    assert code == 1
+    assert err.strip() == "trailhead: the daemon refused to start"
+    assert "Traceback" not in err
 
 
 # ---------------------------------------------------------------------------

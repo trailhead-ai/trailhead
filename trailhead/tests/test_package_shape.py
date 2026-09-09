@@ -18,7 +18,7 @@ Invariants:
 - bare editable install does NOT pull in lore/craft/camp dists.
 """
 
-import importlib.util
+import importlib.metadata
 import os
 import subprocess
 import sys
@@ -119,10 +119,28 @@ def test_bin_camp_version_no_pip():
     assert "0.1.0" in result.stdout, f"expected '0.1.0' in output, got: {result.stdout!r}"
 
 
-def test_craft_not_importable():
-    """tools/craft is a data dir — NOT an importable top-level package (Option B invariant)."""
-    spec = importlib.util.find_spec("craft")
-    assert spec is None, (
-        f"'craft' should not be importable as a top-level package; got spec={spec}. "
-        "tools/ must not be auto-discovered by setuptools."
+def test_the_distribution_ships_only_the_trailhead_package():
+    """`tools/` is data, not distribution content (the Option B invariant).
+
+    Read off the built distribution's own metadata rather than probing for the
+    absence of a `craft` import: `top_level.txt` and RECORD are what setuptools
+    actually produced from `[tool.setuptools] packages`, so this states what the
+    build ships instead of naming one thing it happens not to. A `tools/` tree
+    swept in by auto-discovery shows up here as an extra top-level entry, whatever
+    it is called.
+    """
+    dist = importlib.metadata.distribution("trailhead")
+
+    top_level = (dist.read_text("top_level.txt") or "").split()
+    assert top_level == ["trailhead"], (
+        f"the distribution declares top-level packages {top_level}; only 'trailhead' "
+        "should ship. Check `[tool.setuptools] packages` in pyproject.toml — tools/ "
+        "must not be auto-discovered."
+    )
+
+    shipped_roots = {str(f).split("/")[0] for f in (dist.files or [])}
+    tool_dirs = sorted(r for r in shipped_roots if r in {"tools", "craft", "lore", "camp"})
+    assert not tool_dirs, (
+        f"the distribution ships {tool_dirs}, which are plugin data dirs reached via "
+        "CLAUDE_PLUGIN_ROOT, not importable packages"
     )

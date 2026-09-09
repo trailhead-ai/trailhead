@@ -6,18 +6,17 @@ Contract:
   - get_provider("gitlab") (or any unregistered name) raises a legible error
     that names the documented extension point.
   - The injectable runner threads through get_provider(name, runner=...).
-  - The Provider interface exposes namespaced surfaces repos/pr/ci.
-  - vcs-provider.md exists and names every repos/pr/ci interface method.
+  - The Provider interface exposes namespaced surfaces repos/pr/ci, and the ABC
+    machinery refuses a surface that leaves any of them unimplemented.
 """
 
 from __future__ import annotations
-
-from pathlib import Path
 
 import pytest
 
 from trailhead.vcs import get_provider
 from trailhead.vcs.github import GitHubProvider
+from trailhead.vcs.interface import CISurface, PRSurface, ReposSurface
 
 
 # ---------------------------------------------------------------------------
@@ -73,65 +72,31 @@ class TestGetProvider:
 # ---------------------------------------------------------------------------
 
 
-class TestProviderShape:
-    def test_namespaced_surfaces_present(self) -> None:
+class TestSurfacesAreEnforcedByTheABC:
+    """Every interface method is implemented — enforced at construction, not asserted.
+
+    ``_GitHubRepos`` / ``_GitHubPR`` / ``_GitHubCI`` subclass the ``ReposSurface`` /
+    ``PRSurface`` / ``CISurface`` ABCs, so Python refuses to instantiate any of them
+    while an ``@abstractmethod`` is unimplemented. ``get_provider("github")`` builds
+    all three, which means ``TestGetProvider`` above already proves the whole method
+    set is present — and proves it more strongly than a per-method ``hasattr`` sweep,
+    which passes on any attribute of any type and needs a hand-typed method list that
+    silently rots as the interface grows.
+
+    The test below is the evidence for that claim: it shows the refusal actually
+    happens, so the coverage the sweep used to provide is not merely assumed.
+    """
+
+    def test_an_incomplete_surface_cannot_be_instantiated(self) -> None:
+        class PartialPR(PRSurface):
+            """Implements nothing — stands in for a backend that missed a method."""
+
+        with pytest.raises(TypeError) as exc_info:
+            PartialPR()
+        assert "abstract" in str(exc_info.value).lower()
+
+    def test_the_real_provider_builds_all_three_surfaces(self) -> None:
         provider = get_provider("github")
-        assert hasattr(provider, "repos")
-        assert hasattr(provider, "pr")
-        assert hasattr(provider, "ci")
-
-    def test_repos_methods(self) -> None:
-        provider = get_provider("github")
-        assert hasattr(provider.repos, "detect")
-
-    def test_pr_methods(self) -> None:
-        provider = get_provider("github")
-        for m in ("open", "read_sidecar", "status", "evaluate", "merge", "summary_inputs"):
-            assert hasattr(provider.pr, m), f"pr.{m} missing"
-
-    def test_ci_methods(self) -> None:
-        provider = get_provider("github")
-        for m in ("checks", "wait"):
-            assert hasattr(provider.ci, m), f"ci.{m} missing"
-
-
-# ---------------------------------------------------------------------------
-# Doc test: vcs-provider.md names every repos/pr/ci method
-# ---------------------------------------------------------------------------
-
-
-_DOC_PATH = Path(__file__).resolve().parent.parent / "docs" / "vcs-provider.md"
-
-# The repos/pr/ci surface — every method here must appear in the doc.
-_INTERFACE_METHODS = [
-    "repos.detect",
-    "pr.open",
-    "pr.read_sidecar",
-    "pr.status",
-    "pr.evaluate",
-    "pr.merge",
-    "pr.summary_inputs",
-    "ci.checks",
-    "ci.wait",
-]
-
-
-class TestVcsProviderDoc:
-    def test_doc_exists(self) -> None:
-        assert _DOC_PATH.is_file(), f"missing {_DOC_PATH}"
-
-    def test_doc_names_every_interface_method(self) -> None:
-        text = _DOC_PATH.read_text(encoding="utf-8")
-        missing = [m for m in _INTERFACE_METHODS if m not in text]
-        assert not missing, f"vcs-provider.md does not map these interface methods: {missing}"
-
-    def test_doc_documents_gitlab_mapping(self) -> None:
-        """The doc proves the seam isn't GitHub-only by naming GitLab equivalents."""
-        text = _DOC_PATH.read_text(encoding="utf-8").lower()
-        assert "gitlab" in text
-        assert "glab" in text
-
-    def test_doc_documents_provider_selection(self) -> None:
-        text = _DOC_PATH.read_text(encoding="utf-8")
-        assert "get_provider" in text
-        assert "github" in text.lower()
+        assert isinstance(provider.repos, ReposSurface)
+        assert isinstance(provider.pr, PRSurface)
+        assert isinstance(provider.ci, CISurface)

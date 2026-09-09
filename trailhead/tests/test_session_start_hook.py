@@ -26,6 +26,12 @@ import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from trailhead.tests.fixtures.update_check_schema import (
+    BEHIND_EXAMPLE,
+    OK_EXAMPLE,
+    UNANSWERABLE_NO_STAMP_EXAMPLE,
+)
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _HOOK_PATH = (
     _REPO_ROOT
@@ -98,51 +104,17 @@ def _spy_runner(result: dict):
     return runner, calls
 
 
+# The producer contract these hook tests consume, imported rather than restated:
+# `test_update.py` pins each example against real `check_for_update` output, so
+# feeding the same dicts here means the hook is exercised on shapes the producer
+# actually emits. `_BEHIND` overrides only the delta lines, which the
+# fence-containment tests below need to be non-empty.
+_OK = OK_EXAMPLE
+_UNANSWERABLE = UNANSWERABLE_NO_STAMP_EXAMPLE
 _BEHIND = {
-    "schema_version": 3,
-    "outcome": "behind",
-    "commits_behind": 3,
-    "install_commits_behind": 0,
-    "installed_sha": _SHA,
-    "reason": None,
-    "changelog_delta": {"available": True, "lines": ["Added: a new thing"], "truncated": False},
+    **BEHIND_EXAMPLE,
+    "changelog_delta": {**BEHIND_EXAMPLE["changelog_delta"], "lines": ["Added: a new thing"]},
 }
-
-_OK = {
-    "schema_version": 3,
-    "outcome": "ok",
-    "commits_behind": 0,
-    "install_commits_behind": 0,
-    "installed_sha": _SHA,
-    "reason": None,
-    "changelog_delta": {"available": True, "lines": [], "truncated": False},
-}
-
-_UNANSWERABLE = {
-    "schema_version": 3,
-    "outcome": "unanswerable",
-    "commits_behind": None,
-    "install_commits_behind": None,
-    "installed_sha": None,
-    "reason": "no install provenance stamp found",
-    "changelog_delta": {"available": False, "lines": [], "truncated": False},
-}
-
-
-def test_fixtures_match_pinned_schema_shape():
-    """Sanity: the canned dicts above mirror the pinned producer contract."""
-    from trailhead.tests.fixtures.update_check_schema import (
-        BEHIND_EXAMPLE,
-        OK_EXAMPLE,
-        UNANSWERABLE_NO_STAMP_EXAMPLE,
-    )
-
-    assert set(_BEHIND) == set(BEHIND_EXAMPLE)
-    assert _BEHIND["outcome"] == BEHIND_EXAMPLE["outcome"]
-    assert set(_OK) == set(OK_EXAMPLE)
-    assert _OK["outcome"] == OK_EXAMPLE["outcome"]
-    assert set(_UNANSWERABLE) == set(UNANSWERABLE_NO_STAMP_EXAMPLE)
-    assert _UNANSWERABLE["outcome"] == UNANSWERABLE_NO_STAMP_EXAMPLE["outcome"]
 
 
 # ---------------------------------------------------------------------------

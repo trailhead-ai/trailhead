@@ -27,22 +27,31 @@ _CONFIG = _REPO_ROOT / ".pre-commit-config.yaml"
 _SEAM = "".join(["mcp", "__", "brain", "__"])
 
 
-def _configured_hook_command() -> list[str]:
-    """The local hook's command, lifted out of `.pre-commit-config.yaml`.
+_HOOK_ID = "leak-gate"
 
-    A `repo: local` hook names an `entry:` that resolves to a file in this repo;
-    the hooks pulled from upstream repos name a bare executable that does not.
-    That distinction is what selects the leak gate without parsing YAML.
+
+def _configured_hook_command() -> list[str]:
+    """The leak-gate hook's command, lifted out of `.pre-commit-config.yaml`.
+
+    Selected by its `id:` rather than by being the only `repo: local` entry that
+    resolves in-repo — the repo now configures more than one local gate, and an
+    entry-shape heuristic would silently pick up whichever came first.
     """
-    commands = []
+    entries: dict[str, str] = {}
+    current: str | None = None
     for line in _CONFIG.read_text(encoding="utf-8").splitlines():
-        match = re.match(r"\s*entry:\s*(\S.*?)\s*$", line)
-        if match and (_REPO_ROOT / match.group(1)).is_file():
-            commands.append(str(_REPO_ROOT / match.group(1)))
-    assert len(commands) == 1, (
-        f"expected exactly one local hook whose entry resolves in-repo, got {commands}"
+        if id_match := re.match(r"\s*-?\s*id:\s*(\S+)\s*$", line):
+            current = id_match.group(1)
+        elif entry_match := re.match(r"\s*entry:\s*(\S.*?)\s*$", line):
+            if current is not None:
+                entries[current] = entry_match.group(1)
+
+    assert _HOOK_ID in entries, (
+        f"no hook with id {_HOOK_ID!r} in {_CONFIG}; found {sorted(entries)}"
     )
-    return commands
+    path = _REPO_ROOT / entries[_HOOK_ID]
+    assert path.is_file(), f"the {_HOOK_ID!r} hook names entry {entries[_HOOK_ID]!r}, which is not a file"
+    return [str(path)]
 
 
 def _run(*args: str, local_denylist: str = "/nonexistent/machine-local.denylist"):
