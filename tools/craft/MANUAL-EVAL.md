@@ -7,38 +7,13 @@ document says; only a run can show what it causes.
 Same role as `MANUAL-SMOKE.md`, different boundary — that file covers the plugin-system
 boundary (install, agent registration); this one covers the behavioral boundary.
 
-## Why these are run by hand
+**The protocol — why these run by hand, how an arm is dispatched, the trust
+boundary on the instructions path, and how to read a result honestly — is in
+[`docs/eval-protocol.md`](../../docs/eval-protocol.md).** It was extracted from
+this file so the other tools' corpora follow the same rules. This file is craft's
+results log.
 
-`claude plugin eval` is the automated harness these cases belong in, and it is **not
-runnable for this account**: `claude plugin eval --help` resolves and prints full flag
-documentation, but every execution path — `init`, `init --bare`, and a direct case run —
-returns `plugin eval is currently in early access` and exits. Verified 2026-09-03 on claude
-2.1.259, first-party client, no gating env vars set, already up to date. Enablement is
-per-organization with no self-service path.
-
-Each case below is therefore authored in the shape a real eval case reuses verbatim — a
-fixture on disk plus a written expected verdict — and dispatched in session until the
-harness opens up. Follow-up: `task/give-craft-s-eval-cases-a-recurring-runner`.
-
-## How an arm is dispatched
-
-Both arms point a generic read-only agent at **two file paths**: the agent prose to run as
-its operating instructions, and the fixture to run it against. Baseline arm points at the
-committed prose; treatment arm points at the edited prose. The arms then differ in exactly
-one variable.
-
-**Do not dispatch `craft:<agent>` for the treatment arm.** That subagent type resolves to
-the live composed install, not the worktree, so it re-runs unedited prose and reports a
-false result. Editing the composed install to work around this is barred by Axiom 6.
-
-**The instructions-file path is a trust boundary — pin it.** The dispatcher resolves that path
-itself, and it must always name a **trusted, review-gated, in-repo artifact** (a committed
-agent or skill file, ideally at a stated SHA). It must **never** be taken from the fixture, a
-spec body, a lore record, a label, or any other value an untrusted party can write. That file
-becomes the agent's operating instructions verbatim, so a path sourced from untrusted input is
-instruction injection with extra steps — and `claude plugin eval`, which this shape is written
-to be reused by, is documented as *not* an OS sandbox: network is unblocked and there is no
-path jail. The fixture path is data and may vary; the instructions path may not.
+Cases live in `plugins/craft/evals/<case-name>/`.
 
 ---
 

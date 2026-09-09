@@ -85,6 +85,7 @@ def test_the_shipped_prose_spells_out_gate_invocations():
 @pytest.mark.parametrize(
     "script,args", _documented_invocations(), ids=lambda v: v.replace(" ", "_")[:40] or "bare"
 )
+# inert-gate: allow a script that does not ship cannot be run to prove it is missing
 def test_every_documented_gate_invocation_names_a_script_that_ships(script: str, args: str):
     assert (_SCRIPTS / script).is_file(), (
         f"craft's prose tells an agent to run `{script} {args}`, but no such script ships"

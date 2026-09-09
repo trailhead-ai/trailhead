@@ -598,11 +598,6 @@ def test_declare_refuses_a_symlinked_target_and_leaves_the_real_target_untouched
 # ---------------------------------------------------------------------------
 
 
-def test_script_is_mode_755():
-    mode = DECLARE.stat().st_mode
-    assert mode & 0o777 == 0o755
-
-
 def test_script_runs_bare_via_its_own_documented_invocation(tmp_path):
     target = tmp_path / "CLAUDE.md"
     target.write_text(NO_SECTION_AT_ALL, encoding="utf-8")

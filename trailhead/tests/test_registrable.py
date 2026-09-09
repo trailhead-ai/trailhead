@@ -1,21 +1,30 @@
-"""Every shipped agent/skill must be registrable by the harness — for every tool.
+"""Every dispatchable name trailhead wires must be the name the harness registers.
 
-A subagent ``.md`` only registers as a dispatchable ``subagent_type`` if it opens
-with a YAML frontmatter block carrying a non-empty ``name:`` and ``description:``;
-a ``SKILL.md`` only registers as ``/<tool>:<name>`` under the same two fields. (A
-``tools:`` line is optional — omitting it inherits all tools — so it is not part of
-the registrability floor.) In both cases ``name:`` must equal the on-disk stem
-(agent filename / skill dir) or the harness registers it under the wrong id.
+Two registries decide what an operator can actually invoke, and they are keyed
+differently:
 
-This is the *content* contract on the frontmatter, complementary to
-``test_capability_coverage`` (which proves the wiring *closure*: nothing on disk is
-orphaned, nothing declared dangles). A malformed frontmatter block passes wiring
-but silently fails to register — this test is the only guard against that.
+* **trailhead's**, built by ``load_manifest`` → ``compose_plan`` → ``apply_plan``.
+  ``_discover_subagents`` keys a subagent by its **filename stem** and
+  ``_discover_skills`` keys a skill by its **directory name**; those keys are what
+  ``trailhead install --subagent <name>`` selects on and what lands in the composed
+  tree.
+* **the harness's**, which registers a composed agent as ``subagent_type: <name>``
+  and a composed skill as ``/<tool>:<name>`` reading the ``name:`` field out of the
+  file's own YAML frontmatter.
 
-Consolidated here, parametrized over every tool, so it replaces the per-tool
-copy-paste that each tool carried. Tools that layer *extra* assertions
-(craft's execute-dispatch resolution, lore's injection-defense scans, …) keep
-their own files; this is the shared floor every tool stands on.
+When the two disagree, ``trailhead install`` wires a capability the operator then
+cannot invoke under the name they selected it by — the install reports success and
+the dispatch fails. This suite runs the trailhead half for real (compose the full
+inventory of every tool into a tmp dest, then read back what compose actually
+wrote) and asserts the composed file's declared identity equals the key compose
+filed it under.
+
+**Scope.** The harness half cannot be executed here, so this pins agreement, not
+registration. ``claude plugin validate`` is not an oracle for it either: an agent
+file with no frontmatter at all, and one whose ``name:`` differs from its stem,
+both pass that command clean. What it does check — a skill missing a
+``description:`` earns a warning — is a lint on prose quality rather than a
+dispatch contract, and is left to that command rather than restated here.
 """
 
 from __future__ import annotations
@@ -24,83 +33,105 @@ from pathlib import Path
 
 import pytest
 
+from trailhead.capabilities import load_manifest
+from trailhead.compose import apply_plan, compose_plan
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_TOOLS = ["lore", "camp", "craft", "portage", "outpost"]
+_TOOLS = ["lore", "camp", "craft", "portage", "outpost", "trailhead"]
 
 
-def _plugin_root(tool: str) -> Path:
-    return _REPO_ROOT / "tools" / tool / "plugins" / tool
+def _declared_name(md: Path) -> str | None:
+    """The ``name:`` a YAML frontmatter block declares, or None if there is no
+    closed frontmatter block or no ``name:`` in it.
 
-
-def _frontmatter(md: Path) -> str:
-    text = md.read_text()
-    assert text.startswith("---\n"), (
-        f"{md} must open with a `---` frontmatter block or the harness will not "
-        "register it"
-    )
+    Deliberately returns None rather than raising on a malformed block: a file
+    the harness cannot read a name out of is unregistrable for the same reason
+    a mismatched name is, and the caller reports both as one failure.
+    """
+    text = md.read_text(encoding="utf-8")
+    if not text.startswith("---\n"):
+        return None
     end = text.find("\n---", 3)
-    assert end > 0, f"{md} frontmatter block is not closed"
-    return text[3:end]
-
-
-def _field(frontmatter: str, field: str) -> str | None:
-    for ln in frontmatter.splitlines():
-        if ln.strip().startswith(f"{field}:"):
-            return ln.split(":", 1)[1].strip()
+    if end < 0:
+        return None
+    for line in text[3:end].splitlines():
+        if line.strip().startswith("name:"):
+            return line.split(":", 1)[1].strip() or None
     return None
 
 
-def _agent_files(tool: str) -> list[Path]:
-    agents = _plugin_root(tool) / "agents"
-    return sorted(agents.glob("*.md")) if agents.is_dir() else []
+@pytest.fixture(scope="module")
+def composed(tmp_path_factory) -> dict[str, Path]:
+    """Compose every tool's FULL inventory once, and hand back each dest.
+
+    Composing rather than reading ``tools/<tool>/plugins/`` directly is the point:
+    the files under test are the ones the installer produced, and the name each is
+    keyed by is the one ``compose_plan`` filed it under.
+    """
+    root = tmp_path_factory.mktemp("composed")
+    dests: dict[str, Path] = {}
+    for tool in _TOOLS:
+        manifest = load_manifest(_REPO_ROOT / "tools" / tool / "capabilities.toml")
+        dest = root / tool
+        apply_plan(
+            compose_plan(
+                manifest,
+                {name: None for name in manifest.subagents},
+                {name: None for name in manifest.skills},
+                dest,
+            )
+        )
+        dests[tool] = dest
+    return dests
 
 
-def _skill_files(tool: str) -> list[Path]:
-    skills = _plugin_root(tool) / "skills"
-    if not skills.is_dir():
-        return []
-    return sorted(
-        d / "SKILL.md"
-        for d in skills.iterdir()
-        if d.is_dir() and d.name != "_shared" and (d / "SKILL.md").is_file()
-    )
+def _cases() -> list[tuple[str, str, str]]:
+    """(tool, kind, name) for every selectable capability of every tool.
+
+    Read off the real manifests at collection time so a capability added on disk
+    is covered without being hand-listed here.
+    """
+    out: list[tuple[str, str, str]] = []
+    for tool in _TOOLS:
+        manifest = load_manifest(_REPO_ROOT / "tools" / tool / "capabilities.toml")
+        out += [(tool, "agent", name) for name in manifest.subagents]
+        out += [(tool, "skill", name) for name in manifest.skills]
+    return out
 
 
-# Flatten to (tool, path) pairs so each agent/skill is its own parametrized case
-# with a legible id, across every tool, discovered on disk (never hand-listed).
-_AGENT_CASES = [(t, p) for t in _TOOLS for p in _agent_files(t)]
-_SKILL_CASES = [(t, p) for t in _TOOLS for p in _skill_files(t)]
+_CASES = _cases()
+
+
+# inert-gate: allow guards the parametrization below, which load_manifest builds at import time
+def test_the_inventory_is_not_empty():
+    """Anti-vacuity: a manifest-loading change that silently discovered nothing
+    would leave the parametrization below empty and green.
+    """
+    agents = [c for c in _CASES if c[1] == "agent"]
+    skills = [c for c in _CASES if c[1] == "skill"]
+    assert len(agents) >= 20, f"expected the full agent inventory, found {len(agents)}"
+    assert len(skills) >= 20, f"expected the full skill inventory, found {len(skills)}"
 
 
 @pytest.mark.parametrize(
-    "tool,agent_md", _AGENT_CASES, ids=[f"{t}:{p.stem}" for t, p in _AGENT_CASES]
+    "tool,kind,name", _CASES, ids=[f"{t}:{k}:{n}" for t, k, n in _CASES]
 )
-def test_agent_has_registrable_frontmatter(tool: str, agent_md: Path):
-    fm = _frontmatter(agent_md)
-    assert _field(fm, "name"), f"{tool}:{agent_md.name} frontmatter needs a non-empty `name:`"
-    assert _field(fm, "description"), (
-        f"{tool}:{agent_md.name} frontmatter needs a non-empty `description:`"
+def test_composed_capability_declares_the_name_it_was_wired_under(
+    tool: str, kind: str, name: str, composed: dict[str, Path]
+):
+    md = (
+        composed[tool] / "agents" / f"{name}.md"
+        if kind == "agent"
+        else composed[tool] / "skills" / name / "SKILL.md"
     )
-    name = _field(fm, "name")
-    assert name == agent_md.stem, (
-        f"{tool}:{agent_md.name} frontmatter name={name!r} must equal the filename stem "
-        f"{agent_md.stem!r} (registers as {tool}:{agent_md.stem})"
+    assert md.is_file(), (
+        f"{tool}: compose wired {kind} {name!r} but produced no {md.name} for it at "
+        f"{md.relative_to(composed[tool])}"
     )
-
-
-@pytest.mark.parametrize(
-    "tool,skill_md", _SKILL_CASES, ids=[f"{t}:{p.parent.name}" for t, p in _SKILL_CASES]
-)
-def test_skill_has_registrable_frontmatter(tool: str, skill_md: Path):
-    fm = _frontmatter(skill_md)
-    assert _field(fm, "name"), (
-        f"{tool}:{skill_md.parent.name}/SKILL.md frontmatter needs a non-empty `name:`"
-    )
-    assert _field(fm, "description"), (
-        f"{tool}:{skill_md.parent.name}/SKILL.md frontmatter needs a non-empty `description:`"
-    )
-    name = _field(fm, "name")
-    assert name == skill_md.parent.name, (
-        f"{tool}:{skill_md.parent.name}/SKILL.md frontmatter name={name!r} must equal the "
-        f"skill dir name (registers as /{tool}:{skill_md.parent.name})"
+    declared = _declared_name(md)
+    assert declared == name, (
+        f"{tool}: `trailhead install` wires this {kind} under {name!r}, but the "
+        f"composed file declares name={declared!r} — the harness registers it under "
+        f"the declared name, so selecting it by {name!r} installs a capability that "
+        f"cannot be dispatched by that name"
     )

@@ -157,6 +157,7 @@ def test_every_reference_document_is_named_by_skill_md(path):
 
 
 @pytest.mark.parametrize("name", sorted(gauntlet_local_targets(_skill_text())))
+# inert-gate: allow pointer integrity; a target that is not there cannot be loaded
 def test_every_gauntlet_local_pointer_resolves(name):
     """A count of pointers is not evidence the pointee is there — assert the
     target's existence directly rather than relying on another gate.

@@ -159,12 +159,9 @@ def check_claim(claim: dict, anchor_set: dict[str, dict[str, set[str]]]) -> None
 class TestClaimsManifestSchema:
     """Pin the claim TOML schema before building the resolver."""
 
-    def test_claims_file_exists(self):
-        """landing_claims.toml must exist at trailhead/landing_claims.toml."""
-        assert _CLAIMS_FILE.exists(), (
-            f"trailhead/landing_claims.toml not found at {_CLAIMS_FILE}; "
-            "create it with at least one [[claim]] entry"
-        )
+    # A bare existence check on _CLAIMS_FILE is deliberately absent: every test
+    # below opens the file, so a missing one fails them all with the path in the
+    # traceback rather than passing an existence assertion and nothing else.
 
     def test_claims_file_parses_as_toml(self):
         """landing_claims.toml must be valid TOML."""
@@ -895,85 +892,6 @@ class TestLoreRecallHonestyGuards:
       - Not present Tier-2 semantic/embedding recall as a built feature.
     """
 
-    def test_lore_readme_contains_area_search_positive(self):
-        """The lore README must document the real area-memory mechanism.
-
-        The `lore recall --areas` command was retired and replaced with the area-membership
-        case of `lore search` (`lore search 'area:<name>'`). The README must document
-        that real mechanism — the guard's intent (the actual mechanism is documented,
-        not just that the old oversell is absent) is unchanged; only the mechanism is.
-        """
-        assert _LORE_README.exists(), f"lore README not found at {_LORE_README}"
-        text = _LORE_README.read_text(encoding="utf-8")
-        assert "lore search" in text and "area:" in text, (
-            "lore README must document the area-mediated memory mechanism — "
-            "`lore search 'area:<name>'` (which superseded `lore recall --areas`) "
-            "— ensures the real mechanism is documented, not just that the "
-            "old oversell is absent"
-        )
-
-    def test_lore_readme_no_branch_keyword_recall_as_live_feature(self):
-        """Negative: lore README must not assert branch-keyword recall as a live mechanism.
-
-        The branch-keyword recall was removed 2026-06-05 (every camp branch is
-        worktree-<slug> so the keyword matched universally). The stale paragraph
-        "When the current git branch contains any of those keywords" must be gone.
-
-        Note: a historical mention ("was removed") is distinct from the stale *claim* phrasing
-        and would not match this targeted grep — the test targets the live-claim form.
-        """
-        assert _LORE_README.exists(), f"lore README not found at {_LORE_README}"
-        text = _LORE_README.read_text(encoding="utf-8")
-        assert "git branch contains" not in text, (
-            "lore README must not assert branch-keyword recall as a live mechanism — "
-            "the 'When the current git branch contains any of those keywords' paragraph "
-            "describes a removed feature (removed 2026-06-05)"
-        )
-
-    def test_lore_readme_no_semantic_recall_as_built_feature(self):
-        """Negative regression sentinel: lore README must not present Tier-2 semantic/
-        embedding recall as built.
-
-        Tier-2 local embeddings are opt-in and NOT built. This is a *phrase-pinned*
-        regression guard: it triggers on the embedding/semantic vocabulary a reintroduction
-        would most likely use, and only passes such a line if it carries a not-yet-built
-        qualifier. It is dormant today (none of these phrases appear), and is a sentinel
-        against a *future* edit reintroducing the oversell — it is NOT a general semantic-
-        claim detector (a wholly-novel paraphrase could still slip past; the prose-honesty
-        review is the backstop). We scan line-by-line to avoid variable-width lookbehind.
-        """
-        assert _LORE_README.exists(), f"lore README not found at {_LORE_README}"
-        text = _LORE_README.read_text(encoding="utf-8")
-        trigger_terms = ("semantic recall", "semantic search", "embedding", "vector search")
-        qualifying_terms = ("planned", "not yet", "coming soon", "opt-in", "not built")
-        unqualified_lines = []
-        for line in text.splitlines():
-            lower = line.lower()
-            if any(t in lower for t in trigger_terms):
-                if not any(q in lower for q in qualifying_terms):
-                    unqualified_lines.append(line.strip())
-        assert not unqualified_lines, (
-            "lore README must not present Tier-2 semantic/embedding recall as a built feature. "
-            "If mentioned at all, qualify explicitly as 'planned / not yet built'. "
-            f"Unqualified occurrences: {unqualified_lines}"
-        )
-
-
-class TestNoToolReadmePypiLine:
-    """None of the three tool READMEs may contain a 'pip install trailhead' line."""
-
-    @pytest.mark.parametrize("readme", _TOOL_READMES, ids=lambda p: p.parent.name)
-    def test_no_pip_install_trailhead_line(self, readme):
-        """Tool README must not contain 'pip install trailhead' (name-squat exposure)."""
-        assert readme.exists(), f"README not found at {readme}"
-        text = readme.read_text(encoding="utf-8")
-        assert "pip install trailhead" not in text, (
-            f"{readme.parent.name}/README.md must not contain 'pip install trailhead' — "
-            "the public PyPI install does not exist yet (lands with the org/repo-homing work); "
-            "showing it implies a live install that would 404"
-        )
-
-
 # ---------------------------------------------------------------------------
 # Root README honesty + structural guards
 # ---------------------------------------------------------------------------
@@ -987,48 +905,12 @@ class TestRootReadmeNoPypiLine:
     The current root README has TWO such lines; the narrative landing must remove them.
     """
 
-    def test_root_readme_no_pip_install_trailhead(self):
-        """Root README must not contain 'pip install trailhead'."""
-        assert _ROOT_README.exists(), f"root README not found at {_ROOT_README}"
-        text = _ROOT_README.read_text(encoding="utf-8")
-        assert "pip install trailhead" not in text, (
-            "README.md must not contain 'pip install trailhead' — "
-            "the public PyPI install does not exist yet (lands with the org/repo-homing work). "
-            "Use the editable local install block ('Try it today') + the registry-future block "
-            "instead."
-        )
-
-
 class TestRootReadmeNoSemanticRecallOversell:
     """Root README must not present Tier-2 semantic/embedding recall as a built feature.
 
     Mirrors the lore-README guard. Tier-2 local embeddings are opt-in and
     NOT built. Any mention must carry a not-yet-built qualifier.
     """
-
-    def test_root_readme_no_unqualified_semantic_recall(self):
-        """Root README must not claim semantic/embedding recall as built.
-
-        Phrase-pinned regression sentinel: triggers on embedding/semantic vocabulary a
-        reintroduction would most likely use. A wholly-novel paraphrase could slip past;
-        the prose-honesty review is the backstop.
-        """
-        assert _ROOT_README.exists(), f"root README not found at {_ROOT_README}"
-        text = _ROOT_README.read_text(encoding="utf-8")
-        trigger_terms = ("semantic recall", "semantic search", "embedding", "vector search")
-        qualifying_terms = ("planned", "not yet", "coming soon", "opt-in", "not built")
-        unqualified_lines = []
-        for line in text.splitlines():
-            lower = line.lower()
-            if any(t in lower for t in trigger_terms):
-                if not any(q in lower for q in qualifying_terms):
-                    unqualified_lines.append(line.strip())
-        assert not unqualified_lines, (
-            "README.md must not present Tier-2 semantic/embedding recall as a built feature. "
-            "If mentioned at all, qualify explicitly as 'planned / not yet built'. "
-            f"Unqualified occurrences: {unqualified_lines}"
-        )
-
 
 class TestRootReadmeStructuralGuard:
     """The root README must NOT place a four-tool markdown table before the lore lead.

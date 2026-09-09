@@ -360,7 +360,7 @@ def _split_fixture(text: str) -> tuple[str, str]:
     return spec_text, text[block_start:block_end]
 
 
-def test_waived_concern_eval_fixtures_exist():
+def test_waived_concern_eval_fixtures_exist():  # inert-gate: allow guards the fixture loop in the next test
     assert len(WAIVED_CONCERN_FIXTURES) == 3, (
         f"expected the three waived-concern-stands-down fixtures, found "
         f"{[p.name for p in WAIVED_CONCERN_FIXTURES]!r}"
@@ -398,6 +398,7 @@ _WAIVER_RULE_START = "A concern above can be waived for this spec alone"
 _WAIVER_RULE_END = "### Filling the calibration token"
 
 
+# inert-gate: allow checks the doc against _CONCERNS imported from the renderer
 def test_council_waiver_rule_names_every_canonical_concern():
     council_text = (SKILLS_DIR / "_shared" / "council.md").read_text(encoding="utf-8")
     start = council_text.index(_WAIVER_RULE_START)

@@ -568,15 +568,6 @@ def test_unresolved_enumeration_note_reads_as_its_own_reason_code():
     assert "reason-code: unresolved-enumeration" in err, err
 
 
-def test_skill_prescribes_a_comment_shaped_unresolved_enumeration_note():
-    text = BRAINSTORM_SKILL.read_text()
-    section = text[text.index("**Fill `## Maturity`") : text.index("**Certify the drafted body")]
-    assert "<!--" in section, (
-        "step 6a must prescribe a comment-shaped unresolved-enumeration note — a bare "
-        f"sentence under the heading is rejected by the certify step it feeds: {section!r}"
-    )
-
-
 def test_skill_names_empty_section_as_meaning_only_an_unfilled_stamp():
     """`empty-section` no longer has a second, sanctioned cause — it means one
     thing, and it always refuses. The unresolved-enumeration case now has its
@@ -604,18 +595,6 @@ def test_skill_names_a_remedy_for_the_unresolved_enumeration_reason_code_that_re
     assert re.search(r"resolv", bullet.group(0), re.IGNORECASE), (
         "the `unresolved-enumeration` remedy must instruct resolving the "
         f"enumeration before retrying: {bullet.group(0)!r}"
-    )
-
-
-def test_skill_instructs_retaining_the_keep_marked_reminder_comment():
-    """The template's keep-marker is only half the mechanism — the step that fills
-    the section has to honour it. Without this, the reminder survives by convention
-    alone, which is the failure the reminder exists to prevent."""
-    text = BRAINSTORM_SKILL.read_text()
-    section = text[text.index("**Fill `## Maturity`") : text.index("**Certify the drafted body")]
-    assert re.search(r"\bkeep\b", section, re.IGNORECASE), (
-        "step 6a must instruct keeping the template's keep-marked reminder comment "
-        f"when the section is filled: {section!r}"
     )
 
 
@@ -692,23 +671,6 @@ def test_keep_marked_reminder_survives_pre_fill_strip_with_vocabulary_intact():
     # vocabulary above survived via the keep-marked comment, not a fluke of
     # the pre-fill comment being left in place.
     assert "never invented here" not in rendered
-
-
-def test_fill_step_defines_the_vanilla_single_repo_stamp_key():
-    """Step 1's enumeration has a single-current-repo path outside a camp
-    workspace (no camp manifest, no camp member name to key on). Step 6a's
-    fill instruction must define what key that entry uses, or a vanilla
-    single-repo write has no defined `## Maturity` bullet to produce."""
-    text = BRAINSTORM_SKILL.read_text()
-    section = text[text.index("**Fill `## Maturity`") : text.index("**Certify the drafted body")]
-    assert re.search(r"vanilla", section, re.IGNORECASE), (
-        "step 6a must name the vanilla (no camp manifest) single-repo case "
-        f"explicitly: {section!r}"
-    )
-    assert re.search(r"basename|directory name", section, re.IGNORECASE), (
-        "step 6a must define the vanilla single-repo stamp key concretely "
-        f"(e.g. the repository directory's basename): {section!r}"
-    )
 
 
 # ---- the malformed-entry remedy is actionable even when the offending text

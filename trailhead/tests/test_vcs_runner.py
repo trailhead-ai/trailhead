@@ -148,7 +148,7 @@ class TestShellSafety:
         rp.run(["git", "push", "origin", branch], runner=stub)
         assert calls[0][3] == branch
 
-    def test_no_shell_flag_is_false(self) -> None:
+    def test_no_shell_flag_is_false(self) -> None:  # inert-gate: allow pins a security constant documenting shell=False
         assert rp.SHELL_FALSE is True, "runner.SHELL_FALSE must be True (documents shell=False)"
 
 

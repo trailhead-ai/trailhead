@@ -13,7 +13,6 @@ from pathlib import Path
 
 import pytest
 
-from trailhead import harness
 from trailhead.harness import claude_config_file
 from trailhead.harness.claude_code import _claude_dir
 
@@ -69,6 +68,17 @@ class TestTheDirectoryFileSplit:
 
 
 class TestExport:
-    def test_it_is_a_pinned_public_export(self):
-        assert "claude_config_file" in harness.__all__
-        assert harness.claude_config_file is claude_config_file
+    def test_a_star_import_binds_the_resolver_callers_reach_for(self):
+        """`__all__` exists to govern `from trailhead.harness import *`, so run that
+        import and use what it bound, rather than asserting the name appears in a
+        list. A membership check passes just as well when the name in `__all__` has
+        no matching attribute — the star import is what breaks.
+        """
+        namespace: dict[str, object] = {}
+        exec("from trailhead.harness import *", namespace)  # noqa: S102
+
+        assert "claude_config_file" in namespace, (
+            "`from trailhead.harness import *` does not bind claude_config_file; "
+            "camp's launch-time pretrust reaches for it through this module"
+        )
+        assert namespace["claude_config_file"] is claude_config_file
