@@ -225,3 +225,71 @@ def test_refusal_never_echoes_a_distinctive_target_repo_marker():
     assert result.returncode != 0
     assert marker not in _stdout(result)
     assert marker not in _stderr(result)
+
+
+# ---- fail-safe: an understated prototype stamp is overridden by a higher --
+#      declared level in the target repository's own agent-instruction file
+
+
+def test_understated_prototype_stamp_overridden_by_higher_declared_production(tmp_path):
+    agent_file = tmp_path / "CLAUDE.md"
+    agent_file.write_text(
+        "## Project Maturity\n\nproduction\n", encoding="utf-8"
+    )
+    result = _run(
+        SINGLE_PROTOTYPE, ["--agent-instruction-file", str(agent_file)]
+    )
+    assert result.returncode == 0, _stderr(result)
+    out = _stdout(result)
+    assert "not-suppressed" in out
+    assert "(basis: agent-instruction-file-override)" in out
+
+
+def test_understated_prototype_stamp_overridden_by_higher_declared_early(tmp_path):
+    agent_file = tmp_path / "CLAUDE.md"
+    agent_file.write_text(
+        "## Project Maturity\n\nearly\n", encoding="utf-8"
+    )
+    result = _run(
+        SINGLE_PROTOTYPE, ["--agent-instruction-file", str(agent_file)]
+    )
+    assert result.returncode == 0, _stderr(result)
+    out = _stdout(result)
+    assert "not-suppressed" in out
+    assert "(basis: agent-instruction-file-override)" in out
+
+
+def test_prototype_stamp_agreeing_with_declared_prototype_still_suppresses(tmp_path):
+    agent_file = tmp_path / "CLAUDE.md"
+    agent_file.write_text(
+        "## Project Maturity\n\nprototype\n", encoding="utf-8"
+    )
+    result = _run(
+        SINGLE_PROTOTYPE, ["--agent-instruction-file", str(agent_file)]
+    )
+    assert result.returncode == 0, _stderr(result)
+    out = _stdout(result)
+    assert "not-suppressed" not in out
+    assert "(basis: stamp)" in out
+
+
+def test_overstating_stamp_direction_is_unaffected_by_a_lower_declaration(tmp_path):
+    agent_file = tmp_path / "CLAUDE.md"
+    agent_file.write_text(
+        "## Project Maturity\n\nprototype\n", encoding="utf-8"
+    )
+    result = _run(
+        SINGLE_PRODUCTION, ["--agent-instruction-file", str(agent_file)]
+    )
+    assert result.returncode == 0, _stderr(result)
+    out = _stdout(result)
+    assert "not-suppressed" in out
+    assert "(basis: stamp)" in out
+
+
+def test_understated_prototype_stamp_without_agent_instruction_file_still_suppresses():
+    result = _run(SINGLE_PROTOTYPE)
+    assert result.returncode == 0, _stderr(result)
+    out = _stdout(result)
+    assert "not-suppressed" not in out
+    assert "(basis: stamp)" in out
