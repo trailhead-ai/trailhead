@@ -192,3 +192,36 @@ def test_suppression_block_names_the_canonical_migration_concern_phrase():
     result = _run(SINGLE_PROTOTYPE)
     assert result.returncode == 0, _stderr(result)
     assert concern_phrase in _stdout(result)
+
+
+# ---- the block names the resolved target repository, labelled -------------
+
+
+def test_single_entry_stamp_names_the_implicitly_resolved_repository():
+    result = _run(SINGLE_PROTOTYPE)
+    assert result.returncode == 0, _stderr(result)
+    assert "(target-repo: trailhead)" in _stdout(result)
+
+
+def test_multi_entry_stamp_with_explicit_target_names_the_resolved_repository():
+    result = _run(MULTI_TARGET_PROTOTYPE, ["--target-repo", "trailhead"])
+    assert result.returncode == 0, _stderr(result)
+    assert "(target-repo: trailhead)" in _stdout(result)
+
+
+def test_no_suppression_block_also_names_the_resolved_repository():
+    result = _run(SINGLE_PRODUCTION)
+    assert result.returncode == 0, _stderr(result)
+    assert "not-suppressed" in _stdout(result)
+    assert "(target-repo: trailhead)" in _stdout(result)
+
+
+# ---- a refusal never echoes the target repository it was given ------------
+
+
+def test_refusal_never_echoes_a_distinctive_target_repo_marker():
+    marker = "ZZZ-TARGET-REPO-MARKER-ZZZ"
+    result = _run(MULTI_TARGET_PROTOTYPE, ["--target-repo", marker])
+    assert result.returncode != 0
+    assert marker not in _stdout(result)
+    assert marker not in _stderr(result)

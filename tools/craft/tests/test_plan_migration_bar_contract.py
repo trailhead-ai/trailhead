@@ -21,8 +21,12 @@ PLAN_SKILL = CRAFT / "skills" / "plan" / "SKILL.md"
 SCRIPTS_DIR = CRAFT / "scripts"
 RENDERER = SCRIPTS_DIR / "migration_bar.py"
 
+sys.path.insert(0, str(SCRIPTS_DIR))
+import migration_bar  # noqa: E402
+
 PROTOTYPE_FIXTURE = b"## Maturity\n\n- trailhead: prototype\n"
 PRODUCTION_FIXTURE = b"## Maturity\n\n- trailhead: production\n"
+REFUSING_FIXTURE = b"## Maturity\n\n- trailhead: prototype\n- lookout: production\n"
 
 
 def _skill_text() -> str:
@@ -84,7 +88,7 @@ def test_invocation_extracted_from_step7_against_prototype_fixture_produces_supp
     result = _run_extracted_renderer(PROTOTYPE_FIXTURE)
     assert result.returncode == 0, result.stderr.decode("utf-8")
     out = result.stdout.decode("utf-8")
-    assert out.splitlines()[0].startswith("migration-bar: prototype ")
+    assert out.splitlines()[0].startswith("migration-bar: (level: prototype) ")
     assert "— suppressed: migration and backfill" in out
 
 
@@ -92,7 +96,7 @@ def test_invocation_extracted_from_step7_against_production_fixture_produces_no_
     result = _run_extracted_renderer(PRODUCTION_FIXTURE)
     assert result.returncode == 0, result.stderr.decode("utf-8")
     out = result.stdout.decode("utf-8")
-    assert out.splitlines()[0].startswith("migration-bar: production ")
+    assert out.splitlines()[0].startswith("migration-bar: (level: production) ")
     assert "— not-suppressed: migration and backfill" in out
 
 
@@ -118,6 +122,17 @@ def test_migration_bar_instruction_lives_inside_step_7_and_precedes_step_8():
     assert invocation_index >= 0
 
 
+def _reopening_condition_phrase(stdout: str) -> str:
+    """The renderer's own reopening-condition phrase, captured from its
+    actual suppression-block text rather than retyped."""
+    match = re.search(r"acceptance criteria require (.+?) —", stdout)
+    assert match, (
+        f"renderer suppression block must state a reopening condition after "
+        f"'acceptance criteria require': {stdout!r}"
+    )
+    return match.group(1)
+
+
 # ---- safe direction: non-zero exit decomposes migration work normally -----
 
 
@@ -126,11 +141,31 @@ def test_step7_names_safe_direction_for_non_zero_exit():
     clause_match = re.search(r"[Oo]n a non-zero exit[^.]*\.", step7)
     assert clause_match, "step 7 must have an 'on a non-zero exit' clause terminated by '.'"
     clause = " ".join(clause_match.group(0).split())
-    assert re.search(r"decompose migration.*normally", clause, re.IGNORECASE), (
-        f"the non-zero-exit clause must decompose migration work normally: {clause!r}"
+
+    refusal = _run_extracted_renderer(REFUSING_FIXTURE)
+    assert refusal.returncode != 0
+    reason_marker_match = re.search(r"reason-code:", refusal.stderr.decode("utf-8"))
+    assert reason_marker_match, (
+        f"renderer refusal must emit a reason-code marker: {refusal.stderr!r}"
     )
-    assert re.search(r"reason-code", clause), (
-        f"the non-zero-exit clause must state the renderer's own reason-code: {clause!r}"
+    reason_marker = reason_marker_match.group(0)
+
+    success = _run_extracted_renderer(PROTOTYPE_FIXTURE)
+    assert success.returncode == 0, success.stderr.decode("utf-8")
+    concern_match = re.search(
+        r"suppressed: (.+)$", success.stdout.decode("utf-8").splitlines()[0]
+    )
+    assert concern_match, (
+        f"suppression block must state a concern phrase: {success.stdout!r}"
+    )
+    concern_word = concern_match.group(1).split()[0]
+
+    assert re.search(rf"decompose {re.escape(concern_word)}.*normally", clause, re.IGNORECASE), (
+        f"the non-zero-exit clause must decompose {concern_word} work normally: {clause!r}"
+    )
+    assert reason_marker in clause, (
+        f"the non-zero-exit clause must state the renderer's own "
+        f"{reason_marker!r} marker: {clause!r}"
     )
 
 
@@ -139,16 +174,28 @@ def test_step7_names_safe_direction_for_non_zero_exit():
 
 def test_step7_names_safe_direction_for_non_prototype_level():
     step7 = _normalized_define_tasks_step()
+    prototype_level = migration_bar._PROTOTYPE_LEVEL
     clause_match = re.search(
-        r"resolved level other than `prototype`[^.]*\.", step7
+        rf"resolved level other than `{re.escape(prototype_level)}`[^.]*\.", step7
     )
     assert clause_match, (
-        "step 7 must have a 'resolved level other than `prototype`' clause "
-        "terminated by '.'"
+        f"step 7 must have a 'resolved level other than `{prototype_level}`' "
+        f"clause terminated by '.'"
     )
     clause = " ".join(clause_match.group(0).split())
-    assert re.search(r"decompose migration.*normally", clause, re.IGNORECASE), (
-        f"the non-prototype-level clause must decompose migration work "
+
+    result = _run_extracted_renderer(PRODUCTION_FIXTURE)
+    assert result.returncode == 0, result.stderr.decode("utf-8")
+    concern_match = re.search(
+        r"not-suppressed: (.+)$", result.stdout.decode("utf-8").splitlines()[0]
+    )
+    assert concern_match, (
+        f"non-prototype block must state a not-suppressed concern phrase: {result.stdout!r}"
+    )
+    concern_word = concern_match.group(1).split()[0]
+
+    assert re.search(rf"decompose {re.escape(concern_word)}.*normally", clause, re.IGNORECASE), (
+        f"the non-prototype-level clause must decompose {concern_word} work "
         f"normally: {clause!r}"
     )
 
@@ -158,14 +205,18 @@ def test_step7_names_safe_direction_for_non_prototype_level():
 
 
 def test_step7_names_acceptance_criteria_carveout_and_requires_naming_criterion():
+    result = _run_extracted_renderer(PROTOTYPE_FIXTURE)
+    assert result.returncode == 0, result.stderr.decode("utf-8")
+    key_phrase = _reopening_condition_phrase(result.stdout.decode("utf-8"))
+
     step7 = _normalized_define_tasks_step()
     clause_match = re.search(
-        r"unless an acceptance criterion requires preserving existing state[^.]*\.",
+        rf"unless an acceptance criterion requires {re.escape(key_phrase)}[^.]*\.",
         step7,
     )
     assert clause_match, (
-        "step 7 must have an acceptance-criteria carve-out clause terminated "
-        "by '.'"
+        f"step 7 must have an acceptance-criteria carve-out clause requiring "
+        f"{key_phrase!r}, terminated by '.'"
     )
     clause = " ".join(clause_match.group(0).split())
     assert re.search(r"name which criterion", clause, re.IGNORECASE), (
@@ -188,13 +239,14 @@ def test_durable_trace_fields_are_derived_from_the_renderers_own_emitted_block()
     first_line = result.stdout.decode("utf-8").splitlines()[0]
 
     block_re = re.compile(
-        r"^migration-bar: (?P<level>\S+) \(basis: (?P<basis>\S+)\) — "
+        r"^migration-bar: \(level: (?P<level>\S+)\) \(basis: (?P<basis>\S+)\) "
+        r"\(target-repo: (?P<repo>\S+)\) — "
         r"(?P<state>suppressed|not-suppressed): (?P<concern>.+)$"
     )
     match = block_re.match(first_line)
     assert match, (
         f"renderer's first block line no longer carries a distinguishable "
-        f"level and basis: {first_line!r}"
+        f"level, basis, target-repo, and state: {first_line!r}"
     )
 
     step7 = _normalized_define_tasks_step()
@@ -207,23 +259,16 @@ def test_durable_trace_fields_are_derived_from_the_renderers_own_emitted_block()
         "write, terminated by '.'"
     )
     clause = " ".join(given_axioms_clause_match.group(0).split())
-    for cue in ("target repository", "resolved level", "the basis", "suppressed"):
-        assert cue in clause, (
-            f"the durable-trace clause must require writing {cue!r}: {clause!r}"
+    for cue in ("target-repo", "level", "basis", match.group("state")):
+        assert f"`{cue}`" in clause, (
+            f"the durable-trace clause must require writing `{cue}`: {clause!r}"
         )
 
 
 def test_carveout_condition_is_derived_from_the_renderers_own_reopening_text():
     result = _run_extracted_renderer(PROTOTYPE_FIXTURE)
     assert result.returncode == 0, result.stderr.decode("utf-8")
-    stdout = result.stdout.decode("utf-8")
-    reopen_match = re.search(r"[Rr]eopens only if (.+?)\.", stdout)
-    assert reopen_match, f"renderer suppression block must state a reopening condition: {stdout!r}"
-    key_phrase = "preserving existing state"
-    assert key_phrase in reopen_match.group(1), (
-        f"fixture assumption: renderer condition mentions {key_phrase!r}: "
-        f"{reopen_match.group(1)!r}"
-    )
+    key_phrase = _reopening_condition_phrase(result.stdout.decode("utf-8"))
 
     step7 = _normalized_define_tasks_step()
     assert key_phrase in step7, (

@@ -41,10 +41,13 @@ agent-instruction-file / default fallback chain exactly as it does for
 that renderer.
 
 On a resolved level of `prototype`, this renderer prints a block naming
-the resolved level and its basis, stating that migration and backfill
-tasks are suppressed for this plan, and stating the one condition that
-reopens them: acceptance criteria that require preserving existing state.
-At every other level it prints a block stating nothing is suppressed.
+the resolved level, its basis, and — when a stamp was consulted — the
+target repository the level was resolved for, stating that migration and
+backfill tasks are suppressed for this plan, and stating the one
+condition that reopens them: acceptance criteria that require preserving
+existing state. At every other level it prints a block stating nothing is
+suppressed. The target repository is omitted on the absent-stamp fallback
+chain, where there is no per-repository stamp to name it from.
 
 No refusal ever writes the offending value a `StampError` may carry to
 stdout or stderr — the stamp is vault-writable content read by an agent
@@ -105,9 +108,13 @@ def _err(msg: str) -> None:
 
 def resolve_target_level(
     spec_text: str, target_repo: str | None, agent_instruction_file: str | None
-) -> tuple[str, str]:
-    """Return `(level, basis)` for the plan's target repository, or raise
-    `RenderError` on any fail-closed outcome."""
+) -> tuple[str, str, str | None]:
+    """Return `(level, basis, resolved_repo)` for the plan's target
+    repository, or raise `RenderError` on any fail-closed outcome.
+    `resolved_repo` is the stamp key the level was read from — set only
+    when a stamp was consulted, since only then has the name passed the
+    stamp grammar's own character class. It is `None` on the absent-stamp
+    fallback chain, where there is no per-repository stamp to select from."""
     try:
         entries = parse_entries(spec_text)
     except StampError as e:
@@ -122,24 +129,27 @@ def resolve_target_level(
             )
         except maturity_bars.RenderError as e:
             raise RenderError(e.reason_code) from e
-        return level, basis
+        return level, basis, None
 
     if target_repo is None:
         if len(entries) != 1:
             raise RenderError(_TARGET_REPO_REQUIRED_REASON_CODE)
-        return next(iter(entries.values())), "stamp"
+        resolved_repo = next(iter(entries))
+        return entries[resolved_repo], "stamp", resolved_repo
 
     if target_repo not in entries:
         raise RenderError(_TARGET_REPO_ABSENT_REASON_CODE)
 
-    return entries[target_repo], "stamp"
+    return entries[target_repo], "stamp", target_repo
 
 
-def render(level: str, basis: str) -> str:
+def render(level: str, basis: str, target_repo: str | None) -> str:
+    repo_field = f" (target-repo: {target_repo})" if target_repo is not None else ""
+    header = f"migration-bar: (level: {level}) (basis: {basis}){repo_field}"
+
     if level == _PROTOTYPE_LEVEL:
         return (
-            f"migration-bar: {level} (basis: {basis}) — "
-            f"suppressed: {_MIGRATION_CONCERN}\n"
+            f"{header} — suppressed: {_MIGRATION_CONCERN}\n"
             f"Migration and backfill tasks are suppressed for this plan.\n"
             "Reopens only if the plan's acceptance criteria require "
             "preserving existing state — decompose the migration/backfill "
@@ -147,8 +157,7 @@ def render(level: str, basis: str) -> str:
         )
 
     return (
-        f"migration-bar: {level} (basis: {basis}) — "
-        f"not-suppressed: {_MIGRATION_CONCERN}\n"
+        f"{header} — not-suppressed: {_MIGRATION_CONCERN}\n"
         "Nothing is suppressed; decompose migration and backfill tasks "
         "normally for this plan.\n"
     )
@@ -169,14 +178,14 @@ def main(argv: list[str]) -> int:
         return 2
 
     try:
-        level, basis = resolve_target_level(
+        level, basis, target_repo = resolve_target_level(
             spec_text, args.target_repo, args.agent_instruction_file
         )
     except RenderError as e:
         _err(f"reason-code: {e.reason_code}")
         return 2
 
-    sys.stdout.write(render(level, basis))
+    sys.stdout.write(render(level, basis, target_repo))
     return 0
 
 

@@ -301,9 +301,9 @@ from repository content. And at any resolved level other than `prototype`, decom
 normally.
 
 **When migration and backfill tasks are suppressed, write the decision into the plan's `Given
-Axioms` in step 8** — the target repository, the resolved level, the basis, and the fact that
-migration and backfill tasks were suppressed; and, where the acceptance-criteria carve-out reopened
-them instead, the criterion that did.
+Axioms` in step 8** — the renderer's resolved `target-repo`, `level`, and `basis`, and that it
+reported `suppressed`; and, where the acceptance-criteria carve-out reopened them instead, the
+criterion that did.
 
 Break the feature into buildable tasks. Each task is the component-shaped unit beneath a slice — see
 `_shared/slice.md` for the quality bar a slice must clear and the value floor it's read against.
