@@ -1,63 +1,32 @@
-"""Every shipped skill must be registrable by Claude Code.
+"""The skill inventory lore ships is the inventory `trailhead` discovers.
 
-A SKILL.md only registers as an invocable `/lore:<name>` command if it opens
-with a YAML frontmatter block carrying at least a `description:`. A skill
-without that frontmatter silently never registers — this test locks the
-invariant so that can't happen.
+What the harness offers an operator is whatever `trailhead.capabilities`
+finds on disk, so that discovery is the subject: run the loader and assert the
+inventory it produced. A skill directory silently disappearing — or a new one
+appearing unwired — shows up here.
 
-`skills/_shared/` is a reference doc, not a skill, and is exempt.
+The frontmatter *content* contract (a closed block with a non-empty `name:`
+and `description:`, matching the on-disk stem) is proved for every tool at
+once in `trailhead/tests/test_registrable.py`.
 """
+
+from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
+from trailhead.capabilities import load_manifest
 
-SKILLS_DIR = Path(__file__).parent.parent / "plugins" / "lore" / "skills"
+_LORE_MANIFEST = Path(__file__).resolve().parents[2] / "lore" / "capabilities.toml"
 
 
-def _skill_files() -> list[Path]:
-    return sorted(
-        d / "SKILL.md"
-        for d in SKILLS_DIR.iterdir()
-        if d.is_dir() and d.name != "_shared" and (d / "SKILL.md").exists()
+def test_lore_ships_exactly_the_capture_and_ritual_skills():
+    """flush, sync, search, record, research. Per-kind capture lives on the
+    `lore record` / `lore session` CLI surface, not as skills; brainstorm lives
+    in the craft plugin. `skills/_shared/` is a reference doc, not a skill, and
+    the loader is what decides it is not one."""
+    manifest = load_manifest(_LORE_MANIFEST)
+    assert set(manifest.skills) == {"flush", "sync", "search", "record", "research"}, (
+        f"lore's discovered skill inventory drifted: {sorted(manifest.skills)}"
     )
-
-
-@pytest.mark.parametrize("skill_md", _skill_files(), ids=lambda p: p.parent.name)
-def test_skill_has_registrable_frontmatter(skill_md: Path):
-    text = skill_md.read_text()
-    assert text.startswith("---\n"), (
-        f"{skill_md.parent.name}/SKILL.md must open with a `---` frontmatter "
-        "block or Claude Code will not register it as a /lore: command"
-    )
-    end = text.find("\n---", 3)
-    assert end > 0, f"{skill_md.parent.name}/SKILL.md frontmatter block is not closed"
-    frontmatter = text[3:end]
-    desc_lines = [
-        ln
-        for ln in frontmatter.splitlines()
-        if ln.strip().startswith("description:") and ln.split(":", 1)[1].strip()
-    ]
-    assert desc_lines, (
-        f"{skill_md.parent.name}/SKILL.md frontmatter must carry a non-empty "
-        "`description:` (it's what drives skill triggering)"
-    )
-
-
-def test_all_capture_and_ritual_skills_present():
-    """Guard against a skill dir silently disappearing.
-
-    The lore plugin ships exactly these invocable skills: flush, sync, search,
-    record, research (plus _shared, a reference doc that is exempt). Per-kind
-    capture lives on the `lore record` / `lore session` CLI surface, not as
-    skills; brainstorm lives in the craft plugin.
-    """
-    names = {p.parent.name for p in _skill_files()}
-    expected = {
-        "flush", "sync",
-        "search", "record", "research",
-    }
-    assert names == expected, (
-        f"lore plugin skill set drifted: missing {sorted(expected - names)}, "
-        f"unexpected {sorted(names - expected)}"
-    )
+    for name, relative in manifest.skills.items():
+        assert relative == f"skills/{name}", (name, relative)

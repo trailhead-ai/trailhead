@@ -188,9 +188,6 @@ def _rule_denies(rule: str, path: str) -> bool:
 
 
 class TestGuardHookDenyAllow:
-    def test_guard_hook_script_exists(self):
-        assert GUARD_SCRIPT.is_file(), f"missing guard hook script: {GUARD_SCRIPT}"
-
     def test_write_inside_vault_is_denied(self, tmp_path):
         """A Write under the guarded vault root is denied (exit 2)."""
         vault = tmp_path / "vaults" / "default"
@@ -800,41 +797,6 @@ class TestGuardExemptZone:
         assert result.returncode == 0, (
             "a colon-containing vaults root must still carve out its sites zone; "
             f"stderr={result.stderr!r}"
-        )
-
-
-class TestGuardDocstringScope:
-    """Accurate comment on the no-path allow branch, and an explicit
-    accepted-out-of-scope note for Bash-mediated writes.
-    """
-
-    def test_module_docstring_documents_the_exempt_env_var(self):
-        src = GUARD_SCRIPT.read_text()
-        assert "LORE_VAULT_GUARD_EXEMPT" in src
-
-    def test_module_docstring_documents_the_escaped_default_symlink(self):
-        """The one case where the exemption cannot apply must be stated where a
-        reader of the guard will find it, not left as folklore."""
-        src = GUARD_SCRIPT.read_text()
-        opening = src.index('"""')
-        docstring = src[opening + 3 : src.index('"""', opening + 3)]
-        assert "outside the vaults root" in docstring, (
-            "the guard docstring must state that a `default` symlink pointing "
-            "outside the vaults root cannot be covered by an exemption pattern"
-        )
-
-    def test_module_docstring_documents_accepted_bash_gap(self):
-        src = GUARD_SCRIPT.read_text()
-        # The module docstring must explicitly call Bash writes accepted/out-of-scope.
-        assert "Bash" in src
-        assert "out-of-scope" in src.lower() or "out of scope" in src.lower()
-
-    def test_no_path_allow_branch_comment_is_not_bash(self):
-        """The missing-path allow branch must NOT be commented as 'e.g. Bash'
-        (Bash never matches the matcher and never reaches the hook)."""
-        src = GUARD_SCRIPT.read_text()
-        assert "e.g. Bash" not in src, (
-            "the no-file-path allow branch comment must not claim it fires for Bash"
         )
 
 

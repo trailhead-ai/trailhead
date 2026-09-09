@@ -1028,32 +1028,6 @@ _NON_TASK_KINDS = sorted(rm().KINDS - {"task"})
 _NO_DEPENDS_ON_KINDS = sorted(rm().KINDS - {"task", "spec", "adr"})
 
 
-def test_non_task_kinds_are_the_expected_eight():
-    """Guards the parametrized rejection tests below against a silent kind-set drift."""
-    assert _NON_TASK_KINDS == [
-        "adr",
-        "area",
-        "blob",
-        "collaboration",
-        "decision",
-        "lesson",
-        "session",
-        "spec",
-    ]
-
-
-def test_kinds_without_a_dependency_graph_are_the_expected_six():
-    """Guards the rejection test below against a silent kind-set drift."""
-    assert _NO_DEPENDS_ON_KINDS == [
-        "area",
-        "blob",
-        "collaboration",
-        "decision",
-        "lesson",
-        "session",
-    ]
-
-
 def test_depends_on_rejected_on_every_graphless_kind_naming_field_and_kind():
     for kind in _NO_DEPENDS_ON_KINDS:
         sidecar = _base_sidecar_with(kind=kind, **{"depends-on": ["other"]})

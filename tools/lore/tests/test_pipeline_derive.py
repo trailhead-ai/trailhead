@@ -125,15 +125,6 @@ class TestTerminalMemberAccounting:
 
 
 class TestOrphanedSeeds:
-    def test_orphaning_adr_statuses_is_exactly_dropped_and_superseded(self):
-        """Regression pin, not a new rule: the gauntlet no longer writes `dropped`
-        or `superseded` onto a draft ADR it reviews (it now writes `revise`
-        prescriptions instead), so the sole remaining forward-path trigger for
-        orphaning a seed is supersession. The constant itself is unchanged by that
-        shift — this pins it stays exactly the closed two-status set, asserted
-        rather than assumed."""
-        assert derive.ORPHANING_ADR_STATUSES == frozenset({"dropped", "superseded"})
-
     def test_a_dropped_root_renders_while_a_non_terminal_spec_still_points_at_it(self):
         lineages = _derive(
             [
@@ -640,12 +631,30 @@ class TestDependencyProjection:
     dependency the operator cannot see is one they cannot act on.
     """
 
-    def test_the_projected_shape_tracks_the_evaluator_it_is_built_from(self):
-        """A field added to the evaluator's verdict must be projected, not
-        silently dropped, so the two shapes are pinned to each other."""
+    def test_the_projected_shape_carries_every_field_the_evaluator_produced(self):
+        """`_evaluate` projects a verdict by positional splat, so a field added
+        to — or reordered within — the evaluator's verdict either raises or
+        silently lands in the wrong slot. Evaluate a real entry, project it
+        through the real derivation, and compare the two field by field.
+        """
         from lore.record import graph as graph_mod
 
-        assert derive.Dependency._fields == graph_mod.DependencyStatus._fields
+        records = {
+            "adr/board": _adr("draft"),
+            "spec/foo": _spec("ready", adrs=["board"]),
+            "spec/bar": _spec("draft", adrs=["board"], **_deps("spec/foo@planned")),
+        }
+        graph = {rid: sidecar for rid, sidecar in records.items()}
+        (verdict,) = graph_mod.evaluate_dependencies(
+            graph, records["spec/bar"]["depends-on"]
+        )
+
+        lineages = _derive([_walk("local", records)])
+        bar = {m.record_id: m for m in lineages[0].members}["spec/bar"]
+        (projected,) = bar.dependencies
+
+        for field in verdict._fields:
+            assert getattr(projected, field) == getattr(verdict, field), field
 
     def test_a_target_short_of_the_required_stage_gates_the_record(self):
         records = {

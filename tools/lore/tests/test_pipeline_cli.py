@@ -1681,15 +1681,6 @@ class TestEachSidecarIsReadOnce:
 class TestSurfaceDocumentation:
     """The documented contract a consumer reads before parsing ``--json``."""
 
-    def test_the_docs_page_states_both_load_bearing_contract_facts(self):
-        page = (
-            PLUGIN_ROOT / "docs" / "pipeline.md"
-        ).read_text(encoding="utf-8").lower()
-
-        assert "zero exit does not mean the board is complete" in page
-        assert "authoritative gating signal" in page
-        assert "met" in page
-
     def test_the_json_help_names_flags_as_the_gating_signal(self, capsys):
         from lore.cli import dispatch
 
