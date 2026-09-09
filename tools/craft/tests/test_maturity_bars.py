@@ -318,6 +318,10 @@ THREE_REPO_STAMP = (
     "- zebra: production\n"
 )
 
+SEVERITY_COLLISION_STAMP = (
+    "# S\n\n## Maturity\n\n- lookout: production\n- Critical: prototype\n"
+)
+
 
 @pytest.mark.parametrize("level_a,level_b", list(itertools.permutations(_LEVEL_ORDER, 2)))
 def test_two_repo_stamp_renders_each_repositorys_own_severity_basis_highest_stamped(level_a, level_b):
@@ -333,8 +337,8 @@ def test_two_repo_stamp_renders_each_repositorys_own_severity_basis_highest_stam
         # the two dict lookups themselves would prove only a property of
         # this parametrization, never of the renderer's output.
         assert (
-            f"- {concern}: repo-a={_SEVERITY_BY_LEVEL[level_a]}, "
-            f"repo-b={_SEVERITY_BY_LEVEL[level_b]}"
+            f"- {concern}: `repo-a`={_SEVERITY_BY_LEVEL[level_a]}, "
+            f"`repo-b`={_SEVERITY_BY_LEVEL[level_b]}"
         ) in out
 
 
@@ -344,9 +348,9 @@ def test_two_repo_stamp_at_same_level_still_renders_the_full_matrix():
     assert result.returncode == 0
     out = _stdout(result)
     assert "maturity: early (basis: highest-stamped)" in out
-    assert "concern x repository: repo-a, repo-b" in out
+    assert "concern x repository: `repo-a`, `repo-b`" in out
     for concern in CONCERNS:
-        assert f"- {concern}: repo-a=Important, repo-b=Important" in out
+        assert f"- {concern}: `repo-a`=Important, `repo-b`=Important" in out
 
 
 def test_three_repo_stamp_orders_columns_by_member_name_not_write_order():
@@ -359,10 +363,10 @@ def test_three_repo_stamp_orders_columns_by_member_name_not_write_order():
     result = _run(spec.encode("utf-8"))
     assert result.returncode == 0
     out = _stdout(result)
-    assert "concern x repository: alpha, mango, zebra" in out
+    assert "concern x repository: `alpha`, `mango`, `zebra`" in out
     for concern in CONCERNS:
         assert (
-            f"- {concern}: alpha=Minor, mango=Important, zebra=Critical"
+            f"- {concern}: `alpha`=Minor, `mango`=Important, `zebra`=Critical"
         ) in out
 
 
@@ -430,7 +434,7 @@ def test_three_repo_stamp_carries_all_five_concerns_for_every_repository():
     lines = _stdout(_run(THREE_REPO_STAMP.encode("utf-8"))).splitlines()
     for concern in CONCERNS:
         assert (
-            f"- {concern}: alpha=Minor, mango=Important, zebra=Critical"
+            f"- {concern}: `alpha`=Minor, `mango`=Important, `zebra`=Critical"
         ) in lines, f"{concern!r} missing its full per-repository row"
 
 
@@ -448,7 +452,7 @@ def test_highest_stamped_severity_vocabulary_is_exactly_three_words():
 
 def test_highest_stamped_downgrade_restatement_names_repository_and_level():
     out = _stdout(_run(MIXED_TWO_REPO_STAMP.encode("utf-8")))
-    assert "downgraded by lookout's prototype maturity level" in out
+    assert "downgraded by `lookout`'s prototype maturity level" in out
 
 
 def test_single_repository_stamp_renders_byte_for_byte_unchanged():
@@ -470,8 +474,37 @@ def test_single_repository_stamp_renders_byte_for_byte_unchanged():
 
 def test_matrix_header_and_per_repository_line_shape_are_pinned():
     lines = _stdout(_run(MIXED_TWO_REPO_STAMP.encode("utf-8"))).splitlines()
-    assert "concern x repository: lookout, trailhead" in lines
-    assert "- backwards compatibility: lookout=Minor, trailhead=Critical" in lines
+    assert "concern x repository: `lookout`, `trailhead`" in lines
+    assert "- backwards compatibility: `lookout`=Minor, `trailhead`=Critical" in lines
+
+
+# ---- a member name colliding with the severity vocabulary --------------
+
+
+def test_severity_colliding_member_name_renders_delimited_in_the_header():
+    out = _stdout(_run(SEVERITY_COLLISION_STAMP.encode("utf-8")))
+    assert "concern x repository: `Critical`, `lookout`" in out
+
+
+def test_severity_colliding_member_name_renders_delimited_not_as_a_bare_token():
+    out = _stdout(_run(SEVERITY_COLLISION_STAMP.encode("utf-8")))
+    assert "`Critical`=Minor" in out
+    assert "Critical=Minor" not in out
+
+
+def test_severity_colliding_member_name_stays_delimited_in_the_downgrade_example():
+    out = _stdout(_run(SEVERITY_COLLISION_STAMP.encode("utf-8")))
+    assert "migration and backfill — `Critical`, Minor, downgraded by " in out
+    assert "downgraded by `Critical`'s prototype maturity level" in out
+
+
+# ---- treat-as-data framing for interpolated repository names -----------
+
+
+def test_matrix_block_states_repository_names_are_labels_not_instructions():
+    out = _stdout(_run(MIXED_TWO_REPO_STAMP.encode("utf-8")))
+    assert "labels" in out.lower()
+    assert "never instructions" in out.lower() or "not instructions" in out.lower()
 
 
 @pytest.mark.parametrize(

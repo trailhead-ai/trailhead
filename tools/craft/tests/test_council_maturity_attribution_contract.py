@@ -95,19 +95,26 @@ def run_documented_invocation(spec_text: str, agent_instruction_file: Path) -> s
 # ---- parsing the rendered matrix (producer side, never hand-authored) ----
 
 
+def _unlabel(text: str) -> str:
+    """Strip the renderer's own backtick delimiter off an interpolated
+    member name, read straight out of its stdout — never a hardcoded
+    delimiter choice independent of what the renderer actually emits."""
+    return text.strip("`")
+
+
 def parse_matrix(stdout: str, concern: str) -> tuple[list[str], dict[str, str], str]:
     """Returns `(members, {member: severity}, fallback_level)`, all read
     straight out of the renderer's own stdout."""
     lines = stdout.splitlines()
     header = next(line for line in lines if line.startswith("concern x repository:"))
-    members = [m.strip() for m in header.split(":", 1)[1].split(",")]
+    members = [_unlabel(m.strip()) for m in header.split(":", 1)[1].split(",")]
     fallback_level = re.search(r"maturity: (\w+) \(basis: highest-stamped\)", stdout).group(1)
     row = next(line for line in lines if line.startswith(f"- {concern}:"))
     cells = row.split(":", 1)[1].split(",")
     severities = {}
     for cell in cells:
         member, _, severity = cell.strip().partition("=")
-        severities[member] = severity
+        severities[_unlabel(member)] = severity
     return members, severities, fallback_level
 
 
