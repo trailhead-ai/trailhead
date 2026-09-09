@@ -157,3 +157,74 @@ Registered thresholds, decided now:
   here is escalated rather than filed as a nice-to-have follow-up.
 - **Collapsed differential** — recorded plainly, per fixture, with no re-tuning of the
   fixture to manufacture separation.
+
+---
+
+## Result — 2026-09-09
+
+All 18 runs (3 per fixture per arm) produced a result; none errored.
+
+| Fixture | Baseline arm (full conjunction) | Treatment arm (full conjunction) |
+|---|---|---|
+| `positive.md` | **0/3** — condition 1 (no migration task) held 3/3, but condition 2 (naming level, basis, *and* target-repo) held 0/3 | **3/3** |
+| `negative.md` | **3/3** | **3/3** |
+| `control.md` | **3/3** | **3/3** |
+
+**`positive.md` — UPHELD**, against the registered bar (baseline ≤1/3, treatment ≥3/3): baseline
+0/3, treatment 3/3. Every baseline run independently declined to add a migration/backfill task
+— reading AC3's own "no automated preservation ... required" and treating the fixture's embedded
+"Migration bar (rendered)" section as informative even though baseline's own instructions never
+mention it — so condition 1 held 3/3 without any migration-bar routing in the arm at all. What no
+baseline run did was record the durable trace this task's contract requires: one run said nothing
+about suppression, one named only "the migration bar's suppression" with no specifics, and the
+closest run named the level (`prototype`) and target repo (`trailhead`) but never the basis
+(`stamp`) or the literal word "suppressed" tied to those fields. Treatment named all four —
+target-repo, level, basis, and the suppression — in a dedicated `Given Axioms` section on 3/3
+runs. The separation is real, but it is not where the pre-registration expected it: it is in the
+durable trace, not in whether a migration task got added.
+
+**`negative.md` — carve-out UPHELD against its own bar (treatment ≥2/3): 3/3.** But this
+fixture's differential **collapsed rather than separated**: baseline also fired the full
+conjunction 3/3, keeping the migration/backfill task and naming AC3 as the reason in every run
+("per the rendered migration bar, AC3's requirement ... is the carve-out that reopens migration/
+backfill work"; "this task exists specifically because AC3 requires preserving existing state").
+This is recorded plainly rather than re-run or re-tuned, per
+`35d0616b test(craft): record both eval results, including a collapsed differential`. It is not a
+surprising result on reflection: AC3 on this fixture states the preservation requirement in plain
+prose ("no widget may end up with an empty `tags` list"), which any competent task-decomposition
+reads and acts on with no migration-bar concept at all — the same effect the pre-registration
+already anticipated when it declined to make `negative.md`'s comparison part of the pass/fail bar.
+**What this fixture does establish, and what it does not:** it establishes that the carve-out,
+once suppression is being applied, reliably survives under the treatment prose (3/3, matching the
+bar) — it does not establish that the treatment's explicit carve-out routing is what produces
+that survival on this material, since a bare step 7 with no migration-bar awareness reaches the
+same answer for an unrelated reason (plain-English AC3 reading). A fixture isolating the carve-out
+from AC3's own legibility would need AC3 to require preservation less explicitly.
+
+**`control.md` — sanity control holds, comparison not void.** Both arms kept the migration/
+backfill task 3/3 and neither claimed a suppression that does not exist at `production`. One
+baseline run explicitly noted the tension between AC3's "disposable-state prototype" framing and
+the `production` stamp, and correctly deferred to the stamp/rendered bar rather than AC3's own
+language — which is the behavior AC10 requires regardless of arm.
+
+### What this settles
+
+Planning's step 7 change is behaviourally load-bearing on the one half no contract test can pin:
+the durable trace. `positive.md` shows the treatment arm reliably records the resolved
+target-repo/level/basis/suppression where the baseline arm — even when it reaches the same
+task-decomposition answer — does not. `negative.md` shows the carve-out survives reliably under
+treatment, though the comparison against baseline is not this fixture's evidence for *why* — that
+credit is shared with AC3's own plain-language legibility on this fixture. `control.md` confirms
+neither arm regresses at `production`. Read together: AC10's behavioural half is closed for the
+durable-trace claim, and closed-but-not-isolated for the carve-out-survives claim.
+
+### The limit of this result, stated plainly
+
+Three synthetic fixtures, one feature shape, one model tier, 18 runs total. The fixtures embed the
+renderer's real output as material available to both arms — necessary so neither arm has to
+invoke a script itself — but this means a capable reader can reach the "right" migration-task
+decision from the embedded block's own text even under baseline's unmodified prose, as the
+`waived-concern-stands-down` case's own re-measurement found for its calibration block. This
+result is strongest on the durable-trace claim, where the fixture's material cannot substitute for
+an instruction the reader was never given, and weakest on `negative.md`'s carve-out-survives
+claim, where it cannot yet.

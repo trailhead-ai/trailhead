@@ -756,6 +756,30 @@ see `expected.md` for the full diff.
 stamp). Each fixture's "Migration bar (rendered)" section is `migration_bar.py`'s real,
 directly-run output for that fixture's own `## Maturity` section.
 
+**Result, 2026-09-09 (18 runs, 3 per fixture per arm, none errored):**
+
+| Fixture | Baseline (full conjunction) | Treatment (full conjunction) |
+|---|---|---|
+| `positive.md` | 0/3 | 3/3 |
+| `negative.md` | 3/3 | 3/3 |
+| `control.md` | 3/3 | 3/3 |
+
+**`positive.md` UPHELD**, and cleanly separated: every baseline run correctly omitted a
+migration task (reading AC3 and the fixture's own embedded renderer output, with no
+migration-bar concept in its own instructions) but none recorded the durable trace — the
+resolved target-repo, level, *and* basis together — while treatment did on 3/3. The
+separation is in the durable trace, not in whether a migration task got added.
+
+**`negative.md` carve-out UPHELD against its own bar, but the differential against baseline
+collapsed (3/3 both arms) rather than separated** — recorded per
+`35d0616b test(craft): record both eval results, including a collapsed differential`.
+AC3 on this fixture states its preservation requirement in plain prose, which a bare step 7
+with no migration-bar routing already acts on for an unrelated reason. This fixture's
+result does not by itself show the carve-out routing is what produces the survival on this
+material — see `expected.md` for the full reading.
+
+**`control.md` sanity control holds** — both arms kept the migration task 3/3, comparison
+not void.
+
 See `plugins/craft/evals/prototype-plan-carries-no-migration/expected.md` for the full
-pre-registration, pass conditions, and thresholds. Results are recorded there once runs
-complete.
+pre-registration, pass conditions, thresholds, and result writeup.
