@@ -6,15 +6,25 @@ configured group and every declared account on this machine.
 Two axes are being added to questions the two verbs already answer:
 
 - **group** — `--all-groups` (`-g`) widens the answer from one group to every configured
-  group. Absent, both verbs behave exactly as they do today.
+  group. `camp list` absent the option is unchanged. `camp sessions` absent the option now
+  narrows to the named or resolved group's own rows, where before it returned whatever the
+  one bound store held: a session outside every configured group is no longer reported by a
+  group-scoped query. That narrowing is the cross-account disclosure fix, not a side effect
+  of the option.
 - **account** — not an option. Session enumeration always spans every credential store any
   group declares, plus the default one. There is no way to ask for one account, because an
   account is a group's declaration, not an operator's per-command choice.
 
 Every session row gains two keys in `--json`, present on every invocation: `group` (the
 group whose worktree the session's working directory falls in, or `null`) and `account`
-(the credential store the row was read from, carried verbatim from the group's
-declaration, or the resolved default). The human-readable line is unchanged.
+(that group's declared credential store, carried verbatim as written, or `null` where it
+declares none). The human-readable line is unchanged.
+
+Both keys are derived from the row's working directory, not from which store answered the
+enumeration. A session's `account` is therefore the store its group declares — the store a
+launch or resume in that worktree would use — which is the question an operator reading the
+row is asking. See *group declaring no account* below, which settles the same point for a
+row with no group at all.
 
 Workspace rows already carry `group`; nothing about their shape changes.
 
@@ -72,14 +82,17 @@ $ camp sessions -g --json
 ```
 
 The row is attributed to `levr` because its working directory resolves there, and to
-`~/.claude-levr` because that is the store it was read from. Both are facts about the row,
-not inferences about the invocation.
+`~/.claude-levr` because that is the store `levr` declares. Both are facts about where the
+session lives, not inferences about which store happened to answer.
 
 ## State — many
 
-Several groups across several accounts, answered in one listing. Rows are ordered by
-group, then by the verb's existing within-group order, so the widened answer reads as the
-narrow answers concatenated in a stable sequence rather than interleaved by discovery.
+Several groups across several accounts, answered in one listing. An unscoped listing orders
+rows by group, then by the verb's existing within-group order, so the widened answer reads
+as the narrow answers concatenated in a stable sequence rather than interleaved by
+discovery. A row belonging to no group sorts ahead of every named one. A listing already
+scoped by `--dir` or by a workspace slug keeps that scope's own order — the group ordering
+exists to make a whole-machine answer readable, and a scoped answer is not one.
 
 ```
 $ camp list -g
@@ -120,14 +133,14 @@ failure this whole design exists to remove.
 
 ```
 $ camp sessions -g
-camp: cannot determine running sessions — the harness did not answer
+camp sessions: could not enumerate live sessions for every configured group — every credential store failed (account '~/.claude-levr', the default account) — check each store's credentials and re-run
 $ echo $status
 1
 ```
 
 ```
 $ camp sessions -g --json
-camp: cannot determine running sessions — the harness did not answer
+camp sessions: could not enumerate live sessions for every configured group — every credential store failed (account '~/.claude-levr', the default account) — check each store's credentials and re-run
 ```
 
 Nothing is printed on stdout in the JSON form. A consumer parsing an empty array would
@@ -147,7 +160,7 @@ failure would lose them.
 ```
 $ camp sessions -g
 09d79961-8036-4350-bd38-351ff97d9eea  interactive  ~/.local/state/camp/levr/worktrees/audio-real-day (audio-real-day-c4)
-camp: could not read sessions for account ~/.claude-levr — skipping
+camp sessions: could not enumerate sessions for account '~/.claude-levr'
 
 $ echo $status
 0
@@ -164,7 +177,7 @@ absence:
 ```
 $ camp sessions -g --json
 [{"ok": true,  "session_id": "09d79961-...", "group": "levr", "account": "~/.claude-levr", ...},
- {"ok": false, "account": "~/.claude-levr", "reason": "the harness did not answer"}]
+ {"ok": false, "account": "~/.claude-levr", "reason": "sessions could not be enumerated for this credential store"}]
 ```
 
 Every row carries `ok`, so one field distinguishes the two and a consumer never has to
@@ -174,13 +187,16 @@ and the reason, never session attribution it does not have. This is the same sha
 cross-host work will need for a host that does not answer, which is why it is settled here
 rather than invented twice.
 
-The same shape covers a group configuration camp cannot parse: that group is skipped, by
-name, and every other group still answers.
+The same `ok` discriminator covers a group configuration camp cannot parse: that group is
+skipped, by name, and every other group still answers. Its row names the group rather than
+an account — a config camp could not read declares no store to name — so the two failure
+rows share the discriminator and the `reason`, and differ in which one of `account` or
+`group` they can support.
 
 ```
 $ camp list -g
 audio-real-day /Users/tduffield/.local/state/camp/levr/worktrees/audio-real-day
-camp: cannot read group config home-manager.toml — skipping
+camp list: /Users/tduffield/.config/camp/groups/home-manager.toml: invalid TOML — skipping
 ```
 
 An unreadable group is a *narrower* answer than the operator asked for, so it must be
@@ -237,5 +253,5 @@ cannot address the question:
 
 ```
 $ camp list -g
-camp: no groups are configured — nothing to list
+camp list: no groups configured — nothing to list
 ```
