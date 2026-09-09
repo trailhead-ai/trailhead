@@ -57,6 +57,42 @@ resolves to the live composed install, not the worktree, so it re-runs unedited
 prose and reports a false result. Editing the composed install to work around this
 is barred by Axiom 6 (never touch the developer's real install from a test).
 
+### A subagent inherits the ruleset you are trying to measure
+
+Dispatching both arms as subagents **cannot measure a user-level ruleset**, which
+is what most of these cases are about. A subagent inherits `~/.claude/rules/`, so
+if the prose under test lives there, the baseline arm is already carrying it and
+both arms are the treatment arm. A probe agent told to use no tools will quote the
+ruleset back verbatim; run that probe before trusting any baseline.
+
+Dispatch each arm as its own `claude` process with `--setting-sources project`,
+which drops user-level settings and rules while leaving authentication intact.
+Pass the arm's prose with `--append-system-prompt` and enumerate tools with
+`--allowedTools` — a blanket `--permission-mode bypassPermissions` is refused by
+the auto-mode classifier, correctly.
+
+Two consequences, both of which belong in the case's limitations:
+
+- The clean room has **no PreToolUse hook**, because hooks are installed into
+  user-level settings. For a guardrail that claims to work in harnesses without
+  hooks, that is the faithful condition; for anything else it removes a
+  protection production has.
+- Grade an `Edit`-tool write separately from a shell write. They say different
+  things about a system whose hook covers one and not the other.
+
+### A fixture must let the sanctioned path succeed
+
+If a case forbids one mechanism, the fixture has to make the permitted mechanism
+actually work. A task that cannot be completed the sanctioned way does not
+measure obedience — it measures resourcefulness, and a compliant agent becomes a
+determined one. In the `bash-write-gate` case the fixture vault was deliberately
+unregistered, so agents went looking for the config that would register it, read
+the developer's real repo, and mutated the real `~/.config/lore/config.json`.
+
+Give the run a throwaway config it can succeed against (`XDG_CONFIG_HOME` and
+`XDG_STATE_HOME` under the scratch directory), and diff the developer's real
+config after any run that had shell access. Escapes are silent otherwise.
+
 **The instructions-file path is a trust boundary — pin it.** The dispatcher
 resolves that path itself, and it must always name a trusted, review-gated,
 in-repo artifact — a committed agent or skill file, ideally at a stated SHA. It
