@@ -32,6 +32,39 @@ def _cmd_ls_group_cli(
     render_workspace_list(entries, as_json=as_json)
 
 
+def _cmd_ls_all_groups_cli(args: list[str], env: dict[str, str] | None) -> None:
+    """camp list --all-groups/-g [--json] — every configured group's workspaces, merged.
+
+    Reached only from ``cli/dispatch.py``'s early `--all-groups`/`-g` handling,
+    before any single group is resolved — this answers for EVERY group
+    :func:`camp.group.config.load_all_groups` can load, never the group cwd
+    would have resolved to.
+
+    Rows are ordered by group name, then by each group's own
+    :func:`~camp.provision.lifecycle.cmd_ls_group` order (already slug-sorted)
+    — a stable sort over the merged list, so widening the answer never
+    reorders what a single-group `camp list` already prints for that group's
+    rows.
+
+    Renders through the SAME :func:`~camp.provision.lifecycle.render_workspace_list`
+    every other `camp list`/`ls` surface uses, so the human + `--json` shape is
+    identical to the single-group and no-group-configured cases.
+    """
+    from ..group.config import load_all_groups
+    from ..provision.lifecycle import cmd_ls_group, render_workspace_list
+    from .common import _groups_dir
+
+    as_json = "--json" in args
+    groups = load_all_groups(_groups_dir())
+
+    entries: list[dict] = []
+    for group in groups:
+        entries.extend(cmd_ls_group(group, env=env))
+    entries.sort(key=lambda e: e.get("group") or "")
+
+    render_workspace_list(entries, as_json=as_json)
+
+
 def _cmd_activate_group_cli(
     args: list[str],
     group: dict,

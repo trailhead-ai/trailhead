@@ -1327,10 +1327,21 @@ def _list_recoverable(
 
 def _cmd_sessions_group_cli(
     args: list[str],
-    group: dict,
+    group: dict | None,
     env: dict[str, str] | None,
+    *,
+    all_groups: bool = False,
 ) -> None:
     """camp sessions [<slug>] [--dir <path>] [--recoverable [--limit <n>|--all]] [--json].
+
+    `all_groups=True` is the `--all-groups`/`-g` seam: reached only from
+    ``cli/dispatch.py``'s early handling of that option, with `group=None`
+    (there is no single resolved group to narrow by — `--all-groups` and
+    `--group` are refused together before this function is ever called). A
+    `--dir` scope still works unchanged (it never depended on `group`); with
+    no `--dir` and no positional slug it skips the cwd-relative slug
+    resolution `group` would otherwise be needed for and leaves `scope` (and
+    therefore the narrowing below) at `None` — the whole cross-store pool.
 
     Two listings behind one verb, over the same scope. The LIVE listing answers
     what is running; `--recoverable` answers what is dead and could be brought
@@ -1422,7 +1433,7 @@ def _cmd_sessions_group_cli(
         # about, and is the whole reason the recoverable listing marks rows
         # root-missing rather than hiding them.
         scope = Path(directory).expanduser().resolve()
-    else:
+    elif not all_groups:
         slug = _slug_from_args_or_cwd(
             rest, group, verb="sessions", consume_positional=True, allow_none=True, env=env
         )
@@ -1458,6 +1469,8 @@ def _cmd_sessions_group_cli(
             return f"workspace {slug!r}"
         if directory is not None:
             return f"directory {str(scope)!r}"
+        if all_groups:
+            return "every configured group"
         return f"group {group['group']['name']!r}"
 
     records, failures, stores_total = _enumerate_live_sessions_pool(scope, env=env)
@@ -1488,13 +1501,20 @@ def _cmd_sessions_group_cli(
     from .common import _groups_dir
 
     resolved_env = dict(env) if env is not None else dict(os.environ)
-    all_groups = load_all_groups(_groups_dir())
+    all_group_configs = load_all_groups(_groups_dir())
     attributed = [
-        (record, _attribute_session(record.cwd, all_groups, env=resolved_env))
+        (record, _attribute_session(record.cwd, all_group_configs, env=resolved_env))
         for record in records
     ]
     if scope is None:
-        attributed = _sessions_for_group(attributed, group["group"]["name"])
+        if all_groups:
+            # Widened rather than narrowed: every store's rows, ordered by
+            # group so the merged answer is stable across invocations. A
+            # stable sort keeps each group's OWN rows in the enumeration
+            # order _enumerate_live_sessions_pool already produced them in.
+            attributed = sorted(attributed, key=lambda pair: pair[1]["group"] or "")
+        else:
+            attributed = _sessions_for_group(attributed, group["group"]["name"])
 
     if as_json:
         payload = [

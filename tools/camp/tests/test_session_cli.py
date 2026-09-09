@@ -122,6 +122,11 @@ import os
 import sys
 from pathlib import Path
 
+calls_file = os.environ.get("CAMP_FAKE_ENUMERATE_CALLS_FILE")
+if calls_file:
+    with open(calls_file, "a") as _calls_handle:
+        print("1", file=_calls_handle)
+
 rows_path = os.environ.get("CAMP_FAKE_SESSIONS_FILE")
 scope = sys.argv[1]
 scope_path = Path(scope).resolve() if scope else None
@@ -1997,6 +2002,146 @@ def test_camp_sessions_merges_two_stores_each_holding_a_session(cli_env) -> None
     ids = {row["session_id"] for row in payload}
     assert ids == {"merge-sess-aaa", "merge-sess-bbb"}
     assert all(row["ok"] is True for row in payload)
+
+
+def test_camp_sessions_all_groups_merges_every_configured_groups_sessions(cli_env) -> None:
+    """`--all-groups` widens rather than narrows: two DIFFERENT groups' sessions
+    both come back in ONE answer, with no `--group` and no cwd that resolves
+    to either — the opposite of the ordinary bare-group-named query, which
+    would narrow to one of them.
+    """
+    account_a = cli_env["tmp_path"] / "allgroups-account-a"
+    account_b = cli_env["tmp_path"] / "allgroups-account-b"
+    _add_account_group(cli_env, "allgroupsa", account_a, cli_env["tmp_path"] / "repo-agsa")
+    _add_account_group(cli_env, "allgroupsb", account_b, cli_env["tmp_path"] / "repo-agsb")
+    _register_live_at(account_a, "ag-sess-aaa", cli_env["tmp_path"] / "repo-agsa")
+    _register_live_at(account_b, "ag-sess-bbb", cli_env["tmp_path"] / "repo-agsb")
+
+    env = _env_without_shared_claude_dir(cli_env)
+    result = subprocess.run(
+        [sys.executable, str(_CLI_CAMP), "sessions", "--all-groups", "--json"],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(cli_env["tmp_path"]),
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    ok_rows = [row for row in payload if row["ok"] is True]
+    ids = {row["session_id"] for row in ok_rows}
+    assert ids == {"ag-sess-aaa", "ag-sess-bbb"}
+    groups = {row["group"] for row in ok_rows}
+    assert groups == {"allgroupsa", "allgroupsb"}
+
+
+def test_camp_sessions_all_groups_short_and_long_spellings_are_byte_identical(
+    cli_env,
+) -> None:
+    """Compares stdout from TWO REAL invocations, not two calls into the same
+    formatting helper."""
+    account_a = cli_env["tmp_path"] / "spelling-account-a"
+    _add_account_group(cli_env, "spellinga", account_a, cli_env["tmp_path"] / "repo-spa")
+    _register_live_at(account_a, "spelling-sess", cli_env["tmp_path"] / "repo-spa")
+
+    env = _env_without_shared_claude_dir(cli_env)
+    long_form = subprocess.run(
+        [sys.executable, str(_CLI_CAMP), "sessions", "--all-groups"],
+        capture_output=True, text=True, env=env, cwd=str(cli_env["tmp_path"]),
+    )
+    short_form = subprocess.run(
+        [sys.executable, str(_CLI_CAMP), "sessions", "-g"],
+        capture_output=True, text=True, env=env, cwd=str(cli_env["tmp_path"]),
+    )
+
+    assert long_form.returncode == 0, long_form.stderr
+    assert short_form.returncode == 0, short_form.stderr
+    assert long_form.stdout == short_form.stdout
+    assert "spelling-sess" in long_form.stdout
+
+
+def test_camp_sessions_all_groups_orders_rows_by_group_then_within_group_order(
+    cli_env,
+) -> None:
+    """The pool is walked in config-FILE load order (alphabetical by filename),
+    while the answer must be ordered by declared group NAME — so this test
+    names the group whose config file loads FIRST such that its group NAME
+    sorts LAST, and vice versa, and asserts the printed order follows the
+    NAME, not the file load order.
+    """
+    account_first_file = cli_env["tmp_path"] / "order-account-aaa-file"
+    account_second_file = cli_env["tmp_path"] / "order-account-zzz-file"
+    # File "aaa-order.toml" loads FIRST but declares group "zzzorder".
+    _add_account_group(
+        cli_env, "aaa-order", account_first_file, cli_env["tmp_path"] / "repo-order-1"
+    )
+    _add_account_group(
+        cli_env, "zzz-order", account_second_file, cli_env["tmp_path"] / "repo-order-2"
+    )
+    # Rewrite the two just-authored configs so their FILE STEM and their
+    # declared [group].name diverge from each other and from one another's
+    # original names, without touching how `_add_account_group` wired them.
+    aaa_path = cli_env["config_dir"] / "groups" / "aaa-order.toml"
+    zzz_path = cli_env["config_dir"] / "groups" / "zzz-order.toml"
+    aaa_path.write_text(
+        aaa_path.read_text(encoding="utf-8").replace(
+            'name = "aaa-order"', 'name = "zzzorder"'
+        ),
+        encoding="utf-8",
+    )
+    zzz_path.write_text(
+        zzz_path.read_text(encoding="utf-8").replace(
+            'name = "zzz-order"', 'name = "aaaorder"'
+        ),
+        encoding="utf-8",
+    )
+    _register_live_at(account_first_file, "order-sess-in-zzzorder", cli_env["tmp_path"] / "repo-order-1")
+    _register_live_at(account_second_file, "order-sess-in-aaaorder", cli_env["tmp_path"] / "repo-order-2")
+
+    env = _env_without_shared_claude_dir(cli_env)
+    result = subprocess.run(
+        [sys.executable, str(_CLI_CAMP), "sessions", "--all-groups", "--json"],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(cli_env["tmp_path"]),
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    ok_rows = [row for row in payload if row["ok"] is True]
+    assert [row["group"] for row in ok_rows] == ["aaaorder", "zzzorder"]
+
+
+def test_camp_sessions_all_groups_with_a_named_group_refuses_with_zero_enumerations(
+    cli_env,
+) -> None:
+    """Naming a single group alongside `--all-groups` refuses before a single
+    harness is ever asked anything — proven by a counter the fake harness's
+    enumeration subprocess itself increments on every invocation, which must
+    stay at zero.
+    """
+    calls_file = cli_env["tmp_path"] / "enumerate-calls.tsv"
+
+    result = _camp(
+        cli_env,
+        "sessions",
+        "--all-groups",
+        "--group",
+        "mygroup",
+        extra_env={"CAMP_FAKE_ENUMERATE_CALLS_FILE": str(calls_file)},
+    )
+
+    _assert_clean_refusal(result, needle="--all-groups", verb="sessions")
+    assert not calls_file.exists() or calls_file.read_text() == ""
+
+
+def test_camp_sessions_absent_all_groups_output_is_unchanged(cli_env) -> None:
+    """No `--all-groups`/`-g` anywhere → the pre-existing default surface,
+    unaffected by the new option's presence in the CLI."""
+    result = _camp(cli_env, "sessions", "--group", "mygroup")
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == ""
 
 
 def test_camp_sessions_one_store_failing_still_returns_the_others_rows(cli_env) -> None:

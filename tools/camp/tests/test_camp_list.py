@@ -513,3 +513,152 @@ class TestListEmptySubprocess:
         assert r.stdout == "", (
             f"empty group list must produce no stdout, got {r.stdout!r}"
         )
+
+
+# ---------------------------------------------------------------------------
+# camp list --all-groups / -g — every configured group's workspaces, merged.
+# ---------------------------------------------------------------------------
+
+
+def _write_group_toml_named(
+    groups_dir: Path, *, file_stem: str, group_name: str
+) -> None:
+    """Like `_write_group_toml`, but the TOML FILENAME can differ from the
+    `[group].name` it declares — used to prove ordering is by the declared
+    group name, not by config-file load order (which `load_all_groups` walks
+    alphabetically by FILENAME)."""
+    (groups_dir / f"{file_stem}.toml").write_text(
+        f'[group]\nname = "{group_name}"\n\n'
+        f"[[members]]\nname = \"repo_a\"\nrepo_root = \"/nonexistent/repo\"\n\n"
+        f'[branch]\npattern = "worktree-{{slug}}"\n'
+    )
+
+
+@pytest.fixture()
+def two_group_list_cli_env(tmp_path):
+    """Two configured groups, each with one seeded workspace, and a cwd
+    (tmp_path itself) from which NEITHER group resolves."""
+    config_dir = tmp_path / "camp-config"
+    groups_dir = config_dir / "groups"
+    groups_dir.mkdir(parents=True, exist_ok=True)
+    state_dir = tmp_path / "camp-state"
+    state_dir.mkdir(parents=True, exist_ok=True)
+
+    _write_group_toml(groups_dir, "groupa")
+    _write_group_toml(groups_dir, "groupb")
+
+    env = {**os.environ}
+    env["CAMP_CONFIG_DIR"] = str(config_dir)
+    env["CAMP_STATE_DIR"] = str(state_dir)
+
+    ws_a = _seed_manifest_raw("groupa", "ws-a", state_dir=state_dir)
+    ws_b = _seed_manifest_raw("groupb", "ws-b", state_dir=state_dir)
+
+    return {
+        "env": env,
+        "tmp_path": tmp_path,
+        "ws_a": ws_a,
+        "ws_b": ws_b,
+    }
+
+
+def _camp_from(env_dict: dict, cwd: Path, *args) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [sys.executable, str(_CLI_CAMP), *args],
+        capture_output=True,
+        text=True,
+        env=env_dict["env"],
+        cwd=str(cwd),
+    )
+
+
+class TestListAllGroups:
+    def test_merges_every_configured_groups_workspaces(
+        self, two_group_list_cli_env
+    ) -> None:
+        r = _camp_from(
+            two_group_list_cli_env, two_group_list_cli_env["tmp_path"], "list",
+            "--all-groups",
+        )
+        assert r.returncode == 0, f"stdout: {r.stdout}\nstderr: {r.stderr}"
+        lines = [ln for ln in r.stdout.splitlines() if ln]
+        slugs = {ln.split(None, 1)[0] for ln in lines}
+        assert slugs == {"ws-a", "ws-b"}
+
+    def test_json_carries_the_group_each_row_belongs_to(
+        self, two_group_list_cli_env
+    ) -> None:
+        r = _camp_from(
+            two_group_list_cli_env, two_group_list_cli_env["tmp_path"], "list",
+            "--all-groups", "--json",
+        )
+        assert r.returncode == 0, r.stderr
+        rows = json.loads(r.stdout)
+        assert {row["group"] for row in rows} == {"groupa", "groupb"}
+        assert {row["slug"] for row in rows} == {"ws-a", "ws-b"}
+        assert set(rows[0].keys()) == {"slug", "branch", "workspace_path", "group"}
+
+    def test_short_and_long_spellings_produce_byte_identical_output(
+        self, two_group_list_cli_env
+    ) -> None:
+        """Compares TWO REAL invocations' captured stdout — not two calls into
+        the same formatting helper — so a spelling that silently diverged in
+        argv handling would actually be caught."""
+        long_form = _camp_from(
+            two_group_list_cli_env, two_group_list_cli_env["tmp_path"], "list",
+            "--all-groups",
+        )
+        short_form = _camp_from(
+            two_group_list_cli_env, two_group_list_cli_env["tmp_path"], "list", "-g",
+        )
+        assert long_form.returncode == 0, long_form.stderr
+        assert short_form.returncode == 0, short_form.stderr
+        assert long_form.stdout == short_form.stdout
+        assert long_form.stdout != ""
+
+    def test_rows_are_ordered_by_group_name_not_by_config_file_load_order(
+        self, tmp_path
+    ) -> None:
+        """`load_all_groups` walks config files alphabetically by FILENAME.
+        Here the file that sorts FIRST declares the group that sorts LAST by
+        NAME, so a merge that forgot to sort by group would print zzzgroup
+        before aaagroup — the opposite of what this asserts."""
+        config_dir = tmp_path / "camp-config"
+        groups_dir = config_dir / "groups"
+        groups_dir.mkdir(parents=True, exist_ok=True)
+        state_dir = tmp_path / "camp-state"
+        state_dir.mkdir(parents=True, exist_ok=True)
+
+        _write_group_toml_named(groups_dir, file_stem="aaa-file", group_name="zzzgroup")
+        _write_group_toml_named(groups_dir, file_stem="zzz-file", group_name="aaagroup")
+
+        env = {**os.environ}
+        env["CAMP_CONFIG_DIR"] = str(config_dir)
+        env["CAMP_STATE_DIR"] = str(state_dir)
+        env_dict = {"env": env}
+
+        _seed_manifest_raw("zzzgroup", "slug-in-zzz", state_dir=state_dir)
+        _seed_manifest_raw("aaagroup", "slug-in-aaa", state_dir=state_dir)
+
+        r = _camp_from(env_dict, tmp_path, "list", "--all-groups", "--json")
+        assert r.returncode == 0, r.stderr
+        rows = json.loads(r.stdout)
+        assert [row["group"] for row in rows] == ["aaagroup", "zzzgroup"]
+
+    def test_absent_the_option_output_is_unchanged(self, list_cli_env) -> None:
+        """No `--all-groups`/`-g` anywhere → identical to the pre-existing
+        single-group `camp list` surface."""
+        r = _camp(list_cli_env, "list", "--group", "listgroup")
+        assert r.returncode == 0, r.stderr
+        lines = {ln.split(None, 1)[0] for ln in r.stdout.splitlines() if ln}
+        assert lines == {"ws-alpha", "ws-beta"}
+
+    def test_all_groups_with_a_named_group_refuses(self, two_group_list_cli_env) -> None:
+        r = _camp_from(
+            two_group_list_cli_env, two_group_list_cli_env["tmp_path"],
+            "list", "--all-groups", "--group", "groupa",
+        )
+        assert r.returncode != 0, r.stdout
+        assert r.stdout == ""
+        assert "camp list: " in r.stderr
+        assert "--all-groups" in r.stderr

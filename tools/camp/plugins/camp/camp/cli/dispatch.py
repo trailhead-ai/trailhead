@@ -48,6 +48,32 @@ _VERSION = "0.1.0"
 # (bootstrap skipped). _resolve_group_for_command consults it.
 _TRAILHEAD_PATHS_OK = False
 
+#: The two spellings of the widen-to-every-group option, and the only verbs it
+#: has any meaning for. Held here, once, so `read_all_groups_option` (the
+#: reader `main()` consults for every verb) and its applicability check can
+#: never drift against each other.
+ALL_GROUPS_FLAGS = ("--all-groups", "-g")
+_ALL_GROUPS_VERBS = frozenset({"list", "sessions"})
+
+
+def read_all_groups_option(args: list[str]) -> tuple[list[str], bool]:
+    """Consume every ``--all-groups``/``-g`` from *args*, order-preserving.
+
+    Returns ``(remaining, present)``. This is the ONE reader both `camp list`
+    and `camp sessions` are widened through — `main()` calls it exactly once,
+    on the raw argv, before a verb is classified or a group is resolved, so
+    the two entry points cannot drift on what spells the option or where its
+    applicability is decided.
+    """
+    remaining: list[str] = []
+    present = False
+    for arg in args:
+        if arg in ALL_GROUPS_FLAGS:
+            present = True
+        else:
+            remaining.append(arg)
+    return remaining, present
+
 
 def _not_on_path_warning() -> None:
     """Print a one-time warning if this tool's bin/ dir is not on $PATH."""
@@ -265,6 +291,29 @@ def main() -> None:
         return
 
     # ---------------------------------------------------------------------------
+    # --all-groups / -g — read ONCE here, before a single group is ever
+    # resolved, before any group config is loaded, and before any session or
+    # workspace is enumerated. A refusal below therefore costs nothing: not
+    # one file has been read yet and no harness has been asked anything.
+    # ---------------------------------------------------------------------------
+    scan_rest = argv[1:] if first else []
+    scan_rest, all_groups = read_all_groups_option(scan_rest)
+    if all_groups:
+        canonical, _kind = _resolve_verb(first) if first else (first, "live")
+        if canonical not in _ALL_GROUPS_VERBS:
+            print(f"camp {first}: --all-groups has no meaning here", file=sys.stderr)
+            sys.exit(1)
+        if any(a == "--group" or a.startswith("--group=") for a in scan_rest):
+            print(
+                f"camp {canonical}: --all-groups and --group name every group and "
+                "one group at once — pass one or the other",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        _dispatch_all_groups_command(canonical, scan_rest)
+        return
+
+    # ---------------------------------------------------------------------------
     # Group-aware command routing
     # ---------------------------------------------------------------------------
     _SKIP_GROUP_RESOLVE = frozenset({
@@ -305,6 +354,29 @@ def main() -> None:
     # spine module-load cost.
     from ..spine import main as _spine_main
     _spine_main()
+
+
+def _dispatch_all_groups_command(verb: str, rest: list[str]) -> None:
+    """Answer `list` or `sessions` for every configured group in one invocation.
+
+    Reached ONLY from `main()`'s early `--all-groups`/`-g` handling, before any
+    single group is resolved — the whole point of the option is an answer with
+    no one group to resolve against, and refusing a named group alongside it
+    (in `main()`, before this function ever runs) is what keeps that true.
+    `verb` is already the canonicalized verb name.
+    """
+    from ..group.config import GroupConfigError
+    from .session import _cmd_sessions_group_cli
+    from .workspace import _cmd_ls_all_groups_cli
+
+    try:
+        if verb == "list":
+            _cmd_ls_all_groups_cli(rest, env=None)
+        else:
+            _cmd_sessions_group_cli(rest, None, None, all_groups=True)
+    except GroupConfigError as e:
+        print(f"camp: config error: {e}", file=sys.stderr)
+        sys.exit(1)
 
 
 def _dispatch_group_command(
