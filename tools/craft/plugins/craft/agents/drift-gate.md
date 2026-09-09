@@ -70,11 +70,13 @@ Rules:
    can tell the check was considered and not just skipped.
 4. **Tests that run their subject** — read every test the diff adds or changes. Each must *execute*
    the thing it names — call the function, invoke the CLI, load the file through its real loader,
-   run the artifact through its consumer — before it asserts. An assertion over source shape (a
-   symbol exists, a path is on disk, a string appears in a markdown file) never ran the code and is
-   DRIFT, not a minor nit: it cannot fail when the behaviour breaks. The same holds for its mirror,
-   a test whose subject is that something is *gone*. A test-contract item covered only by such a
-   test is uncovered.
+   run the artifact through its consumer — before it asserts. An assertion over source the test
+   never ran (a symbol is defined, a committed path is on disk, a string appears in a markdown file)
+   is DRIFT, not a minor nit: it cannot fail when the behaviour breaks. The same holds for its
+   mirror, a test whose subject is that something is *gone*. A test-contract item covered only by
+   such a test is uncovered. **Existence asserted over a file the test itself generated is not this
+   finding** — that is an observed output; flag it only where the contents were checkable and the
+   test settled for the path.
 5. **Mutation transcript** — for each item in the intent document's `**Test contract:**` (or
    `## Test contract`), read the transcript in the commit body. A present transcript must, per item,
    name the test node id, the mutation kind applied and the exact edit, and **which assertion**

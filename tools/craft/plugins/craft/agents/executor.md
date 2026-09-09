@@ -149,9 +149,12 @@ any. Always:
   run is testing existing behaviour, not yours — fix the test.
 - **Every test executes its subject.** Call the function, invoke the CLI, load the file through its
   real loader, run the artifact through its consumer — then assert on what came back. An assertion
-  that a symbol exists, a file is on disk, or a sentence appears in a markdown source has inspected
-  the code, not run it, and does not count. Nor does its mirror: never assert that something is
-  *gone*. When the task removes something, test the behaviour the removal was for.
+  about source the test never ran — a symbol is defined, a committed file is on disk, a sentence
+  appears in a markdown artifact — inspected the code rather than running it, and does not count.
+  Nor does its mirror: never assert that something is *gone*; test the behaviour the removal was
+  for. Asserting that a file **your test just generated** exists is fine — that is an output, not a
+  source inspection — but assert its contents where you can: existence proves the step ran, contents
+  prove it did the right thing.
 
 Use the repo's existing test framework, directory layout, and helpers. Place tests where the
 existing suite expects them, and prefer testing business logic over pure rendering.

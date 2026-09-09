@@ -30,26 +30,46 @@ does not ship, and it does not count as coverage.
 
 Everything else is a nice-to-have. These five are the floor.
 
-### Presence is not behaviour
+### Presence is not behaviour — unless your test produced it
 
-Banned, in every language and every test suite:
+The line is not what the assertion *looks* like. It is whether **the test ran the
+code that produced the thing being asserted about.** Existence is a perfectly good
+observation when it is the observable output of a step you just executed.
+
+Legitimate — the subject ran, and the file on disk is its result:
 
 ```
-assert hasattr(module, "resolve")          # the symbol exists
-assert "never do X" in skill_md            # the instruction is written down
-assert (root / "config.toml").exists()     # the file is on disk
-assert isinstance(handler, Callable)       # something callable was defined
+run_install(env=env)                                   # ← the subject ran
+assert (claude_dir / "rules" / "trailhead-craft.md").exists()
 ```
 
-Each of these is the same mistake: it inspects the shape of the code instead of
-running it. A function that exists and returns the wrong answer passes all four.
+Banned — nothing ran, and the assertion describes the repo as checked out:
 
-The fix is never to delete the intent — it is to find the consumer and run it.
-The symbol exists *so that* a caller can use it: call it and assert the result.
-The file is on disk *so that* a loader can read it: load it and assert what the
+```
+assert hasattr(module, "resolve")            # the symbol exists
+assert "never do X" in skill_md              # the instruction is written down
+assert (repo_root / "config.toml").exists()  # the file was committed
+assert isinstance(handler, Callable)         # something callable was defined
+```
+
+Each banned form makes the same mistake: it inspects the shape of the source
+instead of running it. A function that exists and returns the wrong answer passes
+all four, on every commit, forever.
+
+The fix is never to delete the intent — it is to find the consumer and run it. The
+symbol exists *so that* a caller can use it: call it and assert the result. The
+committed file exists *so that* a loader can read it: load it and assert what the
 loader produced. If you cannot name a consumer that would break without the thing,
-you have found something with no behaviour to test, and the right move is to
-question whether it should exist at all.
+you have found something with no behaviour to test, and the question is whether it
+should exist at all.
+
+**Contents beat existence.** Where a generator, installer, or build step writes
+files, existence pins only that the step *ran*; contents pin that it did the *right
+thing*. A generator that creates every expected path and fills each with garbage
+passes an existence check clean. Assert on what is in the file — or better, on what
+the real loader makes of it — whenever the format lets you. Treat a bare existence
+assertion as the weakest acceptable form, reached for when the artifact is opaque
+or its contents are genuinely not the point, not as the target.
 
 ### Absence is not behaviour either
 
