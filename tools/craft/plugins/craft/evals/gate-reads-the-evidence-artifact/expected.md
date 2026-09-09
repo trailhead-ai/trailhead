@@ -71,7 +71,7 @@ independently.
 ## Expected failure — baseline arm
 
 Against `agents/drift-gate.md` as committed, condition 1 is expected to **fail**. The committed
-check 4 asks whether "the executor's report show[s] mutation evidence (break, RED, restore,
+mutation-transcript check asks whether "the executor's report show[s] mutation evidence (break, RED, restore,
 GREEN, empty diff)" — and the executor's report *does* say so. The committed gate is pointed at
 the report, which is the channel it structurally cannot trust, and the fixture's report makes
 the claim in good faith. The expected baseline behaviour is therefore **PASS on both variants**.

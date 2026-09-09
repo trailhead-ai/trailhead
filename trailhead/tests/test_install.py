@@ -426,13 +426,17 @@ class TestShellenvGuidance:
 # ---------------------------------------------------------------------------
 
 
-def _outpost_ruleset() -> tuple[str, str]:
-    """The ruleset name + content outpost's manifest declares, read from disk."""
-    manifest = load_manifest(_REPO_ROOT / "tools" / "outpost" / "capabilities.toml")
+def _declared_ruleset(tool: str) -> tuple[str, str]:
+    """The ruleset name + content *tool*'s manifest declares, read from disk."""
+    manifest = load_manifest(_REPO_ROOT / "tools" / tool / "capabilities.toml")
     # utf-8 explicitly: install pins it, and the ruleset carries non-ASCII prose
     # that a locale-default codec would fail to read (or read differently).
     content = (manifest.plugin_root / manifest.ruleset).read_text(encoding="utf-8")
     return f"trailhead-{manifest.tool_name}", content
+
+
+def _outpost_ruleset() -> tuple[str, str]:
+    return _declared_ruleset("outpost")
 
 
 class _RecordingHarness(ClaudeCodeHarness):
@@ -489,8 +493,11 @@ class TestRulesetInstall:
         ):
             rc = run_install(env=_env(tmp_path), quiet=True)
         assert rc == 0
-        assert _RecorderA.installs == [("claude_code", name)]
-        assert _RecorderB.installs == [("codex", name)]
+        # Every harness gets the same set — the subject is per-harness parity,
+        # not which plugins happen to declare a ruleset today.
+        assert {n for _, n in _RecorderA.installs} == {n for _, n in _RecorderB.installs}
+        assert ("claude_code", name) in _RecorderA.installs
+        assert ("codex", name) in _RecorderB.installs
 
     def test_declared_ruleset_installed_once_per_harness(self, tmp_path):
         harness = _RecordingHarness()
@@ -499,7 +506,10 @@ class TestRulesetInstall:
         ):
             rc = run_install(env=_env(tmp_path), quiet=True)
         assert rc == 0
-        assert harness.ruleset_calls == [_outpost_ruleset()]
+        # Once per harness: no ruleset name is installed twice in a single run.
+        names = [n for n, _ in harness.ruleset_calls]
+        assert len(names) == len(set(names)), names
+        assert harness.ruleset_calls.count(_outpost_ruleset()) == 1
 
     def test_ruleset_name_comes_from_the_plugin_key_not_the_manifest(
         self, tmp_path, capsys
@@ -541,6 +551,17 @@ class TestRulesetInstall:
             run_install(env=env, quiet=True)
         installed = tmp_path / "claude" / "rules" / f"{name}.md"
         assert installed.read_text(encoding="utf-8") == content
+
+    def test_craft_ruleset_written_to_the_injected_claude_dir(self, tmp_path):
+        """Craft owns the TDD rituals, so the testing posture ships with craft."""
+        env = {**_env(tmp_path), "TRAILHEAD_CLAUDE_DIR": str(tmp_path / "claude")}
+        source = _REPO_ROOT / "tools" / "craft" / "plugins" / "craft" / "rules.md"
+        with _patched(detected=True):
+            run_install(env=env, quiet=True)
+        installed = tmp_path / "claude" / "rules" / "trailhead-craft.md"
+        assert installed.read_text(encoding="utf-8") == source.read_text(
+            encoding="utf-8"
+        )
 
     def test_reinstall_is_a_no_op_and_reports_up_to_date(self, tmp_path, capsys):
         env = {**_env(tmp_path), "TRAILHEAD_CLAUDE_DIR": str(tmp_path / "claude")}
