@@ -11,8 +11,10 @@
 # Two denylists feed the gate:
 #   scripts/leak-gate-seams.denylist  committed structural seams, enforced
 #                                     everywhere including CI
-#   $LEAK_GATE_LOCAL_DENYLIST         identifying tokens, never tracked in any
-#     (default ~/.claude/leak-gate.denylist)
+#   $LEAK_GATE_LOCAL_DENYLIST         identifying tokens, kept out of THIS repo
+#     (default ~/.claude/leak-gate.denylist)  (it is chezmoi-managed, so it does
+#                                     live in the operator's private dotfiles
+#                                     repo — just never in a shipped surface)
 #
 # The machine-local one is layered on as OPTIONAL: a fresh clone or a CI runner
 # without it still gets the committed patterns rather than being blocked. The
