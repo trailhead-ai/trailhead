@@ -32,6 +32,18 @@ repos:
         pass_filenames: false
         always_run: true
 
+  # Agent cost-tier gate — refuse an agent that leaves `model:` or `effort:` to
+  # inheritance. Runs only on the agent files a commit actually touches;
+  # trailhead/tests/test_agent_tier_convention.py runs the same gate over the
+  # whole tree, so a commit and a suite run cannot disagree.
+  - repo: local
+    hooks:
+      - id: agent-tier-gate
+        name: agent tier gate (every agent declares model + effort)
+        language: system
+        entry: scripts/agent-tier-gate
+        files: ^tools/[^/]+/plugins/[^/]+/agents/.*\.md$
+
   # PEP 8 style enforcement via ruff (pycodestyle E/W + pyflakes F).
   # Rules and line-length are configured in pyproject.toml ([tool.ruff]).
   - repo: https://github.com/astral-sh/ruff-pre-commit

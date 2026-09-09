@@ -1,0 +1,106 @@
+#!/usr/bin/env python3
+"""agent-tier-gate — block an agent that leaves its cost tier to inheritance.
+
+`model:` and `effort:` are the two largest per-dispatch cost multipliers under
+trailhead's control. An agent omitting either inherits a value nobody chose, and
+the omission is invisible at review time because the field simply is not there.
+
+This is a lint over source text, not a behavioural contract, so it lives here as
+a gate rather than as a test: it runs as a `repo: local` pre-commit hook on every
+commit that touches an agent, and `trailhead/tests/test_agent_tier_convention.py`
+runs it too so a full-suite run reports the same verdict.
+
+It checks declaration, not choice: `haiku`/`low` for a mechanical agent and
+`opus`/`xhigh` for a synthesis agent are both correct. See
+`trailhead/docs/agent-cost-convention.md` for how to pick.
+
+Usage:
+  scripts/agent-tier-gate                # every shipped agent under tools/
+  scripts/agent-tier-gate <path> [...]   # the given agent files instead
+  scripts/agent-tier-gate --list         # print the set that would be scanned
+
+Exit: 0 clean · 1 one or more findings (prints relpath: reason).
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+
+VALID_MODELS = frozenset({"haiku", "sonnet", "opus"})
+VALID_EFFORTS = frozenset({"low", "medium", "high", "xhigh"})
+
+
+def frontmatter(text: str) -> str | None:
+    """The body of a closed YAML frontmatter block, or None if there is not one."""
+    if not text.startswith("---\n"):
+        return None
+    end = text.find("\n---", 3)
+    return text[3:end] if end > 0 else None
+
+
+def field(block: str, name: str) -> str | None:
+    for line in block.splitlines():
+        if line.strip().startswith(f"{name}:"):
+            return line.split(":", 1)[1].strip() or None
+    return None
+
+
+def findings_for(path: Path) -> list[str]:
+    """Every reason `path` fails the convention, as human-readable strings."""
+    block = frontmatter(path.read_text(encoding="utf-8"))
+    if block is None:
+        return ["no closed YAML frontmatter block, so it declares no cost tier"]
+    out: list[str] = []
+    for name, valid in (("model", VALID_MODELS), ("effort", VALID_EFFORTS)):
+        value = field(block, name)
+        if value is None:
+            out.append(
+                f"declares no `{name}:` — it would silently inherit a value nobody "
+                f"chose; pick one of {sorted(valid)}"
+            )
+        elif value not in valid:
+            out.append(f"declares {name} `{value}`, not one of {sorted(valid)}")
+    return out
+
+
+def agent_files(root: Path = REPO_ROOT) -> list[Path]:
+    return sorted(root.glob("tools/*/plugins/*/agents/*.md"))
+
+
+def scan(paths: list[Path]) -> dict[Path, list[str]]:
+    return {p: f for p in paths if (f := findings_for(p))}
+
+
+def main(argv: list[str]) -> int:
+    args = argv[1:]
+    if args[:1] == ["--list"]:
+        # The set this gate would scan, one path per line. Exists so a caller can
+        # check the enumeration is non-empty without reimplementing the glob: a
+        # gate that found nothing would otherwise certify the tree clean forever.
+        for path in agent_files():
+            print(path.relative_to(REPO_ROOT))
+        return 0
+    paths = [Path(a).resolve() for a in args] or agent_files()
+    offenders = scan(paths)
+    for path, reasons in offenders.items():
+        try:
+            shown = path.relative_to(REPO_ROOT)
+        except ValueError:
+            shown = path
+        for reason in reasons:
+            print(f"{shown}: {reason}", file=sys.stderr)
+    if offenders:
+        print(
+            f"\nagent-tier-gate: {len(offenders)} agent(s) leave a cost tier to "
+            f"inheritance — see trailhead/docs/agent-cost-convention.md",
+            file=sys.stderr,
+        )
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv))
