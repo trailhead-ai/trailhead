@@ -348,6 +348,38 @@ topic-rooted path, or when the parent carries no `## Enumerated states`, this st
 
 ### 7. Define Tasks
 
+**Before decomposing, resolve whether migration and backfill work is suppressed for this plan's
+target repository.** Pipe the linked spec's body through the renderer, by the same absolute-path
+convention `skills/plan/SKILL.md`'s step 7 uses:
+
+```sh
+lore record show spec/<spec-name> \
+  | ${CLAUDE_PLUGIN_ROOT}/scripts/migration_bar.py [--target-repo <name>]
+```
+
+`--target-repo` names the plan's target repository — the camp member this plan builds against. Omit
+it when the spec's `## Maturity` section names exactly one repository; supply it once the section
+names more than one.
+
+State the resolved level and its basis in your returned summary — a dispatched run has no live
+session for an in-session statement to reach.
+
+When the renderer's block opens with the literal token `— suppressed: migration and backfill`,
+define no migration or backfill task for this plan — unless an acceptance criterion requires
+preserving existing state, in which case name which criterion and keep the task, decomposed
+normally. When the block opens with `— not-suppressed: migration and backfill`, decompose migration
+and backfill work normally.
+
+Both safe directions: on a non-zero exit, decompose migration work normally, and state the
+renderer's own `reason-code:` in your returned summary — that vocabulary is authored by this script,
+not read from repository content. And at any resolved level other than `prototype`, decompose
+migration work normally.
+
+**When migration and backfill tasks are suppressed, write the decision into the plan's `Given
+Axioms` in step 8, as an axiom citing the spec's own `## Maturity` section** — the renderer's
+resolved `target-repo`, `level`, and `basis`, and that it reported `suppressed`; and, where the
+acceptance-criteria carve-out reopened them instead, the criterion that did.
+
 Break the feature into buildable tasks. Each task is the component-shaped unit beneath a slice — see
 `skills/_shared/slice.md` for the quality bar a slice must clear and the value floor it's read
 against. Order so that:
