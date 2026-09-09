@@ -68,7 +68,14 @@ Rules:
    there is no subsequent task, so this check does not apply** — say so in the report
    (`next-task readiness: N/A — standalone leaf`) rather than letting it pass silently, so a reader
    can tell the check was considered and not just skipped.
-4. **Mutation transcript** — for each item in the intent document's `**Test contract:**` (or
+4. **Tests that run their subject** — read every test the diff adds or changes. Each must *execute*
+   the thing it names — call the function, invoke the CLI, load the file through its real loader,
+   run the artifact through its consumer — before it asserts. An assertion over source shape (a
+   symbol exists, a path is on disk, a string appears in a markdown file) never ran the code and is
+   DRIFT, not a minor nit: it cannot fail when the behaviour breaks. The same holds for its mirror,
+   a test whose subject is that something is *gone*. A test-contract item covered only by such a
+   test is uncovered.
+5. **Mutation transcript** — for each item in the intent document's `**Test contract:**` (or
    `## Test contract`), read the transcript in the commit body. A present transcript must, per item,
    name the test node id, the mutation kind applied and the exact edit, and **which assertion**
    failed. "The test went RED" is not a transcript: going red and pinning the behaviour are
@@ -81,7 +88,7 @@ the run needed. Do not mark it deficient for reporting one. It is DRIFT only if 
 transcript at all, or if the transcript settles on redundancy or "defence in depth" without showing
 the cited protections removed together.
 
-5. **Observation points** — the report carries, per asserted property, the exact command the
+6. **Observation points** — the report carries, per asserted property, the exact command the
    executor ran to enumerate the sites the property must hold at, and that command's result count.
    **Re-run one of them.** If the count differs, or a site in the enumeration does not carry the
    property, that is DRIFT — name the site.

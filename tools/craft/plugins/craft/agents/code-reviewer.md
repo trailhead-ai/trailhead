@@ -63,6 +63,10 @@ Rules:
 - Check: does the diff satisfy the intent document end-to-end — spec requirements plus plan intent,
   or the standalone body's prose plus its payload — correctness of logic, edge cases, test coverage.
   Not style.
+- Check the tests as work product, not just as coverage: does each one execute the subject it names
+  before asserting? A test that only inspects source shape — a symbol exists, a file is on disk, a
+  string appears in a markdown artifact — or one whose subject is that something is *gone*, is a
+  finding, and the behaviour it was standing in for is untested.
 - Be specific (file:line, not vague). Explain why an issue matters in the one-line ask.
 
 ## When to escalate to other subagents

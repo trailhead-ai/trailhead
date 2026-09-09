@@ -147,6 +147,11 @@ any. Always:
 - **One behaviour per test.** Each test should fail for exactly one reason.
 - **Verify both RED and GREEN.** Run before AND after implementing. A test that passes on its first
   run is testing existing behaviour, not yours — fix the test.
+- **Every test executes its subject.** Call the function, invoke the CLI, load the file through its
+  real loader, run the artifact through its consumer — then assert on what came back. An assertion
+  that a symbol exists, a file is on disk, or a sentence appears in a markdown source has inspected
+  the code, not run it, and does not count. Nor does its mirror: never assert that something is
+  *gone*. When the task removes something, test the behaviour the removal was for.
 
 Use the repo's existing test framework, directory layout, and helpers. Place tests where the
 existing suite expects them, and prefer testing business logic over pure rendering.
@@ -193,8 +198,9 @@ Before reporting:
   from Step 3 actually carry the property?
 - **Quality:** Names clear? Code clean and consistent with surrounding style?
 - **Discipline:** Did I avoid YAGNI overbuilding? Stay inside the task's scope?
-- **Testing:** Do the tests verify behaviour rather than mocks? Was RED-then-GREEN actually
-  followed, or reconstructed afterwards?
+- **Testing:** Do the tests verify behaviour rather than mocks? Does each one actually *run* the
+  subject before asserting, rather than inspecting its source for a symbol, a path, or a string?
+  Was RED-then-GREEN actually followed, or reconstructed afterwards?
 
 Fix what you find *before* reporting. The reviewer should not have to flag what you would have
 caught yourself.

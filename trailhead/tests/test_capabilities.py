@@ -462,8 +462,13 @@ class TestRuleset:
         assert m.ruleset is None
 
     def test_existing_manifests_without_ruleset_still_load(self):
-        for path in (_LORE_MANIFEST, _CRAFT_MANIFEST, _CAMP_MANIFEST):
+        for path in (_LORE_MANIFEST, _CAMP_MANIFEST):
             assert load_manifest(path).ruleset is None
+
+    def test_craft_manifest_resolves_its_declared_ruleset_to_a_readable_file(self):
+        """A declared ruleset must resolve under the plugin root and be readable."""
+        m = load_manifest(_CRAFT_MANIFEST)
+        assert m.ruleset_path().read_text(encoding="utf-8").strip() != ""
 
     def test_ruleset_traversal_raises(self, tmp_path):
         _make_plugin_dir(tmp_path, "badtool")

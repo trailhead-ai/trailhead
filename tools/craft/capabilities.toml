@@ -32,6 +32,11 @@
 #     execute's After All Tasks simplify phase. Selecting `simplifier` without this
 #     directory would leave that path unresolvable in a composed install.
 #
+# `ruleset` carries the always-loaded testing posture — what a test must do to be
+# a test, and the TDD loop the executor and drift-gate enforce. It ships with
+# craft because craft owns those rituals; a harness without craft has no executor
+# to hold to them.
+#
 # Dependency worth knowing when hand-picking a selection: the `gauntlet` skill owns
 # the spec's draft -> ready edge (brainstorm and plan deliberately cannot freeze a
 # spec). A selection carrying `brainstorm` or `plan` but NOT `gauntlet` therefore
@@ -44,3 +49,4 @@
 [tool]
 name = "craft"
 base = ["skills/_shared", "templates", "scripts"]
+ruleset = "rules.md"
