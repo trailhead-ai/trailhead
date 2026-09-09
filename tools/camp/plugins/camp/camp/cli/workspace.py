@@ -51,7 +51,7 @@ def _cmd_ls_all_groups_cli(args: list[str], env: dict[str, str] | None) -> None:
     identical to the single-group and no-group-configured cases.
 
     A group config camp cannot parse is skipped BY NAME on stderr rather than
-    failing the whole answer (:func:`~camp.provision.lifecycle.load_answerable_groups`)
+    failing the whole answer (:func:`~camp.provision.lifecycle.answerable_groups_or_refuse`)
     — one broken sibling must not blank every other group's rows. With every
     configured group unparsable, or with none configured at all, this NEVER
     falls through to the legacy standalone-worktree registry `spine.py`'s
@@ -60,23 +60,17 @@ def _cmd_ls_all_groups_cli(args: list[str], env: dict[str, str] | None) -> None:
     the reason on stderr instead, exiting nonzero only when every group
     failed to parse.
     """
-    from ..provision.lifecycle import cmd_ls_group, load_answerable_groups, render_workspace_list
+    from ..provision.lifecycle import (
+        answerable_groups_or_refuse,
+        cmd_ls_group,
+        render_workspace_list,
+    )
     from .common import _groups_dir
 
     as_json = "--json" in args
-    groups, skipped = load_answerable_groups(_groups_dir())
-
-    for detail in skipped:
-        print(f"camp list: {detail} — skipping", file=sys.stderr)
+    groups = answerable_groups_or_refuse(_groups_dir(), verb="list")
 
     if not groups:
-        if skipped:
-            print(
-                "camp list: could not answer for any configured group — "
-                "every group config failed to parse; fix a config above and re-run",
-                file=sys.stderr,
-            )
-            sys.exit(1)
         print("camp list: no groups configured — nothing to list", file=sys.stderr)
         render_workspace_list([], as_json=as_json)
         return

@@ -375,13 +375,24 @@ class TestListPureRead:
 # ---------------------------------------------------------------------------
 
 
-def _write_group_toml(groups_dir: Path, group_name: str) -> None:
-    """Write a minimal group config TOML with a non-existent (fake) repo_root."""
-    (groups_dir / f"{group_name}.toml").write_text(
+def _write_group_toml_named(
+    groups_dir: Path, *, file_stem: str, group_name: str
+) -> None:
+    """Write a minimal group config TOML whose FILENAME may differ from the
+    `[group].name` it declares — the general form, used directly to prove
+    ordering is by the declared group name and not by config-file load order
+    (which `load_all_groups` walks alphabetically by FILENAME)."""
+    (groups_dir / f"{file_stem}.toml").write_text(
         f'[group]\nname = "{group_name}"\n\n'
         f"[[members]]\nname = \"repo_a\"\nrepo_root = \"/nonexistent/repo\"\n\n"
         f'[branch]\npattern = "worktree-{{slug}}"\n'
     )
+
+
+def _write_group_toml(groups_dir: Path, group_name: str) -> None:
+    """Write a minimal group config TOML with a non-existent (fake) repo_root,
+    in the ordinary shape where the filename matches the declared name."""
+    _write_group_toml_named(groups_dir, file_stem=group_name, group_name=group_name)
 
 
 def _seed_manifest_raw(group_name: str, slug: str, *, state_dir: Path) -> Path:
@@ -518,20 +529,6 @@ class TestListEmptySubprocess:
 # ---------------------------------------------------------------------------
 # camp list --all-groups / -g — every configured group's workspaces, merged.
 # ---------------------------------------------------------------------------
-
-
-def _write_group_toml_named(
-    groups_dir: Path, *, file_stem: str, group_name: str
-) -> None:
-    """Like `_write_group_toml`, but the TOML FILENAME can differ from the
-    `[group].name` it declares — used to prove ordering is by the declared
-    group name, not by config-file load order (which `load_all_groups` walks
-    alphabetically by FILENAME)."""
-    (groups_dir / f"{file_stem}.toml").write_text(
-        f'[group]\nname = "{group_name}"\n\n'
-        f"[[members]]\nname = \"repo_a\"\nrepo_root = \"/nonexistent/repo\"\n\n"
-        f'[branch]\npattern = "worktree-{{slug}}"\n'
-    )
 
 
 @pytest.fixture()

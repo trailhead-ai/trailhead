@@ -246,6 +246,39 @@ def load_answerable_groups(groups_dir: Path) -> tuple[list[dict[str, Any]], list
     return groups, skipped
 
 
+def answerable_groups_or_refuse(groups_dir: Path, *, verb: str) -> list[dict[str, Any]]:
+    """:func:`load_answerable_groups`, plus the two notices a cross-group answer owes.
+
+    The cross-group verbs (`camp list`, `camp sessions`) narrow their answer
+    for the same reasons and must say so in the same words, so both the
+    per-config skip line and the every-config-unparsable refusal are stated
+    here once rather than at each verb:
+
+    * one ``camp <verb>: <detail> — skipping`` line per config that failed to
+      parse, naming it, while every group that DID parse still answers;
+    * a refusal — nonzero exit, a stated reason — when configs were present
+      and NONE of them parsed. Zero rows would be indistinguishable from "no
+      groups are configured", which is a different and false statement, so
+      this case must not answer at all.
+
+    Returns the groups that parsed. An EMPTY list is therefore exactly one
+    situation: *groups_dir* holds no configs. That case is left to the caller
+    to state, because the two verbs word it differently and reach it at
+    different points in their own flow.
+    """
+    groups, skipped = load_answerable_groups(groups_dir)
+    for detail in skipped:
+        print(f"camp {verb}: {detail} — skipping", file=sys.stderr)
+    if not groups and skipped:
+        print(
+            f"camp {verb}: could not answer for any configured group — "
+            "every group config failed to parse; fix a config above and re-run",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    return groups
+
+
 def _provision_member_and_flip(
     group: dict[str, Any],
     slug: str,

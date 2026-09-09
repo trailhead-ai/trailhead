@@ -350,7 +350,6 @@ class TestLiveSessionPoolQueriesEachStoreExactlyOnce:
 
     def test_each_store_is_enumerated_exactly_once(self, monkeypatch):
         import camp.cli.session as cli_session
-        import camp.group.config as group_config
         import camp.launch.profile as profile
         import camp.launch.session as launch_session
 
@@ -360,7 +359,6 @@ class TestLiveSessionPoolQueriesEachStoreExactlyOnce:
             {"group": {"name": "g2"}, "launch": {"account": "/acct/b"}},
             {"group": {"name": "g3"}},
         ]
-        monkeypatch.setattr(group_config, "load_all_groups", lambda *a, **k: groups)
 
         calls: list = []
 
@@ -370,7 +368,9 @@ class TestLiveSessionPoolQueriesEachStoreExactlyOnce:
 
         monkeypatch.setattr(launch_session, "enumerate_records", fake_enumerate_records)
 
-        records, failures, total = cli_session._enumerate_live_sessions_pool(None, env={})
+        records, failures, total = cli_session._enumerate_live_sessions_pool(
+            None, env={}, groups=groups
+        )
 
         assert total == 3
         assert len(calls) == 3
@@ -388,7 +388,6 @@ class TestLiveSessionPoolBoundsAHangingStore:
         import subprocess
 
         import camp.cli.session as cli_session
-        import camp.group.config as group_config
         import camp.launch.profile as profile
         import camp.launch.session as launch_session
         from datetime import datetime, timezone
@@ -399,7 +398,6 @@ class TestLiveSessionPoolBoundsAHangingStore:
             {"group": {"name": "g1"}, "launch": {"account": "/acct/hangs"}},
             {"group": {"name": "g2"}, "launch": {"account": "/acct/answers"}},
         ]
-        monkeypatch.setattr(group_config, "load_all_groups", lambda *a, **k: groups)
 
         answer = [
             SessionRecord(
@@ -420,7 +418,9 @@ class TestLiveSessionPoolBoundsAHangingStore:
 
         monkeypatch.setattr(launch_session, "enumerate_records", fake_enumerate_records)
 
-        records, failures, total = cli_session._enumerate_live_sessions_pool(None, env={})
+        records, failures, total = cli_session._enumerate_live_sessions_pool(
+            None, env={}, groups=groups
+        )
 
         assert total == 2
         assert records == answer

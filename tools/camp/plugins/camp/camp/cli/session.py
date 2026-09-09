@@ -1130,34 +1130,11 @@ def _store_failure_payload(failure: dict) -> dict:
     return {"ok": False, "account": failure["account"], "reason": failure["reason"]}
 
 
-def _enumerate_sessions(group: dict, workspace: Path | None, env: dict[str, str] | None):
-    """Return the live session records, or None when they cannot be determined.
-
-    None is the honest "I could not tell" — a harness camp cannot name, a harness
-    with no enumeration concept, a missing binary, a non-zero exit, or output the
-    seam refuses to decode. It is deliberately distinct from `[]`, which is the
-    equally honest "nothing is running": the caller prints a notice for the first
-    and stays silent for the second.
-    """
-    from ..launch.profile import harness_for
-    from ..launch.session import enumerate_records
-
-    harness = harness_for(group)
-    if harness is None:
-        return None
-    try:
-        return enumerate_records(
-            harness, workspace, dict(env) if env is not None else dict(os.environ)
-        )
-    except Exception:  # noqa: BLE001 — every failure of a read-only query degrades
-        return None
-
-
 def _enumerate_live_sessions_pool(
     scope: Path | None,
     *,
     env: dict[str, str] | None,
-    groups: list[dict] | None = None,
+    groups: list[dict],
 ) -> tuple[list, list[dict], int]:
     """Enumerate live sessions once per (harness, credential store) candidate.
 
@@ -1192,21 +1169,17 @@ def _enumerate_live_sessions_pool(
     (harness, account) in :func:`_addressable_harnesses`, and this walks it
     once, so no store is ever enumerated twice.
 
-    *groups* lets a caller supply an already-loaded (and possibly
-    already-degraded) config list instead of this function loading it fresh —
-    the `--all-groups` seam uses this to reuse a single load that has already
-    skipped an unparsable sibling by name, rather than re-loading here with no
-    chance to degrade. ``None`` (every other caller) preserves the original
-    behavior: load every configured group itself.
+    *groups* is supplied by the caller rather than loaded here, and is the SAME
+    list the caller attributes the returned records against — one load per
+    invocation, so the pool and the attribution can never be built from two
+    different readings of the config directory. It also lets a caller pass a
+    list that has already degraded (the `--all-groups` seam skips an unparsable
+    sibling BY NAME before calling), which a load performed in here would have
+    no way to report.
     """
     from ..launch.session import enumerate_records
 
     resolved_env = dict(env) if env is not None else dict(os.environ)
-    if groups is None:
-        from ..group.config import load_all_groups
-        from .common import _groups_dir
-
-        groups = load_all_groups(_groups_dir())
     stores = _addressable_harnesses(groups, env=resolved_env)
 
     records: list = []
@@ -1356,7 +1329,7 @@ def _cmd_sessions_group_cli(
     therefore the narrowing below) at `None` — the whole cross-store pool.
 
     Under `all_groups=True`, group configs are loaded once through
-    :func:`~camp.provision.lifecycle.load_answerable_groups`, which degrades a
+    :func:`~camp.provision.lifecycle.answerable_groups_or_refuse`, which degrades a
     config camp cannot parse instead of failing the whole answer: one broken
     sibling is skipped BY NAME on stderr while every other group still
     answers, exit 0. Every group unparsable is a refusal (nonzero exit, a
@@ -1476,18 +1449,15 @@ def _cmd_sessions_group_cli(
     all_groups_configs: list[dict] | None = None
     all_groups_no_groups_configured = False
     if all_groups:
-        from ..provision.lifecycle import load_answerable_groups
+        from ..provision.lifecycle import answerable_groups_or_refuse
         from .common import _groups_dir
 
-        all_groups_configs, skipped_configs = load_answerable_groups(_groups_dir())
-        for detail in skipped_configs:
-            print(f"camp sessions: {detail} — skipping", file=sys.stderr)
-        if not all_groups_configs and skipped_configs:
-            _die(
-                "camp sessions: could not answer for any configured group — "
-                "every group config failed to parse; fix a config above and re-run"
-            )
-        all_groups_no_groups_configured = not all_groups_configs and not skipped_configs
+        all_groups_configs = answerable_groups_or_refuse(_groups_dir(), verb="sessions")
+        # An empty list is the ONE case that helper returns rather than
+        # refusing: no group configs at all. Stated below rather than here,
+        # because `--recoverable` returns before that point and answers from
+        # the harness's default store without it.
+        all_groups_no_groups_configured = not all_groups_configs
 
     if recoverable:
         if slug:
@@ -1514,6 +1484,19 @@ def _cmd_sessions_group_cli(
             return "every configured group"
         return f"group {group['group']['name']!r}"
 
+    # ONE reading of the config directory per invocation, shared by the
+    # enumeration pool below and by the attribution that pairs each returned
+    # record with a group: two loads could disagree about which groups exist,
+    # and a row would then be attributed against a different set than the pool
+    # that produced it.
+    if all_groups:
+        session_groups = all_groups_configs or []
+    else:
+        from ..group.config import load_all_groups
+        from .common import _groups_dir
+
+        session_groups = load_all_groups(_groups_dir())
+
     if all_groups_no_groups_configured:
         print(
             "camp sessions: no groups configured — nothing to answer for",
@@ -1522,7 +1505,7 @@ def _cmd_sessions_group_cli(
         records, failures = [], []
     else:
         records, failures, stores_total = _enumerate_live_sessions_pool(
-            scope, env=env, groups=all_groups_configs
+            scope, env=env, groups=session_groups
         )
 
         if stores_total == 0:
@@ -1549,15 +1532,8 @@ def _cmd_sessions_group_cli(
                 )
 
     resolved_env = dict(env) if env is not None else dict(os.environ)
-    if all_groups:
-        attribution_groups = all_groups_configs or []
-    else:
-        from ..group.config import load_all_groups
-        from .common import _groups_dir
-
-        attribution_groups = load_all_groups(_groups_dir())
     attributed = [
-        (record, _attribute_session(record.cwd, attribution_groups, env=resolved_env))
+        (record, _attribute_session(record.cwd, session_groups, env=resolved_env))
         for record in records
     ]
     if scope is None:

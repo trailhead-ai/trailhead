@@ -47,6 +47,9 @@ class _FakeHarness:
     def session_launch_env_set(self, account, *, env=None):
         return {}
 
+    def session_transcripts(self, workspace=None, *, env=None):
+        return []
+
 
 # ---------------------------------------------------------------------------
 # the bookmark surface is gone
@@ -139,11 +142,12 @@ def test_sessions_path_resolves_addressable_harnesses(monkeypatch) -> None:
 
 
 def test_resume_path_resolves_the_group_harness(monkeypatch) -> None:
-    """`camp launch --resume`'s enumeration asks the group's harness (cli.session:_enumerate_sessions)."""
+    """`camp launch --resume`'s pool asks the group's harness (cli.session:_session_pool)."""
     import camp.cli.session as cli_session
 
     harness = _FakeHarness()
     seen: list[dict] = []
+    record = type("SessionRecord", (), {"session_id": "sess-1"})()
 
     def fake_harness_for(group):
         seen.append(group)
@@ -151,9 +155,13 @@ def test_resume_path_resolves_the_group_harness(monkeypatch) -> None:
 
     monkeypatch.setattr("camp.launch.profile.harness_for", fake_harness_for)
     monkeypatch.setattr(
-        "camp.launch.session.enumerate_records", lambda h, ws, env: ["record"]
+        "camp.launch.session.enumerate_records", lambda h, ws, env: [record]
     )
 
     group = {"group": {"name": "g"}}
-    assert cli_session._enumerate_sessions(group, None, {}) == ["record"]
+    _transcripts, live, answered, _accounts = cli_session._session_pool(
+        [group], verb="launch", env={}
+    )
+    assert live == [record]
+    assert [store.harness for store in answered] == [harness]
     assert seen == [group]
