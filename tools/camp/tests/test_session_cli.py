@@ -1955,10 +1955,9 @@ def test_camp_sessions_with_no_addressable_store_at_all_degrades(cli_env) -> Non
 def test_camp_sessions_lists_a_session_running_under_a_non_default_credential_store(
     cli_env,
 ) -> None:
-    """The measured defect this task closes, pinned end to end: a shell bound
-    to the default credential store still sees a session running under a
-    group's OWN declared account, because the listing now asks every declared
-    store instead of whichever one the shell happens to carry.
+    """A shell bound to the default credential store still sees a session
+    running under a group's OWN declared account: the listing asks every
+    declared store, not whichever one the shell happens to carry.
     """
     account = cli_env["tmp_path"] / "nondefault-account"
     launch_dir = cli_env["tmp_path"] / "repo-nondefault"
