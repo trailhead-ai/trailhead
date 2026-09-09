@@ -1848,3 +1848,99 @@ class TestSetupActivatePhaseRetry:
         _cmd_setup_group_cli(
             ["--status", "--name", "nonexistent-slug"], group, env, dry_run=False
         )
+
+
+class TestRemoveGuardRefusesOnADroppedStore:
+    """`camp remove`'s session guard's ``on_drop`` wiring: a group whose
+    harness resolves but whose store cannot be bound must REFUSE the
+    removal outright, the same fail-closed posture `gather_pool` takes on a
+    store it cannot read — never degrade to a notice-and-continue the way
+    the fail-open listing verbs (`camp sessions`, `camp kill`) do.
+    """
+
+    def test_a_dropped_store_reaches_the_removal_guards_refusal(self, monkeypatch):
+        from camp.cli.lifecycle import _refuse_on_dropped_store
+        from camp.cli.session import _addressable_harnesses
+        from camp.launch import teardown_guard
+        import camp.launch.profile as profile
+
+        class _UnbindableHarness:
+            name = "unbindable"
+
+            def session_launch_env_set(self, account, *, env=None):
+                raise ValueError("account is not absolute")
+
+            def session_launch_env_unset(self):
+                return []
+
+        monkeypatch.setattr(profile, "harness_for", lambda group: _UnbindableHarness())
+        groups = [{"group": {"name": "flaky"}, "launch": {"account": "rel/path"}}]
+
+        with pytest.raises(teardown_guard.EnumerationUnavailable) as excinfo:
+            _addressable_harnesses(groups, env={}, on_drop=_refuse_on_dropped_store)
+
+        assert "flaky" in str(excinfo.value)
+        assert "not absolute" in str(excinfo.value)
+
+    def test_camp_remove_itself_refuses_rather_than_proceeding(
+        self, monkeypatch, tmp_path, capsys
+    ):
+        """The wiring, exercised through the real `camp remove` handler: a
+        group whose store cannot be bound must reach the SAME refusal a
+        store camp cannot READ gets — never let removal proceed as though
+        nothing was there to block it.
+
+        The default (no-account) probe is given a WORKING harness so the
+        pool is never merely empty — the only way this test can refuse is
+        via the `flaky` group's own dropped store, isolating the wiring
+        from `gather_pool`'s separate "no harness at all" fail-closed path.
+        """
+        import camp.cli.lifecycle as lifecycle_mod
+        import camp.cli.session as session_mod
+        import camp.launch.profile as profile
+
+        class _UnbindableHarness:
+            name = "unbindable"
+
+            def session_launch_env_set(self, account, *, env=None):
+                raise ValueError("account is not absolute")
+
+            def session_launch_env_unset(self):
+                return []
+
+        class _WorkingHarness:
+            name = "working"
+
+            def session_launch_env_set(self, account, *, env=None):
+                return {}
+
+            def session_launch_env_unset(self):
+                return []
+
+            def session_transcripts(self, workspace=None, *, env=None):
+                return []
+
+            def session_enumerate(self, workspace=None):
+                return ["true"]
+
+            def parse_session_list(self, output):
+                return []
+
+        def fake_harness_for(config: dict):
+            name = (config.get("group") or {}).get("name")
+            return _UnbindableHarness() if name == "flaky" else _WorkingHarness()
+
+        group = _make_group_config("flaky", [{"name": "repo_a", "repo_root": "/tmp/fake-repo"}])
+        env = _camp_state_env(tmp_path)
+
+        monkeypatch.setattr(profile, "harness_for", fake_harness_for)
+        monkeypatch.setattr(session_mod, "_parsable_groups", lambda: [group])
+
+        with pytest.raises(SystemExit) as excinfo:
+            lifecycle_mod._cmd_remove_group_cli(["myslug"], group, env, dry_run=False)
+
+        assert excinfo.value.code != 0
+        err = capsys.readouterr().err
+        assert "flaky" in err
+        assert "not absolute" in err
+        assert "removal is irreversible" in err

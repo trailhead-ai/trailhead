@@ -55,6 +55,13 @@ _TRAILHEAD_PATHS_OK = False
 ALL_GROUPS_FLAGS = ("--all-groups", "-g")
 _ALL_GROUPS_VERBS = frozenset({"list", "sessions"})
 
+#: Verbs whose trailing argv is an opaque payload forwarded to something else
+#: — never camp's own flags. `camp foreach <cmd…>` forwards everything after
+#: its own `--name`/`--fail-fast`/`--json` to the wrapped command verbatim, so
+#: a `-g` or `--all-groups` in THAT command's own argv (e.g. `git log -g`)
+#: must never be scanned for camp's widen-to-every-group option at all.
+_OPAQUE_PAYLOAD_VERBS = frozenset({"foreach"})
+
 
 def read_all_groups_option(args: list[str]) -> tuple[list[str], bool]:
     """Consume every ``--all-groups``/``-g`` from *args*, order-preserving.
@@ -296,7 +303,7 @@ def main() -> None:
     # workspace is enumerated. A refusal below therefore costs nothing: not
     # one file has been read yet and no harness has been asked anything.
     # ---------------------------------------------------------------------------
-    scan_rest = argv[1:] if first else []
+    scan_rest = argv[1:] if first and first not in _OPAQUE_PAYLOAD_VERBS else []
     scan_rest, all_groups = read_all_groups_option(scan_rest)
     if all_groups:
         canonical, _kind = _resolve_verb(first) if first else (first, "live")

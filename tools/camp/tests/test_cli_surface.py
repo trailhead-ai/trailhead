@@ -490,6 +490,37 @@ def test_all_groups_has_no_meaning_for_a_verb_that_does_not_read_it(
     assert "config error" not in (result.stdout + result.stderr)
 
 
+def test_camp_foreach_passes_a_payload_flag_named_like_all_groups_through_unchanged(
+    tmp_path: Path,
+) -> None:
+    """`camp foreach <cmd…>` forwards EVERYTHING after the verb (and its own
+    `--name`/`--fail-fast`/`--json` flags) to the wrapped command verbatim —
+    `-g`/`--all-groups` there belongs to that command, not to camp. The
+    pinned regression: `--all-groups`/`-g` used to be scanned for across the
+    WHOLE of argv before the verb was even classified, so `camp foreach git
+    log -g` died with "--all-groups has no meaning here" instead of ever
+    reaching `git log`.
+    """
+    worktree = tmp_path / "trailhead" / ".claude" / "worktrees" / "myslug"
+    worktree.mkdir(parents=True)
+    (worktree / ".workspace-manifest.json").write_text(
+        '{"name": "myslug", "repos": [{"name": "repo-a"}]}', encoding="utf-8"
+    )
+    env = {
+        "WORKSPACE_ROOT": str(tmp_path),
+        "CAMP_CONFIG_DIR": str(tmp_path / "config"),
+        "CAMP_STATE_DIR": str(tmp_path / "state"),
+    }
+
+    result = _run(
+        ["foreach", "--name", "myslug", "echo", "-g", "--all-groups"], env=env
+    )
+
+    assert "has no meaning here" not in result.stderr
+    assert result.returncode == 0, result.stderr
+    assert "-g --all-groups" in result.stdout
+
+
 def _assert_clean_refusal(result, *, needle: str, verb: str) -> None:
     assert result.returncode != 0, result.stdout
     assert result.stdout == ""

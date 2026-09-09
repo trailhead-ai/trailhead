@@ -409,7 +409,9 @@ def _account_label(account: str | None) -> str:
     return f"account {account!r}" if account is not None else "the default account"
 
 
-def _addressable_harnesses(groups, *, env: dict[str, str] | None = None) -> list:
+def _addressable_harnesses(
+    groups, *, env: dict[str, str] | None = None, on_drop=None
+) -> list:
     """Every (harness, credential store) camp can ask about sessions.
 
     A reference addresses a SESSION, not a group. Naming a group, or standing in
@@ -434,10 +436,12 @@ def _addressable_harnesses(groups, *, env: dict[str, str] | None = None) -> list
     both come from :func:`camp.launch.profile.harness_store_for`, which asks
     the harness.
 
-    A group whose harness camp cannot name — or whose declared account the
-    harness refuses to bind — contributes nothing rather than failing the
-    lookup: one bad group must not make every other group's sessions
-    unaddressable.
+    A group whose harness camp cannot name contributes nothing rather than
+    failing the lookup: one bad group must not make every other group's
+    sessions unaddressable. A group whose harness DID resolve but whose
+    declared account the harness refuses to bind is different — that store
+    was a real candidate a moment ago, so dropping it is never silent: see
+    *on_drop*.
 
     The default (no-account) store is ALWAYS a member of the pool, regardless
     of what any configured group declares — including when every configured
@@ -446,19 +450,45 @@ def _addressable_harnesses(groups, *, env: dict[str, str] | None = None) -> list
     groups are configured; the dedupe above already keys the pool by
     (harness, account), so a group that itself declares no account still
     contributes the default store exactly once.
+
+    *on_drop*, when given, is called with ``(group_config, error)`` for every
+    group whose store :func:`~camp.launch.profile.harness_store_for` raised
+    :class:`~camp.launch.profile.StoreBindingError` for, INSTEAD OF this
+    function's own default notice — the fail-closed ``camp remove`` guard
+    passes one that refuses outright rather than degrading, because a store
+    camp cannot bind is a session it cannot see, and a removal guard must
+    never read that as "nothing to block on".
     """
-    from ..launch.profile import harness_store_for
+    from ..launch.profile import harness_store_for, StoreBindingError
 
     resolved_env = dict(env) if env is not None else dict(os.environ)
     found: dict[tuple[str, str | None], object] = {}
     for config in groups or []:
-        store = harness_store_for(config, env=resolved_env)
+        try:
+            store = harness_store_for(config, env=resolved_env)
+        except StoreBindingError as e:
+            if on_drop is not None:
+                on_drop(config, e)
+            else:
+                name = (config.get("group") or {}).get("name", "?")
+                print(
+                    f"camp: could not address group {name!r}'s credential "
+                    f"store — {e}",
+                    file=sys.stderr,
+                )
+            continue
         if store is None:
             continue
         key = (_harness_display_name(store), store.account)
         found.setdefault(key, store)
 
-    default_store = harness_store_for({}, env=resolved_env)
+    try:
+        default_store = harness_store_for({}, env=resolved_env)
+    except StoreBindingError:
+        # No declaring group to name for the anonymous default probe — a
+        # bind failure here degrades exactly like the harness-unnameable
+        # case it sits alongside.
+        default_store = None
     if default_store is not None:
         key = (_harness_display_name(default_store), default_store.account)
         found.setdefault(key, default_store)
@@ -1561,9 +1591,16 @@ def _cmd_sessions_group_cli(
         else:
             attributed = _sessions_for_group(attributed, group["group"]["name"])
             if not already_notified_unanswerable:
-                from ..launch.profile import harness_store_for
+                from ..launch.profile import StoreBindingError, harness_store_for
 
-                if harness_store_for(group, env=resolved_env) is None:
+                try:
+                    group_store_unaddressable = (
+                        harness_store_for(group, env=resolved_env) is None
+                    )
+                except StoreBindingError:
+                    group_store_unaddressable = True
+
+                if group_store_unaddressable:
                     # This group's own credential store never entered the
                     # pool at all — distinct from the pool answering with
                     # zero rows for it, which is a legitimate empty listing.

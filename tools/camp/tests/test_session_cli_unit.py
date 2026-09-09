@@ -382,6 +382,60 @@ class TestAddressableHarnessesStoreKeying:
             assert store.env["BASE"] == "1"
 
 
+class _UnbindableHarness:
+    """A harness camp CAN name (`harness_for` resolves it), whose declared
+    account it refuses to bind — a store that was a real candidate a moment
+    ago, distinct from a group whose harness camp never heard of."""
+
+    name = "unbindable"
+
+    def session_launch_env_set(self, account, *, env=None):
+        raise ValueError("account is not absolute")
+
+    def session_launch_env_unset(self):
+        return []
+
+
+class TestAddressableHarnessesDroppedStoreIsNeverSilent:
+    """A group whose harness resolves but whose store cannot be bound is a
+    dropped candidate, not a silently-absent one — the caller states which
+    group and why, or refuses outright via `on_drop`."""
+
+    def test_a_dropped_store_prints_a_notice_naming_the_group_and_reason(
+        self, monkeypatch, capsys
+    ):
+        import camp.cli.session as cli_session
+        import camp.launch.profile as profile
+
+        monkeypatch.setattr(profile, "harness_for", lambda group: _UnbindableHarness())
+        groups = [{"group": {"name": "flaky"}, "launch": {"account": "rel/path"}}]
+
+        stores = cli_session._addressable_harnesses(groups, env={})
+
+        assert stores == []
+        err = capsys.readouterr().err
+        assert "flaky" in err
+        assert "not absolute" in err
+
+    def test_on_drop_replaces_the_default_notice(self, monkeypatch, capsys):
+        import camp.cli.session as cli_session
+        import camp.launch.profile as profile
+
+        monkeypatch.setattr(profile, "harness_for", lambda group: _UnbindableHarness())
+        groups = [{"group": {"name": "flaky"}, "launch": {"account": "rel/path"}}]
+
+        seen = []
+
+        def on_drop(config, error):
+            seen.append((config["group"]["name"], str(error)))
+
+        stores = cli_session._addressable_harnesses(groups, env={}, on_drop=on_drop)
+
+        assert stores == []
+        assert seen == [("flaky", "account is not absolute")]
+        assert capsys.readouterr().err == ""
+
+
 class TestLiveSessionPoolQueriesEachStoreExactlyOnce:
     """`_enumerate_live_sessions_pool` walks the (harness, store) pool once —
     the pool itself is already deduplicated, and this proves the WALK adds no

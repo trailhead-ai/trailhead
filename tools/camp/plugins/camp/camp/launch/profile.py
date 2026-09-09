@@ -207,18 +207,39 @@ class HarnessStore:
         return self.harness.session_retention_days(env=self.env)
 
 
+class StoreBindingError(Exception):
+    """*group*'s harness is nameable, but its declared store could not be
+    bound — a relative or control-character ``account``, a
+    ``TRAILHEAD_CLAUDE_DIR`` conflict, or a harness with no launch seam at
+    all (``session_launch_env_set``/``session_launch_env_unset`` answering
+    ``None``).
+
+    Distinct from :func:`harness_store_for` answering plain ``None`` (camp
+    cannot name a harness for the group at all — see that function's
+    docstring): THIS is a group whose harness camp DID resolve, so a caller
+    dropping it silently would lose a store that was, moments ago, a real
+    candidate. The message is the harness's own reason, unwrapped, so a
+    caller can name both the group and why in one notice.
+    """
+
+
 def harness_store_for(group: dict, *, env: dict[str, str] | None = None) -> HarnessStore | None:
     """The (harness, credential store) *group*'s declared account resolves to.
 
-    ``None`` when camp cannot name a harness for *group* at all (the same
-    degrading posture :func:`harness_for` takes), OR when the harness refuses
-    to bind the declared account, OR states no launch support at all
-    (``session_launch_env_set``/``session_launch_env_unset`` answering
-    ``None``). All three degrade the SAME way here — contributing no
-    candidate — because this is a read path: one group whose store camp
-    cannot resolve must not blank the pool's answer for every other group's
-    store, the same reasoning that makes an unrecognized harness contribute
-    nothing rather than fail the whole lookup.
+    ``None`` when camp cannot name a harness for *group* at all — the same
+    degrading posture :func:`harness_for` takes, and the ONE condition this
+    function still answers silently: one group's harness camp never heard of
+    must not blank the pool's answer for every other group's store, the same
+    reasoning that makes an unrecognized harness contribute nothing rather
+    than fail the whole lookup.
+
+    Raises :class:`StoreBindingError` when the harness DOES resolve but
+    refuses to bind the declared account, or states no launch support at all
+    — a caller must not treat this the same as "unnameable harness": the
+    harness was real, the group loaded, and the store still vanished. A
+    caller building a pool from many groups is expected to catch this per
+    group and say which group and why, never to let it stay silent the way
+    an unrecognized harness does.
 
     Deliberately calls ``session_launch_env_set``/``session_launch_env_unset``
     directly rather than going through the launch engine's own account
@@ -245,11 +266,18 @@ def harness_store_for(group: dict, *, env: dict[str, str] | None = None) -> Harn
     try:
         binding = harness.session_launch_env_set(account, env=resolved_env)
         scrub = harness.session_launch_env_unset()
-    except Exception:  # noqa: BLE001 — a store camp cannot bind to contributes nothing
-        return None
+    except Exception as e:  # noqa: BLE001 — the harness's own reason, surfaced, not swallowed
+        raise StoreBindingError(str(e)) from e
     if binding is None or scrub is None:
-        return None
+        raise StoreBindingError(
+            f"{_harness_display_name_for(harness)} declares no launch support"
+        )
 
     store_env = {k: v for k, v in resolved_env.items() if k not in set(scrub)}
     store_env.update(binding)
     return HarnessStore(harness=harness, account=account, env=store_env)
+
+
+def _harness_display_name_for(harness) -> str:
+    underlying = getattr(harness, "harness", harness)
+    return getattr(harness, "name", None) or type(underlying).__name__
