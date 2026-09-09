@@ -18,7 +18,6 @@ Invariants:
 - bare editable install does NOT pull in lore/craft/camp dists.
 """
 
-import importlib.metadata
 import os
 import subprocess
 import sys
@@ -119,28 +118,46 @@ def test_bin_camp_version_no_pip():
     assert "0.1.0" in result.stdout, f"expected '0.1.0' in output, got: {result.stdout!r}"
 
 
-def test_the_distribution_ships_only_the_trailhead_package():
-    """`tools/` is data, not distribution content (the Option B invariant).
+def test_the_tools_tree_is_not_importable_from_a_git_clone():
+    """`tools/` is plugin data reached via CLAUDE_PLUGIN_ROOT, not distribution
+    content (the Option B invariant).
 
-    Read off the built distribution's own metadata rather than probing for the
-    absence of a `craft` import: `top_level.txt` and RECORD are what setuptools
-    actually produced from `[tool.setuptools] packages`, so this states what the
-    build ships instead of naming one thing it happens not to. A `tools/` tree
-    swept in by auto-discovery shows up here as an extra top-level entry, whatever
-    it is called.
+    Run the import in the exact scenario the module documents — a git clone with
+    the repo root on sys.path and nothing pip-installed — and assert the
+    observable consequence a developer would hit. Reading installed distribution
+    metadata cannot serve here: this project is never pip-installed, so that
+    oracle answers only on a machine that happens to have an editable install and
+    raises PackageNotFoundError everywhere else, CI included.
+
+    Probes every tool's package name so a new one swept in by auto-discovery is
+    caught, rather than naming `craft` alone. The bare `tools` directory is
+    deliberately not probed: any directory on sys.path is importable as a Python 3
+    implicit namespace package, and `tools/` holds no top-level module, so its
+    importability says nothing about what setuptools discovered.
     """
-    dist = importlib.metadata.distribution("trailhead")
-
-    top_level = (dist.read_text("top_level.txt") or "").split()
-    assert top_level == ["trailhead"], (
-        f"the distribution declares top-level packages {top_level}; only 'trailhead' "
-        "should ship. Check `[tool.setuptools] packages` in pyproject.toml — tools/ "
-        "must not be auto-discovered."
+    env = _clean_env()
+    env["PYTHONPATH"] = str(_REPO_ROOT)
+    program = (
+        "import importlib, sys\n"
+        "import trailhead  # the repo root really is importable\n"
+        "leaked = []\n"
+        "for name in ('craft', 'lore', 'camp', 'portage', 'outpost'):\n"
+        "    try:\n"
+        "        importlib.import_module(name)\n"
+        "    except ModuleNotFoundError:\n"
+        "        continue\n"
+        "    leaked.append(name)\n"
+        "print(','.join(leaked))\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", program], env=env, capture_output=True, text=True
     )
 
-    shipped_roots = {str(f).split("/")[0] for f in (dist.files or [])}
-    tool_dirs = sorted(r for r in shipped_roots if r in {"tools", "craft", "lore", "camp"})
-    assert not tool_dirs, (
-        f"the distribution ships {tool_dirs}, which are plugin data dirs reached via "
-        "CLAUDE_PLUGIN_ROOT, not importable packages"
+    assert result.returncode == 0, (
+        f"the probe itself failed, so nothing was proven:\n{result.stderr}"
+    )
+    leaked = [name for name in result.stdout.strip().split(",") if name]
+    assert not leaked, (
+        f"{leaked} are importable as top-level packages from a bare git clone; "
+        "tools/ must not be auto-discovered by setuptools"
     )
