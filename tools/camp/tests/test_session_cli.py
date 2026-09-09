@@ -903,6 +903,47 @@ def _register_live(cli_env, session_id: str, cwd: Path) -> None:
         handle.write(f"{session_id}\t{cwd}\n")
 
 
+def _seed_transcript_at(claude_dir: Path, session_id: str, cwd: Path) -> Path:
+    """Author one harness transcript directly under *claude_dir* — a credential
+    store OTHER than the fixture's shared TRAILHEAD_CLAUDE_DIR, for tests
+    spanning more than one store.
+    """
+    munged = str(cwd).replace("/", "-").replace(".", "-")
+    directory = claude_dir / "projects" / munged
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / f"{session_id}.jsonl"
+    path.write_text(json.dumps({"type": "user", "cwd": str(cwd)}) + "\n", encoding="utf-8")
+    return path
+
+
+def _add_account_group(cli_env, name: str, account: Path, repo: Path) -> None:
+    """Author a fresh fakeharness group declaring `[launch] account = account`."""
+    _init_git_repo(repo)
+    result = _camp(cli_env, "group", name, "--member", f"member={repo}")
+    assert result.returncode == 0, result.stderr
+    _set_harness_binary(cli_env["config_dir"], name, "fakeharness")
+    path = cli_env["config_dir"] / "groups" / f"{name}.toml"
+    path.write_text(
+        path.read_text(encoding="utf-8") + f'\n[launch]\naccount = "{account}"\n',
+        encoding="utf-8",
+    )
+
+
+def _env_without_shared_claude_dir(cli_env) -> dict[str, str]:
+    """The fixture's env, minus TRAILHEAD_CLAUDE_DIR and with a safe HOME.
+
+    Every OTHER test in this file relies on TRAILHEAD_CLAUDE_DIR pinning every
+    declared-nothing store to one shared, hermetic directory. Proving that two
+    DECLARED accounts resolve to two DIFFERENT stores needs the opposite: each
+    account's own `CLAUDE_CONFIG_DIR` binding, uncontested by that override —
+    Axiom 6 is kept instead by pointing HOME at a tmp_path directory nothing
+    else in the suite reads or writes.
+    """
+    env = {k: v for k, v in cli_env["env"].items() if k != "TRAILHEAD_CLAUDE_DIR"}
+    env["HOME"] = str(cli_env["tmp_path"] / "safe-home")
+    return env
+
+
 def _workspace_launch_dir(cli_env, slug: str) -> Path:
     """The directory a slug launch resolves to — the transcript's recorded cwd."""
     return Path(_new_workspace(cli_env, slug)).resolve()
@@ -1289,6 +1330,48 @@ def test_camp_launch_resume_ambiguous_json_rows_carry_the_candidate_key_set(
     assert payload[0]["root_missing"] is False
     assert payload[0]["unreadable"] is False
     assert _state_tree(cli_env) == before
+
+
+def test_camp_launch_resume_refuses_a_ref_matching_under_two_credential_stores(
+    cli_env,
+) -> None:
+    """The same collision `camp kill` refuses is refused on the resume path too:
+    both stores answer, the match is ambiguous, and nothing is spawned.
+    """
+    account_a = cli_env["tmp_path"] / "resume-account-a"
+    account_b = cli_env["tmp_path"] / "resume-account-b"
+    _add_account_group(
+        cli_env, "resumea", account_a, cli_env["tmp_path"] / "repo-resumea"
+    )
+    _add_account_group(
+        cli_env, "resumeb", account_b, cli_env["tmp_path"] / "repo-resumeb"
+    )
+
+    root_a = cli_env["tmp_path"] / "resume-root-a"
+    root_b = cli_env["tmp_path"] / "resume-root-b"
+    root_a.mkdir()
+    root_b.mkdir()
+    _seed_transcript_at(account_a, "resume-shared-aaa", root_a)
+    _seed_transcript_at(account_b, "resume-shared-bbb", root_b)
+
+    env = _env_without_shared_claude_dir(cli_env)
+    result = subprocess.run(
+        [sys.executable, str(_CLI_CAMP), "launch", "--resume", "resume-shared-"],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(cli_env["tmp_path"]),
+    )
+
+    assert result.returncode == 2, result.stderr
+    rows = [line for line in result.stdout.splitlines() if line.strip()]
+    assert len(rows) == 2, result.stdout
+    ids = {row.split()[1] for row in rows}
+    assert ids == {"resume-shared-aaa", "resume-shared-bbb"}
+    message = result.stderr.strip()
+    assert message.startswith("camp launch: 'resume-shared-' matches 2 sessions")
+    assert str(account_a) in message
+    assert str(account_b) in message
 
 
 def test_camp_launch_resume_zero_match_messages_differ_by_whether_the_pool_is_empty(
@@ -2568,6 +2651,47 @@ def test_camp_kill_with_an_ambiguous_ref_exits_two_and_lists_candidates(cli_env)
         "a longer prefix naming exactly one"
     ]
     assert _tmux_calls(cli_env, "kill-session") == []
+
+
+def test_camp_kill_refuses_a_ref_matching_under_two_credential_stores(cli_env) -> None:
+    """The pinned regression: before the pool was keyed by (harness, store), two
+    groups sharing a harness with different accounts collapsed to ONE queried
+    store, so a session sitting in the unqueried account was invisible and a
+    ref could resolve straight to the queried one. Re-keying makes both stores
+    answer, so the match is ambiguous — never a silent resolve.
+    """
+    account_a = cli_env["tmp_path"] / "account-a"
+    account_b = cli_env["tmp_path"] / "account-b"
+    _add_account_group(cli_env, "accta", account_a, cli_env["tmp_path"] / "repo-accta")
+    _add_account_group(cli_env, "acctb", account_b, cli_env["tmp_path"] / "repo-acctb")
+
+    root_a = cli_env["tmp_path"] / "root-a"
+    root_b = cli_env["tmp_path"] / "root-b"
+    root_a.mkdir()
+    root_b.mkdir()
+    _seed_transcript_at(account_a, "sess-shared-aaa", root_a)
+    _seed_transcript_at(account_b, "sess-shared-bbb", root_b)
+
+    env = _env_without_shared_claude_dir(cli_env)
+    result = subprocess.run(
+        [sys.executable, str(_CLI_CAMP), "kill", "sess-shared-"],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(cli_env["tmp_path"]),
+    )
+
+    assert result.returncode == 2, result.stderr
+    rows = result.stdout.strip().splitlines()
+    assert len(rows) == 2, result.stdout
+    assert {row.split()[1] for row in rows} == {"sess-shared-aaa", "sess-shared-bbb"}
+    message = result.stderr.strip()
+    assert message.startswith(
+        "camp kill: 'sess-shared-' matches 2 sessions (listed above) — "
+    )
+    assert str(account_a) in message
+    assert str(account_b) in message
+    assert message.endswith("re-run with a longer prefix naming exactly one")
 
 
 def test_camp_kill_of_a_session_still_present_after_the_kill_fails(cli_env) -> None:

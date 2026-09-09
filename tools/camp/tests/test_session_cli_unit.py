@@ -194,13 +194,15 @@ class TestSessionPoolLiveProbePosture:
         import camp.launch.session as launch_session
 
         harness = self._harness()
-        monkeypatch.setattr(cli_session, "_addressable_harnesses", lambda groups: [harness])
+        monkeypatch.setattr(
+            cli_session, "_addressable_harnesses", lambda groups, **k: [harness]
+        )
         # The enumeration could not be answered — the seam's documented `None`.
         monkeypatch.setattr(launch_session, "enumerate_records", lambda *a, **k: None)
         return cli_session._session_pool([], env={}, **kwargs)
 
     def test_the_resume_path_degrades_to_a_narrower_pool(self, monkeypatch):
-        transcripts, live, answered = self._pool(monkeypatch, verb="launch")
+        transcripts, live, answered, accounts = self._pool(monkeypatch, verb="launch")
         assert live == []
         assert len(answered) == 1
 
@@ -214,3 +216,122 @@ class TestSessionPoolLiveProbePosture:
         message = capsys.readouterr().err.strip()
         assert message.startswith("camp kill: ")
         assert "live" in message
+
+
+class _AccountAwareHarness:
+    """A harness stand-in whose account binding is a simple, opaque mapping —
+    proving camp reads no key of its own out of it (it uses whatever name
+    THIS harness chooses, never ``CLAUDE_CONFIG_DIR`` or any other credential
+    path camp might otherwise hardcode).
+    """
+
+    name = "acctharness"
+
+    def session_launch_env_unset(self):
+        return []
+
+    def session_launch_env_set(self, account, *, env=None):
+        if account is None:
+            return {}
+        return {"FAKE_STORE_DIR": account}
+
+
+class TestAddressableHarnessesStoreKeying:
+    """`_addressable_harnesses` keys its pool by (harness, credential store),
+    not by harness name alone — see the module docstring for why."""
+
+    def test_two_groups_sharing_a_harness_with_different_accounts_are_two_candidates(
+        self, monkeypatch
+    ):
+        """The pinned regression: before this keying, two groups sharing a
+        harness with different accounts collapsed into ONE queried store."""
+        import camp.cli.session as cli_session
+        import camp.launch.profile as profile
+
+        monkeypatch.setattr(profile, "harness_for", lambda group: _AccountAwareHarness())
+        groups = [
+            {"group": {"name": "g1"}, "launch": {"account": "/acct/a"}},
+            {"group": {"name": "g2"}, "launch": {"account": "/acct/b"}},
+        ]
+
+        stores = cli_session._addressable_harnesses(groups, env={})
+
+        assert len(stores) == 2
+        assert {s.account for s in stores} == {"/acct/a", "/acct/b"}
+
+    def test_two_groups_sharing_a_harness_with_the_same_account_are_one_candidate(
+        self, monkeypatch
+    ):
+        import camp.cli.session as cli_session
+        import camp.launch.profile as profile
+
+        monkeypatch.setattr(profile, "harness_for", lambda group: _AccountAwareHarness())
+        groups = [
+            {"group": {"name": "g1"}, "launch": {"account": "/acct/a"}},
+            {"group": {"name": "g2"}, "launch": {"account": "/acct/a"}},
+        ]
+
+        stores = cli_session._addressable_harnesses(groups, env={})
+
+        assert len(stores) == 1
+        assert stores[0].account == "/acct/a"
+
+    def test_groups_declaring_no_account_contribute_the_default_store_once(
+        self, monkeypatch
+    ):
+        import camp.cli.session as cli_session
+        import camp.launch.profile as profile
+
+        monkeypatch.setattr(profile, "harness_for", lambda group: _AccountAwareHarness())
+        groups = [{"group": {"name": "g1"}}, {"group": {"name": "g2"}}, {"group": {"name": "g3"}}]
+
+        stores = cli_session._addressable_harnesses(groups, env={})
+
+        assert len(stores) == 1
+        assert stores[0].account is None
+
+    def test_a_group_whose_harness_camp_cannot_name_contributes_nothing(self, monkeypatch):
+        import camp.cli.session as cli_session
+        import camp.launch.profile as profile
+
+        def fake_harness_for(group):
+            if group["group"]["name"] == "bad":
+                return None
+            return _AccountAwareHarness()
+
+        monkeypatch.setattr(profile, "harness_for", fake_harness_for)
+        groups = [{"group": {"name": "bad"}}, {"group": {"name": "good"}}]
+
+        stores = cli_session._addressable_harnesses(groups, env={})
+
+        assert len(stores) == 1
+
+    def test_no_groups_configured_yields_the_default_harness_profiles_default_store(self):
+        """No monkeypatching: the real ClaudeCodeHarness resolves, and its
+        `session_launch_env_set(None, ...)` is pure — no filesystem write."""
+        import camp.cli.session as cli_session
+
+        stores = cli_session._addressable_harnesses([], env={})
+
+        assert len(stores) == 1
+        assert stores[0].account is None
+
+    def test_each_stores_environment_differs_and_comes_from_the_harness(self, monkeypatch):
+        """camp names no credential path of its own: the store's env carries
+        exactly the mapping THIS harness chose to return, under whatever key
+        it named — never a hardcoded `CLAUDE_CONFIG_DIR` or similar."""
+        import camp.cli.session as cli_session
+        import camp.launch.profile as profile
+
+        monkeypatch.setattr(profile, "harness_for", lambda group: _AccountAwareHarness())
+        groups = [
+            {"group": {"name": "g1"}, "launch": {"account": "/acct/a"}},
+            {"group": {"name": "g2"}, "launch": {"account": "/acct/b"}},
+        ]
+
+        stores = cli_session._addressable_harnesses(groups, env={"BASE": "1"})
+
+        by_account = {s.account: s.env.get("FAKE_STORE_DIR") for s in stores}
+        assert by_account == {"/acct/a": "/acct/a", "/acct/b": "/acct/b"}
+        for store in stores:
+            assert store.env["BASE"] == "1"

@@ -228,7 +228,7 @@ def _cmd_remove_group_cli(
         session_groups = _parsable_groups()
         try:
             transcripts, live = teardown_guard.gather_pool(
-                _addressable_harnesses(session_groups), env=resolved_env
+                _addressable_harnesses(session_groups, env=resolved_env), env=resolved_env
             )
             holding = teardown_guard.blocking_sessions(
                 ws_dir,

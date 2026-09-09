@@ -439,3 +439,70 @@ def test_the_guard_module_neither_prints_nor_exits() -> None:
     }
     assert "sys.exit" not in attrs
     assert "os.environ" not in attrs
+
+
+# ---------------------------------------------------------------------------
+# camp remove's collision with the store-keyed pool (cli.session integration)
+# ---------------------------------------------------------------------------
+
+
+class _AccountAwareHarness:
+    """A harness stand-in whose transcripts differ per the bound account —
+    read through the `env` binding `_addressable_harnesses` composes, never
+    through a key the harness contract does not define."""
+
+    name = "acctharness"
+
+    def __init__(self, transcripts_by_account):
+        self._by_account = transcripts_by_account
+
+    def session_launch_env_unset(self):
+        return []
+
+    def session_launch_env_set(self, account, *, env=None):
+        return {} if account is None else {"FAKE_STORE_KEY": account}
+
+    def session_transcripts(self, workspace=None, *, env=None):
+        return list(self._by_account.get((env or {}).get("FAKE_STORE_KEY"), []))
+
+    def session_enumerate(self, workspace=None):
+        return ["probe"]
+
+    def parse_session_list(self, output):
+        return []
+
+
+def test_a_session_in_the_second_declared_store_still_blocks_removal(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The pinned regression for `camp remove`: before the pool camp gathers
+    was keyed by (harness, store), two groups sharing a harness collapsed to
+    ONE queried store, so `gather_pool` never saw a session sitting in the
+    account the collapse discarded — and removal proceeded over it. Feeding
+    `_addressable_harnesses`'s own output into `gather_pool` proves the
+    workspace is still recognized as blocked once both stores answer.
+    """
+    import camp.cli.session as cli_session
+    import camp.launch.profile as profile
+    import camp.launch.teardown_guard as guard
+
+    ws = _workspace(tmp_path, "g", "ws")
+    harness = _AccountAwareHarness({
+        None: [],
+        "/acct/b": [_transcript(_UUID_A, ws)],
+    })
+    monkeypatch.setattr(profile, "harness_for", lambda group: harness)
+    monkeypatch.setattr(guard.subprocess, "run", _ok())
+
+    groups = [
+        {"group": {"name": "g1"}},
+        {"group": {"name": "g2"}, "launch": {"account": "/acct/b"}},
+    ]
+    stores = cli_session._addressable_harnesses(groups, env={})
+
+    transcripts, live = guard.gather_pool(stores, env={})
+    blocking = guard.blocking_sessions(
+        ws, transcripts=transcripts, live_records=live, groups=groups, env={}, now=_NOW
+    )
+
+    assert [c.session_id for c in blocking] == [_UUID_A]

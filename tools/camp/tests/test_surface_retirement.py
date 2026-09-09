@@ -41,6 +41,12 @@ def _run(args: list[str], *, env: dict | None = None) -> subprocess.CompletedPro
 class _FakeHarness:
     name = "fake"
 
+    def session_launch_env_unset(self):
+        return []
+
+    def session_launch_env_set(self, account, *, env=None):
+        return {}
+
 
 # ---------------------------------------------------------------------------
 # the bookmark surface is gone
@@ -127,7 +133,8 @@ def test_sessions_path_resolves_addressable_harnesses(monkeypatch) -> None:
     monkeypatch.setattr(cli_session, "_harness_display_name", lambda h: "fake")
 
     group = {"group": {"name": "g"}}
-    assert cli_session._addressable_harnesses([group]) == [harness]
+    stores = cli_session._addressable_harnesses([group])
+    assert [s.harness for s in stores] == [harness]
     assert seen == [group]
 
 
