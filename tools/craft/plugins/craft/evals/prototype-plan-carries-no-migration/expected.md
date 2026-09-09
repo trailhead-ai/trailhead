@@ -170,18 +170,46 @@ All 18 runs (3 per fixture per arm) produced a result; none errored.
 | `negative.md` | **3/3** | **3/3** |
 | `control.md` | **3/3** | **3/3** |
 
-**`positive.md` — UPHELD**, against the registered bar (baseline ≤1/3, treatment ≥3/3): baseline
-0/3, treatment 3/3. Every baseline run independently declined to add a migration/backfill task
-— reading AC3's own "no automated preservation ... required" and treating the fixture's embedded
-"Migration bar (rendered)" section as informative even though baseline's own instructions never
-mention it — so condition 1 held 3/3 without any migration-bar routing in the arm at all. What no
-baseline run did was record the durable trace this task's contract requires: one run said nothing
-about suppression, one named only "the migration bar's suppression" with no specifics, and the
-closest run named the level (`prototype`) and target repo (`trailhead`) but never the basis
-(`stamp`) or the literal word "suppressed" tied to those fields. Treatment named all four —
-target-repo, level, basis, and the suppression — in a dedicated `Given Axioms` section on 3/3
-runs. The separation is real, but it is not where the pre-registration expected it: it is in the
-durable trace, not in whether a migration task got added.
+**`positive.md` — corrected, 2026-09-09: scored against the registered rule, not the full
+conjunction.** The registered bar names **condition 1 alone** (no migration/backfill task) as
+the suppression-firing metric: upheld if baseline fires it on ≤1/3 runs and treatment fires
+the full conjunction on ≥3/3; **falsified if both arms fire condition 1 on ≥2/3 runs each**.
+Measured: baseline fired condition 1 on **3/3** runs, not ≤1/3, and treatment's full-conjunction
+3/3 necessarily includes condition 1, so both arms suppress condition 1 on ≥2/3 runs each. That
+is the registered falsification condition. The table above's earlier verdict instead scored the
+full three-condition conjunction (0/3 for baseline, since baseline never recorded the durable
+trace) as if it were the pre-registered metric — substituting a metric the pre-registration did
+not name after the runs had already produced a result, and reading a null result on the
+registered suppression claim as a pass. That was wrong and is corrected here rather than left
+standing:
+
+**The suppression claim — FALSIFIED.** Every baseline run independently declined to add a
+migration/backfill task, reading AC3's own "no automated preservation ... required" and the
+fixture's embedded "Migration bar (rendered)" section as informative even though baseline's own
+instructions never mention the renderer — so the block's own legible text, not the routing this
+task adds, is what suppressed the task on this fixture. Registering the bar against condition 1
+alone (rather than the full conjunction) exists exactly to catch this: a baseline that reaches
+the right task-decomposition answer by reading the fixture's embedded block does not show the
+prose change did anything.
+
+**The durable-trace claim — UPHELD.** This is a separate, independently observed dimension, not
+a substitute for the falsified one, and it carries no pre-registered numbered bar of its own —
+the registered thresholds cover condition 1's firing rate only, so "upheld" here is a plain
+description of a clean, measured separation rather than a claim scored against a threshold. No
+baseline run recorded the durable trace this task's contract requires: one run said nothing about
+suppression, one named only "the migration bar's suppression" with no specifics, and the closest
+run named the level (`prototype`) and target repo (`trailhead`) but never the basis (`stamp`) or
+the literal word "suppressed" tied to those fields. Treatment named all four — target-repo,
+level, basis, and the suppression — in a dedicated `Given Axioms` section on 3/3 runs.
+
+**Read together: two distinct outcomes, not one blended verdict.** The change did not prove out
+on whether a migration task gets added on this fixture (falsified — the fixture's own embedded
+block already carries enough signal for a migration-bar-unaware baseline to suppress) — but it
+did prove out on whether the suppression decision leaves a durable, checkable trace an operator
+or a later slice-loop pass can read back (upheld, cleanly, 0/3 vs 3/3). Finding 2 below identifies
+why the suppression half could not be measured cleanly on this fixture — the same embedded block
+that lets treatment route correctly also hands baseline the answer — and registers a second
+measurement round that removes it from baseline's material.
 
 **`negative.md` — carve-out UPHELD against its own bar (treatment ≥2/3): 3/3.** But this
 fixture's differential **collapsed rather than separated**: baseline also fired the full
@@ -216,7 +244,11 @@ task-decomposition answer — does not. `negative.md` shows the carve-out surviv
 treatment, though the comparison against baseline is not this fixture's evidence for *why* — that
 credit is shared with AC3's own plain-language legibility on this fixture. `control.md` confirms
 neither arm regresses at `production`. Read together: AC10's behavioural half is closed for the
-durable-trace claim, and closed-but-not-isolated for the carve-out-survives claim.
+durable-trace claim, and closed-but-not-isolated for the carve-out-survives claim. It is **not**
+closed for the suppression claim itself — `positive.md`'s corrected scoring above shows the
+registered suppression bar was falsified on this instrument, because the fixture's own embedded
+block hands baseline enough signal to suppress unprompted. Round Two, registered below, exists
+to answer the suppression question on an instrument that does not make that mistake.
 
 ### The limit of this result, stated plainly
 
