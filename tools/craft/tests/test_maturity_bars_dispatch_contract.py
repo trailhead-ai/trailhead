@@ -23,8 +23,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pytest
-
 from test_maturity_bars_council_contract import discover_council_dispatchers
 
 REPO_ROOT = Path(__file__).parent.parent
@@ -415,15 +413,6 @@ def test_waived_concern_eval_fixtures_exist():
     )
 
 
-@pytest.mark.xfail(
-    reason=(
-        "Pass 1 of the stand-down-severity change (task/report-a-waived-concern-as-a-"
-        "stand-down-not-a-finding) added the withheld severity to the renderer's "
-        "stand-down: line; these hand-authored eval fixture blocks are stale by design "
-        "and Pass 2 regenerates and re-runs the eval arms."
-    ),
-    strict=True,
-)
 def test_waived_concern_eval_calibration_blocks_byte_match_the_renderer():
     for fixture_path in WAIVED_CONCERN_FIXTURES:
         text = fixture_path.read_text(encoding="utf-8")
