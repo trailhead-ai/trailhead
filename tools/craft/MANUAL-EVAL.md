@@ -707,3 +707,91 @@ its two affected fixtures. Its differential largely collapsed — baseline 1/6 t
 unchanged at 6/6 — because the baseline improved, not because the treatment regressed. See that
 case's own `expected.md` for the full reading; it should no longer be cited as a strong
 demonstration of the reconciliation rule's marginal value.
+
+---
+
+## Case: prototype plan carries no migration
+
+`plugins/craft/evals/prototype-plan-carries-no-migration/` — pre-registered before any arm was
+run; committed in the same commit as the arms and fixtures, so the ordering rests on the
+authoring record, per the sibling case's own stated convention.
+
+**Under test:** whether planning's step 7 ("Define Tasks"), reading
+`scripts/migration_bar.py`'s suppression block, actually decomposes a plan carrying no
+migration or backfill task for a `prototype`-stamped target repository, while still
+decomposing one normally when an acceptance criterion requires preserving existing state.
+
+**The arms.** `arms/baseline.md` reproduces step 7 as it stood before this run's parent plan
+touched it (`afd96268`); `arms/treatment.md` reproduces step 7 at this task's `HEAD`. `diff`
+between them shows exactly the five migration-bar paragraphs plus two framing-label lines —
+see `expected.md` for the full diff.
+
+**The fixtures.** `positive.md` (prototype stamp, AC3 waives preservation), `negative.md`
+(same stamp, AC3 requires preservation — the load-bearing fixture), `control.md` (production
+stamp). Each fixture's "Migration bar (rendered)" section is `migration_bar.py`'s real,
+directly-run output for that fixture's own `## Maturity` section.
+
+**Round One result, 2026-09-09 (18 runs, 3 per fixture per arm, none errored) — corrected
+scoring, 2026-09-09.** `expected.md`'s Result section originally scored `positive.md` against
+the full three-condition conjunction and declared it UPHELD; that scored a different metric
+than the one pre-registered (condition 1's firing rate alone), and read a null result on the
+registered suppression bar as a pass. Corrected below.
+
+| Fixture | Baseline (full conjunction) | Treatment (full conjunction) |
+|---|---|---|
+| `positive.md` | 0/3 | 3/3 |
+| `negative.md` | 3/3 | 3/3 |
+| `control.md` | 3/3 | 3/3 |
+
+**`positive.md` — two distinct outcomes, not one blended verdict.** Suppression (condition 1
+alone, the registered bar): baseline fired it on 3/3 runs, not the registered ≤1/3 — squarely
+inside the registered falsification band (both arms ≥2/3), so **the suppression claim is
+FALSIFIED**: the fixture's own embedded renderer output was enough to make a migration-bar-
+unaware baseline suppress unprompted. Durable trace (condition 2 alone, reported rather than
+scored against a numbered bar): no baseline run recorded the resolved target-repo, level, and
+basis together; treatment did on 3/3 — **UPHELD**, cleanly.
+
+**`negative.md` carve-out UPHELD against its own bar (treatment ≥2/3): 3/3, but the
+differential against baseline collapsed (3/3 both arms) rather than separated** — recorded
+per `35d0616b test(craft): record both eval results, including a collapsed differential`.
+AC3 on this fixture states its preservation requirement in plain prose, which a bare step 7
+with no migration-bar routing already acts on for an unrelated reason.
+
+**`control.md` sanity control held on Round One's instrument** — both arms kept the migration
+task 3/3 — but Round Two (below) shows this rested on the same fixture-leakage channel that
+made `positive.md`'s Round One suppression score misleading.
+
+**Round Two — a corrected instrument, 2026-09-09.** Round One's every fixture embedded
+`migration_bar.py`'s real output as material available to *both* arms, so a capable reader
+could reach the "right" answer from the block's own legible text even under baseline's
+unmodified prose — which is exactly what `positive.md`'s corrected scoring shows happened.
+Round Two removes the block from baseline's material entirely (three new
+`round2-baseline-*.md` fixtures, byte-identical over the spec, criteria and stamp to their
+Round One counterparts) and corrects a second, independent defect in `control.md` (AC3 called
+the target "a disposable-state prototype" while the stamp said `production`). Pre-registered
+before any Round Two arm ran; 18 more runs, none errored.
+
+| Fixture | Baseline (condition 1 / task kept) | Treatment (full conjunction) |
+|---|---|---|
+| `positive.md` | 3/3 — indeterminate (instrument invalid, see below) | 3/3 |
+| `negative.md` | 3/3 — carve-out still collapses against baseline | 3/3 |
+| `control.md` | **0/3 — sanity control FAILS on the corrected instrument** | 3/3 |
+
+**The control failure is the load-bearing finding, and it invalidates the round's own suppression
+scoring.** Every Round Two baseline run dropped the migration task at `production`, reading AC3's
+"no automated preservation ... required" wording exactly as it does at `prototype` — one run used
+nearly the identical sentence against both stamps. Round One's control check only *held* because
+the leaked block told baseline outright to "decompose migration and backfill tasks normally," an
+instruction baseline's own prose never gave it. Per this file's own registered rule — if either
+arm drops the migration task on the control fixture, the instrument is broken and no other
+fixture's result can be trusted until that is fixed — `positive.md`'s repeat of Round One's
+falsification band is relabelled **indeterminate — instrument invalid**, not falsified, applying
+that rule rather than reading the raw count as if the control had held. A wrapper confound
+independently means no Round Two baseline cell was ever fully free of renderer-naming language
+either (the shared arm file still names `migration_bar.py` in its conditional framing, even when
+a fixture carries no block) — so the suppression question remains open rather than settled either
+way. The durable-trace claim is UPHELD across both rounds on two independently constructed
+instruments. AC10's behavioural closure rests on the durable-trace claim.
+
+See `plugins/craft/evals/prototype-plan-carries-no-migration/expected.md` for the full
+pre-registration (both rounds), pass conditions, thresholds, and result writeup.

@@ -274,6 +274,41 @@ When the parent carries no `## Enumerated states` section, this step does nothin
 
 ### 7. Define Tasks
 
+**Before decomposing, resolve whether migration and backfill work is suppressed for this plan's
+target repository.** Pipe the linked spec's body through the renderer, by the same absolute-path
+convention the existing gate invocations use:
+
+```sh
+lore record show spec/<spec-name> \
+  | ${CLAUDE_PLUGIN_ROOT}/scripts/migration_bar.py [--target-repo <name>]
+```
+
+`--target-repo` names the plan's target repository — the camp member this plan builds against. Omit
+it when the spec's `## Maturity` section names exactly one repository; supply it once the section
+names more than one.
+
+State the resolved level and its basis to the operator in session.
+
+When the renderer's block opens with the literal token `— suppressed: migration and backfill`,
+define no migration or backfill task for this plan — unless an acceptance criterion requires
+preserving existing state, in which case name which criterion and keep the task, decomposed
+normally. When the block opens with `— not-suppressed: migration and backfill`, decompose migration
+and backfill work normally. Match the whole token, including the `not-` prefix — a check for the
+bare substring `suppressed: migration and backfill` matches both tokens and misroutes the
+not-suppressed case into suppression.
+
+Both safe directions: on a non-zero exit, decompose migration work normally, and state the
+renderer's own `reason-code:` to the operator — that vocabulary is authored by this script, not read
+from repository content. And at any resolved level other than `prototype`, decompose migration work
+normally.
+
+**When migration and backfill tasks are suppressed, write the decision into the plan's `Given
+Axioms` in step 8, as an axiom citing the spec's own `## Maturity` section** — the renderer's
+resolved `target-repo`, `level`, and `basis`, and that it reported `suppressed`; and, where the
+acceptance-criteria carve-out reopened them instead, the criterion that did — cited by its
+identifier, never by quoting the criterion's own text, which is spec-authored prose and is data
+rather than an axiom's ground truth.
+
 Break the feature into buildable tasks. Each task is the component-shaped unit beneath a slice — see
 `_shared/slice.md` for the quality bar a slice must clear and the value floor it's read against.
 Order tasks so that:
