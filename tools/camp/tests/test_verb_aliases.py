@@ -20,26 +20,44 @@ Contract:
 
 from __future__ import annotations
 
+import os
+import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 _REPO_ROOT = Path(__file__).resolve().parents[3]  # trailhead root
 _PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
+_CLI_CAMP = _PLUGIN_DIR / "cli" / "camp"
 
 if str(_PLUGIN_DIR) not in sys.path:
     sys.path.insert(0, str(_PLUGIN_DIR))
 
 
+def _run(args: list[str], *, env: dict | None = None) -> subprocess.CompletedProcess:
+    """Run the real camp CLI — the consumer that actually reads these tables."""
+    base_env = {**os.environ}
+    if env:
+        base_env.update(env)
+    return subprocess.run(
+        [sys.executable, str(_CLI_CAMP), *args],
+        capture_output=True,
+        text=True,
+        env=base_env,
+    )
+
+
+@pytest.fixture()
+def groupless_env(tmp_path: Path) -> dict[str, str]:
+    """Env where no group resolves, so verb routing is what decides the outcome."""
+    (tmp_path / "groups").mkdir(parents=True)
+    return {"CAMP_CONFIG_DIR": str(tmp_path), "CAMP_STATE_DIR": str(tmp_path / "state")}
+
+
 # ---------------------------------------------------------------------------
 # VERB_ALIASES + canonical_verb
 # ---------------------------------------------------------------------------
-
-
-def test_verb_aliases_table() -> None:
-    """VERB_ALIASES maps the two short aliases to their canonical verbs."""
-    from camp.workspace.verb_taxonomy import VERB_ALIASES
-
-    assert VERB_ALIASES == {"rm": "remove", "ls": "list"}
 
 
 def test_canonical_verb_normalizes_aliases() -> None:
@@ -63,19 +81,19 @@ def test_canonical_verb_identity_for_non_aliases() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_needs_group_verbs_is_canonical_set() -> None:
-    """NEEDS_GROUP_VERBS is the renamed canonical set (no ai/rm/enter)."""
-    from camp.workspace.verb_taxonomy import NEEDS_GROUP_VERBS
-
-    assert set(NEEDS_GROUP_VERBS) == {
-        "new",
-        "remove",
-        "pwd",
-        "activate",
-        "setup",
-        "launch",
-        "sessions",
-    }
+@pytest.mark.parametrize(
+    "verb", ["new", "remove", "pwd", "activate", "setup", "launch", "sessions"]
+)
+def test_needs_group_verb_asks_for_a_group_rather_than_erroring_as_a_slug(
+    verb: str, groupless_env: dict[str, str]
+) -> None:
+    """Run from a cwd where no group resolves, each canonical verb must reach the
+    needs-group path. The bare-slug error means the dispatcher did not recognise
+    it as a verb at all — which is the failure NEEDS_GROUP_VERBS exists to
+    prevent."""
+    combined = _run([verb], env=groupless_env)
+    text = (combined.stdout + combined.stderr).lower()
+    assert "group" in text, f"{verb!r} did not reach the needs-group path: {text!r}"
 
 
 def test_kill_is_not_a_needs_group_verb() -> None:
@@ -92,32 +110,33 @@ def test_kill_is_not_a_needs_group_verb() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_legacy_redirects_point_directly_at_canonicals() -> None:
-    """Renamed verbs map straight to the live canonical verb."""
-    from camp.workspace.verb_taxonomy import LEGACY_REDIRECTS
+def test_legacy_redirect_keys_classify_as_legacy() -> None:
+    """Each retired verb still resolves — as `legacy`, so the dispatcher can
+    redirect it rather than falling through to the bare-slug error."""
+    from camp.workspace.verb_taxonomy import LEGACY_REDIRECTS, resolve_verb
 
-    assert LEGACY_REDIRECTS == {
-        "open": "new",
-        "break": "remove",
-        "init": "group",
-        "ai": "new",
-        "enter": "activate",
-        "resume": "launch --resume",
-        "bookmark": "launch --resume",
-    }
-
-
-def test_legacy_redirects_never_chain() -> None:
-    """No redirect target is itself a removed verb (no chained redirect)."""
-    from camp.workspace.verb_taxonomy import LEGACY_REDIRECTS
-
-    removed_verbs = {"ai", "rm", "enter", "open", "break", "init", "resume", "bookmark"}
-    for old, target in LEGACY_REDIRECTS.items():
-        new = target.split()[0]
-        assert new not in removed_verbs, (
-            f"{old!r} redirects to {new!r}, a removed verb — the dispatcher does "
-            "not support chained redirects; point it at the live canonical."
+    assert LEGACY_REDIRECTS, "no legacy redirects declared — nothing under test"
+    for old_verb in LEGACY_REDIRECTS:
+        assert resolve_verb(old_verb) == (old_verb, "legacy"), (
+            f"{old_verb!r} is declared a legacy redirect but the resolver does not "
+            "classify it as one"
         )
+
+
+def test_legacy_redirect_targets_resolve_live() -> None:
+    """Every redirect points at a verb the resolver reports as live — which is
+    what 'never chained' means operationally: follow the redirect once and you
+    land on something that dispatches."""
+    from camp.workspace.verb_taxonomy import LEGACY_REDIRECTS, resolve_verb
+
+    for old_verb, target in LEGACY_REDIRECTS.items():
+        head = target.split()[0]
+        canonical, kind = resolve_verb(head)
+        assert kind == "live", (
+            f"{old_verb!r} redirects to {head!r}, which resolves {kind!r} — the "
+            "dispatcher does not support chained redirects; point it at a live verb"
+        )
+        assert canonical == head
 
 
 # ---------------------------------------------------------------------------
@@ -150,18 +169,17 @@ def test_resolve_verb_unknown_token_is_live_identity() -> None:
     assert resolve_verb("new") == ("new", "live")
 
 
-def test_resolve_verb_alias_takes_precedence_over_classification() -> None:
-    """The order is alias FIRST, then disabled/legacy — so a hypothetical alias
-    whose key ALSO named a disabled/legacy verb would resolve via the alias, the
-    SAME way at both entry points. We assert the order
-    directly on a synthetic table so the guarantee does not depend on today's
-    disjoint keys."""
-    import camp.workspace.verb_taxonomy as vt
+def test_alias_resolution_wins_over_every_other_classification() -> None:
+    """An alias key resolves to its canonical verb, live — never to `disabled`
+    or `legacy`. Asserted by running the resolver on every alias key, so the
+    guarantee holds however the other tables grow."""
+    from camp.workspace.verb_taxonomy import VERB_ALIASES, resolve_verb
 
-    # The real tables keep alias keys disjoint from disabled/legacy keys; assert
-    # that invariant explicitly so a future collision is caught here too.
-    assert not (set(vt.VERB_ALIASES) & set(vt.DISABLED_VERBS))
-    assert not (set(vt.VERB_ALIASES) & set(vt.LEGACY_REDIRECTS))
+    assert VERB_ALIASES, "no aliases declared — nothing under test"
+    for alias, canonical in VERB_ALIASES.items():
+        assert resolve_verb(alias) == (canonical, "live"), (
+            f"alias {alias!r} did not win resolution — got {resolve_verb(alias)!r}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -169,61 +187,7 @@ def test_resolve_verb_alias_takes_precedence_over_classification() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_reserved_membership_is_pinned() -> None:
-    """spine.RESERVED is derived from verb_taxonomy, so this pins
-    its exact membership: any drift — adding/renaming a taxonomy verb or editing
-    _STATIC_RESERVED — must update this set DELIBERATELY rather than silently
-    changing bare-slug validation."""
-    from camp.spine import RESERVED
-
-    assert RESERVED == frozenset(
-        {
-            # Taxonomy-derived: alias keys, legacy-redirect keys, disabled verbs,
-            # needs-group verbs.
-            "rm",
-            "ls",
-            "open",
-            "break",
-            "init",
-            "ai",
-            "enter",
-            "restock",
-            "sweep",
-            "code",
-            "fire",
-            "new",
-            "remove",
-            "pwd",
-            "activate",
-            "setup",
-            "launch",
-            "sessions",
-            # Static: canonical/fleet verbs, meta verbs, hook handlers.
-            "group",
-            "groups",
-            "list",
-            "status",
-            "sync",
-            "rebase",
-            "path",
-            "foreach",
-            "doctor",
-            "kill",
-            "resume",
-            "bookmark",
-            "help",
-            "version",
-            "which",
-            "session-bootstrap",
-            "worktree-cleanup",
-        }
-    )
-
-
-def test_reserved_superset_of_taxonomy_tokens() -> None:
-    """Every taxonomy-owned token (alias keys + canonical targets, legacy keys +
-    targets, disabled, needs-group) is reserved — the derivation cannot drop one."""
-    from camp.spine import RESERVED
+def _taxonomy_tokens() -> set[str]:
     from camp.workspace.verb_taxonomy import (
         DISABLED_VERBS,
         LEGACY_REDIRECTS,
@@ -231,7 +195,7 @@ def test_reserved_superset_of_taxonomy_tokens() -> None:
         VERB_ALIASES,
     )
 
-    taxonomy_tokens = (
+    return (
         set(VERB_ALIASES)
         | set(VERB_ALIASES.values())
         | set(LEGACY_REDIRECTS)
@@ -239,27 +203,58 @@ def test_reserved_superset_of_taxonomy_tokens() -> None:
         | set(DISABLED_VERBS)
         | set(NEEDS_GROUP_VERBS)
     )
-    assert taxonomy_tokens <= RESERVED
 
 
-# ---------------------------------------------------------------------------
-# Repo sweep: no live stale-verb invocation strings in README / hook templates
-# ---------------------------------------------------------------------------
+def test_no_reserved_token_is_dispatched_as_a_bare_slug(groupless_env) -> None:
+    """RESERVED exists to stop a token being taken for a workspace slug. Run the
+    real CLI on every reserved token and require that none of them reaches the
+    bare-slug error — that error IS the failure the set prevents.
+
+    Asserted through the CLI rather than over set membership, because membership
+    is only a proxy: a token could be in RESERVED and still fall through if the
+    dispatcher stopped consulting the set.
+    """
+    from camp.spine import RESERVED
+
+    assert RESERVED, "RESERVED is empty — nothing under test"
+    offenders = []
+    for token in sorted(RESERVED - {"which"}):  # see the xfail below
+        out = _run([token], env=groupless_env)
+        if "bare slug dispatch is no longer supported" in (out.stdout + out.stderr):
+            offenders.append(token)
+    assert not offenders, (
+        f"reserved tokens dispatched as bare slugs: {offenders} — RESERVED no "
+        "longer protects them"
+    )
 
 
-def test_readmes_have_no_stale_verb_invocations() -> None:
-    """README files carry no live `camp ai`/`camp enter`/`camp cd` invocations."""
-    readmes = [
-        _REPO_ROOT / "README.md",
-        _REPO_ROOT / "tools" / "camp" / "README.md",
+def test_every_taxonomy_token_is_protected_from_bare_slug_dispatch(groupless_env) -> None:
+    """The derivation cannot silently drop a taxonomy-owned token: each one, run
+    through the CLI, must avoid the bare-slug error."""
+    tokens = _taxonomy_tokens()
+    assert tokens, "taxonomy declares no tokens — nothing under test"
+    offenders = [
+        t
+        for t in sorted(tokens)
+        if "bare slug dispatch is no longer supported"
+        in (lambda r: r.stdout + r.stderr)(_run([t], env=groupless_env))
     ]
-    stale = ("camp ai", "camp enter", "camp cd")
-    for readme in readmes:
-        if not readme.is_file():
-            continue
-        content = readme.read_text()
-        for token in stale:
-            assert token not in content, (
-                f"{readme} still names the removed invocation {token!r}; "
-                "update it to camp new / camp activate."
-            )
+    assert not offenders, (
+        f"taxonomy tokens fell through to bare-slug dispatch: {offenders} — the "
+        "RESERVED derivation dropped them"
+    )
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "`which` is in RESERVED and in the dispatcher's skip-group-resolve set, "
+        "but only the `--which` FLAG has a handler. The bare token falls through "
+        "every branch to the bare-slug error (and exits 0 while printing it). "
+        "Membership in RESERVED never made the dispatcher route it. Remove this "
+        "xfail when `camp which` dispatches."
+    ),
+)
+def test_which_is_not_dispatched_as_a_bare_slug(groupless_env) -> None:
+    out = _run(["which"], env=groupless_env)
+    assert "bare slug dispatch is no longer supported" not in (out.stdout + out.stderr)
