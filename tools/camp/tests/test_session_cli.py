@@ -1718,6 +1718,44 @@ def test_camp_sessions_json_carries_a_declared_account_verbatim(cli_env) -> None
     assert payload[0]["account"] != str(account)
 
 
+def test_camp_sessions_two_spellings_of_the_same_account_dedupe_to_one_store(
+    cli_env,
+) -> None:
+    """Two groups declaring the SAME credential-store directory under two
+    different spellings must be one pool entry, not two — a session sitting
+    in that shared store must appear exactly once, not once per spelling.
+    """
+    account = cli_env["tmp_path"] / "shared-account"
+    repo_a = cli_env["tmp_path"] / "repo-dedupe-a"
+    repo_b = cli_env["tmp_path"] / "repo-dedupe-b"
+    _add_account_group(cli_env, "dedupea", account, repo_a, declared=str(account))
+    # Deliberately a non-canonical spelling of the identical directory a
+    # different group already declared canonically — the same collapsing
+    # form `test_camp_sessions_json_carries_a_declared_account_verbatim`
+    # uses to prove the verbatim pin, reused here to prove two spellings of
+    # one directory still bind to one physical store.
+    _add_account_group(cli_env, "dedupeb", account, repo_b, declared=f"{account}/.")
+    _register_live_at(account, "dedupe-sess", repo_a)
+
+    env = _env_without_shared_claude_dir(cli_env)
+    result = subprocess.run(
+        [sys.executable, str(_CLI_CAMP), "sessions", "--group", "dedupea", "--json"],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(cli_env["tmp_path"]),
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert [row["session_id"] for row in payload] == ["dedupe-sess"]
+    # The surviving pool entry keeps the FIRST-declared spelling — "dedupea"
+    # loads before "dedupeb" (config files are read in filename order) and
+    # declared the canonical form, so that is what the row carries, not the
+    # collapsing "/." spelling declared second.
+    assert payload[0]["account"] == str(account)
+
+
 def test_camp_sessions_json_nulls_group_and_account_outside_every_group(cli_env) -> None:
     """A session whose cwd resolves into no configured group is still listed,
     with a null group and a null account — never dropped, never a raised error.

@@ -462,7 +462,7 @@ def _addressable_harnesses(
     from ..launch.profile import harness_store_for, StoreBindingError
 
     resolved_env = dict(env) if env is not None else dict(os.environ)
-    found: dict[tuple[str, str | None], object] = {}
+    found: dict[tuple[str, tuple[tuple[str, str], ...]], object] = {}
     for config in groups or []:
         try:
             store = harness_store_for(config, env=resolved_env)
@@ -479,7 +479,7 @@ def _addressable_harnesses(
             continue
         if store is None:
             continue
-        key = (_harness_display_name(store), store.account)
+        key = (_harness_display_name(store), _store_binding_key(store))
         found.setdefault(key, store)
 
     try:
@@ -490,10 +490,28 @@ def _addressable_harnesses(
         # case it sits alongside.
         default_store = None
     if default_store is not None:
-        key = (_harness_display_name(default_store), default_store.account)
+        key = (_harness_display_name(default_store), _store_binding_key(default_store))
         found.setdefault(key, default_store)
 
     return list(found.values())
+
+
+def _store_binding_key(store) -> tuple[tuple[str, str], ...]:
+    """The dedupe key for *store*: its BOUND environment, not the raw declared
+    account string.
+
+    Two groups can declare the same credential-store directory under two
+    different spellings (``/acct/w`` vs. ``/acct/w/``, or ``~/x`` vs. its
+    expansion) — textually different, but the harness binds both to the same
+    resolved store, so ``store.env`` (the environment queries against this
+    store actually run under, per :func:`~camp.launch.profile.harness_store_for`)
+    is byte-identical between them. Keying on that resolved binding rather than
+    on ``store.account`` collapses such spellings to one pool entry, so the
+    same store is never read twice and its sessions never listed twice.
+    ``store.account`` itself is untouched by this — it still carries the
+    declaring group's string verbatim.
+    """
+    return tuple(sorted(store.env.items()))
 
 
 def _parsable_groups() -> list[dict]:
