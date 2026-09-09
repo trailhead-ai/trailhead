@@ -311,3 +311,90 @@ def test_plan_remedy_table_names_every_reason_code_the_renderer_can_actually_emi
             f"plan/SKILL.md's step 8.5 remedy table never names reason-code `{code}`, "
             "which scripts/maturity_bars.py can actually exit non-zero with"
         )
+
+
+# ---- contract item 10: the waived-concern eval fixtures embed the renderer's real output ----
+#
+# `plugins/craft/evals/waived-concern-stands-down/` is a manual (hand-dispatched) eval case,
+# not something pytest can run — but the calibration block each fixture embeds under its own
+# `## Maturity calibration` heading is claimed to be `scripts/maturity_bars.py`'s real output
+# for that fixture's own spec, not hand-authored stand-down wording. That claim is ordinary
+# code-vs-document wiring and stays a deterministic test: re-run the renderer against the
+# fixture's own spec section and byte-compare.
+
+EVALS_DIR = REPO_ROOT / "plugins" / "craft" / "evals"
+WAIVED_CONCERN_EVAL = EVALS_DIR / "waived-concern-stands-down"
+WAIVED_CONCERN_FIXTURES = sorted(
+    (WAIVED_CONCERN_EVAL / "fixtures").glob("*.md")
+)
+
+_SPEC_HEADING = "## Spec under review\n\n"
+_CALIBRATION_HEADING = "\n## Maturity calibration\n\n"
+_LENS_HEADING = "\n## Captured lens responses\n"
+
+
+def _split_fixture(text: str) -> tuple[str, str]:
+    """Return `(spec_text, calibration_block)` from a waived-concern-stands-down
+    fixture: the spec section between the `## Spec under review` and
+    `## Maturity calibration` headings, and the calibration block between
+    `## Maturity calibration` and `## Captured lens responses`."""
+    spec_start = text.index(_SPEC_HEADING) + len(_SPEC_HEADING)
+    calibration_start = text.index(_CALIBRATION_HEADING, spec_start)
+    spec_text = text[spec_start:calibration_start]
+    block_start = calibration_start + len(_CALIBRATION_HEADING)
+    block_end = text.index(_LENS_HEADING, block_start)
+    return spec_text, text[block_start:block_end]
+
+
+def test_waived_concern_eval_fixtures_exist():
+    assert len(WAIVED_CONCERN_FIXTURES) == 3, (
+        f"expected the three waived-concern-stands-down fixtures, found "
+        f"{[p.name for p in WAIVED_CONCERN_FIXTURES]!r}"
+    )
+
+
+def test_waived_concern_eval_calibration_blocks_byte_match_the_renderer():
+    for fixture_path in WAIVED_CONCERN_FIXTURES:
+        text = fixture_path.read_text(encoding="utf-8")
+        spec_text, embedded_block = _split_fixture(text)
+        result = _run_bars(spec_text.encode("utf-8"))
+        assert result.returncode == 0, (
+            f"{fixture_path.name}: renderer refused its own embedded spec: {result.stderr!r}"
+        )
+        rendered = result.stdout.decode("utf-8")
+        assert rendered == embedded_block, (
+            f"{fixture_path.name}: embedded '## Maturity calibration' block does not "
+            "byte-match scripts/maturity_bars.py run against this fixture's own spec — "
+            "the eval would be measuring hand-authored wording the renderer never emits"
+        )
+
+
+# ---- contract item 11: the documented concern names are derived from _CONCERNS ----
+#
+# `_shared/council.md`'s new waiver-rule prose names the closed concern vocabulary a
+# `Waives:` marker recognises. That vocabulary is owned in one place — `_CONCERNS` in
+# `scripts/maturity_bars.py` — so this test imports it rather than retyping it, the same
+# discipline `test_maturity_bars_council_contract.py` already applies to the severity table.
+
+sys.path.insert(0, str(REPO_ROOT / "plugins" / "craft" / "scripts"))
+from maturity_bars import _CONCERNS  # noqa: E402
+
+
+_WAIVER_RULE_START = "A concern above can be waived for this spec alone"
+_WAIVER_RULE_END = "### Filling the calibration token"
+
+
+def test_council_waiver_rule_names_every_canonical_concern():
+    council_text = (SKILLS_DIR / "_shared" / "council.md").read_text(encoding="utf-8")
+    start = council_text.index(_WAIVER_RULE_START)
+    end = council_text.index(_WAIVER_RULE_END, start)
+    # Collapse the prose-wrap gate's own line breaks (a concern phrase can be
+    # wrapped mid-phrase) so this checks the wording, not the line layout.
+    waiver_rule_text = " ".join(council_text[start:end].split())
+    for concern in _CONCERNS:
+        assert concern in waiver_rule_text, (
+            f"_shared/council.md's waiver-rule paragraph never names concern {concern!r} — "
+            "it should name the exact phrases scripts/maturity_bars.py actually recognises "
+            "in a `Waives:` marker, not a paraphrase or a subset, and not merely rely on the "
+            "severity table above it to have already said so"
+        )
