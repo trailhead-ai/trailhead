@@ -109,7 +109,12 @@ def test_every_gate_that_grades_a_spec_finds_the_shipped_templates_criteria_head
 # the capture on the `**AC` bullet prefix (rather than on the quote alone) keeps
 # the neighbouring Compound / Not-compound prose examples — which are criteria
 # text, not whole bullets — out of the set.
-_WORKED_EXAMPLE = re.compile(r'-\s+(Refused|Conformant)\b[^:\n]*:\s*"(-\s+\*\*AC.+?)"', re.S)
+# The label is captured as any bare word rather than as an alternation of the two
+# known verdicts. Matching only `Refused|Conformant` would let a relabelled example
+# fall out of the set silently — the parametrization would just get shorter and stay
+# green — so every labelled example is captured and its label is checked below.
+_WORKED_EXAMPLE = re.compile(r'-\s+([A-Z][a-z]+)\b[^:\n]*:\s*"(-\s+\*\*AC.+?)"', re.S)
+_VERDICTS = ("Refused", "Conformant")
 
 
 def _criterion_examples() -> list[tuple[str, str]]:
@@ -125,14 +130,20 @@ def _spec_declaring(criterion: str) -> str:
     return f"{text[:start]}## Acceptance Criteria\n\n{criterion}\n\n{text[end:]}"
 
 
-def test_the_spec_template_teaches_both_criterion_verdicts():
-    """Non-vacuity guard on the extraction below: a template edit that stops the
-    worked examples matching would otherwise shrink the parametrization to nothing
-    — or to one verdict — and leave the grading test passing on an empty set."""
-    verdicts = {verdict for verdict, _ in _criterion_examples()}
-    assert verdicts == {"Refused", "Conformant"}, (
-        "expected the spec template's `## Acceptance Criteria` comment to carry worked "
-        f"examples of both verdicts, extracted: {sorted(verdicts)}"
+def test_every_worked_example_the_spec_template_states_carries_a_known_verdict():
+    """Non-vacuity guard on the extraction below. Capturing the label as a bare word
+    and checking it here — rather than only matching the two known verdicts — is what
+    makes the guard total: an example relabelled to anything else fails by name
+    instead of quietly leaving the parametrization one case shorter."""
+    verdicts = [verdict for verdict, _ in _criterion_examples()]
+    unknown = sorted({v for v in verdicts if v not in _VERDICTS})
+    assert not unknown, (
+        f"the spec template labels worked examples with verdicts the gate cannot grade: "
+        f"{unknown} (expected only {list(_VERDICTS)})"
+    )
+    assert set(verdicts) == set(_VERDICTS), (
+        "expected the `## Acceptance Criteria` comment to carry worked examples of both "
+        f"verdicts, extracted: {sorted(set(verdicts))}"
     )
 
 
