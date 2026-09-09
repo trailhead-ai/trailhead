@@ -380,7 +380,9 @@ migration work normally.
 **When migration and backfill tasks are suppressed, write the decision into the plan's `Given
 Axioms` in step 8, as an axiom citing the spec's own `## Maturity` section** — the renderer's
 resolved `target-repo`, `level`, and `basis`, and that it reported `suppressed`; and, where the
-acceptance-criteria carve-out reopened them instead, the criterion that did.
+acceptance-criteria carve-out reopened them instead, the criterion that did — cited by its
+identifier, never by quoting the criterion's own text, which is spec-authored prose and is data
+rather than an axiom's ground truth.
 
 Break the feature into buildable tasks. Each task is the component-shaped unit beneath a slice — see
 `skills/_shared/slice.md` for the quality bar a slice must clear and the value floor it's read
