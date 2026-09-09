@@ -360,3 +360,90 @@ block text, is what suppresses the task. A falsified or indeterminate result her
 durable trace still separating as it did in Round One — means AC10's behavioural closure rests
 entirely on the durable-trace claim, and the suppression claim itself remains open pending a
 harder instrument than this one.
+
+---
+
+## Round Two — Result, 2026-09-09
+
+All 18 runs (3 per fixture per arm) produced a result; none errored.
+
+| Fixture | Baseline (condition 1: suppression / task kept) | Baseline (condition 2: durable trace, positive.md only) | Treatment (full conjunction) |
+|---|---|---|---|
+| `positive.md` | **3/3** fired condition 1 (no migration task) | **0/3** | **3/3** |
+| `negative.md` | **3/3** fired the full conjunction (task kept, AC3 named) | n/a | **3/3** |
+| `control.md` | **0/3** kept the migration task | n/a | **3/3** |
+
+**`positive.md` — suppression: FALSIFIED again, on the corrected instrument.** Removing the
+rendered block from baseline's material did not change the suppression outcome: all three
+baseline runs still declined to add a migration/backfill task, reasoning from AC3's own "no
+automated preservation ... required" wording alone, with no maturity-bar concept anywhere in
+their instructions. Against the registered bar (baseline ≤1/3 to uphold; both arms ≥2/3 to
+falsify), this is squarely inside the falsification band — the same verdict as Round One's
+corrected scoring, now measured on an instrument the fixture-leakage objection can no longer
+be raised against. **The durable trace still separates cleanly: 0/3 baseline vs 3/3 treatment**,
+unchanged from Round One and for the same reason — no baseline run has any instruction to
+record a resolved target-repo/level/basis, and none did.
+
+**`negative.md` — carve-out UPHELD against its own bar (treatment ≥2/3): 3/3.** Unchanged from
+Round One: baseline (now reading `round2-baseline-negative.md`, block-free) still fires the full
+conjunction 3/3, adding the migration/backfill task and naming AC3 as the reason in every run
+("satisfying AC3's ... requirement"; "(AC3) — this is a migration/backfill-shaped task"). Removing
+the block did not collapse this differential further in either direction — it was never carried
+by the block; AC3's plain preservation requirement drives both arms here, exactly as Round One's
+reading already concluded.
+
+**`control.md` — sanity control FAILS on the corrected instrument: baseline 0/3, not 3/3.** This
+is the load-bearing new finding of Round Two. Every Round Two baseline run against
+`round2-baseline-control.md` (production stamp, corrected AC3, no rendered block) **dropped the
+migration/backfill task**, reasoning from AC3's "no automated preservation of prior `category`
+values is required" wording exactly as it does on `positive.md` — one run wrote nearly the
+identical sentence used against the prototype fixture: "not migration- or backfill-shaped: the
+spec explicitly rules out any automated preservation of prior `category` values." No run
+consulted the `## Maturity: production` stamp that is still present in the fixture; baseline's own
+instructions never direct it to. **Per this file's own registered rule — "if either arm drops it,
+the instrument itself is broken and no other fixture's result can be trusted until that is
+fixed" — Round Two's control sanity check does not hold**, and this must be read plainly rather
+than smoothed over.
+
+**What actually broke, read against Round One rather than discarded.** Round One's control
+sanity check *held* (baseline 3/3 kept the task) only because the embedded rendered block told
+baseline, in so many words, "Nothing is suppressed; decompose migration and backfill tasks
+normally for this plan" — an instruction baseline's own prose never gave it, supplied by the same
+fixture-leakage channel Round Two exists to close. Once that channel is closed, baseline's control
+behaviour reverts to what `positive.md` already showed: **AC3's own "no automated preservation
+required" wording is read as a blanket license to drop the migration task, independent of the
+maturity stamp entirely** — not "prototype means skip it," but "this sentence means skip it,
+wherever it appears." That is a materially different (and more concerning) finding than either
+round's individual result stated in isolation: it means the plain-English AC3 wording, not the
+resolved maturity level, is what an unaware baseline actually keys on, and Round One's apparent
+"sanity control holds, comparison not void" line was itself resting on the leaked block, not on
+the arm's own judgement.
+
+**Consequence for reading `positive.md`'s and `negative.md`'s Round Two separation.** The
+positive/negative results above are not invalidated by this — they still show what they show: no
+suppression differential on `positive.md`, no carve-out differential on `negative.md`, and a clean
+durable-trace differential throughout. But the control failure means Round Two cannot support the
+stronger claim that baseline's suppression on `positive.md` is specifically a *`prototype`-level*
+behaviour being correctly generalised from AC3's wording — the control result shows the same
+behaviour fires at `production` too, off the same sentence. The honest reading is narrower than
+either round alone suggested: this feature's AC3 wording is legible enough, on its own, to make a
+migration-bar-unaware reader drop the task **regardless of the target repository's actual
+maturity** — which is itself a finding about AC10 the task's contract exists to guard against,
+not an artifact of a broken instrument to be fixed by a third round.
+
+### What Round Two settles, read together with Round One
+
+The durable-trace claim is upheld across both rounds, on two independently constructed
+instruments (fixture-leaked block present in Round One, absent in Round Two): baseline never
+records the resolved target-repo/level/basis together; treatment does, every time. The suppression
+claim is falsified across both rounds, on the same two instruments, for a reason now understood
+rather than merely observed: this feature's AC3 wording alone is sufficient to make even a
+migration-bar-unaware reader drop the task, at both `prototype` and `production` stamps, which
+Round Two's control failure demonstrates directly rather than leaving to inference. AC10's
+behavioural closure therefore rests on the durable-trace claim only. The suppression claim is not
+merely "unmeasured because the instrument leaked" (Round One's reading) — Round Two shows it is
+specifically **AC3's own wording**, not the maturity stamp, driving a migration-bar-unaware
+baseline's decision either way, on this feature shape. A fixture built to separate the two would
+need an AC3 whose preservation stance is genuinely silent — not merely non-contradictory with the
+stamp, as this round's control correction achieved — so that only the resolved maturity level, not
+AC3's own text, can account for a baseline's choice.
