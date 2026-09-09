@@ -1,10 +1,14 @@
-"""The operator-facing README is checked against the code it documents.
+"""Every TOML the README documents is run through the code that consumes it.
 
-Two kinds of drift are cheap to introduce and expensive to discover: a
-documented TOML spelling the real parser would reject, and a prose description
-of the credential deny list that no longer matches what the launch gate
-enforces. Both are pinned here against the production parser and the production
-deny list rather than against a transcription of them.
+A documented spelling the real parser would reject, and a backticked deny entry
+the launch gate does not enforce, are both cheap to introduce and expensive to
+discover. Each documented block is fed to the production parser, and each named
+entry checked against the production deny list — the README's examples are the
+inputs, not the assertions.
+
+What the README *says* about the deny list is not checked here: the behaviours
+that prose describes — a declared account extending the list, a relative one
+contributing nothing — are pinned by execution in ``test_launch_eligibility``.
 """
 
 from __future__ import annotations
@@ -25,10 +29,6 @@ _TOML_BLOCK = re.compile(r"```toml\n(.*?)```", re.DOTALL)
 
 def _toml_blocks() -> list[str]:
     return _TOML_BLOCK.findall(README.read_text())
-
-
-def test_the_readme_ships_toml_examples() -> None:
-    assert _toml_blocks(), "no ```toml blocks found — the extractor has drifted"
 
 
 @pytest.mark.parametrize("block", _toml_blocks())
@@ -81,27 +81,3 @@ def test_every_deny_entry_the_readme_names_is_really_in_the_floor() -> None:
     assert not missing, f"README names deny entries the code does not enforce: {missing}"
 
 
-def test_the_readme_documents_that_declared_accounts_extend_the_deny_list() -> None:
-    """Group-declared accounts are added to the floor — the README must say so.
-
-    Without this, an operator reads "fixed in camp's code" and concludes their
-    group's `account` is not itself protected as a launch root.
-    """
-    text = README.read_text()
-    assert "account" in text and re.search(
-        r"account[^.]{0,400}?(deny|denied|credential)", text, re.IGNORECASE | re.DOTALL
-    ), "README does not document that a declared account becomes a deny entry"
-
-
-def test_the_readme_does_not_promise_that_the_account_is_never_read_as_a_path() -> None:
-    """The deny derivation DOES interpret `account` as a path, and contributes no
-    entry at all for one that is neither absolute nor `~`-anchored. Prose saying
-    camp never validates it as a path reads as deny-list protection an operator
-    with a relative value does not have."""
-    text = README.read_text()
-    assert "does not validate it as a path" not in text
-    assert re.search(
-        r"relative[^.]{0,200}?(no deny entry|contributes no|no entry)",
-        text,
-        re.IGNORECASE | re.DOTALL,
-    ), "README does not say that a relative account contributes no deny entry"

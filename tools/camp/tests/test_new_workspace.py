@@ -372,12 +372,20 @@ class TestInputCharset:
     """
 
     def test_slug_is_constrained_to_safe_charset(self):
-        from camp.spine import _VALID_SLUG_RE
+        """The validator refuses anything outside the charset, and says why.
 
-        assert _VALID_SLUG_RE.pattern == r"^[a-z0-9-]+$"
-        assert _VALID_SLUG_RE.match("feat-x")
-        assert not _VALID_SLUG_RE.match("feat x")
-        assert not _VALID_SLUG_RE.match("feat;rm")
+        Driven through `_validate_slug` rather than its regex: the regex is one
+        implementation of the rule, and asserting its source text would pass on
+        a validator that had stopped consulting it.
+        """
+        from camp.spine import _validate_slug
+
+        _validate_slug("feat-x")  # the accepted shape — no raise
+
+        for bad in ("", "feat x", "feat;rm", "feat/x", "Feat", "feat$x", "feat`x"):
+            with pytest.raises(SystemExit) as excinfo:
+                _validate_slug(bad)
+            assert excinfo.value.code == 1, bad
 
     def test_group_name_is_constrained_to_slug_charset(self):
         from camp.group.resolve import validate_group_name, GroupConfinementError

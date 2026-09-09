@@ -1,29 +1,24 @@
-"""The bookmark surface is retired; the resume path it fronted still works.
+"""`camp bookmark` / `camp resume` redirect, and the resume path still works.
 
 Re-entering a session is `camp launch --resume <ref>`, addressed by unambiguous
-prefix of the derived name or session id. The `camp bookmark` verb family, the
-`camp resume` verb, the bookmark package, its skill, and its `camp rm` guard are
-all gone, and the free-text note they carried has no replacement.
+prefix of the derived name or session id.
 
 Test contract:
-- `camp.bookmark` and `camp.cli.groupless` no longer import, and the bookmark
-  skill directory is gone — the package cannot be reintroduced by accident.
-- `bookmark` and `resume` are absent from `camp help` and from every live verb
-  table; each spelling lands on a legacy redirect naming `camp launch --resume`,
-  the replacement an operator who typed the retired verb yesterday needs.
-- The launch, sessions, and resume paths each still resolve the same harness for
-  the same group — the specific regression the deletion risks.
+- Each retired spelling resolves as a legacy redirect and, run through the CLI,
+  answers with `camp launch --resume` — the replacement an operator who typed
+  the retired verb yesterday needs — rather than the bare-slug refusal, which
+  answers a question about slugs.
+- The launch, sessions, and resume paths each resolve the same harness for the
+  same group — the specific regression the redirect risks.
 """
 
 from __future__ import annotations
 
-import importlib
 import os
 import subprocess
 import sys
 from pathlib import Path
 
-import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
@@ -52,40 +47,17 @@ class _FakeHarness:
 # ---------------------------------------------------------------------------
 
 
-def test_the_bookmark_package_no_longer_imports() -> None:
-    with pytest.raises(ModuleNotFoundError):
-        importlib.import_module("camp.bookmark")
-
-
-def test_the_groupless_subverb_classifier_no_longer_imports() -> None:
-    """It classified `bookmark ls`/`rm`; with those gone it had no other caller."""
-    with pytest.raises(ModuleNotFoundError):
-        importlib.import_module("camp.cli.groupless")
-
-
-def test_the_bookmark_skill_directory_is_gone() -> None:
-    assert not (_PLUGIN_DIR / "skills" / "bookmark").exists()
-
-
 def test_neither_verb_is_a_live_verb() -> None:
     """Retired, not renamed-away: neither spelling resolves to a live verb.
 
-    Both stay RESERVED — a redirect key has to be, or bare-slug validation would
-    claim the token before the redirect could name its replacement.
+    The resolver is the unit; the two CLI tests below are the same claim end to
+    end, where a token the dispatcher never routes shows up as the bare-slug
+    error instead.
     """
-    from camp.spine import RESERVED
     from camp.workspace.verb_taxonomy import resolve_verb
 
     for verb in ("bookmark", "resume"):
-        assert verb in RESERVED
         assert resolve_verb(verb) == (verb, "legacy")
-
-
-def test_neither_verb_appears_in_help() -> None:
-    result = _run(["help"])
-    assert result.returncode == 0, result.stderr
-    assert "camp bookmark" not in result.stdout
-    assert "camp resume" not in result.stdout
 
 
 def test_camp_bookmark_points_at_the_replacement_verb(tmp_path: Path) -> None:

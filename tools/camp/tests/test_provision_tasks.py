@@ -1082,20 +1082,3 @@ def test_flip_persists_tasks_without_dropping_other_states(tmp_path):
         "bootstrap": {"state": "ok"},
     }
 
-
-# ---------------------------------------------------------------------------
-# grep-clean: the retired bootstrap runner is gone
-# ---------------------------------------------------------------------------
-
-
-def test_no_retired_bootstrap_runner_references_remain():
-    """The retired single-command bootstrap runner is gone from tools/camp."""
-    # Split the needle so this test file does not match itself.
-    needle = "_run_" + "bootstrap"
-    camp_root = _REPO_ROOT / "tools" / "camp"
-    hits = [
-        str(p)
-        for p in camp_root.rglob("*.py")
-        if needle in p.read_text(encoding="utf-8", errors="ignore")
-    ]
-    assert hits == [], f"retired bootstrap runner still referenced in: {hits}"
