@@ -820,29 +820,12 @@ class TestMergeMethod:
         )
         toml = _write_toml(tmp_path, release_toml_body)
         merge_argv: list[list[str]] = []
+        answer = _make_pr_stub({"7": "MERGEABLE_CLEAN"})
 
         def stub(cmd, **kwargs):
-            if "config" in cmd and "user.email" in cmd:
-                return subprocess.CompletedProcess(cmd, 0, "test@example.com\n", "")
-            if "view" in cmd and "--json" in cmd:
-                return subprocess.CompletedProcess(
-                    cmd,
-                    0,
-                    json.dumps(
-                        {
-                            "state": "OPEN",
-                            "mergeable": "MERGEABLE",
-                            "mergeStateStatus": "CLEAN",
-                            "isDraft": False,
-                            "headRefName": "feat",
-                        }
-                    ),
-                    "",
-                )
             if "pr" in cmd and "merge" in cmd:
                 merge_argv.append(list(cmd))
-                return subprocess.CompletedProcess(cmd, 0, "merged\n", "")
-            return subprocess.CompletedProcess(cmd, 0, "", "")
+            return answer(cmd, **kwargs)
 
         provider = get_provider("github", runner=stub)
         pr_pairs = [PRPair(repo_path=str(wt), pr_number="7", member_name="alpha")]
