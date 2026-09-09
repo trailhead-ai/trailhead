@@ -437,19 +437,32 @@ def _addressable_harnesses(groups, *, env: dict[str, str] | None = None) -> list
     A group whose harness camp cannot name — or whose declared account the
     harness refuses to bind — contributes nothing rather than failing the
     lookup: one bad group must not make every other group's sessions
-    unaddressable. With no groups configured at all, camp's default harness
-    profile's default store is the one thing left to ask.
+    unaddressable.
+
+    The default (no-account) store is ALWAYS a member of the pool, regardless
+    of what any configured group declares — including when every configured
+    group declares its own account. A session running under the default
+    store must stay addressable no matter how the rest of the machine's
+    groups are configured; the dedupe above already keys the pool by
+    (harness, account), so a group that itself declares no account still
+    contributes the default store exactly once.
     """
     from ..launch.profile import harness_store_for
 
     resolved_env = dict(env) if env is not None else dict(os.environ)
     found: dict[tuple[str, str | None], object] = {}
-    for config in groups or [{}]:
+    for config in groups or []:
         store = harness_store_for(config, env=resolved_env)
         if store is None:
             continue
         key = (_harness_display_name(store), store.account)
         found.setdefault(key, store)
+
+    default_store = harness_store_for({}, env=resolved_env)
+    if default_store is not None:
+        key = (_harness_display_name(default_store), default_store.account)
+        found.setdefault(key, default_store)
+
     return list(found.values())
 
 
@@ -1497,6 +1510,7 @@ def _cmd_sessions_group_cli(
 
         session_groups = load_all_groups(_groups_dir())
 
+    already_notified_unanswerable = False
     if all_groups_no_groups_configured:
         print(
             "camp sessions: no groups configured — nothing to answer for",
@@ -1516,6 +1530,7 @@ def _cmd_sessions_group_cli(
             )
             records = []
             failures = []
+            already_notified_unanswerable = True
         elif failures and len(failures) == stores_total:
             accounts = ", ".join(_account_label(failure["account"]) for failure in failures)
             _die(
@@ -1545,6 +1560,21 @@ def _cmd_sessions_group_cli(
             attributed = sorted(attributed, key=lambda pair: pair[1]["group"] or "")
         else:
             attributed = _sessions_for_group(attributed, group["group"]["name"])
+            if not already_notified_unanswerable:
+                from ..launch.profile import harness_store_for
+
+                if harness_store_for(group, env=resolved_env) is None:
+                    # This group's own credential store never entered the
+                    # pool at all — distinct from the pool answering with
+                    # zero rows for it, which is a legitimate empty listing.
+                    # An operator reading silence here as "nothing running"
+                    # is exactly the confident-wrong-answer this listing
+                    # exists to avoid.
+                    print(
+                        f"camp sessions: could not determine the live sessions for "
+                        f"{_described()} — reporting none",
+                        file=sys.stderr,
+                    )
 
     if as_json:
         payload = [

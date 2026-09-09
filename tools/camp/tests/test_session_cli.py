@@ -231,6 +231,15 @@ class FakeHarness(ClaudeCodeHarness):
 
 
 _registry._HARNESSES[FakeHarness.name] = FakeHarness
+# `_addressable_harnesses` always probes camp's baked-in default binary
+# ("claude") alongside every configured group's own store — registering the
+# fake under that canonical name too means the always-present default store
+# resolves to the SAME controllable stand-in every declared no-account group
+# already uses, so it dedupes against a no-account fakeharness group exactly
+# as camp's own keying intends, rather than silently substituting a real,
+# environment-dependent `claude` binary into this suite's total-failure
+# scenarios.
+_registry._HARNESSES["claude_code"] = FakeHarness
 '''
 
 _TMUX_STUB = '''#!/usr/bin/env python3
@@ -1909,16 +1918,21 @@ def test_camp_sessions_total_failure_json_emits_no_array_at_all(cli_env) -> None
 
 
 def test_camp_sessions_survives_a_group_whose_harness_camp_cannot_name(cli_env) -> None:
-    """`badgroup`'s harness never becomes a pool candidate at all — it is not a
-    failing store, it is one that was never addressable — so the OTHER
-    configured group's store still answers the listing normally.
+    """`badgroup`'s harness never becomes a pool candidate at all — it is not
+    a failing store, it is one that was never addressable. This is a
+    corrected pin: an earlier version of this test asserted the listing
+    answered silently in this case, which reads as "nothing is running" when
+    the true answer is "camp could not tell" — exactly the confident-wrong
+    answer this whole listing exists to remove. The corrected contract is a
+    notice naming the group, an empty stdout, and a clean (zero) exit — a
+    degrade, not a refusal, because a named group whose sessions cannot be
+    determined is still a question the caller can move past.
     """
     result = _camp(cli_env, "sessions", "--group", "badgroup")
 
     assert result.returncode == 0, result.stderr
     assert result.stdout == ""
-    assert "could not determine" not in result.stderr
-    assert "could not enumerate" not in result.stderr
+    assert "camp sessions: could not determine the live sessions for group 'badgroup'" in result.stderr
 
 
 def test_camp_sessions_with_no_addressable_store_at_all_degrades(cli_env) -> None:

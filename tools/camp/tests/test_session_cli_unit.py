@@ -259,8 +259,9 @@ class TestAddressableHarnessesStoreKeying:
 
         stores = cli_session._addressable_harnesses(groups, env={})
 
-        assert len(stores) == 2
-        assert {s.account for s in stores} == {"/acct/a", "/acct/b"}
+        declared = [s for s in stores if s.account is not None]
+        assert len(declared) == 2
+        assert {s.account for s in declared} == {"/acct/a", "/acct/b"}
 
     def test_two_groups_sharing_a_harness_with_the_same_account_are_one_candidate(
         self, monkeypatch
@@ -276,8 +277,9 @@ class TestAddressableHarnessesStoreKeying:
 
         stores = cli_session._addressable_harnesses(groups, env={})
 
-        assert len(stores) == 1
-        assert stores[0].account == "/acct/a"
+        declared = [s for s in stores if s.account is not None]
+        assert len(declared) == 1
+        assert declared[0].account == "/acct/a"
 
     def test_groups_declaring_no_account_contribute_the_default_store_once(
         self, monkeypatch
@@ -293,12 +295,52 @@ class TestAddressableHarnessesStoreKeying:
         assert len(stores) == 1
         assert stores[0].account is None
 
+    def test_every_configured_group_declaring_an_account_still_yields_the_default_store(
+        self, monkeypatch
+    ):
+        """The pinned regression: the default store used to enter the pool
+        only when the group list was EMPTY, so a machine where every group
+        declares an account never queried the default store at all — a
+        session running under it was invisible to every reference."""
+        import camp.cli.session as cli_session
+        import camp.launch.profile as profile
+
+        monkeypatch.setattr(profile, "harness_for", lambda group: _AccountAwareHarness())
+        groups = [
+            {"group": {"name": "g1"}, "launch": {"account": "/acct/a"}},
+            {"group": {"name": "g2"}, "launch": {"account": "/acct/b"}},
+        ]
+
+        stores = cli_session._addressable_harnesses(groups, env={})
+
+        assert {s.account for s in stores} == {"/acct/a", "/acct/b", None}
+
+    def test_a_group_declaring_no_account_does_not_duplicate_the_default_store(
+        self, monkeypatch
+    ):
+        """One group declares an account, the other declares none — the
+        no-account group already contributes the default store, so the
+        default probe must not add a second copy of it."""
+        import camp.cli.session as cli_session
+        import camp.launch.profile as profile
+
+        monkeypatch.setattr(profile, "harness_for", lambda group: _AccountAwareHarness())
+        groups = [
+            {"group": {"name": "g1"}, "launch": {"account": "/acct/a"}},
+            {"group": {"name": "g2"}},
+        ]
+
+        stores = cli_session._addressable_harnesses(groups, env={})
+
+        assert {s.account for s in stores} == {"/acct/a", None}
+        assert len(stores) == 2
+
     def test_a_group_whose_harness_camp_cannot_name_contributes_nothing(self, monkeypatch):
         import camp.cli.session as cli_session
         import camp.launch.profile as profile
 
         def fake_harness_for(group):
-            if group["group"]["name"] == "bad":
+            if (group.get("group") or {}).get("name") == "bad":
                 return None
             return _AccountAwareHarness()
 
@@ -334,7 +376,7 @@ class TestAddressableHarnessesStoreKeying:
 
         stores = cli_session._addressable_harnesses(groups, env={"BASE": "1"})
 
-        by_account = {s.account: s.env.get("FAKE_STORE_DIR") for s in stores}
+        by_account = {s.account: s.env.get("FAKE_STORE_DIR") for s in stores if s.account is not None}
         assert by_account == {"/acct/a": "/acct/a", "/acct/b": "/acct/b"}
         for store in stores:
             assert store.env["BASE"] == "1"
@@ -412,9 +454,12 @@ class TestLiveSessionPoolBoundsAHangingStore:
         ]
 
         def fake_enumerate_records(store, scope, env):
-            if store.env.get("FAKE_STORE_DIR") == "/acct/hangs":
+            account = store.env.get("FAKE_STORE_DIR")
+            if account == "/acct/hangs":
                 raise subprocess.TimeoutExpired(cmd=["fake"], timeout=10)
-            return answer
+            if account == "/acct/answers":
+                return answer
+            return []  # the default store, always present alongside the two declared ones
 
         monkeypatch.setattr(launch_session, "enumerate_records", fake_enumerate_records)
 
@@ -422,7 +467,7 @@ class TestLiveSessionPoolBoundsAHangingStore:
             None, env={}, groups=groups
         )
 
-        assert total == 2
+        assert total == 3
         assert records == answer
         assert len(failures) == 1
         assert failures[0]["account"] == "/acct/hangs"

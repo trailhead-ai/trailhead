@@ -531,6 +531,46 @@ def test_a_session_in_the_second_declared_store_still_blocks_removal(
     assert [c.session_id for c in blocking] == [_UUID_A]
 
 
+def test_a_session_in_the_default_store_still_blocks_removal_when_every_group_declares_an_account(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The pinned regression for `camp remove`: `_addressable_harnesses` only
+    ever supplied the default (no-account) store when the group list was
+    EMPTY. On a machine where every configured group declares an account —
+    the case here, both `g1` and `g2` do — the default store never entered
+    the pool at all, so a session running under it was invisible to
+    `gather_pool` and a removal of the workspace it was rooted in would
+    proceed without being blocked. Feeding `_addressable_harnesses`'s own
+    output into `gather_pool` proves the default store is queried and the
+    workspace is recognized as blocked.
+    """
+    import camp.cli.session as cli_session
+    import camp.launch.profile as profile
+    import camp.launch.teardown_guard as guard
+
+    ws = _workspace(tmp_path, "g", "ws")
+    harness = _AccountAwareHarness({
+        None: [_transcript(_UUID_A, ws)],
+        "/acct/a": [],
+        "/acct/b": [],
+    })
+    monkeypatch.setattr(profile, "harness_for", lambda group: harness)
+    monkeypatch.setattr(guard.subprocess, "run", _ok())
+
+    groups = [
+        {"group": {"name": "g1"}, "launch": {"account": "/acct/a"}},
+        {"group": {"name": "g2"}, "launch": {"account": "/acct/b"}},
+    ]
+    stores = cli_session._addressable_harnesses(groups, env={})
+
+    transcripts, live = guard.gather_pool(stores, env={})
+    blocking = guard.blocking_sessions(
+        ws, transcripts=transcripts, live_records=live, groups=groups, env={}, now=_NOW
+    )
+
+    assert [c.session_id for c in blocking] == [_UUID_A]
+
+
 def test_a_session_in_the_second_declared_store_still_blocks_removal_when_live(
     tmp_path: Path, monkeypatch
 ) -> None:
