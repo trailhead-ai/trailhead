@@ -173,8 +173,12 @@ The shape that works:
 - **Every distinct trigger the inputs named survives, named.** This is the load-bearing one. A merge
   that loses a trigger is a regression, not a consolidation, and it is the thing to check for
   explicitly before writing.
-- Length goes **down**. If the merged record is longer than its longest input, the merge flattened
-  rather than consolidated — go back.
+- **Total** length goes down, and by a lot. Measure against the inputs' *combined* length, not
+  against the longest one. A merge of two rich records legitimately runs longer than either, because
+  it is carrying both their triggers; what it must never approach is their sum — a record at 90% of
+  the combined input length is an append-log wearing a single heading. Measuring against the longest
+  input puts this rule in direct conflict with trigger preservation above, and trigger preservation
+  is the one that wins.
 
 ### What has to be carried across
 
