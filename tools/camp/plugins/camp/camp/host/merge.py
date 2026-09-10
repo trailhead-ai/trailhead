@@ -22,15 +22,35 @@ one per host, in `hosts.toml` declaration order), it returns one merged
 
 This module does no I/O, no printing, no exiting, no network, and holds no
 state across calls — it is a pure function over values its caller already
-collected. Contacting the declared hosts (concurrently, through a thread
-pool) is the next task's job; this module trusts whatever order and content
-its caller hands it for `host_answers`.
+collected.
+
+`answer_all_hosts_concurrently` is the companion that produces the
+`host_answers` this merge consumes: it fans the declared hosts out through a
+bounded thread pool, one worker per host, and runs the caller's local answer
+on its own pool slot so the local work overlaps the fan-out instead of
+preceding it. `run_camp` is stateless across calls, so the same injected
+`runner` is safe to use from every worker at once. A worker whose call
+raises something outside `camp.host.transport`'s closed outcome set is
+camp's own bug, not a machine that failed to answer — it is never allowed to
+be misread as one, so it is caught and turned into a row whose reason names
+it as an internal camp fault rather than reusing any transport-failure
+reason.
 """
 from __future__ import annotations
 
-from typing import Any, Sequence
+from concurrent.futures import ThreadPoolExecutor
+from typing import Any, Callable, Sequence
 
-from .relay import HostAnswer
+from .config import Host
+from .relay import HostAnswer, answer_for_host
+from .transport import Runner, default_runner
+
+#: The reason stamped on a host's row when its worker raised something
+#: outside the transport's closed outcome set — a bug in camp's own
+#: fan-out code, never a real machine failure. Deliberately worded so it
+#: cannot collide with any reason `camp.host.relay.answer_for_host` itself
+#: produces for an actual host-failure state.
+INTERNAL_FAULT_REASON = "internal camp fault — not a host failure"
 
 
 def merge_all_hosts_answer(
@@ -94,3 +114,81 @@ def merge_all_hosts_answer(
         rows = [r for r in rows if "group" not in r or r.get("group") == group]
 
     return rows, notices, local_exit_code
+
+
+LocalAnswer = Callable[[], tuple[list[dict[str, Any]], list[str], int]]
+
+
+def answer_all_hosts_concurrently(
+    local_answer: LocalAnswer,
+    hosts: Sequence[tuple[str, Host]],
+    *,
+    verb: str,
+    remote_argv: Sequence[str],
+    runner: Runner = default_runner,
+) -> tuple[tuple[list[dict[str, Any]], list[str], int], list[tuple[str, HostAnswer]]]:
+    """Compute the local answer and contact every declared host, concurrently.
+
+    Runs *local_answer* and one worker per entry in *hosts* on a single
+    bounded thread pool (`len(hosts) + 1` workers — one slot per declared
+    host plus one for the local answer), so the local work overlaps the
+    fan-out instead of running before or after it. `run_camp` holds no state
+    across calls, so the same *runner* is safe to share across every worker.
+
+    Args:
+        local_answer: Zero-argument callable returning the local
+            `(rows, notices, exit_code)` — the caller's own value-returning
+            local path (`cmd_ls_group`'s projection, or
+            `_sessions_live_answer`).
+        hosts: One `(host_name, Host)` pair per declared host, in
+            `hosts.toml` declaration order. The pool starts a worker for
+            each entry, but the returned `host_answers` is always in this
+            same declared order regardless of which worker finished first —
+            completion order never leaks into the result.
+        verb: Passed through to `answer_for_host` — `"list"` or
+            `"sessions"`.
+        remote_argv: Passed through to `answer_for_host` — the same
+            all-groups, JSON remote command every `--host` verb already
+            builds.
+        runner: Injected transport runner, shared by every worker.
+
+    Returns:
+        `(local_result, host_answers)` — `local_result` is whatever
+        *local_answer* returned; `host_answers` is one `(host_name,
+        HostAnswer)` pair per entry in *hosts*, in declared order.
+    """
+    with ThreadPoolExecutor(max_workers=len(hosts) + 1) as pool:
+        local_future = pool.submit(local_answer)
+        host_futures = [
+            (host_name, pool.submit(_answer_one_host, verb, host, host_name, remote_argv, runner))
+            for host_name, host in hosts
+        ]
+
+        local_result = local_future.result()
+        host_answers = [(host_name, future.result()) for host_name, future in host_futures]
+
+    return local_result, host_answers
+
+
+def _answer_one_host(
+    verb: str,
+    host: Host,
+    host_name: str,
+    remote_argv: Sequence[str],
+    runner: Runner,
+) -> HostAnswer:
+    """`answer_for_host`, with any exception outside its own closed outcome
+    set caught and turned into an internal-fault row instead of propagating
+    out of the worker — a bug in this code must never render as a host that
+    failed to answer."""
+    try:
+        return answer_for_host(verb, host, host_name, remote_argv, runner=runner)
+    except Exception as exc:
+        return HostAnswer(
+            rows=[{"ok": False, "host": host_name, "reason": INTERNAL_FAULT_REASON}],
+            notices=[
+                f"camp {verb}: host {host_name!r} hit an internal camp error — {exc}"
+            ],
+            exit_code=1,
+            answered=False,
+        )
