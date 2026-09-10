@@ -190,10 +190,17 @@ def _ownership_notice(mpath: Path, env: dict[str, str] | None) -> str | None:
     recorded owner (`owner_of`, None means never recorded) equals this
     host's declared name (`self_host_name`, None means never declared).
     Every other configuration is a comparison this host cannot vouch for —
-    including the two where the comparison cannot be made at all — and each
+    including the ones where the comparison cannot be made at all — and each
     gets its own distinguishable notice rather than being folded into
     silence. An unchecked workspace must never read the same as a verified
     one.
+
+    "Never recorded" (owner_of successfully read the manifest and found no
+    "owner" key) is kept distinct from "could not be determined" (the
+    manifest exists but owner_of refused it — e.g. a non-string owner): the
+    first is a claim about the record, the second is a claim about this
+    host's ability to read it, and collapsing them would assert more than
+    is actually known.
 
     This host's own name is resolved fresh from `env` each call. A
     `trailhead.paths.PathResolutionError` (an injected environment that
@@ -209,11 +216,12 @@ def _ownership_notice(mpath: Path, env: dict[str, str] | None) -> str | None:
     from ..host import self_host_name
 
     owner: str | None = None
+    unreadable_reason: str | None = None
     if mpath.is_file():
         try:
             owner = owner_of(read_central_manifest(mpath))
-        except ManifestError:
-            owner = None
+        except ManifestError as e:
+            unreadable_reason = str(e)
 
     try:
         self_name = self_host_name(env=env)
@@ -224,6 +232,11 @@ def _ownership_notice(mpath: Path, env: dict[str, str] | None) -> str | None:
         return (
             "camp remove: ownership check skipped — this host has no "
             "declared name; declare one in hosts.toml's self_name field"
+        )
+    if unreadable_reason is not None:
+        return (
+            f"camp remove: this workspace's ownership could not be "
+            f"determined — {unreadable_reason}"
         )
     if owner is None:
         return "camp remove: this workspace's ownership was never recorded"
@@ -260,9 +273,10 @@ def _cmd_remove_group_cli(
     verb compares the workspace's recorded owner (`owner_of`, None means
     never recorded) against this host's declared name (`self_host_name`,
     None means never declared). Silence is the ONLY outcome for a verified
-    match — every other configuration, including the two where the
-    comparison cannot be made at all, gets its own distinguishable notice
-    (see `_ownership_notice`) rather than being folded into silence. This is
+    match — every other configuration, including the ones where the
+    comparison cannot be made at all (no declared name, or a manifest whose
+    owner cannot be read), gets its own distinguishable notice (see
+    `_ownership_notice`) rather than being folded into silence. This is
     a notice, not a refusal: exit code and removal behavior are unchanged in
     every case — only the operator's information changes. A malformed
     `hosts.toml` (`HostConfigError`) is surfaced as a clean fatal error here,
