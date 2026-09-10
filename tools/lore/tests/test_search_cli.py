@@ -997,3 +997,230 @@ def test_search_does_not_bump_last_referenced_at(tmp_path):
     _run(["area:penny"], vault=personal, state=state)
     after = _lref()
     assert before == after
+
+
+# ---------------------------------------------------------------------------
+# Bounded walk: --offset over a total order
+#
+# A caller that must EXAMINE a corpus (dedup, consolidation, an audit) rather
+# than sample its top N has to walk it in bounded pages. That needs two things
+# together: an offset, and a sort key that is a TOTAL order. The recency key
+# alone is not — in the real vault 1388 lesson records share only 726 distinct
+# (updated_at, last_referenced_at) pairs, one tie group holding 97 records — so
+# an offset over a partial order silently skips and duplicates rows across
+# pages. These tests pin the walk, not the flag.
+# ---------------------------------------------------------------------------
+
+
+def _make_tied_fixture(tmp_path: Path, count: int = 7):
+    """A vault of ``count`` lesson records sharing ONE (updated-at) sort key.
+
+    Every record is indistinguishable under the recency order, so any page
+    boundary has to be decided by the tiebreak.
+
+    Indexed in TWO passes — a full ``rebuild`` over the alphabetically-LATER
+    half, then an incremental ``upsert_row`` of the earlier half — so the rows'
+    physical (rowid) order is deliberately NOT their id order. That mirrors the
+    real vault, where records are indexed as they are written rather than in
+    name order, and it means a test asserting a declared order cannot be
+    satisfied by incidental insertion order.
+
+    Returns (vault, state, ids) with ``ids`` sorted ascending.
+    """
+    index_store = load_script("lore.search.index")
+
+    vault = tmp_path / "tied"
+    state = tmp_path / "tied-state"
+    vault.mkdir()
+    state.mkdir()
+
+    def _sidecar(n):
+        return {
+            "title": f"Tied Lesson {n:02d}",
+            "status": "active",
+            "created-at": "2026-06-22T17:22:35Z",
+            "updated-at": "2026-06-22T17:22:35Z",
+        }
+
+    split = count // 2
+    later = list(range(split, count))  # indexed FIRST
+    earlier = list(range(split))  # indexed SECOND
+
+    for n in later:
+        _write_record(
+            vault, "lesson", f"tied-lesson-{n:02d}", _sidecar(n),
+            f"Tied lesson number {n:02d} about widgets.",
+        )
+    _build_index(state, [vault], owned=vault)
+
+    conn = index_store.open_index(env={"XDG_STATE_HOME": str(state)})
+    try:
+        for n in earlier:
+            name = f"tied-lesson-{n:02d}"
+            body = f"Tied lesson number {n:02d} about widgets."
+            _write_record(vault, "lesson", name, _sidecar(n), body)
+            index_store.upsert_row(
+                conn, str(vault), "lesson", name, _sidecar(n), body, shared=0
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+    return vault, state, [f"tied-lesson-{n:02d}" for n in range(count)]
+
+
+def _page_ids(payload):
+    """Record names from a --json payload, page order preserved."""
+    return [h["id"].rsplit("/", 1)[-1] for h in payload["hits"]]
+
+
+def test_walk_with_offset_covers_tied_corpus_exactly_once(tmp_path):
+    """The contract: paging a fully-tied corpus yields every record once."""
+    vault, state, ids = _make_tied_fixture(tmp_path, count=7)
+
+    walked = []
+    for offset in range(0, 7, 2):
+        r = _run(
+            ["kind:lesson", "--limit", "2", "--offset", str(offset), "--json"],
+            vault=vault,
+            state=state,
+        )
+        assert r.returncode == 0, r.stderr
+        walked.extend(_page_ids(json.loads(r.stdout)))
+
+    assert len(walked) == len(set(walked)), f"duplicate rows across pages: {walked}"
+    assert sorted(walked) == sorted(ids), f"walk did not cover the corpus: {walked}"
+
+
+def test_offset_page_is_disjoint_from_the_first_page(tmp_path):
+    vault, state, _ = _make_tied_fixture(tmp_path, count=7)
+
+    first = _run(
+        ["kind:lesson", "--limit", "3", "--json"], vault=vault, state=state
+    )
+    second = _run(
+        ["kind:lesson", "--limit", "3", "--offset", "3", "--json"],
+        vault=vault,
+        state=state,
+    )
+    assert first.returncode == 0, first.stderr
+    assert second.returncode == 0, second.stderr
+
+    page_one = _page_ids(json.loads(first.stdout))
+    page_two = _page_ids(json.loads(second.stdout))
+    assert len(page_one) == 3 and len(page_two) == 3
+    assert not set(page_one) & set(page_two)
+
+
+def test_tied_records_come_back_in_ascending_id_order(tmp_path):
+    """The tiebreak is record id ascending — a declared, reproducible total order.
+
+    The fixture indexes its records in two passes so that rowid order is not
+    id order; only a real tiebreak in the ORDER BY can satisfy this. Without
+    one, a paged walk over a tied corpus has no defined page boundaries.
+    """
+    vault, state, ids = _make_tied_fixture(tmp_path, count=7)
+    r = _run(["kind:lesson", "--limit", "7", "--json"], vault=vault, state=state)
+    assert r.returncode == 0, r.stderr
+    assert _page_ids(json.loads(r.stdout)) == sorted(ids)
+
+
+def test_json_offset_field_reports_the_page_start(tmp_path):
+    vault, state, _ = _make_tied_fixture(tmp_path, count=7)
+    r = _run(
+        ["kind:lesson", "--limit", "2", "--offset", "4", "--json"],
+        vault=vault,
+        state=state,
+    )
+    assert r.returncode == 0, r.stderr
+    payload = json.loads(r.stdout)
+    assert payload["offset"] == 4
+    assert payload["showing"] == 2
+    assert payload["total"] == 7
+
+
+def test_json_truncated_false_on_the_final_page(tmp_path):
+    """``truncated`` must mean "more rows beyond this page", not "page is full".
+
+    The final page of a walk can be exactly ``--limit`` rows long and still be
+    the end of the corpus. A caller that stops on ``truncated`` needs that
+    distinction or it either loops forever or stops early.
+    """
+    vault, state, _ = _make_tied_fixture(tmp_path, count=6)
+
+    middle = json.loads(
+        _run(
+            ["kind:lesson", "--limit", "3", "--offset", "0", "--json"],
+            vault=vault,
+            state=state,
+        ).stdout
+    )
+    final = json.loads(
+        _run(
+            ["kind:lesson", "--limit", "3", "--offset", "3", "--json"],
+            vault=vault,
+            state=state,
+        ).stdout
+    )
+
+    assert middle["showing"] == 3 and middle["truncated"] is True
+    assert final["showing"] == 3 and final["truncated"] is False
+
+
+def test_human_footer_names_the_offset_on_a_later_page(tmp_path):
+    vault, state, _ = _make_tied_fixture(tmp_path, count=7)
+    r = _run(
+        ["kind:lesson", "--limit", "2", "--offset", "2"], vault=vault, state=state
+    )
+    assert r.returncode == 0, r.stderr
+    assert "showing 2 of 7" in r.stdout
+    assert "offset 2" in r.stdout
+
+
+def test_negative_offset_errors_without_traceback(tmp_path):
+    vault, state, _ = _make_tied_fixture(tmp_path, count=3)
+    r = _run(
+        ["kind:lesson", "--offset", "-1", "--json"], vault=vault, state=state
+    )
+    assert r.returncode != 0
+    assert "Traceback" not in r.stderr
+    # Specifically the range complaint — NOT argparse's "unrecognized
+    # arguments", which would also exit nonzero and mention "offset".
+    assert "unrecognized" not in r.stderr
+    assert "--offset must be >= 0" in r.stderr
+
+
+def test_offset_past_the_end_is_empty_and_succeeds(tmp_path):
+    vault, state, _ = _make_tied_fixture(tmp_path, count=3)
+    r = _run(
+        ["kind:lesson", "--limit", "2", "--offset", "99", "--json"],
+        vault=vault,
+        state=state,
+    )
+    assert r.returncode == 0, r.stderr
+    payload = json.loads(r.stdout)
+    assert payload["hits"] == []
+    assert payload["total"] == 3
+    assert payload["truncated"] is False
+
+
+def test_walk_with_offset_covers_a_full_text_query_exactly_once(tmp_path):
+    """The ranked (bm25) path has its OWN ORDER BY and needs the tiebreak too.
+
+    Every record here matches the same term with the same score, so bm25 adds no
+    discrimination on top of the already-tied recency key.
+    """
+    vault, state, ids = _make_tied_fixture(tmp_path, count=7)
+
+    walked = []
+    for offset in range(0, 7, 3):
+        r = _run(
+            ["widgets", "--limit", "3", "--offset", str(offset), "--json"],
+            vault=vault,
+            state=state,
+        )
+        assert r.returncode == 0, r.stderr
+        walked.extend(_page_ids(json.loads(r.stdout)))
+
+    assert len(walked) == len(set(walked)), f"duplicate rows across pages: {walked}"
+    assert sorted(walked) == sorted(ids), f"walk did not cover the corpus: {walked}"

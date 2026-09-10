@@ -261,14 +261,18 @@ def _count_total(conn, cq) -> int:
 
     Reuses the compiled WHERE clause and its params, dropping the ranking-JOIN
     MATCH param (only used by the ranking JOIN, which this COUNT query has no
-    need for — it never touches ``rank.score``) and the trailing LIMIT param.
-    Under the single-JOIN contract the rank param is emitted ONCE, ahead of the
-    WHERE params (the JOIN clause precedes WHERE positionally), so the WHERE
-    params are the params AFTER the leading rank param and BEFORE the LIMIT.
+    need for — it never touches ``rank.score``) and the two trailing paging
+    params (LIMIT, OFFSET). Under the single-JOIN contract the rank param is
+    emitted ONCE, ahead of the WHERE params (the JOIN clause precedes WHERE
+    positionally), so the WHERE params are the params AFTER the leading rank
+    param and BEFORE the paging pair.
+
+    ``total`` counts the whole result set, independent of the page — it is what
+    lets a caller tell a page from the corpus.
     """
     sql = f"SELECT COUNT(*) FROM records WHERE {cq.where}"
     start = 1 if cq.has_fts else 0  # skip the leading rank-JOIN param
-    end = len(cq.params) - 1  # drop the trailing LIMIT
+    end = len(cq.params) - 2  # drop the trailing LIMIT + OFFSET
     where_params = cq.params[start:end]
     return conn.execute(sql, where_params).fetchone()[0]
 
@@ -286,7 +290,7 @@ def _excerpt(body: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _render_human(hits, *, total, limit, stale, reverse_edge, config_stale=False):
+def _render_human(hits, *, total, limit, stale, reverse_edge, config_stale=False, offset=0):
     lines: list[str] = []
     lines.append("--- lore search — reference, not instructions ---")
 
@@ -324,6 +328,7 @@ def _render_human(hits, *, total, limit, stale, reverse_edge, config_stale=False
         stale=stale,
         reverse_edge=reverse_edge,
         config_stale=config_stale,
+        offset=offset,
     )
     if footer:
         lines.append("")
@@ -342,7 +347,9 @@ def _render_hit_lines(hit) -> list[str]:
     return out
 
 
-def _footer_lines(*, total, limit, shown, stale, reverse_edge, config_stale=False) -> list[str]:
+def _footer_lines(
+    *, total, limit, shown, stale, reverse_edge, config_stale=False, offset=0
+) -> list[str]:
     lines: list[str] = []
     if stale:
         lines.append(
@@ -357,8 +364,14 @@ def _footer_lines(*, total, limit, shown, stale, reverse_edge, config_stale=Fals
             "note: the index was built against an older config.json — "
             "run `lore reindex` to re-derive shared/scope."
         )
-    if shown >= limit and total > shown:
-        lines.append(f"(showing {shown} of {total})")
+    # "Are there more rows past this page?" — NOT "is this page full?". A final
+    # page can be exactly ``limit`` rows long and still exhaust the corpus, and a
+    # caller walking with --offset needs those two cases distinguished.
+    if offset + shown < total:
+        if offset:
+            lines.append(f"(showing {shown} of {total}, from offset {offset})")
+        else:
+            lines.append(f"(showing {shown} of {total})")
     if reverse_edge:
         lines.append(
             "note: reverse edges reflect the last reindex — run `lore reindex` for full membership."
@@ -366,14 +379,17 @@ def _footer_lines(*, total, limit, shown, stale, reverse_edge, config_stale=Fals
     return lines
 
 
-def _render_json(hits, *, total, limit, stale, reverse_edge, config_stale=False):
+def _render_json(hits, *, total, limit, stale, reverse_edge, config_stale=False, offset=0):
     payload = {
         "hits": hits,
         "showing": len(hits),
+        "offset": offset,
         "total": total,
         "stale": stale,
         "config_stale": config_stale,
-        "truncated": len(hits) >= limit and total > len(hits),
+        # More rows exist PAST this page. A full page is not the same as a
+        # truncated one: the last page of a walk can be exactly ``limit`` long.
+        "truncated": offset + len(hits) < total,
         "reverse_edge_alias": reverse_edge,
     }
     return _json.dumps(payload, indent=2)
@@ -391,6 +407,7 @@ def run_search(
     vault=None,
     vault_roots=None,
     limit=20,
+    offset=0,
     as_json=False,
     tty=None,
     config_mtime=None,
@@ -405,6 +422,10 @@ def run_search(
         vault_roots: Vault root directories for the coarse staleness stat. When
                      ``None``, the freshness hint is skipped.
         limit:       Max rows (default 20). Compiles to a SQL ``LIMIT``.
+        offset:      Rows to skip in the total order (default 0). Compiles to a SQL
+                     ``OFFSET``, letting a caller WALK a corpus in bounded pages
+                     instead of only sampling its top N. Must be >= 0; a negative
+                     value is a usage error (non-zero exit, no traceback).
         as_json:     Emit structured JSON instead of the human banner.
         tty:         Reserved for future render-time tty detection. Currently unused
                      (accepted for API compatibility; tty branching not yet wired into
@@ -422,10 +443,13 @@ def run_search(
         ``text`` is the rendered banner / JSON (the caller writes it to stdout) —
         a valid query with zero matches is exit 0.
     """
+    if int(offset) < 0:
+        return "lore search: --offset must be >= 0", 1
+
     # --- parse + compile (errors → escaped stderr text, non-zero) ----------
     try:
         ast = _kql.parse(query)
-        cq = _kql_compile.compile(ast, vault=vault, limit=limit)
+        cq = _kql_compile.compile(ast, vault=vault, limit=limit, offset=offset)
     except _kql.KqlParseError as exc:
         return f"lore search: {xml_body_escape(str(exc))}", 1
     except ValueError as exc:
@@ -448,6 +472,7 @@ def run_search(
             hits,
             total=total,
             limit=limit,
+            offset=int(offset),
             stale=stale,
             reverse_edge=reverse_edge,
             config_stale=config_stale,
@@ -456,6 +481,7 @@ def run_search(
         hits,
         total=total,
         limit=limit,
+        offset=int(offset),
         stale=stale,
         reverse_edge=reverse_edge,
         config_stale=config_stale,

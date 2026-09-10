@@ -67,10 +67,34 @@ lore search 'area:auth-service'
   `<external-memory>` fence and no entity-escaping** — unlike the human
   banner, a `shared: 1` hit's body/snippet arrives verbatim.
 - `--limit N` — cap the number of results (default 20).
+- `--offset N` — skip the first N results (default 0). With `--limit`, walks a
+  result set in bounded pages.
 
 ```bash
 lore search 'kind:lesson and area:vault' --json --limit 5
 ```
+
+### Walking a whole corpus, not sampling it
+
+`--limit` alone gives you the top N under the ranking — a **page**, not the set.
+Any task that must *examine* every record (a dedup pass, a consolidation, an
+audit) has to walk the result set instead.
+
+Results are returned in a **total order**, so paging with `--offset` neither
+skips nor repeats a row. Read `total` to size the corpus and `truncated` to
+decide whether to keep going — `truncated` means *more rows exist past this
+page*, so a final page that happens to be exactly `--limit` long still reports
+`false`.
+
+```bash
+lore search 'kind:lesson' --json --limit 1   # read `total` first
+lore search 'kind:lesson' --json --limit 25 --offset 0
+lore search 'kind:lesson' --json --limit 25 --offset 25   # …until truncated is false
+```
+
+**Never conclude anything about a corpus from one page.** A default-`--limit`
+result answered "how many are there?" with `20` for a 178-record corpus once,
+and the audit built on it was confidently wrong. `total` is the number to read.
 
 ## Process
 

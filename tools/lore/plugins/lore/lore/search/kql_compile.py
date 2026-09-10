@@ -248,7 +248,10 @@ class CompiledQuery:
                      the JOIN precedes WHERE positionally), then WHERE params (tree
                      order incl. each MATCH string), then the LIMIT value.
         order_by:    The ORDER BY clause string (without the ``ORDER BY`` keyword).
+                     Always ends in the unique ``records.id`` tiebreak, making it a
+                     TOTAL order — the precondition for OFFSET paging to be sound.
         limit:       The LIMIT value (int).
+        offset:      The OFFSET value (int, >= 0). Rows to skip in the total order.
         has_fts:     True when the query contains at least one full-text node.
         rank_match:  The OR-combined POSITIVE full-text MATCH expression used by the
                      bm25 ranking JOIN (empty string for a pure-facet query).
@@ -261,6 +264,7 @@ class CompiledQuery:
     params: list
     order_by: str
     limit: int
+    offset: int
     has_fts: bool
     rank_match: str
     join_clause: str = ""
@@ -280,7 +284,7 @@ class CompiledQuery:
         if self.where:
             parts.append(f"WHERE {self.where}")
         parts.append(f"ORDER BY {self.order_by}")
-        parts.append("LIMIT ?")
+        parts.append("LIMIT ? OFFSET ?")
         return "\n".join(parts)
 
 
@@ -425,7 +429,7 @@ def _combine_sql(left_sql: str, right_sql: str, op: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def compile(ast, *, vault=None, limit=20) -> CompiledQuery:
+def compile(ast, *, vault=None, limit=20, offset=0) -> CompiledQuery:
     """Compile a KQL AST to a parameterized SQL fragment set.
 
     Args:
@@ -433,13 +437,17 @@ def compile(ast, *, vault=None, limit=20) -> CompiledQuery:
         vault: When provided, add ``records.vault = ?`` to the WHERE; ``None`` adds
                no vault predicate (all vaults).
         limit: Maximum rows to return (default 20, per spec lock). Coerced to int.
+        offset: Rows to skip in the total order (default 0). Coerced to int.
+                Sound only because ``order_by`` is a total order — see
+                :class:`CompiledQuery`.
 
     Returns:
         A :class:`CompiledQuery` whose ``params`` is positionally aligned with
         ``full_query()`` (the rank-JOIN MATCH param once when full-text is present,
-        then WHERE params, then the LIMIT value).
+        then WHERE params, then the LIMIT value, then the OFFSET value).
     """
     limit = int(limit)
+    offset = int(offset)
 
     compiler = _Compiler()
     sql_frag, where_params = compiler._compile_node(ast)
@@ -474,13 +482,19 @@ def compile(ast, *, vault=None, limit=20) -> CompiledQuery:
         )
         final_params.append(rank_match)
         # NULL (unmatched) rows sort LAST (the LEFT JOIN found no `rank` row);
-        # matched (negative) rows sort ASC = best first; recency tiebreak makes
-        # the order stable.
-        order_by = "rank.score IS NULL, rank.score ASC, updated_at DESC, last_referenced_at DESC"
+        # matched (negative) rows sort ASC = best first. Recency narrows ties but
+        # does not break them — records written in one batch share a timestamp,
+        # so `records.id` (unique) is appended to make the key a TOTAL order.
+        # Without it the row order is left to the query plan, and OFFSET paging
+        # is only incidentally, not guaranteeably, free of skips and repeats.
+        order_by = (
+            "rank.score IS NULL, rank.score ASC, updated_at DESC, "
+            "last_referenced_at DESC, records.id ASC"
+        )
     else:
         rank_match = ""
         join_clause = ""
-        order_by = "updated_at DESC, last_referenced_at DESC"
+        order_by = "updated_at DESC, last_referenced_at DESC, records.id ASC"
 
     where_parts = []
 
@@ -495,12 +509,14 @@ def compile(ast, *, vault=None, limit=20) -> CompiledQuery:
     where = " AND ".join(where_parts) if where_parts else "1"
 
     final_params.append(limit)
+    final_params.append(offset)
 
     return CompiledQuery(
         where=where,
         params=final_params,
         order_by=order_by,
         limit=limit,
+        offset=offset,
         has_fts=has_fts,
         rank_match=rank_match,
         join_clause=join_clause,
