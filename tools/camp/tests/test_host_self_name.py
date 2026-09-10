@@ -16,10 +16,17 @@ Test contract:
 - Malformed TOML -> HostConfigError naming path and reason.
 - The config directory is resolved through the injected environment; no test
   ever reads the operator's real ~/.config/camp.
+- `camp doctor` reports the declared name in an informational row on the text
+  rendering when a name is declared, and reports "not declared" when none is.
+- `camp doctor --json` carries the same row; its value is the declared name,
+  or reports it as not declared when none is.
+- The row never fails the overall `doctor` verdict, whether or not a name is
+  declared.
 """
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -195,3 +202,66 @@ def test_cli_surface_renders_clean_error_and_exits_nonzero(tmp_path: Path) -> No
     stderr_lines = [line for line in result.stderr.splitlines() if line.strip()]
     assert any(line.startswith("camp: ") for line in stderr_lines), result.stderr
     assert "Traceback" not in result.stderr
+
+
+def _run_doctor(tmp_path: Path, config_root: Path, args: list[str]) -> subprocess.CompletedProcess:
+    env = {
+        **os.environ,
+        **_env(config_root),
+        "CAMP_STATE_DIR": str(tmp_path / "state"),
+        "CAMP_TEST_ASDF_PRESENT": "1",
+    }
+    return subprocess.run(
+        [sys.executable, str(_CLI_CAMP), "doctor", *args],
+        cwd=str(tmp_path),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+
+def test_doctor_text_reports_declared_name(tmp_path: Path) -> None:
+    config_root = tmp_path / "config"
+    _write_hosts_toml(config_root, 'self_name = "andromeda"\n')
+
+    result = _run_doctor(tmp_path, config_root, [])
+
+    assert "andromeda" in result.stdout, result.stdout
+    assert result.returncode == 0, result.stderr
+
+
+def test_doctor_text_reports_not_declared_when_absent(tmp_path: Path) -> None:
+    config_root = tmp_path / "config"
+
+    result = _run_doctor(tmp_path, config_root, [])
+
+    assert "not declared" in result.stdout, result.stdout
+    assert result.returncode == 0, result.stderr
+
+
+def test_doctor_json_reports_declared_name(tmp_path: Path) -> None:
+    config_root = tmp_path / "config"
+    _write_hosts_toml(config_root, 'self_name = "andromeda"\n')
+
+    result = _run_doctor(tmp_path, config_root, ["--json"])
+
+    assert result.returncode == 0, result.stderr
+    report = json.loads(result.stdout)
+    host_row = next(c for c in report["checks"] if c["check"] == "host_name")
+    assert host_row["details"] == "andromeda"
+    assert host_row["pass"] is True
+    assert report["pass"] is True
+
+
+def test_doctor_json_reports_not_declared_when_absent(tmp_path: Path) -> None:
+    config_root = tmp_path / "config"
+
+    result = _run_doctor(tmp_path, config_root, ["--json"])
+
+    assert result.returncode == 0, result.stderr
+    report = json.loads(result.stdout)
+    host_row = next(c for c in report["checks"] if c["check"] == "host_name")
+    assert host_row["details"] == "not declared"
+    assert host_row["pass"] is True
+    assert report["pass"] is True

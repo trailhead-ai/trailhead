@@ -1113,6 +1113,7 @@ def cmd_doctor(args: list[str], dry_run: bool = False) -> None:
             "check": "host_name",
             "description": "self-declared host name",
             "pass": True,
+            "informational": True,
             "details": host_name if host_name else "not declared",
         }
     )
@@ -1125,7 +1126,7 @@ def cmd_doctor(args: list[str], dry_run: bool = False) -> None:
         for c in checks:
             status = "PASS" if c["pass"] else "FAIL"
             print(f"  [{status}] {c['description']}")
-            if not c["pass"]:
+            if not c["pass"] or c.get("informational"):
                 details = c.get("details")
                 if isinstance(details, list):
                     for d in details:
