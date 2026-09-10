@@ -16,13 +16,16 @@ malformed — non-string, empty, or outside the strict identifier charset — is
 an error: raised as `HostConfigError`, carrying the file path and reason,
 never as a raw traceback.
 
-The name is validated against camp's strict identifier charset (the same
-``\\Z``-anchored pattern as `camp.group.resolve.validate_group_name`, not the
-permissive workspace-slug validator) because a later slice interpolates this
-value into an ssh command line — validating at the declaration site is what
-keeps that from being a shell-injection surface. ``\\Z`` (not ``$``) anchors
-the true end of string; ``$`` also matches just before a trailing newline,
-which would let ``"valid\\n"`` slip through undetected.
+The name is validated against camp's strict identifier charset (a
+``\\Z``-anchored pattern close to `camp.group.resolve.validate_group_name`'s,
+not the permissive workspace-slug validator, but additionally requiring an
+``[a-z0-9]`` leading character) because a later slice interpolates this value
+into an ssh command line — validating at the declaration site is what keeps
+that from being a shell-injection surface. A leading hyphen is refused
+because it would be argv injection against that command line (e.g. an
+``ssh``-recognized flag), not just an identifier oddity. ``\\Z`` (not ``$``)
+anchors the true end of string; ``$`` also matches just before a trailing
+newline, which would let ``"valid\\n"`` slip through undetected.
 
 A declared name is not verified for uniqueness across the operator's hosts —
 this is a local, peer-independent read with no network and no peer to compare
@@ -50,7 +53,12 @@ class HostConfigError(Exception):
 # trailing newline, which would let a name like "valid\n" slip through and
 # defeat the control-character guarantee — see camp.group.resolve's
 # _VALID_GROUP_RE, the same precedent.
-_VALID_HOST_NAME_RE = re.compile(r"^[a-z0-9-]+\Z")
+#
+# The leading character is restricted to `[a-z0-9]` (no hyphen) because a
+# later slice interpolates this value into an ssh command line: a
+# leading-hyphen name (e.g. "-oProxyCommand=...") would be argv injection
+# against that command, not just a cosmetic identifier issue.
+_VALID_HOST_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]*\Z")
 
 
 def self_host_name(env: dict[str, str] | None = None) -> str | None:
@@ -67,9 +75,9 @@ def self_host_name(env: dict[str, str] | None = None) -> str | None:
              Defaults to os.environ.
 
     Raises:
-        HostConfigError: If hosts.toml is malformed TOML, or `self_name` is
-            present but not a non-empty string in camp's strict identifier
-            charset (``^[a-z0-9-]+$``).
+        HostConfigError: If hosts.toml cannot be read or is malformed TOML,
+            or `self_name` is present but not a non-empty string in camp's
+            strict identifier charset (``^[a-z0-9][a-z0-9-]*$``).
     """
     import trailhead.paths as _paths
 
@@ -79,7 +87,12 @@ def self_host_name(env: dict[str, str] | None = None) -> str | None:
         return None
 
     try:
-        raw: dict[str, Any] = tomllib.loads(path.read_text(encoding="utf-8"))
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as e:
+        raise HostConfigError(f"{path}: cannot read file — {e}") from e
+
+    try:
+        raw: dict[str, Any] = tomllib.loads(text)
     except tomllib.TOMLDecodeError as e:
         raise HostConfigError(f"{path}: TOML parse error — {e}") from e
 
@@ -96,8 +109,9 @@ def self_host_name(env: dict[str, str] | None = None) -> str | None:
         raise HostConfigError(f"{path}: field 'self_name' must not be empty")
     if not _VALID_HOST_NAME_RE.match(name):
         raise HostConfigError(
-            f"{path}: field 'self_name' {name!r} must contain only lowercase "
-            "letters, digits, and hyphens (^[a-z0-9-]+$)"
+            f"{path}: field 'self_name' {name!r} must start with a lowercase "
+            "letter or digit and contain only lowercase letters, digits, "
+            "and hyphens (^[a-z0-9][a-z0-9-]*$)"
         )
 
     return name
