@@ -587,6 +587,9 @@ def test_sessions_a_and_all_hosts_flag_produce_the_same_answer(
     hosts_and_group_env, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     transport = _transport_module()
+    import camp.launch.session as launch_session
+
+    monkeypatch.setattr(launch_session, "enumerate_records", lambda *a, **k: [])
     remote_rows = [
         {
             "ok": True,
@@ -699,6 +702,9 @@ def test_sessions_human_output_renders_answered_rows_under_their_machine(
     hosts_and_group_env, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     transport = _transport_module()
+    import camp.launch.session as launch_session
+
+    monkeypatch.setattr(launch_session, "enumerate_records", lambda *a, **k: [])
 
     def fake_run_camp(host, remote_argv, **kw):
         if host.ssh == "andromeda":
