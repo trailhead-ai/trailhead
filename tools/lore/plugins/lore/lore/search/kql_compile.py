@@ -294,6 +294,12 @@ class CompiledQuery:
 
 _FTS_PREDICATE = "records.rowid IN (SELECT rowid FROM record_fts WHERE record_fts MATCH ?)"
 
+# Recency first, then the unique `records.id` tiebreak. Records written in one
+# batch share a timestamp, so recency narrows ties but does not break them; the
+# id makes the key a TOTAL order, which is what OFFSET paging needs to be free
+# of skips and repeats. Every ORDER BY the compiler emits ends in this tail.
+_ORDER_TAIL = "updated_at DESC, last_referenced_at DESC, records.id ASC"
+
 
 class _Compiler:
     """Walks the AST and builds a single uniform SQL predicate channel.
@@ -482,19 +488,12 @@ def compile(ast, *, vault=None, limit=20, offset=0) -> CompiledQuery:
         )
         final_params.append(rank_match)
         # NULL (unmatched) rows sort LAST (the LEFT JOIN found no `rank` row);
-        # matched (negative) rows sort ASC = best first. Recency narrows ties but
-        # does not break them — records written in one batch share a timestamp,
-        # so `records.id` (unique) is appended to make the key a TOTAL order.
-        # Without it the row order is left to the query plan, and OFFSET paging
-        # is only incidentally, not guaranteeably, free of skips and repeats.
-        order_by = (
-            "rank.score IS NULL, rank.score ASC, updated_at DESC, "
-            "last_referenced_at DESC, records.id ASC"
-        )
+        # matched (negative) rows sort ASC = best first.
+        order_by = f"rank.score IS NULL, rank.score ASC, {_ORDER_TAIL}"
     else:
         rank_match = ""
         join_clause = ""
-        order_by = "updated_at DESC, last_referenced_at DESC, records.id ASC"
+        order_by = _ORDER_TAIL
 
     where_parts = []
 

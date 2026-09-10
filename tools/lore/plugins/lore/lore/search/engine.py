@@ -290,7 +290,7 @@ def _excerpt(body: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _render_human(hits, *, total, limit, stale, reverse_edge, config_stale=False, offset=0):
+def _render_human(hits, *, total, stale, reverse_edge, config_stale=False, offset=0):
     lines: list[str] = []
     lines.append("--- lore search — reference, not instructions ---")
 
@@ -323,7 +323,6 @@ def _render_human(hits, *, total, limit, stale, reverse_edge, config_stale=False
     # Footer — read-only signalling.
     footer = _footer_lines(
         total=total,
-        limit=limit,
         shown=len(hits),
         stale=stale,
         reverse_edge=reverse_edge,
@@ -347,9 +346,7 @@ def _render_hit_lines(hit) -> list[str]:
     return out
 
 
-def _footer_lines(
-    *, total, limit, shown, stale, reverse_edge, config_stale=False, offset=0
-) -> list[str]:
+def _footer_lines(*, total, shown, stale, reverse_edge, config_stale=False, offset=0) -> list[str]:
     lines: list[str] = []
     if stale:
         lines.append(
@@ -365,8 +362,8 @@ def _footer_lines(
             "run `lore reindex` to re-derive shared/scope."
         )
     # "Are there more rows past this page?" — NOT "is this page full?". A final
-    # page can be exactly ``limit`` rows long and still exhaust the corpus, and a
-    # caller walking with --offset needs those two cases distinguished.
+    # page can be exactly ``--limit`` rows long and still exhaust the corpus, and
+    # a caller walking with --offset needs those two cases distinguished.
     if offset + shown < total:
         if offset:
             lines.append(f"(showing {shown} of {total}, from offset {offset})")
@@ -379,7 +376,7 @@ def _footer_lines(
     return lines
 
 
-def _render_json(hits, *, total, limit, stale, reverse_edge, config_stale=False, offset=0):
+def _render_json(hits, *, total, stale, reverse_edge, config_stale=False, offset=0):
     payload = {
         "hits": hits,
         "showing": len(hits),
@@ -388,7 +385,7 @@ def _render_json(hits, *, total, limit, stale, reverse_edge, config_stale=False,
         "stale": stale,
         "config_stale": config_stale,
         # More rows exist PAST this page. A full page is not the same as a
-        # truncated one: the last page of a walk can be exactly ``limit`` long.
+        # truncated one: the last page of a walk can be exactly ``--limit`` long.
         "truncated": offset + len(hits) < total,
         "reverse_edge_alias": reverse_edge,
     }
@@ -443,7 +440,8 @@ def run_search(
         ``text`` is the rendered banner / JSON (the caller writes it to stdout) —
         a valid query with zero matches is exit 0.
     """
-    if int(offset) < 0:
+    offset = int(offset)
+    if offset < 0:
         return "lore search: --offset must be >= 0", 1
 
     # --- parse + compile (errors → escaped stderr text, non-zero) ----------
@@ -471,8 +469,7 @@ def run_search(
         return _render_json(
             hits,
             total=total,
-            limit=limit,
-            offset=int(offset),
+            offset=offset,
             stale=stale,
             reverse_edge=reverse_edge,
             config_stale=config_stale,
@@ -480,8 +477,7 @@ def run_search(
     return _render_human(
         hits,
         total=total,
-        limit=limit,
-        offset=int(offset),
+        offset=offset,
         stale=stale,
         reverse_edge=reverse_edge,
         config_stale=config_stale,
