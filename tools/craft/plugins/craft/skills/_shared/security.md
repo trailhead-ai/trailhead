@@ -47,8 +47,8 @@ the consuming site states — this document fixes the shape every site validates
 site's own path-resolution rule.
 
 **Known inlined copies of the safe-value regex.** `brainstorm/SKILL.md`, `distill/SKILL.md`,
-`plan/SKILL.md`, `slice/SKILL.md`, and `drive/SKILL.md` apply this shape unprompted at their own
-substitution sites, so each keeps its own literal copy of `^[A-Za-z0-9._/-]+$` rather than
-dispatching here to read it — that is exactly what keeps the check inline at the point it fires. A
-later change to the canonical shape above must walk these five sites too, or they drift silently out
-of sync with the rule this document states.
+`plan/SKILL.md`, `slice/SKILL.md`, `drive/SKILL.md`, and `consolidate/SKILL.md` apply this shape
+unprompted at their own substitution sites, so each keeps its own literal copy of
+`^[A-Za-z0-9._/-]+$` rather than dispatching here to read it — that is exactly what keeps the check
+inline at the point it fires. A later change to the canonical shape above must walk these six sites
+too, or they drift silently out of sync with the rule this document states.

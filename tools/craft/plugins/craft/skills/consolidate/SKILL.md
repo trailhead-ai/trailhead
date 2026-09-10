@@ -2,8 +2,8 @@
 name: consolidate
 description: >
   Run the consolidation ritual over a labelled lesson corpus — walk it whole, cluster by the
-  failure each lesson prevents, fold each duplicate cluster into one coherent lesson, repoint
-  inbound links, and delete what was folded away. Predicts its own merge count before reading
+  failure each lesson prevents, fold each duplicate cluster into one coherent lesson, classify
+  every inbound reference before touching it, and delete what was folded away. Predicts its own merge count before reading
   the corpus, and stops merging at the point where a cluster's members name genuinely distinct
   triggers.
   TRIGGER when: the user says "consolidate the lessons", "the lesson corpus has bloated",
@@ -92,10 +92,13 @@ direct write bypasses the index and the sidecar and silently corrupts the record
 sees bytes without the sidecar that gives them meaning. This ritual deletes records, so a shortcut
 here is the most expensive one available.
 
-**Every write, without exception.** There is exactly one read the CLI cannot serve — finding body
-`[[wikilinks]]` before a delete, which no query answers (Step 5) — and that carve-out is read-only
-and scoped to locating link sites. It never licenses a direct write, and nothing else reads around
-the CLI.
+**Every write, without exception.** There is exactly one read the CLI cannot serve — finding the
+sites in record text that name a folded record, before a delete and again after it, which no query
+answers (Step 5) — and that carve-out is read-only and scoped to locating those sites. It covers
+every form the name appears in, not only `[[wikilink]]` syntax: a bare prose mention and a
+machine-written ledger line are both reference sites, and a scan that matches only link syntax
+misses exactly the two forms Step 5's classification exists to handle. It never licenses a direct
+write, and nothing else reads around the CLI.
 
 **Every vault-sourced value is shape-checked before it enters a command line.** Record ids and names
 arrive from a git-synced vault a teammate can write, and this ritual substitutes them into commands
@@ -103,9 +106,18 @@ throughout. Validate each against `^[A-Za-z0-9._/-]+$` **before any substitution
 `../_shared/security.md`. A value that fails is never substituted, quoted, or escaped in — refuse
 loudly and stop.
 
-That shape alone still admits `..` and a leading `/`, and every value this ritual substitutes lands
-in a **positional path segment** — `lesson/<name>` in a `record show`, `record update`, or
-`record delete` — never a droppable flag, so there is no well-formed "omit it" form to fall back on.
+That shape alone still admits `..` and a leading `/`, and the check runs at **every** site a folded
+or survivor name reaches — the sites below are the ones this ritual uses, not a closed list, and
+none of them is a droppable flag, so there is no well-formed "omit it" form to fall back on at any:
+
+- a **query filter**, `'related-lesson:<folded-name>'` in the Step 5 facet search — the *earliest*
+  use of the name, ahead of every other, which makes it the first place the check has to fire;
+- a **positional path segment**, `lesson/<name>` in a `record show`, `record update`, or
+  `record delete`;
+- a **flag value**, `--unset-related lesson=<name>` and `--related lesson=<name>`;
+- **body prose**, the annotation text Step 5 writes.
+
+
 Reject any value carrying a `.` or `..` path segment as well as failing the shape check. `lore`
 confines record ids to the vault root on its own, but that is a backstop this ritual does not get to
 assume: a folded name is checked here, at the substitution site, per the traversal rule
@@ -221,8 +233,10 @@ suggests the inputs shared nothing: that is the stop condition telling you these
 ### What has to be carried across
 
 - **Cross-links.** Every `[[wikilink]]` a folded record's body carried moves to the survivor, unless
-  the survivor already says the same thing. These are in the body text you already read in Step 2 —
-  collect them from it, since they are not indexed and no query returns them.
+  the survivor already says the same thing. **A link to another member of the same cluster is
+  dropped, not moved** — its target is about to be deleted, and moved as-is it becomes either a
+  dangling link or a link from the survivor to itself. These are in the body text you already read
+  in Step 2 — collect them from it, since they are not indexed and no query returns them.
 - **`supersedes` edges.** A folded record's `supersedes` targets become the survivor's.
 - **Label provenance.** Re-read the labels on every folded record. **A single-valued label is the
   trap**: where a folded record carried a different value for one — a second subsystem, say — the
@@ -238,7 +252,7 @@ corpus's life where an agent reads that text in bulk and can catch it.
 
 Write the survivor with `lore record update <id> --vault <name>`, piping the full merged body.
 
-## Step 5 — Repoint inbound links, then delete
+## Step 5 — Classify inbound references, repoint what navigates, then delete
 
 Order matters: **repoint first, delete second.** A delete that runs first leaves every inbound link
 pointing at nothing, and nothing will tell you.
@@ -265,15 +279,86 @@ it alone leaves dangling prose links behind — silently, because nothing report
 
 Until lore can answer this, the instrument is a **read-only** scan of record text for the folded
 name. This is the one place this ritual reads vault bytes outside the CLI, it is narrowly scoped to
-finding link sites, and it stays read-only: every rewrite still goes through `lore record update`.
-Never let this carve-out widen into a direct write.
+finding reference sites, and it stays read-only: every rewrite still goes through
+`lore record update`. Never let this carve-out widen into a direct write.
 
-Then `lore record update` each confirmed referrer with the link rewritten.
+### Classify before you touch: navigation, history, ledger
+
+A site that names the folded record is not automatically a link to rewrite. **The question that
+decides the disposition is what the reference is *for*, not what it looks like.** Form never
+overrides intent: a ticked flow-out item reading `Lesson recorded: [[lesson/<name>]]` is a
+`[[wikilink]]`, and it is still history — it states what a past pass produced, and rewriting it
+falsifies that statement.
+
+**Navigation** — a reference a reader follows expecting the guidance that now applies. A live
+`[[wikilink]]` in a lesson or task body, or a sidecar `related` edge. **Rewrite it to the
+survivor.** A body link is rewritten by a body update; a sidecar edge is *not* — it needs the pair
+
+```bash
+lore record update <referrer-id> --vault <name> \
+  --unset-related lesson=<folded-name> --related lesson=<survivor-name>
+```
+
+A body-only update leaves the stale edge in place, and Step 6 then counts it as dangling.
+
+**History** — a statement about what a past pass produced ("this postmortem wrote `lesson/<name>`"),
+in a record a person or an agent authored. The statement is true about a record that no longer
+exists, and substituting the survivor's name makes it false: that is not the lesson that pass wrote.
+**Annotate instead** — demote the old name to plain text, since it no longer names a live record,
+and add the pointer forward as a real link:
+
+```
+lesson/<folded-name> (consolidated into [[lesson/<survivor-name>]])
+```
+
+The forward pointer has to be a `[[wikilink]]`. Lore's only notion of a reference is a wikilink or a
+sidecar edge, so a plain-text annotation resolves to nothing and adds no reference at all — it reads
+like a repoint and is one only if it links.
+
+**Ledger** — **anything inside a `session` record.** Not just the `- referenced <ts> <id>` entries:
+a session body is a tool-managed log, and a folded name can sit in a `- candidate …` block as easily
+as in a referenced line. **Leave the whole record alone.** Do not rewrite it, and do not annotate it
+either. The disposition is keyed on the record's kind, not on the shape of the line — a candidate
+block reads like agent-authored prose, and routing it to History on that basis reintroduces exactly
+the hazard below. `session` is the only kind lore writes outside the vault lock today, which is why
+the rule names it; a future kind that gains an out-of-band writer belongs here too, and nothing in
+lore enforces that coupling for you.
+
+Rewriting falsifies the audit trail for the same reason it does in prose. Annotating is worse than
+it looks: `lore record update` is a read-modify-write that takes only the vault write lock, never
+`session_write_lock` — and a live session appends candidates to that same body under exactly that
+lock. Annotating a session another agent is still writing can silently drop a candidate appended
+between the read and the write. Lore's own rename sweep takes the session lock for precisely this
+case; this ritual has no path that does, so it does not write session bodies at all.
+
+A ledger entry is an audit fact about a moment, not a pointer a reader follows. **Report the ledger
+sites in the Step 6 numbers and move on** — they are not dangling references, because they were
+never references.
+
+**A referrer the CLI refuses to write is a fourth disposition: report it, and do not delete.** The
+clearest case is a **body** reference inside an `adr` past `draft`: lore freezes that body outright,
+and the exemption the rename sweep uses to rewrite links through a freeze is not available to
+`record update`. The freeze is keyed on the body alone, so a sidecar-only edge repoint on the same
+frozen record still lands — check which one you are holding before concluding the referrer is
+unwritable. Do not force it, and do not work around it by leaving the reference to dangle: a folded
+record with an unwritable referrer stays **unfolded**, its survivor keeps the merged content, and
+the pass reports the site and the record it could not retire. Discovering this while holding delete
+authority is the moment to stop, not to improvise.
+
+Every rewrite and every annotation is a `lore record update` call. None of them is a file write.
 
 **Verify by counting, not by re-querying.** Do not re-run the facet query and expect nothing — it is
 symmetric, and its reverse rows survive a delete until the next `lore reindex`, so "returns nothing"
 is not a reachable state and a pass that waits for it will stall. The check that means something is
-the one Step 6 makes: the number of links that still resolve is the same before and after.
+the one Step 6 makes: no reference to a folded record is left dangling. Measure that with two reads
+**after** the delete. Re-run the read-only text scan: every site that still names a folded record
+must be either an annotation carrying a live pointer to the survivor or a ledger entry you
+deliberately left. Then read back the sidecar of every referrer you rewrote with
+`lore record show --json` and confirm the edge now names the survivor — the text scan cannot see a
+sidecar edge, and the facet query is unusable after a delete, so without this read the sidecar half
+of the assertion has no enforcement at all. Confirm too that each rewrite target **resolves live**:
+a link pointed at a mistyped survivor is dangling and carries none of the folded names the scan
+looks for.
 
 ### Why the loser is deleted rather than marked
 
@@ -298,8 +383,18 @@ lore record delete lesson/<folded-name> --vault <name>
 Verification is the deliverable. Report every one of these:
 
 - **Corpus count before and after**, next to the **prediction** from the start.
-- **Inbound links that still resolve** — the count before and after must match. A drop is a
-  regression: something was deleted with a live referrer.
+- **Inbound references, with a dangling count of zero.** That is the assertion, and it is the thing
+  a pass fails on. Report the sites **split by disposition** — rewritten, annotated, and ledger
+  entries left untouched — because the split is the evidence the classification was actually made,
+  and a bare total hides a pass that rewrote history. A ledger entry is never dangling and never
+  counts against this; it was never a reference.
+- **Resolving references before and after**, as an *observation*, not an equality, over the sites
+  the scan found — never corpus-wide, where the folded records' own outbound links disappear with
+  them and read as a loss. Annotating a **bare prose** mention raises the count, because a plain
+  name became a live wikilink; annotating a mention that was *already* a wikilink is **net zero**,
+  since it demotes one link and adds one. So the increase is accounted for by the bare-prose
+  annotations alone, and a pass that made both kinds should expect a rise smaller than its
+  annotation count. A **drop** is still a regression: something was deleted with a live referrer.
 - **Trigger preservation, spot-checked.** For a sample of merged records, re-read the folded inputs'
   triggers and confirm the survivor still names each one. A merge that lost a trigger is reverted,
   not explained.
