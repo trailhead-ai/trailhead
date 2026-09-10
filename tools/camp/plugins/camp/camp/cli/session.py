@@ -1659,6 +1659,83 @@ def _cmd_sessions_group_cli(
     # every other group still answers, immediately followed by
     # `_list_recoverable` refusing outright on that very same broken
     # config — a promise and its own contradiction in the same invocation.
+    def _described() -> str:
+        if slug:
+            return f"workspace {slug!r}"
+        if directory is not None:
+            return f"directory {str(scope)!r}"
+        if all_groups:
+            return "every configured group"
+        return f"group {group['group']['name']!r}"
+
+    rows, notices, exit_code = _sessions_live_answer(
+        scope, env=env, all_groups=all_groups, group=group, described=_described()
+    )
+    for notice in notices:
+        print(notice, file=sys.stderr)
+    if exit_code != 0:
+        sys.exit(exit_code)
+
+    if as_json:
+        print(json.dumps(rows))
+        return
+    from ..launch.recovery import printable_path
+
+    for row in rows:
+        if not row.get("ok", True):
+            continue
+        label = f" ({row['name']})" if row.get("name") else ""
+        print(f"{row['session_id']}  {row['kind']}  {printable_path(row['cwd'])}{label}")
+
+
+def _sessions_live_answer(
+    scope: Path | None,
+    *,
+    env: dict[str, str] | None,
+    all_groups: bool,
+    group: dict | None,
+    described: str,
+) -> tuple[list[dict], list[str], int]:
+    """The value-returning half of `camp sessions`' LIVE listing (never the
+    `--recoverable` listing, which stays its own answer through
+    `_list_recoverable`).
+
+    Enumerates every store's live sessions and returns ``(rows, notices,
+    exit_code)`` — never prints, never calls ``sys.exit``.
+    `_cmd_sessions_group_cli` is the renderer for BOTH the single-group and
+    the `--all-groups` entry points: it calls this, prints each notice to
+    stderr in order, prints the rows (`--json` or human), and exits with the
+    returned code.
+
+    *rows* is exactly the JSON-shaped payload `--json` already prints today
+    — one `_session_payload` dict per live session, then one
+    `_store_failure_payload` per credential store that failed to answer,
+    then one `_group_config_failure_payload` per unparsable sibling under
+    `--all-groups`, in that order.
+
+    *notices* carries every stderr line the printed form emits for this
+    listing, in the same order, INCLUDING `_addressable_harnesses`'s own
+    per-group credential-store-binding notice. That helper still prints it
+    directly by default (its `on_drop=None` posture stays unchanged — its
+    other callers, and the shipped unit test double standing in for
+    `_enumerate_live_sessions_pool`, both depend on that signature staying
+    as-is), so this function captures it with a temporary `sys.stderr`
+    redirect around the one call that can reach it, rather than threading a
+    new `on_drop` parameter through `_enumerate_live_sessions_pool`.
+
+    *exit_code* is 0 on every path except the one refusal below (every
+    credential store failed) — the printed form's `_die` there, replaced
+    with a returned ``1`` instead of a raised `SystemExit`.
+
+    *described* is the caller's already-computed `_described()` text — this
+    function has no `slug`/`directory` of its own, only the *scope* they
+    already resolved to.
+    """
+    import io
+    from contextlib import redirect_stderr
+
+    notices: list[str] = []
+
     all_groups_configs: list[dict] | None = None
     all_groups_unparsable: list[str] = []
     all_groups_no_groups_configured = False
@@ -1670,15 +1747,6 @@ def _cmd_sessions_group_cli(
             _groups_dir(), verb="sessions"
         )
         all_groups_no_groups_configured = not all_groups_configs
-
-    def _described() -> str:
-        if slug:
-            return f"workspace {slug!r}"
-        if directory is not None:
-            return f"directory {str(scope)!r}"
-        if all_groups:
-            return "every configured group"
-        return f"group {group['group']['name']!r}"
 
     # ONE reading of the config directory per invocation, shared by the
     # enumeration pool below and by the attribution that pairs each returned
@@ -1695,38 +1763,37 @@ def _cmd_sessions_group_cli(
 
     already_notified_unanswerable = False
     if all_groups_no_groups_configured:
-        print(
-            "camp sessions: no groups configured — nothing to answer for",
-            file=sys.stderr,
-        )
+        notices.append("camp sessions: no groups configured — nothing to answer for")
         records, failures = [], []
     else:
-        records, failures, stores_total = _enumerate_live_sessions_pool(
-            scope, env=env, groups=session_groups
-        )
+        capture = io.StringIO()
+        with redirect_stderr(capture):
+            records, failures, stores_total = _enumerate_live_sessions_pool(
+                scope, env=env, groups=session_groups
+            )
+        notices.extend(line for line in capture.getvalue().splitlines() if line)
 
         if stores_total == 0:
-            print(
-                f"camp sessions: could not determine the live sessions for {_described()} — "
-                "reporting none",
-                file=sys.stderr,
+            notices.append(
+                f"camp sessions: could not determine the live sessions for {described} — "
+                "reporting none"
             )
             records = []
             failures = []
             already_notified_unanswerable = True
         elif failures and len(failures) == stores_total:
             accounts = ", ".join(_account_label(failure["account"]) for failure in failures)
-            _die(
-                f"camp sessions: could not enumerate live sessions for {_described()} — "
+            notices.append(
+                f"camp sessions: could not enumerate live sessions for {described} — "
                 f"every credential store failed ({accounts}) — check each store's "
                 "credentials and re-run"
             )
+            return [], notices, 1
         else:
             for failure in failures:
-                print(
+                notices.append(
                     "camp sessions: could not enumerate sessions for "
-                    f"{_account_label(failure['account'])}",
-                    file=sys.stderr,
+                    f"{_account_label(failure['account'])}"
                 )
 
     resolved_env = dict(env) if env is not None else dict(os.environ)
@@ -1760,27 +1827,15 @@ def _cmd_sessions_group_cli(
                     # An operator reading silence here as "nothing running"
                     # is exactly the confident-wrong-answer this listing
                     # exists to avoid.
-                    print(
+                    notices.append(
                         f"camp sessions: could not determine the live sessions for "
-                        f"{_described()} — reporting none",
-                        file=sys.stderr,
+                        f"{described} — reporting none"
                     )
 
-    if as_json:
-        payload = [
-            _session_payload(record, **attribution) for record, attribution in attributed
-        ]
-        payload += [_store_failure_payload(failure) for failure in failures]
-        payload += [
-            _group_config_failure_payload(detail) for detail in all_groups_unparsable
-        ]
-        print(json.dumps(payload))
-        return
-    from ..launch.recovery import printable_path
-
-    for record, _attribution in attributed:
-        label = f" ({record.name})" if record.name else ""
-        print(f"{record.session_id}  {record.kind}  {printable_path(record.cwd)}{label}")
+    rows = [_session_payload(record, **attribution) for record, attribution in attributed]
+    rows += [_store_failure_payload(failure) for failure in failures]
+    rows += [_group_config_failure_payload(detail) for detail in all_groups_unparsable]
+    return rows, notices, 0
 
 
 # ---------------------------------------------------------------------------
