@@ -1190,6 +1190,45 @@ def test_negative_offset_errors_without_traceback(tmp_path):
     assert "--offset must be >= 0" in r.stderr
 
 
+def test_offset_beyond_sqlite_range_errors_without_traceback(tmp_path):
+    """A bind value wider than SQLite's 64-bit INTEGER reaches ``conn.execute``
+    and raises ``OverflowError`` unless the range is checked first. The CLI
+    contract is a clean ``lore search: …`` line, never a traceback."""
+    vault, state, _ = _make_tied_fixture(tmp_path, count=3)
+    r = _run(
+        ["kind:lesson", "--offset", str(2**63), "--json"], vault=vault, state=state
+    )
+    assert r.returncode != 0
+    assert "Traceback" not in r.stderr
+    assert "OverflowError" not in r.stderr
+    assert "--offset is out of range" in r.stderr
+
+
+def test_limit_beyond_sqlite_range_errors_without_traceback(tmp_path):
+    """``--limit`` binds through the same door as ``--offset``; the range guard
+    covers both or the traceback just moves one flag over."""
+    vault, state, _ = _make_tied_fixture(tmp_path, count=3)
+    r = _run(
+        ["kind:lesson", "--limit", str(2**63), "--json"], vault=vault, state=state
+    )
+    assert r.returncode != 0
+    assert "Traceback" not in r.stderr
+    assert "OverflowError" not in r.stderr
+    assert "--limit is out of range" in r.stderr
+
+
+def test_ranked_query_pages_tied_scores_in_ascending_id_order(tmp_path):
+    """The ranked branch carries its own ``ORDER BY``. Records tied on rank and
+    on both recency columns fall through to ``records.id``; without that tail
+    the ranked branch's order is undefined and paging it is unsound."""
+    vault, state, _ = _make_tied_fixture(tmp_path, count=7)
+    r = _run(["widgets", "--limit", "50", "--json"], vault=vault, state=state)
+    assert r.returncode == 0, r.stderr
+    names = _page_ids(json.loads(r.stdout))
+    assert len(names) > 1, "fixture must produce several ranked hits to order"
+    assert names == sorted(names)
+
+
 def test_offset_past_the_end_is_empty_and_succeeds(tmp_path):
     vault, state, _ = _make_tied_fixture(tmp_path, count=3)
     r = _run(
