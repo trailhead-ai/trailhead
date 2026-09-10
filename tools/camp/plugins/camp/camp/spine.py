@@ -1056,7 +1056,22 @@ def cmd_doctor(args: list[str], dry_run: bool = False) -> None:
       (a) asdf present — asdf resolvable/installed.
       (b) manifest ↔ git-worktree consistency — a placeholder that always
           passes (no writer of registry.json exists to produce drift).
+      (c) self-declared host name — informational only, always passes.
+
+    A malformed self-declared host name (``hosts.toml``'s ``self_name``) is not
+    folded into the pass/fail check list below — it hard-exits immediately with
+    a clean ``camp: <message>`` line, the same posture `_dispatch_group_command`
+    already uses for a malformed group config, rather than reporting as one
+    more failed check among others.
     """
+    from .host.config import HostConfigError, self_host_name
+
+    try:
+        host_name = self_host_name()
+    except HostConfigError as e:
+        print(f"camp: {e}", file=sys.stderr)
+        sys.exit(1)
+
     as_json = "--json" in args
 
     checks: list[dict[str, Any]] = []
@@ -1089,6 +1104,16 @@ def cmd_doctor(args: list[str], dry_run: bool = False) -> None:
                 f"stale registry instances: {stale_ids}" if stale_ids else "no drift detected"
             ),
             "stale_registry_instances": stale_ids,
+        }
+    )
+
+    # --- check (c): self-declared host name — informational, never fails ---
+    checks.append(
+        {
+            "check": "host_name",
+            "description": "self-declared host name",
+            "pass": True,
+            "details": host_name if host_name else "not declared",
         }
     )
 
