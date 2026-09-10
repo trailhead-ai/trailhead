@@ -1608,8 +1608,8 @@ class TestGetCommitSeries:
         assert strategies_two == frozenset({"merge", "rebase"})
         assert series_one == [("one", 1)]
         assert series_two == [("two", 2)]
-        assert set(cache_one) == {("/repo-a", "30")}
-        assert set(cache_two) == {("/repo-b", "31")}
+        assert set(cache_one) == {("/repo-a", "30", True)}
+        assert set(cache_two) == {("/repo-b", "31", True)}
         assert set(cache_one).isdisjoint(cache_two)
 
 
@@ -3060,6 +3060,77 @@ class TestMergeLoopSeriesRead:
         # for `beta` added none, whether or not `alpha` ever reached it.
         graphql_calls = [c for c in call_log if "graphql" in " ".join(c)]
         assert len(graphql_calls) == 2
+
+    def test_explicit_strategy_never_asks_for_the_commit_series(
+        self, tmp_path: Path
+    ) -> None:
+        """A group with an explicitly configured strategy resolves without
+        ever consulting the series, so the query it issues must not select
+        `commits` — measured on this repository's own history, that
+        selection is the whole payload: 116KB against 190 bytes on a
+        23-commit pull request, since each commit carries a full message
+        body plus a diffstat. Read off the actual `query=` argument the
+        runner was handed, not from a fixture."""
+        manifest, wt = _one_repo_group(tmp_path)
+        toml = _write_toml(
+            tmp_path, '[release]\nauto_merge = true\nmerge_method = "squash"\n'
+        )
+        calls: list[list[str]] = []
+        stub = _make_capability_stub(call_log=calls)
+        provider = get_provider("github", runner=stub)
+        pr_pairs = [PRPair(repo_path=str(wt), pr_number="7", member_name="alpha")]
+        result = provider.pr.merge(pr_pairs, str(manifest), toml_path=str(toml))
+
+        assert result["merged"] == [f"{wt}:7"]
+        queries = [
+            arg
+            for call in calls
+            if "graphql" in " ".join(call)
+            for arg in call
+            if arg.startswith("query=")
+        ]
+        assert queries, calls
+        for query in queries:
+            assert "commits(" not in query
+            # The stack gate still runs off the same query.
+            assert "stackEntry" in query
+
+    def test_automatic_selection_still_asks_for_the_commit_series(
+        self, tmp_path: Path
+    ) -> None:
+        """The other side of the same branch: an automatic run cannot know
+        whether the series rung will be reached until the permitted set
+        comes back on this very query, so it always selects `commits`."""
+        manifest, wt = _one_repo_group(tmp_path)
+        toml = _write_toml(tmp_path, "[release]\nauto_merge = true\n")
+        calls: list[list[str]] = []
+        stub = _make_capability_stub(
+            capabilities={
+                "alpha": {
+                    "mergeCommitAllowed": True,
+                    "squashMergeAllowed": True,
+                    "rebaseMergeAllowed": False,
+                }
+            },
+            commits={"alpha": [_commit_node("real work", 40, 0)]},
+            call_log=calls,
+        )
+        provider = get_provider("github", runner=stub)
+        pr_pairs = [PRPair(repo_path=str(wt), pr_number="7", member_name="alpha")]
+        result = provider.pr.merge(pr_pairs, str(manifest), toml_path=str(toml))
+
+        assert result["merged"] == [f"{wt}:7"]
+        queries = [
+            arg
+            for call in calls
+            if "graphql" in " ".join(call)
+            for arg in call
+            if arg.startswith("query=")
+        ]
+        assert queries, calls
+        assert all("commits(" in query for query in queries)
+        # And still exactly one round trip per pull request.
+        assert len(queries) == 1
 
     def test_transient_series_lookup_failure_offers_no_configuration_change(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
