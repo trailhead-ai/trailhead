@@ -451,13 +451,23 @@ def _record_link_tokens() -> tuple[str, str]:
     package``. Putting the package root on ``sys.path`` and importing it by
     dotted name works; ``sys.path`` is restored afterwards since the suite
     runs under pytest-xdist.
+
+    ``build_record_url`` is called with an explicit ``env`` override pinning
+    the base to :data:`DEFAULT_BASE`. Leaving ``env`` at its default reads the
+    real process environment (``LORE_RECORD_URL_BASE``, then
+    ``~/.config/lore/config.json``), so on a developer machine with either set
+    the resolved base would differ from ``base`` below and ``built[len(base):]``
+    would mis-slice — a failure caused by the test's own environment leakage,
+    not by anything the rule under test does.
     """
     lore_plugin_root = str(_REPO_ROOT / "tools" / "lore" / "plugins" / "lore")
     sys.path.insert(0, lore_plugin_root)
     try:
         record_url = importlib.import_module("lore.record_url")
         base = record_url.DEFAULT_BASE
-        built = record_url.build_record_url("vaultseg", "kindseg", "slugseg")
+        built = record_url.build_record_url(
+            "vaultseg", "kindseg", "slugseg", env={"LORE_RECORD_URL_BASE": base}
+        )
     finally:
         sys.path.remove(lore_plugin_root)
     records_segment = built[len(base):].split("vaultseg")[0]
@@ -740,7 +750,12 @@ class TestRecordLinkRuleInstalled:
 
         assert _ruleset_names_the_record_link_tokens(installed_text) is True
 
-        stripped = installed_text.split("## Record links")[0]
+        # Derived from the contract's own tokens, not the section heading: a
+        # heading rename with the rule intact must not turn this red, and a
+        # section added after "## Record links" must not be silently swept
+        # away by a heading-anchored split.
+        base, records_segment = _record_link_tokens()
+        stripped = installed_text.replace(base, "").replace(records_segment, "")
         assert _ruleset_names_the_record_link_tokens(stripped) is False
 
 

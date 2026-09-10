@@ -97,6 +97,15 @@ late in a long session. Two of the case's three named fallback reasons
 than by ordinary model caution — only the non-standard-path fallback and the
 link's exact target form were.
 
+**Deviation from task 2's contract.** The task called for arms differing in
+exactly one variable — the committed ruleset, and a copy with the
+record-link section removed. What ran instead was a synthetic five-line
+brief with and without that section appended, not the full committed
+ruleset. Cost: this run says nothing about whether the rule survives
+ship-time context density, the crowding-out condition the spec named as
+this eval's whole purpose. See `expected.md`'s Limitations for the full
+statement.
+
 ## Case: publish-routing
 
 `plugins/outpost/evals/publish-routing/` — seven fixtures over a scratch
@@ -158,17 +167,3 @@ Not covered: the routing decision late in a long session or against a user
 pushing the other way, and the "never tell a teammate it is live" clause, which
 needs a failing sync to become the live question. That clause is a separate
 case — and the escape above is a reminder that it is not academic.
-
-When the first case lands, record it here as:
-
-```
-## Case: <name>
-
-`plugins/outpost/evals/<name>/` — fixture, and `expected.md` carrying the pass
-condition, written before any arm was run.
-
-**Under test:** <the claim, and where it is written down>
-
-| Date | Arm | Prose under test | Runs | Result | Notes |
-|------|-----|------------------|------|--------|-------|
-```
