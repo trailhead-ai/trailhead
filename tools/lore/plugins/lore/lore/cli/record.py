@@ -428,8 +428,32 @@ def _render_record(
     the default ``"error: "``). Backs both ``lore record show`` (caller-supplied
     ``<kind>/<name>``) and ``lore session show`` (the resolved session record
     id), so the output shape is identical for both.
+
+    **The shared-layer trust fence.** A record read out of a ``shared: true``
+    vault is content this operator did not author, on its way into an agent's
+    context, and this is the command a bulk-processing caller must use to get a
+    full body — so the marker ``lore search`` and the pipeline board apply to
+    shared content applies here too, by the same two-mode contract. Human mode
+    splices the body into the ``<external-memory layer="shared" source="…">``
+    data channel, which entity-escapes what it wraps. ``--json`` carries a
+    ``layer`` marker (``"shared"`` / ``"personal"``) for the consumer and
+    entity-escapes the vault-authored halves of the payload itself — the body,
+    and every string anywhere inside the sidecar, since a shared vault authors
+    its keys as readily as its values. ``record_id``/``kind``/``name`` are not
+    escaped: they are the caller's own id, confined to a safe charset before
+    anything was opened.
+
+    The write path's :func:`record.store.neutralize_fences` does not make this
+    redundant. It guards what *this* lore stores; shared content arrives by
+    ``lore sync``, authored elsewhere, having never passed through it.
+
+    Trust comes from :func:`_vault_trust`, so a record stamped untrusted in the
+    index is a record rendered untrusted here. Path-aliased config entries that
+    disagree about it refuse to render rather than pick one — a wrong guess
+    would hand shared content over as the operator's own.
     """
     from ..record import store as record_store_mod
+    from ..search import xml_escape
 
     try:
         loc = record_store_mod.locate_record(record_id, vault_root=vault_root)
@@ -442,6 +466,13 @@ def _render_record(
     except Exception as exc:
         print(f"error: record show failed: {exc}", file=sys.stderr)
         return 1
+
+    try:
+        vault_name, shared_flag = _vault_trust(vault_root)
+    except _AliasedTrustConflict as exc:
+        print(f"lore: {exc}", file=sys.stderr)
+        return 1
+    shared = shared_flag != 0
 
     body = (
         loc.body_path.read_text(encoding="utf-8")
@@ -456,14 +487,25 @@ def _render_record(
                 sidecar = json.loads(loc.sidecar_path.read_text(encoding="utf-8"))
             except (OSError, ValueError):
                 sidecar = {}
+        if shared:
+            body = xml_escape.xml_body_escape(body)
+            sidecar = xml_escape.map_strings(sidecar, xml_escape.xml_body_escape)
         payload = {
             "record_id": record_id,
             "kind": loc.kind,
             "name": loc.name,
+            "layer": (
+                xml_escape.SHARED_LAYER if shared
+                else xml_escape.PERSONAL_LAYER
+            ),
             "sidecar": sidecar,
             "body": body,
         }
         print(json.dumps(payload, indent=2, sort_keys=True))
+    elif shared:
+        sys.stdout.write(
+            "\n".join(xml_escape.wrap_shared(vault_name, body.split("\n"))) + "\n"
+        )
     else:
         sys.stdout.write(body)
     return 0
@@ -534,9 +576,30 @@ def _cmd_record_delete(args) -> int:
     ``lore: <msg>`` + nonzero — never falling back to the scan. Omitting
     ``--vault`` preserves :func:`_resolve_record_op_vault`'s scan exactly as
     before.
+
+    **The inbound-reference guard.** A delete leaves every reference to the
+    record dangling, and nothing repairs them afterwards, so a delete is refused
+    while any record still names this one — repoint first, delete second, is
+    enforced here rather than left to a caller following it. What counts as a
+    reference is :func:`record.rename.find_inbound_references`' answer, which is
+    the rename sweep's own: a body wikilink or a ``related`` edge. Bare prose
+    naming the record is not one, which is what lets a consolidation annotation
+    survive the fold it records.
+
+    Two references do not block. One in a ``shared: true`` vault is reported and
+    stepped over: content the operator does not control does not get a veto over
+    their own record. The record's link to itself is not a reason it cannot go.
+
+    A referrer that could not be read *does* block, in its own words. A scan that
+    failed to look must not be reported as a scan that found nothing.
+
+    ``--force`` deletes anyway and names every reference it left dangling, which
+    is the escape hatch for a deliberate delete and for a vault whose referrers
+    cannot be read. It is not silence.
     """
     from .. import locking as locking_mod
     from ..record import guards as guards_mod
+    from ..record import rename as rename_mod
     from ..record import store as record_store_mod
     from . import resolve_state as resolve_state_mod
 
@@ -579,6 +642,29 @@ def _cmd_record_delete(args) -> int:
     # Computed before the delete off the on-disk task/design graph; a no-op
     # for every kind that carries neither graph.
     kind, _, name = record_id.partition("/")
+
+    # The inbound-reference guard: computed before the lock, so a refused delete
+    # never even creates a lock sidecar, and off the vaults as they are on disk
+    # rather than the index — body wikilinks are not indexed at all.
+    inbound = rename_mod.find_inbound_references(
+        rename_mod.sweep_vaults(), kind, name, source_root=vault_root
+    )
+    blocking = [ref for ref in inbound if not ref.shared]
+    if blocking and not getattr(args, "force", False):
+        print(
+            f"lore: refusing to delete {record_id} — "
+            f"{len(blocking)} record(s) still reference it:",
+            file=sys.stderr,
+        )
+        for line in _inbound_lines(blocking):
+            print(line, file=sys.stderr)
+        print(
+            "repoint these references first, or pass --force to delete anyway "
+            "and leave them dangling",
+            file=sys.stderr,
+        )
+        return 1
+
     _, guard_notices = guards_mod.evaluate_graph_guards(
         kind=kind,
         name=name,
@@ -609,8 +695,29 @@ def _cmd_record_delete(args) -> int:
         return 1
 
     _print_guard_notices(guard_notices)
+    if inbound:
+        print(
+            f"notice: {len(inbound)} reference(s) to {record_id} now dangle:",
+            file=sys.stderr,
+        )
+        for line in _inbound_lines(inbound):
+            print(line, file=sys.stderr)
 
     return 0
+
+
+def _inbound_lines(refs) -> list[str]:
+    """One indented line per inbound reference, naming its vault and any reason.
+
+    Shared by the refusal and the post-delete notice so a caller reads the same
+    list whichever side of ``--force`` they are on.
+    """
+    lines = []
+    for ref in refs:
+        suffix = f" — {ref.error}" if ref.error else ""
+        trust = " [shared vault]" if ref.shared else ""
+        lines.append(f"  {ref.record_id} (vault {ref.vault!r}){trust}{suffix}")
+    return lines
 
 
 def _cmd_record_rename(args) -> int:
@@ -1100,6 +1207,61 @@ def _resolve_destination_root(merged_sidecar: dict, kind: str) -> tuple[str, int
     return str(resolution.chosen.path), vault_config_mod.shared_flag(resolution.chosen)
 
 
+class _AliasedTrustConflict(Exception):
+    """Path-aliased ``config.json`` entries disagree on one root's ``shared`` flag.
+
+    Carries the operator-facing message; each caller reports it in its own
+    convention (``record update`` aborts its write, ``record show`` refuses to
+    render) rather than this module guessing which.
+    """
+
+
+def _vault_trust(vault_root: str) -> tuple[str, int]:
+    """The ``(vault_name, shared_flag)`` ``config.json`` declares for *vault_root*.
+
+    The one trust classification for an already-located record's vault, shared
+    by ``record update``'s index stamp (:func:`_resolve_current_vault_shared`)
+    and ``record show``'s output fence (:func:`_render_record`) — so what gets
+    written as untrusted and what gets rendered as untrusted cannot drift apart.
+
+    Matched on the resolved path, because ``config.json`` enforces unique vault
+    *names* and not unique vault *paths*: a symlinked root or a relative path
+    beside an absolute one is one vault, as it is everywhere else in this
+    codebase that decides vault identity.
+
+    A root no config declares — vanilla usage, or a path outside the configured
+    set — is the operator's own: ``("", 0)``, the same trusted default
+    ``record create`` stamps when there is no config to route by.
+
+    **Path-aliased entries refuse rather than guess.** Two entries can name one
+    directory carrying different ``shared`` flags, and that flag decides both
+    whether a write is stamped untrusted and whether a read is fenced. Taking
+    the config-order first match would let whichever alias happens to be listed
+    first silently re-classify the record as trusted, so a disagreement raises
+    :class:`_AliasedTrustConflict` naming the entries; aliases that agree are
+    unambiguous and resolve normally.
+    """
+    from ..vault import config as vault_config_mod
+
+    loaded = _load_vault_config()
+    if loaded is None:
+        return "", 0
+    _, vaults = loaded
+    current = Path(vault_root).resolve()
+    matches = [v for v in vaults if Path(v.path).resolve() == current]
+    if not matches:
+        return "", 0
+    flags = {vault_config_mod.shared_flag(v) for v in matches}
+    if len(flags) > 1:
+        names = ", ".join(repr(v.name) for v in matches)
+        raise _AliasedTrustConflict(
+            f"vault entries {names} all resolve to {current} but disagree "
+            "on their 'shared' flag; fix config.json so path-aliased "
+            "entries agree before reading or writing records there"
+        )
+    return matches[0].name, flags.pop()
+
+
 def _resolve_current_vault_shared(location) -> tuple[str, int]:
     """Destination = the record's current vault, unchanged, with its trust flag.
 
@@ -1114,40 +1276,16 @@ def _resolve_current_vault_shared(location) -> tuple[str, int]:
     in exactly the named vault, so its current vault IS that vault — pinning the
     destination there needs no separate branch.
 
-    **Path-aliased entries refuse rather than guess.** ``config.json`` enforces
-    unique vault *names*, not unique vault *paths*, so two entries can name one
-    directory carrying different ``shared`` flags. The trust flag returned here
-    is stamped onto the index row by the caller's write, so taking the
-    config-order first match would let whichever alias happens to be listed
-    first silently re-classify the record — downgrading fenced ``shared: true``
-    content to trusted. When the aliases disagree there is no defensible answer,
-    so this aborts with a clean ``lore: `` error naming the entries; aliases that
-    agree on ``shared`` are unambiguous and resolve normally.
+    The trust flag is :func:`_vault_trust`'s, which also decides whether
+    ``record show`` fences this record — one classification, so a write stamped
+    untrusted is a read rendered untrusted. A path-aliased disagreement it
+    cannot resolve aborts the update with a clean ``lore: `` error.
     """
-    from ..vault import config as vault_config_mod
-
-    loaded = _load_vault_config()
-    if loaded is None:
-        return location.vault_root, 0
-    _, vaults = loaded
-    current = Path(location.vault_root).resolve()
-    matches = [v for v in vaults if Path(v.path).resolve() == current]
-    if not matches:
-        return location.vault_root, 0
-    flags = {vault_config_mod.shared_flag(v) for v in matches}
-    if len(flags) > 1:
-        names = ", ".join(repr(v.name) for v in matches)
-        raise _UpdateAborted(
-            _fail(
-                [
-                    f"vault entries {names} all resolve to {current} but disagree "
-                    "on their 'shared' flag; fix config.json so path-aliased "
-                    "entries agree before updating records there"
-                ],
-                prefix="lore: ",
-            )
-        )
-    return location.vault_root, flags.pop()
+    try:
+        _, flag = _vault_trust(location.vault_root)
+    except _AliasedTrustConflict as exc:
+        raise _UpdateAborted(_fail([str(exc)], prefix="lore: ")) from exc
+    return location.vault_root, flag
 
 
 class _UpdateAborted(Exception):
@@ -1786,6 +1924,12 @@ def add_record_subparser(sub) -> None:
     p_record_delete.add_argument("--product", default=None, help=argparse.SUPPRESS)
     p_record_delete.add_argument("--suite", default=None, help=argparse.SUPPRESS)
     p_record_delete.add_argument("--team", default=None, help=argparse.SUPPRESS)
+    p_record_delete.add_argument(
+        "--force", dest="force", action="store_true", default=False,
+        help="Delete even while other records still reference this one, leaving "
+             "those references dangling. Without it a delete is refused and the "
+             "referring records are listed.",
+    )
     p_record_delete.set_defaults(func=cmd_record)
 
     p_record_show = p_record_sub.add_parser(

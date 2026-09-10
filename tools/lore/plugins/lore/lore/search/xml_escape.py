@@ -21,6 +21,13 @@ Pure, no I/O.
 
 from __future__ import annotations
 
+#: The two values of the ``layer`` marker that names a rendered value's trust
+#: layer in machine-readable output. One vocabulary rather than one per command,
+#: because a consumer switching on it reads ``record show``'s marker and the
+#: pipeline board's interchangeably.
+SHARED_LAYER = "shared"
+PERSONAL_LAYER = "personal"
+
 # The fenced data-channel framing for shared-layer content.
 _FENCE_OPEN = '<external-memory layer="shared" source="{source}">'
 _FENCE_CLOSE = "</external-memory>"
@@ -50,6 +57,25 @@ def xml_body_escape(text: str) -> str:
     text = text.replace("<", "&lt;")
     text = text.replace(">", "&gt;")
     return text
+
+
+def map_strings(value: object, transform):
+    """Apply *transform* to every string inside *value*, keys included.
+
+    A vault-authored value is not always a bare string: a sidecar holds maps,
+    lists, and maps of lists, and the vault authored every string anywhere
+    inside one. Walking the value is what lets a caller classify a whole field
+    as untrusted rather than only its top level. Non-string scalars pass
+    through, since nothing but text can carry a fence token.
+    """
+    if isinstance(value, str):
+        return transform(value)
+    if isinstance(value, dict):
+        return {transform(k) if isinstance(k, str) else k: map_strings(v, transform)
+                for k, v in value.items()}
+    if isinstance(value, list):
+        return [map_strings(item, transform) for item in value]
+    return value
 
 
 def wrap_shared(source: str, body_lines: list[str]) -> list[str]:

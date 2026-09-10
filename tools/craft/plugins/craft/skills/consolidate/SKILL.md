@@ -277,10 +277,16 @@ facets are built only from the sidecar map, and full-text search does not match 
 name. So the facet query above finds a *subset* of what a delete would break, and a pass that trusts
 it alone leaves dangling prose links behind — silently, because nothing reports them.
 
-Until lore can answer this, the instrument is a **read-only** scan of record text for the folded
-name. This is the one place this ritual reads vault bytes outside the CLI, it is narrowly scoped to
-finding reference sites, and it stays read-only: every rewrite still goes through
-`lore record update`. Never let this carve-out widen into a direct write.
+The instrument that closes that gap is a **read-only** scan of record text for the folded name. This
+is the one place this ritual reads vault bytes outside the CLI, it is narrowly scoped to finding
+reference sites, and it stays read-only: every rewrite still goes through `lore record update`.
+Never let this carve-out widen into a direct write.
+
+`lore record delete` refuses while a body `[[wikilink]]` or a `related` edge still names the record,
+and lists the referrers — so a missed repoint of either shape stops the delete instead of dangling
+after it. The scan still has to run. The guard counts navigational links only, and what it does not
+count is exactly what Step 5 has to classify: a bare-prose mention, which is a history site and has
+to survive the fold. Treat the refusal as the floor under this step, not as its verification.
 
 ### Classify before you touch: navigation, history, ledger
 
@@ -377,6 +383,10 @@ which is why those are steps of their own, and why the delete is last.
 ```bash
 lore record delete lesson/<folded-name> --vault <name>
 ```
+
+A refusal here is the repoint pass reporting a site it missed, and the fix is to go back to Step 5
+and repoint what the refusal names. Never `--force` past it: that deletes the record and leaves the
+link it named pointing at nothing, which is the one outcome this whole ordering exists to prevent.
 
 ## Step 6 — Verify, and report against the prediction
 
