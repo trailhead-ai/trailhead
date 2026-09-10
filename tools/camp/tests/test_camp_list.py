@@ -282,6 +282,25 @@ class TestListJson:
 
         assert json.loads(capsys.readouterr().out) == []
 
+    def test_plain_list_json_never_carries_a_host_key(self, camp_cli, tmp_path, capsys):
+        """AC6 non-regression pin: a plain local `camp list --json` — no
+        `--host` in play — carries EXACTLY the pre-existing key set and no
+        `host` key. The `--host` axis stamps `host` only on a relayed row
+        (camp.host.relay); this path must never gain it, unconditionally or
+        otherwise. Expected keys are spelled out literally here rather than
+        imported from the module under test, so a mutation to the module's
+        own key set constant cannot also mutate this test's expectation."""
+        group = _make_group("listgrp")
+        env = {"CAMP_STATE_DIR": str(tmp_path / "state")}
+        _seed_manifest("listgrp", "feat-x", env=env)
+
+        camp_cli._cmd_ls_group_cli(["--json"], group, env)
+
+        rows = json.loads(capsys.readouterr().out)
+        assert len(rows) == 1
+        assert set(rows[0].keys()) == {"ok", "slug", "branch", "workspace_path", "group"}
+        assert "host" not in rows[0]
+
     def test_shared_renderer_projects_both_sources_to_one_schema(self, capsys):
         """The renderer projects group-style and spine-style entries (different
         source keys) onto the SAME fixed schema."""
