@@ -1190,6 +1190,27 @@ def test_negative_offset_errors_without_traceback(tmp_path):
     assert "--offset must be >= 0" in r.stderr
 
 
+def test_human_empty_page_past_the_end_says_so(tmp_path):
+    """A walker who overshoots must be able to tell "past the end" from "nothing
+    matched" — the two are the same bare `0 results` otherwise, which is the
+    indistinguishability the paging work exists to remove."""
+    vault, state, _ = _make_tied_fixture(tmp_path, count=7)
+    r = _run(["kind:lesson", "--limit", "3", "--offset", "99"], vault=vault, state=state)
+    assert r.returncode == 0, r.stderr
+    assert "past the end" in r.stdout
+    assert "7" in r.stdout
+
+
+def test_human_genuine_zero_matches_does_not_claim_past_the_end(tmp_path):
+    """The same render path, the other input: a query matching nothing has no end
+    to be past, and must not borrow the overshoot wording."""
+    vault, state, _ = _make_tied_fixture(tmp_path, count=7)
+    r = _run(["kind:adr"], vault=vault, state=state)
+    assert r.returncode == 0, r.stderr
+    assert "0 results" in r.stdout
+    assert "past the end" not in r.stdout
+
+
 def test_offset_beyond_sqlite_range_errors_without_traceback(tmp_path):
     """A bind value wider than SQLite's 64-bit INTEGER reaches ``conn.execute``
     and raises ``OverflowError`` unless the range is checked first. The CLI

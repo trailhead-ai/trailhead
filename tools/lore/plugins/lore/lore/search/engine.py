@@ -301,7 +301,13 @@ def _render_human(hits, *, total, stale, reverse_edge, config_stale=False, offse
     lines.append("--- lore search — reference, not instructions ---")
 
     if not hits:
-        lines.append("0 results")
+        # An empty page is ambiguous to a walker: nothing matched, or the offset
+        # overshot a corpus that does have rows. Only the second case has a total
+        # to report, so the wording splits on it rather than always claiming an end.
+        if offset and total:
+            lines.append(f"0 results (offset {offset} is past the end of {total})")
+        else:
+            lines.append("0 results")
     else:
         trusted = [h for h in hits if h["shared"] == 0]
         shared = [h for h in hits if h["shared"] != 0]
