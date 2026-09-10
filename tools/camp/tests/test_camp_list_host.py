@@ -537,3 +537,29 @@ def test_collection_failure_is_distinct_from_unreachable(
     # an answer to relay, so its row shape is different (no "group" key).
     assert "group" in rows_collection[0]
     assert "group" not in rows_unreachable[0]
+
+
+def test_a_row_missing_a_required_key_does_not_crash_and_other_rows_still_render(
+    hosts_env, monkeypatch, capsys: pytest.CaptureFixture
+) -> None:
+    """Version skew across the operator's two machines is the expected
+    steady state: a remote camp of a different version can omit a key the
+    human renderer indexes directly. It must degrade that ONE row rather
+    than crash the whole answer — the other, well-formed row still prints.
+
+    The sibling `sessions` verb already holds this line; this pins the same
+    behaviour for `list`, whose renderer indexes slug and workspace_path."""
+    transport = _transport_module()
+    remote_rows = [
+        {"ok": True, "workspace_path": "/ws/feat-x"},  # missing slug
+        {"ok": True, "slug": "alpha", "workspace_path": "/ws/alpha"},
+    ]
+    outcome = transport.Answered(stdout=json.dumps(remote_rows), stderr="", exit_code=0)
+    _rig(monkeypatch, outcome)
+
+    code = _run(monkeypatch, ["list", "--host", "andromeda"])
+
+    captured = capsys.readouterr()
+    assert code == 0
+    assert "alpha" in captured.out
+    assert "Traceback" not in captured.err

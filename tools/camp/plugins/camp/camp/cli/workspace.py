@@ -111,8 +111,25 @@ def _cmd_ls_host_cli(args: list[str], host: "Host", host_name: str) -> None:
 
     def _render_human_rows(rows: list[dict]) -> None:
         for row in rows:
-            if row.get("ok"):
-                print(f"{row['slug']} {row['workspace_path']}")
+            if not row.get("ok"):
+                continue
+            # Version skew across the operator's two machines is the
+            # expected steady state for this feature, not an edge case — a
+            # remote camp of a different version can answer with a row that
+            # omits a key this rendering depends on. Degrade that ONE row
+            # rather than let it take the whole answer down; the well-formed
+            # rows around it still print.
+            try:
+                slug = row["slug"]
+                workspace_path = row["workspace_path"]
+            except KeyError as e:
+                print(
+                    f"camp list: host {host_name!r} sent a workspace row "
+                    f"missing {e.args[0]!r} — skipping",
+                    file=sys.stderr,
+                )
+                continue
+            print(f"{slug} {workspace_path}")
 
     relay_all_groups(
         "list",
