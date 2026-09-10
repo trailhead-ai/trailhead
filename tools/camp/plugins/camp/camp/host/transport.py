@@ -183,10 +183,9 @@ def default_runner(
     )
     try:
         stdout, stderr = process.communicate(timeout=execution_timeout)
-    except subprocess.TimeoutExpired:
-        _kill(process)
-        raise
     except BaseException:
+        # Covers the execution-timeout expiry and every other unwind (an
+        # interrupt included) with one handler — the cleanup is the same.
         _kill(process)
         raise
     return RawResult(stdout=stdout, stderr=stderr, exit_code=process.returncode)

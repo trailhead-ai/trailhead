@@ -14,8 +14,7 @@ dispatches through. A verb plugs in by:
     same form `--all-groups --json` already answers locally with), and
   - supplying a `render_human_rows` callback that prints its own answered
     rows the way that verb already prints them locally (`list` prints
-    `slug workspace_path`; a future `sessions` wiring would print its own
-    per-session line).
+    `slug workspace_path`; `sessions` prints its own per-session line).
 
 Everything else — host-unreachable through camp-not-resolvable, the JSON
 shape of a relayed row, and the remote-refusal passthrough — is rendered

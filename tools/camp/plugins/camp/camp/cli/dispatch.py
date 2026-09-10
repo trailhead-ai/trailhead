@@ -86,6 +86,18 @@ def read_all_groups_option(args: list[str]) -> tuple[list[str], bool]:
     return remaining, present
 
 
+def _flag_present(args: list[str], flag: str) -> bool:
+    """True when *flag* appears in *args* in either spelling (``--x`` /
+    ``--x=value``).
+
+    A presence scan only — nothing is consumed, because `main()`'s collision
+    refusals must SEE a flag in an argv the refused command never gets to
+    run. One scanner for every such check, so `--group`'s collision test and
+    `--host`'s cannot drift apart on what counts as "present".
+    """
+    return any(a == flag or a.startswith(f"{flag}=") for a in args)
+
+
 #: The one spelling of the resolve-a-single-declared-remote-host option, and
 #: the only verbs it has any meaning for. Held here, once, so
 #: `read_host_option` (the reader `main()` consults for every verb) and its
@@ -115,8 +127,10 @@ def read_host_option(args: list[str]) -> tuple[list[str], str | None]:
     refusal that flag should have triggered downstream never fires. Nothing
     is consumed from *args* before that refusal: it raises against a plain
     scan, never against the mutated copy `_consume_flag_value` would have
-    produced. ``--host=`` (an empty value after the equals sign) refuses the
-    same way, since an empty host name is never a resolvable one either.
+    produced. That same scan is also what refuses a trailing ``--host`` with
+    nothing after it at all. ``--host=`` (an empty value after the equals
+    sign) refuses after delegating, since an empty host name is never a
+    resolvable one either.
     Returns ``(remaining, host_name)``; `host_name` is `None` when `--host`
     is absent. Raises `_HostFlagMissingValue` when the value is missing.
     """
@@ -132,8 +146,6 @@ def read_host_option(args: list[str]) -> tuple[list[str], str | None]:
             break
 
     host_name = _consume_flag_value(remaining, HOST_FLAG)
-    if host_name is None and HOST_FLAG in remaining:
-        raise _HostFlagMissingValue()
     if host_name == "":
         raise _HostFlagMissingValue()
     return remaining, host_name
@@ -146,27 +158,19 @@ def _dispatch_host_command(
 
     Reached ONLY after `--host` has resolved to a declared host and every
     refusal above has passed — `main()`'s `--host` block is this function's
-    sole caller. `list` and `sessions` are both wired to the SSH transport
-    (`camp.host.transport.run_camp`, via `camp.host.relay.relay_all_groups`).
+    sole caller, and it refuses any verb outside `_HOST_VERBS` before
+    reaching here, so *verb* is always one of the two below. Both are wired
+    to the SSH transport (`camp.host.transport.run_camp`, via
+    `camp.host.relay.relay_all_groups`).
     """
     if verb == "list":
         from .workspace import _cmd_ls_host_cli
 
         _cmd_ls_host_cli(rest, host, host_name)
-        return
-
-    if verb == "sessions":
+    else:
         from .session import _cmd_sessions_host_cli
 
         _cmd_sessions_host_cli(rest, host, host_name)
-        return
-
-    print(
-        f"camp {verb}: --host {host_name!r} is declared but not yet wired to "
-        "a transport",
-        file=sys.stderr,
-    )
-    sys.exit(1)
 
 
 def _not_on_path_warning() -> None:
@@ -397,7 +401,7 @@ def main() -> None:
         if canonical not in _ALL_GROUPS_VERBS:
             print(f"camp {first}: --all-groups has no meaning here", file=sys.stderr)
             sys.exit(1)
-        if any(a == "--group" or a.startswith("--group=") for a in scan_rest):
+        if _flag_present(scan_rest, "--group"):
             print(
                 f"camp {canonical}: --all-groups and --group name every group and "
                 "one group at once — pass one or the other",
@@ -407,14 +411,15 @@ def main() -> None:
         # --host names "every group on a named remote host"; --all-groups
         # names "every group on this machine". Different scopes, so refused
         # like the --group collision above rather than accepted as
-        # redundant — detected by the same argv-scan shape as the --group
-        # check, so a valueless `--host` (caught properly by read_host_option
+        # redundant — detected through the same `_flag_present` scanner the
+        # --group check uses, so a valueless `--host` (caught properly by
+        # read_host_option
         # when reached on its own) is still caught here rather than silently
         # dispatching --all-groups's local answer. This check must live
         # INSIDE the all_groups branch: --all-groups is consumed and
         # dispatched before read_host_option ever runs below, so without it
         # --host is silently dropped.
-        if any(a == HOST_FLAG or a.startswith(f"{HOST_FLAG}=") for a in scan_rest):
+        if _flag_present(scan_rest, HOST_FLAG):
             print(
                 f"camp {canonical}: --all-groups and {HOST_FLAG} name every group "
                 "on this machine and every group on a named remote host at once "
@@ -441,7 +446,7 @@ def main() -> None:
         if canonical not in _HOST_VERBS:
             print(f"camp {first}: {HOST_FLAG} has no meaning here", file=sys.stderr)
             sys.exit(1)
-        if any(a == "--group" or a.startswith("--group=") for a in scan_rest):
+        if _flag_present(scan_rest, "--group"):
             print(
                 f"camp {canonical}: {HOST_FLAG} and --group name one remote "
                 "host and one local group at once — pass one or the other",
