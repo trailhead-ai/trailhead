@@ -205,8 +205,8 @@ class TestRowsMatchThePrintedJsonForm:
         group_b = {"group": {"name": "g2"}, "launch": {"account": "/acct/b"}, "members": []}
         monkeypatch.setattr(
             lifecycle,
-            "answerable_groups_or_refuse",
-            lambda groups_dir, *, verb: ([group_a, group_b], []),
+            "load_answerable_groups",
+            lambda groups_dir: ([group_a, group_b], []),
         )
 
         rec_a = _record("sess-a")
@@ -329,8 +329,8 @@ class TestAddressableHarnessesNoticeReachesReturnedNotices:
         monkeypatch.setattr(profile, "harness_for", fake_harness_for)
         monkeypatch.setattr(
             lifecycle,
-            "answerable_groups_or_refuse",
-            lambda groups_dir, *, verb: ([flaky_group], []),
+            "load_answerable_groups",
+            lambda groups_dir: ([flaky_group], []),
         )
 
         live_row = _record("probe-sess-1")
@@ -412,8 +412,8 @@ class TestNoticeOrderIsPreserved:
         monkeypatch.setattr(profile, "harness_for", fake_harness_for)
         monkeypatch.setattr(
             lifecycle,
-            "answerable_groups_or_refuse",
-            lambda groups_dir, *, verb: ([flaky_group, failing_group], []),
+            "load_answerable_groups",
+            lambda groups_dir: ([flaky_group, failing_group], []),
         )
 
         def fake_enumerate_records(store, scope, env):
@@ -438,3 +438,120 @@ class TestNoticeOrderIsPreserved:
         assert len(notices) == 2
         assert "could not address group" in notices[0] and "flaky" in notices[0]
         assert "could not enumerate sessions for" in notices[1] and "failing" in notices[1]
+
+
+class TestAllGroupsRefusalIsReturnedNotRaised:
+    """`_sessions_live_answer` is documented as never printing and never
+    calling `sys.exit` — but on the `--all-groups` branch it used to call
+    `answerable_groups_or_refuse` directly, which does both when every
+    configured group's TOML fails to parse. These drive the refusal through
+    a REAL unparsable groups directory (no monkeypatching of
+    `answerable_groups_or_refuse` itself) so the refusal branch actually runs.
+
+    Task: task/extract-a-value-returning-local-answer-for-camp-sessions
+    (fix dispatch against commit 0567218f44cccdac695bf136120a52cfbaf2e14c).
+    """
+
+    def test_every_group_config_unparsable_returns_instead_of_exiting(
+        self, monkeypatch, tmp_path
+    ):
+        import camp.cli.common as cli_common
+        import camp.cli.session as cli_session
+
+        groups_dir = tmp_path / "groups"
+        groups_dir.mkdir()
+        (groups_dir / "broken.toml").write_text("not valid toml [[[", encoding="utf-8")
+
+        monkeypatch.setattr(cli_common, "_groups_dir", lambda: groups_dir)
+
+        env = {"HOME": str(tmp_path)}
+
+        rows, notices, exit_code = cli_session._sessions_live_answer(
+            None, env=env, all_groups=True, group=None, described="every configured group"
+        )
+
+        assert rows == []
+        assert exit_code == 1
+        assert any(
+            "could not answer for any configured group" in n
+            and "every group config failed to parse" in n
+            for n in notices
+        )
+
+    def test_every_group_config_unparsable_still_exits_one_through_the_real_cli(
+        self, monkeypatch, capsys, tmp_path
+    ):
+        import camp.cli.common as cli_common
+        import camp.cli.session as cli_session
+
+        groups_dir = tmp_path / "groups"
+        groups_dir.mkdir()
+        (groups_dir / "broken.toml").write_text("not valid toml [[[", encoding="utf-8")
+
+        monkeypatch.setattr(cli_common, "_groups_dir", lambda: groups_dir)
+
+        env = {"HOME": str(tmp_path)}
+
+        with pytest.raises(SystemExit) as exc:
+            cli_session._cmd_sessions_group_cli([], group=None, env=env, all_groups=True)
+
+        assert exc.value.code == 1
+        err = capsys.readouterr().err
+        assert "could not answer for any configured group" in err
+        assert "every group config failed to parse" in err
+
+    def test_mixed_parsable_and_unparsable_group_configs(
+        self, monkeypatch, capsys, tmp_path
+    ):
+        import camp.cli.common as cli_common
+        import camp.cli.session as cli_session
+        import camp.launch.profile as profile
+        import camp.launch.session as launch_session
+
+        groups_dir = tmp_path / "groups"
+        groups_dir.mkdir()
+        (groups_dir / "broken.toml").write_text("not valid toml [[[", encoding="utf-8")
+        (groups_dir / "good.toml").write_text(
+            "[group]\n"
+            "name = \"g1\"\n"
+            "[[members]]\n"
+            "name = \"m1\"\n"
+            "repo_root = \"/repo\"\n",
+            encoding="utf-8",
+        )
+
+        monkeypatch.setattr(cli_common, "_groups_dir", lambda: groups_dir)
+
+        class _AcctHarness:
+            name = "acctharness"
+
+            def session_launch_env_unset(self):
+                return []
+
+            def session_launch_env_set(self, account, *, env=None):
+                return {} if account is None else {"FAKE_STORE_DIR": account}
+
+        monkeypatch.setattr(profile, "harness_for", lambda group: _AcctHarness())
+
+        rec = _record("sess-good")
+
+        def fake_enumerate_records(store, scope, env):
+            return [rec] if store.account is None else []
+
+        monkeypatch.setattr(launch_session, "enumerate_records", fake_enumerate_records)
+
+        env = {"HOME": str(tmp_path)}
+
+        rows, notices, exit_code = cli_session._sessions_live_answer(
+            None, env=env, all_groups=True, group=None, described="every configured group"
+        )
+        printed_rows, printed_notices, printed_exit = _call_cli_json(
+            monkeypatch, capsys, [], None, env, all_groups=True
+        )
+
+        assert exit_code == 0 and printed_exit == 0
+        assert notices == printed_notices
+        assert any("broken.toml" in n and "skipping" in n for n in notices)
+        assert notices[0] == printed_notices[0]
+        assert any(r.get("session_id") == "sess-good" for r in rows)
+        assert rows == printed_rows

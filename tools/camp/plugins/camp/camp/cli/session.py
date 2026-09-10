@@ -1723,9 +1723,16 @@ def _sessions_live_answer(
     redirect around the one call that can reach it, rather than threading a
     new `on_drop` parameter through `_enumerate_live_sessions_pool`.
 
-    *exit_code* is 0 on every path except the one refusal below (every
-    credential store failed) — the printed form's `_die` there, replaced
-    with a returned ``1`` instead of a raised `SystemExit`.
+    *exit_code* is 0 on every path except two refusals: every credential
+    store failed, and (under `all_groups=True`) every configured group's
+    TOML failed to parse — both are the printed form's `_die`, replaced with
+    a returned ``1`` instead of a raised `SystemExit`. The group-config
+    refusal used to be raised by calling
+    :func:`~camp.provision.lifecycle.answerable_groups_or_refuse` directly;
+    this function instead calls that helper's value-returning sibling
+    :func:`~camp.provision.lifecycle.load_answerable_groups` and turns the
+    same two notices into returned data itself, so this value function never
+    exits the process on that path either.
 
     *described* is the caller's already-computed `_described()` text — this
     function has no `slug`/`directory` of its own, only the *scope* they
@@ -1740,12 +1747,18 @@ def _sessions_live_answer(
     all_groups_unparsable: list[str] = []
     all_groups_no_groups_configured = False
     if all_groups:
-        from ..provision.lifecycle import answerable_groups_or_refuse
+        from ..provision.lifecycle import load_answerable_groups
         from .common import _groups_dir
 
-        all_groups_configs, all_groups_unparsable = answerable_groups_or_refuse(
-            _groups_dir(), verb="sessions"
-        )
+        all_groups_configs, all_groups_unparsable = load_answerable_groups(_groups_dir())
+        for detail in all_groups_unparsable:
+            notices.append(f"camp sessions: {detail} — skipping")
+        if not all_groups_configs and all_groups_unparsable:
+            notices.append(
+                "camp sessions: could not answer for any configured group — "
+                "every group config failed to parse; fix a config above and re-run"
+            )
+            return [], notices, 1
         all_groups_no_groups_configured = not all_groups_configs
 
     # ONE reading of the config directory per invocation, shared by the
