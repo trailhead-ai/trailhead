@@ -209,11 +209,48 @@ def test_no_merged_pull_request_reports_not_applicable():
     assert summarize_strategy_disclosures([]) == "n/a"
 
 
-def _graphql_merge_spy(calls, permitted):
-    """A runner answering just enough gh/git for a merge, with the repository
-    reporting `permitted` as its allowed merge strategies."""
+def _group_fixture(tmp_path, *member_names: str):
+    """A manifest and group TOML for `member_names`, one worktree each.
+
+    Returns `(manifest_path, toml_path, worktree_paths)`. The TOML enables
+    auto-merge and, for more than one member, pins the merge order to the
+    order the names were given in.
+    """
+    import json as _json
+
+    worktrees = []
+    members = []
+    for name in member_names:
+        wt = tmp_path / "wt" / name
+        wt.mkdir(parents=True)
+        worktrees.append(wt)
+        members.append(
+            {"name": name, "repo_root": str(tmp_path), "worktree_path": str(wt)}
+        )
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(_json.dumps({"schema_version": 1, "members": members}))
+    toml = tmp_path / "group.toml"
+    body = "[release]\nauto_merge = true\n"
+    if len(member_names) > 1:
+        order = ", ".join(f"'{name}'" for name in member_names)
+        body += f"merge_order = [{order}]\n"
+    toml.write_text(body, encoding="utf-8")
+    return manifest, toml, worktrees
+
+
+def _graphql_merge_spy(calls, permitted, *, pr_commits=None):
+    """A runner answering just enough gh/git for a merge, per pull request:
+    `permitted` (the repository's allowed merge strategies) and
+    `pr_commits` (the pull request's commit nodes, see `_commit_node`) are
+    both keyed by pr_number, so one stub answers a multi-pull-request run
+    where each pull request has its own capabilities and commit series. A
+    pull request absent from `pr_commits` gets no `commits` field at all —
+    `get_commit_series`'s malformed-shape path.
+    """
     import json as _json
     import subprocess
+
+    pr_commits = pr_commits or {}
 
     def run(cmd, **kwargs):
         calls.append(list(cmd))
@@ -223,24 +260,32 @@ def _graphql_merge_spy(calls, permitted):
         if "remote" in cmd_str and "get-url" in cmd_str:
             return subprocess.CompletedProcess(cmd, 0, "git@github.com:acme/api.git\n", "")
         if "graphql" in cmd_str:
+            number_tok = next((t for t in cmd if t.startswith("number=")), None)
+            pr_number = number_tok.split("=", 1)[1] if number_tok else None
+            allowed = permitted.get(pr_number, set())
+            nodes = pr_commits.get(pr_number)
+            pull_request: dict = {"stackEntry": None}
+            if nodes is not None:
+                pull_request["commits"] = {"totalCount": len(nodes), "nodes": nodes}
             payload = {
                 "data": {
                     "repository": {
-                        "mergeCommitAllowed": "merge" in permitted,
-                        "squashMergeAllowed": "squash" in permitted,
-                        "rebaseMergeAllowed": "rebase" in permitted,
-                        "pullRequest": {"stackEntry": None},
+                        "mergeCommitAllowed": "merge" in allowed,
+                        "squashMergeAllowed": "squash" in allowed,
+                        "rebaseMergeAllowed": "rebase" in allowed,
+                        "pullRequest": pull_request,
                     }
                 }
             }
             return subprocess.CompletedProcess(cmd, 0, _json.dumps(payload), "")
         if "view" in cmd_str and "--json" in cmd_str:
+            pr_number = cmd[cmd.index("view") + 1]
             payload = {
                 "state": "OPEN",
                 "mergeable": "MERGEABLE",
                 "mergeStateStatus": "CLEAN",
                 "isDraft": False,
-                "headRefName": "feat",
+                "headRefName": f"feat-{pr_number}",
             }
             return subprocess.CompletedProcess(cmd, 0, _json.dumps(payload), "")
         return subprocess.CompletedProcess(cmd, 0, "", "")
@@ -257,28 +302,12 @@ def test_the_line_the_merge_path_actually_prints_parses_via_the_real_parser(
     printed through the real parser, so a producer-side reword fails here
     rather than silently yielding an unparseable report field.
     """
-    import json as _json
-
     from trailhead.vcs.github import GitHubProvider, PRPair
 
-    wt = tmp_path / "wt" / "api"
-    wt.mkdir(parents=True)
-    manifest = tmp_path / "manifest.json"
-    manifest.write_text(
-        _json.dumps(
-            {
-                "schema_version": 1,
-                "members": [
-                    {"name": "api", "repo_root": str(tmp_path), "worktree_path": str(wt)}
-                ],
-            }
-        )
-    )
-    toml = tmp_path / "group.toml"
-    toml.write_text("[release]\nauto_merge = true\n", encoding="utf-8")
+    manifest, toml, (wt,) = _group_fixture(tmp_path, "api")
 
     calls: list[list[str]] = []
-    provider = GitHubProvider(runner=_graphql_merge_spy(calls, {"merge", "squash", "rebase"}))
+    provider = GitHubProvider(runner=_graphql_merge_spy(calls, {"11": {"merge", "squash", "rebase"}}))
     provider.pr.merge(
         [PRPair(repo_path=str(wt), pr_number="11", member_name="api")],
         str(manifest),
@@ -315,81 +344,15 @@ def _commit_node(message: str, additions: int, deletions: int) -> dict:
     }
 
 
-def _graphql_merge_spy_with_commits(calls, permitted, *, pr_commits):
-    """Like `_graphql_merge_spy`, but per-pull-request: `permitted` and
-    `pr_commits` are keyed by pr_number so a single stub can answer a
-    multi-pull-request run where each pull request has its own capability
-    set and commit series."""
-    import json as _json
-    import subprocess
-
-    def run(cmd, **kwargs):
-        calls.append(list(cmd))
-        cmd_str = " ".join(cmd)
-        if "config" in cmd_str and "user.email" in cmd_str:
-            return subprocess.CompletedProcess(cmd, 0, "dev@example.com\n", "")
-        if "remote" in cmd_str and "get-url" in cmd_str:
-            return subprocess.CompletedProcess(cmd, 0, "git@github.com:acme/api.git\n", "")
-        if "graphql" in cmd_str:
-            number_tok = next((t for t in cmd if t.startswith("number=")), None)
-            pr_number = number_tok.split("=", 1)[1] if number_tok else None
-            allowed = permitted.get(pr_number, set())
-            nodes = pr_commits.get(pr_number)
-            pull_request: dict = {"stackEntry": None}
-            if nodes is not None:
-                pull_request["commits"] = {"totalCount": len(nodes), "nodes": nodes}
-            payload = {
-                "data": {
-                    "repository": {
-                        "mergeCommitAllowed": "merge" in allowed,
-                        "squashMergeAllowed": "squash" in allowed,
-                        "rebaseMergeAllowed": "rebase" in allowed,
-                        "pullRequest": pull_request,
-                    }
-                }
-            }
-            return subprocess.CompletedProcess(cmd, 0, _json.dumps(payload), "")
-        if "view" in cmd_str and "--json" in cmd_str:
-            view_tok_idx = cmd.index("view")
-            pr_number = cmd[view_tok_idx + 1]
-            payload = {
-                "state": "OPEN",
-                "mergeable": "MERGEABLE",
-                "mergeStateStatus": "CLEAN",
-                "isDraft": False,
-                "headRefName": f"feat-{pr_number}",
-            }
-            return subprocess.CompletedProcess(cmd, 0, _json.dumps(payload), "")
-        return subprocess.CompletedProcess(cmd, 0, "", "")
-
-    return run
-
-
 def test_series_driven_disclosure_line_parses_via_the_real_parser(tmp_path, capsys):
     """The disclosure line's shape must still hold for the new
     series-driven reason vocabulary (AC10), not only for the
     rebase-permitted case the sibling test covers: a real merge run whose
     repository forbids rebasing and permits both other strategies produces
     a line the real parser reads back intact, reason text included."""
-    import json as _json
-
     from trailhead.vcs.github import GitHubProvider, PRPair
 
-    wt = tmp_path / "wt" / "api"
-    wt.mkdir(parents=True)
-    manifest = tmp_path / "manifest.json"
-    manifest.write_text(
-        _json.dumps(
-            {
-                "schema_version": 1,
-                "members": [
-                    {"name": "api", "repo_root": str(tmp_path), "worktree_path": str(wt)}
-                ],
-            }
-        )
-    )
-    toml = tmp_path / "group.toml"
-    toml.write_text("[release]\nauto_merge = true\n", encoding="utf-8")
+    manifest, toml, (wt,) = _group_fixture(tmp_path, "api")
 
     calls: list[list[str]] = []
     commits = [
@@ -397,7 +360,7 @@ def test_series_driven_disclosure_line_parses_via_the_real_parser(tmp_path, caps
         _commit_node("add the renderer", 140, 20),
     ]
     provider = GitHubProvider(
-        runner=_graphql_merge_spy_with_commits(
+        runner=_graphql_merge_spy(
             calls, {"12": {"merge", "squash"}}, pr_commits={"12": commits}
         )
     )
@@ -417,7 +380,7 @@ def test_series_driven_disclosure_line_parses_via_the_real_parser(tmp_path, caps
         "the merge path printed no line this parser recognises for the "
         f"series-driven reason — producer and consumer have drifted apart. stderr was:\n{err}"
     )
-    series = get_commit_series(str(wt), "12", runner=_graphql_merge_spy_with_commits(
+    series = get_commit_series(str(wt), "12", runner=_graphql_merge_spy(
         [], {"12": {"merge", "squash"}}, pr_commits={"12": commits}
     ))
     expected_strategy, expected_reason = resolve_merge_strategy(
@@ -435,37 +398,16 @@ def test_two_pull_requests_one_reading_series_one_not_both_parse_independently(
     permitted) — and the real parser reads both disclosures back correctly
     attributed to their own pull request, over the runner's real command
     log across one genuine two-pull-request merge run."""
-    import json as _json
-
     from trailhead.vcs.github import GitHubProvider, PRPair
 
-    wt_a = tmp_path / "wt" / "api"
-    wt_b = tmp_path / "wt" / "web"
-    wt_a.mkdir(parents=True)
-    wt_b.mkdir(parents=True)
-    manifest = tmp_path / "manifest.json"
-    manifest.write_text(
-        _json.dumps(
-            {
-                "schema_version": 1,
-                "members": [
-                    {"name": "api", "repo_root": str(tmp_path), "worktree_path": str(wt_a)},
-                    {"name": "web", "repo_root": str(tmp_path), "worktree_path": str(wt_b)},
-                ],
-            }
-        )
-    )
-    toml = tmp_path / "group.toml"
-    toml.write_text(
-        "[release]\nauto_merge = true\nmerge_order = ['api', 'web']\n", encoding="utf-8"
-    )
+    manifest, toml, (wt_a, wt_b) = _group_fixture(tmp_path, "api", "web")
 
     calls: list[list[str]] = []
     commits = [
         _commit_node("add the parser", 120, 10),
         _commit_node("add the renderer", 140, 20),
     ]
-    runner = _graphql_merge_spy_with_commits(
+    runner = _graphql_merge_spy(
         calls,
         {"21": {"merge", "squash", "rebase"}, "22": {"merge", "squash"}},
         pr_commits={"22": commits},

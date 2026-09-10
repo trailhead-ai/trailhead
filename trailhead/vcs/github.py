@@ -1093,11 +1093,10 @@ def get_permitted_merge_strategies(
 
 
 #: One prefix per resolution cause `resolve_merge_strategy` and
-#: `describe_merge_refusal` can report, keyed by cause name. Pinned here so
-#: two different causes can never render as near-identical text — the
-#: merge-loop task and the next slice's commit-series rule both extend this
-#: vocabulary rather than retyping it. Every prefix used by either function
-#: below is drawn from this dict, and its values are pairwise distinct.
+#: `describe_merge_refusal` can report, keyed by cause name. Pinned in one
+#: table so two different causes can never render as near-identical text.
+#: Every prefix used by either function below is drawn from this dict; its
+#: values are pairwise distinct, and none is a substring of another.
 RESOLUTION_REASON_PREFIXES: dict[str, str] = {
     "explicit_configured": "explicit-configured",
     "auto_rebase_permitted": "auto-rebase-permitted",
@@ -1110,6 +1109,25 @@ RESOLUTION_REASON_PREFIXES: dict[str, str] = {
     "auto_none_permitted": "auto-none-permitted",
     "merge_refused": "merge-refused",
 }
+
+
+def _series_decides(configured_method: str, permitted: frozenset[str] | str) -> bool:
+    """True for exactly the one rung of `resolve_merge_strategy`'s ladder
+    that consults ``series``: automatic selection, a resolved permitted set,
+    rebasing forbidden, and two or more other strategies permitted. Every
+    other rung decides without the series.
+
+    `resolve_merge_strategy` guards that rung with this predicate and
+    `_merge_prs` pays for the series read only where it holds, so the
+    condition has a single definition the two cannot drift apart from — and
+    the read is never issued for a decision that would ignore its result.
+    """
+    return (
+        configured_method == AUTOMATIC_MERGE_METHOD
+        and permitted != PERMITTED_STRATEGIES_LOOKUP_FAILED
+        and "rebase" not in permitted
+        and len(permitted - {"rebase"}) >= 2
+    )
 
 
 def resolve_merge_strategy(
@@ -1211,7 +1229,7 @@ def resolve_merge_strategy(
         prefix = RESOLUTION_REASON_PREFIXES["auto_sole_permitted"]
         return only, f"{prefix}: repository permits only '{only}'"
 
-    if len(remaining) >= 2:
+    if _series_decides(configured_method, permitted):
         if series is None or series == COMMIT_SERIES_LOOKUP_FAILED:
             prefix = RESOLUTION_REASON_PREFIXES["auto_series_lookup_failed"]
             return "squash", f"{prefix}: commit series lookup failed"
@@ -1471,23 +1489,14 @@ def _merge_prs(
         else:
             permitted = frozenset()
 
-        # The series is read only when `resolve_merge_strategy`'s
-        # rebase-forbidden, two-or-more-permitted branch would actually
-        # consult it — every other branch decides without it, and paying
-        # for the read there would be a wasted round trip. This mirrors
-        # `resolve_merge_strategy`'s own branch condition exactly (see its
-        # docstring); keep the two in sync if either changes. `series`
-        # stays `None` for every other case — never resolved here — so
-        # `resolve_merge_strategy` never receives its own "not consulted"
-        # default in the one branch where that default is indistinguishable
-        # from a genuine provider failure.
+        # Read the series only where the resolver will actually consult it
+        # (`_series_decides`); paying for the read anywhere else is a wasted
+        # round trip. `series` stays `None` for every other case — never
+        # resolved here — so `resolve_merge_strategy` never receives its own
+        # "not consulted" default in the one branch where that default is
+        # indistinguishable from a genuine provider failure.
         series: list[tuple[str, int]] | str | None = None
-        if (
-            merge_method == AUTOMATIC_MERGE_METHOD
-            and permitted != PERMITTED_STRATEGIES_LOOKUP_FAILED
-            and "rebase" not in permitted
-            and len(permitted - {"rebase"}) >= 2
-        ):
+        if _series_decides(merge_method, permitted):
             series = get_commit_series(
                 pair.repo_path, pair.pr_number, runner, cache=query_cache
             )
