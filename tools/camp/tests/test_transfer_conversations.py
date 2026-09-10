@@ -277,8 +277,9 @@ def _snapshot(root: Path) -> dict[str, tuple[str, object]]:
     return snapshot
 
 
-# inert-gate: allow pure function over injected data — no mutation can turn this
-# red; it exists to pin that the seam starts no process and writes nothing.
+# A seam pin, not a behavioural assertion: the enumeration is a pure function over
+# injected data, so the only thing a state snapshot can show is that the seam reaches
+# no store of its own. It needs no inert-gate exemption — it does run its subject.
 def test_enumeration_writes_nothing_to_camp_state(tmp_path: Path) -> None:
     env = _env(tmp_path)
     ws = _workspace(tmp_path, "g", "ws")
