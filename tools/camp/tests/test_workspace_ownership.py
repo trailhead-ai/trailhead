@@ -252,3 +252,401 @@ class TestSeedNeverReStamps:
         seed_pending_workspace(g["group"], slug, env=env)
         data = read_central_manifest(mpath)
         assert owner_of(data) == "andromeda", "seed must never re-stamp an existing owner"
+
+
+# ---------------------------------------------------------------------------
+# 8. The writer-level guard: write_central_manifest refuses to drop or change
+#    an on-disk owner unless the caller opts in.
+# ---------------------------------------------------------------------------
+
+
+class TestWriterGuardRefusesOwnerDrop:
+    def test_write_refuses_write_that_would_drop_existing_owner(self, tmp_path):
+        from camp.group.manifest import ManifestError, read_central_manifest, write_central_manifest
+
+        mpath = tmp_path / "manifest.json"
+        write_central_manifest(mpath, {"schema_version": 1, "owner": "andromeda", "members": []})
+
+        with pytest.raises(ManifestError) as exc_info:
+            write_central_manifest(mpath, {"schema_version": 1, "members": []})
+
+        assert str(mpath) in str(exc_info.value)
+        assert read_central_manifest(mpath)["owner"] == "andromeda", (
+            "a refused write must leave the on-disk owner untouched"
+        )
+
+    def test_write_refuses_write_that_would_change_existing_owner_without_opt_in(self, tmp_path):
+        from camp.group.manifest import ManifestError, read_central_manifest, write_central_manifest
+
+        mpath = tmp_path / "manifest.json"
+        write_central_manifest(mpath, {"schema_version": 1, "owner": "andromeda", "members": []})
+
+        with pytest.raises(ManifestError):
+            write_central_manifest(mpath, {"schema_version": 1, "owner": "orion", "members": []})
+
+        assert read_central_manifest(mpath)["owner"] == "andromeda"
+
+
+class TestWriterGuardOptIn:
+    def test_write_accepts_owner_change_with_explicit_opt_in(self, tmp_path):
+        from camp.group.manifest import owner_of, read_central_manifest, write_central_manifest
+
+        mpath = tmp_path / "manifest.json"
+        write_central_manifest(mpath, {"schema_version": 1, "owner": "andromeda", "members": []})
+
+        write_central_manifest(
+            mpath,
+            {"schema_version": 1, "owner": "orion", "members": []},
+            allow_owner_change=True,
+        )
+
+        assert owner_of(read_central_manifest(mpath)) == "orion"
+
+
+class TestWriterGuardPassthroughWhenDiskHasNoOwner:
+    def test_write_accepts_any_write_when_disk_carries_no_owner(self, tmp_path):
+        from camp.group.manifest import owner_of, read_central_manifest, write_central_manifest
+
+        mpath = tmp_path / "manifest.json"
+        write_central_manifest(mpath, {"schema_version": 1, "members": []})
+
+        write_central_manifest(mpath, {"schema_version": 1, "owner": "andromeda", "members": []})
+
+        assert owner_of(read_central_manifest(mpath)) == "andromeda"
+
+    def test_write_with_opt_in_also_accepted_when_disk_carries_no_owner(self, tmp_path):
+        from camp.group.manifest import owner_of, read_central_manifest, write_central_manifest
+
+        mpath = tmp_path / "manifest.json"
+        write_central_manifest(mpath, {"schema_version": 1, "members": []})
+
+        write_central_manifest(
+            mpath,
+            {"schema_version": 1, "owner": "andromeda", "members": []},
+            allow_owner_change=True,
+        )
+
+        assert owner_of(read_central_manifest(mpath)) == "andromeda"
+
+
+# ---------------------------------------------------------------------------
+# 9. Real lifecycle verbs against a record-carrying workspace.
+# ---------------------------------------------------------------------------
+
+
+class TestFullReconcileSurvivesOwner:
+    def test_reconcile_worktree_carries_forward_top_level_owner(self, one_member_group):
+        from camp.provision.provision import bring_up_workspace
+        from camp.provision.reconcile import reconcile_worktree
+        from camp.group.manifest import read_central_manifest, owner_of
+
+        g = one_member_group
+        env = _env(g["tmp_path"])
+        _declare_self_name(env, "andromeda")
+        slug = "feat-o"
+
+        bring_up_workspace(g["group"], slug, env=env)
+        mpath = _manifest_path("owng", slug, env)
+        assert owner_of(read_central_manifest(mpath)) == "andromeda"
+
+        reconcile_worktree(g["group"], slug, env=env)
+
+        assert owner_of(read_central_manifest(mpath)) == "andromeda"
+
+
+class TestCampSetupSurvivesOwner:
+    def test_setup_group_re_run_preserves_owner(self, one_member_group):
+        from camp.provision.provision import bring_up_workspace
+        from camp.provision.lifecycle import cmd_setup_group
+        from camp.group.manifest import read_central_manifest, owner_of
+
+        g = one_member_group
+        env = _env(g["tmp_path"])
+        _declare_self_name(env, "andromeda")
+        slug = "feat-o"
+        bring_up_workspace(g["group"], slug, env=env)
+        mpath = _manifest_path("owng", slug, env)
+
+        cmd_setup_group(g["group"], slug, env=env)
+        assert owner_of(read_central_manifest(mpath)) == "andromeda"
+
+        # Re-run on an already-provisioned workspace.
+        cmd_setup_group(g["group"], slug, env=env)
+        assert owner_of(read_central_manifest(mpath)) == "andromeda"
+
+
+class TestCampSyncSurvivesOwner:
+    def test_sync_group_preserves_owner(self, one_member_group):
+        from camp.provision.provision import bring_up_workspace
+        from camp.provision.lifecycle import cmd_setup_group, cmd_sync_group
+        from camp.group.manifest import read_central_manifest, owner_of
+
+        g = one_member_group
+        env = _env(g["tmp_path"])
+        _declare_self_name(env, "andromeda")
+        slug = "feat-o"
+        bring_up_workspace(g["group"], slug, env=env)
+        cmd_setup_group(g["group"], slug, env=env)
+        mpath = _manifest_path("owng", slug, env)
+
+        cmd_sync_group(g["group"], env=env)
+
+        assert owner_of(read_central_manifest(mpath)) == "andromeda"
+
+
+class TestCampRebaseSurvivesOwner:
+    def test_rebase_cli_preserves_owner(self, one_member_group):
+        from camp.provision.provision import bring_up_workspace
+        from camp.provision.lifecycle import cmd_setup_group
+        from camp.cli.lifecycle import _cmd_rebase_group_cli
+        from camp.group.manifest import read_central_manifest, owner_of
+
+        g = one_member_group
+        env = _env(g["tmp_path"])
+        _declare_self_name(env, "andromeda")
+        slug = "feat-o"
+        bring_up_workspace(g["group"], slug, env=env)
+        cmd_setup_group(g["group"], slug, env=env)
+        mpath = _manifest_path("owng", slug, env)
+
+        _cmd_rebase_group_cli(["--name", slug], g["group"], env, dry_run=False)
+
+        assert owner_of(read_central_manifest(mpath)) == "andromeda"
+
+
+class TestActivateMemberSurvivesOwner:
+    def test_activate_member_mark_activated_write_preserves_owner(self, one_member_group):
+        from camp.provision.provision import bring_up_workspace
+        from camp.provision.lifecycle import cmd_setup_group
+        from camp.provision.activation import activate_member
+        from camp.group.manifest import read_central_manifest, owner_of
+
+        g = one_member_group
+        env = _env(g["tmp_path"])
+        _declare_self_name(env, "andromeda")
+        slug = "feat-o"
+        bring_up_workspace(g["group"], slug, env=env)
+        cmd_setup_group(g["group"], slug, env=env)  # brings repo_a to "ready"
+        mpath = _manifest_path("owng", slug, env)
+
+        activate_member(g["group"], slug, "repo_a", env=env)
+
+        assert owner_of(read_central_manifest(mpath)) == "andromeda"
+
+
+class TestActivateTaskPersistSurvivesOwner:
+    def test_run_activate_tasks_in_background_write_preserves_owner(self, tmp_path):
+        from camp.group.manifest import (
+            manifest_path_for,
+            owner_of,
+            read_central_manifest,
+            workspace_dir,
+            write_central_manifest,
+        )
+        from camp.provision.activation import run_activate_tasks_in_background
+
+        repo_a = tmp_path / "repo_a"
+        _init_git_repo(repo_a)
+        member_config = {
+            "name": "repo_a",
+            "repo_root": str(repo_a),
+            "tasks": [
+                {
+                    "name": "dep-install",
+                    "phase": "activate",
+                    "required": False,
+                    "timeout_seconds": None,
+                    "steps": [{"name": "dep-install", "cmd": ["true"]}],
+                }
+            ],
+            "base": "origin/main",
+        }
+        group = _make_group("owng2", [member_config])
+        env = _env(tmp_path)
+        slug = "feat-o"
+
+        wt_path = workspace_dir("owng2", slug, env=env) / "repo_a"
+        wt_path.mkdir(parents=True, exist_ok=True)
+
+        mpath = manifest_path_for("owng2", slug, env=env)
+        write_central_manifest(
+            mpath,
+            {
+                "schema_version": 1,
+                "group": "owng2",
+                "slug": slug,
+                "branch": f"worktree-{slug}",
+                "members": [
+                    {
+                        "name": "repo_a",
+                        "repo_root": str(repo_a),
+                        "worktree_path": str(wt_path),
+                        "provision_state": "ready",
+                        "tasks": {},
+                    }
+                ],
+                "owner": "andromeda",
+            },
+        )
+
+        run_activate_tasks_in_background(group, slug, "repo_a", env=env)
+
+        data = read_central_manifest(mpath)
+        assert owner_of(data) == "andromeda"
+        # confirm the write site actually ran, not merely returned early
+        assert data["members"][0]["work_state"] == "ready"
+
+
+class TestMemberStateFlipSurvivesOwner:
+    def test_flip_member_state_unlocked_preserves_owner(self, tmp_path):
+        from camp.group.manifest import (
+            flip_member_state_unlocked,
+            owner_of,
+            read_central_manifest,
+            reconcile_lock,
+            write_central_manifest,
+        )
+
+        mpath = tmp_path / "manifest.json"
+        write_central_manifest(
+            mpath,
+            {
+                "schema_version": 1,
+                "group": "g",
+                "slug": "s",
+                "branch": "worktree-s",
+                "members": [
+                    {
+                        "name": "m",
+                        "repo_root": "/x",
+                        "worktree_path": "/y",
+                        "provision_state": "pending",
+                    }
+                ],
+                "owner": "andromeda",
+            },
+        )
+
+        with reconcile_lock(mpath.parent):
+            flip_member_state_unlocked(mpath, "m", "ready")
+
+        data = read_central_manifest(mpath)
+        assert owner_of(data) == "andromeda"
+        assert data["members"][0]["provision_state"] == "ready"
+
+
+class TestSequentialWritesSurviveOwner:
+    def test_reconcile_then_setup_in_sequence_preserves_owner(self, one_member_group):
+        from camp.provision.provision import bring_up_workspace
+        from camp.provision.reconcile import reconcile_worktree
+        from camp.provision.lifecycle import cmd_setup_group
+        from camp.group.manifest import read_central_manifest, owner_of
+
+        g = one_member_group
+        env = _env(g["tmp_path"])
+        _declare_self_name(env, "andromeda")
+        slug = "feat-o"
+        bring_up_workspace(g["group"], slug, env=env)
+        mpath = _manifest_path("owng", slug, env)
+
+        reconcile_worktree(g["group"], slug, env=env)
+        assert owner_of(read_central_manifest(mpath)) == "andromeda"
+
+        cmd_setup_group(g["group"], slug, env=env)
+        assert owner_of(read_central_manifest(mpath)) == "andromeda"
+
+
+class TestReconcileNeverInventsOwnership:
+    def test_reconcile_and_setup_add_no_owner_to_keyless_manifest(self, one_member_group):
+        from camp.provision.provision import bring_up_workspace
+        from camp.provision.reconcile import reconcile_worktree
+        from camp.provision.lifecycle import cmd_setup_group
+        from camp.group.manifest import read_central_manifest
+
+        g = one_member_group
+        env = _env(g["tmp_path"])  # no self-name declared
+        slug = "feat-o"
+        bring_up_workspace(g["group"], slug, env=env)
+        mpath = _manifest_path("owng", slug, env)
+        assert "owner" not in read_central_manifest(mpath)
+
+        reconcile_worktree(g["group"], slug, env=env)
+        assert "owner" not in read_central_manifest(mpath)
+
+        cmd_setup_group(g["group"], slug, env=env)
+        assert "owner" not in read_central_manifest(mpath)
+
+
+# ---------------------------------------------------------------------------
+# 10. Hot-path safety: the guard changes nothing about an ownerless manifest.
+# ---------------------------------------------------------------------------
+
+
+class TestHotPathSafetyForOwnerlessWorkspace:
+    def test_seeded_manifest_matches_expected_full_shape_with_no_owner(self, one_member_group):
+        from camp.provision.provision import seed_pending_workspace
+        from camp.group.manifest import read_central_manifest
+
+        g = one_member_group
+        env = _env(g["tmp_path"])  # no self-name declared
+        slug = "feat-o"
+
+        mpath = seed_pending_workspace(g["group"], slug, env=env)
+        data = read_central_manifest(mpath)
+
+        wt_path = _workspace_dir("owng", slug, env) / "repo_a"
+        assert data == {
+            "schema_version": 1,
+            "group": "owng",
+            "slug": slug,
+            "branch": f"worktree-{slug}",
+            "members": [
+                {
+                    "name": "repo_a",
+                    "repo_root": str(g["repo_a"]),
+                    "worktree_path": str(wt_path),
+                    "provision_state": "pending",
+                }
+            ],
+        }
+
+
+# ---------------------------------------------------------------------------
+# 11. The per-member carry-forward set is unaffected by the top-level fix.
+# ---------------------------------------------------------------------------
+
+
+class TestPerMemberCarryForwardUnaffectedByOwnerFix:
+    def test_reconcile_preserves_member_level_keys_with_owner_present(self, one_member_group):
+        from camp.provision.provision import bring_up_workspace
+        from camp.provision.reconcile import reconcile_worktree
+        from camp.group.manifest import read_central_manifest, write_central_manifest
+
+        g = one_member_group
+        env = _env(g["tmp_path"])
+        _declare_self_name(env, "andromeda")
+        slug = "feat-o"
+        bring_up_workspace(g["group"], slug, env=env)
+        mpath = _manifest_path("owng", slug, env)
+
+        # Simulate cmd_setup_group having already flipped this member and
+        # recorded per-task state, which reconcile_worktree's per-member
+        # carry-forward reads on its next run.
+        data = read_central_manifest(mpath)
+        data["members"][0].update(
+            {
+                "provision_state": "ready",
+                "activated": True,
+                "work_state": "ready",
+                "tasks": {"dep-install": {"state": "ok"}},
+            }
+        )
+        write_central_manifest(mpath, data)
+
+        reconcile_worktree(g["group"], slug, env=env)
+
+        rebuilt = read_central_manifest(mpath)["members"][0]
+        assert rebuilt["provision_state"] == "ready"
+        assert rebuilt["activated"] is True
+        assert rebuilt["work_state"] == "ready"
+        assert rebuilt["tasks"] == {"dep-install": {"state": "ok"}}
