@@ -1411,14 +1411,12 @@ def _cmd_sessions_host_cli(args: list[str], host: "Host", host_name: str) -> Non
 
     Delegates everything downstream of "what argv to send" and "how to print
     an ok row" to :func:`camp.host.relay.relay_all_groups` — the shared seam
-    every `--host` verb dispatches through. The local `--all-groups` sessions
-    renderer is NOT reused for the human path: it sorts its rows by group
-    (see `_cmd_sessions_group_cli`'s `all_groups` branch) and it prints from
-    live `SessionRecord` objects rather than the relayed JSON dicts a remote
-    answer produces — reusing it would re-sort what the design requires
-    never be re-sorted. `_render_human_rows` below is instead a small
-    hand-written callback in the same shape `_cmd_ls_host_cli` already
-    uses for `list`.
+    every `--host` verb dispatches through. `_render_human_rows` below
+    renders each row through :func:`render_session_row_human`, the shared
+    per-row renderer, and never through the local `--all-groups` listing:
+    that one sorts its rows by group (see `_cmd_sessions_group_cli`'s
+    `all_groups` branch), and re-sorting is exactly what the design requires
+    a relayed answer never do.
     """
     from ..host.relay import relay_all_groups
     from ..spine import _die
@@ -1454,8 +1452,6 @@ def _cmd_sessions_host_cli(args: list[str], host: "Host", host_name: str) -> Non
         )
 
     def _render_human_rows(rows: list[dict]) -> None:
-        from ..launch.recovery import printable_path
-
         for row in rows:
             if not row.get("ok"):
                 continue
@@ -1466,9 +1462,7 @@ def _cmd_sessions_host_cli(args: list[str], host: "Host", host_name: str) -> Non
             # rather than let it take the whole answer down; the well-formed
             # rows around it still print.
             try:
-                session_id = row["session_id"]
-                kind = row["kind"]
-                cwd = row["cwd"]
+                rendered = render_session_row_human(row)
             except KeyError as e:
                 print(
                     f"camp sessions: host {host_name!r} sent a session row "
@@ -1476,8 +1470,7 @@ def _cmd_sessions_host_cli(args: list[str], host: "Host", host_name: str) -> Non
                     file=sys.stderr,
                 )
                 continue
-            label = f" ({row['name']})" if row.get("name") else ""
-            print(f"{session_id}  {kind}  {printable_path(cwd)}{label}")
+            print(rendered)
 
     relay_all_groups(
         "sessions",
@@ -1687,10 +1680,15 @@ def _cmd_sessions_group_cli(
 
 
 def render_session_row_human(row: dict) -> str:
-    """One answered `camp sessions` row, human-rendered — the same
-    ``session_id  kind  cwd (name)`` line `_cmd_sessions_group_cli` already
-    prints, factored out so the `-a`/`--all-hosts` merged renderer in
-    `cli/dispatch.py` can print one row at a time under a machine's header.
+    """One answered `camp sessions` row, human-rendered — the
+    ``session_id  kind  cwd (name)`` line, from a JSON-shaped row rather
+    than a `SessionRecord`.
+
+    The one place a local, relayed, or merged `camp sessions` row is turned
+    into its human line: `_cmd_sessions_group_cli`, `_cmd_sessions_host_cli`'s
+    `--host` callback, and the `-a`/`--all-hosts` merged renderer in
+    `cli/dispatch.py` all print through it. Raises `KeyError` on a row
+    missing a key it needs, so a caller can degrade that one row.
     """
     from ..launch.recovery import printable_path
 
@@ -1753,16 +1751,15 @@ def _sessions_live_answer(
     redirect around the one call that can reach it, rather than threading a
     new `on_drop` parameter through `_enumerate_live_sessions_pool`.
 
-    *exit_code* is 0 on every path except two refusals: every credential
-    store failed, and (under `all_groups=True`) every configured group's
-    TOML failed to parse — both are the printed form's `_die`, replaced with
-    a returned ``1`` instead of a raised `SystemExit`. The group-config
-    refusal used to be raised by calling
-    :func:`~camp.provision.lifecycle.answerable_groups_or_refuse` directly;
-    this function instead calls that helper's value-returning sibling
-    :func:`~camp.provision.lifecycle.load_answerable_groups` and turns the
-    same two notices into returned data itself, so this value function never
-    exits the process on that path either.
+    *exit_code* is 0 on every path except two refusals, each returned as a
+    ``1`` rather than raised: every credential store failed, and (under
+    `all_groups=True`) every configured group's TOML failed to parse. The
+    group-config refusal is reached through
+    :func:`~camp.provision.lifecycle.load_answerable_groups` — the
+    value-returning sibling of
+    :func:`~camp.provision.lifecycle.answerable_groups_or_refuse`, never that
+    helper — with its two notices turned into returned data here, so this
+    function never exits the process on that path either.
 
     *described* is the caller's already-computed `_described()` text — this
     function has no `slug`/`directory` of its own, only the *scope* they

@@ -34,10 +34,14 @@ def _project_list_rows(entries: list[dict]) -> list[dict]:
 
 
 def render_list_row_human(row: dict) -> str:
-    """One answered `camp list` row, human-rendered — the same
-    ``slug workspace_path`` line `render_workspace_list` and `_cmd_ls_host_cli`
-    already print, factored out so the `-a`/`--all-hosts` merged renderer in
-    `cli/dispatch.py` can print one row at a time under a machine's header.
+    """One answered `camp list` row, human-rendered — the ``slug
+    workspace_path`` line, from a JSON-shaped row rather than an entry.
+
+    The one place a relayed or merged `camp list` row is turned into its
+    human line: both `_cmd_ls_host_cli`'s `--host` callback and the
+    `-a`/`--all-hosts` merged renderer in `cli/dispatch.py` print one row at
+    a time through it. Raises `KeyError` on a row missing a key it needs, so
+    a caller can degrade that one row.
     """
     return f"{row['slug']} {row['workspace_path']}"
 
@@ -196,8 +200,7 @@ def _cmd_ls_host_cli(args: list[str], host: "Host", host_name: str) -> None:
             # rather than let it take the whole answer down; the well-formed
             # rows around it still print.
             try:
-                slug = row["slug"]
-                workspace_path = row["workspace_path"]
+                rendered = render_list_row_human(row)
             except KeyError as e:
                 print(
                     f"camp list: host {host_name!r} sent a workspace row "
@@ -205,7 +208,7 @@ def _cmd_ls_host_cli(args: list[str], host: "Host", host_name: str) -> None:
                     file=sys.stderr,
                 )
                 continue
-            print(f"{slug} {workspace_path}")
+            print(rendered)
 
     relay_all_groups(
         "list",

@@ -106,6 +106,25 @@ def split_bundled_short_flags(args: list[str]) -> list[str]:
     return out
 
 
+def _read_widening_option(
+    args: list[str], flags: tuple[str, ...]
+) -> tuple[list[str], bool]:
+    """Consume every token in *args* spelling one of *flags*, order-preserving.
+
+    Returns ``(remaining, present)``. The one scan behind both widening
+    options below, so the two axes cannot drift on how their option is
+    consumed — only on which spellings name it.
+    """
+    remaining: list[str] = []
+    present = False
+    for arg in args:
+        if arg in flags:
+            present = True
+        else:
+            remaining.append(arg)
+    return remaining, present
+
+
 def read_all_groups_option(args: list[str]) -> tuple[list[str], bool]:
     """Consume every ``--all-groups``/``-g`` from *args*, order-preserving.
 
@@ -115,14 +134,7 @@ def read_all_groups_option(args: list[str]) -> tuple[list[str], bool]:
     the two entry points cannot drift on what spells the option or where its
     applicability is decided.
     """
-    remaining: list[str] = []
-    present = False
-    for arg in args:
-        if arg in ALL_GROUPS_FLAGS:
-            present = True
-        else:
-            remaining.append(arg)
-    return remaining, present
+    return _read_widening_option(args, ALL_GROUPS_FLAGS)
 
 
 def read_all_hosts_option(args: list[str]) -> tuple[list[str], bool]:
@@ -134,14 +146,7 @@ def read_all_hosts_option(args: list[str]) -> tuple[list[str], bool]:
     ``-ag`` into its own ``-a``/``-g`` tokens), before a verb is classified
     or a group is resolved.
     """
-    remaining: list[str] = []
-    present = False
-    for arg in args:
-        if arg in ALL_HOSTS_FLAGS:
-            present = True
-        else:
-            remaining.append(arg)
-    return remaining, present
+    return _read_widening_option(args, ALL_HOSTS_FLAGS)
 
 
 def _flag_present(args: list[str], flag: str) -> bool:
