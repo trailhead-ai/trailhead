@@ -45,6 +45,16 @@ _HOST_INVOCATION = re.compile(
     r"^camp (?:list|sessions) --host <name>(?: --json)?$", re.MULTILINE
 )
 
+#: The exact invocation lines the README's "Remote hosts" section documents
+#: for the `-a`/`--all-hosts`/`-ag` widen-every-machine option — the same
+#: shape as `_HOST_INVOCATION` above, one call form per line. `<name>` is
+#: the group placeholder the README uses alongside `-a`/`--all-hosts` (never
+#: alongside `-ag`, which needs no group).
+_ALL_HOSTS_INVOCATION = re.compile(
+    r"^camp (?:list|sessions) (?:(?:-a|--all-hosts) --group <name>|-ag)(?: --json)?$",
+    re.MULTILINE,
+)
+
 
 def _toml_blocks() -> list[str]:
     return _TOML_BLOCK.findall(README.read_text())
@@ -52,6 +62,10 @@ def _toml_blocks() -> list[str]:
 
 def _host_invocation_lines() -> list[str]:
     return _HOST_INVOCATION.findall(README.read_text())
+
+
+def _all_hosts_invocation_lines() -> list[str]:
+    return _ALL_HOSTS_INVOCATION.findall(README.read_text())
 
 
 @pytest.mark.parametrize("block", _toml_blocks())
@@ -218,3 +232,97 @@ def test_documented_host_invocation_forms_produce_an_answer_against_a_stub_trans
         else:
             assert captured.out == ""
 
+
+
+# ---------------------------------------------------------------------------
+# --all-hosts / -a — same contract as --host above, run through the real
+# dispatcher and help emitter rather than checked as prose.
+# ---------------------------------------------------------------------------
+
+
+def test_help_documents_all_hosts_option_that_the_dispatcher_actually_treats_as_recognized(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """`camp --help` must document `--all-hosts` for `list` and `sessions`
+    only where the dispatcher truly treats it as recognized — proven by
+    contrast against a genuinely unrecognized flag."""
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        cmd_help([])
+    help_text = buf.getvalue()
+
+    documented = sorted(
+        set(re.findall(r"camp (list|sessions) --all-hosts\|-a", help_text))
+    )
+    assert documented == ["list", "sessions"], (
+        "camp --help no longer documents --all-hosts for both list and sessions"
+    )
+
+    dispatch = importlib.import_module("camp.cli.dispatch")
+    cfg = tmp_path / "empty-config"
+    cfg.mkdir()
+    monkeypatch.setenv("CAMP_CONFIG_DIR", str(cfg))
+    monkeypatch.setenv("CAMP_STATE_DIR", str(tmp_path / "state"))
+    monkeypatch.setenv("WORKSPACE_ROOT", str(tmp_path / "workspace"))
+
+    def _invoke(argv: list[str]) -> tuple[int, str]:
+        monkeypatch.setattr(sys, "argv", argv)
+        try:
+            dispatch.main()
+            code = 0
+        except SystemExit as exc:
+            code = exc.code
+        return code, capsys.readouterr().err
+
+    for verb in documented:
+        # No group configured at all: --all-hosts must reach ITS OWN
+        # "needs a group" refusal, naming -ag and --group — never the
+        # unrelated "no group resolved from cwd" message a plain --group
+        # miss produces, and never an unrecognized-flag no-op.
+        all_hosts_code, all_hosts_err = _invoke(["camp", verb, "-a"])
+        typo_code, typo_err = _invoke(["camp", verb, "-a-typo"])
+
+        assert "-ag" in all_hosts_err and "--group" in all_hosts_err, all_hosts_err
+        assert "-ag" not in typo_err
+        assert (all_hosts_code, all_hosts_err) != (typo_code, typo_err)
+
+
+def test_documented_all_hosts_invocation_forms_produce_an_answer_against_a_stub_transport(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """Every `-a`/`--all-hosts`/`-ag` form the README documents must actually
+    run and answer — not refuse — when a group resolves and the transport
+    answers."""
+    lines = _all_hosts_invocation_lines()
+    assert lines, "README no longer documents an --all-hosts invocation form"
+
+    dispatch = importlib.import_module("camp.cli.dispatch")
+    transport = importlib.import_module("camp.host.transport")
+
+    cfg = tmp_path / "config"
+    groups_dir = cfg / "groups"
+    groups_dir.mkdir(parents=True)
+    (groups_dir / "andromeda.toml").write_text(
+        '[group]\nname = "andromeda"\n\n'
+        '[[members]]\nname = "member-a"\nrepo_root = "/tmp/fake-member-a"\n'
+    )
+    (cfg / "hosts.toml").write_text("[hosts.andromeda]\n", encoding="utf-8")
+    monkeypatch.setenv("CAMP_CONFIG_DIR", str(cfg))
+    monkeypatch.setenv("CAMP_STATE_DIR", str(tmp_path / "state"))
+
+    outcome = transport.Answered(stdout="[]", stderr="", exit_code=0)
+    monkeypatch.setattr(transport, "run_camp", lambda host, remote_argv, **kw: outcome)
+
+    for line in lines:
+        argv = shlex.split(line.replace("<name>", "andromeda"))
+        assert argv[0] == "camp"
+        monkeypatch.setattr(sys, "argv", argv)
+        try:
+            dispatch.main()
+            code = 0
+        except SystemExit as exc:
+            code = exc.code
+        assert code == 0, f"{line!r} did not answer: exit {code}, stderr={capsys.readouterr().err!r}"
+        captured = capsys.readouterr()
+        if "--json" in argv:
+            assert captured.out.strip() == "[]"

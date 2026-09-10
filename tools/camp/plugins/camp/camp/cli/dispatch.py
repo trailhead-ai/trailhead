@@ -59,12 +59,51 @@ _TRAILHEAD_PATHS_OK = False
 ALL_GROUPS_FLAGS = ("--all-groups", "-g")
 _ALL_GROUPS_VERBS = frozenset({"list", "sessions"})
 
+#: The two spellings of the widen-to-every-machine option, and the only
+#: verbs it has any meaning for. Held here, once, alongside
+#: `ALL_GROUPS_FLAGS` above, so the two independent axes (groups, machines)
+#: can never drift against each other on spelling or applicability.
+ALL_HOSTS_FLAGS = ("--all-hosts", "-a")
+_ALL_HOSTS_VERBS = frozenset({"list", "sessions"})
+
 #: Verbs whose trailing argv is an opaque payload forwarded to something else
 #: — never camp's own flags. `camp foreach <cmd…>` forwards everything after
 #: its own `--name`/`--fail-fast`/`--json` to the wrapped command verbatim, so
 #: a `-g` or `--all-groups` in THAT command's own argv (e.g. `git log -g`)
 #: must never be scanned for camp's widen-to-every-group option at all.
 _OPAQUE_PAYLOAD_VERBS = frozenset({"foreach"})
+
+#: The characters `split_bundled_short_flags` is willing to expand a
+#: bundled single-dash token into — camp's own short flags, and only these
+#: two. Held here, once, so the splitter and the two readers above
+#: (`ALL_GROUPS_FLAGS`'s `-g`, `ALL_HOSTS_FLAGS`'s `-a`) cannot drift apart
+#: on what counts as one of camp's own short options.
+_BUNDLED_SHORT_FLAG_CHARS = frozenset({"a", "g"})
+
+
+def split_bundled_short_flags(args: list[str]) -> list[str]:
+    """Split a bundled single-dash token (``-ag``, ``-ga``, ``-aa``, …) into
+    its individual short flags, ONE token per character, order-preserving.
+
+    Deliberately conservative: a token is split ONLY when EVERY character
+    after the leading dash is one of camp's own short flags (`a`, `g`) —
+    `_BUNDLED_SHORT_FLAG_CHARS`. Anything else (a verb's own short option, a
+    flag value, a long `--flag`, a bare `-`) passes through completely
+    unchanged, so no verb's own argument can ever be corrupted by this scan.
+    An already-bare `-a` or `-g` is untouched too (nothing to split).
+    """
+    out: list[str] = []
+    for arg in args:
+        if (
+            len(arg) > 2
+            and arg[0] == "-"
+            and arg[1] != "-"
+            and all(c in _BUNDLED_SHORT_FLAG_CHARS for c in arg[1:])
+        ):
+            out.extend(f"-{c}" for c in arg[1:])
+        else:
+            out.append(arg)
+    return out
 
 
 def read_all_groups_option(args: list[str]) -> tuple[list[str], bool]:
@@ -80,6 +119,25 @@ def read_all_groups_option(args: list[str]) -> tuple[list[str], bool]:
     present = False
     for arg in args:
         if arg in ALL_GROUPS_FLAGS:
+            present = True
+        else:
+            remaining.append(arg)
+    return remaining, present
+
+
+def read_all_hosts_option(args: list[str]) -> tuple[list[str], bool]:
+    """Consume every ``--all-hosts``/``-a`` from *args*, order-preserving.
+
+    Returns ``(remaining, present)`` — the same shape as
+    `read_all_groups_option`. `main()` calls it exactly once, on the raw
+    argv (after `split_bundled_short_flags` has already separated a bundled
+    ``-ag`` into its own ``-a``/``-g`` tokens), before a verb is classified
+    or a group is resolved.
+    """
+    remaining: list[str] = []
+    present = False
+    for arg in args:
+        if arg in ALL_HOSTS_FLAGS:
             present = True
         else:
             remaining.append(arg)
@@ -346,6 +404,17 @@ def main() -> None:
 
     first = argv[0] if argv else None
 
+    # Split a bundled short-flag token (`-ag`, `-ga`, …) into its individual
+    # flags BEFORE anything downstream reads argv — the one place this must
+    # happen so every later reader (`read_all_groups_option`,
+    # `read_all_hosts_option`, `_flag_present`, `_resolve_group_for_command`,
+    # the group-aware dispatch) sees the same expanded tokens regardless of
+    # how the operator spelled it. `foreach`'s opaque payload is excluded —
+    # its own argv is forwarded verbatim to the wrapped command and must
+    # never be rewritten.
+    if first is not None and first not in _OPAQUE_PAYLOAD_VERBS:
+        argv = [first, *split_bundled_short_flags(argv[1:])]
+
     # ---------------------------------------------------------------------------
     # Hook handler subcommands (session-bootstrap, worktree-cleanup)
     # These run before group resolution — they handle their own silent no-op logic.
@@ -407,6 +476,36 @@ def main() -> None:
     # ---------------------------------------------------------------------------
     scan_rest = argv[1:] if first and first not in _OPAQUE_PAYLOAD_VERBS else []
     scan_rest, all_groups = read_all_groups_option(scan_rest)
+    scan_rest, all_hosts = read_all_hosts_option(scan_rest)
+
+    # ---------------------------------------------------------------------------
+    # --all-hosts / -a — read at the same early point as --all-groups, and
+    # BEFORE the --all-groups-only branch below, since `-ag`/`-ga` (both
+    # present) is answered by the all-hosts path too — it widens both axes
+    # rather than being a third flag. When --all-hosts is absent this block
+    # is a no-op and --all-groups behaves exactly as it did before this
+    # option existed.
+    # ---------------------------------------------------------------------------
+    if all_hosts:
+        canonical, _kind = _resolve_verb(first) if first else (first, "live")
+        if canonical not in _ALL_HOSTS_VERBS:
+            print(f"camp {first}: --all-hosts has no meaning here", file=sys.stderr)
+            sys.exit(1)
+        # --host names one declared machine; --all-hosts names every declared
+        # machine plus this one. Refused like the --all-groups/--host
+        # collision above rather than accepted as redundant.
+        if _flag_present(scan_rest, HOST_FLAG):
+            print(
+                f"camp {canonical}: --all-hosts and {HOST_FLAG} name every "
+                "machine and one machine at once — pass one or the other",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        _dispatch_all_hosts_command(
+            canonical, scan_rest, all_groups=all_groups, argv=argv
+        )
+        return
+
     if all_groups:
         canonical, _kind = _resolve_verb(first) if first else (first, "live")
         if canonical not in _ALL_GROUPS_VERBS:
@@ -570,6 +669,153 @@ def _dispatch_all_groups_command(verb: str, rest: list[str]) -> None:
     except GroupConfigError as e:
         print(f"camp: config error: {e}", file=sys.stderr)
         sys.exit(1)
+
+
+def _dispatch_all_hosts_command(
+    verb: str, rest: list[str], *, all_groups: bool, argv: list[str]
+) -> None:
+    """Answer `list` or `sessions` for the resolved group — or, under
+    `-ag`/`-ga`, every group — on every declared machine plus this one,
+    merged into one ordered answer.
+
+    Reached ONLY from `main()`'s early `--all-hosts`/`-a` handling, before
+    any single group is resolved for the machine axis itself — the group
+    axis (`all_groups`) stays exactly where the `--all-groups` handling
+    already puts it; this function only widens the machine axis and, when
+    `all_groups` is False, resolves the one group its narrowing filter
+    needs via the SAME resolver every plain (non-widened) invocation uses.
+
+    `-a`'s narrowing to a resolved group is applied locally, as a filter on
+    the merged rows (:func:`camp.host.merge.merge_all_hosts_answer`'s
+    `group=`) — never as a group name crossing the wire. Every remote
+    invocation is always the all-groups + `--json` form, matching what
+    `--host` already sends.
+    """
+    from ..host.config import HostConfigError, load_hosts, self_host_name
+    from ..host.merge import answer_all_hosts_concurrently, merge_all_hosts_answer
+
+    if all_groups and _flag_present(rest, "--group"):
+        print(
+            f"camp {verb}: --all-groups and --group name every group and "
+            "one group at once — pass one or the other",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    as_json = _flag_present(rest, "--json")
+
+    group: dict | None = None
+    narrow_group: str | None = None
+    if not all_groups:
+        try:
+            group, _group_env = _resolve_group_for_command(argv)
+        except Exception as exc:
+            print(f"camp: config error: {exc}", file=sys.stderr)
+            sys.exit(1)
+        if group is None:
+            print(
+                f"camp {verb}: --all-hosts needs a group to widen — pass "
+                "-ag for every group on every machine, or --group <name> "
+                "to name one",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        narrow_group = group["group"]["name"]
+
+    if verb == "list":
+        from .workspace import local_list_answer as local_answer_fn
+        from .workspace import render_list_row_human as render_row
+    else:
+        from .session import local_sessions_answer as local_answer_fn
+        from .session import render_session_row_human as render_row
+
+    def _local_answer() -> tuple[list[dict], list[str], int]:
+        return local_answer_fn(group, all_groups=all_groups)
+
+    try:
+        hosts = load_hosts()
+        hosts_error: str | None = None
+    except HostConfigError as exc:
+        hosts = {}
+        hosts_error = str(exc)
+
+    (local_rows, local_notices, local_exit_code), host_answers = (
+        answer_all_hosts_concurrently(
+            _local_answer,
+            list(hosts.items()),
+            verb=verb,
+            remote_argv=[verb, "--all-groups", "--json"],
+        )
+    )
+
+    try:
+        self_name = self_host_name()
+    except HostConfigError as exc:
+        print(f"camp {verb}: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    rows, notices, exit_code = merge_all_hosts_answer(
+        local_rows,
+        local_notices,
+        local_exit_code,
+        self_name=self_name,
+        host_answers=host_answers,
+        hosts_error=hosts_error,
+        group=narrow_group,
+    )
+
+    if as_json:
+        import json as _json
+
+        print(_json.dumps(rows))
+    else:
+        for notice in notices:
+            print(notice, file=sys.stderr)
+        _render_all_hosts_human(self_name, hosts, hosts_error, rows, render_row)
+
+    sys.exit(exit_code)
+
+
+def _render_all_hosts_human(
+    self_name: str | None,
+    hosts: dict,
+    hosts_error: str | None,
+    rows: list[dict],
+    render_row,
+) -> None:
+    """Print the merged answer grouped by machine — local block first, then
+    every declared host in `hosts.toml` declaration order (the same order
+    `merge_all_hosts_answer` already merged the rows in). Every machine gets
+    its header, even one with nothing beneath it; a machine whose only row
+    is a failure (`ok: false`) prints that row's `reason` in place of a
+    rendered row.
+    """
+    machines = [(self_name, self_name if self_name is not None else "this machine")]
+    machines += [(host_name, host_name) for host_name in hosts]
+
+    for key, label in machines:
+        print(label)
+        for row in rows:
+            if row.get("host") != key:
+                continue
+            if not row.get("ok", True):
+                print(f"  {row.get('reason', 'unknown failure')}")
+            else:
+                print(f"  {render_row(row)}")
+
+    # hosts.toml itself failed to parse: the declared hosts could never be
+    # enumerated, so there is no declared-host header to attribute this row
+    # to. When the local machine has its own declared name, it never shares
+    # a `host` key with this row (`None`), so it would otherwise never be
+    # printed at all — the local machine's own answer would silently read
+    # as complete. Skipped only when the local machine is ALSO undeclared
+    # (both share the `host: None` key): the row already printed above,
+    # under the local block, rather than being printed twice.
+    if hosts_error is not None and self_name is not None:
+        print("hosts.toml")
+        for row in rows:
+            if row.get("host") is None and not row.get("ok", True):
+                print(f"  {row.get('reason', hosts_error)}")
 
 
 def _dispatch_group_command(

@@ -256,6 +256,39 @@ before answering, an unrecognized host key, a changed host key, camp not
 resolvable on that host (declare `camp_bin`), every credential offered
 refused, or the remote camp's own refusal relayed verbatim.
 
+`--host <name>` names one machine and answers for every group on it.
+`camp list`/`camp sessions` also take `--all-hosts` (short: `-a`), which is
+the opposite shape: **this resolved group, on every declared machine plus
+the one you're typing on** — the asymmetry an operator otherwise has to
+learn the hard way, so it is stated here rather than left implicit. `-ag`
+(the bundled short form of `-a -g`) widens the group axis too, for every
+group on every machine; `-a --group <name>` composes to ask for one named
+group on machines generally, without needing a resolvable cwd.
+
+```
+camp list -a --group <name>
+camp list --all-hosts --group <name> --json
+camp list -ag --json
+camp sessions -a --group <name>
+camp sessions --all-hosts --group <name> --json
+camp sessions -ag --json
+```
+
+(`-a`/`--all-hosts` also resolve the group from cwd, the same as plain
+`camp list`/`camp sessions` — `--group <name>` is shown explicitly above only
+so each form is runnable from any cwd.)
+
+Declared hosts are contacted concurrently, and the merged answer is grouped
+by machine on the human path — the local machine first (named by
+`self_name` in `hosts.toml`, or `this machine` when undeclared), then every
+declared host in the order `hosts.toml` declares it — with a failed
+machine's line printed under its own header rather than aborting the rest.
+The `--json` path is one flat array in the same order, every row carrying
+`host`. `-a` refuses alongside `--host` (they name a machine's worth of
+groups and a group's worth of machines at once) and, with no group resolved
+from cwd or `--group`, refuses naming `-ag` or `--group <name>` as the ways
+forward — it never falls back to the legacy standalone-worktree source.
+
 ## Group setup
 
 ```
