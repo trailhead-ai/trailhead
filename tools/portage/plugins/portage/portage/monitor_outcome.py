@@ -78,6 +78,14 @@ def read_monitor_outcome(path: Path) -> str:
     return text
 
 
+# `parse_strategy_disclosure` and `summarize_strategy_disclosures` have no
+# runtime caller: monitor is a prose-driven subagent, so the agent itself does
+# this reading and aggregation per `agents/monitor.md`. They are the executable
+# specification of that prose — the thing tests can run and mutate, where the
+# instructions themselves can only be read. Treat a change here as a change to
+# what monitor is instructed to do, and move the two together.
+
+
 class StrategyDisclosure(NamedTuple):
     """One pull request's resolved merge strategy, parsed off `portage merge`'s
     per-pull-request stderr disclosure line."""
@@ -117,7 +125,9 @@ def parse_strategy_disclosure(line: str) -> StrategyDisclosure | None:
 def summarize_strategy_disclosures(disclosures: list[StrategyDisclosure]) -> str:
     """Render monitor's report `Strategy:` field from a run's disclosures.
 
-    Empty input (nothing merged this run) renders `n/a`. When every
+    Empty input — no disclosure lines collected, which is not the same as
+    nothing having merged, since a disclosure is printed before each merge
+    is attempted — renders `n/a`. When every
     disclosure names the same strategy and the same reason, it is reported
     once: `<strategy> — <reason>`. Otherwise each pull request's strategy is
     attributed to its own repository, in the order given:

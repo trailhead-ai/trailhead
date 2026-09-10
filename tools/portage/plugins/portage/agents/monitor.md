@@ -271,8 +271,11 @@ field of the report below:
   operator that a capability lookup failed on one pull request but not another, or that a
   strategy was explicitly configured rather than selected, and collapsing it away loses that
   distinction.
-- If no pull request merged this run (blocked or stopped before any merge), the field reads
-  `n/a`.
+- If `portage merge` printed no disclosure lines at all this run, the field reads `n/a`. Key
+  this on the absence of disclosure lines, not on whether anything merged: a disclosure is
+  printed *before* each merge is attempted, so a run whose merges were all refused still has
+  disclosures to report — and that is exactly the run whose strategies an operator most needs
+  to see.
 
 ## Report structure
 

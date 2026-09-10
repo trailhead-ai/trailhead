@@ -924,8 +924,21 @@ def resolve_merge_strategy(
     resolution cause — so a lookup failure, a sole-permitted-strategy
     outcome, and the interim squash outcome can never render as
     near-identical text.
+
+    The returned strategy is always a key of `_MERGE_METHOD_FLAGS`, so it
+    can always be handed to `_do_merge`. `_MERGE_METHOD_VALUES` is wider
+    than that map — it also carries automatic selection, a configuration
+    value with no merge flag — so a `configured_method` that is neither
+    automatic selection nor a mergeable strategy raises
+    `MergeMethodInvalidError` here rather than being returned and failing
+    at the merge call.
     """
     if configured_method != AUTOMATIC_MERGE_METHOD:
+        if configured_method not in _MERGE_METHOD_FLAGS:
+            raise MergeMethodInvalidError(
+                f"cannot merge with [release].merge_method {configured_method!r} — "
+                f"mergeable strategies are {sorted(_MERGE_METHOD_FLAGS)}"
+            )
         prefix = RESOLUTION_REASON_PREFIXES["explicit_configured"]
         return configured_method, (
             f"{prefix}: [release].merge_method='{configured_method}'"

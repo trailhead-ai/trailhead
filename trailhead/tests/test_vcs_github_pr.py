@@ -1276,6 +1276,59 @@ class TestPermittedMergeStrategies:
 
 
 class TestResolveMergeStrategy:
+    def test_a_configured_value_that_is_not_a_mergeable_strategy_refuses(self) -> None:
+        """The explicit branch returns the configured value straight through,
+        so it must first be a strategy that can actually be merged with.
+
+        `_MERGE_METHOD_VALUES` is deliberately wider than `_MERGE_METHOD_FLAGS`
+        — it carries automatic selection, which is a configuration value with
+        no merge flag of its own — so membership in the accepted vocabulary is
+        not sufficient to be returnable here. A second configuration-only
+        value added to that vocabulary must refuse at resolution rather than
+        being returned as a strategy and failing at the merge call.
+        """
+        from trailhead.vcs.github import (
+            MergeMethodInvalidError,
+            _MERGE_METHOD_FLAGS,
+            resolve_merge_strategy,
+        )
+
+        not_a_strategy = "not-a-mergeable-strategy"
+        assert not_a_strategy not in _MERGE_METHOD_FLAGS
+
+        with pytest.raises(MergeMethodInvalidError) as excinfo:
+            resolve_merge_strategy(not_a_strategy, frozenset({"rebase"}))
+        assert not_a_strategy in str(excinfo.value)
+
+    def test_every_returnable_strategy_has_a_merge_flag(self) -> None:
+        """The resolver's stated invariant, over every input it accepts:
+        whatever it returns can be handed to the merge call. Derived from the
+        module's own flag map rather than a retyped list, so widening the
+        vocabulary without widening the flag map fails here.
+        """
+        from trailhead.vcs.github import (
+            AUTOMATIC_MERGE_METHOD,
+            PERMITTED_STRATEGIES_LOOKUP_FAILED,
+            _MERGE_METHOD_FLAGS,
+            resolve_merge_strategy,
+        )
+
+        vocabulary = sorted(_MERGE_METHOD_FLAGS)
+        permitted_shapes: list = [PERMITTED_STRATEGIES_LOOKUP_FAILED]
+        for size in range(len(vocabulary) + 1):
+            permitted_shapes.extend(
+                frozenset(combo) for combo in itertools.combinations(vocabulary, size)
+            )
+
+        configured_shapes = [AUTOMATIC_MERGE_METHOD, *vocabulary]
+        for configured in configured_shapes:
+            for permitted in permitted_shapes:
+                strategy, _reason = resolve_merge_strategy(configured, permitted)
+                assert strategy in _MERGE_METHOD_FLAGS, (
+                    f"resolve_merge_strategy({configured!r}, {permitted!r}) returned "
+                    f"{strategy!r}, which has no merge flag"
+                )
+
     def test_explicit_configured_strategy_wins_with_no_capability_read_consulted(self) -> None:
         from trailhead.vcs.github import PERMITTED_STRATEGIES_LOOKUP_FAILED, resolve_merge_strategy
 
@@ -1707,11 +1760,17 @@ class TestMergeLoopResolvesPerPullRequest:
         assert any("7" in m for m in result["merged"])
 
     def test_one_repository_query_per_pull_request(self, tmp_path: Path) -> None:
-        """The whole merge path issues exactly one repository (graphql)
-        query per pull request under automatic selection — the capability
-        read and the stack-entry read share the fetch a shared cache
-        provides, scoped per pull request rather than collapsed to one
-        query for the whole invocation."""
+        """The whole merge path issues exactly one repository (graphql) query
+        per pull request under automatic selection: the capability read and
+        the stack-entry read share one fetch.
+
+        What this observes is the sharing, not the cache's scope. The cache is
+        keyed by (repo path, pull request number), so hoisting it out of the
+        loop would not change this count — two pull requests still key
+        separately. Dropping the shared cache from either reader does change
+        it, which is the regression worth catching, since sharing is opt-in
+        and a caller that omits it silently pays twice.
+        """
         manifest, wt_a, wt_b = self._setup_two_repos(tmp_path)
         toml = _write_toml(
             tmp_path, "[release]\nauto_merge = true\nmerge_order = ['alpha', 'beta']\n"
