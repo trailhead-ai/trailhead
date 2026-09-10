@@ -707,6 +707,11 @@ def _dispatch_all_hosts_command(
         )
         sys.exit(1)
 
+    if verb == "sessions":
+        from .session import refuse_sessions_local_only_options
+
+        refuse_sessions_local_only_options(rest, widening_flag="--all-hosts")
+
     as_json = _flag_present(rest, "--json")
 
     group: dict | None = None
@@ -753,11 +758,23 @@ def _dispatch_all_hosts_command(
         )
     )
 
-    try:
-        self_name = self_host_name()
-    except HostConfigError as exc:
-        print(f"camp {verb}: {exc}", file=sys.stderr)
-        sys.exit(1)
+    # self_host_name() re-reads the same hosts.toml load_hosts() already
+    # read above. When that read already failed (hosts_error is set), the
+    # declared-hosts read is treated as ONE operation: self_name is None
+    # and the failure is already carried as hosts_error — a second raise
+    # here must never bypass the recovery merge_all_hosts_answer renders
+    # for exactly this state. self_host_name() is only called when the
+    # file is known to parse, so a raise here names a genuine self_name-
+    # specific problem (e.g. a malformed self_name value), not a failure
+    # to read the declarations.
+    if hosts_error is not None:
+        self_name: str | None = None
+    else:
+        try:
+            self_name = self_host_name()
+        except HostConfigError as exc:
+            print(f"camp {verb}: {exc}", file=sys.stderr)
+            sys.exit(1)
 
     rows, notices, exit_code = merge_all_hosts_answer(
         local_rows,
@@ -769,13 +786,14 @@ def _dispatch_all_hosts_command(
         group=narrow_group,
     )
 
+    for notice in notices:
+        print(notice, file=sys.stderr)
+
     if as_json:
         import json as _json
 
         print(_json.dumps(rows))
     else:
-        for notice in notices:
-            print(notice, file=sys.stderr)
         _render_all_hosts_human(self_name, hosts, hosts_error, rows, render_row, verb)
 
     sys.exit(exit_code)
@@ -807,8 +825,18 @@ def _render_all_hosts_human(
     case — every other row on this machine, and every other machine, still
     renders.
     """
+    # Nothing in host/config.py checks a declared host name for uniqueness
+    # against self_name (by design — see the module docstring), so the same
+    # key can appear twice here. De-duplicate by key, preserving order and
+    # keeping the local entry first, so that machine's block — and its
+    # rows, matched by key below — is never printed twice.
     machines = [(self_name, self_name if self_name is not None else "this machine")]
-    machines += [(host_name, host_name) for host_name in hosts]
+    seen_keys = {self_name}
+    for host_name in hosts:
+        if host_name in seen_keys:
+            continue
+        seen_keys.add(host_name)
+        machines.append((host_name, host_name))
 
     for key, label in machines:
         print(label)

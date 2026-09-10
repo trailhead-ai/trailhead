@@ -1388,6 +1388,66 @@ def _list_recoverable(
         )
 
 
+def refuse_sessions_local_only_options(rest: list[str], *, widening_flag: str) -> None:
+    """Refuse the five `camp sessions` options that narrow or reshape the
+    LOCAL question — meaningless once *widening_flag* (``--host`` or
+    ``--all-hosts``) has widened the machine axis to a remote or merged
+    answer: ``--recoverable``, ``--all``, ``--dir``, ``--limit``, and a
+    positional workspace slug.
+
+    Shared by `_cmd_sessions_host_cli` (``--host``) and the `-a`/
+    ``--all-hosts`` wiring in `cli/dispatch.py`, so both widening forms
+    refuse alike rather than one silently dropping what the other refuses.
+    """
+    from ..spine import _die
+
+    if "--recoverable" in rest:
+        _die(
+            f"camp sessions: --recoverable has no meaning with {widening_flag} "
+            "— a widened machine is always asked for its own live sessions"
+        )
+    if "--all" in rest:
+        _die(
+            "camp sessions: --all only widens --recoverable, which has no "
+            f"meaning with {widening_flag}"
+        )
+    if "--dir" in rest or any(a.startswith("--dir=") for a in rest):
+        _die(
+            f"camp sessions: --dir has no meaning with {widening_flag} — a "
+            "widened machine answers for every one of its own groups, not a "
+            "local directory"
+        )
+    if "--limit" in rest or any(a.startswith("--limit=") for a in rest):
+        _die(
+            "camp sessions: --limit only widens --recoverable, which has no "
+            f"meaning with {widening_flag}"
+        )
+
+    # `--json` and (on the `-a`/`--all-hosts` path only — `--host` never
+    # sees one, refused together with `--group` upstream) a `--group
+    # <name>` pair are the widened form's own recognized options, not a
+    # leftover positional. Stripped before the catch-all below so neither
+    # is mistaken for a workspace slug.
+    positional = []
+    skip_next = False
+    for arg in rest:
+        if skip_next:
+            skip_next = False
+            continue
+        if arg == "--group":
+            skip_next = True
+            continue
+        if arg == "--json" or arg.startswith("--group="):
+            continue
+        positional.append(arg)
+
+    if positional:
+        _die(
+            f"camp sessions: {widening_flag} widens the machine axis — a "
+            f"workspace slug ({positional[0]!r}) has no meaning alongside it"
+        )
+
+
 def _cmd_sessions_host_cli(args: list[str], host: "Host", host_name: str) -> None:
     """camp sessions --host <name> [--json] — every group's live sessions on
     one declared remote machine, relayed through the SSH transport.
@@ -1419,37 +1479,11 @@ def _cmd_sessions_host_cli(args: list[str], host: "Host", host_name: str) -> Non
     a relayed answer never do.
     """
     from ..host.relay import relay_all_groups
-    from ..spine import _die
 
     rest = list(args)
     as_json = _consume_flag(rest, "--json")
 
-    if "--recoverable" in rest:
-        _die(
-            "camp sessions: --recoverable has no meaning with --host — a "
-            "remote host is always asked for its own live sessions"
-        )
-    if "--all" in rest:
-        _die(
-            "camp sessions: --all only widens --recoverable, which has no "
-            "meaning with --host"
-        )
-    if "--dir" in rest or any(a.startswith("--dir=") for a in rest):
-        _die(
-            "camp sessions: --dir has no meaning with --host — a remote "
-            "host answers for every one of its own groups, not a local "
-            "directory"
-        )
-    if "--limit" in rest or any(a.startswith("--limit=") for a in rest):
-        _die(
-            "camp sessions: --limit only widens --recoverable, which has no "
-            "meaning with --host"
-        )
-    if rest:
-        _die(
-            f"camp sessions: --host answers for every group on that host — "
-            f"a workspace slug ({rest[0]!r}) has no meaning alongside it"
-        )
+    refuse_sessions_local_only_options(rest, widening_flag="--host")
 
     def _render_human_rows(rows: list[dict]) -> None:
         for row in rows:

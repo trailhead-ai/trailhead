@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -49,6 +50,56 @@ def hosts_and_group_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
     )
     monkeypatch.setenv("CAMP_CONFIG_DIR", str(tmp_path))
     monkeypatch.setenv("CAMP_STATE_DIR", str(tmp_path / "state"))
+
+
+def _seed_local_workspace(group_name: str, slug: str, *, env: dict) -> None:
+    """Seed a real local workspace + manifest, no git operations, so the
+    local answer this file merges actually carries a row (rather than the
+    empty local answer every other fixture in this file exercises)."""
+    from camp.group.manifest import manifest_path_for, workspace_dir, write_central_manifest
+
+    ws = workspace_dir(group_name, slug, env=env)
+    ws.mkdir(parents=True, exist_ok=True)
+    mpath = manifest_path_for(group_name, slug, env=env)
+    write_central_manifest(
+        mpath,
+        {
+            "schema_version": 1,
+            "group": group_name,
+            "slug": slug,
+            "branch": f"worktree-{slug}",
+            "members": [
+                {
+                    "name": "repo_a",
+                    "repo_root": "/nonexistent/repo_a",
+                    "worktree_path": str(ws / "repo_a"),
+                    "provision_state": "pending",
+                }
+            ],
+        },
+    )
+
+
+@pytest.fixture()
+def hosts_and_group_env_with_local_workspace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`hosts_and_group_env`, plus a real, provisioned local workspace in
+    "testgrp" — so a merged answer's local block carries an actual row
+    rather than only a header, for tests that must observe the local row's
+    shape and position, not just its header."""
+    groups_dir = tmp_path / "groups"
+    groups_dir.mkdir(parents=True)
+    (groups_dir / "testgrp.toml").write_text(
+        '[group]\nname = "testgrp"\n\n'
+        '[[members]]\nname = "member-a"\nrepo_root = "/tmp/fake-member-a"\n'
+    )
+    (tmp_path / "hosts.toml").write_text(
+        "[hosts.andromeda]\n[hosts.lookout]\n", encoding="utf-8"
+    )
+    monkeypatch.setenv("CAMP_CONFIG_DIR", str(tmp_path))
+    monkeypatch.setenv("CAMP_STATE_DIR", str(tmp_path / "state"))
+    _seed_local_workspace("testgrp", "local-ws", env=os.environ)
 
 
 def _run(monkeypatch: pytest.MonkeyPatch, argv: list[str]) -> int:
@@ -266,12 +317,58 @@ def test_all_hosts_with_group_flag_composes_rather_than_refusing(
 
 
 # ---------------------------------------------------------------------------
+# CRITICAL 1 — an unparsable hosts.toml must still yield the local answer
+# plus one ok:false row naming the file, never a bare exit-1 refusal.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def broken_hosts_and_group_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """CAMP_CONFIG_DIR with one real group ("testgrp") and a hosts.toml that
+    cannot parse as TOML at all."""
+    groups_dir = tmp_path / "groups"
+    groups_dir.mkdir(parents=True)
+    (groups_dir / "testgrp.toml").write_text(
+        '[group]\nname = "testgrp"\n\n'
+        '[[members]]\nname = "member-a"\nrepo_root = "/tmp/fake-member-a"\n'
+    )
+    (tmp_path / "hosts.toml").write_text("this is not = = toml [[[", encoding="utf-8")
+    monkeypatch.setenv("CAMP_CONFIG_DIR", str(tmp_path))
+    monkeypatch.setenv("CAMP_STATE_DIR", str(tmp_path / "state"))
+
+
+def test_unparsable_hosts_toml_still_yields_the_local_answer(
+    broken_hosts_and_group_env, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """The recovery branch `merge_all_hosts_answer` already renders for an
+    unparsable hosts.toml must actually be reachable: the local answer
+    still prints, exit is the local answer's own (0 for an existing empty
+    group), and the parse failure is named on stderr — never a bare exit 1
+    with empty stdout."""
+    transport = _transport_module()
+
+    def _boom(*args, **kwargs):
+        raise AssertionError("an unparsable hosts.toml has no hosts to contact")
+
+    monkeypatch.setattr(transport, "run_camp", _boom)
+
+    code = _run(monkeypatch, ["list", "-a", "--group", "testgrp", "--json"])
+    captured = capsys.readouterr()
+    assert code == 0
+    rows = json.loads(captured.out)
+    assert any(r.get("ok") is False and "hosts.toml" in r.get("reason", "") for r in rows)
+    assert any("hosts.toml" in n for n in captured.err.splitlines())
+
+
+# ---------------------------------------------------------------------------
 # Human rendering — grouped by machine, local first, declared order.
 # ---------------------------------------------------------------------------
 
 
 def test_human_output_grouped_by_machine_local_first_then_declared_order(
-    hosts_and_group_env, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+    hosts_and_group_env_with_local_workspace,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture,
 ) -> None:
     transport = _transport_module()
 
@@ -290,11 +387,62 @@ def test_human_output_grouped_by_machine_local_first_then_declared_order(
 
     lines = out.splitlines()
     assert lines[0] == "this machine"
-    assert lines[1] == "andromeda"
-    assert lines[2] == "  remoteA /r/a"
-    assert lines[3] == "lookout"
-    assert lines[4].strip() != ""  # the failure line lookout owes
-    assert "remoteA" not in lines[4]
+    assert lines[1].startswith("  ") and lines[1].split()[0] == "local-ws"
+    assert lines[2] == "andromeda"
+    assert lines[3] == "  remoteA /r/a"
+    assert lines[4] == "lookout"
+    assert lines[5].strip() != ""  # the failure line lookout owes
+    assert "remoteA" not in lines[5]
+
+
+# ---------------------------------------------------------------------------
+# 8 — self_name equal to a declared host name must not double the machine.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def self_name_collides_with_declared_host_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """hosts.toml declares self_name == a declared host's own name — nothing
+    rejects this (host/config.py explicitly declines to check uniqueness)."""
+    groups_dir = tmp_path / "groups"
+    groups_dir.mkdir(parents=True)
+    (groups_dir / "testgrp.toml").write_text(
+        '[group]\nname = "testgrp"\n\n'
+        '[[members]]\nname = "member-a"\nrepo_root = "/tmp/fake-member-a"\n'
+    )
+    (tmp_path / "hosts.toml").write_text(
+        'self_name = "andromeda"\n[hosts.andromeda]\n[hosts.lookout]\n', encoding="utf-8"
+    )
+    monkeypatch.setenv("CAMP_CONFIG_DIR", str(tmp_path))
+    monkeypatch.setenv("CAMP_STATE_DIR", str(tmp_path / "state"))
+
+
+def test_self_name_colliding_with_a_declared_host_prints_the_machine_once(
+    self_name_collides_with_declared_host_env,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    transport = _transport_module()
+    monkeypatch.setattr(
+        transport,
+        "run_camp",
+        lambda host, remote_argv, **kw: _answered(
+            [{"ok": True, "slug": "remote1", "workspace_path": "/r/1", "branch": "", "group": "testgrp"}]
+        ),
+    )
+
+    code = _run(monkeypatch, ["list", "-a", "--group", "testgrp"])
+    out = capsys.readouterr().out
+    assert code == 0
+
+    lines = out.splitlines()
+    assert lines.count("andromeda") == 1
+    assert lines[0] == "andromeda"
+    assert lines[1] == "  remote1 /r/1"
+    assert lines[2] == "lookout"
+    assert lines[3] == "  remote1 /r/1"
 
 
 def test_zero_state_prints_every_machines_header_with_nothing_beneath(
@@ -357,12 +505,48 @@ def test_machine_readable_output_is_one_flat_array_in_declared_order(
 
 
 # ---------------------------------------------------------------------------
+# IMPORTANT 5 — `-a --json` must not drop notices; stdout stays one array.
+# ---------------------------------------------------------------------------
+
+
+def test_ag_json_still_prints_the_unparsable_group_notice_to_stderr(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """`camp list -ag --json` (every group, every machine) must still name
+    an unparsable group config on stderr — the same notice `-g --json`
+    (without `-a`) already prints. This notice comes from the LOCAL
+    all-groups answer, independent of hosts.toml, so it isolates the JSON
+    branch's own notice-dropping defect from the hosts_error path."""
+    groups_dir = tmp_path / "groups"
+    groups_dir.mkdir(parents=True)
+    (groups_dir / "broken.toml").write_text("this is not = = toml [[[", encoding="utf-8")
+    (groups_dir / "ok.toml").write_text(
+        '[group]\nname = "ok"\n\n'
+        '[[members]]\nname = "member-a"\nrepo_root = "/tmp/fake-member-a"\n'
+    )
+    (tmp_path / "hosts.toml").write_text("[hosts.andromeda]\n", encoding="utf-8")
+    monkeypatch.setenv("CAMP_CONFIG_DIR", str(tmp_path))
+    monkeypatch.setenv("CAMP_STATE_DIR", str(tmp_path / "state"))
+
+    transport = _transport_module()
+    monkeypatch.setattr(transport, "run_camp", lambda host, remote_argv, **kw: _answered([]))
+
+    code = _run(monkeypatch, ["list", "-ag", "--json"])
+    captured = capsys.readouterr()
+    assert code == 0
+    rows = json.loads(captured.out)
+    assert any(r.get("ok") is False and "broken.toml" in r.get("reason", "") for r in rows)
+    assert "skipping" in captured.err
+    assert "broken.toml" in captured.err
+
+
+# ---------------------------------------------------------------------------
 # Backward compatibility — the plain single-machine surface is unchanged.
 # ---------------------------------------------------------------------------
 
 
 def test_plain_list_json_still_carries_no_host_key(
-    hosts_and_group_env, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+    hosts_and_group_env_with_local_workspace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     transport = _transport_module()
 
@@ -374,7 +558,10 @@ def test_plain_list_json_still_carries_no_host_key(
     code = _run(monkeypatch, ["list", "--group", "testgrp", "--json"])
     out = capsys.readouterr().out
     assert code == 0
-    assert json.loads(out) == []
+    rows = json.loads(out)
+    assert len(rows) == 1
+    assert rows[0]["slug"] == "local-ws"
+    assert "host" not in rows[0]
 
 
 def test_plain_host_flag_behaves_exactly_as_before(
@@ -426,6 +613,86 @@ def test_sessions_a_and_all_hosts_flag_produce_the_same_answer(
     assert code_a == 0
     rows = json.loads(out_a)
     assert {r["host"] for r in rows} == {"andromeda", "lookout"}
+
+
+# ---------------------------------------------------------------------------
+# CRITICAL 2 — `sessions -a` must refuse the same five local-only options
+# `_cmd_sessions_host_cli` already refuses for `--host`, rather than
+# silently answering the live listing.
+# ---------------------------------------------------------------------------
+
+
+def test_sessions_a_and_recoverable_refuses(
+    hosts_and_group_env, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    transport = _transport_module()
+
+    def _boom(*args, **kwargs):
+        raise AssertionError("a refused sessions -a must never contact the transport")
+
+    monkeypatch.setattr(transport, "run_camp", _boom)
+
+    code = _run(monkeypatch, ["sessions", "-a", "--group", "testgrp", "--recoverable"])
+    err = capsys.readouterr().err
+    assert code != 0
+    assert "own live sessions" in err
+
+
+def test_sessions_a_and_all_refuses(
+    hosts_and_group_env, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    transport = _transport_module()
+    monkeypatch.setattr(transport, "run_camp", lambda *a, **kw: (_ for _ in ()).throw(
+        AssertionError("a refused sessions -a must never contact the transport")
+    ))
+
+    code = _run(monkeypatch, ["sessions", "-a", "--group", "testgrp", "--all"])
+    err = capsys.readouterr().err
+    assert code != 0
+    assert "only widens --recoverable" in err
+
+
+def test_sessions_a_and_dir_refuses(
+    hosts_and_group_env, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    transport = _transport_module()
+    monkeypatch.setattr(transport, "run_camp", lambda *a, **kw: (_ for _ in ()).throw(
+        AssertionError("a refused sessions -a must never contact the transport")
+    ))
+
+    code = _run(monkeypatch, ["sessions", "-a", "--group", "testgrp", "--dir", "/tmp/somewhere"])
+    err = capsys.readouterr().err
+    assert code != 0
+    assert "not a local directory" in err
+
+
+def test_sessions_a_and_limit_refuses(
+    hosts_and_group_env, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    transport = _transport_module()
+    monkeypatch.setattr(transport, "run_camp", lambda *a, **kw: (_ for _ in ()).throw(
+        AssertionError("a refused sessions -a must never contact the transport")
+    ))
+
+    code = _run(monkeypatch, ["sessions", "-a", "--group", "testgrp", "--limit", "5"])
+    err = capsys.readouterr().err
+    assert code != 0
+    assert "only widens --recoverable" in err
+
+
+def test_sessions_a_and_positional_slug_refuses(
+    hosts_and_group_env, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    transport = _transport_module()
+    monkeypatch.setattr(transport, "run_camp", lambda *a, **kw: (_ for _ in ()).throw(
+        AssertionError("a refused sessions -a must never contact the transport")
+    ))
+
+    code = _run(monkeypatch, ["sessions", "-a", "--group", "testgrp", "feat-x"])
+    err = capsys.readouterr().err
+    assert code != 0
+    assert "feat-x" in err
+    assert "workspace slug" in err
 
 
 def test_sessions_human_output_renders_answered_rows_under_their_machine(
@@ -485,8 +752,8 @@ def test_a_malformed_remote_row_is_skipped_with_a_notice_other_rows_still_render
         if host.ssh == "andromeda":
             return _answered(
                 [
-                    {"ok": True, "workspace_path": "/ws/feat-x"},  # missing slug
-                    {"ok": True, "slug": "alpha", "workspace_path": "/ws/alpha"},
+                    {"ok": True, "workspace_path": "/ws/feat-x", "group": "testgrp"},  # missing slug
+                    {"ok": True, "slug": "alpha", "workspace_path": "/ws/alpha", "group": "testgrp"},
                 ]
             )
         return _answered([])

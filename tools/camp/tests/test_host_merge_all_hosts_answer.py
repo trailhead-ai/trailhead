@@ -199,13 +199,16 @@ def test_local_group_config_failure_row_is_stamped_and_kept():
 
 def test_remote_collection_failure_row_is_relayed_unchanged():
     # "A remote machine's own collection failure" — relay.py already stamps
-    # `host`; merge just concatenates it in.
+    # `host`; merge just concatenates it in. Exercised WITH a group=
+    # narrowing (IMPORTANT 7) — without one, this test cannot observe the
+    # row being incorrectly dropped by the group filter.
     merge = _merge_module()
     remote_failure_row = {"ok": False, "group": None, "reason": "remote-groups.toml: bad", "host": "andromeda"}
     rows, _, _ = merge.merge_all_hosts_answer(
         [], [], 0,
         self_name=None,
         host_answers=[("andromeda", _host_answer([remote_failure_row]))],
+        group="trailhead",
     )
     assert rows == [remote_failure_row]
 
@@ -281,6 +284,57 @@ def test_group_filter_never_drops_a_row_with_no_group_key():
         group="trailhead",
     )
     assert rows == [{"ok": False, "host": "andromeda", "reason": "unreachable"}]
+
+
+def test_group_filter_never_drops_a_remote_collection_failure_row_that_carries_a_group_key():
+    # IMPORTANT 3 — a remote camp's own collection-failure row carries a
+    # `group` key (set to null), so the old "group" in r discriminator
+    # drops it under -a --group X. Discriminating on `ok` instead keeps it.
+    merge = _merge_module()
+    remote_failure_row = {
+        "ok": False, "group": None, "reason": "remote-groups.toml: bad", "host": "andromeda",
+    }
+    rows, _, _ = merge.merge_all_hosts_answer(
+        [], [], 0,
+        self_name=None,
+        host_answers=[("andromeda", _host_answer([remote_failure_row]))],
+        group="trailhead",
+    )
+    assert rows == [remote_failure_row]
+
+
+def test_group_filter_drops_an_ok_row_missing_the_group_key_entirely():
+    # IMPORTANT 3 — a version-skewed remote's ok row that omits `group`
+    # entirely must still be narrowed by the resolved group, not leaked
+    # through because the key is absent.
+    merge = _merge_module()
+    rows, _, _ = merge.merge_all_hosts_answer(
+        [], [], 0,
+        self_name=None,
+        host_answers=[
+            ("andromeda", _host_answer([{"ok": True, "slug": "s1", "host": "andromeda"}])),
+        ],
+        group="trailhead",
+    )
+    assert rows == []
+
+
+def test_group_filter_is_never_applied_to_local_rows():
+    # IMPORTANT 4 — the local answer arrives already narrowed by
+    # local_list_answer/local_sessions_answer; re-filtering it drops a
+    # workspace whose manifest group is "" or absent.
+    merge = _merge_module()
+    local_rows = [
+        {"ok": True, "slug": "local-empty-group", "group": ""},
+        {"ok": True, "slug": "local-no-group-key"},
+    ]
+    rows, _, _ = merge.merge_all_hosts_answer(
+        local_rows, [], 0,
+        self_name=None,
+        host_answers=[],
+        group="trailhead",
+    )
+    assert {r["slug"] for r in rows} == {"local-empty-group", "local-no-group-key"}
 
 
 def test_no_group_given_filters_nothing():

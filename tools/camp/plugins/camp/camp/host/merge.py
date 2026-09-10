@@ -97,6 +97,11 @@ def merge_all_hosts_answer(
         `(rows, notices, exit_code)` — the same shape a value-returning
         local answer already returns.
     """
+    # The local answer arrives already narrowed to the resolved group by its
+    # own caller (`local_list_answer`/`local_sessions_answer`) — it is never
+    # re-filtered here. Only remote rows carry groups this side never asked
+    # for (every remote invocation is the all-groups form), so only remote
+    # rows are narrowed.
     rows: list[dict[str, Any]] = [
         {**row, "host": self_name} for row in local_rows
     ]
@@ -107,11 +112,19 @@ def merge_all_hosts_answer(
         notices.append(f"camp: {hosts_error}")
     else:
         for _host_name, answer in host_answers:
-            rows.extend(answer.rows)
+            host_rows = answer.rows
+            if group is not None:
+                # A failure row (`ok: false`) is never narrowed by group —
+                # discriminated on camp's own `ok` field, never on whether a
+                # `group` key happens to be present, since a collection-
+                # failure row carries `"group": null` and a version-skewed
+                # ok row can omit the key entirely.
+                host_rows = [
+                    r for r in host_rows
+                    if not r.get("ok", True) or r.get("group") == group
+                ]
+            rows.extend(host_rows)
             notices.extend(answer.notices)
-
-    if group is not None:
-        rows = [r for r in rows if "group" not in r or r.get("group") == group]
 
     return rows, notices, local_exit_code
 

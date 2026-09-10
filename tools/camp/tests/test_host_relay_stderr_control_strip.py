@@ -162,6 +162,29 @@ def test_remote_refusal_exact_wording_unchanged_apart_from_escapes(monkeypatch) 
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# stderr that is nothing but control sequences (or a bare newline) must not
+# survive as an empty-string notice.
+# ---------------------------------------------------------------------------
+
+
+def test_stderr_of_only_control_code_points_produces_no_notice(monkeypatch) -> None:
+    # Unlike the cursor/colour escapes above (whose printable parameter
+    # bytes survive the strip), these control code points have no
+    # printable payload at all — the stripped text is genuinely empty.
+    transport = _transport_module()
+    outcome = transport.RemoteRefusal(stdout="", stderr="\x01\x02\x03\n", exit_code=1)
+    answer = _answer_via_host_path(monkeypatch, outcome)
+    assert answer.notices == []
+
+
+def test_bare_newline_stderr_produces_no_notice(monkeypatch) -> None:
+    transport = _transport_module()
+    outcome = transport.RemoteRefusal(stdout="", stderr="\n", exit_code=1)
+    answer = _answer_via_host_path(monkeypatch, outcome)
+    assert answer.notices == []
+
+
 def test_non_ascii_content_not_mangled(monkeypatch) -> None:
     transport = _transport_module()
     stderr = "camp list: café-ソフト group not found: \x1b[31m✗\x1b[0m\n"
