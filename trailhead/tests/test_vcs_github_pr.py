@@ -1354,6 +1354,393 @@ class TestDescribeMergeRefusal:
 
 
 # ---------------------------------------------------------------------------
+# pr.merge — per-pull-request strategy resolution + disclosure (wiring)
+# ---------------------------------------------------------------------------
+
+
+def _make_capability_stub(
+    *,
+    capabilities: dict[str, dict[str, bool]] | None = None,
+    fail_merge_repos: set[str] | None = None,
+    call_log: list[list[str]] | None = None,
+):
+    """Stub keyed by repo directory basename -> permitted-merge-method
+    booleans. `pr view` always reports mergeable/clean/non-draft/no-stack;
+    `graphql` returns the repository object folding those booleans in
+    alongside a null `stackEntry`; `pr merge` fails for any repo basename
+    named in `fail_merge_repos`.
+    """
+    capabilities = capabilities or {}
+    fail_merge_repos = fail_merge_repos or set()
+    default_caps = {
+        "mergeCommitAllowed": True,
+        "squashMergeAllowed": True,
+        "rebaseMergeAllowed": True,
+    }
+
+    def stub(cmd, **kwargs) -> subprocess.CompletedProcess:
+        if call_log is not None:
+            call_log.append(list(cmd))
+        cmd_str = " ".join(cmd)
+        cwd = kwargs.get("cwd") or ""
+        name = Path(cwd).name
+        if "config" in cmd and "user.email" in cmd:
+            return subprocess.CompletedProcess(cmd, 0, "test@example.com\n", "")
+        if "remote" in cmd and "get-url" in cmd:
+            return subprocess.CompletedProcess(
+                cmd, 0, f"git@github.com:acme/{name}.git\n", ""
+            )
+        if "pr" in cmd and "view" in cmd and "--json" in cmd:
+            return subprocess.CompletedProcess(
+                cmd,
+                0,
+                json.dumps(
+                    {
+                        "state": "OPEN",
+                        "mergeable": "MERGEABLE",
+                        "mergeStateStatus": "CLEAN",
+                        "isDraft": False,
+                        "headRefName": "feat",
+                    }
+                ),
+                "",
+            )
+        if "graphql" in cmd_str:
+            caps = capabilities.get(name, default_caps)
+            body = {
+                "data": {
+                    "repository": {
+                        **caps,
+                        "pullRequest": {"stackEntry": None},
+                    }
+                }
+            }
+            return subprocess.CompletedProcess(cmd, 0, json.dumps(body), "")
+        if "pr" in cmd and "merge" in cmd:
+            if name in fail_merge_repos:
+                return subprocess.CompletedProcess(cmd, 1, "", "GraphQL: merge blocked")
+            return subprocess.CompletedProcess(cmd, 0, "merged\n", "")
+        if "push" in cmd and "--delete" in cmd:
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    return stub
+
+
+class TestMergeLoopResolvesPerPullRequest:
+    def _setup_two_repos(self, tmp_path: Path) -> tuple[Path, Path, Path]:
+        wt_a = tmp_path / "wt" / "alpha"
+        wt_b = tmp_path / "wt" / "beta"
+        wt_a.mkdir(parents=True)
+        wt_b.mkdir(parents=True)
+        manifest = _write_manifest(
+            tmp_path,
+            [
+                {"name": "alpha", "repo_root": str(tmp_path), "worktree_path": str(wt_a)},
+                {"name": "beta", "repo_root": str(tmp_path), "worktree_path": str(wt_b)},
+            ],
+        )
+        return manifest, wt_a, wt_b
+
+    def test_two_pull_requests_resolve_independently_per_repository(
+        self, tmp_path: Path
+    ) -> None:
+        """`alpha` permits rebasing, `beta` forbids it and permits only
+        squash — under automatic selection the group no longer shares one
+        strategy; each pull request merges with the strategy its own
+        repository permits."""
+        manifest, wt_a, wt_b = self._setup_two_repos(tmp_path)
+        toml = _write_toml(
+            tmp_path, "[release]\nauto_merge = true\nmerge_order = ['alpha', 'beta']\n"
+        )
+        call_log: list[list[str]] = []
+        stub = _make_capability_stub(
+            capabilities={
+                "alpha": {
+                    "mergeCommitAllowed": True,
+                    "squashMergeAllowed": True,
+                    "rebaseMergeAllowed": True,
+                },
+                "beta": {
+                    "mergeCommitAllowed": False,
+                    "squashMergeAllowed": True,
+                    "rebaseMergeAllowed": False,
+                },
+            },
+            call_log=call_log,
+        )
+        provider = get_provider("github", runner=stub)
+        pr_pairs = [
+            PRPair(repo_path=str(wt_a), pr_number="1", member_name="alpha"),
+            PRPair(repo_path=str(wt_b), pr_number="2", member_name="beta"),
+        ]
+        result = provider.pr.merge(pr_pairs, str(manifest), toml_path=str(toml))
+
+        merge_argvs = [c for c in call_log if "pr" in c and "merge" in c]
+        assert len(merge_argvs) == 2
+        assert "--rebase" in merge_argvs[0]
+        assert "--squash" in merge_argvs[1]
+        assert set(result["merged"]) == {f"{wt_a}:1", f"{wt_b}:2"}
+
+    def test_disclosure_precedes_each_merge_call_not_batched(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The resolved strategy is disclosed on stderr immediately before
+        that pull request's own merge call — not after, and not once for
+        the whole run."""
+        import sys as sys_module
+
+        manifest, wt_a, wt_b = self._setup_two_repos(tmp_path)
+        toml = _write_toml(
+            tmp_path, "[release]\nauto_merge = true\nmerge_order = ['alpha', 'beta']\n"
+        )
+        events: list[tuple[str, str]] = []
+
+        class _RecordingStderr:
+            def write(self, s: str) -> int:
+                if "strategy '" in s:
+                    events.append(("disclosure", s))
+                return len(s)
+
+            def flush(self) -> None:
+                pass
+
+        monkeypatch.setattr(sys_module, "stderr", _RecordingStderr())
+
+        def stub(cmd, **kwargs):
+            result = _make_capability_stub()(cmd, **kwargs)
+            if "pr" in cmd and "merge" in cmd:
+                cwd = kwargs.get("cwd") or ""
+                events.append(("merge", Path(cwd).name))
+            return result
+
+        provider = get_provider("github", runner=stub)
+        pr_pairs = [
+            PRPair(repo_path=str(wt_a), pr_number="1", member_name="alpha"),
+            PRPair(repo_path=str(wt_b), pr_number="2", member_name="beta"),
+        ]
+        provider.pr.merge(pr_pairs, str(manifest), toml_path=str(toml))
+
+        merge_indices = [i for i, e in enumerate(events) if e[0] == "merge"]
+        assert len(merge_indices) == 2
+        for merge_index in merge_indices:
+            # a disclosure event immediately precedes each merge event
+            assert events[merge_index - 1][0] == "disclosure"
+        # not batched: a disclosure for the second PR does not appear before
+        # the first PR's own merge call
+        first_merge_index = merge_indices[0]
+        disclosures_before_first_merge = [
+            e for e in events[:first_merge_index] if e[0] == "disclosure"
+        ]
+        assert len(disclosures_before_first_merge) == 1
+
+    def test_lookup_failure_disclosure_differs_from_other_reasons(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A merge whose strategy came from a failed capability lookup
+        discloses that cause, distinguishable from a merge whose strategy
+        was resolved for any other reason."""
+        from trailhead.vcs.github import RESOLUTION_REASON_PREFIXES
+        import sys as sys_module
+
+        wt = tmp_path / "wt" / "alpha"
+        wt.mkdir(parents=True)
+        manifest = _write_manifest(
+            tmp_path,
+            [{"name": "alpha", "repo_root": str(tmp_path), "worktree_path": str(wt)}],
+        )
+        toml = _write_toml(tmp_path, "[release]\nauto_merge = true\n")
+
+        def stub(cmd, **kwargs):
+            cmd_str = " ".join(cmd)
+            if "config" in cmd and "user.email" in cmd:
+                return subprocess.CompletedProcess(cmd, 0, "test@example.com\n", "")
+            if "remote" in cmd and "get-url" in cmd:
+                return subprocess.CompletedProcess(
+                    cmd, 0, "git@github.com:acme/alpha.git\n", ""
+                )
+            if "pr" in cmd and "view" in cmd and "--json" in cmd:
+                return subprocess.CompletedProcess(
+                    cmd,
+                    0,
+                    json.dumps(
+                        {
+                            "state": "OPEN",
+                            "mergeable": "MERGEABLE",
+                            "mergeStateStatus": "CLEAN",
+                            "isDraft": False,
+                            "headRefName": "feat",
+                        }
+                    ),
+                    "",
+                )
+            if "graphql" in cmd_str:
+                # repository itself unresolvable -> lookup failure
+                return subprocess.CompletedProcess(
+                    cmd, 0, json.dumps({"data": {"repository": None}}), ""
+                )
+            if "pr" in cmd and "merge" in cmd:
+                return subprocess.CompletedProcess(cmd, 0, "merged\n", "")
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+
+        captured: list[str] = []
+
+        class _RecordingStderr:
+            def write(self, s: str) -> int:
+                if s.strip():
+                    captured.append(s)
+                return len(s)
+
+            def flush(self) -> None:
+                pass
+
+        monkeypatch.setattr(sys_module, "stderr", _RecordingStderr())
+
+        provider = get_provider("github", runner=stub)
+        pr_pairs = [PRPair(repo_path=str(wt), pr_number="9", member_name="alpha")]
+        provider.pr.merge(pr_pairs, str(manifest), toml_path=str(toml))
+
+        disclosure = next(
+            line
+            for line in captured
+            if RESOLUTION_REASON_PREFIXES["auto_lookup_failed"] in line
+        )
+        assert RESOLUTION_REASON_PREFIXES["auto_rebase_permitted"] not in disclosure
+        assert RESOLUTION_REASON_PREFIXES["auto_sole_permitted"] not in disclosure
+        assert RESOLUTION_REASON_PREFIXES["auto_interim_squash"] not in disclosure
+
+    def test_explicit_configured_strategy_performs_no_capability_read(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A group with an explicit `merge_method` performs no capability
+        read at all — the resolver never inspects `permitted` for a
+        concretely-configured strategy, so the merge loop must not even
+        issue the lookup for that case."""
+        import trailhead.vcs.github as gh_module
+
+        wt = tmp_path / "wt" / "alpha"
+        wt.mkdir(parents=True)
+        manifest = _write_manifest(
+            tmp_path,
+            [{"name": "alpha", "repo_root": str(tmp_path), "worktree_path": str(wt)}],
+        )
+        toml = _write_toml(
+            tmp_path, '[release]\nauto_merge = true\nmerge_method = "rebase"\n'
+        )
+        calls: list[tuple] = []
+        original = gh_module.get_permitted_merge_strategies
+
+        def _spy(*args, **kwargs):
+            calls.append((args, kwargs))
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(gh_module, "get_permitted_merge_strategies", _spy)
+
+        stub = _make_capability_stub()
+        provider = get_provider("github", runner=stub)
+        pr_pairs = [PRPair(repo_path=str(wt), pr_number="7", member_name="alpha")]
+        result = provider.pr.merge(pr_pairs, str(manifest), toml_path=str(toml))
+
+        assert calls == []
+        assert any("7" in m for m in result["merged"])
+
+    def test_one_repository_query_per_pull_request(self, tmp_path: Path) -> None:
+        """The whole merge path issues exactly one repository (graphql)
+        query per pull request under automatic selection — the capability
+        read and the stack-entry read share the fetch a shared cache
+        provides, scoped per pull request rather than collapsed to one
+        query for the whole invocation."""
+        manifest, wt_a, wt_b = self._setup_two_repos(tmp_path)
+        toml = _write_toml(
+            tmp_path, "[release]\nauto_merge = true\nmerge_order = ['alpha', 'beta']\n"
+        )
+        call_log: list[list[str]] = []
+        stub = _make_capability_stub(call_log=call_log)
+        provider = get_provider("github", runner=stub)
+        pr_pairs = [
+            PRPair(repo_path=str(wt_a), pr_number="1", member_name="alpha"),
+            PRPair(repo_path=str(wt_b), pr_number="2", member_name="beta"),
+        ]
+        provider.pr.merge(pr_pairs, str(manifest), toml_path=str(toml))
+
+        graphql_calls = [c for c in call_log if "graphql" in " ".join(c)]
+        assert len(graphql_calls) == 2
+
+    def test_refusal_recorded_as_failure_with_no_second_merge_attempt(
+        self, tmp_path: Path
+    ) -> None:
+        """A merge refused at merge time is recorded as a failure via
+        `describe_merge_refusal`, not retried with a different strategy —
+        exactly one merge call is made for that pull request."""
+        wt = tmp_path / "wt" / "alpha"
+        wt.mkdir(parents=True)
+        manifest = _write_manifest(
+            tmp_path,
+            [{"name": "alpha", "repo_root": str(tmp_path), "worktree_path": str(wt)}],
+        )
+        toml = _write_toml(
+            tmp_path, '[release]\nauto_merge = true\nmerge_method = "rebase"\n'
+        )
+        call_log: list[list[str]] = []
+        stub = _make_capability_stub(fail_merge_repos={"alpha"}, call_log=call_log)
+        provider = get_provider("github", runner=stub)
+        pr_pairs = [PRPair(repo_path=str(wt), pr_number="7", member_name="alpha")]
+        result = provider.pr.merge(pr_pairs, str(manifest), toml_path=str(toml))
+
+        merge_argvs = [c for c in call_log if "pr" in c and "merge" in c]
+        assert len(merge_argvs) == 1
+        failed_msg = next(v for k, v in result["failed"].items() if "7" in k)
+        assert failed_msg == "merge-refused: rebase refused — GraphQL: merge blocked"
+        assert result["merged"] == []
+
+    def test_refusal_does_not_raise_and_skips_the_remainder(
+        self, tmp_path: Path
+    ) -> None:
+        """No unhandled exception escapes the merge path on a refusal, and
+        the remainder of the merge order is skipped exactly as any other
+        mid-order failure skips it."""
+        manifest, wt_a, wt_b = self._setup_two_repos(tmp_path)
+        toml = _write_toml(
+            tmp_path, "[release]\nauto_merge = true\nmerge_order = ['alpha', 'beta']\n"
+        )
+        stub = _make_capability_stub(fail_merge_repos={"alpha"})
+        provider = get_provider("github", runner=stub)
+        pr_pairs = [
+            PRPair(repo_path=str(wt_a), pr_number="1", member_name="alpha"),
+            PRPair(repo_path=str(wt_b), pr_number="2", member_name="beta"),
+        ]
+        result = provider.pr.merge(pr_pairs, str(manifest), toml_path=str(toml))
+
+        assert result["merged"] == []
+        assert any("1" in k for k in result["failed"])
+        skip_msg = next(v for k, v in result["skipped"].items() if "2" in k)
+        assert "blocked by" in skip_msg
+
+    def test_refusal_message_reaches_the_diagnostic_stream(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The refusal message is not merely formatted and discarded — it
+        reaches stderr, the same operator-visible surface the disclosure
+        itself uses."""
+        wt = tmp_path / "wt" / "alpha"
+        wt.mkdir(parents=True)
+        manifest = _write_manifest(
+            tmp_path,
+            [{"name": "alpha", "repo_root": str(tmp_path), "worktree_path": str(wt)}],
+        )
+        toml = _write_toml(
+            tmp_path, '[release]\nauto_merge = true\nmerge_method = "squash"\n'
+        )
+        stub = _make_capability_stub(fail_merge_repos={"alpha"})
+        provider = get_provider("github", runner=stub)
+        pr_pairs = [PRPair(repo_path=str(wt), pr_number="7", member_name="alpha")]
+        provider.pr.merge(pr_pairs, str(manifest), toml_path=str(toml))
+
+        err = capsys.readouterr().err
+        assert "merge-refused: squash refused — GraphQL: merge blocked" in err
+
+
+# ---------------------------------------------------------------------------
 # ci.wait (ports wait_for_actionable)
 # ---------------------------------------------------------------------------
 

@@ -1032,13 +1032,17 @@ def _merge_prs(
         )
 
     # merge_method gate — fail-closed on an unrecognized value, before any
-    # subprocess call. An absent key changes behaviour (new default: squash)
-    # so it announces itself on stderr rather than switching silently. The
-    # notice itself is printed below, after the merge_order gates, so a
-    # refused run never announces a merge method it never used.
+    # subprocess call. A malformed or unreadable configuration resolves to
+    # squash, the safe direction; a well-formed configuration that names
+    # automatic selection explicitly, or omits the key, is left as
+    # AUTOMATIC_MERGE_METHOD for the per-pull-request resolver below rather
+    # than collapsed here. Either case announces itself on stderr rather
+    # than switching silently. The notice itself is printed below, after the
+    # merge_order gates, so a refused run never announces a merge method it
+    # never used.
     merge_method = _load_merge_method(toml_path)
     merge_method_notice_needed = merge_method is None or merge_method == AUTOMATIC_MERGE_METHOD
-    if merge_method_notice_needed:
+    if merge_method is None:
         merge_method = "squash"
 
     # Merge safety gate
@@ -1108,7 +1112,13 @@ def _merge_prs(
             _skip_remaining(ordered, merged, failed, skipped, pair)
             break
 
-        stack = _get_stack_entry(pair.repo_path, pair.pr_number, runner)
+        # One shared fetch per pull request: the stack-entry read below and
+        # the capability read that follows it (when selection is automatic)
+        # both key off this cache, so a caller needing both signals for the
+        # same pull request costs one repository query, not two.
+        query_cache: dict[tuple[str, str], dict | None] = {}
+
+        stack = _get_stack_entry(pair.repo_path, pair.pr_number, runner, cache=query_cache)
         if stack is not None:
             stack_number = stack.get("number", "?")
             failed[key] = (
@@ -1120,9 +1130,25 @@ def _merge_prs(
             _skip_remaining(ordered, merged, failed, skipped, pair)
             break
 
-        ok, err = _do_merge(pair.repo_path, pair.pr_number, author_email, merge_method, runner)
+        if merge_method == AUTOMATIC_MERGE_METHOD:
+            permitted = get_permitted_merge_strategies(
+                pair.repo_path, pair.pr_number, runner, cache=query_cache
+            )
+        else:
+            permitted = frozenset()
+        strategy, reason = resolve_merge_strategy(merge_method, permitted)
+
+        print(
+            f"portage merge: PR #{pair.pr_number} ({pair.member_name}): "
+            f"strategy '{strategy}' — {reason}",
+            file=sys.stderr,
+        )
+
+        ok, err = _do_merge(pair.repo_path, pair.pr_number, author_email, strategy, runner)
         if not ok:
-            failed[key] = err
+            described = describe_merge_refusal(strategy, err)
+            failed[key] = described
+            print(f"portage merge: {described}", file=sys.stderr)
             _skip_remaining(ordered, merged, failed, skipped, pair)
             break
 
