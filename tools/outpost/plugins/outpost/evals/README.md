@@ -15,7 +15,5 @@ The authoring rules, the dispatch shape, and the trust boundary on the
 instructions path are in `docs/eval-protocol.md` — read it before adding a case.
 Results go in `tools/outpost/MANUAL-EVAL.md`.
 
-This corpus currently holds two cases: `publish-routing` (does the default-publish
-rule route deliverables correctly?) and `record-link-rendering` (does the
-record-link rule cause linked, resolved, safe output?). Results for both are in
-`tools/outpost/MANUAL-EVAL.md`.
+Each case directory under here is one entry in this corpus; results for all of
+them are in `tools/outpost/MANUAL-EVAL.md`.

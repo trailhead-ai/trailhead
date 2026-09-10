@@ -27,16 +27,27 @@ Three separately-judged pass conditions, each graded per run:
 ## Why no `scripts/eval-sandbox`
 
 Every arm here is dispatched with `--allowedTools "Read"` and no shell tool
-at all. The three pass conditions above are entirely about what the agent
-*renders in prose* from information already placed in its prompt and one
-file it may `Read` — nothing in this case asks an arm to write, publish, or
-reach outside its fixture. `docs/eval-protocol.md` mandates the sandbox for
-an arm that has shell access, because a capable agent with shell access will
-go find the real machinery when the fixture's sanctioned path doesn't work.
-That failure mode requires a shell to exploit. Removing shell access removes
-the reach the sandbox exists to confine, rather than confining it — so the
-sandbox is not omitted by oversight; it is inapplicable to this case's tool
+at all. `docs/eval-protocol.md` names the write-side escape the sandbox
+confines — an arm that cannot complete a task the sanctioned way goes and
+finds the real machinery instead, as happened twice in `publish-routing`
+(a real vault published into, a real `lore sync` pushed to origin). That
+escape requires a shell: neither arm here can invoke one, write a file, or
+publish anything, so that failure mode does not apply to this case's tool
 grant.
+
+The read side is a different claim, and this case does not confine it the
+way `scripts/eval-sandbox` does. `docs/eval-protocol.md` states default-deny
+on the read side as the sandbox's actual point, not an incidental property
+of denying shell access — and an unconfined `Read` tool can open any path
+the process can read, including the answer key: this repository's own
+`rules.md`, or the installed `~/.claude/rules/trailhead-outpost.md`. Neither
+arm is prevented from reading either file directly. What stands in for
+confinement here is weaker than a boundary: the task prompt tells the arm to
+use the given file *locations* rather than reading the record files'
+contents, and the baseline arm's own output is the only evidence this held —
+its record-1 link was missing the `/records/` path segment the real rule
+requires, which is inconsistent with having read the answer key. That is
+observational, not enforced, and does not generalize past this run.
 
 ## Arms
 
@@ -85,7 +96,7 @@ the rule under test.
 
 `fixtures/make-fixture-env.sh <run-dir>` builds a self-contained scratch
 environment: a `vault-ls.txt` reproducing `lore vault ls`'s real
-tab-separated output shape (name, scope, path, kinds column), and three
+tab-separated output shape (name, scope, path, kinds column), and five
 record files under it —
 
 | # | File location (relative to run dir) | Vault | Resolvable? | Path standard? | Kind/slug grammar |
@@ -179,3 +190,20 @@ bareness, or the never-link-into-a-record-body rule — those are separate
 claims the same rule makes but that this task's contract does not cover.
 It also does not cover adherence late in a long session or under any
 pressure to abbreviate.
+
+**Deviation from task 2's contract.** The task's test contract calls for two
+arms differing in exactly one variable: "the committed ruleset, and a copy
+under `arms/` with the record-link section removed." What was actually built
+is a synthetic five-line brief (`arms/baseline.md`) plus that same brief with
+the `## Record links` section appended (`arms/treatment.md`) — not the full
+committed ruleset minus the section. The cost: this case measures the rule
+in isolation, with no surrounding ruleset content competing for the model's
+attention, so it says nothing about whether the rule survives ship-time
+context density — the crowding-out condition the spec named as this eval's
+whole purpose (spec `record-mentions-in-agent-output-are-reachable`, Open
+Questions/Risks: "one behavioural eval aimed at a ritual deliverable, where
+the instruction is most likely to be crowded out by surrounding
+procedure"). A future
+re-run against the real committed ruleset with the section stripped, rather
+than a synthetic brief, would close this gap; this run does not, and the
+recorded PASS above should be read accordingly.
