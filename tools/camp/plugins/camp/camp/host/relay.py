@@ -28,6 +28,7 @@ each verb's own renderer's job (for `list`, that's
 from __future__ import annotations
 
 import json
+import re
 import sys
 from dataclasses import dataclass, field
 from typing import Any, Callable, Sequence
@@ -246,13 +247,35 @@ def _try_parse_rows(stdout: str) -> list[dict[str, Any]] | None:
     return data
 
 
+#: C0 (U+0000-U+001F) and C1 (U+0080-U+009F) controls, plus DEL (U+007F) —
+#: everything a remote camp's stderr could use to manipulate this side's
+#: terminal (cursor moves, colour, OSC/CSI introducers). Newline (U+000A)
+#: and tab (U+0009) are excluded so multi-line, tab-formatted stderr keeps
+#: its line structure. Matched by Unicode code point over the decoded
+#: `str`, never by byte — a byte-oriented filter would corrupt multi-byte
+#: UTF-8 sequences, since a C1 byte value can appear as a continuation byte
+#: inside one.
+_CONTROL_SEQUENCE_RE = re.compile("[\x00-\x08\x0b-\x1f\x7f\x80-\x9f]")
+
+
+def _strip_control_sequences(text: str) -> str:
+    """Remove C0/C1 control code points (and DEL) from *text*, preserving
+    newline and tab and every other code point untouched — including a lone
+    surrogate `errors="surrogateescape"` may have put in the string, which
+    is not a control code point and is left exactly as decoded."""
+    return _CONTROL_SEQUENCE_RE.sub("", text)
+
+
 def _verbatim_notice(text: str) -> list[str]:
     """One notice entry for *text*, exactly as `_print_verbatim` used to
-    print it (normalized to a single trailing newline the caller re-adds),
-    or none when there is nothing to say."""
+    print it (normalized to a single trailing newline the caller re-adds,
+    and with control sequences stripped so relayed remote stderr can no
+    longer drive this side's terminal), or none when there is nothing to
+    say."""
     if not text:
         return []
-    return [text[:-1] if text.endswith("\n") else text]
+    stripped = text[:-1] if text.endswith("\n") else text
+    return [_strip_control_sequences(stripped)]
 
 
 def _fail_answer(
