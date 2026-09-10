@@ -2182,21 +2182,37 @@ class TestResolveMergeStrategy:
         subset still gets the non-empty-reason assertion above."""
         from trailhead.vcs.github import (
             AUTOMATIC_MERGE_METHOD,
+            COMMIT_SERIES_LOOKUP_FAILED,
+            COMMIT_SERIES_TRUNCATED,
             _MERGE_METHOD_FLAGS,
             resolve_merge_strategy,
         )
+
+        # Every shape the series argument can take, so the powerset reaches
+        # each of the series rung's returns rather than only its
+        # lookup-failure sub-branch (which `series=None` alone would take).
+        series_shapes = {
+            "unread": None,
+            "lookup-failed": COMMIT_SERIES_LOOKUP_FAILED,
+            "truncated": COMMIT_SERIES_TRUNCATED,
+            "dominated": [("real work", 40), ("fixup! real work", 1), ("wip: more", 1)],
+            "not-dominated": [("real work one", 40), ("real work two", 40)],
+        }
 
         vocabulary = sorted(_MERGE_METHOD_FLAGS)
         checked_nonempty = 0
         for size in range(len(vocabulary) + 1):
             for combo in itertools.combinations(vocabulary, size):
                 permitted = frozenset(combo)
-                strategy, reason = resolve_merge_strategy(AUTOMATIC_MERGE_METHOD, permitted)
-                assert reason
-                if permitted:
-                    assert strategy in permitted
-                    checked_nonempty += 1
-        assert checked_nonempty == 2 ** len(vocabulary) - 1
+                for shape, series in series_shapes.items():
+                    strategy, reason = resolve_merge_strategy(
+                        AUTOMATIC_MERGE_METHOD, permitted, series=series
+                    )
+                    assert reason, shape
+                    if permitted:
+                        assert strategy in permitted, (shape, sorted(permitted), strategy)
+                        checked_nonempty += 1
+        assert checked_nonempty == (2 ** len(vocabulary) - 1) * len(series_shapes)
 
     def test_no_permitted_strategy_resolves_to_squash_with_its_own_reason(self) -> None:
         """A repository reporting no permitted strategy still resolves, because
