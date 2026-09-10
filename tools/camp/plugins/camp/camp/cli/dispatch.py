@@ -394,6 +394,24 @@ def main() -> None:
                 file=sys.stderr,
             )
             sys.exit(1)
+        # --host names "every group on a named remote host"; --all-groups
+        # names "every group on this machine". Different scopes, so refused
+        # like the --group collision above rather than accepted as
+        # redundant — detected by the same argv-scan shape as the --group
+        # check, so a valueless `--host` (caught properly by read_host_option
+        # when reached on its own) is still caught here rather than silently
+        # dispatching --all-groups's local answer. This check must live
+        # INSIDE the all_groups branch: --all-groups is consumed and
+        # dispatched before read_host_option ever runs below, so without it
+        # --host is silently dropped.
+        if any(a == HOST_FLAG or a.startswith(f"{HOST_FLAG}=") for a in scan_rest):
+            print(
+                f"camp {canonical}: --all-groups and {HOST_FLAG} name every group "
+                "on this machine and every group on a named remote host at once "
+                "— pass one or the other",
+                file=sys.stderr,
+            )
+            sys.exit(1)
         _dispatch_all_groups_command(canonical, scan_rest)
         return
 

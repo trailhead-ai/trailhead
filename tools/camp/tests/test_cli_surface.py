@@ -749,6 +749,95 @@ def test_host_with_an_empty_equals_value_refuses_as_a_missing_value(
 
 
 # ---------------------------------------------------------------------------
+# --host + --all-groups — the two "every group" spellings name different
+# scopes (every group on a named remote host vs. every group on this
+# machine), and the surrounding design refuses scope collisions rather than
+# silently picking one. `--all-groups` is read and dispatched FIRST in
+# main() (a long-established, load-bearing ordering) — these regression
+# tests prove the refusal fires despite that, through the real CLI entry
+# point, since a unit test of either reader alone cannot see the join.
+# ---------------------------------------------------------------------------
+
+
+def test_all_groups_and_host_refuse_for_list(
+    corrupt_sibling_env_with_hosts: dict[str, str],
+) -> None:
+    """The reported defect: `camp list --host andromeda --all-groups` used to
+    silently ignore --host and answer for local groups instead, with exit 0.
+    It must refuse, naming both options, and exit nonzero."""
+    result = _run(
+        ["list", "--host", "andromeda", "--all-groups"],
+        env=corrupt_sibling_env_with_hosts,
+    )
+    _assert_clean_refusal(result, needle="--all-groups", verb="list")
+    combined = result.stdout + result.stderr
+    assert "--host" in combined, combined
+    assert "config error" not in combined
+
+
+def test_all_groups_and_host_refuse_for_sessions(
+    corrupt_sibling_env_with_hosts: dict[str, str],
+) -> None:
+    """Same defect, `camp sessions` path."""
+    result = _run(
+        ["sessions", "--host", "andromeda", "--all-groups"],
+        env=corrupt_sibling_env_with_hosts,
+    )
+    _assert_clean_refusal(result, needle="--all-groups", verb="sessions")
+    combined = result.stdout + result.stderr
+    assert "--host" in combined, combined
+    assert "config error" not in combined
+
+
+def test_all_groups_and_host_refuse_regardless_of_flag_order(
+    corrupt_sibling_env_with_hosts: dict[str, str],
+) -> None:
+    """Argument order must not decide whether an operator gets a wrong
+    answer or a refusal — `--all-groups --host andromeda` refuses
+    identically to `--host andromeda --all-groups`."""
+    result = _run(
+        ["list", "--all-groups", "--host", "andromeda"],
+        env=corrupt_sibling_env_with_hosts,
+    )
+    _assert_clean_refusal(result, needle="--all-groups", verb="list")
+    combined = result.stdout + result.stderr
+    assert "--host" in combined, combined
+    assert "config error" not in combined
+
+
+def test_all_groups_host_and_group_together_refuses_deterministically(
+    corrupt_sibling_env_with_hosts: dict[str, str],
+) -> None:
+    """All three at once: whichever refusal fires, it fires deterministically
+    — pinned here as the existing --all-groups+--group refusal, since that
+    check runs before the new --all-groups+--host check."""
+    result = _run(
+        ["list", "--host", "andromeda", "--all-groups", "--group", "testgrp"],
+        env=corrupt_sibling_env_with_hosts,
+    )
+    _assert_clean_refusal(result, needle="--all-groups", verb="list")
+    combined = result.stdout + result.stderr
+    assert "--group" in combined, combined
+    assert "config error" not in combined
+
+
+def test_all_groups_and_host_with_a_missing_host_value_still_refuses(
+    corrupt_sibling_env_with_hosts: dict[str, str],
+) -> None:
+    """`--host` with no value, alongside `--all-groups`, must not silently
+    succeed — pinned as the same both-options refusal, since --host's
+    presence is detected by scanning argv the same way the --group check
+    beside it does, independent of whether --host carries a value."""
+    result = _run(
+        ["list", "--host", "--all-groups"], env=corrupt_sibling_env_with_hosts
+    )
+    _assert_clean_refusal(result, needle="--all-groups", verb="list")
+    combined = result.stdout + result.stderr
+    assert "--host" in combined, combined
+    assert "config error" not in combined
+
+
+# ---------------------------------------------------------------------------
 # read_host_option — direct unit tests. The CLI-level refusals above prove
 # the message an operator sees; these prove the argv `read_host_option`
 # hands back to its caller, which a subprocess-level assertion cannot see.
