@@ -251,6 +251,15 @@ def test_status_json_scoped_entry_retains_fire_and_dev_env_keys(
     assert entry["repos"] == []
 
 
+def _isolated_config_env(tmp_path: Path) -> dict[str, str]:
+    """A hermetic env for self_host_name: isolates CAMP_CONFIG_DIR/HOME so
+    cmd_doctor never reads the operator's real ~/.config/camp/hosts.toml."""
+    return {
+        "HOME": str(tmp_path / "home"),
+        "CAMP_CONFIG_DIR": str(tmp_path / "config"),
+    }
+
+
 def test_doctor_json_no_registry_consistency_passes(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -261,7 +270,7 @@ def test_doctor_json_no_registry_consistency_passes(
 
     _isolate_roots(monkeypatch, tmp_path)
     try:
-        cmd_doctor(["--json"])
+        cmd_doctor(["--json"], env=_isolated_config_env(tmp_path))
     except SystemExit:
         pass  # asdf check may fail in CI; we only assert on the consistency check
     report = _json.loads(capsys.readouterr().out)
@@ -269,6 +278,32 @@ def test_doctor_json_no_registry_consistency_passes(
     assert consistency["pass"] is True
     assert consistency["details"] == "no drift detected"
     assert consistency["stale_registry_instances"] == []
+
+
+def test_doctor_json_host_name_reads_through_injected_env_not_real_install(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """cmd_doctor's self-declared-host-name check must read through the
+    injected env, never the operator's real ~/.config/camp/hosts.toml —
+    proven by stamping a name only the isolated location carries and
+    confirming the report reflects exactly that name."""
+    import json as _json
+
+    from camp.spine import cmd_doctor
+
+    _isolate_roots(monkeypatch, tmp_path)
+    env = _isolated_config_env(tmp_path)
+    config_dir = Path(env["CAMP_CONFIG_DIR"])
+    config_dir.mkdir(parents=True)
+    (config_dir / "hosts.toml").write_text('self_name = "isolated-test-host"\n')
+
+    try:
+        cmd_doctor(["--json"], env=env)
+    except SystemExit:
+        pass
+    report = _json.loads(capsys.readouterr().out)
+    host_row = next(c for c in report["checks"] if c["check"] == "host_name")
+    assert host_row["details"] == "isolated-test-host"
 
 
 # ---------------------------------------------------------------------------

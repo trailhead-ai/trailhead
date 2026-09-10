@@ -1046,7 +1046,9 @@ def _doctor_asdf_present() -> bool:
     return bool(shutil.which("asdf"))
 
 
-def cmd_doctor(args: list[str], dry_run: bool = False) -> None:
+def cmd_doctor(
+    args: list[str], dry_run: bool = False, *, env: dict[str, str] | None = None
+) -> None:
     """camp doctor [--json]
 
     Minimal read-only workspace health check (worktree-relevant checks only).
@@ -1063,11 +1065,17 @@ def cmd_doctor(args: list[str], dry_run: bool = False) -> None:
     a clean ``camp: <message>`` line, the same posture `_dispatch_group_command`
     already uses for a malformed group config, rather than reporting as one
     more failed check among others.
+
+    Args:
+        env: Override os.environ for the self-declared-host-name check's path
+             resolution (for hermetic tests). Defaults to os.environ, same as
+             `self_host_name`'s own default — production callers never pass
+             this.
     """
     from .host.config import HostConfigError, self_host_name
 
     try:
-        host_name = self_host_name()
+        host_name = self_host_name(env=env)
     except HostConfigError as e:
         print(f"camp: {e}", file=sys.stderr)
         sys.exit(1)
