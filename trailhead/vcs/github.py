@@ -988,6 +988,14 @@ def describe_merge_refusal(strategy: str, refusal: str) -> str:
     contract; neither is reachable from here, since this function neither
     loops nor recurses and its only decision is which literal string to
     return.
+
+    ``refusal`` is **not** passed through ``wrap_untrusted``, unlike every
+    other free-text ingress in this module. It is provider-composed error
+    text about a merge that was refused — not a template interpolating any
+    pull-request author's content — so the threat the marker exists for does
+    not reach it. That reasoning depends on the provider's error text staying
+    free of submitted content: if it ever echoes any, this becomes an
+    unwrapped path onto an agent-consumed surface and needs the marker.
     """
     prefix = RESOLUTION_REASON_PREFIXES["merge_refused"]
     return f"{prefix}: {strategy} refused — {refusal}"
