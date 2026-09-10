@@ -105,10 +105,10 @@ request rather than using one strategy for the whole run:
 A commit counts toward fix-up dominance when its subject opens with a recognised marker — a git
 interactive-rebase marker (`fixup!`, `squash!`, `amend!`), this project's `[fix]` convention, a
 bare or scoped conventional-commit `fix:`/`fix(scope):` type, or a `wip`/`WIP:` marker — or it
-repeats an earlier commit's subject in the same series exactly (only the repeat counts toward
-dominance, not the first occurrence) — **and**, either way, its changed-line count (additions +
-deletions) does not exceed 50. A marked or repeated commit above that threshold is treated as
-real work and excluded from the count.
+shares its subject exactly with another commit in the same series (every member of a duplicated
+group counts, not only the second and later occurrences) — **and**, either way, its changed-line
+count (additions + deletions) does not exceed 50. A marked or duplicated commit above that
+threshold is treated as real work and excluded from the count.
 
 `portage merge` prints the resolved strategy and the reason for it to stderr before each merge —
 see "Strategy disclosure" in `monitor.md` for the exact line shape and how the watch agent
