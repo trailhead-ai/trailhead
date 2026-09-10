@@ -220,6 +220,42 @@ neither has an empty listing as an honest answer: camp cannot name a harness for
 any configured group, or the harnesses it can name keep no transcripts it can
 read. An unusable `--limit` refuses too.
 
+## Remote hosts
+
+Declare a remote machine once, in `~/.config/camp/hosts.toml`:
+
+```toml
+[hosts.andromeda]
+ssh = "andromeda.lan"
+camp_bin = "/home/tom/.local/state/trailhead/bin/camp"
+```
+
+`ssh` defaults to the table key itself — the destination a plain `ssh <name>`
+would use — and `camp_bin` defaults to the bare command name `camp`; declare
+it explicitly whenever `camp` is not on that host's non-interactive PATH,
+which is the common case over a plain SSH invocation.
+
+```
+camp list --host <name>
+camp list --host <name> --json
+camp sessions --host <name>
+camp sessions --host <name> --json
+```
+
+Both connect over `BatchMode=yes` SSH and answer for every configured group
+on that machine in one call. `--host` refuses alongside `--group` and
+`--all-groups`; `camp sessions --host <name>` additionally refuses
+`--recoverable`, `--all`, `--limit`, `--dir`, and a positional workspace
+slug, since each of those narrows or reshapes a single machine's own local
+question rather than "every group on that host". A host name not declared
+in `hosts.toml` is refused the same way.
+
+A failure to connect, authenticate, or run camp on the far side is its own
+rendered outcome rather than a crash: unreachable, connected but stalled
+before answering, an unrecognized host key, a changed host key, camp not
+resolvable on that host (declare `camp_bin`), every credential offered
+refused, or the remote camp's own refusal relayed verbatim.
+
 ## Group setup
 
 ```
