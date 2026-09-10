@@ -36,6 +36,7 @@ import time
 from pathlib import Path
 
 import pytest
+from ._helpers import camp_state_env, init_git_repo
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
@@ -61,36 +62,6 @@ def _load_cli_module():
     `camp.cli.lifecycle` command-group module (setup/sync/remove/rebase).
     """
     return importlib.import_module("camp.cli.lifecycle")
-
-
-def _init_git_repo(path: Path) -> None:
-    path.mkdir(parents=True, exist_ok=True)
-    subprocess.run(["git", "init", "-b", "main", str(path)], check=True, capture_output=True)
-    subprocess.run(
-        ["git", "-C", str(path), "config", "user.email", "test@test.com"],
-        check=True,
-        capture_output=True,
-    )
-    subprocess.run(
-        ["git", "-C", str(path), "config", "user.name", "Test"], check=True, capture_output=True
-    )
-    (path / "README.md").write_text("# test\n")
-    subprocess.run(["git", "-C", str(path), "add", "README.md"], check=True, capture_output=True)
-    subprocess.run(
-        ["git", "-C", str(path), "commit", "-m", "init", "--no-gpg-sign"],
-        check=True,
-        capture_output=True,
-    )
-    # Self-origin so the configured base `origin/main` resolves locally (a real
-    # member always has a fetchable/resolvable base).
-    subprocess.run(
-        ["git", "-C", str(path), "remote", "add", "origin", str(path)],
-        check=True,
-        capture_output=True,
-    )
-    subprocess.run(
-        ["git", "-C", str(path), "fetch", "origin", "--quiet"], check=True, capture_output=True
-    )
 
 
 def _wait_provisioned(manifest_path: Path, members: list[str], timeout: float = 20.0) -> None:
@@ -128,8 +99,8 @@ def remove_env(tmp_path: Path):
 
     repo_a = tmp_path / "repo_a"
     repo_b = tmp_path / "repo_b"
-    _init_git_repo(repo_a)
-    _init_git_repo(repo_b)
+    init_git_repo(repo_a, origin=True)
+    init_git_repo(repo_b, origin=True)
 
     env = {**os.environ}
     env["CAMP_CONFIG_DIR"] = str(config_dir)
@@ -423,13 +394,11 @@ def _make_group_config(name, members, *, branch_pattern="worktree-{slug}"):
 
 
 def _camp_state_env(tmp_path: Path) -> dict[str, str]:
-    state_root = tmp_path / "camp-state"
-    state_root.mkdir(parents=True, exist_ok=True)
     # The derived teardown guard reads BOTH harness seams, so both have to be
     # hermetic here too — and the live probe has no permissive branch, so an
     # environment with no `claude` on PATH would refuse every removal rather
     # than answer. Give it the same stand-in the subprocess fixture uses.
-    return {"CAMP_STATE_DIR": str(state_root), **_stub.harness_env(tmp_path)}
+    return {**camp_state_env(tmp_path), **_stub.harness_env(tmp_path)}
 
 
 @pytest.fixture()
@@ -443,8 +412,8 @@ def inproc_group(tmp_path: Path, monkeypatch):
 
     repo_a = tmp_path / "repo_a"
     repo_b = tmp_path / "repo_b"
-    _init_git_repo(repo_a)
-    _init_git_repo(repo_b)
+    init_git_repo(repo_a, origin=True)
+    init_git_repo(repo_b, origin=True)
     group = _make_group_config(
         "removegroup",
         [

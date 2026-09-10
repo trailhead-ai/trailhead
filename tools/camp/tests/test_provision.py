@@ -40,6 +40,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from ._helpers import camp_state_env, init_git_repo
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]  # trailhead root
 _PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
@@ -55,45 +56,8 @@ _VENV_PYTHON = sys.executable
 # ---------------------------------------------------------------------------
 
 
-def _init_git_repo(path: Path) -> None:
-    path.mkdir(parents=True, exist_ok=True)
-    subprocess.run(["git", "init", "-b", "main", str(path)], check=True, capture_output=True)
-    subprocess.run(
-        ["git", "-C", str(path), "config", "user.email", "test@test.com"],
-        check=True,
-        capture_output=True,
-    )
-    subprocess.run(
-        ["git", "-C", str(path), "config", "user.name", "Test"], check=True, capture_output=True
-    )
-    (path / "README.md").write_text("# test\n")
-    subprocess.run(["git", "-C", str(path), "add", "README.md"], check=True, capture_output=True)
-    subprocess.run(
-        ["git", "-C", str(path), "commit", "-m", "init", "--no-gpg-sign"],
-        check=True,
-        capture_output=True,
-    )
-    # Self-origin so the configured base `origin/main` resolves locally — a real
-    # member always has a fetchable/resolvable base; without it the base-fetch
-    # correctly fails the member (BUG 4 fix: no silent HEAD fallback).
-    subprocess.run(
-        ["git", "-C", str(path), "remote", "add", "origin", str(path)],
-        check=True,
-        capture_output=True,
-    )
-    subprocess.run(
-        ["git", "-C", str(path), "fetch", "origin", "--quiet"], check=True, capture_output=True
-    )
-
-
 def _make_group_config(name, members, *, branch_pattern="worktree-{slug}"):
     return {"group": {"name": name}, "members": members, "branch_pattern": branch_pattern}
-
-
-def _camp_state_env(tmp_path: Path) -> dict[str, str]:
-    state_root = tmp_path / "camp-state"
-    state_root.mkdir(parents=True, exist_ok=True)
-    return {"CAMP_STATE_DIR": str(state_root)}
 
 
 def _member_wt(group_name, slug, member, env):
@@ -112,8 +76,8 @@ def _workspace_dir(group_name, slug, env):
 def two_member_group(tmp_path: Path):
     repo_a = tmp_path / "repo_a"
     repo_b = tmp_path / "repo_b"
-    _init_git_repo(repo_a)
-    _init_git_repo(repo_b)
+    init_git_repo(repo_a, origin=True)
+    init_git_repo(repo_b, origin=True)
     group = _make_group_config(
         "testgroup",
         [
@@ -121,7 +85,7 @@ def two_member_group(tmp_path: Path):
             {"name": "repo_b", "repo_root": str(repo_b), "tasks": [], "base": "origin/main"},
         ],
     )
-    env = _camp_state_env(tmp_path)
+    env = camp_state_env(tmp_path)
     return {"group": group, "repo_a": repo_a, "repo_b": repo_b, "env": env, "tmp_path": tmp_path}
 
 
@@ -653,8 +617,8 @@ class TestForegroundSetup:
         from camp.provision.lifecycle import cmd_setup_group
 
         repo_a = tmp_path / "repo_a"
-        _init_git_repo(repo_a)
-        env = _camp_state_env(tmp_path)
+        init_git_repo(repo_a, origin=True)
+        env = camp_state_env(tmp_path)
         # repo_b has a non-existent repo_root → worktree add fails.
         group = _make_group_config(
             "failg",
@@ -1243,8 +1207,8 @@ class TestBootPathBudget:
         monkeypatch.setattr(reconcile, "BOOT_TASK_BUDGET_SECONDS", 0.05)
 
         repo = tmp_path / "repo"
-        _init_git_repo(repo)
-        env = _camp_state_env(tmp_path)
+        init_git_repo(repo, origin=True)
+        env = camp_state_env(tmp_path)
         group = _make_group_config(
             "bootbudgetg",
             [
@@ -1292,8 +1256,8 @@ class TestBootPathBudget:
         monkeypatch.setattr(reconcile, "BOOT_TASK_BUDGET_SECONDS", 5.0)
 
         repo = tmp_path / "repo"
-        _init_git_repo(repo)
-        env = _camp_state_env(tmp_path)
+        init_git_repo(repo, origin=True)
+        env = camp_state_env(tmp_path)
         runs = tmp_path / "runs"
         group = _make_group_config(
             "bootbudgetrerung",
@@ -1338,8 +1302,8 @@ class TestBootPathBudget:
         from camp.group.manifest import read_central_manifest, write_central_manifest
 
         repo = tmp_path / "repo"
-        _init_git_repo(repo)
-        env = _camp_state_env(tmp_path)
+        init_git_repo(repo, origin=True)
+        env = camp_state_env(tmp_path)
         runs = tmp_path / "runs"
         group = _make_group_config(
             "setupretrybudgetg",
@@ -1389,8 +1353,8 @@ class TestBootPathBudget:
         monkeypatch.setattr(reconcile, "BOOT_TASK_BUDGET_SECONDS", 5.0)
 
         repo = tmp_path / "repo"
-        _init_git_repo(repo)
-        env = _camp_state_env(tmp_path)
+        init_git_repo(repo, origin=True)
+        env = camp_state_env(tmp_path)
         marker = tmp_path / "later_marker"
         group = _make_group_config(
             "bootbudgetlaterg",
@@ -1436,8 +1400,8 @@ class TestBootPathBudget:
         monkeypatch.setattr(reconcile, "BOOT_TASK_BUDGET_SECONDS", 0.05)
 
         repo = tmp_path / "repo"
-        _init_git_repo(repo)
-        env = _camp_state_env(tmp_path)
+        init_git_repo(repo, origin=True)
+        env = camp_state_env(tmp_path)
         group = _make_group_config(
             "bootbudgetmsgg",
             [
@@ -1481,8 +1445,8 @@ class TestBootPathBudget:
         monkeypatch.setattr(reconcile, "BOOT_TASK_BUDGET_SECONDS", 0.05)
 
         repo = tmp_path / "repo"
-        _init_git_repo(repo)
-        env = _camp_state_env(tmp_path)
+        init_git_repo(repo, origin=True)
+        env = camp_state_env(tmp_path)
         group_dict = _make_group_config(
             "freshprocmsgg",
             [
@@ -1579,8 +1543,8 @@ class TestOwnerReadFailureDoesNotWipePerMemberState:
         )
 
         repo = tmp_path / "repo"
-        _init_git_repo(repo)
-        env = _camp_state_env(tmp_path)
+        init_git_repo(repo, origin=True)
+        env = camp_state_env(tmp_path)
         group = _make_group_config(
             "ownerbugreconcileg",
             [{"name": "repo", "repo_root": str(repo), "base": "origin/main", "tasks": []}],
@@ -1616,8 +1580,8 @@ class TestOwnerReadFailureDoesNotWipePerMemberState:
         )
 
         repo = tmp_path / "repo"
-        _init_git_repo(repo)
-        env = _camp_state_env(tmp_path)
+        init_git_repo(repo, origin=True)
+        env = camp_state_env(tmp_path)
         group = _make_group_config(
             "ownerbugseedg",
             [{"name": "repo", "repo_root": str(repo), "base": "origin/main", "tasks": []}],
@@ -1658,8 +1622,8 @@ class TestReconcileSelfHealsUnreadableOwnerlessManifest:
         from camp.group.manifest import read_central_manifest
 
         repo = tmp_path / "repo"
-        _init_git_repo(repo)
-        env = _camp_state_env(tmp_path)
+        init_git_repo(repo, origin=True)
+        env = camp_state_env(tmp_path)
         # No hosts.toml anywhere — this host never declared a name.
         env["CAMP_CONFIG_DIR"] = str(tmp_path / "config")
         env["HOME"] = str(tmp_path / "home")

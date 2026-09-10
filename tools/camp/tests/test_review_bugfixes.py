@@ -22,11 +22,11 @@ claude exec).
 from __future__ import annotations
 
 import importlib
-import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+from ._helpers import camp_state_env, init_git_repo
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
@@ -35,42 +35,8 @@ if str(_PLUGIN_DIR) not in sys.path:
     sys.path.insert(0, str(_PLUGIN_DIR))
 
 
-def _init_git_repo(path: Path) -> None:
-    path.mkdir(parents=True, exist_ok=True)
-    subprocess.run(["git", "init", "-b", "main", str(path)], check=True, capture_output=True)
-    subprocess.run(
-        ["git", "-C", str(path), "config", "user.email", "t@t.com"], check=True, capture_output=True
-    )
-    subprocess.run(
-        ["git", "-C", str(path), "config", "user.name", "T"], check=True, capture_output=True
-    )
-    (path / "README.md").write_text("# t\n")
-    subprocess.run(["git", "-C", str(path), "add", "README.md"], check=True, capture_output=True)
-    subprocess.run(
-        ["git", "-C", str(path), "commit", "-m", "i", "--no-gpg-sign"],
-        check=True,
-        capture_output=True,
-    )
-    # Self-origin so the configured base `origin/main` resolves locally (a real
-    # member always has a fetchable/resolvable base).
-    subprocess.run(
-        ["git", "-C", str(path), "remote", "add", "origin", str(path)],
-        check=True,
-        capture_output=True,
-    )
-    subprocess.run(
-        ["git", "-C", str(path), "fetch", "origin", "--quiet"], check=True, capture_output=True
-    )
-
-
 def _make_group_config(name, members, *, branch_pattern="worktree-{slug}"):
     return {"group": {"name": name}, "members": members, "branch_pattern": branch_pattern}
-
-
-def _camp_state_env(tmp_path: Path) -> dict[str, str]:
-    state_root = tmp_path / "camp-state"
-    state_root.mkdir(parents=True, exist_ok=True)
-    return {"CAMP_STATE_DIR": str(state_root)}
 
 
 def _workspace_dir(group_name, slug, env):
@@ -97,8 +63,8 @@ def camp_cli():
 def two_member_group(tmp_path: Path):
     repo_a = tmp_path / "repo_a"
     repo_b = tmp_path / "repo_b"
-    _init_git_repo(repo_a)
-    _init_git_repo(repo_b)
+    init_git_repo(repo_a, origin=True)
+    init_git_repo(repo_b, origin=True)
     group = _make_group_config(
         "bugfixgroup",
         [
@@ -106,7 +72,7 @@ def two_member_group(tmp_path: Path):
             {"name": "repo_b", "repo_root": str(repo_b), "bootstrap": [], "base": "origin/main"},
         ],
     )
-    env = _camp_state_env(tmp_path)
+    env = camp_state_env(tmp_path)
     return {"group": group, "repo_a": repo_a, "repo_b": repo_b, "env": env, "tmp_path": tmp_path}
 
 

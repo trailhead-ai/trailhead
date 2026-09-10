@@ -23,6 +23,7 @@ import time
 from pathlib import Path
 
 import pytest
+from ._helpers import init_git_repo
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
@@ -30,36 +31,6 @@ _CLI_CAMP = _PLUGIN_DIR / "cli" / "camp"
 
 if str(_PLUGIN_DIR) not in sys.path:
     sys.path.insert(0, str(_PLUGIN_DIR))
-
-
-def _init_git_repo(path: Path) -> None:
-    path.mkdir(parents=True, exist_ok=True)
-    subprocess.run(["git", "init", "-b", "main", str(path)], check=True, capture_output=True)
-    subprocess.run(
-        ["git", "-C", str(path), "config", "user.email", "test@test.com"],
-        check=True,
-        capture_output=True,
-    )
-    subprocess.run(
-        ["git", "-C", str(path), "config", "user.name", "Test"], check=True, capture_output=True
-    )
-    (path / "README.md").write_text("# test\n")
-    subprocess.run(["git", "-C", str(path), "add", "README.md"], check=True, capture_output=True)
-    subprocess.run(
-        ["git", "-C", str(path), "commit", "-m", "init", "--no-gpg-sign"],
-        check=True,
-        capture_output=True,
-    )
-    # Self-origin so the configured base `origin/main` resolves locally (a real
-    # member always has a fetchable/resolvable base).
-    subprocess.run(
-        ["git", "-C", str(path), "remote", "add", "origin", str(path)],
-        check=True,
-        capture_output=True,
-    )
-    subprocess.run(
-        ["git", "-C", str(path), "fetch", "origin", "--quiet"], check=True, capture_output=True
-    )
 
 
 @pytest.fixture()
@@ -72,8 +43,8 @@ def cli_env(tmp_path: Path):
 
     repo_a = tmp_path / "repo_a"
     repo_b = tmp_path / "repo_b"
-    _init_git_repo(repo_a)
-    _init_git_repo(repo_b)
+    init_git_repo(repo_a, origin=True)
+    init_git_repo(repo_b, origin=True)
 
     env = {**os.environ}
     env["CAMP_CONFIG_DIR"] = str(config_dir)
@@ -397,7 +368,7 @@ class TestCampSetupActivatePhaseRetry:
         state_dir.mkdir(parents=True, exist_ok=True)
 
         repo_a = tmp_path / "repo_a"
-        _init_git_repo(repo_a)
+        init_git_repo(repo_a, origin=True)
 
         group_name = "actgroup"
         cleanup_cmd = [

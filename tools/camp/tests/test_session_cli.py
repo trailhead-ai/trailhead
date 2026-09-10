@@ -78,6 +78,8 @@ Test contract:
 
 from __future__ import annotations
 
+import importlib.util
+
 import json
 import os
 import re
@@ -88,6 +90,15 @@ import pathlib
 from pathlib import Path
 
 import pytest
+# This module is itself exec'd by path from test_statelessness.py, under a
+# module name of its own, so it has no parent package and cannot use a relative
+# import. Address the helpers by path for the same reason.
+_HELPERS_SOURCE = Path(__file__).resolve().parent / "_helpers.py"
+_helpers_spec = importlib.util.spec_from_file_location("camp_tests_helpers", _HELPERS_SOURCE)
+assert _helpers_spec and _helpers_spec.loader, _HELPERS_SOURCE
+_helpers = importlib.util.module_from_spec(_helpers_spec)
+_helpers_spec.loader.exec_module(_helpers)
+init_git_repo = _helpers.init_git_repo
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
@@ -335,34 +346,6 @@ elif args and args[0] == "kill-session":
 '''
 
 
-def _init_git_repo(path: Path) -> None:
-    path.mkdir(parents=True, exist_ok=True)
-    subprocess.run(["git", "init", "-b", "main", str(path)], check=True, capture_output=True)
-    subprocess.run(
-        ["git", "-C", str(path), "config", "user.email", "test@test.com"],
-        check=True,
-        capture_output=True,
-    )
-    subprocess.run(
-        ["git", "-C", str(path), "config", "user.name", "Test"], check=True, capture_output=True
-    )
-    (path / "README.md").write_text("# test\n")
-    subprocess.run(["git", "-C", str(path), "add", "README.md"], check=True, capture_output=True)
-    subprocess.run(
-        ["git", "-C", str(path), "commit", "-m", "init", "--no-gpg-sign"],
-        check=True,
-        capture_output=True,
-    )
-    subprocess.run(
-        ["git", "-C", str(path), "remote", "add", "origin", str(path)],
-        check=True,
-        capture_output=True,
-    )
-    subprocess.run(
-        ["git", "-C", str(path), "fetch", "origin", "--quiet"], check=True, capture_output=True
-    )
-
-
 def _set_harness_binary(config_dir: Path, group_name: str, binary: str) -> None:
     """Append a [harness] block naming *binary* to an authored group config."""
     path = config_dir / "groups" / f"{group_name}.toml"
@@ -381,8 +364,8 @@ def cli_env(tmp_path: Path):
 
     repo_a = tmp_path / "repo_a"
     repo_b = tmp_path / "repo_b"
-    _init_git_repo(repo_a)
-    _init_git_repo(repo_b)
+    init_git_repo(repo_a, origin=True)
+    init_git_repo(repo_b, origin=True)
 
     shim_dir = tmp_path / "shims"
     shim_dir.mkdir()
@@ -990,7 +973,7 @@ def _add_account_group(
     — a non-canonical spelling of the same path, used to prove camp carries the
     declaration through rather than a canonicalized form of it.
     """
-    _init_git_repo(repo)
+    init_git_repo(repo, origin=True)
     result = _camp(cli_env, "group", name, "--member", f"member={repo}")
     assert result.returncode == 0, result.stderr
     _set_harness_binary(cli_env["config_dir"], name, "fakeharness")
@@ -1871,7 +1854,7 @@ def test_camp_sessions_group_named_answer_is_empty_when_nothing_runs_there(
     fill in for it.
     """
     repo_empty = cli_env["tmp_path"] / "repo-emptygroup"
-    _init_git_repo(repo_empty)
+    init_git_repo(repo_empty, origin=True)
     result = _camp(cli_env, "group", "emptygroup", "--member", f"member={repo_empty}")
     assert result.returncode == 0, result.stderr
     _set_harness_binary(cli_env["config_dir"], "emptygroup", "fakeharness")
@@ -3191,7 +3174,7 @@ def _author_activate_group(cli_env, group_name: str, member_name: str = "member"
     install. A dedicated repo keeps this out of the no-overlap constraint the
     fixture's mygroup/badgroup repos are already under."""
     repo = cli_env["tmp_path"] / f"repo_{group_name}"
-    _init_git_repo(repo)
+    init_git_repo(repo, origin=True)
     config_dir = cli_env["config_dir"]
     path = config_dir / "groups" / f"{group_name}.toml"
     path.write_text(

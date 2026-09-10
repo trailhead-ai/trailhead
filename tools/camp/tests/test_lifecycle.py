@@ -55,6 +55,7 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
+from ._helpers import camp_state_env, init_git_repo
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]  # trailhead root
 _PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
@@ -66,28 +67,6 @@ if str(_PLUGIN_DIR) not in sys.path:
 # ---------------------------------------------------------------------------
 # Helpers — synthetic git repos
 # ---------------------------------------------------------------------------
-
-
-def _init_git_repo(path: Path) -> None:
-    """Initialize a real git repo at path with an initial commit."""
-    path.mkdir(parents=True, exist_ok=True)
-    subprocess.run(["git", "init", "-b", "main", str(path)], check=True, capture_output=True)
-    subprocess.run(
-        ["git", "-C", str(path), "config", "user.email", "test@test.com"],
-        check=True,
-        capture_output=True,
-    )
-    subprocess.run(
-        ["git", "-C", str(path), "config", "user.name", "Test"], check=True, capture_output=True
-    )
-    readme = path / "README.md"
-    readme.write_text("# test\n")
-    subprocess.run(["git", "-C", str(path), "add", "README.md"], check=True, capture_output=True)
-    subprocess.run(
-        ["git", "-C", str(path), "commit", "-m", "init", "--no-gpg-sign"],
-        check=True,
-        capture_output=True,
-    )
 
 
 def _make_group_config(
@@ -116,13 +95,6 @@ def _provision_task(name: str, cmd: list[str], *, required: bool = True) -> dict
     }
 
 
-def _camp_state_env(tmp_path: Path) -> dict[str, str]:
-    """Return env override dict pointing CAMP_STATE_DIR at tmp_path."""
-    state_root = tmp_path / "camp-state"
-    state_root.mkdir(parents=True, exist_ok=True)
-    return {"CAMP_STATE_DIR": str(state_root)}
-
-
 def _member_wt(group_name: str, slug: str, member: str, env: dict[str, str]) -> Path:
     """Return the unified-layout worktree path for a member:
     central_state_dir(group)/worktrees/<slug>/<member>."""
@@ -141,8 +113,8 @@ def two_member_group(tmp_path: Path):
     """A 2-member group with real git repos, bootstrap sentinel files, and env."""
     repo_a = tmp_path / "repo_a"
     repo_b = tmp_path / "repo_b"
-    _init_git_repo(repo_a)
-    _init_git_repo(repo_b)
+    init_git_repo(repo_a)
+    init_git_repo(repo_b)
 
     # Bootstrap for each: touch a sentinel file to prove it ran
     sentinel_a = tmp_path / "bootstrap_a_ran"
@@ -163,7 +135,7 @@ def two_member_group(tmp_path: Path):
             },
         ],
     )
-    env = _camp_state_env(tmp_path)
+    env = camp_state_env(tmp_path)
     return {
         "group": group,
         "repo_a": repo_a,
@@ -384,10 +356,10 @@ class TestBootstrapFailureAtomicity:
 
         repo_a = tmp_path / "repo_a"
         repo_b = tmp_path / "repo_b"
-        _init_git_repo(repo_a)
-        _init_git_repo(repo_b)
+        init_git_repo(repo_a)
+        init_git_repo(repo_b)
 
-        env = _camp_state_env(tmp_path)
+        env = camp_state_env(tmp_path)
         group = _make_group_config(
             "failgroup",
             [
@@ -424,10 +396,10 @@ class TestBootstrapFailureAtomicity:
 
         repo_a = tmp_path / "repo_a"
         repo_b = tmp_path / "repo_b"
-        _init_git_repo(repo_a)
-        _init_git_repo(repo_b)
+        init_git_repo(repo_a)
+        init_git_repo(repo_b)
 
-        env = _camp_state_env(tmp_path)
+        env = camp_state_env(tmp_path)
         group = _make_group_config(
             "failgroup",
             [
@@ -542,7 +514,7 @@ class TestBranchBasePolicy:
 
         monkeypatch.setattr(reconcile, "_add_worktree_for_member", fake_add)
 
-        env = _camp_state_env(tmp_path)
+        env = camp_state_env(tmp_path)
         group = _make_group_config(
             "basegroup",
             [
@@ -621,7 +593,7 @@ class TestWorktreeAdminName:
         from camp.provision.reconcile import _add_worktree_for_member, _worktree_registered
 
         repo = tmp_path / "trailhead"
-        _init_git_repo(repo)
+        init_git_repo(repo)
         slug = "trailhead"  # equals the member name
         member = {"name": "trailhead", "repo_root": str(repo)}
         wt_path = tmp_path / "ws" / slug / "trailhead"
@@ -645,7 +617,7 @@ class TestWorktreeAdminName:
         from camp.provision.reconcile import _add_worktree_for_member
 
         repo = tmp_path / "trailhead"
-        _init_git_repo(repo)
+        init_git_repo(repo)
         slug = "feat-recov"
         member = {"name": "trailhead", "repo_root": str(repo)}
         wt_path = tmp_path / "ws" / slug / "trailhead"
@@ -681,7 +653,7 @@ class TestWorktreeAdminName:
         from camp.provision.reconcile import _add_worktree_for_member
 
         repo = tmp_path / "trailhead"
-        _init_git_repo(repo)
+        init_git_repo(repo)
         slug = "feat-orphan"
         member = {"name": "trailhead", "repo_root": str(repo)}
         wt_path = tmp_path / "ws" / slug / "trailhead"
@@ -710,7 +682,7 @@ class TestWorktreeAdminName:
         from camp.provision.reconcile import _add_worktree_for_member, ReconcileError
 
         repo = tmp_path / "trailhead"
-        _init_git_repo(repo)
+        init_git_repo(repo)
         member = {"name": "trailhead", "repo_root": str(repo)}
         wt_path = tmp_path / "ws" / "feat" / "trailhead"
 
@@ -1023,7 +995,7 @@ class TestCentralManifestPath:
         from camp.group.resolve import central_state_dir
 
         repo_a = tmp_path / "repo_a"
-        _init_git_repo(repo_a)
+        init_git_repo(repo_a)
 
         custom_state = tmp_path / "custom-state"
         custom_state.mkdir()
@@ -1468,7 +1440,6 @@ class TestStatusTwoFacts:
         assert status_header(report) == "failed"
 
 
-
 # ---------------------------------------------------------------------------
 # camp setup: activate-phase retry that does not hold the reconcile lock.
 #
@@ -1551,7 +1522,7 @@ class TestSetupActivatePhaseRetry:
         group_name = "actgroup"
         member_name = "repo_a"
         slug = "act-retry"
-        env = _camp_state_env(tmp_path)
+        env = camp_state_env(tmp_path)
 
         _seed_ready_member_with_activate_task(
             tmp_path, group_name, slug, member_name, task_state="failed", env=env
@@ -1583,7 +1554,7 @@ class TestSetupActivatePhaseRetry:
         group_name = "actgroup"
         member_name = "repo_a"
         slug = "act-noop"
-        env = _camp_state_env(tmp_path)
+        env = camp_state_env(tmp_path)
 
         _seed_ready_member_with_activate_task(
             tmp_path, group_name, slug, member_name, task_state="ok", env=env
@@ -1609,7 +1580,7 @@ class TestSetupActivatePhaseRetry:
         group_name = "actgroup"
         member_name = "repo_a"
         slug = "act-lock-scope"
-        env = _camp_state_env(tmp_path)
+        env = camp_state_env(tmp_path)
 
         _seed_ready_member_with_activate_task(
             tmp_path, group_name, slug, member_name, task_state="failed", env=env
@@ -1680,7 +1651,7 @@ class TestSetupActivatePhaseRetry:
         group_name = "actgroup"
         member_name = "repo_a"
         slug = "act-write-locked"
-        env = _camp_state_env(tmp_path)
+        env = camp_state_env(tmp_path)
 
         _seed_ready_member_with_activate_task(
             tmp_path, group_name, slug, member_name, task_state="failed", env=env
@@ -1735,7 +1706,7 @@ class TestSetupActivatePhaseRetry:
         group_name = "actgroup"
         member_name = "repo_a"
         slug = "act-crash"
-        env = _camp_state_env(tmp_path)
+        env = camp_state_env(tmp_path)
 
         _seed_ready_member_with_activate_task(
             tmp_path, group_name, slug, member_name, task_state="failed", env=env
@@ -1814,7 +1785,7 @@ class TestSetupActivatePhaseRetry:
         monkeypatch.setattr(lifecycle_mod, "cmd_setup_group", boom)
 
         group = _make_group_config("actgroup", [{"name": "repo_a", "repo_root": "/tmp/fake-repo", "tasks": []}])
-        env = _camp_state_env(tmp_path)
+        env = camp_state_env(tmp_path)
 
         _cmd_setup_group_cli(
             ["--status", "--name", "nonexistent-slug"], group, env, dry_run=False
@@ -1902,7 +1873,7 @@ class TestRemoveGuardRefusesOnADroppedStore:
             return _UnbindableHarness() if name == "flaky" else _WorkingHarness()
 
         group = _make_group_config("flaky", [{"name": "repo_a", "repo_root": "/tmp/fake-repo"}])
-        env = _camp_state_env(tmp_path)
+        env = camp_state_env(tmp_path)
 
         monkeypatch.setattr(profile, "harness_for", fake_harness_for)
         monkeypatch.setattr(session_mod, "_parsable_groups", lambda: [group])

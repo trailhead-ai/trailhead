@@ -22,11 +22,11 @@ from __future__ import annotations
 
 import importlib
 import json
-import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+from ._helpers import init_git_repo
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
@@ -49,28 +49,10 @@ def camp_cli():
     return _load_cli_module()
 
 
-def _init_git_repo(path: Path) -> None:
-    path.mkdir(parents=True, exist_ok=True)
-    subprocess.run(["git", "init", "-b", "main", str(path)], check=True, capture_output=True)
-    subprocess.run(
-        ["git", "-C", str(path), "config", "user.email", "t@t.com"], check=True, capture_output=True
-    )
-    subprocess.run(
-        ["git", "-C", str(path), "config", "user.name", "T"], check=True, capture_output=True
-    )
-    (path / "README.md").write_text("# t\n")
-    subprocess.run(["git", "-C", str(path), "add", "README.md"], check=True, capture_output=True)
-    subprocess.run(
-        ["git", "-C", str(path), "commit", "-m", "i", "--no-gpg-sign"],
-        check=True,
-        capture_output=True,
-    )
-
-
 @pytest.fixture()
 def group_env(tmp_path):
     repo_a = tmp_path / "repo_a"
-    _init_git_repo(repo_a)
+    init_git_repo(repo_a)
     group = {
         "group": {"name": "g"},
         "members": [
