@@ -270,11 +270,17 @@ def _verbatim_notice(text: str) -> list[str]:
     """One notice entry for *text* — the remote's own stderr, normalized to
     a single trailing newline the caller re-adds and with control sequences
     stripped so relayed remote stderr cannot drive this side's terminal — or
-    no entry at all when there is nothing to say."""
+    no entry at all when there is nothing to say. Stderr consisting only of
+    control sequences (or a bare newline) strips down to an empty string,
+    which is checked for here rather than before stripping — an empty-string
+    notice would print as a blank line under the machine's header."""
     if not text:
         return []
     stripped = text[:-1] if text.endswith("\n") else text
-    return [_strip_control_sequences(stripped)]
+    stripped = _strip_control_sequences(stripped)
+    if not stripped:
+        return []
+    return [stripped]
 
 
 def _fail_answer(
