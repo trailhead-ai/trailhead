@@ -1,0 +1,5682 @@
+{
+  "meta": {
+    "source_window": "last 100 merged pull requests on github.com/trailhead-ai/trailhead as of 2026-09-10 (spans 2026-08-12T00:00:47Z to 2026-09-10T11:48:22Z)",
+    "enumeration_command": "gh pr list --state merged --limit 100 --json number,title,mergedAt",
+    "per_commit_source": "gh pr view <n> --json commits for subjects/oids; git show --numstat <oid> locally for additions/deletions; merge commits (parent_count > 1) excluded from each series",
+    "branch_count": 100,
+    "multi_commit_branch_count": 85,
+    "single_commit_branch_count": 15,
+    "candidate_thresholds_tested": [
+      10,
+      20,
+      30,
+      50
+    ]
+  },
+  "cases": [
+    {
+      "case_id": "pr-209",
+      "pr_number": 209,
+      "pr_title": "feat(camp): answer camp list/sessions for a named remote host over SSH",
+      "merged_at": "2026-09-10T11:48:22Z",
+      "series_length": 14,
+      "commits": [
+        {
+          "subject": "docs(camp): design for a named remote host answering list and sessions",
+          "changed_lines": 300,
+          "additions": 300,
+          "deletions": 0
+        },
+        {
+          "subject": "feat(camp): add hosts.toml declaration loader",
+          "changed_lines": 310,
+          "additions": 310,
+          "deletions": 0
+        },
+        {
+          "subject": "docs(camp): pin the measured ssh classification into the transport de\u2026",
+          "changed_lines": 26,
+          "additions": 26,
+          "deletions": 0
+        },
+        {
+          "subject": "feat(camp): add SSH transport with outcome classification",
+          "changed_lines": 697,
+          "additions": 697,
+          "deletions": 0
+        },
+        {
+          "subject": "feat(camp): add --host option to the CLI dispatcher",
+          "changed_lines": 366,
+          "additions": 366,
+          "deletions": 0
+        },
+        {
+          "subject": "fix(camp): --host refuses a missing value instead of swallowing the n\u2026",
+          "changed_lines": 113,
+          "additions": 108,
+          "deletions": 5
+        },
+        {
+          "subject": "fix(camp): refuse --host + --all-groups instead of silently dropping \u2026",
+          "changed_lines": 107,
+          "additions": 107,
+          "deletions": 0
+        },
+        {
+          "subject": "feat(camp): wire camp list --host to the SSH transport end to end",
+          "changed_lines": 683,
+          "additions": 679,
+          "deletions": 4
+        },
+        {
+          "subject": "feat(camp): wire camp sessions --host to the SSH transport end to end",
+          "changed_lines": 659,
+          "additions": 654,
+          "deletions": 5
+        },
+        {
+          "subject": "feat(camp): classify SSH authentication failure as its own host state",
+          "changed_lines": 153,
+          "additions": 149,
+          "deletions": 4
+        },
+        {
+          "subject": "docs(camp): document --host on the usage text and README, conformance\u2026",
+          "changed_lines": 188,
+          "additions": 186,
+          "deletions": 2
+        },
+        {
+          "subject": "refactor(camp): collapse dead scaffolding and duplicated argv scans i\u2026",
+          "changed_lines": 57,
+          "additions": 30,
+          "deletions": 27
+        },
+        {
+          "subject": "fix(camp): close seven correctness/security gaps in the named-host an\u2026",
+          "changed_lines": 389,
+          "additions": 368,
+          "deletions": 21
+        },
+        {
+          "subject": "fix(camp): degrade a malformed row in list --host instead of crashing",
+          "changed_lines": 47,
+          "additions": 45,
+          "deletions": 2
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-208",
+      "pr_number": 208,
+      "pr_title": "feat(camp): host-declared ownership and self-name hardening",
+      "merged_at": "2026-09-10T11:32:52Z",
+      "series_length": 17,
+      "commits": [
+        {
+          "subject": "feat(camp): a host declares its own name via hosts.toml self_name",
+          "changed_lines": 332,
+          "additions": 332,
+          "deletions": 0
+        },
+        {
+          "subject": "test(camp): close informational gap in doctor's self-declared host row",
+          "changed_lines": 73,
+          "additions": 72,
+          "deletions": 1
+        },
+        {
+          "subject": "feat(camp): stamp the declared owning host on a new workspace manifest",
+          "changed_lines": 328,
+          "additions": 325,
+          "deletions": 3
+        },
+        {
+          "subject": "feat(camp): the workspace record survives every writer that rebuilds it",
+          "changed_lines": 459,
+          "additions": 456,
+          "deletions": 3
+        },
+        {
+          "subject": "refactor(camp): extract owner carry-forward into one manifest helper",
+          "changed_lines": 58,
+          "additions": 53,
+          "deletions": 5
+        },
+        {
+          "subject": "feat(camp): camp remove notices when workspace ownership diverges",
+          "changed_lines": 360,
+          "additions": 359,
+          "deletions": 1
+        },
+        {
+          "subject": "test(camp): statelessness guard walks a workspace carrying the record",
+          "changed_lines": 31,
+          "additions": 31,
+          "deletions": 0
+        },
+        {
+          "subject": "refactor(camp): collapse repeated setup in the ownership test files",
+          "changed_lines": 405,
+          "additions": 146,
+          "deletions": 259
+        },
+        {
+          "subject": "fix(camp): wrap hosts.toml reads, reject leading-hyphen self_name",
+          "changed_lines": 89,
+          "additions": 73,
+          "deletions": 16
+        },
+        {
+          "subject": "fix(camp): separate the owner read from per-member state carry-forward",
+          "changed_lines": 114,
+          "additions": 105,
+          "deletions": 9
+        },
+        {
+          "subject": "fix(camp): guard refuses a corrupt on-disk owner instead of falling t\u2026",
+          "changed_lines": 173,
+          "additions": 159,
+          "deletions": 14
+        },
+        {
+          "subject": "fix(camp): thread env through cmd_doctor's self-declared-host-name check",
+          "changed_lines": 49,
+          "additions": 46,
+          "deletions": 3
+        },
+        {
+          "subject": "fix(camp): let an unreadable on-disk manifest self-heal instead of re\u2026",
+          "changed_lines": 152,
+          "additions": 105,
+          "deletions": 47
+        },
+        {
+          "subject": "fix(camp): route a missing manifest to the could-not-determine notice",
+          "changed_lines": 34,
+          "additions": 29,
+          "deletions": 5
+        },
+        {
+          "subject": "fix(camp): report a malformed hosts.toml as a failed doctor check row",
+          "changed_lines": 87,
+          "additions": 69,
+          "deletions": 18
+        },
+        {
+          "subject": "fix(camp): convert a RecursionError from hosts.toml into HostConfigError",
+          "changed_lines": 109,
+          "additions": 107,
+          "deletions": 2
+        },
+        {
+          "subject": "test(camp): replace tautological ANSI-notice test with a real injecti\u2026",
+          "changed_lines": 49,
+          "additions": 47,
+          "deletions": 2
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-207",
+      "pr_number": 207,
+      "pr_title": "feat: resolve and disclose per-PR merge strategy",
+      "merged_at": "2026-09-10T11:21:47Z",
+      "series_length": 18,
+      "commits": [
+        {
+          "subject": "test: assumption probe for repo-level merge-method fields on stackEnt\u2026",
+          "changed_lines": 95,
+          "additions": 95,
+          "deletions": 0
+        },
+        {
+          "subject": "feat(trailhead): distinguish absent from malformed merge_method confi\u2026",
+          "changed_lines": 80,
+          "additions": 55,
+          "deletions": 25
+        },
+        {
+          "subject": "feat(trailhead): read a repository's permitted merge strategies with \u2026",
+          "changed_lines": 364,
+          "additions": 252,
+          "deletions": 112
+        },
+        {
+          "subject": "fix(trailhead): share one repository fetch across stack-entry and mer\u2026",
+          "changed_lines": 138,
+          "additions": 92,
+          "deletions": 46
+        },
+        {
+          "subject": "feat(trailhead): total merge-strategy resolver over configured settin\u2026",
+          "changed_lines": 265,
+          "additions": 265,
+          "deletions": 0
+        },
+        {
+          "subject": "test(trailhead): pin the empty-permitted-set resolution and disclose \u2026",
+          "changed_lines": 38,
+          "additions": 37,
+          "deletions": 1
+        },
+        {
+          "subject": "feat(trailhead): resolve and disclose a merge strategy per pull request",
+          "changed_lines": 429,
+          "additions": 421,
+          "deletions": 8
+        },
+        {
+          "subject": "docs(trailhead): correct describe_merge_refusal's docstring to name i\u2026",
+          "changed_lines": 13,
+          "additions": 7,
+          "deletions": 6
+        },
+        {
+          "subject": "fix(trailhead): split the unset-merge-method notice by automatic vs. \u2026",
+          "changed_lines": 169,
+          "additions": 150,
+          "deletions": 19
+        },
+        {
+          "subject": "docs(trailhead): record why the unreadable-config notice branch is de\u2026",
+          "changed_lines": 9,
+          "additions": 9,
+          "deletions": 0
+        },
+        {
+          "subject": "feat(portage): carry merge-strategy disclosure into monitor's report",
+          "changed_lines": 280,
+          "additions": 276,
+          "deletions": 4
+        },
+        {
+          "subject": "test(portage): sync the four merge_method surfaces off the retired sq\u2026",
+          "changed_lines": 133,
+          "additions": 119,
+          "deletions": 14
+        },
+        {
+          "subject": "test(portage): pin that a same-strategy, different-reason run stays a\u2026",
+          "changed_lines": 32,
+          "additions": 32,
+          "deletions": 0
+        },
+        {
+          "subject": "docs(trailhead): sync the provider-seam doc's merge_method default an\u2026",
+          "changed_lines": 14,
+          "additions": 11,
+          "deletions": 3
+        },
+        {
+          "subject": "refactor(trailhead): fold the lookup-failure test onto the shared mer\u2026",
+          "changed_lines": 74,
+          "additions": 16,
+          "deletions": 58
+        },
+        {
+          "subject": "test: bind the disclosure line's producer to its parser, and de-vacuu\u2026",
+          "changed_lines": 109,
+          "additions": 107,
+          "deletions": 2
+        },
+        {
+          "subject": "fix(trailhead): refuse a configured merge_method that has no merge flag",
+          "changed_lines": 101,
+          "additions": 93,
+          "deletions": 8
+        },
+        {
+          "subject": "docs(trailhead): record why the merge-refusal text is exempt from the\u2026",
+          "changed_lines": 8,
+          "additions": 8,
+          "deletions": 0
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-206",
+      "pr_number": 206,
+      "pr_title": "test: prune tests whose subject has only one possible output",
+      "merged_at": "2026-09-10T02:54:04Z",
+      "series_length": 2,
+      "commits": [
+        {
+          "subject": "test: prune tests whose subject has only one possible output",
+          "changed_lines": 3837,
+          "additions": 104,
+          "deletions": 3733
+        },
+        {
+          "subject": "feat(craft): require a test to have an input it can vary",
+          "changed_lines": 289,
+          "additions": 279,
+          "deletions": 10
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-205",
+      "pr_number": 205,
+      "pr_title": "feat(evals): behavioural eval for lore's carve-out scope",
+      "merged_at": "2026-09-10T00:52:08Z",
+      "series_length": 3,
+      "commits": [
+        {
+          "subject": "test(evals): pre-register lore's carve-out-does-not-generalise verdict",
+          "changed_lines": 177,
+          "additions": 177,
+          "deletions": 0
+        },
+        {
+          "subject": "feat(evals): behavioural eval for lore's carve-out scope",
+          "changed_lines": 277,
+          "additions": 277,
+          "deletions": 0
+        },
+        {
+          "subject": "docs(evals): record lore's carve-out-scope result and the sandbox-ver\u2026",
+          "changed_lines": 146,
+          "additions": 142,
+          "deletions": 4
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-204",
+      "pr_number": 204,
+      "pr_title": "feat(evals): kernel-enforced eval isolation, plus camp and portage behavioural cases",
+      "merged_at": "2026-09-09T21:15:31Z",
+      "series_length": 6,
+      "commits": [
+        {
+          "subject": "feat(evals): kernel-enforced isolation for eval arms",
+          "changed_lines": 404,
+          "additions": 401,
+          "deletions": 3
+        },
+        {
+          "subject": "test(evals): pre-register camp's read-content-is-not-authorization ve\u2026",
+          "changed_lines": 118,
+          "additions": 118,
+          "deletions": 0
+        },
+        {
+          "subject": "test(evals): pre-register portage's approval-is-human-only verdict",
+          "changed_lines": 121,
+          "additions": 121,
+          "deletions": 0
+        },
+        {
+          "subject": "feat(evals): behavioural eval for camp's read-content authorization rule",
+          "changed_lines": 860,
+          "additions": 850,
+          "deletions": 10
+        },
+        {
+          "subject": "feat(evals): behavioural eval for portage's human-only approval rule",
+          "changed_lines": 770,
+          "additions": 760,
+          "deletions": 10
+        },
+        {
+          "subject": "docs(evals): say trailhead's eval corpus stays empty structurally",
+          "changed_lines": 36,
+          "additions": 18,
+          "deletions": 18
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-203",
+      "pr_number": 203,
+      "pr_title": "feat(portage): make the merge method configurable, defaulting to squash",
+      "merged_at": "2026-09-09T22:11:55Z",
+      "series_length": 5,
+      "commits": [
+        {
+          "subject": "feat(trailhead): add [release].merge_method config for portage merge",
+          "changed_lines": 376,
+          "additions": 368,
+          "deletions": 8
+        },
+        {
+          "subject": "fix(trailhead): collapse merge_method fallback to a single default",
+          "changed_lines": 79,
+          "additions": 44,
+          "deletions": 35
+        },
+        {
+          "subject": "refactor(trailhead): collapse merge_method duplication left by the tw\u2026",
+          "changed_lines": 107,
+          "additions": 7,
+          "deletions": 100
+        },
+        {
+          "subject": "fix(trailhead): close merge_method review findings - TypeError guard,\u2026",
+          "changed_lines": 94,
+          "additions": 84,
+          "deletions": 10
+        },
+        {
+          "subject": "docs(portage): close re-review minors on merge_method surfaces",
+          "changed_lines": 9,
+          "additions": 7,
+          "deletions": 2
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-202",
+      "pr_number": 202,
+      "pr_title": "feat(camp): cross-group, cross-account listing for camp list/sessions",
+      "merged_at": "2026-09-09T19:49:10Z",
+      "series_length": 23,
+      "commits": [
+        {
+          "subject": "feat(camp): key the session candidate pool by (harness, credential st\u2026",
+          "changed_lines": 564,
+          "additions": 525,
+          "deletions": 39
+        },
+        {
+          "subject": "feat(camp): enumerate live sessions once per credential store and merge",
+          "changed_lines": 560,
+          "additions": 521,
+          "deletions": 39
+        },
+        {
+          "subject": "feat(camp): attribute every session row to its group and its account",
+          "changed_lines": 147,
+          "additions": 145,
+          "deletions": 2
+        },
+        {
+          "subject": "test(camp): make the verbatim-account pin catch normalization",
+          "changed_lines": 28,
+          "additions": 23,
+          "deletions": 5
+        },
+        {
+          "subject": "feat(camp): filter camp sessions to the named group's attributed rows",
+          "changed_lines": 226,
+          "additions": 199,
+          "deletions": 27
+        },
+        {
+          "subject": "feat(camp): add --all-groups/-g to camp list and camp sessions",
+          "changed_lines": 502,
+          "additions": 493,
+          "deletions": 9
+        },
+        {
+          "subject": "feat(camp): a narrowed --all-groups answer says why it narrowed",
+          "changed_lines": 438,
+          "additions": 405,
+          "deletions": 33
+        },
+        {
+          "subject": "fix(camp): realign the enumeration test double with its production si\u2026",
+          "changed_lines": 5,
+          "additions": 4,
+          "deletions": 1
+        },
+        {
+          "subject": "refactor(camp): drop dead enumeration scaffolding and share the cross\u2026",
+          "changed_lines": 196,
+          "additions": 102,
+          "deletions": 94
+        },
+        {
+          "subject": "docs(camp): add the cross-group cross-account listing design doc",
+          "changed_lines": 233,
+          "additions": 233,
+          "deletions": 0
+        },
+        {
+          "subject": "docs(camp): correct the design doc to the surface that actually ships",
+          "changed_lines": 41,
+          "additions": 22,
+          "deletions": 19
+        },
+        {
+          "subject": "fix(camp): the default credential store is always in the pool, and a \u2026",
+          "changed_lines": 163,
+          "additions": 146,
+          "deletions": 17
+        },
+        {
+          "subject": "fix(camp): foreach payload never scanned for --all-groups, and a drop\u2026",
+          "changed_lines": 389,
+          "additions": 365,
+          "deletions": 24
+        },
+        {
+          "subject": "fix(camp): an unparsable group config gets an in-band ok:false row in\u2026",
+          "changed_lines": 89,
+          "additions": 76,
+          "deletions": 13
+        },
+        {
+          "subject": "test(camp): update surface-retirement pins for the always-probed defa\u2026",
+          "changed_lines": 11,
+          "additions": 9,
+          "deletions": 2
+        },
+        {
+          "subject": "test(camp): describe the cross-store listing pin by its behaviour",
+          "changed_lines": 7,
+          "additions": 3,
+          "deletions": 4
+        },
+        {
+          "subject": "docs(camp): note that --json account paths describe local filesystem \u2026",
+          "changed_lines": 5,
+          "additions": 5,
+          "deletions": 0
+        },
+        {
+          "subject": "docs(camp): correct the design doc to the strings and semantics that \u2026",
+          "changed_lines": 48,
+          "additions": 32,
+          "deletions": 16
+        },
+        {
+          "subject": "fix(camp): `camp sessions -g <slug>` refuses instead of silently disc\u2026",
+          "changed_lines": 35,
+          "additions": 34,
+          "deletions": 1
+        },
+        {
+          "subject": "fix(camp): dedupe the credential-store pool by the bound store, not t\u2026",
+          "changed_lines": 62,
+          "additions": 59,
+          "deletions": 3
+        },
+        {
+          "subject": "fix(camp): `camp sessions -g --recoverable` no longer promises an ans\u2026",
+          "changed_lines": 56,
+          "additions": 40,
+          "deletions": 16
+        },
+        {
+          "subject": "fix(camp): `camp list --json` success rows carry `ok: true`",
+          "changed_lines": 37,
+          "additions": 27,
+          "deletions": 10
+        },
+        {
+          "subject": "fix(camp): drop unused `ws` assignment in list-all-groups test",
+          "changed_lines": 2,
+          "additions": 1,
+          "deletions": 1
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-201",
+      "pr_number": 201,
+      "pr_title": "feat(evals): behavioural evals for lore and outpost, and the isolation lesson",
+      "merged_at": "2026-09-09T18:28:43Z",
+      "series_length": 2,
+      "commits": [
+        {
+          "subject": "feat(evals): first behavioural eval for lore's vault write prohibition",
+          "changed_lines": 404,
+          "additions": 403,
+          "deletions": 1
+        },
+        {
+          "subject": "feat(evals): behavioural eval for outpost's publish-routing rule",
+          "changed_lines": 381,
+          "additions": 380,
+          "deletions": 1
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-200",
+      "pr_number": 200,
+      "pr_title": "feat(craft): plan's Define Tasks step reads the migration-bar stamp",
+      "merged_at": "2026-09-09T17:40:19Z",
+      "series_length": 14,
+      "commits": [
+        {
+          "subject": "test: assumption probe \u2014 stamp member name matches camp member name",
+          "changed_lines": 79,
+          "additions": 79,
+          "deletions": 0
+        },
+        {
+          "subject": "feat(craft): render the migration-suppression directive from the spec\u2026",
+          "changed_lines": 457,
+          "additions": 378,
+          "deletions": 79
+        },
+        {
+          "subject": "feat(craft): plan's Define Tasks step reads the migration-bar stamp",
+          "changed_lines": 264,
+          "additions": 264,
+          "deletions": 0
+        },
+        {
+          "subject": "fix(craft): derive migration-bar step-7 contract checks from the rend\u2026",
+          "changed_lines": 181,
+          "additions": 134,
+          "deletions": 47
+        },
+        {
+          "subject": "test(craft): pre-register prototype-plan-carries-no-migration eval",
+          "changed_lines": 410,
+          "additions": 410,
+          "deletions": 0
+        },
+        {
+          "subject": "test(craft): record prototype-plan-carries-no-migration eval results",
+          "changed_lines": 99,
+          "additions": 97,
+          "deletions": 2
+        },
+        {
+          "subject": "refactor(craft): dedupe the step-7 contract test's concern-word deriv\u2026",
+          "changed_lines": 41,
+          "additions": 17,
+          "deletions": 24
+        },
+        {
+          "subject": "fix(craft): sync planner subagent's Define Tasks step to the migratio\u2026",
+          "changed_lines": 201,
+          "additions": 134,
+          "deletions": 67
+        },
+        {
+          "subject": "fix(craft): rescore prototype-plan-carries-no-migration's positive.md\u2026",
+          "changed_lines": 58,
+          "additions": 45,
+          "deletions": 13
+        },
+        {
+          "subject": "test(craft): correct the prototype-plan-carries-no-migration instrume\u2026",
+          "changed_lines": 239,
+          "additions": 220,
+          "deletions": 19
+        },
+        {
+          "subject": "test(craft): record Round Two of prototype-plan-carries-no-migration,\u2026",
+          "changed_lines": 154,
+          "additions": 137,
+          "deletions": 17
+        },
+        {
+          "subject": "docs(craft): correct documentation-honesty findings on prototype-plan\u2026",
+          "changed_lines": 214,
+          "additions": 137,
+          "deletions": 77
+        },
+        {
+          "subject": "fix(craft): don't let an understated maturity stamp override the targ\u2026",
+          "changed_lines": 161,
+          "additions": 159,
+          "deletions": 2
+        },
+        {
+          "subject": "docs(craft): cite the reopening criterion by identifier, not by its text",
+          "changed_lines": 8,
+          "additions": 6,
+          "deletions": 2
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-199",
+      "pr_number": 199,
+      "pr_title": "fix(camp): dispatch `camp which` as a bare verb",
+      "merged_at": "2026-09-09T16:02:00Z",
+      "series_length": 1,
+      "commits": [
+        {
+          "subject": "fix(camp): dispatch `camp which` as a bare verb, like its meta siblings",
+          "changed_lines": 43,
+          "additions": 27,
+          "deletions": 16
+        }
+      ],
+      "human_verdict": null,
+      "ambiguous": true,
+      "ambiguous_note": "single-commit branch: fix-up-dominance is a degenerate question for a 1-commit series (squash and preserve produce the same merge output), so no meaningful human verdict applies \u2014 recorded for completeness, not as a regression case."
+    },
+    {
+      "case_id": "pr-198",
+      "pr_number": 198,
+      "pr_title": "test(trailhead): sweep inert tests onto behavioural assertions, and gate the rule",
+      "merged_at": "2026-09-09T15:21:35Z",
+      "series_length": 6,
+      "commits": [
+        {
+          "subject": "test(trailhead): drop two migration-absence sweeps, fix stale test po\u2026",
+          "changed_lines": 132,
+          "additions": 2,
+          "deletions": 130
+        },
+        {
+          "subject": "test(trailhead): run the registries and the tier gate instead of read\u2026",
+          "changed_lines": 447,
+          "additions": 305,
+          "deletions": 142
+        },
+        {
+          "subject": "test(trailhead): replace shape and doc pins with the consumers that e\u2026",
+          "changed_lines": 262,
+          "additions": 127,
+          "deletions": 135
+        },
+        {
+          "subject": "fix(trailhead): pin the packaging invariant without needing an install",
+          "changed_lines": 59,
+          "additions": 38,
+          "deletions": 21
+        },
+        {
+          "subject": "feat(scripts): add the inert-test gate and clear the tree under it",
+          "changed_lines": 563,
+          "additions": 375,
+          "deletions": 188
+        },
+        {
+          "subject": "feat(evals): extract the eval protocol and scaffold a corpus for ever\u2026",
+          "changed_lines": 577,
+          "additions": 528,
+          "deletions": 49
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-197",
+      "pr_number": 197,
+      "pr_title": "test(craft): sweep craft's inert tests onto behavioral assertions",
+      "merged_at": "2026-09-09T14:19:00Z",
+      "series_length": 7,
+      "commits": [
+        {
+          "subject": "test(craft): run the note_store templates through their real consumers",
+          "changed_lines": 494,
+          "additions": 244,
+          "deletions": 250
+        },
+        {
+          "subject": "test(craft): make the worked-example extraction total",
+          "changed_lines": 29,
+          "additions": 20,
+          "deletions": 9
+        },
+        {
+          "subject": "test(craft): resolve craft's capability references through the real m\u2026",
+          "changed_lines": 391,
+          "additions": 136,
+          "deletions": 255
+        },
+        {
+          "subject": "test(craft): drop the prose-scanning citation layer, run the leak gat\u2026",
+          "changed_lines": 1504,
+          "additions": 79,
+          "deletions": 1425
+        },
+        {
+          "subject": "test(craft): pin runtime path resolvability instead of the manifest's\u2026",
+          "changed_lines": 142,
+          "additions": 82,
+          "deletions": 60
+        },
+        {
+          "subject": "test(craft): parse documented gate invocations, drop the phrase pins",
+          "changed_lines": 198,
+          "additions": 112,
+          "deletions": 86
+        },
+        {
+          "subject": "test(craft): check the severity vocabulary against the renderer, drop\u2026",
+          "changed_lines": 132,
+          "additions": 43,
+          "deletions": 89
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-196",
+      "pr_number": 196,
+      "pr_title": "feat(craft): stand down maturity-sensitive concerns a spec's Non-Goals waive",
+      "merged_at": "2026-09-09T13:41:34Z",
+      "series_length": 10,
+      "commits": [
+        {
+          "subject": "docs(trailhead): forbid tests whose subject is authored prose",
+          "changed_lines": 12,
+          "additions": 12,
+          "deletions": 0
+        },
+        {
+          "subject": "feat(craft): recognise a waived concern and render a stand-down",
+          "changed_lines": 495,
+          "additions": 493,
+          "deletions": 2
+        },
+        {
+          "subject": "feat(craft): document the waiver rule and eval it against a synthesis\u2026",
+          "changed_lines": 712,
+          "additions": 708,
+          "deletions": 4
+        },
+        {
+          "subject": "test(craft): document the Non-Goals waiver marker where authors write it",
+          "changed_lines": 115,
+          "additions": 114,
+          "deletions": 1
+        },
+        {
+          "subject": "refactor(craft): filter waived concerns once in the calibration renderer",
+          "changed_lines": 12,
+          "additions": 6,
+          "deletions": 6
+        },
+        {
+          "subject": "fix(craft): resolve F1-F8 correctness findings from maturity waiver r\u2026",
+          "changed_lines": 451,
+          "additions": 381,
+          "deletions": 70
+        },
+        {
+          "subject": "fix(craft): close S1-S8 findings from security audit and re-review",
+          "changed_lines": 416,
+          "additions": 315,
+          "deletions": 101
+        },
+        {
+          "subject": "fix(craft): name the withheld severity in every stand-down line",
+          "changed_lines": 86,
+          "additions": 75,
+          "deletions": 11
+        },
+        {
+          "subject": "test(craft): register the lens-bending eval before running its arms",
+          "changed_lines": 424,
+          "additions": 411,
+          "deletions": 13
+        },
+        {
+          "subject": "test(craft): record both eval results, including a collapsed differen\u2026",
+          "changed_lines": 125,
+          "additions": 125,
+          "deletions": 0
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-195",
+      "pr_number": 195,
+      "pr_title": "feat(leak-gate): wire the leak gate into pre-commit",
+      "merged_at": "2026-09-09T11:37:49Z",
+      "series_length": 2,
+      "commits": [
+        {
+          "subject": "feat(leak-gate): wire the leak gate into pre-commit and give it a com\u2026",
+          "changed_lines": 276,
+          "additions": 272,
+          "deletions": 4
+        },
+        {
+          "subject": "docs(leak-gate): name `pre-commit install` as the one setup step",
+          "changed_lines": 45,
+          "additions": 38,
+          "deletions": 7
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-194",
+      "pr_number": 194,
+      "pr_title": "test(lore): make the skill docs testable by running what they say",
+      "merged_at": "2026-09-09T04:56:37Z",
+      "series_length": 2,
+      "commits": [
+        {
+          "subject": "test(lore): replace skill-prose pins with parser- and manifest-driven\u2026",
+          "changed_lines": 1660,
+          "additions": 426,
+          "deletions": 1234
+        },
+        {
+          "subject": "test(lore): drop source-inspecting guards with behavioural equivalents",
+          "changed_lines": 1675,
+          "additions": 44,
+          "deletions": 1631
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-193",
+      "pr_number": 193,
+      "pr_title": "test(portage): convert prose pins to document-as-input",
+      "merged_at": "2026-09-09T03:47:58Z",
+      "series_length": 1,
+      "commits": [
+        {
+          "subject": "test(portage): convert prose pins to document-as-input, drop the rest",
+          "changed_lines": 755,
+          "additions": 244,
+          "deletions": 511
+        }
+      ],
+      "human_verdict": null,
+      "ambiguous": true,
+      "ambiguous_note": "single-commit branch: fix-up-dominance is a degenerate question for a 1-commit series (squash and preserve produce the same merge output), so no meaningful human verdict applies \u2014 recorded for completeness, not as a regression case."
+    },
+    {
+      "case_id": "pr-192",
+      "pr_number": 192,
+      "pr_title": "test(camp): behavioral-test sweep, tranche 2 (camp inert-test cleanup)",
+      "merged_at": "2026-09-09T03:21:20Z",
+      "series_length": 2,
+      "commits": [
+        {
+          "subject": "test(camp): drop source-inspecting guards with behavioural equivalents",
+          "changed_lines": 695,
+          "additions": 49,
+          "deletions": 646
+        },
+        {
+          "subject": "test(camp): make the concierge doc gate run the CLI and the emitters",
+          "changed_lines": 656,
+          "additions": 194,
+          "deletions": 462
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-191",
+      "pr_number": 191,
+      "pr_title": "test: behavioral-test sweep, tranche 1 (outpost plugin + camp verb-taxonomy)",
+      "merged_at": "2026-09-09T02:40:31Z",
+      "series_length": 2,
+      "commits": [
+        {
+          "subject": "test(trailhead): make the outpost plugin tests run the loader and com\u2026",
+          "changed_lines": 108,
+          "additions": 52,
+          "deletions": 56
+        },
+        {
+          "subject": "test(camp): route the verb-taxonomy tests through the resolver and th\u2026",
+          "changed_lines": 249,
+          "additions": 122,
+          "deletions": 127
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-190",
+      "pr_number": 190,
+      "pr_title": "feat(craft): ship a testing ruleset requiring tests to execute their subject",
+      "merged_at": "2026-09-09T02:04:51Z",
+      "series_length": 3,
+      "commits": [
+        {
+          "subject": "feat(craft): ship a testing ruleset requiring tests to execute their \u2026",
+          "changed_lines": 228,
+          "additions": 216,
+          "deletions": 12
+        },
+        {
+          "subject": "fix(craft): carve out generated-output existence from the presence ban",
+          "changed_lines": 75,
+          "additions": 51,
+          "deletions": 24
+        },
+        {
+          "subject": "fix(craft): rewrap executor.md line to satisfy prose-wrap contract",
+          "changed_lines": 4,
+          "additions": 2,
+          "deletions": 2
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-189",
+      "pr_number": 189,
+      "pr_title": "feat(craft): rate findings at the maturity level of the repository they name",
+      "merged_at": "2026-09-09T01:02:49Z",
+      "series_length": 6,
+      "commits": [
+        {
+          "subject": "feat(craft): render per-repository severities for a multi-repo maturi\u2026",
+          "changed_lines": 234,
+          "additions": 207,
+          "deletions": 27
+        },
+        {
+          "subject": "feat(craft): state the finding-attribution rule in council.md's calib\u2026",
+          "changed_lines": 324,
+          "additions": 324,
+          "deletions": 0
+        },
+        {
+          "subject": "refactor(craft): drop cross-task duplication in the maturity matrix t\u2026",
+          "changed_lines": 88,
+          "additions": 34,
+          "deletions": 54
+        },
+        {
+          "subject": "fix(craft): close FIX_FIRST findings from the maturity-matrix correct\u2026",
+          "changed_lines": 175,
+          "additions": 151,
+          "deletions": 24
+        },
+        {
+          "subject": "fix(craft): close final maturity-matrix review findings (G1-G7)",
+          "changed_lines": 183,
+          "additions": 153,
+          "deletions": 30
+        },
+        {
+          "subject": "fix(craft): delimit interpolated member names in the maturity matrix \u2026",
+          "changed_lines": 107,
+          "additions": 83,
+          "deletions": 24
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-188",
+      "pr_number": 188,
+      "pr_title": "feat(craft): brainstorm asks once for an undeclared repository's maturity level",
+      "merged_at": "2026-09-08T20:17:15Z",
+      "series_length": 11,
+      "commits": [
+        {
+          "subject": "feat(craft): render prototype edge-checklist confirmations",
+          "changed_lines": 368,
+          "additions": 368,
+          "deletions": 0
+        },
+        {
+          "subject": "feat(craft): wire brainstorm's grill step to the edge-confirmation re\u2026",
+          "changed_lines": 291,
+          "additions": 291,
+          "deletions": 0
+        },
+        {
+          "subject": "fix(craft): repair correctness-review findings on the edge-confirmati\u2026",
+          "changed_lines": 134,
+          "additions": 96,
+          "deletions": 38
+        },
+        {
+          "subject": "feat(craft): add maturity_declare.py, the inverse of maturity_resolve.py",
+          "changed_lines": 664,
+          "additions": 664,
+          "deletions": 0
+        },
+        {
+          "subject": "test(craft): pin marker-absence on the two remaining declare refusal \u2026",
+          "changed_lines": 12,
+          "additions": 12,
+          "deletions": 0
+        },
+        {
+          "subject": "feat(craft): brainstorm asks on the absence path and invokes the writer",
+          "changed_lines": 419,
+          "additions": 419,
+          "deletions": 0
+        },
+        {
+          "subject": "style(craft): clear ruff findings in the declaration-ask contract tests",
+          "changed_lines": 5,
+          "additions": 2,
+          "deletions": 3
+        },
+        {
+          "subject": "refactor(craft): drop cross-task duplication in the maturity declarat\u2026",
+          "changed_lines": 45,
+          "additions": 12,
+          "deletions": 33
+        },
+        {
+          "subject": "test(craft): give the decline-path check a subject that can fail",
+          "changed_lines": 24,
+          "additions": 13,
+          "deletions": 11
+        },
+        {
+          "subject": "fix(craft): close the maturity-declare correctness-review findings",
+          "changed_lines": 411,
+          "additions": 370,
+          "deletions": 41
+        },
+        {
+          "subject": "fix(craft): refuse symlinked declaration targets, close OSError gap",
+          "changed_lines": 199,
+          "additions": 161,
+          "deletions": 38
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-187",
+      "pr_number": 187,
+      "pr_title": "feat(outpost): retire the pickup-review skills",
+      "merged_at": "2026-09-07T22:46:48Z",
+      "series_length": 3,
+      "commits": [
+        {
+          "subject": "feat(outpost): retire the three pickup-review skills from trailhead",
+          "changed_lines": 1429,
+          "additions": 13,
+          "deletions": 1416
+        },
+        {
+          "subject": "docs(outpost): describe the plugin by what it ships",
+          "changed_lines": 10,
+          "additions": 5,
+          "deletions": 5
+        },
+        {
+          "subject": "docs: stop advertising the retired review loop in the marketplace",
+          "changed_lines": 2,
+          "additions": 1,
+          "deletions": 1
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-186",
+      "pr_number": 186,
+      "pr_title": "feat(craft): rate maturity-sensitive council concerns by spec maturity level",
+      "merged_at": "2026-09-07T21:07:11Z",
+      "series_length": 7,
+      "commits": [
+        {
+          "subject": "feat(craft): render the maturity calibration block from a resolved level",
+          "changed_lines": 673,
+          "additions": 672,
+          "deletions": 1
+        },
+        {
+          "subject": "fix: fail closed on undecodable stdin in the calibration renderer",
+          "changed_lines": 257,
+          "additions": 252,
+          "deletions": 5
+        },
+        {
+          "subject": "feat(craft): land maturity calibration mapping on the shared council \u2026",
+          "changed_lines": 277,
+          "additions": 269,
+          "deletions": 8
+        },
+        {
+          "subject": "feat(craft): wire every council dispatcher to fill the calibration token",
+          "changed_lines": 365,
+          "additions": 355,
+          "deletions": 10
+        },
+        {
+          "subject": "fix(craft): fit the gauntlet calibration instruction within its line \u2026",
+          "changed_lines": 54,
+          "additions": 25,
+          "deletions": 29
+        },
+        {
+          "subject": "refactor(craft): drop scaffolding the maturity-calibration build left\u2026",
+          "changed_lines": 230,
+          "additions": 6,
+          "deletions": 224
+        },
+        {
+          "subject": "fix(craft): repair correctness-review findings on the calibration slice",
+          "changed_lines": 135,
+          "additions": 126,
+          "deletions": 9
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-185",
+      "pr_number": 185,
+      "pr_title": "feat(craft): project maturity stamping, reading, and hardening",
+      "merged_at": "2026-09-07T16:24:14Z",
+      "series_length": 8,
+      "commits": [
+        {
+          "subject": "feat(craft): add the maturity stamp reader",
+          "changed_lines": 577,
+          "additions": 577,
+          "deletions": 0
+        },
+        {
+          "subject": "test(craft): pin the empty-section reason-code by exact match",
+          "changed_lines": 8,
+          "additions": 4,
+          "deletions": 4
+        },
+        {
+          "subject": "feat(craft): brainstorm stamps the spec, template carries the section",
+          "changed_lines": 397,
+          "additions": 385,
+          "deletions": 12
+        },
+        {
+          "subject": "fix(craft): secure the stamp reminder, and unblock the unresolved-enu\u2026",
+          "changed_lines": 135,
+          "additions": 108,
+          "deletions": 27
+        },
+        {
+          "subject": "test(craft): prove the maturity stamp survives resolve -> stamp -> read",
+          "changed_lines": 122,
+          "additions": 122,
+          "deletions": 0
+        },
+        {
+          "subject": "refactor(craft): drive the maturity seams from their producing suites",
+          "changed_lines": 64,
+          "additions": 26,
+          "deletions": 38
+        },
+        {
+          "subject": "fix(craft): give unresolved-enumeration its own reason-code, restore \u2026",
+          "changed_lines": 459,
+          "additions": 408,
+          "deletions": 51
+        },
+        {
+          "subject": "fix(craft): planner certifies its spec writes, harden the stamp reade\u2026",
+          "changed_lines": 468,
+          "additions": 447,
+          "deletions": 21
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-184",
+      "pr_number": 184,
+      "pr_title": "feat(lore): print a reader link on record create/update",
+      "merged_at": "2026-09-07T14:34:06Z",
+      "series_length": 9,
+      "commits": [
+        {
+          "subject": "feat(lore): add the record-URL contract module and its base resolution",
+          "changed_lines": 407,
+          "additions": 407,
+          "deletions": 0
+        },
+        {
+          "subject": "feat(lore): print the record reader URL on stderr for create/update",
+          "changed_lines": 224,
+          "additions": 224,
+          "deletions": 0
+        },
+        {
+          "subject": "test(lore): pin the CLI-level surfacing of a rejected record_url_base",
+          "changed_lines": 22,
+          "additions": 22,
+          "deletions": 0
+        },
+        {
+          "subject": "refactor(lore): drop duplicated arrange helpers from the record-URL t\u2026",
+          "changed_lines": 37,
+          "additions": 14,
+          "deletions": 23
+        },
+        {
+          "subject": "fix(lore): close five correctness-review gaps in the record-URL trailer",
+          "changed_lines": 212,
+          "additions": 193,
+          "deletions": 19
+        },
+        {
+          "subject": "fix(lore): name the base-rejection reason that actually fired",
+          "changed_lines": 37,
+          "additions": 28,
+          "deletions": 9
+        },
+        {
+          "subject": "fix(lore): reject credentials in the record-URL base and escape dot s\u2026",
+          "changed_lines": 50,
+          "additions": 49,
+          "deletions": 1
+        },
+        {
+          "subject": "fix(lore): never let the reader-link trailer fail a completed write",
+          "changed_lines": 91,
+          "additions": 90,
+          "deletions": 1
+        },
+        {
+          "subject": "fix(lore): resolve the vault name inside the reader trailer's guard",
+          "changed_lines": 58,
+          "additions": 43,
+          "deletions": 15
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-183",
+      "pr_number": 183,
+      "pr_title": "Add typed `supersedes` edge to lore",
+      "merged_at": "2026-09-07T02:14:37Z",
+      "series_length": 6,
+      "commits": [
+        {
+          "subject": "test: assumption probe \u2014 unknown sidecar keys reject update, not drop",
+          "changed_lines": 120,
+          "additions": 120,
+          "deletions": 0
+        },
+        {
+          "subject": "feat(lore): records a supersession as a typed edge",
+          "changed_lines": 542,
+          "additions": 408,
+          "deletions": 134
+        },
+        {
+          "subject": "feat(lore): supersession edge queryable in both directions via KQL",
+          "changed_lines": 306,
+          "additions": 295,
+          "deletions": 11
+        },
+        {
+          "subject": "fix(lore): typed-edge writer/reader docs, kill traversal + reindex-ab\u2026",
+          "changed_lines": 288,
+          "additions": 273,
+          "deletions": 15
+        },
+        {
+          "subject": "docs(lore): state the supersedes guard's real traversal coverage",
+          "changed_lines": 16,
+          "additions": 10,
+          "deletions": 6
+        },
+        {
+          "subject": "fix(lore): confine the supersedes name segment like parent and depend\u2026",
+          "changed_lines": 52,
+          "additions": 45,
+          "deletions": 7
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-182",
+      "pr_number": 182,
+      "pr_title": "feat(craft): declare and resolve project maturity from the agent-instruction file",
+      "merged_at": "2026-09-06T22:53:59Z",
+      "series_length": 6,
+      "commits": [
+        {
+          "subject": "feat(craft): add stdlib-only maturity resolver script",
+          "changed_lines": 399,
+          "additions": 399,
+          "deletions": 0
+        },
+        {
+          "subject": "test(craft): resolve and state project maturity in brainstorm's frami\u2026",
+          "changed_lines": 201,
+          "additions": 201,
+          "deletions": 0
+        },
+        {
+          "subject": "feat(craft): declare trailhead's project maturity, document the conve\u2026",
+          "changed_lines": 251,
+          "additions": 249,
+          "deletions": 2
+        },
+        {
+          "subject": "refactor(craft): hoist shared maturity test helpers to their producin\u2026",
+          "changed_lines": 43,
+          "additions": 13,
+          "deletions": 30
+        },
+        {
+          "subject": "fix(craft): correct maturity resolver safety defects from FIX_FIRST r\u2026",
+          "changed_lines": 506,
+          "additions": 445,
+          "deletions": 61
+        },
+        {
+          "subject": "fix(craft): close maturity-resolver fail-unsafe and steganography gaps",
+          "changed_lines": 520,
+          "additions": 447,
+          "deletions": 73
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-181",
+      "pr_number": 181,
+      "pr_title": "feat(craft): single-source scrub/untrusted-value rules into _shared/security.md",
+      "merged_at": "2026-09-06T19:26:01Z",
+      "series_length": 11,
+      "commits": [
+        {
+          "subject": "test(craft): pre-register the scrub-citation-vs-inline eval for AC1",
+          "changed_lines": 1404,
+          "additions": 1404,
+          "deletions": 0
+        },
+        {
+          "subject": "docs(craft): record the scrub-citation-vs-inline eval result \u2014 bar cl\u2026",
+          "changed_lines": 182,
+          "additions": 182,
+          "deletions": 0
+        },
+        {
+          "subject": "feat(craft): move the credential scrub and untrusted-value rule into \u2026",
+          "changed_lines": 209,
+          "additions": 162,
+          "deletions": 47
+        },
+        {
+          "subject": "feat(craft): repoint every citing surface at _shared/security.md",
+          "changed_lines": 327,
+          "additions": 284,
+          "deletions": 43
+        },
+        {
+          "subject": "fix(craft): repoint drive's escaped attribution, replace blanket excl\u2026",
+          "changed_lines": 207,
+          "additions": 128,
+          "deletions": 79
+        },
+        {
+          "subject": "refactor(craft): single-source the security-citation scan helpers",
+          "changed_lines": 94,
+          "additions": 39,
+          "deletions": 55
+        },
+        {
+          "subject": "test(craft): strengthen the security-citation non-vacuity guard to a \u2026",
+          "changed_lines": 79,
+          "additions": 71,
+          "deletions": 8
+        },
+        {
+          "subject": "fix(craft): repoint drive's stale scrub dispatches and widen the migr\u2026",
+          "changed_lines": 254,
+          "additions": 202,
+          "deletions": 52
+        },
+        {
+          "subject": "test(craft): scan the corpus for stale scrub dispatches, not the deri\u2026",
+          "changed_lines": 34,
+          "additions": 20,
+          "deletions": 14
+        },
+        {
+          "subject": "fix(craft): repoint refine's security.md read, widen drive's dispatch\u2026",
+          "changed_lines": 269,
+          "additions": 224,
+          "deletions": 45
+        },
+        {
+          "subject": "fix(craft): stop restating a partial scrub category list in refine.md",
+          "changed_lines": 71,
+          "additions": 65,
+          "deletions": 6
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-180",
+      "pr_number": 180,
+      "pr_title": "test(craft): pre-register and record the unconditional-citation-vs-inline eval",
+      "merged_at": "2026-09-06T14:56:17Z",
+      "series_length": 2,
+      "commits": [
+        {
+          "subject": "test(craft): pre-register the unconditional-citation-vs-inline eval",
+          "changed_lines": 2097,
+          "additions": 2097,
+          "deletions": 0
+        },
+        {
+          "subject": "test(craft): record the unconditional-citation-vs-inline result \u2014 9/9\u2026",
+          "changed_lines": 158,
+          "additions": 158,
+          "deletions": 0
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-179",
+      "pr_number": 179,
+      "pr_title": "fix(craft): relocate gauntlet skill disposition and calibration machinery to stay under the 500-line bar",
+      "merged_at": "2026-09-06T14:42:40Z",
+      "series_length": 8,
+      "commits": [
+        {
+          "subject": "test(craft): pin gauntlet skill length and reference pointer integrit\u2026",
+          "changed_lines": 171,
+          "additions": 171,
+          "deletions": 0
+        },
+        {
+          "subject": "test(craft): close the vacuity hole in the gauntlet reference contract",
+          "changed_lines": 25,
+          "additions": 20,
+          "deletions": 5
+        },
+        {
+          "subject": "feat(craft): relocate gauntlet disposition machinery into a skill-loc\u2026",
+          "changed_lines": 305,
+          "additions": 176,
+          "deletions": 129
+        },
+        {
+          "subject": "test(craft): count 40 governed prose files, not 39",
+          "changed_lines": 18,
+          "additions": 9,
+          "deletions": 9
+        },
+        {
+          "subject": "fix: correct gauntlet dispositions relocation per FIX_FIRST review",
+          "changed_lines": 164,
+          "additions": 114,
+          "deletions": 50
+        },
+        {
+          "subject": "docs(craft): point the relocated calibration note at its new home",
+          "changed_lines": 4,
+          "additions": 2,
+          "deletions": 2
+        },
+        {
+          "subject": "fix(craft): restore the answered guard and correct the inline invento\u2026",
+          "changed_lines": 64,
+          "additions": 38,
+          "deletions": 26
+        },
+        {
+          "subject": "fix(craft): restore the empty-reason half of the anti-forgery rule",
+          "changed_lines": 32,
+          "additions": 31,
+          "deletions": 1
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-178",
+      "pr_number": 178,
+      "pr_title": "feat(craft): make the slice ledger's coverage attestation tamper-evident",
+      "merged_at": "2026-09-05T20:41:18Z",
+      "series_length": 11,
+      "commits": [
+        {
+          "subject": "feat(craft): expose parse_ledger_entries sibling accessor over candid\u2026",
+          "changed_lines": 404,
+          "additions": 370,
+          "deletions": 34
+        },
+        {
+          "subject": "feat(craft): add ledger gate certifying append-only coverage integrity",
+          "changed_lines": 930,
+          "additions": 930,
+          "deletions": 0
+        },
+        {
+          "subject": "feat(craft): wire the ledger gate into /craft:slice's reconcile, pin \u2026",
+          "changed_lines": 459,
+          "additions": 457,
+          "deletions": 2
+        },
+        {
+          "subject": "test(craft): make item-4's reason-code persist pin relational, not a \u2026",
+          "changed_lines": 67,
+          "additions": 54,
+          "deletions": 13
+        },
+        {
+          "subject": "feat(craft): document and pin the legacy ledger backfill under the mo\u2026",
+          "changed_lines": 193,
+          "additions": 193,
+          "deletions": 0
+        },
+        {
+          "subject": "refactor(craft): dedupe the ledger contract test's gate harness",
+          "changed_lines": 53,
+          "additions": 12,
+          "deletions": 41
+        },
+        {
+          "subject": "fix(craft): close the ledger gate's entries-view/merged-view coverage\u2026",
+          "changed_lines": 408,
+          "additions": 361,
+          "deletions": 47
+        },
+        {
+          "subject": "test(craft): pin wrapped multi-line ledgers and derive real reason codes",
+          "changed_lines": 136,
+          "additions": 118,
+          "deletions": 18
+        },
+        {
+          "subject": "fix(craft): close five security-audit findings on the ledger gate family",
+          "changed_lines": 446,
+          "additions": 431,
+          "deletions": 15
+        },
+        {
+          "subject": "fix(craft): satisfy ruff E741/E402 in candidate_set ledger code",
+          "changed_lines": 11,
+          "additions": 5,
+          "deletions": 6
+        },
+        {
+          "subject": "fix(craft): vendor the differential test's baseline fixture into the \u2026",
+          "changed_lines": 607,
+          "additions": 604,
+          "deletions": 3
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-177",
+      "pr_number": 177,
+      "pr_title": "feat(craft): hard-wrap craft prose at a consistent column",
+      "merged_at": "2026-09-05T20:55:36Z",
+      "series_length": 13,
+      "commits": [
+        {
+          "subject": "feat(craft): add wrap_gate.py for consistent-column prose wrapping",
+          "changed_lines": 520,
+          "additions": 520,
+          "deletions": 0
+        },
+        {
+          "subject": "test(craft): make the three line-sensitive prose assertions wrap-inse\u2026",
+          "changed_lines": 184,
+          "additions": 178,
+          "deletions": 6
+        },
+        {
+          "subject": "feat(craft): add wrap_prose.py, the greedy filler whose oracle is wra\u2026",
+          "changed_lines": 636,
+          "additions": 636,
+          "deletions": 0
+        },
+        {
+          "subject": "fix(craft): make the wrap gate's under-fill rule block-boundary aware",
+          "changed_lines": 239,
+          "additions": 195,
+          "deletions": 44
+        },
+        {
+          "subject": "fix(craft): mask YAML frontmatter in the wrap gate and formatter",
+          "changed_lines": 242,
+          "additions": 227,
+          "deletions": 15
+        },
+        {
+          "subject": "test(craft): make the partial-covers and close-gate assertions wrap-i\u2026",
+          "changed_lines": 178,
+          "additions": 174,
+          "deletions": 4
+        },
+        {
+          "subject": "fix(craft): distinguish a real table row from pipe-as-or prose in the\u2026",
+          "changed_lines": 324,
+          "additions": 304,
+          "deletions": 20
+        },
+        {
+          "subject": "refactor(craft): reflow craft prose to column 100, pin it with a cont\u2026",
+          "changed_lines": 7465,
+          "additions": 4556,
+          "deletions": 2909
+        },
+        {
+          "subject": "refactor(craft): make the wrap gate the single source of the formatte\u2026",
+          "changed_lines": 139,
+          "additions": 56,
+          "deletions": 83
+        },
+        {
+          "subject": "fix(craft): correct nested-quote merging, gate/formatter disagreement\u2026",
+          "changed_lines": 146,
+          "additions": 126,
+          "deletions": 20
+        },
+        {
+          "subject": "fix(craft): strip structural prefix from the single-unit exemption, c\u2026",
+          "changed_lines": 98,
+          "additions": 87,
+          "deletions": 11
+        },
+        {
+          "subject": "fix(craft): resolve ruff lint failures in wrap gate and wrap-prose tests",
+          "changed_lines": 8,
+          "additions": 3,
+          "deletions": 5
+        },
+        {
+          "subject": "fix(craft): reflow prose merged from main and harden a reason-code regex",
+          "changed_lines": 105,
+          "additions": 52,
+          "deletions": 53
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-176",
+      "pr_number": 176,
+      "pr_title": "feat(craft): refuse implementation-identifier and unsanctioned-verification criteria at the gauntlet",
+      "merged_at": "2026-09-04T20:05:47Z",
+      "series_length": 5,
+      "commits": [
+        {
+          "subject": "feat(craft): add criterion content gate (AC3 no-implementation-identi\u2026",
+          "changed_lines": 1125,
+          "additions": 1104,
+          "deletions": 21
+        },
+        {
+          "subject": "feat(craft): wire the criterion gate into the gauntlet and teach the \u2026",
+          "changed_lines": 419,
+          "additions": 418,
+          "deletions": 1
+        },
+        {
+          "subject": "fix(craft): close criterion-gate credential leaks, sub-bullet AC3 esc\u2026",
+          "changed_lines": 273,
+          "additions": 246,
+          "deletions": 27
+        },
+        {
+          "subject": "fix(craft): honor loose-list continuations in criterion blocks; state\u2026",
+          "changed_lines": 150,
+          "additions": 140,
+          "deletions": 10
+        },
+        {
+          "subject": "fix(craft): neutralize control bytes, close truncate-before-scrub gap\u2026",
+          "changed_lines": 219,
+          "additions": 214,
+          "deletions": 5
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-175",
+      "pr_number": 175,
+      "pr_title": "feat(craft): refuse a slice close without a recorded criterion observation",
+      "merged_at": "2026-09-04T16:32:28Z",
+      "series_length": 21,
+      "commits": [
+        {
+          "subject": "feat(craft): add the candidate-set derivation gate",
+          "changed_lines": 746,
+          "additions": 746,
+          "deletions": 0
+        },
+        {
+          "subject": "feat(craft): wire /craft:slice's candidate set to the real gate",
+          "changed_lines": 324,
+          "additions": 319,
+          "deletions": 5
+        },
+        {
+          "subject": "refactor(craft): collapse the candidate-set gate's duplicated parsers",
+          "changed_lines": 95,
+          "additions": 24,
+          "deletions": 71
+        },
+        {
+          "subject": "fix(craft): score ledger entries not physical lines in candidate_set.py",
+          "changed_lines": 298,
+          "additions": 247,
+          "deletions": 51
+        },
+        {
+          "subject": "fix(craft): pin the fenced-block defense and close the eligibility fa\u2026",
+          "changed_lines": 247,
+          "additions": 222,
+          "deletions": 25
+        },
+        {
+          "subject": "fix(craft): mask HTML comments and reject duplicate headings in the c\u2026",
+          "changed_lines": 449,
+          "additions": 411,
+          "deletions": 38
+        },
+        {
+          "subject": "style(craft): rename an ambiguous loop variable in candidate_set.py",
+          "changed_lines": 2,
+          "additions": 1,
+          "deletions": 1
+        },
+        {
+          "subject": "feat(craft): certify a drafted partial-coverage list at the covers gate",
+          "changed_lines": 172,
+          "additions": 139,
+          "deletions": 33
+        },
+        {
+          "subject": "feat(craft): derive the candidate set with partially-covered criteria\u2026",
+          "changed_lines": 549,
+          "additions": 510,
+          "deletions": 39
+        },
+        {
+          "subject": "docs(craft): wire partial coverage through the slice ritual end to end",
+          "changed_lines": 385,
+          "additions": 378,
+          "deletions": 7
+        },
+        {
+          "subject": "refactor(craft): collapse the duplicated full/partial coverage arms",
+          "changed_lines": 56,
+          "additions": 22,
+          "deletions": 34
+        },
+        {
+          "subject": "fix(craft): triaged review fixes for partial-coverage covers gate",
+          "changed_lines": 195,
+          "additions": 169,
+          "deletions": 26
+        },
+        {
+          "subject": "fix(craft): apply closed set of review hygiene/accuracy fixes to cove\u2026",
+          "changed_lines": 46,
+          "additions": 31,
+          "deletions": 15
+        },
+        {
+          "subject": "fix(craft): close double-quote shell-injection hole in slice --title \u2026",
+          "changed_lines": 186,
+          "additions": 171,
+          "deletions": 15
+        },
+        {
+          "subject": "feat(craft): add the observation gate certifying Covers claims are ob\u2026",
+          "changed_lines": 968,
+          "additions": 968,
+          "deletions": 0
+        },
+        {
+          "subject": "feat(craft): wire the observation gate into Phase 6 and anchor its pr\u2026",
+          "changed_lines": 297,
+          "additions": 295,
+          "deletions": 2
+        },
+        {
+          "subject": "test(craft): pin the sanctioned verification-method vocabulary across\u2026",
+          "changed_lines": 158,
+          "additions": 158,
+          "deletions": 0
+        },
+        {
+          "subject": "refactor(craft): share the execute.md span reader between the two con\u2026",
+          "changed_lines": 56,
+          "additions": 8,
+          "deletions": 48
+        },
+        {
+          "subject": "fix(craft): close observation-gate correctness-review findings",
+          "changed_lines": 267,
+          "additions": 243,
+          "deletions": 24
+        },
+        {
+          "subject": "fix(craft): close observation-gate false-green paths from re-review",
+          "changed_lines": 236,
+          "additions": 214,
+          "deletions": 22
+        },
+        {
+          "subject": "fix(craft): close observation-gate invisible-Unicode and digit-anchor\u2026",
+          "changed_lines": 136,
+          "additions": 128,
+          "deletions": 8
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-174",
+      "pr_number": 174,
+      "pr_title": "feat(craft): remove every second-level reference between shared craft documents",
+      "merged_at": "2026-09-04T16:27:51Z",
+      "series_length": 8,
+      "commits": [
+        {
+          "subject": "feat(craft): add reference-depth gate over synthetic documents",
+          "changed_lines": 349,
+          "additions": 349,
+          "deletions": 0
+        },
+        {
+          "subject": "fix(craft): collapse six blocked-path write repetitions in execute.md",
+          "changed_lines": 116,
+          "additions": 110,
+          "deletions": 6
+        },
+        {
+          "subject": "feat(craft): promote the three needed documents into the reading skil\u2026",
+          "changed_lines": 124,
+          "additions": 88,
+          "deletions": 36
+        },
+        {
+          "subject": "test(craft): reword the three remaining _shared mentions, add referen\u2026",
+          "changed_lines": 104,
+          "additions": 87,
+          "deletions": 17
+        },
+        {
+          "subject": "refactor(craft): drop the subsumed gate assertion from the collapse s\u2026",
+          "changed_lines": 42,
+          "additions": 2,
+          "deletions": 40
+        },
+        {
+          "subject": "fix(craft): make status-ownership read unconditional in drive, streng\u2026",
+          "changed_lines": 64,
+          "additions": 51,
+          "deletions": 13
+        },
+        {
+          "subject": "fix(craft): pin blocked-path heading presence, clause-scope both skil\u2026",
+          "changed_lines": 122,
+          "additions": 88,
+          "deletions": 34
+        },
+        {
+          "subject": "fix(craft): attribute the in-progress write to execute, not the plann\u2026",
+          "changed_lines": 5,
+          "additions": 3,
+          "deletions": 2
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-173",
+      "pr_number": 173,
+      "pr_title": "feat(craft): keep a partially covered criterion in the slice candidate set",
+      "merged_at": "2026-09-04T03:58:22Z",
+      "series_length": 14,
+      "commits": [
+        {
+          "subject": "feat(craft): add the candidate-set derivation gate",
+          "changed_lines": 746,
+          "additions": 746,
+          "deletions": 0
+        },
+        {
+          "subject": "feat(craft): wire /craft:slice's candidate set to the real gate",
+          "changed_lines": 324,
+          "additions": 319,
+          "deletions": 5
+        },
+        {
+          "subject": "refactor(craft): collapse the candidate-set gate's duplicated parsers",
+          "changed_lines": 95,
+          "additions": 24,
+          "deletions": 71
+        },
+        {
+          "subject": "fix(craft): score ledger entries not physical lines in candidate_set.py",
+          "changed_lines": 298,
+          "additions": 247,
+          "deletions": 51
+        },
+        {
+          "subject": "fix(craft): pin the fenced-block defense and close the eligibility fa\u2026",
+          "changed_lines": 247,
+          "additions": 222,
+          "deletions": 25
+        },
+        {
+          "subject": "fix(craft): mask HTML comments and reject duplicate headings in the c\u2026",
+          "changed_lines": 449,
+          "additions": 411,
+          "deletions": 38
+        },
+        {
+          "subject": "style(craft): rename an ambiguous loop variable in candidate_set.py",
+          "changed_lines": 2,
+          "additions": 1,
+          "deletions": 1
+        },
+        {
+          "subject": "feat(craft): certify a drafted partial-coverage list at the covers gate",
+          "changed_lines": 172,
+          "additions": 139,
+          "deletions": 33
+        },
+        {
+          "subject": "feat(craft): derive the candidate set with partially-covered criteria\u2026",
+          "changed_lines": 549,
+          "additions": 510,
+          "deletions": 39
+        },
+        {
+          "subject": "docs(craft): wire partial coverage through the slice ritual end to end",
+          "changed_lines": 385,
+          "additions": 378,
+          "deletions": 7
+        },
+        {
+          "subject": "refactor(craft): collapse the duplicated full/partial coverage arms",
+          "changed_lines": 56,
+          "additions": 22,
+          "deletions": 34
+        },
+        {
+          "subject": "fix(craft): triaged review fixes for partial-coverage covers gate",
+          "changed_lines": 195,
+          "additions": 169,
+          "deletions": 26
+        },
+        {
+          "subject": "fix(craft): apply closed set of review hygiene/accuracy fixes to cove\u2026",
+          "changed_lines": 46,
+          "additions": 31,
+          "deletions": 15
+        },
+        {
+          "subject": "fix(craft): close double-quote shell-injection hole in slice --title \u2026",
+          "changed_lines": 186,
+          "additions": 171,
+          "deletions": 15
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-172",
+      "pr_number": 172,
+      "pr_title": "feat(craft): give the long shared documents a gated contents block",
+      "merged_at": "2026-09-04T03:41:18Z",
+      "series_length": 3,
+      "commits": [
+        {
+          "subject": "test(craft): retire the surviving prose-pin suite",
+          "changed_lines": 389,
+          "additions": 0,
+          "deletions": 389
+        },
+        {
+          "subject": "feat(craft): give the long shared documents a contents block and a gate",
+          "changed_lines": 593,
+          "additions": 593,
+          "deletions": 0
+        },
+        {
+          "subject": "fix(craft): read document structure with the masker the sibling gates\u2026",
+          "changed_lines": 313,
+          "additions": 225,
+          "deletions": 88
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-171",
+      "pr_number": 171,
+      "pr_title": "feat(craft): derive the candidate set from recorded criterion identifiers",
+      "merged_at": "2026-09-04T01:17:18Z",
+      "series_length": 7,
+      "commits": [
+        {
+          "subject": "feat(craft): add the candidate-set derivation gate",
+          "changed_lines": 746,
+          "additions": 746,
+          "deletions": 0
+        },
+        {
+          "subject": "feat(craft): wire /craft:slice's candidate set to the real gate",
+          "changed_lines": 324,
+          "additions": 319,
+          "deletions": 5
+        },
+        {
+          "subject": "refactor(craft): collapse the candidate-set gate's duplicated parsers",
+          "changed_lines": 95,
+          "additions": 24,
+          "deletions": 71
+        },
+        {
+          "subject": "fix(craft): score ledger entries not physical lines in candidate_set.py",
+          "changed_lines": 298,
+          "additions": 247,
+          "deletions": 51
+        },
+        {
+          "subject": "fix(craft): pin the fenced-block defense and close the eligibility fa\u2026",
+          "changed_lines": 247,
+          "additions": 222,
+          "deletions": 25
+        },
+        {
+          "subject": "fix(craft): mask HTML comments and reject duplicate headings in the c\u2026",
+          "changed_lines": 449,
+          "additions": 411,
+          "deletions": 38
+        },
+        {
+          "subject": "style(craft): rename an ambiguous loop variable in candidate_set.py",
+          "changed_lines": 2,
+          "additions": 1,
+          "deletions": 1
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-170",
+      "pr_number": 170,
+      "pr_title": "test(craft): retire the prose-pin contract suites",
+      "merged_at": "2026-09-03T22:58:30Z",
+      "series_length": 1,
+      "commits": [
+        {
+          "subject": "test(craft): retire the prose-pin contract suites",
+          "changed_lines": 15694,
+          "additions": 0,
+          "deletions": 15694
+        }
+      ],
+      "human_verdict": null,
+      "ambiguous": true,
+      "ambiguous_note": "single-commit branch: fix-up-dominance is a degenerate question for a 1-commit series (squash and preserve produce the same merge output), so no meaningful human verdict applies \u2014 recorded for completeness, not as a regression case."
+    },
+    {
+      "case_id": "pr-169",
+      "pr_number": 169,
+      "pr_title": "craft: a slice parent records which spec criteria it makes green",
+      "merged_at": "2026-09-03T22:00:33Z",
+      "series_length": 5,
+      "commits": [
+        {
+          "subject": "feat(craft): add covers_gate.py to certify --covers against spec crit\u2026",
+          "changed_lines": 347,
+          "additions": 347,
+          "deletions": 0
+        },
+        {
+          "subject": "feat(craft): slice writes and certifies the Covers field",
+          "changed_lines": 208,
+          "additions": 207,
+          "deletions": 1
+        },
+        {
+          "subject": "fix(craft): unblock covers gate on legacy specs, anchor heading, tigh\u2026",
+          "changed_lines": 213,
+          "additions": 194,
+          "deletions": 19
+        },
+        {
+          "subject": "fix(craft): close covers-gate deadlock via heading casing, fence-blin\u2026",
+          "changed_lines": 331,
+          "additions": 308,
+          "deletions": 23
+        },
+        {
+          "subject": "fix(craft): close CommonMark line-forging and --covers injection hole\u2026",
+          "changed_lines": 160,
+          "additions": 154,
+          "deletions": 6
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-168",
+      "pr_number": 168,
+      "pr_title": "refactor(craft): move build mechanism into the executor, narrow the gate to measured evidence",
+      "merged_at": "2026-09-03T22:16:04Z",
+      "series_length": 13,
+      "commits": [
+        {
+          "subject": "test: pre-register the observation-point-enumeration eval",
+          "changed_lines": 308,
+          "additions": 308,
+          "deletions": 0
+        },
+        {
+          "subject": "test: pre-register the gate-reads-the-evidence-artifact eval",
+          "changed_lines": 291,
+          "additions": 291,
+          "deletions": 0
+        },
+        {
+          "subject": "test: record the observation-point and gate-artifact eval baselines",
+          "changed_lines": 887,
+          "additions": 730,
+          "deletions": 157
+        },
+        {
+          "subject": "refactor(craft): move build mechanism from the dispatch into the exec\u2026",
+          "changed_lines": 688,
+          "additions": 575,
+          "deletions": 113
+        },
+        {
+          "subject": "fix(craft): restore the dispatch prose the reframe had no reason to r\u2026",
+          "changed_lines": 36,
+          "additions": 10,
+          "deletions": 26
+        },
+        {
+          "subject": "fix(craft): keep the controller's test-run obligations in the dispatch",
+          "changed_lines": 23,
+          "additions": 12,
+          "deletions": 11
+        },
+        {
+          "subject": "refactor(craft): narrow the drift-gate change to what evidence supports",
+          "changed_lines": 57,
+          "additions": 18,
+          "deletions": 39
+        },
+        {
+          "subject": "test(craft): record the observation-point treatment arm \u2014 5/5 on the \u2026",
+          "changed_lines": 52,
+          "additions": 52,
+          "deletions": 0
+        },
+        {
+          "subject": "test(craft): correct stale line references in the transcript fixture",
+          "changed_lines": 4,
+          "additions": 2,
+          "deletions": 2
+        },
+        {
+          "subject": "test(craft): reconcile the gate fixture's diffstats with its real diff",
+          "changed_lines": 18,
+          "additions": 9,
+          "deletions": 9
+        },
+        {
+          "subject": "test(craft): delete the prose pins guarding the executor dispatch con\u2026",
+          "changed_lines": 2258,
+          "additions": 0,
+          "deletions": 2258
+        },
+        {
+          "subject": "test(craft): record the gate-reads-the-evidence-artifact case",
+          "changed_lines": 196,
+          "additions": 123,
+          "deletions": 73
+        },
+        {
+          "subject": "fix(craft): restore the pinned wording for security-finding escalation",
+          "changed_lines": 6,
+          "additions": 3,
+          "deletions": 3
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-167",
+      "pr_number": 167,
+      "pr_title": "Remove ranger",
+      "merged_at": "2026-09-03T21:22:19Z",
+      "series_length": 4,
+      "commits": [
+        {
+          "subject": "refactor(trailhead): remove the ranger plugin",
+          "changed_lines": 13906,
+          "additions": 23,
+          "deletions": 13883
+        },
+        {
+          "subject": "refactor(craft): collapse execute to a single procedure with no dual \u2026",
+          "changed_lines": 825,
+          "additions": 242,
+          "deletions": 583
+        },
+        {
+          "subject": "docs(trailhead): drop the ranger citations from portage, lore, and camp",
+          "changed_lines": 103,
+          "additions": 41,
+          "deletions": 62
+        },
+        {
+          "subject": "style(craft): rewrap two test docstrings under the 120-column limit",
+          "changed_lines": 14,
+          "additions": 8,
+          "deletions": 6
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-166",
+      "pr_number": 166,
+      "pr_title": "craft: catch compound acceptance criteria at the gauntlet",
+      "merged_at": "2026-09-03T20:06:51Z",
+      "series_length": 13,
+      "commits": [
+        {
+          "subject": "feat(craft): make slice selection a three-level judgment",
+          "changed_lines": 113,
+          "additions": 96,
+          "deletions": 17
+        },
+        {
+          "subject": "craft: stand up the compound-criterion eval case and observe it red",
+          "changed_lines": 224,
+          "additions": 224,
+          "deletions": 0
+        },
+        {
+          "subject": "fix(craft): fix the Acceptance Criteria comment in spec.md template",
+          "changed_lines": 16,
+          "additions": 15,
+          "deletions": 1
+        },
+        {
+          "subject": "craft: restore the testability bar to the spec template's criteria co\u2026",
+          "changed_lines": 5,
+          "additions": 4,
+          "deletions": 1
+        },
+        {
+          "subject": "feat(craft): teach the consistency pass to detect compound criteria",
+          "changed_lines": 35,
+          "additions": 30,
+          "deletions": 5
+        },
+        {
+          "subject": "craft: reconcile the auditor's mechanical claim with its one judgment\u2026",
+          "changed_lines": 4,
+          "additions": 3,
+          "deletions": 1
+        },
+        {
+          "subject": "craft: prove compound detection generalizes, across three fixtures",
+          "changed_lines": 306,
+          "additions": 304,
+          "deletions": 2
+        },
+        {
+          "subject": "feat(craft): bind a reported compound criterion to the gauntlet's Cri\u2026",
+          "changed_lines": 20,
+          "additions": 18,
+          "deletions": 2
+        },
+        {
+          "subject": "craft: capture a real consistency-pass report as the adjudication arm\u2026",
+          "changed_lines": 51,
+          "additions": 51,
+          "deletions": 0
+        },
+        {
+          "subject": "craft: record the severity arm, including that its baseline was not red",
+          "changed_lines": 44,
+          "additions": 43,
+          "deletions": 1
+        },
+        {
+          "subject": "craft: point the README at MANUAL-EVAL.md alongside MANUAL-SMOKE.md",
+          "changed_lines": 12,
+          "additions": 10,
+          "deletions": 2
+        },
+        {
+          "subject": "craft: correct an overstated evidence claim and the stale gating framing",
+          "changed_lines": 99,
+          "additions": 86,
+          "deletions": 13
+        },
+        {
+          "subject": "craft: pin the eval dispatch pattern's trust boundary",
+          "changed_lines": 23,
+          "additions": 22,
+          "deletions": 1
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-165",
+      "pr_number": 165,
+      "pr_title": "craft: /craft:drive \u2014 take a ready spec through one slice end to end",
+      "merged_at": "2026-09-02T21:55:32Z",
+      "series_length": 17,
+      "commits": [
+        {
+          "subject": "feat(craft): add /craft:drive entry point and selection phase",
+          "changed_lines": 404,
+          "additions": 404,
+          "deletions": 0
+        },
+        {
+          "subject": "feat(craft): checkpoint /craft:drive's run state on the slice parent",
+          "changed_lines": 232,
+          "additions": 232,
+          "deletions": 0
+        },
+        {
+          "subject": "test(ranger): assumption probe \u2014 blocked escalation child stays outsi\u2026",
+          "changed_lines": 43,
+          "additions": 43,
+          "deletions": 0
+        },
+        {
+          "subject": "Revert \"test(ranger): assumption probe \u2014 blocked escalation child sta\u2026",
+          "changed_lines": 43,
+          "additions": 0,
+          "deletions": 43
+        },
+        {
+          "subject": "feat(craft): add the driver's escalation contract to drive/SKILL.md",
+          "changed_lines": 395,
+          "additions": 394,
+          "deletions": 1
+        },
+        {
+          "subject": "feat(craft): driver plan phase dispatches planner and escalates on a \u2026",
+          "changed_lines": 326,
+          "additions": 313,
+          "deletions": 13
+        },
+        {
+          "subject": "fix(craft): route the driver's planner-blocked stop through the escal\u2026",
+          "changed_lines": 31,
+          "additions": 28,
+          "deletions": 3
+        },
+        {
+          "subject": "feat(craft): drive's build phase \u2014 driver-worker agent and its dispatch",
+          "changed_lines": 504,
+          "additions": 491,
+          "deletions": 13
+        },
+        {
+          "subject": "feat(craft): drive's PR tail maps portage's four terminal tokens",
+          "changed_lines": 375,
+          "additions": 364,
+          "deletions": 11
+        },
+        {
+          "subject": "feat(craft): add drive's slice close and boundary stop",
+          "changed_lines": 231,
+          "additions": 220,
+          "deletions": 11
+        },
+        {
+          "subject": "test(trailhead): add drive to the craft skill inventory",
+          "changed_lines": 4,
+          "additions": 4,
+          "deletions": 0
+        },
+        {
+          "subject": "refactor(craft): retire drive's incremental-build scaffolding",
+          "changed_lines": 85,
+          "additions": 41,
+          "deletions": 44
+        },
+        {
+          "subject": "fix(craft): connect drive's resume, PR-open, and council-persist seams",
+          "changed_lines": 164,
+          "additions": 150,
+          "deletions": 14
+        },
+        {
+          "subject": "fix(craft): close the Important/Minor findings on /craft:drive's review",
+          "changed_lines": 366,
+          "additions": 343,
+          "deletions": 23
+        },
+        {
+          "subject": "fix(craft): repair correctness defects in drive's ritual text",
+          "changed_lines": 350,
+          "additions": 290,
+          "deletions": 60
+        },
+        {
+          "subject": "fix(craft): bring drive's escalation body and group-name substitution\u2026",
+          "changed_lines": 52,
+          "additions": 44,
+          "deletions": 8
+        },
+        {
+          "subject": "craft: run drive's plan and build phases inline, attended",
+          "changed_lines": 801,
+          "additions": 226,
+          "deletions": 575
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-164",
+      "pr_number": 164,
+      "pr_title": "fix: two slice-8 follow-ups \u2014 the lore parent edge and the outpost restart race",
+      "merged_at": "2026-09-02T18:46:04Z",
+      "series_length": 2,
+      "commits": [
+        {
+          "subject": "fix(lore): reject a kind-prefixed task parent, as depends-on already is",
+          "changed_lines": 170,
+          "additions": 154,
+          "deletions": 16
+        },
+        {
+          "subject": "fix(trailhead): scale restart's pid-settle window with its health tim\u2026",
+          "changed_lines": 121,
+          "additions": 119,
+          "deletions": 2
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-163",
+      "pr_number": 163,
+      "pr_title": "feat(craft): the gauntlet reviews a spec and nothing else",
+      "merged_at": "2026-09-02T17:41:25Z",
+      "series_length": 8,
+      "commits": [
+        {
+          "subject": "test: pin the single-subject gauntlet and the sole ADR author",
+          "changed_lines": 172,
+          "additions": 147,
+          "deletions": 25
+        },
+        {
+          "subject": "test(craft): amputate the gauntlet skill's adr mode",
+          "changed_lines": 825,
+          "additions": 97,
+          "deletions": 728
+        },
+        {
+          "subject": "test(craft): amputate the adr-review bars from the shared council doc\u2026",
+          "changed_lines": 120,
+          "additions": 31,
+          "deletions": 89
+        },
+        {
+          "subject": "refactor(craft): drop scaffolding the gauntlet amputation orphaned",
+          "changed_lines": 78,
+          "additions": 23,
+          "deletions": 55
+        },
+        {
+          "subject": "refactor(craft): retire the last absence-assertion and de-narrate its\u2026",
+          "changed_lines": 37,
+          "additions": 8,
+          "deletions": 29
+        },
+        {
+          "subject": "fix(craft): finish removing the ADR gauntlet mode from craft's prose",
+          "changed_lines": 130,
+          "additions": 67,
+          "deletions": 63
+        },
+        {
+          "subject": "docs(craft): state what the draft-subject regex is for, not what the \u2026",
+          "changed_lines": 7,
+          "additions": 4,
+          "deletions": 3
+        },
+        {
+          "subject": "fix(craft): close the gauntlet's single-subject erosion gaps from rev\u2026",
+          "changed_lines": 129,
+          "additions": 116,
+          "deletions": 13
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-162",
+      "pr_number": 162,
+      "pr_title": "feat(craft): a slice that ships a visual surface ships its states",
+      "merged_at": "2026-09-02T14:40:46Z",
+      "series_length": 10,
+      "commits": [
+        {
+          "subject": "chore(craft): amputate the uncalled HTML-mockup design pipeline",
+          "changed_lines": 2296,
+          "additions": 32,
+          "deletions": 2264
+        },
+        {
+          "subject": "feat(craft): land the state-coverage reference in _shared/slice.md",
+          "changed_lines": 169,
+          "additions": 169,
+          "deletions": 0
+        },
+        {
+          "subject": "feat(craft): slice states the visual-surface call and enumerates stat\u2026",
+          "changed_lines": 139,
+          "additions": 137,
+          "deletions": 2
+        },
+        {
+          "subject": "feat(craft): plan step 6.5 produces the design doc before Define Tasks",
+          "changed_lines": 137,
+          "additions": 137,
+          "deletions": 0
+        },
+        {
+          "subject": "fix(craft): name the design-doc label plan/SKILL.md's step 6.5 leaves\u2026",
+          "changed_lines": 80,
+          "additions": 73,
+          "deletions": 7
+        },
+        {
+          "subject": "feat(craft): Phase 6 refuses a slice close when enumerated states mis\u2026",
+          "changed_lines": 107,
+          "additions": 106,
+          "deletions": 1
+        },
+        {
+          "subject": "refactor(craft): collapse the state-coverage suite's per-document hel\u2026",
+          "changed_lines": 210,
+          "additions": 94,
+          "deletions": 116
+        },
+        {
+          "subject": "fix(craft): close the writer-reader gap in the state-coverage close gate",
+          "changed_lines": 182,
+          "additions": 165,
+          "deletions": 17
+        },
+        {
+          "subject": "fix(craft): reconcile state-coverage review findings",
+          "changed_lines": 172,
+          "additions": 142,
+          "deletions": 30
+        },
+        {
+          "subject": "fix(craft): tighten state-coverage gate path containment and honesty",
+          "changed_lines": 96,
+          "additions": 95,
+          "deletions": 1
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-161",
+      "pr_number": 161,
+      "pr_title": "craft: distill loses its forward machinery",
+      "merged_at": "2026-09-02T03:55:49Z",
+      "series_length": 7,
+      "commits": [
+        {
+          "subject": "fix(craft): distill's cluster classes lose the forward-anchored class",
+          "changed_lines": 303,
+          "additions": 84,
+          "deletions": 219
+        },
+        {
+          "subject": "fix(craft): distill's write order ends at the member-spec completion \u2026",
+          "changed_lines": 297,
+          "additions": 75,
+          "deletions": 222
+        },
+        {
+          "subject": "fix(craft): close two review findings on the distill forward-amputation",
+          "changed_lines": 71,
+          "additions": 46,
+          "deletions": 25
+        },
+        {
+          "subject": "fix(craft): re-anchor the absorption-sweep exclusion and key surfacin\u2026",
+          "changed_lines": 112,
+          "additions": 98,
+          "deletions": 14
+        },
+        {
+          "subject": "fix(craft): describe the adr provenance edge as carried, not as authored",
+          "changed_lines": 27,
+          "additions": 22,
+          "deletions": 5
+        },
+        {
+          "subject": "refactor(craft): collapse duplicate distill pins and retire dead scaf\u2026",
+          "changed_lines": 64,
+          "additions": 14,
+          "deletions": 50
+        },
+        {
+          "subject": "fix(craft): resolve whole-change review findings on distill's forward\u2026",
+          "changed_lines": 293,
+          "additions": 221,
+          "deletions": 72
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-160",
+      "pr_number": 160,
+      "pr_title": "feat(craft): re-aim the spec gauntlet for the vertical-slice model",
+      "merged_at": "2026-09-01T22:50:15Z",
+      "series_length": 5,
+      "commits": [
+        {
+          "subject": "docs(craft): re-aim the spec gauntlet's prose for the vertical-slice \u2026",
+          "changed_lines": 235,
+          "additions": 229,
+          "deletions": 6
+        },
+        {
+          "subject": "fix(craft): wire the divergence prober's derivation question to a ver\u2026",
+          "changed_lines": 307,
+          "additions": 251,
+          "deletions": 56
+        },
+        {
+          "subject": "docs(craft): name Required Interfaces in brainstorm's canonical-secti\u2026",
+          "changed_lines": 29,
+          "additions": 28,
+          "deletions": 1
+        },
+        {
+          "subject": "fix(craft): close the second-round review findings on the gauntlet re\u2026",
+          "changed_lines": 139,
+          "additions": 118,
+          "deletions": 21
+        },
+        {
+          "subject": "test(craft): pin the adr-review block by digest rather than a 2269-ch\u2026",
+          "changed_lines": 14,
+          "additions": 11,
+          "deletions": 3
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-159",
+      "pr_number": 159,
+      "pr_title": "fix(craft): scope the ledger reconcile to labelled slice parents too",
+      "merged_at": "2026-09-01T22:17:33Z",
+      "series_length": 1,
+      "commits": [
+        {
+          "subject": "fix(craft): scope the ledger reconcile to labelled slice parents too",
+          "changed_lines": 43,
+          "additions": 41,
+          "deletions": 2
+        }
+      ],
+      "human_verdict": null,
+      "ambiguous": true,
+      "ambiguous_note": "single-commit branch: fix-up-dominance is a degenerate question for a 1-commit series (squash and preserve produce the same merge output), so no meaningful human verdict applies \u2014 recorded for completeness, not as a regression case."
+    },
+    {
+      "case_id": "pr-158",
+      "pr_number": 158,
+      "pr_title": "fix(craft): scope the open-slice guard to labelled slice parents",
+      "merged_at": "2026-09-01T21:59:37Z",
+      "series_length": 1,
+      "commits": [
+        {
+          "subject": "fix(craft): scope the open-slice guard to labelled slice parents",
+          "changed_lines": 167,
+          "additions": 147,
+          "deletions": 20
+        }
+      ],
+      "human_verdict": null,
+      "ambiguous": true,
+      "ambiguous_note": "single-commit branch: fix-up-dominance is a degenerate question for a 1-commit series (squash and preserve produce the same merge output), so no meaningful human verdict applies \u2014 recorded for completeness, not as a regression case."
+    },
+    {
+      "case_id": "pr-157",
+      "pr_number": 157,
+      "pr_title": "feat(craft): a brainstorm exits with one spec, and gains the untrusted-value guard",
+      "merged_at": "2026-09-01T20:29:20Z",
+      "series_length": 3,
+      "commits": [
+        {
+          "subject": "feat(craft): a brainstorm exits with one spec",
+          "changed_lines": 605,
+          "additions": 274,
+          "deletions": 331
+        },
+        {
+          "subject": "feat(craft): give brainstorm the untrusted-value guard",
+          "changed_lines": 114,
+          "additions": 114,
+          "deletions": 0
+        },
+        {
+          "subject": "fix(craft): close the review findings on slice 5",
+          "changed_lines": 140,
+          "additions": 103,
+          "deletions": 37
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-156",
+      "pr_number": 156,
+      "pr_title": "feat(craft): the slice loop gains its terminus",
+      "merged_at": "2026-09-01T15:42:36Z",
+      "series_length": 4,
+      "commits": [
+        {
+          "subject": "feat(craft): distill queues a spec the slice loop closed out",
+          "changed_lines": 146,
+          "additions": 142,
+          "deletions": 4
+        },
+        {
+          "subject": "fix(craft): give distill the untrusted-value guard its siblings carry",
+          "changed_lines": 49,
+          "additions": 49,
+          "deletions": 0
+        },
+        {
+          "subject": "feat(craft): planning writes no spec status, and routes a ready spec \u2026",
+          "changed_lines": 124,
+          "additions": 74,
+          "deletions": 50
+        },
+        {
+          "subject": "fix(craft): reconcile the completion contract across distill, plan, a\u2026",
+          "changed_lines": 125,
+          "additions": 89,
+          "deletions": 36
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-155",
+      "pr_number": 155,
+      "pr_title": "feat(craft): /craft:slice chooses and materializes the next slice",
+      "merged_at": "2026-09-01T07:21:36Z",
+      "series_length": 11,
+      "commits": [
+        {
+          "subject": "feat(craft): add /craft:slice skill for selection and materialization",
+          "changed_lines": 367,
+          "additions": 364,
+          "deletions": 3
+        },
+        {
+          "subject": "fix(craft): guard execute's in-progress branch against a not-yet-plan\u2026",
+          "changed_lines": 51,
+          "additions": 50,
+          "deletions": 1
+        },
+        {
+          "subject": "fix(craft): make execute's claim write craft/branch unconditionally",
+          "changed_lines": 38,
+          "additions": 34,
+          "deletions": 4
+        },
+        {
+          "subject": "feat(craft): give /craft:slice re-entry guards, termination, and a Sl\u2026",
+          "changed_lines": 265,
+          "additions": 261,
+          "deletions": 4
+        },
+        {
+          "subject": "feat(craft): root /craft:plan at an existing slice parent",
+          "changed_lines": 167,
+          "additions": 152,
+          "deletions": 15
+        },
+        {
+          "subject": "fix(craft): fix pass on slice-skill inventory, allowlist, and prose",
+          "changed_lines": 52,
+          "additions": 42,
+          "deletions": 10
+        },
+        {
+          "subject": "refactor(craft): drop the redundant non-owner pointer to slice/SKILL.md",
+          "changed_lines": 2,
+          "additions": 1,
+          "deletions": 1
+        },
+        {
+          "subject": "fix(craft): reconcile in-progress discrimination and re-wire the slic\u2026",
+          "changed_lines": 450,
+          "additions": 434,
+          "deletions": 16
+        },
+        {
+          "subject": "fix(craft): preserve slice value claim through plan, fix slice loop o\u2026",
+          "changed_lines": 382,
+          "additions": 365,
+          "deletions": 17
+        },
+        {
+          "subject": "fix(craft): final re-review fixes for the slice loop wiring",
+          "changed_lines": 557,
+          "additions": 506,
+          "deletions": 51
+        },
+        {
+          "subject": "fix(craft): scrub, strip, and shape-check slice/plan interpolation sites",
+          "changed_lines": 129,
+          "additions": 128,
+          "deletions": 1
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-154",
+      "pr_number": 154,
+      "pr_title": "feat(craft): make scoped per-slice test runs the executor default",
+      "merged_at": "2026-09-01T05:16:27Z",
+      "series_length": 2,
+      "commits": [
+        {
+          "subject": "feat(craft): make scoped per-slice test runs the executor dispatch de\u2026",
+          "changed_lines": 190,
+          "additions": 184,
+          "deletions": 6
+        },
+        {
+          "subject": "fix(craft): correct the entire-suite claim and harden the scoped-run \u2026",
+          "changed_lines": 59,
+          "additions": 57,
+          "deletions": 2
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-153",
+      "pr_number": 153,
+      "pr_title": "camp: name a session by the member it is rooted at",
+      "merged_at": "2026-09-01T14:04:59Z",
+      "series_length": 1,
+      "commits": [
+        {
+          "subject": "camp: name a session by the member it is rooted at",
+          "changed_lines": 519,
+          "additions": 482,
+          "deletions": 37
+        }
+      ],
+      "human_verdict": null,
+      "ambiguous": true,
+      "ambiguous_note": "single-commit branch: fix-up-dominance is a degenerate question for a 1-commit series (squash and preserve produce the same merge output), so no meaningful human verdict applies \u2014 recorded for completeness, not as a regression case."
+    },
+    {
+      "case_id": "pr-152",
+      "pr_number": 152,
+      "pr_title": "refactor(craft): name the observable increment a slice and the unit beneath it a task",
+      "merged_at": "2026-09-01T02:23:06Z",
+      "series_length": 8,
+      "commits": [
+        {
+          "subject": "feat(craft): add the canonical slice/task vocabulary definition",
+          "changed_lines": 142,
+          "additions": 142,
+          "deletions": 0
+        },
+        {
+          "subject": "refactor(craft): move the planning surface to the slice/task vocabulary",
+          "changed_lines": 196,
+          "additions": 146,
+          "deletions": 50
+        },
+        {
+          "subject": "refactor(craft): move the execute surface to the slice/task vocabulary",
+          "changed_lines": 408,
+          "additions": 268,
+          "deletions": 140
+        },
+        {
+          "subject": "refactor(craft): move the remaining prose surface to slice/task vocab\u2026",
+          "changed_lines": 117,
+          "additions": 82,
+          "deletions": 35
+        },
+        {
+          "subject": "refactor(craft): close the last two old-sense vocabulary sites",
+          "changed_lines": 19,
+          "additions": 17,
+          "deletions": 2
+        },
+        {
+          "subject": "refactor(craft): reuse the COUNCIL_SHARED constant in the vocabulary \u2026",
+          "changed_lines": 2,
+          "additions": 1,
+          "deletions": 1
+        },
+        {
+          "subject": "fix(craft): repair broken cross-refs and guards after slice/task rename",
+          "changed_lines": 74,
+          "additions": 54,
+          "deletions": 20
+        },
+        {
+          "subject": "fix(craft): give the inline-heading guard a single pattern, repair po\u2026",
+          "changed_lines": 66,
+          "additions": 36,
+          "deletions": 30
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-151",
+      "pr_number": 151,
+      "pr_title": "feat(lore): carve an outpost config zone out of the vault write guard",
+      "merged_at": "2026-08-31T22:43:51Z",
+      "series_length": 1,
+      "commits": [
+        {
+          "subject": "feat(lore): carve an outpost config zone out of the vault write guard",
+          "changed_lines": 131,
+          "additions": 106,
+          "deletions": 25
+        }
+      ],
+      "human_verdict": null,
+      "ambiguous": true,
+      "ambiguous_note": "single-commit branch: fix-up-dominance is a degenerate question for a 1-commit series (squash and preserve produce the same merge output), so no meaningful human verdict applies \u2014 recorded for completeness, not as a regression case."
+    },
+    {
+      "case_id": "pr-150",
+      "pr_number": 150,
+      "pr_title": "feat(ranger): add the scout skill",
+      "merged_at": "2026-08-31T00:22:53Z",
+      "series_length": 2,
+      "commits": [
+        {
+          "subject": "feat(ranger): add the scout skill",
+          "changed_lines": 165,
+          "additions": 163,
+          "deletions": 2
+        },
+        {
+          "subject": "feat(ranger): scout ships its branch through portage",
+          "changed_lines": 60,
+          "additions": 48,
+          "deletions": 12
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-149",
+      "pr_number": 149,
+      "pr_title": "docs(craft): retire freeze vocabulary and frame the gauntlet as refining",
+      "merged_at": "2026-08-28T16:32:43Z",
+      "series_length": 1,
+      "commits": [
+        {
+          "subject": "docs(craft): retire freeze vocabulary and frame the gauntlet as refining",
+          "changed_lines": 255,
+          "additions": 131,
+          "deletions": 124
+        }
+      ],
+      "human_verdict": null,
+      "ambiguous": true,
+      "ambiguous_note": "single-commit branch: fix-up-dominance is a degenerate question for a 1-commit series (squash and preserve produce the same merge output), so no meaningful human verdict applies \u2014 recorded for completeness, not as a regression case."
+    },
+    {
+      "case_id": "pr-148",
+      "pr_number": 148,
+      "pr_title": "fix(craft,lore): revise-outcome gauntlet, distill-only ADR activation, active-ADR immutability guard",
+      "merged_at": "2026-08-28T13:21:35Z",
+      "series_length": 19,
+      "commits": [
+        {
+          "subject": "feat(craft): add operator `answered` disposition and edit-first test \u2026",
+          "changed_lines": 118,
+          "additions": 79,
+          "deletions": 39
+        },
+        {
+          "subject": "test(craft): pin the route rule's final-disposition reading and answe\u2026",
+          "changed_lines": 26,
+          "additions": 21,
+          "deletions": 5
+        },
+        {
+          "subject": "fix(craft): close route-totality and re-adjudication gaps in gauntlet\u2026",
+          "changed_lines": 165,
+          "additions": 146,
+          "deletions": 19
+        },
+        {
+          "subject": "fix(craft): name the re-adjudication re-present in the escalation tab\u2026",
+          "changed_lines": 32,
+          "additions": 31,
+          "deletions": 1
+        },
+        {
+          "subject": "test: assumption probe for ADR-immutability guard seam",
+          "changed_lines": 158,
+          "additions": 158,
+          "deletions": 0
+        },
+        {
+          "subject": "fix(craft): replace gauntlet's reframed disposition with prescription\u2026",
+          "changed_lines": 261,
+          "additions": 199,
+          "deletions": 62
+        },
+        {
+          "subject": "feat(lore): structurally block body-changing writes against active adrs",
+          "changed_lines": 800,
+          "additions": 625,
+          "deletions": 175
+        },
+        {
+          "subject": "fix(craft): delete the gauntlet's route rule; freeze on absence of `r\u2026",
+          "changed_lines": 716,
+          "additions": 439,
+          "deletions": 277
+        },
+        {
+          "subject": "fix(craft): name the draft adr a withheld freeze leaves, not a droppe\u2026",
+          "changed_lines": 29,
+          "additions": 27,
+          "deletions": 2
+        },
+        {
+          "subject": "fix(craft): gauntlet stops flipping an adr; distill activates on the \u2026",
+          "changed_lines": 531,
+          "additions": 389,
+          "deletions": 142
+        },
+        {
+          "subject": "fix(craft): stop the shared tail promising a flip the adr mode no lon\u2026",
+          "changed_lines": 90,
+          "additions": 61,
+          "deletions": 29
+        },
+        {
+          "subject": "feat(craft): describe distill activation and reaches-downstream orpha\u2026",
+          "changed_lines": 90,
+          "additions": 74,
+          "deletions": 16
+        },
+        {
+          "subject": "feat: distill routes forward-anchored clusters to the zero-ADR path",
+          "changed_lines": 270,
+          "additions": 266,
+          "deletions": 4
+        },
+        {
+          "subject": "fix(craft): name the narrowed exclusion from the activation step it f\u2026",
+          "changed_lines": 22,
+          "additions": 21,
+          "deletions": 1
+        },
+        {
+          "subject": "chore: author the superseding ADR and prove Slice 1's metadata exception",
+          "changed_lines": 0,
+          "additions": 0,
+          "deletions": 0
+        },
+        {
+          "subject": "refactor(craft): collapse duplicated section slicers, retire stale cr\u2026",
+          "changed_lines": 133,
+          "additions": 80,
+          "deletions": 53
+        },
+        {
+          "subject": "fix(craft): key the absorption sweep on the edge that exists, delete \u2026",
+          "changed_lines": 252,
+          "additions": 222,
+          "deletions": 30
+        },
+        {
+          "subject": "fix(lore): close the status-laundering bypass of active-adr immutability",
+          "changed_lines": 284,
+          "additions": 277,
+          "deletions": 7
+        },
+        {
+          "subject": "fix: rename ambiguous loop variable in adr-active-immutable test",
+          "changed_lines": 2,
+          "additions": 1,
+          "deletions": 1
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-147",
+      "pr_number": 147,
+      "pr_title": "feat(trailhead): SessionStart update-check with changelog delta and hardened provenance",
+      "merged_at": "2026-08-27T20:25:06Z",
+      "series_length": 19,
+      "commits": [
+        {
+          "subject": "docs(trailhead): retire the install-manifest vaporware doc",
+          "changed_lines": 269,
+          "additions": 108,
+          "deletions": 161
+        },
+        {
+          "subject": "test: assumption probe for plugin-declared SessionStart hook seam",
+          "changed_lines": 244,
+          "additions": 244,
+          "deletions": 0
+        },
+        {
+          "subject": "feat(trailhead): record install provenance stamp",
+          "changed_lines": 951,
+          "additions": 705,
+          "deletions": 246
+        },
+        {
+          "subject": "docs(trailhead): describe current state in install-manifest guard doc\u2026",
+          "changed_lines": 18,
+          "additions": 9,
+          "deletions": 9
+        },
+        {
+          "subject": "feat(trailhead): add update-detection probe (trailhead update --check)",
+          "changed_lines": 770,
+          "additions": 769,
+          "deletions": 1
+        },
+        {
+          "subject": "feat(trailhead): extract changelog delta into update --check",
+          "changed_lines": 304,
+          "additions": 292,
+          "deletions": 12
+        },
+        {
+          "subject": "feat(trailhead): apply-mode `trailhead update` performs the upgrade",
+          "changed_lines": 787,
+          "additions": 768,
+          "deletions": 19
+        },
+        {
+          "subject": "feat(trailhead): SessionStart delivery via a first-party trailhead pl\u2026",
+          "changed_lines": 1039,
+          "additions": 1025,
+          "deletions": 14
+        },
+        {
+          "subject": "test(trailhead): pin control-sequence containment in the session-star\u2026",
+          "changed_lines": 37,
+          "additions": 35,
+          "deletions": 2
+        },
+        {
+          "subject": "refactor(trailhead): collapse cross-slice duplication in the self-upd\u2026",
+          "changed_lines": 189,
+          "additions": 102,
+          "deletions": 87
+        },
+        {
+          "subject": "fix(trailhead): close self-update review findings (RCE, rollback, red\u2026",
+          "changed_lines": 719,
+          "additions": 653,
+          "deletions": 66
+        },
+        {
+          "subject": "fix(trailhead): close the sha argument-injection class, not just the \u2026",
+          "changed_lines": 473,
+          "additions": 427,
+          "deletions": 46
+        },
+        {
+          "subject": "fix(trailhead): close remaining Important findings from the self-upda\u2026",
+          "changed_lines": 128,
+          "additions": 120,
+          "deletions": 8
+        },
+        {
+          "subject": "fix(trailhead): close Minor findings and sync the hook's independent \u2026",
+          "changed_lines": 235,
+          "additions": 200,
+          "deletions": 35
+        },
+        {
+          "subject": "docs(trailhead): tighten sanitizer docstring after narrowing the stri\u2026",
+          "changed_lines": 14,
+          "additions": 8,
+          "deletions": 6
+        },
+        {
+          "subject": "fix(trailhead): neutralize fence runs split by invisible codepoints",
+          "changed_lines": 126,
+          "additions": 122,
+          "deletions": 4
+        },
+        {
+          "subject": "refactor(trailhead): shrink the provenance stamp to what cannot be de\u2026",
+          "changed_lines": 1229,
+          "additions": 618,
+          "deletions": 611
+        },
+        {
+          "subject": "fix(trailhead): exec the SessionStart check from the validated path",
+          "changed_lines": 42,
+          "additions": 34,
+          "deletions": 8
+        },
+        {
+          "subject": "fix(trailhead): close review findings on the reduced update path",
+          "changed_lines": 369,
+          "additions": 330,
+          "deletions": 39
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-146",
+      "pr_number": 146,
+      "pr_title": "perf(lore): speed up KQL search ranking and snippet lookups",
+      "merged_at": "2026-08-27T17:13:00Z",
+      "series_length": 4,
+      "commits": [
+        {
+          "subject": "perf(lore): compute bm25 once via a single JOIN instead of per-candid\u2026",
+          "changed_lines": 519,
+          "additions": 440,
+          "deletions": 79
+        },
+        {
+          "subject": "refactor(lore): fold the ranking branch together and drop dead benchm\u2026",
+          "changed_lines": 62,
+          "additions": 29,
+          "deletions": 33
+        },
+        {
+          "subject": "fix(lore): chunk the snippet IN(...) lookup and deflake the bare-quer\u2026",
+          "changed_lines": 219,
+          "additions": 168,
+          "deletions": 51
+        },
+        {
+          "subject": "perf(lore): stop the bm25 ranking JOIN from being flattened per-row",
+          "changed_lines": 133,
+          "additions": 104,
+          "deletions": 29
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-145",
+      "pr_number": 145,
+      "pr_title": "craft phase-boundary sha recording + pytest-xdist parallelization",
+      "merged_at": "2026-08-27T18:02:22Z",
+      "series_length": 13,
+      "commits": [
+        {
+          "subject": "test: parallelize the suite with pytest-xdist, fix load-sensitive ass\u2026",
+          "changed_lines": 110,
+          "additions": 96,
+          "deletions": 14
+        },
+        {
+          "subject": "feat(craft): record the phase-boundary sha via craft/phase-boundary l\u2026",
+          "changed_lines": 247,
+          "additions": 246,
+          "deletions": 1
+        },
+        {
+          "subject": "test: eliminate the quiet-period heuristic; serialize the latency ben\u2026",
+          "changed_lines": 95,
+          "additions": 39,
+          "deletions": 56
+        },
+        {
+          "subject": "fix(craft): validate boundary sha, atomic tick+boundary write, mid-bu\u2026",
+          "changed_lines": 132,
+          "additions": 130,
+          "deletions": 2
+        },
+        {
+          "subject": "test: widen the margin on two more wall-clock-threshold tests",
+          "changed_lines": 15,
+          "additions": 11,
+          "deletions": 4
+        },
+        {
+          "subject": "test: widen boot budget margin in the later-task-still-runs test",
+          "changed_lines": 13,
+          "additions": 11,
+          "deletions": 2
+        },
+        {
+          "subject": "fix(craft): correctness polish on phase-boundary resumability contract",
+          "changed_lines": 131,
+          "additions": 122,
+          "deletions": 9
+        },
+        {
+          "subject": "fix(craft): bound phase-boundary revert to this run's base, show reve\u2026",
+          "changed_lines": 108,
+          "additions": 98,
+          "deletions": 10
+        },
+        {
+          "subject": "docs(craft): drop history narration from the out-of-range fail-closed\u2026",
+          "changed_lines": 5,
+          "additions": 2,
+          "deletions": 3
+        },
+        {
+          "subject": "test: widen margins on the remaining wall-clock threshold sites",
+          "changed_lines": 54,
+          "additions": 39,
+          "deletions": 15
+        },
+        {
+          "subject": "test: widen boot budget margin in the over-budget-not-reexecuted test",
+          "changed_lines": 11,
+          "additions": 9,
+          "deletions": 2
+        },
+        {
+          "subject": "test: wait for the logfile, not the sentinel, in the exec-survival test",
+          "changed_lines": 8,
+          "additions": 7,
+          "deletions": 1
+        },
+        {
+          "subject": "fix: self-heal pytest-xdist for existing venvs, document serial escap\u2026",
+          "changed_lines": 82,
+          "additions": 78,
+          "deletions": 4
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-144",
+      "pr_number": 144,
+      "pr_title": "feat: pull the lore vaults before camp launches a session",
+      "merged_at": "2026-08-27T03:51:24Z",
+      "series_length": 2,
+      "commits": [
+        {
+          "subject": "feat: pull the lore vaults before camp launches a session",
+          "changed_lines": 311,
+          "additions": 311,
+          "deletions": 0
+        },
+        {
+          "subject": "fix(camp): suppress ruff F811 on shared rig fixture parameters",
+          "changed_lines": 8,
+          "additions": 4,
+          "deletions": 4
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-143",
+      "pr_number": 143,
+      "pr_title": "feat(craft): mutation-evidence gate + feedback-loop closure",
+      "merged_at": "2026-08-27T03:12:34Z",
+      "series_length": 11,
+      "commits": [
+        {
+          "subject": "feat(craft): require mutation evidence per test-contract item",
+          "changed_lines": 154,
+          "additions": 154,
+          "deletions": 0
+        },
+        {
+          "subject": "fix(craft): close mutation-evidence review findings 1-9",
+          "changed_lines": 182,
+          "additions": 159,
+          "deletions": 23
+        },
+        {
+          "subject": "fix(craft): scope mutation-evidence pins to their exact target lines",
+          "changed_lines": 153,
+          "additions": 128,
+          "deletions": 25
+        },
+        {
+          "subject": "feat(craft): close the feedback half of the execute learning loop",
+          "changed_lines": 236,
+          "additions": 187,
+          "deletions": 49
+        },
+        {
+          "subject": "refactor(craft): drop the read-side test's stale write-side fixture r\u2026",
+          "changed_lines": 5,
+          "additions": 0,
+          "deletions": 5
+        },
+        {
+          "subject": "fix(craft): reconcile execute.md's dispatch mandates with review find\u2026",
+          "changed_lines": 224,
+          "additions": 217,
+          "deletions": 7
+        },
+        {
+          "subject": "test(craft): harden three pins the re-review found bypassable",
+          "changed_lines": 46,
+          "additions": 46,
+          "deletions": 0
+        },
+        {
+          "subject": "fix(craft): validate parent-value and name positional-value remedies \u2026",
+          "changed_lines": 243,
+          "additions": 239,
+          "deletions": 4
+        },
+        {
+          "subject": "fix(lore): scrub codename from shippable search examples",
+          "changed_lines": 14,
+          "additions": 7,
+          "deletions": 7
+        },
+        {
+          "subject": "style(craft): silence E501 on two contract pin literals",
+          "changed_lines": 4,
+          "additions": 2,
+          "deletions": 2
+        },
+        {
+          "subject": "refactor(craft): point Step 7 at the mutation procedure instead of re\u2026",
+          "changed_lines": 2,
+          "additions": 1,
+          "deletions": 1
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-142",
+      "pr_number": 142,
+      "pr_title": "feat(craft): carry the prior-art survey into the dispatched planner path",
+      "merged_at": "2026-08-26T22:09:31Z",
+      "series_length": 1,
+      "commits": [
+        {
+          "subject": "feat(craft): carry the prior-art survey into the dispatched planner path",
+          "changed_lines": 248,
+          "additions": 248,
+          "deletions": 0
+        }
+      ],
+      "human_verdict": null,
+      "ambiguous": true,
+      "ambiguous_note": "single-commit branch: fix-up-dominance is a degenerate question for a 1-commit series (squash and preserve produce the same merge output), so no meaningful human verdict applies \u2014 recorded for completeness, not as a regression case."
+    },
+    {
+      "case_id": "pr-141",
+      "pr_number": 141,
+      "pr_title": "feat(craft): run an external prior-art survey before build-vs-adopt calls",
+      "merged_at": "2026-08-26T21:45:55Z",
+      "series_length": 10,
+      "commits": [
+        {
+          "subject": "test(craft): assumption probe \u2014 craft/prior-art label key end to end",
+          "changed_lines": 78,
+          "additions": 78,
+          "deletions": 0
+        },
+        {
+          "subject": "test(craft): pin the craft/prior-art label round trip as durable cove\u2026",
+          "changed_lines": 0,
+          "additions": 0,
+          "deletions": 0
+        },
+        {
+          "subject": "feat(craft): inline the prior-art survey block into brainstorm",
+          "changed_lines": 251,
+          "additions": 251,
+          "deletions": 0
+        },
+        {
+          "subject": "fix(craft): keep the shared survey block free of brainstorm-specific \u2026",
+          "changed_lines": 2,
+          "additions": 1,
+          "deletions": 1
+        },
+        {
+          "subject": "feat: inline the prior-art survey block into plan's approach stage",
+          "changed_lines": 147,
+          "additions": 147,
+          "deletions": 0
+        },
+        {
+          "subject": "feat(trailhead): declare a prescriptive dependency posture for the pr\u2026",
+          "changed_lines": 77,
+          "additions": 77,
+          "deletions": 0
+        },
+        {
+          "subject": "chore(craft): drop the probe scaffolding from the prior-art label con\u2026",
+          "changed_lines": 32,
+          "additions": 18,
+          "deletions": 14
+        },
+        {
+          "subject": "fix(craft): reorder, ground, and strengthen the prior-art survey block",
+          "changed_lines": 192,
+          "additions": 169,
+          "deletions": 23
+        },
+        {
+          "subject": "fix(craft): close injection holes in prior-art survey recipe",
+          "changed_lines": 216,
+          "additions": 201,
+          "deletions": 15
+        },
+        {
+          "subject": "fix(craft): apply the survey's character rule before assignment, to e\u2026",
+          "changed_lines": 50,
+          "additions": 42,
+          "deletions": 8
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-140",
+      "pr_number": 140,
+      "pr_title": "camp: provisioning gates work, not the session",
+      "merged_at": "2026-08-24T06:02:22Z",
+      "series_length": 24,
+      "commits": [
+        {
+          "subject": "fix(camp): widen launch confirmation budget and infer diagnosis from \u2026",
+          "changed_lines": 277,
+          "additions": 255,
+          "deletions": 22
+        },
+        {
+          "subject": "feat(camp): add per-task cleanup config and document the phase contract",
+          "changed_lines": 255,
+          "additions": 250,
+          "deletions": 5
+        },
+        {
+          "subject": "feat(camp): task runner gains retry cleanup, per-task budget, over-bu\u2026",
+          "changed_lines": 436,
+          "additions": 403,
+          "deletions": 33
+        },
+        {
+          "subject": "feat: split manifest work-readiness from provision_state, persist ove\u2026",
+          "changed_lines": 346,
+          "additions": 334,
+          "deletions": 12
+        },
+        {
+          "subject": "test: assumption probe \u2014 teardown vs activate-phase concurrency guard",
+          "changed_lines": 202,
+          "additions": 202,
+          "deletions": 0
+        },
+        {
+          "subject": "feat(camp): status reports boot- and work-readiness as two facts",
+          "changed_lines": 459,
+          "additions": 442,
+          "deletions": 17
+        },
+        {
+          "subject": "test(camp): remove ephemeral teardown/activate-guard assumption probe",
+          "changed_lines": 202,
+          "additions": 0,
+          "deletions": 202
+        },
+        {
+          "subject": "feat(camp): non-blocking camp activate with an OS-released concurrenc\u2026",
+          "changed_lines": 1250,
+          "additions": 1079,
+          "deletions": 171
+        },
+        {
+          "subject": "feat(camp): boot-path budget and the misclassification report",
+          "changed_lines": 469,
+          "additions": 469,
+          "deletions": 0
+        },
+        {
+          "subject": "feat: camp new --activate flag; --launch waits on boot-ready only",
+          "changed_lines": 375,
+          "additions": 373,
+          "deletions": 2
+        },
+        {
+          "subject": "feat(camp): retry failed activate-phase tasks via camp setup without \u2026",
+          "changed_lines": 614,
+          "additions": 612,
+          "deletions": 2
+        },
+        {
+          "subject": "test(camp): fix silent no-op sleep injection in activate-retry race test",
+          "changed_lines": 28,
+          "additions": 20,
+          "deletions": 8
+        },
+        {
+          "subject": "feat(camp): SessionStart capability report",
+          "changed_lines": 597,
+          "additions": 597,
+          "deletions": 0
+        },
+        {
+          "subject": "fix(camp): capability report uses declared task capability text verbatim",
+          "changed_lines": 261,
+          "additions": 246,
+          "deletions": 15
+        },
+        {
+          "subject": "feat(camp): camp-authored provisioning notices, staleness guard, all-\u2026",
+          "changed_lines": 565,
+          "additions": 536,
+          "deletions": 29
+        },
+        {
+          "subject": "feat(camp): reassign expensive tasks to the activate phase",
+          "changed_lines": 331,
+          "additions": 320,
+          "deletions": 11
+        },
+        {
+          "subject": "feat(ranger): drain requests activate-phase work and waits for it",
+          "changed_lines": 73,
+          "additions": 70,
+          "deletions": 3
+        },
+        {
+          "subject": "refactor(camp): one reader for a member's task phases",
+          "changed_lines": 165,
+          "additions": 68,
+          "deletions": 97
+        },
+        {
+          "subject": "fix(camp): derive work_state from task results, gate retries on per-t\u2026",
+          "changed_lines": 245,
+          "additions": 218,
+          "deletions": 27
+        },
+        {
+          "subject": "fix: address four whole-change review Importants",
+          "changed_lines": 420,
+          "additions": 335,
+          "deletions": 85
+        },
+        {
+          "subject": "fix(camp): close inject-queue provenance bypass, redact json pointer,\u2026",
+          "changed_lines": 589,
+          "additions": 452,
+          "deletions": 137
+        },
+        {
+          "subject": "fix(camp): remove remaining --json pointers from capability report, c\u2026",
+          "changed_lines": 210,
+          "additions": 195,
+          "deletions": 15
+        },
+        {
+          "subject": "fix(camp): resolve ruff lint errors in test_provision_cli",
+          "changed_lines": 8,
+          "additions": 2,
+          "deletions": 6
+        },
+        {
+          "subject": "test(camp): fix two flaky state-dir tests racing the detached provisi\u2026",
+          "changed_lines": 31,
+          "additions": 20,
+          "deletions": 11
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-139",
+      "pr_number": 139,
+      "pr_title": "feat(craft): lead adjudications with a narrative synthesis",
+      "merged_at": "2026-08-23T17:59:50Z",
+      "series_length": 1,
+      "commits": [
+        {
+          "subject": "feat(craft): lead adjudications with a narrative synthesis",
+          "changed_lines": 205,
+          "additions": 182,
+          "deletions": 23
+        }
+      ],
+      "human_verdict": null,
+      "ambiguous": true,
+      "ambiguous_note": "single-commit branch: fix-up-dominance is a degenerate question for a 1-commit series (squash and preserve produce the same merge output), so no meaningful human verdict applies \u2014 recorded for completeness, not as a regression case."
+    },
+    {
+      "case_id": "pr-138",
+      "pr_number": 138,
+      "pr_title": "camp resolves the harness account binding per group",
+      "merged_at": "2026-08-23T12:08:11Z",
+      "series_length": 16,
+      "commits": [
+        {
+          "subject": "feat(harness): express an account binding as launch env",
+          "changed_lines": 406,
+          "additions": 380,
+          "deletions": 26
+        },
+        {
+          "subject": "feat(camp): a group declares its account under [launch]",
+          "changed_lines": 79,
+          "additions": 76,
+          "deletions": 3
+        },
+        {
+          "subject": "feat(camp): one account resolution feeds the trust seed and the pane",
+          "changed_lines": 902,
+          "additions": 776,
+          "deletions": 126
+        },
+        {
+          "subject": "feat: deny every declared account as a launch root",
+          "changed_lines": 284,
+          "additions": 269,
+          "deletions": 15
+        },
+        {
+          "subject": "feat(camp): the confirmation failure reports what it saw",
+          "changed_lines": 765,
+          "additions": 744,
+          "deletions": 21
+        },
+        {
+          "subject": "test(camp): cover the absent groups directory and state what it does",
+          "changed_lines": 26,
+          "additions": 23,
+          "deletions": 3
+        },
+        {
+          "subject": "docs(camp): state that a declared account joins the deny list, and pi\u2026",
+          "changed_lines": 112,
+          "additions": 106,
+          "deletions": 6
+        },
+        {
+          "subject": "refactor(camp): collapse cross-slice duplication on the launch path",
+          "changed_lines": 51,
+          "additions": 23,
+          "deletions": 28
+        },
+        {
+          "subject": "fix(harness): the account default is the variable's absence, not a value",
+          "changed_lines": 446,
+          "additions": 355,
+          "deletions": 91
+        },
+        {
+          "subject": "fix(camp): the account binding never becomes a tmux server global",
+          "changed_lines": 186,
+          "additions": 155,
+          "deletions": 31
+        },
+        {
+          "subject": "fix(camp): the trust pre-seed survives a launch resolution with no env",
+          "changed_lines": 42,
+          "additions": 39,
+          "deletions": 3
+        },
+        {
+          "subject": "fix(camp): the account-key probe cannot be denied by the stopping shell",
+          "changed_lines": 66,
+          "additions": 61,
+          "deletions": 5
+        },
+        {
+          "subject": "fix(camp): the confirmation names the config file the pane actually r\u2026",
+          "changed_lines": 106,
+          "additions": 99,
+          "deletions": 7
+        },
+        {
+          "subject": "fix(camp,harness): a control character in an account is refused, not \u2026",
+          "changed_lines": 170,
+          "additions": 169,
+          "deletions": 1
+        },
+        {
+          "subject": "fix(camp): the pane sanitizer strips the 8-bit control sequences too",
+          "changed_lines": 34,
+          "additions": 32,
+          "deletions": 2
+        },
+        {
+          "subject": "docs(camp): say what camp actually does with a declared account",
+          "changed_lines": 44,
+          "additions": 37,
+          "deletions": 7
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-137",
+      "pr_number": 137,
+      "pr_title": "Cut lore CLI discovery friction: tighter record create/update help, did-you-mean on unknown verbs",
+      "merged_at": "2026-08-23T05:04:36Z",
+      "series_length": 6,
+      "commits": [
+        {
+          "subject": "feat: trim record create/update help, suggest nearest verb on a typo",
+          "changed_lines": 361,
+          "additions": 252,
+          "deletions": 109
+        },
+        {
+          "subject": "fix: state that record update --vault never re-routes",
+          "changed_lines": 19,
+          "additions": 18,
+          "deletions": 1
+        },
+        {
+          "subject": "fix: unset-pairing rule must not promise a uniform value shape",
+          "changed_lines": 28,
+          "additions": 27,
+          "deletions": 1
+        },
+        {
+          "subject": "fix: correct the --unset-* contract and silence wrong verb guesses",
+          "changed_lines": 195,
+          "additions": 172,
+          "deletions": 23
+        },
+        {
+          "subject": "docs: align test docstrings with the corrected removal contract",
+          "changed_lines": 14,
+          "additions": 7,
+          "deletions": 7
+        },
+        {
+          "subject": "fix: drop the abbreviation escape, name list->ls as a synonym",
+          "changed_lines": 61,
+          "additions": 34,
+          "deletions": 27
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-136",
+      "pr_number": 136,
+      "pr_title": "fix(craft): gate executor Opus escalation on observed failure, not slice shape",
+      "merged_at": "2026-08-23T02:25:54Z",
+      "series_length": 1,
+      "commits": [
+        {
+          "subject": "fix(craft): gate executor Opus escalation on observed failure, not sl\u2026",
+          "changed_lines": 85,
+          "additions": 79,
+          "deletions": 6
+        }
+      ],
+      "human_verdict": null,
+      "ambiguous": true,
+      "ambiguous_note": "single-commit branch: fix-up-dominance is a degenerate question for a 1-commit series (squash and preserve produce the same merge output), so no meaningful human verdict applies \u2014 recorded for completeness, not as a regression case."
+    },
+    {
+      "case_id": "pr-135",
+      "pr_number": 135,
+      "pr_title": "feat(camp): provision .mcp.json into camp workspaces, raise graph timeout",
+      "merged_at": "2026-08-23T01:43:56Z",
+      "series_length": 2,
+      "commits": [
+        {
+          "subject": "feat(camp): provision .mcp.json into camp workspaces, raise graph tim\u2026",
+          "changed_lines": 172,
+          "additions": 170,
+          "deletions": 2
+        },
+        {
+          "subject": "fix(camp): reorder mcp-config before code-review-graph, no-op copy on\u2026",
+          "changed_lines": 71,
+          "additions": 64,
+          "deletions": 7
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-134",
+      "pr_number": 134,
+      "pr_title": "craft: close the execute learning loop with per-slice instrumentation",
+      "merged_at": "2026-08-23T01:55:06Z",
+      "series_length": 10,
+      "commits": [
+        {
+          "subject": "feat(craft): emit per-slice metrics in the execute loop",
+          "changed_lines": 154,
+          "additions": 153,
+          "deletions": 1
+        },
+        {
+          "subject": "test(craft): pin the run-totals field list to its own sentence",
+          "changed_lines": 7,
+          "additions": 6,
+          "deletions": 1
+        },
+        {
+          "subject": "feat(craft): dispatch postmortem writes retrievable process lessons",
+          "changed_lines": 184,
+          "additions": 184,
+          "deletions": 0
+        },
+        {
+          "subject": "docs(craft): name stdin as the lesson-body channel in the postmortem",
+          "changed_lines": 12,
+          "additions": 11,
+          "deletions": 1
+        },
+        {
+          "subject": "feat(craft): read dispatch lessons back at the run's claim",
+          "changed_lines": 227,
+          "additions": 227,
+          "deletions": 0
+        },
+        {
+          "subject": "docs(craft): give the retrieval outcome a home on the run-total row",
+          "changed_lines": 13,
+          "additions": 12,
+          "deletions": 1
+        },
+        {
+          "subject": "test(craft): make the metrics pins fail on a duplicate occurrence",
+          "changed_lines": 13,
+          "additions": 11,
+          "deletions": 2
+        },
+        {
+          "subject": "fix(craft): make the execute learning loop actually close",
+          "changed_lines": 212,
+          "additions": 198,
+          "deletions": 14
+        },
+        {
+          "subject": "fix(craft): route the execute learning loop's lesson write to the ele\u2026",
+          "changed_lines": 196,
+          "additions": 171,
+          "deletions": 25
+        },
+        {
+          "subject": "fix(craft): forward only CLI-escaped lesson previews and quote vault-\u2026",
+          "changed_lines": 119,
+          "additions": 92,
+          "deletions": 27
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-133",
+      "pr_number": 133,
+      "pr_title": "Declare model tier and effort on every composed subagent",
+      "merged_at": "2026-08-22T21:08:31Z",
+      "series_length": 2,
+      "commits": [
+        {
+          "subject": "Declare model tier and effort on every composed subagent",
+          "changed_lines": 174,
+          "additions": 171,
+          "deletions": 3
+        },
+        {
+          "subject": "Drop two dead bindings that leave main's lint red",
+          "changed_lines": 4,
+          "additions": 2,
+          "deletions": 2
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-132",
+      "pr_number": 132,
+      "pr_title": "fix(camp): make a relocated CLAUDE_CONFIG_DIR reach the launched session",
+      "merged_at": "2026-08-22T17:46:21Z",
+      "series_length": 11,
+      "commits": [
+        {
+          "subject": "test: probe doctor's config-dir blind spot (ephemeral)",
+          "changed_lines": 41,
+          "additions": 41,
+          "deletions": 0
+        },
+        {
+          "subject": "fix(trailhead): key Claude plugin registration state on the config dir",
+          "changed_lines": 644,
+          "additions": 479,
+          "deletions": 165
+        },
+        {
+          "subject": "fix(camp): honour CLAUDE_CONFIG_DIR in the launch-time trust pre-seed",
+          "changed_lines": 334,
+          "additions": 310,
+          "deletions": 24
+        },
+        {
+          "subject": "test: share helpers and drop unused bindings in the config-dir tests",
+          "changed_lines": 30,
+          "additions": 14,
+          "deletions": 16
+        },
+        {
+          "subject": "test(trailhead): pin the plugin-install exit status the wiring relies on",
+          "changed_lines": 81,
+          "additions": 81,
+          "deletions": 0
+        },
+        {
+          "subject": "fix(trailhead): keep the shared composed tree when another config dir\u2026",
+          "changed_lines": 170,
+          "additions": 166,
+          "deletions": 4
+        },
+        {
+          "subject": "test(trailhead): hold the exemplar harness to the widened seam",
+          "changed_lines": 53,
+          "additions": 45,
+          "deletions": 8
+        },
+        {
+          "subject": "fix(camp): refuse a relative CLAUDE_CONFIG_DIR in the trust pre-seed",
+          "changed_lines": 55,
+          "additions": 52,
+          "deletions": 3
+        },
+        {
+          "subject": "fix(trailhead): refuse a seam/CLAUDE_CONFIG_DIR conflict at the confi\u2026",
+          "changed_lines": 200,
+          "additions": 198,
+          "deletions": 2
+        },
+        {
+          "subject": "test(trailhead): close the axiom-6 hole around Claude Code's global c\u2026",
+          "changed_lines": 304,
+          "additions": 301,
+          "deletions": 3
+        },
+        {
+          "subject": "fix(camp): carry CLAUDE_CONFIG_DIR into the launched pane",
+          "changed_lines": 181,
+          "additions": 180,
+          "deletions": 1
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-131",
+      "pr_number": 131,
+      "pr_title": "camp: stop a session to reclaim its memory, and retire bookmarks",
+      "merged_at": "2026-08-21T13:09:14Z",
+      "series_length": 11,
+      "commits": [
+        {
+          "subject": "refactor: relocate harness_for and its siblings out of camp/bookmark",
+          "changed_lines": 368,
+          "additions": 279,
+          "deletions": 89
+        },
+        {
+          "subject": "feat(camp): add the stop engine",
+          "changed_lines": 793,
+          "additions": 793,
+          "deletions": 0
+        },
+        {
+          "subject": "feat(camp): add the camp kill verb and a resume no-history signal",
+          "changed_lines": 975,
+          "additions": 927,
+          "deletions": 48
+        },
+        {
+          "subject": "feat: refuse `camp rm` on a workspace that still holds a session",
+          "changed_lines": 893,
+          "additions": 875,
+          "deletions": 18
+        },
+        {
+          "subject": "fix: fail closed on every teardown-guard enumeration failure",
+          "changed_lines": 222,
+          "additions": 164,
+          "deletions": 58
+        },
+        {
+          "subject": "docs(camp): document the stop path in the concierge skill",
+          "changed_lines": 92,
+          "additions": 91,
+          "deletions": 1
+        },
+        {
+          "subject": "test(camp): cover camp kill in the byte-level statelessness walk",
+          "changed_lines": 49,
+          "additions": 43,
+          "deletions": 6
+        },
+        {
+          "subject": "refactor(camp): retire the bookmark surface",
+          "changed_lines": 5374,
+          "additions": 182,
+          "deletions": 5192
+        },
+        {
+          "subject": "refactor(camp): collapse the duplicated session-ref refusal",
+          "changed_lines": 110,
+          "additions": 59,
+          "deletions": 51
+        },
+        {
+          "subject": "fix: close four \"could not tell\" doors on the stop path",
+          "changed_lines": 442,
+          "additions": 387,
+          "deletions": 55
+        },
+        {
+          "subject": "fix(camp): rename an ambiguous lambda parameter to satisfy ruff E741",
+          "changed_lines": 2,
+          "additions": 1,
+          "deletions": 1
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-130",
+      "pr_number": 130,
+      "pr_title": "camp: resume a dead session, and launch at a directory you name",
+      "merged_at": "2026-08-21T01:16:28Z",
+      "series_length": 26,
+      "commits": [
+        {
+          "subject": "test(camp): narrow seam-removal argv-flag guard to AST scan",
+          "changed_lines": 132,
+          "additions": 106,
+          "deletions": 26
+        },
+        {
+          "subject": "test(camp): catch argv grown element-by-element in the seam guard",
+          "changed_lines": 63,
+          "additions": 60,
+          "deletions": 3
+        },
+        {
+          "subject": "feat(trailhead): harness seam enumerates top-level session transcripts",
+          "changed_lines": 440,
+          "additions": 439,
+          "deletions": 1
+        },
+        {
+          "subject": "fix(trailhead): bound the transcript head-scan read, not just the decode",
+          "changed_lines": 73,
+          "additions": 71,
+          "deletions": 2
+        },
+        {
+          "subject": "feat(camp): parse the [launch] roots allowlist in group config",
+          "changed_lines": 123,
+          "additions": 123,
+          "deletions": 0
+        },
+        {
+          "subject": "feat(camp): add the shared launch-eligibility gate",
+          "changed_lines": 485,
+          "additions": 485,
+          "deletions": 0
+        },
+        {
+          "subject": "fix(camp): require launch.roots entries to name a fixed location",
+          "changed_lines": 48,
+          "additions": 47,
+          "deletions": 1
+        },
+        {
+          "subject": "feat(camp): add the derived-name rule and the prefix session resolver",
+          "changed_lines": 1007,
+          "additions": 1007,
+          "deletions": 0
+        },
+        {
+          "subject": "test(camp): close the reachable gaps in the recovery purity scan",
+          "changed_lines": 34,
+          "additions": 29,
+          "deletions": 5
+        },
+        {
+          "subject": "feat(camp): parameterize the launch engine with root, name component,\u2026",
+          "changed_lines": 774,
+          "additions": 664,
+          "deletions": 110
+        },
+        {
+          "subject": "fix(camp): reclaim the tmux session name when a spawn times out",
+          "changed_lines": 73,
+          "additions": 73,
+          "deletions": 0
+        },
+        {
+          "subject": "feat(camp): add camp launch --dir for directory-rooted launches",
+          "changed_lines": 431,
+          "additions": 416,
+          "deletions": 15
+        },
+        {
+          "subject": "fix(camp): fold session-name components tmux cannot address",
+          "changed_lines": 105,
+          "additions": 99,
+          "deletions": 6
+        },
+        {
+          "subject": "feat(camp): add camp launch --resume for prefix-addressed session rec\u2026",
+          "changed_lines": 1099,
+          "additions": 1048,
+          "deletions": 51
+        },
+        {
+          "subject": "feat(camp): add camp sessions --recoverable and --dir",
+          "changed_lines": 1169,
+          "additions": 1128,
+          "deletions": 41
+        },
+        {
+          "subject": "test(camp): stop pinning a recoverable row's age to an exact second",
+          "changed_lines": 7,
+          "additions": 6,
+          "deletions": 1
+        },
+        {
+          "subject": "test(camp): pin the state dir unchanged across every new launch flow",
+          "changed_lines": 249,
+          "additions": 249,
+          "deletions": 0
+        },
+        {
+          "subject": "docs(camp): name camp launch's addressing forms and exit codes in help",
+          "changed_lines": 152,
+          "additions": 151,
+          "deletions": 1
+        },
+        {
+          "subject": "docs(camp): document the directory-rooted and resume launch flavors",
+          "changed_lines": 114,
+          "additions": 107,
+          "deletions": 7
+        },
+        {
+          "subject": "docs(camp): give the concierge skill camp's shipped recovery surface",
+          "changed_lines": 137,
+          "additions": 110,
+          "deletions": 27
+        },
+        {
+          "subject": "fix(camp): load the CLI scaffolding by path, not by module name",
+          "changed_lines": 42,
+          "additions": 26,
+          "deletions": 16
+        },
+        {
+          "subject": "docs(camp): say precisely how the two exit-code assertions relate",
+          "changed_lines": 7,
+          "additions": 4,
+          "deletions": 3
+        },
+        {
+          "subject": "refactor(camp): render both candidate listings through one print site",
+          "changed_lines": 65,
+          "additions": 25,
+          "deletions": 40
+        },
+        {
+          "subject": "fix(camp): resume a session at the directory its transcript recorded",
+          "changed_lines": 356,
+          "additions": 287,
+          "deletions": 69
+        },
+        {
+          "subject": "fix(camp): keep the credential rule unconditional and the name rule a\u2026",
+          "changed_lines": 318,
+          "additions": 298,
+          "deletions": 20
+        },
+        {
+          "subject": "fix(camp): escape an untrusted path everywhere camp prints one",
+          "changed_lines": 101,
+          "additions": 70,
+          "deletions": 31
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-129",
+      "pr_number": 129,
+      "pr_title": "feat(lore): resolvable vault rebase conflicts via lore resolve",
+      "merged_at": "2026-08-21T00:31:10Z",
+      "series_length": 15,
+      "commits": [
+        {
+          "subject": "feat(lore): canonical sidecar serialization + lore vault reformat",
+          "changed_lines": 643,
+          "additions": 602,
+          "deletions": 41
+        },
+        {
+          "subject": "feat(lore): resolution-session marker + DRIFT_RESOLVING write fence",
+          "changed_lines": 574,
+          "additions": 554,
+          "deletions": 20
+        },
+        {
+          "subject": "feat(lore): lore resolve \u2014 rebase re-run, field-wise auto-merge, conf\u2026",
+          "changed_lines": 1402,
+          "additions": 1384,
+          "deletions": 18
+        },
+        {
+          "subject": "feat(lore): lore resolve take / take-file / --abort",
+          "changed_lines": 934,
+          "additions": 919,
+          "deletions": 15
+        },
+        {
+          "subject": "feat(lore): pull-only sync and freshness-window implicit pull on writ\u2026",
+          "changed_lines": 734,
+          "additions": 725,
+          "deletions": 9
+        },
+        {
+          "subject": "fix: make implicit_pull's advisory contract cover the freshness check",
+          "changed_lines": 22,
+          "additions": 18,
+          "deletions": 4
+        },
+        {
+          "subject": "feat(lore): close `lore flush` with the full sync flow",
+          "changed_lines": 590,
+          "additions": 543,
+          "deletions": 47
+        },
+        {
+          "subject": "docs(lore): drive conflict resolution from /lore:sync and /lore:flush",
+          "changed_lines": 371,
+          "additions": 336,
+          "deletions": 35
+        },
+        {
+          "subject": "fix(lore): correct resolve --json example keys in sync skill doc",
+          "changed_lines": 59,
+          "additions": 57,
+          "deletions": 2
+        },
+        {
+          "subject": "fix(lore): scope the unsynced-vaults notice to shared vaults on defau\u2026",
+          "changed_lines": 157,
+          "additions": 136,
+          "deletions": 21
+        },
+        {
+          "subject": "refactor(lore): collapse cross-slice duplication in the sync/resolve/\u2026",
+          "changed_lines": 102,
+          "additions": 42,
+          "deletions": 60
+        },
+        {
+          "subject": "fix(lore): preserve settled judgment across a lore resolve re-read",
+          "changed_lines": 152,
+          "additions": 145,
+          "deletions": 7
+        },
+        {
+          "subject": "fix(lore): close four minor correctness gaps in resolve and reformat",
+          "changed_lines": 117,
+          "additions": 99,
+          "deletions": 18
+        },
+        {
+          "subject": "fix(lore): unique machine-local state keys, reformat resolution fence",
+          "changed_lines": 236,
+          "additions": 213,
+          "deletions": 23
+        },
+        {
+          "subject": "fix(lore): parseable --json finish, absent-vs-null slots in resolve",
+          "changed_lines": 197,
+          "additions": 172,
+          "deletions": 25
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-128",
+      "pr_number": 128,
+      "pr_title": "feat(lore): allow the lore CLI through the Claude Code permission layer",
+      "merged_at": "2026-08-21T00:08:24Z",
+      "series_length": 2,
+      "commits": [
+        {
+          "subject": "feat: allow Bash(lore:*) through the permission layer",
+          "changed_lines": 141,
+          "additions": 141,
+          "deletions": 0
+        },
+        {
+          "subject": "test(lore): make guardrail deny-list/preserve tests actually test the\u2026",
+          "changed_lines": 32,
+          "additions": 30,
+          "deletions": 2
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-127",
+      "pr_number": 127,
+      "pr_title": "docs(lore): land the transcript-as-labeled-blob-record convention",
+      "merged_at": "2026-08-20T22:17:31Z",
+      "series_length": 7,
+      "commits": [
+        {
+          "subject": "test: pin the transcript convention's vault mechanics",
+          "changed_lines": 284,
+          "additions": 284,
+          "deletions": 0
+        },
+        {
+          "subject": "feat(lore): route transcript capture through record/SKILL.md",
+          "changed_lines": 206,
+          "additions": 206,
+          "deletions": 0
+        },
+        {
+          "subject": "docs: signpost the transcript convention in the lore README",
+          "changed_lines": 50,
+          "additions": 50,
+          "deletions": 0
+        },
+        {
+          "subject": "test(lore): scope the /lore:record pointer pin to the transcript sub-\u2026",
+          "changed_lines": 20,
+          "additions": 19,
+          "deletions": 1
+        },
+        {
+          "subject": "refactor(lore): de-duplicate the transcript convention test helpers",
+          "changed_lines": 178,
+          "additions": 79,
+          "deletions": 99
+        },
+        {
+          "subject": "fix(lore): repair and pin the documented transcript search command",
+          "changed_lines": 159,
+          "additions": 146,
+          "deletions": 13
+        },
+        {
+          "subject": "fix(lore): make the transcript hit test topic-aware, not date-only",
+          "changed_lines": 179,
+          "additions": 156,
+          "deletions": 23
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-126",
+      "pr_number": 126,
+      "pr_title": "feat(trailhead): set the client-visible name on launched sessions",
+      "merged_at": "2026-08-20T01:10:53Z",
+      "series_length": 1,
+      "commits": [
+        {
+          "subject": "feat(trailhead): set the client-visible name on launched sessions",
+          "changed_lines": 105,
+          "additions": 88,
+          "deletions": 17
+        }
+      ],
+      "human_verdict": null,
+      "ambiguous": true,
+      "ambiguous_note": "single-commit branch: fix-up-dominance is a degenerate question for a 1-commit series (squash and preserve produce the same merge output), so no meaningful human verdict applies \u2014 recorded for completeness, not as a regression case."
+    },
+    {
+      "case_id": "pr-125",
+      "pr_number": 125,
+      "pr_title": "feat(lore): add lore pipeline command for cross-vault work tracking",
+      "merged_at": "2026-08-19T22:59:55Z",
+      "series_length": 14,
+      "commits": [
+        {
+          "subject": "test: assumption probe for U3 \u2014 JSON-mode escaping composition",
+          "changed_lines": 198,
+          "additions": 198,
+          "deletions": 0
+        },
+        {
+          "subject": "test: assumption probe for U1 \u2014 config degrade posture resolver choice",
+          "changed_lines": 254,
+          "additions": 254,
+          "deletions": 0
+        },
+        {
+          "subject": "test: assumption probe for U2 \u2014 walk-built graph feeds real evaluate_\u2026",
+          "changed_lines": 340,
+          "additions": 340,
+          "deletions": 0
+        },
+        {
+          "subject": "test: probe U4 assumption \u2014 help-surface tests for lore pipeline regi\u2026",
+          "changed_lines": 171,
+          "additions": 171,
+          "deletions": 0
+        },
+        {
+          "subject": "feat(lore): add the lore pipeline command skeleton and fencing chokep\u2026",
+          "changed_lines": 2514,
+          "additions": 1534,
+          "deletions": 980
+        },
+        {
+          "subject": "fix(lore): pin the pipeline envelope and enrol free-text fields in ne\u2026",
+          "changed_lines": 329,
+          "additions": 188,
+          "deletions": 141
+        },
+        {
+          "subject": "feat(lore): derive pipeline lineage membership and the per-record pro\u2026",
+          "changed_lines": 1415,
+          "additions": 1351,
+          "deletions": 64
+        },
+        {
+          "subject": "feat(lore): split the pipeline board into priority and recency tiers",
+          "changed_lines": 516,
+          "additions": 497,
+          "deletions": 19
+        },
+        {
+          "subject": "feat(lore): gate pipeline board records on stage-qualified depends-on",
+          "changed_lines": 1207,
+          "additions": 1133,
+          "deletions": 74
+        },
+        {
+          "subject": "fix(lore): clear leak-gate token and ambiguous test variable names",
+          "changed_lines": 24,
+          "additions": 12,
+          "deletions": 12
+        },
+        {
+          "subject": "refactor(lore): drop the unread walk path field and fold the warning \u2026",
+          "changed_lines": 31,
+          "additions": 14,
+          "deletions": 17
+        },
+        {
+          "subject": "test(lore): pin the projected vault fields to their declared sets",
+          "changed_lines": 12,
+          "additions": 12,
+          "deletions": 0
+        },
+        {
+          "subject": "fix(lore): correctness fixes from lore pipeline whole-change review",
+          "changed_lines": 125,
+          "additions": 102,
+          "deletions": 23
+        },
+        {
+          "subject": "fix(lore): cap pipeline sidecar reads and stop a nested-JSON bomb fro\u2026",
+          "changed_lines": 125,
+          "additions": 116,
+          "deletions": 9
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-124",
+      "pr_number": 124,
+      "pr_title": "fix(camp): refuse flag-shaped slugs instead of normalizing them",
+      "merged_at": "2026-08-19T17:47:40Z",
+      "series_length": 1,
+      "commits": [
+        {
+          "subject": "fix(camp): refuse flag-shaped slugs instead of normalizing them",
+          "changed_lines": 48,
+          "additions": 47,
+          "deletions": 1
+        }
+      ],
+      "human_verdict": null,
+      "ambiguous": true,
+      "ambiguous_note": "single-commit branch: fix-up-dominance is a degenerate question for a 1-commit series (squash and preserve produce the same merge output), so no meaningful human verdict applies \u2014 recorded for completeness, not as a regression case."
+    },
+    {
+      "case_id": "pr-123",
+      "pr_number": 123,
+      "pr_title": "feat(lore): stage-qualified depends-on for spec and adr kinds",
+      "merged_at": "2026-08-19T17:49:02Z",
+      "series_length": 14,
+      "commits": [
+        {
+          "subject": "feat(lore): add pure design-dependency grammar and evaluator to graph.py",
+          "changed_lines": 479,
+          "additions": 479,
+          "deletions": 0
+        },
+        {
+          "subject": "feat(lore): qualified-id design-graph loader and stage-blind cycle de\u2026",
+          "changed_lines": 290,
+          "additions": 289,
+          "deletions": 1
+        },
+        {
+          "subject": "refactor(lore): kind-parameterize the edge-reference confinement guard",
+          "changed_lines": 63,
+          "additions": 58,
+          "deletions": 5
+        },
+        {
+          "subject": "feat(lore): open depends-on to spec/adr and guard the design graph",
+          "changed_lines": 636,
+          "additions": 617,
+          "deletions": 19
+        },
+        {
+          "subject": "feat(lore): route CLI depends-on writes through the graph-guard dispa\u2026",
+          "changed_lines": 214,
+          "additions": 194,
+          "deletions": 20
+        },
+        {
+          "subject": "feat(lore): rewrite design depends-on edges, own-vault only",
+          "changed_lines": 360,
+          "additions": 346,
+          "deletions": 14
+        },
+        {
+          "subject": "docs(craft): scope the bare-name graph rule to task edges",
+          "changed_lines": 53,
+          "additions": 43,
+          "deletions": 10
+        },
+        {
+          "subject": "docs(lore): correct the per-field gate description in the model contract",
+          "changed_lines": 6,
+          "additions": 4,
+          "deletions": 2
+        },
+        {
+          "subject": "refactor(lore): dedupe the design-graph loader and publish the parse-\u2026",
+          "changed_lines": 191,
+          "additions": 97,
+          "deletions": 94
+        },
+        {
+          "subject": "fix(lore): grandfather stored task depends-on entries at the form guard",
+          "changed_lines": 152,
+          "additions": 149,
+          "deletions": 3
+        },
+        {
+          "subject": "fix(lore): close the design-edge grammar hole and the graph purity gap",
+          "changed_lines": 133,
+          "additions": 121,
+          "deletions": 12
+        },
+        {
+          "subject": "test(lore): pin the create path's validate-everything depends-on sema\u2026",
+          "changed_lines": 17,
+          "additions": 17,
+          "deletions": 0
+        },
+        {
+          "subject": "fix(lore): neutralize untrusted node ids in graph-guard messages",
+          "changed_lines": 232,
+          "additions": 223,
+          "deletions": 9
+        },
+        {
+          "subject": "fix(lore): decide own-vault identity on realpath, not path equality",
+          "changed_lines": 64,
+          "additions": 63,
+          "deletions": 1
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-122",
+      "pr_number": 122,
+      "pr_title": "feat(camp): add concierge skill launch flow with groups verb and tmux_name",
+      "merged_at": "2026-08-19T17:20:49Z",
+      "series_length": 12,
+      "commits": [
+        {
+          "subject": "feat(camp): add read-only `camp groups [--json]` verb",
+          "changed_lines": 226,
+          "additions": 221,
+          "deletions": 5
+        },
+        {
+          "subject": "feat(camp): carry tmux_name through camp new --launch --json",
+          "changed_lines": 72,
+          "additions": 61,
+          "deletions": 11
+        },
+        {
+          "subject": "fix(camp): reserve the `groups` verb token",
+          "changed_lines": 6,
+          "additions": 6,
+          "deletions": 0
+        },
+        {
+          "subject": "feat(camp): add the concierge skill for workspace launch",
+          "changed_lines": 567,
+          "additions": 552,
+          "deletions": 15
+        },
+        {
+          "subject": "test(camp): make the derived-name guard reject assembly instructions",
+          "changed_lines": 72,
+          "additions": 71,
+          "deletions": 1
+        },
+        {
+          "subject": "fix(camp): degrade any unloadable group config in `camp groups`",
+          "changed_lines": 95,
+          "additions": 75,
+          "deletions": 20
+        },
+        {
+          "subject": "docs(camp): list `camp groups` in the help menu",
+          "changed_lines": 1,
+          "additions": 1,
+          "deletions": 0
+        },
+        {
+          "subject": "test(camp): assert tmux_name against the name the engine reported",
+          "changed_lines": 11,
+          "additions": 9,
+          "deletions": 2
+        },
+        {
+          "subject": "docs(camp): correct the concierge skill's failure and recovery claims",
+          "changed_lines": 154,
+          "additions": 132,
+          "deletions": 22
+        },
+        {
+          "subject": "fix(camp): degrade only genuine load failures in `camp groups`",
+          "changed_lines": 69,
+          "additions": 59,
+          "deletions": 10
+        },
+        {
+          "subject": "test(camp): pin the reuse path's tmux_name to the engine-reported value",
+          "changed_lines": 42,
+          "additions": 42,
+          "deletions": 0
+        },
+        {
+          "subject": "docs(camp): make the concierge skill's reads executable and honest",
+          "changed_lines": 50,
+          "additions": 40,
+          "deletions": 10
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-121",
+      "pr_number": 121,
+      "pr_title": "feat(camp): detached session launch and on-demand session query",
+      "merged_at": "2026-08-19T13:58:31Z",
+      "series_length": 9,
+      "commits": [
+        {
+          "subject": "feat(camp): pretrust_workspace returns a bool failure signal",
+          "changed_lines": 150,
+          "additions": 142,
+          "deletions": 8
+        },
+        {
+          "subject": "feat(camp): bounded wait for provisioning-ready",
+          "changed_lines": 168,
+          "additions": 168,
+          "deletions": 0
+        },
+        {
+          "subject": "feat(camp): detached tmux launch engine with pane-level env scrub",
+          "changed_lines": 617,
+          "additions": 617,
+          "deletions": 0
+        },
+        {
+          "subject": "feat(camp): confirm detached launches by enumeration membership",
+          "changed_lines": 344,
+          "additions": 343,
+          "deletions": 1
+        },
+        {
+          "subject": "feat(camp): camp launch, camp sessions, and camp new --launch",
+          "changed_lines": 798,
+          "additions": 791,
+          "deletions": 7
+        },
+        {
+          "subject": "refactor(camp): fold three enumeration probes into one mechanic",
+          "changed_lines": 90,
+          "additions": 45,
+          "deletions": 45
+        },
+        {
+          "subject": "fix(camp): degrade subprocess/manifest failures instead of tracebacks",
+          "changed_lines": 282,
+          "additions": 268,
+          "deletions": 14
+        },
+        {
+          "subject": "fix(camp): scrub-seam None refusal, broader poll/kill tolerance, pret\u2026",
+          "changed_lines": 191,
+          "additions": 178,
+          "deletions": 13
+        },
+        {
+          "subject": "docs(camp): document the launch surface and scope the confinement claim",
+          "changed_lines": 38,
+          "additions": 37,
+          "deletions": 1
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-120",
+      "pr_number": 120,
+      "pr_title": "feat(craft): rework gauntlet resolution into recommend-then-accept",
+      "merged_at": "2026-08-19T01:53:00Z",
+      "series_length": 6,
+      "commits": [
+        {
+          "subject": "docs(craft): gauntlet resolves by recommend-then-accept",
+          "changed_lines": 589,
+          "additions": 513,
+          "deletions": 76
+        },
+        {
+          "subject": "docs(craft): gauntlet's accepted tail writes once, then flips",
+          "changed_lines": 436,
+          "additions": 421,
+          "deletions": 15
+        },
+        {
+          "subject": "docs(craft): re-anchor downstream gauntlet references to recommend-th\u2026",
+          "changed_lines": 81,
+          "additions": 71,
+          "deletions": 10
+        },
+        {
+          "subject": "fix(craft): apply accepted edits in the gauntlet's adr tail",
+          "changed_lines": 344,
+          "additions": 303,
+          "deletions": 41
+        },
+        {
+          "subject": "fix(craft): close the gauntlet's shared-tail-to-per-mode-tail seams",
+          "changed_lines": 297,
+          "additions": 265,
+          "deletions": 32
+        },
+        {
+          "subject": "fix(craft): scrub and mark the gauntlet's persisted finding detail",
+          "changed_lines": 144,
+          "additions": 137,
+          "deletions": 7
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-119",
+      "pr_number": 119,
+      "pr_title": "feat: widen the Harness seam for detached-launch modality and session enumeration",
+      "merged_at": "2026-08-14T12:53:01Z",
+      "series_length": 9,
+      "commits": [
+        {
+          "subject": "feat: add SessionRecord, modality vocabulary, five launch/enumeration\u2026",
+          "changed_lines": 253,
+          "additions": 253,
+          "deletions": 0
+        },
+        {
+          "subject": "harness: lead session_launch docstring with the HarnessError divergence",
+          "changed_lines": 12,
+          "additions": 7,
+          "deletions": 5
+        },
+        {
+          "subject": "feat: implement Claude Code session_enumerate and parse_session_list",
+          "changed_lines": 294,
+          "additions": 293,
+          "deletions": 1
+        },
+        {
+          "subject": "feat: implement the Claude Code launch trio",
+          "changed_lines": 138,
+          "additions": 136,
+          "deletions": 2
+        },
+        {
+          "subject": "test: both-or-neither invariants and the Axiom-1 launch-seam guard",
+          "changed_lines": 185,
+          "additions": 185,
+          "deletions": 0
+        },
+        {
+          "subject": "refactor: consolidate duplicated imports in the harness launch-seam t\u2026",
+          "changed_lines": 42,
+          "additions": 14,
+          "deletions": 28
+        },
+        {
+          "subject": "fix: harden launch-seam docstrings, parse_session_list error handling\u2026",
+          "changed_lines": 144,
+          "additions": 118,
+          "deletions": 26
+        },
+        {
+          "subject": "fix: degrade an unusable startedAt instead of dropping the whole listing",
+          "changed_lines": 171,
+          "additions": 132,
+          "deletions": 39
+        },
+        {
+          "subject": "fix: redact home paths from error excerpts and guard a flag-shaped wo\u2026",
+          "changed_lines": 75,
+          "additions": 73,
+          "deletions": 2
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-118",
+      "pr_number": 118,
+      "pr_title": "feat(craft): pin a plain-language shape for adjudicated findings",
+      "merged_at": "2026-08-14T12:16:59Z",
+      "series_length": 2,
+      "commits": [
+        {
+          "subject": "feat(craft): pin a plain-language shape for adjudicated findings",
+          "changed_lines": 85,
+          "additions": 82,
+          "deletions": 3
+        },
+        {
+          "subject": "fix(craft): scope the finding-shape contract and bind its remaining c\u2026",
+          "changed_lines": 76,
+          "additions": 63,
+          "deletions": 13
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-117",
+      "pr_number": 117,
+      "pr_title": "feat(trailhead): install plugin-declared user-level rulesets",
+      "merged_at": "2026-08-13T19:23:33Z",
+      "series_length": 5,
+      "commits": [
+        {
+          "subject": "feat(trailhead): install plugin-declared user-level rulesets",
+          "changed_lines": 424,
+          "additions": 406,
+          "deletions": 18
+        },
+        {
+          "subject": "test(trailhead): keep the install suite off the real Claude dir",
+          "changed_lines": 133,
+          "additions": 130,
+          "deletions": 3
+        },
+        {
+          "subject": "fix(trailhead): degrade cleanly on an unreadable declared ruleset",
+          "changed_lines": 68,
+          "additions": 60,
+          "deletions": 8
+        },
+        {
+          "subject": "fix(trailhead): degrade cleanly on a non-utf-8 ruleset surface",
+          "changed_lines": 85,
+          "additions": 68,
+          "deletions": 17
+        },
+        {
+          "subject": "fix(trailhead): confine the user-ruleset write to the rules dir",
+          "changed_lines": 153,
+          "additions": 145,
+          "deletions": 8
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-116",
+      "pr_number": 116,
+      "pr_title": "fix(lore): span all non-shared vaults in `lore areas`, close shared-vault leak",
+      "merged_at": "2026-08-13T19:39:05Z",
+      "series_length": 7,
+      "commits": [
+        {
+          "subject": "fix(lore): make `lore areas` span every configured non-shared vault",
+          "changed_lines": 416,
+          "additions": 391,
+          "deletions": 25
+        },
+        {
+          "subject": "refactor(lore): drop redundant cap re-application from the area-map m\u2026",
+          "changed_lines": 43,
+          "additions": 20,
+          "deletions": 23
+        },
+        {
+          "subject": "fix(lore): guard lore areas against malformed config shapes and gate \u2026",
+          "changed_lines": 219,
+          "additions": 196,
+          "deletions": 23
+        },
+        {
+          "subject": "fix(lore): close the areas-command exception class, normalize wrong-s\u2026",
+          "changed_lines": 398,
+          "additions": 362,
+          "deletions": 36
+        },
+        {
+          "subject": "fix(lore): close case-alias shared-vault leak and sanitize area menu",
+          "changed_lines": 282,
+          "additions": 261,
+          "deletions": 21
+        },
+        {
+          "subject": "fix(lore): drop unused import and skip case-alias test on case-sensit\u2026",
+          "changed_lines": 12,
+          "additions": 7,
+          "deletions": 5
+        },
+        {
+          "subject": "test(lore): pin shared-vault dedupe with an FS-independent unit test",
+          "changed_lines": 110,
+          "additions": 90,
+          "deletions": 20
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-115",
+      "pr_number": 115,
+      "pr_title": "fix(lore): drop the hardcoded name from the librarian agent",
+      "merged_at": "2026-08-13T19:15:05Z",
+      "series_length": 1,
+      "commits": [
+        {
+          "subject": "fix(lore): drop the hardcoded name from the librarian agent",
+          "changed_lines": 8,
+          "additions": 4,
+          "deletions": 4
+        }
+      ],
+      "human_verdict": null,
+      "ambiguous": true,
+      "ambiguous_note": "single-commit branch: fix-up-dominance is a degenerate question for a 1-commit series (squash and preserve produce the same merge output), so no meaningful human verdict applies \u2014 recorded for completeness, not as a regression case."
+    },
+    {
+      "case_id": "pr-114",
+      "pr_number": 114,
+      "pr_title": "refactor(outpost): generalize pickup skills to a role-based reviewer",
+      "merged_at": "2026-08-13T19:15:20Z",
+      "series_length": 1,
+      "commits": [
+        {
+          "subject": "refactor(outpost): generalize pickup skills to a role-based reviewer",
+          "changed_lines": 120,
+          "additions": 60,
+          "deletions": 60
+        }
+      ],
+      "human_verdict": null,
+      "ambiguous": true,
+      "ambiguous_note": "single-commit branch: fix-up-dominance is a degenerate question for a 1-commit series (squash and preserve produce the same merge output), so no meaningful human verdict applies \u2014 recorded for completeness, not as a regression case."
+    },
+    {
+      "case_id": "pr-113",
+      "pr_number": 113,
+      "pr_title": "feat(trailhead): self-refreshing trailhead() shell function + doctor/install/uninstall alignment",
+      "merged_at": "2026-08-13T02:07:58Z",
+      "series_length": 9,
+      "commits": [
+        {
+          "subject": "feat(trailhead): shellenv emits a self-refreshing trailhead() function",
+          "changed_lines": 206,
+          "additions": 201,
+          "deletions": 5
+        },
+        {
+          "subject": "feat(trailhead): doctor reports the bare-name trailhead path",
+          "changed_lines": 177,
+          "additions": 177,
+          "deletions": 0
+        },
+        {
+          "subject": "feat(trailhead): install summary names trailhead in shellenv guidance",
+          "changed_lines": 95,
+          "additions": 88,
+          "deletions": 7
+        },
+        {
+          "subject": "test(trailhead): assert trailhead omission on the PATH-guidance line",
+          "changed_lines": 6,
+          "additions": 3,
+          "deletions": 3
+        },
+        {
+          "subject": "docs(trailhead): correct uninstall summary copy on shim/trailhead per\u2026",
+          "changed_lines": 29,
+          "additions": 28,
+          "deletions": 1
+        },
+        {
+          "subject": "docs(trailhead): correct shim-dir framing, document trailhead function",
+          "changed_lines": 65,
+          "additions": 59,
+          "deletions": 6
+        },
+        {
+          "subject": "refactor(trailhead): doctor reuses pathint's shared bin/trailhead exe\u2026",
+          "changed_lines": 17,
+          "additions": 8,
+          "deletions": 9
+        },
+        {
+          "subject": "fix(trailhead): close shell-injection and install-summary gaps from r\u2026",
+          "changed_lines": 124,
+          "additions": 100,
+          "deletions": 24
+        },
+        {
+          "subject": "fix(trailhead): guard the shim name against eval-unsafe chars",
+          "changed_lines": 7,
+          "additions": 7,
+          "deletions": 0
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-112",
+      "pr_number": 112,
+      "pr_title": "feat(lore,outpost): vault sites zone + publish-site guardrail hardening",
+      "merged_at": "2026-08-12T15:19:57Z",
+      "series_length": 12,
+      "commits": [
+        {
+          "subject": "test(lore): assumption-probe for default-symlink exemption coverage",
+          "changed_lines": 150,
+          "additions": 150,
+          "deletions": 0
+        },
+        {
+          "subject": "feat(lore): carve the vault sites zone out of all three write guardrails",
+          "changed_lines": 752,
+          "additions": 571,
+          "deletions": 181
+        },
+        {
+          "subject": "test(lore): assumption-probe for lore sync --vault naming at the defa\u2026",
+          "changed_lines": 166,
+          "additions": 166,
+          "deletions": 0
+        },
+        {
+          "subject": "feat(outpost): add outpost:publish-site skill for vault-hosted static\u2026",
+          "changed_lines": 1003,
+          "additions": 837,
+          "deletions": 166
+        },
+        {
+          "subject": "test(outpost): cover publish_site.py's exact end-to-end payload shape",
+          "changed_lines": 67,
+          "additions": 67,
+          "deletions": 0
+        },
+        {
+          "subject": "chore(lore): drop dead test imports and stale deny-rule docstring",
+          "changed_lines": 13,
+          "additions": 5,
+          "deletions": 8
+        },
+        {
+          "subject": "fix(lore): anchor and escape guard exemptions, deny vault .git",
+          "changed_lines": 190,
+          "additions": 160,
+          "deletions": 30
+        },
+        {
+          "subject": "fix(outpost): make publish-site replace safe and serve-faithful",
+          "changed_lines": 471,
+          "additions": 432,
+          "deletions": 39
+        },
+        {
+          "subject": "fix(outpost): reject nested .git in publish payload, survive interrupts",
+          "changed_lines": 157,
+          "additions": 151,
+          "deletions": 6
+        },
+        {
+          "subject": "docs(lore): name the nested-.git hazard in the sites carve-out",
+          "changed_lines": 12,
+          "additions": 9,
+          "deletions": 3
+        },
+        {
+          "subject": "fix(lore): reject over-broad vault-guard exemption patterns",
+          "changed_lines": 107,
+          "additions": 95,
+          "deletions": 12
+        },
+        {
+          "subject": "fix(outpost): fold case when rejecting nested .git in publish payload",
+          "changed_lines": 57,
+          "additions": 50,
+          "deletions": 7
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-111",
+      "pr_number": 111,
+      "pr_title": "fix(lore): make session show/flush/referenced vault-aware with shared-vault write gating",
+      "merged_at": "2026-08-12T00:23:22Z",
+      "series_length": 5,
+      "commits": [
+        {
+          "subject": "fix(lore): resolve sessions across all vaults in show and flush",
+          "changed_lines": 426,
+          "additions": 386,
+          "deletions": 40
+        },
+        {
+          "subject": "refactor(lore): share the flush rollback and drop redundant scaffolding",
+          "changed_lines": 255,
+          "additions": 127,
+          "deletions": 128
+        },
+        {
+          "subject": "fix(lore): take session referenced cross-vault and fail closed on config",
+          "changed_lines": 300,
+          "additions": 276,
+          "deletions": 24
+        },
+        {
+          "subject": "fix(lore): fence shared vaults out of the session write fan-out",
+          "changed_lines": 434,
+          "additions": 420,
+          "deletions": 14
+        },
+        {
+          "subject": "docs(lore): state session show's real unfenced shared-vault read posture",
+          "changed_lines": 9,
+          "additions": 6,
+          "deletions": 3
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    },
+    {
+      "case_id": "pr-110",
+      "pr_number": 110,
+      "pr_title": "feat(trailhead): add outpost restart verb",
+      "merged_at": "2026-08-12T00:00:47Z",
+      "series_length": 4,
+      "commits": [
+        {
+          "subject": "feat(trailhead): add outpost restart verb (rebuild-then-restart)",
+          "changed_lines": 232,
+          "additions": 219,
+          "deletions": 13
+        },
+        {
+          "subject": "refactor(trailhead): collapse duplicated outpost test subprocess helper",
+          "changed_lines": 64,
+          "additions": 30,
+          "deletions": 34
+        },
+        {
+          "subject": "fix(trailhead): verify outpost restart health, surface build stdout",
+          "changed_lines": 113,
+          "additions": 104,
+          "deletions": 9
+        },
+        {
+          "subject": "fix(trailhead): restart confirms new pid, not just /health, before de\u2026",
+          "changed_lines": 110,
+          "additions": 100,
+          "deletions": 10
+        }
+      ],
+      "human_verdict": "deliberately-separated",
+      "ambiguous": false,
+      "ambiguous_note": null
+    }
+  ]
+}
