@@ -868,8 +868,9 @@ class TestMergeMethod:
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         """An absent key is a readable, well-formed configuration, so it
-        gets the automatic-selection notice — not the malformed-input one —
-        and that notice names the setting value that restores squashing."""
+        gets the automatic-selection notice — not the malformed-input one.
+        The opt-out instruction is a separate end-of-run line, withheld
+        from a faulting run like this one."""
         argv = self._run_merge_capture_argv(tmp_path, "[release]\nauto_merge = true\n")
         assert len(argv) == 1
         # This stub's PR carries no capability data, so the per-pull-request
@@ -878,7 +879,6 @@ class TestMergeMethod:
         assert "--squash" in argv[0]
         err = capsys.readouterr().err
         assert "automatic selection" in err
-        assert 'merge_method = "squash"' in err
 
     def test_automatic_named_explicitly_is_accepted_not_refused(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
@@ -915,12 +915,12 @@ class TestMergeMethod:
         return the same value, not raise and not resolve to automatic —
         rather than trusting that the literal in the notice text is
         correct."""
-        from trailhead.vcs.github import _load_merge_method
+        from trailhead.vcs.github import _load_merge_method, _restore_squashing_hint
 
-        self._run_merge_capture_argv(tmp_path, "[release]\nauto_merge = true\n")
-        err = capsys.readouterr().err
-        match = re.search(r'merge_method = "([^"]+)"', err)
-        assert match is not None, err
+        hint = _restore_squashing_hint(["auto-rebase-permitted: repository permits rebasing"])
+        assert hint is not None
+        match = re.search(r'merge_method = "([^"]+)"', hint)
+        assert match is not None, hint
         restoring_value = match.group(1)
 
         round_trip_dir = tmp_path / "round-trip"
@@ -3096,6 +3096,66 @@ class TestMergeLoopSeriesRead:
         disclosure = next(line for line in err.splitlines() if "PR #7" in line)
         assert RESOLUTION_REASON_PREFIXES["auto_series_lookup_failed"] in disclosure
         assert "merge_method" not in disclosure
+
+    def test_transient_failure_run_carries_no_configuration_remedy_anywhere(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """A run where a pull request fell back because of a transient
+        series-lookup failure emits no instruction to change configuration
+        anywhere on either stream — not only on the per-pull-request line.
+        The reader of this stream is often an autonomous agent, and a
+        standing "pin merge_method" instruction co-occurring with an
+        unexpected fallback invites pinning the whole group's configuration
+        in response to a one-off provider hiccup."""
+        manifest, wt = _one_repo_group(tmp_path)
+        toml = _write_toml(tmp_path, "[release]\nauto_merge = true\n")
+        stub = _make_capability_stub(
+            capabilities={
+                "alpha": {
+                    "mergeCommitAllowed": True,
+                    "squashMergeAllowed": True,
+                    "rebaseMergeAllowed": False,
+                }
+            },
+            # No "alpha" entry in `commits` — the series read fails.
+        )
+        provider = get_provider("github", runner=stub)
+        pr_pairs = [PRPair(repo_path=str(wt), pr_number="7", member_name="alpha")]
+        provider.pr.merge(pr_pairs, str(manifest), toml_path=str(toml))
+
+        captured = capsys.readouterr()
+        combined = captured.out + captured.err
+        assert "add `[release] merge_method" not in combined
+        # The disclosure that automatic selection is on still runs — only
+        # the remedy is withheld.
+        assert "automatic selection" in combined
+
+    def test_clean_automatic_run_still_offers_the_opt_out(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The other side of the same branch: a run in which nothing
+        faulted — every pull request resolved through an ordinary automatic
+        rung — does name the configuration opt-out, because there is no
+        fallback for a reader to misattribute it to."""
+        manifest, wt = _one_repo_group(tmp_path)
+        toml = _write_toml(tmp_path, "[release]\nauto_merge = true\n")
+        stub = _make_capability_stub(
+            capabilities={
+                "alpha": {
+                    "mergeCommitAllowed": True,
+                    "squashMergeAllowed": True,
+                    "rebaseMergeAllowed": True,
+                }
+            },
+        )
+        provider = get_provider("github", runner=stub)
+        pr_pairs = [PRPair(repo_path=str(wt), pr_number="7", member_name="alpha")]
+        result = provider.pr.merge(pr_pairs, str(manifest), toml_path=str(toml))
+
+        assert result["merged"] == [f"{wt}:7"]
+        captured = capsys.readouterr()
+        combined = captured.out + captured.err
+        assert "add `[release] merge_method" in combined
 
     def test_ordinary_series_decision_offers_no_configuration_change(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]

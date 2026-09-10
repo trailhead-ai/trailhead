@@ -1373,11 +1373,58 @@ def _merge_method_notice(merge_method: str | None) -> str | None:
         return (
             "portage merge: [release].merge_method is automatic selection "
             "— merges will use whichever strategy the target repository "
-            "permits, preferring rebase — add `[release] merge_method = "
-            f'"{_RESTORE_SQUASH_METHOD}"` to the group TOML to restore '
-            "squashing."
+            "permits, preferring rebase."
         )
     return None
+
+
+#: The resolution reasons that mean something went wrong rather than that
+#: automatic selection made an ordinary choice: a lookup that failed, a
+#: series too long to read, and a repository reporting no permitted
+#: strategy at all. `_restore_squashing_hint` withholds its opt-out from any
+#: run carrying one of these.
+_FAULT_RESOLUTION_PREFIXES = frozenset(
+    RESOLUTION_REASON_PREFIXES[key]
+    for key in (
+        "auto_series_lookup_failed",
+        "auto_series_truncated",
+        "auto_lookup_failed",
+        "auto_none_permitted",
+    )
+)
+
+
+def _restore_squashing_hint(reasons: list[str]) -> str | None:
+    """Return the end-of-run instruction for opting out of automatic
+    selection, or `None` when this run must not carry one.
+
+    The opt-out is withheld from any run in which a pull request resolved
+    through a fault rung (`_FAULT_RESOLUTION_PREFIXES`). The instruction is
+    individually accurate wherever it appears — automatic selection *is*
+    configured, and that *is* how to opt out — so the risk it carries is
+    co-occurrence, not wrong text: a reader who meets an unexpected
+    fallback and a standing "pin merge_method" instruction in the same
+    stream can pin the whole group's configuration in response to a one-off
+    provider fault. Withholding it is the only remedy that removes the
+    correlation; rewording it in place does not.
+
+    This is why the hint runs at the end rather than beside the top-of-run
+    disclosure: only a summary that has seen every outcome can tell an
+    ordinary automatic choice from a fault. A run that resolved nothing at
+    all (every pull request skipped, or a refusal before the first
+    resolution) also gets no hint — there is no choice to opt out of.
+    """
+    if not reasons:
+        return None
+    if any(
+        reason.split(":", 1)[0] in _FAULT_RESOLUTION_PREFIXES for reason in reasons
+    ):
+        return None
+    return (
+        "portage merge: automatic selection chose the strategy for this run "
+        f'— add `[release] merge_method = "{_RESTORE_SQUASH_METHOD}"` to the '
+        "group TOML to always squash instead."
+    )
 
 
 def _merge_prs(
@@ -1454,6 +1501,7 @@ def _merge_prs(
     merged: list[str] = []
     failed: dict[str, str] = {}
     skipped: dict[str, str] = {}
+    resolution_reasons: list[str] = []
 
     for pair in ordered:
         key = f"{pair.repo_path}:{pair.pr_number}"
@@ -1518,6 +1566,7 @@ def _merge_prs(
             )
 
         strategy, reason = resolve_merge_strategy(merge_method, permitted, series=series)
+        resolution_reasons.append(reason)
 
         print(
             f"portage merge: PR #{pair.pr_number} ({pair.member_name}): "
@@ -1536,6 +1585,11 @@ def _merge_prs(
         merged.append(key)
         branch = state.get("headRefName", "")
         _delete_remote_branch(pair.repo_path, branch, runner)
+
+    if merge_method == AUTOMATIC_MERGE_METHOD:
+        hint = _restore_squashing_hint(resolution_reasons)
+        if hint is not None:
+            print(hint, file=sys.stderr)
 
     return {"merged": merged, "failed": failed, "skipped": skipped}
 

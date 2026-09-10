@@ -226,10 +226,18 @@ request — preferring rebase where the repository permits it, falling back to w
 `merge`/`squash` is sole-permitted, and otherwise deciding between the two from the pull
 request's commit series (fix-up-dominated resolves to squashing; not dominated resolves to a
 merge commit) — see "Automatic merge-strategy selection" in `pr-merge-rituals.md` for the full
-ladder and the fix-up marker vocabulary. It prints a notice on stderr naming the resolution and
-the remediation to restore squashing (`add [release] merge_method = "squash" to the group TOML`)
-— surface that notice verbatim rather than swallowing it, so the operator sees the behaviour
+ladder and the fix-up marker vocabulary. It prints a notice on stderr at the top of the run naming
+automatic selection, and a disclosure line per pull request naming the resolved strategy and its
+reason — surface both verbatim rather than swallowing them, so the operator sees the behaviour
 before it lands on `main`.
+
+The instruction for opting out (`add [release] merge_method = "squash" to the group TOML`) is a
+separate end-of-run line, and it is emitted **only** on a run in which nothing faulted. A run
+where any pull request fell back on a lookup failure, a truncated series, or a repository
+reporting no permitted strategy carries no configuration instruction at all — do not supply one
+from this document. Pinning `merge_method` for the whole group in response to a one-off provider
+fault disables rebase-by-default with no human in the loop, which is exactly what withholding
+the line prevents.
 When `merge_method` is set to a value other than `merge`/`squash`/`rebase`/`automatic`, `portage
 merge` refuses with exit 2 before any `gh` call — honor that exit code and surface it as
 `BLOCKED: portage merge refused — [release].merge_method is invalid; see stderr for the accepted values.`
