@@ -158,6 +158,10 @@ class TestCraftInventory:
         # drive takes a `ready` spec through one single-repo slice end to end —
         # select, plan, build, PR tail — then stops at the slice boundary and
         # reports, escalating rather than resolving anything it does not own.
+        # consolidate is the corpus ritual: it walks a labelled lesson corpus
+        # whole, folds duplicate clusters into one coherent lesson each, and
+        # deletes what it folded away, so the corpus stops outgrowing the
+        # bounded window that dispatch-time retrieval reads from.
         m = load_manifest(_CRAFT_MANIFEST)
         assert set(m.skills) == {
             "polish",
@@ -172,6 +176,7 @@ class TestCraftInventory:
             "distill",
             "slice",
             "drive",
+            "consolidate",
         }
 
     def test_shared_not_selectable(self):
