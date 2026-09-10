@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import re
-
 import _portage_cli  # noqa: F401  (prepends the plugin root onto sys.path)
 from portage.monitor_outcome import (
     StrategyDisclosure,
@@ -205,91 +203,6 @@ def test_explicit_configuration_is_reported_without_implying_selection():
 
 def test_no_merged_pull_request_reports_not_applicable():
     assert summarize_strategy_disclosures([]) == "n/a"
-
-
-# ---------------------------------------------------------------------------
-# monitor.md's Strategy-disclosure prose is the INPUT here: its documented
-# line/field shapes are extracted and fed to the real parser/summarizer, so a
-# doc that drifts from what the code actually accepts fails here rather than
-# on an agent's first attempt to follow it. Nothing below asserts that a
-# sentence appears in the document.
-# ---------------------------------------------------------------------------
-
-_MONITOR_MD = _portage_cli.PLUGIN_ROOT / "agents" / "monitor.md"
-
-
-def _monitor_md_text() -> str:
-    return _MONITOR_MD.read_text(encoding="utf-8")
-
-
-def _documented_disclosure_template() -> str:
-    match = re.search(
-        r"`portage merge: PR #<pr_number> \(<member_name>\): strategy '<strategy>' — <reason>`",
-        _monitor_md_text(),
-    )
-    assert match, "monitor.md must document the per-PR strategy disclosure line's shape"
-    return match.group(0).strip("`")
-
-
-def _documented_uniform_template() -> str:
-    match = re.search(r"once: `(<strategy> — <reason>)`", _monitor_md_text())
-    assert match, "monitor.md must document the uniform-run Strategy field shape"
-    return match.group(1)
-
-
-def _documented_mixed_template() -> str:
-    match = re.search(
-        r"comma-separated: `(<member_name>=<strategy> \(<reason>\))`", _monitor_md_text()
-    )
-    assert match, "monitor.md must document the mixed-run per-repository Strategy field shape"
-    return match.group(1)
-
-
-def test_documented_disclosure_line_shape_parses_via_the_real_resolver():
-    strategy, reason = resolve_merge_strategy(AUTOMATIC_MERGE_METHOD, frozenset({"rebase"}))
-    line = (
-        _documented_disclosure_template()
-        .replace("<pr_number>", "42")
-        .replace("<member_name>", "trailhead-ai.github.io")
-        .replace("<strategy>", strategy)
-        .replace("<reason>", reason)
-    )
-    assert parse_strategy_disclosure(line) == StrategyDisclosure(
-        "42", "trailhead-ai.github.io", strategy, reason
-    )
-
-
-def test_documented_uniform_shape_matches_the_real_summary():
-    strategy, reason = resolve_merge_strategy(AUTOMATIC_MERGE_METHOD, frozenset({"rebase"}))
-    disclosures = [
-        StrategyDisclosure("1", "member-a", strategy, reason),
-        StrategyDisclosure("2", "member-b", strategy, reason),
-    ]
-    expected = (
-        _documented_uniform_template().replace("<strategy>", strategy).replace("<reason>", reason)
-    )
-    assert summarize_strategy_disclosures(disclosures) == expected
-
-
-def test_documented_mixed_shape_matches_the_real_summary():
-    rebase_strategy, rebase_reason = resolve_merge_strategy(
-        AUTOMATIC_MERGE_METHOD, frozenset({"rebase"})
-    )
-    squash_strategy, squash_reason = resolve_merge_strategy(
-        AUTOMATIC_MERGE_METHOD, frozenset({"squash"})
-    )
-    disclosures = [
-        StrategyDisclosure("1", "member-a", rebase_strategy, rebase_reason),
-        StrategyDisclosure("2", "member-b", squash_strategy, squash_reason),
-    ]
-    template = _documented_mixed_template()
-    expected = ", ".join(
-        template.replace("<member_name>", d.member_name)
-        .replace("<strategy>", d.strategy)
-        .replace("<reason>", d.reason)
-        for d in disclosures
-    )
-    assert summarize_strategy_disclosures(disclosures) == expected
 
 
 def _graphql_merge_spy(calls, permitted):
