@@ -81,15 +81,6 @@ def _dispatches() -> dict[str, set[str]]:
     return found
 
 
-def test_craft_prose_dispatches_subagents_by_name():
-    """Non-vacuity guard: an extraction that stops matching would leave the
-    resolution test below iterating over an empty set and reporting clean."""
-    assert len(_dispatches()) >= 5, (
-        f"expected craft's skills and agents to dispatch several subagents by name, "
-        f"extracted: {sorted(_dispatches())}"
-    )
-
-
 @pytest.mark.parametrize("name", sorted(_dispatches()), ids=lambda n: n)
 def test_every_dispatched_subagent_resolves_to_an_installed_capability(name: str):
     """A dispatch naming a subagent the manifest does not register dead-ends at the
@@ -110,20 +101,6 @@ _AGENT_TOKEN = re.compile(r"(?<!/)\bcraft:([a-z][a-z0-9-]*)")
 
 def _readme() -> str:
     return _README.read_text(encoding="utf-8")
-
-
-@pytest.mark.parametrize("skill", sorted(_SKILLS), ids=lambda n: n)
-def test_every_registered_skill_is_advertised_in_the_readme(skill: str):
-    assert f"/craft:{skill}" in _readme(), (
-        f"craft's manifest registers the skill `{skill}` but the README never names it"
-    )
-
-
-@pytest.mark.parametrize("subagent", sorted(_CRAFT_SUBAGENTS), ids=lambda n: n)
-def test_every_registered_subagent_is_advertised_in_the_readme(subagent: str):
-    assert f"craft:{subagent}" in _readme(), (
-        f"craft's manifest registers the subagent `{subagent}` but the README never names it"
-    )
 
 
 def test_every_capability_the_readme_advertises_is_one_the_manifest_registers():

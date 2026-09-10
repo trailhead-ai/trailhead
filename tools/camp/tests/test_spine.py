@@ -251,6 +251,15 @@ def test_status_json_scoped_entry_retains_fire_and_dev_env_keys(
     assert entry["repos"] == []
 
 
+def _isolated_config_env(tmp_path: Path) -> dict[str, str]:
+    """A hermetic env for self_host_name: isolates CAMP_CONFIG_DIR/HOME so
+    cmd_doctor never reads the operator's real ~/.config/camp/hosts.toml."""
+    return {
+        "HOME": str(tmp_path / "home"),
+        "CAMP_CONFIG_DIR": str(tmp_path / "config"),
+    }
+
+
 def test_doctor_json_no_registry_consistency_passes(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -261,7 +270,7 @@ def test_doctor_json_no_registry_consistency_passes(
 
     _isolate_roots(monkeypatch, tmp_path)
     try:
-        cmd_doctor(["--json"])
+        cmd_doctor(["--json"], env=_isolated_config_env(tmp_path))
     except SystemExit:
         pass  # asdf check may fail in CI; we only assert on the consistency check
     report = _json.loads(capsys.readouterr().out)
@@ -269,6 +278,101 @@ def test_doctor_json_no_registry_consistency_passes(
     assert consistency["pass"] is True
     assert consistency["details"] == "no drift detected"
     assert consistency["stale_registry_instances"] == []
+
+
+def test_doctor_json_host_name_reads_through_injected_env_not_real_install(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """cmd_doctor's self-declared-host-name check must read through the
+    injected env, never the operator's real ~/.config/camp/hosts.toml —
+    proven by stamping a name only the isolated location carries and
+    confirming the report reflects exactly that name."""
+    import json as _json
+
+    from camp.spine import cmd_doctor
+
+    _isolate_roots(monkeypatch, tmp_path)
+    env = _isolated_config_env(tmp_path)
+    config_dir = Path(env["CAMP_CONFIG_DIR"])
+    config_dir.mkdir(parents=True)
+    (config_dir / "hosts.toml").write_text('self_name = "isolated-test-host"\n')
+
+    try:
+        cmd_doctor(["--json"], env=env)
+    except SystemExit:
+        pass
+    report = _json.loads(capsys.readouterr().out)
+    host_row = next(c for c in report["checks"] if c["check"] == "host_name")
+    assert host_row["details"] == "isolated-test-host"
+
+
+def test_doctor_json_malformed_hosts_toml_fails_host_name_row_not_the_verb(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A malformed hosts.toml must surface as a failed `host_name` check row
+    among the others — not an early hard-exit that prevents the asdf and
+    consistency checks from ever running."""
+    import json as _json
+
+    from camp.spine import cmd_doctor
+
+    _isolate_roots(monkeypatch, tmp_path)
+    env = _isolated_config_env(tmp_path)
+    config_dir = Path(env["CAMP_CONFIG_DIR"])
+    config_dir.mkdir(parents=True)
+    (config_dir / "hosts.toml").write_text("self_name = 12345\n")
+
+    with pytest.raises(SystemExit) as exc_info:
+        cmd_doctor(["--json"], env=env)
+    assert exc_info.value.code != 0
+
+    report = _json.loads(capsys.readouterr().out)
+    checks_by_name = {c["check"] for c in report["checks"]}
+    assert checks_by_name == {"asdf", "consistency", "host_name"}, (
+        "the other checks must still run and be reported"
+    )
+    host_row = next(c for c in report["checks"] if c["check"] == "host_name")
+    assert host_row["pass"] is False
+    assert "hosts.toml" in host_row["details"]
+    assert "self_name" in host_row["details"]
+
+
+def test_doctor_json_deeply_nested_hosts_toml_fails_host_name_row_not_a_traceback(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A hosts.toml nested deep enough to blow tomllib's recursion limit must
+    surface as a failed `host_name` row (via HostConfigError), same as any
+    other malformed TOML — never a raw RecursionError traceback, and never an
+    early hard-exit that prevents the other checks from running."""
+    import json as _json
+
+    from camp.spine import cmd_doctor
+
+    _isolate_roots(monkeypatch, tmp_path)
+    env = _isolated_config_env(tmp_path)
+    config_dir = Path(env["CAMP_CONFIG_DIR"])
+    config_dir.mkdir(parents=True)
+    depth = 200
+    nested_bomb = "bomb = " + "{a=" * depth + "1" + "}" * depth + "\n"
+    (config_dir / "hosts.toml").write_text('self_name = "x"\n' + nested_bomb)
+
+    original_limit = sys.getrecursionlimit()
+    sys.setrecursionlimit(150)
+    try:
+        with pytest.raises(SystemExit) as exc_info:
+            cmd_doctor(["--json"], env=env)
+    finally:
+        sys.setrecursionlimit(original_limit)
+    assert exc_info.value.code != 0
+
+    report = _json.loads(capsys.readouterr().out)
+    checks_by_name = {c["check"] for c in report["checks"]}
+    assert checks_by_name == {"asdf", "consistency", "host_name"}, (
+        "the other checks must still run and be reported"
+    )
+    host_row = next(c for c in report["checks"] if c["check"] == "host_name")
+    assert host_row["pass"] is False
+    assert "hosts.toml" in host_row["details"]
 
 
 # ---------------------------------------------------------------------------

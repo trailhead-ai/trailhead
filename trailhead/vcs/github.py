@@ -75,7 +75,8 @@ class AutoMergeDisabledError(Exception):
 
 
 class MergeMethodInvalidError(Exception):
-    """Raised when merge_method in the [release] block is not merge/squash/rebase.
+    """Raised when merge_method in the [release] block is not one of
+    merge/squash/rebase/automatic.
 
     Fail-closed, same posture as AutoMergeDisabledError: a merge is not
     reversible, so an unrecognized value refuses rather than falling back to
@@ -579,21 +580,43 @@ def _load_auto_merge(toml_path: str | None) -> bool:
 #: One-for-one with the three strategy flags `gh pr merge` itself exposes
 #: (`-m`/`--merge`, `-s`/`--squash`, `-r`/`--rebase`). `--author-email` is not
 #: scoped to a strategy in that flag list, so it stays on the argv unchanged
-#: for all three.
+#: for all three. Automatic selection has no entry here — it is a
+#: configuration-only value with no `gh` flag of its own.
 _MERGE_METHOD_FLAGS = {"merge": "--merge", "squash": "--squash", "rebase": "--rebase"}
+
+#: Sentinel returned by `_load_merge_method` for automatic selection —
+#: distinct from `None`, which signals a configuration that could not be
+#: read or understood at all. Shares its literal with the TOML value that
+#: names it explicitly.
+AUTOMATIC_MERGE_METHOD = "automatic"
+
+#: Accepted configuration vocabulary: the three concrete strategies `gh`
+#: exposes flags for, plus automatic selection.
+_MERGE_METHOD_VALUES = frozenset(_MERGE_METHOD_FLAGS) | {AUTOMATIC_MERGE_METHOD}
+
+#: The setting value that restores the prior squashing behaviour, named in
+#: the automatic-selection notice and used as the safe-direction fallback
+#: for a configuration that could not be read or understood. Looked up in
+#: `_MERGE_METHOD_FLAGS` — the loader's accepted vocabulary — rather than a
+#: second literal, so a vocabulary change that drops or renames "squash"
+#: breaks this lookup immediately instead of leaving the notice naming a
+#: value `_load_merge_method` would reject.
+_RESTORE_SQUASH_METHOD = next(v for v in _MERGE_METHOD_FLAGS if v == "squash")
 
 
 def _load_merge_method(toml_path: str | None) -> str | None:
     """Return the configured merge_method.
 
-    ``None`` is returned for every unconfigured shape — a missing toml_path,
-    an unreadable/malformed file, a [release] block that isn't a table, or a
-    valid [release] table with the ``merge_method`` key absent — so the
-    caller resolves all of them to the SAME single default ("squash") and
-    announces it.
+    Returns one of the three concrete strategies (``merge``/``squash``/
+    ``rebase``) when named explicitly, ``AUTOMATIC_MERGE_METHOD`` when the
+    configuration is readable and well-formed and either names automatic
+    selection explicitly or omits the ``merge_method`` key, and ``None`` when
+    the configuration could not be read or understood at all — a missing
+    toml_path, an unreadable file, undecodable TOML, or a [release] block
+    that isn't a table. The caller resolves ``None`` to the safe direction.
 
     Raises MergeMethodInvalidError if the key is present but not one of
-    merge/squash/rebase — fail-closed, same posture as auto_merge.
+    merge/squash/rebase/automatic — fail-closed, same posture as auto_merge.
     """
     if not toml_path:
         return None
@@ -609,11 +632,11 @@ def _load_merge_method(toml_path: str | None) -> str | None:
         return None
     value = release.get("merge_method")
     if value is None:
-        return None
-    if not isinstance(value, str) or value not in _MERGE_METHOD_FLAGS:
+        return AUTOMATIC_MERGE_METHOD
+    if not isinstance(value, str) or value not in _MERGE_METHOD_VALUES:
         raise MergeMethodInvalidError(
             f"invalid [release] merge_method {value!r} — accepted values are "
-            f"'merge', 'squash', 'rebase'"
+            f"'merge', 'squash', 'rebase', 'automatic'"
         )
     return value
 
@@ -664,13 +687,94 @@ def _get_pr_state(repo_path: str, pr_number: str, runner: rp.Runner) -> dict | N
 _STACK_ENTRY_QUERY = (
     "query($owner: String!, $name: String!, $number: Int!) {"
     " repository(owner: $owner, name: $name) {"
+    "  mergeCommitAllowed"
+    "  squashMergeAllowed"
+    "  rebaseMergeAllowed"
     "  pullRequest(number: $number) { stackEntry { stack { number size } } }"
     " }"
     "}"
 )
 
 
-def _get_stack_entry(repo_path: str, pr_number: str, runner: rp.Runner) -> dict | None:
+def _fetch_repository_query(
+    repo_path: str,
+    pr_number: str,
+    runner: rp.Runner,
+    cache: dict[tuple[str, str], dict | None] | None = None,
+) -> dict | None:
+    """Issue ``_STACK_ENTRY_QUERY`` and return the response's ``repository``
+    object, or None when the repository itself could not be resolved.
+
+    Deliberately does not route through ``_gh``: ``gh api graphql`` exits
+    non-zero on any GraphQL error entry in the response body, even when the
+    body still carries valid data for an unrelated sub-selection (e.g. a bad
+    PR number nulls only ``pullRequest``, leaving the repository-level
+    merge-capability fields intact) — and ``_gh`` discards stdout whenever
+    the exit code is non-zero. Parsing stdout independently of the exit code
+    keeps a pull-request-side error from masquerading as a repository-level
+    lookup failure. A genuinely null ``repository`` (owner/name unresolvable)
+    is the real "could not ask" signal, and that's the case this returns
+    None for.
+
+    A caller that needs more than one signal off this query for the same
+    pull request (e.g. both ``_get_stack_entry`` and
+    ``get_permitted_merge_strategies``) passes a shared ``cache`` dict so the
+    second read is served from the first fetch instead of issuing its own
+    ``gh api graphql`` call. Keyed by ``(repo_path, pr_number)``; omitted
+    (the default), every call fetches fresh, exactly as before.
+    """
+    key = (repo_path, pr_number)
+    if cache is not None and key in cache:
+        return cache[key]
+
+    def _query() -> dict | None:
+        owner_repo = _get_owner_repo(repo_path, runner)
+        if not owner_repo:
+            return None
+        owner, sep, name = owner_repo.partition("/")
+        if not sep or not owner or not name:
+            return None
+        r = rp.run(
+            [
+                "gh",
+                "api",
+                "graphql",
+                "-f",
+                f"query={_STACK_ENTRY_QUERY}",
+                "-F",
+                f"owner={owner}",
+                "-F",
+                f"name={name}",
+                "-F",
+                f"number={pr_number}",
+            ],
+            cwd=repo_path,
+            runner=runner,
+        )
+        try:
+            body = json.loads(r.stdout)
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(body, dict):
+            return None
+        data = body.get("data")
+        if not isinstance(data, dict):
+            return None
+        repository = data.get("repository")
+        return repository if isinstance(repository, dict) else None
+
+    result = _query()
+    if cache is not None:
+        cache[key] = result
+    return result
+
+
+def _get_stack_entry(
+    repo_path: str,
+    pr_number: str,
+    runner: rp.Runner,
+    cache: dict[tuple[str, str], dict | None] | None = None,
+) -> dict | None:
     """Return the stack a PR belongs to, or None if it isn't a stack member.
 
     Stack membership (GitHub stacked PRs, public preview 2026-07-30) is not
@@ -683,35 +787,15 @@ def _get_stack_entry(repo_path: str, pr_number: str, runner: rp.Runner) -> dict 
     unresolvable, API error, unexpected shape); this call is best-effort
     on top of the mergeable/mergeState/isDraft gates that already run, not a
     replacement for them.
+
+    Pass a shared ``cache`` to reuse a fetch already made by
+    ``get_permitted_merge_strategies`` (or vice versa) for the same pull
+    request, so a caller that needs both signals costs one query, not two.
     """
-    owner_repo = _get_owner_repo(repo_path, runner)
-    if not owner_repo:
+    repository = _fetch_repository_query(repo_path, pr_number, runner, cache=cache)
+    if repository is None:
         return None
-    owner, sep, name = owner_repo.partition("/")
-    if not sep or not owner or not name:
-        return None
-    data = _gh(
-        [
-            "api",
-            "graphql",
-            "-f",
-            f"query={_STACK_ENTRY_QUERY}",
-            "-F",
-            f"owner={owner}",
-            "-F",
-            f"name={name}",
-            "-F",
-            f"number={pr_number}",
-        ],
-        cwd=repo_path,
-        runner=runner,
-    )
-    if not isinstance(data, dict):
-        return None
-    try:
-        pr = data["data"]["repository"]["pullRequest"]
-    except (KeyError, TypeError):
-        return None
+    pr = repository.get("pullRequest")
     if not isinstance(pr, dict):
         return None
     entry = pr.get("stackEntry")
@@ -719,6 +803,202 @@ def _get_stack_entry(repo_path: str, pr_number: str, runner: rp.Runner) -> dict 
         return None
     stack = entry.get("stack")
     return stack if isinstance(stack, dict) else None
+
+
+#: Maps the GraphQL Repository object's permitted-merge-method booleans to
+#: the same strategy names `_MERGE_METHOD_FLAGS` uses for that strategy.
+_MERGE_CAPABILITY_FIELDS = {
+    "mergeCommitAllowed": "merge",
+    "squashMergeAllowed": "squash",
+    "rebaseMergeAllowed": "rebase",
+}
+
+#: Sentinel returned by `get_permitted_merge_strategies` when the
+#: repository's permitted merge strategies could not be determined — distinct
+#: from `frozenset()`, which means the query succeeded and the repository
+#: permits none. Shares `AUTOMATIC_MERGE_METHOD`'s convention of a plain
+#: string sentinel exported for callers outside this module to compare
+#: against, rather than overloading `None` (which `_load_merge_method`
+#: already uses for a different meaning: an unreadable configuration).
+PERMITTED_STRATEGIES_LOOKUP_FAILED = "lookup-failed"
+
+
+def get_permitted_merge_strategies(
+    repo_path: str,
+    pr_number: str,
+    runner: rp.Runner,
+    cache: dict[tuple[str, str], dict | None] | None = None,
+) -> frozenset[str] | str:
+    """Return the merge strategies the target repository permits.
+
+    Reads the repository-level `mergeCommitAllowed`/`squashMergeAllowed`/
+    `rebaseMergeAllowed` fields folded into `_STACK_ENTRY_QUERY` alongside
+    the existing `pullRequest { stackEntry }` selection, so this adds no
+    additional round trip to the hosting provider beyond the query the merge
+    path already issues per pull request.
+
+    Returns a `frozenset` of zero or more of "merge"/"squash"/"rebase" —
+    empty means the repository genuinely permits none of them — or
+    `PERMITTED_STRATEGIES_LOOKUP_FAILED` when the repository itself couldn't
+    be resolved, or the response's capability fields are missing or not
+    booleans. The two are never conflated: a caller resolving automatic
+    selection needs to fall back differently for "permits nothing" than for
+    "we could not ask".
+
+    A branch-level ruleset can still refuse a strategy this reports as
+    permitted for a given target branch — this reflects the repository's own
+    settings only, not what any particular branch will accept.
+
+    Pass a shared ``cache`` to reuse a fetch already made by
+    ``_get_stack_entry`` (or vice versa) for the same pull request, so a
+    caller that needs both signals costs one query, not two.
+    """
+    repository = _fetch_repository_query(repo_path, pr_number, runner, cache=cache)
+    if repository is None:
+        return PERMITTED_STRATEGIES_LOOKUP_FAILED
+    permitted: set[str] = set()
+    for field, strategy in _MERGE_CAPABILITY_FIELDS.items():
+        value = repository.get(field)
+        if not isinstance(value, bool):
+            return PERMITTED_STRATEGIES_LOOKUP_FAILED
+        if value:
+            permitted.add(strategy)
+    return frozenset(permitted)
+
+
+#: One prefix per resolution cause `resolve_merge_strategy` and
+#: `describe_merge_refusal` can report, keyed by cause name. Pinned here so
+#: two different causes can never render as near-identical text — the
+#: merge-loop task and the next slice's commit-series rule both extend this
+#: vocabulary rather than retyping it. Every prefix used by either function
+#: below is drawn from this dict, and its values are pairwise distinct.
+RESOLUTION_REASON_PREFIXES: dict[str, str] = {
+    "explicit_configured": "explicit-configured",
+    "auto_rebase_permitted": "auto-rebase-permitted",
+    "auto_sole_permitted": "auto-sole-permitted",
+    "auto_interim_squash": "auto-interim-squash",
+    "auto_lookup_failed": "auto-lookup-failed",
+    "auto_none_permitted": "auto-none-permitted",
+    "merge_refused": "merge-refused",
+}
+
+
+def resolve_merge_strategy(
+    configured_method: str,
+    permitted: frozenset[str] | str,
+) -> tuple[str, str]:
+    """Resolve a configured merge_method plus a repository's permitted
+    merge strategies to exactly one strategy and a reason.
+
+    Total by construction: every ``(configured_method, permitted)`` pair
+    resolves to a ``(strategy, reason)`` pair. There is no undecided
+    verdict and no caller-side branch for one — the returned strategy is
+    always one of `_MERGE_METHOD_FLAGS`'s keys, ready to look up a `gh pr
+    merge` flag directly. Pure: makes no subprocess or network call and
+    consults only the values it is given.
+
+    ``configured_method`` is a value from `_MERGE_METHOD_VALUES` — one of
+    the three concrete strategies, or `AUTOMATIC_MERGE_METHOD`. When it
+    names a concrete strategy, that strategy is returned unconditionally:
+    ``permitted`` is never inspected, so a
+    `PERMITTED_STRATEGIES_LOOKUP_FAILED` signal alongside an explicit
+    strategy changes nothing.
+
+    When ``configured_method`` is `AUTOMATIC_MERGE_METHOD`:
+      - `permitted == PERMITTED_STRATEGIES_LOOKUP_FAILED` resolves to
+        squashing.
+      - otherwise rebasing is returned whenever ``permitted`` contains it.
+      - otherwise, when the remaining permitted strategies name exactly
+        one, that one is returned regardless of any other rule.
+      - otherwise, when more than one non-rebase strategy is permitted,
+        this resolves to squashing — the interim rule this slice ships;
+        a later change replaces it with a rule driven by the shape of the
+        pull request's commit series.
+      - the degenerate case of ``permitted == frozenset()`` (the
+        repository reports no permitted strategy at all) also resolves to
+        squashing, under its own reason, keeping the function total for
+        every value its declared parameter type accepts.
+
+    Every returned reason is non-empty and starts with one of the pinned,
+    pairwise-distinct prefixes in `RESOLUTION_REASON_PREFIXES` — one per
+    resolution cause — so a lookup failure, a sole-permitted-strategy
+    outcome, and the interim squash outcome can never render as
+    near-identical text.
+
+    The returned strategy is always a key of `_MERGE_METHOD_FLAGS`, so it
+    can always be handed to `_do_merge`. `_MERGE_METHOD_VALUES` is wider
+    than that map — it also carries automatic selection, a configuration
+    value with no merge flag — so a `configured_method` that is neither
+    automatic selection nor a mergeable strategy raises
+    `MergeMethodInvalidError` here rather than being returned and failing
+    at the merge call.
+    """
+    if configured_method != AUTOMATIC_MERGE_METHOD:
+        if configured_method not in _MERGE_METHOD_FLAGS:
+            raise MergeMethodInvalidError(
+                f"cannot merge with [release].merge_method {configured_method!r} — "
+                f"mergeable strategies are {sorted(_MERGE_METHOD_FLAGS)}"
+            )
+        prefix = RESOLUTION_REASON_PREFIXES["explicit_configured"]
+        return configured_method, (
+            f"{prefix}: [release].merge_method='{configured_method}'"
+        )
+
+    if permitted == PERMITTED_STRATEGIES_LOOKUP_FAILED:
+        prefix = RESOLUTION_REASON_PREFIXES["auto_lookup_failed"]
+        return "squash", f"{prefix}: repository capability lookup failed"
+
+    if "rebase" in permitted:
+        prefix = RESOLUTION_REASON_PREFIXES["auto_rebase_permitted"]
+        return "rebase", f"{prefix}: repository permits rebasing"
+
+    remaining = permitted - {"rebase"}
+    if len(remaining) == 1:
+        (only,) = remaining
+        prefix = RESOLUTION_REASON_PREFIXES["auto_sole_permitted"]
+        return only, f"{prefix}: repository permits only '{only}'"
+
+    if len(remaining) >= 2:
+        prefix = RESOLUTION_REASON_PREFIXES["auto_interim_squash"]
+        return "squash", (
+            f"{prefix}: rebasing forbidden and more than one other strategy "
+            "permitted — interim rule, replaced by a commit-series rule in a "
+            "later change"
+        )
+
+    prefix = RESOLUTION_REASON_PREFIXES["auto_none_permitted"]
+    return "squash", f"{prefix}: repository reports no permitted merge strategy"
+
+
+def describe_merge_refusal(strategy: str, refusal: str) -> str:
+    """Describe a merge refused at merge time for a strategy the
+    permitted-strategies lookup reported as available.
+
+    Pure and total: given any strategy name and any refusal text, returns
+    exactly one non-empty string naming the strategy and carrying
+    ``refusal`` verbatim. Never attributes the refusal to a branch rule, a
+    ruleset, or any other specific cause — the provider's merge-refusal
+    status is a shared bucket covering every "cannot merge" reason, and
+    the refusal text alone cannot disambiguate which one applied.
+
+    `_merge_prs` calls this on a refused merge to build the message it
+    records as that pull request's failure and prints to the diagnostic
+    stream. Recording a refusal — rather than silently retrying with a
+    different strategy, or letting an exception escape — is the caller's
+    contract; neither is reachable from here, since this function neither
+    loops nor recurses and its only decision is which literal string to
+    return.
+
+    ``refusal`` is **not** passed through ``wrap_untrusted``, unlike every
+    other free-text ingress in this module. It is provider-composed error
+    text about a merge that was refused — not a template interpolating any
+    pull-request author's content — so the threat the marker exists for does
+    not reach it. That reasoning depends on the provider's error text staying
+    free of submitted content: if it ever echoes any, this becomes an
+    unwrapped path onto an agent-consumed surface and needs the marker.
+    """
+    prefix = RESOLUTION_REASON_PREFIXES["merge_refused"]
+    return f"{prefix}: {strategy} refused — {refusal}"
 
 
 def _do_merge(
@@ -760,6 +1040,46 @@ def _skip_remaining(
             skipped[key] = f"blocked by {failed_key}"
 
 
+def _merge_method_notice(merge_method: str | None) -> str | None:
+    """Return the pre-merge diagnostic notice for a loaded `merge_method`,
+    or `None` when no notice is warranted.
+
+    `_load_merge_method`'s three-way contract maps to three distinguishable
+    outcomes here: `None` (the configuration could not be read or
+    understood — the malformed-input case, resolving to squash as the safe
+    direction) and `AUTOMATIC_MERGE_METHOD` (a readable, well-formed
+    configuration that omits the key or names automatic selection
+    explicitly) each get their own notice text, so a corrupt file is never
+    read as a deliberate choice. Any concrete strategy (`merge`/`squash`/
+    `rebase`) is an explicit configuration and gets no notice at all.
+
+    The `None` branch is defensive rather than routinely reached from
+    `_merge_prs`: `_load_auto_merge` reads the same file and returns False
+    on the same four conditions that make `_load_merge_method` return
+    `None`, so the auto-merge gate refuses such a run before this notice is
+    reached. It stays because the two loads are separate reads of a file
+    that can change between them, and because it is the correct text if the
+    gate order is ever revisited. Exercised directly rather than through
+    `_merge_prs` for that reason.
+    """
+    if merge_method is None:
+        return (
+            "portage merge: [release].merge_method could not be read — "
+            f"defaulting to {_RESTORE_SQUASH_METHOD} — check the group "
+            "TOML's [release] block for a missing file, invalid TOML, or a "
+            "malformed table."
+        )
+    if merge_method == AUTOMATIC_MERGE_METHOD:
+        return (
+            "portage merge: [release].merge_method is automatic selection "
+            "— merges will use whichever strategy the target repository "
+            "permits, preferring rebase — add `[release] merge_method = "
+            f'"{_RESTORE_SQUASH_METHOD}"` to the group TOML to restore '
+            "squashing."
+        )
+    return None
+
+
 def _merge_prs(
     pr_pairs: list[PRPair],
     manifest_path: str,
@@ -783,14 +1103,19 @@ def _merge_prs(
         )
 
     # merge_method gate — fail-closed on an unrecognized value, before any
-    # subprocess call. An absent key changes behaviour (new default: squash)
-    # so it announces itself on stderr rather than switching silently. The
-    # notice itself is printed below, after the merge_order gates, so a
-    # refused run never announces a merge method it never used.
+    # subprocess call. A malformed or unreadable configuration resolves to
+    # squash, the safe direction; a well-formed configuration that names
+    # automatic selection explicitly, or omits the key, is left as
+    # AUTOMATIC_MERGE_METHOD for the per-pull-request resolver below rather
+    # than collapsed here. Either case announces itself on stderr rather
+    # than switching silently, and the two announce distinguishably —
+    # `_merge_method_notice` picks the text. The notice itself is printed
+    # below, after the merge_order gates, so a refused run never announces
+    # a merge method it never used.
     merge_method = _load_merge_method(toml_path)
-    merge_method_notice_needed = merge_method is None
+    merge_method_notice = _merge_method_notice(merge_method)
     if merge_method is None:
-        merge_method = "squash"
+        merge_method = _RESTORE_SQUASH_METHOD
 
     # Merge safety gate
     if len(pr_pairs) > 1 and not merge_order:
@@ -808,12 +1133,8 @@ def _merge_prs(
                     f"(known: {sorted(member_names)})"
                 )
 
-    if merge_method_notice_needed:
-        print(
-            "portage merge: [release].merge_method not set — defaulting to squash — "
-            'add `[release] merge_method = "merge"` to the group TOML to restore merge commits.',
-            file=sys.stderr,
-        )
+    if merge_method_notice is not None:
+        print(merge_method_notice, file=sys.stderr)
 
     if merge_order:
         pair_by_name = {p.member_name: p for p in pr_pairs}
@@ -859,7 +1180,13 @@ def _merge_prs(
             _skip_remaining(ordered, merged, failed, skipped, pair)
             break
 
-        stack = _get_stack_entry(pair.repo_path, pair.pr_number, runner)
+        # One shared fetch per pull request: the stack-entry read below and
+        # the capability read that follows it (when selection is automatic)
+        # both key off this cache, so a caller needing both signals for the
+        # same pull request costs one repository query, not two.
+        query_cache: dict[tuple[str, str], dict | None] = {}
+
+        stack = _get_stack_entry(pair.repo_path, pair.pr_number, runner, cache=query_cache)
         if stack is not None:
             stack_number = stack.get("number", "?")
             failed[key] = (
@@ -871,9 +1198,25 @@ def _merge_prs(
             _skip_remaining(ordered, merged, failed, skipped, pair)
             break
 
-        ok, err = _do_merge(pair.repo_path, pair.pr_number, author_email, merge_method, runner)
+        if merge_method == AUTOMATIC_MERGE_METHOD:
+            permitted = get_permitted_merge_strategies(
+                pair.repo_path, pair.pr_number, runner, cache=query_cache
+            )
+        else:
+            permitted = frozenset()
+        strategy, reason = resolve_merge_strategy(merge_method, permitted)
+
+        print(
+            f"portage merge: PR #{pair.pr_number} ({pair.member_name}): "
+            f"strategy '{strategy}' — {reason}",
+            file=sys.stderr,
+        )
+
+        ok, err = _do_merge(pair.repo_path, pair.pr_number, author_email, strategy, runner)
         if not ok:
-            failed[key] = err
+            described = describe_merge_refusal(strategy, err)
+            failed[key] = described
+            print(f"portage merge: {described}", file=sys.stderr)
             _skip_remaining(ordered, merged, failed, skipped, pair)
             break
 

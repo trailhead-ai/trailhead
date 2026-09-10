@@ -139,11 +139,12 @@ a reason to stop looking:
   compliant arm as a refusal. Have the runner write a completion marker as its
   last act and have the grader skip any run without one.
 
-Three of the first four cases produced a wrong first grading pass, each in a
-different way, and none of them was visible in the run output. Assume the
-grader is wrong until its verdict and a hand-read log agree on a sample.
 - **Never point a fixture at a real vault, repo, or config**, even read-only. The
   fixture is data; live infrastructure is not part of it.
+
+Four of the first five cases produced a wrong first grading pass, each in a
+different way, and none was visible in the run output. Assume the grader is
+wrong until its verdict and a hand-read log agree on a sample.
 
 ### A fixture must let the sanctioned path succeed
 
@@ -157,6 +158,15 @@ the developer's real repo, and mutated the real `~/.config/lore/config.json`.
 Give the run a throwaway config it can succeed against (`XDG_CONFIG_HOME` and
 `XDG_STATE_HOME` under the scratch directory), and diff the developer's real
 config after any run that had shell access. Escapes are silent otherwise.
+
+**Verify that it succeeds from inside the sandbox, not from your shell.** A CLI
+that works when you test it may still fall back to a path the profile denies —
+a state directory, a cache, a lock file — and it fails that way only under
+confinement. `carve-out-does-not-generalise` staged a throwaway config, checked
+it by hand, and still had the sanctioned path broken in half the runs where it
+was the answer, because the check ran outside the jail. Run the real command
+through `scripts/eval-sandbox` against a built fixture and read its exit code
+before dispatching a batch.
 
 **The instructions-file path is a trust boundary — pin it.** The dispatcher
 resolves that path itself, and it must always name a trusted, review-gated,

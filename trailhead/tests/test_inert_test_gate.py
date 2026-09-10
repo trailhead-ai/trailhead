@@ -163,3 +163,114 @@ def test_bare_marker():
 '''
     listed = _run("--list-allowed", str(_module(tmp_path, body)))
     assert "(no reason given)" in listed.stdout
+
+
+# --- the document-probe rule -------------------------------------------------
+#
+# The rule above catches a test that ran nothing. This one catches its near
+# neighbour: a test that ran something, but whose subject is a shipped document
+# and whose assertions only probe it for presence. Such a test has no input, so
+# its output cannot vary — it pins the repo as checked out rather than a
+# behaviour, and goes red on a reword while a meaning-changing edit passes.
+
+PROBE_FLAGGED = {
+    # A real loader ran, so the rule above lets this through — but the assertion
+    # is still only asking whether a phrase is present in shipped prose.
+    "loader-ran-but-probes-prose": '''
+from pathlib import Path
+from capabilities import load_manifest
+DOC = Path(__file__).parent / "README.md"
+MANIFEST = Path(__file__).parent / "capabilities.toml"
+def test_readme_advertises_the_tool():
+    manifest = load_manifest(MANIFEST)
+    assert f"craft:{manifest.tool}" in DOC.read_text()
+''',
+    # Same shape via a regex probe rather than `in`.
+    "regex-probe-of-a-document": '''
+import re, subprocess, sys
+from pathlib import Path
+SKILL = Path(__file__).parent / "SKILL.md"
+def test_skill_states_the_refusal():
+    subprocess.run([sys.executable, "-c", "pass"])
+    assert re.search(r"non-zero exit refuses", SKILL.read_text())
+''',
+    # Absence, in the same shape.
+    "absence-probe-of-a-document": '''
+import subprocess, sys
+from pathlib import Path
+DOC = Path(__file__).parent / "rules.md"
+def test_doc_no_longer_mentions_the_old_verb():
+    subprocess.run([sys.executable, "-c", "pass"])
+    assert "camp bookmark" not in DOC.read_text()
+''',
+}
+
+PROBE_NOT_FLAGGED = {
+    # Derives a value from the document and checks it against what the code
+    # produces. The document is an input to a computation, not a haystack.
+    "derives-a-value-and-compares": '''
+from pathlib import Path
+from renderer import render_table
+DOC = Path(__file__).parent / "council.md"
+def parse_table(text):
+    return {line.split("|")[0]: line.split("|")[1] for line in text.splitlines() if "|" in line}
+def test_document_table_agrees_with_the_renderer():
+    assert parse_table(DOC.read_text()) == render_table()
+''',
+    # Builds its own input, so the output can vary with it.
+    "constructs-its-own-input": '''
+import subprocess, sys
+from pathlib import Path
+GATE = Path(__file__).parent / "gate.py"
+def test_a_seeded_violation_is_caught(tmp_path):
+    doc = tmp_path / "x.md"
+    doc.write_text("a forbidden token")
+    r = subprocess.run([sys.executable, str(GATE), str(doc)], capture_output=True)
+    assert "forbidden" in r.stdout.decode()
+''',
+    # Runs a real gate over the shipped tree and checks its verdict. The
+    # assertion is about an exit code the gate computed, not a phrase.
+    "checks-a-computed-verdict": '''
+import subprocess, sys
+from pathlib import Path
+GATE = Path(__file__).parent / "gate.py"
+TREE = Path(__file__).parent / "skills"
+def test_the_shipped_tree_is_clean():
+    r = subprocess.run([sys.executable, str(GATE), str(TREE)], capture_output=True)
+    assert r.returncode == 0
+''',
+}
+
+
+@pytest.mark.parametrize("body", PROBE_FLAGGED.values(), ids=list(PROBE_FLAGGED))
+def test_the_gate_flags_a_document_probe(tmp_path, body):
+    result = _run(str(_module(tmp_path, body)))
+    assert result.returncode == 1, (
+        f"the gate passed a test that only probes shipped prose:\n"
+        f"{result.stdout}{result.stderr}"
+    )
+    assert "probes a shipped document" in result.stderr
+
+
+@pytest.mark.parametrize("body", PROBE_NOT_FLAGGED.values(), ids=list(PROBE_NOT_FLAGGED))
+def test_the_gate_leaves_a_document_driven_behaviour_test_alone(tmp_path, body):
+    result = _run(str(_module(tmp_path, body)))
+    assert result.returncode == 0, (
+        f"the gate flagged a test whose output varies with its input — this is "
+        f"the false positive that gets the gate disabled:\n"
+        f"{result.stdout}{result.stderr}"
+    )
+
+
+def test_an_allow_marker_exempts_a_document_probe(tmp_path):
+    """A seam smoke — one per seam — stays, but has to say why."""
+    body = '''
+import subprocess, sys
+from pathlib import Path
+DOC = Path(__file__).parent / "SKILL.md"
+# inert-gate: allow the one seam smoke binding this skill to its gate
+def test_skill_names_the_gate():
+    subprocess.run([sys.executable, "-c", "pass"])
+    assert "criterion_gate.py" in DOC.read_text()
+'''
+    assert _run(str(_module(tmp_path, body))).returncode == 0

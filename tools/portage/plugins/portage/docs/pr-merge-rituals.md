@@ -78,14 +78,14 @@ Optional keys in `[release]` of the group TOML:
 ```toml
 [release]
 merge_order = ["alpha", "beta"]          # PR merge order
-merge_method = "squash"                  # merge / squash / rebase — default: squash
+merge_method = "squash"                  # merge / squash / rebase / automatic — default: automatic
 review_bot_login = "my-review-bot"       # optional review bot
 # external_tracker = { kind = "..." }    # reserved; no connector
 ```
 
-All keys are optional, but omitting `merge_method` is not a no-op: it selects the
-`squash` default, announced on stderr, rather than leaving merging unconfigured. Omitting
-`review_bot_login` → CI-only PR evaluation (no bot review path).
+All keys are optional, but omitting `merge_method` is not a no-op: it selects `automatic`
+selection, announced on stderr via the notice `portage merge` prints, rather than leaving
+merging unconfigured. Omitting `review_bot_login` → CI-only PR evaluation (no bot review path).
 
 ## Error convention split
 

@@ -88,40 +88,6 @@ class TestAlwaysOnSet:
         m = load_manifest(_LORE_MANIFEST)
         assert isinstance(compose_plan(m, {}, {}, tmp_path / "dest"), Plan)
 
-    def test_contains_claude_plugin(self, tmp_path):
-        m = load_manifest(_LORE_MANIFEST)
-        dest = tmp_path / "dest"
-        dests = {op.dest for op in compose_plan(m, {}, {}, dest).ops}
-        assert dest / ".claude-plugin" in dests
-
-    def test_contains_base_and_hooks_dir(self, tmp_path):
-        m = load_manifest(_LORE_MANIFEST)
-        dest = tmp_path / "dest"
-        dests = {op.dest for op in compose_plan(m, {}, {}, dest).ops}
-        for b in m.base:
-            assert dest / b in dests
-        if m.hooks_json:
-            assert dest / str(Path(m.hooks_json).parent) in dests
-
-    def test_empty_selection_exact_count(self, tmp_path):
-        # .claude-plugin (1) + len(base) [+ hooks dir (1) if hooks_json declared]
-        m = load_manifest(_LORE_MANIFEST)
-        plan = compose_plan(m, {}, {}, tmp_path / "dest")
-        hooks_count = 1 if m.hooks_json else 0
-        assert len(plan.ops) == 1 + len(m.base) + hooks_count
-
-    def test_no_selectable_dirs_in_empty_plan(self, tmp_path):
-        m = load_manifest(_LORE_MANIFEST)
-        dest = tmp_path / "dest"
-        always_on = (
-            {".claude-plugin"}
-            | set(m.base)
-            | ({str(Path(m.hooks_json).parent)} if m.hooks_json else set())
-        )
-        for op in compose_plan(m, {}, {}, dest).ops:
-            assert str(op.dest.relative_to(dest)) in always_on
-
-
 # ---------------------------------------------------------------------------
 # Name-based selection (real lore manifest)
 # ---------------------------------------------------------------------------

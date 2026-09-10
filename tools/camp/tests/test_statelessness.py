@@ -74,6 +74,13 @@ _cli = importlib.util.module_from_spec(_spec)
 sys.modules[_spec.name] = _cli
 _spec.loader.exec_module(_cli)
 
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
+if str(_PLUGIN_DIR) not in sys.path:
+    sys.path.insert(0, str(_PLUGIN_DIR))
+
+from camp.group.manifest import manifest_path_for, owner_of, read_central_manifest  # noqa: E402
+
 _camp = _cli._camp
 _init_git_repo = _cli._init_git_repo
 _new_workspace = _cli._new_workspace
@@ -162,6 +169,13 @@ def test_no_new_launch_flow_writes_anything_under_the_state_dir(cli_env) -> None
     home = tmp_path / "fakehome"
     (home / ".ssh").mkdir(parents=True)
 
+    # A declared self-name so `camp new` below stamps an owner on the fixture's
+    # live workspace — see the precondition assertion after `live_workspace`.
+    Path(cli_env["config_dir"]).mkdir(parents=True, exist_ok=True)
+    (Path(cli_env["config_dir"]) / "hosts.toml").write_text(
+        'self_name = "statelessness-host"\n', encoding="utf-8"
+    )
+
     # A third group, harnessed like mygroup but with no [launch] roots at all —
     # the "directory rooting is off by default" refusal needs a group that never
     # turned it on, and the allowlist below can only be authored once per group.
@@ -186,6 +200,17 @@ def test_no_new_launch_flow_writes_anything_under_the_state_dir(cli_env) -> None
     amb_one = _workspace_launch_dir(cli_env, "feat-amb-one")
     amb_two = _workspace_launch_dir(cli_env, "feat-amb-two")
     live_workspace = Path(_new_workspace(cli_env, "feat-live")).resolve()
+
+    # Precondition: the workspace this walk actually drives must already carry
+    # an owner, read back through the real manifest reader — otherwise the
+    # byte-level snapshot below is walking a manifest key it has never seen,
+    # and would keep passing even if a future change stopped stamping it.
+    live_manifest = manifest_path_for("mygroup", "feat-live", env=cli_env["env"])
+    owner_before = owner_of(read_central_manifest(live_manifest))
+    assert owner_before == "statelessness-host", (
+        "fixture workspace carries no owner — the guard below would be "
+        "walking a manifest key it has never seen"
+    )
 
     _seed_transcript(cli_env, _ID_WORKSPACE, workspace)
     _seed_transcript(cli_env, _ID_ROOTED, rooted)
@@ -303,3 +328,9 @@ def test_no_new_launch_flow_writes_anything_under_the_state_dir(cli_env) -> None
     assert codes["resume the stopped session"] == 0, errors["resume the stopped session"]
     refusals = [label for label, code in codes.items() if code == 1]
     assert len(refusals) >= 15, refusals
+
+    # The owner value itself, read directly — not just implied by the snapshot
+    # equality above — so a flow that rewrote it to a same-length value would
+    # still be caught.
+    owner_after = owner_of(read_central_manifest(live_manifest))
+    assert owner_after == owner_before

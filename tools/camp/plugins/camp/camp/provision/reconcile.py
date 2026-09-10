@@ -55,7 +55,9 @@ from ..group.config import tasks_in_phase
 from ..group.manifest import (
     WORK_STATE_NOT_APPLICABLE,
     ManifestError,
+    carry_forward_owner,
     manifest_path_for,
+    owner_of,
     read_central_manifest,
     reap_lock_unlocked,
     reconcile_lock,
@@ -603,7 +605,11 @@ def reconcile_worktree(
     activation.py) is read up front and copied onto the rebuilt entry unchanged —
     reconcile_worktree never sets these fields itself, so this is a pure
     carry-forward. Without it, this function (invoked on every SessionStart) would
-    silently wipe them.
+    silently wipe them. The whole manifest is rebuilt too (schema_version/group/
+    slug/branch/members), so the workspace-level `owner` key gets the same
+    carry-forward treatment; write_central_manifest's own guard backs this up —
+    an omission here would now fail loudly on the first write instead of
+    dropping the field silently.
 
     Returns a result dict with:
         member_count:  int
@@ -653,18 +659,28 @@ def reconcile_worktree(
             # three. A member with no prior entry gets no key, same as today.
             prior_tasks: dict[str, dict[str, Any]] = {}
             prior_state: dict[str, dict[str, Any]] = {}
+            prior_owner: str | None = None
             if mpath.is_file():
                 try:
-                    for m in read_central_manifest(mpath).get("members", []):
+                    prior_manifest = read_central_manifest(mpath)
+                except ManifestError:
+                    prior_manifest = None
+                if prior_manifest is not None:
+                    for m in prior_manifest.get("members", []):
                         prior_tasks[m["name"]] = m.get("tasks") or {}
                         prior_state[m["name"]] = {
                             key: m[key]
                             for key in ("provision_state", "activated", "reason", "work_state")
                             if key in m
                         }
-                except ManifestError:
-                    prior_tasks = {}
-                    prior_state = {}
+                    # A malformed workspace-level owner (owner_of's own
+                    # validation, e.g. a non-string) must not also wipe the
+                    # per-member carry-forward above — the two reads are
+                    # independent concerns.
+                    try:
+                        prior_owner = owner_of(prior_manifest)
+                    except ManifestError:
+                        prior_owner = None
 
             # -- Phase 2: Run provision-phase tasks per member in parallel.
             #
@@ -753,6 +769,11 @@ def reconcile_worktree(
                 "branch": branch,
                 "members": member_results,
             }
+            # Pure carry-forward of the workspace-level owner, same posture as
+            # the per-member carry-forward above: this rebuild never sets or
+            # clears ownership itself, only preserves whatever was already
+            # recorded. Absent when the prior manifest never recorded one.
+            carry_forward_owner(manifest_data, prior_owner)
             write_central_manifest(mpath, manifest_data)
 
     return {

@@ -14,9 +14,17 @@ those calls is in `INERT_CALLS` — the closed set of operations that observe
 rather than execute. An `import` inside the body counts as execution, because
 importing the module under test runs it.
 
+The gate carries a second, narrower rule for the near neighbour the first one
+misses: a test that *did* run something, but whose subject is a shipped document
+and whose assertions only probe it for presence. Such a test constructs no input,
+so its output cannot vary — it pins the repo as checked out rather than a
+behaviour, goes red on a reword, and passes a meaning-changing edit. A test that
+derives a value from a document and checks it against what the code produces is
+not this: the document is an input to a computation, and it is left alone.
+
 What it deliberately does NOT do: judge whether an assertion is *about* the right
 thing. A test that runs a CLI and then asserts something trivial passes this gate.
-The gate catches the one mechanical property that can be checked mechanically.
+The gate catches the mechanical properties that can be checked mechanically.
 
 ## Allowing a case
 
@@ -76,7 +84,51 @@ INERT_CALLS = frozenset(
     }
 )
 
+#: Reading a document off the shipped tree. Paired with an assertion that only
+#: probes for presence, this is a test whose subject is the repo as checked out.
+_DOCUMENT_READS = frozenset({"read_text", "read_bytes", "glob", "rglob", "iterdir"})
+
+#: A fixture that lets a test build its own input. A test taking one of these can
+#: vary what it feeds the subject, so the document-probe rule does not apply.
+_INPUT_FIXTURES = frozenset({"tmp_path", "tmp_path_factory", "capsys", "monkeypatch"})
+
+#: Calls that ask "is it in there?" without deriving a value to check.
+_PROBE_CALLS = frozenset({"search", "match", "findall", "fullmatch", "finditer"})
+
 _ALLOW_RE = re.compile(r"#\s*inert-gate:\s*allow\b[ \t]*(?P<reason>.*)$")
+
+
+def _repo_anchors(tree: ast.Module) -> set[str]:
+    """Module-level names bound to a path expression — the shipped-tree anchors.
+
+    A document probe reads through one of these rather than through a fixture,
+    which is what separates "the file this repo ships" from "the file this test
+    just wrote".
+    """
+    out: set[str] = set()
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and "Path" in ast.dump(node.value):
+            out |= {t.id for t in node.targets if isinstance(t, ast.Name)}
+    return out
+
+
+def _is_presence_probe(test: ast.expr) -> bool:
+    """True if this assertion only asks whether something is present.
+
+    `x in text` and `re.search(p, text)` probe. `parse(text) == rendered()`
+    derives a value and checks it, and is not a probe however prose-shaped the
+    document it read was.
+    """
+    if isinstance(test, ast.Compare) and len(test.ops) == 1:
+        return isinstance(test.ops[0], (ast.In, ast.NotIn))
+    if isinstance(test, ast.Call):
+        name = getattr(test.func, "attr", None) or getattr(test.func, "id", None)
+        return name in _PROBE_CALLS
+    if isinstance(test, ast.UnaryOp) and isinstance(test.op, ast.Not):
+        return _is_presence_probe(test.operand)
+    if isinstance(test, ast.BoolOp):
+        return all(_is_presence_probe(v) for v in test.values)
+    return False
 
 
 def _executable_names(node: ast.AST) -> set[str]:
@@ -122,7 +174,7 @@ def _allow_reason(source_lines: list[str], node: ast.FunctionDef) -> str | None:
 def findings_for(path: Path) -> tuple[list[tuple[int, str]], list[tuple[int, str, str]]]:
     """(findings, allowed) for one test module.
 
-    findings: (lineno, test name) that executed nothing and are not allowed.
+    findings: (lineno, test name, verdict) failing a rule and not allowed.
     allowed:  (lineno, test name, reason) carrying an allow marker.
     """
     text = path.read_text(encoding="utf-8")
@@ -138,7 +190,9 @@ def findings_for(path: Path) -> tuple[list[tuple[int, str]], list[tuple[int, str
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
     }
 
-    findings: list[tuple[int, str]] = []
+    anchors = _repo_anchors(tree)
+
+    findings: list[tuple[int, str, str]] = []
     allowed: list[tuple[int, str, str]] = []
     for node in functions.values():
         if not node.name.startswith("test_"):
@@ -146,16 +200,53 @@ def findings_for(path: Path) -> tuple[list[tuple[int, str]], list[tuple[int, str
         names = _executable_names(node)
         # One hop into module-local helpers and same-module fixtures: a test that
         # delegates its run to a helper still ran something.
-        referenced = (names | {a.arg for a in node.args.args}) & set(functions)
+        params = {a.arg for a in node.args.args}
+        referenced = (names | params) & set(functions)
         for helper in referenced:
             names |= _executable_names(functions[helper])
-        if names - INERT_CALLS:
+
+        if not (names - INERT_CALLS):
+            verdict = "executes nothing before asserting"
+        elif _probes_a_document(text, node, functions, referenced, params, anchors):
+            verdict = "probes a shipped document it never varies"
+        else:
             continue
+
         if (reason := _allow_reason(lines, node)) is not None:
             allowed.append((node.lineno, node.name, reason))
         else:
-            findings.append((node.lineno, node.name))
+            findings.append((node.lineno, node.name, verdict))
     return findings, allowed
+
+
+def _probes_a_document(
+    text: str,
+    node: ast.FunctionDef,
+    functions: dict[str, ast.FunctionDef],
+    referenced: set[str],
+    params: set[str],
+    anchors: set[str],
+) -> bool:
+    """True if this test's whole subject is a document it reads and never varies.
+
+    Three conditions, all required: it builds no input of its own, it reads
+    through a shipped-tree anchor, and every assertion it makes only probes for
+    presence.
+    """
+    if params & _INPUT_FIXTURES or not anchors:
+        return False
+    reads = _executable_names(node)
+    for helper in referenced:
+        reads |= _executable_names(functions[helper])
+    if not (reads & _DOCUMENT_READS):
+        return False
+    blob = (ast.get_source_segment(text, node) or "") + "".join(
+        ast.get_source_segment(text, functions[h]) or "" for h in referenced
+    )
+    if not any(anchor in blob for anchor in anchors):
+        return False
+    asserts = [a.test for a in ast.walk(node) if isinstance(a, ast.Assert)]
+    return bool(asserts) and all(_is_presence_probe(a) for a in asserts)
 
 
 def test_modules(paths: list[Path]) -> list[Path]:
@@ -188,8 +279,8 @@ def main(argv: list[str]) -> int:
             for lineno, name, reason in allowed:
                 print(f"{shown}:{lineno}: {name} — {reason}")
             continue
-        for lineno, name in findings:
-            print(f"{shown}:{lineno}: {name} executes nothing before asserting", file=sys.stderr)
+        for lineno, name, verdict in findings:
+            print(f"{shown}:{lineno}: {name} {verdict}", file=sys.stderr)
             total_findings += 1
 
     if list_allowed:
@@ -198,8 +289,11 @@ def main(argv: list[str]) -> int:
     if total_findings:
         print(
             f"\ninert-test-gate: {total_findings} test(s) assert without running their "
-            f"subject. Find the consumer and run it, or mark a deliberate exemption "
-            f"with `# inert-gate: allow <reason>` on the def line.",
+            f"subject, or assert only that a phrase is present in a document they "
+            f"never vary. Find the consumer and run it, or feed the subject an input "
+            f"that changes the answer. A deliberate exemption — a seam smoke, a "
+            f"closed vocabulary — is marked `# inert-gate: allow <reason>` on the "
+            f"def line.",
             file=sys.stderr,
         )
         return 1

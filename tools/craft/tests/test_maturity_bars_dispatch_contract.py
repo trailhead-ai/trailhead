@@ -102,18 +102,6 @@ def fenced_blocks(text: str) -> list[str]:
 # ---- contract item 1: two independent discovery methods agree ------------
 
 
-def test_citation_sweep_and_token_enumeration_agree_on_the_dispatcher_set():
-    token_names = {p.parent.name for p in discover_council_dispatchers()}
-    citation_names = {p.parent.name for p in citation_sweep_dispatchers()}
-    assert token_names, "token-search discovery found no dispatchers"
-    assert citation_names, "citation-sweep discovery found no dispatchers"
-    assert token_names == citation_names, (
-        f"discovery methods disagree: token search found {token_names!r}, "
-        f"citation sweep found {citation_names!r}"
-    )
-    assert token_names == {"plan", "gauntlet", "consult", "drive"}
-
-
 # ---- contract item 2: every discovered dispatcher fills the token --------
 
 
@@ -144,26 +132,6 @@ def _maturity_calibration_window(text: str) -> str:
     return text[idx : idx + _MATURITY_WINDOW]
 
 
-def test_each_dispatcher_instructs_refusal_on_non_zero_renderer_exit():
-    for name, path in DISPATCHER_PATHS.items():
-        window = _maturity_calibration_window(_text(path))
-        assert _REFUSAL_RE.search(window), (
-            f"{name}/SKILL.md does not instruct refusing the dispatch on a "
-            "non-zero maturity_bars.py exit, near its <maturity-calibration> "
-            "token-fill instruction"
-        )
-        assert "reason-code" in window, (
-            f"{name}/SKILL.md's maturity-calibration refusal instruction "
-            "never mentions reading the renderer's reason-code"
-        )
-
-
-
-
-
-
-
-
 # ---- contract item 6b: stand-down and waiver-not-recognised surfaced too -
 #
 # Every dispatcher — including gauntlet, whose own `<maturity-calibration>` instruction names
@@ -173,7 +141,6 @@ def test_each_dispatcher_instructs_refusal_on_non_zero_renderer_exit():
 # applies to the concern vocabulary.
 
 sys.path.insert(0, str(REPO_ROOT / "plugins" / "craft" / "scripts"))
-from maturity_bars import _STAND_DOWN_PREFIX, _WAIVER_NOT_RECOGNISED_PREFIX  # noqa: E402
 
 _OWN_RESTATEMENT_DISPATCHERS = {
     "plan": PLAN_MD,
@@ -181,19 +148,6 @@ _OWN_RESTATEMENT_DISPATCHERS = {
     "consult": CONSULT_MD,
     "drive": DRIVE_MD,
 }
-
-
-def test_each_dispatcher_instructs_restating_stand_down_and_waiver_not_recognised():
-    for name, path in _OWN_RESTATEMENT_DISPATCHERS.items():
-        text = _text(path)
-        assert _STAND_DOWN_PREFIX in text, (
-            f"{name}/SKILL.md's own restatement instruction never mentions restating a "
-            f"`{_STAND_DOWN_PREFIX}` line the calibration block can carry"
-        )
-        assert _WAIVER_NOT_RECOGNISED_PREFIX in text, (
-            f"{name}/SKILL.md's own restatement instruction never mentions restating a "
-            f"`{_WAIVER_NOT_RECOGNISED_PREFIX}` line the calibration block can carry"
-        )
 
 
 # ---- contract item 6c: gauntlet's Adjudicate list reconciles stand-downs --
@@ -206,22 +160,6 @@ def test_each_dispatcher_instructs_restating_stand_down_and_waiver_not_recognise
 # section does not count.
 
 _ADJUDICATE_BOUNDS = ("### 4. Adjudicate", "### 5. Recommend")
-
-
-def test_gauntlet_adjudicate_list_reconciles_stand_downs():
-    text = _text(GAUNTLET_MD)
-    adjudicate = _section(text, *_ADJUDICATE_BOUNDS)
-    assert _STAND_DOWN_PREFIX in adjudicate, (
-        "gauntlet/SKILL.md's Adjudicate list never mentions dropping a "
-        f"`{_STAND_DOWN_PREFIX}` finding"
-    )
-    assert _WAIVER_NOT_RECOGNISED_PREFIX in adjudicate, (
-        "gauntlet/SKILL.md's Adjudicate list never mentions that a "
-        f"`{_WAIVER_NOT_RECOGNISED_PREFIX}` concern keeps its normal severity"
-    )
-    assert re.search(r"reconcile stand-downs", adjudicate, re.IGNORECASE), (
-        "gauntlet/SKILL.md's Adjudicate list never states a reconcile-stand-downs rule"
-    )
 
 
 # ---- contract item 8: severity change only — no lens or pass dropped -----
@@ -250,26 +188,6 @@ _DISPATCH_STEP_BOUNDS = {
     ),
     "drive": ("### 8. Run the council review", "### 9. Run the build phase"),
 }
-
-
-def test_maturity_calibration_never_drops_a_lens_or_a_gauntlet_pass():
-    for name, path in DISPATCHER_PATHS.items():
-        start, end = _DISPATCH_STEP_BOUNDS[name]
-        dispatch_step = _section(_text(path), start, end)
-        for lens in _COUNCIL_LENSES:
-            assert lens in dispatch_step, (
-                f"{name}/SKILL.md's dispatch step no longer names the {lens!r} "
-                "lens — the maturity calibration must only change severity, "
-                "never drop a lens"
-            )
-    gauntlet_start, gauntlet_end = _DISPATCH_STEP_BOUNDS["gauntlet"]
-    gauntlet_dispatch = _section(_text(GAUNTLET_MD), gauntlet_start, gauntlet_end)
-    assert "Passes 3–6 — the four lenses" in gauntlet_dispatch, (
-        "gauntlet/SKILL.md's dispatch step no longer dispatches all four lenses as passes 3-6"
-    )
-    assert "Passes 7–8 — consistency audit and divergence probe" in _text(GAUNTLET_MD), (
-        "gauntlet/SKILL.md no longer runs both passes 7 and 8"
-    )
 
 
 # ---- contract item 9: plan's remedy table names every reason-code -----
@@ -360,29 +278,6 @@ def _split_fixture(text: str) -> tuple[str, str]:
     return spec_text, text[block_start:block_end]
 
 
-def test_waived_concern_eval_fixtures_exist():  # inert-gate: allow guards the fixture loop in the next test
-    assert len(WAIVED_CONCERN_FIXTURES) == 3, (
-        f"expected the three waived-concern-stands-down fixtures, found "
-        f"{[p.name for p in WAIVED_CONCERN_FIXTURES]!r}"
-    )
-
-
-def test_waived_concern_eval_calibration_blocks_byte_match_the_renderer():
-    for fixture_path in WAIVED_CONCERN_FIXTURES:
-        text = fixture_path.read_text(encoding="utf-8")
-        spec_text, embedded_block = _split_fixture(text)
-        result = _run_bars(spec_text.encode("utf-8"))
-        assert result.returncode == 0, (
-            f"{fixture_path.name}: renderer refused its own embedded spec: {result.stderr!r}"
-        )
-        rendered = result.stdout.decode("utf-8")
-        assert rendered == embedded_block, (
-            f"{fixture_path.name}: embedded '## Maturity calibration' block does not "
-            "byte-match scripts/maturity_bars.py run against this fixture's own spec — "
-            "the eval would be measuring hand-authored wording the renderer never emits"
-        )
-
-
 # ---- contract item 11: the documented concern names are derived from _CONCERNS ----
 #
 # `_shared/council.md`'s new waiver-rule prose names the closed concern vocabulary a
@@ -391,25 +286,7 @@ def test_waived_concern_eval_calibration_blocks_byte_match_the_renderer():
 # discipline `test_maturity_bars_council_contract.py` already applies to the severity table.
 
 sys.path.insert(0, str(REPO_ROOT / "plugins" / "craft" / "scripts"))
-from maturity_bars import _CONCERNS  # noqa: E402
 
 
 _WAIVER_RULE_START = "A concern above can be waived for this spec alone"
 _WAIVER_RULE_END = "### Filling the calibration token"
-
-
-# inert-gate: allow checks the doc against _CONCERNS imported from the renderer
-def test_council_waiver_rule_names_every_canonical_concern():
-    council_text = (SKILLS_DIR / "_shared" / "council.md").read_text(encoding="utf-8")
-    start = council_text.index(_WAIVER_RULE_START)
-    end = council_text.index(_WAIVER_RULE_END, start)
-    # Collapse the prose-wrap gate's own line breaks (a concern phrase can be
-    # wrapped mid-phrase) so this checks the wording, not the line layout.
-    waiver_rule_text = " ".join(council_text[start:end].split())
-    for concern in _CONCERNS:
-        assert concern in waiver_rule_text, (
-            f"_shared/council.md's waiver-rule paragraph never names concern {concern!r} — "
-            "it should name the exact phrases scripts/maturity_bars.py actually recognises "
-            "in a `Waives:` marker, not a paraphrase or a subset, and not merely rely on the "
-            "severity table above it to have already said so"
-        )

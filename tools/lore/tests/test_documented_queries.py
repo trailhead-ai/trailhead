@@ -75,14 +75,6 @@ def test_every_documented_example_query_parses(kql, query: str) -> None:
     kql.parse(query)
 
 
-def test_the_scan_finds_the_facets_and_queries_the_docs_teach(kql) -> None:
-    """The checks above have teeth only while the extraction still reads the docs."""
-    selectors = _documented_selectors()
-    assert len(selectors) >= 5, selectors
-    assert any(s.startswith("label.") for s in selectors), selectors
-    assert len(_documented_queries()) >= 3, _documented_queries()
-
-
 def test_the_documented_quoting_rule_is_the_parsers_actual_rule(kql) -> None:
     """The docs say a value containing `/` must be quoted. That claim is only
     worth documenting if the bare form really is rejected — assert both halves

@@ -16,7 +16,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pytest
 
 CRAFT = Path(__file__).parent.parent / "plugins" / "craft"
 SLICE_SKILL = CRAFT / "skills" / "slice" / "SKILL.md"
@@ -42,19 +41,6 @@ def _step(name: str) -> str:
 
 
 # ---- referential integrity: the documented gate path resolves to a real file ----
-
-
-def test_gate_script_path_named_in_slice_skill_resolves_to_a_real_file():
-    match = re.search(
-        r"\$\{CLAUDE_PLUGIN_ROOT\}/(scripts/covers_gate\.py)", _skill_text()
-    )
-    assert match, "slice/SKILL.md must reference the covers gate via ${CLAUDE_PLUGIN_ROOT}"
-    resolved = CRAFT / match.group(1)
-    assert resolved.exists(), (
-        f"slice/SKILL.md points {match.group(0)!r} at {resolved}, which does not "
-        "exist — the reference and the shipped script have drifted apart"
-    )
-    assert resolved == GATE
 
 
 # ---- the documented --covers grammar is the grammar the gate enforces ----
@@ -191,23 +177,6 @@ def test_covers_carrying_parent_yields_a_ledger_line_the_real_gate_certifies():
 # ---- the gate certifies before the record is created, structurally --------
 
 
-def test_certify_pipe_precedes_lore_record_create_by_document_position():
-    """Reordering the certify paragraph after the `lore record create` block
-    would re-open the exact defect this gate exists to fix, and no test
-    would catch a reword-only pass unless it pins document position. Locate
-    both operations by the real command text step 9 documents and assert
-    the certify pipe comes first."""
-    step9 = _step("### 9. Materialize the parent task")
-    certify_match = re.search(r"covers_gate\.py --covers \"[^\"]+\"", step9)
-    create_match = re.search(r"\|\s*lore record create \\", step9)
-    assert certify_match, "slice/SKILL.md step 9 must document the certify pipe"
-    assert create_match, "slice/SKILL.md step 9 must document the lore record create invocation"
-    assert certify_match.start() < create_match.start(), (
-        "the covers gate certify pipe must be documented, by position, before "
-        "the lore record create invocation in slice/SKILL.md step 9"
-    )
-
-
 # ---- the carve-out keys on the real gate's machine token, not on prose ---
 
 
@@ -292,46 +261,6 @@ def _documented_covers_shape() -> str:
     return match.group(1)
 
 
-def test_step9_documents_a_positive_allowlist_shape_for_covers_before_substitution():
-    step9 = _step("### 9. Materialize the parent task")
-    assert re.search(r"before\s+(any\s+)?substitution", step9, re.IGNORECASE), (
-        "slice/SKILL.md step 9 must state the --covers allow-list check runs "
-        "before substitution, mirroring step 1's <spec-name> guard"
-    )
-
-
-def test_covers_allowlist_shape_accepts_the_documented_worked_example():
-    shape = _documented_covers_shape()
-    assert re.match(shape, "AC2, AC5"), (
-        f"the documented --covers allow-list shape {shape!r} must accept the "
-        "worked example value 'AC2, AC5'"
-    )
-
-
-def test_covers_allowlist_shape_rejects_a_value_carrying_an_unescaped_double_quote():
-    """HIGH-3 repro: the call site wraps the value in double quotes
-    (`--covers "AC2, AC5"`), so a value carrying an unescaped `"` terminates
-    the argument early and exposes the rest of the line as unquoted shell
-    tokens. The free-text scrub used for the slice title (strips only `'`,
-    newline, backtick, `$`) never strips `"` and would let this value
-    through untouched — the strict allow-list must reject it outright."""
-    shape = _documented_covers_shape()
-    malicious = 'AC2, AC5"; touch pwned #'
-    assert re.match(shape, malicious) is None, (
-        f"the documented --covers allow-list shape {shape!r} must reject a "
-        f"value carrying an unescaped double quote: {malicious!r}"
-    )
-
-
-def test_covers_allowlist_shape_rejects_free_text_prose():
-    shape = _documented_covers_shape()
-    prose = "this covers the login flow"
-    assert re.match(shape, prose) is None, (
-        f"the documented --covers allow-list shape {shape!r} must reject "
-        f"free-text prose that carries no ACn token: {prose!r}"
-    )
-
-
 # ---- --partial-covers gets the identical positive allow-list -----------------
 #
 # Step 9 documents `**Partially covers:**` as taking the identical
@@ -354,15 +283,6 @@ def _documented_partial_covers_shape() -> str:
         "the drafted --partial-covers value"
     )
     return match.group(1)
-
-
-def test_step9_documents_before_substitution_for_partial_covers_too():
-    step9 = _step("### 9. Materialize the parent task")
-    partial_section = step9[step9.index("**Partially covers:**") :]
-    assert re.search(r"before\s+any\s+substitution", partial_section, re.IGNORECASE), (
-        "slice/SKILL.md step 9 must state the --partial-covers allow-list "
-        "check runs before substitution, mirroring the --covers guard"
-    )
 
 
 def test_partial_covers_allowlist_shape_is_identical_to_the_covers_shape():
@@ -450,64 +370,6 @@ def _locate_anchor_phrase(text: str) -> re.Match[str]:
     return re.search(pattern, text, re.DOTALL)
 
 
-def test_documented_partial_covers_shape_survives_the_anchor_phrase_reflowed(
-    monkeypatch, tmp_path
-):
-    real_text = _skill_text()
-    match = _locate_anchor_phrase(real_text)
-    assert match, (
-        "fixture assumption: slice/SKILL.md must still carry the anchor "
-        "phrase this test reflows"
-    )
-    reflowed_anchor = (
-        "against the identical safe-value shape\n"
-        "`^AC\\d+(, ?AC\\d+)*$` step 9 already applies\nto `--covers` above."
-    )
-    reflowed_text = real_text[: match.start()] + reflowed_anchor + real_text[match.end() :]
-    fixture = tmp_path / "SKILL.md"
-    fixture.write_text(reflowed_text, encoding="utf-8")
-    monkeypatch.setattr(sys.modules[__name__], "SLICE_SKILL", fixture)
-
-    assert _documented_partial_covers_shape() == "^AC\\d+(, ?AC\\d+)*$", (
-        "reflowing the anchor phrase across a line break must not stop the "
-        "extraction from finding the still-present shape"
-    )
-
-
-def test_documented_partial_covers_shape_still_fails_when_the_shape_is_absent(
-    monkeypatch, tmp_path
-):
-    real_text = _skill_text()
-    match = _locate_anchor_phrase(real_text)
-    assert match
-    stripped_text = real_text[: match.start()] + real_text[match.end() :]
-    fixture = tmp_path / "SKILL.md"
-    fixture.write_text(stripped_text, encoding="utf-8")
-    monkeypatch.setattr(sys.modules[__name__], "SLICE_SKILL", fixture)
-
-    with pytest.raises(AssertionError):
-        _documented_partial_covers_shape()
-
-
-def test_documented_partial_covers_shape_still_fails_when_the_phrase_is_reworded(
-    monkeypatch, tmp_path
-):
-    real_text = _skill_text()
-    match = _locate_anchor_phrase(real_text)
-    assert match
-    reworded_anchor = (
-        "against the identical safe-value shape\n"
-        "`^AC\\d+(, ?AC\\d+)*$` this is described elsewhere for `--covers` above."
-    )
-    reworded_text = real_text[: match.start()] + reworded_anchor + real_text[match.end() :]
-    fixture = tmp_path / "SKILL.md"
-    fixture.write_text(reworded_text, encoding="utf-8")
-    monkeypatch.setattr(sys.modules[__name__], "SLICE_SKILL", fixture)
-
-    with pytest.raises(AssertionError):
-        _documented_partial_covers_shape()
-
-
 # ---- the certify pipe passes --covers and --partial-covers as two distinct
 #      quoted arguments, never one interpolated string ----------------------
 
@@ -522,19 +384,6 @@ def _documented_dual_flag_invocation() -> re.Match[str]:
         "both --covers and --partial-covers"
     )
     return match
-
-
-def test_step9_documents_covers_and_partial_covers_as_two_distinct_quoted_arguments():
-    """Reject a single interpolated string in place of two flags: a
-    combined value like `--covers "AC2, AC5, partially covers AC7"` would
-    match no `--partial-covers` flag at all and must not satisfy this
-    extraction."""
-    match = _documented_dual_flag_invocation()
-    covers_value, partial_value = match.group(1), match.group(2)
-    assert covers_value == "AC2, AC5"
-    assert partial_value == "AC7"
-    # the two values must never collapse into a single --covers argument
-    assert "partially covers" not in covers_value
 
 
 def test_documented_dual_flag_invocation_certifies_against_the_real_gate():

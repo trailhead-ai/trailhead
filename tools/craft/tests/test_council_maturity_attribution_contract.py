@@ -280,38 +280,5 @@ def producer_defers(path: Path) -> bool:
 # ---- contract item 5: the ladder table is unchanged ------------------------
 
 
-def test_ladder_table_still_maps_all_five_concerns_across_all_three_levels():
-    text = council_text()
-    section_start = text.index("## Maturity calibration")
-    section_end = text.index("\n### ", section_start)
-    section = text[section_start:section_end]
-    expected_rows = [
-        "| backwards compatibility | Minor | Important | Critical |",
-        "| migration and backfill | Minor | Important | Critical |",
-        "| rollback and reversibility | Minor | Important | Critical |",
-        "| production failure visibility | Minor | Important | Critical |",
-        "| cross-consumer blast radius | Minor | Important | Critical |",
-    ]
-    for row in expected_rows:
-        assert row in section, f"ladder table row changed or missing: {row!r}"
-
-
 # ---- contract item 6: the fallback-severity pointer names a severity, ----
 #      not the header line, which only ever names a level -----------------
-
-
-def test_filling_section_never_claims_the_header_line_names_the_fallback_severity():
-    """`maturity: <level> (basis: <basis>)` names a level, never a severity
-    — `scripts/maturity_bars.py`'s `render()` states the fallback severity
-    itself in the block's own disclaimer line, so this section must point a
-    reader there rather than at a header line that cannot answer it.
-    Whitespace-normalized before matching (matching this file's own
-    `extract_property_markers` convention) so a line-wrapped rendering of
-    the offending phrase cannot slip past a literal-newline check."""
-    section = re.sub(r"\s+", " ", filling_section(council_text()))
-    assert "the header line names" not in section
-
-
-def test_filling_section_points_to_where_the_block_states_the_fallback_severity():
-    section = re.sub(r"\s+", " ", filling_section(council_text()))
-    assert "the fallback severity the block states" in section

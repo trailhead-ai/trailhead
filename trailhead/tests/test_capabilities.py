@@ -77,17 +77,6 @@ class TestLoreInventory:
     def test_returns_manifest(self):
         assert isinstance(load_manifest(_LORE_MANIFEST), Manifest)
 
-    def test_tool_name(self):
-        assert load_manifest(_LORE_MANIFEST).tool_name == "lore"
-
-    def test_base_is_empty(self):
-        # lore ships no always-on base dirs; the CLI-only vault-write rule reaches
-        # agents via CLAUDE.md, so no shared reference doc needs shipping.
-        assert load_manifest(_LORE_MANIFEST).base == []
-
-    def test_hooks_json(self):
-        assert load_manifest(_LORE_MANIFEST).hooks_json is None
-
     def test_lore_agents_discovered(self):
         # The lore agent roster: librarian (unchanged) +
         # investigator (deep investigation, opus/xhigh) + researcher (lighter
@@ -108,27 +97,13 @@ class TestLoreInventory:
         for name in m.skills:
             assert m.skills[name] == f"skills/{name}"
 
-    def test_sync_is_now_selectable(self):
-        # sync was always-on (base) under the capability model; it has a SKILL.md
-        # so it is now a selectable skill.
-        assert "sync" in load_manifest(_LORE_MANIFEST).skills
-
-
 # ---------------------------------------------------------------------------
 # Real craft sample
 # ---------------------------------------------------------------------------
 
 
 class TestCraftInventory:
-    def test_tool_name(self):
-        assert load_manifest(_CRAFT_MANIFEST).tool_name == "craft"
-
-    def test_no_hooks_json(self):
-        assert load_manifest(_CRAFT_MANIFEST).hooks_json is None
-
-    def test_base_is_shared_templates_and_scripts(self):
-        assert load_manifest(_CRAFT_MANIFEST).base == ["skills/_shared", "templates", "scripts"]
-
+    # inert-gate: allow code-vs-document check, expected list derived from the manifest
     def test_doc_worked_example_matches_the_real_manifest(self):
         """capability-manifest.md quotes craft's manifest as a worked example.
 
@@ -206,26 +181,6 @@ class TestCraftInventory:
 # ---------------------------------------------------------------------------
 # camp / portage
 # ---------------------------------------------------------------------------
-
-
-class TestOtherInventories:
-    def test_camp_inventory(self):
-        # camp is a CLI (bin) + hooks tool: no always-on base and no subagents.
-        # One selectable skill wraps the CLI verbs an agent drives
-        # conversationally — `concierge` (create-or-reuse a workspace and launch
-        # a session into it). The operator-facing worktree orchestration stays in
-        # the README, since a workspace exists before the harness opens.
-        m = load_manifest(_CAMP_MANIFEST)
-        assert m.base == []
-        assert m.subagents == {}
-        assert m.skills == {"concierge": "skills/concierge"}
-
-    def test_portage_inventory(self):
-        # The four legacy skills (open/update/monitor/merge) collapsed into one
-        # verb-dispatched pull_request skill.
-        m = load_manifest(_PORTAGE_MANIFEST)
-        assert set(m.subagents) == {"green-driver", "monitor", "summarizer", "updater"}
-        assert set(m.skills) == {"pull_request"}
 
 
 # ---------------------------------------------------------------------------

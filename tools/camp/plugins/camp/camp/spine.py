@@ -1057,7 +1057,9 @@ def _doctor_asdf_present() -> bool:
     return bool(shutil.which("asdf"))
 
 
-def cmd_doctor(args: list[str], dry_run: bool = False) -> None:
+def cmd_doctor(
+    args: list[str], dry_run: bool = False, *, env: dict[str, str] | None = None
+) -> None:
     """camp doctor [--json]
 
     Minimal read-only workspace health check (worktree-relevant checks only).
@@ -1067,7 +1069,37 @@ def cmd_doctor(args: list[str], dry_run: bool = False) -> None:
       (a) asdf present — asdf resolvable/installed.
       (b) manifest ↔ git-worktree consistency — a placeholder that always
           passes (no writer of registry.json exists to produce drift).
+      (c) self-declared host name — informational only, never fails on its
+          own; a malformed ``hosts.toml`` fails this ONE check row (naming
+          the file and the reason) rather than the whole verb.
+
+    `doctor` is a health roll-up: a broken declaration is one failed check
+    among others, not a reason to exit before the other checks run. The
+    roll-up already exits nonzero when any check fails, so a malformed
+    ``hosts.toml`` still yields a nonzero exit — via the failed row below,
+    never a raw traceback and never an early hard-exit that starves the
+    other checks of a chance to report.
+
+    Args:
+        env: Override os.environ for the self-declared-host-name check's path
+             resolution (for hermetic tests). Defaults to os.environ, same as
+             `self_host_name`'s own default — production callers never pass
+             this.
     """
+    from .host.config import HostConfigError, self_host_name
+
+    host_name: str | None = None
+    host_name_error: str | None = None
+    try:
+        host_name = self_host_name(env=env)
+    except HostConfigError as e:
+        host_name_error = str(e)
+        # A clean `camp: <message>` line, same error-hygiene posture as every
+        # other named-error path in this CLI — surfaced up front, in addition
+        # to (never instead of) the failed check row below, so the reason is
+        # visible even to a caller that only reads stderr.
+        print(f"camp: {host_name_error}", file=sys.stderr)
+
     as_json = "--json" in args
 
     checks: list[dict[str, Any]] = []
@@ -1103,6 +1135,28 @@ def cmd_doctor(args: list[str], dry_run: bool = False) -> None:
         }
     )
 
+    # --- check (c): self-declared host name — informational, unless malformed ---
+    if host_name_error is not None:
+        any_failed = True
+        checks.append(
+            {
+                "check": "host_name",
+                "description": "self-declared host name",
+                "pass": False,
+                "details": host_name_error,
+            }
+        )
+    else:
+        checks.append(
+            {
+                "check": "host_name",
+                "description": "self-declared host name",
+                "pass": True,
+                "informational": True,
+                "details": host_name if host_name else "not declared",
+            }
+        )
+
     if as_json:
         report = {"pass": not any_failed, "checks": checks}
         print(json.dumps(report))
@@ -1111,7 +1165,7 @@ def cmd_doctor(args: list[str], dry_run: bool = False) -> None:
         for c in checks:
             status = "PASS" if c["pass"] else "FAIL"
             print(f"  [{status}] {c['description']}")
-            if not c["pass"]:
+            if not c["pass"] or c.get("informational"):
                 details = c.get("details")
                 if isinstance(details, list):
                     for d in details:

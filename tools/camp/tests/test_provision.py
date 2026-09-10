@@ -1558,3 +1558,127 @@ cmd = ["{_VENV_PYTHON}", "-c", "import time; time.sleep(5)"]
         _code, report = provision_status_code(group_dict, "s", env=env)
         by_name = {m["name"]: m for m in report["members"]}
         assert by_name["repo"]["tasks"]["graph-build"]["state"] == "over-budget"
+
+
+# ---------------------------------------------------------------------------
+# Regression: an owner_of failure while rebuilding a manifest must not also
+# wipe the unrelated per-member provision_state/tasks carry-forward. The two
+# reads are separate concerns and one raising must not destroy the other.
+# ---------------------------------------------------------------------------
+
+
+class TestOwnerReadFailureDoesNotWipePerMemberState:
+    def test_reconcile_worktree_preserves_provision_state_when_owner_of_raises(
+        self, tmp_path, monkeypatch
+    ):
+        import camp.provision.reconcile as reconcile
+        from camp.group.manifest import (
+            ManifestError,
+            read_central_manifest,
+            write_central_manifest,
+        )
+
+        repo = tmp_path / "repo"
+        _init_git_repo(repo)
+        env = _camp_state_env(tmp_path)
+        group = _make_group_config(
+            "ownerbugreconcileg",
+            [{"name": "repo", "repo_root": str(repo), "base": "origin/main", "tasks": []}],
+        )
+
+        reconcile.reconcile_worktree(group, "s", env=env)
+        mpath = _workspace_dir("ownerbugreconcileg", "s", env) / "manifest.json"
+        data = read_central_manifest(mpath)
+        data["members"][0]["provision_state"] = "ready"
+        write_central_manifest(mpath, data)
+
+        def _boom(manifest):
+            raise ManifestError("simulated corrupt owner")
+
+        monkeypatch.setattr(reconcile, "owner_of", _boom)
+
+        reconcile.reconcile_worktree(group, "s", env=env)
+
+        rebuilt = read_central_manifest(mpath)["members"][0]
+        assert rebuilt["provision_state"] == "ready", (
+            "a failure reading the workspace-level owner must not wipe the "
+            "unrelated per-member provision_state carry-forward"
+        )
+
+    def test_seed_pending_workspace_preserves_prior_provision_state_when_owner_of_raises(
+        self, tmp_path, monkeypatch
+    ):
+        import camp.provision.provision as provision
+        from camp.group.manifest import (
+            ManifestError,
+            read_central_manifest,
+            write_central_manifest,
+        )
+
+        repo = tmp_path / "repo"
+        _init_git_repo(repo)
+        env = _camp_state_env(tmp_path)
+        group = _make_group_config(
+            "ownerbugseedg",
+            [{"name": "repo", "repo_root": str(repo), "base": "origin/main", "tasks": []}],
+        )
+
+        mpath = provision.seed_pending_workspace(group, "s", env=env)
+        data = read_central_manifest(mpath)
+        data["members"][0]["provision_state"] = "ready"
+        write_central_manifest(mpath, data)
+
+        def _boom(manifest):
+            raise ManifestError("simulated corrupt owner")
+
+        monkeypatch.setattr(provision, "owner_of", _boom)
+
+        provision.seed_pending_workspace(group, "s", env=env)
+
+        rebuilt = read_central_manifest(mpath)["members"][0]
+        assert rebuilt["provision_state"] == "ready", (
+            "a failure reading the workspace-level owner must not wipe the "
+            "unrelated prior per-member provision_state"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Regression: reconcile must self-heal a truncated on-disk manifest on the
+# ownerless hot path — a host that never declared a name, on a workspace
+# that never carried an owner. The write-guard's OWN pre-write read failing
+# must not turn into a refusal that blocks reconcile's rebuild.
+# ---------------------------------------------------------------------------
+
+
+class TestReconcileSelfHealsUnreadableOwnerlessManifest:
+    def test_reconcile_worktree_rebuilds_a_truncated_manifest_with_no_declared_owner(
+        self, tmp_path, capsys
+    ):
+        import camp.provision.reconcile as reconcile
+        from camp.group.manifest import read_central_manifest
+
+        repo = tmp_path / "repo"
+        _init_git_repo(repo)
+        env = _camp_state_env(tmp_path)
+        # No hosts.toml anywhere — this host never declared a name.
+        env["CAMP_CONFIG_DIR"] = str(tmp_path / "config")
+        env["HOME"] = str(tmp_path / "home")
+        group = _make_group_config(
+            "ownerlesshealg",
+            [{"name": "repo", "repo_root": str(repo), "base": "origin/main", "tasks": []}],
+        )
+
+        reconcile.reconcile_worktree(group, "s", env=env)
+        mpath = _workspace_dir("ownerlesshealg", "s", env) / "manifest.json"
+        mpath.write_text("{ truncated")
+
+        result = reconcile.reconcile_worktree(group, "s", env=env)
+
+        assert result["member_count"] == 1
+        rebuilt = read_central_manifest(mpath)
+        assert rebuilt["members"][0]["name"] == "repo"
+        assert "owner" not in rebuilt
+
+        captured = capsys.readouterr()
+        assert str(mpath) in captured.err
+        assert "could not be read" in captured.err

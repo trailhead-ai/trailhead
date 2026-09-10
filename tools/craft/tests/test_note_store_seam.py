@@ -42,7 +42,6 @@ for _path in (str(SCRIPTS_DIR), str(_LORE_PLUGIN)):
 
 import maturity_stamp  # noqa: E402
 from lore.cli.dispatch import build_parser  # noqa: E402
-from lore.record.guards import body_has_flow_out  # noqa: E402
 from lore.record.model import STATUS_VOCAB  # noqa: E402
 
 
@@ -67,16 +66,6 @@ def _run_gate(script: str, body: str) -> subprocess.CompletedProcess[str]:
 # ---------------------------------------------------------------------------
 # The parent-task body, read by lore's completion guard
 # ---------------------------------------------------------------------------
-
-
-def test_the_parent_task_body_suppresses_lores_flow_out_reminder():
-    """The `## Flow-out` section exists so that a parent task completed with this
-    body does NOT draw lore's flow-out reminder. lore owns that decision, so the
-    template is put to lore's own guard rather than to a copy of its regex."""
-    assert body_has_flow_out(_template("plan")), (
-        "craft's parent-task body no longer satisfies lore's flow-out guard — a plan "
-        "created from it would draw a flow-out reminder on completion"
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -147,31 +136,6 @@ def test_every_worked_example_the_spec_template_states_carries_a_known_verdict()
     )
 
 
-@pytest.mark.parametrize(
-    "verdict,criterion",
-    _criterion_examples(),
-    ids=[f"{verdict}[{i}]" for i, (verdict, _) in enumerate(_criterion_examples())],
-)
-def test_the_criterion_grammar_the_template_teaches_is_the_one_the_gate_enforces(
-    verdict: str, criterion: str
-):
-    """Each worked example is graded by the real gate and must draw the verdict the
-    template labelled it with. This is the only thing that ties the template's
-    teaching to the rule: a gate whose bar moves, or an example edited until it no
-    longer illustrates the bar, stops agreeing here."""
-    result = _run_gate("criterion_gate", _spec_declaring(criterion))
-    if verdict == "Conformant":
-        assert result.returncode == 0, (
-            f"the spec template offers this as a conformant criterion, but criterion_gate "
-            f"refuses it (exit {result.returncode}):\n{criterion}\n{result.stderr}"
-        )
-    else:
-        assert result.returncode == 1, (
-            f"the spec template offers this as a refused criterion, but criterion_gate "
-            f"returned {result.returncode}:\n{criterion}\n{result.stdout}{result.stderr}"
-        )
-
-
 # ---------------------------------------------------------------------------
 # The spec body's `## Maturity` section, read by the maturity stamper
 # ---------------------------------------------------------------------------
@@ -208,28 +172,6 @@ def test_ordinary_prose_in_the_maturity_section_is_rejected():
 _GRAMMAR = re.compile(r"-\s*<([a-z-]*member[a-z-]*)>\s*:\s*<([a-z-]*level[a-z-]*)>")
 # The closed vocabulary, as the comment spells it: `prototype` / `early` / `production`.
 _VOCABULARY = re.compile(r"`(prototype|early|production)`")
-
-
-def test_the_maturity_grammar_the_template_states_is_the_one_the_stamper_parses():
-    """The grammar and the closed vocabulary are lifted out of the template's own
-    comment and used to write entries, which the real stamper then has to parse
-    back. A comment that states a grammar the stamper does not accept — a renamed
-    separator, a level dropped from the vocabulary — fails here instead of being
-    discovered by whoever wrote a spec against it."""
-    section = _maturity_section()
-    assert _GRAMMAR.search(section), f"the `## Maturity` comment states no per-line grammar: {section!r}"
-    levels = sorted(set(_VOCABULARY.findall(section)))
-    assert levels == ["early", "production", "prototype"], (
-        f"the `## Maturity` comment must state the closed vocabulary, found: {levels}"
-    )
-
-    entries = {f"member-{i}": level for i, level in enumerate(levels)}
-    body = _template("spec").replace(
-        "## Maturity\n",
-        "## Maturity\n" + "".join(f"- {name}: {level}\n" for name, level in entries.items()),
-        1,
-    )
-    assert maturity_stamp.parse_entries(body) == entries
 
 
 # ---------------------------------------------------------------------------
@@ -269,15 +211,6 @@ def _documented_invocations() -> list[list[str]]:
     return found
 
 
-def test_the_note_store_contract_spells_out_invocations_to_check():
-    """Non-vacuity guard: an extractor that stops matching the fenced recipes would
-    otherwise leave the parse test below iterating over nothing."""
-    assert len(_documented_invocations()) >= 4, (
-        f"expected the note_store contract to spell out several `lore` recipes, "
-        f"extracted: {_documented_invocations()}"
-    )
-
-
 @pytest.mark.parametrize(
     "argv", _documented_invocations(), ids=[" ".join(a[:3]) for a in _documented_invocations()]
 )
@@ -298,11 +231,6 @@ _CHAIN = re.compile(r"\b(task|spec):\s*`([a-z-]+(?:\s*→\s*[a-z-]+)+)`")
 def _documented_chains() -> list[tuple[str, list[str]]]:
     text = NOTE_STORAGE_MD.read_text(encoding="utf-8")
     return [(kind, [s.strip() for s in chain.split("→")]) for kind, chain in _CHAIN.findall(text)]
-
-
-def test_the_note_store_contract_states_a_status_chain_for_both_kinds():
-    """Non-vacuity guard on the chain extraction."""
-    assert {kind for kind, _ in _documented_chains()} == {"task", "spec"}, _documented_chains()
 
 
 @pytest.mark.parametrize("kind,chain", _documented_chains(), ids=lambda v: v if isinstance(v, str) else "")

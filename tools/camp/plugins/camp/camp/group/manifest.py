@@ -40,7 +40,20 @@ Schema (v1):
                 "tasks": {"<task-name>": {"state": "ok"}},
             },
             ...
-        ]
+        ],
+        # The declared host name of the machine that created this workspace,
+        # stamped at seed time from that host's own hosts.toml self_name.
+        # Absent on a manifest whose creating host declared no self_name, and
+        # on every manifest written before this key existed — read it via
+        # manifest.owner_of, which defaults a missing key to None ("never
+        # recorded") rather than raising; there is no migration step. None
+        # never means "owned by this host" and never triggers a rewrite.
+        # Every writer in this module passes through write_central_manifest,
+        # which refuses to drop or change an on-disk owner unless the caller
+        # passes allow_owner_change=True — a rebuild site that forgets to
+        # carry an owner forward fails loudly on its first write instead of
+        # shipping silently.
+        "owner": "<declared host name, or absent>",
     }
 """
 
@@ -49,6 +62,7 @@ from __future__ import annotations
 import fcntl
 import json
 import os
+import sys
 import tempfile
 from contextlib import contextmanager
 from pathlib import Path
@@ -62,16 +76,86 @@ class ManifestError(Exception):
     """
 
 
-def write_central_manifest(path: Path, data: dict[str, Any]) -> None:
+def write_central_manifest(
+    path: Path, data: dict[str, Any], *, allow_owner_change: bool = False
+) -> None:
     """Write data to path atomically with mode 0o600.
 
     Uses a temp file in the same directory + os.replace for atomicity.
     Sets file mode to 0o600 after the write (umask-proof).
 
+    Bypass-proof ownership guard: every manifest write in the plugin passes
+    through this one function, so it is the single place that can refuse a
+    write that would silently drop a recorded owner. Before writing, if a
+    manifest already exists at `path` and carries a string "owner", the
+    incoming `data` must carry that SAME owner value, or the write is
+    refused with a named ManifestError — unless the caller passes
+    `allow_owner_change=True`, the explicit opt-in a deliberate ownership
+    change (or clear) uses. A path with no on-disk manifest, or an on-disk
+    manifest carrying no owner, has nothing to protect and every write is
+    accepted unconditionally, opt-in or not — this guard is invisible on the
+    hot path of an ownerless workspace.
+
+    An on-disk manifest whose "owner" is present but not a string is refused
+    the same way as a would-be drop, rather than treated as "nothing to
+    protect" — that shape is exactly the case this guard exists to catch,
+    and letting it read as ownerless would silently disable the guard for
+    the one write that most needs it. `allow_owner_change=True` still opts
+    out, same as every other refusal here.
+
+    An on-disk manifest that cannot even be read (malformed or truncated
+    JSON) is different: there is no owner to protect because there is
+    nothing to read, so this is treated as ownerless rather than refused —
+    refusing here would block every writer (including reconcile's own
+    self-heal) on damage the write is trying to repair, with no
+    `allow_owner_change` surface most callers can reach to recover. The
+    write proceeds, but never silently: a diagnostic naming the path and
+    the read failure goes to stderr first, so an operator sees that
+    whatever owner the corrupt file may have carried was not verified.
+
     Args:
         path:  Absolute path for the manifest file (parent must exist).
         data:  Dict to serialize as JSON.
+        allow_owner_change: Opt in to writing a value that changes or drops
+            a known on-disk owner (a string "owner" successfully read, or a
+            non-string "owner" value). Defaults to False. Has no bearing on
+            an unreadable on-disk manifest, which is never refused.
+
+    Raises:
+        ManifestError: If the write would drop or change a known on-disk
+            owner, or the on-disk owner is present but not a string — none
+            without `allow_owner_change=True`.
     """
+    if not allow_owner_change and path.is_file():
+        try:
+            on_disk: dict[str, Any] | None = read_central_manifest(path)
+        except ManifestError as e:
+            print(
+                f"camp: warning: on-disk manifest at {path} could not be "
+                f"read ({e}) — overwriting it; any owner it may have "
+                f"recorded could not be verified",
+                file=sys.stderr,
+            )
+            on_disk = None
+        if on_disk is not None:
+            disk_owner = on_disk.get("owner")
+            if disk_owner is not None:
+                if not isinstance(disk_owner, str):
+                    raise ManifestError(
+                        f"camp: refusing to write manifest at {path}: the "
+                        f"on-disk owner is not a string (got "
+                        f"{type(disk_owner).__name__}) — pass "
+                        f"allow_owner_change=True for a deliberate ownership "
+                        f"change"
+                    )
+                if data.get("owner") != disk_owner:
+                    raise ManifestError(
+                        f"camp: refusing to write manifest at {path}: this write "
+                        f"would drop or change the recorded owner {disk_owner!r} "
+                        f"— pass allow_owner_change=True for a deliberate "
+                        f"ownership change"
+                    )
+
     path.parent.mkdir(parents=True, exist_ok=True)
 
     fd, tmp_path = tempfile.mkstemp(
@@ -240,6 +324,46 @@ def work_state_for_member(member: dict[str, Any]) -> str:
     is required.
     """
     return member.get("work_state", "pending")
+
+
+def owner_of(manifest: dict[str, Any]) -> str | None:
+    """Return the workspace's declared owning host, or None if never recorded.
+
+    A manifest written before this key existed, or written by a host that
+    declared no self_name, carries no "owner" entry at all — that reads as
+    None ("never recorded"), never as "owned by this host", and reading it
+    never triggers a rewrite. There is no migration step.
+
+    Raises:
+        ManifestError: If "owner" is present but not a string — refused
+            rather than silently coerced, since ownership is a single
+            declared host, not a value to guess at.
+    """
+    owner = manifest.get("owner")
+    if owner is None:
+        return None
+    if not isinstance(owner, str):
+        raise ManifestError(
+            f"camp: manifest owner must be a string (got {type(owner).__name__})"
+        )
+    return owner
+
+
+def carry_forward_owner(manifest_data: dict[str, Any], prior_owner: str | None) -> None:
+    """Preserve *prior_owner* into *manifest_data* ahead of a manifest rebuild.
+
+    Pure carry-forward: a rebuild never sets or clears ownership itself, only
+    preserves whatever was already recorded. When *prior_owner* is None (the
+    prior manifest never recorded one), no "owner" key is added at all — not
+    even as None. An "owner" the caller already placed in *manifest_data*
+    before calling this is never overwritten by a stale prior value.
+
+    Mutates *manifest_data* in place; callers assemble the rest of the
+    rebuilt manifest around this call.
+    """
+    if prior_owner is None:
+        return
+    manifest_data.setdefault("owner", prior_owner)
 
 
 def merge_member_tasks(member: dict[str, Any], tasks: dict[str, Any]) -> None:

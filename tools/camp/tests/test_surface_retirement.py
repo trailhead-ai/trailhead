@@ -4,12 +4,16 @@ Re-entering a session is `camp launch --resume <ref>`, addressed by unambiguous
 prefix of the derived name or session id.
 
 Test contract:
-- Each retired spelling resolves as a legacy redirect and, run through the CLI,
-  answers with `camp launch --resume` — the replacement an operator who typed
-  the retired verb yesterday needs — rather than the bare-slug refusal, which
-  answers a question about slugs.
+- Each retired spelling, run through the CLI, answers with `camp launch
+  --resume` — the replacement an operator who typed the retired verb yesterday
+  needs — rather than the bare-slug refusal, which answers a question about
+  slugs. The answer varies by which retired verb was typed.
 - The launch, sessions, and resume paths each resolve the same harness for the
   same group — the specific regression the redirect risks.
+
+That the retired verbs are absent from the live verb table is not tested here:
+removal is not a behaviour, and such a test passes vacuously on any tree where
+the verb never existed.
 """
 
 from __future__ import annotations
@@ -54,19 +58,6 @@ class _FakeHarness:
 # ---------------------------------------------------------------------------
 # the bookmark surface is gone
 # ---------------------------------------------------------------------------
-
-
-def test_neither_verb_is_a_live_verb() -> None:
-    """Retired, not renamed-away: neither spelling resolves to a live verb.
-
-    The resolver is the unit; the two CLI tests below are the same claim end to
-    end, where a token the dispatcher never routes shows up as the bare-slug
-    error instead.
-    """
-    from camp.workspace.verb_taxonomy import resolve_verb
-
-    for verb in ("bookmark", "resume"):
-        assert resolve_verb(verb) == (verb, "legacy")
 
 
 def test_camp_bookmark_points_at_the_replacement_verb(tmp_path: Path) -> None:

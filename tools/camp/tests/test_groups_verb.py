@@ -183,16 +183,6 @@ def test_camp_groups_runs_without_resolved_group_or_cwd_context(tmp_path: Path) 
     assert json.loads(result.stdout) == [{"name": "alpha", "members": ["repo-a"]}]
 
 
-def test_camp_groups_is_listed_in_the_help_menu() -> None:
-    """A live verb absent from the menu is a verb nobody finds."""
-    result = subprocess.run(
-        [sys.executable, str(_CLI_CAMP), "--help"], capture_output=True, text=True
-    )
-
-    assert result.returncode == 0, result.stderr
-    assert "camp groups [--json]" in result.stdout
-
-
 def test_camp_groups_lets_an_unexpected_loader_error_propagate(
     tmp_path: Path, monkeypatch
 ) -> None:

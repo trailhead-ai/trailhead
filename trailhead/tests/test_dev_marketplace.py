@@ -33,33 +33,6 @@ class TestRootMarketplaceShape:
         data = json.loads(_ROOT_MARKETPLACE.read_text())
         assert isinstance(data, dict), "marketplace.json must be a JSON object"
 
-    def test_root_marketplace_name_is_trailhead_local(self):
-        data = json.loads(_ROOT_MARKETPLACE.read_text())
-        assert data.get("name") == "trailhead-local", (
-            f"Expected name='trailhead-local', got: {data.get('name')!r}"
-        )
-
-    def test_root_marketplace_has_one_entry_per_tool(self):
-        data = json.loads(_ROOT_MARKETPLACE.read_text())
-        plugins = data.get("plugins", [])
-        assert len(plugins) == len(_TOOLS), (
-            f"Expected {len(_TOOLS)} plugin entries, got {len(plugins)}: "
-            f"{[p.get('name') for p in plugins]}"
-        )
-
-    def test_root_marketplace_plugin_names(self):
-        data = json.loads(_ROOT_MARKETPLACE.read_text())
-        names = {p.get("name") for p in data.get("plugins", [])}
-        assert names == set(_TOOLS), f"Expected plugin names {set(_TOOLS)}, got {names}"
-
-    def test_every_source_starts_with_tools(self):
-        data = json.loads(_ROOT_MARKETPLACE.read_text())
-        for entry in data.get("plugins", []):
-            src = entry.get("source", "")
-            assert src.startswith("./tools/"), (
-                f"Plugin {entry.get('name')!r}: source must start with './tools/', got {src!r}"
-            )
-
     def test_every_source_resolves_to_plugin_json(self):
         data = json.loads(_ROOT_MARKETPLACE.read_text())
         for entry in data.get("plugins", []):

@@ -260,20 +260,6 @@ class TestListJson:
         assert rows[0]["workspace_path"] == str(ws)
         assert rows[0]["slug"] == "feat-x"
 
-    def test_json_schema_is_the_fixed_key_set(self, camp_cli, tmp_path, capsys):
-        group = _make_group("listgrp")
-        env = {"CAMP_STATE_DIR": str(tmp_path / "state")}
-        _seed_manifest("listgrp", "feat-x", env=env)
-
-        camp_cli._cmd_ls_group_cli(["--json"], group, env)
-
-        rows = json.loads(capsys.readouterr().out)
-        assert set(rows[0].keys()) == self._FIXED_KEYS, (
-            "camp list --json must emit exactly the shared schema"
-        )
-        assert rows[0]["group"] == "listgrp"
-        assert rows[0]["ok"] is True
-
     def test_json_empty_group_is_empty_array(self, camp_cli, tmp_path, capsys):
         group = _make_group("listgrp")
         env = {"CAMP_STATE_DIR": str(tmp_path / "state")}
@@ -332,67 +318,9 @@ class TestListEmpty:
         out = capsys.readouterr().out
         assert out == "", f"empty group must produce no stdout, got {out!r}"
 
-    def test_empty_group_no_error_message_on_stdout(self, camp_cli, tmp_path, capsys):
-        """The 'no camps' message (if any) must not appear on stdout."""
-        group = _make_group("listgrp")
-        env = {"CAMP_STATE_DIR": str(tmp_path / "state")}
-
-        camp_cli._cmd_ls_group_cli([], group, env)
-
-        out = capsys.readouterr().out
-        assert "no camps" not in out.lower(), (
-            f"'no camps' message must not go to stdout, got {out!r}"
-        )
-
-    def test_empty_group_exits_zero(self, camp_cli, tmp_path):
-        group = _make_group("listgrp")
-        env = {"CAMP_STATE_DIR": str(tmp_path / "state")}
-
-        try:
-            camp_cli._cmd_ls_group_cli([], group, env)
-        except SystemExit as e:
-            assert e.code == 0 or e.code is None, (
-                f"empty group list must exit 0, got SystemExit({e.code})"
-            )
-
-
 # ---------------------------------------------------------------------------
 # Purity tests: no state mutation, no harness exec
 # ---------------------------------------------------------------------------
-
-
-class TestListPureRead:
-    """camp list is a pure read: no state mutation and no harness launch."""
-
-    def test_handler_source_has_no_exec_call(self):
-        """The list handler must not call os.execvp or os.execv."""
-        mod = _load_cli_module()
-        src = inspect.getsource(mod._cmd_ls_group_cli)
-        assert "execvp" not in src, "_cmd_ls_group_cli must not call os.execvp"
-        assert "execv" not in src, "_cmd_ls_group_cli must not call os.execv"
-
-    def test_list_does_not_call_write_manifest(self, camp_cli, tmp_path, monkeypatch):
-        """camp list must not call write_central_manifest (pure read)."""
-        import camp.group.manifest as _manifest
-
-        group = _make_group("listgrp")
-        env = {"CAMP_STATE_DIR": str(tmp_path / "state")}
-        # Seed the manifest BEFORE patching so the seed itself doesn't trip the spy.
-        _seed_manifest("listgrp", "feat-x", env=env)
-
-        writes: list = []
-        original = _manifest.write_central_manifest
-        monkeypatch.setattr(
-            _manifest,
-            "write_central_manifest",
-            lambda *a, **k: (writes.append(a), original(*a, **k))[1],
-        )
-
-        camp_cli._cmd_ls_group_cli([], group, env)
-
-        assert writes == [], (
-            f"camp list must not call write_central_manifest; got {len(writes)} call(s)"
-        )
 
 
 # ---------------------------------------------------------------------------

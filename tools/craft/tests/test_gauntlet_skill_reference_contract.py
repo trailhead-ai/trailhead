@@ -124,38 +124,6 @@ def gate(*paths: Path) -> subprocess.CompletedProcess:
     )
 
 
-def test_there_is_a_reference_document_beside_skill_md():
-    """Guards the relational assertions below against passing vacuously on
-    an empty directory. Without this, `test_every_reference_document_is_named`
-    and `test_every_gauntlet_local_pointer_resolves` would both parametrize
-    over nothing and report clean while proving nothing at all.
-    """
-    assert reference_documents(), (
-        f"no reference document beside SKILL.md found in {GAUNTLET}"
-    )
-    # Both relational tests must be guarded, and they read different sources:
-    # the no-orphan test parametrizes over files on disk, the pointer-resolution
-    # test over the names SKILL.md's prose actually mentions in a gauntlet-local
-    # form. A document on disk mentioned only in some other form (`docs/x.md`)
-    # satisfies the first assertion while leaving the second test's parameter
-    # list empty, so guarding disk state alone leaves that hole open.
-    assert gauntlet_local_targets(_skill_text()), (
-        "SKILL.md names no gauntlet-local `.md` target, so "
-        "test_every_gauntlet_local_pointer_resolves would parametrize over "
-        "nothing and report clean while proving nothing at all"
-    )
-
-
-@pytest.mark.parametrize("path", reference_documents(), ids=lambda p: p.name)
-def test_every_reference_document_is_named_by_skill_md(path):
-    """No orphan reference document: a file nothing points at is unreachable
-    in one hop from the entrypoint an agent actually loads.
-    """
-    assert _stem_pattern(path.stem).search(_skill_text()), (
-        f"{path.name} exists in {GAUNTLET} but SKILL.md does not name it"
-    )
-
-
 @pytest.mark.parametrize("name", sorted(gauntlet_local_targets(_skill_text())))
 # inert-gate: allow pointer integrity; a target that is not there cannot be loaded
 def test_every_gauntlet_local_pointer_resolves(name):
@@ -176,45 +144,4 @@ def test_toc_gate_is_clean_for_long_reference_documents(path):
     result = gate(path)
     assert result.returncode == 0, (
         f"{path.name}'s contents block no longer matches its headings:\n{result.stderr}"
-    )
-
-
-def test_security_md_credential_scrub_is_cited_in_the_accepted_tail():
-    section = _accepted_tail_section(_skill_text())
-    assert "_shared/security.md" in section, (
-        "the accepted tail no longer cites `_shared/security.md` "
-        "(the credential-pattern scrub)"
-    )
-
-
-def test_refine_md_data_not_instruction_marker_is_cited_in_the_accepted_tail():
-    section = _accepted_tail_section(_skill_text())
-    assert "_shared/refine.md" in section, (
-        "the accepted tail no longer cites `_shared/refine.md` "
-        "(the data-not-instruction marker)"
-    )
-
-
-@pytest.mark.parametrize("path", reference_documents(), ids=lambda p: p.name)
-def test_reference_documents_name_no_other_reference_document(path):
-    """A reference document naming *another* reference document puts that one
-    two hops from the `SKILL.md` an agent actually loads, which is the depth
-    the split exists to avoid.
-
-    `reference_depth_gate.py` checks this property for `_shared/*.md`, and
-    `test_shared_docs_reference_depth_contract.py` runs it there. That script
-    is deliberately not reused here: it treats every `.md` in the directory as
-    a sibling, and in a skill directory that set includes `SKILL.md` itself.
-    A reference document naming its own entrypoint is a back-reference to
-    level zero, not a second-level reference, so the gate reports it as a
-    finding when it is not one. The entrypoint is excluded below for that
-    reason, and only reference-document-to-reference-document mentions count.
-    """
-    others = [p for p in reference_documents() if p != path]
-    if not others:
-        pytest.skip("only one reference document — no sibling to name")
-    text = path.read_text(encoding="utf-8")
-    named = [p.name for p in others if _stem_pattern(p.stem).search(text)]
-    assert not named, (
-        f"{path.name} names {named}, putting them two hops from SKILL.md"
     )

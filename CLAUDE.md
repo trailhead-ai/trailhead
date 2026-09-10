@@ -113,6 +113,14 @@ fallback, no GNU `readlink -f`, macOS-safe).
   code-vs-document consistency check** — a document must name a token, reason-code, or
   constant the code actually emits, with the expected set derived from the module rather
   than retyped. That is wiring, not behavior, and an eval is the wrong instrument for it.
+- **A test needs an input it can vary.** Running the subject is the floor; the bar is
+  showing its answer changes with what it was given. An assertion whose subject has one
+  possible output — a default value, a shipped inventory, a byte-for-byte snapshot, a
+  closed vocabulary — restates a decision the code already records, and can only go red
+  when someone changes their mind. Wiring with nothing to vary gets exactly one seam
+  smoke, marked `# inert-gate: allow <reason>`. `scripts/inert-test-gate` enforces both
+  halves and `--list-allowed` prints every exemption; see the craft ruleset for the full
+  rule.
 - Comments, docstrings, and tests must stand on their own — explain intent and
   contracts in terms a reader of the code can verify directly. Do **not** reference
   internal planning artifacts (development "slices", lettered "specs" or invariant
