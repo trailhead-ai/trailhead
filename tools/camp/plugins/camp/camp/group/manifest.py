@@ -313,6 +313,23 @@ def owner_of(manifest: dict[str, Any]) -> str | None:
     return owner
 
 
+def carry_forward_owner(manifest_data: dict[str, Any], prior_owner: str | None) -> None:
+    """Preserve *prior_owner* into *manifest_data* ahead of a manifest rebuild.
+
+    Pure carry-forward: a rebuild never sets or clears ownership itself, only
+    preserves whatever was already recorded. When *prior_owner* is None (the
+    prior manifest never recorded one), no "owner" key is added at all — not
+    even as None. An "owner" the caller already placed in *manifest_data*
+    before calling this is never overwritten by a stale prior value.
+
+    Mutates *manifest_data* in place; callers assemble the rest of the
+    rebuilt manifest around this call.
+    """
+    if prior_owner is None:
+        return
+    manifest_data.setdefault("owner", prior_owner)
+
+
 def merge_member_tasks(member: dict[str, Any], tasks: dict[str, Any]) -> None:
     """Merge a per-task state map into `member["tasks"]` in place.
 
