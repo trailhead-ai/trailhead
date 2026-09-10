@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import itertools
 import json
+import re
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -871,32 +872,125 @@ class TestMergeMethod:
         assert "--squash" not in argv[0]
         assert "--rebase" not in argv[0]
 
-    def test_absent_merge_method_defaults_to_squash_and_warns(
+    def test_absent_merge_method_names_automatic_selection_and_warns(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
+        """An absent key is a readable, well-formed configuration, so it
+        gets the automatic-selection notice — not the malformed-input one —
+        and that notice names the setting value that restores squashing."""
         argv = self._run_merge_capture_argv(tmp_path, "[release]\nauto_merge = true\n")
         assert len(argv) == 1
+        # This stub's PR carries no capability data, so the per-pull-request
+        # resolver's lookup-failure fallback picks squash here — a separate
+        # concern from the notice text under test.
         assert "--squash" in argv[0]
-        assert "--merge" not in argv[0]
-        assert "--rebase" not in argv[0]
         err = capsys.readouterr().err
-        assert "squash" in err
-        assert 'merge_method = "merge"' in err
+        assert "automatic selection" in err
+        assert 'merge_method = "squash"' in err
 
     def test_automatic_named_explicitly_is_accepted_not_refused(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         """`merge_method = "automatic"` widens the accepted vocabulary — it
         must resolve rather than raise MergeMethodInvalidError, and it takes
-        the same not-a-named-strategy path as an absent key (still squash,
-        still the notice, for now — nothing consumes the distinction yet)."""
+        the same path as an absent key: the per-pull-request resolver picks
+        the strategy, and the automatic-selection notice fires the same
+        way."""
         argv = self._run_merge_capture_argv(
             tmp_path, '[release]\nauto_merge = true\nmerge_method = "automatic"\n'
         )
         assert len(argv) == 1
         assert "--squash" in argv[0]
         err = capsys.readouterr().err
-        assert "squash" in err
+        assert "automatic selection" in err
+
+    def test_automatic_notice_does_not_claim_squash_is_still_the_default(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The automatic-selection notice must not carry the prior
+        default's claim — a run under automatic selection may rebase, so
+        the notice cannot say squash is what's happening now."""
+        self._run_merge_capture_argv(tmp_path, "[release]\nauto_merge = true\n")
+        err = capsys.readouterr().err
+        assert "defaulting to squash" not in err
+
+    def test_automatic_notice_restoring_value_round_trips_through_the_loader(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The automatic-selection notice names a setting value that
+        restores squashing. Prove that value is genuinely accepted by
+        `_load_merge_method` — feeding it back through the loader must
+        return the same value, not raise and not resolve to automatic —
+        rather than trusting that the literal in the notice text is
+        correct."""
+        from trailhead.vcs.github import _load_merge_method
+
+        self._run_merge_capture_argv(tmp_path, "[release]\nauto_merge = true\n")
+        err = capsys.readouterr().err
+        match = re.search(r'merge_method = "([^"]+)"', err)
+        assert match is not None, err
+        restoring_value = match.group(1)
+
+        round_trip_dir = tmp_path / "round-trip"
+        round_trip_dir.mkdir()
+        round_trip_toml = _write_toml(
+            round_trip_dir, f'[release]\nauto_merge = true\nmerge_method = "{restoring_value}"\n'
+        )
+        assert _load_merge_method(str(round_trip_toml)) == restoring_value
+
+    def test_malformed_release_table_notice_distinguishable_from_automatic(self) -> None:
+        """A malformed configuration resolves to squash, same as before,
+        but its notice must read differently from the well-formed-and-
+        unset case's — a corrupt file is never mistaken for a deliberate
+        choice. `_merge_method_notice` is the function `_merge_prs` calls
+        to pick this text; the malformed shape (`None` from
+        `_load_merge_method`) cannot be produced through a single static
+        TOML file passed to `_merge_prs`, because the same read failure
+        that makes `_load_merge_method` return `None` also makes
+        `_load_auto_merge` return `False`, which refuses the merge before
+        the notice is ever reached — so this exercises the notice-selection
+        function directly, the same function the real merge path calls."""
+        from trailhead.vcs.github import AUTOMATIC_MERGE_METHOD, _merge_method_notice
+
+        malformed_notice = _merge_method_notice(None)
+        automatic_notice = _merge_method_notice(AUTOMATIC_MERGE_METHOD)
+        assert malformed_notice is not None
+        assert automatic_notice is not None
+        assert malformed_notice != automatic_notice
+        assert "automatic selection" not in malformed_notice
+        assert "could not be read" in malformed_notice
+        assert "squash" in malformed_notice
+
+    def test_explicit_strategy_notice_is_none(self) -> None:
+        """An explicitly configured strategy gets no notice at all —
+        `_merge_method_notice` returns `None` for any concrete strategy."""
+        from trailhead.vcs.github import _merge_method_notice
+
+        for method in ("merge", "squash", "rebase"):
+            assert _merge_method_notice(method) is None
+
+    def test_merge_result_payload_unaffected_by_notice(self, tmp_path: Path) -> None:
+        """The notice goes to stderr; the result payload — what a caller
+        eventually serializes to stdout — must parse exactly as before,
+        unaffected by which notice (or none) fired."""
+        wt = tmp_path / "wt" / "alpha"
+        wt.mkdir(parents=True)
+        manifest = _write_manifest(
+            tmp_path,
+            [{"name": "alpha", "repo_root": str(tmp_path), "worktree_path": str(wt)}],
+        )
+        toml = _write_toml(tmp_path, "[release]\nauto_merge = true\n")
+        answer = _make_pr_stub({"7": "MERGEABLE_CLEAN"})
+        provider = get_provider("github", runner=answer)
+        pr_pairs = [PRPair(repo_path=str(wt), pr_number="7", member_name="alpha")]
+
+        result = provider.pr.merge(pr_pairs, str(manifest), toml_path=str(toml))
+
+        assert json.loads(json.dumps(result)) == {
+            "merged": [f"{wt}:7"],
+            "failed": {},
+            "skipped": {},
+        }
 
     def test_configured_merge_method_prints_no_notice(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]

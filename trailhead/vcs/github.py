@@ -594,6 +594,15 @@ AUTOMATIC_MERGE_METHOD = "automatic"
 #: exposes flags for, plus automatic selection.
 _MERGE_METHOD_VALUES = frozenset(_MERGE_METHOD_FLAGS) | {AUTOMATIC_MERGE_METHOD}
 
+#: The setting value that restores the prior squashing behaviour, named in
+#: the automatic-selection notice and used as the safe-direction fallback
+#: for a configuration that could not be read or understood. Looked up in
+#: `_MERGE_METHOD_FLAGS` — the loader's accepted vocabulary — rather than a
+#: second literal, so a vocabulary change that drops or renames "squash"
+#: breaks this lookup immediately instead of leaving the notice naming a
+#: value `_load_merge_method` would reject.
+_RESTORE_SQUASH_METHOD = next(v for v in _MERGE_METHOD_FLAGS if v == "squash")
+
 
 def _load_merge_method(toml_path: str | None) -> str | None:
     """Return the configured merge_method.
@@ -1010,6 +1019,37 @@ def _skip_remaining(
             skipped[key] = f"blocked by {failed_key}"
 
 
+def _merge_method_notice(merge_method: str | None) -> str | None:
+    """Return the pre-merge diagnostic notice for a loaded `merge_method`,
+    or `None` when no notice is warranted.
+
+    `_load_merge_method`'s three-way contract maps to three distinguishable
+    outcomes here: `None` (the configuration could not be read or
+    understood — the malformed-input case, resolving to squash as the safe
+    direction) and `AUTOMATIC_MERGE_METHOD` (a readable, well-formed
+    configuration that omits the key or names automatic selection
+    explicitly) each get their own notice text, so a corrupt file is never
+    read as a deliberate choice. Any concrete strategy (`merge`/`squash`/
+    `rebase`) is an explicit configuration and gets no notice at all.
+    """
+    if merge_method is None:
+        return (
+            "portage merge: [release].merge_method could not be read — "
+            f"defaulting to {_RESTORE_SQUASH_METHOD} — check the group "
+            "TOML's [release] block for a missing file, invalid TOML, or a "
+            "malformed table."
+        )
+    if merge_method == AUTOMATIC_MERGE_METHOD:
+        return (
+            "portage merge: [release].merge_method is automatic selection "
+            "— merges will use whichever strategy the target repository "
+            "permits, preferring rebase — add `[release] merge_method = "
+            f'"{_RESTORE_SQUASH_METHOD}"` to the group TOML to restore '
+            "squashing."
+        )
+    return None
+
+
 def _merge_prs(
     pr_pairs: list[PRPair],
     manifest_path: str,
@@ -1038,13 +1078,14 @@ def _merge_prs(
     # automatic selection explicitly, or omits the key, is left as
     # AUTOMATIC_MERGE_METHOD for the per-pull-request resolver below rather
     # than collapsed here. Either case announces itself on stderr rather
-    # than switching silently. The notice itself is printed below, after the
-    # merge_order gates, so a refused run never announces a merge method it
-    # never used.
+    # than switching silently, and the two announce distinguishably —
+    # `_merge_method_notice` picks the text. The notice itself is printed
+    # below, after the merge_order gates, so a refused run never announces
+    # a merge method it never used.
     merge_method = _load_merge_method(toml_path)
-    merge_method_notice_needed = merge_method is None or merge_method == AUTOMATIC_MERGE_METHOD
+    merge_method_notice = _merge_method_notice(merge_method)
     if merge_method is None:
-        merge_method = "squash"
+        merge_method = _RESTORE_SQUASH_METHOD
 
     # Merge safety gate
     if len(pr_pairs) > 1 and not merge_order:
@@ -1062,12 +1103,8 @@ def _merge_prs(
                     f"(known: {sorted(member_names)})"
                 )
 
-    if merge_method_notice_needed:
-        print(
-            "portage merge: [release].merge_method not set — defaulting to squash — "
-            'add `[release] merge_method = "merge"` to the group TOML to restore merge commits.',
-            file=sys.stderr,
-        )
+    if merge_method_notice is not None:
+        print(merge_method_notice, file=sys.stderr)
 
     if merge_order:
         pair_by_name = {p.member_name: p for p in pr_pairs}
