@@ -7,6 +7,7 @@ runner — zero network. No hardcoded review-bot login (a passed param).
 
 from __future__ import annotations
 
+import itertools
 import json
 import subprocess
 from pathlib import Path
@@ -1163,6 +1164,157 @@ class TestPermittedMergeStrategies:
         assert len(graphql_calls) == 1
         assert stack == {"number": 9, "size": 2}
         assert strategies == frozenset({"merge", "squash", "rebase"})
+
+
+# ---------------------------------------------------------------------------
+# resolve_merge_strategy / describe_merge_refusal
+# ---------------------------------------------------------------------------
+
+
+class TestResolveMergeStrategy:
+    def test_explicit_configured_strategy_wins_with_no_capability_read_consulted(self) -> None:
+        from trailhead.vcs.github import PERMITTED_STRATEGIES_LOOKUP_FAILED, resolve_merge_strategy
+
+        strategy, reason = resolve_merge_strategy("merge", PERMITTED_STRATEGIES_LOOKUP_FAILED)
+        assert strategy == "merge"
+        assert reason
+
+    def test_automatic_with_rebase_permitted_resolves_to_rebase(self) -> None:
+        from trailhead.vcs.github import AUTOMATIC_MERGE_METHOD, resolve_merge_strategy
+
+        strategy, reason = resolve_merge_strategy(
+            AUTOMATIC_MERGE_METHOD, frozenset({"rebase", "squash"})
+        )
+        assert strategy == "rebase"
+        assert reason
+
+    def test_automatic_with_rebase_forbidden_and_exactly_one_other_permitted(self) -> None:
+        from trailhead.vcs.github import AUTOMATIC_MERGE_METHOD, resolve_merge_strategy
+
+        strategy, reason = resolve_merge_strategy(AUTOMATIC_MERGE_METHOD, frozenset({"squash"}))
+        assert strategy == "squash"
+        assert reason
+
+        strategy, reason = resolve_merge_strategy(AUTOMATIC_MERGE_METHOD, frozenset({"merge"}))
+        assert strategy == "merge"
+        assert reason
+
+    def test_automatic_with_rebase_forbidden_and_both_others_permitted_resolves_to_interim_squash(
+        self,
+    ) -> None:
+        """Interim rule: with rebasing forbidden and more than one other
+        strategy permitted, this slice resolves to squashing. A later change
+        replaces this with a rule driven by the commit series' shape; this
+        test names the rule as interim so that change reads as intended
+        rather than as a regression."""
+        from trailhead.vcs.github import AUTOMATIC_MERGE_METHOD, resolve_merge_strategy
+
+        strategy, reason = resolve_merge_strategy(
+            AUTOMATIC_MERGE_METHOD, frozenset({"merge", "squash"})
+        )
+        assert strategy == "squash"
+        assert reason
+
+    def test_automatic_with_lookup_failed_resolves_to_squash_distinguishable_from_interim(
+        self,
+    ) -> None:
+        from trailhead.vcs.github import (
+            AUTOMATIC_MERGE_METHOD,
+            PERMITTED_STRATEGIES_LOOKUP_FAILED,
+            resolve_merge_strategy,
+        )
+
+        lookup_strategy, lookup_reason = resolve_merge_strategy(
+            AUTOMATIC_MERGE_METHOD, PERMITTED_STRATEGIES_LOOKUP_FAILED
+        )
+        interim_strategy, interim_reason = resolve_merge_strategy(
+            AUTOMATIC_MERGE_METHOD, frozenset({"merge", "squash"})
+        )
+        assert lookup_strategy == "squash"
+        assert interim_strategy == "squash"
+        assert lookup_reason != interim_reason
+
+    def test_never_returns_a_strategy_absent_from_the_permitted_set(self) -> None:
+        """Enumerated from the module's own strategy vocabulary
+        (`_MERGE_METHOD_FLAGS`) rather than a hand-typed list of cases — every
+        subset of it, derived by power set, is exercised."""
+        from trailhead.vcs.github import (
+            AUTOMATIC_MERGE_METHOD,
+            _MERGE_METHOD_FLAGS,
+            resolve_merge_strategy,
+        )
+
+        vocabulary = sorted(_MERGE_METHOD_FLAGS)
+        checked_nonempty = 0
+        for size in range(len(vocabulary) + 1):
+            for combo in itertools.combinations(vocabulary, size):
+                permitted = frozenset(combo)
+                strategy, reason = resolve_merge_strategy(AUTOMATIC_MERGE_METHOD, permitted)
+                assert reason
+                if permitted:
+                    assert strategy in permitted
+                    checked_nonempty += 1
+        assert checked_nonempty == 2 ** len(vocabulary) - 1
+
+    def test_reason_prefixes_are_pinned_and_pairwise_distinct(self) -> None:
+        """Prefixes are read back from the resolver and refusal-formatter
+        actually running each named cause, then checked against the module's
+        own `RESOLUTION_REASON_PREFIXES` registry — derived, not retyped."""
+        from trailhead.vcs.github import (
+            AUTOMATIC_MERGE_METHOD,
+            PERMITTED_STRATEGIES_LOOKUP_FAILED,
+            RESOLUTION_REASON_PREFIXES,
+            describe_merge_refusal,
+            resolve_merge_strategy,
+        )
+
+        outcomes = [
+            resolve_merge_strategy("rebase", PERMITTED_STRATEGIES_LOOKUP_FAILED)[1],
+            resolve_merge_strategy(AUTOMATIC_MERGE_METHOD, frozenset({"rebase"}))[1],
+            resolve_merge_strategy(AUTOMATIC_MERGE_METHOD, frozenset({"squash"}))[1],
+            resolve_merge_strategy(AUTOMATIC_MERGE_METHOD, frozenset({"merge", "squash"}))[1],
+            resolve_merge_strategy(AUTOMATIC_MERGE_METHOD, PERMITTED_STRATEGIES_LOOKUP_FAILED)[1],
+            resolve_merge_strategy(AUTOMATIC_MERGE_METHOD, frozenset())[1],
+            describe_merge_refusal("rebase", "some provider refusal text"),
+        ]
+        prefixes = [reason.split(":", 1)[0] for reason in outcomes]
+
+        assert len(set(prefixes)) == len(prefixes)
+        assert set(prefixes) <= set(RESOLUTION_REASON_PREFIXES.values())
+        assert len(set(RESOLUTION_REASON_PREFIXES.values())) == len(RESOLUTION_REASON_PREFIXES)
+
+
+class TestDescribeMergeRefusal:
+    def test_names_the_strategy_and_carries_the_refusal_verbatim(self) -> None:
+        from trailhead.vcs.github import RESOLUTION_REASON_PREFIXES, describe_merge_refusal
+
+        described = describe_merge_refusal("rebase", "GraphQL: merge blocked")
+        prefix = RESOLUTION_REASON_PREFIXES["merge_refused"]
+        assert described == f"{prefix}: rebase refused — GraphQL: merge blocked"
+
+    def test_never_attributes_a_cause_the_refusal_text_did_not_name(self) -> None:
+        """The refusal text is opaque and may not name a branch rule at
+        all — the formatter must pass it through verbatim rather than
+        inventing an explanation, for a refusal that names nothing."""
+        from trailhead.vcs.github import RESOLUTION_REASON_PREFIXES, describe_merge_refusal
+
+        described = describe_merge_refusal("squash", "Pull Request is not mergeable")
+        prefix = RESOLUTION_REASON_PREFIXES["merge_refused"]
+        assert described == f"{prefix}: squash refused — Pull Request is not mergeable"
+
+    def test_names_exactly_the_strategy_it_was_given_never_a_different_one(self) -> None:
+        """The resolver could not have predicted this refusal; the formatter
+        never substitutes a different strategy for the one that was
+        actually attempted and refused."""
+        from trailhead.vcs.github import describe_merge_refusal
+
+        for strategy in ("merge", "squash", "rebase"):
+            described = describe_merge_refusal(strategy, "refused")
+            body = described.split(": ", 1)[1]
+            assert strategy in body
+            for other in ("merge", "squash", "rebase"):
+                if other != strategy:
+                    assert other not in body
 
 
 # ---------------------------------------------------------------------------

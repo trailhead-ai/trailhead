@@ -857,6 +857,119 @@ def get_permitted_merge_strategies(
     return frozenset(permitted)
 
 
+#: One prefix per resolution cause `resolve_merge_strategy` and
+#: `describe_merge_refusal` can report, keyed by cause name. Pinned here so
+#: two different causes can never render as near-identical text — the
+#: merge-loop task and the next slice's commit-series rule both extend this
+#: vocabulary rather than retyping it. Every prefix used by either function
+#: below is drawn from this dict, and its values are pairwise distinct.
+RESOLUTION_REASON_PREFIXES: dict[str, str] = {
+    "explicit_configured": "explicit-configured",
+    "auto_rebase_permitted": "auto-rebase-permitted",
+    "auto_sole_permitted": "auto-sole-permitted",
+    "auto_interim_squash": "auto-interim-squash",
+    "auto_lookup_failed": "auto-lookup-failed",
+    "auto_none_permitted": "auto-none-permitted",
+    "merge_refused": "merge-refused",
+}
+
+
+def resolve_merge_strategy(
+    configured_method: str,
+    permitted: frozenset[str] | str,
+) -> tuple[str, str]:
+    """Resolve a configured merge_method plus a repository's permitted
+    merge strategies to exactly one strategy and a reason.
+
+    Total by construction: every ``(configured_method, permitted)`` pair
+    resolves to a ``(strategy, reason)`` pair. There is no undecided
+    verdict and no caller-side branch for one — the returned strategy is
+    always one of `_MERGE_METHOD_FLAGS`'s keys, ready to look up a `gh pr
+    merge` flag directly. Pure: makes no subprocess or network call and
+    consults only the values it is given.
+
+    ``configured_method`` is a value from `_MERGE_METHOD_VALUES` — one of
+    the three concrete strategies, or `AUTOMATIC_MERGE_METHOD`. When it
+    names a concrete strategy, that strategy is returned unconditionally:
+    ``permitted`` is never inspected, so a
+    `PERMITTED_STRATEGIES_LOOKUP_FAILED` signal alongside an explicit
+    strategy changes nothing.
+
+    When ``configured_method`` is `AUTOMATIC_MERGE_METHOD`:
+      - `permitted == PERMITTED_STRATEGIES_LOOKUP_FAILED` resolves to
+        squashing.
+      - otherwise rebasing is returned whenever ``permitted`` contains it.
+      - otherwise, when the remaining permitted strategies name exactly
+        one, that one is returned regardless of any other rule.
+      - otherwise, when more than one non-rebase strategy is permitted,
+        this resolves to squashing — the interim rule this slice ships;
+        a later change replaces it with a rule driven by the shape of the
+        pull request's commit series.
+      - the degenerate case of ``permitted == frozenset()`` (the
+        repository reports no permitted strategy at all) also resolves to
+        squashing, under its own reason, keeping the function total for
+        every value its declared parameter type accepts.
+
+    Every returned reason is non-empty and starts with one of the pinned,
+    pairwise-distinct prefixes in `RESOLUTION_REASON_PREFIXES` — one per
+    resolution cause — so a lookup failure, a sole-permitted-strategy
+    outcome, and the interim squash outcome can never render as
+    near-identical text.
+    """
+    if configured_method != AUTOMATIC_MERGE_METHOD:
+        prefix = RESOLUTION_REASON_PREFIXES["explicit_configured"]
+        return configured_method, (
+            f"{prefix}: [release].merge_method='{configured_method}'"
+        )
+
+    if permitted == PERMITTED_STRATEGIES_LOOKUP_FAILED:
+        prefix = RESOLUTION_REASON_PREFIXES["auto_lookup_failed"]
+        return "squash", f"{prefix}: repository capability lookup failed"
+
+    if "rebase" in permitted:
+        prefix = RESOLUTION_REASON_PREFIXES["auto_rebase_permitted"]
+        return "rebase", f"{prefix}: repository permits rebasing"
+
+    remaining = permitted - {"rebase"}
+    if len(remaining) == 1:
+        (only,) = remaining
+        prefix = RESOLUTION_REASON_PREFIXES["auto_sole_permitted"]
+        return only, f"{prefix}: repository permits only '{only}'"
+
+    if len(remaining) >= 2:
+        prefix = RESOLUTION_REASON_PREFIXES["auto_interim_squash"]
+        return "squash", (
+            f"{prefix}: rebasing forbidden and more than one other strategy "
+            "permitted — interim rule, replaced by a commit-series rule in a "
+            "later change"
+        )
+
+    prefix = RESOLUTION_REASON_PREFIXES["auto_none_permitted"]
+    return "squash", f"{prefix}: repository reports no permitted merge strategy"
+
+
+def describe_merge_refusal(strategy: str, refusal: str) -> str:
+    """Describe a merge refused at merge time for a strategy the
+    permitted-strategies lookup reported as available.
+
+    Pure and total: given any strategy name and any refusal text, returns
+    exactly one non-empty string naming the strategy and carrying
+    ``refusal`` verbatim. Never attributes the refusal to a branch rule, a
+    ruleset, or any other specific cause — the provider's merge-refusal
+    status is a shared bucket covering every "cannot merge" reason, and
+    the refusal text alone cannot disambiguate which one applied.
+
+    Not called from any merge loop by this change. A caller that records
+    a merge-time refusal as a recorded failure — rather than a silent
+    retry with a different strategy, or an unhandled exception — uses
+    this to build that failure's message; both are precluded by
+    construction here, since this function neither loops nor recurses and
+    its only decision is which literal string to return.
+    """
+    prefix = RESOLUTION_REASON_PREFIXES["merge_refused"]
+    return f"{prefix}: {strategy} refused — {refusal}"
+
+
 def _do_merge(
     repo_path: str, pr_number: str, author_email: str, merge_method: str, runner: rp.Runner
 ) -> tuple[bool, str]:
