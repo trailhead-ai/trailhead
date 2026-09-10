@@ -2710,10 +2710,14 @@ class TestMergeLoopSeriesRead:
                 },
             },
             commits={
+                # Substantial, unmarked commits: `beta` classifies as NOT
+                # fix-up-dominated and merges with `--merge`. That is what
+                # makes this test discriminating — a broken series wiring
+                # falls back to squash, so a `--squash` expectation here
+                # would pass whether or not the series was ever consulted.
                 "beta": [
-                    _commit_node("fixup! tidy", 5, 1),
-                    _commit_node("fixup! tidy again", 4, 0),
-                    _commit_node("fixup! and again", 3, 1),
+                    _commit_node("add the parser", 180, 20),
+                    _commit_node("add the renderer", 140, 30),
                 ]
             },
             call_log=call_log,
@@ -2728,7 +2732,7 @@ class TestMergeLoopSeriesRead:
         merge_argvs = [c for c in call_log if "pr" in c and "merge" in c]
         assert len(merge_argvs) == 2
         assert "--rebase" in merge_argvs[0]
-        assert "--squash" in merge_argvs[1]
+        assert "--merge" in merge_argvs[1]
         assert set(result["merged"]) == {f"{wt_a}:1", f"{wt_b}:2"}
         # Folding the series onto the same query means each pull request
         # still costs exactly one graphql round trip — reading the series
