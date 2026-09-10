@@ -313,6 +313,10 @@ def test_documented_all_hosts_invocation_forms_produce_an_answer_against_a_stub_
     outcome = transport.Answered(stdout="[]", stderr="", exit_code=0)
     monkeypatch.setattr(transport, "run_camp", lambda host, remote_argv, **kw: outcome)
 
+    import camp.launch.session as launch_session
+
+    monkeypatch.setattr(launch_session, "enumerate_records", lambda *a, **k: [])
+
     for line in lines:
         argv = shlex.split(line.replace("<name>", "andromeda"))
         assert argv[0] == "camp"
