@@ -19,8 +19,9 @@ description: >
 
 Lessons accrete and nothing removes them. Every run that learns something writes a record; no run
 ever checks whether the thing was already written down. Meanwhile the retrieval that surfaces
-lessons at dispatch time loads a fixed, recency-bounded window. **The corpus grows without bound and
-the window does not**, so a lesson's odds of ever being read decay as the corpus grows around it.
+lessons at dispatch time loads a fixed *number of records*, ordered by recency. **The corpus grows
+without bound and the window does not**, so a lesson's odds of ever being read decay as the corpus
+grows around it — and the only thing that raises them back is a smaller count.
 
 That is not a filing problem. It is the mechanism by which the same lesson gets re-learned: writing
 a lesson is cheap and feels productive, and nobody checks for an existing one because checking means
@@ -173,12 +174,17 @@ The shape that works:
 - **Every distinct trigger the inputs named survives, named.** This is the load-bearing one. A merge
   that loses a trigger is a regression, not a consolidation, and it is the thing to check for
   explicitly before writing.
-- **Total** length goes down, and by a lot. Measure against the inputs' *combined* length, not
-  against the longest one. A merge of two rich records legitimately runs longer than either, because
-  it is carrying both their triggers; what it must never approach is their sum — a record at 90% of
-  the combined input length is an append-log wearing a single heading. Measuring against the longest
-  input puts this rule in direct conflict with trigger preservation above, and trigger preservation
-  is the one that wins.
+- **Length is a reading, not a limit.** The retrieval window is bounded by *record count* — the
+  dispatch read is a `--limit`ed query — so what a merge buys is the slot it frees, and the
+  survivor's word count competes with nothing. Never trim to hit a number, and never drop a trigger
+  to make a record shorter.
+
+What length *tells* you is which kind of cluster you had. Fold several genuinely redundant records
+and the survivor lands far below their combined length, because most of what you dropped was
+restatement. Fold two rich records that each named a real trigger and it lands just under their sum,
+because there was little restatement to drop — that is a correct merge, not a failed one. A survivor
+at nearly the full combined length is worth one more look, not because it is too long but because it
+suggests the inputs shared nothing: that is the stop condition telling you these were two lessons.
 
 ### What has to be carried across
 
@@ -234,6 +240,9 @@ Verification is the deliverable. Report every one of these:
 - **Trigger preservation, spot-checked.** For a sample of merged records, re-read the folded inputs'
   triggers and confirm the survivor still names each one. A merge that lost a trigger is reverted,
   not explained.
+- **Each merge's length against its inputs' combined length**, as a reading on the cluster, not a
+  bar it had to clear. Ratios spread wide is the healthy result: the low ones found real redundancy,
+  the high ones merged records that shared a prevention but little prose.
 - **Clusters examined and deliberately kept separate**, with the distinct triggers that kept them
   apart. This is evidence the stop condition was applied, and without it a small merge count is
   indistinguishable from a pass that did not look.
