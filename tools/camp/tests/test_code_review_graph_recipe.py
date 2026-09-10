@@ -24,7 +24,7 @@ from pathlib import Path
 
 import pytest
 
-from ._helpers import init_git_repo
+from ._helpers import camp_state_env, init_git_repo
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]  # trailhead root
 _PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
@@ -217,7 +217,7 @@ def test_workspace_creation_runs_mcp_config_but_not_reassigned_tasks_until_activ
         "members": [trailhead_member],
         "branch_pattern": "worktree-{slug}",
     }
-    env = {"CAMP_STATE_DIR": str(tmp_path / "camp-state")}
+    env = camp_state_env(tmp_path)
 
     # Creation: only the provision-phase mcp-config task runs.
     reconcile_worktree(group, "s", env=env)

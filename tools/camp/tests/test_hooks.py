@@ -596,10 +596,8 @@ class TestWorktreeCleanup:
         init_git_repo(repo_a)
         init_git_repo(repo_b)
 
-        env = {
-            "CAMP_STATE_DIR": str(tmp_path / "camp-state"),
-            "CAMP_CONFIG_DIR": str(camp_config_dir),
-        }
+        state_env = camp_state_env(tmp_path)
+        env = {**state_env, "CAMP_CONFIG_DIR": str(camp_config_dir)}
 
         group = _make_group_config(
             "cleanup-group",
@@ -610,7 +608,6 @@ class TestWorktreeCleanup:
         )
 
         # Create worktrees via reconcile (using the module, not the CLI)
-        state_env = {"CAMP_STATE_DIR": str(tmp_path / "camp-state")}
         reconcile_worktree(group, "feat-y", env=state_env)
 
         wt_a = _member_wt("cleanup-group", "feat-y", "repo_a", state_env)
@@ -650,7 +647,7 @@ bootstrap = []
         mpath = manifest_path_for(
             "cleanup-group",
             "feat-y",
-            env={"CAMP_STATE_DIR": str(tmp_path / "camp-state")},
+            env=state_env,
         )
         assert not mpath.exists(), f"Manifest should have been removed: {mpath}"
 
@@ -665,17 +662,14 @@ bootstrap = []
         repo_a = tmp_path / "repo_a"
         init_git_repo(repo_a)
 
-        env = {
-            "CAMP_STATE_DIR": str(tmp_path / "camp-state"),
-            "CAMP_CONFIG_DIR": str(camp_config_dir),
-        }
+        state_env = camp_state_env(tmp_path)
+        env = {**state_env, "CAMP_CONFIG_DIR": str(camp_config_dir)}
 
         group = _make_group_config(
             "dirty-group",
             [{"name": "repo_a", "repo_root": str(repo_a), "bootstrap": []}],
         )
 
-        state_env = {"CAMP_STATE_DIR": str(tmp_path / "camp-state")}
         reconcile_worktree(group, "feat-dirty", env=state_env)
 
         wt_a = _member_wt("dirty-group", "feat-dirty", "repo_a", state_env)
@@ -717,17 +711,14 @@ bootstrap = []
         repo_a = tmp_path / "repo_a"
         init_git_repo(repo_a)
 
-        env = {
-            "CAMP_STATE_DIR": str(tmp_path / "camp-state"),
-            "CAMP_CONFIG_DIR": str(camp_config_dir),
-        }
+        state_env = camp_state_env(tmp_path)
+        env = {**state_env, "CAMP_CONFIG_DIR": str(camp_config_dir)}
 
         group = _make_group_config(
             "force-group",
             [{"name": "repo_a", "repo_root": str(repo_a), "bootstrap": []}],
         )
 
-        state_env = {"CAMP_STATE_DIR": str(tmp_path / "camp-state")}
         reconcile_worktree(group, "feat-force", env=state_env)
 
         wt_a = _member_wt("force-group", "feat-force", "repo_a", state_env)

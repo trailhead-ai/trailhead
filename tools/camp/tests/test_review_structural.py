@@ -30,7 +30,7 @@ import textwrap
 from pathlib import Path
 
 import pytest
-from ._helpers import init_git_repo
+from ._helpers import camp_state_env, init_git_repo
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
@@ -305,9 +305,7 @@ class TestC1RmtreeGuard:
             ],
             "branch_pattern": "worktree-{slug}",
         }
-        state_root = tmp_path / "camp-state"
-        state_root.mkdir()
-        env = {"CAMP_STATE_DIR": str(state_root)}
+        env = camp_state_env(tmp_path)
 
         # Provision normally (real workspace dir under worktrees_root).
         import camp.provision.provision as provision
