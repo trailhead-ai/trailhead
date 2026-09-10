@@ -105,6 +105,16 @@ def _parse_host(raw: Any, *, path: Path, name: str) -> Host:
         raise HostConfigError(
             f"{path}: hosts.{name}.ssh must be a string, got {type(ssh).__name__!r}"
         )
+    if ssh.startswith("-"):
+        # transport.py places this value directly into the local `ssh`
+        # argv, immediately after the fixed -o options — an ssh value
+        # beginning with "-" lands in OPTION position rather than as the
+        # destination, so e.g. ssh = "-oProxyCommand=<cmd>" is option
+        # injection. Refused at load, before it ever reaches the transport.
+        raise HostConfigError(
+            f"{path}: hosts.{name}.ssh must not begin with '-' — {ssh!r} "
+            "would be read as an ssh option, not a destination"
+        )
 
     camp_bin = raw.get("camp_bin", _DEFAULT_CAMP_BIN)
     if not isinstance(camp_bin, str):

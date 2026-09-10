@@ -162,11 +162,91 @@ def test_refused_connection_classifies_as_unreachable() -> None:
     assert isinstance(outcome, transport.Unreachable)
 
 
+def test_no_route_to_host_classifies_as_unreachable() -> None:
+    fake = _FakeRunner(
+        result=transport.RawResult(
+            stdout="", stderr="ssh: connect to host andromeda port 22: No route to host\r\n", exit_code=255
+        )
+    )
+
+    outcome = transport.run_camp(_HOST, ["list"], runner=fake)
+
+    assert isinstance(outcome, transport.Unreachable)
+
+
+def test_network_unreachable_classifies_as_unreachable() -> None:
+    fake = _FakeRunner(
+        result=transport.RawResult(
+            stdout="", stderr="ssh: connect to host andromeda port 22: Network is unreachable\r\n", exit_code=255
+        )
+    )
+
+    outcome = transport.run_camp(_HOST, ["list"], runner=fake)
+
+    assert isinstance(outcome, transport.Unreachable)
+
+
+def test_darwin_operation_timed_out_classifies_as_unreachable() -> None:
+    # macOS strerror(ETIMEDOUT), distinct from the existing "Connection timed
+    # out" — the operator runs two Macs, so this wording is a live path.
+    fake = _FakeRunner(
+        result=transport.RawResult(
+            stdout="", stderr="ssh: connect to host andromeda port 22: Operation timed out\r\n", exit_code=255
+        )
+    )
+
+    outcome = transport.run_camp(_HOST, ["list"], runner=fake)
+
+    assert isinstance(outcome, transport.Unreachable)
+
+
 def test_missing_remote_binary_classifies_as_camp_not_resolvable() -> None:
     fake = _FakeRunner(
         result=transport.RawResult(
             stdout="", stderr="bash: line 1: camp: command not found\n", exit_code=127
         )
+    )
+
+    outcome = transport.run_camp(_HOST, ["list"], runner=fake)
+
+    assert isinstance(outcome, transport.CampNotResolvable)
+
+
+def test_exit_127_with_bash_no_such_file_wording_classifies_as_camp_not_resolvable() -> None:
+    # A wrong camp_bin PATH (as opposed to a missing bare command) produces
+    # this wording under bash — "command not found" alone would miss it.
+    fake = _FakeRunner(
+        result=transport.RawResult(
+            stdout="",
+            stderr="bash: line 1: /opt/wrong/camp: No such file or directory\n",
+            exit_code=127,
+        )
+    )
+
+    outcome = transport.run_camp(_HOST, ["list"], runner=fake)
+
+    assert isinstance(outcome, transport.CampNotResolvable)
+
+
+def test_exit_127_with_dash_not_found_wording_classifies_as_camp_not_resolvable() -> None:
+    # dash/ash say "not found" (no "command") for BOTH causes — a missing
+    # bare command and a wrong path.
+    fake = _FakeRunner(
+        result=transport.RawResult(
+            stdout="", stderr="/bin/sh: 1: camp: not found\n", exit_code=127
+        )
+    )
+
+    outcome = transport.run_camp(_HOST, ["list"], runner=fake)
+
+    assert isinstance(outcome, transport.CampNotResolvable)
+
+
+def test_exit_127_with_no_recognizable_wording_still_classifies_as_camp_not_resolvable() -> None:
+    # Exit 127 alone is unambiguous against every transport failure (all of
+    # which are 255) — the message is not required to classify it.
+    fake = _FakeRunner(
+        result=transport.RawResult(stdout="", stderr="", exit_code=127)
     )
 
     outcome = transport.run_camp(_HOST, ["list"], runner=fake)
@@ -454,6 +534,43 @@ def test_runner_is_invoked_exactly_once_even_when_it_reports_stopped_responding(
 # runner rather than the injected stub, since the thing under test is the
 # module's own subprocess cleanup.
 # ---------------------------------------------------------------------------
+
+
+def test_default_runner_real_communicate_timeout_expiry_kills_the_child(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The execution-timeout path, driven for real: `default_runner`'s OWN
+    `communicate(timeout=...)` expiring (not a fake raising
+    `TimeoutExpired`) must re-raise `TimeoutExpired` AND actually kill the
+    child — this is `default_runner`'s own contract, distinct from
+    `run_camp`'s classification of that exception into `StoppedResponding`,
+    which the other timeout tests in this file already cover via the
+    injected `_FakeRunner` seam."""
+    import os
+
+    captured: dict[str, int] = {}
+    real_init = subprocess.Popen.__init__
+
+    def _capturing_init(self, *args, **kwargs):
+        real_init(self, *args, **kwargs)
+        captured["pid"] = self.pid
+
+    monkeypatch.setattr(subprocess.Popen, "__init__", _capturing_init)
+
+    with pytest.raises(subprocess.TimeoutExpired):
+        transport.default_runner(["sleep", "30"], 0.2, dict(os.environ))
+
+    pid = captured["pid"]
+    deadline = time.monotonic() + 2.0
+    gone = False
+    while time.monotonic() < deadline:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            gone = True
+            break
+        time.sleep(0.05)
+    assert gone, f"child pid {pid} is still alive after the real timeout expired"
 
 
 def test_interrupted_call_terminates_the_local_child_process(monkeypatch: pytest.MonkeyPatch) -> None:

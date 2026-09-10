@@ -406,3 +406,40 @@ def test_host_and_group_together_never_call_the_transport(
     assert "--host" in captured.err, captured.err
     assert "--group" in captured.err, captured.err
     assert "no group resolved from cwd" not in captured.err, captured.err
+
+
+def test_trailing_host_flag_on_inapplicable_verb_reports_no_meaning_not_missing_value(
+    isolated_env: dict[str, str], tmp_path: Path
+) -> None:
+    """`--host` with no value at all, on a verb --host has no meaning for
+    regardless of a value (status is not in `_HOST_VERBS`), must report
+    "has no meaning here" — not "requires a value", which would tell the
+    operator to go supply a value that would be refused anyway."""
+    result = _run(["status", "--host"], env=isolated_env, cwd=tmp_path)
+
+    assert result.returncode != 0
+    assert "has no meaning here" in result.stderr, result.stderr
+    assert "requires a value" not in result.stderr, result.stderr
+
+
+def test_groups_verb_with_host_flag_refuses_instead_of_answering_locally(
+    isolated_env: dict[str, str], tmp_path: Path
+) -> None:
+    """`camp groups` is read-only and dispatched before group resolution —
+    its early return in main() used to precede the --host reader entirely,
+    so `camp groups --host andromeda` silently answered LOCALLY at exit 0
+    instead of refusing. --host must never be silently dropped."""
+    result = _run(["groups", "--host", "andromeda"], env=isolated_env, cwd=tmp_path)
+
+    assert result.returncode != 0
+    assert "--host" in result.stderr
+    assert "no groups configured" not in result.stdout
+
+
+def test_group_verb_with_host_flag_refuses_instead_of_answering_locally(
+    isolated_env: dict[str, str], tmp_path: Path
+) -> None:
+    result = _run(["group", "testgrp", "--host", "andromeda"], env=isolated_env, cwd=tmp_path)
+
+    assert result.returncode != 0
+    assert "--host" in result.stderr

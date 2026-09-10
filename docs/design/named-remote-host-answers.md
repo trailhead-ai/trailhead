@@ -62,7 +62,7 @@ partition after the connection was established. The whole invocation therefore c
 second, longer execution bound, and exceeding it is its own state below. Without it the
 documented silence while waiting is indistinguishable from an indefinite hang, which is
 the one failure this surface must never render as normal operation. Both bounds have a
-stated default and an operator-facing override.
+stated default: 10s to connect, 60s for the whole invocation.
 
 The subprocess runs under a fixed `LC_ALL=C` so the classification below reads a stable
 message, and every outcome is decided on the exit code **and** the message together —

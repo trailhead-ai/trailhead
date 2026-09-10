@@ -370,6 +370,9 @@ def main() -> None:
 
     # 'group' is the new name for 'init'; 'init' redirects to 'group'.
     if first == "group":
+        if _flag_present(argv[1:], HOST_FLAG):
+            print(f"camp {first}: {HOST_FLAG} has no meaning here", file=sys.stderr)
+            sys.exit(1)
         from .group import _cmd_group_cli
         _cmd_group_cli(argv[1:])
         return
@@ -377,8 +380,16 @@ def main() -> None:
     # 'groups' is a read-only listing, dispatched here — before group
     # resolution is even attempted — so it never requires a resolved group
     # and never fails outright on a sibling group's malformed config (it
-    # degrades that one entry instead; see _cmd_groups_cli).
+    # degrades that one entry instead; see _cmd_groups_cli). Both this
+    # branch and 'group' above return BEFORE the --host reader below is
+    # ever reached, so --host must be refused explicitly here — otherwise
+    # `camp groups --host <name>` silently answers LOCALLY at exit 0
+    # instead of refusing (the same silent-drop class already fixed once
+    # for --all-groups + --group).
     if first == "groups":
+        if _flag_present(argv[1:], HOST_FLAG):
+            print(f"camp {first}: {HOST_FLAG} has no meaning here", file=sys.stderr)
+            sys.exit(1)
         from .group import _cmd_groups_cli
         _cmd_groups_cli(argv[1:])
         return
@@ -435,7 +446,19 @@ def main() -> None:
     # before any group config loads, any group resolves, or the hosts file is
     # even opened for a verb this option has no meaning for. A refusal below
     # therefore also costs nothing.
+    #
+    # Applicability is checked BEFORE the value is read: a verb --host has no
+    # meaning for is refused with "has no meaning here" even when --host is
+    # also missing its value — a value check that ran first would instead
+    # report "requires a value" on a verb where no value would ever be
+    # accepted anyway.
     # ---------------------------------------------------------------------------
+    if _flag_present(scan_rest, HOST_FLAG):
+        canonical, _kind = _resolve_verb(first) if first else (first, "live")
+        if canonical not in _HOST_VERBS:
+            print(f"camp {first}: {HOST_FLAG} has no meaning here", file=sys.stderr)
+            sys.exit(1)
+
     try:
         scan_rest, host_name = read_host_option(scan_rest)
     except _HostFlagMissingValue:

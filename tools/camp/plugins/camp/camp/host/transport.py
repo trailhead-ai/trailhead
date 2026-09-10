@@ -65,7 +65,20 @@ DEFAULT_EXECUTION_TIMEOUT_SECONDS = 60.0
 _DNS_FAILURE = "Could not resolve hostname"
 _CONNECTION_REFUSED = "Connection refused"
 _CONNECT_TIMEOUT = "Connection timed out"
-_UNREACHABLE_SUBSTRINGS = (_DNS_FAILURE, _CONNECTION_REFUSED, _CONNECT_TIMEOUT)
+_NO_ROUTE_TO_HOST = "No route to host"
+_NETWORK_UNREACHABLE = "Network is unreachable"
+# macOS strerror(ETIMEDOUT) — distinct wording from "Connection timed out"
+# above, which is the Linux/glibc form. Both are live: the operator runs two
+# Macs, so this is not a hypothetical.
+_DARWIN_OPERATION_TIMED_OUT = "Operation timed out"
+_UNREACHABLE_SUBSTRINGS = (
+    _DNS_FAILURE,
+    _CONNECTION_REFUSED,
+    _CONNECT_TIMEOUT,
+    _NO_ROUTE_TO_HOST,
+    _NETWORK_UNREACHABLE,
+    _DARWIN_OPERATION_TIMED_OUT,
+)
 
 _IDENTITY_CHANGED = "REMOTE HOST IDENTIFICATION HAS CHANGED"
 
@@ -74,10 +87,6 @@ _IDENTITY_CHANGED = "REMOTE HOST IDENTIFICATION HAS CHANGED"
 # algorithm-independent halves stays correct for any key type ssh offers.
 _IDENTITY_UNKNOWN_A = "host key is known for"
 _IDENTITY_UNKNOWN_B = "requested strict checking"
-
-# The remote shell's own "command not found" wording, measured through ssh
-# with exit 127. Generic across shells — never a specific shell's prefix.
-_COMMAND_NOT_FOUND = "command not found"
 
 # ssh's own authentication-failure wording, measured 2026-09-10 against real
 # ssh under LC_ALL=C with BatchMode=yes and no usable identity loaded:
@@ -178,7 +187,8 @@ def default_runner(
         list(argv),
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        text=True,
+        encoding="utf-8",
+        errors="surrogateescape",
         env=dict(env),
     )
     try:
@@ -254,7 +264,12 @@ def _classify(raw: RawResult) -> TransportOutcome:
             return CredentialsRefused()
         return RemoteRefusal(stdout=raw.stdout, stderr=raw.stderr, exit_code=raw.exit_code)
 
-    if raw.exit_code == 127 and _COMMAND_NOT_FOUND in raw.stderr:
+    if raw.exit_code == 127:
+        # Unambiguous against every transport failure (all of which are
+        # 255), so the message is not required — only the shell's wording
+        # for "could not run this" varies (bash: "command not found" for a
+        # missing bare command, "No such file or directory" for a wrong
+        # camp_bin path; dash/ash: "not found" for both).
         return CampNotResolvable()
 
     return RemoteRefusal(stdout=raw.stdout, stderr=raw.stderr, exit_code=raw.exit_code)

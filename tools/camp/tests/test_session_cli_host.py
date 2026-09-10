@@ -191,6 +191,29 @@ def test_many_rows_human_path_preserves_order(
     assert "(worker)" in lines[1]
 
 
+def test_a_row_missing_a_required_key_does_not_crash_and_other_rows_still_render(
+    hosts_env, monkeypatch, capsys: pytest.CaptureFixture
+) -> None:
+    """Version skew across the operator's two machines is the expected
+    steady state: a remote camp of a different version can omit a key the
+    human renderer indexes directly. It must degrade that ONE row rather
+    than crash the whole answer — the other, well-formed row still prints."""
+    transport = _transport_module()
+    remote_rows = [
+        {"ok": True, "cwd": "/ws/feat-x", "kind": "claude"},  # missing session_id
+        _session_row(session_id="alpha-session"),
+    ]
+    outcome = transport.Answered(stdout=json.dumps(remote_rows), stderr="", exit_code=0)
+    _rig(monkeypatch, outcome)
+
+    code = _run(monkeypatch, ["sessions", "--host", "andromeda"])
+
+    captured = capsys.readouterr()
+    assert code == 0
+    assert "alpha-session" in captured.out
+    assert "Traceback" not in captured.err
+
+
 # ---------------------------------------------------------------------------
 # Remote attribution survives — the local side never re-attributes group or
 # account from local config.

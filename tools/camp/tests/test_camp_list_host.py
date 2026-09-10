@@ -174,10 +174,35 @@ def test_every_relayed_row_gains_host_key(
     assert rows[0]["host"] == "andromeda"
 
 
+def _install_fake_ssh(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stdout: str) -> None:
+    """Puts a fake `ssh` script FIRST on $PATH that ignores its argv and
+    writes *stdout* — used to drive real `default_runner` (a real
+    subprocess, a real pipe, real bytes across the subprocess boundary)
+    without ever making a real network connection."""
+    import os
+    import stat
+
+    bin_dir = tmp_path / "fakebin"
+    bin_dir.mkdir()
+    script = bin_dir / "ssh"
+    script.write_text(
+        "#!/usr/bin/env python3\n"
+        "import sys\n"
+        f"sys.stdout.buffer.write({stdout!r}.encode('utf-8'))\n"
+        "sys.exit(0)\n",
+        encoding="utf-8",
+    )
+    script.chmod(script.stat().st_mode | stat.S_IEXEC)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+
+
 def test_non_ascii_bytes_in_relayed_row_decode_and_render_unmangled(
-    hosts_env, monkeypatch, capsys: pytest.CaptureFixture
+    hosts_env, monkeypatch, tmp_path: Path, capsys: pytest.CaptureFixture
 ) -> None:
-    transport = _transport_module()
+    """Drives the REAL `default_runner` (not a stubbed `run_camp`) through a
+    fake `ssh` on $PATH — the subprocess boundary non-ASCII bytes must
+    actually survive is real, not the stub every other test in this file
+    injects at the `run_camp` seam."""
     remote_rows = [
         {
             "ok": True,
@@ -187,10 +212,7 @@ def test_non_ascii_bytes_in_relayed_row_decode_and_render_unmangled(
             "group": "gröup",
         }
     ]
-    outcome = transport.Answered(
-        stdout=json.dumps(remote_rows, ensure_ascii=False), stderr="", exit_code=0
-    )
-    _rig(monkeypatch, outcome)
+    _install_fake_ssh(tmp_path, monkeypatch, json.dumps(remote_rows, ensure_ascii=False))
 
     code = _run(monkeypatch, ["list", "--host", "andromeda", "--json"])
     rows = json.loads(capsys.readouterr().out)
@@ -444,6 +466,53 @@ def test_collection_failure_relays_rows_with_host_and_remote_exit_status(
     assert rows == [
         {"ok": True, "slug": "ws-a", "branch": "b", "workspace_path": "/a", "group": "g", "host": "andromeda"},
         {"ok": False, "group": None, "reason": "levr.toml: invalid TOML", "host": "andromeda"},
+    ]
+
+
+def test_unparsable_remote_answer_emits_a_json_row_not_silence(
+    hosts_env, monkeypatch, capsys: pytest.CaptureFixture
+) -> None:
+    """A RemoteRefusal (or any unmatched transport failure classified as one)
+    whose stdout does not decode as a JSON array must still answer a --json
+    caller with a row — an empty stdout with nothing printed to stdout would
+    read as "the host has nothing to report", which is the exact confident
+    wrong answer this whole design exists to remove."""
+    transport = _transport_module()
+    outcome = transport.RemoteRefusal(
+        stdout="", stderr="ssh: some unmatched transport failure\n", exit_code=255
+    )
+    _rig(monkeypatch, outcome)
+
+    code = _run(monkeypatch, ["list", "--host", "andromeda", "--json"])
+
+    captured = capsys.readouterr()
+    assert code == 255
+    rows = json.loads(captured.out)
+    assert rows == [
+        {"ok": False, "host": "andromeda", "reason": "remote answer could not be parsed"}
+    ]
+
+
+def test_malformed_remote_array_of_non_objects_does_not_crash(
+    hosts_env, monkeypatch, capsys: pytest.CaptureFixture
+) -> None:
+    """A remote answer that decodes as a JSON array but whose elements are
+    not objects (a different-versioned or misbehaving remote camp) must not
+    raise — stamping `host` onto a non-dict element is a TypeError, not a
+    row to relay."""
+    transport = _transport_module()
+    outcome = transport.Answered(
+        stdout=json.dumps(["oops", "not", "objects"]), stderr="", exit_code=0
+    )
+    _rig(monkeypatch, outcome)
+
+    code = _run(monkeypatch, ["list", "--host", "andromeda", "--json"])
+
+    captured = capsys.readouterr()
+    assert code == 0
+    rows = json.loads(captured.out)
+    assert rows == [
+        {"ok": False, "host": "andromeda", "reason": "remote answer could not be parsed"}
     ]
 
 

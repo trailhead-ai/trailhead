@@ -1459,11 +1459,25 @@ def _cmd_sessions_host_cli(args: list[str], host: "Host", host_name: str) -> Non
         for row in rows:
             if not row.get("ok"):
                 continue
+            # Version skew across the operator's two machines is the
+            # expected steady state for this feature, not an edge case — a
+            # remote camp of a different version can answer with a row that
+            # omits a key this rendering depends on. Degrade that ONE row
+            # rather than let it take the whole answer down; the well-formed
+            # rows around it still print.
+            try:
+                session_id = row["session_id"]
+                kind = row["kind"]
+                cwd = row["cwd"]
+            except KeyError as e:
+                print(
+                    f"camp sessions: host {host_name!r} sent a session row "
+                    f"missing {e.args[0]!r} — skipping",
+                    file=sys.stderr,
+                )
+                continue
             label = f" ({row['name']})" if row.get("name") else ""
-            print(
-                f"{row['session_id']}  {row['kind']}  "
-                f"{printable_path(row['cwd'])}{label}"
-            )
+            print(f"{session_id}  {kind}  {printable_path(cwd)}{label}")
 
     relay_all_groups(
         "sessions",
