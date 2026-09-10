@@ -185,6 +185,37 @@ class TestOwnerOfAccessor:
 
 
 # ---------------------------------------------------------------------------
+# 8. carry_forward_owner — the shared rebuild helper
+# ---------------------------------------------------------------------------
+
+
+class TestCarryForwardOwner:
+    def test_prior_owner_is_carried_into_manifest_data(self):
+        from camp.group.manifest import carry_forward_owner
+
+        manifest_data: dict = {"schema_version": 1, "members": []}
+        carry_forward_owner(manifest_data, "andromeda")
+
+        assert manifest_data["owner"] == "andromeda"
+
+    def test_no_prior_owner_adds_no_owner_key(self):
+        from camp.group.manifest import carry_forward_owner
+
+        manifest_data: dict = {"schema_version": 1, "members": []}
+        carry_forward_owner(manifest_data, None)
+
+        assert "owner" not in manifest_data
+
+    def test_existing_owner_in_manifest_data_is_not_overwritten_by_stale_prior(self):
+        from camp.group.manifest import carry_forward_owner
+
+        manifest_data: dict = {"schema_version": 1, "members": [], "owner": "current"}
+        carry_forward_owner(manifest_data, "stale")
+
+        assert manifest_data["owner"] == "current"
+
+
+# ---------------------------------------------------------------------------
 # 5. Compatibility / no-backfill across the full lifecycle
 # ---------------------------------------------------------------------------
 

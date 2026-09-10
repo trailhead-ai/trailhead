@@ -55,6 +55,7 @@ from ..group.config import tasks_in_phase
 from ..group.manifest import (
     WORK_STATE_NOT_APPLICABLE,
     ManifestError,
+    carry_forward_owner,
     manifest_path_for,
     owner_of,
     read_central_manifest,
@@ -766,8 +767,7 @@ def reconcile_worktree(
             # the per-member carry-forward above: this rebuild never sets or
             # clears ownership itself, only preserves whatever was already
             # recorded. Absent when the prior manifest never recorded one.
-            if prior_owner is not None:
-                manifest_data["owner"] = prior_owner
+            carry_forward_owner(manifest_data, prior_owner)
             write_central_manifest(mpath, manifest_data)
 
     return {

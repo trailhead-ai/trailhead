@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Any
 
 from ..group.manifest import (
+    carry_forward_owner,
     manifest_path_for,
     owner_of,
     workspace_dir,
@@ -190,9 +191,8 @@ def seed_pending_workspace(
         # even if the running host's own declared name differs. Only a
         # workspace whose ownership was never recorded gets stamped, and only
         # when this host has declared a name to stamp.
-        if prior_owner is not None:
-            manifest_data["owner"] = prior_owner
-        else:
+        carry_forward_owner(manifest_data, prior_owner)
+        if "owner" not in manifest_data:
             declared = _declared_owner(env)
             if declared is not None:
                 manifest_data["owner"] = declared
