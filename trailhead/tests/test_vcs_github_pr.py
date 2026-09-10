@@ -1271,6 +1271,236 @@ class TestPermittedMergeStrategies:
 
 
 # ---------------------------------------------------------------------------
+# get_commit_series (folded into _STACK_ENTRY_QUERY)
+# ---------------------------------------------------------------------------
+
+
+def _commit_node(message: str, additions: int, deletions: int, parent_count: int = 1) -> dict:
+    return {
+        "commit": {
+            "message": message,
+            "additions": additions,
+            "deletions": deletions,
+            "parents": {"totalCount": parent_count},
+        }
+    }
+
+
+class TestGetCommitSeries:
+    def test_well_formed_response_yields_ordered_summaries(self) -> None:
+        """One summary per commit, in the provider's order, carrying the
+        first line of the full `message` and `additions + deletions`."""
+        from trailhead.vcs.github import get_commit_series
+
+        nodes = [
+            _commit_node("first commit\n\nbody text", 3, 1),
+            _commit_node("second commit", 10, 4),
+        ]
+        stub = _graphql_stub(
+            {"pullRequest": {"commits": {"totalCount": 2, "nodes": nodes}}}
+        )
+        result = get_commit_series("/repo", "20", runner=stub)
+        assert result == [("first commit", 4), ("second commit", 14)]
+
+    def test_subject_taken_from_message_not_truncated_headline(self) -> None:
+        """`messageHeadline` truncates at ~72 chars with a trailing ellipsis
+        — two subjects differing only past that point must remain
+        distinguishable, so the subject must come from `message`'s first
+        line, whole, never from a headline field."""
+        from trailhead.vcs.github import get_commit_series
+
+        long_a = "a" * 80 + " tail-A"
+        long_b = "a" * 80 + " tail-B"
+        stub = _graphql_stub(
+            {
+                "pullRequest": {
+                    "commits": {
+                        "totalCount": 2,
+                        "nodes": [
+                            _commit_node(long_a, 1, 0),
+                            _commit_node(long_b, 1, 0),
+                        ],
+                    }
+                }
+            }
+        )
+        result = get_commit_series("/repo", "21", runner=stub)
+        subjects = [subject for subject, _size in result]
+        assert subjects == [long_a, long_b]
+        assert subjects[0] != subjects[1]
+
+    def test_merge_commit_dropped_relative_order_preserved(self) -> None:
+        from trailhead.vcs.github import get_commit_series
+
+        nodes = [
+            _commit_node("one", 1, 0, parent_count=1),
+            _commit_node("merge remote-tracking branch", 0, 0, parent_count=2),
+            _commit_node("two", 2, 0, parent_count=1),
+        ]
+        stub = _graphql_stub(
+            {"pullRequest": {"commits": {"totalCount": 3, "nodes": nodes}}}
+        )
+        result = get_commit_series("/repo", "22", runner=stub)
+        assert result == [("one", 1), ("two", 2)]
+
+    def test_series_longer_than_page_size_resolves_to_truncated(self) -> None:
+        """`totalCount` exceeding `len(nodes)` is genuine truncation — the
+        page-size ceiling was hit — never a silently short series."""
+        from trailhead.vcs.github import COMMIT_SERIES_TRUNCATED, get_commit_series
+
+        nodes = [_commit_node("c", 1, 0)]
+        stub = _graphql_stub(
+            {"pullRequest": {"commits": {"totalCount": 300, "nodes": nodes}}}
+        )
+        result = get_commit_series("/repo", "23", runner=stub)
+        assert result == COMMIT_SERIES_TRUNCATED
+
+    def test_unresolvable_repository_returns_lookup_failed(self) -> None:
+        from trailhead.vcs.github import COMMIT_SERIES_LOOKUP_FAILED, get_commit_series
+
+        stub = _graphql_stub(None, returncode=1, errors=[{"type": "NOT_FOUND"}])
+        result = get_commit_series("/repo", "24", runner=stub)
+        assert result == COMMIT_SERIES_LOOKUP_FAILED
+
+    def test_missing_commits_field_returns_lookup_failed(self) -> None:
+        from trailhead.vcs.github import COMMIT_SERIES_LOOKUP_FAILED, get_commit_series
+
+        stub = _graphql_stub({"pullRequest": {"stackEntry": None}})
+        result = get_commit_series("/repo", "25", runner=stub)
+        assert result == COMMIT_SERIES_LOOKUP_FAILED
+
+    def test_non_integer_size_returns_lookup_failed(self) -> None:
+        from trailhead.vcs.github import COMMIT_SERIES_LOOKUP_FAILED, get_commit_series
+
+        nodes = [
+            {
+                "commit": {
+                    "message": "bad",
+                    "additions": "not-an-int",
+                    "deletions": 0,
+                    "parents": {"totalCount": 1},
+                }
+            }
+        ]
+        stub = _graphql_stub(
+            {"pullRequest": {"commits": {"totalCount": 1, "nodes": nodes}}}
+        )
+        result = get_commit_series("/repo", "26", runner=stub)
+        assert result == COMMIT_SERIES_LOOKUP_FAILED
+
+    def test_lookup_failed_distinct_from_truncated_and_from_empty_success(self) -> None:
+        from trailhead.vcs.github import (
+            COMMIT_SERIES_LOOKUP_FAILED,
+            COMMIT_SERIES_TRUNCATED,
+            get_commit_series,
+        )
+
+        lookup_failed = get_commit_series(
+            "/repo", "27", runner=_graphql_stub(None, returncode=1)
+        )
+        truncated = get_commit_series(
+            "/repo",
+            "28",
+            runner=_graphql_stub(
+                {
+                    "pullRequest": {
+                        "commits": {"totalCount": 300, "nodes": [_commit_node("c", 1, 0)]}
+                    }
+                }
+            ),
+        )
+        empty = get_commit_series(
+            "/repo",
+            "29",
+            runner=_graphql_stub(
+                {"pullRequest": {"commits": {"totalCount": 0, "nodes": []}}}
+            ),
+        )
+        assert lookup_failed == COMMIT_SERIES_LOOKUP_FAILED
+        assert truncated == COMMIT_SERIES_TRUNCATED
+        assert empty == []
+        assert lookup_failed != truncated
+        assert lookup_failed != empty
+        assert truncated != empty
+
+    def test_no_local_git_history_command_runs_reading_the_series(self) -> None:
+        """AC7: the series comes from the hosting provider's response, never
+        a local walk of the checkout's branch state. The existing `git
+        remote get-url origin` call (needed to resolve owner/repo for the
+        GraphQL query, and already shared by the sibling readers) is the
+        only git subprocess this path may run — no `git log`/`git diff`/
+        similar history command."""
+        from trailhead.vcs.github import get_commit_series
+
+        calls: list[list[str]] = []
+        stub = _graphql_stub(
+            {
+                "pullRequest": {
+                    "commits": {"totalCount": 1, "nodes": [_commit_node("c", 1, 0)]}
+                }
+            },
+            call_log=calls,
+        )
+        get_commit_series("/repo", "32", runner=stub)
+
+        git_calls = [c for c in calls if c and c[0] == "git"]
+        assert git_calls == [["git", "remote", "get-url", "origin"]]
+
+    def test_one_fetch_serves_capability_and_series_across_two_pull_requests(self) -> None:
+        """A caller taking both the capability read and the series read for
+        one pull request costs exactly one provider query — observed across
+        a two-pull-request run (the merge loop's own shape: a fresh
+        per-pull-request cache dict) rather than by counting calls to a
+        single function. The two pull requests' cache dicts stay keyed
+        apart."""
+        from trailhead.vcs.github import get_commit_series, get_permitted_merge_strategies
+
+        calls: list[list[str]] = []
+        repo_one = {
+            "mergeCommitAllowed": True,
+            "squashMergeAllowed": True,
+            "rebaseMergeAllowed": False,
+            "pullRequest": {
+                "commits": {"totalCount": 1, "nodes": [_commit_node("one", 1, 0)]}
+            },
+        }
+        repo_two = {
+            "mergeCommitAllowed": True,
+            "squashMergeAllowed": False,
+            "rebaseMergeAllowed": True,
+            "pullRequest": {
+                "commits": {"totalCount": 1, "nodes": [_commit_node("two", 2, 0)]}
+            },
+        }
+
+        cache_one: dict = {}
+        strategies_one = get_permitted_merge_strategies(
+            "/repo-a", "30", runner=_graphql_stub(repo_one, call_log=calls), cache=cache_one
+        )
+        series_one = get_commit_series(
+            "/repo-a", "30", runner=_graphql_stub(repo_one, call_log=calls), cache=cache_one
+        )
+
+        cache_two: dict = {}
+        strategies_two = get_permitted_merge_strategies(
+            "/repo-b", "31", runner=_graphql_stub(repo_two, call_log=calls), cache=cache_two
+        )
+        series_two = get_commit_series(
+            "/repo-b", "31", runner=_graphql_stub(repo_two, call_log=calls), cache=cache_two
+        )
+
+        graphql_calls = [c for c in calls if "graphql" in " ".join(c)]
+        assert len(graphql_calls) == 2
+        assert strategies_one == frozenset({"merge", "squash"})
+        assert strategies_two == frozenset({"merge", "rebase"})
+        assert series_one == [("one", 1)]
+        assert series_two == [("two", 2)]
+        assert set(cache_one) == {("/repo-a", "30")}
+        assert set(cache_two) == {("/repo-b", "31")}
+        assert set(cache_one).isdisjoint(cache_two)
+
+
+# ---------------------------------------------------------------------------
 # resolve_merge_strategy / describe_merge_refusal
 # ---------------------------------------------------------------------------
 
