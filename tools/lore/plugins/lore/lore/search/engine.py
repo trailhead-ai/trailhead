@@ -69,6 +69,12 @@ from . import kql as _kql
 from . import kql_compile as _kql_compile
 from .xml_escape import wrap_shared, xml_body_escape
 
+# Both paging values bind straight into ``LIMIT ? OFFSET ?``. SQLite's INTEGER is
+# 64-bit, and ``conn.execute`` raises ``OverflowError`` on a wider Python int rather
+# than returning a row set — a raw traceback where the CLI contract promises a
+# ``lore search: …`` line, so the range is checked before the statement is built.
+_SQLITE_MAX_INT = 2**63 - 1
+
 # Reverse-edge alias surface names (the facets whose membership is materialized in
 # reindex pass 2; a query using them gets the "run lore reindex" completeness note).
 # The kind-derived ``related-<kind>`` fields (one per ``record.model.KINDS`` member)
@@ -443,6 +449,10 @@ def run_search(
     offset = int(offset)
     if offset < 0:
         return "lore search: --offset must be >= 0", 1
+    if offset > _SQLITE_MAX_INT:
+        return "lore search: --offset is out of range", 1
+    if not -_SQLITE_MAX_INT - 1 <= int(limit) <= _SQLITE_MAX_INT:
+        return "lore search: --limit is out of range", 1
 
     # --- parse + compile (errors → escaped stderr text, non-zero) ----------
     try:
