@@ -68,6 +68,32 @@ The subprocess runs under a fixed `LC_ALL=C` so the classification below reads a
 message, and every outcome is decided on the exit code **and** the message together —
 neither alone separates the states, because several of them share an exit code.
 
+Measured against real `ssh` on 2026-09-10, and the classification rests on these rather
+than on expectation. Every transport-level failure is exit 255, separable only by message:
+`Could not resolve hostname` / `Connection refused` / `Connection timed out` for an
+unreachable host, `REMOTE HOST IDENTIFICATION HAS CHANGED` for a changed key, and
+`host key is known for` together with `requested strict checking` for a key that was never
+pinned. The never-pinned message interpolates the key algorithm, so nothing matches a
+literal algorithm name — a host offering a different key type would be misclassified. A
+missing remote binary is exit 127, unambiguous against every transport failure, and a
+remote camp's own exit code comes back verbatim.
+
+**Resolution order is load-bearing, because 255 is ambiguous.** A remote camp that exits
+255 cannot be told from a transport failure by exit code, and it may print nothing at all.
+The message is therefore matched against the known, fixed transport strings **first**, and
+an otherwise-unmatched 255 is the remote command's own exit. Never the reverse: assuming
+transport first would render a genuine remote refusal as a connection failure that never
+happened.
+
+**The execution bound stops waiting; it does not stop the remote side.** Also measured:
+terminating the local `ssh` process, gracefully or forcibly, leaves the remote command
+running — it is reparented and survives. So an invocation that hits the execution bound, or
+is interrupted, may leave a remote camp process running until it exits on its own. The
+usual remedy is a pty, which would apply CRLF translation to the very stream this transport
+exists to relay verbatim; the read-only verbs here are short-lived, so the leak is accepted
+and stated rather than traded for a corrupted answer. It is worth revisiting when a
+state-changing or long-running verb rides this transport.
+
 ## State — zero
 
 The host answered and has nothing to report. The rendering is the local zero rendering:
