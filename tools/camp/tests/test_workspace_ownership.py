@@ -1014,3 +1014,39 @@ class TestRemoveOwnershipNoticeMalformedHostsTomlIsCleanError:
         err = capsys.readouterr().err
         assert err.startswith("camp remove: ")
         assert "Traceback" not in err
+
+    def test_deeply_nested_hosts_toml_dies_cleanly_not_a_recursion_error(
+        self, one_member_group, capsys
+    ):
+        """tomllib's nested-inline-table recursion can exhaust the
+        interpreter's recursion limit before it ever raises TOMLDecodeError —
+        that must also surface as a clean `camp remove: ` error, not a raw
+        RecursionError traceback."""
+        import sys
+
+        from camp.cli.lifecycle import _cmd_remove_group_cli
+
+        g = one_member_group
+        slug = "feat-o"
+        env, _ = _owned_workspace(g["group"], g["tmp_path"], slug=slug)
+
+        depth = 200
+        nested_bomb = "bomb = " + "{a=" * depth + "1" + "}" * depth + "\n"
+        (Path(env["CAMP_CONFIG_DIR"]) / "hosts.toml").write_text(
+            'self_name = "andromeda"\n' + nested_bomb, encoding="utf-8"
+        )
+
+        original_limit = sys.getrecursionlimit()
+        sys.setrecursionlimit(150)
+        try:
+            with pytest.raises(SystemExit) as exc_info:
+                _cmd_remove_group_cli(
+                    ["--name", slug, "--force"], g["group"], env, dry_run=False
+                )
+        finally:
+            sys.setrecursionlimit(original_limit)
+
+        assert exc_info.value.code != 0
+        err = capsys.readouterr().err
+        assert err.startswith("camp remove: ")
+        assert "Traceback" not in err

@@ -75,8 +75,10 @@ def self_host_name(env: dict[str, str] | None = None) -> str | None:
              Defaults to os.environ.
 
     Raises:
-        HostConfigError: If hosts.toml cannot be read or is malformed TOML,
-            or `self_name` is present but not a non-empty string in camp's
+        HostConfigError: If hosts.toml cannot be read, is malformed TOML, or
+            is nested deeply enough to exhaust the parser's recursion limit
+            (tomllib parses nested inline tables and arrays recursively), or
+            `self_name` is present but not a non-empty string in camp's
             strict identifier charset (``^[a-z0-9][a-z0-9-]*$``).
     """
     import trailhead.paths as _paths
@@ -94,6 +96,14 @@ def self_host_name(env: dict[str, str] | None = None) -> str | None:
     try:
         raw: dict[str, Any] = tomllib.loads(text)
     except tomllib.TOMLDecodeError as e:
+        raise HostConfigError(f"{path}: TOML parse error — {e}") from e
+    except RecursionError as e:
+        # tomllib is pure Python and parses nested inline tables (and nested
+        # arrays) recursively, so a hosts.toml with a few thousand levels of
+        # nesting exhausts the interpreter's recursion limit instead of
+        # raising TOMLDecodeError. Scoped to this one call (not a broader
+        # `except Exception` around the function) so it cannot also swallow
+        # the HostConfigError this function raises itself below.
         raise HostConfigError(f"{path}: TOML parse error — {e}") from e
 
     if "self_name" not in raw:

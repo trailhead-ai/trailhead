@@ -176,6 +176,27 @@ def test_hosts_toml_with_bad_encoding_raises_host_config_error(tmp_path: Path) -
         self_host_name(env=_env(tmp_path))
 
 
+def test_deeply_nested_inline_tables_raise_host_config_error_not_recursion_error(
+    tmp_path: Path,
+) -> None:
+    """tomllib is pure Python and parses nested inline tables recursively, so
+    a hosts.toml with enough nesting blows the interpreter's recursion limit.
+    That must surface as `HostConfigError`, never a raw `RecursionError`."""
+    from camp.host.config import HostConfigError, self_host_name
+
+    depth = 200
+    nested_bomb = "bomb = " + "{a=" * depth + "1" + "}" * depth + "\n"
+    _write_hosts_toml(tmp_path, 'self_name = "x"\n' + nested_bomb)
+
+    original_limit = sys.getrecursionlimit()
+    sys.setrecursionlimit(150)
+    try:
+        with pytest.raises(HostConfigError):
+            self_host_name(env=_env(tmp_path))
+    finally:
+        sys.setrecursionlimit(original_limit)
+
+
 def test_hosts_toml_unreadable_raises_host_config_error(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
