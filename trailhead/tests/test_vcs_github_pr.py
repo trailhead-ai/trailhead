@@ -1455,16 +1455,20 @@ class TestDescribeMergeRefusal:
 def _make_capability_stub(
     *,
     capabilities: dict[str, dict[str, bool]] | None = None,
+    null_repos: set[str] | None = None,
     fail_merge_repos: set[str] | None = None,
     call_log: list[list[str]] | None = None,
 ):
     """Stub keyed by repo directory basename -> permitted-merge-method
     booleans. `pr view` always reports mergeable/clean/non-draft/no-stack;
     `graphql` returns the repository object folding those booleans in
-    alongside a null `stackEntry`; `pr merge` fails for any repo basename
-    named in `fail_merge_repos`.
+    alongside a null `stackEntry`, or a null repository for any basename in
+    `null_repos` (an unresolvable repository — the capability lookup's
+    failure signal); `pr merge` fails for any repo basename named in
+    `fail_merge_repos`.
     """
     capabilities = capabilities or {}
+    null_repos = null_repos or set()
     fail_merge_repos = fail_merge_repos or set()
     default_caps = {
         "mergeCommitAllowed": True,
@@ -1500,15 +1504,14 @@ def _make_capability_stub(
                 "",
             )
         if "graphql" in cmd_str:
-            caps = capabilities.get(name, default_caps)
-            body = {
-                "data": {
-                    "repository": {
-                        **caps,
-                        "pullRequest": {"stackEntry": None},
-                    }
+            if name in null_repos:
+                repository: dict | None = None
+            else:
+                repository = {
+                    **capabilities.get(name, default_caps),
+                    "pullRequest": {"stackEntry": None},
                 }
-            }
+            body = {"data": {"repository": repository}}
             return subprocess.CompletedProcess(cmd, 0, json.dumps(body), "")
         if "pr" in cmd and "merge" in cmd:
             if name in fail_merge_repos:
@@ -1629,13 +1632,12 @@ class TestMergeLoopResolvesPerPullRequest:
         assert len(disclosures_before_first_merge) == 1
 
     def test_lookup_failure_disclosure_differs_from_other_reasons(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         """A merge whose strategy came from a failed capability lookup
         discloses that cause, distinguishable from a merge whose strategy
         was resolved for any other reason."""
         from trailhead.vcs.github import RESOLUTION_REASON_PREFIXES
-        import sys as sys_module
 
         wt = tmp_path / "wt" / "alpha"
         wt.mkdir(parents=True)
@@ -1645,58 +1647,14 @@ class TestMergeLoopResolvesPerPullRequest:
         )
         toml = _write_toml(tmp_path, "[release]\nauto_merge = true\n")
 
-        def stub(cmd, **kwargs):
-            cmd_str = " ".join(cmd)
-            if "config" in cmd and "user.email" in cmd:
-                return subprocess.CompletedProcess(cmd, 0, "test@example.com\n", "")
-            if "remote" in cmd and "get-url" in cmd:
-                return subprocess.CompletedProcess(
-                    cmd, 0, "git@github.com:acme/alpha.git\n", ""
-                )
-            if "pr" in cmd and "view" in cmd and "--json" in cmd:
-                return subprocess.CompletedProcess(
-                    cmd,
-                    0,
-                    json.dumps(
-                        {
-                            "state": "OPEN",
-                            "mergeable": "MERGEABLE",
-                            "mergeStateStatus": "CLEAN",
-                            "isDraft": False,
-                            "headRefName": "feat",
-                        }
-                    ),
-                    "",
-                )
-            if "graphql" in cmd_str:
-                # repository itself unresolvable -> lookup failure
-                return subprocess.CompletedProcess(
-                    cmd, 0, json.dumps({"data": {"repository": None}}), ""
-                )
-            if "pr" in cmd and "merge" in cmd:
-                return subprocess.CompletedProcess(cmd, 0, "merged\n", "")
-            return subprocess.CompletedProcess(cmd, 0, "", "")
-
-        captured: list[str] = []
-
-        class _RecordingStderr:
-            def write(self, s: str) -> int:
-                if s.strip():
-                    captured.append(s)
-                return len(s)
-
-            def flush(self) -> None:
-                pass
-
-        monkeypatch.setattr(sys_module, "stderr", _RecordingStderr())
-
+        stub = _make_capability_stub(null_repos={"alpha"})
         provider = get_provider("github", runner=stub)
         pr_pairs = [PRPair(repo_path=str(wt), pr_number="9", member_name="alpha")]
         provider.pr.merge(pr_pairs, str(manifest), toml_path=str(toml))
 
         disclosure = next(
             line
-            for line in captured
+            for line in capsys.readouterr().err.splitlines()
             if RESOLUTION_REASON_PREFIXES["auto_lookup_failed"] in line
         )
         assert RESOLUTION_REASON_PREFIXES["auto_rebase_permitted"] not in disclosure
