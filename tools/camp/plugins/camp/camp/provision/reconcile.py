@@ -663,6 +663,9 @@ def reconcile_worktree(
             if mpath.is_file():
                 try:
                     prior_manifest = read_central_manifest(mpath)
+                except ManifestError:
+                    prior_manifest = None
+                if prior_manifest is not None:
                     for m in prior_manifest.get("members", []):
                         prior_tasks[m["name"]] = m.get("tasks") or {}
                         prior_state[m["name"]] = {
@@ -670,11 +673,14 @@ def reconcile_worktree(
                             for key in ("provision_state", "activated", "reason", "work_state")
                             if key in m
                         }
-                    prior_owner = owner_of(prior_manifest)
-                except ManifestError:
-                    prior_tasks = {}
-                    prior_state = {}
-                    prior_owner = None
+                    # A malformed workspace-level owner (owner_of's own
+                    # validation, e.g. a non-string) must not also wipe the
+                    # per-member carry-forward above — the two reads are
+                    # independent concerns.
+                    try:
+                        prior_owner = owner_of(prior_manifest)
+                    except ManifestError:
+                        prior_owner = None
 
             # -- Phase 2: Run provision-phase tasks per member in parallel.
             #

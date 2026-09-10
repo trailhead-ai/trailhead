@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Any
 
 from ..group.manifest import (
+    ManifestError,
     carry_forward_owner,
     manifest_path_for,
     owner_of,
@@ -157,12 +158,19 @@ def seed_pending_workspace(
         if mpath.is_file():
             try:
                 prior = read_central_manifest(mpath)
+            except Exception:
+                prior = None
+            if prior is not None:
                 for m in prior.get("members", []):
                     existing_states[m["name"]] = m
-                prior_owner = owner_of(prior)
-            except Exception:
-                existing_states = {}
-                prior_owner = None
+                # A malformed workspace-level owner (owner_of's own
+                # validation, e.g. a non-string) must not also wipe the
+                # per-member existing_states above — the two reads are
+                # independent concerns.
+                try:
+                    prior_owner = owner_of(prior)
+                except ManifestError:
+                    prior_owner = None
 
         member_entries: list[dict[str, Any]] = []
         for member in group["members"]:
