@@ -32,6 +32,7 @@ from typing import Any
 
 from ..group.manifest import (
     manifest_path_for,
+    owner_of,
     workspace_dir,
     write_central_manifest,
 )
@@ -96,6 +97,26 @@ def spawn_detached_provisioner(
 # ---------------------------------------------------------------------------
 
 
+def _declared_owner(env: dict[str, str] | None) -> str | None:
+    """This host's declared self-name, or None if it cannot be determined.
+
+    A malformed hosts.toml (HostConfigError) propagates — that is an operator
+    declaration error worth failing loudly on, same posture as `camp doctor`.
+    A PathResolutionError (no HOME in an injected env, e.g. a test dict that
+    only sets CAMP_STATE_DIR) is swallowed to None instead: ownership is
+    opt-in, so an environment that cannot even resolve a config dir behaves
+    exactly like a host that never declared a name.
+    """
+    from trailhead.paths import PathResolutionError
+
+    from ..host import self_host_name
+
+    try:
+        return self_host_name(env=env)
+    except PathResolutionError:
+        return None
+
+
 def seed_pending_workspace(
     group: dict[str, Any],
     slug: str,
@@ -106,7 +127,10 @@ def seed_pending_workspace(
 
     Synchronous and fast — no git fetch, no worktree add. Returns the manifest path.
     Idempotent: a member already listed keeps its existing provision_state so a
-    re-run of camp ai does not reset a ready member back to pending.
+    re-run of camp ai does not reset a ready member back to pending. Same
+    posture for the workspace-level "owner" key: a manifest that already
+    carries one keeps it unchanged; only a workspace whose ownership was
+    never recorded gets stamped, and only when this host has declared a name.
     """
     from . import reconcile
     from ..group.manifest import read_central_manifest, reconcile_lock
@@ -128,13 +152,16 @@ def seed_pending_workspace(
         ws_dir.mkdir(parents=True, exist_ok=True)
 
         existing_states: dict[str, dict[str, Any]] = {}
+        prior_owner: str | None = None
         if mpath.is_file():
             try:
                 prior = read_central_manifest(mpath)
                 for m in prior.get("members", []):
                     existing_states[m["name"]] = m
+                prior_owner = owner_of(prior)
             except Exception:
                 existing_states = {}
+                prior_owner = None
 
         member_entries: list[dict[str, Any]] = []
         for member in group["members"]:
@@ -152,13 +179,23 @@ def seed_pending_workspace(
                 entry["reason"] = prior["reason"]
             member_entries.append(entry)
 
-        manifest_data = {
+        manifest_data: dict[str, Any] = {
             "schema_version": 1,
             "group": group_name,
             "slug": slug,
             "branch": branch,
             "members": member_entries,
         }
+        # Never re-stamp: a workspace that already carries an owner keeps it,
+        # even if the running host's own declared name differs. Only a
+        # workspace whose ownership was never recorded gets stamped, and only
+        # when this host has declared a name to stamp.
+        if prior_owner is not None:
+            manifest_data["owner"] = prior_owner
+        else:
+            declared = _declared_owner(env)
+            if declared is not None:
+                manifest_data["owner"] = declared
         write_central_manifest(mpath, manifest_data)
     return mpath
 
