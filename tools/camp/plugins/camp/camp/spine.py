@@ -1058,13 +1058,16 @@ def cmd_doctor(
       (a) asdf present — asdf resolvable/installed.
       (b) manifest ↔ git-worktree consistency — a placeholder that always
           passes (no writer of registry.json exists to produce drift).
-      (c) self-declared host name — informational only, always passes.
+      (c) self-declared host name — informational only, never fails on its
+          own; a malformed ``hosts.toml`` fails this ONE check row (naming
+          the file and the reason) rather than the whole verb.
 
-    A malformed self-declared host name (``hosts.toml``'s ``self_name``) is not
-    folded into the pass/fail check list below — it hard-exits immediately with
-    a clean ``camp: <message>`` line, the same posture `_dispatch_group_command`
-    already uses for a malformed group config, rather than reporting as one
-    more failed check among others.
+    `doctor` is a health roll-up: a broken declaration is one failed check
+    among others, not a reason to exit before the other checks run. The
+    roll-up already exits nonzero when any check fails, so a malformed
+    ``hosts.toml`` still yields a nonzero exit — via the failed row below,
+    never a raw traceback and never an early hard-exit that starves the
+    other checks of a chance to report.
 
     Args:
         env: Override os.environ for the self-declared-host-name check's path
@@ -1074,11 +1077,17 @@ def cmd_doctor(
     """
     from .host.config import HostConfigError, self_host_name
 
+    host_name: str | None = None
+    host_name_error: str | None = None
     try:
         host_name = self_host_name(env=env)
     except HostConfigError as e:
-        print(f"camp: {e}", file=sys.stderr)
-        sys.exit(1)
+        host_name_error = str(e)
+        # A clean `camp: <message>` line, same error-hygiene posture as every
+        # other named-error path in this CLI — surfaced up front, in addition
+        # to (never instead of) the failed check row below, so the reason is
+        # visible even to a caller that only reads stderr.
+        print(f"camp: {host_name_error}", file=sys.stderr)
 
     as_json = "--json" in args
 
@@ -1115,16 +1124,27 @@ def cmd_doctor(
         }
     )
 
-    # --- check (c): self-declared host name — informational, never fails ---
-    checks.append(
-        {
-            "check": "host_name",
-            "description": "self-declared host name",
-            "pass": True,
-            "informational": True,
-            "details": host_name if host_name else "not declared",
-        }
-    )
+    # --- check (c): self-declared host name — informational, unless malformed ---
+    if host_name_error is not None:
+        any_failed = True
+        checks.append(
+            {
+                "check": "host_name",
+                "description": "self-declared host name",
+                "pass": False,
+                "details": host_name_error,
+            }
+        )
+    else:
+        checks.append(
+            {
+                "check": "host_name",
+                "description": "self-declared host name",
+                "pass": True,
+                "informational": True,
+                "details": host_name if host_name else "not declared",
+            }
+        )
 
     if as_json:
         report = {"pass": not any_failed, "checks": checks}
