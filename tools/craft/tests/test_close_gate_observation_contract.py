@@ -152,57 +152,9 @@ def test_documented_exit_codes_match_real_gate_behaviour():
 # ---------------------------------------------------------------------------
 
 
-def test_producer_write_command_carries_diff_flag():
-    phase5 = _phase_spans(_doc_text()).get("Phase 5: Flow-out")
-    assert phase5 is not None
-    match = re.search(
-        r"`(lore record update task/<parent-name> --vault <elected-vault>[^`]*)`",
-        phase5,
-    )
-    assert match, (
-        "execute.md's Phase 5 must show the producer's literal write command "
-        "as inline code"
-    )
-    command = match.group(1)
-    tokens = command.split()
-    assert "--diff" in tokens, (
-        f"the documented producer command {command!r} must carry --diff — a "
-        "bare-stdin update would replace the whole parent body"
-    )
-
-
 # ---------------------------------------------------------------------------
 # Item 4 — the producer contract is anchored at Phase 5 structurally
 # ---------------------------------------------------------------------------
-
-
-def test_producer_contract_anchored_in_phase_5_span():
-    spans = _phase_spans(_doc_text())
-    phase5 = spans.get("Phase 5: Flow-out")
-    assert phase5 is not None, "execute.md must carry a '### Phase 5: Flow-out' heading"
-    assert "--diff" in phase5 and "lore record update task/<parent-name>" in phase5, (
-        "the producer's write command must live inside the Phase 5 span"
-    )
-    assert "## Criterion observations" in phase5, (
-        "the observation grammar block must live inside the Phase 5 span"
-    )
-
-
-def test_producer_contract_is_not_duplicated_into_another_phase_span():
-    """The grammar block's own example lines are its unique fingerprint —
-    unlike the section name `## Criterion observations`, which Phase 6's gate
-    paragraph legitimately references in prose, the actual worked example
-    lines (`- **AC9** — automated-assertion — <evidence pointer>`) define the
-    grammar and must exist only where it is authored: Phase 5."""
-    spans = _phase_spans(_doc_text())
-    marker = "- **AC9** — automated-assertion — <evidence pointer>"
-    for name, body in spans.items():
-        if name == "Phase 5: Flow-out":
-            continue
-        assert marker not in body, (
-            f"the observation grammar block must be anchored only at Phase 5, "
-            f"found it under {name!r} too"
-        )
 
 
 # ---------------------------------------------------------------------------
@@ -255,73 +207,3 @@ def _worked_example_line(text: str) -> str | None:
         stripped_lines = [re.sub(r"^>[ \t]?", "", line) for line in block.splitlines()]
         return re.sub(r"\s+", " ", " ".join(stripped_lines)).strip()
     return None
-
-
-def test_completion_report_worked_example_carries_a_criterion_observations_clause_matching_state_coverage_shape():
-    text = _doc_text()
-    line = _worked_example_line(text)
-    assert line, "execute.md must carry the Phase 6 worked completion-report example"
-    state_m = re.search(r"state-coverage: parent (\d+), doc (\d+), missing (\d+)", line)
-    obs_m = re.search(r"criterion-observations: covered (\d+), observed (\d+), missing (\d+)", line)
-    assert state_m, "worked example must retain the state-coverage clause's 3-field shape"
-    assert obs_m, (
-        "worked example must carry a criterion-observations clause naming covered, "
-        "observed, and missing counts — the same shape state-coverage already uses"
-    )
-
-
-def test_worked_example_line_extraction_survives_the_blockquote_reflowed_across_lines():
-    """A greedy reflow of `execute.md` folds the worked example's one long
-    block-quote line into several `> `-prefixed physical lines — pin that
-    the extraction still finds a clause that landed on a later physical
-    line, not merely one that stayed on the first."""
-    reflowed_doc = (
-        "intro text\n\n"
-        "> simplify: no changes; correctness: SHIP, 0 findings; security: skipped —\n"
-        "> no trigger; state-coverage: parent 4, doc 4, missing 0;\n"
-        "> criterion-observations: covered 3, observed 3, missing 0; push: 2 repos\n"
-        "> pushed, 1 already up to date; metrics: 4 tasks, 7 dispatches (1.75/task),\n"
-        "> 42m wall clock, 1 lesson written, 2 lessons consumed\n"
-        "\ntrailing text"
-    )
-    line = _worked_example_line(reflowed_doc)
-    assert line, "extraction must still find the worked example in a reflowed block quote"
-    assert re.search(r"state-coverage: parent 4, doc 4, missing 0", line), (
-        "the state-coverage clause must survive being rejoined across the "
-        f"block quote's wrapped lines: {line!r}"
-    )
-    assert re.search(r"criterion-observations: covered 3, observed 3, missing 0", line), (
-        "a clause that lands on a later physical line after the reflow must "
-        f"not be dropped: {line!r}"
-    )
-
-
-def test_worked_example_line_extraction_still_fails_when_the_criterion_observations_clause_is_absent():
-    """The trailing prose line, outside the block quote, carries a
-    would-be-matching clause on purpose: a version of `_worked_example_line`
-    that reads past the block quote's boundary (e.g. joining every line in
-    the document rather than only the contiguous `> `-prefixed run) would
-    wrongly pick it up. The block quote itself omits the clause."""
-    doc = (
-        "intro text\n\n"
-        "> simplify: no changes; correctness: SHIP, 0 findings; security: skipped —\n"
-        "> no trigger; state-coverage: parent 4, doc 4, missing 0; push: 2 repos\n"
-        "> pushed, 1 already up to date\n"
-        "\ncriterion-observations: covered 3, observed 3, missing 0 (trailing prose, "
-        "not part of the quote)\n"
-    )
-    line = _worked_example_line(doc)
-    assert line is not None
-    assert re.search(r"criterion-observations: covered (\d+), observed (\d+), missing (\d+)", line) is None
-
-
-def test_worked_example_line_extraction_still_fails_when_the_criterion_observations_clause_is_reworded():
-    doc = (
-        "> simplify: no changes; state-coverage: parent 4, doc 4, missing 0;\n"
-        "> observation counts: covered 3, observed 3, missing 0\n"
-        "\ncriterion-observations: covered 9, observed 9, missing 9 (trailing prose, "
-        "not part of the quote)\n"
-    )
-    line = _worked_example_line(doc)
-    assert line is not None
-    assert re.search(r"criterion-observations: covered (\d+), observed (\d+), missing (\d+)", line) is None

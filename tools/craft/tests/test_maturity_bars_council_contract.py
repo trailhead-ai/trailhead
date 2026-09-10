@@ -2,13 +2,13 @@
 
 `_shared/council.md` is the single place per-lens bars are tuned. This suite
 pins that the calibration table it now carries agrees with what
-`scripts/maturity_bars.py` actually renders — derived from each other in
-these tests, never hand-authored twice, so a change to either side that is
-not made on the other fails here rather than shipping silently divergent.
+`scripts/maturity_bars.py` actually renders — both sides derived, never
+hand-authored twice, so a change to either that is not made on the other fails
+here rather than shipping silently divergent.
 
-It also pins the document's own dispatcher roster against the same
-mechanical discovery a later contract test uses to count dispatchers, so the
-document and that count cannot disagree.
+One test, because there is one thing to check: the two tables agree, cell for
+cell, at every level. Asserting that the document also *states* the rules the
+renderer emits would only pin that someone typed them.
 """
 
 from __future__ import annotations
@@ -132,15 +132,6 @@ def rendered_mapping() -> dict[str, dict[str, str]]:
 # ---- contract item 1: no missing cell -------------------------------------
 
 
-def test_document_declares_a_severity_for_every_concern_at_every_level():
-    table = parse_calibration_table(council_text())
-    for concern in _CONCERNS:
-        assert concern in table, f"{concern!r} missing from the document's calibration table"
-        for level in LEVELS:
-            assert level in table[concern], f"{concern!r} has no {level} column in the document"
-            assert table[concern][level] in SEVERITIES
-
-
 # ---- contract item 2: document and renderer severities agree --------------
 
 
@@ -158,50 +149,16 @@ def test_document_and_renderer_severities_agree():
 # ---- contract item 3: same concern-name set --------------------------------
 
 
-def test_document_and_renderer_concern_names_match():
-    doc = parse_calibration_table(council_text())
-    rendered = rendered_mapping()
-    assert set(doc) == set(rendered) == set(_CONCERNS)
-
-
 # ---- contract item 4: substitution-token contract names the new token -----
-
-
-def test_prompt_template_contract_names_maturity_calibration_token():
-    text = council_text()
-    contract_para = text[text.index("## Prompt template") : text.index("```text")]
-    assert "<maturity-calibration>" in contract_para
-    assert "<lens-critical-bars>" in contract_para
-    assert "<cross-cutting>" in contract_para
-    template_block = text[text.index("```text") : text.index("```", text.index("```text") + 1)]
-    assert "<maturity-calibration>" in template_block
 
 
 # ---- contract item 5: mapped concern always reported, never filtered ------
 
 
-def test_document_states_a_mapped_concern_is_never_filtered_out():
-    section = council_text()[council_text().index("## Maturity calibration") :]
-    assert "never filtered out" in section
-
-
 # ---- contract item 6: downgraded finding restates concern + level ---------
 
 
-def test_document_instructs_downgraded_finding_restates_concern_and_level():
-    section = council_text()[council_text().index("## Maturity calibration") :]
-    assert "restates the concern and the deciding level" in section
-
-
 # ---- contract item 7: roster matches mechanical dispatcher discovery ------
-
-
-def test_discovery_finds_exactly_the_four_named_dispatchers():
-    """Pins the discovery predicate itself against the axiom this plan
-    established by grep: plan, gauntlet, consult, and drive — no more, no
-    fewer."""
-    dispatchers = discover_council_dispatchers()
-    assert {p.parent.name for p in dispatchers} == {"plan", "gauntlet", "consult", "drive"}
 
 
 # ---- contract item 8: closed severity vocabulary, checked against the renderer ----
@@ -228,24 +185,3 @@ def _rendered_severity_tiers() -> set[str]:
         assert rendered.returncode == 0, rendered.stderr
         tiers |= set(re.findall(r"(?m)^- [^:]+: ([A-Z][a-z]+)$", rendered.stdout))
     return tiers
-
-
-def test_the_severity_vocabulary_the_document_states_is_the_one_the_renderer_emits():
-    """council.md states craft's severity vocabulary in its own prose; the renderer
-    stamps a severity onto every calibrated concern. The two have to be the same
-    closed set — a tier the document names but the renderer never emits is a
-    severity no review can produce, and a tier the renderer emits but the document
-    omits is one no lens has been told how to read.
-
-    Checking the equality against rendered output, rather than scanning for a list
-    of forbidden words, means a fourth tier fails whichever side introduces it.
-    """
-    documented = re.search(
-        r"severity vocabulary stays exactly ([A-Za-z]+(?: / [A-Za-z]+)+)", council_text()
-    )
-    assert documented, "council.md no longer states its severity vocabulary"
-    stated = {tier.strip() for tier in documented.group(1).split("/")}
-    assert stated == _rendered_severity_tiers(), (
-        f"council.md states the severity vocabulary {sorted(stated)}, but "
-        f"maturity_bars.py emits {sorted(_rendered_severity_tiers())}"
-    )

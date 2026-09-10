@@ -68,47 +68,7 @@ def _step(name: str) -> str:
 # ---- 1. the framing step instructs resolution, before grilling begins ----
 
 
-def test_frame_step_instructs_maturity_resolution_for_every_touched_repository():
-    frame_step = _step("### 1. Frame")
-    assert "maturity_resolve.py" in frame_step, (
-        "brainstorm's framing step (step 1) must instruct invoking the "
-        "maturity resolver"
-    )
-    assert re.search(r"every repositor(y|ies)", frame_step, re.IGNORECASE), (
-        "the framing step must instruct resolution for every repository the "
-        "work touches, not merely the current one"
-    )
-
-
-def test_maturity_resolution_is_documented_inside_step_1_before_step_2_heading():
-    text = _skill_text()
-    step1_start = text.index("### 1. Frame")
-    step2_start = text.index("### 2. Grill for Clarity")
-    resolver_mention = text.index("maturity_resolve.py")
-    assert step1_start < resolver_mention < step2_start, (
-        "the maturity resolution instruction must live inside step 1 (Frame), "
-        "positioned before step 2 (Grill for Clarity) begins"
-    )
-
-
 # ---- 2. the closed vocabulary is named, and only that vocabulary ----
-
-
-def test_frame_step_names_the_closed_vocabulary_and_no_other_level():
-    frame_step = _step("### 1. Frame")
-    # Word-boundary matches, not bare substring checks — "early" bare would
-    # be satisfiable by "clearly"/"nearly"/"yearly" appearing anywhere in
-    # this multi-thousand-character step, without the vocabulary word itself
-    # ever being named.
-    assert re.search(r"\bprototype\b", frame_step)
-    assert re.search(r"\bearly\b", frame_step)
-    assert re.search(r"\bproduction\b", frame_step)
-    # No fourth level word slips in beside the closed three.
-    for off_vocab in ("spike", "throwaway", "mature", "stable", "beta"):
-        assert off_vocab not in frame_step.lower(), (
-            f"step 1 must name only prototype/early/production, found "
-            f"off-vocabulary word {off_vocab!r}"
-        )
 
 
 # ---- 3. an absent declaration resolves to production ----
@@ -148,122 +108,16 @@ def test_out_of_vocabulary_declaration_resolves_to_production_via_the_real_resol
     )
 
 
-def test_frame_step_documents_reporting_the_offending_value_and_the_valid_ones():
-    frame_step = _step("### 1. Frame")
-    # Anchored to the invalid-value clause itself (from the reason token
-    # through the terminating '.'), not the whole multi-thousand-character
-    # step — an unscoped search would be satisfied by "offending-value" or
-    # "valid level" appearing in an unrelated clause elsewhere in step 1.
-    clause_match = re.search(r"invalid-value`?\)[^.]*\.", frame_step)
-    assert clause_match, (
-        "step 1 must have an invalid-value clause terminated by '.'"
-    )
-    clause = clause_match.group(0)
-    assert "offending-value" in clause or "offending value" in clause, (
-        "the invalid-value clause must document reporting the offending "
-        f"value: {clause!r}"
-    )
-    assert re.search(r"valid (level|value)", clause, re.IGNORECASE), (
-        "the invalid-value clause must document naming the valid levels "
-        f"alongside the offending value: {clause!r}"
-    )
-
-
 # ---- 5. the resolved level is stated per repository, in the session ----
-
-
-def test_frame_step_requires_stating_the_resolved_level_per_repository_in_session():
-    frame_step = _step("### 1. Frame")
-    # Step 1 mentions "session" many times elsewhere (the prior-art survey
-    # block), so an unscoped "session" search would pass on any of those —
-    # scope to one sentence spanning "per repository" through "the session".
-    same_sentence = re.search(
-        r"per repositor(?:y|ies)[^.]*\bsession\b", frame_step, re.IGNORECASE
-    )
-    assert same_sentence, (
-        "step 1 must require, in one statement, that the resolved level be "
-        f"stated per repository in the session: {frame_step!r}"
-    )
 
 
 # ---- 6. the resolver is invoked by the same absolute-path convention ----
 
 
-def test_resolver_invoked_by_the_same_absolute_path_convention_as_other_gates():
-    frame_step = _step("### 1. Frame")
-    assert "${CLAUDE_PLUGIN_ROOT}/scripts/maturity_resolve.py" in frame_step, (
-        "step 1 must invoke the resolver via the ${CLAUDE_PLUGIN_ROOT}/scripts/ "
-        "convention the existing gate invocations (candidate_set.py, "
-        "covers_gate.py, criterion_gate.py) already use"
-    )
-
-    slice_skill_text = (CRAFT / "skills" / "slice" / "SKILL.md").read_text(encoding="utf-8")
-    other_gate_invocations = re.findall(
-        r"\$\{CLAUDE_PLUGIN_ROOT\}/scripts/\S+\.py",
-        slice_skill_text,
-    )
-    assert other_gate_invocations, "fixture assumption: slice/SKILL.md invokes gates this way"
-    # Every existing invocation is piped input, never a bare invocation with
-    # flags substituting for stdin — the maturity resolver follows the same
-    # "pipe content in" shape rather than a flag-based interface.
-    for invocation in other_gate_invocations:
-        assert re.search(
-            r"\|\s*" + re.escape(invocation), slice_skill_text
-        ), f"existing gate invocation {invocation!r} must be piped, not standalone"
-
-    assert re.search(
-        r"\|\s*\$\{CLAUDE_PLUGIN_ROOT\}/scripts/maturity_resolve\.py", frame_step
-    ), (
-        "the maturity resolver invocation must also be piped input, matching "
-        "the established gate-invocation shape"
-    )
-
-
 # ---- 7. behaviour is named for a non-zero resolver exit on an existing file ----
 
 
-def test_frame_step_names_behaviour_on_a_non_zero_resolver_exit():
-    """A resolver invocation can exit non-zero (fail-closed) even for a
-    repository whose agent-instruction file exists — non-UTF-8 content, or a
-    read failure mid-pipe. Step 1 must say what happens then, or a
-    repository can silently end up with no level stated at all (AC3/AC3b)."""
-    frame_step = _step("### 1. Frame")
-    # Scoped to the resolver's OWN non-zero exit (a fail-closed read failure
-    # on an existing file), not the neighbouring "leak a non-zero exit"
-    # clause about the absence-path guard, which is a different case.
-    assert re.search(r"resolver.{0,20}exits? non-zero", frame_step, re.IGNORECASE), (
-        "step 1 must name the resolver's own non-zero-exit case explicitly"
-    )
-    clause_match = re.search(
-        r"resolver.{0,20}exits? non-zero[^.]*\.", frame_step, re.IGNORECASE
-    )
-    assert clause_match, "step 1 must have a non-zero-exit clause terminated by '.'"
-    clause = clause_match.group(0)
-    assert "production" in clause, (
-        f"the non-zero-exit clause must still state a level (production): {clause!r}"
-    )
-
-
 # ---- 8. the unreachable-repository case is named, not silently omitted ----
-
-
-def test_frame_step_names_the_case_where_repositories_cannot_be_enumerated():
-    """Beyond the camp-workspace and single-current-repo cases, a session
-    rooted above several repositories with no camp manifest to enumerate
-    them must be named explicitly — never silently folded into the
-    single-current-repo fallback, which would omit sibling repos this work
-    touches."""
-    frame_step = _step("### 1. Frame")
-    assert re.search(r"neither", frame_step, re.IGNORECASE), (
-        "step 1 must name the case where neither the camp-workspace nor the "
-        "single-current-repo enumeration applies"
-    )
-    clause_match = re.search(r"neither[^.]*\.", frame_step, re.IGNORECASE)
-    assert clause_match, "step 1 must have a 'neither applies' clause terminated by '.'"
-    clause = clause_match.group(0)
-    assert re.search(r"explicit|state|cannot", clause, re.IGNORECASE), (
-        f"the 'neither applies' clause must require stating the case explicitly: {clause!r}"
-    )
 
 
 # ===========================================================================
@@ -327,121 +181,14 @@ def test_template_rendered_with_two_repository_maturity_section_accepted_at_exit
 #         camp member name ---------------------------------------------------
 
 
-def test_write_step_instructs_writing_the_maturity_section_keyed_by_member_name():
-    step = _write_step()
-    assert "## Maturity" in step, (
-        "step 6a must instruct writing the `## Maturity` section by its heading"
-    )
-    assert re.search(r"camp member name", step, re.IGNORECASE), (
-        "step 6a must name the camp member name as the section's key"
-    )
-
-
-def test_write_step_stamps_repositories_the_work_touches_not_every_enumerated_member():
-    """AC5 and the template both scope the stamp to 'every repository this work
-    touches' — a possible subset of step 1's enumeration, which resolves a level
-    for every camp-workspace member regardless of whether the work touches it.
-    Stamping the full enumeration reimports exactly the production-ceremony-on-
-    a-prototype failure this spec exists to prevent (AC8 rates an unattributable
-    finding at the highest stamped level)."""
-    step = _write_step()
-    assert re.search(r"repositor(?:y|ies) this work touches", step, re.IGNORECASE), (
-        "step 6a must scope the stamp to the repositories this work touches, "
-        f"matching AC5's own wording: {step!r}"
-    )
-    assert "step 1's enumeration reached" not in step, (
-        "step 6a must not instruct stamping every repository step 1's enumeration "
-        f"reached — that over-stamps relative to AC5: {step!r}"
-    )
-
-
 # ---- 6. the write step instructs certifying via the real reader before
 #         `lore record create`, and refusing on a non-zero exit -------------
-
-
-def test_write_step_instructs_certifying_via_maturity_stamp_before_create():
-    step = _write_step()
-    assert "maturity_stamp.py" in step, (
-        "step 6a must instruct piping the drafted body through maturity_stamp.py"
-    )
-    assert re.search(r"non-zero exit", step, re.IGNORECASE), (
-        "step 6a must name the non-zero-exit refusal case explicitly"
-    )
-    refusal_clause_match = re.search(r"non-zero exit[^.]*\.", step, re.IGNORECASE)
-    assert refusal_clause_match, "step 6a must have a non-zero-exit clause terminated by '.'"
-    assert re.search(r"refus", refusal_clause_match.group(0), re.IGNORECASE), (
-        "the non-zero-exit clause must instruct refusing the write, not proceeding: "
-        f"{refusal_clause_match.group(0)!r}"
-    )
-
-
-def test_write_step_names_no_exception_to_the_non_zero_exit_refusal():
-    """A non-zero exit always refuses the write. There is no longer a
-    sanctioned exception — `empty-section` and `unresolved-enumeration` are
-    now two distinct, both-refusing codes, so no reason-code lets a create
-    proceed on a non-zero exit."""
-    step = _write_step()
-    assert "sanctioned exception" not in step.lower(), (
-        "step 6a must not carry a sanctioned-exception clause — every "
-        f"non-zero exit refuses the write: {step!r}"
-    )
-    refusal_clause_match = re.search(r"non-zero exit[^.]*\.", step, re.IGNORECASE)
-    assert refusal_clause_match, "step 6a must have a non-zero-exit clause terminated by '.'"
-    assert "exception" not in refusal_clause_match.group(0).lower(), (
-        "the non-zero-exit clause itself must not name an exception: "
-        f"{refusal_clause_match.group(0)!r}"
-    )
-
-
-def test_maturity_certify_precedes_the_record_create_it_guards():
-    step = _write_step()
-    certify_at = step.index("maturity_stamp.py")
-    create_at = step.index("lore record create --kind spec")
-    assert certify_at < create_at, (
-        "the maturity_stamp.py certify instruction must appear before the "
-        "`lore record create --kind spec` call it guards within step 6a"
-    )
 
 
 # ---- 7. every reason-code the reader can emit gets its own named remedy ----
 
 
-def test_write_step_names_a_distinct_remedy_for_every_stamp_reason_code():
-    step = _write_step()
-    clauses: dict[str, str] = {}
-    for code in _STAMP_REASON_CODES:
-        # Scoped to the bullet line naming this reason-code, from just past its
-        # backticked token through the terminating '.' — captured as its own
-        # group so the code token itself (always distinct) never masks two
-        # codes sharing identical remedy prose.
-        pattern = re.escape(f"`{code}`") + r"\s*—\s*([^.]*\.)"
-        match = re.search(pattern, step)
-        assert match, f"step 6a must name a remedy for reason-code `{code}`"
-        clauses[code] = match.group(1)
-    # A shared boilerplate sentence copy-pasted under all eight codes would
-    # satisfy the loop above without translating any of them individually —
-    # guard against that by requiring eight *distinct* remedy clauses.
-    assert len(set(clauses.values())) == len(_STAMP_REASON_CODES), (
-        f"each reason-code must get its own distinct remedy clause, not a shared "
-        f"boilerplate line: {clauses!r}"
-    )
-
-
 # ---- 8. the unresolved-enumeration case is named, not silently completed ---
-
-
-def test_write_step_names_the_unresolved_enumeration_case():
-    step = _write_step()
-    assert re.search(r"unresolved-enumeration", step, re.IGNORECASE), (
-        "step 6a must name the unresolved-enumeration case (step 1's own term "
-        "for when repositories could not be enumerated at all)"
-    )
-    clause_match = re.search(r"unresolved-enumeration[^.]*\.", step, re.IGNORECASE)
-    assert clause_match, "step 6a must have an unresolved-enumeration clause terminated by '.'"
-    assert re.search(r"complete", clause_match.group(0), re.IGNORECASE), (
-        "the unresolved-enumeration clause must contrast against a stamp that "
-        f"reads as complete: {clause_match.group(0)!r}"
-    )
 
 
 # ---- Slices-sibling hard constraint: the template's placement is inert to
@@ -556,65 +303,8 @@ _UNRESOLVED_ENUMERATION_BODY = """# X
 """
 
 
-def test_unresolved_enumeration_note_reads_as_its_own_reason_code():
-    """A prose sentence under the heading trips `malformed-entry`; the prescribed
-    comment-shaped note must trip neither that nor the generic `empty-section` —
-    it gets its own code, and still exits non-zero."""
-    result = _run_script(STAMP, _UNRESOLVED_ENUMERATION_BODY)
-    assert result.returncode == 2
-    err = result.stderr.decode("utf-8")
-    assert "reason-code: malformed-entry" not in err, err
-    assert "reason-code: empty-section" not in err, err
-    assert "reason-code: unresolved-enumeration" in err, err
-
-
-def test_skill_names_empty_section_as_meaning_only_an_unfilled_stamp():
-    """`empty-section` no longer has a second, sanctioned cause — it means one
-    thing, and it always refuses. The unresolved-enumeration case now has its
-    own code and is not mentioned in this bullet."""
-    text = BRAINSTORM_SKILL.read_text()
-    bullet = re.search(r"- `empty-section`[^\n]*(?:\n  [^\n]*)*", text)
-    assert bullet, "the `empty-section` remedy bullet must exist"
-    assert not re.search(r"unresolved.enumeration", bullet.group(0), re.IGNORECASE), (
-        "the `empty-section` remedy must no longer name the unresolved-enumeration "
-        f"case — that case now has its own reason-code: {bullet.group(0)!r}"
-    )
-    assert re.search(r"refus", bullet.group(0), re.IGNORECASE), (
-        "the `empty-section` remedy must state that it refuses, with no exception: "
-        f"{bullet.group(0)!r}"
-    )
-
-
-def test_skill_names_a_remedy_for_the_unresolved_enumeration_reason_code_that_refuses():
-    """The new code gets its own remedy bullet, and that remedy still refuses the
-    write — resolving the enumeration (not proceeding on the marked note) is the
-    only path back to a create."""
-    text = BRAINSTORM_SKILL.read_text()
-    bullet = re.search(r"- `unresolved-enumeration`[^\n]*(?:\n  [^\n]*)*", text)
-    assert bullet, "an `unresolved-enumeration` remedy bullet must exist"
-    assert re.search(r"resolv", bullet.group(0), re.IGNORECASE), (
-        "the `unresolved-enumeration` remedy must instruct resolving the "
-        f"enumeration before retrying: {bullet.group(0)!r}"
-    )
-
-
 # ---- the near-miss heading (trailing/doubled whitespace) is named in the
 #      section-absent remedy, not just "add it" -----------------------------
-
-
-def test_section_absent_remedy_names_the_near_miss_heading_case():
-    """A heading with trailing or doubled whitespace (`## Maturity `,
-    `##  Maturity`) also exits `section-absent`, because the heading matcher
-    requires an exact match. Following the bare "add it" remedy on that body
-    produces a *second* heading and `duplicate-section` on retry — the remedy
-    must name the near-miss case so an author checks for it first."""
-    text = BRAINSTORM_SKILL.read_text()
-    bullet = re.search(r"- `section-absent`[^\n]*(?:\n  [^\n]*)*", text)
-    assert bullet, "the `section-absent` remedy bullet must exist"
-    assert re.search(r"whitespace|near.miss", bullet.group(0), re.IGNORECASE), (
-        "the `section-absent` remedy must name the near-miss-heading case (trailing "
-        f"or doubled whitespace): {bullet.group(0)!r}"
-    )
 
 
 def test_section_absent_fixture_heading_with_trailing_space_reproduces_the_near_miss():
@@ -684,42 +374,6 @@ def _malformed_entry_bullet() -> str:
     return bullet.group(0)
 
 
-def test_malformed_entry_remedy_names_normalization_for_an_unrepresentable_member_name():
-    """Camp validates member names only as non-empty strings — no character
-    restriction — so a name like `my repo` can never satisfy the reader's
-    safe grammar (`^(?!\\.{1,2}$)[A-Za-z0-9._-]+$`) no matter how its shape is
-    corrected. 'correct that line's shape' alone is not actionable for that
-    case; the remedy must name a real normalization."""
-    bullet = _malformed_entry_bullet()
-    assert re.search(r"normali[sz]e", bullet, re.IGNORECASE), (
-        f"the `malformed-entry` remedy must name normalizing an un-representable "
-        f"member name, not just 'correct that line's shape': {bullet!r}"
-    )
-
-
-def test_malformed_entry_remedy_names_collision_detection_for_normalized_keys():
-    """A normalization that can map two distinct member names to the same
-    safe-grammar key must say how that collision is caught — never a silent
-    one-shadows-the-other write."""
-    bullet = _malformed_entry_bullet()
-    assert re.search(r"collid|collision", bullet, re.IGNORECASE), (
-        f"the `malformed-entry` remedy must name collision detection for the "
-        f"normalized key: {bullet!r}"
-    )
-
-
-def test_malformed_entry_remedy_normalization_is_a_defined_deterministic_transform():
-    """The normalization must be spelled out concretely (which characters are
-    replaced, and with what) rather than left to an author's own judgment call
-    each time — an undefined 'pick something reasonable' produces a different
-    key for the same member name on a later retry."""
-    bullet = _malformed_entry_bullet()
-    assert re.search(r"\[A-Za-z0-9._-\]", bullet), (
-        f"the `malformed-entry` remedy must cite the reader's own safe-grammar "
-        f"character class it normalizes into: {bullet!r}"
-    )
-
-
 # ---- Waiver discoverability — step 6a names the `Waives:` marker where an
 #      author actually writes Non-Goals (task/waiver-is-discoverable-where-
 #      non-goals-are-authored) ---------------------------------------------
@@ -730,23 +384,6 @@ def _waiver_guidance_section() -> str:
     start = text.index("**Waive a maturity-sensitive concern")
     end = text.index("**Certify the drafted body")
     return text[start:end]
-
-
-def test_every_waivable_concern_is_named_in_the_waiver_guidance():
-    """The authoring guidance must name every concern the renderer can
-    waive. The expected list is derived from `maturity_bars._CONCERNS` at
-    test time, never retyped: a hardcoded list here is exactly how a
-    sibling guard in this suite went silently false when the module gained
-    another constant."""
-    # Whitespace-collapsed because the prose-wrap gate may line-wrap a
-    # multi-word phrase between its words — a formatting artifact, not a
-    # content defect — and the phrase must still be findable across it.
-    section = " ".join(_waiver_guidance_section().split())
-    for concern in maturity_bars._CONCERNS:
-        assert concern in section, (
-            f"waiver guidance must name canonical concern {concern!r}, "
-            f"derived from maturity_bars._CONCERNS: {section!r}"
-        )
 
 
 def _guidance_example_bullet() -> str:

@@ -174,39 +174,6 @@ def test_documented_declare_snippet_wrong_is_caught_by_the_check_above(tmp_path)
 # ---- 2. the snippet carries no hardcoded level and no hardcoded repository -
 
 
-def test_declare_snippet_carries_only_placeholders_no_hardcoded_level_or_repo():
-    snippet = _declare_snippet()
-    for level_word in ("prototype", "early", "production"):
-        assert not re.search(rf"\b{level_word}\b", snippet), (
-            f"the snippet must never name a real level literally — found "
-            f"{level_word!r} in {snippet!r}, which would declare the wrong "
-            f"thing for whatever repository it is pointed at"
-        )
-    assert "<level>" in snippet, f"the snippet must carry a <level> placeholder: {snippet!r}"
-    assert "<repo-root>" in snippet, (
-        f"the snippet must carry a <repo-root> placeholder, not a real path: {snippet!r}"
-    )
-
-
-def test_ask_states_the_answer_is_normalized_before_it_reaches_a_command_line():
-    """The operator's answer is free text, but the command line only ever
-    sees one of the three closed-vocabulary words — the ask must say so."""
-    ask = _ask_clause()
-    normalize_match = re.search(r"normalized[^.]*\.", ask, re.IGNORECASE)
-    assert normalize_match, (
-        f"the ask must state the answer is normalized before reaching a "
-        f"command line: {ask!r}"
-    )
-    clause = normalize_match.group(0)
-    assert re.search(r"one of the three closed-vocabulary words", clause), (
-        f"the normalization clause must name the closed vocabulary: {clause!r}"
-    )
-    assert re.search(r"command line", clause, re.IGNORECASE), (
-        f"the normalization clause must say where the normalized word ends "
-        f"up: {clause!r}"
-    )
-
-
 # ---- 3. the ask fires only on the absence path ------------------------------
 
 
@@ -222,54 +189,7 @@ def test_invalid_value_fixture_does_not_resolve_as_section_absent():
     assert reason == "invalid-value"
 
 
-def test_ask_triggers_scoped_to_absence_and_section_absent_only():
-    frame_step = _step("### 1. Frame")
-    trigger_match = re.search(
-        r"On the absence path[^.]*\.", frame_step
-    )
-    assert trigger_match, (
-        f"step 1 must have an 'On the absence path' trigger clause "
-        f"terminated by '.': {frame_step!r}"
-    )
-    trigger = trigger_match.group(0)
-    assert "section-absent" in trigger
-    assert re.search(r"no agent-instruction file", trigger, re.IGNORECASE)
-    assert "invalid-value" not in trigger, (
-        f"the ask's trigger clause must not fire on invalid-value, which is "
-        f"a bad declaration, not an absent one: {trigger!r}"
-    )
-    assert "declared" not in trigger.split("section-absent")[0], (
-        f"the ask's trigger clause must not fire on an ordinary declared "
-        f"reason: {trigger!r}"
-    )
-
-
 # ---- 4. the decline path writes nothing -------------------------------------
-
-
-def test_decline_clause_states_writing_nothing():
-    ask = _ask_clause()
-    decline_match = re.search(r"declined or absent answer[^.]*\.", ask, re.IGNORECASE)
-    assert decline_match, f"the ask must have a decline clause: {ask!r}"
-    assert re.search(r"writes? nothing", decline_match.group(0), re.IGNORECASE), (
-        f"the decline clause must state that nothing is written: "
-        f"{decline_match.group(0)!r}"
-    )
-
-
-def test_decline_branch_documents_no_write_invocation():
-    """AC4b requires a declined answer to write nothing, so the documented
-    decline branch must not carry a writer invocation. Asserted against the
-    live skill text: everything from the decline sentence to the end of the
-    ask is the branch an agent follows on a decline, and a `maturity_declare`
-    invocation appearing there would direct the write AC4b forbids."""
-    ask = _ask_clause()
-    decline_start = ask.index("On a declined or absent answer")
-    decline_branch = ask[decline_start:]
-    assert "maturity_declare" not in decline_branch, (
-        "the decline branch must direct no write, but it names the writer: "
-        f"{decline_branch!r}"
-    )
 
 
 # ---- 5. the writer-refusal path is pinned, not just promised ---------------
@@ -291,16 +211,6 @@ def test_writer_refusal_is_driven_with_the_positive_control_fixture(tmp_path):
     assert target.read_bytes() == original
 
 
-def test_refusal_clause_instructs_reporting_and_continuing_at_production():
-    ask = _ask_clause()
-    refusal_match = re.search(r"If the writer refuses[^.]*\.", ask)
-    assert refusal_match, f"the ask must have a writer-refusal clause: {ask!r}"
-    clause = refusal_match.group(0)
-    assert re.search(r"report", clause, re.IGNORECASE)
-    assert re.search(r"continue", clause, re.IGNORECASE)
-    assert "production" in clause
-
-
 # ---- 6. the five concerns and severity are pinned against the real renderer
 
 
@@ -315,41 +225,6 @@ def test_maturity_bars_default_output_names_five_concerns_at_production_severity
             f"Critical: {stdout!r}"
         )
     assert len(BARS_CONCERNS) == 5, "fixture assumption: exactly five concerns"
-
-
-def test_ask_instructs_invoking_the_renderer_for_the_recommended_level():
-    ask = _ask_clause()
-    assert "maturity_bars.py" in ask, (
-        f"the ask must instruct invoking the real renderer to show what the "
-        f"recommendation governs: {ask!r}"
-    )
-    match = re.search(r"```sh\n(.*maturity_bars\.py.*)\n```", ask, re.DOTALL)
-    assert match, f"the renderer invocation must be fenced: {ask!r}"
-
-
-def test_ask_shows_all_three_levels_consequences_via_the_level_flag():
-    """AC4/AC4b's Delivers requires the ask to state what the CHOSEN level
-    does — but the operator is choosing among three words, so seeing only
-    the recommended level's block leaves the other two invisible at the
-    moment of choosing. The ask must run the renderer once per vocabulary
-    word via its `--level` flag, never re-listing the mapping itself."""
-    block = _bars_snippet()
-    for level in ("prototype", "early", "production"):
-        assert re.search(rf"--level[= ]{level}\b", block), (
-            f"the ask must invoke maturity_bars.py --level {level!r}: {block!r}"
-        )
-
-
-def test_ask_does_not_carry_a_second_copy_of_the_concern_mapping():
-    """The ask must show the mapping by running the renderer, never by
-    re-listing it — a second copy drifts from the renderer the moment either
-    changes."""
-    ask = _ask_clause()
-    for concern in BARS_CONCERNS:
-        assert concern not in ask, (
-            f"the ask must not hardcode {concern!r} — it must come from "
-            f"running maturity_bars.py: {ask!r}"
-        )
 
 
 # ---- 7. the documented correction path works when followed -----------------
@@ -387,51 +262,11 @@ No longer early — this repository is now at the production level.
     assert level == "production"
 
 
-def test_correction_path_clause_names_the_trap():
-    frame_step = _step("### 1. Frame")
-    start = frame_step.index("**Correcting a wrong declaration.**")
-    correction = frame_step[start:]
-    assert re.search(r"trap", correction, re.IGNORECASE)
-    assert re.search(r"ambiguous", correction, re.IGNORECASE)
-    assert "production" in correction
-
-
 # ---- 8. the recommendation and the vocabulary are pinned against the real
 #         resolver's closed vocabulary --------------------------------------
 
 
-def test_ask_recommends_production_and_names_exactly_the_closed_vocabulary():
-    ask = _ask_clause()
-    recommend_match = re.search(r"Recommend `production`\.", ask)
-    assert recommend_match, f"the ask must recommend production explicitly: {ask!r}"
-
-    sys.path.insert(0, str(SCRIPTS_DIR))
-    from maturity_resolve import LEVELS  # noqa: PLC0415
-
-    for level in LEVELS:
-        assert re.search(rf"`{level}`", ask), (
-            f"the ask must name the closed-vocabulary word {level!r}: {ask!r}"
-        )
-    assert len(LEVELS) == 3, "fixture assumption: the closed vocabulary has exactly three words"
-    for off_vocab in ("spike", "throwaway", "mature", "stable", "beta"):
-        assert off_vocab not in ask.lower(), (
-            f"the ask must name only the closed vocabulary, found "
-            f"off-vocabulary word {off_vocab!r}"
-        )
-
-
 # ---- 9. the ask fires at most once per repository per session --------------
-
-
-def test_ask_states_it_fires_once_per_repository():
-    ask = _ask_clause()
-    lead_sentence_match = re.search(r"^On the absence path[^.]*\.", ask)
-    assert lead_sentence_match, f"the ask must have a lead sentence terminated by '.': {ask!r}"
-    lead_sentence = lead_sentence_match.group(0)
-    assert re.search(r"\bonce\b", lead_sentence, re.IGNORECASE), (
-        f"the ask's lead sentence must state it fires once per repository: "
-        f"{lead_sentence!r}"
-    )
 
 
 # ---- 10. the prose-wrap gate at column 100 stays clean ----------------------

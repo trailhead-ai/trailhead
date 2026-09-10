@@ -133,15 +133,35 @@ def test_rejects_symlink_in_payload(tmp_path):
     assert "symlink" in result.stderr
 
 
-def test_rejects_nested_git_directory_in_payload(tmp_path):
-    """A payload containing a ``.git`` directory would publish as a gitlink (or
-    a fatal ``git add -A``) once `lore sync`'s bare ``git add -A`` reaches it —
-    reject it at publish, before anything is written into the vault."""
+@pytest.mark.parametrize(
+    ("relpath", "kind"),
+    [
+        (".git", "dir"),          # a full nested repo publishes as a gitlink
+        (".git", "file"),         # the gitlink file a submodule checkout leaves
+        ("sub/.git", "dir"),      # the fold applies at depth, and is pinpointed
+        (".GIT", "dir"),          # case-insensitive fs: git's own guard skips it
+        ("sub/.Git", "file"),     # mixed case, nested — both folds at once
+    ],
+    ids=["dir", "gitlink-file", "nested-dir", "uppercase", "mixedcase-nested"],
+)
+def test_rejects_a_git_entry_in_payload(tmp_path, relpath, kind):
+    """Any `.git` entry, at any depth and in any case, is refused before a write.
+
+    `lore sync`'s bare `git add -A` treats a nested `.git` as a gitlink or fails
+    outright, and on a case-insensitive filesystem git's own `.git`-name
+    protection skips a `.GIT`, so the site would publish and sync clean while the
+    directory never reaches a teammate. The refusal must name the offending path
+    — not just the string `.git` — and must leave the vault untouched.
+    """
     vault = _make_vault(tmp_path)
     source = _write_site(tmp_path / "src", {"index.html": "<html></html>"})
-    git_dir = source / ".git"
-    git_dir.mkdir()
-    (git_dir / "config").write_text("[core]\n")
+    target = source / relpath
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if kind == "dir":
+        target.mkdir()
+        (target / "config").write_text("[core]\n")
+    else:
+        target.write_text("gitdir: ../.git/modules/sub\n")
 
     result = _run(
         [str(source), "mysite", "--vault-path", str(vault), "--no-sync"],
@@ -149,82 +169,7 @@ def test_rejects_nested_git_directory_in_payload(tmp_path):
     )
 
     assert result.returncode != 0
-    assert ".git" in result.stderr
-    assert not (vault / "sites" / "mysite").exists()
-
-
-def test_rejects_git_plain_file_in_payload(tmp_path):
-    """A gitlink-style ``.git`` file (as a submodule checkout leaves behind) is
-    just as hazardous to `lore sync`'s bare ``git add -A`` as a full nested
-    repo — reject it too."""
-    vault = _make_vault(tmp_path)
-    source = _write_site(tmp_path / "src", {"index.html": "<html></html>"})
-    (source / ".git").write_text("gitdir: ../.git/modules/sub\n")
-
-    result = _run(
-        [str(source), "mysite", "--vault-path", str(vault), "--no-sync"],
-        _env(tmp_path),
-    )
-
-    assert result.returncode != 0
-    assert ".git" in result.stderr
-    assert not (vault / "sites" / "mysite").exists()
-
-
-def test_rejects_nested_git_directory_names_the_offending_path(tmp_path):
-    """The error must name the exact offending path, not just the string
-    ``.git`` — a nested ``.git`` several directories deep should be pinpointed."""
-    vault = _make_vault(tmp_path)
-    source = _write_site(tmp_path / "src", {"index.html": "<html></html>"})
-    git_dir = source / "sub" / ".git"
-    git_dir.mkdir(parents=True)
-
-    result = _run(
-        [str(source), "mysite", "--vault-path", str(vault), "--no-sync"],
-        _env(tmp_path),
-    )
-
-    assert result.returncode != 0
-    assert str(Path("sub") / ".git") in result.stderr
-    assert not (vault / "sites" / "mysite").exists()
-
-
-def test_rejects_uppercase_git_directory_in_payload(tmp_path):
-    """A ``.GIT`` entry is as hazardous as ``.git``: on a case-insensitive
-    filesystem (macOS default) git's own ``.git``-name protection skips it during
-    `lore sync`'s ``git add -A``, so the site would publish and sync 0 while the
-    directory never reaches teammates. The segment check must fold case."""
-    vault = _make_vault(tmp_path)
-    source = _write_site(tmp_path / "src", {"index.html": "<html></html>"})
-    git_dir = source / ".GIT"
-    git_dir.mkdir()
-    (git_dir / "config").write_text("[core]\n")
-
-    result = _run(
-        [str(source), "mysite", "--vault-path", str(vault), "--no-sync"],
-        _env(tmp_path),
-    )
-
-    assert result.returncode != 0
-    assert ".GIT" in result.stderr
-    assert not (vault / "sites" / "mysite").exists()
-
-
-def test_rejects_mixedcase_git_file_nested_in_payload(tmp_path):
-    """A mixed-case ``.Git`` entry nested below the top level must be rejected
-    too — the fold applies at every depth, matching the nested lowercase case."""
-    vault = _make_vault(tmp_path)
-    source = _write_site(tmp_path / "src", {"index.html": "<html></html>"})
-    (source / "sub").mkdir()
-    (source / "sub" / ".Git").write_text("gitdir: ../.git/modules/sub\n")
-
-    result = _run(
-        [str(source), "mysite", "--vault-path", str(vault), "--no-sync"],
-        _env(tmp_path),
-    )
-
-    assert result.returncode != 0
-    assert str(Path("sub") / ".Git") in result.stderr
+    assert str(Path(relpath)) in result.stderr
     assert not (vault / "sites" / "mysite").exists()
 
 

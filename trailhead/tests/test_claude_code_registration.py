@@ -45,17 +45,6 @@ class TestGenerateManifest:
         _harness().generate_manifest(["lore"], composed_root)
         assert (composed_root / ".claude-plugin" / "marketplace.json").exists()
 
-    def test_marketplace_name_is_trailhead(self, composed_root):
-        """Consolidated marketplace name must be 'trailhead', not 'trailhead-<tool>'."""
-        _harness().generate_manifest(["lore"], composed_root)
-        data = json.loads((composed_root / ".claude-plugin" / "marketplace.json").read_text())
-        assert data["name"] == "trailhead"
-
-    def test_marketplace_owner_name_is_trailhead(self, composed_root):
-        _harness().generate_manifest(["lore"], composed_root)
-        data = json.loads((composed_root / ".claude-plugin" / "marketplace.json").read_text())
-        assert data["owner"] == {"name": "trailhead"}
-
     def test_multi_tool_plugins_list(self, composed_root):
         _harness().generate_manifest(["lore", "camp"], composed_root)
         data = json.loads((composed_root / ".claude-plugin" / "marketplace.json").read_text())

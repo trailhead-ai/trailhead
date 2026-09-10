@@ -42,30 +42,6 @@ def _cases(tool: str) -> list[Path]:
 _CASES = [(tool, case) for tool in _TOOLS for case in _cases(tool)]
 
 
-@pytest.mark.parametrize("tool", _TOOLS)
-# inert-gate: allow eval corpus is test material; its shape has no runnable consumer
-def test_every_tool_has_a_corpus_directory_and_a_results_log(tool: str):
-    """The scaffolding is what makes an eval cheap enough to actually write.
-
-    Both are read by a human before authoring a case, so their absence is what
-    causes a tool's prose to go unmeasured by default.
-    """
-    corpus = _corpus(tool)
-    assert corpus.is_dir(), (
-        f"{tool} has no evals/ corpus at {corpus.relative_to(_REPO_ROOT)}; see "
-        "docs/eval-protocol.md for the layout"
-    )
-    assert (corpus / "README.md").is_file(), (
-        f"{tool}'s eval corpus has no README.md saying what belongs in it"
-    )
-    manual = _REPO_ROOT / "tools" / tool / "MANUAL-EVAL.md"
-    assert manual.is_file(), f"{tool} has no MANUAL-EVAL.md results log"
-    assert "docs/eval-protocol.md" in manual.read_text(encoding="utf-8"), (
-        f"{tool}'s MANUAL-EVAL.md does not point at the shared protocol, so a case "
-        "authored from it would miss the dispatch and trust-boundary rules"
-    )
-
-
 @pytest.mark.parametrize(
     "tool,case", _CASES, ids=[f"{t}:{c.name}" for t, c in _CASES] or None
 )

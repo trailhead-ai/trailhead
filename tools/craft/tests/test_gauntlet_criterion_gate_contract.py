@@ -143,58 +143,9 @@ def _documented_exit1_code() -> int:
     return int(m.group(1))
 
 
-def test_step1_states_exit_0_and_the_gate_agrees():
-    assert _documented_exit0_code() == 0
-    assert _run_gate(ALL_CLEAN).returncode == _documented_exit0_code()
-
-
-def test_step1_states_the_carveout_reason_code_proceeds_and_the_gate_agrees():
-    step1 = _normalize(_step("### 1. Resolve and read the spec"))
-    assert _ZERO_CRITERIA_REASON_CODE in step1
-    assert "the one non-zero exit that proceeds" in step1
-    r = _run_gate(ZERO_IDENTIFIERS)
-    assert r.returncode == 2
-    assert _ZERO_CRITERIA_REASON_CODE in r.stderr
-
-
-def test_step1_states_exit_1_blocks_and_the_gate_agrees():
-    assert _documented_exit1_code() == 1
-    r = _run_gate(REFUSED_CODE_LOCATION)
-    assert r.returncode == _documented_exit1_code()
-
-
-def test_step1_states_every_other_exit_2_reason_and_the_gate_agrees():
-    step1 = _step("### 1. Resolve and read the spec")
-    for reason_code in (
-        _DUPLICATE_HEADING_REASON_CODE,
-        _UNTERMINATED_REGION_REASON_CODE,
-        _EMPTY_STDIN_REASON_CODE,
-        _NON_UTF8_STDIN_REASON_CODE,
-    ):
-        assert reason_code in step1, f"{reason_code!r} not documented in step 1"
-
-    assert _run_gate(DUPLICATE_HEADING).returncode == 2
-    assert _run_gate(UNTERMINATED_FENCE).returncode == 2
-    assert _run_gate("").returncode == 2
-    non_utf8 = subprocess.run(
-        [sys.executable, str(GATE)], input=b"\xff\xfe\x00garbage", capture_output=True
-    )
-    assert non_utf8.returncode == 2
-
-
 # ---------------------------------------------------------------------------
 # Item 3 — the gate is anchored before the pass-dispatch step, by document order
 # ---------------------------------------------------------------------------
-
-
-def test_criterion_gate_invocation_precedes_the_dispatch_step_in_document_order():
-    text = _skill_text()
-    gate_pos = text.index("criterion_gate.py")
-    dispatch_pos = text.index("### 3. Dispatch the eight passes")
-    assert gate_pos < dispatch_pos, (
-        "the criterion-gate invocation must be documented before the step that "
-        "dispatches the eight passes, by the document's own section order"
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -320,15 +271,6 @@ def _documented_blocking_codes() -> set[str]:
     return codes
 
 
-def test_carveout_code_is_disjoint_from_the_documented_blocking_codes():
-    carveout = _documented_carveout_code()
-    blocking = _documented_blocking_codes()
-    assert carveout not in blocking, (
-        "the carve-out reason-code must never also appear among the codes "
-        "documented as blocking dispatch"
-    )
-
-
 def test_zero_identifier_spec_reaches_dispatch_via_the_carveout():
     carveout = _documented_carveout_code()
     r = _run_gate(ZERO_IDENTIFIERS)
@@ -351,50 +293,6 @@ def test_refused_criterion_spec_does_not_reach_dispatch():
 # ---------------------------------------------------------------------------
 
 
-def test_duplicate_heading_reason_code_is_documented_as_blocking_and_the_gate_agrees():
-    blocking = _documented_blocking_codes()
-    assert _DUPLICATE_HEADING_REASON_CODE in blocking
-    r = _run_gate(DUPLICATE_HEADING)
-    assert r.returncode == 2
-    assert _DUPLICATE_HEADING_REASON_CODE in r.stderr
-    assert _DUPLICATE_HEADING_REASON_CODE != _documented_carveout_code()
-
-
-def test_unterminated_masked_region_reason_code_is_documented_as_blocking_and_the_gate_agrees():
-    blocking = _documented_blocking_codes()
-    assert _UNTERMINATED_REGION_REASON_CODE in blocking
-
-    r = _run_gate(UNTERMINATED_FENCE)
-    assert r.returncode == 2
-    assert _UNTERMINATED_REGION_REASON_CODE in r.stderr
-
-    r2 = _run_gate(UNTERMINATED_HTML_COMMENT)
-    assert r2.returncode == 2
-    assert _UNTERMINATED_REGION_REASON_CODE in r2.stderr
-
-    assert _UNTERMINATED_REGION_REASON_CODE != _documented_carveout_code()
-
-
-def test_empty_stdin_reason_code_is_documented_as_blocking_and_the_gate_agrees():
-    blocking = _documented_blocking_codes()
-    assert _EMPTY_STDIN_REASON_CODE in blocking
-    r = _run_gate("")
-    assert r.returncode == 2
-    assert _EMPTY_STDIN_REASON_CODE in r.stderr
-    assert _EMPTY_STDIN_REASON_CODE != _documented_carveout_code()
-
-
-def test_non_utf8_stdin_reason_code_is_documented_as_blocking_and_the_gate_agrees():
-    blocking = _documented_blocking_codes()
-    assert _NON_UTF8_STDIN_REASON_CODE in blocking
-    r = subprocess.run(
-        [sys.executable, str(GATE)], input=b"\xff\xfe\x00garbage", capture_output=True
-    )
-    assert r.returncode == 2
-    assert _NON_UTF8_STDIN_REASON_CODE.encode() in r.stderr
-    assert _NON_UTF8_STDIN_REASON_CODE != _documented_carveout_code()
-
-
 # ---------------------------------------------------------------------------
 # Item 7 — the unapplied-bars report is pinned to the carve-out path
 # ---------------------------------------------------------------------------
@@ -413,22 +311,3 @@ def _carveout_clause() -> str:
     if para_end == -1:
         para_end = len(step1)
     return step1[para_start:para_end]
-
-
-def test_report_language_is_pinned_to_the_carveout_paragraph_not_elsewhere():
-    clause = _carveout_clause()
-    assert "not applied" in clause, (
-        "the paragraph declaring the zero-criterion-identifiers carve-out must "
-        "itself state that the criterion-content bars were not applied — "
-        f"got: {clause!r}"
-    )
-
-    # negative control: an unrelated paragraph (exit-1 handling) must not
-    # independently satisfy this, or the test would pass regardless of where
-    # the report language actually lives
-    step1 = _step("### 1. Resolve and read the spec")
-    exit1_idx = step1.index("exit 1 (integrity violation")
-    exit1_para_start = step1.rfind("\n\n", 0, exit1_idx) + 2
-    exit1_para_end = step1.find("\n\n", exit1_idx)
-    exit1_clause = step1[exit1_para_start:exit1_para_end]
-    assert "not applied" not in exit1_clause

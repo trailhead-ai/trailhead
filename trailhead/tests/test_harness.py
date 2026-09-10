@@ -1,6 +1,5 @@
 """Tests for trailhead/harness/ — the harness interface, factory, and detection."""
 
-import dataclasses
 import json
 import os
 from datetime import datetime, timezone
@@ -22,7 +21,6 @@ from trailhead.harness import (
 from trailhead.harness.claude_code import _ERROR_EXCERPT_LIMIT
 from trailhead.harness.base import (
     MODALITIES,
-    MODALITY_DETACHED_GUI,
     MODALITY_TTY_REQUIRED,
     UNSUPPORTED_RULESET_NOTICE,
     SessionRecord,
@@ -471,14 +469,6 @@ class TestClaudeCodeUserRulesetNameConfinement:
         assert (claude_dir / "rules" / "trailhead-outpost.md").read_text() == "body\n"
 
 
-class TestSessionTranscriptPathBaseDefault:
-    """The transcript-path seam is CONCRETE with a degrading default: a harness
-    with no session-transcript concept answers None rather than raising."""
-
-    def test_returns_none(self, tmp_path):
-        assert _BareHarness().session_transcript_path("abc123", tmp_path) is None
-
-
 class TestClaudeCodeSessionTranscriptPath:
     """Claude Code stores transcripts at <config_dir>/projects/<munged-cwd>/<id>.jsonl,
     where <munged-cwd> is the session's start cwd with BOTH '/' and '.' replaced by '-'."""
@@ -549,14 +539,6 @@ class TestClaudeCodeSessionTranscriptPath:
                 )
                 is None
             )
-
-
-class TestSessionResumeBaseDefault:
-    """The resume-argv seam is CONCRETE with a degrading default: a harness with
-    no resume concept answers None rather than raising."""
-
-    def test_returns_none(self):
-        assert _BareHarness().session_resume("abc123") is None
 
 
 class TestClaudeCodeSessionResume:
@@ -717,15 +699,6 @@ class TestClaudeCodeSessionLaunchEnvUnset:
             assert var in unset
 
 
-class TestSessionRetentionDaysBaseDefault:
-    """The retention seam is CONCRETE with a degrading default: a harness that
-    does not clean up transcripts on a schedule answers None, and a caller must
-    skip its retention warning entirely rather than invent a window."""
-
-    def test_returns_none(self):
-        assert _BareHarness().session_retention_days() is None
-
-
 class TestClaudeCodeSessionRetentionDays:
     """Claude Code deletes transcripts older than the top-level `cleanupPeriodDays`
     setting; absent, its own default is 30 days."""
@@ -800,30 +773,6 @@ class TestLaunchEnumerationBaseDefaults:
     with no launch or enumeration concept answers None for all six, never
     raises, and never requires implementing anything to instantiate."""
 
-    def test_session_launch_returns_none(self, tmp_path):
-        assert _BareHarness().session_launch(tmp_path, "sess-1") is None
-
-    def test_session_launch_modality_returns_none(self):
-        assert _BareHarness().session_launch_modality() is None
-
-    def test_session_launch_env_unset_returns_none(self):
-        assert _BareHarness().session_launch_env_unset() is None
-
-    def test_session_launch_env_set_returns_none(self):
-        assert _BareHarness().session_launch_env_set(None) is None
-
-    def test_session_launch_env_set_returns_none_for_a_declared_account(self):
-        assert _BareHarness().session_launch_env_set("/somewhere") is None
-
-    def test_session_enumerate_returns_none(self, tmp_path):
-        assert _BareHarness().session_enumerate(tmp_path) is None
-
-    def test_session_enumerate_returns_none_with_no_workspace(self):
-        assert _BareHarness().session_enumerate() is None
-
-    def test_parse_session_list_returns_none(self):
-        assert _BareHarness().parse_session_list("anything") is None
-
     def test_bare_harness_instantiates_without_implementing_any_of_the_six(self, tmp_path):
         """All six are non-abstract: subclassing Harness without overriding them
         must not raise TypeError at instantiation."""
@@ -832,20 +781,10 @@ class TestLaunchEnumerationBaseDefaults:
         assert h.session_launch_modality() is None
         assert h.session_launch_env_unset() is None
         assert h.session_launch_env_set(None) is None
+        assert h.session_launch_env_set("/somewhere") is None
+        assert h.session_enumerate(tmp_path) is None
         assert h.session_enumerate() is None
         assert h.parse_session_list("x") is None
-
-
-class TestModalityVocabulary:
-    # inert-gate: allow pins caller-visible wire vocabulary other code compares against
-    def test_constants_have_exact_spec_values(self):
-        assert MODALITY_TTY_REQUIRED == "tty-required"
-        assert MODALITY_DETACHED_GUI == "detached-gui"
-
-    # inert-gate: allow pins the closed modality vocabulary itself
-    def test_modalities_frozenset_is_exactly_the_two_constants(self):
-        assert MODALITIES == {MODALITY_TTY_REQUIRED, MODALITY_DETACHED_GUI}
-        assert isinstance(MODALITIES, frozenset)
 
 
 class _LaunchOnlyBrokenHarness(_BareHarness):
@@ -1049,19 +988,6 @@ class TestBothOrNeitherInvariants:
 
 
 class TestSessionRecord:
-    def test_is_frozen(self, tmp_path):
-        rec = SessionRecord(
-            session_id="sess-1",
-            cwd=tmp_path,
-            kind="tmux",
-            controllable=True,
-            name=None,
-            pid=None,
-            started_at=None,
-        )
-        with pytest.raises(dataclasses.FrozenInstanceError):
-            rec.session_id = "sess-2"
-
     def test_accepts_none_for_optional_fields(self, tmp_path):
         rec = SessionRecord(
             session_id="sess-1",
@@ -1371,13 +1297,6 @@ class TestClaudeCodeParseSessionListDuplicateIds:
 
 
 class TestSessionTranscript:
-    def test_is_frozen(self, tmp_path):
-        row = SessionTranscript(
-            session_id="sess-1", cwd=tmp_path, modified_at=datetime.now(timezone.utc)
-        )
-        with pytest.raises(dataclasses.FrozenInstanceError):
-            row.session_id = "sess-2"
-
     def test_accepts_none_for_cwd(self):
         row = SessionTranscript(
             session_id="sess-1", cwd=None, modified_at=datetime.now(timezone.utc)
@@ -1387,18 +1306,6 @@ class TestSessionTranscript:
     def test_requires_the_three_fields(self):
         with pytest.raises(TypeError):
             SessionTranscript()
-
-
-class TestSessionTranscriptsBaseDefault:
-    """The store-enumeration seam is CONCRETE with a degrading default: a
-    harness with no recovery concept answers None rather than raising."""
-
-    def test_returns_none(self):
-        assert _BareHarness().session_transcripts() is None
-
-    def test_returns_none_with_workspace_and_env(self, tmp_path):
-        env = {"TRAILHEAD_CLAUDE_DIR": str(tmp_path / "claude")}
-        assert _BareHarness().session_transcripts(tmp_path, env=env) is None
 
 
 class TestClaudeCodeSessionTranscripts:

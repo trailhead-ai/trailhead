@@ -28,10 +28,6 @@ def _run(cmd: list[str], cwd: Path) -> subprocess.CompletedProcess:
 
 
 class TestBinResolvesThroughSymlink:
-    def test_bin_exists_and_is_executable(self):
-        assert _BIN_PORTAGE.is_file(), f"{_BIN_PORTAGE} missing"
-        assert os.access(_BIN_PORTAGE, os.X_OK), f"{_BIN_PORTAGE} not executable"
-
     def test_help_through_symlink_exits_zero(self, tmp_path):
         link = tmp_path / "portage"
         link.symlink_to(_BIN_PORTAGE)

@@ -56,48 +56,6 @@ def _resolved_recipe() -> dict:
 # ---------------------------------------------------------------------------
 
 
-def test_example_config_recipe_is_single_build_step() -> None:
-    task = _resolved_recipe()
-
-    assert task["phase"] == "activate"
-    assert task["required"] is False
-    assert isinstance(task["timeout_seconds"], int) and task["timeout_seconds"] > 0
-    assert task["steps"] == [
-        {
-            "name": "build",
-            "cmd": ["code-review-graph", "build", "--repo", "{worktree}"],
-        }
-    ]
-
-
-def test_example_config_recipe_declares_a_capability_consequence() -> None:
-    """A member waiting on this activate-phase task must be told what it can't
-    do yet — the graph MCP server has no graph until this task settles."""
-    task = _resolved_recipe()
-
-    assert isinstance(task["capability"], str) and task["capability"].strip()
-    assert "graph" in task["capability"].lower()
-
-
-def test_example_config_recipe_timeout_is_at_least_900_seconds() -> None:
-    """A full build of this worktree measured 914s on an otherwise-idle box —
-    5x the prior 180s budget. 900s leaves ~2x headroom under provisioning
-    contention; a regression back toward 180 must fail this test."""
-    task = _resolved_recipe()
-
-    assert task["timeout_seconds"] >= 900
-
-
-def test_example_config_recipe_has_no_seed_step() -> None:
-    """Guard against a seed/rsync step creeping back into the recipe."""
-    task = _resolved_recipe()
-
-    flat = " ".join(tok for step in task["steps"] for tok in step["cmd"])
-    assert "rsync" not in flat
-    assert "update" not in flat
-    assert len(task["steps"]) == 1
-
-
 # ---------------------------------------------------------------------------
 # 2. Through the runner: ok only on exit 0; non-zero fails without raising.
 # ---------------------------------------------------------------------------

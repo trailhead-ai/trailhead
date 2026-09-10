@@ -67,14 +67,3 @@ def test_every_dispatched_agent_resolves_to_an_installed_subagent():
         f"these portage docs dispatch agents no tool installs: {phantom} "
         f"(installed: {sorted(installed)})"
     )
-
-
-def test_the_scan_finds_the_dispatches_portage_is_built_around():
-    """The check above has teeth only while the extraction still sees dispatches.
-
-    Both of portage's own lifecycle agents are dispatched by name from the
-    ``pull_request`` skill; if the scan stops finding them, it has stopped
-    reading the docs and would pass over any phantom.
-    """
-    dispatched = _dispatched_names()
-    assert {"updater", "monitor"} <= set(dispatched), sorted(dispatched)

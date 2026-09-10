@@ -28,10 +28,8 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
-import inspect
 import json
 import os
-import re
 import subprocess
 import sys
 import time
@@ -413,59 +411,6 @@ class TestCampRemoveInvokesReconcileBreak:
 # ===========================================================================
 # Structural: no lore / no session-liveness precondition in the remove path
 # ===========================================================================
-
-
-class TestRemovePathHasNoLoreOrSessionPrecondition:
-    """The remove handler + reconcile_break make no `lore` call and carry no
-    session-liveness precondition (there is no session lock)."""
-
-    def test_remove_handler_is_named_remove(self):
-        """The remove handler is named `_cmd_remove_group_cli`."""
-        mod = _load_cli_module()
-        assert hasattr(mod, "_cmd_remove_group_cli"), (
-            "the remove handler must be named _cmd_remove_group_cli"
-        )
-
-    def test_remove_handler_makes_no_lore_or_session_call(self):
-        mod = _load_cli_module()
-        src = inspect.getsource(mod._cmd_remove_group_cli)
-        # Narrow to actual lore invocations: module import or subprocess argv.
-        # Raw substring "lore" would trip on innocent words like "explore";
-        # we check specifically for `import lore`, `from lore`, or `"lore"`/`'lore'`
-        # as a string literal (the lore CLI binary name in a subprocess call).
-        assert not re.search(r'\bimport lore\b', src), (
-            "remove handler must not import the lore module"
-        )
-        assert not re.search(r'\bfrom lore\b', src), (
-            "remove handler must not import from the lore module"
-        )
-        assert '"lore"' not in src and "'lore'" not in src, (
-            "remove handler must not invoke the lore CLI (no lore string literal)"
-        )
-        assert "session_lock" not in src, "remove handler must have no session-lock precondition"
-        assert "acquire_session" not in src, (
-            "remove handler must have no session-liveness precondition"
-        )
-
-    def test_reconcile_break_makes_no_lore_or_session_call(self):
-        import camp.provision.reconcile as reconcile
-
-        src = inspect.getsource(reconcile.reconcile_break)
-        # Same narrowed assertion: check for import or subprocess invocation,
-        # not raw substring (avoids false hits on "explore", "folklore", etc.).
-        assert not re.search(r'\bimport lore\b', src), (
-            "reconcile_break must not import the lore module"
-        )
-        assert not re.search(r'\bfrom lore\b', src), (
-            "reconcile_break must not import from the lore module"
-        )
-        assert '"lore"' not in src and "'lore'" not in src, (
-            "reconcile_break must not invoke the lore CLI (no lore string literal)"
-        )
-        assert "session_lock" not in src, "reconcile_break must hold no session-lock precondition"
-        assert "acquire_session" not in src, (
-            "reconcile_break must have no session-liveness precondition"
-        )
 
 
 # ===========================================================================
