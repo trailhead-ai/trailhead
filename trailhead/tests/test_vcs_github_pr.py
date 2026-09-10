@@ -997,13 +997,23 @@ class TestMergeMethod:
     ) -> None:
         """An operator who HAS set merge_method must not be told the key is
         unset — the notice exists only for the absent-key path."""
+        from trailhead.vcs.github import AUTOMATIC_MERGE_METHOD, _merge_method_notice
+
         argv = self._run_merge_capture_argv(
             tmp_path, '[release]\nauto_merge = true\nmerge_method = "squash"\n'
         )
         assert len(argv) == 1
         err = capsys.readouterr().err
-        assert "not set" not in err
-        assert "defaulting" not in err
+        # Both notices the module can emit, taken from the module itself: a
+        # substring typed here would go stale the moment either is reworded,
+        # and would then pass by naming a string nothing produces.
+        unconfigured_notices = [
+            _merge_method_notice(None),
+            _merge_method_notice(AUTOMATIC_MERGE_METHOD),
+        ]
+        assert all(notice for notice in unconfigured_notices)
+        for notice in unconfigured_notices:
+            assert notice not in err
 
     def test_unrecognized_merge_method_raises_before_any_gh_call(
         self, tmp_path: Path

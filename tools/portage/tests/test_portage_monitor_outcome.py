@@ -290,3 +290,98 @@ def test_documented_mixed_shape_matches_the_real_summary():
         for d in disclosures
     )
     assert summarize_strategy_disclosures(disclosures) == expected
+
+
+def _graphql_merge_spy(calls, permitted):
+    """A runner answering just enough gh/git for a merge, with the repository
+    reporting `permitted` as its allowed merge strategies."""
+    import json as _json
+    import subprocess
+
+    def run(cmd, **kwargs):
+        calls.append(list(cmd))
+        cmd_str = " ".join(cmd)
+        if "config" in cmd_str and "user.email" in cmd_str:
+            return subprocess.CompletedProcess(cmd, 0, "dev@example.com\n", "")
+        if "remote" in cmd_str and "get-url" in cmd_str:
+            return subprocess.CompletedProcess(cmd, 0, "git@github.com:acme/api.git\n", "")
+        if "graphql" in cmd_str:
+            payload = {
+                "data": {
+                    "repository": {
+                        "mergeCommitAllowed": "merge" in permitted,
+                        "squashMergeAllowed": "squash" in permitted,
+                        "rebaseMergeAllowed": "rebase" in permitted,
+                        "pullRequest": {"stackEntry": None},
+                    }
+                }
+            }
+            return subprocess.CompletedProcess(cmd, 0, _json.dumps(payload), "")
+        if "view" in cmd_str and "--json" in cmd_str:
+            payload = {
+                "state": "OPEN",
+                "mergeable": "MERGEABLE",
+                "mergeStateStatus": "CLEAN",
+                "isDraft": False,
+                "headRefName": "feat",
+            }
+            return subprocess.CompletedProcess(cmd, 0, _json.dumps(payload), "")
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    return run
+
+
+def test_the_line_the_merge_path_actually_prints_parses_via_the_real_parser(
+    tmp_path, capsys
+):
+    """The disclosure line's shape is encoded twice — as a format string in
+    `trailhead.vcs.github`'s merge loop, and as this module's parsing regex.
+    Bind them by running the real merge path and feeding what it really
+    printed through the real parser, so a producer-side reword fails here
+    rather than silently yielding an unparseable report field.
+    """
+    import json as _json
+
+    from trailhead.vcs.github import GitHubProvider, PRPair
+
+    wt = tmp_path / "wt" / "api"
+    wt.mkdir(parents=True)
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(
+        _json.dumps(
+            {
+                "schema_version": 1,
+                "members": [
+                    {"name": "api", "repo_root": str(tmp_path), "worktree_path": str(wt)}
+                ],
+            }
+        )
+    )
+    toml = tmp_path / "group.toml"
+    toml.write_text("[release]\nauto_merge = true\n", encoding="utf-8")
+
+    calls: list[list[str]] = []
+    provider = GitHubProvider(runner=_graphql_merge_spy(calls, {"merge", "squash", "rebase"}))
+    provider.pr.merge(
+        [PRPair(repo_path=str(wt), pr_number="11", member_name="api")],
+        str(manifest),
+        toml_path=str(toml),
+    )
+
+    err = capsys.readouterr().err
+    disclosures = [
+        parsed
+        for parsed in (parse_strategy_disclosure(line) for line in err.splitlines())
+        if parsed is not None
+    ]
+
+    assert len(disclosures) == 1, (
+        "the merge path printed no line this parser recognises — producer and "
+        f"consumer have drifted apart. stderr was:\n{err}"
+    )
+    expected_strategy, expected_reason = resolve_merge_strategy(
+        AUTOMATIC_MERGE_METHOD, frozenset({"merge", "squash", "rebase"})
+    )
+    assert disclosures[0] == StrategyDisclosure(
+        "11", "api", expected_strategy, expected_reason
+    )
