@@ -95,13 +95,21 @@ def test_shared_fixture_coexists_with_a_remote_host_table(tmp_path: Path) -> Non
         "an dromeda",
         "andromeda;rm -rf /",
         "andro\nmeda",
+        "-andromeda",
     ],
-    ids=["uppercase", "dot", "space", "shell-metacharacter", "embedded-newline"],
+    ids=["uppercase", "dot", "space", "shell-metacharacter", "embedded-newline", "leading-hyphen"],
 )
 def test_self_name_outside_strict_charset_raises(tmp_path: Path, bad_name: str) -> None:
     from camp.host.config import HostConfigError, self_host_name
 
-    _write_hosts_toml(tmp_path, f"self_name = {bad_name!r}\n")
+    # A basic (double-quoted) TOML string, not `!r` (which emits a TOML
+    # *literal* single-quoted string): TOML literal strings never process
+    # backslash escapes, so `!r`'s `'andro\nmeda'` round-trips as the four
+    # literal characters backslash-n, never the embedded newline the
+    # embedded-newline case is meant to exercise. A basic string's `\n`
+    # escape is what actually produces a real embedded newline.
+    escaped = bad_name.replace("\\", "\\\\").replace("\n", "\\n").replace('"', '\\"')
+    _write_hosts_toml(tmp_path, f'self_name = "{escaped}"\n')
 
     with pytest.raises(HostConfigError):
         self_host_name(env=_env(tmp_path))
@@ -153,6 +161,41 @@ def test_malformed_toml_raises_naming_path_and_reason(tmp_path: Path) -> None:
     with pytest.raises(HostConfigError) as exc_info:
         self_host_name(env=_env(tmp_path))
     assert str(hosts_toml) in str(exc_info.value)
+
+
+def test_hosts_toml_with_bad_encoding_raises_host_config_error(tmp_path: Path) -> None:
+    """A hosts.toml saved as UTF-16 must not escape as a raw UnicodeDecodeError."""
+    from camp.host.config import HostConfigError, self_host_name
+
+    config_root = tmp_path / "config"
+    config_root.mkdir(parents=True, exist_ok=True)
+    path = config_root / "hosts.toml"
+    path.write_bytes('self_name = "andromeda"\n'.encode("utf-16"))
+
+    with pytest.raises(HostConfigError):
+        self_host_name(env=_env(tmp_path))
+
+
+def test_hosts_toml_unreadable_raises_host_config_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A hosts.toml that cannot be opened (e.g. mode-000, root-owned) must not
+    escape as a raw PermissionError."""
+    from camp.host.config import HostConfigError, self_host_name
+
+    _write_hosts_toml(tmp_path, 'self_name = "andromeda"\n')
+
+    real_read_text = Path.read_text
+
+    def fake_read_text(self: Path, *args, **kwargs):
+        if self.name == "hosts.toml":
+            raise PermissionError(13, "Permission denied")
+        return real_read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", fake_read_text)
+
+    with pytest.raises(HostConfigError):
+        self_host_name(env=_env(tmp_path))
 
 
 def test_module_reexports_self_host_name_from_package_root(tmp_path: Path) -> None:
