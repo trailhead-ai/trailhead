@@ -708,12 +708,36 @@ _STACK_ENTRY_QUERY = (
     "}"
 )
 
+#: `_STACK_ENTRY_QUERY` minus the `commits` selection, for a caller that
+#: already knows the commit series will never be read — a group with an
+#: explicitly configured `merge_method`, whose strategy resolves on
+#: `resolve_merge_strategy`'s first rung.
+#:
+#: The selection is the whole payload, measured against this repository on
+#: 2026-09-10: a 23-commit pull request answers 116KB with it and 190 bytes
+#: without, because each node carries a full commit message body alongside
+#: its diffstat. Round-trip count is identical either way — this is payload,
+#: not latency from an extra call.
+_STACK_ENTRY_QUERY_NO_COMMITS = (
+    "query($owner: String!, $name: String!, $number: Int!) {"
+    " repository(owner: $owner, name: $name) {"
+    "  mergeCommitAllowed"
+    "  squashMergeAllowed"
+    "  rebaseMergeAllowed"
+    "  pullRequest(number: $number) {"
+    "   stackEntry { stack { number size } }"
+    "  }"
+    " }"
+    "}"
+)
+
 
 def _fetch_repository_query(
     repo_path: str,
     pr_number: str,
     runner: rp.Runner,
-    cache: dict[tuple[str, str], dict | None] | None = None,
+    cache: dict[tuple[str, str, bool], dict | None] | None = None,
+    include_commits: bool = True,
 ) -> dict | None:
     """Issue ``_STACK_ENTRY_QUERY`` and return the response's ``repository``
     object, or None when the repository itself could not be resolved.
@@ -736,7 +760,7 @@ def _fetch_repository_query(
     ``gh api graphql`` call. Keyed by ``(repo_path, pr_number)``; omitted
     (the default), every call fetches fresh, exactly as before.
     """
-    key = (repo_path, pr_number)
+    key = (repo_path, pr_number, include_commits)
     if cache is not None and key in cache:
         return cache[key]
 
@@ -753,7 +777,7 @@ def _fetch_repository_query(
                 "api",
                 "graphql",
                 "-f",
-                f"query={_STACK_ENTRY_QUERY}",
+                f"query={_STACK_ENTRY_QUERY if include_commits else _STACK_ENTRY_QUERY_NO_COMMITS}",
                 "-F",
                 f"owner={owner}",
                 "-F",
@@ -786,7 +810,8 @@ def _get_stack_entry(
     repo_path: str,
     pr_number: str,
     runner: rp.Runner,
-    cache: dict[tuple[str, str], dict | None] | None = None,
+    cache: dict[tuple[str, str, bool], dict | None] | None = None,
+    include_commits: bool = True,
 ) -> dict | None:
     """Return the stack a PR belongs to, or None if it isn't a stack member.
 
@@ -805,7 +830,9 @@ def _get_stack_entry(
     ``get_permitted_merge_strategies`` (or vice versa) for the same pull
     request, so a caller that needs both signals costs one query, not two.
     """
-    repository = _fetch_repository_query(repo_path, pr_number, runner, cache=cache)
+    repository = _fetch_repository_query(
+        repo_path, pr_number, runner, cache=cache, include_commits=include_commits
+    )
     if repository is None:
         return None
     pr = repository.get("pullRequest")
@@ -842,7 +869,7 @@ def get_commit_series(
     repo_path: str,
     pr_number: str,
     runner: rp.Runner,
-    cache: dict[tuple[str, str], dict | None] | None = None,
+    cache: dict[tuple[str, str, bool], dict | None] | None = None,
 ) -> list[tuple[str, int]] | str:
     """Return the pull request's commit series as ordered
     ``(subject, change_size)`` summaries, off the `commits` connection
@@ -1069,7 +1096,7 @@ def get_permitted_merge_strategies(
     repo_path: str,
     pr_number: str,
     runner: rp.Runner,
-    cache: dict[tuple[str, str], dict | None] | None = None,
+    cache: dict[tuple[str, str, bool], dict | None] | None = None,
 ) -> frozenset[str] | str:
     """Return the merge strategies the target repository permits.
 
@@ -1532,9 +1559,21 @@ def _merge_prs(
         # the capability read that follows it (when selection is automatic)
         # both key off this cache, so a caller needing both signals for the
         # same pull request costs one repository query, not two.
-        query_cache: dict[tuple[str, str], dict | None] = {}
+        query_cache: dict[tuple[str, str, bool], dict | None] = {}
 
-        stack = _get_stack_entry(pair.repo_path, pair.pr_number, runner, cache=query_cache)
+        # An explicitly configured strategy resolves on the resolver's first
+        # rung, so the commit series is never read — and the `commits`
+        # selection is the whole payload of this query. Decided here, before
+        # the first call, because `merge_method` is known up front while the
+        # permitted set is not.
+        include_commits = merge_method == AUTOMATIC_MERGE_METHOD
+        stack = _get_stack_entry(
+            pair.repo_path,
+            pair.pr_number,
+            runner,
+            cache=query_cache,
+            include_commits=include_commits,
+        )
         if stack is not None:
             stack_number = stack.get("number", "?")
             failed[key] = (
