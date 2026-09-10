@@ -681,3 +681,284 @@ class TestPerMemberCarryForwardUnaffectedByOwnerFix:
         assert rebuilt["activated"] is True
         assert rebuilt["work_state"] == "ready"
         assert rebuilt["tasks"] == {"dep-install": {"state": "ok"}}
+
+
+# ---------------------------------------------------------------------------
+# 12. `camp remove` surfaces the ownership comparison as a stderr notice.
+#
+# Silence is the ONLY outcome for a verified-local removal (owner equals this
+# host's declared name). Every configuration this host cannot vouch for gets
+# its own distinguishable notice rather than being folded into silence.
+# ---------------------------------------------------------------------------
+
+
+def _remove_and_capture(group, slug, env, capsys):
+    """Invoke the real remove handler in-process and return captured output.
+
+    --force skips the session-liveness guard (no harness stubs are wired in
+    this fixture set) so the notice logic itself is what is under test.
+    """
+    from camp.cli.lifecycle import _cmd_remove_group_cli
+
+    _cmd_remove_group_cli(["--name", slug, "--force"], group, env, dry_run=False)
+    return capsys.readouterr()
+
+
+class TestRemoveOwnershipNoticeSilentWhenVerifiedLocal:
+    def test_owner_equals_self_name_prints_no_ownership_notice(
+        self, one_member_group, capsys
+    ):
+        from camp.provision.provision import bring_up_workspace
+
+        g = one_member_group
+        env = _env(g["tmp_path"])
+        _declare_self_name(env, "andromeda")
+        slug = "feat-o"
+        bring_up_workspace(g["group"], slug, env=env)
+
+        captured = _remove_and_capture(g["group"], slug, env, capsys)
+
+        assert captured.err == "camp remove: removed worktree 'feat-o' (repo_a)\n"
+
+
+class TestRemoveOwnershipNoticeOwnedElsewhere:
+    def test_owner_differs_from_self_name_names_the_owning_host(
+        self, one_member_group, capsys
+    ):
+        from camp.provision.provision import bring_up_workspace
+
+        g = one_member_group
+        env = _env(g["tmp_path"])
+        _declare_self_name(env, "andromeda")
+        slug = "feat-o"
+        bring_up_workspace(g["group"], slug, env=env)
+
+        # The workspace changes hands: this host now declares a different name.
+        _declare_self_name(env, "orion")
+
+        captured = _remove_and_capture(g["group"], slug, env, capsys)
+
+        assert "andromeda" in captured.err
+        notice_lines = [
+            ln for ln in captured.err.splitlines() if "andromeda" in ln and "owned" in ln
+        ]
+        assert len(notice_lines) == 1, captured.err
+        # Removal still completed despite the mismatch.
+        assert "removed worktree 'feat-o'" in captured.err
+
+
+class TestRemoveOwnershipNoticeNeverRecorded:
+    def test_no_owner_with_declared_self_name_says_never_recorded(
+        self, one_member_group, capsys
+    ):
+        from camp.provision.provision import bring_up_workspace
+
+        g = one_member_group
+        env = _env(g["tmp_path"])  # no self-name declared during creation
+        slug = "feat-o"
+        bring_up_workspace(g["group"], slug, env=env)
+
+        # This host now declares a name, after the fact.
+        _declare_self_name(env, "orion")
+
+        captured = _remove_and_capture(g["group"], slug, env, capsys)
+
+        assert "never recorded" in captured.err
+        assert "removed worktree 'feat-o'" in captured.err
+
+
+class TestRemoveOwnershipNoticeNoSelfNameDeclared:
+    def test_no_self_name_with_owner_says_check_skipped(self, one_member_group, capsys):
+        from camp.provision.provision import bring_up_workspace
+
+        g = one_member_group
+        env = _env(g["tmp_path"])
+        _declare_self_name(env, "andromeda")
+        slug = "feat-o"
+        bring_up_workspace(g["group"], slug, env=env)
+
+        # This host no longer declares a name at all.
+        (Path(env["CAMP_CONFIG_DIR"]) / "hosts.toml").unlink()
+
+        captured = _remove_and_capture(g["group"], slug, env, capsys)
+
+        assert "no declared name" in captured.err
+        assert "hosts.toml" in captured.err
+        assert "removed worktree 'feat-o'" in captured.err
+
+    def test_no_self_name_without_owner_says_check_skipped_identically(
+        self, one_member_group, capsys
+    ):
+        from camp.provision.provision import bring_up_workspace
+
+        g = one_member_group
+        env = _env(g["tmp_path"])  # no self-name declared, no owner ever stamped
+        slug = "feat-o"
+        bring_up_workspace(g["group"], slug, env=env)
+
+        captured_without_owner = _remove_and_capture(g["group"], slug, env, capsys)
+
+        # Second scenario: an owner WAS recorded, but this host still declares
+        # no name — the contract requires the SAME notice text either way.
+        env2 = _env(g["tmp_path"])
+        _declare_self_name(env2, "andromeda")
+        slug2 = "feat-p"
+        repo_b = g["tmp_path"] / "repo_b_second"
+        _init_git_repo(repo_b)
+        group2 = _make_group(
+            "owng2",
+            [{"name": "repo_a", "repo_root": str(repo_b), "tasks": [], "base": "origin/main"}],
+        )
+        bring_up_workspace(group2, slug2, env=env2)
+        (Path(env2["CAMP_CONFIG_DIR"]) / "hosts.toml").unlink()
+
+        captured_with_owner = _remove_and_capture(group2, slug2, env2, capsys)
+
+        def _skip_line(err: str) -> str:
+            lines = [ln for ln in err.splitlines() if "no declared name" in ln]
+            assert len(lines) == 1, err
+            return lines[0]
+
+        assert _skip_line(captured_without_owner.err) == _skip_line(captured_with_owner.err)
+
+
+class TestRemoveOwnershipNoticesAreDistinguishable:
+    def test_the_three_notices_are_pairwise_distinct(self, one_member_group, capsys):
+        from camp.provision.provision import bring_up_workspace
+
+        g = one_member_group
+        tmp = g["tmp_path"]
+
+        def _notice_line(err: str) -> str:
+            candidates = [
+                ln
+                for ln in err.splitlines()
+                if ("owned" in ln or "never recorded" in ln or "no declared name" in ln)
+            ]
+            assert len(candidates) == 1, err
+            return candidates[0]
+
+        # Owned elsewhere.
+        env_a = _env(tmp / "a")
+        _declare_self_name(env_a, "andromeda")
+        bring_up_workspace(g["group"], "feat-a", env=env_a)
+        _declare_self_name(env_a, "orion")
+        owned_elsewhere = _notice_line(
+            _remove_and_capture(g["group"], "feat-a", env_a, capsys).err
+        )
+
+        # Never recorded.
+        env_b = _env(tmp / "b")
+        repo_b = tmp / "repo_b_never"
+        _init_git_repo(repo_b)
+        group_b = _make_group(
+            "owngb",
+            [{"name": "repo_a", "repo_root": str(repo_b), "tasks": [], "base": "origin/main"}],
+        )
+        bring_up_workspace(group_b, "feat-b", env=env_b)
+        _declare_self_name(env_b, "orion")
+        never_recorded = _notice_line(_remove_and_capture(group_b, "feat-b", env_b, capsys).err)
+
+        # No declared name at all.
+        env_c = _env(tmp / "c")
+        repo_c = tmp / "repo_c_noname"
+        _init_git_repo(repo_c)
+        group_c = _make_group(
+            "owngc",
+            [{"name": "repo_a", "repo_root": str(repo_c), "tasks": [], "base": "origin/main"}],
+        )
+        bring_up_workspace(group_c, "feat-c", env=env_c)
+        no_name = _notice_line(_remove_and_capture(group_c, "feat-c", env_c, capsys).err)
+
+        assert len({owned_elsewhere, never_recorded, no_name}) == 3, (
+            owned_elsewhere,
+            never_recorded,
+            no_name,
+        )
+
+
+class TestRemoveOwnershipNoticeStderrOnly:
+    def test_notice_never_appears_on_stdout(self, one_member_group, capsys):
+        from camp.provision.provision import bring_up_workspace
+
+        g = one_member_group
+        env = _env(g["tmp_path"])
+        _declare_self_name(env, "andromeda")
+        slug = "feat-o"
+        bring_up_workspace(g["group"], slug, env=env)
+        _declare_self_name(env, "orion")
+
+        captured = _remove_and_capture(g["group"], slug, env, capsys)
+
+        assert "andromeda" not in captured.out
+        assert captured.out == ""
+
+
+class TestRemoveOwnershipNoticeNoAnsi:
+    def test_notice_contains_no_ansi_escape_codes(self, one_member_group, capsys):
+        from camp.provision.provision import bring_up_workspace
+
+        g = one_member_group
+        env = _env(g["tmp_path"])
+        _declare_self_name(env, "andromeda")
+        slug = "feat-o"
+        bring_up_workspace(g["group"], slug, env=env)
+        _declare_self_name(env, "orion")
+
+        captured = _remove_and_capture(g["group"], slug, env, capsys)
+
+        assert "\x1b" not in captured.err
+
+
+class TestRemoveOwnershipNoticePathResolutionErrorIsObservable:
+    def test_env_that_cannot_resolve_config_dir_gets_the_skip_notice_not_silence(
+        self, one_member_group, capsys
+    ):
+        """A gap this task is the first consumer of: an injected env lacking
+        HOME cannot resolve a config dir at all. Treating that the same as
+        "no declared name" (an observable notice) is the deliberate choice —
+        silently returning None here would be the exact fail-open this
+        design exists to prevent."""
+        from camp.provision.provision import bring_up_workspace
+
+        g = one_member_group
+        env = _env(g["tmp_path"])
+        _declare_self_name(env, "andromeda")
+        slug = "feat-o"
+        bring_up_workspace(g["group"], slug, env=env)
+
+        # Simulate an environment that cannot resolve a config dir at all —
+        # no CAMP_CONFIG_DIR override and no HOME.
+        broken_env = {"CAMP_STATE_DIR": env["CAMP_STATE_DIR"]}
+
+        captured = _remove_and_capture(g["group"], slug, broken_env, capsys)
+
+        assert "no declared name" in captured.err
+        assert captured.err.strip() != ""
+
+
+class TestRemoveOwnershipNoticeMalformedHostsTomlIsCleanError:
+    def test_malformed_hosts_toml_dies_cleanly_not_a_traceback(
+        self, one_member_group, capsys
+    ):
+        from camp.provision.provision import bring_up_workspace
+        from camp.cli.lifecycle import _cmd_remove_group_cli
+
+        g = one_member_group
+        env = _env(g["tmp_path"])
+        _declare_self_name(env, "andromeda")
+        slug = "feat-o"
+        bring_up_workspace(g["group"], slug, env=env)
+
+        # Corrupt the declaration after creation.
+        (Path(env["CAMP_CONFIG_DIR"]) / "hosts.toml").write_text(
+            "self_name = 42\n", encoding="utf-8"
+        )
+
+        with pytest.raises(SystemExit) as exc_info:
+            _cmd_remove_group_cli(["--name", slug, "--force"], g["group"], env, dry_run=False)
+
+        assert exc_info.value.code != 0
+        err = capsys.readouterr().err
+        assert err.startswith("camp remove: ")
+        assert "Traceback" not in err
