@@ -862,8 +862,8 @@ def get_commit_series(
 
     Returns `COMMIT_SERIES_LOOKUP_FAILED` when the repository couldn't be
     resolved, the pull request or its `commits` field is missing or the
-    wrong shape, `totalCount` isn't an integer, or any commit's message or
-    size fields are missing or the wrong shape. Returns
+    wrong shape, `totalCount` isn't an integer, or any commit's message,
+    size, or parent-count fields are missing or the wrong shape. Returns
     `COMMIT_SERIES_TRUNCATED` when `totalCount` exceeds the number of nodes
     returned — the page-size ceiling was hit, so what's in `nodes` is not
     the whole series and must never be read as though it were. An empty
@@ -911,8 +911,12 @@ def get_commit_series(
             return COMMIT_SERIES_LOOKUP_FAILED
 
         parents = commit.get("parents")
-        parent_count = parents.get("totalCount") if isinstance(parents, dict) else None
-        if isinstance(parent_count, int) and parent_count > 1:
+        if not isinstance(parents, dict):
+            return COMMIT_SERIES_LOOKUP_FAILED
+        parent_count = parents.get("totalCount")
+        if not isinstance(parent_count, int) or isinstance(parent_count, bool):
+            return COMMIT_SERIES_LOOKUP_FAILED
+        if parent_count > 1:
             continue
 
         subject = message.split("\n", 1)[0]
@@ -1007,6 +1011,16 @@ def classify_fixup_dominance(series: list[tuple[str, int]]) -> FixupDominance:
     exercised the "catches an actual pile" direction of this rule — only
     synthetic tests pin that direction. The measured branches only prove
     the "must never over-collapse a deliberately-separated branch" side.
+
+    Second known limit: `tests/fixtures/fixup_dominance_calibration.json`
+    was exported from `gh pr view --json commits`, whose per-commit subject
+    is the truncated `messageHeadline` (a trailing `…` on anything past
+    roughly 72 characters), never the untruncated `message` this function's
+    caller actually reads. The fixture can exercise the size-threshold and
+    marker-spelling directions fine, but it can never exercise the
+    exact-subject-repeat rule against a real branch where two subjects
+    differ only past that truncation point — the fixture's own subjects
+    can't distinguish that case from a real repeat.
     """
     if not isinstance(series, list):
         raise TypeError(
