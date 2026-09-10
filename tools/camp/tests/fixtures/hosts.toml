@@ -1,0 +1,4 @@
+self_name = "andromeda"
+
+[hosts.orion]
+ssh = "orion.local"
