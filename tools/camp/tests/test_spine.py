@@ -306,6 +306,37 @@ def test_doctor_json_host_name_reads_through_injected_env_not_real_install(
     assert host_row["details"] == "isolated-test-host"
 
 
+def test_doctor_json_malformed_hosts_toml_fails_host_name_row_not_the_verb(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A malformed hosts.toml must surface as a failed `host_name` check row
+    among the others — not an early hard-exit that prevents the asdf and
+    consistency checks from ever running."""
+    import json as _json
+
+    from camp.spine import cmd_doctor
+
+    _isolate_roots(monkeypatch, tmp_path)
+    env = _isolated_config_env(tmp_path)
+    config_dir = Path(env["CAMP_CONFIG_DIR"])
+    config_dir.mkdir(parents=True)
+    (config_dir / "hosts.toml").write_text("self_name = 12345\n")
+
+    with pytest.raises(SystemExit) as exc_info:
+        cmd_doctor(["--json"], env=env)
+    assert exc_info.value.code != 0
+
+    report = _json.loads(capsys.readouterr().out)
+    checks_by_name = {c["check"] for c in report["checks"]}
+    assert checks_by_name == {"asdf", "consistency", "host_name"}, (
+        "the other checks must still run and be reported"
+    )
+    host_row = next(c for c in report["checks"] if c["check"] == "host_name")
+    assert host_row["pass"] is False
+    assert "hosts.toml" in host_row["details"]
+    assert "self_name" in host_row["details"]
+
+
 # ---------------------------------------------------------------------------
 # Import guard: legible ImportError, not raw traceback
 # ---------------------------------------------------------------------------
