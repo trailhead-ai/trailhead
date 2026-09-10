@@ -18,8 +18,9 @@ def init_git_repo(path: Path, *, origin: bool = False) -> None:
 
     With *origin* true the repo additionally gains an `origin` remote pointing at
     itself, fetched so remote-tracking refs exist. Callers that resolve a base
-    like `origin/main`, or that exercise fetch, need it; callers that do not must
-    leave it off, because its presence changes what those callers observe.
+    like `origin/main`, or that exercise fetch, need it. Callers that do not
+    leave it off so the repo stays the minimum their test needs — not because a
+    remote would break them; it does not.
     """
     path.mkdir(parents=True, exist_ok=True)
 
