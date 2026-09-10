@@ -274,3 +274,172 @@ def test_kill_is_routed_without_resolving_a_group(isolated_env, tmp_path) -> Non
     assert _TRACEBACK_MARKER not in combined
     assert "camp kill: " in combined
     assert "--group" not in combined
+
+
+# ---------------------------------------------------------------------------
+# --host <name> — the seam dispatch.main() hands a resolved Host through.
+#
+# In-process (imports camp.cli.dispatch directly, monkeypatches sys.argv/env)
+# rather than the subprocess `_run` used everywhere above in this file: these
+# two assertions — "the downstream handler received a clean argv" and "no
+# transport call was attempted" — need visibility into which Python object
+# was called with what, which a subprocess's exit code and stdout/stderr text
+# cannot show.
+# ---------------------------------------------------------------------------
+
+
+def _dispatch_module():
+    if str(_PLUGIN_DIR) not in sys.path:
+        sys.path.insert(0, str(_PLUGIN_DIR))
+    import importlib
+
+    return importlib.import_module("camp.cli.dispatch")
+
+
+@pytest.fixture()
+def hosts_env(tmp_path: Path) -> dict[str, str]:
+    """CAMP_CONFIG_DIR with hosts.toml declaring one host, config/state dirs
+    isolated in tmp_path."""
+    cfg = tmp_path / "config"
+    cfg.mkdir()
+    (cfg / "hosts.toml").write_text("[hosts.andromeda]\n", encoding="utf-8")
+    return {"CAMP_CONFIG_DIR": str(cfg), "CAMP_STATE_DIR": str(tmp_path / "state")}
+
+
+@pytest.mark.parametrize("verb", ["list", "sessions"])
+@pytest.mark.parametrize(
+    "flag_argv",
+    [["--host", "andromeda"], ["--host=andromeda"]],
+    ids=["space", "equals"],
+)
+def test_host_option_both_spellings_hand_the_same_clean_argv_downstream(
+    monkeypatch: pytest.MonkeyPatch,
+    hosts_env: dict[str, str],
+    verb: str,
+    flag_argv: list[str],
+) -> None:
+    dispatch = _dispatch_module()
+    for k, v in hosts_env.items():
+        monkeypatch.setenv(k, v)
+
+    calls: list[tuple] = []
+    monkeypatch.setattr(
+        dispatch, "_dispatch_host_command", lambda *args: calls.append(args)
+    )
+    monkeypatch.setattr(sys, "argv", ["camp", verb, *flag_argv, "--json"])
+
+    try:
+        dispatch.main()
+    except SystemExit as exc:
+        pytest.fail(f"unexpected exit {exc.code} before reaching the handler")
+
+    assert len(calls) == 1, calls
+    canonical, host, host_name, rest = calls[0]
+    assert canonical == verb
+    assert host_name == "andromeda"
+    assert host.ssh == "andromeda"
+    # The handler received a clean argv — no stray --host of either spelling,
+    # but the verb's OTHER flags (here --json) are still there.
+    assert not any(a == "--host" or a.startswith("--host=") for a in rest), rest
+    assert "--json" in rest, rest
+
+
+def test_host_named_but_undeclared_never_calls_the_transport(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
+    dispatch = _dispatch_module()
+    cfg = tmp_path / "config"
+    cfg.mkdir()
+    (cfg / "hosts.toml").write_text(
+        "[hosts.andromeda]\n[hosts.workshop]\n", encoding="utf-8"
+    )
+    monkeypatch.setenv("CAMP_CONFIG_DIR", str(cfg))
+    monkeypatch.setenv("CAMP_STATE_DIR", str(tmp_path / "state"))
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+
+    import importlib
+
+    transport = importlib.import_module("camp.host.transport")
+
+    def _boom(*args, **kwargs):
+        raise AssertionError("transport.run_camp must not be called for an undeclared host")
+
+    monkeypatch.setattr(transport, "run_camp", _boom)
+    monkeypatch.setattr(sys, "argv", ["camp", "list", "--host", "nope"])
+
+    with pytest.raises(SystemExit) as excinfo:
+        dispatch.main()
+    assert excinfo.value.code != 0
+    captured = capsys.readouterr()
+    assert "no host named 'nope' is declared" in captured.err
+
+
+def test_host_and_group_together_never_call_the_transport(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
+    dispatch = _dispatch_module()
+    cfg = tmp_path / "config"
+    cfg.mkdir()
+    (cfg / "hosts.toml").write_text("[hosts.andromeda]\n", encoding="utf-8")
+    monkeypatch.setenv("CAMP_CONFIG_DIR", str(cfg))
+    monkeypatch.setenv("CAMP_STATE_DIR", str(tmp_path / "state"))
+
+    import importlib
+
+    transport = importlib.import_module("camp.host.transport")
+
+    def _boom(*args, **kwargs):
+        raise AssertionError("transport.run_camp must not be called when --host and --group collide")
+
+    monkeypatch.setattr(transport, "run_camp", _boom)
+    monkeypatch.setattr(
+        sys, "argv", ["camp", "sessions", "--host", "andromeda", "--group", "testgrp"]
+    )
+
+    with pytest.raises(SystemExit) as excinfo:
+        dispatch.main()
+    assert excinfo.value.code != 0
+    captured = capsys.readouterr()
+    # Pins WHICH refusal fired, not just that something exited non-zero — a
+    # missing --host/--group mutual-exclusion check would instead fall through
+    # to the unrelated "no group resolved from cwd" refusal and still exit 1.
+    assert "--host" in captured.err, captured.err
+    assert "--group" in captured.err, captured.err
+    assert "no group resolved from cwd" not in captured.err, captured.err
+
+
+def test_trailing_host_flag_on_inapplicable_verb_reports_no_meaning_not_missing_value(
+    isolated_env: dict[str, str], tmp_path: Path
+) -> None:
+    """`--host` with no value at all, on a verb --host has no meaning for
+    regardless of a value (status is not in `_HOST_VERBS`), must report
+    "has no meaning here" — not "requires a value", which would tell the
+    operator to go supply a value that would be refused anyway."""
+    result = _run(["status", "--host"], env=isolated_env, cwd=tmp_path)
+
+    assert result.returncode != 0
+    assert "has no meaning here" in result.stderr, result.stderr
+    assert "requires a value" not in result.stderr, result.stderr
+
+
+def test_groups_verb_with_host_flag_refuses_instead_of_answering_locally(
+    isolated_env: dict[str, str], tmp_path: Path
+) -> None:
+    """`camp groups` is read-only and dispatched before group resolution —
+    its early return in main() used to precede the --host reader entirely,
+    so `camp groups --host andromeda` silently answered LOCALLY at exit 0
+    instead of refusing. --host must never be silently dropped."""
+    result = _run(["groups", "--host", "andromeda"], env=isolated_env, cwd=tmp_path)
+
+    assert result.returncode != 0
+    assert "--host" in result.stderr
+    assert "no groups configured" not in result.stdout
+
+
+def test_group_verb_with_host_flag_refuses_instead_of_answering_locally(
+    isolated_env: dict[str, str], tmp_path: Path
+) -> None:
+    result = _run(["group", "testgrp", "--host", "andromeda"], env=isolated_env, cwd=tmp_path)
+
+    assert result.returncode != 0
+    assert "--host" in result.stderr

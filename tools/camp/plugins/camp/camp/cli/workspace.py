@@ -7,8 +7,12 @@ workspace's resolved path. (Workspace *creation* — ``new`` — lives in ``grou
 from __future__ import annotations
 
 import sys
+from typing import TYPE_CHECKING
 
 from .dispatch import _slug_from_args_or_cwd
+
+if TYPE_CHECKING:
+    from ..host.config import Host
 
 
 def _cmd_ls_group_cli(
@@ -81,6 +85,60 @@ def _cmd_ls_all_groups_cli(args: list[str], env: dict[str, str] | None) -> None:
     entries.sort(key=lambda e: e.get("group") or "")
 
     render_workspace_list(entries, as_json=as_json, group_failures=unparsable)
+
+
+def _cmd_ls_host_cli(args: list[str], host: "Host", host_name: str) -> None:
+    """camp list --host <name> [--json] — every group's workspaces on one
+    declared remote machine, relayed through the SSH transport.
+
+    Reached ONLY from ``cli/dispatch.py``'s ``--host`` handling in
+    ``_dispatch_host_command``, after the name has resolved to a declared
+    `Host` — the same shape ``_cmd_ls_all_groups_cli`` is reached in for the
+    ``--all-groups`` axis. The far side is ALWAYS invoked with the
+    all-groups + ``--json`` form (never narrowed by the local ``--group`` a
+    remote invocation must never carry — refused earlier in `main()`), so a
+    remote answer always spans that machine's groups.
+
+    Delegates everything downstream of "what argv to send" and "how to print
+    an ok row" to :func:`camp.host.relay.relay_all_groups` — the shared
+    seam every `--host` verb dispatches through — which owns the transport
+    call, outcome classification, and every rendering except this verb's own
+    "how do I print one answered row" callback.
+    """
+    from ..host.relay import relay_all_groups
+
+    as_json = "--json" in args
+
+    def _render_human_rows(rows: list[dict]) -> None:
+        for row in rows:
+            if not row.get("ok"):
+                continue
+            # Version skew across the operator's two machines is the
+            # expected steady state for this feature, not an edge case — a
+            # remote camp of a different version can answer with a row that
+            # omits a key this rendering depends on. Degrade that ONE row
+            # rather than let it take the whole answer down; the well-formed
+            # rows around it still print.
+            try:
+                slug = row["slug"]
+                workspace_path = row["workspace_path"]
+            except KeyError as e:
+                print(
+                    f"camp list: host {host_name!r} sent a workspace row "
+                    f"missing {e.args[0]!r} — skipping",
+                    file=sys.stderr,
+                )
+                continue
+            print(f"{slug} {workspace_path}")
+
+    relay_all_groups(
+        "list",
+        host,
+        host_name,
+        ["list", "--all-groups", "--json"],
+        as_json=as_json,
+        render_human_rows=_render_human_rows,
+    )
 
 
 def _cmd_activate_group_cli(
