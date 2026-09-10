@@ -1237,7 +1237,16 @@ class TestResolveMergeStrategy:
     def test_never_returns_a_strategy_absent_from_the_permitted_set(self) -> None:
         """Enumerated from the module's own strategy vocabulary
         (`_MERGE_METHOD_FLAGS`) rather than a hand-typed list of cases — every
-        subset of it, derived by power set, is exercised."""
+        subset of it, derived by power set, is exercised.
+
+        The membership assertion is deliberately scoped to the NON-EMPTY
+        subsets, and `checked_nonempty` pins that exactly those ran. Membership
+        is unsatisfiable for the empty set: the resolver is total, so it must
+        return some strategy, and every strategy is absent from an empty
+        permitted set. That case is asserted instead by
+        `test_no_permitted_strategy_resolves_to_squash_with_its_own_reason`,
+        which pins both the returned strategy and its distinct reason. Every
+        subset still gets the non-empty-reason assertion above."""
         from trailhead.vcs.github import (
             AUTOMATIC_MERGE_METHOD,
             _MERGE_METHOD_FLAGS,
@@ -1255,6 +1264,33 @@ class TestResolveMergeStrategy:
                     assert strategy in permitted
                     checked_nonempty += 1
         assert checked_nonempty == 2 ** len(vocabulary) - 1
+
+    def test_no_permitted_strategy_resolves_to_squash_with_its_own_reason(self) -> None:
+        """A repository reporting no permitted strategy still resolves, because
+        the resolver is total. It cannot satisfy membership — every strategy is
+        absent from an empty set — so it returns the safe direction and says so
+        under a reason distinct from every other squashing outcome, letting a
+        reader tell "permits nothing" from a lookup failure or the interim rule.
+        """
+        from trailhead.vcs.github import (
+            AUTOMATIC_MERGE_METHOD,
+            PERMITTED_STRATEGIES_LOOKUP_FAILED,
+            resolve_merge_strategy,
+        )
+
+        strategy, reason = resolve_merge_strategy(AUTOMATIC_MERGE_METHOD, frozenset())
+
+        assert strategy == "squash"
+        _, lookup_failed_reason = resolve_merge_strategy(
+            AUTOMATIC_MERGE_METHOD, PERMITTED_STRATEGIES_LOOKUP_FAILED
+        )
+        _, interim_reason = resolve_merge_strategy(
+            AUTOMATIC_MERGE_METHOD, frozenset({"merge", "squash"})
+        )
+        assert reason.split(":", 1)[0] not in {
+            lookup_failed_reason.split(":", 1)[0],
+            interim_reason.split(":", 1)[0],
+        }
 
     def test_reason_prefixes_are_pinned_and_pairwise_distinct(self) -> None:
         """Prefixes are read back from the resolver and refusal-formatter
