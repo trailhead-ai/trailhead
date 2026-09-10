@@ -418,25 +418,26 @@ class TestWriterGuardRefusesNonStringDiskOwner:
         assert owner_of(read_central_manifest(mpath)) == "orion"
 
 
-class TestWriterGuardUnreadableManifestDoesNotDisableGuard:
-    """A pre-write read that fails must not silently disable the guard — the
-    exact drop the guard exists to catch would otherwise go through
-    unannounced."""
+class TestWriterGuardUnreadableManifestOverwritesLoudly:
+    """An on-disk manifest the pre-write read cannot parse has no readable
+    owner to protect, so the write proceeds — self-heal, not refusal — but
+    never silently: a diagnostic naming the path and the read failure goes
+    to stderr first."""
 
-    def test_corrupt_on_disk_manifest_refuses_write_rather_than_silently_proceeding(
-        self, tmp_path
+    def test_corrupt_on_disk_manifest_is_overwritten_with_a_stderr_warning(
+        self, tmp_path, capsys
     ):
-        from camp.group.manifest import ManifestError, write_central_manifest
+        from camp.group.manifest import read_central_manifest, write_central_manifest
 
         mpath = tmp_path / "manifest.json"
         mpath.write_text("{not valid json")
 
-        with pytest.raises(ManifestError):
-            write_central_manifest(mpath, {"schema_version": 1, "members": []})
+        write_central_manifest(mpath, {"schema_version": 1, "members": []})
 
-        assert mpath.read_text() == "{not valid json", (
-            "a refused write must leave the corrupt on-disk manifest untouched"
-        )
+        assert read_central_manifest(mpath) == {"schema_version": 1, "members": []}
+        captured = capsys.readouterr()
+        assert str(mpath) in captured.err
+        assert "could not be read" in captured.err
 
     def test_opt_in_still_allows_overwriting_a_corrupt_on_disk_manifest(self, tmp_path):
         from camp.group.manifest import read_central_manifest, write_central_manifest

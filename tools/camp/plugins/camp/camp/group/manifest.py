@@ -62,6 +62,7 @@ from __future__ import annotations
 import fcntl
 import json
 import os
+import sys
 import tempfile
 from contextlib import contextmanager
 from pathlib import Path
@@ -95,51 +96,65 @@ def write_central_manifest(
     accepted unconditionally, opt-in or not — this guard is invisible on the
     hot path of an ownerless workspace.
 
-    An on-disk manifest that cannot even be read (malformed JSON) or whose
-    "owner" is present but not a string is refused the same way as a
-    would-be drop, rather than treated as "nothing to protect" — either
-    shape is exactly the case this guard exists to catch, and letting it
-    read as ownerless would silently disable the guard for the one write
-    that most needs it. `allow_owner_change=True` still opts out, same as
-    every other refusal here.
+    An on-disk manifest whose "owner" is present but not a string is refused
+    the same way as a would-be drop, rather than treated as "nothing to
+    protect" — that shape is exactly the case this guard exists to catch,
+    and letting it read as ownerless would silently disable the guard for
+    the one write that most needs it. `allow_owner_change=True` still opts
+    out, same as every other refusal here.
+
+    An on-disk manifest that cannot even be read (malformed or truncated
+    JSON) is different: there is no owner to protect because there is
+    nothing to read, so this is treated as ownerless rather than refused —
+    refusing here would block every writer (including reconcile's own
+    self-heal) on damage the write is trying to repair, with no
+    `allow_owner_change` surface most callers can reach to recover. The
+    write proceeds, but never silently: a diagnostic naming the path and
+    the read failure goes to stderr first, so an operator sees that
+    whatever owner the corrupt file may have carried was not verified.
 
     Args:
         path:  Absolute path for the manifest file (parent must exist).
         data:  Dict to serialize as JSON.
         allow_owner_change: Opt in to writing a value that changes or drops
-            an owner already on disk. Defaults to False.
+            a known on-disk owner (a string "owner" successfully read, or a
+            non-string "owner" value). Defaults to False. Has no bearing on
+            an unreadable on-disk manifest, which is never refused.
 
     Raises:
-        ManifestError: If the write would drop or change an on-disk owner,
-            the on-disk manifest cannot be read, or its "owner" is present
-            but not a string — none without `allow_owner_change=True`.
+        ManifestError: If the write would drop or change a known on-disk
+            owner, or the on-disk owner is present but not a string — none
+            without `allow_owner_change=True`.
     """
     if not allow_owner_change and path.is_file():
         try:
-            on_disk = read_central_manifest(path)
+            on_disk: dict[str, Any] | None = read_central_manifest(path)
         except ManifestError as e:
-            raise ManifestError(
-                f"camp: refusing to write manifest at {path}: the on-disk "
-                f"manifest could not be read ({e}) — pass "
-                f"allow_owner_change=True for a deliberate overwrite"
-            ) from e
-        disk_owner = on_disk.get("owner")
-        if disk_owner is not None:
-            if not isinstance(disk_owner, str):
-                raise ManifestError(
-                    f"camp: refusing to write manifest at {path}: the "
-                    f"on-disk owner is not a string (got "
-                    f"{type(disk_owner).__name__}) — pass "
-                    f"allow_owner_change=True for a deliberate ownership "
-                    f"change"
-                )
-            if data.get("owner") != disk_owner:
-                raise ManifestError(
-                    f"camp: refusing to write manifest at {path}: this write "
-                    f"would drop or change the recorded owner {disk_owner!r} "
-                    f"— pass allow_owner_change=True for a deliberate "
-                    f"ownership change"
-                )
+            print(
+                f"camp: warning: on-disk manifest at {path} could not be "
+                f"read ({e}) — overwriting it; any owner it may have "
+                f"recorded could not be verified",
+                file=sys.stderr,
+            )
+            on_disk = None
+        if on_disk is not None:
+            disk_owner = on_disk.get("owner")
+            if disk_owner is not None:
+                if not isinstance(disk_owner, str):
+                    raise ManifestError(
+                        f"camp: refusing to write manifest at {path}: the "
+                        f"on-disk owner is not a string (got "
+                        f"{type(disk_owner).__name__}) — pass "
+                        f"allow_owner_change=True for a deliberate ownership "
+                        f"change"
+                    )
+                if data.get("owner") != disk_owner:
+                    raise ManifestError(
+                        f"camp: refusing to write manifest at {path}: this write "
+                        f"would drop or change the recorded owner {disk_owner!r} "
+                        f"— pass allow_owner_change=True for a deliberate "
+                        f"ownership change"
+                    )
 
     path.parent.mkdir(parents=True, exist_ok=True)
 

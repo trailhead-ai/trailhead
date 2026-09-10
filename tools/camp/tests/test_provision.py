@@ -1640,3 +1640,45 @@ class TestOwnerReadFailureDoesNotWipePerMemberState:
             "a failure reading the workspace-level owner must not wipe the "
             "unrelated prior per-member provision_state"
         )
+
+
+# ---------------------------------------------------------------------------
+# Regression: reconcile must self-heal a truncated on-disk manifest on the
+# ownerless hot path — a host that never declared a name, on a workspace
+# that never carried an owner. The write-guard's OWN pre-write read failing
+# must not turn into a refusal that blocks reconcile's rebuild.
+# ---------------------------------------------------------------------------
+
+
+class TestReconcileSelfHealsUnreadableOwnerlessManifest:
+    def test_reconcile_worktree_rebuilds_a_truncated_manifest_with_no_declared_owner(
+        self, tmp_path, capsys
+    ):
+        import camp.provision.reconcile as reconcile
+        from camp.group.manifest import read_central_manifest
+
+        repo = tmp_path / "repo"
+        _init_git_repo(repo)
+        env = _camp_state_env(tmp_path)
+        # No hosts.toml anywhere — this host never declared a name.
+        env["CAMP_CONFIG_DIR"] = str(tmp_path / "config")
+        env["HOME"] = str(tmp_path / "home")
+        group = _make_group_config(
+            "ownerlesshealg",
+            [{"name": "repo", "repo_root": str(repo), "base": "origin/main", "tasks": []}],
+        )
+
+        reconcile.reconcile_worktree(group, "s", env=env)
+        mpath = _workspace_dir("ownerlesshealg", "s", env) / "manifest.json"
+        mpath.write_text("{ truncated")
+
+        result = reconcile.reconcile_worktree(group, "s", env=env)
+
+        assert result["member_count"] == 1
+        rebuilt = read_central_manifest(mpath)
+        assert rebuilt["members"][0]["name"] == "repo"
+        assert "owner" not in rebuilt
+
+        captured = capsys.readouterr()
+        assert str(mpath) in captured.err
+        assert "could not be read" in captured.err
