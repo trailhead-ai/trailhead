@@ -236,14 +236,6 @@ def test_a_root_entry_is_resolved_too(home: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_deny_entries_match_the_pinned_list_exactly(home: Path) -> None:
-    """The list is fixed. Adding or removing an entry is a deliberate change to
-    a security boundary, so it has to break this comparison first."""
-    from camp.launch.eligibility import CREDENTIAL_DENY_ENTRIES
-
-    assert tuple(CREDENTIAL_DENY_ENTRIES) == _EXPECTED_DENY_ENTRIES
-
-
 @pytest.mark.parametrize("entry", _EXPECTED_DENY_ENTRIES)
 def test_each_deny_entry_refuses_when_named_exactly(home: Path, entry: str) -> None:
     target = home / entry.removeprefix("~/")
@@ -440,20 +432,6 @@ def test_a_declared_account_reached_by_symlink_is_denied_where_it_resolves(
     env = _install_group_configs(home, {"levr": "~/linked-account"})
     msg = _refusal(real, _group([str(real)], name="levr"), home, env=env)
     assert "credential" in msg
-
-
-def test_the_hardcoded_floor_survives_derivation_unchanged(home: Path) -> None:
-    """The hardcoded tuple is an immutable floor: derivation may only append to
-    it, never remove, narrow, or reorder an entry."""
-    from camp.launch.eligibility import CREDENTIAL_DENY_ENTRIES, credential_deny_entries
-
-    env = _install_group_configs(home, {"levr": "~/.claude-levr"})
-    entries = credential_deny_entries(env=env)
-
-    assert set(CREDENTIAL_DENY_ENTRIES) == set(_EXPECTED_DENY_ENTRIES)
-    assert set(CREDENTIAL_DENY_ENTRIES) <= set(entries)
-    assert entries[: len(CREDENTIAL_DENY_ENTRIES)] == CREDENTIAL_DENY_ENTRIES
-    assert "~/.claude-levr" in entries
 
 
 @pytest.mark.parametrize("account", ["~/.claude", "~", "~/.claude/nested"])

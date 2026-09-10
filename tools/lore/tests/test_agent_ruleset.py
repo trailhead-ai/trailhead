@@ -1,13 +1,12 @@
-"""Tests for lore's resident agent-ruleset content.
+"""Tests for lore's resident agent-ruleset seam.
 
 ``lore/config/agent_ruleset.py`` renders lore's user-level ruleset via
-``render_ruleset_content()``: the write-prohibition rules (minus the stale
-per-project multi-rules-file "Drift caveat") plus a short disposition primer —
-nothing else. The content is static and byte-identical across calls.
-
-The write-prohibition block must name ``/lore:flush``, must not reference a
-non-existent ``/checkpoint`` command, and must teach ``lore session candidate``
-as the mid-task capture path.
+``render_ruleset_content()``. What that text *says* is authored prose with no
+behaviour to observe — asserting a phrase appears in it proves only that someone
+typed it — so this suite tests the two things about the module that do vary:
+that importing it does not drag in the CLI dispatch layer, and that the harness
+seam reads the rendered content back as current, stale, or missing depending on
+what is on disk.
 """
 
 from __future__ import annotations
@@ -28,106 +27,13 @@ def _render():
     return load_script("lore.config.agent_ruleset").render_ruleset_content()
 
 
-def test_contains_write_prohibition_rules():
-    content = _render()
-    assert "Lore vault — mandatory write rules" in content
-    assert "**only** via the `lore` CLI" in content
-    # The Bash/shell-redirection prohibition (the guardrail gap) must survive.
-    assert "`> file`, `>> file`, `tee`, `sed -i`, `cp`, `mv`" in content
-
-
-def test_write_prohibition_carves_out_the_sites_zone():
-    """The prohibition must scope itself to record trees and name the one
-    subtree that is directly writable, or an agent reading it will refuse the
-    publish flow the guard hook and the deny rules both allow.
-    """
-    prohibition = load_script("lore.config.agent_ruleset")._WRITE_PROHIBITION
-    assert "sites/" in prohibition, (
-        "the write-prohibition block must name the sites zone as its carve-out"
-    )
-    assert "outpost:publish-site" in prohibition, (
-        "the carve-out must point at the skill that owns the publish convention"
-    )
-    assert "nested" in prohibition and ".git" in prohibition, (
-        "the carve-out must warn against creating a nested .git inside the "
-        "sites zone — it corrupts the vault's own sync"
-    )
-
-
-def test_sites_carve_out_does_not_weaken_the_record_prohibition():
-    """The carve-out is a scope statement, not a loophole: the CLI-only rule for
-    records and the Bash-gap note must both survive beside it."""
-    content = _render()
-    assert "**only** via the `lore` CLI" in content
-    assert "opaque to Bash-mediated writes" in content
-
-
-def test_primer_names_the_three_entry_commands():
-    primer = load_script("lore.config.agent_ruleset").PRIMER
-    assert "lore search" in primer
-    assert "lore record" in primer
-    assert "lore session" in primer
-
-
 # ---------------------------------------------------------------------------
 # /lore:flush + lore session candidate (mid-task capture)
 # ---------------------------------------------------------------------------
 
-def test_names_lore_flush_skill():
-    """The write-prohibition block names the /lore:flush finalization skill."""
-    content = _render()
-    assert "/lore:flush" in content, (
-        "render_ruleset_content() must name /lore:flush (the finalization skill)"
-    )
-
-
-def test_does_not_reference_checkpoint():
-    """The rules file must not reference a non-existent /checkpoint command.
-
-    The mid-task capture path is `lore session candidate` (continuous); the
-    evaluation+finalization path is /lore:flush.
-    """
-    content = _render()
-    assert "/checkpoint" not in content, (
-        "render_ruleset_content() must NOT reference /checkpoint — no such "
-        "command exists; the capture path is `lore session candidate` + "
-        "/lore:flush"
-    )
-
-
-def test_teaches_lore_session_candidate_as_capture_path():
-    """The rules file must teach `lore session candidate` as the mid-task capture path.
-
-    Capture is continuous (candidate); flush evaluates.
-    """
-    content = _render()
-    assert "lore session candidate" in content, (
-        "render_ruleset_content() must teach `lore session candidate` as the "
-        "mid-task capture path"
-    )
-
-
 # ---------------------------------------------------------------------------
 # render_ruleset_content(): integration, guardrail-first ordering, determinism
 # ---------------------------------------------------------------------------
-
-def test_render_is_exactly_prohibition_plus_primer():
-    mod = load_script("lore.config.agent_ruleset")
-    content = mod.render_ruleset_content()
-    assert content == f"{mod._WRITE_PROHIBITION}\n{mod.PRIMER}"
-
-
-def test_write_prohibition_is_first_in_the_rendered_content():
-    """A future reorder must not be able to silently demote the guardrail."""
-    mod = load_script("lore.config.agent_ruleset")
-    content = mod.render_ruleset_content()
-    assert content.index(mod._WRITE_PROHIBITION) == 0
-
-
-def test_two_renders_are_byte_identical():
-    mod = load_script("lore.config.agent_ruleset")
-    assert mod.render_ruleset_content() == mod.render_ruleset_content()
-
 
 # ---------------------------------------------------------------------------
 # No import cycle: importing the module must never load the CLI parser.

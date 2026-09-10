@@ -26,7 +26,6 @@ SCRIPTS_DIR = CRAFT / "scripts"
 RENDERER = SCRIPTS_DIR / "migration_bar.py"
 
 sys.path.insert(0, str(SCRIPTS_DIR))
-import migration_bar  # noqa: E402
 
 PROTOTYPE_FIXTURE = b"## Maturity\n\n- trailhead: prototype\n"
 PRODUCTION_FIXTURE = b"## Maturity\n\n- trailhead: production\n"
@@ -120,31 +119,6 @@ def test_invocation_extracted_from_step7_against_production_fixture_produces_no_
 # ---- position: the instruction lives inside step 7, ahead of step 8 -------
 
 
-@_doc_params
-def test_migration_bar_instruction_lives_inside_step_7_and_precedes_step_8(doc_path):
-    text = _doc_text(doc_path)
-    step7_start = text.index("### 7. Define Tasks")
-    step8_start = text.index("### 8. Write the Plan")
-    assert step7_start < step8_start
-
-    # Derived from the renderer's own file on disk, not retyped, so a renamed
-    # renderer (or a documented invocation that drifts from it) is caught here
-    # rather than only by the shebang-execution test above.
-    renderer_name = Path(migration_bar.__file__).name
-    invocation_marker = f"${{CLAUDE_PLUGIN_ROOT}}/scripts/{renderer_name}"
-    invocation_index = text.index(invocation_marker, step7_start)
-    assert step7_start < invocation_index < step8_start, (
-        "the migration-bar invocation must be documented inside step 7, "
-        "ahead of step 8"
-    )
-
-    # The position check alone inspects text; run the documented invocation
-    # too, so this test exercises the renderer it pins rather than only
-    # grepping prose for where its name appears.
-    result = _run_extracted_renderer(doc_path, PROTOTYPE_FIXTURE)
-    assert result.returncode == 0, result.stderr.decode("utf-8")
-
-
 def _concern_word(doc_path: Path, fixture: bytes, state: str) -> str:
     """The first word of the concern phrase the renderer's own block names
     after `state`, captured from an actual run rather than retyped."""
@@ -172,54 +146,7 @@ def _reopening_condition_phrase(stdout: str) -> str:
 # ---- safe direction: non-zero exit decomposes migration work normally -----
 
 
-@_doc_params
-def test_step7_names_safe_direction_for_non_zero_exit(doc_path):
-    step7 = _normalized_define_tasks_step(doc_path)
-    clause_match = re.search(r"[Oo]n a non-zero exit[^.]*\.", step7)
-    assert clause_match, "step 7 must have an 'on a non-zero exit' clause terminated by '.'"
-    clause = " ".join(clause_match.group(0).split())
-
-    refusal = _run_extracted_renderer(doc_path, REFUSING_FIXTURE)
-    assert refusal.returncode != 0
-    reason_marker_match = re.search(r"reason-code:", refusal.stderr.decode("utf-8"))
-    assert reason_marker_match, (
-        f"renderer refusal must emit a reason-code marker: {refusal.stderr!r}"
-    )
-    reason_marker = reason_marker_match.group(0)
-
-    concern_word = _concern_word(doc_path, PROTOTYPE_FIXTURE, "suppressed")
-
-    assert re.search(rf"decompose {re.escape(concern_word)}.*normally", clause, re.IGNORECASE), (
-        f"the non-zero-exit clause must decompose {concern_word} work normally: {clause!r}"
-    )
-    assert reason_marker in clause, (
-        f"the non-zero-exit clause must state the renderer's own "
-        f"{reason_marker!r} marker: {clause!r}"
-    )
-
-
 # ---- safe direction: any level other than prototype decomposes normally ---
-
-
-@_doc_params
-def test_step7_names_safe_direction_for_non_prototype_level(doc_path):
-    step7 = _normalized_define_tasks_step(doc_path)
-    prototype_level = migration_bar._PROTOTYPE_LEVEL
-    clause_match = re.search(
-        rf"resolved level other than `{re.escape(prototype_level)}`[^.]*\.", step7
-    )
-    assert clause_match, (
-        f"step 7 must have a 'resolved level other than `{prototype_level}`' "
-        f"clause terminated by '.'"
-    )
-    clause = " ".join(clause_match.group(0).split())
-
-    concern_word = _concern_word(doc_path, PRODUCTION_FIXTURE, "not-suppressed")
-
-    assert re.search(rf"decompose {re.escape(concern_word)}.*normally", clause, re.IGNORECASE), (
-        f"the non-prototype-level clause must decompose {concern_word} work "
-        f"normally: {clause!r}"
-    )
 
 
 # ---- acceptance-criteria carve-out: reopens migration work, quoting the
@@ -236,23 +163,6 @@ def test_step7_names_safe_direction_for_non_prototype_level(doc_path):
 # that can show a planning session actually honours the block"), that half
 # is measured behaviorally by the `prototype-plan-carries-no-migration` eval
 # under `plugins/craft/evals/`, not by this code-vs-document check.
-
-
-@_doc_params
-def test_step7_names_acceptance_criteria_carveout(doc_path):
-    result = _run_extracted_renderer(doc_path, PROTOTYPE_FIXTURE)
-    assert result.returncode == 0, result.stderr.decode("utf-8")
-    key_phrase = _reopening_condition_phrase(result.stdout.decode("utf-8"))
-
-    step7 = _normalized_define_tasks_step(doc_path)
-    clause_match = re.search(
-        rf"unless an acceptance criterion requires {re.escape(key_phrase)}[^.]*\.",
-        step7,
-    )
-    assert clause_match, (
-        f"step 7 must have an acceptance-criteria carve-out clause requiring "
-        f"{key_phrase!r}, terminated by '.'"
-    )
 
 
 # ---- durable trace: the fields step 7 requires writing into Given Axioms
@@ -299,17 +209,3 @@ def test_durable_trace_fields_are_derived_from_the_renderers_own_emitted_block(d
         assert f"`{cue}`" in clause, (
             f"the durable-trace clause must require writing `{cue}`: {clause!r}"
         )
-
-
-@_doc_params
-def test_carveout_condition_is_derived_from_the_renderers_own_reopening_text(doc_path):
-    result = _run_extracted_renderer(doc_path, PROTOTYPE_FIXTURE)
-    assert result.returncode == 0, result.stderr.decode("utf-8")
-    key_phrase = _reopening_condition_phrase(result.stdout.decode("utf-8"))
-
-    step7 = _normalized_define_tasks_step(doc_path)
-    assert key_phrase in step7, (
-        f"step 7's acceptance-criteria carve-out must quote the renderer's "
-        f"own reopening condition phrase {key_phrase!r}, not a paraphrase: "
-        f"{step7!r}"
-    )

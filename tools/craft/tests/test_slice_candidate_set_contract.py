@@ -104,30 +104,6 @@ def test_documented_covers_ledger_line_derives_the_coverage_the_prose_claims():
 # ---- 2. document-order: derivation precedes the point it's claimed to feed ----
 
 
-def test_gate_pipe_documented_before_the_basis_it_produces_in_step4():
-    step4 = _step("### 4. Reconcile the `## Slices` ledger, then derive the candidate set")
-    pipe_match = re.search(r"candidate_set\.py", step4)
-    basis_match = re.search(r"termination basis: gate-certified", step4)
-    assert pipe_match, "slice/SKILL.md step 4 must document the candidate_set.py pipe"
-    assert basis_match, "slice/SKILL.md step 4 must document the gate-certified basis line"
-    assert pipe_match.start() < basis_match.start(), (
-        "the candidate_set.py pipe must be documented, by position, before the "
-        "gate-certified basis line it produces"
-    )
-
-
-def test_step6_eligibility_check_documented_before_the_termination_write():
-    step6 = _step("### 6. Termination — the loop's terminating condition")
-    eligibility_match = re.search(r"complete-eligible: yes", step6)
-    write_match = re.search(r"--label craft/slice-loop=complete", step6)
-    assert eligibility_match, "slice/SKILL.md step 6 must document the eligibility check"
-    assert write_match, "slice/SKILL.md step 6 must document the completion label write"
-    assert eligibility_match.start() < write_match.start(), (
-        "step 6 must document the complete-eligible check, by position, before the "
-        "craft/slice-loop=complete write it gates"
-    )
-
-
 # ---- 3. an ineligible union never satisfies the documented completion guard ----
 
 

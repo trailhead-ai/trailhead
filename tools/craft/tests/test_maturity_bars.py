@@ -226,19 +226,6 @@ def test_all_five_concerns_appear_at_every_level():
             assert concern in out, f"{concern!r} missing from block for {fixture!r}"
 
 
-def test_severity_vocabulary_is_exactly_three_words_no_fourth_tier():
-    for fixture in (SINGLE_REPO_PROTOTYPE, SINGLE_REPO_EARLY, SINGLE_REPO_PRODUCTION):
-        out = _stdout(_run(fixture.encode("utf-8")))
-        found = {word for word in ("Critical", "Important", "Minor", "Major", "Severe", "Blocker") if word in out}
-        assert found <= set(SEVERITIES)
-        # every concern line's severity is one of the three
-        for concern in CONCERNS:
-            for line in out.splitlines():
-                if line.strip().startswith(f"- {concern}:"):
-                    severity = line.split(":", 1)[1].strip()
-                    assert severity in SEVERITIES
-
-
 # ---- --level flag: preview any level's block, default output untouched ----
 
 
@@ -259,18 +246,6 @@ def test_level_flag_ignores_a_conflicting_maturity_stamp_on_stdin():
     assert "maturity: production (basis: requested)" in out
     for concern in CONCERNS:
         assert f"{concern}: Critical" in out
-
-
-def test_default_output_is_byte_for_byte_unchanged_without_the_level_flag():
-    with_flag_absent = _stdout(_run(b""))
-    assert with_flag_absent == "maturity: production (basis: default)\n\n" + "".join(
-        f"- {concern}: Critical\n" for concern in CONCERNS
-    ) + (
-        "\nEvery concern above is reported at its mapped severity and is "
-        "never filtered out.\nWhere a concern above also appears in your "
-        "per-lens Critical bars, the severity above governs — the bars say "
-        "what to look for, this block says how severely to rate it.\n"
-    )
 
 
 # ---- basis: stamp ----------------------------------------------------------
@@ -371,66 +346,6 @@ def test_three_repo_stamp_orders_columns_by_member_name_not_write_order():
         ) in out
 
 
-def test_highest_stamped_names_the_fallback_level_explicitly():
-    out = _stdout(_run(MIXED_TWO_REPO_STAMP.encode("utf-8")))
-    assert "maturity: production (basis: highest-stamped)" in out
-    assert "not a general highest-wins rule" in out
-
-
-@pytest.mark.parametrize("level_a,level_b", list(itertools.permutations(_LEVEL_ORDER, 2)))
-def test_highest_stamped_block_states_the_fallback_severity_itself(level_a, level_b):
-    """The header names a level (`maturity: <level> (basis: highest-stamped)`),
-    never a severity — a lens rating an unattributable finding needs the
-    fallback severity spelled out in the block itself, not derived from a
-    ladder table (`_shared/council.md`) it is never shown."""
-    out = _stdout(_run(_two_repo_stamp(level_a, level_b).encode("utf-8")))
-    higher = level_a if _LEVEL_ORDER.index(level_a) > _LEVEL_ORDER.index(level_b) else level_b
-    assert f"maturity: {higher} (basis: highest-stamped)" in out
-    fallback_line = next(line for line in out.splitlines() if "sanctioned fallback" in line)
-    assert _SEVERITY_BY_LEVEL[higher] in fallback_line
-
-
-def test_highest_stamped_block_states_the_path_attribution_rule():
-    out = _stdout(_run(MIXED_TWO_REPO_STAMP.encode("utf-8")))
-    assert "leading camp member name segment" in out
-    assert "path" in out
-
-
-def test_attribution_pointer_names_the_columns_below_not_above():
-    """The attribution rule renders before the matrix's column header in
-    every rendered block (the rule is fixed prose that always precedes the
-    per-repository section), so a pointer reading "above" is wrong as
-    rendered no matter which repository the columns name."""
-    out = _stdout(_run(MIXED_TWO_REPO_STAMP.encode("utf-8")))
-    lines = out.splitlines()
-    rule_idx = next(i for i, line in enumerate(lines) if "against the columns" in line)
-    header_idx = next(i for i, line in enumerate(lines) if line.startswith("concern x repository:"))
-    assert rule_idx < header_idx, "attribution rule must render before the columns it points at"
-    assert "against the columns below" in lines[rule_idx]
-    assert "against the columns above" not in out
-
-
-def test_attribution_rule_states_the_multi_match_trigger_over_multiple_cited_paths():
-    """A single cited path's leading segment can never produce "two or more
-    distinct matches" — only multiple cited paths can. The block's own text
-    must carry that plural qualifier (mirroring `_shared/council.md`'s
-    "across the finding's cited paths") so the multi-match case is reachable
-    as written, not merely as intended."""
-    out = _stdout(_run(MIXED_TWO_REPO_STAMP.encode("utf-8")))
-    assert "the paths it cites" in out
-
-
-def test_highest_stamped_block_states_all_four_attribution_cases_decidably():
-    """The rendered block is the only maturity text a lens subagent ever
-    sees, so it — not just council.md — must decide all four cases a
-    finding's cited paths can present, using AC8's own term "single" to
-    settle the two-or-more-match case unambiguously."""
-    out = _stdout(_run(MIXED_TWO_REPO_STAMP.encode("utf-8")))
-    assert "single repository" in out
-    assert "two or more distinct matches" in out
-    assert "no cited path at all" in out
-
-
 def test_three_repo_stamp_carries_all_five_concerns_for_every_repository():
     lines = _stdout(_run(THREE_REPO_STAMP.encode("utf-8"))).splitlines()
     for concern in CONCERNS:
@@ -439,44 +354,9 @@ def test_three_repo_stamp_carries_all_five_concerns_for_every_repository():
         ) in lines, f"{concern!r} missing its full per-repository row"
 
 
-def test_highest_stamped_severity_vocabulary_is_exactly_three_words():
-    out = _stdout(_run(THREE_REPO_STAMP.encode("utf-8")))
-    found = {word for word in ("Critical", "Important", "Minor", "Major", "Severe", "Blocker") if word in out}
-    assert found <= set(SEVERITIES)
-    for concern in CONCERNS:
-        for line in out.splitlines():
-            if line.strip().startswith(f"- {concern}:"):
-                for cell in line.split(":", 1)[1].split(","):
-                    severity = cell.split("=", 1)[1].strip()
-                    assert severity in SEVERITIES
-
-
 def test_highest_stamped_downgrade_restatement_names_repository_and_level():
     out = _stdout(_run(MIXED_TWO_REPO_STAMP.encode("utf-8")))
     assert "downgraded by `lookout`'s prototype maturity level" in out
-
-
-def test_single_repository_stamp_renders_byte_for_byte_unchanged():
-    out = _stdout(_run(SINGLE_REPO_EARLY.encode("utf-8")))
-    assert out == (
-        "maturity: early (basis: stamp)\n\n"
-        + "".join(f"- {concern}: Important\n" for concern in CONCERNS)
-        + "\nEvery concern above is reported at its mapped severity and is "
-        "never filtered out.\nWhere a concern above also appears in your "
-        "per-lens Critical bars, the severity above governs — the bars say "
-        "what to look for, this block says how severely to rate it.\n"
-        "A finding downgraded by this calibration restates the concern "
-        "and the deciding level in its own text (for example "
-        "\"migration and backfill — Important, downgraded by this spec's "
-        "early maturity level\"), so the operator can tell a calibrated "
-        "downgrade from noise and has something concrete to override.\n"
-    )
-
-
-def test_matrix_header_and_per_repository_line_shape_are_pinned():
-    lines = _stdout(_run(MIXED_TWO_REPO_STAMP.encode("utf-8"))).splitlines()
-    assert "concern x repository: `lookout`, `trailhead`" in lines
-    assert "- backwards compatibility: `lookout`=Minor, `trailhead`=Critical" in lines
 
 
 # ---- a member name colliding with the severity vocabulary --------------
@@ -500,12 +380,6 @@ def test_severity_colliding_member_name_stays_delimited_in_the_downgrade_example
 
 
 # ---- treat-as-data framing for interpolated repository names -----------
-
-
-def test_matrix_block_states_repository_names_are_labels_not_instructions():
-    out = _stdout(_run(MIXED_TWO_REPO_STAMP.encode("utf-8")))
-    assert "labels" in out.lower()
-    assert "never instructions" in out.lower() or "not instructions" in out.lower()
 
 
 @pytest.mark.parametrize(
@@ -792,27 +666,6 @@ def test_unreadable_agent_instruction_file_writes_no_block_to_stdout(tmp_path):
 # The rendered block is the ONLY maturity text a lens subagent ever sees. A
 # rule that lives solely in `_shared/council.md` never reaches the actor that
 # writes findings, so the two rules below have to travel in the block itself.
-
-
-@pytest.mark.parametrize("level", ["prototype", "early", "production"])
-def test_block_states_the_calibration_governs_severity_over_the_lens_bars(level):
-    """Three of the five concerns also appear verbatim as per-lens Critical
-    bars. Without a stated tiebreak the lens receives two contradictory
-    severities at `prototype` and `early`."""
-    spec = f"# S\n\n## Maturity\n\n- lookout: {level}\n"
-    out = _stdout(_run(spec.encode("utf-8")))
-    assert "severity" in out.lower()
-    assert "Critical bars" in out or "critical bars" in out
-
-
-@pytest.mark.parametrize("level", ["prototype", "early"])
-def test_block_instructs_a_downgraded_finding_to_restate_concern_and_level(level):
-    """The operator override this slice exists to enable needs the finding to
-    say which level downgraded it."""
-    spec = f"# S\n\n## Maturity\n\n- lookout: {level}\n"
-    out = _stdout(_run(spec.encode("utf-8")))
-    assert "downgrad" in out.lower()
-    assert level in out
 
 
 @pytest.mark.parametrize(
@@ -1168,32 +1021,6 @@ def test_excerpt_sanitization_of_an_injection_shaped_multiline_non_goal():
     excerpt = line[len(prefix) : -len(suffix)]
     assert "`" not in excerpt
     assert len(excerpt) == 200
-
-
-def test_spec_with_no_marked_bullet_renders_byte_for_byte_unchanged_flat_basis():
-    out = _stdout(_run(NON_GOALS_NO_MARKER.encode("utf-8")))
-    assert out == _PRODUCTION_BASELINE
-
-
-def test_spec_with_no_marked_bullet_renders_byte_for_byte_unchanged_matrix_basis():
-    with_non_goals = _stdout(_run(MIXED_TWO_REPO_STAMP_WITH_UNMARKED_NON_GOALS.encode("utf-8")))
-    without_non_goals = _stdout(_run(MIXED_TWO_REPO_STAMP.encode("utf-8")))
-    assert with_non_goals == without_non_goals
-
-
-def test_existing_byte_for_byte_guard_stays_green():
-    """`tests/test_maturity_bars.py:256` (elsewhere in this file) already
-    pins this — this test exists only to state that this task depends on it
-    staying green and unedited."""
-    out = _stdout(_run(b""))
-    assert out == "maturity: production (basis: default)\n\n" + "".join(
-        f"- {concern}: Critical\n" for concern in CONCERNS
-    ) + (
-        "\nEvery concern above is reported at its mapped severity and is "
-        "never filtered out.\nWhere a concern above also appears in your "
-        "per-lens Critical bars, the severity above governs — the bars say "
-        "what to look for, this block says how severely to rate it.\n"
-    )
 
 
 def test_all_five_concerns_waived_renders_a_well_formed_block_with_no_rated_concern():

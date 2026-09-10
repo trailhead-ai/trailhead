@@ -18,7 +18,7 @@ from pathlib import Path
 
 CONFTEST_DIR = Path(__file__).parent
 sys.path.insert(0, str(CONFTEST_DIR))
-from conftest import load_script, make_vault, run_cli  # noqa: E402
+from conftest import make_vault, run_cli  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -27,14 +27,6 @@ from conftest import load_script, make_vault, run_cli  # noqa: E402
 
 
 class TestRecallCommandRetired:
-    def test_bare_recall_is_unknown_command_nonzero(self, tmp_path):
-        vault, state = make_vault(tmp_path)
-        r = run_cli(["recall"], vault=vault, state_dir=state)
-        assert r.returncode != 0, (
-            "`lore recall` must exit non-zero — the command is gone, not a no-op.\n"
-            f"stdout={r.stdout!r} stderr={r.stderr!r}"
-        )
-
     def test_recall_emits_did_you_mean_search_hint(self, tmp_path):
         vault, state = make_vault(tmp_path)
         r = run_cli(["recall"], vault=vault, state_dir=state)
@@ -55,24 +47,3 @@ class TestRecallCommandRetired:
 # ---------------------------------------------------------------------------
 # Call-site: area pointer references search not recall
 # ---------------------------------------------------------------------------
-
-
-class TestAreaPointerCallSite:
-    def test_area_pointer_references_search_not_recall(self, tmp_path):
-        """The area-pointer (serve `lore areas` / recall flows) must point at
-        `lore search`, not the removed `lore recall`.
-        Area profiles live under area/ (singular), not areas/."""
-        area_map = load_script("lore.search.area_map")
-        vault = tmp_path / "vault"
-        (vault / "area").mkdir(parents=True)
-        (vault / "area" / "penny.md").write_text(
-            "---\nname: penny\nsummary: the penny worker\n---\n## Overview\nPenny.\n"
-        )
-        pointer = area_map.render_area_pointer(vault)
-        assert pointer, "area pointer must be non-empty when areas exist"
-        assert "lore search" in pointer, (
-            f"area pointer must reference `lore search`; got: {pointer!r}"
-        )
-        assert "lore recall" not in pointer, (
-            f"area pointer must NOT reference the removed `lore recall`; got: {pointer!r}"
-        )

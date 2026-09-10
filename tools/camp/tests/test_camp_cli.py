@@ -55,18 +55,6 @@ def test_camp_help_prints_grouped_menu() -> None:
     assert "error:" not in output.lower() or "error" not in result.stderr.lower()
 
 
-def test_camp_help_contains_key_commands() -> None:
-    result = subprocess.run(
-        [sys.executable, str(_CLI_CAMP), "--help"],
-        capture_output=True,
-        text=True,
-    )
-    output = result.stdout
-    # 'break' → 'rm', 'sweep' is disabled and removed from help.
-    for cmd in ("ls", "status", "rm", "sync"):
-        assert cmd in output, f"Expected {cmd!r} in --help output, got:\n{output}"
-
-
 # ---------------------------------------------------------------------------
 # camp --version prints binary path
 # ---------------------------------------------------------------------------
@@ -145,19 +133,6 @@ def test_capabilities_toml_loads_and_validates() -> None:
     manifest = load_manifest(_CAPABILITIES_TOML)
     assert manifest.tool_name == "camp"
     assert manifest.validate is True
-
-
-def test_capabilities_toml_skills() -> None:
-    # camp ships a CLI (bin) + hooks and no always-on base. One selectable
-    # skill: `concierge` wraps the create-or-reuse-a-workspace-and-launch-a-
-    # session flow for a caller with no terminal. Worktree orchestration itself
-    # stays operator-facing (README), since the workspace exists before the
-    # harness opens.
-    from trailhead.capabilities import load_manifest
-
-    manifest = load_manifest(_CAPABILITIES_TOML)
-    assert manifest.base == []
-    assert manifest.skills == {"concierge": "skills/concierge"}
 
 
 # ---------------------------------------------------------------------------

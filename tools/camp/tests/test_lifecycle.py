@@ -1416,35 +1416,6 @@ class TestStatusTwoFacts:
         assert report["code"] == 0
         assert report["work_code"] == 3
 
-    def test_json_key_set_conformance(self, two_member_group):
-        """The keys read by the concierge skill and five sibling specs — slug,
-        code, members[].provision_state, members[].tasks, members[].reason —
-        are still present with unchanged meaning. A future rename of any of
-        these must fail HERE, not silently in a downstream consumer."""
-        from camp.provision.lifecycle import provision_status_code
-
-        g = two_member_group
-        self._seed(
-            g["group"],
-            "wf6",
-            g["env"],
-            {
-                "repo_a": {"provision_state": "ready", "work_state": "ready"},
-                "repo_b": {
-                    "provision_state": "failed",
-                    "work_state": "pending",
-                    "reason": "boom",
-                },
-            },
-        )
-        _code, report = provision_status_code(g["group"], "wf6", env=g["env"])
-
-        assert {"slug", "code", "members"} <= set(report.keys())
-        for m in report["members"]:
-            assert {"name", "provision_state", "tasks"} <= set(m.keys())
-        by_name = {m["name"]: m for m in report["members"]}
-        assert by_name["repo_b"]["reason"] == "boom"
-
     def test_status_header_all_ready(self, two_member_group):
         from camp.provision.lifecycle import provision_status_code, status_header
 

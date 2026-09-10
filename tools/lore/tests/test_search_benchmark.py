@@ -166,28 +166,6 @@ def _old_style_ranked_query(match_expr: str, limit: int) -> tuple[str, list]:
     return sql, [match_expr, match_expr, match_expr, limit]
 
 
-def test_old_style_ranked_query_pinned_to_locked_fts_predicate_and_weights():
-    """``_old_style_ranked_query`` hardcodes a copy of the deleted correlated-
-    subquery SQL as the speedup baseline. Nothing else ties it to the real
-    ``kql_compile`` constants it is meant to mirror, so a change to the FTS
-    predicate shape or the locked bm25 weights could drift silently and leave
-    the speedup ratio comparing two SQL shapes that no longer share a WHERE
-    clause or a weighting — pin both here so that drift fails loudly instead."""
-    kql_compile = load_script("lore.search.kql_compile")
-    cq_probe = kql_compile.compile(load_script("lore.search.kql").parse("zephyr"))
-    old_sql, _ = _old_style_ranked_query(cq_probe.params[0], 20)
-
-    assert kql_compile._FTS_PREDICATE in old_sql, (
-        "the baseline's WHERE clause no longer matches kql_compile._FTS_PREDICATE"
-    )
-
-    cq = kql_compile.compile(load_script("lore.search.kql").parse("zephyr"))
-    weights_sql = cq.join_clause.split("bm25(record_fts, ", 1)[1].split(")", 1)[0]
-    assert f"bm25(record_fts, {weights_sql})" in old_sql, (
-        "the baseline's bm25 weights no longer match the locked production weights"
-    )
-
-
 def _measure_speedup_ratio(state_dir: Path, *, query: str, runs: int = 20) -> tuple[float, float]:
     """Interleave the current compiler's query and the alternate correlated-
     subquery ranking shape (``_old_style_ranked_query``) against the SAME

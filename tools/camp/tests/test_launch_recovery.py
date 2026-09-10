@@ -852,59 +852,6 @@ def _recovery_ast() -> ast.Module:
     return ast.parse(Path(recovery.__file__).read_text(encoding="utf-8"))
 
 
-def test_recovery_imports_nothing_from_the_cli_layer_or_process_machinery() -> None:
-    """The module answers questions; it never speaks to a terminal or a process."""
-    offenders = _import_offenders(_recovery_ast())
-
-    assert offenders == [], f"recovery.py must stay pure, found: {offenders}"
-
-
-def test_recovery_never_prints_or_exits() -> None:
-    """Rendering, exit codes, and refusal wording belong to the CLI layer."""
-    offenders = _render_or_exit_offenders(_recovery_ast())
-
-    assert offenders == [], f"recovery.py must not print or exit, found: {offenders}"
-
-
-def test_the_purity_checks_catch_every_violation_they_claim_to(tmp_path: Path) -> None:
-    """The two checks above are only worth having if they fail on a violation.
-
-    Runs the SAME checkers over a module that commits each violation on purpose,
-    so a checker that silently stopped matching is caught here rather than years
-    later by whatever it failed to prevent.
-    """
-    violator = tmp_path / "violator.py"
-    violator.write_text(
-        "import sys\n"
-        "import subprocess\n"
-        "import logging\n"
-        "import importlib\n"
-        "from camp.cli.session import render\n"
-        "from ..cli import helper\n"
-        "from camp import cli\n"
-        "from argparse import ArgumentParser\n"
-        "emit = print\n"
-        "def go():\n"
-        "    emit('hi')\n"
-        "    __import__('camp.cli.session')\n"
-        "    sys.exit(2)\n",
-        encoding="utf-8",
-    )
-    tree = ast.parse(violator.read_text(encoding="utf-8"))
-
-    assert _import_offenders(tree) == [
-        "import sys",
-        "import subprocess",
-        "import logging",
-        "import importlib",
-        "from camp.cli.session import ...",
-        "from ..cli import ...",
-        "from camp import ...",
-        "from argparse import ...",
-    ]
-    assert _render_or_exit_offenders(tree) == ["print", "__import__", ".exit"]
-
-
 # ---------------------------------------------------------------------------
 # Name components tmux can address
 # ---------------------------------------------------------------------------

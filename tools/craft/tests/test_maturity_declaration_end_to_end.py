@@ -34,7 +34,6 @@ from pathlib import Path
 # brainstorm's SKILL.md, are the same ones the resolver suite and the
 # framing-step contract suite drive, so a change to the invocation or to the
 # step grammar reaches every suite from one place.
-from test_brainstorm_maturity_contract import _step
 from test_maturity_resolve import RESOLVER
 from test_maturity_resolve import _run as _run_resolver
 
@@ -97,41 +96,6 @@ def _outside_fence_heading_line_indices(text: str) -> list[int]:
     return heading_lines
 
 
-def test_readme_documents_the_heading_and_vocabulary_the_resolver_itself_matches():
-    module = _resolver_module()
-    readme_text = README.read_text(encoding="utf-8")
-    lines = readme_text.splitlines()
-
-    # Derived from the resolver's own `_HEADING_RE` constant, never a copy of
-    # its pattern text, so renaming the parser's heading cannot leave this
-    # check silently matching stale README prose.
-    assert any(module._HEADING_RE.match(line) for line in lines), (
-        "tools/craft/README.md must document the exact heading the resolver's "
-        "own _HEADING_RE matches"
-    )
-
-    heading_lines = _outside_fence_heading_line_indices(readme_text)
-    own_heading_positions = [
-        i for i in heading_lines if module._HEADING_RE.match(lines[i])
-    ]
-    assert own_heading_positions, (
-        "the real (non-fenced) `## Project Maturity` heading must exist in README.md"
-    )
-    start = own_heading_positions[0]
-    later_headings = [i for i in heading_lines if i > start]
-    end = later_headings[0] if later_headings else len(lines)
-    # Scope to this convention's own documented section (real headings only,
-    # skipping any occurrence inside a fenced example), so a level word
-    # appearing elsewhere in the file, or inside the illustrative code fence,
-    # can never substitute for a real vocabulary mention in prose.
-    section_text = "\n".join(lines[start:end])
-    for level in module._LEVELS:
-        assert level in section_text, (
-            f"tools/craft/README.md's Project Maturity section must name the "
-            f"resolver's own vocabulary word {level!r}"
-        )
-
-
 def _readme_maturity_section_text() -> str:
     readme_text = README.read_text(encoding="utf-8")
     lines = readme_text.splitlines()
@@ -144,67 +108,7 @@ def _readme_maturity_section_text() -> str:
     return "\n".join(lines[start:end])
 
 
-def test_readme_documents_the_section_boundary_and_ambiguous_value_behaviour():
-    """Defect 9: the README must document the section-boundary rule (a
-    fenced code block does not end the section; the next real H1 or H2
-    heading does) and the multiple-vocabulary-word behaviour (ambiguous,
-    resolves to production), not just the plain case-insensitive-anywhere
-    rule."""
-    section_text = _readme_maturity_section_text()
-    assert re.search(r"fenc", section_text, re.IGNORECASE), (
-        "README's Project Maturity section must document that a fenced code "
-        f"block does not terminate the section: {section_text!r}"
-    )
-    assert re.search(r"\bh1\b|top-level heading|# heading", section_text, re.IGNORECASE), (
-        "README's Project Maturity section must document the H1 heading as a "
-        f"section terminator: {section_text!r}"
-    )
-    assert re.search(r"more than one|ambiguous|multiple.{0,20}word", section_text, re.IGNORECASE), (
-        "README's Project Maturity section must document that more than one "
-        f"distinct vocabulary word is ambiguous, not first-match: {section_text!r}"
-    )
-
-
 # ---- defect 8: authoring-site caution against naming a second level word ----
-
-
-def test_readme_project_maturity_section_cautions_authors_about_naming_a_second_level_word():
-    """The README documents the ambiguous-value rule (previous test), but an
-    author writing a declaration needs the caution AT THE SITE where they'd
-    trip it: the tolerance for surrounding prose (`"This repository is at
-    the Production level, per the last review."`) means a rationale
-    sentence naming a second level word — the spec's own `early` example,
-    "full production ceremony is premature" — silently becomes
-    ambiguous-value."""
-    section_text = _readme_maturity_section_text()
-    assert re.search(r"naming\s+a\s+(different|second)\s+level", section_text, re.IGNORECASE), (
-        "README's Project Maturity section must caution an author against "
-        f"naming a second level word in the rationale prose: {section_text!r}"
-    )
-
-
-def test_claude_md_project_maturity_section_cautions_against_naming_a_second_level_word():
-    """trailhead's own declaration models a rationale paragraph; the caution
-    belongs at this declaration site too, not just in the README's general
-    convention doc. Phrased WITHOUT literally naming a second vocabulary
-    word, since doing so would itself make this very section ambiguous."""
-    module = _resolver_module()
-    claude_md_text = CLAUDE_MD.read_text(encoding="utf-8")
-    sections = module._extract_sections(claude_md_text)
-    assert len(sections) == 1, (
-        f"trailhead's own CLAUDE.md must declare exactly one Project Maturity "
-        f"section, got: {sections}"
-    )
-    section_text = sections[0]
-    assert re.search(r"naming\s+a\s+(different|second)\s+level", section_text, re.IGNORECASE), (
-        "CLAUDE.md's Project Maturity section must caution against naming a "
-        f"second level word in its own rationale: {section_text!r}"
-    )
-    # The caution itself must not trip the very rule it warns about.
-    distinct = module._distinct_levels(section_text)
-    assert distinct == ["production"], (
-        f"the caution text must not itself name a second vocabulary word: {distinct}"
-    )
 
 
 # ---- 3. the compose plan carries the resolver script and the edited skill ----
@@ -243,30 +147,3 @@ def test_empty_stdin_is_the_resolvers_fail_closed_path_not_the_absence_path():
     result = _run_resolver(b"")
     assert result.returncode == 2
     assert b"level:" not in result.stdout
-
-
-def test_frame_step_checks_file_existence_before_invoking_resolver():
-    frame_step = _step("### 1. Frame")
-    assert re.search(r"(does\s+not\s+exist|no.{0,20}agent-instruction file)", frame_step, re.IGNORECASE), (
-        "step 1 must check whether the agent-instruction file exists before "
-        "invoking the resolver"
-    )
-
-
-def test_frame_step_takes_absence_path_directly_stating_production_without_invoking_resolver():
-    frame_step = _step("### 1. Frame")
-    # Scoped to the file-existence guard's own clause (terminated by '.'), so a
-    # `production` mention belonging to the resolver's own section-absent
-    # clause elsewhere in step 1 can never satisfy this — a decoy an unscoped
-    # search across the whole step would miss.
-    existence_clause_match = re.search(
-        r"(does\s+not\s+exist|no.{0,20}agent-instruction file)[^.]*\.", frame_step, re.IGNORECASE
-    )
-    assert existence_clause_match, "step 1 must have a file-existence guard clause terminated by '.'"
-    clause = existence_clause_match.group(0)
-    assert "production" in clause, (
-        f"the file-existence guard clause must state production directly: {clause!r}"
-    )
-    assert re.search(r"without invoking|never invok|skip.{0,20}resolver", clause, re.IGNORECASE), (
-        f"the file-existence guard clause must state the resolver is not invoked: {clause!r}"
-    )

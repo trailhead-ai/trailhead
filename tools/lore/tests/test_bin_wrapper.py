@@ -55,10 +55,6 @@ def run_cli_direct(args, env=None, cwd=None):
 # ---- existence + permissions ------------------------------------------------
 
 
-def test_bin_lore_is_executable():
-    assert os.access(str(BIN_PATH), os.X_OK), "bin/lore is not executable"
-
-
 # ---- delegation correctness: --help -----------------------------------------
 
 

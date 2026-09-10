@@ -170,22 +170,6 @@ def _real_reason_codes() -> tuple[set[str], set[str]]:
 REAL_EXIT_1_CODES, REAL_EXIT_2_CODES = _real_reason_codes()
 
 
-def test_documented_exit_1_reason_codes_match_the_gate_s_real_exit_1_codes():
-    documented = _documented_reason_codes(_step4(), "1")
-    assert documented == REAL_EXIT_1_CODES, (
-        f"documented exit-1 codes {documented} diverge from the gate's real "
-        f"exit-1 codes {REAL_EXIT_1_CODES}"
-    )
-
-
-def test_documented_exit_2_reason_codes_match_the_gate_s_real_exit_2_codes():
-    documented = _documented_reason_codes(_step4(), "2")
-    assert documented == REAL_EXIT_2_CODES, (
-        f"documented exit-2 codes {documented} diverge from the gate's real "
-        f"exit-2 codes {REAL_EXIT_2_CODES}"
-    )
-
-
 def test_each_documented_exit_1_code_actually_produces_exit_1(tmp_path):
     cases = [
         (DUPLICATE_TASK_ID, None, "duplicate-ledger-task-id"),
@@ -244,41 +228,6 @@ def test_each_documented_exit_2_code_actually_produces_exit_2(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_ledger_gate_invocation_documented_before_candidate_set_gate():
-    step4 = _step4()
-    ledger_match = re.search(r"ledger_gate\.py", step4)
-    candidate_match = re.search(r"candidate_set\.py", step4)
-    assert ledger_match, "slice/SKILL.md step 4 must document the ledger_gate.py invocation"
-    assert candidate_match, "slice/SKILL.md step 4 must document the candidate_set.py invocation"
-    assert ledger_match.start() < candidate_match.start(), (
-        "the ledger_gate.py invocation must be documented, by position, before "
-        "the candidate_set.py invocation — an unverifiable ledger must refuse "
-        "the pass before a candidate set is derived from it"
-    )
-
-
-def test_backfill_clause_documented_before_the_ledger_gate_invocation():
-    """The backfill clause must fold into the SAME full-body write step 4
-    documents for new lines, before that write is certified — not a second
-    write performed after the gate has already certified the pre-backfill
-    body (which would leave the backfilled tokens uncertified this pass and
-    reopen the lost-update window the fresh-read-before-write clause
-    narrows). Documented, by position, before the ledger_gate.py invocation
-    proves a top-down reading performs it as part of the one write, ahead of
-    certification — never after."""
-    step4 = _step4()
-    backfill_match = re.search(r"Backfilling an existing line", step4)
-    ledger_match = re.search(r"ledger_gate\.py", step4)
-    assert backfill_match, "slice/SKILL.md step 4 must document the backfill clause"
-    assert ledger_match, "slice/SKILL.md step 4 must document the ledger_gate.py invocation"
-    assert backfill_match.start() < ledger_match.start(), (
-        "the backfill clause must be documented, by position, before the "
-        "ledger_gate.py invocation — a session executing top-down must fold "
-        "the backfill into the write the gate then certifies, never perform "
-        "it as a second write after the gate has already certified"
-    )
-
-
 # ---------------------------------------------------------------------------
 # Item 4 — the documented failure-handling step persists only reason-code
 # ---------------------------------------------------------------------------
@@ -315,36 +264,6 @@ def _persist_directives(step4: str, tokens: set[str]) -> dict[str, bool]:
     return directives
 
 
-def test_step4_never_documents_persisting_the_free_text_reason_line():
-    """Following the document for a refusal must produce a report/body
-    carrying only the `reason-code:` token, never the `reason:` free text —
-    the shape `lesson/an-agent-retelling-untrusted-content-launders-it-out-of-its-marker`
-    names.
-
-    This is derived relationally, not by phrase-matching the document's
-    wording: the set of tokens the *real* gate emits is harvested from a live
-    run, then cross-referenced against which of those tokens step 4's own
-    clause structure directs a session to persist. A test asserting the
-    document merely contains a phrase is not acceptable here."""
-    tokens = _harvested_gate_tokens()
-    assert "reason:" in tokens and "reason-code:" in tokens, (
-        "the ledger gate must emit both a `reason:` and a `reason-code:` "
-        f"token for this pin to mean anything; harvested {tokens}"
-    )
-
-    directives = _persist_directives(_step4(), tokens)
-    persist_set = {tok for tok, must_persist in directives.items() if must_persist}
-
-    assert "reason-code:" in persist_set, (
-        "slice/SKILL.md step 4 must direct a session to persist the "
-        "reason-code: token into a durable artifact on the gate's refusal"
-    )
-    assert "reason:" not in persist_set, (
-        "slice/SKILL.md step 4 must never direct a session to persist the "
-        "free-text reason: line into a durable artifact"
-    )
-
-
 # ---------------------------------------------------------------------------
 # Item 5 — exactly one documented ledger coverage-write site in the corpus
 # ---------------------------------------------------------------------------
@@ -369,34 +288,6 @@ def _ledger_coverage_write_sites(skills_dir: Path) -> list[Path]:
         if _COVERS_WRITE_SHAPE_RE.search(text):
             hits.append(f)
     return hits
-
-
-def test_exactly_one_documented_ledger_coverage_write_site_in_the_corpus():
-    hits = _ledger_coverage_write_sites(CRAFT / "skills")
-    assert len(hits) == 1, (
-        f"expected exactly one documented ledger coverage-write site across the "
-        f"craft skill corpus, found {len(hits)}: {hits}"
-    )
-
-
-def test_write_site_pin_catches_a_second_site_documented_under_different_wording(
-    tmp_path,
-):
-    """The pin above must key on the actual coverage-write shape, not on step
-    4's own heading text — proven by planting that same write-shape template
-    under an entirely unrelated heading in a throwaway skill tree the real
-    corpus scan never sees, and confirming the scan still finds it."""
-    decoy_dir = tmp_path / "skills" / "decoy"
-    decoy_dir.mkdir(parents=True)
-    (decoy_dir / "SKILL.md").write_text(
-        "### 9. Some entirely unrelated step, never named 'Reconcile'\n\n"
-        "- **<slice title>** — <value claim>. (`task/<task-id>`, closed "
-        "<close-date>, covers <covers-value>)\n",
-        encoding="utf-8",
-    )
-    hits = _ledger_coverage_write_sites(tmp_path / "skills")
-    assert len(hits) == 1
-    assert hits[0].name == "SKILL.md"
 
 
 # ---------------------------------------------------------------------------

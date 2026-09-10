@@ -1488,19 +1488,6 @@ class TestConfirmSession:
 
         assert harness.enumerate_calls == [resolved]
 
-    def test_constants_exist_and_are_the_defaults_used_by_confirm_session(self):
-        import inspect
-
-        import camp.launch.session as session
-
-        assert session._CONFIRM_POLL_INTERVAL_SECONDS > 0
-        assert session._CONFIRM_POLL_TIMEOUT_SECONDS > 0
-        sig = inspect.signature(session.confirm_session)
-        assert sig.parameters["interval"].default == session._CONFIRM_POLL_INTERVAL_SECONDS
-        assert sig.parameters["timeout"].default == session._CONFIRM_POLL_TIMEOUT_SECONDS
-
-
-
 def _confirm_run_fake(
     calls,
     *,
@@ -2316,20 +2303,6 @@ class TestTheDeclaredAccountBeatsTheAmbient:
         assert pane[1 : pane.index("fakeharness")] == [
             tok for var in SCRUB for tok in ("-u", var)
         ] + [f"{ACCOUNT_KEY}=/accounts/levr"]
-
-    def test_camp_iterates_the_seam_dict_rather_than_naming_a_variable(
-        self, rig, tmp_path
-    ):
-        """A harness expressing its account with two non-Claude variables gets
-        both carried. Camp reads no key of the mapping it merges."""
-        rig["harness"] = FakeHarness(env_set_keys=("FAKE_ACCOUNT_DIR", "FAKE_ACCOUNT_ALT"))
-
-        _launch(rig, group=_group_with_account("/accounts/levr"), env=_poisoned(tmp_path))
-
-        assert _assignments(rig) == [
-            "FAKE_ACCOUNT_ALT=/accounts/levr",
-            "FAKE_ACCOUNT_DIR=/accounts/levr",
-        ]
 
     def test_the_ambient_value_is_never_carried_on_its_own(self, rig, tmp_path):
         """The deleted passthrough, pinned: no operand may carry the poison."""

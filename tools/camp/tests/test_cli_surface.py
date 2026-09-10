@@ -196,83 +196,47 @@ def test_disabled_verb_stabilizes_message(verb: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_camp_ai_redirects_to_new() -> None:
-    """camp ai <slug> errors and names 'camp new' as the replacement."""
-    result = _run(["ai", "my-slug"])
-    combined = result.stdout + result.stderr
-    assert result.returncode != 0, (
-        f"camp ai should exit non-zero (removed verb).\n"
-        f"stdout: {result.stdout}\nstderr: {result.stderr}"
-    )
-    assert "camp new" in combined, (
-        f"camp ai must name 'camp new' as the replacement.\n"
-        f"stdout: {result.stdout}\nstderr: {result.stderr}"
-    )
-
-
-def test_camp_cd_errors() -> None:
-    """camp cd is absent from the working surface and exits non-zero."""
-    result = _run(["cd"])
-    assert result.returncode != 0, (
-        f"camp cd should exit non-zero (absent verb).\n"
-        f"stdout: {result.stdout}\nstderr: {result.stderr}"
-    )
-
-
-def test_camp_enter_redirects_to_activate() -> None:
-    """camp enter errors and names 'camp activate' as the replacement."""
-    result = _run(["enter", "some-member"])
-    combined = result.stdout + result.stderr
-    assert result.returncode != 0, (
-        f"camp enter should exit non-zero (removed verb).\n"
-        f"stdout: {result.stdout}\nstderr: {result.stderr}"
-    )
-    assert "camp activate" in combined, (
-        f"camp enter must name 'camp activate' as the replacement.\n"
-        f"stdout: {result.stdout}\nstderr: {result.stderr}"
-    )
-
-
 # ---------------------------------------------------------------------------
 # Legacy verbs init/open/break → legible error pointing at new canonical
 # ---------------------------------------------------------------------------
 
 
-def test_camp_init_gives_legible_redirect() -> None:
-    """camp init → error pointing at 'camp group'."""
-    result = _run(["init"])
+@pytest.mark.parametrize(
+    ("argv", "names", "forbids"),
+    [
+        (["ai", "my-slug"], "camp new", None),
+        (["cd"], None, None),
+        (["enter", "some-member"], "camp activate", None),
+        (["init"], "group", None),
+        # open and break redirect straight at the canonical verb rather than
+        # chaining through the verb that itself was removed.
+        (["open", "my-slug"], "camp new", "camp ai"),
+        (["break", "--name", "dummy"], "camp remove", None),
+    ],
+    ids=["ai", "cd", "enter", "init", "open", "break"],
+)
+def test_a_retired_verb_exits_nonzero_and_names_its_replacement(argv, names, forbids) -> None:
+    """Every retired verb refuses and points at the verb that replaced it.
+
+    `camp cd` has no replacement to name — it is gone rather than renamed — so it
+    only has to refuse.
+    """
+    result = _run(argv)
     combined = result.stdout + result.stderr
     assert result.returncode != 0, (
-        f"camp init should redirect (non-zero).\n"
+        f"camp {argv[0]} should exit non-zero (retired verb).\n"
         f"stdout: {result.stdout}\nstderr: {result.stderr}"
     )
-    assert "group" in combined, (
-        f"camp init error must mention 'camp group'.\n"
-        f"stdout: {result.stdout}\nstderr: {result.stderr}"
-    )
-
-
-def test_camp_open_redirects_directly_to_new() -> None:
-    """camp open → error pointing at 'camp new' (direct, not through ai)."""
-    result = _run(["open", "my-slug"])
-    combined = result.stdout + result.stderr
-    assert "camp new" in combined, (
-        f"camp open should redirect to 'camp new'.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-    )
-    assert "camp ai" not in combined, (
-        f"camp open must not chain through the removed 'ai' verb.\n"
-        f"stdout: {result.stdout}\nstderr: {result.stderr}"
-    )
-
-
-def test_camp_break_redirects_directly_to_remove() -> None:
-    """camp break → error pointing at 'camp remove' (direct, not through rm)."""
-    result = _run(["break", "--name", "dummy"])
-    combined = result.stdout + result.stderr
-    assert "camp remove" in combined, (
-        f"camp break should redirect to 'camp remove'.\n"
-        f"stdout: {result.stdout}\nstderr: {result.stderr}"
-    )
+    if names is not None:
+        assert names in combined, (
+            f"camp {argv[0]} must name {names!r} as the replacement.\n"
+            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+    if forbids is not None:
+        assert forbids not in combined, (
+            f"camp {argv[0]} must not chain through the removed {forbids!r} verb.\n"
+            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -559,41 +523,6 @@ def test_help_names_every_camp_launch_addressing_form(help_text: str) -> None:
     assert "camp launch <slug>" in help_text
     assert "camp launch --dir <path> --group <name>" in help_text
     assert "camp launch --resume <ref>" in help_text
-
-
-def test_help_names_the_launch_addressing_forms_as_mutually_exclusive(
-    help_text: str,
-) -> None:
-    """One launch roots one way; the help has to say so, not imply it."""
-    assert "mutually exclusive" in help_text
-    launch_block = help_text.split("camp launch <slug>", 1)[1].split("camp sessions", 1)[0]
-    assert "mutually exclusive" in launch_block, launch_block
-
-
-def test_help_names_the_recoverable_listing_and_its_flags(help_text: str) -> None:
-    """`camp sessions` grew a second listing; every flag that widens it is named."""
-    sessions_block = help_text.split("camp sessions", 1)[1].split("camp remove", 1)[0]
-    for flag in ("--recoverable", "--dir <path>", "--limit <n>", "--all"):
-        assert flag in sessions_block, f"{flag!r} missing from:\n{sessions_block}"
-
-
-def test_help_names_the_live_sessions_dir_scope(help_text: str) -> None:
-    """`--dir` scopes the LIVE listing too, not only the recoverable one."""
-    live_line = "camp sessions [<slug>] [--dir <path>] [--all-groups|-g] [--json]"
-    assert live_line in help_text
-
-
-def test_help_states_the_launch_exit_code_contract(help_text: str) -> None:
-    """All three codes, named as codes — not left to be inferred from prose."""
-    contract = _launch_exit_code_contract(help_text)
-    assert set(contract) == {0, 1, 2}, contract
-
-
-def test_help_reads_exit_two_as_candidates_rather_than_failure(help_text: str) -> None:
-    """The one code a reader would otherwise mistake for a broken command."""
-    contract = _launch_exit_code_contract(help_text)
-    assert "candidates" in contract[2].lower(), contract[2]
-    assert "not a failure" in contract[2].lower(), contract[2]
 
 
 def _launch_exit_code_contract(help_text: str) -> dict[int, str]:

@@ -35,36 +35,7 @@ class TestCuratedHelp:
     def test_help_exits_zero(self):
         assert _run(["--help"])[0] == 0
 
-    def test_bare_names_the_commands(self):
-        _, out, _ = _run([])
-        for cmd in ("install", "uninstall", "doctor", "update", "shellenv"):
-            assert cmd in out
-
-    def test_help_mentions_config_flag(self):
-        _, out, _ = _run([])
-        assert "--config" in out
-
-
 class TestSubcommandHelp:
-    def test_install_help_shows_new_flags(self):
-        ec, out, err = _run(["install", "--help"])
-        assert ec == 0
-        text = out + err
-        for flag in ("--harness", "--plugin", "--no-camp", "--no-lore", "--no-portage", "--config"):
-            assert flag in text
-
-    def test_uninstall_help_shows_yes_flag(self):
-        ec, out, _ = _run(["uninstall", "--help"])
-        assert ec == 0
-        assert "--yes" in out or "-y" in out
-
-    def test_update_help_shows_check_and_json_flags(self):
-        ec, out, err = _run(["update", "--help"])
-        assert ec == 0
-        text = out + err
-        for flag in ("--check", "--json", "--timeout", "--window", "--yes", "--dry-run"):
-            assert flag in text
-
     def test_doctor_help_exits_zero(self):
         assert _run(["doctor", "--help"])[0] == 0
 

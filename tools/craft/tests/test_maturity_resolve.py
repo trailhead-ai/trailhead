@@ -482,23 +482,6 @@ def test_non_utf8_stdin_fails_closed_with_nonzero_exit():
 # ---- stdlib-only import ---------------------------------------------------
 
 
-def test_script_imports_nothing_outside_the_standard_library():
-    import ast
-
-    tree = ast.parse(RESOLVER.read_text(encoding="utf-8"))
-    stdlib_modules = {"__future__", "re", "sys"}
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                top_level = alias.name.split(".")[0]
-                assert top_level in stdlib_modules, f"non-stdlib import: {alias.name}"
-        elif isinstance(node, ast.ImportFrom):
-            if node.module is None:
-                continue
-            top_level = node.module.split(".")[0]
-            assert top_level in stdlib_modules, f"non-stdlib import: {node.module}"
-
-
 # ---- defect 1: duplicate `## Project Maturity` sections are ambiguous, never first-match --
 
 

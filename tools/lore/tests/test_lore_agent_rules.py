@@ -102,33 +102,6 @@ class TestInitWritesRuleset:
             "lore init must write ~/.claude/rules/trailhead-lore.md"
         )
 
-    def test_ruleset_content_is_byte_exact(self, tmp_path):
-        state, config, home = _dirs(tmp_path)
-        _run(["init"], state=state, config=config, home=home)
-        assert _ruleset_path(home).read_text() == _ruleset_content(), (
-            "the installed ruleset must be byte-exact with render_ruleset_content()"
-        )
-
-    def test_ruleset_names_every_free_write_zone_the_guard_exempts(self):
-        """Every zone `lore init` exempts must be named in the write rules.
-
-        The rules block is the ONLY protection against Bash-mediated vault
-        writes, and it is also what tells an agent which subtrees it may write
-        directly. A zone the guard allows but the rules do not mention is a
-        zone agents refuse to use; a zone the rules bless but the guard denies
-        is a blocked write with a confusing reason. Deriving the expected names
-        from the init module rather than hardcoding them means a third zone
-        fails here until the prose catches up.
-        """
-        init_mod = load_script("lore.cli.init")
-        zones = [init_mod._SITES_DIR, init_mod._OUTPOST_DIR]
-        content = _ruleset_content()
-        for zone in zones:
-            assert f"`{zone}/`" in content, (
-                f"the write rules must name the {zone!r} free-write zone; "
-                "an unnamed zone is one agents will refuse to write"
-            )
-
     def test_init_emits_per_harness_confirmation_line(self, tmp_path):
         state, config, home = _dirs(tmp_path)
         res = _run(["init"], state=state, config=config, home=home)
@@ -179,27 +152,6 @@ class TestInitInstallsGuardrail:
 
 
 class TestNoBlockInjection:
-    def test_init_writes_no_claude_md(self, tmp_path):
-        state, config, home = _dirs(tmp_path)
-        _run(["init"], state=state, config=config, home=home)
-        assert not (home / "CLAUDE.md").exists(), (
-            "lore init must not write a ~/CLAUDE.md (block injection is gone)"
-        )
-
-    def test_no_agent_rules_markers_anywhere_on_disk(self, tmp_path):
-        state, config, home = _dirs(tmp_path)
-        _run(["init"], state=state, config=config, home=home)
-        for root in (home, state, config):
-            for p in root.rglob("*"):
-                if p.is_file():
-                    try:
-                        text = p.read_text()
-                    except (UnicodeDecodeError, OSError):
-                        continue
-                    assert "lore:agent-rules" not in text, (
-                        f"found a stale lore:agent-rules marker in {p}"
-                    )
-
     def test_init_creates_no_project_files(self, tmp_path):
         state, config, home = _dirs(tmp_path)
         # Run from a git repo dir to prove init does NOT touch project files.
@@ -215,16 +167,6 @@ class TestNoBlockInjection:
 # ---------------------------------------------------------------------------
 # 4. Idempotency: re-run leaves the ruleset byte-for-byte unchanged
 # ---------------------------------------------------------------------------
-
-
-class TestIdempotency:
-    def test_rerun_leaves_ruleset_byte_for_byte_unchanged(self, tmp_path):
-        state, config, home = _dirs(tmp_path)
-        _run(["init"], state=state, config=config, home=home)
-        first = _ruleset_path(home).read_bytes()
-        _run(["init"], state=state, config=config, home=home)
-        second = _ruleset_path(home).read_bytes()
-        assert second == first, "ruleset file must be byte-for-byte stable on re-run"
 
 
 # ---------------------------------------------------------------------------

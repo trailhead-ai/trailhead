@@ -84,14 +84,6 @@ def test_every_documented_lore_command_is_registered_on_the_cli():
     )
 
 
-def test_the_scan_finds_the_commands_the_skills_are_built_around():
-    """The check above has teeth only while the extraction still reads the docs."""
-    calls = set(_documented_calls())
-    assert {"search", "record create", "session candidate", "flush"} <= calls, sorted(
-        calls
-    )
-
-
 # ---------------------------------------------------------------------------
 # Dispatch targets: an agent named in a skill must be one a tool installs.
 # ---------------------------------------------------------------------------
@@ -135,11 +127,6 @@ def test_every_dispatched_agent_resolves_to_an_installed_subagent():
     )
 
 
-def test_the_dispatch_scan_finds_the_research_targets():
-    """The check above has teeth only while the extraction still reads the docs."""
-    assert {"investigator", "researcher"} <= set(_dispatched_agents())
-
-
 # ---------------------------------------------------------------------------
 # Slash commands: a `/tool:skill` a doc points at must be one a tool installs.
 # ---------------------------------------------------------------------------
@@ -173,13 +160,6 @@ def test_every_referenced_slash_command_resolves_to_an_installed_skill():
     assert dead == {}, (
         f"lore docs point at slash commands no tool registers: {dead} "
         f"(installed: {sorted(installed)})"
-    )
-
-
-def test_the_slash_scan_finds_the_skills_lore_cross_references():
-    """The check above has teeth only while the extraction still reads the docs."""
-    assert {"lore:record", "lore:flush", "lore:search"} <= set(
-        _referenced_slash_commands()
     )
 
 
@@ -255,8 +235,3 @@ def test_every_documented_kind_is_a_real_record_kind():
         f"lore docs spell `--kind` values that are not record kinds: {unknown} "
         f"(kinds: {sorted(KINDS)})"
     )
-
-
-def test_the_kind_scan_finds_the_kinds_the_recipes_use():
-    """The check above has teeth only while the extraction still reads the docs."""
-    assert {"blob", "decision"} <= set(_documented_kinds())

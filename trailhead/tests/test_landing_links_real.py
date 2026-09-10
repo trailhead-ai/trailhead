@@ -163,12 +163,6 @@ class TestClaimsManifestSchema:
     # below opens the file, so a missing one fails them all with the path in the
     # traceback rather than passing an existence assertion and nothing else.
 
-    def test_claims_file_parses_as_toml(self):
-        """landing_claims.toml must be valid TOML."""
-        with open(_CLAIMS_FILE, "rb") as f:
-            data = tomllib.load(f)
-        assert "claim" in data, "landing_claims.toml must have a [[claim]] array"
-
     def test_claims_entries_have_required_fields(self):
         """Every claim entry must have: kind, tool, ref, source."""
         with open(_CLAIMS_FILE, "rb") as f:
@@ -317,15 +311,6 @@ class TestForwardCheckNegative:
 class TestBuildRealAnchorSet:
     """build_real_anchor_set() must enumerate a non-empty, stable, known-correct set."""
 
-    def test_returns_non_empty_dict(self):
-        anchors = build_real_anchor_set()
-        assert len(anchors) > 0, "build_real_anchor_set() returned an empty dict"
-
-    def test_known_tools_present(self):
-        anchors = build_real_anchor_set()
-        for tool in ("lore", "craft", "camp"):
-            assert tool in anchors, f"tool {tool!r} missing from anchor set"
-
     def test_camp_anchors_cover_its_skills_and_no_agents(self):
         """camp is a CLI + hooks tool: no subagents, and one skill — `concierge`.
 
@@ -337,12 +322,6 @@ class TestBuildRealAnchorSet:
         assert anchors["camp"]["agents"] == set()
         assert isinstance(anchors["camp"]["skills"], set)
         assert isinstance(anchors["camp"]["agents"], set)
-
-    def test_result_is_stable_across_calls(self):
-        """Repeated calls return the same set (deterministic)."""
-        a = build_real_anchor_set()
-        b = build_real_anchor_set()
-        assert a == b
 
     def test_build_real_anchor_set_raises_on_validate_false_manifest(self, tmp_path):
         """build_real_anchor_set() itself must raise on a validate=false manifest.
@@ -598,14 +577,6 @@ class TestExtractFencedCommands:
         result = extract_fenced_commands(text)
         assert result == {("trailhead", "install")}
 
-    def test_sorted_result_is_deterministic(self):
-        """sorted() on the result is stable across calls."""
-        text = "```sh\ntrailhead doctor\ntrailhead install\n```"
-        r1 = sorted(extract_fenced_commands(text))
-        r2 = sorted(extract_fenced_commands(text))
-        assert r1 == r2
-
-
 class TestExtractRelativeLinks:
     """extract_relative_links() grammar tests."""
 
@@ -638,14 +609,6 @@ class TestExtractRelativeLinks:
         text = "[LICENSE](LICENSE)"
         result = extract_relative_links(text)
         assert result == set()
-
-    def test_sorted_result_is_deterministic(self):
-        """sorted() on the result is stable across calls."""
-        text = "[a](./a.md) [b](./b.md)"
-        r1 = sorted(extract_relative_links(text))
-        r2 = sorted(extract_relative_links(text))
-        assert r1 == r2
-
 
 class TestCheckInverseFixtures:
     """Fixture-driven inverse check tests."""

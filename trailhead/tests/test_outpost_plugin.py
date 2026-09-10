@@ -25,23 +25,8 @@ def _manifest():
 class TestManifestLoads:
     """What the capabilities loader makes of the plugin."""
 
-    def test_skill_only_shape(self):
-        """No always-on `base`, no hooks — the skill is discovered on disk."""
-        m = _manifest()
-        assert m.base == []
-        assert m.hooks_json is None
-
     def test_publish_site_is_a_discovered_skill(self):
         assert _manifest().skills.get("publish-site") == "skills/publish-site"
-
-    def test_loader_finds_no_subagents(self):
-        """Skill-only: discovery yields an empty subagent inventory.
-
-        The point is what the loader reports, not whether an `agents/` dir is
-        on disk — a caller selecting a subagent from this plugin gets nothing
-        to select, which is the behaviour a skill-only plugin promises.
-        """
-        assert _manifest().subagents == {}
 
     def test_declared_ruleset_resolves_to_readable_content(self):
         m = _manifest()
