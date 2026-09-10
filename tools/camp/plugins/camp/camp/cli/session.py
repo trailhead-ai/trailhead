@@ -1679,13 +1679,43 @@ def _cmd_sessions_group_cli(
     if as_json:
         print(json.dumps(rows))
         return
-    from ..launch.recovery import printable_path
 
     for row in rows:
         if not row.get("ok", True):
             continue
-        label = f" ({row['name']})" if row.get("name") else ""
-        print(f"{row['session_id']}  {row['kind']}  {printable_path(row['cwd'])}{label}")
+        print(render_session_row_human(row))
+
+
+def render_session_row_human(row: dict) -> str:
+    """One answered `camp sessions` row, human-rendered — the same
+    ``session_id  kind  cwd (name)`` line `_cmd_sessions_group_cli` already
+    prints, factored out so the `-a`/`--all-hosts` merged renderer in
+    `cli/dispatch.py` can print one row at a time under a machine's header.
+    """
+    from ..launch.recovery import printable_path
+
+    label = f" ({row['name']})" if row.get("name") else ""
+    return f"{row['session_id']}  {row['kind']}  {printable_path(row['cwd'])}{label}"
+
+
+def local_sessions_answer(
+    group: dict | None, *, all_groups: bool
+) -> tuple[list[dict], list[str], int]:
+    """The value-returning local answer for `camp sessions`, reused by the
+    `-a`/`--all-hosts` wiring in `cli/dispatch.py`. `_sessions_live_answer`
+    already never prints or exits, so this is a thin wrapper supplying the
+    `scope=None` (the whole cross-store pool, exactly the `--all-groups`
+    scope already uses) and the `described` text `_cmd_sessions_group_cli`
+    would have computed itself for the same inputs.
+    """
+    described = (
+        "every configured group"
+        if all_groups
+        else f"group {group['group']['name']!r}"
+    )
+    return _sessions_live_answer(
+        None, env=None, all_groups=all_groups, group=group, described=described
+    )
 
 
 def _sessions_live_answer(

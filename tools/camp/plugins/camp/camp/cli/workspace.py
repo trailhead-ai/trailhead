@@ -15,6 +15,82 @@ if TYPE_CHECKING:
     from ..host.config import Host
 
 
+def _project_list_rows(entries: list[dict]) -> list[dict]:
+    """Project `cmd_ls_group`'s entries onto the fixed `camp list` JSON row
+    shape — the same projection `render_workspace_list` applies inline,
+    factored out so the `-a`/`--all-hosts` local answer below can build the
+    same row shape without printing.
+    """
+    return [
+        {
+            "ok": True,
+            "slug": e["slug"],
+            "branch": e.get("branch", ""),
+            "workspace_path": e["workspace_path"],
+            "group": e.get("group"),
+        }
+        for e in entries
+    ]
+
+
+def render_list_row_human(row: dict) -> str:
+    """One answered `camp list` row, human-rendered — the same
+    ``slug workspace_path`` line `render_workspace_list` and `_cmd_ls_host_cli`
+    already print, factored out so the `-a`/`--all-hosts` merged renderer in
+    `cli/dispatch.py` can print one row at a time under a machine's header.
+    """
+    return f"{row['slug']} {row['workspace_path']}"
+
+
+def local_list_answer(
+    group: dict | None, *, all_groups: bool
+) -> tuple[list[dict], list[str], int]:
+    """The value-returning local answer for `camp list`, reused by the
+    `-a`/`--all-hosts` wiring in `cli/dispatch.py`: never prints, never
+    exits.
+
+    ``all_groups=False`` answers for *group* alone — the same rows
+    `_cmd_ls_group_cli` prints via `cmd_ls_group`. ``all_groups=True``
+    answers for every group :func:`~camp.provision.lifecycle.load_answerable_groups`
+    can load — the value-returning sibling of
+    :func:`~camp.provision.lifecycle.answerable_groups_or_refuse`, used
+    here (never that helper) because a `sys.exit`-on-refusal is not
+    something a value-returning answer this function's caller still needs to
+    merge with other machines' answers can afford — the caller decides what
+    to do with a total failure, exactly as `_sessions_live_answer` already
+    does for `camp sessions`' own `-a` path.
+    """
+    from ..provision.lifecycle import cmd_ls_group, load_answerable_groups
+    from .common import _groups_dir
+
+    if not all_groups:
+        entries = cmd_ls_group(group, env=None)
+        return _project_list_rows(entries), [], 0
+
+    notices: list[str] = []
+    groups, unparsable = load_answerable_groups(_groups_dir())
+    for detail in unparsable:
+        notices.append(f"camp list: {detail} — skipping")
+    if not groups and unparsable:
+        notices.append(
+            "camp list: could not answer for any configured group — "
+            "every group config failed to parse; fix a config above and re-run"
+        )
+        return [], notices, 1
+    if not groups:
+        notices.append("camp list: no groups configured — nothing to list")
+        return [], notices, 0
+
+    entries: list[dict] = []
+    for g in groups:
+        entries.extend(cmd_ls_group(g, env=None))
+    entries.sort(key=lambda e: e.get("group") or "")
+
+    rows = _project_list_rows(entries)
+    rows += [{"ok": False, "group": None, "reason": d} for d in unparsable]
+    return rows, notices, 0
+
+
 def _cmd_ls_group_cli(
     args: list[str],
     group: dict,
