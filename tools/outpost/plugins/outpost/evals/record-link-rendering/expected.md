@@ -55,10 +55,22 @@ claude -p "<the task prompt>" --setting-sources project \
 ```
 
 `--setting-sources project` drops `~/.claude/rules/trailhead-outpost.md`
-(which already carries this exact rule on this machine) from both arms'
-context. A subagent dispatch cannot be used for either arm: it would inherit
-that live user-level ruleset, making the baseline arm carry the very rule it
-is supposed to lack, and both arms would become the treatment arm.
+from both arms' context. A subagent dispatch cannot be used for either arm:
+it would inherit that live user-level ruleset, making the baseline arm carry
+the very rule it is supposed to lack, and both arms would become the
+treatment arm.
+
+**What the probe below did and did not establish on this run.** The installed
+copy of that ruleset predated this change and carried no `## Record links`
+section when these arms ran — `bin/trailhead install` had not been re-run,
+and running it to make the probe meaningful is barred (never mutate the
+developer's real install from a test). So a probe that quotes nothing back
+cannot distinguish the flag dropping the rule from there having been no rule
+to drop. Read it as a mechanism check, not as proof of isolation. The
+isolation is load-bearing for every re-run after the next install, when the
+installed copy will carry the rule; the arms' controlling prose reaches them
+through `--append-system-prompt` regardless, which is why the measured
+baseline/treatment split does not rest on this point.
 
 **No-tools probe, run before trusting the baseline:** dispatch a probe agent
 under the same `--setting-sources project` flag, with no ruleset appended,

@@ -24,7 +24,10 @@ scratch environment, and `expected.md` carrying three separately-judged pass
 conditions, written before any arm was run.
 
 **Under test:** the **Record links** section of `plugins/outpost/rules.md`
-(landed in commit `4d586099`), installed as `~/.claude/rules/trailhead-outpost.md`.
+(landed in commit `4d586099`), which installs as
+`~/.claude/rules/trailhead-outpost.md` — not yet installed on this machine when
+these arms ran, so each arm received the prose under test through
+`--append-system-prompt` rather than from the install.
 Both arms were `Read`-only with no shell tool at all — `expected.md` states why
 `scripts/eval-sandbox` does not apply to this case.
 
