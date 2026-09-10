@@ -48,6 +48,11 @@ Schema (v1):
         # manifest.owner_of, which defaults a missing key to None ("never
         # recorded") rather than raising; there is no migration step. None
         # never means "owned by this host" and never triggers a rewrite.
+        # Every writer in this module passes through write_central_manifest,
+        # which refuses to drop or change an on-disk owner unless the caller
+        # passes allow_owner_change=True — a rebuild site that forgets to
+        # carry an owner forward fails loudly on its first write instead of
+        # shipping silently.
         "owner": "<declared host name, or absent>",
     }
 """
@@ -70,16 +75,51 @@ class ManifestError(Exception):
     """
 
 
-def write_central_manifest(path: Path, data: dict[str, Any]) -> None:
+def write_central_manifest(
+    path: Path, data: dict[str, Any], *, allow_owner_change: bool = False
+) -> None:
     """Write data to path atomically with mode 0o600.
 
     Uses a temp file in the same directory + os.replace for atomicity.
     Sets file mode to 0o600 after the write (umask-proof).
 
+    Bypass-proof ownership guard: every manifest write in the plugin passes
+    through this one function, so it is the single place that can refuse a
+    write that would silently drop a recorded owner. Before writing, if a
+    manifest already exists at `path` and carries a string "owner", the
+    incoming `data` must carry that SAME owner value, or the write is
+    refused with a named ManifestError — unless the caller passes
+    `allow_owner_change=True`, the explicit opt-in a deliberate ownership
+    change (or clear) uses. A path with no on-disk manifest, or an on-disk
+    manifest carrying no owner, has nothing to protect and every write is
+    accepted unconditionally, opt-in or not — this guard is invisible on the
+    hot path of an ownerless workspace.
+
     Args:
         path:  Absolute path for the manifest file (parent must exist).
         data:  Dict to serialize as JSON.
+        allow_owner_change: Opt in to writing a value that changes or drops
+            an owner already on disk. Defaults to False.
+
+    Raises:
+        ManifestError: If the write would drop or change an on-disk owner
+            without `allow_owner_change=True`.
     """
+    if not allow_owner_change and path.is_file():
+        try:
+            on_disk = read_central_manifest(path)
+        except ManifestError:
+            on_disk = None
+        if on_disk is not None:
+            disk_owner = on_disk.get("owner")
+            if isinstance(disk_owner, str) and data.get("owner") != disk_owner:
+                raise ManifestError(
+                    f"camp: refusing to write manifest at {path}: this write "
+                    f"would drop or change the recorded owner {disk_owner!r} "
+                    f"— pass allow_owner_change=True for a deliberate "
+                    f"ownership change"
+                )
+
     path.parent.mkdir(parents=True, exist_ok=True)
 
     fd, tmp_path = tempfile.mkstemp(
