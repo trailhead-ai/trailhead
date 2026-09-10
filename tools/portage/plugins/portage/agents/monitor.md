@@ -220,12 +220,13 @@ call `portage merge` as usual and honor its exit code:
 - Exit 0/1: proceed as below (all merged, or partial-merge failure).
 
 `portage merge` also reads `merge_method` from the same `[release]` block — the strategy passed to
-`gh pr merge` (`merge` / `squash` / `rebase`). **Default: `squash`.** When `merge_method` is unset,
-`portage merge` prints a notice on stderr naming the method it chose and the remediation to restore
-merge commits (`add [release] merge_method = "merge" to the group TOML`) — surface that notice
+`gh pr merge` (`merge` / `squash` / `rebase` / `automatic`). **Default: `automatic`.** When
+`merge_method` is unset or explicitly `automatic`, `portage merge` resolves a strategy per pull
+request and prints a notice on stderr naming the resolution and the remediation to restore
+squashing (`add [release] merge_method = "squash" to the group TOML`) — surface that notice
 verbatim rather than swallowing it, so the operator sees the behaviour before it lands on `main`.
-When `merge_method` is set to a value other than `merge`/`squash`/`rebase`, `portage merge` refuses
-with exit 2 before any `gh` call — honor that exit code and surface it as
+When `merge_method` is set to a value other than `merge`/`squash`/`rebase`/`automatic`, `portage
+merge` refuses with exit 2 before any `gh` call — honor that exit code and surface it as
 `BLOCKED: portage merge refused — [release].merge_method is invalid; see stderr for the accepted values.`
 
 `portage merge` exits nonzero on any partial-merge. The agent relies on that exit code, not JSON
@@ -253,6 +254,29 @@ external_tracker = { kind = "...", ... }  # optional
 - Conventional commit prefixes (`feat:`, `fix:`, `chore:`).
 - Use `git -C <path>` instead of `cd <path> && git`.
 
+## Strategy disclosure
+
+Before merging each pull request, `portage merge` prints one disclosure line to stderr:
+
+`portage merge: PR #<pr_number> (<member_name>): strategy '<strategy>' — <reason>`
+
+Collect every disclosure line seen during this run and use them to render the `Strategy:`
+field of the report below:
+
+- If every pull request disclosed the same `<strategy>` and the same `<reason>`, report it
+  once: `<strategy> — <reason>`.
+- Otherwise, report each pull request's own strategy attributed to its repository, one entry
+  per pull request in merge order, comma-separated: `<member_name>=<strategy> (<reason>)`.
+  Never collapse a mixed run to a single strategy name — the reason text is what tells an
+  operator that a capability lookup failed on one pull request but not another, or that a
+  strategy was explicitly configured rather than selected, and collapsing it away loses that
+  distinction.
+- If `portage merge` printed no disclosure lines at all this run, the field reads `n/a`. Key
+  this on the absence of disclosure lines, not on whether anything merged: a disclosure is
+  printed *before* each merge is attempted, so a run whose merges were all refused still has
+  disclosures to report — and that is exactly the run whose strategies an operator most needs
+  to see.
+
 ## Report structure
 
 When you finish (all merged, stopped ready-to-merge, or blocked), return a short summary:
@@ -261,6 +285,7 @@ When you finish (all merged, stopped ready-to-merge, or blocked), return a short
 **Watch result:** merged | ready-to-merge (auto_merge disabled) | blocked after N cycles
 **Group/Slug:** <group>/<slug>
 **PRs:** <urls + final state>
+**Strategy:** <see "Strategy disclosure" above>
 **Fix cycles run:** <count per PR>
 **Blocker (if any):** <one-line summary from summarizer, or the auto_merge remediation>
 ```

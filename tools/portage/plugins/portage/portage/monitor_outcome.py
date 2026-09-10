@@ -6,15 +6,26 @@ that path, naming the state: `MERGED` | `READY <reason>` | `BLOCKED
 <reason>` | `STOPPED <reason>`, so a caller that cannot wait on monitor's
 prose reply can poll for its result instead.
 
+This module also owns the strategy-disclosure grammar: `portage merge`
+prints one line to stderr per pull request naming the merge strategy it
+resolved and why (`trailhead.vcs.github.resolve_merge_strategy`'s reason,
+prefixed from `RESOLUTION_REASON_PREFIXES`). `parse_strategy_disclosure`
+reads one such line back; `summarize_strategy_disclosures` aggregates a
+run's lines into monitor's report `Strategy:` field (see "Strategy
+disclosure" in `agents/monitor.md`), attributing each pull request's
+strategy to its repository whenever a run resolved more than one.
+
 This module owns only the read/parse side. Monitor is a prose-driven
-subagent — there is no monitor-side Python that writes the file — so nothing
-here writes an outcome file; that contract lives in `agents/monitor.md`
-itself.
+subagent — there is no monitor-side Python that writes the file or the
+report — so nothing here writes an outcome file or a report; those
+contracts live in `agents/monitor.md` itself.
 """
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
+from typing import NamedTuple
 
 #: The four terminal-state tokens monitor's outcome file may carry.
 MONITOR_OUTCOME_TOKENS = frozenset({"MERGED", "READY", "BLOCKED", "STOPPED"})
@@ -65,3 +76,69 @@ def read_monitor_outcome(path: Path) -> str:
     if not text.strip():
         return f"BLOCKED empty outcome file {path.name} — monitor wrote no return token"
     return text
+
+
+# `parse_strategy_disclosure` and `summarize_strategy_disclosures` have no
+# runtime caller: monitor is a prose-driven subagent, so the agent itself does
+# this reading and aggregation per `agents/monitor.md`. They are the executable
+# specification of that prose — the thing tests can run and mutate, where the
+# instructions themselves can only be read. Treat a change here as a change to
+# what monitor is instructed to do, and move the two together.
+
+
+class StrategyDisclosure(NamedTuple):
+    """One pull request's resolved merge strategy, parsed off `portage merge`'s
+    per-pull-request stderr disclosure line."""
+
+    pr_number: str
+    member_name: str
+    strategy: str
+    reason: str
+
+
+#: `_merge_prs` (`trailhead/vcs/github.py`) prints exactly this shape once per
+#: pull request, immediately before attempting its merge:
+#: `portage merge: PR #<pr_number> (<member_name>): strategy '<strategy>' — <reason>`
+_STRATEGY_DISCLOSURE_LINE = re.compile(
+    r"^portage merge: PR #(?P<pr_number>\d+) \((?P<member_name>[^)]+)\): "
+    r"strategy '(?P<strategy>[a-z]+)' — (?P<reason>.+)$"
+)
+
+
+def parse_strategy_disclosure(line: str) -> StrategyDisclosure | None:
+    """Parse one of `portage merge`'s per-pull-request strategy disclosure
+    lines, or return `None` when `line` isn't one.
+
+    `reason` is carried verbatim — it already starts with one of
+    `trailhead.vcs.github.RESOLUTION_REASON_PREFIXES`'s pairwise-distinct
+    prefixes, which is what lets `summarize_strategy_disclosures` tell a
+    capability-lookup failure apart from an ordinary automatic selection or
+    an explicitly configured strategy without this module inspecting the
+    reason text itself.
+    """
+    match = _STRATEGY_DISCLOSURE_LINE.match(line.strip())
+    if not match:
+        return None
+    return StrategyDisclosure(**match.groupdict())
+
+
+def summarize_strategy_disclosures(disclosures: list[StrategyDisclosure]) -> str:
+    """Render monitor's report `Strategy:` field from a run's disclosures.
+
+    Empty input — no disclosure lines collected, which is not the same as
+    nothing having merged, since a disclosure is printed before each merge
+    is attempted — renders `n/a`. When every
+    disclosure names the same strategy and the same reason, it is reported
+    once: `<strategy> — <reason>`. Otherwise each pull request's strategy is
+    attributed to its own repository, in the order given:
+    `<member_name>=<strategy> (<reason>)`, comma-separated — never collapsed
+    to a single strategy name, since the per-disclosure reason is what
+    distinguishes a capability-lookup failure or an explicitly configured
+    strategy from an ordinary automatic selection.
+    """
+    if not disclosures:
+        return "n/a"
+    first = disclosures[0]
+    if all(d.strategy == first.strategy and d.reason == first.reason for d in disclosures):
+        return f"{first.strategy} — {first.reason}"
+    return ", ".join(f"{d.member_name}={d.strategy} ({d.reason})" for d in disclosures)
