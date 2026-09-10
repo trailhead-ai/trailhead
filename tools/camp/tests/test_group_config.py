@@ -1882,13 +1882,24 @@ def _load_pre_change_baseline_group(toml_text: str, tmp_path: Path):
     import importlib.util
     import subprocess
 
-    baseline_source = subprocess.run(
+    blob = subprocess.run(
         ["git", "show", "68793ea1:tools/camp/plugins/camp/camp/group/config.py"],
         cwd=_REPO_ROOT,
         capture_output=True,
         text=True,
-        check=True,
-    ).stdout
+    )
+    if blob.returncode != 0:
+        # A shallow clone (the CI checkout default) carries no history to read a
+        # prior loader out of, and a source tree with no `.git` carries none
+        # either. The invariant this comparison strengthens is pinned
+        # independently of history by
+        # `test_member_with_no_excluded_key_loads_as_never_declared`, so skipping
+        # here loses a stronger form of an already-covered claim rather than the
+        # claim itself.
+        pytest.skip(
+            "pre-change loader blob unavailable (shallow clone or no git history)"
+        )
+    baseline_source = blob.stdout
     spec = importlib.util.spec_from_loader("camp_group_config_pre_change_baseline", loader=None)
     module = importlib.util.module_from_spec(spec)
     exec(compile(baseline_source, "<pre-change-config-baseline>", "exec"), module.__dict__)
