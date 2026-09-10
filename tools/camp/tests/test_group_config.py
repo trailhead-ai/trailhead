@@ -1770,3 +1770,158 @@ def test_launch_unknown_key_still_raises_with_account_known(tmp_path: Path) -> N
     msg = str(exc_info.value)
     assert "launch" in msg
     assert "bogus" in msg
+
+
+# ---------------------------------------------------------------------------
+# member 'excluded' field — declared regenerable state
+# ---------------------------------------------------------------------------
+
+
+def _member_toml(extra: str) -> str:
+    return (
+        "[group]\nname = 'testgroup'\n\n"
+        "[[members]]\nname = 'myrepo'\nrepo_root = '/tmp/myrepo'\n" + extra
+    )
+
+
+def test_excluded_single_entry_loads_as_normalized_relative_string(tmp_path: Path) -> None:
+    """A single excluded entry loads as a normalized relative path string —
+    resolution against the member's own worktree happens at consumption time,
+    not at config load (no worktree exists yet at load time)."""
+    cfg = _write_and_load(tmp_path, 'excluded = ["build"]\n')
+    assert cfg["members"][0]["excluded"] == ("build",)
+
+
+def test_excluded_multiple_entries_preserve_declaration_order(tmp_path: Path) -> None:
+    """Several excluded entries load with all of them, in declaration order."""
+    cfg = _write_and_load(tmp_path, 'excluded = ["build", "dist", ".cache"]\n')
+    assert cfg["members"][0]["excluded"] == ("build", "dist", ".cache")
+
+
+def test_excluded_explicit_empty_list_is_not_none(tmp_path: Path) -> None:
+    """An explicit empty list means 'declares nothing regenerable', which is a
+    different, distinguishable answer from 'never declared' (no key at all)."""
+    cfg = _write_and_load(tmp_path, "excluded = []\n")
+    assert cfg["members"][0]["excluded"] == ()
+    assert cfg["members"][0]["excluded"] is not None
+
+
+def test_excluded_absent_key_is_none(tmp_path: Path) -> None:
+    """No 'excluded' key at all loads as None — 'never declared' — which must
+    never compare equal to the explicit-empty-list answer."""
+    f = tmp_path / "testgroup.toml"
+    f.write_text(_VALID_TOML_NO_BOOTSTRAP)
+    from camp.group.config import load_group
+
+    cfg = load_group(f)
+    assert cfg["members"][0]["excluded"] is None
+    assert cfg["members"][0]["excluded"] != ()
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        "/etc/passwd",
+        "../escape",
+        "sub/../../escape",
+        r"sub\..\..\escape",
+    ],
+)
+def test_excluded_entry_escaping_the_worktree_raises(tmp_path: Path, entry: str) -> None:
+    """An absolute path, a '..' segment that would leave the member's worktree,
+    or a path-separator escape (embedded backslash) is refused at load with a
+    named config error identifying the member and the entry.
+
+    TOML literal strings (single-quoted) are used so a backslash entry is not
+    itself interpreted as a TOML escape sequence by the parser.
+    """
+    from camp.group.config import GroupConfigError
+
+    with pytest.raises(GroupConfigError) as exc_info:
+        _write_and_load(tmp_path, f"excluded = ['{entry}']\n")
+    msg = str(exc_info.value)
+    assert "myrepo" in msg
+    assert repr(entry) in msg
+
+
+@pytest.mark.parametrize(
+    "excluded_line",
+    [
+        'excluded = "build"',
+        "excluded = [1]",
+        "excluded = [true]",
+    ],
+)
+def test_excluded_non_list_or_non_string_entry_raises(tmp_path: Path, excluded_line: str) -> None:
+    """A non-list value, and a list carrying a non-string, are each refused at
+    load with a named config error."""
+    from camp.group.config import GroupConfigError
+
+    with pytest.raises(GroupConfigError) as exc_info:
+        _write_and_load(tmp_path, f"{excluded_line}\n")
+    assert "excluded" in str(exc_info.value)
+
+
+def test_excluded_with_unrecognized_sibling_key_drops_the_unrecognized_key(
+    tmp_path: Path,
+) -> None:
+    """A member table carrying both 'excluded' and an unrecognized sibling key
+    loads with 'excluded' recognized and the unrecognized key dropped, exactly
+    as an unrecognized key is dropped today — recognizing 'excluded' introduces
+    no member-key allowlist."""
+    cfg = _write_and_load(tmp_path, 'excluded = ["build"]\nbogus_key = "whatever"\n')
+    member = cfg["members"][0]
+    assert member["excluded"] == ("build",)
+    assert "bogus_key" not in member
+
+
+def _load_pre_change_baseline_group(toml_text: str, tmp_path: Path):
+    """Load the group config via the pre-change config.py blob (base commit
+    68793ea1), so the 'no excluded anywhere' comparison is derived from an
+    actual prior execution rather than a hand-typed expected dict."""
+    import importlib.util
+    import subprocess
+
+    baseline_source = subprocess.run(
+        ["git", "show", "68793ea1:tools/camp/plugins/camp/camp/group/config.py"],
+        cwd=_REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    spec = importlib.util.spec_from_loader("camp_group_config_pre_change_baseline", loader=None)
+    module = importlib.util.module_from_spec(spec)
+    exec(compile(baseline_source, "<pre-change-config-baseline>", "exec"), module.__dict__)
+
+    f = tmp_path / "baseline.toml"
+    f.write_text(toml_text)
+    return module.load_group(f)
+
+
+def test_no_excluded_anywhere_loads_exactly_as_it_did_before_this_change(
+    tmp_path: Path,
+) -> None:
+    """A group config carrying no 'excluded' anywhere loads exactly as it did
+    before this change, aside from the new 'excluded': None key on each
+    member — every other field is byte-identical to the pre-change loader's
+    own output on the same fixture."""
+    from camp.group.config import load_group
+
+    f = tmp_path / "testgroup.toml"
+    f.write_text(_VALID_TOML_NO_BOOTSTRAP)
+    current_cfg = load_group(f)
+
+    baseline_cfg = _load_pre_change_baseline_group(_VALID_TOML_NO_BOOTSTRAP, tmp_path)
+
+    assert current_cfg["members"][0]["excluded"] is None
+
+    current_members_without_excluded = [
+        {k: v for k, v in member.items() if k != "excluded"} for member in current_cfg["members"]
+    ]
+    assert current_members_without_excluded == baseline_cfg["members"]
+    # '_toml_path' legitimately differs — each loader read a different fixture
+    # file on disk — so it's excluded from this "everything else is
+    # byte-identical" comparison, not because it's uninteresting to pin.
+    assert {k: v for k, v in current_cfg.items() if k not in ("members", "_toml_path")} == {
+        k: v for k, v in baseline_cfg.items() if k not in ("members", "_toml_path")
+    }

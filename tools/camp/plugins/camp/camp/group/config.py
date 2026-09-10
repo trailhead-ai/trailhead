@@ -118,6 +118,7 @@ name is a non-empty string; no duplicate scope within one group's list.
 
 from __future__ import annotations
 
+import os
 import re
 import sys
 import tomllib
@@ -219,6 +220,7 @@ def load_group(path: Path) -> dict[str, Any]:
                        "required": bool, "timeout_seconds": int | None,
                        "cleanup": list[str] | None,
                        "steps": [{"name": str, "cmd": list[str]}]}],
+            "excluded": tuple[str, ...] | None,
         }],
         "branch_pattern": str,
         "shared_vaults": [{"name": str, "root": str}],
@@ -230,6 +232,20 @@ def load_group(path: Path) -> dict[str, Any]:
     any) first, then tasks referenced by name via the member's `tasks = [...]`
     field. The legacy "bootstrap"/"hooks" keys are NOT present on the returned
     member dict — this is the only shape downstream code should read.
+
+    Each member's "excluded" declares that member's regenerable state — paths a
+    transfer should recreate rather than copy. Absence of the `excluded` key in
+    the member table is DISTINCT from an explicit empty list: "never declared"
+    normalizes to `None`, "declares nothing regenerable" normalizes to `()` —
+    an empty tuple, and the two must never compare equal. When present, entries
+    normalize to a `tuple[str, ...]` in declaration order, each a lexically
+    relative path: refused at load if absolute, if a NUL byte or backslash is
+    present, or if `os.path.normpath` would leave the member's worktree via a
+    leading `..` segment. This is a LEXICAL check only — at load time there is
+    no worktree to resolve against (a worktree depends on a slug load time
+    knows nothing about); confining the resolved path to a concrete member
+    worktree is a consumer's job at consumption time, using this codebase's
+    established `.resolve()` / `.is_relative_to(...)` idiom, not this loader's.
 
     lore_scopes invariants: scope in {repo, product, suite, team}; name is a
     non-empty string; no duplicate scope within one group's list.
@@ -375,12 +391,16 @@ def load_group(path: Path) -> dict[str, Any]:
             path=path,
         )
 
+        # --- 'excluded' member field (optional): declared regenerable state ---
+        excluded = _parse_member_excluded(m, member_name=member_name, path=path, index=i)
+
         members.append(
             {
                 "name": member_name,
                 "repo_root": repo_root,
                 "base": base,
                 "tasks": resolved_tasks,
+                "excluded": excluded,
             }
         )
 
@@ -556,6 +576,81 @@ def _validate_string_list_field(
                 "empty tokens mask misconfiguration"
             )
     return list(value)
+
+
+#: Characters an 'excluded' entry may never carry: NUL (a raw filesystem-hostile
+#: byte) and backslash (a path-separator escape — this loader treats "/" as the
+#: only valid separator, so a backslash is either a Windows-style escape trick
+#: or a literal filename character neither this codebase nor the confinement
+#: check downstream is prepared to reason about safely).
+_EXCLUDED_FORBIDDEN_CHARS = re.compile(r"[\x00\\]")
+
+
+def _validate_excluded_entry(entry: str, *, path: Path, where: str) -> str:
+    """Lexically confine one 'excluded' entry to a relative path.
+
+    This is a LEXICAL check only — refuses an absolute path, a NUL byte, a
+    backslash, or a normalized form that would leave the member's worktree via
+    a leading '..' segment. There is no worktree to resolve against at config
+    load time (a worktree is `<workspace>/<member>` and depends on a slug load
+    time knows nothing about); the concrete `.resolve()` / `.is_relative_to()`
+    confinement against a real worktree belongs to a consumer at consumption
+    time, not here.
+    """
+    if _EXCLUDED_FORBIDDEN_CHARS.search(entry):
+        raise GroupConfigError(
+            f"{path}: {where} ({entry!r}) contains a NUL byte or backslash, "
+            "which is not a valid path character here"
+        )
+    if not entry.strip():
+        raise GroupConfigError(f"{path}: {where} is empty or whitespace-only")
+    if os.path.isabs(entry):
+        raise GroupConfigError(
+            f"{path}: {where} ({entry!r}) must be a relative path, not absolute"
+        )
+    normalized = os.path.normpath(entry)
+    if normalized == os.pardir or normalized.startswith(os.pardir + os.sep):
+        raise GroupConfigError(
+            f"{path}: {where} ({entry!r}) would leave the member's worktree via '..'"
+        )
+    return normalized
+
+
+def _parse_member_excluded(
+    m: dict[str, Any], *, member_name: str, path: Path, index: int
+) -> tuple[str, ...] | None:
+    """Parse the optional per-member 'excluded' field.
+
+    Absence of the key returns None ("never declared"); an explicit empty list
+    returns () ("declares nothing regenerable") — the two must never compare
+    equal, since a preflight renders them differently.
+    """
+    _MISSING = object()
+    excluded_raw = m.get("excluded", _MISSING)
+    if excluded_raw is _MISSING:
+        return None
+
+    if not isinstance(excluded_raw, list):
+        raise GroupConfigError(
+            f"{path}: members[{index}] ('{member_name}'): field 'excluded' must be "
+            "a list of strings"
+        )
+
+    normalized_entries: list[str] = []
+    for j, entry in enumerate(excluded_raw):
+        if not isinstance(entry, str):
+            raise GroupConfigError(
+                f"{path}: members[{index}] ('{member_name}'): excluded[{j}] must be "
+                f"a string, got {type(entry).__name__!r}"
+            )
+        normalized_entries.append(
+            _validate_excluded_entry(
+                entry,
+                path=path,
+                where=f"members[{index}] ('{member_name}'): excluded[{j}]",
+            )
+        )
+    return tuple(normalized_entries)
 
 
 def _parse_harness(raw: Any, path: Path) -> dict[str, Any] | None:
