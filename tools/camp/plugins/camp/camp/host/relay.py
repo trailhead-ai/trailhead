@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import json
 import sys
+from dataclasses import dataclass, field
 from typing import Any, Callable, Sequence
 
 from . import transport as _transport
@@ -53,42 +54,68 @@ from .transport import (
 RenderHumanRows = Callable[[list[dict[str, Any]]], None]
 
 
-def relay_all_groups(
+@dataclass(frozen=True)
+class HostAnswer:
+    """One machine's contribution to a per-host answer, produced as a value.
+
+    ``rows`` are the host-stamped rows to relay — either the remote's own
+    answered rows (untouched beyond the `host` stamp), or the single
+    ``ok: false`` row synthesized locally for a state the remote never
+    answered at all. ``notices`` are the stderr lines this machine owes,
+    already formatted and in the emission order the named-host surface
+    prints them in — a caller reprints each with its own trailing newline.
+    ``exit_code`` is the code this machine's own invocation produced (or the
+    fixed ``1`` for a state classified before any remote exit code exists).
+
+    ``answered`` is true only when ``rows`` came from the remote's own
+    parseable JSON answer. Every other state synthesizes its failure row
+    locally instead of relaying one, and a caller choosing how to render
+    text output (hand ``rows`` to the verb's own renderer, or print the
+    failure line under the machine's header) needs to tell the two apart —
+    a bare ``ok: false`` row is not a row a verb's renderer understands.
+    """
+
+    rows: list[dict[str, Any]]
+    notices: list[str] = field(default_factory=list)
+    exit_code: int = 0
+    answered: bool = False
+
+
+def answer_for_host(
     verb: str,
     host: Host,
     host_name: str,
     remote_argv: Sequence[str],
     *,
-    as_json: bool,
-    render_human_rows: RenderHumanRows,
     runner: Runner = default_runner,
-) -> None:
-    """Run *remote_argv* on *host* over the transport and render the answer.
+) -> HostAnswer:
+    """Run *remote_argv* on *host* over the transport and return its answer.
 
-    Exits the process in every branch — there is no return path a caller
-    needs to handle further, mirroring the fixed-message refusals `main()`
-    already prints before this is ever reached.
+    Never calls ``sys.exit`` and never prints — every transport outcome
+    becomes a :class:`HostAnswer` instead. Holds no state across calls, so
+    it is safe to call once per declared host, including from several
+    threads at once.
     """
     outcome = _transport.run_camp(host, remote_argv, runner=runner)
 
     if isinstance(outcome, Unreachable):
-        _fail(
-            verb, host_name, as_json,
+        return _fail_answer(
+            verb, host_name,
             human=f"is unreachable — no response within {DEFAULT_CONNECT_TIMEOUT_SECONDS:g}s",
             reason=f"unreachable — no response within {DEFAULT_CONNECT_TIMEOUT_SECONDS:g}s",
         )
 
     if isinstance(outcome, StoppedResponding):
         t = outcome.execution_timeout
-        _fail(
-            verb, host_name, as_json,
+        return _fail_answer(
+            verb, host_name,
             human=f"connected but did not finish within {t:g}s — no answer was received",
             reason=f"connected but did not finish within {t:g}s",
         )
 
     if isinstance(outcome, IdentityUnknown):
-        _fail(
-            verb, host_name, as_json,
+        return _fail_answer(
+            verb, host_name,
             human="has no pinned key — camp will not accept one on first contact",
             reason="no pinned host key",
             extra_human_line=(
@@ -98,8 +125,8 @@ def relay_all_groups(
         )
 
     if isinstance(outcome, IdentityChanged):
-        _fail(
-            verb, host_name, as_json,
+        return _fail_answer(
+            verb, host_name,
             human="presented a different key than the pinned one — refusing to connect",
             reason="host key differs from the pinned key",
             extra_human_line=(
@@ -109,8 +136,8 @@ def relay_all_groups(
         )
 
     if isinstance(outcome, CampNotResolvable):
-        _fail(
-            verb, host_name, as_json,
+        return _fail_answer(
+            verb, host_name,
             human="answered, but camp could not be run there — declare camp_bin "
             "for this host in hosts.toml",
             reason="camp could not be run on the host — declare camp_bin for "
@@ -118,8 +145,8 @@ def relay_all_groups(
         )
 
     if isinstance(outcome, CredentialsRefused):
-        _fail(
-            verb, host_name, as_json,
+        return _fail_answer(
+            verb, host_name,
             human="refused every credential offered — camp never ran there",
             reason="host refused our credentials",
             extra_human_line=(
@@ -145,12 +172,12 @@ def relay_all_groups(
         # would be the one thing this whole design exists to prevent — an
         # empty answer read as "the host has nothing to report" rather than
         # "the host could not be understood".
-        _print_verbatim(outcome.stderr, file=sys.stderr)
-        if as_json:
-            print(json.dumps(
-                [{"ok": False, "host": host_name, "reason": "remote answer could not be parsed"}]
-            ))
-        sys.exit(outcome.exit_code)
+        return HostAnswer(
+            rows=[{"ok": False, "host": host_name, "reason": "remote answer could not be parsed"}],
+            notices=_verbatim_notice(outcome.stderr),
+            exit_code=outcome.exit_code,
+            answered=False,
+        )
 
     # Stamp `host` on each row in place — never re-sort, never drop a row,
     # never touch any other field. This is the entire local contribution to
@@ -158,12 +185,48 @@ def relay_all_groups(
     for row in rows:
         row["host"] = host_name
 
-    if as_json:
-        print(json.dumps(rows))
+    return HostAnswer(
+        rows=rows,
+        notices=_verbatim_notice(outcome.stderr),
+        exit_code=outcome.exit_code,
+        answered=True,
+    )
+
+
+def relay_all_groups(
+    verb: str,
+    host: Host,
+    host_name: str,
+    remote_argv: Sequence[str],
+    *,
+    as_json: bool,
+    render_human_rows: RenderHumanRows,
+    runner: Runner = default_runner,
+) -> None:
+    """Run *remote_argv* on *host* over the transport and render the answer.
+
+    Exits the process in every branch — there is no return path a caller
+    needs to handle further, mirroring the fixed-message refusals `main()`
+    already prints before this is ever reached. Built on
+    :func:`answer_for_host`: this is that value, printed and exited on
+    immediately.
+    """
+    answer = answer_for_host(verb, host, host_name, remote_argv, runner=runner)
+
+    if answer.answered:
+        if as_json:
+            print(json.dumps(answer.rows))
+        else:
+            render_human_rows(answer.rows)
+        for notice in answer.notices:
+            print(notice, file=sys.stderr)
     else:
-        render_human_rows(rows)
-    _print_verbatim(outcome.stderr, file=sys.stderr)
-    sys.exit(outcome.exit_code)
+        for notice in answer.notices:
+            print(notice, file=sys.stderr)
+        if as_json:
+            print(json.dumps(answer.rows))
+
+    sys.exit(answer.exit_code)
 
 
 def _try_parse_rows(stdout: str) -> list[dict[str, Any]] | None:
@@ -183,27 +246,32 @@ def _try_parse_rows(stdout: str) -> list[dict[str, Any]] | None:
     return data
 
 
-def _print_verbatim(text: str, *, file) -> None:
+def _verbatim_notice(text: str) -> list[str]:
+    """One notice entry for *text*, exactly as `_print_verbatim` used to
+    print it (normalized to a single trailing newline the caller re-adds),
+    or none when there is nothing to say."""
     if not text:
-        return
-    print(text, end="" if text.endswith("\n") else "\n", file=file)
+        return []
+    return [text[:-1] if text.endswith("\n") else text]
 
 
-def _fail(
+def _fail_answer(
     verb: str,
     host_name: str,
-    as_json: bool,
     *,
     human: str,
     reason: str,
     extra_human_line: str | None = None,
-) -> None:
-    """Print the fixed rendering for one of the five non-relayable failure
-    states and exit 1 — never a raw transport error, always the operator's
-    terms."""
-    print(f"camp {verb}: host {host_name!r} {human}", file=sys.stderr)
+) -> HostAnswer:
+    """The fixed answer for one of the six non-relayable failure states:
+    its own stderr notice line(s), a single `ok: false` row, and exit 1 —
+    never a raw transport error, always the operator's terms."""
+    notices = [f"camp {verb}: host {host_name!r} {human}"]
     if extra_human_line is not None:
-        print(f"camp {verb}: {extra_human_line}", file=sys.stderr)
-    if as_json:
-        print(json.dumps([{"ok": False, "host": host_name, "reason": reason}]))
-    sys.exit(1)
+        notices.append(f"camp {verb}: {extra_human_line}")
+    return HostAnswer(
+        rows=[{"ok": False, "host": host_name, "reason": reason}],
+        notices=notices,
+        exit_code=1,
+        answered=False,
+    )
