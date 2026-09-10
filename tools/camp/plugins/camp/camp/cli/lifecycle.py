@@ -182,6 +182,59 @@ def _refuse_on_dropped_store(config: dict, error: Exception) -> None:
     )
 
 
+def _ownership_notice(mpath: Path, env: dict[str, str] | None) -> str | None:
+    """Return the `camp remove` ownership notice, or None when nothing is
+    unknown.
+
+    Silence is the ONLY outcome for a verified-local removal: the manifest's
+    recorded owner (`owner_of`, None means never recorded) equals this
+    host's declared name (`self_host_name`, None means never declared).
+    Every other configuration is a comparison this host cannot vouch for —
+    including the two where the comparison cannot be made at all — and each
+    gets its own distinguishable notice rather than being folded into
+    silence. An unchecked workspace must never read the same as a verified
+    one.
+
+    This host's own name is resolved fresh from `env` each call. A
+    `trailhead.paths.PathResolutionError` (an injected environment that
+    cannot even resolve a config directory — e.g. no HOME set) is treated
+    the same as a host that declared no name at all: the honest answer is
+    "the check was skipped", never silence. A `HostConfigError` (a malformed
+    `hosts.toml`) is NOT swallowed here — it propagates to the caller, which
+    surfaces it as a clean fatal error rather than a raw traceback.
+    """
+    from trailhead.paths import PathResolutionError
+
+    from ..group.manifest import ManifestError, owner_of, read_central_manifest
+    from ..host import self_host_name
+
+    owner: str | None = None
+    if mpath.is_file():
+        try:
+            owner = owner_of(read_central_manifest(mpath))
+        except ManifestError:
+            owner = None
+
+    try:
+        self_name = self_host_name(env=env)
+    except PathResolutionError:
+        self_name = None
+
+    if self_name is None:
+        return (
+            "camp remove: ownership check skipped — this host has no "
+            "declared name; declare one in hosts.toml's self_name field"
+        )
+    if owner is None:
+        return "camp remove: this workspace's ownership was never recorded"
+    if owner != self_name:
+        return (
+            f"camp remove: this workspace is owned by host {owner!r}, "
+            f"not this host ({self_name!r})"
+        )
+    return None
+
+
 def _cmd_remove_group_cli(
     args: list[str],
     group: dict,
@@ -202,8 +255,21 @@ def _cmd_remove_group_cli(
     directory. Every confirmation and diagnostic goes to stderr. On any failure
     (including partial removal) stdout is EMPTY and the exit is nonzero — the
     wrapper stays put.
+
+    Ownership notice (stderr only, never stdout): before proceeding, this
+    verb compares the workspace's recorded owner (`owner_of`, None means
+    never recorded) against this host's declared name (`self_host_name`,
+    None means never declared). Silence is the ONLY outcome for a verified
+    match — every other configuration, including the two where the
+    comparison cannot be made at all, gets its own distinguishable notice
+    (see `_ownership_notice`) rather than being folded into silence. This is
+    a notice, not a refusal: exit code and removal behavior are unchanged in
+    every case — only the operator's information changes. A malformed
+    `hosts.toml` (`HostConfigError`) is surfaced as a clean fatal error here,
+    same posture as every other named-error path in this CLI.
     """
-    from ..group.manifest import workspace_dir
+    from ..group.manifest import manifest_path_for, workspace_dir
+    from ..host import HostConfigError
     from ..provision.reconcile import reconcile_break
     from ..spine import _consume_flag_value, _die
 
@@ -224,6 +290,17 @@ def _cmd_remove_group_cli(
         cwd_inside_ws = Path.cwd().resolve().is_relative_to(ws_dir.resolve())
     except OSError:
         cwd_inside_ws = False
+
+    # Ownership notice: surfaced before anything proceeds, same posture as
+    # the session guard below. A malformed hosts.toml is a clean fatal error,
+    # not a notice — never a raw traceback.
+    mpath = manifest_path_for(group["group"]["name"], slug, env=env)
+    try:
+        notice = _ownership_notice(mpath, env)
+    except HostConfigError as e:
+        _die(f"camp remove: {e}")
+    if notice:
+        print(notice, file=sys.stderr)
 
     # Session guard: refuse BEFORE teardown (and before the dry-run early
     # return) so a rejected removal — real or previewed — has torn down
