@@ -50,7 +50,9 @@ Per-group behavior is read from the `[release]` block of the group TOML:
 - `merge_order` — the dependency order for a multi-PR merge (required for >1 PR).
 - `merge_method` — `merge` / `squash` / `rebase` / `automatic` (default: `automatic`;
   `portage merge` prints its resolved-strategy notice on stderr whenever it's unset
-  or explicitly `automatic`).
+  or explicitly `automatic` — see "Automatic merge-strategy selection" in
+  `plugins/portage/docs/pr-merge-rituals.md` for the fallback rule automatic
+  selection follows).
 - `review_bot_login` — the login whose review comments count as actionable
   (default: none — CI-only).
 - `external_tracker` — an optional issue-tracker connector (default: none).
