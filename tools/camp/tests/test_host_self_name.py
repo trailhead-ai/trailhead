@@ -43,51 +43,48 @@ if str(_PLUGIN_DIR) not in sys.path:
     sys.path.insert(0, str(_PLUGIN_DIR))
 
 
-def _env(config_root: Path) -> dict[str, str]:
-    return {"CAMP_CONFIG_DIR": str(config_root), "HOME": str(config_root.parent / "home")}
+def _env(tmp_path: Path) -> dict[str, str]:
+    """A hermetic environment whose camp config dir lives under *tmp_path*."""
+    return {"CAMP_CONFIG_DIR": str(tmp_path / "config"), "HOME": str(tmp_path / "home")}
 
 
-def _write_hosts_toml(config_root: Path, content: str) -> None:
+def _write_hosts_toml(tmp_path: Path, content: str) -> Path:
+    """Write *content* to the hosts.toml `_env(tmp_path)` resolves to; return its path."""
+    config_root = tmp_path / "config"
     config_root.mkdir(parents=True, exist_ok=True)
-    (config_root / "hosts.toml").write_text(content, encoding="utf-8")
+    path = config_root / "hosts.toml"
+    path.write_text(content, encoding="utf-8")
+    return path
 
 
 def test_no_hosts_toml_returns_none(tmp_path: Path) -> None:
     from camp.host.config import self_host_name
 
-    env = _env(tmp_path / "config")
-    assert self_host_name(env=env) is None
+    assert self_host_name(env=_env(tmp_path)) is None
 
 
 def test_hosts_toml_present_with_no_self_name_key_returns_none(tmp_path: Path) -> None:
     from camp.host.config import self_host_name
 
-    config_root = tmp_path / "config"
-    _write_hosts_toml(config_root, '[hosts.orion]\nssh = "orion.local"\n')
+    _write_hosts_toml(tmp_path, '[hosts.orion]\nssh = "orion.local"\n')
 
-    env = _env(config_root)
-    assert self_host_name(env=env) is None
+    assert self_host_name(env=_env(tmp_path)) is None
 
 
 def test_declared_self_name_is_returned(tmp_path: Path) -> None:
     from camp.host.config import self_host_name
 
-    config_root = tmp_path / "config"
-    _write_hosts_toml(config_root, 'self_name = "andromeda"\n')
+    _write_hosts_toml(tmp_path, 'self_name = "andromeda"\n')
 
-    env = _env(config_root)
-    assert self_host_name(env=env) == "andromeda"
+    assert self_host_name(env=_env(tmp_path)) == "andromeda"
 
 
 def test_shared_fixture_coexists_with_a_remote_host_table(tmp_path: Path) -> None:
     from camp.host.config import self_host_name
 
-    config_root = tmp_path / "config"
-    fixture_text = (_FIXTURES_DIR / "hosts.toml").read_text(encoding="utf-8")
-    _write_hosts_toml(config_root, fixture_text)
+    _write_hosts_toml(tmp_path, (_FIXTURES_DIR / "hosts.toml").read_text(encoding="utf-8"))
 
-    env = _env(config_root)
-    assert self_host_name(env=env) == "andromeda"
+    assert self_host_name(env=_env(tmp_path)) == "andromeda"
 
 
 @pytest.mark.parametrize(
@@ -104,12 +101,10 @@ def test_shared_fixture_coexists_with_a_remote_host_table(tmp_path: Path) -> Non
 def test_self_name_outside_strict_charset_raises(tmp_path: Path, bad_name: str) -> None:
     from camp.host.config import HostConfigError, self_host_name
 
-    config_root = tmp_path / "config"
-    _write_hosts_toml(config_root, f'self_name = {bad_name!r}\n')
+    _write_hosts_toml(tmp_path, f"self_name = {bad_name!r}\n")
 
-    env = _env(config_root)
     with pytest.raises(HostConfigError):
-        self_host_name(env=env)
+        self_host_name(env=_env(tmp_path))
 
 
 def test_self_name_with_trailing_newline_raises(tmp_path: Path) -> None:
@@ -117,97 +112,60 @@ def test_self_name_with_trailing_newline_raises(tmp_path: Path) -> None:
     \\Z anchoring (rather than $) exists to defeat."""
     from camp.host.config import HostConfigError, self_host_name
 
-    config_root = tmp_path / "config"
-    _write_hosts_toml(config_root, 'self_name = "andromeda\\n"\n')
+    _write_hosts_toml(tmp_path, 'self_name = "andromeda\\n"\n')
 
-    env = _env(config_root)
     with pytest.raises(HostConfigError):
-        self_host_name(env=env)
+        self_host_name(env=_env(tmp_path))
 
 
 def test_self_name_non_string_integer_raises(tmp_path: Path) -> None:
     from camp.host.config import HostConfigError, self_host_name
 
-    config_root = tmp_path / "config"
-    _write_hosts_toml(config_root, "self_name = 42\n")
+    _write_hosts_toml(tmp_path, "self_name = 42\n")
 
-    env = _env(config_root)
     with pytest.raises(HostConfigError):
-        self_host_name(env=env)
+        self_host_name(env=_env(tmp_path))
 
 
 def test_self_name_non_string_table_raises(tmp_path: Path) -> None:
     from camp.host.config import HostConfigError, self_host_name
 
-    config_root = tmp_path / "config"
-    _write_hosts_toml(config_root, "[self_name]\nx = 1\n")
+    _write_hosts_toml(tmp_path, "[self_name]\nx = 1\n")
 
-    env = _env(config_root)
     with pytest.raises(HostConfigError):
-        self_host_name(env=env)
+        self_host_name(env=_env(tmp_path))
 
 
 def test_self_name_empty_string_raises_not_none(tmp_path: Path) -> None:
     from camp.host.config import HostConfigError, self_host_name
 
-    config_root = tmp_path / "config"
-    _write_hosts_toml(config_root, 'self_name = ""\n')
+    _write_hosts_toml(tmp_path, 'self_name = ""\n')
 
-    env = _env(config_root)
     with pytest.raises(HostConfigError, match="must not be empty"):
-        self_host_name(env=env)
+        self_host_name(env=_env(tmp_path))
 
 
 def test_malformed_toml_raises_naming_path_and_reason(tmp_path: Path) -> None:
     from camp.host.config import HostConfigError, self_host_name
 
-    config_root = tmp_path / "config"
-    _write_hosts_toml(config_root, "self_name = \n")
+    hosts_toml = _write_hosts_toml(tmp_path, "self_name = \n")
 
-    env = _env(config_root)
     with pytest.raises(HostConfigError) as exc_info:
-        self_host_name(env=env)
-    message = str(exc_info.value)
-    assert str(config_root / "hosts.toml") in message
+        self_host_name(env=_env(tmp_path))
+    assert str(hosts_toml) in str(exc_info.value)
 
 
 def test_module_reexports_self_host_name_from_package_root(tmp_path: Path) -> None:
     from camp.host import self_host_name
 
-    env = _env(tmp_path / "config")
-    assert self_host_name(env=env) is None
+    assert self_host_name(env=_env(tmp_path)) is None
 
 
-def test_cli_surface_renders_clean_error_and_exits_nonzero(tmp_path: Path) -> None:
-    """A malformed self_name reaches an actual CLI invocation (camp doctor,
-    which now reports the self-declared host name) and comes back as a clean
-    `camp: <message>` line on stderr with no traceback."""
-    config_root = tmp_path / "config"
-    _write_hosts_toml(config_root, 'self_name = "Not Valid"\n')
-
+def _run_doctor(tmp_path: Path, args: list[str]) -> subprocess.CompletedProcess:
+    """Invoke the real `camp doctor` CLI against the hermetic env for *tmp_path*."""
     env = {
         **os.environ,
-        **_env(config_root),
-        "CAMP_STATE_DIR": str(tmp_path / "state"),
-    }
-    result = subprocess.run(
-        [sys.executable, str(_CLI_CAMP), "doctor"],
-        cwd=str(tmp_path),
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
-    assert result.returncode != 0
-    stderr_lines = [line for line in result.stderr.splitlines() if line.strip()]
-    assert any(line.startswith("camp: ") for line in stderr_lines), result.stderr
-    assert "Traceback" not in result.stderr
-
-
-def _run_doctor(tmp_path: Path, config_root: Path, args: list[str]) -> subprocess.CompletedProcess:
-    env = {
-        **os.environ,
-        **_env(config_root),
+        **_env(tmp_path),
         "CAMP_STATE_DIR": str(tmp_path / "state"),
         "CAMP_TEST_ASDF_PRESENT": "1",
     }
@@ -221,30 +179,40 @@ def _run_doctor(tmp_path: Path, config_root: Path, args: list[str]) -> subproces
     )
 
 
-def test_doctor_text_reports_declared_name(tmp_path: Path) -> None:
-    config_root = tmp_path / "config"
-    _write_hosts_toml(config_root, 'self_name = "andromeda"\n')
+def test_cli_surface_renders_clean_error_and_exits_nonzero(tmp_path: Path) -> None:
+    """A malformed self_name reaches an actual CLI invocation (camp doctor,
+    which now reports the self-declared host name) and comes back as a clean
+    `camp: <message>` line on stderr with no traceback."""
+    _write_hosts_toml(tmp_path, 'self_name = "Not Valid"\n')
 
-    result = _run_doctor(tmp_path, config_root, [])
+    result = _run_doctor(tmp_path, [])
+
+    assert result.returncode != 0
+    stderr_lines = [line for line in result.stderr.splitlines() if line.strip()]
+    assert any(line.startswith("camp: ") for line in stderr_lines), result.stderr
+    assert "Traceback" not in result.stderr
+
+
+def test_doctor_text_reports_declared_name(tmp_path: Path) -> None:
+    _write_hosts_toml(tmp_path, 'self_name = "andromeda"\n')
+
+    result = _run_doctor(tmp_path, [])
 
     assert "andromeda" in result.stdout, result.stdout
     assert result.returncode == 0, result.stderr
 
 
 def test_doctor_text_reports_not_declared_when_absent(tmp_path: Path) -> None:
-    config_root = tmp_path / "config"
-
-    result = _run_doctor(tmp_path, config_root, [])
+    result = _run_doctor(tmp_path, [])
 
     assert "not declared" in result.stdout, result.stdout
     assert result.returncode == 0, result.stderr
 
 
 def test_doctor_json_reports_declared_name(tmp_path: Path) -> None:
-    config_root = tmp_path / "config"
-    _write_hosts_toml(config_root, 'self_name = "andromeda"\n')
+    _write_hosts_toml(tmp_path, 'self_name = "andromeda"\n')
 
-    result = _run_doctor(tmp_path, config_root, ["--json"])
+    result = _run_doctor(tmp_path, ["--json"])
 
     assert result.returncode == 0, result.stderr
     report = json.loads(result.stdout)
@@ -255,9 +223,7 @@ def test_doctor_json_reports_declared_name(tmp_path: Path) -> None:
 
 
 def test_doctor_json_reports_not_declared_when_absent(tmp_path: Path) -> None:
-    config_root = tmp_path / "config"
-
-    result = _run_doctor(tmp_path, config_root, ["--json"])
+    result = _run_doctor(tmp_path, ["--json"])
 
     assert result.returncode == 0, result.stderr
     report = json.loads(result.stdout)

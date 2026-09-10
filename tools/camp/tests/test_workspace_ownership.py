@@ -73,6 +73,16 @@ def _make_group(name, members, *, branch_pattern="worktree-{slug}"):
     return {"group": {"name": name}, "members": members, "branch_pattern": branch_pattern}
 
 
+def _one_member_group_over_fresh_repo(tmp_root: Path, name: str, repo_dirname: str):
+    """A one-member group whose member is a fresh synthetic git repo."""
+    repo = tmp_root / repo_dirname
+    _init_git_repo(repo)
+    return _make_group(
+        name,
+        [{"name": "repo_a", "repo_root": str(repo), "tasks": [], "base": "origin/main"}],
+    )
+
+
 def _env(tmp_path: Path) -> dict[str, str]:
     """CAMP_STATE_DIR + CAMP_CONFIG_DIR + HOME, all hermetic. No hosts.toml
     written by default — a host that never declares a name."""
@@ -103,15 +113,28 @@ def _manifest_path(group_name: str, slug: str, env):
     return manifest_path_for(group_name, slug, env=env)
 
 
+def _owned_workspace(
+    group, tmp_root: Path, *, self_name: str | None = "andromeda", slug: str = "feat-o"
+):
+    """Create *group*'s workspace in a hermetic env; return (env, manifest_path).
+
+    *self_name* is declared before creation, so it is what gets stamped as the
+    owner. Pass None for a host that declares no name at all, which stamps
+    nothing.
+    """
+    from camp.provision.provision import bring_up_workspace
+
+    env = _env(tmp_root)
+    if self_name is not None:
+        _declare_self_name(env, self_name)
+    bring_up_workspace(group, slug, env=env)
+    return env, _manifest_path(group["group"]["name"], slug, env)
+
+
 @pytest.fixture()
 def one_member_group(tmp_path: Path):
-    repo_a = tmp_path / "repo_a"
-    _init_git_repo(repo_a)
-    group = _make_group(
-        "owng",
-        [{"name": "repo_a", "repo_root": str(repo_a), "tasks": [], "base": "origin/main"}],
-    )
-    return {"group": group, "repo_a": repo_a, "tmp_path": tmp_path}
+    group = _one_member_group_over_fresh_repo(tmp_path, "owng", "repo_a")
+    return {"group": group, "repo_a": tmp_path / "repo_a", "tmp_path": tmp_path}
 
 
 @pytest.fixture(autouse=True)
@@ -129,17 +152,13 @@ def _stub_spawn(monkeypatch):
 
 class TestOwnerStampedFromDeclaredName:
     def test_camp_new_stamps_declared_self_name_as_owner(self, one_member_group):
-        from camp.provision.provision import bring_up_workspace
         from camp.group.manifest import read_central_manifest, owner_of
 
         g = one_member_group
-        env = _env(g["tmp_path"])
-        _declare_self_name(env, "andromeda")
 
-        bring_up_workspace(g["group"], "feat-o", env=env)
+        _, mpath = _owned_workspace(g["group"], g["tmp_path"])
 
-        data = read_central_manifest(_manifest_path("owng", "feat-o", env))
-        assert owner_of(data) == "andromeda"
+        assert owner_of(read_central_manifest(mpath)) == "andromeda"
 
 
 # ---------------------------------------------------------------------------
@@ -149,16 +168,13 @@ class TestOwnerStampedFromDeclaredName:
 
 class TestOwnerAbsentWithNoDeclaredName:
     def test_camp_new_with_no_declared_name_writes_no_owner_key(self, one_member_group):
-        from camp.provision.provision import bring_up_workspace
         from camp.group.manifest import read_central_manifest
 
         g = one_member_group
-        env = _env(g["tmp_path"])  # no hosts.toml written
 
-        bring_up_workspace(g["group"], "feat-o", env=env)
+        _, mpath = _owned_workspace(g["group"], g["tmp_path"], self_name=None)
 
-        data = read_central_manifest(_manifest_path("owng", "feat-o", env))
-        assert "owner" not in data
+        assert "owner" not in read_central_manifest(mpath)
 
 
 # ---------------------------------------------------------------------------
@@ -185,7 +201,7 @@ class TestOwnerOfAccessor:
 
 
 # ---------------------------------------------------------------------------
-# 8. carry_forward_owner — the shared rebuild helper
+# carry_forward_owner — the shared rebuild helper
 # ---------------------------------------------------------------------------
 
 
@@ -222,19 +238,16 @@ class TestCarryForwardOwner:
 
 class TestNoBackfillAcrossFullLifecycle:
     def test_lifecycle_verbs_never_add_owner_to_a_keyless_manifest(self, one_member_group):
-        from camp.provision.provision import bring_up_workspace
         from camp.provision.lifecycle import cmd_setup_group, cmd_ls_group
         from camp.provision.activation import activate_member
         from camp.cli.lifecycle import _cmd_remove_group_cli
         from camp.group.manifest import read_central_manifest
 
         g = one_member_group
-        env = _env(g["tmp_path"])  # no self-name declared
         slug = "feat-o"
-        mpath = _manifest_path("owng", slug, env)
 
-        # created
-        bring_up_workspace(g["group"], slug, env=env)
+        # created — by a host that declares no name
+        env, mpath = _owned_workspace(g["group"], g["tmp_path"], self_name=None, slug=slug)
         assert "owner" not in read_central_manifest(mpath)
 
         # provisioned
@@ -286,8 +299,8 @@ class TestSeedNeverReStamps:
 
 
 # ---------------------------------------------------------------------------
-# 8. The writer-level guard: write_central_manifest refuses to drop or change
-#    an on-disk owner unless the caller opts in.
+# The writer-level guard: write_central_manifest refuses to drop or change
+# an on-disk owner unless the caller opts in.
 # ---------------------------------------------------------------------------
 
 
@@ -361,23 +374,19 @@ class TestWriterGuardPassthroughWhenDiskHasNoOwner:
 
 
 # ---------------------------------------------------------------------------
-# 9. Real lifecycle verbs against a record-carrying workspace.
+# Real lifecycle verbs against a record-carrying workspace.
 # ---------------------------------------------------------------------------
 
 
 class TestFullReconcileSurvivesOwner:
     def test_reconcile_worktree_carries_forward_top_level_owner(self, one_member_group):
-        from camp.provision.provision import bring_up_workspace
         from camp.provision.reconcile import reconcile_worktree
         from camp.group.manifest import read_central_manifest, owner_of
 
         g = one_member_group
-        env = _env(g["tmp_path"])
-        _declare_self_name(env, "andromeda")
         slug = "feat-o"
 
-        bring_up_workspace(g["group"], slug, env=env)
-        mpath = _manifest_path("owng", slug, env)
+        env, mpath = _owned_workspace(g["group"], g["tmp_path"], slug=slug)
         assert owner_of(read_central_manifest(mpath)) == "andromeda"
 
         reconcile_worktree(g["group"], slug, env=env)
@@ -387,16 +396,12 @@ class TestFullReconcileSurvivesOwner:
 
 class TestCampSetupSurvivesOwner:
     def test_setup_group_re_run_preserves_owner(self, one_member_group):
-        from camp.provision.provision import bring_up_workspace
         from camp.provision.lifecycle import cmd_setup_group
         from camp.group.manifest import read_central_manifest, owner_of
 
         g = one_member_group
-        env = _env(g["tmp_path"])
-        _declare_self_name(env, "andromeda")
         slug = "feat-o"
-        bring_up_workspace(g["group"], slug, env=env)
-        mpath = _manifest_path("owng", slug, env)
+        env, mpath = _owned_workspace(g["group"], g["tmp_path"], slug=slug)
 
         cmd_setup_group(g["group"], slug, env=env)
         assert owner_of(read_central_manifest(mpath)) == "andromeda"
@@ -408,17 +413,13 @@ class TestCampSetupSurvivesOwner:
 
 class TestCampSyncSurvivesOwner:
     def test_sync_group_preserves_owner(self, one_member_group):
-        from camp.provision.provision import bring_up_workspace
         from camp.provision.lifecycle import cmd_setup_group, cmd_sync_group
         from camp.group.manifest import read_central_manifest, owner_of
 
         g = one_member_group
-        env = _env(g["tmp_path"])
-        _declare_self_name(env, "andromeda")
         slug = "feat-o"
-        bring_up_workspace(g["group"], slug, env=env)
+        env, mpath = _owned_workspace(g["group"], g["tmp_path"], slug=slug)
         cmd_setup_group(g["group"], slug, env=env)
-        mpath = _manifest_path("owng", slug, env)
 
         cmd_sync_group(g["group"], env=env)
 
@@ -427,18 +428,14 @@ class TestCampSyncSurvivesOwner:
 
 class TestCampRebaseSurvivesOwner:
     def test_rebase_cli_preserves_owner(self, one_member_group):
-        from camp.provision.provision import bring_up_workspace
         from camp.provision.lifecycle import cmd_setup_group
         from camp.cli.lifecycle import _cmd_rebase_group_cli
         from camp.group.manifest import read_central_manifest, owner_of
 
         g = one_member_group
-        env = _env(g["tmp_path"])
-        _declare_self_name(env, "andromeda")
         slug = "feat-o"
-        bring_up_workspace(g["group"], slug, env=env)
+        env, mpath = _owned_workspace(g["group"], g["tmp_path"], slug=slug)
         cmd_setup_group(g["group"], slug, env=env)
-        mpath = _manifest_path("owng", slug, env)
 
         _cmd_rebase_group_cli(["--name", slug], g["group"], env, dry_run=False)
 
@@ -447,18 +444,14 @@ class TestCampRebaseSurvivesOwner:
 
 class TestActivateMemberSurvivesOwner:
     def test_activate_member_mark_activated_write_preserves_owner(self, one_member_group):
-        from camp.provision.provision import bring_up_workspace
         from camp.provision.lifecycle import cmd_setup_group
         from camp.provision.activation import activate_member
         from camp.group.manifest import read_central_manifest, owner_of
 
         g = one_member_group
-        env = _env(g["tmp_path"])
-        _declare_self_name(env, "andromeda")
         slug = "feat-o"
-        bring_up_workspace(g["group"], slug, env=env)
+        env, mpath = _owned_workspace(g["group"], g["tmp_path"], slug=slug)
         cmd_setup_group(g["group"], slug, env=env)  # brings repo_a to "ready"
-        mpath = _manifest_path("owng", slug, env)
 
         activate_member(g["group"], slug, "repo_a", env=env)
 
@@ -568,17 +561,13 @@ class TestMemberStateFlipSurvivesOwner:
 
 class TestSequentialWritesSurviveOwner:
     def test_reconcile_then_setup_in_sequence_preserves_owner(self, one_member_group):
-        from camp.provision.provision import bring_up_workspace
         from camp.provision.reconcile import reconcile_worktree
         from camp.provision.lifecycle import cmd_setup_group
         from camp.group.manifest import read_central_manifest, owner_of
 
         g = one_member_group
-        env = _env(g["tmp_path"])
-        _declare_self_name(env, "andromeda")
         slug = "feat-o"
-        bring_up_workspace(g["group"], slug, env=env)
-        mpath = _manifest_path("owng", slug, env)
+        env, mpath = _owned_workspace(g["group"], g["tmp_path"], slug=slug)
 
         reconcile_worktree(g["group"], slug, env=env)
         assert owner_of(read_central_manifest(mpath)) == "andromeda"
@@ -589,16 +578,13 @@ class TestSequentialWritesSurviveOwner:
 
 class TestReconcileNeverInventsOwnership:
     def test_reconcile_and_setup_add_no_owner_to_keyless_manifest(self, one_member_group):
-        from camp.provision.provision import bring_up_workspace
         from camp.provision.reconcile import reconcile_worktree
         from camp.provision.lifecycle import cmd_setup_group
         from camp.group.manifest import read_central_manifest
 
         g = one_member_group
-        env = _env(g["tmp_path"])  # no self-name declared
         slug = "feat-o"
-        bring_up_workspace(g["group"], slug, env=env)
-        mpath = _manifest_path("owng", slug, env)
+        env, mpath = _owned_workspace(g["group"], g["tmp_path"], self_name=None, slug=slug)
         assert "owner" not in read_central_manifest(mpath)
 
         reconcile_worktree(g["group"], slug, env=env)
@@ -609,7 +595,7 @@ class TestReconcileNeverInventsOwnership:
 
 
 # ---------------------------------------------------------------------------
-# 10. Hot-path safety: the guard changes nothing about an ownerless manifest.
+# Hot-path safety: the guard changes nothing about an ownerless manifest.
 # ---------------------------------------------------------------------------
 
 
@@ -643,22 +629,18 @@ class TestHotPathSafetyForOwnerlessWorkspace:
 
 
 # ---------------------------------------------------------------------------
-# 11. The per-member carry-forward set is unaffected by the top-level fix.
+# The per-member carry-forward set is unaffected by the top-level fix.
 # ---------------------------------------------------------------------------
 
 
 class TestPerMemberCarryForwardUnaffectedByOwnerFix:
     def test_reconcile_preserves_member_level_keys_with_owner_present(self, one_member_group):
-        from camp.provision.provision import bring_up_workspace
         from camp.provision.reconcile import reconcile_worktree
         from camp.group.manifest import read_central_manifest, write_central_manifest
 
         g = one_member_group
-        env = _env(g["tmp_path"])
-        _declare_self_name(env, "andromeda")
         slug = "feat-o"
-        bring_up_workspace(g["group"], slug, env=env)
-        mpath = _manifest_path("owng", slug, env)
+        env, mpath = _owned_workspace(g["group"], g["tmp_path"], slug=slug)
 
         # Simulate cmd_setup_group having already flipped this member and
         # recorded per-task state, which reconcile_worktree's per-member
@@ -684,7 +666,7 @@ class TestPerMemberCarryForwardUnaffectedByOwnerFix:
 
 
 # ---------------------------------------------------------------------------
-# 12. `camp remove` surfaces the ownership comparison as a stderr notice.
+# `camp remove` surfaces the ownership comparison as a stderr notice.
 #
 # Silence is the ONLY outcome for a verified-local removal (owner equals this
 # host's declared name). Every configuration this host cannot vouch for gets
@@ -704,17 +686,26 @@ def _remove_and_capture(group, slug, env, capsys):
     return capsys.readouterr()
 
 
-class TestRemoveOwnershipNoticeSilentWhenVerifiedLocal:
-    def test_owner_equals_self_name_prints_no_ownership_notice(
-        self, one_member_group, capsys
-    ):
-        from camp.provision.provision import bring_up_workspace
+def _notice_line(err: str) -> str:
+    """The one ownership-notice line in *err*, asserting there is exactly one.
 
+    Matches whichever of the three notices was emitted; the removal-progress
+    lines `camp remove` also writes to stderr carry none of these markers.
+    """
+    lines = [
+        ln
+        for ln in err.splitlines()
+        if ("owned" in ln or "never recorded" in ln or "no declared name" in ln)
+    ]
+    assert len(lines) == 1, err
+    return lines[0]
+
+
+class TestRemoveOwnershipNoticeSilentWhenVerifiedLocal:
+    def test_owner_equals_self_name_prints_no_ownership_notice(self, one_member_group, capsys):
         g = one_member_group
-        env = _env(g["tmp_path"])
-        _declare_self_name(env, "andromeda")
         slug = "feat-o"
-        bring_up_workspace(g["group"], slug, env=env)
+        env, _ = _owned_workspace(g["group"], g["tmp_path"], slug=slug)
 
         captured = _remove_and_capture(g["group"], slug, env, capsys)
 
@@ -722,41 +713,29 @@ class TestRemoveOwnershipNoticeSilentWhenVerifiedLocal:
 
 
 class TestRemoveOwnershipNoticeOwnedElsewhere:
-    def test_owner_differs_from_self_name_names_the_owning_host(
-        self, one_member_group, capsys
-    ):
-        from camp.provision.provision import bring_up_workspace
-
+    def test_owner_differs_from_self_name_names_the_owning_host(self, one_member_group, capsys):
         g = one_member_group
-        env = _env(g["tmp_path"])
-        _declare_self_name(env, "andromeda")
         slug = "feat-o"
-        bring_up_workspace(g["group"], slug, env=env)
+        env, _ = _owned_workspace(g["group"], g["tmp_path"], slug=slug)
 
         # The workspace changes hands: this host now declares a different name.
         _declare_self_name(env, "orion")
 
         captured = _remove_and_capture(g["group"], slug, env, capsys)
 
-        assert "andromeda" in captured.err
-        notice_lines = [
-            ln for ln in captured.err.splitlines() if "andromeda" in ln and "owned" in ln
-        ]
-        assert len(notice_lines) == 1, captured.err
+        notice = _notice_line(captured.err)
+        assert "andromeda" in notice
+        assert "owned" in notice
         # Removal still completed despite the mismatch.
         assert "removed worktree 'feat-o'" in captured.err
 
 
 class TestRemoveOwnershipNoticeNeverRecorded:
-    def test_no_owner_with_declared_self_name_says_never_recorded(
-        self, one_member_group, capsys
-    ):
-        from camp.provision.provision import bring_up_workspace
-
+    def test_no_owner_with_declared_self_name_says_never_recorded(self, one_member_group, capsys):
         g = one_member_group
-        env = _env(g["tmp_path"])  # no self-name declared during creation
         slug = "feat-o"
-        bring_up_workspace(g["group"], slug, env=env)
+        # No self-name declared during creation, so nothing was stamped.
+        env, _ = _owned_workspace(g["group"], g["tmp_path"], self_name=None, slug=slug)
 
         # This host now declares a name, after the fact.
         _declare_self_name(env, "orion")
@@ -769,13 +748,9 @@ class TestRemoveOwnershipNoticeNeverRecorded:
 
 class TestRemoveOwnershipNoticeNoSelfNameDeclared:
     def test_no_self_name_with_owner_says_check_skipped(self, one_member_group, capsys):
-        from camp.provision.provision import bring_up_workspace
-
         g = one_member_group
-        env = _env(g["tmp_path"])
-        _declare_self_name(env, "andromeda")
         slug = "feat-o"
-        bring_up_workspace(g["group"], slug, env=env)
+        env, _ = _owned_workspace(g["group"], g["tmp_path"], slug=slug)
 
         # This host no longer declares a name at all.
         (Path(env["CAMP_CONFIG_DIR"]) / "hosts.toml").unlink()
@@ -789,85 +764,48 @@ class TestRemoveOwnershipNoticeNoSelfNameDeclared:
     def test_no_self_name_without_owner_says_check_skipped_identically(
         self, one_member_group, capsys
     ):
-        from camp.provision.provision import bring_up_workspace
-
         g = one_member_group
-        env = _env(g["tmp_path"])  # no self-name declared, no owner ever stamped
         slug = "feat-o"
-        bring_up_workspace(g["group"], slug, env=env)
+        # No self-name declared, so no owner was ever stamped and none is now.
+        env, _ = _owned_workspace(g["group"], g["tmp_path"], self_name=None, slug=slug)
 
         captured_without_owner = _remove_and_capture(g["group"], slug, env, capsys)
 
         # Second scenario: an owner WAS recorded, but this host still declares
         # no name — the contract requires the SAME notice text either way.
-        env2 = _env(g["tmp_path"])
-        _declare_self_name(env2, "andromeda")
+        group2 = _one_member_group_over_fresh_repo(g["tmp_path"], "owng2", "repo_b_second")
         slug2 = "feat-p"
-        repo_b = g["tmp_path"] / "repo_b_second"
-        _init_git_repo(repo_b)
-        group2 = _make_group(
-            "owng2",
-            [{"name": "repo_a", "repo_root": str(repo_b), "tasks": [], "base": "origin/main"}],
-        )
-        bring_up_workspace(group2, slug2, env=env2)
+        env2, _ = _owned_workspace(group2, g["tmp_path"], slug=slug2)
         (Path(env2["CAMP_CONFIG_DIR"]) / "hosts.toml").unlink()
 
         captured_with_owner = _remove_and_capture(group2, slug2, env2, capsys)
 
-        def _skip_line(err: str) -> str:
-            lines = [ln for ln in err.splitlines() if "no declared name" in ln]
-            assert len(lines) == 1, err
-            return lines[0]
-
-        assert _skip_line(captured_without_owner.err) == _skip_line(captured_with_owner.err)
+        skipped_without_owner = _notice_line(captured_without_owner.err)
+        assert "no declared name" in skipped_without_owner
+        assert skipped_without_owner == _notice_line(captured_with_owner.err)
 
 
 class TestRemoveOwnershipNoticesAreDistinguishable:
     def test_the_three_notices_are_pairwise_distinct(self, one_member_group, capsys):
-        from camp.provision.provision import bring_up_workspace
-
         g = one_member_group
         tmp = g["tmp_path"]
 
-        def _notice_line(err: str) -> str:
-            candidates = [
-                ln
-                for ln in err.splitlines()
-                if ("owned" in ln or "never recorded" in ln or "no declared name" in ln)
-            ]
-            assert len(candidates) == 1, err
-            return candidates[0]
-
         # Owned elsewhere.
-        env_a = _env(tmp / "a")
-        _declare_self_name(env_a, "andromeda")
-        bring_up_workspace(g["group"], "feat-a", env=env_a)
+        env_a, _ = _owned_workspace(g["group"], tmp / "a", slug="feat-a")
         _declare_self_name(env_a, "orion")
         owned_elsewhere = _notice_line(
             _remove_and_capture(g["group"], "feat-a", env_a, capsys).err
         )
 
         # Never recorded.
-        env_b = _env(tmp / "b")
-        repo_b = tmp / "repo_b_never"
-        _init_git_repo(repo_b)
-        group_b = _make_group(
-            "owngb",
-            [{"name": "repo_a", "repo_root": str(repo_b), "tasks": [], "base": "origin/main"}],
-        )
-        bring_up_workspace(group_b, "feat-b", env=env_b)
+        group_b = _one_member_group_over_fresh_repo(tmp, "owngb", "repo_b_never")
+        env_b, _ = _owned_workspace(group_b, tmp / "b", self_name=None, slug="feat-b")
         _declare_self_name(env_b, "orion")
         never_recorded = _notice_line(_remove_and_capture(group_b, "feat-b", env_b, capsys).err)
 
         # No declared name at all.
-        env_c = _env(tmp / "c")
-        repo_c = tmp / "repo_c_noname"
-        _init_git_repo(repo_c)
-        group_c = _make_group(
-            "owngc",
-            [{"name": "repo_a", "repo_root": str(repo_c), "tasks": [], "base": "origin/main"}],
-        )
-        bring_up_workspace(group_c, "feat-c", env=env_c)
+        group_c = _one_member_group_over_fresh_repo(tmp, "owngc", "repo_c_noname")
+        env_c, _ = _owned_workspace(group_c, tmp / "c", self_name=None, slug="feat-c")
         no_name = _notice_line(_remove_and_capture(group_c, "feat-c", env_c, capsys).err)
 
         assert len({owned_elsewhere, never_recorded, no_name}) == 3, (
@@ -879,13 +817,9 @@ class TestRemoveOwnershipNoticesAreDistinguishable:
 
 class TestRemoveOwnershipNoticeStderrOnly:
     def test_notice_never_appears_on_stdout(self, one_member_group, capsys):
-        from camp.provision.provision import bring_up_workspace
-
         g = one_member_group
-        env = _env(g["tmp_path"])
-        _declare_self_name(env, "andromeda")
         slug = "feat-o"
-        bring_up_workspace(g["group"], slug, env=env)
+        env, _ = _owned_workspace(g["group"], g["tmp_path"], slug=slug)
         _declare_self_name(env, "orion")
 
         captured = _remove_and_capture(g["group"], slug, env, capsys)
@@ -896,13 +830,9 @@ class TestRemoveOwnershipNoticeStderrOnly:
 
 class TestRemoveOwnershipNoticeNoAnsi:
     def test_notice_contains_no_ansi_escape_codes(self, one_member_group, capsys):
-        from camp.provision.provision import bring_up_workspace
-
         g = one_member_group
-        env = _env(g["tmp_path"])
-        _declare_self_name(env, "andromeda")
         slug = "feat-o"
-        bring_up_workspace(g["group"], slug, env=env)
+        env, _ = _owned_workspace(g["group"], g["tmp_path"], slug=slug)
         _declare_self_name(env, "orion")
 
         captured = _remove_and_capture(g["group"], slug, env, capsys)
@@ -919,13 +849,9 @@ class TestRemoveOwnershipNoticePathResolutionErrorIsObservable:
         "no declared name" (an observable notice) is the deliberate choice —
         silently returning None here would be the exact fail-open this
         design exists to prevent."""
-        from camp.provision.provision import bring_up_workspace
-
         g = one_member_group
-        env = _env(g["tmp_path"])
-        _declare_self_name(env, "andromeda")
         slug = "feat-o"
-        bring_up_workspace(g["group"], slug, env=env)
+        env, _ = _owned_workspace(g["group"], g["tmp_path"], slug=slug)
 
         # Simulate an environment that cannot resolve a config dir at all —
         # no CAMP_CONFIG_DIR override and no HOME.
@@ -938,17 +864,12 @@ class TestRemoveOwnershipNoticePathResolutionErrorIsObservable:
 
 
 class TestRemoveOwnershipNoticeMalformedHostsTomlIsCleanError:
-    def test_malformed_hosts_toml_dies_cleanly_not_a_traceback(
-        self, one_member_group, capsys
-    ):
-        from camp.provision.provision import bring_up_workspace
+    def test_malformed_hosts_toml_dies_cleanly_not_a_traceback(self, one_member_group, capsys):
         from camp.cli.lifecycle import _cmd_remove_group_cli
 
         g = one_member_group
-        env = _env(g["tmp_path"])
-        _declare_self_name(env, "andromeda")
         slug = "feat-o"
-        bring_up_workspace(g["group"], slug, env=env)
+        env, _ = _owned_workspace(g["group"], g["tmp_path"], slug=slug)
 
         # Corrupt the declaration after creation.
         (Path(env["CAMP_CONFIG_DIR"]) / "hosts.toml").write_text(
