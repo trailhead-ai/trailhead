@@ -209,6 +209,19 @@ def _kill(process: subprocess.Popen) -> None:
         pass
 
 
+def quote_and_join(camp_bin: str, remote_argv: Sequence[str]) -> str:
+    """Quote ``camp_bin`` and every element of ``remote_argv`` individually,
+    then join with a single space — the exact remote-command shape ``ssh``
+    hands to the far side's login shell to parse and execute as one line.
+
+    Shared by every path that assembles a remote camp invocation (this
+    module's own :func:`run_camp`, and the interactive handoff in
+    ``host/handoff.py``) so there is exactly one place that decides how a
+    remote argv is quoted, never a second implementation of it.
+    """
+    return " ".join(shlex.quote(part) for part in (camp_bin, *remote_argv))
+
+
 def run_camp(
     host: Host,
     remote_argv: Sequence[str],
@@ -225,9 +238,7 @@ def run_camp(
     ``ConnectTimeout``) — the seam tests use to point ``UserKnownHostsFile`` at
     a throwaway file; production callers pass none.
     """
-    remote_command = " ".join(
-        shlex.quote(part) for part in (host.camp_bin, *remote_argv)
-    )
+    remote_command = quote_and_join(host.camp_bin, remote_argv)
     ssh_argv: list[str] = [
         "ssh",
         "-o", "BatchMode=yes",
