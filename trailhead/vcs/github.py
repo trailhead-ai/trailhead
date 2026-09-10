@@ -75,7 +75,8 @@ class AutoMergeDisabledError(Exception):
 
 
 class MergeMethodInvalidError(Exception):
-    """Raised when merge_method in the [release] block is not merge/squash/rebase.
+    """Raised when merge_method in the [release] block is not one of
+    merge/squash/rebase/automatic.
 
     Fail-closed, same posture as AutoMergeDisabledError: a merge is not
     reversible, so an unrecognized value refuses rather than falling back to
@@ -579,21 +580,34 @@ def _load_auto_merge(toml_path: str | None) -> bool:
 #: One-for-one with the three strategy flags `gh pr merge` itself exposes
 #: (`-m`/`--merge`, `-s`/`--squash`, `-r`/`--rebase`). `--author-email` is not
 #: scoped to a strategy in that flag list, so it stays on the argv unchanged
-#: for all three.
+#: for all three. Automatic selection has no entry here — it is a
+#: configuration-only value with no `gh` flag of its own.
 _MERGE_METHOD_FLAGS = {"merge": "--merge", "squash": "--squash", "rebase": "--rebase"}
+
+#: Sentinel returned by `_load_merge_method` for automatic selection —
+#: distinct from `None`, which signals a configuration that could not be
+#: read or understood at all. Shares its literal with the TOML value that
+#: names it explicitly.
+AUTOMATIC_MERGE_METHOD = "automatic"
+
+#: Accepted configuration vocabulary: the three concrete strategies `gh`
+#: exposes flags for, plus automatic selection.
+_MERGE_METHOD_VALUES = frozenset(_MERGE_METHOD_FLAGS) | {AUTOMATIC_MERGE_METHOD}
 
 
 def _load_merge_method(toml_path: str | None) -> str | None:
     """Return the configured merge_method.
 
-    ``None`` is returned for every unconfigured shape — a missing toml_path,
-    an unreadable/malformed file, a [release] block that isn't a table, or a
-    valid [release] table with the ``merge_method`` key absent — so the
-    caller resolves all of them to the SAME single default ("squash") and
-    announces it.
+    Returns one of the three concrete strategies (``merge``/``squash``/
+    ``rebase``) when named explicitly, ``AUTOMATIC_MERGE_METHOD`` when the
+    configuration is readable and well-formed and either names automatic
+    selection explicitly or omits the ``merge_method`` key, and ``None`` when
+    the configuration could not be read or understood at all — a missing
+    toml_path, an unreadable file, undecodable TOML, or a [release] block
+    that isn't a table. The caller resolves ``None`` to the safe direction.
 
     Raises MergeMethodInvalidError if the key is present but not one of
-    merge/squash/rebase — fail-closed, same posture as auto_merge.
+    merge/squash/rebase/automatic — fail-closed, same posture as auto_merge.
     """
     if not toml_path:
         return None
@@ -609,11 +623,11 @@ def _load_merge_method(toml_path: str | None) -> str | None:
         return None
     value = release.get("merge_method")
     if value is None:
-        return None
-    if not isinstance(value, str) or value not in _MERGE_METHOD_FLAGS:
+        return AUTOMATIC_MERGE_METHOD
+    if not isinstance(value, str) or value not in _MERGE_METHOD_VALUES:
         raise MergeMethodInvalidError(
             f"invalid [release] merge_method {value!r} — accepted values are "
-            f"'merge', 'squash', 'rebase'"
+            f"'merge', 'squash', 'rebase', 'automatic'"
         )
     return value
 
@@ -788,8 +802,8 @@ def _merge_prs(
     # notice itself is printed below, after the merge_order gates, so a
     # refused run never announces a merge method it never used.
     merge_method = _load_merge_method(toml_path)
-    merge_method_notice_needed = merge_method is None
-    if merge_method is None:
+    merge_method_notice_needed = merge_method is None or merge_method == AUTOMATIC_MERGE_METHOD
+    if merge_method_notice_needed:
         merge_method = "squash"
 
     # Merge safety gate

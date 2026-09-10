@@ -882,6 +882,21 @@ class TestMergeMethod:
         assert "squash" in err
         assert 'merge_method = "merge"' in err
 
+    def test_automatic_named_explicitly_is_accepted_not_refused(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """`merge_method = "automatic"` widens the accepted vocabulary — it
+        must resolve rather than raise MergeMethodInvalidError, and it takes
+        the same not-a-named-strategy path as an absent key (still squash,
+        still the notice, for now — nothing consumes the distinction yet)."""
+        argv = self._run_merge_capture_argv(
+            tmp_path, '[release]\nauto_merge = true\nmerge_method = "automatic"\n'
+        )
+        assert len(argv) == 1
+        assert "--squash" in argv[0]
+        err = capsys.readouterr().err
+        assert "squash" in err
+
     def test_configured_merge_method_prints_no_notice(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
@@ -953,18 +968,19 @@ class TestMergeMethod:
         msg = str(exc_info.value)
         assert "merge" in msg and "squash" in msg and "rebase" in msg
 
-    def test_unconfigured_release_shapes_share_one_default(
+    def test_well_formed_absent_key_and_malformed_shapes_resolve_differently(
         self, tmp_path: Path
     ) -> None:
-        """`_load_merge_method` resolves every unconfigured shape — absent
-        toml_path, missing file, unparseable TOML, non-table [release], and a
-        valid table with the key absent — to the SAME single result. There is
-        exactly one default in this function, not two: a second, different
-        fallback among the malformed shapes would pass unnoticed if each
-        shape were only compared against its own literal, so this pins them
-        as one set collapsing to one value instead.
+        """`_load_merge_method` no longer collapses every unconfigured shape
+        to one result. A readable, well-formed [release] table with the key
+        absent means automatic selection (AUTOMATIC_MERGE_METHOD) — the
+        configuration was understood and asked for nothing specific. Every
+        shape where the configuration could not be read or understood at all
+        — absent toml_path, missing file, unparseable TOML, non-table
+        [release] — still resolves to None, the safe-direction signal. The
+        two groups must be distinguishable, not a shared sentinel.
         """
-        from trailhead.vcs.github import _load_merge_method
+        from trailhead.vcs.github import AUTOMATIC_MERGE_METHOD, _load_merge_method
 
         # _write_toml always writes to "<tmp_path>/group.toml" — each shape
         # needs its own directory so the three files on disk stay distinct
@@ -980,14 +996,14 @@ class TestMergeMethod:
         non_table = _write_toml(non_table_dir, "release = 1\n")
         valid_table_absent_key = _write_toml(valid_absent_dir, "[release]\nauto_merge = true\n")
 
-        results = {
+        malformed_results = {
             _load_merge_method(None),
             _load_merge_method(str(tmp_path / "does-not-exist.toml")),
             _load_merge_method(str(unparseable)),
             _load_merge_method(str(non_table)),
-            _load_merge_method(str(valid_table_absent_key)),
         }
-        assert results == {None}
+        assert malformed_results == {None}
+        assert _load_merge_method(str(valid_table_absent_key)) == AUTOMATIC_MERGE_METHOD
 
 
 # ---------------------------------------------------------------------------
