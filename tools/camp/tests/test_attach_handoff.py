@@ -119,11 +119,15 @@ def test_remote_argv_reuses_the_transports_own_quote_and_join(monkeypatch):
 # The metacharacter battery — a battery, not a sample.
 # ---------------------------------------------------------------------------
 
+#: Each template carries a `{sentinel}` the shell would create *only* if it
+#: interpreted the metacharacter. The sentinel path is filled in per-test from
+#: `tmp_path`, so its existence is an outcome only the injection can produce —
+#: an absolute path baked in here would make the assertion pass vacuously.
 _METACHARACTER_BATTERY = [
-    "camp-foo; rm -rf /tmp/should-not-run",
-    "camp-foo$(touch /tmp/should-not-run)",
-    "camp-foo`touch /tmp/should-not-run`",
-    "camp-foo\nrm -rf /tmp/should-not-run",
+    "camp-foo; touch {sentinel}",
+    "camp-foo$(touch {sentinel})",
+    "camp-foo`touch {sentinel}`",
+    "camp-foo\ntouch {sentinel}",
     "camp-foo'with\"quotes",
 ]
 
@@ -139,7 +143,8 @@ def test_remote_argv_survives_a_local_shell_standing_in_for_the_far_side(
     argv (no metacharacter interpreted) and must not execute anything extra
     (no injection).
     """
-    sentinel = tmp_path / "should-not-exist"
+    sentinel = tmp_path / "injection-fired"
+    hostile_ref = hostile_ref.format(sentinel=sentinel)
 
     fake_camp_bin = tmp_path / "fake_camp"
     recording = tmp_path / "recorded_argv"
