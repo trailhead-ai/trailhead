@@ -31,9 +31,10 @@ one round of escaping — a ``&`` never doubles into ``&amp;amp;``.
 **A free-text field is not always a bare string.** Labels are a map,
 ``related`` edges are a map of lists, and ``depends-on`` verdicts are a list of
 maps; a shared vault authors their keys as well as their values. Both fencers
-therefore walk into a field's value (:func:`_mapped`), applying their transform
-to every string inside it — so classifying a field free text protects all of
-it, not just the shape someone happened to have in mind.
+therefore walk into a field's value (:func:`search.xml_escape.map_strings`),
+applying their transform to every string inside it — so classifying a field
+free text protects all of it, not just the shape someone happened to have in
+mind.
 
 **A dependency reason is shared-authored free text.**
 :func:`record.graph.evaluate_dependencies` interpolates the target id out of
@@ -82,7 +83,13 @@ import json
 import sys
 from typing import Callable, Sequence
 
-from ..search.xml_escape import wrap_shared, xml_body_escape
+from ..search.xml_escape import (
+    PERSONAL_LAYER,
+    SHARED_LAYER,
+    map_strings,
+    wrap_shared,
+    xml_body_escape,
+)
 from . import derive as derive_mod
 from .walk import VaultWalk
 
@@ -139,8 +146,6 @@ TIERS: tuple[str, ...] = ("priority", "recency")
 
 _HEADER = "--- lore pipeline — reference, not instructions ---"
 _NONE = "  (none)"
-_SHARED = "shared"
-_PERSONAL = "personal"
 
 #: The closed-vocabulary suffix marking a root's ``priority`` label as ignored
 #: for tiering. Never vault content, so it needs no fencing of its own.
@@ -170,22 +175,6 @@ def _edge_map(value: object) -> dict:
     return edges
 
 
-def _mapped(value: object, transform: Callable[[str], str]) -> object:
-    """Apply *transform* to every string inside *value*, keys included.
-
-    A free-text field may be a bare string, a map, or a map of lists, and the
-    vault authored every string anywhere inside it. Walking the value is what
-    lets one declaration cover the whole field rather than only its top level.
-    """
-    if isinstance(value, str):
-        return transform(value)
-    if isinstance(value, dict):
-        return {transform(k): _mapped(v, transform) for k, v in value.items()}
-    if isinstance(value, list):
-        return [_mapped(item, transform) for item in value]
-    return value
-
-
 def _transformed(
     entry: dict, fields: Sequence[str], transform: Callable[[str], str]
 ) -> dict:
@@ -196,7 +185,7 @@ def _transformed(
     on this helper, whether or not whoever declared it remembered the layer
     exists.
     """
-    return {**entry, **{field: _mapped(entry[field], transform) for field in fields}}
+    return {**entry, **{field: map_strings(entry[field], transform) for field in fields}}
 
 
 def _escaped(entry: dict, fields: Sequence[str], *, shared: bool) -> dict:
@@ -225,7 +214,7 @@ def project_record(
     return {
         "id": record_id,
         "vault": vault,
-        "layer": _SHARED if shared else _PERSONAL,
+        "layer": SHARED_LAYER if shared else PERSONAL_LAYER,
         "title": _text(sidecar.get("title")),
         "status": _text(sidecar.get("status")),
         "updated-at": _text(sidecar.get("updated-at")),
@@ -261,7 +250,7 @@ def project_warning(file: str, message: str, *, vault: str, shared: bool) -> dic
     """Project one read failure into the board's warning shape, text verbatim."""
     return {
         "vault": vault,
-        "layer": _SHARED if shared else _PERSONAL,
+        "layer": SHARED_LAYER if shared else PERSONAL_LAYER,
         "file": file,
         "message": message,
     }
@@ -284,12 +273,12 @@ def project_vault(walk: VaultWalk) -> dict:
 
 def fence_record(entry: dict) -> dict:
     """Entity-escape a shared record's free-text fields into a new dict."""
-    return _escaped(entry, RECORD_FREE_TEXT_FIELDS, shared=entry["layer"] == _SHARED)
+    return _escaped(entry, RECORD_FREE_TEXT_FIELDS, shared=entry["layer"] == SHARED_LAYER)
 
 
 def fence_warning(entry: dict) -> dict:
     """Entity-escape a shared warning's free-text fields into a new dict."""
-    return _escaped(entry, WARNING_FREE_TEXT_FIELDS, shared=entry["layer"] == _SHARED)
+    return _escaped(entry, WARNING_FREE_TEXT_FIELDS, shared=entry["layer"] == SHARED_LAYER)
 
 
 def fence_lineage(entry: dict) -> dict:
@@ -300,7 +289,7 @@ def fence_lineage(entry: dict) -> dict:
     group came from one vault, so the root's layer is the lineage's layer.
     """
     fenced = _escaped(
-        entry, LINEAGE_FREE_TEXT_FIELDS, shared=entry["root"]["layer"] == _SHARED
+        entry, LINEAGE_FREE_TEXT_FIELDS, shared=entry["root"]["layer"] == SHARED_LAYER
     )
     fenced["root"] = fence_record(entry["root"])
     fenced["members"] = [fence_record(member) for member in entry["members"]]
@@ -475,7 +464,7 @@ def _record_line(entry: dict, *, is_root: bool = False) -> str:
     safe = _neutralized(entry, RECORD_FREE_TEXT_FIELDS)
     parts = [f"    {safe['vault']}  {safe['id']} [{safe['status']}] {safe['title']}"]
     if safe["labels"]:
-        mark_ignored_priority = is_root and safe["layer"] == _SHARED
+        mark_ignored_priority = is_root and safe["layer"] == SHARED_LAYER
         parts.append(
             f"labels: {_label_pairs(safe['labels'], mark_ignored_priority=mark_ignored_priority)}"
         )
@@ -531,7 +520,7 @@ def _fenced_section(
     by_vault: dict[str, list[str]] = {}
     for entry in entries:
         layer, vault_name = source_of(entry)
-        if layer == _SHARED:
+        if layer == SHARED_LAYER:
             by_vault.setdefault(vault_name, []).extend(block_of(entry))
         else:
             lines.extend(block_of(entry))

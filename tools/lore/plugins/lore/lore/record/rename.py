@@ -72,6 +72,13 @@ whose primary move has landed.
 written with :func:`store.validate_and_write`, so they are validated, provenance
 re-stamped, and fence-neutralized exactly as any other update. Records the sweep
 does not change are never written, so their bytes and provenance are untouched.
+
+**The read-only inbound scan.** This module also answers the question a rename
+answers by acting: which records currently reference a given one.
+:func:`find_inbound_references` is that scan, and ``record delete``'s inbound
+guard is its caller. It lives here rather than beside the guard because it must
+count exactly what the sweep would repoint — it drives the sweep's own rewriters
+to decide, so the two cannot come to disagree about what a reference is.
 """
 
 from __future__ import annotations
@@ -371,6 +378,116 @@ def _iter_records(root: Path):
                 continue
             name = body_path.relative_to(kind_dir).with_suffix("").as_posix()
             yield f"{kind_dir.name}/{name}", kind_dir.name, body_path
+
+
+# ---------------------------------------------------------------------------
+# The read-only inbound scan
+# ---------------------------------------------------------------------------
+
+#: The replacement stem the detectors are driven with. Passing a value no real
+#: stem can equal turns each rewriter into a detector — a value that changed is a
+#: reference — so what the delete guard counts and what a rename would repoint
+#: are one computation rather than two that have to be kept in step.
+_PROBE_STEM = "\x00probe"
+
+
+class InboundRef(NamedTuple):
+    """One record naming the record under examination, or one that could not be read.
+
+    ``shared`` carries the referrer's vault trust. A reference out of a
+    ``shared: true`` vault is reported but never obeyed: content the operator
+    does not control must not be able to veto an operation on their own record.
+
+    ``unchecked`` marks a record whose body or sidecar could not be read, with
+    the reason in ``error``. Nothing is known about its references, which is not
+    the same as knowing it has none — a caller enforcing an invariant has to
+    treat it as unresolved rather than clear.
+    """
+
+    vault: str
+    record_id: str
+    shared: bool
+    unchecked: bool = False
+    error: str | None = None
+
+
+def find_inbound_references(
+    vaults, kind: str, stem: str, *, source_root
+) -> tuple[InboundRef, ...]:
+    """Every record that navigationally references ``<kind>/<stem>``.
+
+    The read-only counterpart to :func:`sweep_references`, for a caller that has
+    to know whether repointing is still outstanding before it destroys the
+    target — ``record delete``'s inbound guard. It walks the same vaults under
+    the same :func:`_confined_kind_dirs` confinement, and decides what counts by
+    driving the sweep's own rewriters with :data:`_PROBE_STEM`: a value that
+    changed is a reference. Detection and rewriting therefore cannot come to
+    disagree about the reference grammar.
+
+    Two shapes count, and only these: a body wikilink (bare or ``kind/``-
+    qualified, aliased or not) and a ``related.<kind>`` sidecar entry. Both are
+    plain cross-references — a reference is only ever to the record it names —
+    so both are counted in every vault. ``depends-on`` and ``parent`` are
+    deliberately out of scope: they state a dependency rather than a navigational
+    reference, they resolve vault-locally for design kinds, and delete already
+    reports them through :func:`guards.evaluate_graph_guards`.
+
+    The record at ``<kind>/<stem>`` inside *source_root* is skipped. A record's
+    link to itself says nothing about whether anything else still needs it.
+
+    Never raises. A body that cannot be read, or a sidecar that exists and will
+    not parse, comes back ``unchecked`` — stricter than the sweep, which treats
+    an unparseable sidecar as empty and moves on. The sweep can afford that: it
+    is repointing what it can find and reporting the rest. A guard cannot,
+    because reporting a scan that failed to look as a scan that found nothing is
+    the exact failure it exists to prevent. A sidecar that is simply absent is
+    not a failure to look: there are no edges to find.
+    """
+    target_id = f"{kind}/{stem}"
+    source = os.path.realpath(source_root)
+    found: list[InboundRef] = []
+    for vault in vaults:
+        own_vault = os.path.realpath(vault.root) == source
+        for record_id, _rec_kind, body_path in _iter_records(vault.root):
+            if own_vault and record_id == target_id:
+                continue
+            try:
+                body = body_path.read_text(encoding="utf-8")
+            except (OSError, ValueError, UnicodeDecodeError) as exc:
+                found.append(
+                    InboundRef(vault.name, record_id, vault.shared,
+                               unchecked=True, error=f"unreadable body: {exc}")
+                )
+                continue
+            if rewrite_body(body, kind, stem, _PROBE_STEM) != body:
+                found.append(InboundRef(vault.name, record_id, vault.shared))
+                continue
+
+            sidecar_path = body_path.with_suffix(".json")
+            try:
+                sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+            except FileNotFoundError:
+                continue
+            except (OSError, ValueError) as exc:
+                found.append(
+                    InboundRef(vault.name, record_id, vault.shared,
+                               unchecked=True, error=f"unreadable sidecar: {exc}")
+                )
+                continue
+            if not isinstance(sidecar, dict):
+                found.append(
+                    InboundRef(vault.name, record_id, vault.shared, unchecked=True,
+                               error="sidecar is not an object")
+                )
+                continue
+            related = sidecar.get("related")
+            if isinstance(related, dict) and isinstance(related.get(kind), list):
+                if any(
+                    _rewrite_entry(entry, kind, stem, _PROBE_STEM) != entry
+                    for entry in related[kind]
+                ):
+                    found.append(InboundRef(vault.name, record_id, vault.shared))
+    return tuple(found)
 
 
 # ---------------------------------------------------------------------------

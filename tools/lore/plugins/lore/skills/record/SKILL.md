@@ -186,6 +186,15 @@ removes it from the working copy only — git history retains every imported
 byte, so deleting after the fact does not unsay it. This is why redaction
 happens before the pipe, not after the import.
 
+**A delete is refused while anything still references the record.** `lore record
+delete` lists the referring records and stops. Repoint them first — a body
+`[[wikilink]]` is rewritten, a `related` edge is moved with `--unset-related
+KIND=NAME` plus `--related KIND=NAME` — then delete. Naming the record in bare
+prose is not a reference and does not block, which is what lets a note recording
+the fold survive the record it folded. `--force` deletes anyway and lists what it
+left dangling; reach for it for a deliberate delete, not to get past the
+refusal.
+
 **Provenance.** Every record minted from a meeting carries the edge
 `related: blob=<name>` back to the transcript at creation time — mandatory,
 because that facet is the only index of a transcript's descendants. The edge
