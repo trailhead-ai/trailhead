@@ -771,7 +771,7 @@ def _dispatch_all_hosts_command(
     else:
         for notice in notices:
             print(notice, file=sys.stderr)
-        _render_all_hosts_human(self_name, hosts, hosts_error, rows, render_row)
+        _render_all_hosts_human(self_name, hosts, hosts_error, rows, render_row, verb)
 
     sys.exit(exit_code)
 
@@ -782,6 +782,7 @@ def _render_all_hosts_human(
     hosts_error: str | None,
     rows: list[dict],
     render_row,
+    verb: str,
 ) -> None:
     """Print the merged answer grouped by machine — local block first, then
     every declared host in `hosts.toml` declaration order (the same order
@@ -789,6 +790,17 @@ def _render_all_hosts_human(
     its header, even one with nothing beneath it; a machine whose only row
     is a failure (`ok: false`) prints that row's `reason` in place of a
     rendered row.
+
+    Version skew across the operator's declared machines is the expected
+    steady state for this feature, not an edge case — a machine running a
+    different version can answer with a row that omits a key `render_row`
+    indexes directly (a remote row, or a local row from a mismatched local
+    answer function). Degrade that ONE row rather than let it take the
+    whole merged listing down, the same isolation the `--host` renderers
+    (`workspace.py`'s `_cmd_ls_host_cli`, `session.py`'s
+    `_cmd_sessions_host_cli`) already hold for their own single-machine
+    case — every other row on this machine, and every other machine, still
+    renders.
     """
     machines = [(self_name, self_name if self_name is not None else "this machine")]
     machines += [(host_name, host_name) for host_name in hosts]
@@ -800,8 +812,17 @@ def _render_all_hosts_human(
                 continue
             if not row.get("ok", True):
                 print(f"  {row.get('reason', 'unknown failure')}")
-            else:
-                print(f"  {render_row(row)}")
+                continue
+            try:
+                rendered = render_row(row)
+            except KeyError as e:
+                print(
+                    f"camp {verb}: {label} sent a row missing "
+                    f"{e.args[0]!r} — skipping",
+                    file=sys.stderr,
+                )
+                continue
+            print(f"  {rendered}")
 
     # hosts.toml itself failed to parse: the declared hosts could never be
     # enumerated, so there is no declared-host header to attribute this row
