@@ -24,6 +24,10 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..host.config import Host
 
 # Single source of truth for the verb dispatch tables. verb_taxonomy is a
 # tiny pure-data module (no regex/subprocess/spine), so importing it at module
@@ -80,6 +84,61 @@ def read_all_groups_option(args: list[str]) -> tuple[list[str], bool]:
         else:
             remaining.append(arg)
     return remaining, present
+
+
+#: The one spelling of the resolve-a-single-declared-remote-host option, and
+#: the only verbs it has any meaning for. Held here, once, so
+#: `read_host_option` (the reader `main()` consults for every verb) and its
+#: applicability check can never drift against each other — the same shape as
+#: `ALL_GROUPS_FLAGS` / `_ALL_GROUPS_VERBS` above.
+HOST_FLAG = "--host"
+_HOST_VERBS = frozenset({"list", "sessions"})
+
+
+class _HostFlagMissingValue(Exception):
+    """Raised by `read_host_option` when ``--host`` is the final token in
+    *args*, with no following value and no ``=value`` — a name camp cannot
+    resolve, so it must refuse rather than silently drop the flag or swallow
+    the next argument as its value."""
+
+
+def read_host_option(args: list[str]) -> tuple[list[str], str | None]:
+    """Consume ``--host <name>``/``--host=value`` from *args*.
+
+    Delegates the actual consumption to `_consume_flag_value` (spine.py),
+    which already supports both spellings — this wraps it only to detect the
+    one case it leaves unconsumed: ``--host`` as the trailing token, with no
+    value. Returns ``(remaining, host_name)``; `host_name` is `None` when
+    `--host` is absent. Raises `_HostFlagMissingValue` for the trailing-token
+    case.
+    """
+    from ..spine import _consume_flag_value
+
+    remaining = list(args)
+    host_name = _consume_flag_value(remaining, HOST_FLAG)
+    if host_name is None and HOST_FLAG in remaining:
+        raise _HostFlagMissingValue()
+    return remaining, host_name
+
+
+def _dispatch_host_command(
+    verb: str, host: "Host", host_name: str, rest: list[str]
+) -> None:
+    """Hand a resolved remote `Host` off to its verb handler.
+
+    Reached ONLY after `--host` has resolved to a declared host and every
+    refusal above has passed — `main()`'s `--host` block is this function's
+    sole caller. Wiring this to the SSH transport
+    (`camp.host.transport.run_camp`) is a later task's job; this function is
+    the seam that task fills in, and it deliberately imports and calls no
+    transport itself.
+    """
+    print(
+        f"camp {verb}: --host {host_name!r} is declared but not yet wired to "
+        "a transport",
+        file=sys.stderr,
+    )
+    sys.exit(1)
 
 
 def _not_on_path_warning() -> None:
@@ -318,6 +377,59 @@ def main() -> None:
             )
             sys.exit(1)
         _dispatch_all_groups_command(canonical, scan_rest)
+        return
+
+    # ---------------------------------------------------------------------------
+    # --host <name> — read at the same early point as --all-groups above:
+    # before any group config loads, any group resolves, or the hosts file is
+    # even opened for a verb this option has no meaning for. A refusal below
+    # therefore also costs nothing.
+    # ---------------------------------------------------------------------------
+    try:
+        scan_rest, host_name = read_host_option(scan_rest)
+    except _HostFlagMissingValue:
+        print(f"camp {first}: {HOST_FLAG} requires a value", file=sys.stderr)
+        sys.exit(1)
+    if host_name is not None:
+        canonical, _kind = _resolve_verb(first) if first else (first, "live")
+        if canonical not in _HOST_VERBS:
+            print(f"camp {first}: {HOST_FLAG} has no meaning here", file=sys.stderr)
+            sys.exit(1)
+        if any(a == "--group" or a.startswith("--group=") for a in scan_rest):
+            print(
+                f"camp {canonical}: {HOST_FLAG} and --group name one remote "
+                "host and one local group at once — pass one or the other",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+        from ..host.config import load_hosts, HostConfigError
+
+        try:
+            hosts = load_hosts()
+        except HostConfigError as e:
+            print(f"camp {canonical}: {e}", file=sys.stderr)
+            sys.exit(1)
+
+        host = hosts.get(host_name)
+        if host is None:
+            if hosts:
+                declared = ", ".join(sorted(hosts))
+                print(
+                    f"camp {canonical}: no host named {host_name!r} is "
+                    f"declared — declared hosts are: {declared}",
+                    file=sys.stderr,
+                )
+            else:
+                print(
+                    f"camp {canonical}: no host named {host_name!r} is "
+                    "declared — no hosts are declared in "
+                    "~/.config/camp/hosts.toml",
+                    file=sys.stderr,
+                )
+            sys.exit(1)
+
+        _dispatch_host_command(canonical, host, host_name, scan_rest)
         return
 
     # ---------------------------------------------------------------------------

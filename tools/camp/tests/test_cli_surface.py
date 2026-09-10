@@ -619,3 +619,125 @@ def _launch_exit_code_contract(help_text: str) -> dict[int, str]:
         elif current is not None and line.strip():
             contract[current] += " " + line.strip()
     return contract
+
+
+# ---------------------------------------------------------------------------
+# --host <name> — option seam, applicability, and refusal ordering.
+#
+# Mirrors the --all-groups section above: `corrupt_sibling_env` proves a
+# refusal fires before `_resolve_group_for_command` ever loads a sibling
+# group's malformed toml, exactly as it does for --all-groups.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def corrupt_sibling_env_with_hosts(tmp_path: Path, corrupt_sibling_env: dict[str, str]) -> dict[str, str]:
+    """`corrupt_sibling_env`'s config dir, plus a hosts.toml declaring two
+    hosts — for refusals that need a real declared-hosts list to differ
+    from the "nothing declared" case, still proven against a corrupt sibling
+    group config."""
+    (tmp_path / "hosts.toml").write_text(
+        "[hosts.andromeda]\n[hosts.workshop]\n", encoding="utf-8"
+    )
+    return corrupt_sibling_env
+
+
+def test_host_named_but_not_declared_lists_the_declared_hosts(
+    corrupt_sibling_env_with_hosts: dict[str, str],
+) -> None:
+    """A host named that isn't among the declared ones names it AND lists
+    what *is* declared — the operator corrects a typo from the line alone."""
+    result = _run(["list", "--host", "nope"], env=corrupt_sibling_env_with_hosts)
+    combined = result.stdout + result.stderr
+    assert result.returncode != 0
+    assert result.stdout == ""
+    assert "no host named 'nope' is declared" in combined, combined
+    assert "declared hosts are: andromeda, workshop" in combined, combined
+    assert "config error" not in combined
+
+
+def test_host_named_with_no_hosts_toml_at_all_points_at_the_file(
+    corrupt_sibling_env: dict[str, str],
+) -> None:
+    """With no hosts.toml at all, the refusal names no host list and points
+    at the file to declare one in instead — the trailing clause an operator
+    reads to know he's declared nothing yet, not merely mistyped a name."""
+    result = _run(["sessions", "--host", "nope"], env=corrupt_sibling_env)
+    combined = result.stdout + result.stderr
+    assert result.returncode != 0
+    assert result.stdout == ""
+    assert "no host named 'nope' is declared" in combined, combined
+    assert "declared hosts are:" not in combined, combined
+    assert "no hosts are declared in ~/.config/camp/hosts.toml" in combined, combined
+    assert "config error" not in combined
+
+
+def test_host_and_group_refuse_before_any_config_loads(
+    corrupt_sibling_env_with_hosts: dict[str, str],
+) -> None:
+    """`--host` and `--group` name a remote machine and a local group at
+    once — refused, mirroring --all-groups + --group's existing shape."""
+    result = _run(
+        ["sessions", "--host", "andromeda", "--group", "testgrp"],
+        env=corrupt_sibling_env_with_hosts,
+    )
+    _assert_clean_refusal(result, needle="--host", verb="sessions")
+    combined = result.stdout + result.stderr
+    assert "--group" in combined, combined
+    assert "config error" not in combined
+
+
+def test_host_has_no_meaning_for_a_verb_that_does_not_read_it(
+    corrupt_sibling_env_with_hosts: dict[str, str],
+) -> None:
+    """`--host` is rejected outright on a verb it has no meaning for, before
+    the hosts file or any group config is ever loaded."""
+    result = _run(["status", "--host", "andromeda"], env=corrupt_sibling_env_with_hosts)
+    _assert_clean_refusal(result, needle="has no meaning here", verb="status")
+    combined = result.stdout + result.stderr
+    assert "config error" not in combined
+    # Distinguishes this refusal from a *resolved* --host reaching the
+    # not-yet-wired downstream handler — the hosts file must never even be
+    # consulted for a verb the option has no meaning for.
+    assert "is declared" not in combined, combined
+
+
+def test_host_with_a_missing_value_refuses(
+    corrupt_sibling_env_with_hosts: dict[str, str],
+) -> None:
+    """`--host` as the trailing token, with nothing after it, refuses rather
+    than silently dropping the flag or falling through to an unrelated
+    error path."""
+    result = _run(["list", "--host"], env=corrupt_sibling_env_with_hosts)
+    combined = result.stdout + result.stderr
+    assert result.returncode != 0
+    assert result.stdout == ""
+    assert "--host" in combined, combined
+    assert "requires a value" in combined, combined
+    assert "config error" not in combined
+
+
+def test_camp_foreach_passes_a_payload_flag_named_like_host_through_unchanged(
+    tmp_path: Path,
+) -> None:
+    """`camp foreach <cmd…>` forwards `--host x` in the wrapped command's own
+    argv verbatim — it never belongs to camp's own option there."""
+    worktree = tmp_path / "trailhead" / ".claude" / "worktrees" / "myslug"
+    worktree.mkdir(parents=True)
+    (worktree / ".workspace-manifest.json").write_text(
+        '{"name": "myslug", "repos": [{"name": "repo-a"}]}', encoding="utf-8"
+    )
+    env = {
+        "WORKSPACE_ROOT": str(tmp_path),
+        "CAMP_CONFIG_DIR": str(tmp_path / "config"),
+        "CAMP_STATE_DIR": str(tmp_path / "state"),
+    }
+
+    result = _run(
+        ["foreach", "--name", "myslug", "echo", "--host", "x"], env=env
+    )
+
+    assert "has no meaning here" not in result.stderr
+    assert "is declared" not in result.stderr
+    assert result.returncode == 0, result.stderr
+    assert "--host x" in result.stdout
