@@ -4,7 +4,9 @@ wire / create_shims / detect_harnesses are patched for hermeticity:
 these tests never compose real trees or touch the user's harness/PATH.
 """
 
+import importlib
 import os
+import sys
 from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
@@ -439,6 +441,36 @@ def _outpost_ruleset() -> tuple[str, str]:
     return _declared_ruleset("outpost")
 
 
+def _record_link_tokens() -> tuple[str, str]:
+    """The record-URL contract's own emitted tokens, derived by importing the
+    module rather than retyping them.
+
+    Loading ``record_url.py`` directly by path fails: it carries a
+    package-relative import, so ``exec_module`` on a bare file-location spec
+    raises ``ImportError: attempted relative import with no known parent
+    package``. Putting the package root on ``sys.path`` and importing it by
+    dotted name works; ``sys.path`` is restored afterwards since the suite
+    runs under pytest-xdist.
+    """
+    lore_plugin_root = str(_REPO_ROOT / "tools" / "lore" / "plugins" / "lore")
+    sys.path.insert(0, lore_plugin_root)
+    try:
+        record_url = importlib.import_module("lore.record_url")
+        base = record_url.DEFAULT_BASE
+        built = record_url.build_record_url("vaultseg", "kindseg", "slugseg")
+    finally:
+        sys.path.remove(lore_plugin_root)
+    records_segment = built[len(base):].split("vaultseg")[0]
+    return base, records_segment
+
+
+def _ruleset_names_the_record_link_tokens(text: str) -> bool:
+    """The predicate under test: does *text* carry the record-URL contract's
+    own base and path-form tokens?"""
+    base, records_segment = _record_link_tokens()
+    return base in text and records_segment in text
+
+
 class _RecordingHarness(ClaudeCodeHarness):
     """Claude Code harness that records the ruleset installs asked of it."""
 
@@ -688,6 +720,28 @@ class TestRulesetInstall:
         assert rc == 0
         assert harness.ruleset_calls == []
         assert "could not install the outpost ruleset" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------
+# Record-link rule pinned at the install seam
+# ---------------------------------------------------------------------------
+
+
+class TestRecordLinkRuleInstalled:
+    def test_installed_outpost_ruleset_names_the_record_url_contract_tokens(
+        self, tmp_path
+    ):
+        env = {**_env(tmp_path), "TRAILHEAD_CLAUDE_DIR": str(tmp_path / "claude")}
+        name, _ = _outpost_ruleset()
+        with _patched(detected=True):
+            run_install(env=env, quiet=True)
+        installed = tmp_path / "claude" / "rules" / f"{name}.md"
+        installed_text = installed.read_text(encoding="utf-8")
+
+        assert _ruleset_names_the_record_link_tokens(installed_text) is True
+
+        stripped = installed_text.split("## Record links")[0]
+        assert _ruleset_names_the_record_link_tokens(stripped) is False
 
 
 # ---------------------------------------------------------------------------
