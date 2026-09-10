@@ -267,11 +267,10 @@ def _strip_control_sequences(text: str) -> str:
 
 
 def _verbatim_notice(text: str) -> list[str]:
-    """One notice entry for *text*, exactly as `_print_verbatim` used to
-    print it (normalized to a single trailing newline the caller re-adds,
-    and with control sequences stripped so relayed remote stderr can no
-    longer drive this side's terminal), or none when there is nothing to
-    say."""
+    """One notice entry for *text* — the remote's own stderr, normalized to
+    a single trailing newline the caller re-adds and with control sequences
+    stripped so relayed remote stderr cannot drive this side's terminal — or
+    no entry at all when there is nothing to say."""
     if not text:
         return []
     stripped = text[:-1] if text.endswith("\n") else text
