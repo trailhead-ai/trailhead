@@ -1717,9 +1717,16 @@ class TestResolveMergeStrategy:
         whatever it returns can be handed to the merge call. Derived from the
         module's own flag map rather than a retyped list, so widening the
         vocabulary without widening the flag map fails here.
+
+        Exercised over the full product of configured values, permitted sets,
+        and series shapes — the sentinels, an empty list, a dominated series,
+        and a non-dominated series — so the series-driven branch is covered
+        by the same totality proof as every other branch.
         """
         from trailhead.vcs.github import (
             AUTOMATIC_MERGE_METHOD,
+            COMMIT_SERIES_LOOKUP_FAILED,
+            COMMIT_SERIES_TRUNCATED,
             PERMITTED_STRATEGIES_LOOKUP_FAILED,
             _MERGE_METHOD_FLAGS,
             resolve_merge_strategy,
@@ -1732,14 +1739,27 @@ class TestResolveMergeStrategy:
                 frozenset(combo) for combo in itertools.combinations(vocabulary, size)
             )
 
+        series_shapes: list = [
+            None,
+            COMMIT_SERIES_LOOKUP_FAILED,
+            COMMIT_SERIES_TRUNCATED,
+            [],
+            [("fixup! x", 1), ("fixup! y", 1), ("real", 40)],  # dominated
+            [("real one", 40), ("real two", 40)],  # not dominated
+        ]
+
         configured_shapes = [AUTOMATIC_MERGE_METHOD, *vocabulary]
         for configured in configured_shapes:
             for permitted in permitted_shapes:
-                strategy, _reason = resolve_merge_strategy(configured, permitted)
-                assert strategy in _MERGE_METHOD_FLAGS, (
-                    f"resolve_merge_strategy({configured!r}, {permitted!r}) returned "
-                    f"{strategy!r}, which has no merge flag"
-                )
+                for series in series_shapes:
+                    strategy, _reason = resolve_merge_strategy(
+                        configured, permitted, series=series
+                    )
+                    assert strategy in _MERGE_METHOD_FLAGS, (
+                        f"resolve_merge_strategy({configured!r}, {permitted!r}, "
+                        f"series={series!r}) returned {strategy!r}, which has no "
+                        "merge flag"
+                    )
 
     def test_explicit_configured_strategy_wins_with_no_capability_read_consulted(self) -> None:
         from trailhead.vcs.github import PERMITTED_STRATEGIES_LOOKUP_FAILED, resolve_merge_strategy
@@ -1768,23 +1788,138 @@ class TestResolveMergeStrategy:
         assert strategy == "merge"
         assert reason
 
-    def test_automatic_with_rebase_forbidden_and_both_others_permitted_resolves_to_interim_squash(
+    def test_rebase_forbidden_two_permitted_series_dominated_resolves_to_squash(
         self,
     ) -> None:
-        """Interim rule: with rebasing forbidden and more than one other
-        strategy permitted, this slice resolves to squashing. A later change
-        replaces this with a rule driven by the commit series' shape; this
-        test names the rule as interim so that change reads as intended
-        rather than as a regression."""
+        """AC2: with rebasing forbidden and more than one other strategy
+        permitted, a fix-up-dominated commit series resolves to squashing."""
         from trailhead.vcs.github import AUTOMATIC_MERGE_METHOD, resolve_merge_strategy
 
+        dominated_series = [
+            ("real work", 40),
+            ("fixup! real work", 1),
+            ("fixup! real work again", 1),
+        ]
         strategy, reason = resolve_merge_strategy(
-            AUTOMATIC_MERGE_METHOD, frozenset({"merge", "squash"})
+            AUTOMATIC_MERGE_METHOD,
+            frozenset({"merge", "squash"}),
+            series=dominated_series,
         )
         assert strategy == "squash"
         assert reason
 
-    def test_automatic_with_lookup_failed_resolves_to_squash_distinguishable_from_interim(
+    def test_rebase_forbidden_two_permitted_series_not_dominated_resolves_to_merge_commit(
+        self,
+    ) -> None:
+        """AC3: the same branch, but a series that is not fix-up-dominated
+        resolves to a merge commit instead of squashing."""
+        from trailhead.vcs.github import AUTOMATIC_MERGE_METHOD, resolve_merge_strategy
+
+        not_dominated_series = [("real work one", 40), ("real work two", 40)]
+        strategy, reason = resolve_merge_strategy(
+            AUTOMATIC_MERGE_METHOD,
+            frozenset({"merge", "squash"}),
+            series=not_dominated_series,
+        )
+        assert strategy == "merge"
+        assert reason
+
+    def test_series_not_consulted_when_rebase_permitted(self) -> None:
+        """The series is consulted only in the rebase-forbidden,
+        two-permitted branch. Here rebasing is permitted, so a series that
+        would resolve to squashing if it were read must not change the
+        answer away from rebase."""
+        from trailhead.vcs.github import AUTOMATIC_MERGE_METHOD, resolve_merge_strategy
+
+        dominated_series = [("fixup! x", 1), ("fixup! y", 1), ("real", 40)]
+        strategy, reason = resolve_merge_strategy(
+            AUTOMATIC_MERGE_METHOD,
+            frozenset({"rebase", "merge", "squash"}),
+            series=dominated_series,
+        )
+        assert strategy == "rebase"
+        assert reason
+
+    def test_series_not_consulted_when_exactly_one_strategy_permitted(self) -> None:
+        """Same guard, the other permitted-set shape: exactly one non-rebase
+        strategy permitted resolves to that strategy regardless of what the
+        series would say — proven with a series that, if read, would flip
+        the answer to squash."""
+        from trailhead.vcs.github import AUTOMATIC_MERGE_METHOD, resolve_merge_strategy
+
+        dominated_series = [("fixup! x", 1), ("fixup! y", 1), ("real", 40)]
+        strategy, reason = resolve_merge_strategy(
+            AUTOMATIC_MERGE_METHOD, frozenset({"merge"}), series=dominated_series
+        )
+        assert strategy == "merge"
+        assert reason
+
+    def test_series_lookup_failed_resolves_to_squash_with_its_own_reason(self) -> None:
+        """AC10: a series read that failed outright resolves to squashing,
+        under a reason distinct from a series read that succeeded but was
+        truncated, and from the pre-existing capability-lookup failure."""
+        from trailhead.vcs.github import (
+            AUTOMATIC_MERGE_METHOD,
+            COMMIT_SERIES_LOOKUP_FAILED,
+            RESOLUTION_REASON_PREFIXES,
+            resolve_merge_strategy,
+        )
+
+        strategy, reason = resolve_merge_strategy(
+            AUTOMATIC_MERGE_METHOD,
+            frozenset({"merge", "squash"}),
+            series=COMMIT_SERIES_LOOKUP_FAILED,
+        )
+        assert strategy == "squash"
+        assert reason.startswith(RESOLUTION_REASON_PREFIXES["auto_series_lookup_failed"])
+
+    def test_series_truncated_resolves_to_squash_with_its_own_reason(self) -> None:
+        """AC10: a truncated series — the page ceiling was hit, so what came
+        back is not the whole series — also resolves to squashing, under yet
+        another distinct reason."""
+        from trailhead.vcs.github import (
+            AUTOMATIC_MERGE_METHOD,
+            COMMIT_SERIES_TRUNCATED,
+            RESOLUTION_REASON_PREFIXES,
+            resolve_merge_strategy,
+        )
+
+        strategy, reason = resolve_merge_strategy(
+            AUTOMATIC_MERGE_METHOD,
+            frozenset({"merge", "squash"}),
+            series=COMMIT_SERIES_TRUNCATED,
+        )
+        assert strategy == "squash"
+        assert reason.startswith(RESOLUTION_REASON_PREFIXES["auto_series_truncated"])
+
+    def test_series_reason_carries_counts_not_subject_text(self) -> None:
+        """AC11: a series-driven reason carries the fix-up count and series
+        length — the evidence an operator needs to check the classifier's
+        call from scrollback — and never any commit subject text, proven
+        with a subject carrying terminal-escape and metacharacter payloads
+        this repository's untrusted-content boundary does not strip."""
+        from trailhead.vcs.github import AUTOMATIC_MERGE_METHOD, resolve_merge_strategy
+
+        hostile_subject = (
+            "\x1b]0;pwned\x07\x1b[31mHACKED\x1b[0m `rm -rf /` $(whoami) "
+            "'; DROP TABLE prs; --"
+        )
+        dominated_series = [
+            ("real work", 40),
+            ("fixup! " + hostile_subject, 1),
+            ("fixup! " + hostile_subject + " two", 1),
+        ]
+        strategy, reason = resolve_merge_strategy(
+            AUTOMATIC_MERGE_METHOD,
+            frozenset({"merge", "squash"}),
+            series=dominated_series,
+        )
+        assert strategy == "squash"
+        assert hostile_subject not in reason
+        assert "2" in reason
+        assert "3" in reason
+
+    def test_automatic_with_lookup_failed_resolves_to_squash_distinguishable_from_series_driven(
         self,
     ) -> None:
         from trailhead.vcs.github import (
@@ -1796,12 +1931,14 @@ class TestResolveMergeStrategy:
         lookup_strategy, lookup_reason = resolve_merge_strategy(
             AUTOMATIC_MERGE_METHOD, PERMITTED_STRATEGIES_LOOKUP_FAILED
         )
-        interim_strategy, interim_reason = resolve_merge_strategy(
-            AUTOMATIC_MERGE_METHOD, frozenset({"merge", "squash"})
+        series_strategy, series_reason = resolve_merge_strategy(
+            AUTOMATIC_MERGE_METHOD,
+            frozenset({"merge", "squash"}),
+            series=[("fixup! x", 1), ("fixup! y", 1), ("real", 40)],
         )
         assert lookup_strategy == "squash"
-        assert interim_strategy == "squash"
-        assert lookup_reason != interim_reason
+        assert series_strategy == "squash"
+        assert lookup_reason != series_reason
 
     def test_never_returns_a_strategy_absent_from_the_permitted_set(self) -> None:
         """Enumerated from the module's own strategy vocabulary
@@ -1867,17 +2004,38 @@ class TestResolveMergeStrategy:
         own `RESOLUTION_REASON_PREFIXES` registry — derived, not retyped."""
         from trailhead.vcs.github import (
             AUTOMATIC_MERGE_METHOD,
+            COMMIT_SERIES_LOOKUP_FAILED,
+            COMMIT_SERIES_TRUNCATED,
             PERMITTED_STRATEGIES_LOOKUP_FAILED,
             RESOLUTION_REASON_PREFIXES,
             describe_merge_refusal,
             resolve_merge_strategy,
         )
 
+        dominated_series = [("fixup! x", 1), ("fixup! y", 1), ("real", 40)]
+        not_dominated_series = [("real one", 40), ("real two", 40)]
         outcomes = [
             resolve_merge_strategy("rebase", PERMITTED_STRATEGIES_LOOKUP_FAILED)[1],
             resolve_merge_strategy(AUTOMATIC_MERGE_METHOD, frozenset({"rebase"}))[1],
             resolve_merge_strategy(AUTOMATIC_MERGE_METHOD, frozenset({"squash"}))[1],
-            resolve_merge_strategy(AUTOMATIC_MERGE_METHOD, frozenset({"merge", "squash"}))[1],
+            resolve_merge_strategy(
+                AUTOMATIC_MERGE_METHOD, frozenset({"merge", "squash"}), series=dominated_series
+            )[1],
+            resolve_merge_strategy(
+                AUTOMATIC_MERGE_METHOD,
+                frozenset({"merge", "squash"}),
+                series=not_dominated_series,
+            )[1],
+            resolve_merge_strategy(
+                AUTOMATIC_MERGE_METHOD,
+                frozenset({"merge", "squash"}),
+                series=COMMIT_SERIES_LOOKUP_FAILED,
+            )[1],
+            resolve_merge_strategy(
+                AUTOMATIC_MERGE_METHOD,
+                frozenset({"merge", "squash"}),
+                series=COMMIT_SERIES_TRUNCATED,
+            )[1],
             resolve_merge_strategy(AUTOMATIC_MERGE_METHOD, PERMITTED_STRATEGIES_LOOKUP_FAILED)[1],
             resolve_merge_strategy(AUTOMATIC_MERGE_METHOD, frozenset())[1],
             describe_merge_refusal("rebase", "some provider refusal text"),
@@ -1887,6 +2045,7 @@ class TestResolveMergeStrategy:
         assert len(set(prefixes)) == len(prefixes)
         assert set(prefixes) <= set(RESOLUTION_REASON_PREFIXES.values())
         assert len(set(RESOLUTION_REASON_PREFIXES.values())) == len(RESOLUTION_REASON_PREFIXES)
+        assert "auto-interim-squash" not in RESOLUTION_REASON_PREFIXES.values()
 
 
 class TestDescribeMergeRefusal:
@@ -2134,7 +2293,10 @@ class TestMergeLoopResolvesPerPullRequest:
         )
         assert RESOLUTION_REASON_PREFIXES["auto_rebase_permitted"] not in disclosure
         assert RESOLUTION_REASON_PREFIXES["auto_sole_permitted"] not in disclosure
-        assert RESOLUTION_REASON_PREFIXES["auto_interim_squash"] not in disclosure
+        assert RESOLUTION_REASON_PREFIXES["auto_series_dominated"] not in disclosure
+        assert RESOLUTION_REASON_PREFIXES["auto_series_not_dominated"] not in disclosure
+        assert RESOLUTION_REASON_PREFIXES["auto_series_lookup_failed"] not in disclosure
+        assert RESOLUTION_REASON_PREFIXES["auto_series_truncated"] not in disclosure
 
     def test_explicit_configured_strategy_performs_no_capability_read(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
