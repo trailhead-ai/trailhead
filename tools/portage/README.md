@@ -48,8 +48,9 @@ Replaces the retired `/portage:open`, `/portage:update`, `/portage:monitor`, and
 Per-group behavior is read from the `[release]` block of the group TOML:
 
 - `merge_order` — the dependency order for a multi-PR merge (required for >1 PR).
-- `merge_method` — `merge` / `squash` / `rebase` (default: `squash`, announced on stderr
-  when unset).
+- `merge_method` — `merge` / `squash` / `rebase` / `automatic` (default: `automatic`;
+  `portage merge` prints its resolved-strategy notice on stderr whenever it's unset
+  or explicitly `automatic`).
 - `review_bot_login` — the login whose review comments count as actionable
   (default: none — CI-only).
 - `external_tracker` — an optional issue-tracker connector (default: none).
