@@ -464,3 +464,109 @@ def test_sessions_human_output_renders_answered_rows_under_their_machine(
     assert lines[1] == "andromeda"
     assert "sess-remote" in lines[2]
     assert lines[3] == "lookout"
+
+
+# ---------------------------------------------------------------------------
+# Per-row failure isolation — a malformed row from one machine must not take
+# down the merged listing. `_render_all_hosts_human` calls `render_row`
+# directly on every row; the two `--host` siblings already wrap this same
+# per-row access in `try/except KeyError` (`workspace.py`'s
+# `_cmd_ls_host_cli` and `session.py`'s `_cmd_sessions_host_cli`), and this
+# pins the merged renderer to the same isolation guarantee.
+# ---------------------------------------------------------------------------
+
+
+def test_a_malformed_remote_row_is_skipped_with_a_notice_other_rows_still_render(
+    hosts_and_group_env, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    transport = _transport_module()
+
+    def fake_run_camp(host, remote_argv, **kw):
+        if host.ssh == "andromeda":
+            return _answered(
+                [
+                    {"ok": True, "workspace_path": "/ws/feat-x"},  # missing slug
+                    {"ok": True, "slug": "alpha", "workspace_path": "/ws/alpha"},
+                ]
+            )
+        return _answered([])
+
+    monkeypatch.setattr(transport, "run_camp", fake_run_camp)
+
+    code = _run(monkeypatch, ["list", "-a", "--group", "testgrp"])
+    captured = capsys.readouterr()
+    assert code == 0
+    assert "Traceback" not in captured.err
+    assert "alpha" in captured.out
+    assert "andromeda" in captured.err
+    assert "slug" in captured.err
+    assert "skipping" in captured.err
+
+
+def test_isolation_a_malformed_row_on_one_host_does_not_affect_another_hosts_rows(
+    hosts_and_group_env, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    transport = _transport_module()
+
+    def fake_run_camp(host, remote_argv, **kw):
+        if host.ssh == "andromeda":
+            return _answered([{"ok": True, "workspace_path": "/ws/feat-x"}])  # missing slug
+        return _answered(
+            [{"ok": True, "slug": "beta", "workspace_path": "/ws/beta", "branch": "", "group": "testgrp"}]
+        )
+
+    monkeypatch.setattr(transport, "run_camp", fake_run_camp)
+
+    code = _run(monkeypatch, ["list", "-a", "--group", "testgrp"])
+    captured = capsys.readouterr()
+    assert code == 0
+    assert "Traceback" not in captured.err
+    assert "beta" in captured.out
+    lines = captured.out.splitlines()
+    assert lines[0] == "this machine"
+    assert lines[1] == "andromeda"
+    assert lines[2] == "lookout"
+    assert lines[3] == "  beta /ws/beta"
+
+
+def test_exit_code_is_unaffected_by_a_malformed_remote_row(
+    hosts_and_group_env, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    transport = _transport_module()
+    monkeypatch.setattr(
+        transport,
+        "run_camp",
+        lambda host, remote_argv, **kw: _answered([{"ok": True, "workspace_path": "/ws/feat-x"}]),
+    )
+
+    code = _run(monkeypatch, ["list", "-a", "--group", "testgrp"])
+    capsys.readouterr()
+    assert code == 0
+
+
+def test_a_malformed_local_row_is_skipped_consistently_with_remote_rows(
+    hosts_and_group_env, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    workspace = importlib.import_module("camp.cli.workspace")
+    transport = _transport_module()
+
+    def fake_local_list_answer(group, *, all_groups):
+        return (
+            [
+                {"ok": True, "workspace_path": "/ws/local-broken"},  # missing slug
+                {"ok": True, "slug": "local-ok", "workspace_path": "/ws/local-ok", "branch": "", "group": "testgrp"},
+            ],
+            [],
+            0,
+        )
+
+    monkeypatch.setattr(workspace, "local_list_answer", fake_local_list_answer)
+    monkeypatch.setattr(transport, "run_camp", lambda host, remote_argv, **kw: _answered([]))
+
+    code = _run(monkeypatch, ["list", "-a", "--group", "testgrp"])
+    captured = capsys.readouterr()
+    assert code == 0
+    assert "Traceback" not in captured.err
+    assert "local-ok" in captured.out
+    assert "slug" in captured.err
+    assert "skipping" in captured.err
