@@ -57,7 +57,10 @@ import os
 import sys
 import time
 from pathlib import Path
-from typing import NoReturn
+from typing import TYPE_CHECKING, NoReturn
+
+if TYPE_CHECKING:
+    from ..host.config import Host
 
 #: Bounds for `camp new --launch`'s provisioning wait. Provisioning clones and
 #: sets up every member repo, so the ceiling is generous; the floor is that this
@@ -1383,6 +1386,93 @@ def _list_recoverable(
             "for the rest",
             file=sys.stderr,
         )
+
+
+def _cmd_sessions_host_cli(args: list[str], host: "Host", host_name: str) -> None:
+    """camp sessions --host <name> [--json] — every group's live sessions on
+    one declared remote machine, relayed through the SSH transport.
+
+    Reached ONLY from ``cli/dispatch.py``'s ``--host`` handling in
+    ``_dispatch_host_command``, after the name has resolved to a declared
+    `Host` — the same shape ``_cmd_ls_host_cli`` is reached in for `list`.
+    The far side is ALWAYS invoked with the all-groups + ``--json`` form, the
+    same shape `_cmd_ls_host_cli` uses, so a remote answer always spans that
+    machine's groups.
+
+    Every other existing `sessions` option (``--group`` is already refused
+    together with ``--host`` upstream in `main()`; ``--recoverable``,
+    ``--all``, ``--dir``, ``--limit``, and a positional workspace slug are
+    refused HERE) narrows or reshapes the LOCAL question in a way that has no
+    meaning for "every group on that host" — narrowing to one directory, one
+    workspace, or the recoverable/dead listing all assume a single machine's
+    own state. Refusing rather than silently dropping them mirrors the
+    ``--all-groups``/``--group`` and ``--host``/``--group`` refusals already
+    beside this one.
+
+    Delegates everything downstream of "what argv to send" and "how to print
+    an ok row" to :func:`camp.host.relay.relay_all_groups` — the shared seam
+    every `--host` verb dispatches through. The local `--all-groups` sessions
+    renderer is NOT reused for the human path: it sorts its rows by group
+    (see `_cmd_sessions_group_cli`'s `all_groups` branch) and it prints from
+    live `SessionRecord` objects rather than the relayed JSON dicts a remote
+    answer produces — reusing it would re-sort what the design requires
+    never be re-sorted. `_render_human_rows` below is instead a small
+    hand-written callback in the same shape `_cmd_ls_host_cli` already
+    uses for `list`.
+    """
+    from ..host.relay import relay_all_groups
+    from ..spine import _die
+
+    rest = list(args)
+    as_json = _consume_flag(rest, "--json")
+
+    if "--recoverable" in rest:
+        _die(
+            "camp sessions: --recoverable has no meaning with --host — a "
+            "remote host is always asked for its own live sessions"
+        )
+    if "--all" in rest:
+        _die(
+            "camp sessions: --all only widens --recoverable, which has no "
+            "meaning with --host"
+        )
+    if "--dir" in rest or any(a.startswith("--dir=") for a in rest):
+        _die(
+            "camp sessions: --dir has no meaning with --host — a remote "
+            "host answers for every one of its own groups, not a local "
+            "directory"
+        )
+    if "--limit" in rest or any(a.startswith("--limit=") for a in rest):
+        _die(
+            "camp sessions: --limit only widens --recoverable, which has no "
+            "meaning with --host"
+        )
+    if rest:
+        _die(
+            f"camp sessions: --host answers for every group on that host — "
+            f"a workspace slug ({rest[0]!r}) has no meaning alongside it"
+        )
+
+    def _render_human_rows(rows: list[dict]) -> None:
+        from ..launch.recovery import printable_path
+
+        for row in rows:
+            if not row.get("ok"):
+                continue
+            label = f" ({row['name']})" if row.get("name") else ""
+            print(
+                f"{row['session_id']}  {row['kind']}  "
+                f"{printable_path(row['cwd'])}{label}"
+            )
+
+    relay_all_groups(
+        "sessions",
+        host,
+        host_name,
+        ["sessions", "--all-groups", "--json"],
+        as_json=as_json,
+        render_human_rows=_render_human_rows,
+    )
 
 
 def _cmd_sessions_group_cli(

@@ -1684,6 +1684,37 @@ def test_camp_sessions_json_uses_normalized_fields_only(cli_env) -> None:
     assert records[0]["account"] is None
 
 
+def test_camp_sessions_json_never_carries_a_host_key(cli_env) -> None:
+    """AC6-shaped non-regression pin (mirrors `test_camp_list.py`'s): a plain
+    local `camp sessions --json` — no `--host` in play — carries EXACTLY the
+    pre-existing ten-key payload and no `host` key. The `--host` axis stamps
+    `host` only on a relayed row (camp.host.relay); this path must never gain
+    it, unconditionally or otherwise. Expected keys are spelled out literally
+    here rather than imported from the module under test, so a mutation to
+    the module's own key set cannot also mutate this test's expectation."""
+    _new_workspace(cli_env, "feat-h")
+    _camp(cli_env, "launch", "feat-h", "--group", "mygroup")
+
+    result = _camp(cli_env, "sessions", "--group", "mygroup", "--json")
+
+    assert result.returncode == 0, result.stderr
+    records = json.loads(result.stdout)
+    assert len(records) == 1
+    assert set(records[0].keys()) == {
+        "ok",
+        "session_id",
+        "cwd",
+        "kind",
+        "controllable",
+        "name",
+        "pid",
+        "started_at",
+        "group",
+        "account",
+    }
+    assert "host" not in records[0]
+
+
 def test_camp_sessions_json_carries_a_declared_account_verbatim(cli_env) -> None:
     """A session whose cwd resolves into a group declaring an account carries
     that exact declared string — byte for byte, not expanded or normalized.

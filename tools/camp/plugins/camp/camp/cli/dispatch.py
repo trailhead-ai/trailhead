@@ -146,15 +146,19 @@ def _dispatch_host_command(
 
     Reached ONLY after `--host` has resolved to a declared host and every
     refusal above has passed — `main()`'s `--host` block is this function's
-    sole caller. `list` is wired to the SSH transport
-    (`camp.host.transport.run_camp`, via `camp.host.relay.relay_all_groups`);
-    `sessions` is a later task's job and still prints the "declared but not
-    yet wired" stub below.
+    sole caller. `list` and `sessions` are both wired to the SSH transport
+    (`camp.host.transport.run_camp`, via `camp.host.relay.relay_all_groups`).
     """
     if verb == "list":
         from .workspace import _cmd_ls_host_cli
 
         _cmd_ls_host_cli(rest, host, host_name)
+        return
+
+    if verb == "sessions":
+        from .session import _cmd_sessions_host_cli
+
+        _cmd_sessions_host_cli(rest, host, host_name)
         return
 
     print(
