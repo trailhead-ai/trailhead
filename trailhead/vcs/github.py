@@ -1031,6 +1031,15 @@ def _merge_method_notice(merge_method: str | None) -> str | None:
     explicitly) each get their own notice text, so a corrupt file is never
     read as a deliberate choice. Any concrete strategy (`merge`/`squash`/
     `rebase`) is an explicit configuration and gets no notice at all.
+
+    The `None` branch is defensive rather than routinely reached from
+    `_merge_prs`: `_load_auto_merge` reads the same file and returns False
+    on the same four conditions that make `_load_merge_method` return
+    `None`, so the auto-merge gate refuses such a run before this notice is
+    reached. It stays because the two loads are separate reads of a file
+    that can change between them, and because it is the correct text if the
+    gate order is ever revisited. Exercised directly rather than through
+    `_merge_prs` for that reason.
     """
     if merge_method is None:
         return (
