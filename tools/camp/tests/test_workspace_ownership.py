@@ -895,6 +895,26 @@ class TestRemoveOwnershipNoticeCouldNotDetermine:
         assert "never recorded" not in captured.err
         assert "removed worktree 'feat-o'" in captured.err
 
+    def test_no_manifest_on_disk_at_all_says_could_not_be_determined_not_never_recorded(
+        self, tmp_path, capsys
+    ):
+        from camp.cli.lifecycle import _cmd_remove_group_cli
+
+        group = _one_member_group_over_fresh_repo(tmp_path, "ownnomanifestg", "repo_nomanifest")
+        env = _env(tmp_path)
+        _declare_self_name(env, "orion")
+        slug = "feat-ghost"
+        # No workspace was ever created for this slug, so mpath.is_file() is
+        # False — a genuinely absent record, distinct from one that was read
+        # and found keyless.
+
+        with pytest.raises(SystemExit):
+            _cmd_remove_group_cli(["--name", slug, "--force"], group, env, dry_run=False)
+
+        captured = capsys.readouterr()
+        assert "could not be determined" in captured.err
+        assert "never recorded" not in captured.err
+
 
 class TestRemoveOwnershipNoticesAreDistinguishable:
     def test_the_three_notices_are_pairwise_distinct(self, one_member_group, capsys):

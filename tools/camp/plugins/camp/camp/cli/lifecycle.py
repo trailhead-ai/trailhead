@@ -196,11 +196,13 @@ def _ownership_notice(mpath: Path, env: dict[str, str] | None) -> str | None:
     one.
 
     "Never recorded" (owner_of successfully read the manifest and found no
-    "owner" key) is kept distinct from "could not be determined" (the
-    manifest exists but owner_of refused it — e.g. a non-string owner): the
-    first is a claim about the record, the second is a claim about this
-    host's ability to read it, and collapsing them would assert more than
-    is actually known.
+    "owner" key) is kept distinct from "could not be determined" (either
+    the manifest exists but owner_of refused it — e.g. a non-string owner
+    — or no manifest exists at `mpath` at all): the first is a claim about
+    the record, the second is a claim about this host's ability to produce
+    one, and collapsing them would assert more than is actually known. A
+    missing manifest is not proof that no owner was ever recorded — it is
+    the absence of anything to read.
 
     This host's own name is resolved fresh from `env` each call. A
     `trailhead.paths.PathResolutionError` (an injected environment that
@@ -222,6 +224,8 @@ def _ownership_notice(mpath: Path, env: dict[str, str] | None) -> str | None:
             owner = owner_of(read_central_manifest(mpath))
         except ManifestError as e:
             unreadable_reason = str(e)
+    else:
+        unreadable_reason = f"no manifest exists at {mpath}"
 
     try:
         self_name = self_host_name(env=env)
