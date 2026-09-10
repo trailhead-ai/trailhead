@@ -12,6 +12,57 @@ loads the file through its real loader, dispatches the agent — and asserts on 
 came back. **If nothing was executed before the assertion, it is not a test.** It
 does not ship, and it does not count as coverage.
 
+### A test needs an input it can vary
+
+Running the subject is the floor, not the bar. A test earns its place by showing
+that the subject's answer *depends on what it was given* — feed it one thing, get
+one answer; feed it another, get a different one. That dependency is the property
+a unit test exists to protect, because it is the property a later edit can break
+without noticing.
+
+**The rule:** the subject must have an input that can change its answer, and the
+test must be one of the points that changes it. Where a unit has only one possible
+output, there is no behaviour to pin — only a decision to restate.
+
+Restating a decision looks like this:
+
+```
+assert DEFAULT_SORT == "created_at desc"            # the default sort order
+assert set(manifest.skills) == {"pull_request"}     # the shipped inventory
+assert render() == GOLDEN                           # a byte-for-byte snapshot
+assert SEVERITIES == ("Critical", "Important", "Minor")   # a closed vocabulary
+assert "never do X" in skill_md                     # a sentence someone typed
+```
+
+Each is true by construction. None can fail for any reason except that a person
+changed their mind — at which point the test is not catching a regression, it is
+asking them to make the same edit twice. The decision is already recorded in the
+code. A test that copies it out adds a second copy to keep in sync, not a check.
+
+The same subjects, tested for behaviour instead, vary the input across the branch
+that decides:
+
+- the sort key the caller **asked** for, against the order that comes back
+- an inventory built from a manifest with two entries, and one with none
+- the renderer at each level it maps, and at a level it must refuse
+- a value on either side of the threshold that flips the answer
+- the document that satisfies the gate, and the one edit that makes it fail
+
+**How to tell them apart.** Ask what would have to break for this test to go red.
+If the honest answer is "someone edits this same constant, or rewords this
+sentence", it is guarding a decision. If it is "the logic mapping inputs to
+outputs stops working", it is guarding a behaviour. Only the second is coverage.
+
+**The one exception is the seam smoke.** Wiring — the installer really writes the
+tree, the documented command really parses, the plugin really loads — has no input
+to vary and is still worth exactly one test, because nothing else shows the pieces
+are connected. One per seam, never one per constant the seam happens to touch.
+
+`scripts/inert-test-gate` holds both rules mechanically: it flags a test that runs
+nothing, and a test whose whole subject is a document it reads and never varies. A
+deliberate seam smoke carries `# inert-gate: allow <reason>` on its `def` line, so
+the exemptions stay countable and reviewable rather than accumulating unseen.
+
 ### The tests worth writing, in the order you should reach for them
 
 1. **The contract, exercised end to end.** Call the public entry point with real
@@ -173,3 +224,8 @@ it.
 - Treat "the tests pass" as evidence when the tests were written after the code and
   never mutation-checked.
 - Ship an assertion that never ran the code it names.
+- Ship an assertion whose subject has only one possible output — a constant, a
+  snapshot, an inventory, a sentence in a document — outside a marked seam smoke.
+- Keep a test alive because deleting it would lower a coverage number. A test that
+  cannot fail for a real reason is not coverage; it is a maintenance cost that
+  reads as safety.
