@@ -1,14 +1,14 @@
 """Each prose surface documenting `[release].merge_method` must name the same
 strategy vocabulary and the same resolved unset-default as the loader itself.
 
-The four surfaces below all asserted a squashing default before automatic
+The surfaces below each documented a squashing default before automatic
 selection shipped. This is the code-versus-document consistency check the
 repository's conventions sanction: the expected values are derived from
 `trailhead.vcs.github` — never retyped here — so a future vocabulary change
 that this test doesn't get updated for fails loudly instead of leaving a
 surface asserting something untrue.
 
-Each surface is checked individually (four separate tests) so a fix to one
+Each surface is checked individually (one test case per surface) so a fix to one
 does not mask a still-stale one, and each surface's check is scoped to its
 own `merge_method`-specific span rather than the whole document — the word
 "automatic" already appears elsewhere in some of these docs as a substring of
@@ -34,6 +34,10 @@ _README = _portage_cli.PLUGIN_ROOT.parents[1] / "README.md"
 _MONITOR_MD = _portage_cli.PLUGIN_ROOT / "agents" / "monitor.md"
 _RITUALS_MD = _portage_cli.PLUGIN_ROOT / "docs" / "pr-merge-rituals.md"
 _SKILL_MD = _portage_cli.PLUGIN_ROOT / "skills" / "pull_request" / "SKILL.md"
+# The provider-seam doc lives outside the portage plugin but documents the same
+# `[release].merge_method` contract, so it belongs to this check rather than to
+# a second one that could drift from it.
+_VCS_PROVIDER_MD = _REPO_ROOT / "trailhead" / "docs" / "vcs-provider.md"
 
 # Each entry locates the merge_method-specific span in its document by a
 # stable start/end anchor pair (text on either side of the span that these
@@ -52,6 +56,10 @@ _SPANS = {
     "SKILL.md": (
         _SKILL_MD,
         r"- Merge method: configured.*?(?=\n- No issue tracker configured)",
+    ),
+    "vcs-provider.md": (
+        _VCS_PROVIDER_MD,
+        r"\| `pr\.merge\(pr_pairs, manifest_path\)` \|.*?(?=\n)",
     ),
 }
 
