@@ -331,6 +331,31 @@ class TestWriterGuardRefusesOwnerDrop:
         assert read_central_manifest(mpath)["owner"] == "andromeda"
 
 
+class TestWriterGuardOwnerMessageNoAnsi:
+    def test_hostile_disk_owner_never_reaches_the_refusal_message_raw(self, tmp_path):
+        """The disk_owner interpolated into the refusal message comes
+        straight off disk — the same attacker-reachable surface as `camp
+        remove`'s notice. It must be `!r`'d the same way."""
+        import json
+
+        from camp.group.manifest import ManifestError, write_central_manifest
+
+        mpath = tmp_path / "manifest.json"
+        hostile_owner = "andromeda\x1b[31m\x1b[2J\x1b]0;PWNED\x07‮attack"
+        mpath.write_text(
+            json.dumps({"schema_version": 1, "owner": hostile_owner, "members": []})
+        )
+
+        with pytest.raises(ManifestError) as exc_info:
+            write_central_manifest(mpath, {"schema_version": 1, "members": []})
+
+        message = str(exc_info.value)
+        assert hostile_owner not in message
+        assert "\x1b" not in message
+        assert "\x07" not in message
+        assert "‮" not in message
+
+
 class TestWriterGuardOptIn:
     def test_write_accepts_owner_change_with_explicit_opt_in(self, tmp_path):
         from camp.group.manifest import owner_of, read_central_manifest, write_central_manifest
@@ -960,15 +985,35 @@ class TestRemoveOwnershipNoticeStderrOnly:
 
 
 class TestRemoveOwnershipNoticeNoAnsi:
-    def test_notice_contains_no_ansi_escape_codes(self, one_member_group, capsys):
+    def test_hostile_owner_value_never_reaches_stderr_raw(self, one_member_group, capsys):
+        """A manifest owner is attacker-reachable — it round-trips through a
+        JSON file this host does not control. Plant one carrying ANSI
+        escapes, a terminal-title-injection sequence, and a bidi override
+        directly into the manifest, run the real `camp remove`, and confirm
+        none of those raw bytes reach stderr: the `!r` interpolation at the
+        notice site must have `repr()`'d them into an escaped, inert form."""
+        import json
+
         g = one_member_group
         slug = "feat-o"
-        env, _ = _owned_workspace(g["group"], g["tmp_path"], slug=slug)
+        env, mpath = _owned_workspace(g["group"], g["tmp_path"], slug=slug)
+
+        hostile_owner = "andromeda\x1b[31m\x1b[2J\x1b]0;PWNED\x07‮attack"
+        data = json.loads(mpath.read_text())
+        data["owner"] = hostile_owner
+        mpath.write_text(json.dumps(data))
+
+        # This host now declares a *different* name, so the notice interpolates
+        # the on-disk (hostile) owner into the "owned by host X" message.
         _declare_self_name(env, "orion")
 
         captured = _remove_and_capture(g["group"], slug, env, capsys)
 
+        assert hostile_owner not in captured.err
         assert "\x1b" not in captured.err
+        assert "\x07" not in captured.err
+        assert "‮" not in captured.err
+        assert "removed worktree 'feat-o'" in captured.err
 
 
 class TestRemoveOwnershipNoticePathResolutionErrorIsObservable:
