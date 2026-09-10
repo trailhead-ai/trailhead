@@ -24,6 +24,8 @@ from pathlib import Path
 
 import pytest
 
+from ._helpers import init_git_repo
+
 _REPO_ROOT = Path(__file__).resolve().parents[3]  # trailhead root
 _PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
 _GROUPS_EXAMPLE_DIR = _REPO_ROOT / "tools" / "camp" / "groups.example"
@@ -189,36 +191,6 @@ def test_agreement_check_skips_rather_than_fails_when_chezmoi_tree_absent(
 # ---------------------------------------------------------------------------
 
 
-def _init_git_repo(path: Path) -> None:
-    import subprocess
-
-    path.mkdir(parents=True, exist_ok=True)
-    subprocess.run(["git", "init", "-b", "main", str(path)], check=True, capture_output=True)
-    subprocess.run(
-        ["git", "-C", str(path), "config", "user.email", "test@test.com"],
-        check=True,
-        capture_output=True,
-    )
-    subprocess.run(
-        ["git", "-C", str(path), "config", "user.name", "Test"], check=True, capture_output=True
-    )
-    (path / "README.md").write_text("# test\n")
-    subprocess.run(["git", "-C", str(path), "add", "README.md"], check=True, capture_output=True)
-    subprocess.run(
-        ["git", "-C", str(path), "commit", "-m", "init", "--no-gpg-sign"],
-        check=True,
-        capture_output=True,
-    )
-    subprocess.run(
-        ["git", "-C", str(path), "remote", "add", "origin", str(path)],
-        check=True,
-        capture_output=True,
-    )
-    subprocess.run(
-        ["git", "-C", str(path), "fetch", "origin", "--quiet"], check=True, capture_output=True
-    )
-
-
 def test_workspace_creation_runs_mcp_config_but_not_reassigned_tasks_until_activation(
     tmp_path: Path,
 ) -> None:
@@ -236,7 +208,7 @@ def test_workspace_creation_runs_mcp_config_but_not_reassigned_tasks_until_activ
     )
 
     repo = tmp_path / "trailhead"
-    _init_git_repo(repo)
+    init_git_repo(repo, origin=True)
     trailhead_member["repo_root"] = str(repo)
     trailhead_member["base"] = "origin/main"
 

@@ -24,6 +24,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from ._helpers import camp_state_env, init_git_repo
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]  # trailhead root
 _PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
@@ -35,41 +36,6 @@ if str(_PLUGIN_DIR) not in sys.path:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _init_git_repo(path: Path) -> None:
-    path.mkdir(parents=True, exist_ok=True)
-    subprocess.run(["git", "init", "-b", "main", str(path)], check=True, capture_output=True)
-    subprocess.run(
-        ["git", "-C", str(path), "config", "user.email", "test@test.com"],
-        check=True,
-        capture_output=True,
-    )
-    subprocess.run(
-        ["git", "-C", str(path), "config", "user.name", "Test"], check=True, capture_output=True
-    )
-    (path / "README.md").write_text("# test\n")
-    subprocess.run(["git", "-C", str(path), "add", "README.md"], check=True, capture_output=True)
-    subprocess.run(
-        ["git", "-C", str(path), "commit", "-m", "init", "--no-gpg-sign"],
-        check=True,
-        capture_output=True,
-    )
-    # Self-origin so the configured base `origin/main` resolves locally.
-    subprocess.run(
-        ["git", "-C", str(path), "remote", "add", "origin", str(path)],
-        check=True,
-        capture_output=True,
-    )
-    subprocess.run(
-        ["git", "-C", str(path), "fetch", "origin", "--quiet"], check=True, capture_output=True
-    )
-
-
-def _camp_state_env(tmp_path: Path) -> dict[str, str]:
-    state_root = tmp_path / "camp-state"
-    state_root.mkdir(parents=True, exist_ok=True)
-    return {"CAMP_STATE_DIR": str(state_root)}
 
 
 def _provision_task(
@@ -145,10 +111,10 @@ def test_mcp_config_task_copies_mcp_json_into_worktree(tmp_path):
     from camp.group.manifest import read_central_manifest
 
     repo = tmp_path / "repo"
-    _init_git_repo(repo)
+    init_git_repo(repo, origin=True)
     mcp_json = repo / ".mcp.json"
     mcp_json.write_text('{"mcpServers": {"code-review-graph": {}}}')
-    env = _camp_state_env(tmp_path)
+    env = camp_state_env(tmp_path)
     group = _make_group(
         "mcpg",
         [
@@ -184,8 +150,8 @@ def test_mcp_config_task_missing_source_does_not_fail_provisioning(tmp_path):
     from camp.group.manifest import read_central_manifest
 
     repo = tmp_path / "repo"
-    _init_git_repo(repo)
-    env = _camp_state_env(tmp_path)
+    init_git_repo(repo, origin=True)
+    env = camp_state_env(tmp_path)
     group = _make_group(
         "mcpg2",
         [
@@ -218,8 +184,8 @@ def test_optional_task_failure_member_ready_recorded_and_warned(tmp_path, capsys
     from camp.group.manifest import read_central_manifest
 
     repo = tmp_path / "repo"
-    _init_git_repo(repo)
-    env = _camp_state_env(tmp_path)
+    init_git_repo(repo, origin=True)
+    env = camp_state_env(tmp_path)
     group = _make_group(
         "optg",
         [
@@ -255,8 +221,8 @@ def test_required_task_failure_member_failed_with_task_in_reason(tmp_path):
     from camp.group.manifest import read_central_manifest
 
     repo = tmp_path / "repo"
-    _init_git_repo(repo)
-    env = _camp_state_env(tmp_path)
+    init_git_repo(repo, origin=True)
+    env = camp_state_env(tmp_path)
     group = _make_group(
         "reqg",
         [
@@ -290,8 +256,8 @@ def test_setup_retry_skips_ok_task_reruns_failed_required(tmp_path):
     from camp.group.manifest import read_central_manifest
 
     repo = tmp_path / "repo"
-    _init_git_repo(repo)
-    env = _camp_state_env(tmp_path)
+    init_git_repo(repo, origin=True)
+    env = camp_state_env(tmp_path)
     seed_runs = tmp_path / "seed_runs"
     migrate_runs = tmp_path / "migrate_runs"
     group = _make_group(
@@ -349,8 +315,8 @@ def test_setup_reruns_outstanding_task_on_ready_member_and_clears_on_success(tmp
     from camp.group.manifest import read_central_manifest
 
     repo = tmp_path / "repo"
-    _init_git_repo(repo)
-    env = _camp_state_env(tmp_path)
+    init_git_repo(repo, origin=True)
+    env = camp_state_env(tmp_path)
     seed_runs = tmp_path / "seed_runs"
     sentinel = tmp_path / "ready.flag"
     group = _make_group(
@@ -398,8 +364,8 @@ def test_setup_ready_member_all_tasks_ok_is_noop(tmp_path, monkeypatch):
     from camp.provision.lifecycle import cmd_setup_group
 
     repo = tmp_path / "repo"
-    _init_git_repo(repo)
-    env = _camp_state_env(tmp_path)
+    init_git_repo(repo, origin=True)
+    env = camp_state_env(tmp_path)
     seed_runs = tmp_path / "seed_runs"
     group = _make_group(
         "readynoop",
@@ -443,8 +409,8 @@ def test_setup_ready_member_task_still_failing(tmp_path):
     from camp.group.manifest import read_central_manifest
 
     repo = tmp_path / "repo"
-    _init_git_repo(repo)
-    env = _camp_state_env(tmp_path)
+    init_git_repo(repo, origin=True)
+    env = camp_state_env(tmp_path)
     group = _make_group(
         "readystill",
         [
@@ -480,8 +446,8 @@ def test_setup_ready_member_retry_timeout_does_not_demote(tmp_path, monkeypatch,
     from camp.group.manifest import read_central_manifest
 
     repo = tmp_path / "repo"
-    _init_git_repo(repo)
-    env = _camp_state_env(tmp_path)
+    init_git_repo(repo, origin=True)
+    env = camp_state_env(tmp_path)
     group = _make_group(
         "readytimeout",
         [
@@ -528,8 +494,8 @@ def test_setup_ready_member_retry_generic_exception_does_not_demote(
     from camp.group.manifest import read_central_manifest
 
     repo = tmp_path / "repo"
-    _init_git_repo(repo)
-    env = _camp_state_env(tmp_path)
+    init_git_repo(repo, origin=True)
+    env = camp_state_env(tmp_path)
     group = _make_group(
         "readygeneric",
         [
@@ -575,8 +541,8 @@ def test_reconcile_raises_reconcile_error_on_required_task_failure(tmp_path):
     from camp.provision.reconcile import reconcile_worktree, ReconcileError
 
     repo = tmp_path / "repo"
-    _init_git_repo(repo)
-    env = _camp_state_env(tmp_path)
+    init_git_repo(repo, origin=True)
+    env = camp_state_env(tmp_path)
     group = _make_group(
         "rcg",
         [
@@ -603,8 +569,8 @@ def test_reconcile_optional_failure_warns_and_writes_manifest(tmp_path, capsys):
     from camp.group.manifest import read_central_manifest
 
     repo = tmp_path / "repo"
-    _init_git_repo(repo)
-    env = _camp_state_env(tmp_path)
+    init_git_repo(repo, origin=True)
+    env = camp_state_env(tmp_path)
     group = _make_group(
         "rcoptg",
         [
@@ -634,8 +600,8 @@ def test_second_reconcile_skips_ok_reruns_failed(tmp_path):
     from camp.group.manifest import read_central_manifest
 
     repo = tmp_path / "repo"
-    _init_git_repo(repo)
-    env = _camp_state_env(tmp_path)
+    init_git_repo(repo, origin=True)
+    env = camp_state_env(tmp_path)
     ok_runs = tmp_path / "ok_runs"
     flaky_runs = tmp_path / "flaky_runs"
     group = _make_group(
@@ -674,8 +640,8 @@ def test_task_states_persist_and_survive_reread(tmp_path):
     from camp.group.manifest import read_central_manifest
 
     repo = tmp_path / "repo"
-    _init_git_repo(repo)
-    env = _camp_state_env(tmp_path)
+    init_git_repo(repo, origin=True)
+    env = camp_state_env(tmp_path)
     group = _make_group(
         "persistg",
         [
@@ -710,8 +676,8 @@ def test_reconcile_preserves_provision_state_and_activated(tmp_path):
     from camp.group.manifest import read_central_manifest, write_central_manifest
 
     repo = tmp_path / "repo"
-    _init_git_repo(repo)
-    env = _camp_state_env(tmp_path)
+    init_git_repo(repo, origin=True)
+    env = camp_state_env(tmp_path)
     group = _make_group(
         "carryg",
         [{"name": "repo", "repo_root": str(repo), "base": "origin/main"}],
@@ -739,8 +705,8 @@ def test_reconcile_first_run_has_no_provision_state_or_activated_key(tmp_path):
     from camp.group.manifest import read_central_manifest
 
     repo = tmp_path / "repo"
-    _init_git_repo(repo)
-    env = _camp_state_env(tmp_path)
+    init_git_repo(repo, origin=True)
+    env = camp_state_env(tmp_path)
     group = _make_group(
         "firstrung",
         [{"name": "repo", "repo_root": str(repo), "base": "origin/main"}],
@@ -760,8 +726,8 @@ def test_reconcile_preserves_failed_provision_state_and_reason(tmp_path):
     from camp.group.manifest import read_central_manifest, write_central_manifest
 
     repo = tmp_path / "repo"
-    _init_git_repo(repo)
-    env = _camp_state_env(tmp_path)
+    init_git_repo(repo, origin=True)
+    env = camp_state_env(tmp_path)
     group = _make_group(
         "failedg",
         [{"name": "repo", "repo_root": str(repo), "base": "origin/main"}],
@@ -789,8 +755,8 @@ def test_reconcile_carries_provision_state_activated_and_tasks_together(tmp_path
     from camp.group.manifest import read_central_manifest, write_central_manifest
 
     repo = tmp_path / "repo"
-    _init_git_repo(repo)
-    env = _camp_state_env(tmp_path)
+    init_git_repo(repo, origin=True)
+    env = camp_state_env(tmp_path)
     group = _make_group(
         "combinedg",
         [
@@ -832,8 +798,8 @@ def test_reconcile_member_with_no_activate_task_reports_not_applicable_work_stat
     from camp.group.manifest import read_central_manifest
 
     repo = tmp_path / "repo"
-    _init_git_repo(repo)
-    env = _camp_state_env(tmp_path)
+    init_git_repo(repo, origin=True)
+    env = camp_state_env(tmp_path)
     group = _make_group(
         "noactivateg",
         [
@@ -861,8 +827,8 @@ def test_reconcile_member_with_activate_task_leaves_work_state_absent_on_first_r
     from camp.group.manifest import read_central_manifest
 
     repo = tmp_path / "repo"
-    _init_git_repo(repo)
-    env = _camp_state_env(tmp_path)
+    init_git_repo(repo, origin=True)
+    env = camp_state_env(tmp_path)
     group = _make_group(
         "hasactivateg",
         [
@@ -891,8 +857,8 @@ def test_reconcile_carries_forward_work_state_set_to_ready(tmp_path):
     from camp.group.manifest import read_central_manifest, write_central_manifest
 
     repo = tmp_path / "repo"
-    _init_git_repo(repo)
-    env = _camp_state_env(tmp_path)
+    init_git_repo(repo, origin=True)
+    env = camp_state_env(tmp_path)
     group = _make_group(
         "workcarryg",
         [
@@ -968,8 +934,8 @@ def test_reconcile_hook_path_skips_over_budget_task_without_reexecuting(tmp_path
     from camp.group.manifest import read_central_manifest, write_central_manifest
 
     repo = tmp_path / "repo"
-    _init_git_repo(repo)
-    env = _camp_state_env(tmp_path)
+    init_git_repo(repo, origin=True)
+    env = camp_state_env(tmp_path)
     runs = tmp_path / "runs"
     group = _make_group(
         "hookskipg",
@@ -1006,8 +972,8 @@ def test_setup_retries_task_recorded_over_budget(tmp_path):
     from camp.group.manifest import read_central_manifest, write_central_manifest
 
     repo = tmp_path / "repo"
-    _init_git_repo(repo)
-    env = _camp_state_env(tmp_path)
+    init_git_repo(repo, origin=True)
+    env = camp_state_env(tmp_path)
     runs = tmp_path / "runs"
     group = _make_group(
         "setupretryg",

@@ -23,11 +23,11 @@ env injection; no real claude exec, no ~/.config or ~/.local/state touched.
 
 from __future__ import annotations
 
-import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+from ._helpers import init_git_repo
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]  # trailhead root
 _PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
@@ -41,34 +41,6 @@ if str(_PLUGIN_DIR) not in sys.path:
 # ---------------------------------------------------------------------------
 
 
-def _init_git_repo(path: Path) -> None:
-    path.mkdir(parents=True, exist_ok=True)
-    subprocess.run(["git", "init", "-b", "main", str(path)], check=True, capture_output=True)
-    subprocess.run(
-        ["git", "-C", str(path), "config", "user.email", "test@test.com"],
-        check=True,
-        capture_output=True,
-    )
-    subprocess.run(
-        ["git", "-C", str(path), "config", "user.name", "Test"], check=True, capture_output=True
-    )
-    (path / "README.md").write_text("# test\n")
-    subprocess.run(["git", "-C", str(path), "add", "README.md"], check=True, capture_output=True)
-    subprocess.run(
-        ["git", "-C", str(path), "commit", "-m", "init", "--no-gpg-sign"],
-        check=True,
-        capture_output=True,
-    )
-    subprocess.run(
-        ["git", "-C", str(path), "remote", "add", "origin", str(path)],
-        check=True,
-        capture_output=True,
-    )
-    subprocess.run(
-        ["git", "-C", str(path), "fetch", "origin", "--quiet"], check=True, capture_output=True
-    )
-
-
 def _make_group(name, members, *, branch_pattern="worktree-{slug}"):
     return {"group": {"name": name}, "members": members, "branch_pattern": branch_pattern}
 
@@ -76,7 +48,7 @@ def _make_group(name, members, *, branch_pattern="worktree-{slug}"):
 def _one_member_group_over_fresh_repo(tmp_root: Path, name: str, repo_dirname: str):
     """A one-member group whose member is a fresh synthetic git repo."""
     repo = tmp_root / repo_dirname
-    _init_git_repo(repo)
+    init_git_repo(repo, origin=True)
     return _make_group(
         name,
         [{"name": "repo_a", "repo_root": str(repo), "tasks": [], "base": "origin/main"}],
@@ -576,7 +548,7 @@ class TestActivateTaskPersistSurvivesOwner:
         from camp.provision.activation import run_activate_tasks_in_background
 
         repo_a = tmp_path / "repo_a"
-        _init_git_repo(repo_a)
+        init_git_repo(repo_a, origin=True)
         member_config = {
             "name": "repo_a",
             "repo_root": str(repo_a),

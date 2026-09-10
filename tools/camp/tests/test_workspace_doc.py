@@ -40,6 +40,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from ._helpers import camp_state_env
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]  # trailhead root
 _PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
@@ -58,12 +59,6 @@ def _make_group_config(name, members, *, branch_pattern="worktree-{slug}", harne
     if harness is not None:
         cfg["harness"] = harness
     return cfg
-
-
-def _camp_state_env(tmp_path: Path) -> dict[str, str]:
-    state_root = tmp_path / "camp-state"
-    state_root.mkdir(parents=True, exist_ok=True)
-    return {"CAMP_STATE_DIR": str(state_root)}
 
 
 # ---------------------------------------------------------------------------
@@ -642,7 +637,7 @@ class TestBringUpWorkspaceIntegration:
         """bring_up_workspace writes CLAUDE.md at the workspace root."""
         from camp.provision.provision import bring_up_workspace
 
-        env = _camp_state_env(tmp_path)
+        env = camp_state_env(tmp_path)
         group = _make_group_config(
             "mygroup",
             [{"name": "repo_a", "repo_root": str(tmp_path / "repo_a"), "bootstrap": []}],
@@ -662,7 +657,7 @@ class TestBringUpWorkspaceIntegration:
         """bring_up_workspace (claude default) does NOT write AGENT.md."""
         from camp.provision.provision import bring_up_workspace
 
-        env = _camp_state_env(tmp_path)
+        env = camp_state_env(tmp_path)
         group = _make_group_config(
             "mygroup",
             [{"name": "repo_a", "repo_root": str(tmp_path / "repo_a"), "bootstrap": []}],
@@ -684,7 +679,7 @@ class TestBringUpWorkspaceIntegration:
         """bring_up_workspace writes workspace .claude/settings.json with SessionStart hook."""
         from camp.provision.provision import bring_up_workspace
 
-        env = _camp_state_env(tmp_path)
+        env = camp_state_env(tmp_path)
         group = _make_group_config(
             "mygroup",
             [{"name": "repo_a", "repo_root": str(tmp_path / "repo_a"), "bootstrap": []}],
@@ -713,7 +708,7 @@ class TestBringUpWorkspaceIntegration:
         """bring_up_workspace CLAUDE.md embeds member names."""
         from camp.provision.provision import bring_up_workspace
 
-        env = _camp_state_env(tmp_path)
+        env = camp_state_env(tmp_path)
         group = _make_group_config(
             "mygroup",
             [
@@ -737,7 +732,7 @@ class TestBringUpWorkspaceIntegration:
         """Calling bring_up_workspace twice produces identical docs (no duplication)."""
         from camp.provision.provision import bring_up_workspace
 
-        env = _camp_state_env(tmp_path)
+        env = camp_state_env(tmp_path)
         group = _make_group_config(
             "mygroup",
             [{"name": "repo_a", "repo_root": str(tmp_path / "repo_a"), "bootstrap": []}],

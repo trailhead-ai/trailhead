@@ -19,6 +19,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from ._helpers import init_git_repo
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]  # trailhead root
 _TOOL_DIR = _REPO_ROOT / "tools" / "camp"
@@ -149,28 +150,6 @@ def test_capabilities_toml_loads_and_validates() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _init_git_repo(path: Path) -> None:
-    """Initialize a real git repo at path with an initial commit."""
-    path.mkdir(parents=True, exist_ok=True)
-    subprocess.run(["git", "init", "-b", "main", str(path)], check=True, capture_output=True)
-    subprocess.run(
-        ["git", "-C", str(path), "config", "user.email", "test@test.com"],
-        check=True,
-        capture_output=True,
-    )
-    subprocess.run(
-        ["git", "-C", str(path), "config", "user.name", "Test"], check=True, capture_output=True
-    )
-    readme = path / "README.md"
-    readme.write_text("# test\n")
-    subprocess.run(["git", "-C", str(path), "add", "README.md"], check=True, capture_output=True)
-    subprocess.run(
-        ["git", "-C", str(path), "commit", "-m", "init", "--no-gpg-sign"],
-        check=True,
-        capture_output=True,
-    )
-
-
 def _run_init(
     args: list[str],
     *,
@@ -228,7 +207,7 @@ def author_env(tmp_path: Path):
     repos = {}
     for name in ("alpha", "beta", "gamma"):
         repo = tmp_path / name
-        _init_git_repo(repo)
+        init_git_repo(repo)
         repos[name] = repo
 
     return {
@@ -774,7 +753,7 @@ def test_member_path_with_equals_splits_on_first(author_env, tmp_path):
     """A path containing '=' splits on the FIRST '=' only."""
     g = author_env
     weird = tmp_path / "weird=dir"
-    _init_git_repo(weird)
+    init_git_repo(weird)
     result = _run_init(
         ["mygroup", "--member", f"alpha={weird}"],
         config_dir=g["config_dir"],

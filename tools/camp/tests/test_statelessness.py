@@ -81,8 +81,9 @@ if str(_PLUGIN_DIR) not in sys.path:
 
 from camp.group.manifest import manifest_path_for, owner_of, read_central_manifest  # noqa: E402
 
+from ._helpers import init_git_repo  # noqa: E402
+
 _camp = _cli._camp
-_init_git_repo = _cli._init_git_repo
 _new_workspace = _cli._new_workspace
 _register_live = _cli._register_live
 _seed_transcript = _cli._seed_transcript
@@ -180,7 +181,7 @@ def test_no_new_launch_flow_writes_anything_under_the_state_dir(cli_env) -> None
     # the "directory rooting is off by default" refusal needs a group that never
     # turned it on, and the allowlist below can only be authored once per group.
     third_repo = tmp_path / "repo_c"
-    _init_git_repo(third_repo)
+    init_git_repo(third_repo, origin=True)
     result = _camp(cli_env, "group", "nolaunch", "--member", f"member={third_repo}")
     assert result.returncode == 0, result.stderr
     _set_harness_binary(cli_env["config_dir"], "nolaunch", "fakeharness")

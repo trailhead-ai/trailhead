@@ -30,6 +30,7 @@ import textwrap
 from pathlib import Path
 
 import pytest
+from ._helpers import init_git_repo
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
@@ -284,32 +285,6 @@ class TestFix9VerbTaxonomy:
 # ===========================================================================
 
 
-def _init_git_repo(path: Path) -> None:
-    path.mkdir(parents=True, exist_ok=True)
-    subprocess.run(["git", "init", "-b", "main", str(path)], check=True, capture_output=True)
-    subprocess.run(
-        ["git", "-C", str(path), "config", "user.email", "t@t.com"], check=True, capture_output=True
-    )
-    subprocess.run(
-        ["git", "-C", str(path), "config", "user.name", "T"], check=True, capture_output=True
-    )
-    (path / "README.md").write_text("# t\n")
-    subprocess.run(["git", "-C", str(path), "add", "README.md"], check=True, capture_output=True)
-    subprocess.run(
-        ["git", "-C", str(path), "commit", "-m", "i", "--no-gpg-sign"],
-        check=True,
-        capture_output=True,
-    )
-    subprocess.run(
-        ["git", "-C", str(path), "remote", "add", "origin", str(path)],
-        check=True,
-        capture_output=True,
-    )
-    subprocess.run(
-        ["git", "-C", str(path), "fetch", "origin", "--quiet"], check=True, capture_output=True
-    )
-
-
 class TestC1RmtreeGuard:
     def test_rmtree_guard_rejects_symlink_escaping_workspace_dir(self, tmp_path, monkeypatch):
         """Member worktree_paths stay INSIDE the resolved workspace dir (pre-check
@@ -322,7 +297,7 @@ class TestC1RmtreeGuard:
         from camp.group.manifest import workspace_dir, read_central_manifest
 
         repo = tmp_path / "repo_a"
-        _init_git_repo(repo)
+        init_git_repo(repo, origin=True)
         group = {
             "group": {"name": "c1grp"},
             "members": [

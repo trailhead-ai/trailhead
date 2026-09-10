@@ -54,6 +54,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from ._helpers import camp_state_env, init_git_repo
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]  # trailhead root
 _PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
@@ -68,28 +69,6 @@ if str(_PLUGIN_DIR) not in sys.path:
 # ---------------------------------------------------------------------------
 
 
-def _init_git_repo(path: Path) -> None:
-    """Initialize a real git repo at path with an initial commit."""
-    path.mkdir(parents=True, exist_ok=True)
-    subprocess.run(["git", "init", "-b", "main", str(path)], check=True, capture_output=True)
-    subprocess.run(
-        ["git", "-C", str(path), "config", "user.email", "test@test.com"],
-        check=True,
-        capture_output=True,
-    )
-    subprocess.run(
-        ["git", "-C", str(path), "config", "user.name", "Test"], check=True, capture_output=True
-    )
-    readme = path / "README.md"
-    readme.write_text("# test\n")
-    subprocess.run(["git", "-C", str(path), "add", "README.md"], check=True, capture_output=True)
-    subprocess.run(
-        ["git", "-C", str(path), "commit", "-m", "init", "--no-gpg-sign"],
-        check=True,
-        capture_output=True,
-    )
-
-
 def _make_group_config(
     name: str,
     members: list[dict[str, Any]],
@@ -102,13 +81,6 @@ def _make_group_config(
         "members": members,
         "branch_pattern": branch_pattern,
     }
-
-
-def _camp_state_env(tmp_path: Path) -> dict[str, str]:
-    """Return env override dict pointing CAMP_STATE_DIR at tmp_path."""
-    state_root = tmp_path / "camp-state"
-    state_root.mkdir(parents=True, exist_ok=True)
-    return {"CAMP_STATE_DIR": str(state_root)}
 
 
 def _member_wt(group_name: str, slug: str, member: str, env: dict[str, str]) -> Path:
@@ -129,8 +101,8 @@ def two_member_group(tmp_path: Path):
     """A 2-member group with real git repos and env."""
     repo_a = tmp_path / "repo_a"
     repo_b = tmp_path / "repo_b"
-    _init_git_repo(repo_a)
-    _init_git_repo(repo_b)
+    init_git_repo(repo_a)
+    init_git_repo(repo_b)
 
     group = _make_group_config(
         "testgroup",
@@ -139,7 +111,7 @@ def two_member_group(tmp_path: Path):
             {"name": "repo_b", "repo_root": str(repo_b), "bootstrap": []},
         ],
     )
-    env = _camp_state_env(tmp_path)
+    env = camp_state_env(tmp_path)
     return {
         "group": group,
         "repo_a": repo_a,
@@ -310,7 +282,7 @@ class TestHooksWriter:
         # Create a repo_root path with a space and a quote in it
         spaced_dir = tmp_path / "my repo's dir"
         spaced_dir.mkdir(parents=True, exist_ok=True)
-        _init_git_repo(spaced_dir)
+        init_git_repo(spaced_dir)
 
         # camp_bin path with a space and a quote
         camp_bin_spaced = str(tmp_path / "my bin's/camp")
@@ -425,7 +397,7 @@ class TestSessionBootstrapNoOp:
 
         # Create a different repo for the group (not cwd)
         other_repo = tmp_path / "other_repo"
-        _init_git_repo(other_repo)
+        init_git_repo(other_repo)
 
         toml_content = f"""
 [group]
@@ -479,7 +451,7 @@ bootstrap = []
 
         # Create a member repo
         member_repo = tmp_path / "member_repo"
-        _init_git_repo(member_repo)
+        init_git_repo(member_repo)
 
         toml_content = f"""
 [group]
@@ -512,7 +484,7 @@ class TestSessionBootstrapIdempotent:
         groups_dir.mkdir(parents=True, exist_ok=True)
 
         member_repo = tmp_path / "member_repo"
-        _init_git_repo(member_repo)
+        init_git_repo(member_repo)
 
         toml_content = f"""
 [group]
@@ -621,8 +593,8 @@ class TestWorktreeCleanup:
 
         repo_a = tmp_path / "repo_a"
         repo_b = tmp_path / "repo_b"
-        _init_git_repo(repo_a)
-        _init_git_repo(repo_b)
+        init_git_repo(repo_a)
+        init_git_repo(repo_b)
 
         env = {
             "CAMP_STATE_DIR": str(tmp_path / "camp-state"),
@@ -691,7 +663,7 @@ bootstrap = []
         groups_dir.mkdir(parents=True, exist_ok=True)
 
         repo_a = tmp_path / "repo_a"
-        _init_git_repo(repo_a)
+        init_git_repo(repo_a)
 
         env = {
             "CAMP_STATE_DIR": str(tmp_path / "camp-state"),
@@ -743,7 +715,7 @@ bootstrap = []
         groups_dir.mkdir(parents=True, exist_ok=True)
 
         repo_a = tmp_path / "repo_a"
-        _init_git_repo(repo_a)
+        init_git_repo(repo_a)
 
         env = {
             "CAMP_STATE_DIR": str(tmp_path / "camp-state"),
@@ -790,7 +762,7 @@ bootstrap = []
         groups_dir.mkdir(parents=True, exist_ok=True)
 
         other_repo = tmp_path / "other"
-        _init_git_repo(other_repo)
+        init_git_repo(other_repo)
 
         toml_content = f"""
 [group]
@@ -837,7 +809,7 @@ class TestSessionBootstrapGenuineFailure:
         groups_dir.mkdir(parents=True, exist_ok=True)
 
         member_repo = tmp_path / "member_repo"
-        _init_git_repo(member_repo)
+        init_git_repo(member_repo)
 
         # A bootstrap that always fails → reconcile raises naming the member/slug.
         toml_content = f"""
@@ -919,7 +891,7 @@ class TestSessionBootstrapOverBudgetSkip:
         groups_dir.mkdir(parents=True, exist_ok=True)
 
         member_repo = tmp_path / "member_repo"
-        _init_git_repo(member_repo)
+        init_git_repo(member_repo)
 
         toml_content = f"""
 [group]
@@ -1595,7 +1567,7 @@ class TestSessionBootstrapCapabilityReportIntegration:
         groups_dir.mkdir(parents=True, exist_ok=True)
 
         member_repo = tmp_path / "member_repo"
-        _init_git_repo(member_repo)
+        init_git_repo(member_repo)
 
         toml_content = f"""
 [group]

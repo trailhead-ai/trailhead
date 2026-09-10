@@ -35,6 +35,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from ._helpers import init_git_repo
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
@@ -69,17 +70,6 @@ def groupless_env(tmp_path: Path) -> dict[str, str]:
     return {"CAMP_CONFIG_DIR": str(tmp_path), "CAMP_STATE_DIR": str(tmp_path / "state")}
 
 
-def _init_git_repo(path: Path) -> None:
-    path.mkdir(parents=True, exist_ok=True)
-    run = lambda *a: subprocess.run(a, check=True, capture_output=True)  # noqa: E731
-    run("git", "init", "-b", "main", str(path))
-    run("git", "-C", str(path), "config", "user.email", "t@t.com")
-    run("git", "-C", str(path), "config", "user.name", "T")
-    (path / "README.md").write_text("# t\n")
-    run("git", "-C", str(path), "add", "README.md")
-    run("git", "-C", str(path), "commit", "-m", "i", "--no-gpg-sign")
-
-
 @pytest.fixture()
 def group_env(tmp_path, monkeypatch):
     """A one-member group `camp new` can really create a workspace in.
@@ -91,7 +81,7 @@ def group_env(tmp_path, monkeypatch):
 
     monkeypatch.setattr(provision, "spawn_detached_provisioner", lambda **kw: None)
     repo = tmp_path / "repo_a"
-    _init_git_repo(repo)
+    init_git_repo(repo)
     return {
         "group": {
             "group": {"name": "g"},
