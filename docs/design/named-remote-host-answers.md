@@ -302,6 +302,36 @@ The line is the remote camp's own, printed as it wrote it, with the remote exit 
 carried through. The local side adds nothing — a wrapper here would make one camp's
 refusal read as another camp's bug.
 
+## State — host refused our credentials
+
+ssh authenticated with nothing — every credential offered was refused, at exit 255.
+The connection never completed and camp never ran on the far side; this is the one
+failure state whose remedy is entirely on the operator's side of the connection, so
+unlike the changed-key state above, the message says exactly what to do.
+
+```
+$ camp list --host andromeda
+camp list: host 'andromeda' refused every credential offered — camp never ran there
+camp list: load the identity authorized on that host (e.g. ssh-add) and confirm it is in the host's authorized_keys, then re-run
+$ echo $status
+1
+```
+
+```
+$ camp list --host andromeda --json
+[{"ok": false, "host": "andromeda", "reason": "host refused our credentials"}]
+```
+
+This is the single most likely first-contact failure for a `--host` verb:
+`BatchMode=yes` refuses to prompt, so a key that is not loaded into an agent, or is
+not authorized on the far side, produces this rather than a password prompt. Measured
+directly against real `ssh` on 2026-09-10 with no usable identity loaded:
+`ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=<tmp>
+localhost true` exits 255 with stderr `tomduffield@localhost: Permission denied
+(publickey).`. The classifier matches the invariant `Permission denied` — never the
+username prefix, and never the parenthesized method list, both of which vary by
+target and by what the local ssh-agent offers.
+
 ## State — host not declared
 
 ```

@@ -37,6 +37,7 @@ from .config import Host
 from .transport import (
     Answered,
     CampNotResolvable,
+    CredentialsRefused,
     DEFAULT_CONNECT_TIMEOUT_SECONDS,
     IdentityChanged,
     IdentityUnknown,
@@ -115,6 +116,17 @@ def relay_all_groups(
             "for this host in hosts.toml",
             reason="camp could not be run on the host — declare camp_bin for "
             "this host in hosts.toml",
+        )
+
+    if isinstance(outcome, CredentialsRefused):
+        _fail(
+            verb, host_name, as_json,
+            human="refused every credential offered — camp never ran there",
+            reason="host refused our credentials",
+            extra_human_line=(
+                "load the identity authorized on that host (e.g. ssh-add) "
+                "and confirm it is in the host's authorized_keys, then re-run"
+            ),
         )
 
     # Answered / RemoteRefusal both carry stdout/stderr/exit_code. The

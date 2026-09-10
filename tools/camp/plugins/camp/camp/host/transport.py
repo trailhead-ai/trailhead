@@ -19,10 +19,14 @@ separate them are locale-dependent.
 Resolution order, measured 2026-09-10 against real ``ssh``: a remote camp
 invocation exiting 255 is indistinguishable from a transport failure by exit
 code alone, and may print nothing. The fixed transport substrings are
-therefore matched FIRST; an otherwise-unmatched 255 is the remote command's
-own exit, classified as :class:`RemoteRefusal`. Never the reverse — assuming
-transport first would render a genuine remote refusal as a connection failure
-that never happened.
+therefore matched FIRST — unreachable, then the two host-identity states,
+then the authentication-failure signal (:class:`CredentialsRefused`) — and an
+otherwise-unmatched 255 is the remote command's own exit, classified as
+:class:`RemoteRefusal`. Never the reverse — assuming transport first would
+render a genuine remote refusal as a connection failure that never happened.
+:class:`CredentialsRefused` covers the single most likely first-contact
+failure: ``BatchMode=yes`` with no usable identity loaded produces ``ssh``'s
+own ``Permission denied`` line, never a password prompt.
 
 Residual, also measured: terminating the local ``ssh`` child (on the execution
 timeout, or on an interrupt unwinding through this call) bounds only the local
@@ -75,6 +79,14 @@ _IDENTITY_UNKNOWN_B = "requested strict checking"
 # with exit 127. Generic across shells — never a specific shell's prefix.
 _COMMAND_NOT_FOUND = "command not found"
 
+# ssh's own authentication-failure wording, measured 2026-09-10 against real
+# ssh under LC_ALL=C with BatchMode=yes and no usable identity loaded:
+# "<user>@<host>: Permission denied (publickey)." (and, with more offered
+# methods, "Permission denied (publickey,password)."). Never the username or
+# the parenthesized method list — both vary by target and by what the local
+# ssh-agent offers, so only the invariant "Permission denied" is matched.
+_PERMISSION_DENIED = "Permission denied"
+
 
 @dataclass(frozen=True)
 class TransportOutcome:
@@ -117,6 +129,14 @@ class IdentityChanged(TransportOutcome):
 @dataclass(frozen=True)
 class CampNotResolvable(TransportOutcome):
     """The connection completed but the far side could not run camp."""
+
+
+@dataclass(frozen=True)
+class CredentialsRefused(TransportOutcome):
+    """ssh authenticated with nothing — the remote host refused every
+    credential offered. The connection never completed and camp never ran;
+    the remedy is entirely on the operator's side (load an identity, get it
+    authorized on the far side)."""
 
 
 @dataclass(frozen=True)
@@ -231,6 +251,8 @@ def _classify(raw: RawResult) -> TransportOutcome:
             return IdentityChanged()
         if _IDENTITY_UNKNOWN_A in raw.stderr and _IDENTITY_UNKNOWN_B in raw.stderr:
             return IdentityUnknown()
+        if _PERMISSION_DENIED in raw.stderr:
+            return CredentialsRefused()
         return RemoteRefusal(stdout=raw.stdout, stderr=raw.stderr, exit_code=raw.exit_code)
 
     if raw.exit_code == 127 and _COMMAND_NOT_FOUND in raw.stderr:

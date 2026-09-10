@@ -331,6 +331,29 @@ def test_unmatched_255_classifies_as_remote_refusal_not_unreachable() -> None:
     assert outcome.exit_code == 255
 
 
+def test_auth_failure_classifies_as_credentials_refused_not_remote_refusal() -> None:
+    # Real signal measured on this machine, 2026-09-10: `ssh -o BatchMode=yes
+    # -o StrictHostKeyChecking=no -o UserKnownHostsFile=<tmp> localhost true`
+    # with no usable identity loaded — exit 255, stderr
+    # "tomduffield@localhost: Permission denied (publickey).\n".
+    stderr = "tom@andromeda: Permission denied (publickey).\n"
+    fake = _FakeRunner(result=transport.RawResult(stdout="", stderr=stderr, exit_code=255))
+
+    outcome = transport.run_camp(_HOST, ["list"], runner=fake)
+
+    assert isinstance(outcome, transport.CredentialsRefused)
+    assert not isinstance(outcome, transport.RemoteRefusal)
+
+
+def test_auth_failure_with_multiple_offered_methods_still_classifies_as_credentials_refused() -> None:
+    stderr = "tom@andromeda: Permission denied (publickey,password).\n"
+    fake = _FakeRunner(result=transport.RawResult(stdout="", stderr=stderr, exit_code=255))
+
+    outcome = transport.run_camp(_HOST, ["list"], runner=fake)
+
+    assert isinstance(outcome, transport.CredentialsRefused)
+
+
 def test_matched_255_message_classifies_as_transport_failure_not_remote_refusal() -> None:
     stderr = "ssh: Could not resolve hostname andromeda: nodename nor servname provided\n"
     fake = _FakeRunner(result=transport.RawResult(stdout="", stderr=stderr, exit_code=255))

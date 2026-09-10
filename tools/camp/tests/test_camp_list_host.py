@@ -333,6 +333,47 @@ def test_camp_not_resolvable_state(
     assert "reason" in rows[0]
 
 
+def test_host_credentials_refused_state(
+    hosts_env, monkeypatch, capsys: pytest.CaptureFixture
+) -> None:
+    transport = _transport_module()
+    outcome = transport.CredentialsRefused()
+    _rig(monkeypatch, outcome)
+
+    code = _run(monkeypatch, ["list", "--host", "andromeda", "--json"])
+
+    captured = capsys.readouterr()
+    assert code != 0
+    assert "refused every credential" in captured.err
+    assert "ssh-add" in captured.err
+    rows = json.loads(captured.out)
+    assert rows == [{"ok": False, "host": "andromeda", "reason": "host refused our credentials"}]
+
+
+def test_host_credentials_refused_distinct_from_remote_refusal_and_camp_not_resolvable(
+    hosts_env, monkeypatch, capsys: pytest.CaptureFixture
+) -> None:
+    transport = _transport_module()
+
+    _rig(monkeypatch, transport.CredentialsRefused())
+    _run(monkeypatch, ["list", "--host", "andromeda", "--json"])
+    credentials_err = capsys.readouterr().err
+
+    _rig(monkeypatch, transport.CampNotResolvable())
+    _run(monkeypatch, ["list", "--host", "andromeda", "--json"])
+    not_resolvable_err = capsys.readouterr().err
+
+    _rig(
+        monkeypatch,
+        transport.RemoteRefusal(stdout="", stderr="camp list: boom\n", exit_code=1),
+    )
+    _run(monkeypatch, ["list", "--host", "andromeda", "--json"])
+    remote_refusal_err = capsys.readouterr().err
+
+    assert credentials_err != not_resolvable_err
+    assert credentials_err != remote_refusal_err
+
+
 def test_json_failure_row_carries_only_ok_host_reason(
     hosts_env, monkeypatch, capsys: pytest.CaptureFixture
 ) -> None:

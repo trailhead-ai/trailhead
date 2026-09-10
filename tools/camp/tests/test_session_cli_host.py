@@ -347,6 +347,23 @@ def test_camp_not_resolvable_state(
     assert "reason" in rows[0]
 
 
+def test_host_credentials_refused_state(
+    hosts_env, monkeypatch, capsys: pytest.CaptureFixture
+) -> None:
+    transport = _transport_module()
+    outcome = transport.CredentialsRefused()
+    _rig(monkeypatch, outcome)
+
+    code = _run(monkeypatch, ["sessions", "--host", "andromeda", "--json"])
+
+    captured = capsys.readouterr()
+    assert code != 0
+    assert "refused every credential" in captured.err
+    assert "ssh-add" in captured.err
+    rows = json.loads(captured.out)
+    assert rows == [{"ok": False, "host": "andromeda", "reason": "host refused our credentials"}]
+
+
 def test_remote_refusal_relayed_prints_remote_stderr_unchanged(
     hosts_env, monkeypatch, capsys: pytest.CaptureFixture
 ) -> None:
