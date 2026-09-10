@@ -959,12 +959,13 @@ def describe_merge_refusal(strategy: str, refusal: str) -> str:
     status is a shared bucket covering every "cannot merge" reason, and
     the refusal text alone cannot disambiguate which one applied.
 
-    Not called from any merge loop by this change. A caller that records
-    a merge-time refusal as a recorded failure — rather than a silent
-    retry with a different strategy, or an unhandled exception — uses
-    this to build that failure's message; both are precluded by
-    construction here, since this function neither loops nor recurses and
-    its only decision is which literal string to return.
+    `_merge_prs` calls this on a refused merge to build the message it
+    records as that pull request's failure and prints to the diagnostic
+    stream. Recording a refusal — rather than silently retrying with a
+    different strategy, or letting an exception escape — is the caller's
+    contract; neither is reachable from here, since this function neither
+    loops nor recurses and its only decision is which literal string to
+    return.
     """
     prefix = RESOLUTION_REASON_PREFIXES["merge_refused"]
     return f"{prefix}: {strategy} refused — {refusal}"
