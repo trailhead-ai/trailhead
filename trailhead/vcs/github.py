@@ -33,7 +33,7 @@ import time
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, NamedTuple, Sequence
 
 from trailhead.vcs import runner as rp
 from trailhead.vcs.untrusted import wrap_untrusted
@@ -915,6 +915,117 @@ def get_commit_series(
         subject = message.split("\n", 1)[0]
         series.append((subject, additions + deletions))
     return series
+
+
+#: The change-size threshold (in changed lines: additions + deletions) a
+#: fix-up-marked or work-in-progress-marked commit must not exceed to count
+#: toward fix-up dominance (AC18).
+#:
+#: Calibrated against this repository's last 100 merged pull requests
+#: (2026-08-12 to 2026-09-10, 85 of them multi-commit): at 10, 20, 30 and 50
+#: changed lines, every one of those 85 human-labelled-deliberately-separated
+#: branches classifies identically — not fix-up-dominated. The first real
+#: branch to flip is at 75. That means the real-branch evidence pins a safe
+#: *ceiling*, not a specific point inside it — 50 is the most permissive
+#: value inside the band the data actually rules out, not a value the data
+#: singled out on its own. See `tests/fixtures/fixup_dominance_calibration.json`
+#: for the measured branches this was checked against.
+FIXUP_CHANGE_SIZE_THRESHOLD = 50
+
+#: Fix-up marker prefixes recognised verbatim at the start of a commit
+#: subject: git's own interactive-rebase markers plus this project's `[fix]`
+#: convention. Checked case-sensitively, matching how these markers are
+#: conventionally written.
+_FIXUP_MARKER_PREFIXES = ("fixup!", "squash!", "amend!", "[fix]")
+
+#: The conventional-commit `fix` type, bare (`fix:`) or scoped
+#: (`fix(scope):`). Admitted to the marker vocabulary only in combination
+#: with `FIXUP_CHANGE_SIZE_THRESHOLD` — see the threshold's docstring: this
+#: project's own history carries only this spelling among the seven, and
+#: every occurrence measured is a mix of small tidy-ups and substantial
+#: work, so the size gate is the discriminator, not this pattern alone.
+_CONVENTIONAL_FIX_MARKER = re.compile(r"^fix(\([^)]*\))?:")
+
+#: A work-in-progress marker at the start of a subject — `WIP`, `wip:`,
+#: `WIP: `, etc. Matched case-insensitively, on a word boundary so it never
+#: matches a subject merely starting with the letters ("wiped up ...").
+_WIP_MARKER = re.compile(r"^wip\b", re.IGNORECASE)
+
+
+def _has_fixup_marker(subject: str) -> bool:
+    """True when `subject` opens with one of the pinned marker spellings —
+    a git fix-up marker, the project's `[fix]`, the conventional-commit
+    `fix:` / `fix(scope):` type, or a work-in-progress marker."""
+    return (
+        subject.startswith(_FIXUP_MARKER_PREFIXES)
+        or bool(_CONVENTIONAL_FIX_MARKER.match(subject))
+        or bool(_WIP_MARKER.match(subject))
+    )
+
+
+class FixupDominance(NamedTuple):
+    """The verdict `classify_fixup_dominance` returns, carrying the counts
+    a caller needs to explain the verdict (AC4) without retelling any commit
+    subject — `fixup_count` and `series_length` are safe to interpolate into
+    an operator-facing reason; commit text is not."""
+
+    dominated: bool
+    fixup_count: int
+    series_length: int
+
+
+def classify_fixup_dominance(series: list[tuple[str, int]]) -> FixupDominance:
+    """Classify a pull request's commit series as fix-up-dominated or not
+    (AC4), purely from the series itself — no subprocess call, no provider
+    read; call `get_commit_series` first and hand this the result.
+
+    A commit counts as a fix-up when it carries a marker recognised by
+    `_has_fixup_marker`, or repeats an earlier commit's subject in this
+    series exactly (the first occurrence of a repeated subject does not
+    count — only the repeat does) — **and**, either way, its reported
+    `change_size` does not exceed `FIXUP_CHANGE_SIZE_THRESHOLD` (AC18). A
+    marked or repeated commit above the threshold is real work and is
+    excluded, not counted.
+
+    The series is fix-up-dominated when strictly more than half its commits
+    count as fix-ups — a series split exactly evenly is not dominated. An
+    empty series is not dominated (there is nothing to dominate it with).
+
+    Deliberately refuses a `get_commit_series` sentinel (`str`) rather than
+    silently misreporting on it: a sentinel means the series could not be
+    read at all, and folding that into "not dominated" would hide a lookup
+    failure behind an ordinary-looking verdict. Resolving what a sentinel
+    means for the merge outcome is the resolver's job, not this classifier's
+    — check for `COMMIT_SERIES_LOOKUP_FAILED` / `COMMIT_SERIES_TRUNCATED`
+    before calling this.
+
+    Known limit of the calibration: this repository's own history contains
+    zero genuine multi-commit fix-up piles, so no real branch has ever
+    exercised the "catches an actual pile" direction of this rule — only
+    synthetic tests pin that direction. The measured branches only prove
+    the "must never over-collapse a deliberately-separated branch" side.
+    """
+    if not isinstance(series, list):
+        raise TypeError(
+            "classify_fixup_dominance expects a resolved commit series (a "
+            "list of (subject, change_size) pairs) from get_commit_series, "
+            "not one of its sentinel values (COMMIT_SERIES_LOOKUP_FAILED / "
+            "COMMIT_SERIES_TRUNCATED) — check for those first"
+        )
+
+    seen_subjects: set[str] = set()
+    fixup_count = 0
+    for subject, change_size in series:
+        is_repeat = subject in seen_subjects
+        seen_subjects.add(subject)
+        if (_has_fixup_marker(subject) or is_repeat) and change_size <= FIXUP_CHANGE_SIZE_THRESHOLD:
+            fixup_count += 1
+
+    series_length = len(series)
+    dominated = fixup_count * 2 > series_length
+    return FixupDominance(
+        dominated=dominated, fixup_count=fixup_count, series_length=series_length
+    )
 
 
 #: Maps the GraphQL Repository object's permitted-merge-method booleans to

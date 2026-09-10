@@ -1501,6 +1501,188 @@ class TestGetCommitSeries:
 
 
 # ---------------------------------------------------------------------------
+# classify_fixup_dominance
+# ---------------------------------------------------------------------------
+
+_CALIBRATION_FIXTURE_PATH = (
+    Path(__file__).parent / "fixtures" / "fixup_dominance_calibration.json"
+)
+
+
+def _load_calibration_cases() -> list[dict]:
+    data = json.loads(_CALIBRATION_FIXTURE_PATH.read_text())
+    return data["cases"]
+
+
+def _series_from_fixture_case(case: dict) -> list[tuple[str, int]]:
+    return [(c["subject"], c["changed_lines"]) for c in case["commits"]]
+
+
+_NON_AMBIGUOUS_CASES = [c for c in _load_calibration_cases() if not c["ambiguous"]]
+
+
+class TestClassifyFixupDominance:
+    def test_each_marker_spelling_is_recognised_on_a_small_commit(self) -> None:
+        """Each of the seven pinned marker spellings, alone in a
+        single-commit series, classifies that series as fix-up-dominated.
+        Each spelling is its own assertion so one unrecognised spelling
+        cannot hide behind another passing."""
+        from trailhead.vcs.github import classify_fixup_dominance
+
+        marked_subjects = [
+            "fixup! tidy up error message",
+            "squash! tidy up error message",
+            "amend! tidy up error message",
+            "[fix] tidy up error message",
+            "fix: tidy up error message",
+            "fix(cli): tidy up error message",
+            "WIP: tidy up error message",
+        ]
+        for subject in marked_subjects:
+            result = classify_fixup_dominance([(subject, 5)])
+            assert result.dominated, f"{subject!r} was not recognised as a fix-up marker"
+            assert result.fixup_count == 1
+
+    def test_subject_with_no_marker_does_not_count_at_any_size(self) -> None:
+        from trailhead.vcs.github import classify_fixup_dominance
+
+        small = classify_fixup_dominance([("tidy up error message", 5), ("feat: x", 1)])
+        large = classify_fixup_dominance([("tidy up error message", 500), ("feat: x", 1)])
+        assert small.fixup_count == 0
+        assert not small.dominated
+        assert large.fixup_count == 0
+        assert not large.dominated
+
+    def test_marked_commit_exceeding_threshold_does_not_count_boundary(self) -> None:
+        """AC18, on both sides of the pinned threshold — the boundary
+        itself, not merely far from it."""
+        from trailhead.vcs.github import (
+            FIXUP_CHANGE_SIZE_THRESHOLD,
+            classify_fixup_dominance,
+        )
+
+        at_threshold = classify_fixup_dominance([("fix: x", FIXUP_CHANGE_SIZE_THRESHOLD)])
+        over_threshold = classify_fixup_dominance(
+            [("fix: x", FIXUP_CHANGE_SIZE_THRESHOLD + 1)]
+        )
+        assert at_threshold.fixup_count == 1
+        assert at_threshold.dominated
+        assert over_threshold.fixup_count == 0
+        assert not over_threshold.dominated
+
+    def test_threshold_constant_is_pinned_at_fifty(self) -> None:
+        """The calibrated threshold is 50 changed lines exactly. Uses the
+        literal boundary values, not `FIXUP_CHANGE_SIZE_THRESHOLD`, so a
+        change to the constant in either direction turns this test red —
+        the fixture regression alone only catches it being raised."""
+        from trailhead.vcs.github import classify_fixup_dominance
+
+        at_fifty = classify_fixup_dominance([("fix: x", 50)])
+        at_fifty_one = classify_fixup_dominance([("fix: x", 51)])
+        assert at_fifty.fixup_count == 1
+        assert at_fifty.dominated
+        assert at_fifty_one.fixup_count == 0
+        assert not at_fifty_one.dominated
+
+    def test_repeated_subject_counts_first_occurrence_and_near_miss_do_not(self) -> None:
+        from trailhead.vcs.github import classify_fixup_dominance
+
+        series = [
+            ("do the thing", 3),
+            ("do the thing", 3),
+            ("do the thing!", 3),
+            ("feat: unrelated work", 40),
+        ]
+        result = classify_fixup_dominance(series)
+        # first "do the thing" doesn't count, the exact repeat does, and
+        # "do the thing!" (differs by one character) never counts.
+        assert result.fixup_count == 1
+
+    def test_repeated_subject_still_subject_to_size_gate(self) -> None:
+        from trailhead.vcs.github import classify_fixup_dominance
+
+        result = classify_fixup_dominance([("do the thing", 3), ("do the thing", 500)])
+        assert result.fixup_count == 0
+        assert not result.dominated
+
+    def test_dominance_is_strictly_more_than_half(self) -> None:
+        """A series split exactly evenly is not dominated, tested at the
+        exact boundary in both directions, plus an empty series."""
+        from trailhead.vcs.github import classify_fixup_dominance
+
+        exact_half = classify_fixup_dominance([("fix: x", 1), ("feat: y", 1)])
+        just_over_half = classify_fixup_dominance(
+            [("fix: x", 1), ("fix: y", 1), ("feat: z", 40)]
+        )
+        empty = classify_fixup_dominance([])
+        assert not exact_half.dominated
+        assert just_over_half.dominated
+        assert not empty.dominated
+        assert empty.fixup_count == 0
+        assert empty.series_length == 0
+
+    def test_makes_no_subprocess_call_and_consults_only_its_argument(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from trailhead.vcs.github import classify_fixup_dominance
+
+        def _forbidden(*args, **kwargs):
+            raise AssertionError("classify_fixup_dominance must not run a subprocess")
+
+        monkeypatch.setattr(subprocess, "run", _forbidden)
+        monkeypatch.setattr(subprocess, "Popen", _forbidden)
+
+        result = classify_fixup_dominance([("fix: x", 1), ("feat: y", 40)])
+        assert result.fixup_count == 1
+
+    def test_totality_covers_lookup_failed_truncated_empty_and_zero_size(self) -> None:
+        """The classifier's input space includes every shape
+        `get_commit_series` can hand it: the lookup-failure sentinel, the
+        truncation sentinel, an empty-but-successful series, and a
+        zero-change-size commit — not well-formed series only."""
+        from trailhead.vcs.github import (
+            COMMIT_SERIES_LOOKUP_FAILED,
+            COMMIT_SERIES_TRUNCATED,
+            classify_fixup_dominance,
+        )
+
+        with pytest.raises(TypeError):
+            classify_fixup_dominance(COMMIT_SERIES_LOOKUP_FAILED)
+        with pytest.raises(TypeError):
+            classify_fixup_dominance(COMMIT_SERIES_TRUNCATED)
+
+        empty_result = classify_fixup_dominance([])
+        assert empty_result == (False, 0, 0)
+
+        zero_size_result = classify_fixup_dominance([("fix: x", 0)])
+        assert zero_size_result.fixup_count == 1
+        assert zero_size_result.dominated
+
+    @pytest.mark.parametrize(
+        "case",
+        _NON_AMBIGUOUS_CASES,
+        ids=[c["case_id"] for c in _NON_AMBIGUOUS_CASES],
+    )
+    def test_calibration_fixture_matches_human_verdict(self, case: dict) -> None:
+        """Threshold regression, from Task 1's exported fixture: every
+        real, human-labelled deliberately-separated branch classifies as
+        not fix-up-dominated at the pinned threshold — asserted per branch,
+        not as an aggregate rate, because a branch a human called
+        deliberately-separated classifying as dominated is the exact
+        failure this gate exists to prevent."""
+        from trailhead.vcs.github import classify_fixup_dominance
+
+        assert case["human_verdict"] == "deliberately-separated"
+        series = _series_from_fixture_case(case)
+        result = classify_fixup_dominance(series)
+        assert not result.dominated, (
+            f"{case['case_id']} (PR #{case['pr_number']}) was human-labelled "
+            f"deliberately-separated but classified as fix-up-dominated "
+            f"({result.fixup_count}/{result.series_length})"
+        )
+
+
+# ---------------------------------------------------------------------------
 # resolve_merge_strategy / describe_merge_refusal
 # ---------------------------------------------------------------------------
 
