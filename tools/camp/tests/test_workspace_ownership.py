@@ -373,6 +373,86 @@ class TestWriterGuardPassthroughWhenDiskHasNoOwner:
         assert owner_of(read_central_manifest(mpath)) == "andromeda"
 
 
+class TestWriterGuardRefusesNonStringDiskOwner:
+    """`owner_of` itself refuses a non-string owner — the guard's own
+    isinstance check must not read that same shape as "nothing to protect"
+    and let a rebuild erase it."""
+
+    def test_write_refuses_when_disk_owner_is_a_non_string_list(self, tmp_path):
+        import json
+
+        from camp.group.manifest import (
+            ManifestError,
+            read_central_manifest,
+            write_central_manifest,
+        )
+
+        mpath = tmp_path / "manifest.json"
+        mpath.write_text(
+            json.dumps({"schema_version": 1, "owner": ["andromeda"], "members": []})
+        )
+
+        with pytest.raises(ManifestError):
+            write_central_manifest(mpath, {"schema_version": 1, "members": []})
+
+        assert read_central_manifest(mpath)["owner"] == ["andromeda"], (
+            "a refused write must leave the corrupt on-disk owner untouched"
+        )
+
+    def test_write_with_opt_in_still_accepted_over_a_non_string_disk_owner(self, tmp_path):
+        import json
+
+        from camp.group.manifest import owner_of, read_central_manifest, write_central_manifest
+
+        mpath = tmp_path / "manifest.json"
+        mpath.write_text(
+            json.dumps({"schema_version": 1, "owner": ["andromeda"], "members": []})
+        )
+
+        write_central_manifest(
+            mpath,
+            {"schema_version": 1, "owner": "orion", "members": []},
+            allow_owner_change=True,
+        )
+
+        assert owner_of(read_central_manifest(mpath)) == "orion"
+
+
+class TestWriterGuardUnreadableManifestDoesNotDisableGuard:
+    """A pre-write read that fails must not silently disable the guard — the
+    exact drop the guard exists to catch would otherwise go through
+    unannounced."""
+
+    def test_corrupt_on_disk_manifest_refuses_write_rather_than_silently_proceeding(
+        self, tmp_path
+    ):
+        from camp.group.manifest import ManifestError, write_central_manifest
+
+        mpath = tmp_path / "manifest.json"
+        mpath.write_text("{not valid json")
+
+        with pytest.raises(ManifestError):
+            write_central_manifest(mpath, {"schema_version": 1, "members": []})
+
+        assert mpath.read_text() == "{not valid json", (
+            "a refused write must leave the corrupt on-disk manifest untouched"
+        )
+
+    def test_opt_in_still_allows_overwriting_a_corrupt_on_disk_manifest(self, tmp_path):
+        from camp.group.manifest import read_central_manifest, write_central_manifest
+
+        mpath = tmp_path / "manifest.json"
+        mpath.write_text("{not valid json")
+
+        write_central_manifest(
+            mpath,
+            {"schema_version": 1, "members": []},
+            allow_owner_change=True,
+        )
+
+        assert read_central_manifest(mpath) == {"schema_version": 1, "members": []}
+
+
 # ---------------------------------------------------------------------------
 # Real lifecycle verbs against a record-carrying workspace.
 # ---------------------------------------------------------------------------
@@ -695,7 +775,12 @@ def _notice_line(err: str) -> str:
     lines = [
         ln
         for ln in err.splitlines()
-        if ("owned" in ln or "never recorded" in ln or "no declared name" in ln)
+        if (
+            "owned" in ln
+            or "never recorded" in ln
+            or "no declared name" in ln
+            or "could not be determined" in ln
+        )
     ]
     assert len(lines) == 1, err
     return lines[0]
@@ -783,6 +868,31 @@ class TestRemoveOwnershipNoticeNoSelfNameDeclared:
         skipped_without_owner = _notice_line(captured_without_owner.err)
         assert "no declared name" in skipped_without_owner
         assert skipped_without_owner == _notice_line(captured_with_owner.err)
+
+
+class TestRemoveOwnershipNoticeCouldNotDetermine:
+    def test_non_string_owner_on_disk_says_could_not_be_determined_not_never_recorded(
+        self, one_member_group, capsys
+    ):
+        import json
+
+        g = one_member_group
+        slug = "feat-o"
+        env, mpath = _owned_workspace(g["group"], g["tmp_path"], slug=slug)
+        _declare_self_name(env, "orion")
+
+        # Corrupt the manifest's owner after creation — a shape `owner_of`
+        # itself refuses, distinct from a manifest that genuinely never
+        # recorded one.
+        data = json.loads(mpath.read_text())
+        data["owner"] = ["andromeda"]
+        mpath.write_text(json.dumps(data))
+
+        captured = _remove_and_capture(g["group"], slug, env, capsys)
+
+        assert "could not be determined" in captured.err
+        assert "never recorded" not in captured.err
+        assert "removed worktree 'feat-o'" in captured.err
 
 
 class TestRemoveOwnershipNoticesAreDistinguishable:

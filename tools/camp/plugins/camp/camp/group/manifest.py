@@ -95,6 +95,14 @@ def write_central_manifest(
     accepted unconditionally, opt-in or not — this guard is invisible on the
     hot path of an ownerless workspace.
 
+    An on-disk manifest that cannot even be read (malformed JSON) or whose
+    "owner" is present but not a string is refused the same way as a
+    would-be drop, rather than treated as "nothing to protect" — either
+    shape is exactly the case this guard exists to catch, and letting it
+    read as ownerless would silently disable the guard for the one write
+    that most needs it. `allow_owner_change=True` still opts out, same as
+    every other refusal here.
+
     Args:
         path:  Absolute path for the manifest file (parent must exist).
         data:  Dict to serialize as JSON.
@@ -102,17 +110,30 @@ def write_central_manifest(
             an owner already on disk. Defaults to False.
 
     Raises:
-        ManifestError: If the write would drop or change an on-disk owner
-            without `allow_owner_change=True`.
+        ManifestError: If the write would drop or change an on-disk owner,
+            the on-disk manifest cannot be read, or its "owner" is present
+            but not a string — none without `allow_owner_change=True`.
     """
     if not allow_owner_change and path.is_file():
         try:
             on_disk = read_central_manifest(path)
-        except ManifestError:
-            on_disk = None
-        if on_disk is not None:
-            disk_owner = on_disk.get("owner")
-            if isinstance(disk_owner, str) and data.get("owner") != disk_owner:
+        except ManifestError as e:
+            raise ManifestError(
+                f"camp: refusing to write manifest at {path}: the on-disk "
+                f"manifest could not be read ({e}) — pass "
+                f"allow_owner_change=True for a deliberate overwrite"
+            ) from e
+        disk_owner = on_disk.get("owner")
+        if disk_owner is not None:
+            if not isinstance(disk_owner, str):
+                raise ManifestError(
+                    f"camp: refusing to write manifest at {path}: the "
+                    f"on-disk owner is not a string (got "
+                    f"{type(disk_owner).__name__}) — pass "
+                    f"allow_owner_change=True for a deliberate ownership "
+                    f"change"
+                )
+            if data.get("owner") != disk_owner:
                 raise ManifestError(
                     f"camp: refusing to write manifest at {path}: this write "
                     f"would drop or change the recorded owner {disk_owner!r} "
