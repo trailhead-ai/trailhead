@@ -717,6 +717,91 @@ def test_host_with_a_missing_value_refuses(
     assert "config error" not in combined
 
 
+def test_host_followed_by_group_refuses_as_a_missing_value(
+    corrupt_sibling_env_with_hosts: dict[str, str],
+) -> None:
+    """`--host --group testgrp` is a missing --host value, not a lookup for a
+    host literally named '--group' — the message must say so, not name
+    '--group' as an undeclared host."""
+    result = _run(
+        ["list", "--host", "--group", "testgrp"], env=corrupt_sibling_env_with_hosts
+    )
+    combined = result.stdout + result.stderr
+    assert result.returncode != 0
+    assert result.stdout == ""
+    assert "requires a value" in combined, combined
+    assert "no host named" not in combined, combined
+    assert "config error" not in combined
+
+
+def test_host_with_an_empty_equals_value_refuses_as_a_missing_value(
+    corrupt_sibling_env_with_hosts: dict[str, str],
+) -> None:
+    """`--host=` (empty value after the equals sign) refuses with the
+    missing-value message, not a host-lookup failure for the empty string."""
+    result = _run(["list", "--host="], env=corrupt_sibling_env_with_hosts)
+    combined = result.stdout + result.stderr
+    assert result.returncode != 0
+    assert result.stdout == ""
+    assert "requires a value" in combined, combined
+    assert "no host named" not in combined, combined
+    assert "config error" not in combined
+
+
+# ---------------------------------------------------------------------------
+# read_host_option — direct unit tests. The CLI-level refusals above prove
+# the message an operator sees; these prove the argv `read_host_option`
+# hands back to its caller, which a subprocess-level assertion cannot see.
+# ---------------------------------------------------------------------------
+
+
+def _dispatch_module():
+    sys.path.insert(0, str(_PLUGIN_DIR))
+    from camp.cli import dispatch
+
+    return dispatch
+
+
+def test_read_host_option_swallows_nothing_when_the_value_is_missing_before_a_flag() -> None:
+    """`--host --group g` must raise before consuming `--group` as the host
+    value — the defect this fix closes did exactly that."""
+    dispatch = _dispatch_module()
+    args = ["--host", "--group", "g"]
+    with pytest.raises(dispatch._HostFlagMissingValue):
+        dispatch.read_host_option(args)
+    # read_host_option operates on a copy; the caller's own list, and thus
+    # what a caller re-reads after catching the exception, is untouched.
+    assert args == ["--host", "--group", "g"]
+
+
+def test_read_host_option_swallows_nothing_when_the_value_is_missing_before_all_groups() -> None:
+    dispatch = _dispatch_module()
+    args = ["--host", "--all-groups"]
+    with pytest.raises(dispatch._HostFlagMissingValue):
+        dispatch.read_host_option(args)
+    assert args == ["--host", "--all-groups"]
+
+
+def test_read_host_option_trailing_token_still_raises() -> None:
+    """Regression guard: the originally-implemented case must not break."""
+    dispatch = _dispatch_module()
+    with pytest.raises(dispatch._HostFlagMissingValue):
+        dispatch.read_host_option(["--host"])
+
+
+def test_read_host_option_empty_equals_value_raises_missing_value() -> None:
+    dispatch = _dispatch_module()
+    with pytest.raises(dispatch._HostFlagMissingValue):
+        dispatch.read_host_option(["--host="])
+
+
+def test_read_host_option_parses_a_real_host_name_and_never_mistakes_it_for_a_flag() -> None:
+    dispatch = _dispatch_module()
+    remaining, host_name = dispatch.read_host_option(["--host", "andromeda"])
+    assert host_name == "andromeda"
+    assert remaining == []
+
+
 def test_camp_foreach_passes_a_payload_flag_named_like_host_through_unchanged(
     tmp_path: Path,
 ) -> None:

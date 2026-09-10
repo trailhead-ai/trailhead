@@ -106,17 +106,35 @@ def read_host_option(args: list[str]) -> tuple[list[str], str | None]:
     """Consume ``--host <name>``/``--host=value`` from *args*.
 
     Delegates the actual consumption to `_consume_flag_value` (spine.py),
-    which already supports both spellings — this wraps it only to detect the
-    one case it leaves unconsumed: ``--host`` as the trailing token, with no
-    value. Returns ``(remaining, host_name)``; `host_name` is `None` when
-    `--host` is absent. Raises `_HostFlagMissingValue` for the trailing-token
-    case.
+    which already supports both spellings — but that helper takes whatever
+    token follows ``--host`` as its value, whatever it is. A host name never
+    begins with ``-``, so before delegating, this scans for the first
+    ``--host`` occurrence and refuses up front when the next token is
+    another flag (or absent) — otherwise a flag like ``--group`` or
+    ``--all-groups`` gets silently swallowed as the host name, and the very
+    refusal that flag should have triggered downstream never fires. Nothing
+    is consumed from *args* before that refusal: it raises against a plain
+    scan, never against the mutated copy `_consume_flag_value` would have
+    produced. ``--host=`` (an empty value after the equals sign) refuses the
+    same way, since an empty host name is never a resolvable one either.
+    Returns ``(remaining, host_name)``; `host_name` is `None` when `--host`
+    is absent. Raises `_HostFlagMissingValue` when the value is missing.
     """
     from ..spine import _consume_flag_value
 
     remaining = list(args)
+    for i, arg in enumerate(remaining):
+        if arg == HOST_FLAG:
+            if i + 1 >= len(remaining) or remaining[i + 1].startswith("-"):
+                raise _HostFlagMissingValue()
+            break
+        if arg.startswith(f"{HOST_FLAG}="):
+            break
+
     host_name = _consume_flag_value(remaining, HOST_FLAG)
     if host_name is None and HOST_FLAG in remaining:
+        raise _HostFlagMissingValue()
+    if host_name == "":
         raise _HostFlagMissingValue()
     return remaining, host_name
 
