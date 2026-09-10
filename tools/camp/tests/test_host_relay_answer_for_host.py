@@ -71,7 +71,6 @@ def test_answered_zero_rows(monkeypatch) -> None:
 
 def test_answered_one_row_stamped_with_host(monkeypatch) -> None:
     transport = _transport_module()
-    remote_rows = [{"ok": True, "slug": "ws-a", "workspace_path": "/a"}]
     answer = _answer(
         monkeypatch,
         transport.Answered(stdout='[{"ok": true, "slug": "ws-a", "workspace_path": "/a"}]', stderr="", exit_code=0),

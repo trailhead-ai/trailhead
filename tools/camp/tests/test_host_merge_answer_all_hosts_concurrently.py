@@ -106,7 +106,6 @@ def test_all_declared_hosts_answer_concurrently_via_barrier():
 
 def test_never_responding_hosts_complete_within_twice_the_connect_timeout():
     merge = _merge_module()
-    transport = _transport_module()
 
     n = 5
     sleep_seconds = 0.15
