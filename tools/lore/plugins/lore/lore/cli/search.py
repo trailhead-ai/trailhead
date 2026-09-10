@@ -59,6 +59,7 @@ def cmd_search(args) -> int:
         vault=None,
         vault_roots=vault_roots or None,
         limit=args.limit,
+        offset=args.offset,
         as_json=getattr(args, "json", False),
         config_mtime=config_mtime,
     )
@@ -90,5 +91,15 @@ def add_search_subparser(sub) -> None:
         type=int,
         default=20,
         help="Maximum number of results (default 20)",
+    )
+    p_search.add_argument(
+        "--offset",
+        type=int,
+        default=0,
+        help=(
+            "Skip this many results (default 0). With --limit, walks a result "
+            "set in bounded pages; the ordering is total, so pages neither skip "
+            "nor repeat rows."
+        ),
     )
     p_search.set_defaults(func=cmd_search)

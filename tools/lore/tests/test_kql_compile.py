@@ -551,17 +551,24 @@ class TestLimit:
         assert cq.limit == 5
 
     def test_limit_is_bound_param_not_interpolated(self, kql, compiler):
-        """LIMIT is a ? placeholder; the value is the last bind param."""
-        cq = compiler.compile(kql.parse("kind:spec"), limit=7)
+        """LIMIT/OFFSET are ? placeholders; their values are the trailing binds."""
+        cq = compiler.compile(kql.parse("kind:spec"), limit=7, offset=3)
         sql = cq.full_query()
-        assert "LIMIT ?" in sql
+        assert "LIMIT ? OFFSET ?" in sql
         assert "LIMIT 7" not in sql
-        assert cq.params[-1] == 7
+        assert "OFFSET 3" not in sql
+        assert cq.params[-2:] == [7, 3]
 
     def test_limit_coerced_to_int(self, kql, compiler):
         cq = compiler.compile(kql.parse("kind:spec"), limit="9")
         assert cq.limit == 9
-        assert cq.params[-1] == 9
+        assert cq.params[-2] == 9
+
+    def test_offset_coerced_to_int_and_defaults_to_zero(self, kql, compiler):
+        assert compiler.compile(kql.parse("kind:spec")).params[-1] == 0
+        cq = compiler.compile(kql.parse("kind:spec"), offset="4")
+        assert cq.offset == 4
+        assert cq.params[-1] == 4
 
     def test_limit_appears_in_full_query(self, kql, compiler):
         cq = compiler.compile(kql.parse("kind:spec"), limit=7)
@@ -598,11 +605,11 @@ class TestParamAlignment:
         assert any(i.endswith("/spec/alpha") for i in ids), ids
 
     def test_rank_match_param_precedes_limit(self, kql, compiler):
-        """Param order: WHERE params (incl. MATCH strings), then rank MATCH, then LIMIT."""
-        cq = compiler.compile(kql.parse("zephyr"), limit=5)
-        # rank_match present and appears in params before the trailing LIMIT
+        """Param order: WHERE params (incl. MATCH strings), then rank MATCH, then LIMIT/OFFSET."""
+        cq = compiler.compile(kql.parse("zephyr"), limit=5, offset=2)
+        # rank_match present and appears in params before the trailing paging pair
         assert cq.rank_match in cq.params
-        assert cq.params[-1] == 5
+        assert cq.params[-2:] == [5, 2]
         # The MATCH string 'zephyr' appears in WHERE position (index 0), rank later.
         assert cq.params[0] == "zephyr"
 
@@ -1266,7 +1273,7 @@ class TestParamOrderContract:
         assert cq.params[0] == "zephyr"  # the rank-JOIN param, ahead of WHERE
         assert cq.params[1] == "zephyr"  # the WHERE MATCH predicate param
         assert cq.params[2] == "spec"  # the kind:spec WHERE param
-        assert cq.params[-1] == 5  # LIMIT trails
+        assert cq.params[-2:] == [5, 0]  # LIMIT then OFFSET trail
 
     def test_params_positionally_align_with_full_query(self, kql, compiler, fixture_index):
         conn, vault, env = fixture_index
