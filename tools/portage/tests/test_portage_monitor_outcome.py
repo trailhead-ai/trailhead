@@ -15,6 +15,7 @@ from trailhead.vcs.github import (
     AUTOMATIC_MERGE_METHOD,
     PERMITTED_STRATEGIES_LOOKUP_FAILED,
     RESOLUTION_REASON_PREFIXES,
+    get_commit_series,
     resolve_merge_strategy,
 )
 
@@ -301,3 +302,193 @@ def test_the_line_the_merge_path_actually_prints_parses_via_the_real_parser(
     assert disclosures[0] == StrategyDisclosure(
         "11", "api", expected_strategy, expected_reason
     )
+
+
+def _commit_node(message: str, additions: int, deletions: int) -> dict:
+    return {
+        "commit": {
+            "message": message,
+            "additions": additions,
+            "deletions": deletions,
+            "parents": {"totalCount": 1},
+        }
+    }
+
+
+def _graphql_merge_spy_with_commits(calls, permitted, *, pr_commits):
+    """Like `_graphql_merge_spy`, but per-pull-request: `permitted` and
+    `pr_commits` are keyed by pr_number so a single stub can answer a
+    multi-pull-request run where each pull request has its own capability
+    set and commit series."""
+    import json as _json
+    import subprocess
+
+    def run(cmd, **kwargs):
+        calls.append(list(cmd))
+        cmd_str = " ".join(cmd)
+        if "config" in cmd_str and "user.email" in cmd_str:
+            return subprocess.CompletedProcess(cmd, 0, "dev@example.com\n", "")
+        if "remote" in cmd_str and "get-url" in cmd_str:
+            return subprocess.CompletedProcess(cmd, 0, "git@github.com:acme/api.git\n", "")
+        if "graphql" in cmd_str:
+            number_tok = next((t for t in cmd if t.startswith("number=")), None)
+            pr_number = number_tok.split("=", 1)[1] if number_tok else None
+            allowed = permitted.get(pr_number, set())
+            nodes = pr_commits.get(pr_number)
+            pull_request: dict = {"stackEntry": None}
+            if nodes is not None:
+                pull_request["commits"] = {"totalCount": len(nodes), "nodes": nodes}
+            payload = {
+                "data": {
+                    "repository": {
+                        "mergeCommitAllowed": "merge" in allowed,
+                        "squashMergeAllowed": "squash" in allowed,
+                        "rebaseMergeAllowed": "rebase" in allowed,
+                        "pullRequest": pull_request,
+                    }
+                }
+            }
+            return subprocess.CompletedProcess(cmd, 0, _json.dumps(payload), "")
+        if "view" in cmd_str and "--json" in cmd_str:
+            view_tok_idx = cmd.index("view")
+            pr_number = cmd[view_tok_idx + 1]
+            payload = {
+                "state": "OPEN",
+                "mergeable": "MERGEABLE",
+                "mergeStateStatus": "CLEAN",
+                "isDraft": False,
+                "headRefName": f"feat-{pr_number}",
+            }
+            return subprocess.CompletedProcess(cmd, 0, _json.dumps(payload), "")
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    return run
+
+
+def test_series_driven_disclosure_line_parses_via_the_real_parser(tmp_path, capsys):
+    """The disclosure line's shape must still hold for the new
+    series-driven reason vocabulary (AC10), not only for the
+    rebase-permitted case the sibling test covers: a real merge run whose
+    repository forbids rebasing and permits both other strategies produces
+    a line the real parser reads back intact, reason text included."""
+    import json as _json
+
+    from trailhead.vcs.github import GitHubProvider, PRPair
+
+    wt = tmp_path / "wt" / "api"
+    wt.mkdir(parents=True)
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(
+        _json.dumps(
+            {
+                "schema_version": 1,
+                "members": [
+                    {"name": "api", "repo_root": str(tmp_path), "worktree_path": str(wt)}
+                ],
+            }
+        )
+    )
+    toml = tmp_path / "group.toml"
+    toml.write_text("[release]\nauto_merge = true\n", encoding="utf-8")
+
+    calls: list[list[str]] = []
+    commits = [
+        _commit_node("add the parser", 120, 10),
+        _commit_node("add the renderer", 140, 20),
+    ]
+    provider = GitHubProvider(
+        runner=_graphql_merge_spy_with_commits(
+            calls, {"12": {"merge", "squash"}}, pr_commits={"12": commits}
+        )
+    )
+    provider.pr.merge(
+        [PRPair(repo_path=str(wt), pr_number="12", member_name="api")],
+        str(manifest),
+        toml_path=str(toml),
+    )
+
+    err = capsys.readouterr().err
+    disclosures = [
+        parsed
+        for parsed in (parse_strategy_disclosure(line) for line in err.splitlines())
+        if parsed is not None
+    ]
+    assert len(disclosures) == 1, (
+        "the merge path printed no line this parser recognises for the "
+        f"series-driven reason — producer and consumer have drifted apart. stderr was:\n{err}"
+    )
+    series = get_commit_series(str(wt), "12", runner=_graphql_merge_spy_with_commits(
+        [], {"12": {"merge", "squash"}}, pr_commits={"12": commits}
+    ))
+    expected_strategy, expected_reason = resolve_merge_strategy(
+        AUTOMATIC_MERGE_METHOD, frozenset({"merge", "squash"}), series=series
+    )
+    assert disclosures[0] == StrategyDisclosure("12", "api", expected_strategy, expected_reason)
+    assert RESOLUTION_REASON_PREFIXES["auto_series_not_dominated"] in expected_reason
+
+
+def test_two_pull_requests_one_reading_series_one_not_both_parse_independently(
+    tmp_path, capsys
+):
+    """Two pull requests in one run resolve independently — one reads the
+    series (rebase forbidden, two others permitted), one does not (rebase
+    permitted) — and the real parser reads both disclosures back correctly
+    attributed to their own pull request, over the runner's real command
+    log across one genuine two-pull-request merge run."""
+    import json as _json
+
+    from trailhead.vcs.github import GitHubProvider, PRPair
+
+    wt_a = tmp_path / "wt" / "api"
+    wt_b = tmp_path / "wt" / "web"
+    wt_a.mkdir(parents=True)
+    wt_b.mkdir(parents=True)
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(
+        _json.dumps(
+            {
+                "schema_version": 1,
+                "members": [
+                    {"name": "api", "repo_root": str(tmp_path), "worktree_path": str(wt_a)},
+                    {"name": "web", "repo_root": str(tmp_path), "worktree_path": str(wt_b)},
+                ],
+            }
+        )
+    )
+    toml = tmp_path / "group.toml"
+    toml.write_text(
+        "[release]\nauto_merge = true\nmerge_order = ['api', 'web']\n", encoding="utf-8"
+    )
+
+    calls: list[list[str]] = []
+    commits = [
+        _commit_node("add the parser", 120, 10),
+        _commit_node("add the renderer", 140, 20),
+    ]
+    runner = _graphql_merge_spy_with_commits(
+        calls,
+        {"21": {"merge", "squash", "rebase"}, "22": {"merge", "squash"}},
+        pr_commits={"22": commits},
+    )
+    provider = GitHubProvider(runner=runner)
+    provider.pr.merge(
+        [
+            PRPair(repo_path=str(wt_a), pr_number="21", member_name="api"),
+            PRPair(repo_path=str(wt_b), pr_number="22", member_name="web"),
+        ],
+        str(manifest),
+        toml_path=str(toml),
+    )
+
+    err = capsys.readouterr().err
+    disclosures = [
+        parsed
+        for parsed in (parse_strategy_disclosure(line) for line in err.splitlines())
+        if parsed is not None
+    ]
+    assert len(disclosures) == 2
+    by_pr = {d.pr_number: d for d in disclosures}
+    assert RESOLUTION_REASON_PREFIXES["auto_rebase_permitted"] in by_pr["21"].reason
+    assert RESOLUTION_REASON_PREFIXES["auto_series_not_dominated"] in by_pr["22"].reason
+    assert by_pr["21"].strategy == "rebase"
+    assert by_pr["22"].strategy == "merge"

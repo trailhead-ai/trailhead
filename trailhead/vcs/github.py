@@ -1470,7 +1470,29 @@ def _merge_prs(
             )
         else:
             permitted = frozenset()
-        strategy, reason = resolve_merge_strategy(merge_method, permitted)
+
+        # The series is read only when `resolve_merge_strategy`'s
+        # rebase-forbidden, two-or-more-permitted branch would actually
+        # consult it — every other branch decides without it, and paying
+        # for the read there would be a wasted round trip. This mirrors
+        # `resolve_merge_strategy`'s own branch condition exactly (see its
+        # docstring); keep the two in sync if either changes. `series`
+        # stays `None` for every other case — never resolved here — so
+        # `resolve_merge_strategy` never receives its own "not consulted"
+        # default in the one branch where that default is indistinguishable
+        # from a genuine provider failure.
+        series: list[tuple[str, int]] | str | None = None
+        if (
+            merge_method == AUTOMATIC_MERGE_METHOD
+            and permitted != PERMITTED_STRATEGIES_LOOKUP_FAILED
+            and "rebase" not in permitted
+            and len(permitted - {"rebase"}) >= 2
+        ):
+            series = get_commit_series(
+                pair.repo_path, pair.pr_number, runner, cache=query_cache
+            )
+
+        strategy, reason = resolve_merge_strategy(merge_method, permitted, series=series)
 
         print(
             f"portage merge: PR #{pair.pr_number} ({pair.member_name}): "
