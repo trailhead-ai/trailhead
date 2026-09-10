@@ -1007,6 +1007,157 @@ class TestMergeMethod:
 
 
 # ---------------------------------------------------------------------------
+# get_permitted_merge_strategies (folded into _STACK_ENTRY_QUERY)
+# ---------------------------------------------------------------------------
+
+
+def _graphql_stub(
+    repository: dict | None,
+    *,
+    returncode: int = 0,
+    errors: list[dict] | None = None,
+    remote_url: str = "git@github.com:acme/alpha.git",
+    call_log: list[list[str]] | None = None,
+):
+    """Stub runner for a repository -> pullRequest{stackEntry} GraphQL call.
+
+    `repository` is the raw `data.repository` object the fake response
+    carries; passing None simulates a whole-object null (unresolvable
+    owner/repo). `returncode`/`errors` simulate `gh api graphql` exiting
+    non-zero on a GraphQL error entry while the body still carries data.
+    """
+
+    def stub(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
+        if call_log is not None:
+            call_log.append(list(cmd))
+        cmd_str = " ".join(cmd)
+        if "remote" in cmd_str and "get-url" in cmd_str:
+            return subprocess.CompletedProcess(cmd, 0, remote_url, "")
+        if "graphql" in cmd_str:
+            body: dict[str, Any] = {"data": {"repository": repository}}
+            if errors is not None:
+                body["errors"] = errors
+            return subprocess.CompletedProcess(cmd, returncode, json.dumps(body), "")
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    return stub
+
+
+class TestPermittedMergeStrategies:
+    def test_repository_permitting_all_three_returns_all_three(self) -> None:
+        from trailhead.vcs.github import get_permitted_merge_strategies
+
+        stub = _graphql_stub(
+            {
+                "mergeCommitAllowed": True,
+                "squashMergeAllowed": True,
+                "rebaseMergeAllowed": True,
+                "pullRequest": {"stackEntry": None},
+            }
+        )
+        result = get_permitted_merge_strategies("/repo", "1", runner=stub)
+        assert result == frozenset({"merge", "squash", "rebase"})
+
+    def test_repository_permitting_exactly_one_returns_exactly_that_one(self) -> None:
+        from trailhead.vcs.github import get_permitted_merge_strategies
+
+        stub = _graphql_stub(
+            {
+                "mergeCommitAllowed": False,
+                "squashMergeAllowed": False,
+                "rebaseMergeAllowed": True,
+                "pullRequest": {"stackEntry": None},
+            }
+        )
+        result = get_permitted_merge_strategies("/repo", "2", runner=stub)
+        assert result == frozenset({"rebase"})
+
+    def test_unresolvable_repository_returns_lookup_failed_not_empty_set(self) -> None:
+        """A whole-object null `repository` (owner/name unresolvable) is the
+        real "could not ask" signal — it must not read as "permits none"."""
+        from trailhead.vcs.github import (
+            PERMITTED_STRATEGIES_LOOKUP_FAILED,
+            get_permitted_merge_strategies,
+        )
+
+        stub = _graphql_stub(None, returncode=1, errors=[{"type": "NOT_FOUND"}])
+        result = get_permitted_merge_strategies("/repo", "3", runner=stub)
+        assert result == PERMITTED_STRATEGIES_LOOKUP_FAILED
+        assert result != frozenset()
+
+    def test_partial_failure_on_unrelated_field_still_returns_capabilities(self) -> None:
+        """`gh api graphql` exits non-zero on ANY GraphQL error entry, even
+        one scoped to an unrelated sub-selection (e.g. a bad PR number
+        nulling `pullRequest`). The capability fields on the same
+        `repository` object are unaffected and must still be read —
+        routing through `_gh` (which discards stdout on non-zero exit)
+        would wrongly report this as a lookup failure."""
+        from trailhead.vcs.github import get_permitted_merge_strategies
+
+        stub = _graphql_stub(
+            {
+                "mergeCommitAllowed": True,
+                "squashMergeAllowed": True,
+                "rebaseMergeAllowed": False,
+                "pullRequest": None,
+            },
+            returncode=1,
+            errors=[{"type": "NOT_FOUND", "path": ["repository", "pullRequest"]}],
+        )
+        result = get_permitted_merge_strategies("/repo", "999999999", runner=stub)
+        assert result == frozenset({"merge", "squash"})
+
+    def test_malformed_capability_fields_return_lookup_failed(self) -> None:
+        """A repository object present but missing (or mistyped) capability
+        fields is an unexpected shape — it must not raise into the merge
+        loop, and must not read as "permits none"."""
+        from trailhead.vcs.github import (
+            PERMITTED_STRATEGIES_LOOKUP_FAILED,
+            get_permitted_merge_strategies,
+        )
+
+        stub = _graphql_stub({"pullRequest": {"stackEntry": None}})
+        result = get_permitted_merge_strategies("/repo", "4", runner=stub)
+        assert result == PERMITTED_STRATEGIES_LOOKUP_FAILED
+
+    def test_existing_pull_request_field_still_returned_correctly(self) -> None:
+        """Folding the capability fields into the query must not break the
+        existing `_get_stack_entry` read of `pullRequest { stackEntry }`."""
+        from trailhead.vcs.github import _get_stack_entry
+
+        stub = _graphql_stub(
+            {
+                "mergeCommitAllowed": True,
+                "squashMergeAllowed": True,
+                "rebaseMergeAllowed": True,
+                "pullRequest": {"stackEntry": {"stack": {"number": 9, "size": 2}}},
+            }
+        )
+        result = _get_stack_entry("/repo", "5", runner=stub)
+        assert result == {"number": 9, "size": 2}
+
+    def test_no_additional_process_invocation_per_pull_request(self) -> None:
+        """The capability read is folded into the query `_get_stack_entry`
+        already issues — reading permitted strategies for a pull request
+        must not cost a second `gh api graphql` call."""
+        from trailhead.vcs.github import get_permitted_merge_strategies
+
+        calls: list[list[str]] = []
+        stub = _graphql_stub(
+            {
+                "mergeCommitAllowed": True,
+                "squashMergeAllowed": True,
+                "rebaseMergeAllowed": True,
+                "pullRequest": {"stackEntry": None},
+            },
+            call_log=calls,
+        )
+        get_permitted_merge_strategies("/repo", "6", runner=stub)
+        graphql_calls = [c for c in calls if "graphql" in " ".join(c)]
+        assert len(graphql_calls) == 1
+
+
+# ---------------------------------------------------------------------------
 # ci.wait (ports wait_for_actionable)
 # ---------------------------------------------------------------------------
 

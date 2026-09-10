@@ -678,10 +678,64 @@ def _get_pr_state(repo_path: str, pr_number: str, runner: rp.Runner) -> dict | N
 _STACK_ENTRY_QUERY = (
     "query($owner: String!, $name: String!, $number: Int!) {"
     " repository(owner: $owner, name: $name) {"
+    "  mergeCommitAllowed"
+    "  squashMergeAllowed"
+    "  rebaseMergeAllowed"
     "  pullRequest(number: $number) { stackEntry { stack { number size } } }"
     " }"
     "}"
 )
+
+
+def _fetch_repository_query(repo_path: str, pr_number: str, runner: rp.Runner) -> dict | None:
+    """Issue ``_STACK_ENTRY_QUERY`` and return the response's ``repository``
+    object, or None when the repository itself could not be resolved.
+
+    Deliberately does not route through ``_gh``: ``gh api graphql`` exits
+    non-zero on any GraphQL error entry in the response body, even when the
+    body still carries valid data for an unrelated sub-selection (e.g. a bad
+    PR number nulls only ``pullRequest``, leaving the repository-level
+    merge-capability fields intact) — and ``_gh`` discards stdout whenever
+    the exit code is non-zero. Parsing stdout independently of the exit code
+    keeps a pull-request-side error from masquerading as a repository-level
+    lookup failure. A genuinely null ``repository`` (owner/name unresolvable)
+    is the real "could not ask" signal, and that's the case this returns
+    None for.
+    """
+    owner_repo = _get_owner_repo(repo_path, runner)
+    if not owner_repo:
+        return None
+    owner, sep, name = owner_repo.partition("/")
+    if not sep or not owner or not name:
+        return None
+    r = rp.run(
+        [
+            "gh",
+            "api",
+            "graphql",
+            "-f",
+            f"query={_STACK_ENTRY_QUERY}",
+            "-F",
+            f"owner={owner}",
+            "-F",
+            f"name={name}",
+            "-F",
+            f"number={pr_number}",
+        ],
+        cwd=repo_path,
+        runner=runner,
+    )
+    try:
+        body = json.loads(r.stdout)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(body, dict):
+        return None
+    data = body.get("data")
+    if not isinstance(data, dict):
+        return None
+    repository = data.get("repository")
+    return repository if isinstance(repository, dict) else None
 
 
 def _get_stack_entry(repo_path: str, pr_number: str, runner: rp.Runner) -> dict | None:
@@ -698,34 +752,10 @@ def _get_stack_entry(repo_path: str, pr_number: str, runner: rp.Runner) -> dict 
     on top of the mergeable/mergeState/isDraft gates that already run, not a
     replacement for them.
     """
-    owner_repo = _get_owner_repo(repo_path, runner)
-    if not owner_repo:
+    repository = _fetch_repository_query(repo_path, pr_number, runner)
+    if repository is None:
         return None
-    owner, sep, name = owner_repo.partition("/")
-    if not sep or not owner or not name:
-        return None
-    data = _gh(
-        [
-            "api",
-            "graphql",
-            "-f",
-            f"query={_STACK_ENTRY_QUERY}",
-            "-F",
-            f"owner={owner}",
-            "-F",
-            f"name={name}",
-            "-F",
-            f"number={pr_number}",
-        ],
-        cwd=repo_path,
-        runner=runner,
-    )
-    if not isinstance(data, dict):
-        return None
-    try:
-        pr = data["data"]["repository"]["pullRequest"]
-    except (KeyError, TypeError):
-        return None
+    pr = repository.get("pullRequest")
     if not isinstance(pr, dict):
         return None
     entry = pr.get("stackEntry")
@@ -733,6 +763,60 @@ def _get_stack_entry(repo_path: str, pr_number: str, runner: rp.Runner) -> dict 
         return None
     stack = entry.get("stack")
     return stack if isinstance(stack, dict) else None
+
+
+#: Maps the GraphQL Repository object's permitted-merge-method booleans to
+#: the same strategy names `_MERGE_METHOD_FLAGS` uses for that strategy.
+_MERGE_CAPABILITY_FIELDS = {
+    "mergeCommitAllowed": "merge",
+    "squashMergeAllowed": "squash",
+    "rebaseMergeAllowed": "rebase",
+}
+
+#: Sentinel returned by `get_permitted_merge_strategies` when the
+#: repository's permitted merge strategies could not be determined — distinct
+#: from `frozenset()`, which means the query succeeded and the repository
+#: permits none. Shares `AUTOMATIC_MERGE_METHOD`'s convention of a plain
+#: string sentinel exported for callers outside this module to compare
+#: against, rather than overloading `None` (which `_load_merge_method`
+#: already uses for a different meaning: an unreadable configuration).
+PERMITTED_STRATEGIES_LOOKUP_FAILED = "lookup-failed"
+
+
+def get_permitted_merge_strategies(
+    repo_path: str, pr_number: str, runner: rp.Runner
+) -> frozenset[str] | str:
+    """Return the merge strategies the target repository permits.
+
+    Reads the repository-level `mergeCommitAllowed`/`squashMergeAllowed`/
+    `rebaseMergeAllowed` fields folded into `_STACK_ENTRY_QUERY` alongside
+    the existing `pullRequest { stackEntry }` selection, so this adds no
+    additional round trip to the hosting provider beyond the query the merge
+    path already issues per pull request.
+
+    Returns a `frozenset` of zero or more of "merge"/"squash"/"rebase" —
+    empty means the repository genuinely permits none of them — or
+    `PERMITTED_STRATEGIES_LOOKUP_FAILED` when the repository itself couldn't
+    be resolved, or the response's capability fields are missing or not
+    booleans. The two are never conflated: a caller resolving automatic
+    selection needs to fall back differently for "permits nothing" than for
+    "we could not ask".
+
+    A branch-level ruleset can still refuse a strategy this reports as
+    permitted for a given target branch — this reflects the repository's own
+    settings only, not what any particular branch will accept.
+    """
+    repository = _fetch_repository_query(repo_path, pr_number, runner)
+    if repository is None:
+        return PERMITTED_STRATEGIES_LOOKUP_FAILED
+    permitted: set[str] = set()
+    for field, strategy in _MERGE_CAPABILITY_FIELDS.items():
+        value = repository.get(field)
+        if not isinstance(value, bool):
+            return PERMITTED_STRATEGIES_LOOKUP_FAILED
+        if value:
+            permitted.add(strategy)
+    return frozenset(permitted)
 
 
 def _do_merge(
