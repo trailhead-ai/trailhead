@@ -87,6 +87,33 @@ All keys are optional, but omitting `merge_method` is not a no-op: it selects `a
 selection, announced on stderr via the notice `portage merge` prints, rather than leaving
 merging unconfigured. Omitting `review_bot_login` → CI-only PR evaluation (no bot review path).
 
+## Automatic merge-strategy selection
+
+When `merge_method` is `automatic` (the default), `portage merge` resolves a strategy per pull
+request rather than using one strategy for the whole run:
+
+1. Rebase is used whenever the target repository permits it.
+2. Otherwise, when exactly one of `merge`/`squash` is permitted, that one is used.
+3. Otherwise — rebase forbidden and both `merge` and `squash` permitted — the pull request's
+   commit series decides. A series that could not be read, or was truncated by the provider's
+   page size, falls back to squashing. A series that resolved cleanly is classified for fix-up
+   dominance: more than half its commits counted as fix-ups resolves to squashing; otherwise to
+   a merge commit.
+4. If the repository's permitted-strategy lookup itself failed, or it reports no permitted
+   strategy at all, the fallback is squashing.
+
+A commit counts toward fix-up dominance when its subject opens with a recognised marker — a git
+interactive-rebase marker (`fixup!`, `squash!`, `amend!`), this project's `[fix]` convention, a
+bare or scoped conventional-commit `fix:`/`fix(scope):` type, or a `wip`/`WIP:` marker — or it
+repeats an earlier commit's subject in the same series exactly (only the repeat counts toward
+dominance, not the first occurrence) — **and**, either way, its changed-line count (additions +
+deletions) does not exceed 50. A marked or repeated commit above that threshold is treated as
+real work and excluded from the count.
+
+`portage merge` prints the resolved strategy and the reason for it to stderr before each merge —
+see "Strategy disclosure" in `monitor.md` for the exact line shape and how the watch agent
+surfaces it.
+
 ## Error convention split
 
 The PR-evaluator surface (evaluate-status, check-status, wait-for-actionable)

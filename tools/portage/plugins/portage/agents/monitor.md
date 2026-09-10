@@ -222,9 +222,14 @@ call `portage merge` as usual and honor its exit code:
 `portage merge` also reads `merge_method` from the same `[release]` block — the strategy passed to
 `gh pr merge` (`merge` / `squash` / `rebase` / `automatic`). **Default: `automatic`.** When
 `merge_method` is unset or explicitly `automatic`, `portage merge` resolves a strategy per pull
-request and prints a notice on stderr naming the resolution and the remediation to restore
-squashing (`add [release] merge_method = "squash" to the group TOML`) — surface that notice
-verbatim rather than swallowing it, so the operator sees the behaviour before it lands on `main`.
+request — preferring rebase where the repository permits it, falling back to whichever of
+`merge`/`squash` is sole-permitted, and otherwise deciding between the two from the pull
+request's commit series (fix-up-dominated resolves to squashing; not dominated resolves to a
+merge commit) — see "Automatic merge-strategy selection" in `pr-merge-rituals.md` for the full
+ladder and the fix-up marker vocabulary. It prints a notice on stderr naming the resolution and
+the remediation to restore squashing (`add [release] merge_method = "squash" to the group TOML`)
+— surface that notice verbatim rather than swallowing it, so the operator sees the behaviour
+before it lands on `main`.
 When `merge_method` is set to a value other than `merge`/`squash`/`rebase`/`automatic`, `portage
 merge` refuses with exit 2 before any `gh` call — honor that exit code and surface it as
 `BLOCKED: portage merge refused — [release].merge_method is invalid; see stderr for the accepted values.`

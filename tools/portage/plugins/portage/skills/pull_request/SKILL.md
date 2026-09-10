@@ -264,7 +264,10 @@ No issue tracker configured — status transitions skipped. Configure
 - Merge method: configured in `[release].merge_method` of the group TOML — `merge`,
   `squash`, `rebase`, or `automatic`; absent defaults to `automatic` and prints the
   notice `portage merge` emits naming the resolved strategy, since that changes what
-  lands on `main`. An unrecognized value refuses before any merge call.
+  lands on `main`. An unrecognized value refuses before any merge call. `automatic`
+  prefers rebase, then a sole-permitted strategy, then squash/merge driven by the
+  pull request's commit series — see "Automatic merge-strategy selection" in
+  `docs/pr-merge-rituals.md` for the fallback rule.
 - No issue tracker configured — status transitions skipped. Configure
   `[release].external_tracker` in the group TOML to wire a tracker.
 - The `portage` CLI is on `$PATH` via trailhead's CLI shim dir (same mechanism as
