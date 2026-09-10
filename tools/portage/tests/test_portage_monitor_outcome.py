@@ -137,6 +137,38 @@ def test_mixed_run_attributes_each_strategy_to_its_repository():
     assert result != f"{squash_strategy} — {squash_reason}"
 
 
+def test_same_strategy_for_different_reasons_does_not_collapse():
+    """Two pull requests that landed on the same strategy for different
+    reasons stay attributed per repository. This is the silent-degradation
+    signal: when a capability lookup starts failing, every affected merge
+    falls back to squashing, and a run mixing that fallback with a genuine
+    squash is only distinguishable by the reason. Collapsing on strategy
+    alone would render the failing run identical to a healthy one.
+    """
+    degraded_strategy, degraded_reason = resolve_merge_strategy(
+        AUTOMATIC_MERGE_METHOD, PERMITTED_STRATEGIES_LOOKUP_FAILED
+    )
+    healthy_strategy, healthy_reason = resolve_merge_strategy(
+        AUTOMATIC_MERGE_METHOD, frozenset({"squash"})
+    )
+    assert degraded_strategy == healthy_strategy, (
+        "fixture no longer exercises the same-strategy case"
+    )
+    assert degraded_reason != healthy_reason
+
+    result = summarize_strategy_disclosures(
+        [
+            StrategyDisclosure("1", "member-a", healthy_strategy, healthy_reason),
+            StrategyDisclosure("2", "member-b", degraded_strategy, degraded_reason),
+        ]
+    )
+
+    assert result != f"{healthy_strategy} — {healthy_reason}"
+    assert result != f"{degraded_strategy} — {degraded_reason}"
+    assert RESOLUTION_REASON_PREFIXES["auto_lookup_failed"] in result
+    assert "member-b" in result
+
+
 def test_lookup_failure_reads_distinctly_from_a_run_where_every_lookup_succeeded():
     failed_strategy, failed_reason = resolve_merge_strategy(
         AUTOMATIC_MERGE_METHOD, PERMITTED_STRATEGIES_LOOKUP_FAILED
