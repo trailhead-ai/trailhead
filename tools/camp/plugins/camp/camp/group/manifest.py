@@ -40,7 +40,15 @@ Schema (v1):
                 "tasks": {"<task-name>": {"state": "ok"}},
             },
             ...
-        ]
+        ],
+        # The declared host name of the machine that created this workspace,
+        # stamped at seed time from that host's own hosts.toml self_name.
+        # Absent on a manifest whose creating host declared no self_name, and
+        # on every manifest written before this key existed — read it via
+        # manifest.owner_of, which defaults a missing key to None ("never
+        # recorded") rather than raising; there is no migration step. None
+        # never means "owned by this host" and never triggers a rewrite.
+        "owner": "<declared host name, or absent>",
     }
 """
 
@@ -240,6 +248,29 @@ def work_state_for_member(member: dict[str, Any]) -> str:
     is required.
     """
     return member.get("work_state", "pending")
+
+
+def owner_of(manifest: dict[str, Any]) -> str | None:
+    """Return the workspace's declared owning host, or None if never recorded.
+
+    A manifest written before this key existed, or written by a host that
+    declared no self_name, carries no "owner" entry at all — that reads as
+    None ("never recorded"), never as "owned by this host", and reading it
+    never triggers a rewrite. There is no migration step.
+
+    Raises:
+        ManifestError: If "owner" is present but not a string — refused
+            rather than silently coerced, since ownership is a single
+            declared host, not a value to guess at.
+    """
+    owner = manifest.get("owner")
+    if owner is None:
+        return None
+    if not isinstance(owner, str):
+        raise ManifestError(
+            f"camp: manifest owner must be a string (got {type(owner).__name__})"
+        )
+    return owner
 
 
 def merge_member_tasks(member: dict[str, Any], tasks: dict[str, Any]) -> None:
