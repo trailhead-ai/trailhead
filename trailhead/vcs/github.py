@@ -687,7 +687,12 @@ _STACK_ENTRY_QUERY = (
 )
 
 
-def _fetch_repository_query(repo_path: str, pr_number: str, runner: rp.Runner) -> dict | None:
+def _fetch_repository_query(
+    repo_path: str,
+    pr_number: str,
+    runner: rp.Runner,
+    cache: dict[tuple[str, str], dict | None] | None = None,
+) -> dict | None:
     """Issue ``_STACK_ENTRY_QUERY`` and return the response's ``repository``
     object, or None when the repository itself could not be resolved.
 
@@ -701,44 +706,66 @@ def _fetch_repository_query(repo_path: str, pr_number: str, runner: rp.Runner) -
     lookup failure. A genuinely null ``repository`` (owner/name unresolvable)
     is the real "could not ask" signal, and that's the case this returns
     None for.
+
+    A caller that needs more than one signal off this query for the same
+    pull request (e.g. both ``_get_stack_entry`` and
+    ``get_permitted_merge_strategies``) passes a shared ``cache`` dict so the
+    second read is served from the first fetch instead of issuing its own
+    ``gh api graphql`` call. Keyed by ``(repo_path, pr_number)``; omitted
+    (the default), every call fetches fresh, exactly as before.
     """
-    owner_repo = _get_owner_repo(repo_path, runner)
-    if not owner_repo:
-        return None
-    owner, sep, name = owner_repo.partition("/")
-    if not sep or not owner or not name:
-        return None
-    r = rp.run(
-        [
-            "gh",
-            "api",
-            "graphql",
-            "-f",
-            f"query={_STACK_ENTRY_QUERY}",
-            "-F",
-            f"owner={owner}",
-            "-F",
-            f"name={name}",
-            "-F",
-            f"number={pr_number}",
-        ],
-        cwd=repo_path,
-        runner=runner,
-    )
-    try:
-        body = json.loads(r.stdout)
-    except json.JSONDecodeError:
-        return None
-    if not isinstance(body, dict):
-        return None
-    data = body.get("data")
-    if not isinstance(data, dict):
-        return None
-    repository = data.get("repository")
-    return repository if isinstance(repository, dict) else None
+    key = (repo_path, pr_number)
+    if cache is not None and key in cache:
+        return cache[key]
+
+    def _query() -> dict | None:
+        owner_repo = _get_owner_repo(repo_path, runner)
+        if not owner_repo:
+            return None
+        owner, sep, name = owner_repo.partition("/")
+        if not sep or not owner or not name:
+            return None
+        r = rp.run(
+            [
+                "gh",
+                "api",
+                "graphql",
+                "-f",
+                f"query={_STACK_ENTRY_QUERY}",
+                "-F",
+                f"owner={owner}",
+                "-F",
+                f"name={name}",
+                "-F",
+                f"number={pr_number}",
+            ],
+            cwd=repo_path,
+            runner=runner,
+        )
+        try:
+            body = json.loads(r.stdout)
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(body, dict):
+            return None
+        data = body.get("data")
+        if not isinstance(data, dict):
+            return None
+        repository = data.get("repository")
+        return repository if isinstance(repository, dict) else None
+
+    result = _query()
+    if cache is not None:
+        cache[key] = result
+    return result
 
 
-def _get_stack_entry(repo_path: str, pr_number: str, runner: rp.Runner) -> dict | None:
+def _get_stack_entry(
+    repo_path: str,
+    pr_number: str,
+    runner: rp.Runner,
+    cache: dict[tuple[str, str], dict | None] | None = None,
+) -> dict | None:
     """Return the stack a PR belongs to, or None if it isn't a stack member.
 
     Stack membership (GitHub stacked PRs, public preview 2026-07-30) is not
@@ -751,8 +778,12 @@ def _get_stack_entry(repo_path: str, pr_number: str, runner: rp.Runner) -> dict 
     unresolvable, API error, unexpected shape); this call is best-effort
     on top of the mergeable/mergeState/isDraft gates that already run, not a
     replacement for them.
+
+    Pass a shared ``cache`` to reuse a fetch already made by
+    ``get_permitted_merge_strategies`` (or vice versa) for the same pull
+    request, so a caller that needs both signals costs one query, not two.
     """
-    repository = _fetch_repository_query(repo_path, pr_number, runner)
+    repository = _fetch_repository_query(repo_path, pr_number, runner, cache=cache)
     if repository is None:
         return None
     pr = repository.get("pullRequest")
@@ -784,7 +815,10 @@ PERMITTED_STRATEGIES_LOOKUP_FAILED = "lookup-failed"
 
 
 def get_permitted_merge_strategies(
-    repo_path: str, pr_number: str, runner: rp.Runner
+    repo_path: str,
+    pr_number: str,
+    runner: rp.Runner,
+    cache: dict[tuple[str, str], dict | None] | None = None,
 ) -> frozenset[str] | str:
     """Return the merge strategies the target repository permits.
 
@@ -805,8 +839,12 @@ def get_permitted_merge_strategies(
     A branch-level ruleset can still refuse a strategy this reports as
     permitted for a given target branch — this reflects the repository's own
     settings only, not what any particular branch will accept.
+
+    Pass a shared ``cache`` to reuse a fetch already made by
+    ``_get_stack_entry`` (or vice versa) for the same pull request, so a
+    caller that needs both signals costs one query, not two.
     """
-    repository = _fetch_repository_query(repo_path, pr_number, runner)
+    repository = _fetch_repository_query(repo_path, pr_number, runner, cache=cache)
     if repository is None:
         return PERMITTED_STRATEGIES_LOOKUP_FAILED
     permitted: set[str] = set()

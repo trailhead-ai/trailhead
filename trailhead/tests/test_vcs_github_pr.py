@@ -1136,11 +1136,14 @@ class TestPermittedMergeStrategies:
         result = _get_stack_entry("/repo", "5", runner=stub)
         assert result == {"number": 9, "size": 2}
 
-    def test_no_additional_process_invocation_per_pull_request(self) -> None:
-        """The capability read is folded into the query `_get_stack_entry`
-        already issues — reading permitted strategies for a pull request
-        must not cost a second `gh api graphql` call."""
-        from trailhead.vcs.github import get_permitted_merge_strategies
+    def test_one_fetch_serves_both_stack_entry_and_permitted_strategies(self) -> None:
+        """Obtaining BOTH the stack-entry signal and the permitted strategies
+        for one pull request must cost exactly one query — the merge loop is
+        exactly the caller that needs both. A stub call log, not a
+        per-function count, is what proves the pair shares a single fetch:
+        counting either reader alone is true by construction (each contains
+        exactly one `rp.run`) and cannot catch two independent fetches."""
+        from trailhead.vcs.github import _get_stack_entry, get_permitted_merge_strategies
 
         calls: list[list[str]] = []
         stub = _graphql_stub(
@@ -1148,13 +1151,18 @@ class TestPermittedMergeStrategies:
                 "mergeCommitAllowed": True,
                 "squashMergeAllowed": True,
                 "rebaseMergeAllowed": True,
-                "pullRequest": {"stackEntry": None},
+                "pullRequest": {"stackEntry": {"stack": {"number": 9, "size": 2}}},
             },
             call_log=calls,
         )
-        get_permitted_merge_strategies("/repo", "6", runner=stub)
+        cache: dict = {}
+        stack = _get_stack_entry("/repo", "6", runner=stub, cache=cache)
+        strategies = get_permitted_merge_strategies("/repo", "6", runner=stub, cache=cache)
+
         graphql_calls = [c for c in calls if "graphql" in " ".join(c)]
         assert len(graphql_calls) == 1
+        assert stack == {"number": 9, "size": 2}
+        assert strategies == frozenset({"merge", "squash", "rebase"})
 
 
 # ---------------------------------------------------------------------------
