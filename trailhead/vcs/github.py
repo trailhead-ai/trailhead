@@ -684,13 +684,25 @@ def _get_pr_state(repo_path: str, pr_number: str, runner: rp.Runner) -> dict | N
         return None
 
 
+#: The `commits` connection's `first:` ceiling is 250 (verified live against
+#: this repository's own PR #207: `first: 250` succeeds, `first: 251` fails
+#: with `EXCESSIVE_PAGINATION` and returns `"pullRequest": null` for the
+#: *entire* selection — which would take out the stack-entry and capability
+#: reads sharing this query, not just the commit series). Never raise this
+#: past 250.
 _STACK_ENTRY_QUERY = (
     "query($owner: String!, $name: String!, $number: Int!) {"
     " repository(owner: $owner, name: $name) {"
     "  mergeCommitAllowed"
     "  squashMergeAllowed"
     "  rebaseMergeAllowed"
-    "  pullRequest(number: $number) { stackEntry { stack { number size } } }"
+    "  pullRequest(number: $number) {"
+    "   stackEntry { stack { number size } }"
+    "   commits(first: 250) {"
+    "    totalCount"
+    "    nodes { commit { message additions deletions parents { totalCount } } }"
+    "   }"
+    "  }"
     " }"
     "}"
 )
@@ -803,6 +815,106 @@ def _get_stack_entry(
         return None
     stack = entry.get("stack")
     return stack if isinstance(stack, dict) else None
+
+
+#: Sentinel returned by `get_commit_series` when the pull request's commit
+#: series could not be read at all — an unresolvable repository, a missing
+#: or malformed `commits` field, or a commit reporting a non-integer size.
+#: Distinct from `COMMIT_SERIES_TRUNCATED` (a genuine truncation, not a read
+#: failure) and from `[]` (a read that succeeded on a pull request with zero
+#: commits). Mirrors `PERMITTED_STRATEGIES_LOOKUP_FAILED`'s convention of a
+#: plain string sentinel rather than `None` or an exception.
+COMMIT_SERIES_LOOKUP_FAILED = "lookup-failed"
+
+#: Sentinel returned by `get_commit_series` when the pull request has more
+#: commits than the query's `first: 250` page can carry — `totalCount`
+#: exceeds `len(nodes)`. Never resolved to a silently short series: a
+#: 300-commit branch judged on its first 250 commits is exactly the failure
+#: mode this exists to prevent. Distinct from `COMMIT_SERIES_LOOKUP_FAILED`.
+COMMIT_SERIES_TRUNCATED = "truncated"
+
+
+def get_commit_series(
+    repo_path: str,
+    pr_number: str,
+    runner: rp.Runner,
+    cache: dict[tuple[str, str], dict | None] | None = None,
+) -> list[tuple[str, int]] | str:
+    """Return the pull request's commit series as ordered
+    ``(subject, change_size)`` summaries, off the `commits` connection
+    folded into `_STACK_ENTRY_QUERY` alongside the existing
+    `pullRequest { stackEntry }` and repository-capability selections — so
+    this adds no additional round trip to the hosting provider beyond the
+    query the merge path already issues per pull request.
+
+    ``subject`` is the first line of the commit's full ``message``, never
+    ``messageHeadline`` — the provider truncates that field at roughly 72
+    characters with a trailing ellipsis, which would make two subjects that
+    differ only past the truncation point indistinguishable.
+    ``change_size`` is ``additions + deletions``.
+
+    A commit reporting more than one parent (a merge-from-mainline commit)
+    is dropped from the series; the remaining commits keep their relative
+    order.
+
+    Returns `COMMIT_SERIES_LOOKUP_FAILED` when the repository couldn't be
+    resolved, the pull request or its `commits` field is missing or the
+    wrong shape, `totalCount` isn't an integer, or any commit's message or
+    size fields are missing or the wrong shape. Returns
+    `COMMIT_SERIES_TRUNCATED` when `totalCount` exceeds the number of nodes
+    returned — the page-size ceiling was hit, so what's in `nodes` is not
+    the whole series and must never be read as though it were. An empty
+    list means the read succeeded and the pull request has zero commits (or
+    zero after merge commits are dropped) — distinct from both sentinels.
+
+    Pass a shared ``cache`` to reuse a fetch already made by
+    `_get_stack_entry` / `get_permitted_merge_strategies` for the same pull
+    request, so a caller that needs more than one of these signals costs
+    one query, not several.
+    """
+    repository = _fetch_repository_query(repo_path, pr_number, runner, cache=cache)
+    if repository is None:
+        return COMMIT_SERIES_LOOKUP_FAILED
+    pr = repository.get("pullRequest")
+    if not isinstance(pr, dict):
+        return COMMIT_SERIES_LOOKUP_FAILED
+    commits = pr.get("commits")
+    if not isinstance(commits, dict):
+        return COMMIT_SERIES_LOOKUP_FAILED
+    total_count = commits.get("totalCount")
+    nodes = commits.get("nodes")
+    if not isinstance(total_count, int) or isinstance(total_count, bool):
+        return COMMIT_SERIES_LOOKUP_FAILED
+    if not isinstance(nodes, list):
+        return COMMIT_SERIES_LOOKUP_FAILED
+    if total_count != len(nodes):
+        return COMMIT_SERIES_TRUNCATED
+
+    series: list[tuple[str, int]] = []
+    for node in nodes:
+        if not isinstance(node, dict):
+            return COMMIT_SERIES_LOOKUP_FAILED
+        commit = node.get("commit")
+        if not isinstance(commit, dict):
+            return COMMIT_SERIES_LOOKUP_FAILED
+        message = commit.get("message")
+        additions = commit.get("additions")
+        deletions = commit.get("deletions")
+        if not isinstance(message, str):
+            return COMMIT_SERIES_LOOKUP_FAILED
+        if not isinstance(additions, int) or isinstance(additions, bool):
+            return COMMIT_SERIES_LOOKUP_FAILED
+        if not isinstance(deletions, int) or isinstance(deletions, bool):
+            return COMMIT_SERIES_LOOKUP_FAILED
+
+        parents = commit.get("parents")
+        parent_count = parents.get("totalCount") if isinstance(parents, dict) else None
+        if isinstance(parent_count, int) and parent_count > 1:
+            continue
+
+        subject = message.split("\n", 1)[0]
+        series.append((subject, additions + deletions))
+    return series
 
 
 #: Maps the GraphQL Repository object's permitted-merge-method booleans to
