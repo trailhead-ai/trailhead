@@ -253,6 +253,26 @@ external_tracker = { kind = "...", ... }  # optional
 - Conventional commit prefixes (`feat:`, `fix:`, `chore:`).
 - Use `git -C <path>` instead of `cd <path> && git`.
 
+## Strategy disclosure
+
+Before merging each pull request, `portage merge` prints one disclosure line to stderr:
+
+`portage merge: PR #<pr_number> (<member_name>): strategy '<strategy>' — <reason>`
+
+Collect every disclosure line seen during this run and use them to render the `Strategy:`
+field of the report below:
+
+- If every pull request disclosed the same `<strategy>` and the same `<reason>`, report it
+  once: `<strategy> — <reason>`.
+- Otherwise, report each pull request's own strategy attributed to its repository, one entry
+  per pull request in merge order, comma-separated: `<member_name>=<strategy> (<reason>)`.
+  Never collapse a mixed run to a single strategy name — the reason text is what tells an
+  operator that a capability lookup failed on one pull request but not another, or that a
+  strategy was explicitly configured rather than selected, and collapsing it away loses that
+  distinction.
+- If no pull request merged this run (blocked or stopped before any merge), the field reads
+  `n/a`.
+
 ## Report structure
 
 When you finish (all merged, stopped ready-to-merge, or blocked), return a short summary:
@@ -261,6 +281,7 @@ When you finish (all merged, stopped ready-to-merge, or blocked), return a short
 **Watch result:** merged | ready-to-merge (auto_merge disabled) | blocked after N cycles
 **Group/Slug:** <group>/<slug>
 **PRs:** <urls + final state>
+**Strategy:** <see "Strategy disclosure" above>
 **Fix cycles run:** <count per PR>
 **Blocker (if any):** <one-line summary from summarizer, or the auto_merge remediation>
 ```
