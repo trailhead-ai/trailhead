@@ -1775,7 +1775,7 @@ class TestClassifyFixupDominance:
         assert at_fifty_one.fixup_count == 0
         assert not at_fifty_one.dominated
 
-    def test_repeated_subject_counts_first_occurrence_and_near_miss_do_not(self) -> None:
+    def test_duplicated_group_counts_and_near_miss_does_not(self) -> None:
         from trailhead.vcs.github import classify_fixup_dominance
 
         series = [
@@ -1785,15 +1785,36 @@ class TestClassifyFixupDominance:
             ("feat: unrelated work", 40),
         ]
         result = classify_fixup_dominance(series)
-        # first "do the thing" doesn't count, the exact repeat does, and
-        # "do the thing!" (differs by one character) never counts.
-        assert result.fixup_count == 1
+        # both "do the thing" commits count, and "do the thing!" (differs by
+        # one character) never counts.
+        assert result.fixup_count == 2
+        assert not result.dominated
 
-    def test_repeated_subject_still_subject_to_size_gate(self) -> None:
+    def test_every_member_of_a_duplicated_group_counts(self) -> None:
+        """AC4: a commit counts as a fix-up when it repeats another commit's
+        subject exactly — every member of the duplicated group, not only the
+        second and later occurrences. A two-commit series of identical
+        subjects is therefore 2 of 2 and dominated."""
+        from trailhead.vcs.github import classify_fixup_dominance
+
+        pair = classify_fixup_dominance([("fix parser", 5), ("fix parser", 5)])
+        assert pair.fixup_count == 2
+        assert pair.dominated
+
+        # ... and one unique subject alongside the pair is still 2 of 3.
+        with_original = classify_fixup_dominance(
+            [("fix parser", 5), ("fix parser", 5), ("add the parser", 40)]
+        )
+        assert with_original.fixup_count == 2
+        assert with_original.dominated
+
+    def test_duplicated_subject_still_subject_to_size_gate(self) -> None:
+        """The size gate is per commit, so an oversized member of a
+        duplicated group is excluded while its small twin still counts."""
         from trailhead.vcs.github import classify_fixup_dominance
 
         result = classify_fixup_dominance([("do the thing", 3), ("do the thing", 500)])
-        assert result.fixup_count == 0
+        assert result.fixup_count == 1
         assert not result.dominated
 
     def test_dominance_is_strictly_more_than_half(self) -> None:
@@ -2013,6 +2034,21 @@ class TestResolveMergeStrategy:
             series=not_dominated_series,
         )
         assert strategy == "merge"
+        assert reason
+
+    def test_exactly_duplicated_pair_resolves_to_squash(self) -> None:
+        """AC4, at the resolver: with rebasing forbidden and two other
+        strategies permitted, a two-commit series whose subjects are
+        identical and both under the size threshold is fix-up-dominated, so
+        it squashes rather than landing a merge commit."""
+        from trailhead.vcs.github import AUTOMATIC_MERGE_METHOD, resolve_merge_strategy
+
+        strategy, reason = resolve_merge_strategy(
+            AUTOMATIC_MERGE_METHOD,
+            frozenset({"merge", "squash"}),
+            series=[("fix parser", 5), ("fix parser", 5)],
+        )
+        assert strategy == "squash"
         assert reason
 
     def test_series_not_consulted_when_rebase_permitted(self) -> None:

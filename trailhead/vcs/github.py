@@ -31,6 +31,7 @@ import sys
 import tempfile
 import time
 import tomllib
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, NamedTuple, Sequence
@@ -987,9 +988,9 @@ def classify_fixup_dominance(series: list[tuple[str, int]]) -> FixupDominance:
     read; call `get_commit_series` first and hand this the result.
 
     A commit counts as a fix-up when it carries a marker recognised by
-    `_has_fixup_marker`, or repeats an earlier commit's subject in this
-    series exactly (the first occurrence of a repeated subject does not
-    count — only the repeat does) — **and**, either way, its reported
+    `_has_fixup_marker`, or shares its subject exactly with another commit
+    in this series (every member of a duplicated group counts, not only the
+    second and later occurrences) — **and**, either way, its reported
     `change_size` does not exceed `FIXUP_CHANGE_SIZE_THRESHOLD` (AC18). A
     marked or repeated commit above the threshold is real work and is
     excluded, not counted.
@@ -1030,12 +1031,13 @@ def classify_fixup_dominance(series: list[tuple[str, int]]) -> FixupDominance:
             "COMMIT_SERIES_TRUNCATED) — check for those first"
         )
 
-    seen_subjects: set[str] = set()
+    subject_counts = Counter(subject for subject, _ in series)
     fixup_count = 0
     for subject, change_size in series:
-        is_repeat = subject in seen_subjects
-        seen_subjects.add(subject)
-        if (_has_fixup_marker(subject) or is_repeat) and change_size <= FIXUP_CHANGE_SIZE_THRESHOLD:
+        is_duplicated = subject_counts[subject] > 1
+        if (
+            _has_fixup_marker(subject) or is_duplicated
+        ) and change_size <= FIXUP_CHANGE_SIZE_THRESHOLD:
             fixup_count += 1
 
     series_length = len(series)
