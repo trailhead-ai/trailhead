@@ -194,7 +194,10 @@ def test_explicit_configuration_is_reported_without_implying_selection():
     for auto_prefix_key in (
         "auto_rebase_permitted",
         "auto_sole_permitted",
-        "auto_interim_squash",
+        "auto_series_dominated",
+        "auto_series_not_dominated",
+        "auto_series_lookup_failed",
+        "auto_series_truncated",
         "auto_lookup_failed",
         "auto_none_permitted",
     ):

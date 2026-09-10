@@ -823,8 +823,11 @@ def _get_stack_entry(
 #: Distinct from `COMMIT_SERIES_TRUNCATED` (a genuine truncation, not a read
 #: failure) and from `[]` (a read that succeeded on a pull request with zero
 #: commits). Mirrors `PERMITTED_STRATEGIES_LOOKUP_FAILED`'s convention of a
-#: plain string sentinel rather than `None` or an exception.
-COMMIT_SERIES_LOOKUP_FAILED = "lookup-failed"
+#: plain string sentinel rather than `None` or an exception — but its value
+#: is deliberately distinct from `PERMITTED_STRATEGIES_LOOKUP_FAILED`'s, so
+#: the two can never be confused by a comparison against the wrong sentinel
+#: in a scope (`resolve_merge_strategy`) that holds both at once.
+COMMIT_SERIES_LOOKUP_FAILED = "series-lookup-failed"
 
 #: Sentinel returned by `get_commit_series` when the pull request has more
 #: commits than the query's `first: 250` page can carry — `totalCount`
@@ -1099,7 +1102,10 @@ RESOLUTION_REASON_PREFIXES: dict[str, str] = {
     "explicit_configured": "explicit-configured",
     "auto_rebase_permitted": "auto-rebase-permitted",
     "auto_sole_permitted": "auto-sole-permitted",
-    "auto_interim_squash": "auto-interim-squash",
+    "auto_series_dominated": "auto-series-dominated",
+    "auto_series_not_dominated": "auto-series-not-dominated",
+    "auto_series_lookup_failed": "auto-series-lookup-failed",
+    "auto_series_truncated": "auto-series-truncated",
     "auto_lookup_failed": "auto-lookup-failed",
     "auto_none_permitted": "auto-none-permitted",
     "merge_refused": "merge-refused",
@@ -1109,12 +1115,14 @@ RESOLUTION_REASON_PREFIXES: dict[str, str] = {
 def resolve_merge_strategy(
     configured_method: str,
     permitted: frozenset[str] | str,
+    series: list[tuple[str, int]] | str | None = None,
 ) -> tuple[str, str]:
     """Resolve a configured merge_method plus a repository's permitted
-    merge strategies to exactly one strategy and a reason.
+    merge strategies (and, in one branch, its commit series) to exactly one
+    strategy and a reason.
 
-    Total by construction: every ``(configured_method, permitted)`` pair
-    resolves to a ``(strategy, reason)`` pair. There is no undecided
+    Total by construction: every ``(configured_method, permitted, series)``
+    triple resolves to a ``(strategy, reason)`` pair. There is no undecided
     verdict and no caller-side branch for one — the returned strategy is
     always one of `_MERGE_METHOD_FLAGS`'s keys, ready to look up a `gh pr
     merge` flag directly. Pure: makes no subprocess or network call and
@@ -1123,20 +1131,42 @@ def resolve_merge_strategy(
     ``configured_method`` is a value from `_MERGE_METHOD_VALUES` — one of
     the three concrete strategies, or `AUTOMATIC_MERGE_METHOD`. When it
     names a concrete strategy, that strategy is returned unconditionally:
-    ``permitted`` is never inspected, so a
+    ``permitted`` and ``series`` are never inspected, so a
     `PERMITTED_STRATEGIES_LOOKUP_FAILED` signal alongside an explicit
     strategy changes nothing.
+
+    ``series`` defaults to `None`, meaning "not consulted" — every branch
+    below except the rebase-forbidden, two-permitted one ignores it
+    entirely, so existing callers that never pass it keep working exactly
+    as before. It is a `get_commit_series` result: an ordered list of
+    ``(subject, change_size)`` pairs, or one of that function's sentinels
+    (`COMMIT_SERIES_LOOKUP_FAILED` / `COMMIT_SERIES_TRUNCATED`).
 
     When ``configured_method`` is `AUTOMATIC_MERGE_METHOD`:
       - `permitted == PERMITTED_STRATEGIES_LOOKUP_FAILED` resolves to
         squashing.
-      - otherwise rebasing is returned whenever ``permitted`` contains it.
+      - otherwise rebasing is returned whenever ``permitted`` contains it —
+        ``series`` is not consulted.
       - otherwise, when the remaining permitted strategies name exactly
-        one, that one is returned regardless of any other rule.
-      - otherwise, when more than one non-rebase strategy is permitted,
-        this resolves to squashing — the interim rule this slice ships;
-        a later change replaces it with a rule driven by the shape of the
-        pull request's commit series.
+        one, that one is returned regardless of any other rule — ``series``
+        is not consulted.
+      - otherwise (rebasing forbidden and more than one other strategy
+        permitted), this is driven by ``series`` (AC2, AC3, AC10):
+          - `series is None` or `series == COMMIT_SERIES_LOOKUP_FAILED`
+            resolves to squashing, the same safe direction a lookup
+            failure takes elsewhere in this function, under its own
+            reason.
+          - `series == COMMIT_SERIES_TRUNCATED` resolves to squashing
+            under a further distinct reason — a truncated series is not
+            the whole series and must never be judged as though it were.
+          - otherwise ``series`` is a resolved list, classified with
+            `classify_fixup_dominance`: a fix-up-dominated series resolves
+            to squashing; otherwise to a merge commit. Either reason
+            carries `FixupDominance.fixup_count` and `.series_length` —
+            counts only, never any commit subject text (AC11), so a
+            reader can check the verdict from scrollback without echoing
+            any pull request author's content into an operator-facing
+            string.
       - the degenerate case of ``permitted == frozenset()`` (the
         repository reports no permitted strategy at all) also resolves to
         squashing, under its own reason, keeping the function total for
@@ -1145,7 +1175,7 @@ def resolve_merge_strategy(
     Every returned reason is non-empty and starts with one of the pinned,
     pairwise-distinct prefixes in `RESOLUTION_REASON_PREFIXES` — one per
     resolution cause — so a lookup failure, a sole-permitted-strategy
-    outcome, and the interim squash outcome can never render as
+    outcome, and each series-driven outcome can never render as
     near-identical text.
 
     The returned strategy is always a key of `_MERGE_METHOD_FLAGS`, so it
@@ -1182,11 +1212,24 @@ def resolve_merge_strategy(
         return only, f"{prefix}: repository permits only '{only}'"
 
     if len(remaining) >= 2:
-        prefix = RESOLUTION_REASON_PREFIXES["auto_interim_squash"]
-        return "squash", (
-            f"{prefix}: rebasing forbidden and more than one other strategy "
-            "permitted — interim rule, replaced by a commit-series rule in a "
-            "later change"
+        if series is None or series == COMMIT_SERIES_LOOKUP_FAILED:
+            prefix = RESOLUTION_REASON_PREFIXES["auto_series_lookup_failed"]
+            return "squash", f"{prefix}: commit series lookup failed"
+        if series == COMMIT_SERIES_TRUNCATED:
+            prefix = RESOLUTION_REASON_PREFIXES["auto_series_truncated"]
+            return "squash", f"{prefix}: commit series truncated"
+
+        dominance = classify_fixup_dominance(series)
+        if dominance.dominated:
+            prefix = RESOLUTION_REASON_PREFIXES["auto_series_dominated"]
+            return "squash", (
+                f"{prefix}: {dominance.fixup_count} of {dominance.series_length} "
+                "commits are fix-ups"
+            )
+        prefix = RESOLUTION_REASON_PREFIXES["auto_series_not_dominated"]
+        return "merge", (
+            f"{prefix}: {dominance.fixup_count} of {dominance.series_length} "
+            "commits are fix-ups"
         )
 
     prefix = RESOLUTION_REASON_PREFIXES["auto_none_permitted"]
