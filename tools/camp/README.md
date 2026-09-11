@@ -295,6 +295,25 @@ would use — and `camp_bin` defaults to the bare command name `camp`; declare
 it explicitly whenever `camp` is not on that host's non-interactive PATH,
 which is the common case over a plain SSH invocation.
 
+`hosts.toml` also carries this machine's own name, as a top-level
+`self_name` — reserved separately from `[hosts.<name>]` so it can never
+collide with a declared peer:
+
+```toml
+self_name = "sunrise"
+```
+
+Every machine `camp transfer` runs between must declare its **own**,
+**different** `self_name` — nothing here checks that for you. A machine
+that never declares one is a supported "not yet participating" state, not
+an error; `camp transfer` itself refuses on that host and names this file
+and the requirement (see [Transferring a workspace](#transferring-a-workspace)
+below — the refusal, not this section, is the primary way an operator
+learns the file exists). Two machines sharing a name silently pass every
+ownership check on *both* sides at once, since a peer's declared name is
+only ever compared for equality — pick names that cannot collide, the way
+`andromeda`/`sunrise` do above, not `host1`/`host2`.
+
 ```
 camp list --host <name>
 camp list --host <name> --json
@@ -348,6 +367,63 @@ The `--json` path is one flat array in the same order, every row carrying
 groups and a group's worth of machines at once) and, with no group resolved
 from cwd or `--group`, refuses naming `-ag` or `--group <name>` as the ways
 forward — it never falls back to the legacy standalone-worktree source.
+
+## Transferring a workspace
+
+```
+camp transfer <slug> --to <peer> --dry-run [--json]
+```
+
+Previews moving a workspace and its live conversations to a declared peer
+host (see [Remote hosts](#remote-hosts) for declaring one). `--dry-run` is
+**required** — the mover itself is a later slice, so a bare invocation
+refuses rather than silently previewing under a name that will soon mean
+something else.
+
+Each member's regenerable state — build output, installed dependencies,
+anything a transfer should recreate on the peer rather than copy — is
+declared per member as `excluded`, a list of paths relative to that
+member's own `repo_root`:
+
+```toml
+[[members]]
+name = "trailhead-ai.github.io"
+repo_root = "/path/to/trailhead-ai.github.io"
+excluded = ["node_modules"]
+```
+
+Absence of the key is its own state, distinct from declaring it empty: a
+member that has never declared `excluded` reads as "never declared" (not
+"declares nothing regenerable"), and `camp transfer --dry-run` refuses by
+name, listing the member(s), until every member states one or the other —
+an empty list is a legitimate answer, silence is not.
+
+Exit codes:
+
+```
+0  every check passed — a clean verdict
+1  an unexpected/local error (bad flags, malformed config)
+2  --dry-run was omitted — nothing was read from the peer
+3  not clean, for a reason with no more specific code below
+4  this host does not own the workspace
+5  the peer could not be reached
+6  no workspace is recorded here for that slug
+7  the named peer is not declared in hosts.toml
+```
+
+`transfer` and `transfer-probe` (the wire-level answer `--dry-run` reads
+from the peer) are both reserved verb names, so neither can be dispatched
+as a bare slug (`camp transfer` alone always means the verb). A workspace
+is still free to *be named* `transfer` or `transfer-probe`, and stays fully
+reachable through its group's own named verbs:
+
+```
+camp transfer transfer --to <peer> --dry-run --group <name>
+camp transfer-probe --group <name> --slug transfer-probe
+```
+
+The first previews a workspace literally named `transfer`; the second
+answers for one named `transfer-probe`.
 
 ## Group setup
 

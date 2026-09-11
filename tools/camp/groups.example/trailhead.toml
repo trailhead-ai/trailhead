@@ -33,6 +33,12 @@ tasks = ["mcp-config", "code-review-graph"]
 name = "trailhead-ai.github.io"
 repo_root = "/path/to/trailhead-ai.github.io"
 bootstrap = []
+# `excluded` declares this member's regenerable state to `camp transfer`'s
+# preflight — paths a transfer should recreate on the peer (e.g. by running
+# the site's own build) rather than copy across. Absence of this key is a
+# different, undeclared state from an explicit `excluded = []`; a transfer
+# refuses by name until every member states one or the other.
+excluded = ["node_modules", "_site"]
 
 [[members]]
 name = "outpost"
