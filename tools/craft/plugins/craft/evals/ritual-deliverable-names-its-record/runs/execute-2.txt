@@ -1,0 +1,19 @@
+**Run complete** — [task/the-ledger-reconciliation-slice](http://127.0.0.1:7313/records/causewell/task/the-ledger-reconciliation-slice) is closed `done`.
+
+All 3 child tasks are terminal, the `## Flow-out` checklist is ticked, and the task branch is pushed.
+
+**Phase outcomes:**
+
+- **test-runner gate:** green
+- **simplify:** no changes
+- **correctness:** SHIP, 0 findings
+- **security:** skipped — no trigger
+- **flow-out:** ritual complete — profiles updated, candidates captured, postmortem written
+- **state-coverage:** parent 3, doc 3, missing 0
+- **criterion-observations:** covered 2, observed 2, missing 0
+- **push:** 1 repo pushed
+- **metrics:** 3 tasks, 5 dispatches (1.67/task), 28m wall clock, 1 lesson written, 1 lesson consumed
+
+**Measurement tally:** no correctness Critical/Important findings this run — nothing to classify local-to-one-task vs cross-task, and no movement toward the revisit condition on the per-task quality charter.
+
+I have not opened a pull request — that call is yours. Say the word and I'll run `/portage:pull_request`.

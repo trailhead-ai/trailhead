@@ -1,0 +1,5 @@
+The plan for [task/the-ledger-reconciliation-slice](http://127.0.0.1:7313/records/causewell/task/the-ledger-reconciliation-slice) is written to your vault, filled into that slice parent with its component-shaped child tasks beneath it.
+
+**Council Review:** all four lenses dispatched. One Critical — a missing idempotency check on the reconciliation write — disposed `resolved`. No Critical is left undisposed.
+
+Reply **build** to hand off to `/craft:execute` and start building task by task, or run `/craft:execute task/the-ledger-reconciliation-slice` in a fresh session. Call out anything that needs adjustment first.
