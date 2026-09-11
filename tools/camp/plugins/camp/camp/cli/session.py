@@ -2226,6 +2226,13 @@ def _cmd_attach_cli(args: list[str], env: dict[str, str] | None = None) -> None:
 
     rest = list(args)
     _consume_flag_value(rest, "--group")  # a ref names the session; no group needed
+    # `--json` is accepted on the plain `<ref>` form too (no `--resolve`/
+    # `--list`) — deliberately, not an oversight. It changes nothing about
+    # the success path (a handoff has no JSON shape to offer), and its only
+    # effect there is on `_die_unresolved`'s ambiguity listing, which already
+    # supports both a human and a machine-readable rendering for every
+    # ref-addressed verb. Refusing it here would make attach the one verb
+    # that treats a harmless, already-supported flag as an error.
     as_json = _consume_flag(rest, "--json")
     resolve_only = _consume_flag(rest, "--resolve")
     list_only = _consume_flag(rest, "--list")
@@ -2306,27 +2313,37 @@ def _cmd_attach_cli(args: list[str], env: dict[str, str] | None = None) -> None:
             f"camp attach: session {resolution.candidate.session_id} is not "
             f"running — bring it back with `camp launch --resume {ref}`"
         )
-    if isinstance(resolution, (NoMatch, Ambiguous)):
-        from ..launch.recovery import Ambiguous as _RecoveryAmbiguous, NoMatch as _RecoveryNoMatch
+    if isinstance(resolution, Ambiguous):
+        from ..launch.recovery import Ambiguous as _RecoveryAmbiguous
 
-        # attach's own Ambiguous/NoMatch (`camp.attach.resolve`) are never the
-        # SAME classes `_die_unresolved` checks (`camp.launch.recovery`'s) —
+        # attach's own Ambiguous (`camp.attach.resolve`) is never the SAME
+        # class `_die_unresolved` checks (`camp.launch.recovery`'s) —
         # translated here so every ref-addressed verb refuses through that one
         # shared helper and an operator gets the identical wording (including
-        # the populated-vs-empty-pool distinction, and which account a
-        # cross-store ambiguity matched in) regardless of which verb they typed.
-        if isinstance(resolution, Ambiguous):
-            translated = _RecoveryAmbiguous(candidates=resolution.candidates)
-        else:
-            translated = _RecoveryNoMatch(pool_size=resolution.pool_size)
+        # which account a cross-store ambiguity matched in) regardless of
+        # which verb they typed.
         _die_unresolved(
-            translated,
+            _RecoveryAmbiguous(candidates=resolution.candidates),
             ref,
             verb="attach",
             harness=harness,
             env=resolved_env,
             as_json=as_json,
             accounts=accounts,
+        )
+    if isinstance(resolution, NoMatch):
+        # NOT routed through `_die_unresolved`: that helper's populated-pool
+        # wording points at `camp sessions --recoverable` — a listing of
+        # exactly the stopped sessions attach refuses to touch — which is
+        # the wrong next step for a verb that only ever offers live,
+        # camp-owned sessions. Attach names the pool IT searched instead
+        # (`## State — the named session was not found`), while keeping the
+        # empty-vs-populated-pool split `_die_unresolved` itself draws.
+        if resolution.pool_size:
+            _die(f"camp attach: no session on this machine matches {ref!r}")
+        _die(
+            f"camp attach: harness {_harness_display_name(harness)} reports no "
+            f"sessions at all — {_retention_hint(harness, resolved_env)}"
         )
     assert isinstance(resolution, Resolved)
     warn_if_nested(resolved_env)

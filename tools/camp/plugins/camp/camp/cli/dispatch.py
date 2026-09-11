@@ -862,20 +862,29 @@ def _attach_probe_object(outcome) -> dict | None:
     return data
 
 
-def _attach_resolve_answer(outcome) -> bool | None:
+def _attach_resolve_answer(outcome) -> tuple[bool, str | None, str | None] | None:
     """Classify one host's `<camp_bin> attach <ref> --resolve --json` answer.
 
-    `True`/`False` is the far side's own `ok` field — it resolved, or it
-    definitely did not. `None` means the host did not answer a resolvable
-    question at all (unreachable, timed out, refused credentials, answered
-    with something that is not the JSON this probe expects) — the "declared
-    host did not answer" state the design doc requires `-a` to refuse on
-    rather than silently treat as "didn't match".
+    Returns `(matched, session_id, state)`:
+
+    - `matched` is the far side's own `ok` field — it resolved, or it
+      definitely did not.
+    - `session_id` is the session the far side named, when it named one (a
+      `Resolved` match, or a `NotRunning` state — both carry `session_id` in
+      `_attach_resolve_payload`). `None` otherwise.
+    - `state` is the far side's own `state` field (`"not_running"`,
+      `"ambiguous"`, or `"no_match"`), present only when `matched` is False.
+
+    `None` overall means the host did not answer a resolvable question at
+    all (unreachable, timed out, refused credentials, answered with
+    something that is not the JSON this probe expects) — the "declared host
+    did not answer" state the design doc requires `-a` to refuse on rather
+    than silently treat as "didn't match".
     """
     data = _attach_probe_object(outcome)
     if data is None or "ok" not in data:
         return None
-    return bool(data["ok"])
+    return bool(data["ok"]), data.get("session_id"), data.get("state")
 
 
 def _attach_list_answer(outcome) -> list[dict] | None:
@@ -892,6 +901,28 @@ def _attach_list_answer(outcome) -> list[dict] | None:
     if not isinstance(rows, list) or not all(isinstance(r, dict) for r in rows):
         return None
     return rows
+
+
+def _reject_self_named_host(hosts: dict, self_name: str | None) -> None:
+    """Refuse when a declared host shares this machine's own `self_name`.
+
+    Nothing in `host/config.py` rejects that collision at declaration time —
+    `self_host_name`'s own docstring says detecting it "belongs to the first
+    code that has both names in hand", which is here: `_dispatch_attach_all_hosts`
+    is the one place that loads `hosts.toml` AND resolves `self_name` for the
+    same invocation. Left unguarded, a row for that host reaches the local
+    branch of a handoff decision (`row.machine == self_name`) carrying a
+    `_RemoteAttachCandidate`, which has no `derived_name` — an `AttributeError`
+    instead of a camp refusal.
+    """
+    from ..spine import _die
+
+    if self_name is not None and self_name in hosts:
+        _die(
+            f"camp attach: hosts.toml declares {self_name!r} as a remote host — "
+            "the same name this machine's own self_name uses; rename one so "
+            "camp attach can tell them apart"
+        )
 
 
 class _RemoteAttachCandidate:
@@ -959,7 +990,7 @@ def _dispatch_attach_all_hosts(rest: list[str]) -> None:
     from ..host.config import HostConfigError, load_hosts
     from ..host.handoff import handoff, local_argv, remote_argv
     from ..spine import _die
-    from .session import _AMBIGUOUS_EXIT_CODE, _attach_session_context
+    from .session import _AMBIGUOUS_EXIT_CODE, _attach_session_context, _print_candidates
 
     if len(rest) > 1:
         _die(
@@ -983,6 +1014,7 @@ def _dispatch_attach_all_hosts(rest: list[str]) -> None:
         groups, transcripts, live, harness, tmux, self_name, _accounts = _attach_session_context(
             resolved_env
         )
+        _reject_self_named_host(hosts, self_name)
         local_resolution = resolve_attach_ref(
             ref,
             harness=harness,
@@ -1004,7 +1036,7 @@ def _dispatch_attach_all_hosts(rest: list[str]) -> None:
                 return name, None
             return name, _attach_resolve_answer(outcome)
 
-        probed: list[tuple[str, bool | None]] = []
+        probed: list[tuple[str, tuple[bool, str | None, str | None] | None]] = []
         if host_items:
             with concurrent.futures.ThreadPoolExecutor(
                 max_workers=len(host_items)
@@ -1021,13 +1053,52 @@ def _dispatch_attach_all_hosts(rest: list[str]) -> None:
                 f"{'it' if len(silent) == 1 else 'them'}"
             )
 
-        matches: list[str] = []
+        self_label = self_name or "this machine"
+
+        # Every machine holding a session the ref addresses counts as a
+        # match — including one that is ambiguous or stopped there. A local
+        # `Ambiguous`/`NotRunning` is itself evidence this machine matched;
+        # folding it into "no local match" would let a same-ref match
+        # elsewhere silently win the handoff even though this machine also
+        # holds (an ambiguous, or a stopped) session the ref names — exactly
+        # the wrong-guess risk `## State — the named session matches on more
+        # than one machine` exists to refuse. A remote `not_running` is the
+        # same fact on the far side, and is deliberately handed off rather
+        # than resolved here: the far side's own `camp attach <ref>` refuses
+        # in its own words when it is the sole match (mirrors `--host`).
+        matches: list[tuple[str, str]] = []
         if isinstance(local_resolution, Resolved):
-            matches.append(self_name or "this machine")
-        matches.extend(name for name, answer in probed if answer)
+            matches.append((self_label, local_resolution.candidate.session_id))
+        elif isinstance(local_resolution, Ambiguous):
+            matches.append(
+                (self_label, ", ".join(c.session_id for c in local_resolution.candidates))
+            )
+        elif isinstance(local_resolution, NotRunning):
+            matches.append((self_label, local_resolution.candidate.session_id))
+        for name, answer in probed:
+            if answer is None:
+                continue
+            ok, session_id, state = answer
+            if ok or state == "not_running":
+                matches.append((name, session_id or "matched"))
 
         if not matches:
+            asked = ", ".join([self_label] + [n for n, _ in host_items])
+            _die(f"camp attach: no session on any declared machine matches {ref!r} (asked: {asked})")
+
+        if len(matches) > 1:
+            named = "; ".join(f"{machine} ({session})" for machine, session in matches)
+            _die(
+                f"camp attach: {ref!r} matches on more than one machine "
+                f"({named}) — re-run with --host <name> naming "
+                "the one you mean",
+                code=_AMBIGUOUS_EXIT_CODE,
+            )
+
+        winner = matches[0][0]
+        if winner == self_label:
             if isinstance(local_resolution, Ambiguous):
+                _print_candidates(local_resolution.candidates, as_json=False)
                 _die(
                     f"camp attach: {ref!r} matches {len(local_resolution.candidates)} "
                     "sessions on this machine — re-run with a longer prefix naming "
@@ -1039,29 +1110,20 @@ def _dispatch_attach_all_hosts(rest: list[str]) -> None:
                     f"camp attach: session {local_resolution.candidate.session_id} is "
                     f"not running — bring it back with `camp launch --resume {ref}`"
                 )
-            asked = ", ".join([self_name or "this machine"] + [n for n, _ in host_items])
-            _die(f"camp attach: no session on any declared machine matches {ref!r} (asked: {asked})")
-
-        if len(matches) > 1:
-            _die(
-                f"camp attach: {ref!r} matches on more than one machine "
-                f"({', '.join(matches)}) — re-run with --host <name> naming "
-                "the one you mean",
-                code=_AMBIGUOUS_EXIT_CODE,
-            )
+            assert isinstance(local_resolution, Resolved)
+            warn_if_nested(resolved_env)
+            handoff(local_argv(local_resolution.candidate.derived_name))
+            return
 
         warn_if_nested(resolved_env)
-        if isinstance(local_resolution, Resolved):
-            handoff(local_argv(local_resolution.candidate.derived_name))
-        else:
-            winner = matches[0]
-            handoff(remote_argv(hosts[winner], ref))
+        handoff(remote_argv(hosts[winner], ref))
         return
 
     # Bare cross-host picker.
     groups, transcripts, live, harness, tmux, self_name, _accounts = _attach_session_context(
         resolved_env
     )
+    _reject_self_named_host(hosts, self_name)
     local_result = local_pool(
         harness=harness,
         tmux=tmux,
