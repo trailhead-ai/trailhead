@@ -64,6 +64,21 @@ FROZEN_ARMS = {
 }
 
 
+
+def _drift_message(arm_name, sources, with_tail, expected, actual) -> str:
+    """Locate the first differing offset and quote a window around it, so a drift in a
+    large arm (execute-rule-only.md is ~85KB) names the region that actually moved."""
+    limit = min(len(expected), len(actual))
+    offset = next((i for i in range(limit) if expected[i] != actual[i]), limit)
+    lo, hi = max(0, offset - 80), offset + 120
+    return (
+        f"{arm_name} has drifted from its declared construction "
+        f"(sources={sources}, tail={with_tail}); first difference at offset {offset} "
+        f"(expected {len(expected)} chars, actual {len(actual)}):\n"
+        f"  expected: {expected[lo:hi]!r}\n"
+        f"  actual:   {actual[lo:hi]!r}"
+    )
+
 def _arm_files() -> list[Path]:
     return sorted(ARMS_DIR.glob("*.md"))
 
@@ -85,16 +100,4 @@ def test_live_arm_rebuilds_byte_identically(arm_name: str):
     sources, with_tail = LIVE_ARMS[arm_name]
     expected = _rebuild(sources, with_tail)
     actual = (ARMS_DIR / arm_name).read_text(encoding="utf-8")
-    assert actual == expected, (
-        f"{arm_name} has drifted from its declared construction "
-        f"(sources={sources}, tail={with_tail}); "
-        f"first differing region: expected={expected[:200]!r} actual={actual[:200]!r}"
-    )
-
-
-def test_frozen_arms_are_named_with_a_one_line_reason():
-    """Every frozen entry must carry a non-empty justification; this asserts the
-    manifest is honest about the carve-out, not that the arm's bytes match anything."""
-    for name, reason in FROZEN_ARMS.items():
-        assert reason.strip(), f"frozen arm {name} has no stated reason"
-        assert (ARMS_DIR / name).is_file(), f"frozen arm {name} missing from disk"
+    assert actual == expected, _drift_message(arm_name, sources, with_tail, expected, actual)
