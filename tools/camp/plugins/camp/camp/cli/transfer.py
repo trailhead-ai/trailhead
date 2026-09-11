@@ -56,10 +56,10 @@ inputs are checked:
                                after the failing phase ran; re-running the
                                transfer is safe
 
-Code 2 is retired — this verb used to refuse a bare invocation with it before
-the mover existed; it is never produced now and is not reused for anything
-else, so an old script that checked for it specifically still gets a clear
-"not that" answer rather than a code that now means something unrelated.
+Code 2 is absent from the set deliberately: it is never produced, and it is
+held unused rather than reassigned, so a script that checks for it
+specifically gets a clear "not that" answer rather than a code that means
+something unrelated.
 
 Selected by walking `PreflightResult.checks` in their fixed order (see
 `camp.transfer.preflight`'s module docstring) and taking the first check that
