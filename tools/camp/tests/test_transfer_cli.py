@@ -564,7 +564,7 @@ def test_indeterminate_check_renders_differently_from_pass_and_fail(
         ["transfer", "feat-x", "--to", "host-b", "--group", "trailhead", "--dry-run"],
     )
     out = capsys.readouterr().out
-    line = next(l for l in out.splitlines() if "the peer answers" in l)
+    line = next(t for t in out.splitlines() if "the peer answers" in t)
     assert "[INDETERMINATE]" in line
     assert "[PASS]" not in line
     assert "[FAIL]" not in line
