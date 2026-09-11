@@ -1281,9 +1281,13 @@ the pre-registration's ruling), `review`'s **second** outcome (the slice loop no
 back to `/craft:slice`), and `slice`'s selection handoff.
 
 **New fixtures.** `fixtures/review-loop-open-completed-run.md` differs from the already-committed
-`fixtures/review-completed-run.md` in exactly one line — the `craft/slice-loop` marker reads as
-*not* complete instead of `complete` — confirmed reachable by the fixture landing on the
-`/craft:slice` branch rather than `/craft:distill` in every captured run. `fixtures/slice-completed-
+`fixtures/review-completed-run.md` in the branch-selecting state and nothing else. That state spans
+two bullets, not one: the `craft/slice-loop` marker reads as *not* complete instead of `complete`,
+and the bullet stating what the review therefore closes flips with it — "closes its own job, not the
+spec's lifecycle" in place of the inverse. Both must flip together or the fixture asserts a loop that
+is open and a review that ends the spec at the same time, which is self-contradictory rather than
+minimal. Confirmed reachable by the fixture landing on the `/craft:slice` branch rather than
+`/craft:distill` in every captured run. `fixtures/slice-completed-
 run.md` asserts the spec, its ledger, and the chosen slice as already decided, so the deliverable is
 the selection handoff alone with no vault write required to reach it — confirmed reachable the same
 way, by every captured run landing on the handoff with no tool beyond `Read` used.
