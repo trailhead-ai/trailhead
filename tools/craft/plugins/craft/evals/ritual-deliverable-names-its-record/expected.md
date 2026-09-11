@@ -579,3 +579,117 @@ same completion-marker and infrastructure-exclusion rules as every other arm in 
 **Contamination check.** Both treatment arms are checked identical to their own `rule-only`
 counterpart apart from the one handoff paragraph, by `diff` before dispatch (see "The edit" above) —
 no other line, including the appended reader-rule tail, differs.
+
+## Extension — Task 3, pre-registration for the three remaining AC7 outcome sites
+
+**Committed before any arm below is run.** Task 4 measures these three sites against current
+committed prose; Task 5 edits whichever of them AC7 falsifies; Task 6 re-measures. This section
+fixes, in advance, the arm construction, the exact grader invocation, the run count, the pass
+condition, and the tie-break — so no decision here can be retrofitted after a result is seen.
+
+**The three sites** are `execute`'s completion report, `review`'s **second** outcome (the slice loop
+is *not* complete, handing back to `/craft:slice`), and `slice`'s selection handoff. `slice`'s
+worked-example sentence is **not** a site: it emits no deliverable, and is handled as prose
+consistency in the treatment task, never graded here.
+
+### Ruling — `execute` is measurable, not exempt (Council amendment, Critical, Reliability)
+
+The previous slice graded `execute` `--exempt` on the basis recorded at "Finding 1: zero commands by
+design, not a failure" — execute's completion report mandates no handoff, because
+`_shared/execute.md` instructs it **not** to invoke `/portage:pull_request` automatically, leaving
+that call to the operator. **That basis is restated here and rejected as the wrong predicate**, per
+this task's instruction not to re-use the classification without restating its basis.
+
+The basis answers "does this ritual mandate a next command?" AC7 asks a different question: "when
+this ritual prints a command, is it on its own line?" Those come apart exactly here. The changed
+grader (Task 2) settles it as fact rather than as reading: all three committed `execute` captures
+under `runs/` report `exempt-observation: embedded` once a command is supplied. The deliverable does
+name a command, and it names it mid-sentence — the failing shape — at the one site the previous
+measurement recorded as passing. An exempt verdict there reported a pass at an artifact nobody had
+looked at, which is the hole Task 2 closed.
+
+**Ruling: `execute` is graded as a measurable site, with `--command "/portage:pull_request"` and no
+`--exempt` flag.** Its pass condition is `next-command: own-line`, identical to every other
+measurable site.
+
+**The considered alternative, and why it loses.** Printing the command on its own line could be read
+as contradicting execute's deliberate "this call is yours" framing — an own-line command looks like
+a handoff to paste now. It does not: the deferral sentence and the own-line command compose without
+conflict (state that no PR was opened and that the call is the operator's, *then* print the command
+alone on its line). There is no tension to trade off, so the framing is not a reason to exempt.
+
+**Footprint consequence, inherited not re-derived.** This ruling puts `execute/SKILL.md` and
+`_shared/execute.md` inside Task 5's file footprint if and only if Task 4 measures `execute` as
+falsifying AC7. Task 5 inherits this decision and does not re-open it.
+
+### Per-site pre-registration
+
+Every arm below is current committed prose plus the reader-rule tail — the live arms Task 1's
+manifest already pins as byte-identical to their sources. **No new arm file is created for the
+baseline**; Task 5 creates treatment arms if and only if it edits a site.
+
+| Site | Arm | Fixture | Grader invocation | Runs |
+|---|---|---|---|---|
+| `execute` | `arms/execute-rule-only.md` | `fixtures/execute-completed-run.md` | `--record task/the-ledger-reconciliation-slice --command "/portage:pull_request"` | 3 |
+| `review` second outcome | `arms/review-treatment.md` | `fixtures/review-loop-open-completed-run.md` (new, see below) | `--record spec/dock-scheduling-windows --command "/craft:slice spec/dock-scheduling-windows"` | 3 |
+| `slice` selection handoff | `arms/rule-only.md` | `fixtures/slice-completed-run.md` (new, see below) | `--record task/the-berth-allocation-slice --command "/craft:plan task/the-berth-allocation-slice"` | 3 |
+
+**Run budget: 9 processes** — 3 per site, matching this case's existing 3-per-ritual budget.
+
+### Pass condition, per site — two-sided, in the grader's published tokens
+
+Graded only by `tools/craft/plugins/craft/scripts/ritual_deliverable_grader.py`, never an inline
+regex. The tokens below are the grader's own contract vocabulary — `own-line`, `embedded`,
+`absent`, `exempt` — quoted verbatim so a later grading pass cannot reinterpret them:
+
+- **AC7 holds at this site** — `next-command: own-line` for all 3 counted runs.
+- **AC7 falsified at this site** — `next-command: embedded` or `next-command: absent` for any
+  counted run. Reported as a falsification, never softened into a weaker claim that still reads as a
+  pass. A falsified site enters Task 5's treatment footprint.
+- **`next-command: exempt` is not a reachable verdict at any of these three sites**, because no
+  invocation above passes `--exempt`. A grading pass that emits it means the invocation drifted from
+  this pre-registration, and is a defect in the run rather than a result.
+- **`record-link` is not graded at these three sites.** Each is a `next-command` measurement only;
+  AC6's per-ritual vacuity rule above already governs `record-link` and none of these sites changes
+  the text that predicate reads.
+
+### Tie-break — a 2-1 split within one site's 3 runs
+
+Re-run that site's arm 3 more times, 6 total. A clean majority across the 6 resolves the site. A
+combined result that is not a clean majority (4-2, or any other non-resolving split) is
+**AMBIGUOUS**, and AMBIGUOUS is treated as **AC7 falsified** for that site — never as evidence the
+site passes. This matches the split rule this case already pre-registered for the Task 5 treatment
+arms, deliberately rather than by coincidence.
+
+### What counts as a reachable fixture for `review`'s second outcome
+
+The previous slice re-pointed `fixtures/review-completed-run.md` to the loop-complete branch, so the
+second outcome has no fixture today. A fixture is **reachable** for this measurement when it meets
+all three, and the site is measured if and only if it does:
+
+1. It asserts the ritual's pre-handoff state as already true and asks only for the closing report —
+   the technique every existing fixture in this case already uses — so the arm needs no tool beyond
+   `Read` and performs no vault write.
+2. It differs from `fixtures/review-completed-run.md` **only** in the state that selects the branch:
+   the `craft/slice-loop` marker reads as *not* complete, so slices remain to be chosen. Every other
+   line is identical, so the branch is the one variable.
+3. The captured deliverable is `review`'s second-outcome handoff and not its loop-complete handoff —
+   confirmed by the capture naming `/craft:slice` rather than `/craft:distill`. A capture landing on
+   the wrong branch is a fixture defect, discarded and rebuilt; it is never graded.
+
+The same three conditions govern `slice`'s new fixture, with the branch condition replaced by: the
+spec, its ledger, and the chosen slice are asserted as already decided, so the deliverable is the
+selection handoff alone and no vault write is required to reach it.
+
+**If a site proves unreachable under these conditions, it is reported unmeasured — never estimated,
+and never inferred from a neighbouring site.** An unreachable site does not enter Task 5's treatment
+footprint, because an edit whose effect cannot be measured is not a remediation.
+
+### Capture naming — the historical pin must keep its original invocation
+
+New captures from Task 4 and Task 6 land under `runs/` alongside the 30 the previous slice
+committed, which are immutable evidence. `execute`'s pinned *historical* invocation is `--exempt`;
+its pinned *future* invocation is the measurable one ruled above. Both must survive, so new captures
+carry a filename prefix distinct from any existing one rather than extending an existing ritual's
+numbering. Re-grading history under a later ruling would rewrite what the previous measurement
+actually recorded, which is precisely what the regression pin exists to prevent.
