@@ -24,10 +24,12 @@ scratch environment, and `expected.md` carrying three separately-judged pass
 conditions, written before any arm was run.
 
 **Under test:** the **Record links** section of `plugins/outpost/rules.md`
-(landed in commit `4d586099`), which installs as
-`~/.claude/rules/trailhead-outpost.md` — not yet installed on this machine when
-these arms ran, so each arm received the prose under test through
-`--append-system-prompt` rather than from the install.
+(current text, as edited in commit `d14c198a` — named "the vaults root" and
+recompressed to stay inside the section's 12-line budget; originally landed
+in commit `4d586099`), which installs as `~/.claude/rules/trailhead-outpost.md`
+— not yet installed on this machine when these arms ran, so each arm received
+the prose under test through `--append-system-prompt` rather than from the
+install.
 Both arms were `Read`-only with no shell tool at all — `expected.md` states why
 `scripts/eval-sandbox` does not apply to this case.
 
@@ -35,6 +37,8 @@ Both arms were `Read`-only with no shell tool at all — `expected.md` states wh
 |------|-----|------------------|------|--------|-------|
 | 2026-09-10 | baseline (`--setting-sources project`, no ruleset) | none | 3 | linked record 1 in 3/3, but with a wrong target (missing `/records/` segment); linked record 2 (non-standard-path vault) in 3/3; bare on records 3–5 in 3/3 | never told about the rule's link form, resolution steps, or path constraint |
 | 2026-09-10 | treatment (Record links section appended) | link form + base/vault resolution + grammar and path fallbacks | 3 | **3/3 correct on all five records** | record 1 linked with the right visible text and right target; records 2–5 all bare |
+| 2026-09-10 (re-run) | baseline (`--setting-sources project`, no ruleset) | none | 3 | linked record 1 in 3/3, wrong target (missing `/records/` segment) in 3/3; linked record 2 (non-standard-path vault) in 3/3; bare on records 3–5 in 3/3 | re-run against `d14c198a`'s rule text; baseline arm is unchanged prose (`arms/baseline.md`), included per protocol to keep the comparison meaningful |
+| 2026-09-10 (re-run) | treatment (Record links section appended, `d14c198a` text) | link form + base/vault resolution + grammar and path fallbacks, now naming the vaults root explicitly | 3 | **3/3 correct on all five records** | record 1 linked with the right visible text and right target; records 2–5 all bare — identical pattern to the 2026-09-10 rows above |
 
 ### What it showed
 
@@ -105,6 +109,69 @@ ruleset. Cost: this run says nothing about whether the rule survives
 ship-time context density, the crowding-out condition the spec named as
 this eval's whole purpose. See `expected.md`'s Limitations for the full
 statement.
+
+### Re-run (2026-09-10, commit `d14c198a`)
+
+Commit `d14c198a` edited the `## Record links` section of `rules.md` itself
+(naming "the vaults root" and recompressing the section to stay inside its
+12-line budget) and re-synced `arms/treatment.md` byte-for-byte — this fires
+`expected.md`'s own re-run trigger, third bullet ("the `## Record links`
+section ... itself, in any way"). Re-dispatched both arms per the pre-registered
+protocol: `arms/treatment.md`'s `## Record links` section confirmed
+byte-identical to `rules.md`'s before dispatching (`python3` string-equality
+check on the two extracted sections: `identical: True`), then 3 runs each of
+`arms/treatment.md` and `arms/baseline.md` against a freshly built fixture
+(`fixtures/make-fixture-env.sh`), as separate `claude -p` processes with
+`--setting-sources project`, `--allowedTools "Read"`, `< /dev/null`.
+
+**Result: unchanged from the 2026-09-10 rows above, in every particular.**
+Treatment: 3/3 runs linked record 1 correctly
+(`[gearshed/note/rotate-tires](http://127.0.0.1:9199/records/gearshed/note/rotate-tires)`)
+and printed records 2–5 bare. Baseline: 3/3 runs linked record 1 with the
+wrong target (missing `/records/`), 3/3 linked record 2 (the non-standard-path
+vault, `attic-archive`), and 3/3 bare on records 3–5. Graded against
+`expected.md`'s unmodified pass conditions: **PASS**, not INCONCLUSIVE — the
+same reason as before (baseline links record 1 "as often" as treatment but not
+"as correctly," so the INCONCLUSIVE clause is not triggered).
+
+No regression and no narrowing: the same two fallback reasons remain the ones
+shown to be rule-caused (the non-standard-path fallback on record 2, and
+record 1's exact `/records/...` target form), and the same two remain
+undifferentiated from baseline (the unresolvable-vault fallback on record 3,
+and the grammar fallback on records 4–5) — baseline again produced both
+independently, unprompted, in this re-run's raw output. The Limitations
+paragraph above still applies verbatim to this re-run; nothing in the rule
+edit that fired the trigger touched the fallback conditions or the link form,
+which is consistent with the result being unchanged.
+
+**No-tools probe, before trusting the baseline:** dispatched a probe under
+`--setting-sources project` with no ruleset appended, asking it to quote back
+verbatim every instruction mentioning "record" or "link." It quoted only the
+harness's own unrelated Memory-section `[[wikilink]]` prose and one unrelated
+line from the installed `~/.claude/rules/trailhead-outpost.md`
+("Rejected before anything is written: symlinks..."); no `## Record links`
+section was quoted, because the installed copy at `~/.claude/rules/trailhead-outpost.md`
+still predates `bin/trailhead install` being re-run and carries no such
+section yet (confirmed directly: `grep -n "Record links" ~/.claude/rules/trailhead-outpost.md`
+→ no match). This reproduces the prior run's own caveat exactly: the probe
+cannot distinguish `--setting-sources project` dropping the rule from there
+having been no rule installed to drop. Not a new finding — recorded here only
+because this re-run repeated the check independently, as the dispatch lessons
+require.
+
+**Real-state check, after this re-run's six `claude -p` processes** (all
+`--allowedTools "Read"`, no shell/Edit/Write tool): `~/.config/lore/config.json`
+mtime `2026-08-18` — predates this session, untouched.
+`~/.claude/rules/trailhead-outpost.md` mtime `2026-08-14` — predates this
+session, untouched. Every configured vault's git status
+(`default`, `lake-in-the-woods`, `levr`, `trailhead`, plus a stray `lever`
+directory) checked directly: `default` and `lake-in-the-woods` clean;
+`levr` and `trailhead` each carry pending changes, but every one of them is
+`task/*` or `session/*` bookkeeping from unrelated ongoing plan/session work
+(status/updated-at edits, a new session file) — nothing touching
+`rules.md`, `expected.md`, `arms/`, fixtures, or `MANUAL-EVAL.md` itself, and
+nothing a `Read`-only, no-shell arm could have produced. No mutation
+attributable to these six runs.
 
 ## Case: publish-routing
 
