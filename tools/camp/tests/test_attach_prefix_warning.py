@@ -25,8 +25,6 @@ if str(_PLUGIN_DIR) not in sys.path:
     sys.path.insert(0, str(_PLUGIN_DIR))
 
 from camp.attach import prefix_warning  # noqa: E402
-from camp.host import handoff  # noqa: E402
-from camp.host.config import Host  # noqa: E402
 
 
 # ---------------------------------------------------------------------------

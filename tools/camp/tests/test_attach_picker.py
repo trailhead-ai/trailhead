@@ -117,7 +117,7 @@ def test_zero_candidates_states_so_and_never_prompts(tmp_path: Path) -> None:
 
 
 def test_one_candidate_still_prompts_rather_than_auto_attaching(tmp_path: Path) -> None:
-    from camp.attach.picker import Picked, Row, PoolReady, pick_session
+    from camp.attach.picker import Picked, PoolReady, pick_session
 
     state, env, harness, tmux, transcripts, live_records, groups = _fixture_two(tmp_path)
     pool = _build_pool(

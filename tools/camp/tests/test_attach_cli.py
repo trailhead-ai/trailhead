@@ -47,7 +47,6 @@ if str(_TESTS_DIR) not in sys.path:
     sys.path.insert(0, str(_TESTS_DIR))
 
 from test_launch_stop import (  # noqa: E402
-    _NOW,
     _UUID_A,
     _UUID_B,
     _FakeHarness as _BaseFakeHarness,
