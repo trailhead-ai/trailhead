@@ -455,14 +455,22 @@ def _render_move_completion(
 
     Distinguishes "arrived" from "ready to work in" (regeneration is spawned,
     not awaited — see `camp.transfer.receive`'s `finish`), states plainly
-    that ownership did not move, and names the interim risk that nothing
-    scans what crossed for credential-shaped content — untracked files
-    routinely carry them and the peer now holds a cleartext copy.
+    that ownership did not move, names the consequence of that (work the
+    peer accumulates has no way back to the sender, so a later --overwrite
+    destroys it), and names the interim risk that nothing scans what crossed
+    for credential-shaped content — untracked files routinely carry them and
+    the peer now holds a cleartext copy.
     """
     from ..launch.recovery import printable_path
 
     print(f"camp transfer: {slug!r} arrived on {peer_name!r}")
     print(f"  ownership did not move — {self_name!r} still owns {slug!r}")
+    print(
+        f"  work accumulated on {peer_name!r} after this point has no way "
+        f"back to {self_name!r} — a later transfer of {slug!r} with "
+        "--overwrite would destroy any uncommitted or untracked work in "
+        "that copy"
+    )
     print(
         f"  regeneration of each member's excluded state is still running on "
         f"{peer_name!r} — check its progress there with "
@@ -615,7 +623,8 @@ def _cmd_transfer_group_cli(
         print(
             f"camp transfer: phase {e.phase!r} failed — {e.detail}. This is a "
             "failure, not a refusal: everything up to this phase already "
-            "crossed, and re-running the transfer is safe.",
+            "crossed, and re-running the transfer is safe — pass --overwrite, "
+            "since the first begin already seeded the manifest.",
             file=sys.stderr,
         )
         sys.exit(EXIT_PHASE_FAILED)

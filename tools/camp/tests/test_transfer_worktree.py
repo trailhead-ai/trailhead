@@ -257,6 +257,54 @@ class TestConfinement:
 
 
 # ---------------------------------------------------------------------------
+# Mode sanitization — the setuid/setgid/sticky bits and group/other write
+# bits an archive member declares must never survive extraction, independent
+# of whether `tarfile.data_filter` is available on the running interpreter.
+# ---------------------------------------------------------------------------
+
+
+def _mode_archive(member_name: str, mode: int) -> bytes:
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w") as tf:
+        info = tarfile.TarInfo(name=member_name)
+        data = b"payload\n"
+        info.size = len(data)
+        info.mode = mode
+        tf.addfile(info, io.BytesIO(data))
+    return buf.getvalue()
+
+
+class TestModeSanitization:
+    def test_setuid_and_world_writable_bits_are_stripped_on_extraction(
+        self, tmp_path: Path
+    ):
+        from camp.transfer.worktree import extract_archive
+
+        archive = _mode_archive("evil.sh", 0o4777)
+        peer_wt = tmp_path / "peer-wt"
+        peer_wt.mkdir()
+
+        extract_archive(io.BytesIO(archive), peer_wt)
+
+        extracted_mode = (peer_wt / "evil.sh").stat().st_mode & 0o7777
+        assert extracted_mode == 0o755
+        assert extracted_mode & 0o4000 == 0  # setuid gone
+        assert extracted_mode & 0o022 == 0  # group/other write gone
+
+    def test_normal_mode_member_keeps_its_normal_mode(self, tmp_path: Path):
+        from camp.transfer.worktree import extract_archive
+
+        archive = _mode_archive("plain.txt", 0o644)
+        peer_wt = tmp_path / "peer-wt"
+        peer_wt.mkdir()
+
+        extract_archive(io.BytesIO(archive), peer_wt)
+
+        extracted_mode = (peer_wt / "plain.txt").stat().st_mode & 0o7777
+        assert extracted_mode == 0o644
+
+
+# ---------------------------------------------------------------------------
 # Incremental consumption — a stream larger than the pipe's own buffer must
 # not require buffering the whole thing before extraction can start.
 # ---------------------------------------------------------------------------

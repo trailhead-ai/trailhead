@@ -17,6 +17,12 @@ Test contract (all must RED before implementation, GREEN after):
   force-updates it rather than refusing.
 - `camp transfer-receive history` is reachable as a real command through the
   actual `camp` dispatcher, not only by calling `history()` directly.
+- a basis commit the SENDER does not hold locally is not negatived against —
+  `build_bundle_argv` falls back to a full bundle rather than handing git a
+  `--not <sha>` it cannot resolve, and `send_history` still succeeds end to
+  end when the peer reported such a commit.
+- a basis commit that is not a plausible git object-id shape is refused with
+  a clear message before it reaches git's own argv parsing.
 """
 
 from __future__ import annotations
@@ -535,3 +541,131 @@ class TestSendHistoryEndToEnd:
 
         landed = _git_out(peer_repo, "rev-parse", f"refs/heads/{branch}")
         assert landed == tip
+
+
+# ---------------------------------------------------------------------------
+# A peer-reported basis commit the sender does not hold must not be handed
+# to `git bundle create --not` — the sender falls back to a full bundle
+# rather than failing permanently against an object it can never resolve.
+# ---------------------------------------------------------------------------
+
+
+class TestBasisCommitNotHeldBySender:
+    def test_falls_back_to_full_bundle_when_sender_lacks_the_basis_object(
+        self, tmp_path: Path
+    ):
+        from camp.transfer.history import build_bundle_argv
+
+        sender_repo = tmp_path / "sender"
+        init_git_repo(sender_repo, origin=True)
+        branch = "worktree-feat-x"
+        _git(sender_repo, "checkout", "-b", branch)
+
+        # Plausibly-shaped sha the sender's own object store does not hold —
+        # the shape a peer's AHEAD `origin/main` resolves to on ITS host.
+        unheld_basis = "a" * 40
+
+        argv = build_bundle_argv(sender_repo, branch, basis_commit=unheld_basis)
+
+        assert "--not" not in argv
+        assert unheld_basis not in argv
+
+    def test_still_negatives_when_sender_actually_holds_the_basis(self, tmp_path: Path):
+        from camp.transfer.history import build_bundle_argv
+
+        sender_repo = tmp_path / "sender"
+        init_git_repo(sender_repo, origin=True)
+        branch = "worktree-feat-x"
+        _git(sender_repo, "checkout", "-b", branch)
+        base_sha = _git_out(sender_repo, "rev-parse", "HEAD")
+        (sender_repo / "extra.txt").write_text("extra\n")
+        _git(sender_repo, "add", "extra.txt")
+        _git(
+            sender_repo,
+            "-c",
+            "user.email=t@t.com",
+            "-c",
+            "user.name=t",
+            "commit",
+            "-m",
+            "extra",
+            "--no-gpg-sign",
+        )
+
+        argv = build_bundle_argv(sender_repo, branch, basis_commit=base_sha)
+
+        assert "--not" in argv
+        assert base_sha in argv
+
+    def test_send_history_still_succeeds_when_peer_basis_is_unheld_by_sender(
+        self, tmp_path: Path
+    ):
+        from camp.host.config import Host
+        from camp.host.transport import Answered
+        from camp.transfer.history import send_history
+
+        sender_repo = tmp_path / "sender"
+        init_git_repo(sender_repo, origin=True)
+        branch = "worktree-feat-unheld"
+        _git(sender_repo, "checkout", "-b", branch)
+        (sender_repo / "sent.txt").write_text("sent despite unheld basis\n")
+        _git(sender_repo, "add", "sent.txt")
+        _git(
+            sender_repo,
+            "-c",
+            "user.email=t@t.com",
+            "-c",
+            "user.name=t",
+            "commit",
+            "-m",
+            "sent",
+            "--no-gpg-sign",
+        )
+        tip = _git_out(sender_repo, "rev-parse", "HEAD")
+
+        peer_repo = tmp_path / "peer_unheld_repo_a"
+        init_git_repo(peer_repo, origin=False)
+        peer_cfg = tmp_path / "peer-unheld-config"
+        (peer_cfg / "groups").mkdir(parents=True)
+        _write_group_toml(peer_cfg / "groups", "testgroup", [("repo_a", str(peer_repo))])
+        peer_state = tmp_path / "peer-unheld-state"
+
+        host = Host(ssh="fake-peer", camp_bin="/opt/camp/bin/camp")
+
+        # A basis commit shaped like a real sha (as `_basis_commit` on the
+        # peer's own AHEAD `origin/main` would report) but present in
+        # neither the sender's nor the peer's object store.
+        unheld_basis = "b" * 40
+
+        outcome = send_history(
+            host,
+            group="testgroup",
+            slug="feat-unheld",
+            member="repo_a",
+            repo_root=sender_repo,
+            ref=branch,
+            basis_commit=unheld_basis,
+            spawn=_peer_process_spawn(peer_cfg, peer_state),
+        )
+
+        assert isinstance(outcome, Answered), outcome
+        payload = json.loads(outcome.stdout)
+        assert payload["commit"] == tip
+
+        landed = _git_out(peer_repo, "rev-parse", f"refs/heads/{branch}")
+        assert landed == tip
+
+
+class TestMalformedBasisCommitShape:
+    def test_non_hex_basis_commit_refused_with_a_clear_message(self, tmp_path: Path):
+        from camp.transfer.history import InvalidBasisCommit, build_bundle_argv
+
+        sender_repo = tmp_path / "sender"
+        init_git_repo(sender_repo, origin=True)
+        branch = "worktree-feat-x"
+        _git(sender_repo, "checkout", "-b", branch)
+
+        with pytest.raises(InvalidBasisCommit) as exc_info:
+            build_bundle_argv(sender_repo, branch, basis_commit="--not-a-sha; rm -rf")
+
+        assert "--not-a-sha; rm -rf" in str(exc_info.value)
