@@ -67,7 +67,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..group.manifest import workspace_dir
-from .claude_trust import config_file, pretrust_workspace, trust_status
+from .claude_trust import pretrust_workspace, trust_status
 from .lore_pull import pull_lore
 from .profile import harness_for, resolve_harness_profile
 from .recovery import (
@@ -538,28 +538,37 @@ def _report_account(
     )
 
 
-def _warn_if_account_has_no_config(account: str | None, launch_env: dict[str, str]) -> None:
-    """Warn when a declared account has no harness config file yet.
+def _warn_if_account_has_no_config(
+    account: str | None, identity: "AccountIdentity | None"
+) -> None:
+    """Warn when a declared account has no configuration behind it yet.
 
     Advisory, not a refusal: the directory may legitimately not exist before the
-    account is first signed into. But a typo'd declaration otherwise produces a
-    launch that stalls for reasons indistinguishable from every other cause, and
-    naming the path camp actually resolved is what makes the typo visible.
+    account is first signed into — a mistyped account and a correctly-named
+    account not yet logged into are indistinguishable from outside, so camp
+    warns and launches either way rather than refusing.
 
-    Every failure degrades to silence, the same posture as the other advisory
-    probes here — a launch must not hinge on camp's ability to describe it.
+    *identity* is the SAME seam answer :func:`_resolve_account_identity` already
+    produced for the report on this launch — never a second, harness-specific
+    resolver reached directly from this call site. That is what makes the
+    account named here and the account whose configuration was checked the same
+    account by construction, and it is why camp names no credential location of
+    its own: it prints ``identity.label`` verbatim.
+
+    ``identity is None`` means this harness offers no account-identity concept
+    (the base-class default) or the seam failed unexpectedly and already
+    degraded to ``None`` upstream — either way camp cannot check existence
+    without a credential location, and reaching for one of its own here is
+    exactly the constraint this warning must not reinstate. No warning is
+    emitted; behaviour matches a harness with no such capability.
     """
-    if account is None:
+    if account is None or identity is None:
         return
-    try:
-        target = config_file(launch_env)
-        missing = not target.exists()
-    except Exception:  # noqa: BLE001 — advisory probe, never blocks a launch
-        return
-    if missing:
+    if not identity.has_config:
         print(
             f"camp: declared account {account} has no harness config file at "
-            f"{target} — the session may land unauthenticated; check for a typo",
+            f"{identity.label} — the session may land unauthenticated; check "
+            "for a typo",
             file=sys.stderr,
         )
 
@@ -739,7 +748,7 @@ def launch_session(
     # disagree.
     identity = _resolve_account_identity(harness, profile, account, launch_env)
     _report_account(account, account_binding, identity)
-    _warn_if_account_has_no_config(account, launch_env)
+    _warn_if_account_has_no_config(account, identity)
 
     _assert_trust(profile, launch_dir, trust_root, launch_env)
 
