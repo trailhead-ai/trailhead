@@ -1,0 +1,18 @@
+**Cluster: `spec/dock-scheduling-windows`** (vault `harborlight`) — one member, no siblings.
+
+| | |
+|---|---|
+| Members | `spec/dock-scheduling-windows` → `complete`, annotated `distilled=adr` |
+| ADRs written | `adr/dock-scheduling-windows-use-fifo-slots` (vault `harborlight`), `active`, carrying `related: spec=dock-scheduling-windows` |
+| Decisions absorbed | none |
+| ADRs superseded | none |
+| Area profiles re-synthesized | the areas this spec touched, citing the new ADR inline as a wikilink |
+| Terminal outcome | **ADRs written** |
+
+No deferrals in this run — no in-flight members, no zero-task-edges specs.
+
+Read the ADR:
+
+```
+lore record show adr/dock-scheduling-windows-use-fifo-slots
+```

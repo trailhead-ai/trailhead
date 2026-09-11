@@ -13,6 +13,7 @@ never reaches this seam — see the task report for the enumeration).
 from __future__ import annotations
 
 import importlib
+import json
 import sys
 from pathlib import Path
 
@@ -210,3 +211,213 @@ def test_unparsable_json_array_of_non_objects_row(monkeypatch) -> None:
     assert answer.rows == [
         {"ok": False, "host": "andromeda", "reason": "remote answer could not be parsed"}
     ]
+
+
+# ---------------------------------------------------------------------------
+# `answer_object_for_host` — the single-object relay shape, and the
+# outcome-certainty mapping every state-changing verb reuses.
+# ---------------------------------------------------------------------------
+
+
+def _object_answer(monkeypatch, outcome):
+    """Mirrors `_answer` above, but drives the single-object relay entry
+    point `answer_object_for_host` instead of the rows relay."""
+    relay = _relay_module()
+    transport = _transport_module()
+
+    def fake_run_camp(host, remote_argv, **kwargs):
+        return outcome
+
+    monkeypatch.setattr(transport, "run_camp", fake_run_camp)
+
+    return relay.answer_object_for_host(
+        "launch", _host(), "andromeda", ["launch", "ws-a", "--group", "g", "--json"],
+    )
+
+
+_LAUNCH_ANSWER_STDOUT = (
+    '{"workspace": "/a", "session_id": "s1", "tmux_name": "t1", '
+    '"account": "work", "account_binding": {"HOME": "/home/work"}}'
+)
+
+
+def test_certainty_answered_is_happened(monkeypatch) -> None:
+    transport = _transport_module()
+    answer = _object_answer(
+        monkeypatch, transport.Answered(stdout=_LAUNCH_ANSWER_STDOUT, stderr="", exit_code=0)
+    )
+    assert answer.certainty == _relay_module().Certainty.HAPPENED
+
+
+def test_certainty_stopped_responding_is_unknown(monkeypatch) -> None:
+    transport = _transport_module()
+    answer = _object_answer(monkeypatch, transport.StoppedResponding(execution_timeout=60.0))
+    assert answer.certainty == _relay_module().Certainty.UNKNOWN
+
+
+def test_certainty_unreachable_is_did_not_happen(monkeypatch) -> None:
+    transport = _transport_module()
+    answer = _object_answer(monkeypatch, transport.Unreachable(reason="Connection timed out"))
+    assert answer.certainty == _relay_module().Certainty.DID_NOT_HAPPEN
+
+
+def test_certainty_identity_unknown_is_did_not_happen(monkeypatch) -> None:
+    transport = _transport_module()
+    answer = _object_answer(monkeypatch, transport.IdentityUnknown())
+    assert answer.certainty == _relay_module().Certainty.DID_NOT_HAPPEN
+
+
+def test_certainty_identity_changed_is_did_not_happen(monkeypatch) -> None:
+    transport = _transport_module()
+    answer = _object_answer(monkeypatch, transport.IdentityChanged())
+    assert answer.certainty == _relay_module().Certainty.DID_NOT_HAPPEN
+
+
+def test_certainty_credentials_refused_is_did_not_happen(monkeypatch) -> None:
+    transport = _transport_module()
+    answer = _object_answer(monkeypatch, transport.CredentialsRefused())
+    assert answer.certainty == _relay_module().Certainty.DID_NOT_HAPPEN
+
+
+def test_certainty_camp_not_resolvable_is_did_not_happen(monkeypatch) -> None:
+    transport = _transport_module()
+    answer = _object_answer(monkeypatch, transport.CampNotResolvable())
+    assert answer.certainty == _relay_module().Certainty.DID_NOT_HAPPEN
+
+
+def test_certainty_remote_refusal_is_did_not_happen(monkeypatch) -> None:
+    transport = _transport_module()
+    answer = _object_answer(
+        monkeypatch,
+        transport.RemoteRefusal(stdout="", stderr="camp launch: no such group\n", exit_code=1),
+    )
+    assert answer.certainty == _relay_module().Certainty.DID_NOT_HAPPEN
+
+
+def test_stopped_responding_is_the_only_unknown_outcome() -> None:
+    """Enumerates every transport outcome type by reflection, so a later
+    outcome added to `camp.host.transport` without a certainty mapping
+    entry fails this test rather than silently defaulting to certain."""
+    transport = _transport_module()
+    relay = _relay_module()
+
+    sample_outcomes = {
+        transport.Answered: transport.Answered(stdout="{}", stderr="", exit_code=0),
+        transport.Unreachable: transport.Unreachable(reason="x"),
+        transport.StoppedResponding: transport.StoppedResponding(execution_timeout=60.0),
+        transport.IdentityUnknown: transport.IdentityUnknown(),
+        transport.IdentityChanged: transport.IdentityChanged(),
+        transport.CampNotResolvable: transport.CampNotResolvable(),
+        transport.CredentialsRefused: transport.CredentialsRefused(),
+        transport.RemoteRefusal: transport.RemoteRefusal(stdout="", stderr="", exit_code=1),
+    }
+    subclasses = set(transport.TransportOutcome.__subclasses__())
+    assert subclasses == set(sample_outcomes), (
+        "a transport outcome type was added or removed without updating this "
+        "test's enumeration"
+    )
+
+    unknown_types = {
+        outcome_type
+        for outcome_type, outcome in sample_outcomes.items()
+        if relay.classify_certainty(outcome) == relay.Certainty.UNKNOWN
+    }
+    assert unknown_types == {transport.StoppedResponding}
+
+
+def test_object_answer_relays_json_object_successfully(monkeypatch) -> None:
+    transport = _transport_module()
+    answer = _object_answer(
+        monkeypatch, transport.Answered(stdout=_LAUNCH_ANSWER_STDOUT, stderr="", exit_code=0)
+    )
+    assert answer.answer == {
+        "workspace": "/a",
+        "session_id": "s1",
+        "tmux_name": "t1",
+        "account": "work",
+        "account_binding": {"HOME": "/home/work"},
+    }
+
+
+def test_same_object_payload_does_not_relay_through_rows_relay(monkeypatch) -> None:
+    """Pins why the second shape exists: an object answer is not a rows
+    answer — the existing relay treats it as unparsable."""
+    transport = _transport_module()
+    answer = _answer(monkeypatch, transport.Answered(stdout=_LAUNCH_ANSWER_STDOUT, stderr="", exit_code=0))
+    assert answer.rows == [
+        {"ok": False, "host": "andromeda", "reason": "remote answer could not be parsed"}
+    ]
+
+
+def test_object_relay_stderr_survives_verbatim_apart_from_stripping(monkeypatch) -> None:
+    transport = _transport_module()
+    stderr = "camp launch: \x1b[31mno such group\x1b[0m: 'nope'\n"
+    answer = _object_answer(
+        monkeypatch, transport.RemoteRefusal(stdout="", stderr=stderr, exit_code=1)
+    )
+    assert answer.notices == ["camp launch: [31mno such group[0m: 'nope'"]
+
+
+def test_object_relay_exit_code_propagates_unchanged(monkeypatch) -> None:
+    transport = _transport_module()
+    answer = _object_answer(
+        monkeypatch, transport.RemoteRefusal(stdout="", stderr="refused\n", exit_code=17)
+    )
+    assert answer.exit_code == 17
+
+
+def test_object_relay_exit_code_propagates_nonzero_alongside_well_formed_answer(monkeypatch) -> None:
+    """A well-formed answer is relayed even when the far side's own exit
+    code is non-zero — the exit code is carried unchanged, not coerced."""
+    transport = _transport_module()
+    answer = _object_answer(
+        monkeypatch, transport.Answered(stdout=_LAUNCH_ANSWER_STDOUT, stderr="", exit_code=9)
+    )
+    assert answer.answer is not None
+    assert answer.exit_code == 9
+
+
+def test_control_sequences_stripped_from_every_success_field(monkeypatch) -> None:
+    """The success path is the one an operator trusts most — control
+    sequences must be stripped from every field, not only refusal text."""
+    transport = _transport_module()
+    poisoned_stdout = json.dumps({
+        "workspace": "/a\x1b[2J",
+        "session_id": "s1\x1b[31m",
+        "tmux_name": "t1\x9b8m",
+        "account": "work",
+        "account_binding": {"HOME": "/home/work\x1b[0m"},
+    })
+    answer = _object_answer(
+        monkeypatch, transport.Answered(stdout=poisoned_stdout, stderr="", exit_code=0)
+    )
+    assert answer.answer["workspace"] == "/a[2J"
+    assert answer.answer["session_id"] == "s1[31m"
+    assert answer.answer["tmux_name"] == "t18m"
+    assert answer.answer["account_binding"] == {"HOME": "/home/work[0m"}
+
+
+def test_answered_with_unparsable_stdout_is_not_a_relayable_success(monkeypatch) -> None:
+    """`Answered` alone does not guarantee a relayable success — over a
+    transport that does not propagate the remote's own exit status, it also
+    covers camp-not-installed and camp-crashed, whose stdout is not a JSON
+    object. The caller must be able to tell those apart from a parsed
+    answer, so a non-object stdout on an `Answered` outcome still yields
+    `answer=None` even though the certainty is `HAPPENED`."""
+    transport = _transport_module()
+    relay = _relay_module()
+    answer = _object_answer(
+        monkeypatch, transport.Answered(stdout="not json at all", stderr="", exit_code=0)
+    )
+    assert answer.answer is None
+    assert answer.certainty == relay.Certainty.HAPPENED
+
+
+def test_answered_with_json_array_stdout_is_not_a_relayable_success(monkeypatch) -> None:
+    """A JSON *array* (the rows shape) is well-formed JSON but not an
+    object — it must not be mistaken for a relayable single-object answer."""
+    transport = _transport_module()
+    answer = _object_answer(
+        monkeypatch, transport.Answered(stdout='[{"session_id": "s1"}]', stderr="", exit_code=0)
+    )
+    assert answer.answer is None

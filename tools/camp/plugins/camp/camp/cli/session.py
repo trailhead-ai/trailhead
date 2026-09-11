@@ -1516,6 +1516,168 @@ def _cmd_sessions_host_cli(args: list[str], host: "Host", host_name: str) -> Non
     )
 
 
+#: Exit code for `camp launch --host` when the connection completed and the
+#: invocation then exceeded its bound without answering (`Certainty.UNKNOWN`).
+#: Distinct from 0 (success) and from every certain-failure exit — the fixed
+#: `1` the six locally-classified transport failures share, or the far
+#: side's own exit code when the transport happens to propagate it — so a
+#: scripted caller can branch on "check before retrying" without parsing
+#: stderr (docs/design/a-session-starts-on-a-named-machine.md, "Added by
+#: council review (Critical)").
+_LAUNCH_HOST_UNKNOWN_EXIT_CODE = 3
+
+
+def _cmd_launch_host_cli(args: list[str], host: "Host", host_name: str) -> None:
+    """camp launch <slug> --host <name> --group <group> [--json].
+
+    Reached ONLY from `cli/dispatch.py`'s `--host` handling in
+    `_dispatch_host_command`, after `--group` has already been required and
+    validated present — a state-changing verb never infers it from this
+    machine's cwd (see `HOST_FLAG`'s own comment in dispatch.py).
+
+    Relays through `camp.host.relay.answer_object_for_host` — the single-
+    object counterpart to the rows relay `_cmd_sessions_host_cli` and
+    `_cmd_ls_host_cli` use — rather than `relay_all_groups`: a launch answers
+    with one session or nothing at all, and the rendering below needs its
+    own exit-code and stderr-ordering policy the generic rows relay does not
+    provide.
+
+    `Certainty.HAPPENED` is necessary but not sufficient here: this peer's
+    SSH transport does not propagate the remote command's own exit status
+    (see `camp.host.transport`'s module docstring), so a far side that
+    refused, crashed, or could not resolve camp still classifies as
+    `Answered`/HAPPENED. `answer_object_for_host` already guards this —
+    `answer.answer` is `None` whenever the far side's stdout did not decode
+    as a JSON object — so THIS is what decides success, never the certainty
+    or the raw exit code alone.
+    """
+    from ..host.relay import Certainty, answer_object_for_host
+    from ..spine import _consume_flag_value, _die
+
+    rest = list(args)
+    as_json = _consume_flag(rest, "--json")
+    group = _consume_flag_value(rest, "--group")
+    if group is None:
+        # Unreachable in practice — dispatch.py's --host handling already
+        # requires --group for a state-changing verb before this function is
+        # ever reached — but a CLI entry point never trusts a caller-
+        # enforced invariant it can cheaply re-check itself.
+        _die("camp launch: --host requires an explicit --group")
+    if len(rest) != 1:
+        _die(
+            f"camp launch: --host requires exactly one workspace slug, got "
+            f"{len(rest)}"
+        )
+    slug = rest[0]
+
+    answer = answer_object_for_host(
+        "launch", host, host_name, ["launch", slug, "--group", group, "--json"],
+    )
+
+    if answer.answer is not None:
+        _report_launch_host_success(answer.answer, host_name=host_name, as_json=as_json)
+        sys.exit(0)
+
+    if answer.certainty == Certainty.UNKNOWN:
+        # The instruction to check comes FIRST, before any explanation, and
+        # reads as an instruction naming the command to run — an operator
+        # who reads only this line must still do the right thing (design
+        # doc, "State — the connection drops after the launch was sent").
+        command = f"camp sessions --host {host_name} --group {group}"
+        print(
+            f"camp launch: check before retrying — run: {command}",
+            file=sys.stderr,
+        )
+        print(
+            f"camp launch: camp does not know whether a session was started "
+            f"on host {host_name!r} — the connection stopped answering "
+            "before the far side reported back",
+            file=sys.stderr,
+        )
+        for notice in answer.notices:
+            print(notice, file=sys.stderr)
+        if as_json:
+            print(json.dumps({
+                "ok": False,
+                "host": host_name,
+                "certainty": answer.certainty.value,
+                "reason": "connection stopped answering before the far side reported back",
+            }))
+        sys.exit(_LAUNCH_HOST_UNKNOWN_EXIT_CODE)
+
+    # A certain failure: either one of the six locally-classified transport
+    # states (host unreachable, no pinned key, ...) or a far-side refusal
+    # relayed in its own words. Either way nothing was started, so the same
+    # plain sentence closes the report for both — the far side's own words
+    # (when there are any) are relayed exactly as `answer.notices` already
+    # carries them, unwrapped, before it.
+    # Camp's own sentence leads, and the far side's words follow it.
+    #
+    # The order is load-bearing, not cosmetic. The first stderr line is what
+    # carries the certain/uncertain distinction to an operator who skims, and
+    # a line the far side authored cannot carry it: a declared host is trusted
+    # to run commands, not to write camp's most consequential sentence. Left
+    # in front, a refusal crafted to read like the check-before-retry
+    # instruction would send the operator hunting for a session that was never
+    # started — the exact confusion that wording exists to prevent.
+    #
+    # The refusal itself is still relayed in the far side's own words,
+    # unwrapped; only the leading position is camp's.
+    print(f"camp launch: no session was started on host {host_name!r}", file=sys.stderr)
+    for notice in answer.notices:
+        print(notice, file=sys.stderr)
+
+    # The far side's own status is passed through where it says something,
+    # but the uncertain code is RESERVED: a remote camp that happens to exit
+    # with that number would otherwise impersonate camp's own "I do not know",
+    # and the one signal a scripted caller can branch on without parsing prose
+    # would stop meaning what it says. A refusal is certain — nothing was
+    # started and there is nothing to check — so it collapses to the shared
+    # certain-failure code instead.
+    exit_code = answer.exit_code
+    if exit_code == 0 or exit_code == _LAUNCH_HOST_UNKNOWN_EXIT_CODE:
+        exit_code = 1
+    if as_json:
+        reason = answer.notices[-1] if answer.notices else "no session was started"
+        print(json.dumps({
+            "ok": False,
+            "host": host_name,
+            "certainty": answer.certainty.value,
+            "reason": reason,
+        }))
+    sys.exit(exit_code)
+
+
+def _report_launch_host_success(
+    answer: dict, *, host_name: str, as_json: bool
+) -> None:
+    """The success report for `camp launch --host` — the same stdout/stderr
+    split as a local launch (`_report_launched`): stdout carries ONLY the
+    session id, so `$(camp launch --host ...)` captures the same value
+    whichever machine ran it, and everything else — the machine, the
+    workspace, the attach handle — goes to stderr.
+
+    The attach hint names `camp attach --host`, not the local `tmux attach`
+    a same-machine launch prints: the session lives on `host_name`, not
+    here, and the design doc pairs this launch with the attach verb that
+    already reaches a named machine's session.
+    """
+    session_id = answer["session_id"]
+    workspace = answer["workspace"]
+    print(
+        f"camp launch: launched session {session_id} on host {host_name!r} "
+        f"in {workspace}\n  attach: camp attach {session_id} --host {host_name}",
+        file=sys.stderr,
+    )
+    if as_json:
+        payload = dict(answer)
+        payload["host"] = host_name
+        payload["certainty"] = "happened"
+        print(json.dumps(payload))
+        return
+    print(session_id)
+
+
 def _cmd_sessions_group_cli(
     args: list[str],
     group: dict | None,

@@ -114,8 +114,12 @@ Hand off to distill instead, fully formed the same way, but only once the slice 
 spec closed out (`craft/slice-loop=complete`, per `../_shared/status-ownership.md`) — never as the
 unconditional next step from a per-slice review:
 
-> "The slice loop reports spec/streaming-export closed out. Run
-> `/craft:distill spec/streaming-export` when you're ready to distill this work into the ADR log."
+> "The slice loop reports spec/streaming-export closed out. Run this when you're ready to distill
+> this work into the ADR log."
+
+```
+/craft:distill spec/streaming-export
+```
 
 **This handoff is carryoutable.** `distill/SKILL.md` enumerates `ready` specs carrying the
 `craft/slice-loop` marker `/craft:slice` writes at its terminating condition, and its completion

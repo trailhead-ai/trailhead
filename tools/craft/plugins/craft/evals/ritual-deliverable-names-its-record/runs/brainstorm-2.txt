@@ -1,0 +1,14 @@
+Exit Gate — all checklist items verified:
+
+- [x] Shared understanding confirmed in step 5 — you agreed to a playback of exactly what gets built
+- [x] Objectives clear and outcome-framed
+- [x] Acceptance criteria testable and bounded
+- [x] Non-goals explicit
+- [x] Open questions all resolved, deferred, or accepted-as-risk — none unaddressed
+- [x] UI direction locked — the handheld scanner's "slot claimed" state, described verbally in the spec
+- [x] Exit artifact written and shared — [spec/warehouse-picking-batches](http://127.0.0.1:7313/records/northlight/spec/warehouse-picking-batches)
+- [x] No scope deferred, so no `task` records to capture
+
+The spec is saved as a lore `spec` record (status `draft`). Next it goes through the gauntlet — eight parallel passes that attack its facts, premises, consistency, and underdetermination — and the gauntlet flips it to `ready` once you've accepted its recommendation — or overridden it. Run:
+
+`/craft:gauntlet spec/warehouse-picking-batches`

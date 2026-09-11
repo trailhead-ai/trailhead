@@ -1,0 +1,20 @@
+## Distillation complete — 1 cluster
+
+**Cluster: dock-scheduling-windows** (vault `harborlight`)
+
+| | |
+|---|---|
+| Members | spec/dock-scheduling-windows — flipped `complete`, annotated `distilled=adr` |
+| ADRs written | adr/dock-scheduling-windows-use-fifo-slots (`active`), with a `related: spec=dock-scheduling-windows` provenance edge |
+| Decisions absorbed | none |
+| ADRs superseded | none |
+| Area profiles re-synthesized | the areas this spec touched, cited to the new ADR inline |
+| Terminal outcome | **ADRs written** |
+
+**Deferrals:** none. Every candidate in this run was distilled; no member was in flight and no cluster hit the zero-task-edges condition.
+
+Read the ADR:
+
+```
+lore record show adr/dock-scheduling-windows-use-fifo-slots
+```

@@ -562,3 +562,358 @@ def test_host_and_positional_slug_refuses(hosts_env, monkeypatch, capsys) -> Non
     assert "feat-x" in captured.err
     assert "workspace slug" in captured.err
     assert captured_argv == []
+
+
+# ---------------------------------------------------------------------------
+# `camp launch --host <name> --group <group> <slug>` — the single-object
+# relay (`camp.host.relay.answer_object_for_host`), not `relay_all_groups`.
+# Covers the seven enumerated states of docs/design/a-session-starts-on-a-
+# named-machine.md, driven by a fake `transport.run_camp` outcome per state.
+# ---------------------------------------------------------------------------
+
+
+def _launch_answer_stdout(**overrides) -> str:
+    answer = {
+        "workspace": "/workspace/ws-a",
+        "session_id": "s1",
+        "tmux_name": "camp-ws-a-s1",
+        "account": None,
+        "account_binding": {},
+    }
+    answer.update(overrides)
+    return json.dumps(answer)
+
+
+def test_launch_host_success_stdout_is_only_the_session_id(
+    hosts_env, monkeypatch, capsys: pytest.CaptureFixture
+) -> None:
+    transport = _transport_module()
+    captured_argv: list = []
+    outcome = transport.Answered(stdout=_launch_answer_stdout(), stderr="", exit_code=0)
+    _rig(monkeypatch, outcome, capture_argv=captured_argv)
+
+    code = _run(
+        monkeypatch,
+        ["launch", "ws-a", "--host", "andromeda", "--group", "demo"],
+    )
+
+    captured = capsys.readouterr()
+    assert code == 0
+    assert captured.out == "s1\n"
+    assert "andromeda" in captured.err
+    assert "/workspace/ws-a" in captured.err
+    assert captured_argv == [["launch", "ws-a", "--group", "demo", "--json"]]
+
+
+def test_launch_host_success_json_form_carries_certainty_happened(
+    hosts_env, monkeypatch, capsys: pytest.CaptureFixture
+) -> None:
+    transport = _transport_module()
+    outcome = transport.Answered(stdout=_launch_answer_stdout(), stderr="", exit_code=0)
+    _rig(monkeypatch, outcome)
+
+    code = _run(
+        monkeypatch,
+        ["launch", "ws-a", "--host", "andromeda", "--group", "demo", "--json"],
+    )
+
+    captured = capsys.readouterr()
+    assert code == 0
+    payload = json.loads(captured.out)
+    assert payload["session_id"] == "s1"
+    assert payload["host"] == "andromeda"
+    assert payload["certainty"] == "happened"
+
+
+def test_launch_host_already_running_state_is_an_ordinary_success(
+    hosts_env, monkeypatch, capsys: pytest.CaptureFixture
+) -> None:
+    """The far side may answer with a SECOND session for a workspace already
+    running one — camp's launches are not exclusive, so this is rendered
+    exactly like any other successful launch, with no special casing."""
+    transport = _transport_module()
+    outcome = transport.Answered(
+        stdout=_launch_answer_stdout(session_id="s2", tmux_name="camp-ws-a-s2"),
+        stderr="",
+        exit_code=0,
+    )
+    _rig(monkeypatch, outcome)
+
+    code = _run(
+        monkeypatch,
+        ["launch", "ws-a", "--host", "andromeda", "--group", "demo"],
+    )
+
+    captured = capsys.readouterr()
+    assert code == 0
+    assert captured.out == "s2\n"
+
+
+def test_launch_host_refusal_reaches_operator_in_far_sides_own_words(
+    hosts_env, monkeypatch, capsys: pytest.CaptureFixture
+) -> None:
+    """No workspace to launch into: the far side's own camp refused. On this
+    peer's transport the remote exit status is masked to 0 (Answered), so
+    the discriminator is that stdout does not parse as a JSON object."""
+    transport = _transport_module()
+    outcome = transport.Answered(
+        stdout="",
+        stderr="camp launch: no workspace named 'ws-a' in group 'demo'\n",
+        exit_code=0,
+    )
+    _rig(monkeypatch, outcome)
+
+    code = _run(
+        monkeypatch,
+        ["launch", "ws-a", "--host", "andromeda", "--group", "demo"],
+    )
+
+    captured = capsys.readouterr()
+    assert code != 0
+    assert captured.out == ""
+    assert "no workspace named 'ws-a' in group 'demo'" in captured.err
+    assert "remote command failed" not in captured.err
+
+
+def test_launch_host_remote_refusal_outcome_exit_code_is_camps_own(
+    hosts_env, monkeypatch, capsys: pytest.CaptureFixture
+) -> None:
+    """A transport that DOES propagate the remote's own exit code (unlike
+    this peer's) still relays it verbatim rather than a fixed local code."""
+    transport = _transport_module()
+    outcome = transport.RemoteRefusal(
+        stdout="", stderr="camp launch: directory outside allowlist\n", exit_code=7
+    )
+    _rig(monkeypatch, outcome)
+
+    code = _run(
+        monkeypatch,
+        ["launch", "ws-a", "--host", "andromeda", "--group", "demo"],
+    )
+
+    captured = capsys.readouterr()
+    assert code == 7
+    assert "directory outside allowlist" in captured.err
+
+
+def test_launch_host_unreachable_reports_no_session_was_started(
+    hosts_env, monkeypatch, capsys: pytest.CaptureFixture
+) -> None:
+    transport = _transport_module()
+    outcome = transport.Unreachable(reason="Connection timed out")
+    _rig(monkeypatch, outcome)
+
+    code = _run(
+        monkeypatch,
+        ["launch", "ws-a", "--host", "andromeda", "--group", "demo"],
+    )
+
+    captured = capsys.readouterr()
+    assert code != 0
+    assert "unreachable" in captured.err
+    assert "no session was started" in captured.err
+
+
+def test_launch_host_unknown_first_stderr_line_is_the_check_instruction(
+    hosts_env, monkeypatch, capsys: pytest.CaptureFixture
+) -> None:
+    transport = _transport_module()
+    outcome = transport.StoppedResponding(execution_timeout=60.0)
+    _rig(monkeypatch, outcome)
+
+    _run(
+        monkeypatch,
+        ["launch", "ws-a", "--host", "andromeda", "--group", "demo"],
+    )
+
+    captured = capsys.readouterr()
+    first_line = captured.err.splitlines()[0]
+    assert "camp sessions --host andromeda --group demo" in first_line
+    assert first_line.startswith("camp launch: check")
+
+
+def test_launch_host_unknown_does_not_claim_success_or_failure(
+    hosts_env, monkeypatch, capsys: pytest.CaptureFixture
+) -> None:
+    transport = _transport_module()
+    outcome = transport.StoppedResponding(execution_timeout=60.0)
+    _rig(monkeypatch, outcome)
+
+    code = _run(
+        monkeypatch,
+        ["launch", "ws-a", "--host", "andromeda", "--group", "demo"],
+    )
+
+    captured = capsys.readouterr()
+    assert code != 0
+    assert captured.out == ""
+    assert "launched session" not in captured.err
+    assert "no session was started" not in captured.err
+
+
+def test_launch_host_exit_codes_are_mutually_distinct(
+    hosts_env, monkeypatch, capsys: pytest.CaptureFixture
+) -> None:
+    transport = _transport_module()
+
+    _rig(monkeypatch, transport.Answered(stdout=_launch_answer_stdout(), stderr="", exit_code=0))
+    success_code = _run(
+        monkeypatch, ["launch", "ws-a", "--host", "andromeda", "--group", "demo"]
+    )
+    capsys.readouterr()
+
+    _rig(monkeypatch, transport.Unreachable(reason="Connection timed out"))
+    certain_failure_code = _run(
+        monkeypatch, ["launch", "ws-a", "--host", "andromeda", "--group", "demo"]
+    )
+    capsys.readouterr()
+
+    _rig(monkeypatch, transport.StoppedResponding(execution_timeout=60.0))
+    unknown_code = _run(
+        monkeypatch, ["launch", "ws-a", "--host", "andromeda", "--group", "demo"]
+    )
+    capsys.readouterr()
+
+    assert len({success_code, certain_failure_code, unknown_code}) == 3
+
+
+def test_launch_host_far_side_exit_code_never_collides_with_the_unknown_code(
+    hosts_env, monkeypatch, capsys: pytest.CaptureFixture
+) -> None:
+    """A far side that refuses with the same number camp reserves for "I do not
+    know" must not be reported as uncertain.
+
+    The uncertain outcome's exit code is the one signal a scripted caller can
+    branch on without parsing prose, and its whole purpose is to mean "check
+    before you retry". A remote refusal is a CERTAIN failure — nothing was
+    started, and there is nothing to check. Passing the far side's own status
+    through unmapped lets a remote `exit 3` impersonate camp's uncertainty,
+    which is exactly the collision the council item forbids.
+    """
+    transport = _transport_module()
+
+    _rig(monkeypatch, transport.StoppedResponding(execution_timeout=60.0))
+    unknown_code = _run(
+        monkeypatch, ["launch", "ws-a", "--host", "andromeda", "--group", "demo"]
+    )
+    capsys.readouterr()
+
+    _rig(
+        monkeypatch,
+        transport.RemoteRefusal(stdout="", stderr="camp: no workspace 'ws-a'", exit_code=unknown_code),
+    )
+    refusal_code = _run(
+        monkeypatch, ["launch", "ws-a", "--host", "andromeda", "--group", "demo"]
+    )
+    err = capsys.readouterr().err
+
+    assert refusal_code != unknown_code, (
+        f"a far-side refusal exited {refusal_code}, the code reserved for the "
+        f"uncertain outcome — a caller cannot tell them apart"
+    )
+    assert refusal_code != 0
+    assert "no session was started" in err
+
+
+def test_launch_host_far_side_text_cannot_impersonate_the_uncertain_first_line(
+    hosts_env, monkeypatch, capsys: pytest.CaptureFixture
+) -> None:
+    """A far side's own words must never be able to occupy the first stderr line.
+
+    The certain/uncertain distinction is carried for a skimming human by the
+    FIRST stderr line, and for that to mean anything the line has to be camp's
+    own sentence. A declared host is a machine the operator trusts to run
+    commands, not one whose stderr should be able to author camp's most
+    load-bearing line: a refusal crafted to read like the check-before-retry
+    instruction sends the operator looking for a session that was never
+    started, which is the precise confusion the uncertain wording exists to
+    prevent.
+    """
+    transport = _transport_module()
+
+    _rig(monkeypatch, transport.StoppedResponding(execution_timeout=60.0))
+    _run(monkeypatch, ["launch", "ws-a", "--host", "andromeda", "--group", "demo"])
+    uncertain_first_line = capsys.readouterr().err.splitlines()[0]
+
+    impersonation = uncertain_first_line
+    _rig(
+        monkeypatch,
+        transport.RemoteRefusal(stdout="", stderr=impersonation, exit_code=2),
+    )
+    _run(monkeypatch, ["launch", "ws-a", "--host", "andromeda", "--group", "demo"])
+    err = capsys.readouterr().err
+    certain_first_line = err.splitlines()[0]
+
+    assert certain_first_line != uncertain_first_line, (
+        "a far-side refusal reproduced the uncertain outcome's first line verbatim: "
+        f"{certain_first_line!r}"
+    )
+    assert "no session was started" in certain_first_line, certain_first_line
+    # The far side's words are still relayed, just not in the leading position.
+    assert impersonation in err
+
+
+def test_launch_host_certain_and_uncertain_first_lines_differ_in_opening_words(
+    hosts_env, monkeypatch, capsys: pytest.CaptureFixture
+) -> None:
+    transport = _transport_module()
+
+    _rig(monkeypatch, transport.Unreachable(reason="Connection timed out"))
+    _run(monkeypatch, ["launch", "ws-a", "--host", "andromeda", "--group", "demo"])
+    certain_first_line = capsys.readouterr().err.splitlines()[0]
+
+    _rig(monkeypatch, transport.StoppedResponding(execution_timeout=60.0))
+    _run(monkeypatch, ["launch", "ws-a", "--host", "andromeda", "--group", "demo"])
+    uncertain_first_line = capsys.readouterr().err.splitlines()[0]
+
+    assert certain_first_line.split()[:3] != uncertain_first_line.split()[:3]
+
+
+def test_launch_host_json_carries_certainty_for_a_certain_failure(
+    hosts_env, monkeypatch, capsys: pytest.CaptureFixture
+) -> None:
+    transport = _transport_module()
+    _rig(monkeypatch, transport.Unreachable(reason="Connection timed out"))
+
+    code = _run(
+        monkeypatch,
+        ["launch", "ws-a", "--host", "andromeda", "--group", "demo", "--json"],
+    )
+
+    captured = capsys.readouterr()
+    assert code != 0
+    payload = json.loads(captured.out)
+    assert payload["certainty"] == "did_not_happen"
+    assert payload["ok"] is False
+
+
+def test_launch_host_json_carries_certainty_for_the_unknown_outcome(
+    hosts_env, monkeypatch, capsys: pytest.CaptureFixture
+) -> None:
+    transport = _transport_module()
+    _rig(monkeypatch, transport.StoppedResponding(execution_timeout=60.0))
+
+    code = _run(
+        monkeypatch,
+        ["launch", "ws-a", "--host", "andromeda", "--group", "demo", "--json"],
+    )
+
+    captured = capsys.readouterr()
+    assert code != 0
+    payload = json.loads(captured.out)
+    assert payload["certainty"] == "unknown"
+    assert payload["ok"] is False
+
+
+def test_launch_host_far_side_invoked_with_group_slug_and_json(
+    hosts_env, monkeypatch, capsys: pytest.CaptureFixture
+) -> None:
+    transport = _transport_module()
+    captured_argv: list = []
+    outcome = transport.Answered(stdout=_launch_answer_stdout(), stderr="", exit_code=0)
+    _rig(monkeypatch, outcome, capture_argv=captured_argv)
+
+    _run(monkeypatch, ["launch", "ws-a", "--host", "andromeda", "--group", "demo"])
+
+    remote_argv = captured_argv[0]
+    assert remote_argv == ["launch", "ws-a", "--group", "demo", "--json"]

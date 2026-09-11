@@ -573,8 +573,11 @@ the handoff prompt — return to disposition gathering with the user.
 End the presentation with an explicit handoff prompt so the trigger is unambiguous, e.g.:
 
 > "Plan is written to your vault. Reply **build** to hand off to `/craft:execute` and start building
-> task by task, or run `/craft:execute task/<parent-name>` in a fresh session. Call out anything
-> that needs adjustment first."
+> task by task, or run this in a fresh session. Call out anything that needs adjustment first."
+
+```
+/craft:execute task/<parent-name>
+```
 
 The continuation verb (`build`, `start`, `go`, `ship it`) is what pulls in the `/craft:execute`
 skill — don't rely on implicit continuation. Use a verb here rather than the bare skill name so the

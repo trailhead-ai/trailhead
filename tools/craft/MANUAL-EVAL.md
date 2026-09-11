@@ -1017,3 +1017,252 @@ The gap this case located, and which the revert leaves open: neither prose varia
 when no record-link rule is resident, which is every craft-only install. A pointer restated inside
 a ritual cannot close that; only shipping craft its own record-link rule can. Recorded as the
 follow-up carrying AC6 forward.
+
+---
+
+### 2026-09-11 — extension to the ritual set: baseline across brainstorm, gauntlet, plan, execute, review, distill
+
+Run by `task/run-the-baseline-across-the-seven-rituals-and-grade-it` against the `rule-only`
+construction (that ritual's committed prose plus the reader plugin's `## Record links` rule tail,
+appended verbatim) pre-registered in `expected.md`'s "Extension to the ritual set" section. No
+ritual prose was touched. This closes **U1** (AC7 baseline) and **U2** (AC6 breadth) for
+`task/every-pinned-ritual-links-the-record-it-acted-on-and-prints-its-one-next-command-on-its-own-line`.
+
+**Dispatch.** 18 base processes (6 rituals x 3 runs) as separate `claude -p` processes, run in
+three parallel waves of six, `--setting-sources project --allowedTools "Read" < /dev/null`, exactly
+`expected.md`'s dispatch command with `RITUAL` substituted. All 18 exited 0 with a non-empty
+captured stdout — zero exclusions, zero re-dispatches for infrastructure failure. `record-link`
+split 2-1 at `review` and `distill`; per the pre-registered split rule each of those two arms was
+re-run 3 more times (6 more processes, also all exit 0, non-empty), for **24 processes dispatched
+in total this task** (18 base + 6 split re-runs). `next-command` never split for any ritual — all
+six rituals' 3 base runs agreed 3/3, and the 3 extra runs at review/distill (dispatched as the same
+arm) agreed with that base result too.
+
+Combined with slice's already-run `rule-only` arm (3/3 link, from the section above — not re-run
+here), the full ritual-set count is 18 new + 6 split re-runs + 3 already-spent = 27 processes
+observed across the whole ritual set, of which this task dispatched 24.
+
+**Results, per ritual per predicate** (verdicts from
+`tools/craft/plugins/craft/scripts/ritual_deliverable_grader.py`, never an inline regex):
+
+| Ritual | Site is | record-link runs | record-link verdict | next-command runs | next-command verdict |
+|---|---|---|---|---|---|
+| brainstorm | vacuous (no linkable prose mention) | link, link, link (3/3) | **not a PASS/FAIL — rule-violation-shaped finding**, see below | own-line x3 | **PASS** — AC7 holds |
+| gauntlet | vacuous | link, link, link (3/3) | same finding as brainstorm | own-line x3 | **PASS** — AC7 holds |
+| plan | vacuous | link, link, link (3/3) | same finding as brainstorm | embedded x3 | **FAIL** — AC7 falsified at plan |
+| execute | vacuous | link, link, bare (2/3 link, 1/3 bare) | **deviation from the pre-registered split rule** — see correction below | exempt x3 | **UNMEASURED** — see correction below |
+| review | linkable-mention | link, bare, link, then re-run link, link, link (5 link / 1 bare of 6) | **PASS** (5-1 clean majority) — AC6 holds at review, split reported explicitly | embedded x3, then embedded x3 (6/6) | **FAIL** — AC7 falsified at review |
+| distill | linkable-mention (weaker, instruction-only evidence) | bare, link, bare, then re-run link, link, bare (3 link / 3 bare of 6) | **AMBIGUOUS** (3-3 tie, not a clean majority) — not scored either way | own-line x3, then own-line x3 (6/6) | **PASS** — AC7 holds |
+
+**A finding the pre-registration's vacuity table did not anticipate the mechanism of.** At the four
+vacuous sites, the pre-registration's only named explanation for `record-link: link` was "the agent
+linked the handoff command itself" (a rule violation, since the reader rule forbids linking a
+handoff command). Reading the raw captures shows that is **not** what happened at brainstorm,
+gauntlet, plan, or 2/3 of execute's runs: the handoff command stayed bare, on its own line, in every
+run of every ritual. What actually produced `link` was the model adding a **new prose sentence**
+naming the record with a link, beyond what that ritual's own committed template puts there — e.g.
+brainstorm-1: "The spec is saved as a lore `spec` record, [spec/warehouse-picking-batches](http://
+127.0.0.1:7313/records/northlight/spec/warehouse-picking-batches) (status `draft`)." — a sentence
+the committed `SKILL.md` text does not contain verbatim; the model elaborated it, applying the
+reader rule's generic "link first mention per record" instruction to a mention it introduced itself.
+This is reported factually rather than folded into the pre-registered "rule-violation" bucket, since
+that bucket's stated mechanism (linking the command) did not occur. Per the pre-registration's own
+"not scored as a pass either way" instruction, none of these `link` results count toward AC6's
+closure at these four sites regardless of mechanism — that governing instruction is followed as
+written; only the *mechanism* label is corrected here from what was pre-registered.
+
+**Correction — AC7 at execute was never measured, not passed.** This row originally reported
+`next-command: PASS — AC7 vacuously holds (by-design zero-command close)`. That is wrong. All
+three committed captures (`runs/execute-1.txt`, `runs/execute-2.txt`, `runs/execute-3.txt`) print
+an optional `/portage:pull_request` command embedded mid-sentence — exactly the shape AC7
+forbids:
+
+- execute-1: "...that call is yours; run `/portage:pull_request` when you want one."
+- execute-2: "Say the word and I'll run `/portage:pull_request`."
+- execute-3: "Run `/portage:pull_request` when you want one."
+
+The root cause is a classification decision made before any run: execute was pre-registered as
+`--exempt`, on the reading that `_shared/execute.md:979-981`'s instruction — the PR decision
+belongs to the operator, the ritual must not auto-invoke `/portage:pull_request` — makes execute's
+close a genuine zero-command outcome. The grader's `--exempt` path returns `next-command: exempt`
+unconditionally and never reads the deliverable text (`ritual_deliverable_grader.py`,
+`next_command_verdict`, the `if exempt: return "exempt"` branch), so the mid-sentence command
+above was never evaluated against AC7 at all. **AC7 at execute is therefore unmeasured, not
+passed.** The `--exempt` bucket is blind by construction: it cannot detect a command at a site
+classified exempt, whether or not one is present. This does not relitigate the exempt
+classification itself — the instruction it rests on is real — it corrects only the verdict label:
+"unmeasured" replaces "PASS" for execute's next-command predicate everywhere in this log.
+
+This also corrects the record-link cell for execute. That predicate landed a 2-1 split
+(link, link, bare). Per the pre-registered split rule (`expected.md:354-368`), a 2-1 split calls
+for re-running that ritual's arm 3 more times before any verdict — PASS, FAIL, or AMBIGUOUS — is
+assigned. That re-run was never dispatched for execute. Reporting the cell as "no split-rule
+bucket applies" (as an earlier version of this row did) describes an absent rule; the rule in fact
+applies to a vacuous site exactly as it does to a linkable-mention site
+(`expected.md:485`, "at either kind of site") — what is missing is the re-run this task never
+ran, which is a **deviation from the pre-registered rule**, not evidence that none governs here.
+This is harmless to the AC6 tally regardless: execute is a vacuous site and contributes no AC6
+verdict either way, so the unresolved split changes no scored outcome.
+
+**Verbatim evidence, review split:** run 2 (bare) — "The slice loop reports
+`spec/dock-scheduling-windows` closed out"; run 1 (link) — "The slice loop reports
+[spec/dock-scheduling-windows](http://127.0.0.1:7313/records/harborlight/spec/dock-scheduling-windows)
+closed out". Both leave the handoff command (`/craft:distill spec/dock-scheduling-windows`)
+embedded mid-sentence on the line that follows, in every one of the 6 runs — hence the clean 6/6
+`embedded` next-command verdict, an independent falsification of AC7 at this site.
+
+**Verbatim evidence, distill split:** run 1 (bare) — table cell `` `adr/dock-scheduling-windows-
+use-fifo-slots` `` (backtick, code, not a link); run 2 (link) — table cell
+`[adr/dock-scheduling-windows-use-fifo-slots](http://127.0.0.1:7313/records/harborlight/adr/
+dock-scheduling-windows-use-fifo-slots)`. The `lore record show adr/dock-scheduling-windows-
+use-fifo-slots` handoff command is on its own line in all 6 runs (6/6 `own-line`), so AC7 holds
+here cleanly even while record-link stays AMBIGUOUS.
+
+**U1 resolved — does the baseline already satisfy AC7 at each ritual?** Mixed, not uniform.
+AC7 holds at baseline at **brainstorm, gauntlet, and distill** — 3 of 6 measured rituals.
+**Execute is unmeasured, not passed**, per the correction above: its `--exempt` classification
+short-circuits the grader before it reads the deliverable, so the mid-sentence
+`/portage:pull_request` in all three of its captures was never evaluated against AC7. AC7 is
+**falsified at baseline at plan and review** — the command is embedded
+mid-sentence in 3/3 (plan) and 6/6 (review) captured runs, matching the concrete defect shape the
+parent task's Given Axioms named. **This falsifies part of that same prediction, and is reported
+as such rather than reconciled**: the parent task's Given Axioms named brainstorm
+(`SKILL.md:552-557`), gauntlet (`SKILL.md:484-485`), and review (`SKILL.md:110`) as the sites whose
+*committed template text* embeds the command mid-sentence — true of the literal template — but
+brainstorm and gauntlet's **actual captured deliverables** placed the command on its own line in
+every run (the model did not reproduce the template's mid-sentence phrasing verbatim), while
+review's captured deliverables did reproduce the mid-sentence shape in every run. So the baseline
+AC7 defect that survives to Task 5 is narrower than predicted: **plan and review only**, not
+brainstorm or gauntlet.
+
+**U2 resolved — does AC6 hold across all seven rituals, or only the one already measured?**
+Per the pre-registered vacuity rule, AC6's breadth claim is measurable at exactly **three** sites —
+review, distill, slice — not seven, and the four vacuous sites (brainstorm, gauntlet, plan,
+execute) contribute no PASS toward this closure by design. Of the three: **slice** already closed
+PASS (3/3 link, prior section). **Review** closes **PASS** here (5-1 clean majority for `link`,
+split reported explicitly rather than presented as an uncomplicated 3/3). **Distill** does **not**
+close — its combined 6 runs land 3-3, a tie the pre-registered split rule requires be reported as
+**AMBIGUOUS**, not as a pass or a fail with a caveat; distill's weaker, instruction-only
+pre-run evidence base (pre-registered in `expected.md`) is consistent with this outcome landing
+less decisively than review's or slice's, but per that same pre-registration a weak evidence base
+is a note on the finding's strength, not a route to a different verdict — AMBIGUOUS is reported as
+AMBIGUOUS. **AC6 breadth is therefore confirmed at 2 of the 3 measurable sites (review, slice) and
+unresolved at the third (distill).** This is reported plainly, not reconciled with the previous
+slice's single-site PASS.
+
+**Council amendment consequence.** The parent plan's council amendment holds that a measured AC6
+*failure* at any ritual blocks the slice from closing, with the coverage field corrected. Distill's
+result is AMBIGUOUS, not FAIL — the pre-registration keeps AMBIGUOUS in its own bucket, distinct
+from both PASS and FAIL, precisely so it is not scored either way. No ritual in this measurement
+produced a FAIL verdict for AC6 (the four vacuous sites have no FAIL bucket for AC6 at all; they
+produced a distinct rule-violation-shaped finding instead, addressed above). Whether an AMBIGUOUS
+result at one of AC6's three measurable sites is itself sufficient to block the slice's close, or
+whether it is a candidate for one clean re-run batch before that judgment is made, is left to
+`task/every-pinned-ritual-links-the-record-it-acted-on-and-prints-its-one-next-command-on-its-own-line`'s
+own disposition — not decided here.
+
+**Task 5 candidates.** Per U1, the next-command predicate FAILs at **plan** and **review** only.
+Per the parent's Delta design, `task/conditional-fix-the-handoff-shape-where-the-baseline-fails-
+ac7-and-re-measure` is scoped to those two rituals' own handoff shape, each re-measured against its
+own baseline so exactly one variable moves per ritual. Brainstorm, gauntlet, and distill's
+next-command predicate already holds at baseline and needs no fix. Execute's next-command
+predicate is unmeasured, not held — its `--exempt` classification never reads the deliverable
+(see correction above) — but that gap does not add execute to Task 5's candidates: Task 5 is
+scoped by the parent's Delta design to rituals where the baseline predicate FAILs, and an
+unmeasured predicate is a distinct outcome from a failed one.
+
+**Containment check (Council amendment, Critical 4).** All 24 processes dispatched by this task
+used `--allowedTools "Read"` with no shell, `Edit`, `Write`, or `Bash` tool granted, and
+`--setting-sources project` to drop `~/.claude/rules/`. Post-batch diff against an independent
+pre-batch snapshot taken before wave 1:
+
+- Of the four configured lore vaults, `default`, `trailhead`, and `levr` show new `lore: sync
+  vault` / `session: flush ...` commits landing during the batch window; `lake-in-the-woods`'s
+  HEAD is unchanged. None of these commits touch any path this task's fixtures name
+  (`northlight`, `causewell`, `harborlight`, or any of the six new spec/task/adr slugs above —
+  zero fixture-slug hits, confirmed absent from every new commit's diff), and every changed path is
+  either this controlling session's own bookkeeping (`session/*` in `trailhead`) or unrelated
+  background sync activity already in flight before this task started (`levr`'s pre-existing
+  untracked test-audit and task files, `default`'s own session-flush cycle) — the movement traces
+  to other concurrent sessions, not to any of the 24 `Read`-only arms, none of which was granted a
+  tool capable of writing anything.
+- `/home/tomduffield/.claude/` shows churn only in `plugins/known_marketplaces.json`,
+  `backups/.claude.json.backup.*`, and `sessions/*.json` — all files the `claude` CLI itself
+  rewrites on ordinary invocation (backup rotation, session bookkeeping), present before this
+  batch and present after, with no new file and no rule/config file under `rules/` or `settings*`
+  touched.
+- No fixture in this eval case names a real vault, repository, or config path (verified by
+  `expected.md`'s own contamination check, re-confirmed by grep against all six new fixture files
+  for `northlight`/`causewell`/`harborlight` and every fixture slug: only occurrences are inside
+  this eval case's own `fixtures/`/`arms/` and `expected.md`).
+
+No escape attributable to any of the 24 dispatched arms was found.
+
+Captured run outputs (18 base + 6 split-re-run = the 24 dispatched processes' stdout/stderr/exit
+sidecars) are committed under
+`plugins/craft/evals/ritual-deliverable-names-its-record/runs/`.
+
+---
+
+### 2026-09-11 — Task 5: the conditional AC7 fix at `plan` and `review`, re-measured
+
+Run by `task/conditional-fix-the-handoff-shape-where-the-baseline-fails-ac7-and-re-measure` against
+the pre-registration appended to `expected.md` (section "Extension — Task 5, the conditional AC7
+remediation at `plan` and `review`"), committed before either treatment arm below was run. Task 4's
+baseline falsified `next-command` at exactly two of the six measured rituals — `plan` (embedded 3/3)
+and `review` (embedded 6/6) — so this task is not moot; it is scoped to those two rituals only, each
+re-measured against its own `rule-only` baseline so exactly one variable moves per ritual.
+
+**The edit.** `plan/SKILL.md` step 9's handoff prompt and `review/SKILL.md`'s closing distill
+handoff (the loop-complete outcome Task 4's fixture exercises) were changed so the single next
+command prints alone in a fenced code block, separated from the quoted prose, instead of embedded
+mid-sentence. Plan keeps both affordances (the `build` continuation verb and the fresh-session
+command). No other line of either file changed — `diff arms/plan-rule-only.md
+arms/plan-treatment.md` and `diff arms/review-rule-only.md arms/review-treatment.md` each touch only
+the one handoff paragraph and its replacement. The record-link rule tail is untouched in both arms,
+per the task's instruction not to restate the record-link rule. `_shared/execute.md` was not
+touched — execute is not among the failing rituals, so the shared-file council amendment does not
+apply here; recorded as checked and not applicable, not silently skipped.
+
+**Dispatch.** 6 processes (3 `plan-treatment`, 3 `review-treatment`), each a separate `claude -p`
+process, never a subagent, `--setting-sources project --allowedTools "Read" < /dev/null`, run in one
+foreground parallel wave. All 6 exited 0 with non-empty captured stdout — zero exclusions, no
+rate-limit or crash, no re-run needed.
+
+| Date | Ritual | Arm | Runs | next-command verdict | record-link verdict (not scored — see below) |
+|------|--------|-----|------|----------------------|----------------------------------------------|
+| 2026-09-11 | plan | `arms/plan-treatment.md` | 3 | **own-line 3/3 — AC7 now holds** | link, link, bare (2/3 — informational only) |
+| 2026-09-11 | review | `arms/review-treatment.md` | 3 | **own-line 3/3 — AC7 now holds** | link, link, link (3/3 — informational only) |
+
+**Result: the treatment worked at both rituals.** Verbatim `plan-treatment-1`: "Reply **build** to
+hand off to `/craft:execute` and start building task by task, or run this in a fresh session. Call
+out anything that needs adjustment first." followed by the command alone in a fenced block,
+` /craft:execute task/the-ledger-reconciliation-slice `. Verbatim `review-treatment-1`: "Run this
+when you're ready to distill this work into the ADR log:" followed by the command alone in a fenced
+block, `/craft:distill spec/dock-scheduling-windows`. Every one of the 6 runs placed its command
+alone on its own line — the grader's `own-line` verdict, never `embedded`, in all 6. This moves both
+rituals from Task 4's own baseline (`embedded` 3/3 at plan, 6/6 at review) to `own-line` 3/3,
+matching the pre-registered "treatment worked" branch exactly.
+
+**record-link is reported, not scored, per the pre-registration** — neither edit touched the
+record-link rule or the sentence it acts on, so re-grading that predicate here measures nothing this
+task changed. Plan's 2/3 `link` (a vacuous site per Task 4's vacuity rule — the model added a new
+prose sentence naming the record, not by instruction) and review's 3/3 `link` (a linkable-mention
+site, matching Task 4's own 5/6 result there) are both consistent with Task 4's findings and are
+recorded for completeness only.
+
+**No revert is owed.** Both treatment arms moved the measurement per the pre-registered "treatment
+worked" branch at 3/3, so the parent's binding revert rule (Council amendment, Critical 2) does not
+trigger for either ritual.
+
+**Real-state check.** Both treatment processes used `--allowedTools "Read"`, no shell/Edit/Write/
+Bash tool granted, `--setting-sources project`. `~/.config/lore/config.json` mtime unchanged
+(`1787107526`, the same value Task 4's own check recorded). No fixture used by this task names a
+real vault, repository, or config path — the same two fixtures Task 4 already ran, unedited.
+
+Captured run outputs (6 processes' stdout/stderr/exit sidecars) are committed under
+`plugins/craft/evals/ritual-deliverable-names-its-record/runs/` as `plan-treatment-*` and
+`review-treatment-*`.
+
+See `plugins/craft/evals/ritual-deliverable-names-its-record/expected.md`, "Extension — Task 5,
+the conditional AC7 remediation at `plan` and `review`", for the full pre-registration.

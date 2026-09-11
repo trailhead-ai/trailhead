@@ -443,3 +443,166 @@ def test_group_verb_with_host_flag_refuses_instead_of_answering_locally(
 
     assert result.returncode != 0
     assert "--host" in result.stderr
+
+
+# ---------------------------------------------------------------------------
+# `launch` joins `_HOST_VERBS` as the first STATE-CHANGING member — it is
+# refused for --all-hosts/-a with its own wording (not the generic "has no
+# meaning here"), and a `--host launch` requires an explicit --group rather
+# than colliding with it the way the read verbs do. Both refusals fire
+# before any host is contacted; the last test proves the passing case builds
+# a clean argv that carries only the operator's named group, never one
+# resolved from cwd.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("all_hosts_flag", ["--all-hosts", "-a"])
+def test_all_hosts_launch_refuses_with_state_changing_wording_and_never_calls_transport(
+    monkeypatch: pytest.MonkeyPatch, isolated_env: dict[str, str], tmp_path: Path, all_hosts_flag: str
+) -> None:
+    dispatch = _dispatch_module()
+    for k, v in isolated_env.items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.chdir(tmp_path)
+
+    import importlib
+
+    transport = importlib.import_module("camp.host.transport")
+
+    def _boom(*args, **kwargs):
+        raise AssertionError("transport.run_camp must not be called for a refused -a launch")
+
+    monkeypatch.setattr(transport, "run_camp", _boom)
+    monkeypatch.setattr(sys, "argv", ["camp", "launch", all_hosts_flag, "myslug"])
+
+    with pytest.raises(SystemExit) as excinfo:
+        dispatch.main()
+    assert excinfo.value.code != 0
+
+
+def test_all_hosts_launch_refusal_is_distinguishable_from_a_read_verbs_generic_refusal(
+    isolated_env: dict[str, str], tmp_path: Path
+) -> None:
+    """The all-hosts refusal for a state-changing verb (launch) must read as a
+    DECISION — the verb changes state, so it acts on one named machine — never
+    as the generic "has no meaning here" a verb merely lacking the option
+    gets. Asserted against each verb's own wording, per the design doc's
+    "Launching is never a broadcast"."""
+    launch_result = _run(["launch", "-a", "myslug"], env=isolated_env, cwd=tmp_path)
+    assert launch_result.returncode != 0
+    assert "changes state" in launch_result.stderr, launch_result.stderr
+    assert "has no meaning here" not in launch_result.stderr, launch_result.stderr
+    assert "--host" in launch_result.stderr, launch_result.stderr
+
+    read_verb_result = _run(["status", "-a"], env=isolated_env, cwd=tmp_path)
+    assert read_verb_result.returncode != 0
+    assert "has no meaning here" in read_verb_result.stderr, read_verb_result.stderr
+    assert "changes state" not in read_verb_result.stderr, read_verb_result.stderr
+
+
+def test_host_launch_without_group_refuses_before_connecting_and_never_calls_transport(
+    monkeypatch: pytest.MonkeyPatch, hosts_env: dict[str, str], tmp_path: Path
+) -> None:
+    dispatch = _dispatch_module()
+    for k, v in hosts_env.items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.chdir(tmp_path)
+
+    import importlib
+
+    transport = importlib.import_module("camp.host.transport")
+
+    def _boom(*args, **kwargs):
+        raise AssertionError(
+            "transport.run_camp must not be called for a --host launch missing --group"
+        )
+
+    monkeypatch.setattr(transport, "run_camp", _boom)
+    monkeypatch.setattr(sys, "argv", ["camp", "launch", "--host", "andromeda", "myslug"])
+
+    with pytest.raises(SystemExit) as excinfo:
+        dispatch.main()
+    assert excinfo.value.code != 0
+
+
+def test_host_launch_without_group_names_group_as_the_thing_to_supply(
+    hosts_env: dict[str, str], tmp_path: Path
+) -> None:
+    result = _run(["launch", "--host", "andromeda", "myslug"], env=hosts_env, cwd=tmp_path)
+    assert result.returncode != 0
+    assert "--group" in result.stderr, result.stderr
+    assert "--host" in result.stderr, result.stderr
+
+
+@pytest.fixture()
+def hosts_and_local_group_env(tmp_path: Path) -> tuple[dict[str, str], Path]:
+    """A declared host `andromeda`, AND a real local group `testgrp` whose one
+    member's `repo_root` is a directory this fixture also creates — so a cwd
+    inside it makes `resolve_from_cwd` actually resolve "testgrp" locally.
+    Returns (env, member_dir) so a test can assert the local group would have
+    resolved, and then prove a `--host launch` never uses it anyway.
+    """
+    cfg = tmp_path / "config"
+    cfg.mkdir()
+    (cfg / "hosts.toml").write_text("[hosts.andromeda]\n", encoding="utf-8")
+    member_dir = tmp_path / "member-a-repo"
+    member_dir.mkdir()
+    groups_dir = cfg / "groups"
+    groups_dir.mkdir()
+    (groups_dir / "testgrp.toml").write_text(
+        '[group]\nname = "testgrp"\n\n'
+        f'[[members]]\nname = "member-a"\nrepo_root = "{member_dir}"\n',
+        encoding="utf-8",
+    )
+    env = {
+        **os.environ,
+        "CAMP_CONFIG_DIR": str(cfg),
+        "CAMP_STATE_DIR": str(tmp_path / "state"),
+    }
+    return env, member_dir
+
+
+@pytest.mark.parametrize("run_from_member_dir", [False, True], ids=["isolated-cwd", "inside-local-group"])
+def test_host_launch_remote_argv_carries_only_the_named_group_never_cwd_resolved(
+    monkeypatch: pytest.MonkeyPatch,
+    hosts_and_local_group_env: tuple[dict[str, str], Path],
+    tmp_path: Path,
+    run_from_member_dir: bool,
+) -> None:
+    """AC27 regression: with --group and a slug, a `--host` launch's remote
+    argv carries only the group the operator named, never one this side would
+    otherwise resolve from cwd — proven by parametrizing the ONE input that
+    must not change the answer: run once from a cwd where NO local group
+    resolves, and once from inside a directory a REAL local group ("testgrp")
+    would resolve for, and assert the captured argv is identical either way
+    and never mentions "testgrp"."""
+    dispatch = _dispatch_module()
+    env, member_dir = hosts_and_local_group_env
+    for k, v in env.items():
+        monkeypatch.setenv(k, v)
+
+    calls: list[tuple] = []
+    monkeypatch.setattr(
+        dispatch, "_dispatch_host_command", lambda *args: calls.append(args)
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["camp", "launch", "--host", "andromeda", "--group", "prodgroup", "myslug"],
+    )
+    monkeypatch.chdir(member_dir if run_from_member_dir else tmp_path)
+
+    try:
+        dispatch.main()
+    except SystemExit as exc:
+        pytest.fail(f"unexpected exit {exc.code} before reaching the handler")
+
+    assert len(calls) == 1, calls
+    canonical, host, host_name, rest = calls[0]
+    assert canonical == "launch"
+    assert host_name == "andromeda"
+    assert "--group" in rest and "prodgroup" in rest, rest
+    assert "myslug" in rest, rest
+    assert "testgrp" not in rest, (
+        f"a --host launch must never carry a cwd-resolved group: {rest}"
+    )

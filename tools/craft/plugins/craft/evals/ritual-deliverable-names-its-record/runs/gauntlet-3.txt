@@ -1,0 +1,11 @@
+[spec/permit-renewal-workflow](http://127.0.0.1:7313/records/northlight/spec/permit-renewal-workflow) is stamped and advanced.
+
+- Both `resolved` edits, the provenance stamp, and the full `## Gauntlet` finding detail landed in a single atomic write.
+- C1 `resolved` (from proposal), C2 `resolved` (from proposal) — 2 from proposal, 0 operator overrides.
+- No Critical carries `revise`, so the advance condition was met and the status flipped to `ready`.
+
+Next step is the slice loop — run this in a fresh session:
+
+```
+/craft:slice spec/permit-renewal-workflow
+```
