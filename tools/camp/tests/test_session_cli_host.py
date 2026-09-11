@@ -945,12 +945,10 @@ def test_launch_host_far_side_invoked_with_group_slug_and_json(
 # camp kill --host <name> — handler-level tests
 #
 # `_cmd_kill_host_cli` is called DIRECTLY here rather than through
-# `dispatch.main()` — dispatch does not yet route `kill --host` to it (that
-# routing is a later task's job: `kill joins the host verbs`). Calling the
-# handler directly is still a real behavioural test: it executes the
-# subject and varies the payload the relay hands it, which is exactly what
-# these tests pin. The end-to-end `camp kill --host` CLI reach is the next
-# task's to prove.
+# `dispatch.main()`: these tests execute the subject and vary the payload
+# the relay hands it, which is exactly what they pin. The end-to-end
+# `camp kill --host` CLI reach through dispatch is pinned separately, in
+# `test_cli_dispatch_split.py`.
 # ---------------------------------------------------------------------------
 
 

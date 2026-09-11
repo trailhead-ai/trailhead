@@ -2295,13 +2295,10 @@ _KILL_HOST_UNKNOWN_EXIT_CODE = 3
 def _cmd_kill_host_cli(args: list[str], host: "Host", host_name: str) -> None:
     """camp kill <ref> --host <name> [--json].
 
-    Reached ONLY from `cli/dispatch.py`'s `--host` handling for `kill` —
-    that routing is a later task's job
-    (`task/kill-joins-the-host-verbs-and-the-group-requirement-stops-riding-on-state-changing`);
-    nothing in `dispatch.py` calls this yet. Fully groupless, exactly like
-    the local `_cmd_kill_cli`: the reference names the session and the
-    session names everything else, so `--host` carries the reference and
-    nothing else.
+    Reached ONLY from `cli/dispatch.py`'s `--host` handling for `kill`.
+    Fully groupless, exactly like the local `_cmd_kill_cli`: the reference
+    names the session and the session names everything else, so `--host`
+    carries the reference and nothing else.
 
     Relays through `camp.host.relay.answer_payload_for_host`, the payload
     reader that accepts either shape a stop can answer with: one object
@@ -2442,15 +2439,6 @@ def _cmd_kill_host_cli(args: list[str], host: "Host", host_name: str) -> None:
     for notice in answer.notices:
         print(notice, file=sys.stderr)
 
-    # Every certain failure is 1, full stop — never a pass-through of the
-    # remote's own exit code. The status is decided here, from the payload
-    # camp actually parsed: unreachable, unpinned or changed key, refused
-    # credentials, camp not resolvable there, a far-side refusal in its own
-    # words, or an answer camp could not parse are all the same outcome to a
-    # scripted caller. Passing an arbitrary remote code through would also
-    # let a remote camp that happens to exit 2 or 3 for its own reasons
-    # impersonate camp's own reserved "ambiguous" or "unknown" signal.
-    exit_code = 1
     if as_json:
         reason = answer.notices[-1] if answer.notices else "no session was stopped"
         print(
@@ -2463,7 +2451,16 @@ def _cmd_kill_host_cli(args: list[str], host: "Host", host_name: str) -> None:
                 }
             )
         )
-    sys.exit(exit_code)
+
+    # Every certain failure is 1, full stop — never a pass-through of the
+    # remote's own exit code. The status is decided here, from the payload
+    # camp actually parsed: unreachable, unpinned or changed key, refused
+    # credentials, camp not resolvable there, a far-side refusal in its own
+    # words, or an answer camp could not parse are all the same outcome to a
+    # scripted caller. Passing an arbitrary remote code through would also
+    # let a remote camp that happens to exit 2 or 3 for its own reasons
+    # impersonate camp's own reserved "ambiguous" or "unknown" signal.
+    sys.exit(1)
 
 
 # ---------------------------------------------------------------------------
