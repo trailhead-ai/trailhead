@@ -1,0 +1,11 @@
+Plan is written to the vault on `task/the-ledger-reconciliation-slice` (vault: `causewell`) — the slice parent itself now carries the plan body, with its child tasks beneath it.
+
+**Summary:** the plan designs the ledger reconciliation slice end-to-end — goal, delta design, the axioms it rests on, the known unknowns each child task depends on, and the component-shaped child tasks in dependency order, each with its own test contract.
+
+**Council Review:** all four lenses dispatched. One Critical — a missing idempotency check on the reconciliation write — disposed as `resolved` in the plan's `## Council Review` section. No Critical is undisposed.
+
+Reply **build** to hand off to `/craft:execute` and start building task by task, or run this in a fresh session. Call out anything that needs adjustment first.
+
+```
+/craft:execute task/the-ledger-reconciliation-slice
+```

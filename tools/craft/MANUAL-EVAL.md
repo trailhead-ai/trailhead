@@ -1161,3 +1161,68 @@ No escape attributable to any of the 24 dispatched arms was found.
 Captured run outputs (18 base + 6 split-re-run = the 24 dispatched processes' stdout/stderr/exit
 sidecars) are committed under
 `plugins/craft/evals/ritual-deliverable-names-its-record/runs/`.
+
+---
+
+### 2026-09-11 — Task 5: the conditional AC7 fix at `plan` and `review`, re-measured
+
+Run by `task/conditional-fix-the-handoff-shape-where-the-baseline-fails-ac7-and-re-measure` against
+the pre-registration appended to `expected.md` (section "Extension — Task 5, the conditional AC7
+remediation at `plan` and `review`"), committed before either treatment arm below was run. Task 4's
+baseline falsified `next-command` at exactly two of the six measured rituals — `plan` (embedded 3/3)
+and `review` (embedded 6/6) — so this task is not moot; it is scoped to those two rituals only, each
+re-measured against its own `rule-only` baseline so exactly one variable moves per ritual.
+
+**The edit.** `plan/SKILL.md` step 9's handoff prompt and `review/SKILL.md`'s closing distill
+handoff (the loop-complete outcome Task 4's fixture exercises) were changed so the single next
+command prints alone in a fenced code block, separated from the quoted prose, instead of embedded
+mid-sentence. Plan keeps both affordances (the `build` continuation verb and the fresh-session
+command). No other line of either file changed — `diff arms/plan-rule-only.md
+arms/plan-treatment.md` and `diff arms/review-rule-only.md arms/review-treatment.md` each touch only
+the one handoff paragraph and its replacement. The record-link rule tail is untouched in both arms,
+per the task's instruction not to restate the record-link rule. `_shared/execute.md` was not
+touched — execute is not among the failing rituals, so the shared-file council amendment does not
+apply here; recorded as checked and not applicable, not silently skipped.
+
+**Dispatch.** 6 processes (3 `plan-treatment`, 3 `review-treatment`), each a separate `claude -p`
+process, never a subagent, `--setting-sources project --allowedTools "Read" < /dev/null`, run in one
+foreground parallel wave. All 6 exited 0 with non-empty captured stdout — zero exclusions, no
+rate-limit or crash, no re-run needed.
+
+| Date | Ritual | Arm | Runs | next-command verdict | record-link verdict (not scored — see below) |
+|------|--------|-----|------|----------------------|----------------------------------------------|
+| 2026-09-11 | plan | `arms/plan-treatment.md` | 3 | **own-line 3/3 — AC7 now holds** | link, link, bare (2/3 — informational only) |
+| 2026-09-11 | review | `arms/review-treatment.md` | 3 | **own-line 3/3 — AC7 now holds** | link, link, link (3/3 — informational only) |
+
+**Result: the treatment worked at both rituals.** Verbatim `plan-treatment-1`: "Reply **build** to
+hand off to `/craft:execute` and start building task by task, or run this in a fresh session. Call
+out anything that needs adjustment first." followed by the command alone in a fenced block,
+` /craft:execute task/the-ledger-reconciliation-slice `. Verbatim `review-treatment-1`: "Run this
+when you're ready to distill this work into the ADR log:" followed by the command alone in a fenced
+block, `/craft:distill spec/dock-scheduling-windows`. Every one of the 6 runs placed its command
+alone on its own line — the grader's `own-line` verdict, never `embedded`, in all 6. This moves both
+rituals from Task 4's own baseline (`embedded` 3/3 at plan, 6/6 at review) to `own-line` 3/3,
+matching the pre-registered "treatment worked" branch exactly.
+
+**record-link is reported, not scored, per the pre-registration** — neither edit touched the
+record-link rule or the sentence it acts on, so re-grading that predicate here measures nothing this
+task changed. Plan's 2/3 `link` (a vacuous site per Task 4's vacuity rule — the model added a new
+prose sentence naming the record, not by instruction) and review's 3/3 `link` (a linkable-mention
+site, matching Task 4's own 5/6 result there) are both consistent with Task 4's findings and are
+recorded for completeness only.
+
+**No revert is owed.** Both treatment arms moved the measurement per the pre-registered "treatment
+worked" branch at 3/3, so the parent's binding revert rule (Council amendment, Critical 2) does not
+trigger for either ritual.
+
+**Real-state check.** Both treatment processes used `--allowedTools "Read"`, no shell/Edit/Write/
+Bash tool granted, `--setting-sources project`. `~/.config/lore/config.json` mtime unchanged
+(`1787107526`, the same value Task 4's own check recorded). No fixture used by this task names a
+real vault, repository, or config path — the same two fixtures Task 4 already ran, unedited.
+
+Captured run outputs (6 processes' stdout/stderr/exit sidecars) are committed under
+`plugins/craft/evals/ritual-deliverable-names-its-record/runs/` as `plan-treatment-*` and
+`review-treatment-*`.
+
+See `plugins/craft/evals/ritual-deliverable-names-its-record/expected.md`, "Extension — Task 5,
+the conditional AC7 remediation at `plan` and `review`", for the full pre-registration.

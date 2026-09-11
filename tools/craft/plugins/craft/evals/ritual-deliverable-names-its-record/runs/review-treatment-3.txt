@@ -1,0 +1,5 @@
+Review passed and the change is merged. The slice loop reports [spec/dock-scheduling-windows](http://127.0.0.1:7313/records/harborlight/spec/dock-scheduling-windows) closed out. Run this when you're ready to distill this work into the ADR log.
+
+```
+/craft:distill spec/dock-scheduling-windows
+```
