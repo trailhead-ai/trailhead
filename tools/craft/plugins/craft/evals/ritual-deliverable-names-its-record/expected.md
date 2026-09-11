@@ -693,3 +693,41 @@ its pinned *future* invocation is the measurable one ruled above. Both must surv
 carry a filename prefix distinct from any existing one rather than extending an existing ritual's
 numbering. Re-grading history under a later ruling would rewrite what the previous measurement
 actually recorded, which is precisely what the regression pin exists to prevent.
+
+## Deviation from the pre-registration — recorded after the Task 4 result was visible
+
+One deviation, found by the Task 4 conformance gate and disposed of here rather than by editing the
+conditions above. The conditions stay exactly as they were committed at `2dbf938d`: a protocol
+amended after its results are known is no longer a pre-registration, so a deviation is reported, not
+legislated away.
+
+**What deviated.** Condition 2 requires `review`'s new fixture to differ from
+`fixtures/review-completed-run.md` "**only** in the state that selects the branch", and explains
+that requirement with "Every other line is identical, so the branch is the one variable." The
+fixture as built differs in three lines: the `craft/slice-loop` marker bullet (which wraps across
+two) and a second bullet naming what the review therefore closes.
+
+**Disposition — the measurement stands.** The controlling clause is satisfied and the explanatory
+sentence is not, because the branch-selecting state is expressed across two bullets in the source
+fixture rather than one. Flipping only the marker would leave the fixture asserting an open loop and
+a review that ends the spec simultaneously — satisfying the letter of "every other line is
+identical" by making the fixture self-contradictory, which is a worse instrument, not a better one.
+The clause states the rule; the sentence states an assumption about the source fixture's layout that
+turned out to be wrong.
+
+**Why this is not a retrofit, and where the reader should stay skeptical.** The reasoning above
+turns on the fixture's internal consistency and is independent of which way the result came out — it
+would read identically had `review` measured passing. The independent check is condition 3, which
+does not rely on this judgment at all: all six `review-loop-open` captures land on `/craft:slice`
+rather than `/craft:distill`, so the intended branch was demonstrably reached. What a skeptical
+reader should weigh: this disposition was nonetheless written after the result was known, by the
+same person who wrote the condition. The conservative alternative — rebuild the fixture to the
+letter and re-run the site's six arms — was considered and not taken, on the grounds that the
+alternative fixture is self-contradictory and so cannot be the better instrument.
+
+**Scope of the deviation.** `review`'s fixture only. `slice`'s fixture is governed by the same three
+conditions with the branch condition replaced, has no analogous paired bullet, and does not deviate.
+
+**A written claim was also wrong and has been corrected.** `tools/craft/MANUAL-EVAL.md` stated the
+fixture differed "in exactly one line". It now states what actually differs and why the two bullets
+flip together. The commit body at `c00f3559` makes no such claim and needs no correction.
