@@ -260,12 +260,12 @@ def _dispatch_host_command(
 
     "launch" is accepted by `_HOST_VERBS` — and reaches here with `--group`
     already required and present, per the `_STATE_CHANGING_HOST_VERBS`
-    handling above — but the remote launch itself (the remote argv actually
-    sent, its answer, and the certainty-aware rendering the design doc's
-    enumerated states require) is a later task's deliverable. This branch
-    refuses cleanly rather than falling through to the `assert verb ==
-    "attach"` below, which would otherwise raise a raw traceback for a verb
-    this function is not yet wired to complete.
+    handling above. Unlike "list"/"sessions" it is wired through
+    `camp.host.relay.answer_object_for_host` (the single-object relay shape),
+    not `relay_all_groups`: a launch answers with one session or nothing at
+    all, and its rendering carries its own certainty-aware exit-code and
+    stderr-ordering policy the generic rows relay does not provide — see
+    `cli/session.py`'s `_cmd_launch_host_cli`.
     """
     if verb == "list":
         from .workspace import _cmd_ls_host_cli
@@ -276,9 +276,9 @@ def _dispatch_host_command(
 
         _cmd_sessions_host_cli(rest, host, host_name)
     elif verb == "launch":
-        from ..spine import _die
+        from .session import _cmd_launch_host_cli
 
-        _die(f"camp launch: {HOST_FLAG} is accepted, but the remote launch itself is not wired yet")
+        _cmd_launch_host_cli(rest, host, host_name)
     else:
         assert verb == "attach"
         from .session import _cmd_attach_host_cli
