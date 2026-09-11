@@ -1,0 +1,13 @@
+[spec/permit-renewal-workflow](http://127.0.0.1:7313/records/northlight/spec/permit-renewal-workflow) has passed the gauntlet and is now `ready`.
+
+- **Write landed** — one atomic `lore record update --diff` carrying both `resolved` edits, the provenance stamp, and the full `## Gauntlet` finding detail. No hunk was rejected.
+- **Criticals** — C1 `resolved` (from proposal), C2 `resolved` (from proposal). 2 from proposal, 0 operator overrides. None at `revise`, so the advance condition held.
+- **Status flipped** to `ready`.
+
+Full finding detail is retained in the spec's `## Gauntlet` section.
+
+Next step — hand off to the slice loop from a fresh session:
+
+```
+/craft:slice spec/permit-renewal-workflow
+```

@@ -1,0 +1,9 @@
+The Exit Gate checklist is green: shared understanding confirmed with you in step 5, objectives outcome-framed, acceptance criteria testable and bounded, non-goals explicit, no open questions left unaddressed, UI direction locked verbally, and the spec written and shared. No scope was deferred, so there are no `task` records to carry forward.
+
+The spec is saved as a lore `spec` record — [spec/warehouse-picking-batches](http://127.0.0.1:7313/records/northlight/spec/warehouse-picking-batches) (status `draft`). Next it goes through the gauntlet — eight parallel passes that attack its facts, premises, consistency, and underdetermination — and the gauntlet flips it to `ready` once you've accepted its recommendation, or overridden it. Run:
+
+```
+/craft:gauntlet spec/warehouse-picking-batches
+```
+
+Invoke it yourself in a fresh session so it loads cleanly — I won't enter it from here. Once the spec is `ready`, the slice loop picks it up with `/craft:slice spec/warehouse-picking-batches`.

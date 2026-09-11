@@ -1,0 +1,3 @@
+The slice loop reports `spec/dock-scheduling-windows` closed out — this review's change is merged, and with the `craft/slice-loop` marker at `complete` there are no further slices to choose, plan, or build. That closes the spec's lifecycle, not just this review's job.
+
+Run `/craft:distill spec/dock-scheduling-windows` when you're ready to distill this work into the ADR log.
