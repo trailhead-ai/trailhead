@@ -262,6 +262,48 @@ def _gather_conversations(*, group_name: str, slug: str, session_groups, resolve
         return None
 
 
+_MISSING_SELF_NAME_CHECK = "this host has declared a name"
+
+
+def _missing_self_name_remedy(env: dict[str, str]) -> str:
+    """The file to create and the constraint on what to put in it.
+
+    Named here, at the CLI layer that already knows the concrete path and
+    performs every rendering decision — `camp.host.config.self_host_name`
+    stays a plain "declared or not" read with no rendering opinion of its
+    own, and `camp.transfer.preflight` stays pure data-to-data with no path
+    to resolve. The refusal is the primary discovery path for this file, not
+    the README (see the README's own note on this), so it names the file and
+    the different-names requirement rather than pointing elsewhere.
+    """
+    import trailhead.paths as _paths
+
+    path = _paths.config_dir("camp", env=env) / "hosts.toml"
+    return (
+        f"create {path} with `self_name = \"<name>\"` — choose a name that "
+        "differs from every peer's own self_name declared there; two hosts "
+        "declaring the same name pass every ownership check on both sides "
+        "at once, silently, since the loader never compares names across "
+        "machines"
+    )
+
+
+def _augment_missing_self_name_check(result, *, env: dict[str, str]):
+    """Rewrite check 1's FAILED detail to name the remedy, leaving every
+    other check (and the verdict) untouched. See `_missing_self_name_remedy`."""
+    from dataclasses import replace
+
+    from ..transfer.preflight import CheckStatus
+
+    augmented = tuple(
+        replace(check, detail=f"{check.detail} — {_missing_self_name_remedy(env)}")
+        if check.name == _MISSING_SELF_NAME_CHECK and check.status is CheckStatus.FAILED
+        else check
+        for check in result.checks
+    )
+    return replace(result, checks=augmented)
+
+
 def _cmd_transfer_group_cli(
     args: list[str],
     group: dict,
@@ -360,6 +402,7 @@ def _cmd_transfer_group_cli(
         slug=slug,
         conversations=conversations,
     )
+    result = _augment_missing_self_name_check(result, env=resolved_env)
 
     if as_json:
         print(json.dumps(_json_payload(result, slug=slug, peer_name=peer_name)))
