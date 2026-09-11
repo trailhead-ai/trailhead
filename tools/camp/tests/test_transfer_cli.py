@@ -27,6 +27,8 @@ Test contract:
   directory byte-identical, asserted by snapshot.
 - A failing check with no exit code of its own falls through to the shared
   not-clean code, which is distinct from every code that does name a cause.
+- The top-level JSON `ok` discriminator tracks the verdict — true on a clean
+  run, false on a refusal — not merely present.
 """
 
 from __future__ import annotations
@@ -340,12 +342,64 @@ def test_clean_verdict_json_carries_every_check_and_the_ok_discriminator(
 
     payload = json.loads(capsys.readouterr().out)
     assert code == 0
+    assert payload["ok"] is True
     assert payload["verdict"] == "would_transfer"
     assert len(payload["checks"]) == 11
     for row in payload["checks"]:
         assert row["ok"] is (row["status"] == "passed")
     assert all(row["ok"] for row in payload["checks"])
     assert payload["conversations"] == []
+
+
+def test_json_top_level_discriminator_is_false_on_a_refusal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """The top-level `ok` is the field a wrapping script branches on, so it must
+    track the verdict rather than merely being present.
+
+    The clean-path test pins it True; this pins it False on an ownership
+    refusal, which is what makes it a discriminator instead of a constant.
+    """
+    env = _Env(tmp_path)
+    env.write_group(excluded={"repo_a": []})
+    env.write_hosts(self_name="host-a", peers={"host-b": "host-b"})
+    env.write_manifest(owner="host-c")  # owned by neither end
+    env.apply(monkeypatch)
+    probe = _probe_module()
+
+    _fake_probe(
+        monkeypatch,
+        probe.ProbeAnswer(
+            self_name="host-b",
+            group_configured=True,
+            members=(probe.MemberRepoStatus(name="repo_a", repo_root_exists=True),),
+            account=None,
+            workspace_exists=False,
+            workspace_owner=None,
+            contract_version=probe.PROBE_CONTRACT_VERSION,
+        ),
+    )
+    _no_conversations(monkeypatch)
+
+    code = _run(
+        monkeypatch,
+        [
+            "transfer",
+            "feat-x",
+            "--to",
+            "host-b",
+            "--group",
+            "trailhead",
+            "--dry-run",
+            "--json",
+        ],
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert code != 0
+    assert payload["ok"] is False
+    assert payload["verdict"] == "not_clean"
+    assert any(row["ok"] is False for row in payload["checks"])
 
 
 # ---------------------------------------------------------------------------
