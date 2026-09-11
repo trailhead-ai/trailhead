@@ -446,6 +446,57 @@ class Harness(ABC):
         """
         return None
 
+    # -- transcript workspace rewrite ------------------------------------------
+    #
+    # A transcript's recorded root travels with it verbatim when a conversation
+    # crosses hosts — left alone, an arrived transcript would point at the
+    # SENDING host's directory forever. This harness's own transcript discovery
+    # (``session_transcripts`` above) does not need the correction: it discovers
+    # a conversation by its projects-key directory alone and treats the live
+    # invocation directory as ground truth, announcing a correction when the
+    # stored value differs. Camp DOES need it: its resume recovers the launch
+    # root from the transcript's recorded root and refuses when that path does
+    # not exist, and its workspace-scoped listing filters on the recorded root
+    # being relative to the workspace. Un-rewritten, an arrived conversation
+    # would neither be listed nor resumable on the receiving host.
+    #
+    # A pure, streaming, per-file transform: given a transcript and an old/new
+    # root, it rewrites the recorded root and nothing else, one line at a time,
+    # so a transcript hundreds of megabytes wide is never held in memory whole.
+    # Only the field(s) a harness structurally records a root in are touched —
+    # a field that only ever carries a root as free-form prose (a user-message
+    # body, say) is deliberately left alone: rewriting free text would corrupt
+    # the record rather than relocate it.
+    #
+    # Same degrading default as the seams above: ``False`` means "this harness
+    # has no transcript-rewrite concept", so ``destination`` is left untouched.
+    # A harness that DOES implement this may raise ``HarnessError`` to refuse
+    # the WHOLE transcript outright — a recorded root that is not under
+    # ``old_root`` at all, which this seam must never pass through unrewritten.
+    # A caller must treat that raise as a hard, fail-closed stop: nothing is
+    # written to ``destination``.
+
+    def rewrite_transcript_workspace(
+        self, source: Path, destination: Path, old_root: Path, new_root: Path
+    ) -> bool:
+        """Rewrite ``source``'s recorded root from ``old_root`` to ``new_root``,
+        streaming the result into ``destination``.
+
+        Every field this harness structurally records a root in is rewritten
+        from ``old_root`` to ``new_root``; every other field is byte-identical
+        to the input.
+
+        Returns ``False`` when this harness has no transcript-rewrite concept —
+        ``destination`` is left untouched. Returns ``True`` on a completed
+        rewrite.
+
+        Raises ``HarnessError`` to refuse the whole transcript when a line
+        records a root that is not under ``old_root`` — passing such a line
+        through unrewritten would leave a foreign, sending-host path inside a
+        relocated file. Nothing is written to ``destination`` on a refusal.
+        """
+        return False
+
     # -- session retention ----------------------------------------------------
     #
     # Harnesses delete their own session transcripts on a schedule.  A caller
