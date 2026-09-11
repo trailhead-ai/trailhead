@@ -104,23 +104,31 @@ def _cmd_transfer_probe_cli(args: list[str]) -> None:
 # ---------------------------------------------------------------------------
 
 
+#: The closed set of phases `camp transfer-receive` admits, in dispatch
+#: order. A future phase (the `worktree` archive stream this `history`
+#: channel is shaped to be reused by) is a one-line addition here plus a new
+#: `elif phase == "<name>":` branch below — never a second closed-tuple site.
+_PHASES = ("begin", "finish", "history")
+
+
 def _cmd_transfer_receive_cli(args: list[str]) -> None:
-    """camp transfer-receive begin|finish --group <g> --slug <s> [--owner <sender>] [--overwrite]
+    """camp transfer-receive begin|finish|history --group <g> --slug <s> [...]
 
     Dispatched here exactly like `camp transfer-probe` — every local read and
     write is this function's (and `camp.transfer.receive`'s) to make; no path
     is ever built from a caller-supplied field. See `camp.transfer.receive`'s
-    module docstring for the full begin/finish contract.
+    module docstring for the full begin/finish/history contract.
     """
     from ..group.config import GroupConfigError, load_all_groups
     from ..spine import _consume_flag_value
     from ..transfer import receive as receive_mod
     from .common import _groups_dir
 
-    if not args or args[0] not in ("begin", "finish"):
+    if not args or args[0] not in _PHASES:
         got = args[0] if args else None
+        phases = "', '".join(_PHASES)
         print(
-            f"camp transfer-receive: a phase of 'begin' or 'finish' is "
+            f"camp transfer-receive: a phase of '{phases}' is "
             f"required, got {got!r}",
             file=sys.stderr,
         )
@@ -158,6 +166,26 @@ def _cmd_transfer_receive_cli(args: list[str]) -> None:
                 slug=slug,
                 sender=owner,
                 overwrite=overwrite,
+            )
+        except receive_mod.ReceiveRefused as e:
+            print(f"camp transfer-receive: {e}", file=sys.stderr)
+            sys.exit(1)
+        print(json.dumps(answer))
+        return
+
+    if phase == "history":
+        member = _consume_flag_value(rest, "--member")
+        if not member:
+            print("camp transfer-receive: --member is required for history", file=sys.stderr)
+            sys.exit(1)
+        bundle_bytes = sys.stdin.buffer.read()
+        try:
+            answer = receive_mod.history(
+                groups=groups,
+                group_name=group_name,
+                slug=slug,
+                member=member,
+                bundle_bytes=bundle_bytes,
             )
         except receive_mod.ReceiveRefused as e:
             print(f"camp transfer-receive: {e}", file=sys.stderr)
