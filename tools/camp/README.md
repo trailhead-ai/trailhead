@@ -329,6 +329,25 @@ slug, since each of those narrows or reshapes a single machine's own local
 question rather than "every group on that host". A host name not declared
 in `hosts.toml` is refused the same way.
 
+Stopping a session on a declared machine is the one state-changing form of
+this shape:
+
+```
+camp kill <ref> --host <name>
+camp kill <ref> --host <name> --json
+```
+
+The reference alone names the session, so no `--group` is needed — the far
+side resolves it against its own pool exactly as it would locally, and
+refuses in its own words. There is no `--all-hosts` form: a stop acts on the
+one machine you name. Its exit status is its own four-value contract, so a
+script can branch without reading prose — `0` stopped (or already down,
+told apart by the answer's `outcome` field), `2` the reference matched more
+than one session and the candidates are on stdout, `3` the outcome could not
+be determined, `1` every certain failure including a far-side refusal. `2`
+and `3` are reserved: a remote exiting on either collapses to `1` rather
+than impersonating camp's own signal.
+
 A failure to connect, authenticate, or run camp on the far side is its own
 rendered outcome rather than a crash: unreachable, connected but stalled
 before answering, an unrecognized host key, a changed host key, camp not
