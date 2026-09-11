@@ -43,6 +43,20 @@ import warnings
 from pathlib import Path
 from typing import BinaryIO, Callable, Sequence
 
+# `build_archive_argv` below runs THIS file as a standalone script
+# (`python3 <this file> <worktree> <excluded...>`) — `stream_camp` needs a
+# real subprocess to read from, mirroring `camp.transfer.history`'s `git
+# bundle create` producer. A script has no package context, so the relative
+# imports a few lines down (needed only by the sender/peer functions, not by
+# the standalone `write_archive` path `__main__` actually uses) would
+# otherwise fail before `__main__` is even reached. Mirrors `cli/camp`'s own
+# plugin-root bootstrap; a no-op when this module is imported normally.
+if __package__ in (None, ""):
+    _plugin_root = Path(__file__).resolve().parent.parent.parent
+    if str(_plugin_root) not in sys.path:
+        sys.path.insert(0, str(_plugin_root))
+    __package__ = "camp.transfer"
+
 from ..host.config import Host
 from ..host.transport import (
     DEFAULT_CONNECT_TIMEOUT_SECONDS,

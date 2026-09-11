@@ -1,8 +1,8 @@
 """`camp transfer-probe` and `camp transfer` — the transfer preflight's two ends.
 
 `camp transfer-probe` is documented in its own handler below. This module also
-carries `camp transfer <slug> --to <peer> --dry-run [--json]` — the
-operator-facing dry-run verb, dispatched from `cli/dispatch.py`'s group-aware
+carries `camp transfer <slug> --to <peer> [--dry-run] [--overwrite] [--json]`
+— the operator-facing verb, dispatched from `cli/dispatch.py`'s group-aware
 router exactly like `camp status`. It is the one place that performs every
 local read (self-declared name, the workspace manifest, `hosts.toml`, each
 member's declared `excluded` set, the conversation pool) and the one peer read
@@ -11,22 +11,30 @@ member's declared `excluded` set, the conversation pool) and the one peer read
 per its own module docstring. Every rendering decision and every exit code
 below is this module's to make; `compose_preflight` makes none of them.
 
-**`--dry-run` is required.** `camp transfer` moves nothing today — the mover is
-a later slice — so a bare `camp transfer <slug> --to <peer>` refuses by name
-(`EXIT_DRY_RUN_REQUIRED`) before reading anything from the peer, rather than
-silently running a preview under a name that will mean something else once the
-mover ships. This is why the requirement is worded into `--help` (see
-`camp.spine.cmd_help`) rather than left for the operator to discover by running
-the command wrong.
+**The same preflight governs both paths.** `--dry-run` renders the composed
+checks and stops. Its absence runs the identical composition and, only on a
+clean verdict, drives `camp.transfer.move.move_workspace` — begin, then per
+member history and worktree, then finish. Any check that is not PASSED
+refuses on either path, before `move_workspace` is ever called, so a member
+that never declared an `excluded` set (or any other failing check) moves
+nothing whether or not `--dry-run` was given — see
+`camp.transfer.preflight`'s check 10 and this module's `_exit_code_for`.
+
+**`--overwrite`** is the one flag specific to the moving path: it is threaded
+to `move_workspace`, and from there to `transfer-receive begin`, whose own
+refusal it lifts — see `camp.transfer.receive`'s module docstring for what it
+guards. Omitted, a workspace already present on the peer and owned by this
+host refuses (`EXIT_OVERWRITE_REQUIRED`) rather than being torn down by the
+same keystrokes an operator has muscle memory for from the read-only phase.
 
 EXIT CODES — the whole closed set `camp transfer` can return, in the order its
 inputs are checked:
 
-  0  EXIT_WOULD_TRANSFER      every check passed — a clean verdict
+  0  EXIT_WOULD_TRANSFER      every check passed — a clean verdict with
+                               `--dry-run`, or (without it) the transfer
+                               completed
   1  EXIT_ERROR               an unexpected/local error: a missing required
                                flag, a malformed hosts.toml or group config
-  2  EXIT_DRY_RUN_REQUIRED    `--dry-run` was omitted; nothing was read from
-                               the peer on this path
   3  EXIT_NOT_CLEAN           the verdict is NOT_CLEAN for a reason with no
                                more specific code below (this host declared no
                                name, the peer's name collides with this host's,
@@ -35,11 +43,23 @@ inputs are checked:
                                enumerated)
   4  EXIT_OWNERSHIP_REFUSED   this host does not own the workspace — the
                                refusal names the owning host and the remedy
-  5  EXIT_PEER_UNREACHABLE    the peer could not be reached (any of the seven
+  5  EXIT_PEER_UNREACHABLE   the peer could not be reached (any of the seven
                                `camp.host.transport.TransportOutcome` kinds)
   6  EXIT_UNKNOWN_SLUG        no workspace manifest is recorded for this slug
                                on this host
   7  EXIT_UNKNOWN_PEER        the named peer is not declared in hosts.toml
+  8  EXIT_OVERWRITE_REQUIRED  the workspace already exists on the peer, owned
+                               by this host, and `--overwrite` was not passed
+                               — nothing crossed
+  9  EXIT_PHASE_FAILED        a move phase (begin/history/worktree/finish)
+                               failed after the preflight passed — nothing
+                               after the failing phase ran; re-running the
+                               transfer is safe
+
+Code 2 is retired — this verb used to refuse a bare invocation with it before
+the mover existed; it is never produced now and is not reused for anything
+else, so an old script that checked for it specifically still gets a clear
+"not that" answer rather than a code that now means something unrelated.
 
 Selected by walking `PreflightResult.checks` in their fixed order (see
 `camp.transfer.preflight`'s module docstring) and taking the first check that
@@ -52,7 +72,10 @@ collision, peer group/account/slug checks, the excluded-set declaration, and
 conversation enumeration) do not need their own operator-visible exit code —
 their distinguishing detail is carried in the rendered check text and (for
 `--json`) in the check's own `status`/`detail`/`transport_outcome` fields, not
-in the process exit code.
+in the process exit code. `EXIT_OVERWRITE_REQUIRED` and `EXIT_PHASE_FAILED`
+are never produced by the preflight itself — they come from
+`camp.transfer.move.move_workspace`, reached only once every check has
+PASSED.
 """
 
 from __future__ import annotations
@@ -225,12 +248,13 @@ def _cmd_transfer_receive_cli(args: list[str]) -> None:
 
 EXIT_WOULD_TRANSFER = 0
 EXIT_ERROR = 1
-EXIT_DRY_RUN_REQUIRED = 2
 EXIT_NOT_CLEAN = 3
 EXIT_OWNERSHIP_REFUSED = 4
 EXIT_PEER_UNREACHABLE = 5
 EXIT_UNKNOWN_SLUG = 6
 EXIT_UNKNOWN_PEER = 7
+EXIT_OVERWRITE_REQUIRED = 8
+EXIT_PHASE_FAILED = 9
 
 #: Check name -> exit code, for the checks that get their own. Looked up by
 #: `_exit_code_for` while walking `PreflightResult.checks` in order; a check
@@ -449,43 +473,73 @@ def _augment_missing_self_name_check(result, *, env: dict[str, str]):
     return replace(result, checks=augmented)
 
 
+def _render_move_completion(
+    result, *, slug: str, peer_name: str, group_name: str, self_name: str
+) -> None:
+    """The report printed once `move_workspace` returns successfully.
+
+    Distinguishes "arrived" from "ready to work in" (regeneration is spawned,
+    not awaited — see `camp.transfer.receive`'s `finish`), states plainly
+    that ownership did not move, and names the interim risk that nothing
+    scans what crossed for credential-shaped content — untracked files
+    routinely carry them and the peer now holds a cleartext copy.
+    """
+    from ..launch.recovery import printable_path
+
+    print(f"camp transfer: {slug!r} arrived on {peer_name!r}")
+    print(f"  ownership did not move — {self_name!r} still owns {slug!r}")
+    print(
+        f"  regeneration of each member's excluded state is still running on "
+        f"{peer_name!r} — check its progress there with "
+        f"`camp status --name {slug} --group {group_name}`"
+    )
+    print(
+        "  nothing scanned what crossed for credential-shaped content — "
+        "untracked files routinely carry them and the peer now holds a "
+        "cleartext copy; review it yourself"
+    )
+    if not result.conversations:
+        print("  no conversations are rooted in this workspace")
+    else:
+        for conversation in result.conversations:
+            if conversation.unresolved:
+                print(f"    ? {conversation.session_id} — root could not be resolved")
+            else:
+                live_tag = " (live)" if conversation.live else ""
+                subpath = printable_path(conversation.subpath)
+                print(f"    {conversation.session_id} @ {subpath}{live_tag}")
+
+
 def _cmd_transfer_group_cli(
     args: list[str],
     group: dict,
     env: dict[str, str] | None,
     dry_run: bool,
 ) -> None:
-    """camp transfer <slug> --to <peer> --dry-run [--json]
+    """camp transfer <slug> --to <peer> [--dry-run] [--overwrite] [--json]
 
-    See the module docstring for the full exit-code table and the
-    `--dry-run`-is-required rationale. Every check is composed by
-    `camp.transfer.preflight.compose_preflight` from reads this function
-    performs; this function owns rendering and the exit code alone.
+    See the module docstring for the full exit-code table. Every check is
+    composed by `camp.transfer.preflight.compose_preflight` from reads this
+    function performs; this function owns rendering and the exit code alone.
+    On a clean verdict without `--dry-run`, drives
+    `camp.transfer.move.move_workspace` and reports what it did.
     """
     import os
 
     from ..group.manifest import ManifestError, manifest_path_for, owner_of, read_central_manifest
     from ..host.config import HostConfigError, load_hosts, self_host_name
     from ..spine import _consume_flag_value, _die
-    from ..transfer.preflight import MemberDeclaration, compose_preflight
+    from ..transfer.preflight import MemberDeclaration, Verdict, compose_preflight
     from ..transfer.probe import InvalidSlugForTransport, probe_peer
     from .dispatch import _slug_from_args_or_cwd
     from .session import _parsable_groups
 
     as_json = "--json" in args
-    filtered = [a for a in args if a not in ("--json", "--dry-run")]
+    overwrite = "--overwrite" in args
+    filtered = [a for a in args if a not in ("--json", "--dry-run", "--overwrite")]
     _consume_flag_value(filtered, "--group")  # already resolved upstream; drop it
 
     peer_name = _consume_flag_value(filtered, "--to")
-
-    if not dry_run:
-        print(
-            "camp transfer: --dry-run is required — camp transfer only "
-            "previews a transfer today; the moving half is not built yet. "
-            "Re-run with --dry-run.",
-            file=sys.stderr,
-        )
-        sys.exit(EXIT_DRY_RUN_REQUIRED)
 
     if not peer_name:
         _die("camp transfer: --to <peer> is required", code=EXIT_ERROR)
@@ -552,9 +606,46 @@ def _cmd_transfer_group_cli(
     )
     result = _augment_missing_self_name_check(result, env=resolved_env)
 
-    if as_json:
-        print(json.dumps(_json_payload(result, slug=slug, peer_name=peer_name)))
-    else:
-        _render_human(result, slug=slug, peer_name=peer_name)
+    if dry_run or result.verdict is not Verdict.WOULD_TRANSFER:
+        if as_json:
+            print(json.dumps(_json_payload(result, slug=slug, peer_name=peer_name)))
+        else:
+            _render_human(result, slug=slug, peer_name=peer_name)
+        sys.exit(_exit_code_for(result))
 
-    sys.exit(_exit_code_for(result))
+    from ..transfer.move import OverwriteNeeded, PhaseFailed, move_workspace
+
+    def _on_phase(phase: str) -> None:
+        print(f"camp transfer: phase — {phase}")
+
+    try:
+        move_workspace(
+            host=hosts[peer_name],
+            group=group,
+            group_name=group_name,
+            slug=slug,
+            sender_name=self_name,
+            overwrite=overwrite,
+            on_phase=_on_phase,
+            env=resolved_env,
+        )
+    except OverwriteNeeded as e:
+        print(
+            f"camp transfer: refused — {e.detail} — moves nothing; pass "
+            "--overwrite to proceed",
+            file=sys.stderr,
+        )
+        sys.exit(EXIT_OVERWRITE_REQUIRED)
+    except PhaseFailed as e:
+        print(
+            f"camp transfer: phase {e.phase!r} failed — {e.detail}. This is a "
+            "failure, not a refusal: everything up to this phase already "
+            "crossed, and re-running the transfer is safe.",
+            file=sys.stderr,
+        )
+        sys.exit(EXIT_PHASE_FAILED)
+
+    _render_move_completion(
+        result, slug=slug, peer_name=peer_name, group_name=group_name, self_name=self_name
+    )
+    sys.exit(EXIT_WOULD_TRANSFER)

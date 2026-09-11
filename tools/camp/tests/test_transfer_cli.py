@@ -1,11 +1,21 @@
-"""Tests for `camp transfer` — the operator-facing dry-run verb.
+"""Tests for `camp transfer` — the operator-facing verb: preview with
+`--dry-run`, move without it.
 
 Test contract:
 - `--dry-run` prints the ordered checks and what would cross, and exits 0 on a
-  clean verdict.
-- Omitting `--dry-run` refuses with its own exit code and a message naming the
-  reason; nothing is read from the peer on that path.
-- The requirement appears in the verb's help output.
+  clean verdict, and never calls `camp.transfer.move.move_workspace`.
+- Omitting `--dry-run` runs the identical preflight; on a clean verdict it
+  drives `move_workspace` and reports what arrived. A preflight check that is
+  not PASSED refuses exactly as it does with `--dry-run` — `move_workspace` is
+  never called and nothing crosses.
+- `--overwrite` threads through to `move_workspace`; its absence against a
+  workspace already on the peer, owned by this host, refuses by its own exit
+  code, names the flag, and moves nothing — with the flag it transfers, and a
+  re-run after a phase failure succeeds end to end. See
+  `TestMoveWorkspaceEndToEnd` below for the real-peer coverage of that phase
+  orchestration itself.
+- The help output no longer describes `--dry-run` as required and names
+  `--overwrite`.
 - A refusal exits nonzero, names the owning host and the remedy, and is
   distinguishable by exit code from a failure to reach the peer.
 - An indeterminate check is rendered, and its rendering differs from a pass
@@ -43,7 +53,10 @@ import importlib
 import json
 import os
 import re
+import subprocess
 import sys
+import textwrap
+import threading
 from pathlib import Path
 
 import pytest
@@ -61,6 +74,8 @@ if str(_PLUGIN_DIR) not in sys.path:
 import _bootstrap  # noqa: E402
 
 _bootstrap.ensure_trailhead_importable()
+
+from ._helpers import camp_state_env, init_git_repo  # noqa: E402
 
 
 def _dispatch_module():
@@ -81,6 +96,10 @@ def _probe_module():
 
 def _conversations_module():
     return importlib.import_module("camp.transfer.conversations")
+
+
+def _move_module():
+    return importlib.import_module("camp.transfer.move")
 
 
 # ---------------------------------------------------------------------------
@@ -207,34 +226,42 @@ def _run(monkeypatch: pytest.MonkeyPatch, argv: list[str]) -> int:
 
 
 # ---------------------------------------------------------------------------
-# --dry-run is required
+# --dry-run is optional — it previews; its absence moves. Both paths run the
+# identical preflight (see test_transfer_move.py-style coverage below in this
+# file for what the moving path actually does).
 # ---------------------------------------------------------------------------
 
 
-def test_omitting_dry_run_refuses_before_reading_the_peer(
+def test_dry_run_still_previews_and_never_calls_move_workspace(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     env = _Env(tmp_path)
-    env.write_group()
+    env.write_group(excluded={"repo_a": []})
     env.write_hosts(self_name="host-a", peers={"host-b": "host-b"})
+    env.write_manifest(owner="host-a")
     env.apply(monkeypatch)
-
     transfer = _transfer_module()
 
-    def _boom(*a, **k):
-        raise AssertionError("probe_peer must not be called without --dry-run")
+    _fake_probe(monkeypatch, _clean_probe_answer())
+    _no_conversations(monkeypatch)
 
-    monkeypatch.setattr(_probe_module(), "probe_peer", _boom)
+    move = _move_module()
 
-    code = _run(monkeypatch, ["transfer", "feat-x", "--to", "host-b", "--group", "trailhead"])
+    def _boom(**kw):
+        raise AssertionError("move_workspace must not be called with --dry-run")
 
-    assert code == transfer.EXIT_DRY_RUN_REQUIRED
-    err = capsys.readouterr().err
-    assert "--dry-run" in err
-    assert "not built yet" in err
+    monkeypatch.setattr(move, "move_workspace", _boom)
+
+    code = _run(
+        monkeypatch,
+        ["transfer", "feat-x", "--to", "host-b", "--group", "trailhead", "--dry-run"],
+    )
+
+    assert code == transfer.EXIT_WOULD_TRANSFER
+    assert "verdict — would transfer" in capsys.readouterr().out
 
 
-def test_dry_run_requirement_is_documented_in_help() -> None:
+def test_dry_run_is_documented_as_a_preview_not_a_requirement() -> None:
     import io
     from contextlib import redirect_stdout
 
@@ -248,8 +275,42 @@ def test_dry_run_requirement_is_documented_in_help() -> None:
     assert "camp transfer" in help_text
     transfer_section = help_text[help_text.index("camp transfer <slug>") :]
     transfer_section = transfer_section[: transfer_section.index("\n\n")]
-    assert "--dry-run" in transfer_section
-    assert "REQUIRED" in transfer_section
+    assert "REQUIRED" not in transfer_section
+    assert "--overwrite" in transfer_section
+
+
+def test_omitting_dry_run_on_a_clean_preflight_drives_the_move(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    env = _Env(tmp_path)
+    env.write_group(excluded={"repo_a": []})
+    env.write_hosts(self_name="host-a", peers={"host-b": "host-b"})
+    env.write_manifest(owner="host-a")
+    env.apply(monkeypatch)
+    transfer = _transfer_module()
+
+    _fake_probe(monkeypatch, _clean_probe_answer())
+    _no_conversations(monkeypatch)
+
+    move = _move_module()
+    calls = []
+
+    def _fake_move(**kw):
+        calls.append(kw)
+        kw["on_phase"]("begin")
+        return move.MoveResult(members=("repo_a",))
+
+    monkeypatch.setattr(move, "move_workspace", _fake_move)
+
+    code = _run(monkeypatch, ["transfer", "feat-x", "--to", "host-b", "--group", "trailhead"])
+
+    assert code == transfer.EXIT_WOULD_TRANSFER
+    assert len(calls) == 1
+    assert calls[0]["sender_name"] == "host-a"
+    assert calls[0]["overwrite"] is False
+    out = capsys.readouterr().out
+    assert "phase — begin" in out
+    assert "arrived on 'host-b'" in out
 
 
 # ---------------------------------------------------------------------------
@@ -954,3 +1015,562 @@ def test_peer_supplied_text_cannot_forge_camp_output(
     assert out.rstrip().endswith("verdict — not clean"), (
         f"the peer's text displaced camp's own last line: {out!r}"
     )
+
+
+# ---------------------------------------------------------------------------
+# camp.transfer.move — the sender-side mover, driven without --dry-run.
+#
+# The CLI-level tests above (and a few below) fake `move.move_workspace`
+# wholesale to pin the CLI's own rendering/exit-code/flag-wiring — mirroring
+# `_fake_probe`'s established pattern, since `_cmd_transfer_group_cli` does a
+# fresh `from ..transfer.move import move_workspace` on every call and so
+# observes a monkeypatched module attribute. The tests in this section call
+# `move_workspace` itself directly, against a real peer reached through the
+# same `Runner`/`StreamSpawner` seams `camp.host.transport.run_camp` and
+# `stream_camp` define — a real dispatcher subprocess, isolated to its own
+# peer config/state, standing in for ssh exactly as
+# `test_transfer_history.py`'s `TestSendHistoryEndToEnd` already establishes.
+# ---------------------------------------------------------------------------
+
+
+def _git(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", "-C", str(repo), *args], capture_output=True, text=True, check=True
+    )
+
+
+def _git_out(repo: Path, *args: str) -> str:
+    return _git(repo, *args).stdout.strip()
+
+
+def _peer_dispatch_script(camp_args: list[str]) -> str:
+    return textwrap.dedent(
+        f"""
+        import sys
+        sys.path.insert(0, {str(_PLUGIN_DIR)!r})
+        sys.argv = ["camp", *{camp_args!r}]
+        from camp.cli import dispatch
+        dispatch.main()
+        """
+    )
+
+
+def _peer_child_env(peer_cfg: Path, peer_state: Path) -> dict[str, str]:
+    child_env = dict(os.environ)
+    child_env["CAMP_CONFIG_DIR"] = str(peer_cfg)
+    child_env["CAMP_STATE_DIR"] = str(peer_state)
+    return child_env
+
+
+def _peer_runner(peer_cfg: Path, peer_state: Path):
+    """A `Runner` that runs the actual `camp transfer-receive begin|finish
+    ...` invocation `move_workspace` assembled, parsed off the ssh argv, as a
+    real dispatcher subprocess isolated to its own peer config/state."""
+    import shlex
+
+    from camp.host.transport import RawResult
+
+    def _run(argv, execution_timeout, env):
+        remote_command = argv[-1]
+        camp_args = shlex.split(remote_command)[1:]
+        result = subprocess.run(
+            [sys.executable, "-c", _peer_dispatch_script(camp_args)],
+            capture_output=True,
+            text=True,
+            env=_peer_child_env(peer_cfg, peer_state),
+            timeout=execution_timeout,
+        )
+        return RawResult(stdout=result.stdout, stderr=result.stderr, exit_code=result.returncode)
+
+    return _run
+
+
+def _peer_stream_spawn(peer_cfg: Path, peer_state: Path):
+    """A `StreamSpawner` mirroring `_peer_runner`, for the `history` and
+    `worktree` phases `move_workspace` drives over `stream_camp`."""
+    import shlex
+
+    def _spawn(argv, env):
+        remote_command = argv[-1]
+        camp_args = shlex.split(remote_command)[1:]
+        return subprocess.Popen(
+            [sys.executable, "-c", _peer_dispatch_script(camp_args)],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=_peer_child_env(peer_cfg, peer_state),
+        )
+
+    return _spawn
+
+
+def _move_group(sender_repo: Path) -> dict:
+    return {
+        "group": {"name": "testgroup"},
+        "members": [
+            {
+                "name": "repo_a",
+                "repo_root": str(sender_repo),
+                "tasks": [],
+                "base": "no-such-base",
+                "excluded": [],
+            }
+        ],
+        "branch_pattern": "worktree-{slug}",
+    }
+
+
+@pytest.fixture()
+def move_env(tmp_path: Path):
+    """A real sender worktree (an unpushed commit plus an untracked file)
+    and a real, freshly-initialized peer repo with its own isolated
+    config/state — everything `move_workspace` needs to actually move
+    content, with the peer reached as a real subprocess rather than a fake
+    return value."""
+    from camp.host.config import Host
+    from camp.provision.reconcile import _worktree_path
+
+    slug = "feat-move"
+    branch = f"worktree-{slug}"
+
+    sender_repo = tmp_path / "sender"
+    init_git_repo(sender_repo, origin=False)
+    sender_env = camp_state_env(tmp_path / "sender")
+    wt_path = _worktree_path("testgroup", slug, "repo_a", env=sender_env)
+    _git(sender_repo, "worktree", "add", str(wt_path), "-b", branch)
+    (wt_path / "committed.txt").write_text("committed on the sender\n")
+    _git(wt_path, "add", "committed.txt")
+    _git(
+        wt_path,
+        "-c", "user.email=t@t.com",
+        "-c", "user.name=t",
+        "commit", "-m", "sender content", "--no-gpg-sign",
+    )
+    (wt_path / "untracked.txt").write_text("never committed\n")
+
+    peer_repo = tmp_path / "peer_repo_a"
+    init_git_repo(peer_repo, origin=False)
+    peer_cfg = tmp_path / "peer-config"
+    (peer_cfg / "groups").mkdir(parents=True)
+    _write_group_toml(peer_cfg / "groups", "testgroup", [("repo_a", str(peer_repo))])
+    peer_state = tmp_path / "peer-state"
+    peer_env = {"CAMP_CONFIG_DIR": str(peer_cfg), "CAMP_STATE_DIR": str(peer_state)}
+
+    return {
+        "slug": slug,
+        "branch": branch,
+        "group": _move_group(sender_repo),
+        "host": Host(ssh="fake-peer", camp_bin="/opt/camp/bin/camp"),
+        "sender_env": sender_env,
+        "wt_path": wt_path,
+        "peer_repo": peer_repo,
+        "peer_cfg": peer_cfg,
+        "peer_state": peer_state,
+        "peer_env": peer_env,
+        "run": _peer_runner(peer_cfg, peer_state),
+        "stream_spawn": _peer_stream_spawn(peer_cfg, peer_state),
+    }
+
+
+class TestMoveWorkspaceEndToEnd:
+    def test_content_crosses_in_phase_order_against_a_real_peer(self, move_env):
+        from camp.provision.reconcile import _worktree_path
+        from camp.transfer.move import move_workspace
+
+        g = move_env
+        phases: list[str] = []
+
+        result = move_workspace(
+            host=g["host"],
+            group=g["group"],
+            group_name="testgroup",
+            slug=g["slug"],
+            sender_name="host-a",
+            overwrite=False,
+            on_phase=phases.append,
+            env=g["sender_env"],
+            run=g["run"],
+            stream_spawn=g["stream_spawn"],
+        )
+
+        assert phases == ["begin", "history: repo_a", "worktree: repo_a", "finish"]
+        assert result.members == ("repo_a",)
+
+        landed = _git_out(g["peer_repo"], "rev-parse", f"refs/heads/{g['branch']}")
+        sender_tip = _git_out(g["wt_path"], "rev-parse", "HEAD")
+        assert landed == sender_tip
+
+        peer_wt = _worktree_path("testgroup", g["slug"], "repo_a", env=g["peer_env"])
+        assert (peer_wt / "committed.txt").read_text() == "committed on the sender\n"
+        assert (peer_wt / "untracked.txt").read_text() == "never committed\n"
+
+    def test_failure_then_overwrite_refusal_then_successful_rerun(
+        self, move_env, tmp_path: Path
+    ):
+        from camp.provision.reconcile import _worktree_path
+        from camp.transfer.move import OverwriteNeeded, PhaseFailed, move_workspace
+
+        g = move_env
+
+        def _corrupt_history_producer(argv):
+            return subprocess.Popen(
+                [sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'not a bundle')"],
+                stdout=subprocess.PIPE,
+            )
+
+        def _boom_worktree_producer(argv):
+            raise AssertionError("worktree must never run after history failed")
+
+        with pytest.raises(PhaseFailed) as exc_info:
+            move_workspace(
+                host=g["host"],
+                group=g["group"],
+                group_name="testgroup",
+                slug=g["slug"],
+                sender_name="host-a",
+                overwrite=False,
+                env=g["sender_env"],
+                run=g["run"],
+                stream_spawn=g["stream_spawn"],
+                history_producer_spawn=_corrupt_history_producer,
+                worktree_producer_spawn=_boom_worktree_producer,
+            )
+        assert exc_info.value.phase == "history (repo_a)"
+
+        from camp.group.manifest import manifest_path_for
+
+        peer_manifest = manifest_path_for("testgroup", g["slug"], env=g["peer_env"])
+        assert peer_manifest.is_file(), "begin must have seeded the manifest before history failed"
+
+        def _snapshot(root: Path) -> dict[str, bytes]:
+            return {
+                str(p.relative_to(root)): p.read_bytes()
+                for p in sorted(root.rglob("*"))
+                if p.is_file()
+            }
+
+        before_refusal = _snapshot(g["peer_state"])
+        with pytest.raises(OverwriteNeeded) as overwrite_exc:
+            move_workspace(
+                host=g["host"],
+                group=g["group"],
+                group_name="testgroup",
+                slug=g["slug"],
+                sender_name="host-a",
+                overwrite=False,
+                env=g["sender_env"],
+                run=g["run"],
+                stream_spawn=g["stream_spawn"],
+            )
+        assert "--overwrite" in overwrite_exc.value.detail
+        after_refusal = _snapshot(g["peer_state"])
+        assert before_refusal == after_refusal
+
+        result = move_workspace(
+            host=g["host"],
+            group=g["group"],
+            group_name="testgroup",
+            slug=g["slug"],
+            sender_name="host-a",
+            overwrite=True,
+            env=g["sender_env"],
+            run=g["run"],
+            stream_spawn=g["stream_spawn"],
+        )
+        assert result.members == ("repo_a",)
+
+        landed = _git_out(g["peer_repo"], "rev-parse", f"refs/heads/{g['branch']}")
+        sender_tip = _git_out(g["wt_path"], "rev-parse", "HEAD")
+        assert landed == sender_tip
+        peer_wt = _worktree_path("testgroup", g["slug"], "repo_a", env=g["peer_env"])
+        assert (peer_wt / "committed.txt").read_text() == "committed on the sender\n"
+
+
+def test_move_workspace_reports_each_phase_before_a_slow_one_completes():
+    """A slow `finish` proves the ordering contract mechanically: `on_phase`
+    for every phase, `finish` included, has already fired while the remote
+    call for `finish` is still blocked — not merely that the labels end up
+    in the right order once everything has returned."""
+    import json as json_mod
+
+    from camp.host.config import Host
+    from camp.host.transport import RawResult
+    from camp.transfer.move import move_workspace
+
+    finish_started = threading.Event()
+    release_finish = threading.Event()
+
+    def _run(argv, execution_timeout, env):
+        remote_command = argv[-1]
+        if "finish" in remote_command:
+            finish_started.set()
+            assert release_finish.wait(timeout=5), "test deadlocked waiting to release finish"
+            return RawResult(
+                stdout=json_mod.dumps({"contract_version": 1, "manifest_path": "x"}),
+                stderr="",
+                exit_code=0,
+            )
+        return RawResult(
+            stdout=json_mod.dumps(
+                {"contract_version": 1, "members": [{"name": "repo_a", "basis_commit": None}]}
+            ),
+            stderr="",
+            exit_code=0,
+        )
+
+    def _tiny_producer(argv):
+        return subprocess.Popen(
+            [sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'x')"],
+            stdout=subprocess.PIPE,
+        )
+
+    def _fast_stream_spawn(argv, env):
+        return subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                "import sys,json; sys.stdin.buffer.read(); "
+                "sys.stdout.write(json.dumps({'contract_version': 1}))",
+            ],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+    phases: list[str] = []
+    phases_lock = threading.Lock()
+
+    def _on_phase(phase: str) -> None:
+        with phases_lock:
+            phases.append(phase)
+
+    group = {
+        "group": {"name": "testgroup"},
+        "members": [{"name": "repo_a", "repo_root": "/nonexistent", "excluded": []}],
+        "branch_pattern": "worktree-{slug}",
+    }
+
+    result_box: dict = {}
+
+    def _drive():
+        result_box["result"] = move_workspace(
+            host=Host(ssh="fake-peer", camp_bin="/opt/camp/bin/camp"),
+            group=group,
+            group_name="testgroup",
+            slug="feat-slow",
+            sender_name="host-a",
+            overwrite=False,
+            on_phase=_on_phase,
+            run=_run,
+            stream_spawn=_fast_stream_spawn,
+            history_producer_spawn=_tiny_producer,
+            worktree_producer_spawn=_tiny_producer,
+        )
+
+    thread = threading.Thread(target=_drive)
+    thread.start()
+    try:
+        assert finish_started.wait(timeout=5), "finish phase never started"
+        with phases_lock:
+            snapshot = list(phases)
+        assert snapshot == ["begin", "history: repo_a", "worktree: repo_a", "finish"]
+    finally:
+        release_finish.set()
+        thread.join(timeout=5)
+
+    assert result_box["result"].members == ("repo_a",)
+
+
+# ---------------------------------------------------------------------------
+# The moving CLI path — rendering, exit codes, and flag wiring, with
+# `move.move_workspace` faked wholesale (see the section header above for why
+# that observes a monkeypatch). The mover's own phase-driving behaviour is
+# proven against a real peer in `TestMoveWorkspaceEndToEnd`.
+# ---------------------------------------------------------------------------
+
+
+def test_completion_report_names_peer_workspace_regen_and_no_ownership_move(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    env = _Env(tmp_path)
+    env.write_group(excluded={"repo_a": []})
+    env.write_hosts(self_name="host-a", peers={"host-b": "host-b"})
+    env.write_manifest(owner="host-a")
+    env.apply(monkeypatch)
+    transfer = _transfer_module()
+
+    _fake_probe(monkeypatch, _clean_probe_answer())
+    _no_conversations(monkeypatch)
+
+    move = _move_module()
+    monkeypatch.setattr(
+        move, "move_workspace", lambda **kw: move.MoveResult(members=("repo_a",))
+    )
+
+    code = _run(monkeypatch, ["transfer", "feat-x", "--to", "host-b", "--group", "trailhead"])
+
+    assert code == transfer.EXIT_WOULD_TRANSFER
+    out = capsys.readouterr().out
+    assert "'feat-x' arrived on 'host-b'" in out
+    assert "ownership did not move" in out
+    assert "'host-a' still owns 'feat-x'" in out
+    assert "regeneration" in out and "still running" in out
+    assert "camp status --name feat-x --group trailhead" in out
+    assert "credential-shaped content" in out
+    assert "no conversations are rooted in this workspace" in out
+
+
+def test_overwrite_needed_names_the_flag_with_its_own_exit_code(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    env = _Env(tmp_path)
+    env.write_group(excluded={"repo_a": []})
+    env.write_hosts(self_name="host-a", peers={"host-b": "host-b"})
+    env.write_manifest(owner="host-a")
+    env.apply(monkeypatch)
+    transfer = _transfer_module()
+
+    _fake_probe(monkeypatch, _clean_probe_answer())
+    _no_conversations(monkeypatch)
+
+    move = _move_module()
+
+    def _refuse(**kw):
+        raise move.OverwriteNeeded("slug 'feat-x' already exists here — pass --overwrite")
+
+    monkeypatch.setattr(move, "move_workspace", _refuse)
+
+    code = _run(monkeypatch, ["transfer", "feat-x", "--to", "host-b", "--group", "trailhead"])
+
+    assert code == transfer.EXIT_OVERWRITE_REQUIRED
+    err = capsys.readouterr().err
+    assert "--overwrite" in err
+    assert "moves nothing" in err
+
+
+def test_overwrite_flag_threads_through_to_move_workspace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    env = _Env(tmp_path)
+    env.write_group(excluded={"repo_a": []})
+    env.write_hosts(self_name="host-a", peers={"host-b": "host-b"})
+    env.write_manifest(owner="host-a")
+    env.apply(monkeypatch)
+    transfer = _transfer_module()
+
+    _fake_probe(monkeypatch, _clean_probe_answer())
+    _no_conversations(monkeypatch)
+
+    move = _move_module()
+    calls = []
+
+    def _fake_move(**kw):
+        calls.append(kw)
+        return move.MoveResult(members=("repo_a",))
+
+    monkeypatch.setattr(move, "move_workspace", _fake_move)
+
+    code = _run(
+        monkeypatch,
+        ["transfer", "feat-x", "--to", "host-b", "--group", "trailhead", "--overwrite"],
+    )
+
+    assert code == transfer.EXIT_WOULD_TRANSFER
+    assert calls[0]["overwrite"] is True
+
+
+def test_phase_failure_names_the_phase_and_says_rerun_is_safe_distinctly(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    env = _Env(tmp_path)
+    env.write_group(excluded={"repo_a": []})
+    env.write_hosts(self_name="host-a", peers={"host-b": "host-b"})
+    env.write_manifest(owner="host-a")
+    env.apply(monkeypatch)
+    transfer = _transfer_module()
+
+    _fake_probe(monkeypatch, _clean_probe_answer())
+    _no_conversations(monkeypatch)
+
+    move = _move_module()
+
+    def _fail(**kw):
+        raise move.PhaseFailed("worktree (repo_a)", "the peer refused the archive")
+
+    monkeypatch.setattr(move, "move_workspace", _fail)
+
+    code = _run(monkeypatch, ["transfer", "feat-x", "--to", "host-b", "--group", "trailhead"])
+
+    assert code == transfer.EXIT_PHASE_FAILED
+    err = capsys.readouterr().err
+    assert "worktree (repo_a)" in err
+    assert "re-running the transfer is safe" in err
+    # A phase failure is worded distinguishably from an OverwriteNeeded
+    # refusal — it never opens with "refused" or claims to have moved
+    # nothing, since some phases already crossed before the failing one.
+    assert "camp transfer: refused" not in err
+    assert "moves nothing" not in err
+    assert "This is a failure, not a refusal" in err
+
+
+def test_undeclared_excluded_set_refuses_on_the_moving_path_and_never_calls_move(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """AC21, exercised without --dry-run: the same check 10 that governs the
+    preview governs the mover — a member with no declared excluded set
+    refuses by name before `move_workspace` is ever reached."""
+    env = _Env(tmp_path)
+    env.write_group()  # no excluded declared
+    env.write_hosts(self_name="host-a", peers={"host-b": "host-b"})
+    env.write_manifest(owner="host-a")
+    env.apply(monkeypatch)
+    transfer = _transfer_module()
+
+    _fake_probe(monkeypatch, _clean_probe_answer())
+    _no_conversations(monkeypatch)
+
+    move = _move_module()
+
+    def _boom(**kw):
+        raise AssertionError("move_workspace must not run when a member's excluded set is undeclared")
+
+    monkeypatch.setattr(move, "move_workspace", _boom)
+
+    code = _run(monkeypatch, ["transfer", "feat-x", "--to", "host-b", "--group", "trailhead"])
+
+    assert code == transfer.EXIT_NOT_CLEAN
+    err_or_out = capsys.readouterr()
+    assert "repo_a" in err_or_out.out
+    assert "never declared an excluded set" in err_or_out.out
+
+
+def test_not_passed_preflight_on_the_moving_path_leaves_a_real_peer_directory_untouched(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    env = _Env(tmp_path)
+    env.write_group(excluded={"repo_a": []})
+    env.write_hosts(self_name="host-a", peers={"host-b": "host-b"})
+    env.write_manifest(owner="host-c")  # owned elsewhere -> ownership check fails
+    env.apply(monkeypatch)
+    transfer = _transfer_module()
+
+    _fake_probe(monkeypatch, _clean_probe_answer())
+    _no_conversations(monkeypatch)
+
+    move = _move_module()
+
+    def _boom(**kw):
+        raise AssertionError("move_workspace must not run on a NOT_CLEAN verdict")
+
+    monkeypatch.setattr(move, "move_workspace", _boom)
+
+    peer_dir = tmp_path / "real-peer-state"
+    (peer_dir / "central").mkdir(parents=True)
+    (peer_dir / "central" / "marker.txt").write_text("untouched\n")
+    before = _snapshot(peer_dir)
+
+    code = _run(monkeypatch, ["transfer", "feat-x", "--to", "host-b", "--group", "trailhead"])
+
+    assert code == transfer.EXIT_OWNERSHIP_REFUSED
+    capsys.readouterr()
+    assert _snapshot(peer_dir) == before
