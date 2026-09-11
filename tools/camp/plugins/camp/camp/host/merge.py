@@ -131,6 +131,12 @@ def merge_all_hosts_answer(
 
 LocalAnswer = Callable[[], tuple[list[dict[str, Any]], list[str], int]]
 
+#: A per-host worker: given a declared host's name and its declaration,
+#: returns that host's contribution as a `HostAnswer`. Called exactly once
+#: per declared host, on its own pool slot — completion order never leaks
+#: into the result.
+HostWorker = Callable[[str, Host], HostAnswer]
+
 
 def answer_all_hosts_concurrently(
     local_answer: LocalAnswer,
@@ -139,6 +145,7 @@ def answer_all_hosts_concurrently(
     verb: str,
     remote_argv: Sequence[str],
     runner: Runner = default_runner,
+    worker: HostWorker | None = None,
 ) -> tuple[tuple[list[dict[str, Any]], list[str], int], list[tuple[str, HostAnswer]]]:
     """Compute the local answer and contact every declared host, concurrently.
 
@@ -158,22 +165,41 @@ def answer_all_hosts_concurrently(
             each entry, but the returned `host_answers` is always in this
             same declared order regardless of which worker finished first —
             completion order never leaks into the result.
-        verb: Passed through to `answer_for_host` — `"list"` or
-            `"sessions"`.
-        remote_argv: Passed through to `answer_for_host` — the same
-            all-groups, JSON remote command every `--host` verb already
-            builds.
-        runner: Injected transport runner, shared by every worker.
+        verb: Passed through to the default worker's `answer_for_host` call
+            (`"list"` or `"sessions"`) and used to word the internal-fault
+            notice when any worker raises.
+        remote_argv: Passed through to the default worker's
+            `answer_for_host` call — the same all-groups, JSON remote
+            command every `--host` verb already builds. Unused when
+            *worker* is injected.
+        runner: Injected transport runner, used by the default worker.
+            Unused when *worker* is injected.
+        worker: Injected per-host worker, called as `worker(host_name,
+            host)` once per entry in *hosts*, returning that host's
+            `HostAnswer`. Defaults to today's relay worker — one call to
+            `answer_for_host` per host, using *verb*, *remote_argv*, and
+            *runner* — so a caller fanning out a plain listing sees no
+            change. A raising worker (injected or default) is never allowed
+            to propagate: it is caught here and turned into a row whose
+            reason names it as an internal camp fault rather than a real
+            machine failure, and every other host's result still comes
+            back.
 
     Returns:
         `(local_result, host_answers)` — `local_result` is whatever
         *local_answer* returned; `host_answers` is one `(host_name,
         HostAnswer)` pair per entry in *hosts*, in declared order.
     """
+    active_worker: HostWorker = worker if worker is not None else (
+        lambda host_name, host: answer_for_host(
+            verb, host, host_name, remote_argv, runner=runner
+        )
+    )
+
     with ThreadPoolExecutor(max_workers=len(hosts) + 1) as pool:
         local_future = pool.submit(local_answer)
         host_futures = [
-            (host_name, pool.submit(_answer_one_host, verb, host, host_name, remote_argv, runner))
+            (host_name, pool.submit(_run_host_worker, active_worker, host_name, host, verb))
             for host_name, host in hosts
         ]
 
@@ -183,19 +209,18 @@ def answer_all_hosts_concurrently(
     return local_result, host_answers
 
 
-def _answer_one_host(
-    verb: str,
-    host: Host,
+def _run_host_worker(
+    worker: HostWorker,
     host_name: str,
-    remote_argv: Sequence[str],
-    runner: Runner,
+    host: Host,
+    verb: str,
 ) -> HostAnswer:
-    """`answer_for_host`, with any exception outside its own closed outcome
-    set caught and turned into an internal-fault row instead of propagating
-    out of the worker — a bug in this code must never render as a host that
-    failed to answer."""
+    """Run *worker* for one host, with any exception outside its own closed
+    outcome set caught and turned into an internal-fault row instead of
+    propagating out of the pool — a bug in worker code must never render as
+    a host that failed to answer."""
     try:
-        return answer_for_host(verb, host, host_name, remote_argv, runner=runner)
+        return worker(host_name, host)
     except Exception as exc:
         return HostAnswer(
             rows=[{"ok": False, "host": host_name, "reason": INTERNAL_FAULT_REASON}],

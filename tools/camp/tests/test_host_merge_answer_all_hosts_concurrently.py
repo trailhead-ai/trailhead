@@ -312,3 +312,169 @@ def test_internal_fault_leaves_other_hosts_and_local_exit_code_unaffected():
     assert by_name["fine"].rows == [{"ok": True, "slug": "ok-row", "host": "fine"}]
     # the local answer's own exit code is untouched by a remote worker's fault
     assert local_result[2] == 7
+
+
+# ---------------------------------------------------------------------------
+# the injected per-host worker
+# ---------------------------------------------------------------------------
+
+
+def _host_answer(rows, notices=None, exit_code=0, answered=True):
+    relay = _relay_module()
+    return relay.HostAnswer(
+        rows=rows, notices=notices or [], exit_code=exit_code, answered=answered
+    )
+
+
+def test_injected_worker_is_called_once_per_declared_host_with_its_declaration():
+    merge = _merge_module()
+
+    hosts = [
+        ("andromeda", _host("andromeda-ssh")),
+        ("lookout", _host("lookout-ssh")),
+    ]
+
+    calls: list[tuple[str, object]] = []
+
+    def worker(host_name, host):
+        calls.append((host_name, host))
+        return _host_answer([{"ok": True, "slug": f"from-{host_name}"}])
+
+    _local_result, host_answers = merge.answer_all_hosts_concurrently(
+        _local_answer(),
+        hosts,
+        verb="list",
+        remote_argv=["list", "--all-groups", "--json"],
+        worker=worker,
+    )
+
+    assert sorted(calls) == sorted(hosts)
+    assert len(calls) == len(hosts)
+    assert [name for name, _ in host_answers] == ["andromeda", "lookout"]
+
+
+def test_injected_worker_results_return_in_declared_order_regardless_of_which_finishes_first():
+    merge = _merge_module()
+
+    hosts = [
+        ("first-declared", _host("a")),
+        ("second-declared", _host("b")),
+    ]
+
+    def make_worker(slow_host_name):
+        def worker(host_name, host):
+            if host_name == slow_host_name:
+                time.sleep(0.15)
+            return _host_answer([{"ok": True, "slug": f"from-{host_name}"}])
+
+        return worker
+
+    # Vary which host finishes first; declared order must survive either way.
+    for slow_host_name in ("first-declared", "second-declared"):
+        _local_result, host_answers = merge.answer_all_hosts_concurrently(
+            _local_answer(),
+            hosts,
+            verb="list",
+            remote_argv=["list", "--all-groups", "--json"],
+            worker=make_worker(slow_host_name),
+        )
+        assert [name for name, _ in host_answers] == [
+            "first-declared",
+            "second-declared",
+        ]
+        assert host_answers[0][1].rows[0]["slug"] == "from-first-declared"
+        assert host_answers[1][1].rows[0]["slug"] == "from-second-declared"
+
+
+def test_injected_worker_that_raises_becomes_fault_row_other_hosts_still_answer():
+    merge = _merge_module()
+
+    hosts = [
+        ("buggy", _host("buggy-ssh")),
+        ("fine", _host("fine-ssh")),
+    ]
+
+    def worker(host_name, host):
+        if host_name == "buggy":
+            raise RuntimeError("probe blew up")
+        return _host_answer([{"ok": True, "slug": "fine-row"}])
+
+    local_result, host_answers = merge.answer_all_hosts_concurrently(
+        _local_answer(exit_code=3),
+        hosts,
+        verb="list",
+        remote_argv=["list", "--all-groups", "--json"],
+        worker=worker,
+    )
+
+    by_name = dict(host_answers)
+    assert by_name["buggy"].answered is False
+    merge_mod = merge
+    assert by_name["buggy"].rows == [
+        {"ok": False, "host": "buggy", "reason": merge_mod.INTERNAL_FAULT_REASON}
+    ]
+    assert by_name["fine"].answered is True
+    assert by_name["fine"].rows == [{"ok": True, "slug": "fine-row"}]
+    # a worker's own fault never touches the local answer's exit code
+    assert local_result[2] == 3
+
+
+def test_injected_worker_runs_concurrently_across_declared_hosts():
+    """The injection point itself must not weaken the bounded-wait property
+    — pinned deterministically via a barrier a serial fan-out cannot
+    satisfy, mirroring the default-worker concurrency test above."""
+    merge = _merge_module()
+
+    n = 4
+    barrier = threading.Barrier(n, timeout=5)
+
+    def worker(host_name, host):
+        barrier.wait()
+        return _host_answer([])
+
+    hosts = [(f"host{i}", _host(f"host{i}")) for i in range(n)]
+
+    _local_result, host_answers = merge.answer_all_hosts_concurrently(
+        _local_answer(),
+        hosts,
+        verb="list",
+        remote_argv=["list", "--all-groups", "--json"],
+        worker=worker,
+    )
+
+    assert len(host_answers) == n
+    for host_name, answer in host_answers:
+        assert answer.answered is True, (host_name, answer.rows)
+
+
+def test_default_worker_is_the_relay_worker_via_the_listing_path():
+    """No `worker=` is injected — the fan-out must still go through
+    `answer_for_host`'s own JSON-parsing, host-stamping relay path rather
+    than some other default. Proven by driving a real stub runner through
+    the listing path and checking the shape only `answer_for_host` produces
+    (JSON parsed, row host-stamped), not by inspecting which callable is
+    installed."""
+    merge = _merge_module()
+    transport = _transport_module()
+
+    def runner(argv, timeout, env):
+        return transport.RawResult(
+            stdout='[{"ok": true, "slug": "camp-attach"}]', stderr="", exit_code=0
+        )
+
+    hosts = [("andromeda", _host("andromeda-ssh"))]
+
+    _local_result, host_answers = merge.answer_all_hosts_concurrently(
+        _local_answer(),
+        hosts,
+        verb="list",
+        remote_argv=["list", "--all-groups", "--json"],
+        runner=runner,
+    )
+
+    [(host_name, answer)] = host_answers
+    assert host_name == "andromeda"
+    assert answer.answered is True
+    assert answer.rows == [
+        {"ok": True, "slug": "camp-attach", "host": "andromeda"}
+    ]
