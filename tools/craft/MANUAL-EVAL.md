@@ -1358,7 +1358,7 @@ the pre-registration's instruction that `execute`'s historical `--exempt` invoca
 See `plugins/craft/evals/ritual-deliverable-names-its-record/expected.md`, "Extension — Task 3,
 pre-registration for the three remaining AC7 outcome sites", for the full pre-registration.
 
-## Task 6 — re-measuring the three treated sites (2026-09-11)
+### 2026-09-11 — Task 6: re-measuring the three treated sites
 
 Task 5 treated all three baseline-falsifying sites by removing the command from its sentence and
 printing it alone in a fenced block beneath — the shape the previous slice measured effective at
