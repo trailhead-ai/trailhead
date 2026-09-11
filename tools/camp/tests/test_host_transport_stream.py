@@ -289,8 +289,13 @@ def test_connection_dying_without_closing_is_classified_within_a_bounded_time() 
 
 
 def test_streaming_past_the_bound_with_continuous_progress_is_not_killed() -> None:
-    chunk_count = 12
-    interval_between_chunks = 0.1
+    # The gap between chunks must sit well under the liveness bound below
+    # (0.11s) so ordinary scheduling jitter on a loaded machine cannot stall
+    # a chunk past it, while the total still exceeds the bound severalfold —
+    # that excess is what makes this discriminating against an absolute
+    # deadline.
+    chunk_count = 20
+    interval_between_chunks = 0.02
     script = (
         "import sys, time\n"
         f"for _ in range({chunk_count}):\n"
