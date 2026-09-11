@@ -606,3 +606,209 @@ def test_host_launch_remote_argv_carries_only_the_named_group_never_cwd_resolved
     assert "testgrp" not in rest, (
         f"a --host launch must never carry a cwd-resolved group: {rest}"
     )
+
+
+# ---------------------------------------------------------------------------
+# `kill` joins `_HOST_VERBS` alongside `launch` — but the two verbs now split
+# across TWO different sets rather than one. Both are STATE-CHANGING (drives
+# the --all-hosts refusal wording), but only `launch` requires an explicit
+# --group: a stop is groupless, so `--host` + `--group` together on `kill`
+# takes the same collision refusal `list`/`sessions`/`attach` already take,
+# never the "requires an explicit --group" wording. Each test below runs the
+# SAME assertion against both verbs to prove the sets actually separated,
+# per `task/kill-joins-the-host-verbs-and-the-group-requirement-stops-riding-
+# on-state-changing`'s test contract.
+# ---------------------------------------------------------------------------
+
+
+def _rig_kill_relay(monkeypatch: pytest.MonkeyPatch, *, capture_argv: list | None = None):
+    """Point `camp.host.relay.answer_payload_for_host` at a canned "stopped"
+    answer so a `--host` kill can reach all the way through `dispatch.main()`
+    to `_cmd_kill_host_cli` without any real SSH transport running."""
+    import importlib
+
+    relay = importlib.import_module("camp.host.relay")
+
+    answer = relay.HostPayloadAnswer(
+        obj={"session_id": "sess-1", "tmux_name": "camp-feat-x-sess1", "outcome": "stopped"},
+        rows=None,
+        certainty=relay.Certainty.HAPPENED,
+        notices=[],
+        exit_code=0,
+    )
+
+    def fake_answer_payload_for_host(verb, host, host_name, remote_argv, **kwargs):
+        if capture_argv is not None:
+            capture_argv.append((verb, list(remote_argv)))
+        return answer
+
+    monkeypatch.setattr(relay, "answer_payload_for_host", fake_answer_payload_for_host)
+    return relay
+
+
+def test_host_kill_reaches_the_real_kill_handler_end_to_end(
+    monkeypatch: pytest.MonkeyPatch,
+    hosts_env: dict[str, str],
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    """`camp kill <ref> --host <name>` — with NO --group — must reach the real
+    routed handler and succeed, proving the dispatch wiring this task adds
+    (not a mocked `_dispatch_host_command`, unlike the routing tests above:
+    this is the end-to-end CLI reach the task's scope facts say is new)."""
+    dispatch = _dispatch_module()
+    for k, v in hosts_env.items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.chdir(tmp_path)
+
+    captured_argv: list = []
+    _rig_kill_relay(monkeypatch, capture_argv=captured_argv)
+    monkeypatch.setattr(sys, "argv", ["camp", "kill", "sess-1", "--host", "andromeda"])
+
+    with pytest.raises(SystemExit) as excinfo:
+        dispatch.main()
+
+    assert excinfo.value.code == 0
+    assert capsys.readouterr().out == "sess-1\n"
+    assert captured_argv == [("kill", ["kill", "sess-1", "--json"])]
+
+
+@pytest.mark.parametrize(
+    "verb,ref_or_slug,expect_group_required",
+    [("kill", "sess-1", False), ("launch", "myslug", True)],
+    ids=["kill-groupless", "launch-requires-group"],
+)
+def test_group_requirement_applies_to_launch_only_not_kill(
+    monkeypatch: pytest.MonkeyPatch,
+    hosts_env: dict[str, str],
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture,
+    verb: str,
+    ref_or_slug: str,
+    expect_group_required: bool,
+) -> None:
+    dispatch = _dispatch_module()
+    for k, v in hosts_env.items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.chdir(tmp_path)
+
+    if not expect_group_required:
+        _rig_kill_relay(monkeypatch)
+    else:
+        import importlib
+
+        transport = importlib.import_module("camp.host.transport")
+
+        def _boom(*args, **kwargs):
+            raise AssertionError(
+                "transport.run_camp must not be called for a --host launch missing --group"
+            )
+
+        monkeypatch.setattr(transport, "run_camp", _boom)
+
+    monkeypatch.setattr(
+        sys, "argv", ["camp", verb, ref_or_slug, "--host", "andromeda"]
+    )
+
+    with pytest.raises(SystemExit) as excinfo:
+        dispatch.main()
+
+    err = capsys.readouterr().err
+    if expect_group_required:
+        assert excinfo.value.code != 0
+        assert "requires an explicit" in err and "--group" in err, err
+    else:
+        assert excinfo.value.code == 0, err
+        assert "requires an explicit" not in err, err
+
+
+def test_kill_host_and_group_collision_takes_attachs_refusal_not_launchs(
+    monkeypatch: pytest.MonkeyPatch,
+    hosts_env: dict[str, str],
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    """`camp kill <ref> --host <name> --group <g>` must refuse with the
+    one-remote-host-and-one-local-group collision wording that `list` /
+    `sessions` / `attach` already take — NOT `launch`'s "requires an
+    explicit --group" wording, since a stop never needed --group in the
+    first place."""
+    dispatch = _dispatch_module()
+    for k, v in hosts_env.items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.chdir(tmp_path)
+
+    import importlib
+
+    transport = importlib.import_module("camp.host.transport")
+
+    def _boom(*args, **kwargs):
+        raise AssertionError(
+            "transport.run_camp must not be called when --host and --group collide on kill"
+        )
+
+    monkeypatch.setattr(transport, "run_camp", _boom)
+    monkeypatch.setattr(
+        sys, "argv", ["camp", "kill", "sess-1", "--host", "andromeda", "--group", "testgrp"]
+    )
+
+    with pytest.raises(SystemExit) as excinfo:
+        dispatch.main()
+
+    assert excinfo.value.code != 0
+    err = capsys.readouterr().err
+    assert "--host" in err and "--group" in err, err
+    assert "one remote" in err, err
+    assert "requires an explicit" not in err, err
+
+
+@pytest.mark.parametrize("all_hosts_flag", ["--all-hosts", "-a"])
+@pytest.mark.parametrize("verb,ref_or_slug", [("kill", "sess-1"), ("launch", "myslug")])
+def test_state_changing_all_hosts_wording_applies_to_kill_and_launch_alike(
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_env: dict[str, str],
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture,
+    verb: str,
+    ref_or_slug: str,
+    all_hosts_flag: str,
+) -> None:
+    """The all-hosts refusal for a state-changing verb must name the single-
+    host form, never the generic "has no meaning here" — and this now holds
+    for BOTH state-changing verbs, not just launch."""
+    dispatch = _dispatch_module()
+    for k, v in isolated_env.items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.chdir(tmp_path)
+
+    import importlib
+
+    transport = importlib.import_module("camp.host.transport")
+
+    def _boom(*args, **kwargs):
+        raise AssertionError(f"transport.run_camp must not be called for a refused -a {verb}")
+
+    monkeypatch.setattr(transport, "run_camp", _boom)
+    monkeypatch.setattr(sys, "argv", ["camp", verb, ref_or_slug, all_hosts_flag])
+
+    with pytest.raises(SystemExit) as excinfo:
+        dispatch.main()
+
+    assert excinfo.value.code != 0
+    err = capsys.readouterr().err
+    assert "changes state" in err, err
+    assert "has no meaning here" not in err, err
+    assert "--host" in err, err
+
+
+def test_host_kill_with_no_value_reports_missing_value_not_no_meaning(
+    isolated_env: dict[str, str], tmp_path: Path
+) -> None:
+    """`camp kill --host` with no following value must refuse for the missing
+    value — kill is now IN `_HOST_VERBS`, so the "has no meaning here" path
+    (reserved for a verb outside the set entirely) must not fire instead."""
+    result = _run(["kill", "some-ref", "--host"], env=isolated_env, cwd=tmp_path)
+
+    assert result.returncode != 0
+    assert "requires a value" in result.stderr, result.stderr
+    assert "has no meaning here" not in result.stderr, result.stderr
