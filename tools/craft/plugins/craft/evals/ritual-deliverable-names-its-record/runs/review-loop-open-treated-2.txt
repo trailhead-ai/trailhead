@@ -1,0 +1,7 @@
+Review passed and the change is merged — the `code-reviewer` pass came back `SHIP` with zero Critical findings against the full diff.
+
+That closes this review's job, not the spec's lifecycle: [spec/dock-scheduling-windows](http://127.0.0.1:7313/records/harborlight/spec/dock-scheduling-windows) still reads `craft/slice-loop` as something other than `complete`, so further slices remain to be chosen, planned, or built. Run this to choose the next slice.
+
+```
+/craft:slice spec/dock-scheduling-windows
+```

@@ -280,8 +280,8 @@ re-confirm the `--exempt` bucket the branching-outcome tests in
 | brainstorm | `fixtures/brainstorm-completed-run.md` / `arms/brainstorm-rule-only.md` | `skills/brainstorm/SKILL.md:533-557`, Exit Gate, all-green handoff | `spec/warehouse-picking-batches` (vault `northlight`) | `--record spec/warehouse-picking-batches --command "/craft:gauntlet spec/warehouse-picking-batches"` |
 | gauntlet | `fixtures/gauntlet-completed-run.md` / `arms/gauntlet-rule-only.md` | `skills/gauntlet/SKILL.md:435-499`, step 6 advance handoff | `spec/permit-renewal-workflow` (vault `northlight`) | `--record spec/permit-renewal-workflow --command "/craft:slice spec/permit-renewal-workflow"` |
 | plan | `fixtures/plan-completed-run.md` / `arms/plan-rule-only.md` | `skills/plan/SKILL.md:563-586`, step 9 handoff prompt | `task/the-ledger-reconciliation-slice` (vault `causewell`) | `--record task/the-ledger-reconciliation-slice --command "/craft:execute task/the-ledger-reconciliation-slice"` |
-| execute | `fixtures/execute-completed-run.md` / `arms/execute-rule-only.md` | `skills/_shared/execute.md:979-988`, clean-close completion report | `task/the-ledger-reconciliation-slice` (vault `causewell`) | `--record task/the-ledger-reconciliation-slice --exempt` (Finding 1: zero commands by design, not a failure) |
-| review | `fixtures/review-completed-run.md` / `arms/review-rule-only.md` | `skills/review/SKILL.md:102-124`, "loop complete" handoff (:118-120) | `spec/dock-scheduling-windows` (vault `harborlight`) | `--record spec/dock-scheduling-windows --command "/craft:distill spec/dock-scheduling-windows"` |
+| execute | `fixtures/execute-completed-run.md` / `arms/execute-rule-only.md` | `skills/_shared/execute.md:979-988` at the time this row was written, now `978-991` post-treatment, clean-close completion report | `task/the-ledger-reconciliation-slice` (vault `causewell`) | `--record task/the-ledger-reconciliation-slice --exempt` (Finding 1: zero commands by design, not a failure) |
+| review | `fixtures/review-completed-run.md` / `arms/review-rule-only.md` | `skills/review/SKILL.md:102-124` at the time this row was written, now `102-125` post-treatment, "loop complete" handoff (:118-120 then, `:120-124` now) | `spec/dock-scheduling-windows` (vault `harborlight`) | `--record spec/dock-scheduling-windows --command "/craft:distill spec/dock-scheduling-windows"` |
 | distill | `fixtures/distill-completed-run.md` / `arms/distill-rule-only.md` | `skills/distill/SKILL.md:435-446`, single-cluster "ADRs written" outcome | `adr/dock-scheduling-windows-use-fifo-slots` (vault `harborlight`) | `--record adr/dock-scheduling-windows-use-fifo-slots --command "lore record show adr/dock-scheduling-windows-use-fifo-slots"` |
 
 **Why `execute`'s record and `plan`'s record are the same identifier.** `plan`'s fixture stubs the
@@ -420,9 +420,11 @@ Per ritual, verified against the committed file:
 - **plan** (`skills/plan/SKILL.md:574-586`) — "Plan is written to your vault" names no id in prose;
   the id appears only inside `` `/craft:execute task/streaming-export` `` (:586). **No linkable
   prose mention.**
-- **execute** (`skills/_shared/execute.md:979-988`) — the completion report's worked example names
+- **execute** (`skills/_shared/execute.md:979-988` at the time this row was written, now `978-991`
+  post-treatment) — the completion report's worked example names
   no record id at all, and prints zero commands. **No linkable prose mention.**
-- **review, fixtured at the loop-complete outcome** (`skills/review/SKILL.md:118-120`) — "The slice
+- **review, fixtured at the loop-complete outcome** (`skills/review/SKILL.md:118-120` at the time
+  this row was written, now `120-124` post-treatment) — "The slice
   loop reports spec/streaming-export closed out." is prose naming the id, outside the backtick-wrapped
   command on the line that follows it. **Linkable prose mention exists.**
 - **distill** (`skills/distill/SKILL.md:437`) — "the ADRs written (with their record ids)"
