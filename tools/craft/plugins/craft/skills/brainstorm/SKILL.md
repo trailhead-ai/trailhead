@@ -551,23 +551,16 @@ spec passes before it advances.
 
 **The handoff:**
 
-> "`spec/streaming-export` is saved as a lore `spec` record (status `draft`). Next it goes through
-> the gauntlet — eight parallel passes that attack its facts, premises, consistency, and
-> underdetermination — and the gauntlet flips it to `ready` once you've accepted its recommendation
-> — or overridden it. Run `/craft:gauntlet spec/streaming-export`."
+> "The spec is saved as a lore `spec` record (status `draft`). Next it goes through the gauntlet —
+> eight parallel passes that attack its facts, premises, consistency, and underdetermination — and
+> the gauntlet flips it to `ready` once you've accepted its recommendation — or overridden it. Run
+> `/craft:gauntlet <spec-id>`."
 
 **Print the handoff command fully formed** — substitute the real record id (e.g. `/craft:gauntlet
 spec/streaming-export`), never a `<placeholder>`, so the user can paste it into a fresh session
 as-is. **If any scope was deferred, name those tasks here too** — the handoff is the one message an
 operator reads as their marching orders, and work captured but never mentioned is work nobody
 returns to.
-
-**Name the spec as a link in the handoff's opening sentence** — rendered per the reader plugin's
-`## Record links` rule when that rule is resident in this session, or printed as the bare
-`spec/<slug>` identifier when it is not; never hand-assemble the URL yourself. The handoff command
-stays bare on its own line. The example above shows the fallback branch, so it reads correctly in a
-session with no such rule resident; with the rule resident, that opening mention renders as a link
-instead.
 
 **Do not flip the spec to `ready` yourself.** Brainstorm writes the spec at `draft` and stops there;
 the `gauntlet` skill owns the flip — it runs in the accepted tail, once the operator has accepted

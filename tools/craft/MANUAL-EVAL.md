@@ -1005,3 +1005,15 @@ the control now shows the rule alone accounts for the entire effect.
 **Real-state check.** All 12 runs used `--allowedTools "Read"` with no shell, `Edit`, `Write`, or
 `Bash` tool granted, and `--setting-sources project` to drop `~/.claude/rules/`. No write tool
 exists in any arm, so no vault mutation is attributable to this batch.
+
+**Disposition (operator decision, 2026-09-11).** On this result the seven ritual prose edits were
+reverted; the eval case, its arms, and this log are what the slice ships. `slice/SKILL.md` is once
+again byte-identical to `arms/baseline.md`, so the `baseline` and `rule-only` arms above were run
+against exactly the prose now in the tree and their results stand as the live measurement — no
+re-run is owed despite the reverting change to `## Outcome`. The `treatment` and `reader-absent`
+arms are retained as the frozen record of a measured, rejected variant.
+
+The gap this case located, and which the revert leaves open: neither prose variant produces a link
+when no record-link rule is resident, which is every craft-only install. A pointer restated inside
+a ritual cannot close that; only shipping craft its own record-link rule can. Recorded as the
+follow-up carrying AC6 forward.

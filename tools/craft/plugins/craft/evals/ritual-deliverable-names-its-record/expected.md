@@ -1,5 +1,32 @@
 # ritual-deliverable-names-its-record — does a ritual's closing report link the record it acted on?
 
+## Outcome of this case — read this first
+
+**Run 2026-09-11. The hypothesis this case was built to test was falsified, and the prose change it
+was built to justify was not shipped.** The completed 2x2:
+
+| | no rule resident | reader rule resident |
+|---|---|---|
+| **unedited prose** | bare (3/3) | **link (3/3)** |
+| **edited prose** | bare (3/3) | link (3/3) |
+
+The reader's `## Record links` rule is the sole determinant in all four cells; the proposed ritual
+edit had no measured effect in either condition. On that result the ritual edits were reverted, so
+`slice/SKILL.md` today is byte-identical to `arms/baseline.md`.
+
+**What that means for the arms.** `arms/baseline.md` and `arms/rule-only.md` were run against
+exactly the prose that ships, and their results stand as the live measurement: the reader rule
+turns a bare identifier into a correct link at this site, unaided. `arms/treatment.md` and
+`arms/reader-absent.md` are the frozen record of a prose variant that was measured and rejected;
+they are kept as evidence, not as a description of any text now in the tree. Read every mention
+below of "as edited by `task/make-the-seven-ritual-deliverables-name-their-record-as-a-link`" as
+naming that rejected variant.
+
+**The gap this case actually located.** Neither prose variant produces a link when no record-link
+rule is resident — a craft-only install, which carries no such rule at all. Restating a pointer to
+outpost's rule inside a ritual cannot fix that; only giving craft its own rule can. See the
+follow-up recorded against this case.
+
 ## What is under test
 
 `## Outcome`, the closing section of `tools/craft/plugins/craft/skills/slice/SKILL.md` (today's

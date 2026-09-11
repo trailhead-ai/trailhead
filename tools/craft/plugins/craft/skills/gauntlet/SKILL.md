@@ -481,10 +481,7 @@ lore record update <spec-id> --status ready
 and hand off to the slice loop. Do not enter it from inside the gauntlet — let the user invoke
 `/craft:slice` so it loads cleanly; this is the loop's only wired entry point, so its own
 `/craft:plan spec/<id>` handoff would create a second, unlinked parent and strand the spec outside
-the loop. Name the spec as a link in the sentence that introduces the handoff — rendered per the
-reader plugin's `## Record links` rule when that rule is resident in this session, or printed as the
-bare `spec/<slug>` identifier when it is not; never hand-assemble the URL yourself. End the wrap-up
-with the handoff command **fully formed**, bare on its own line — the real spec-id, never a
+the loop. End the wrap-up with the handoff command **fully formed** — the real spec-id, never a
 `<placeholder>` (e.g. `/craft:slice spec/streaming-export`) — so the user can paste it into a fresh
 session as-is.
 

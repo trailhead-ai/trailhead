@@ -978,10 +978,7 @@ sees what the loop taught itself where they already read the run's outcome.
 **Completion report.** Report to the user and stop. Do **not** automatically invoke
 `/portage:pull_request` — the user decides when to open a PR. The report must **enumerate every
 phase's outcome explicitly, even when a phase was clean, empty, or skipped** — a phase with nothing
-to say still gets a line, so a reader can tell it ran. Name the parent task record in the report as
-a link — rendered per the reader plugin's `## Record links` rule when that rule is resident in this
-session, or printed as the bare `task/<slug>` identifier when it is not; never hand-assemble the URL
-yourself. Worked example:
+to say still gets a line, so a reader can tell it ran. Worked example:
 
 > simplify: no changes; correctness: SHIP, 0 findings; security: skipped — no trigger;
 > state-coverage: parent 4, doc 4, missing 0; criterion-observations: covered 3, observed 3, missing

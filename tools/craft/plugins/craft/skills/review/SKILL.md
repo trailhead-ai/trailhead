@@ -105,22 +105,16 @@ Review sits before distill in the pipeline (brainstorm → gauntlet → (slice �
 review)* → distill) — merging closes review's own job, not the spec's lifecycle. Under the loop, one
 review closes one slice, not the spec: once the reviewed diff is merged, end with a fully-formed
 handoff back into `/craft:slice` for the spec's next pass — the real spec id, never a
-`<placeholder>`. Name the spec as a link in that opening sentence — rendered per the reader plugin's
-`## Record links` rule when that rule is resident in this session, or printed as the bare
-`spec/<slug>` identifier when it is not; never hand-assemble the URL yourself. The handoff command
-stays bare on its own line. Both examples below show the fallback branch, so each reads correctly in
-a session with no such rule resident; with the rule resident, the opening mention renders as a link
-instead:
+`<placeholder>`:
 
-> "Review passed and the change to `spec/streaming-export` is merged. Run `/craft:slice
-> spec/streaming-export` to choose the next slice."
+> "Review passed and the change is merged. Run `/craft:slice spec/streaming-export` to choose the
+> next slice."
 
-Hand off to distill instead, fully formed the same way — the spec named as a link the same way, the
-command itself bare — but only once the slice loop reports the spec closed out
-(`craft/slice-loop=complete`, per `../_shared/status-ownership.md`) — never as the unconditional
-next step from a per-slice review:
+Hand off to distill instead, fully formed the same way, but only once the slice loop reports the
+spec closed out (`craft/slice-loop=complete`, per `../_shared/status-ownership.md`) — never as the
+unconditional next step from a per-slice review:
 
-> "The slice loop reports `spec/streaming-export` closed out. Run
+> "The slice loop reports spec/streaming-export closed out. Run
 > `/craft:distill spec/streaming-export` when you're ready to distill this work into the ADR log."
 
 **This handoff is carryoutable.** `distill/SKILL.md` enumerates `ready` specs carrying the
