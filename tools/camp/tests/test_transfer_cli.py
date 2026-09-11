@@ -1516,9 +1516,9 @@ def test_phase_failure_names_the_phase_and_says_rerun_is_safe_distinctly(
 def test_undeclared_excluded_set_refuses_on_the_moving_path_and_never_calls_move(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
-    """AC21, exercised without --dry-run: the same check 10 that governs the
-    preview governs the mover — a member with no declared excluded set
-    refuses by name before `move_workspace` is ever reached."""
+    """Exercised without --dry-run: the same undeclared-excluded-set check
+    that governs the preview governs the mover — a member with no declared
+    excluded set refuses by name before `move_workspace` is ever reached."""
     env = _Env(tmp_path)
     env.write_group()  # no excluded declared
     env.write_hosts(self_name="host-a", peers={"host-b": "host-b"})
@@ -1544,7 +1544,7 @@ def test_undeclared_excluded_set_refuses_on_the_moving_path_and_never_calls_move
     assert "never declared an excluded set" in err_or_out.out
 
 
-def test_not_passed_preflight_on_the_moving_path_leaves_a_real_peer_directory_untouched(
+def test_not_passed_preflight_on_the_moving_path_never_reaches_the_mover(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     env = _Env(tmp_path)
@@ -1564,13 +1564,7 @@ def test_not_passed_preflight_on_the_moving_path_leaves_a_real_peer_directory_un
 
     monkeypatch.setattr(move, "move_workspace", _boom)
 
-    peer_dir = tmp_path / "real-peer-state"
-    (peer_dir / "central").mkdir(parents=True)
-    (peer_dir / "central" / "marker.txt").write_text("untouched\n")
-    before = _snapshot(peer_dir)
-
     code = _run(monkeypatch, ["transfer", "feat-x", "--to", "host-b", "--group", "trailhead"])
 
     assert code == transfer.EXIT_OWNERSHIP_REFUSED
     capsys.readouterr()
-    assert _snapshot(peer_dir) == before
