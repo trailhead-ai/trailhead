@@ -133,6 +133,27 @@ def _capturing_stream_spawner(capture_path: Path):
     return _spawn
 
 
+def _verb_flags(ssh_argv: list[str]) -> dict[str, str]:
+    """Every `--flag value` pair of the `transfer-receive` verb inside a fully
+    assembled ssh argv, whose remote command arrives as one joined string."""
+    remote = ssh_argv[-1].split()
+    verb = remote.index("transfer-receive")
+    tail = remote[verb:]
+    return {tail[i]: tail[i + 1] for i, tok in enumerate(tail) if tok.startswith("--")}
+
+
+def _argv_capturing_stream_spawner(seen: list[list[str]]):
+    """A `StreamSpawner` that records the remote argv it was handed before
+    draining the producer, so a test can assert what actually goes on the wire
+    rather than what the module's own source appears to build."""
+
+    def _spawn(argv, env):
+        seen.append(list(argv))
+        return _consuming_stream_spawner(argv, env)
+
+    return _spawn
+
+
 def _failing_stream_spawner(argv, env):
     return subprocess.Popen(
         [sys.executable, "-c", "import sys; sys.stdin.buffer.read(); sys.exit(1)"],
@@ -516,3 +537,78 @@ class TestProducerFailurePropagates:
 
         assert isinstance(outcome, ProducerFailed)
         assert outcome.exit_code == 3
+
+
+class TestWireArgumentsCarryNoSenderPath:
+    """The peer resolves every path it writes from its own group config, so the
+    wire may name a conversation and its location *within* the workspace and
+    nothing else. These pin that shape at the call site that builds it.
+
+    The spawner is handed the whole ssh argv, whose remote-command element
+    legitimately carries the PEER's own camp binary path (from its `Host`
+    config). What must never appear is a path belonging to the SENDING host, so
+    these assertions read the `transfer-receive` verb's own flag values rather
+    than scanning the argv wholesale.
+    """
+
+    def _run(self, tmp_path: Path):
+        from camp.transfer.conversations import send_workspace_conversations
+
+        ws = tmp_path / "ws"
+        member = ws / "member-repo"
+        member.mkdir(parents=True)
+        claude_dir = tmp_path / "home" / ".claude"
+        root_transcript = _make_transcript_file(claude_dir, _munge(ws), _UUID_ROOT, ws)
+        member_transcript = _make_transcript_file(
+            claude_dir, _munge(member), _UUID_MEMBER, member
+        )
+
+        rows = _rows(
+            ws,
+            transcripts=[
+                _transcript(_UUID_ROOT, ws),
+                _transcript(_UUID_MEMBER, member),
+            ],
+        )
+        assert {r.session_id for r in rows} == {_UUID_ROOT, _UUID_MEMBER}
+
+        by_id = {_UUID_ROOT: root_transcript, _UUID_MEMBER: member_transcript}
+        seen: list[list[str]] = []
+        send_workspace_conversations(
+            _host(),
+            group="g",
+            slug="s",
+            workspace=ws,
+            conversations=rows,
+            locate_transcript=lambda session_id, root: by_id[session_id],
+            spawn=_argv_capturing_stream_spawner(seen),
+        )
+        return ws, [_verb_flags(argv) for argv in seen]
+
+    def test_argv_names_the_session_and_its_subpath_and_varies_with_them(
+        self, tmp_path: Path
+    ) -> None:
+        _ws, calls = self._run(tmp_path)
+        assert len(calls) == 2
+
+        pairs = {flags["--session-id"]: flags["--subpath"] for flags in calls}
+        # The subpath the enumeration assigned each conversation reaches the
+        # wire verbatim, and the two conversations differ on it — the property a
+        # single-conversation test cannot show.
+        assert pairs == {_UUID_ROOT: ".", _UUID_MEMBER: "member-repo"}
+
+    def test_no_verb_argument_carries_a_path_from_the_sending_host(
+        self, tmp_path: Path
+    ) -> None:
+        ws, calls = self._run(tmp_path)
+        assert len(calls) == 2
+
+        for flags in calls:
+            for flag, value in flags.items():
+                assert not value.startswith("/"), (
+                    f"{flag} carries the absolute path {value!r}; "
+                    "the peer accepts no path from the wire"
+                )
+                assert str(ws) not in value, (
+                    f"{flag} carries the sending host's workspace path in {value!r}"
+                )
