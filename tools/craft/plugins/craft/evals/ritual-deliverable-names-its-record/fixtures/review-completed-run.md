@@ -7,9 +7,9 @@ the state below as already true and move straight to the Closing handoff.
 
 - Spec this slice belongs to: `spec/dock-scheduling-windows` (vault: `harborlight`, status
   `ready`).
-- Slice-loop marker on the spec: `craft/slice-loop` is present but does **not** yet read
-  `complete` — more slices remain to be chosen, planned, and built before the loop closes out.
-- This review closes one slice's own job, not the spec's lifecycle.
+- Slice-loop marker on the spec: `craft/slice-loop` reads `complete` — the slice loop reports this
+  spec closed out; no further slices remain to be chosen, planned, or built.
+- This review closes the spec's lifecycle, not just its own job.
 
 Now write the response you would give the operator at this point in the procedure — nothing
 before it, nothing after it. Report only what your instructions say to report at this point; do
