@@ -178,24 +178,41 @@ def _flag_present(args: list[str], flag: str) -> bool:
 #: the JSON relay transport `_dispatch_host_command` builds for "list"/
 #: "sessions" — see that function's own docstring.
 #:
-#: "launch" is the first STATE-CHANGING member — see
-#: `_STATE_CHANGING_HOST_VERBS` below, which every other member of this set
-#: is deliberately excluded from.
+#: "launch" and "kill" are the two STATE-CHANGING members — see
+#: `_STATE_CHANGING_HOST_VERBS` below. "kill" is nonetheless groupless (see
+#: `_GROUP_REQUIRED_HOST_VERBS`'s own comment for why the two concerns no
+#: longer share one set).
 HOST_FLAG = "--host"
-_HOST_VERBS = frozenset({"list", "sessions", "attach", "launch"})
+_HOST_VERBS = frozenset({"list", "sessions", "attach", "launch", "kill"})
 
 #: The subset of `_HOST_VERBS` that changes state on the named machine,
-#: rather than merely reading from it. Held here, once, so two refusals stay
-#: in lockstep with the same set: the `--all-hosts`/`-a` refusal below gives
-#: a member of this set its own wording — the option is refused because the
-#: verb changes state, not because it merely "has no meaning" — and the
-#: `--host`+`--group` handling exempts a member of this set from the
-#: collision refusal every OTHER `_HOST_VERBS` member gets, requiring an
-#: explicit `--group` instead: a state-changing verb needs to know which
-#: group to act on remotely, so `--group` is the value it forwards, never a
-#: value this side infers from its own cwd (`docs/design/a-session-starts-
-#: on-a-named-machine.md`, "The group is named, never inferred").
-_STATE_CHANGING_HOST_VERBS = frozenset({"launch"})
+#: rather than merely reading from it. Held here, once, so the
+#: `--all-hosts`/`-a` refusal below stays in lockstep with this set: a
+#: member gets its own wording — the option is refused because the verb
+#: changes state, not because it merely "has no meaning" — where every
+#: other `_HOST_VERBS` member gets the generic refusal.
+#:
+#: This set drives ONLY the --all-hosts wording now. It used to also decide
+#: the --group requirement below, but "kill" joining it broke that
+#: coincidence: a stop is groupless (the reference names the session, and
+#: the far side resolves it against its own pool exactly as it would
+#: locally), so "kill" belongs here for the all-hosts refusal but must NOT
+#: pick up "launch"'s --group requirement — see `_GROUP_REQUIRED_HOST_VERBS`
+#: below, which holds only "launch".
+_STATE_CHANGING_HOST_VERBS = frozenset({"launch", "kill"})
+
+#: The subset of `_HOST_VERBS` for which `--host` requires an explicit
+#: `--group <name>` rather than colliding with one the way every other
+#: `_HOST_VERBS` member does. A state-changing verb that also needs to know
+#: WHICH group to act on remotely belongs here: `--group` is the value it
+#: forwards, never a value this side infers from its own cwd
+#: (`docs/design/a-session-starts-on-a-named-machine.md`, "The group is
+#: named, never inferred"). "kill" is deliberately excluded even though it
+#: is state-changing — a stop names no group at all, so `--host` + `--group`
+#: together on "kill" takes the same collision refusal `list`/`sessions`/
+#: `attach` take, per `docs/design/stopping-a-session-on-a-named-machine.md`,
+#: "The reference names the session; the group is not asked for".
+_GROUP_REQUIRED_HOST_VERBS = frozenset({"launch"})
 
 
 class _HostFlagMissingValue(Exception):
@@ -250,7 +267,7 @@ def _dispatch_host_command(
     Reached ONLY after `--host` has resolved to a declared host and every
     refusal above has passed — `main()`'s `--host` block is this function's
     sole caller, and it refuses any verb outside `_HOST_VERBS` before
-    reaching here, so *verb* is always one of the four below.
+    reaching here, so *verb* is always one of the five below.
 
     "list" and "sessions" are wired to the SSH transport
     (`camp.host.transport.run_camp`, via `camp.host.relay.relay_all_groups`).
@@ -259,13 +276,21 @@ def _dispatch_host_command(
     relaying a JSON answer — see `cli/session.py`'s `_cmd_attach_host_cli`.
 
     "launch" is accepted by `_HOST_VERBS` — and reaches here with `--group`
-    already required and present, per the `_STATE_CHANGING_HOST_VERBS`
+    already required and present, per the `_GROUP_REQUIRED_HOST_VERBS`
     handling above. Unlike "list"/"sessions" it is wired through
     `camp.host.relay.answer_object_for_host` (the single-object relay shape),
     not `relay_all_groups`: a launch answers with one session or nothing at
     all, and its rendering carries its own certainty-aware exit-code and
     stderr-ordering policy the generic rows relay does not provide — see
     `cli/session.py`'s `_cmd_launch_host_cli`.
+
+    "kill" reaches here with NO --group required or forwarded — it is
+    state-changing (`_STATE_CHANGING_HOST_VERBS`) but not group-required
+    (`_GROUP_REQUIRED_HOST_VERBS`): the reference alone names the session,
+    exactly as with "attach". It is wired through
+    `camp.host.relay.answer_payload_for_host` (the payload relay shape that
+    accepts either a single object or candidate rows) — see `cli/session.py`'s
+    `_cmd_kill_host_cli`.
     """
     if verb == "list":
         from .workspace import _cmd_ls_host_cli
@@ -279,6 +304,10 @@ def _dispatch_host_command(
         from .session import _cmd_launch_host_cli
 
         _cmd_launch_host_cli(rest, host, host_name)
+    elif verb == "kill":
+        from .session import _cmd_kill_host_cli
+
+        _cmd_kill_host_cli(rest, host, host_name)
     else:
         assert verb == "attach"
         from .session import _cmd_attach_host_cli
@@ -681,7 +710,7 @@ def main() -> None:
         if canonical not in _HOST_VERBS:
             print(f"camp {first}: {HOST_FLAG} has no meaning here", file=sys.stderr)
             sys.exit(1)
-        if canonical in _STATE_CHANGING_HOST_VERBS:
+        if canonical in _GROUP_REQUIRED_HOST_VERBS:
             # A state-changing verb sends --group across untouched — the far
             # side resolves it there, exactly as a local invocation would.
             # No group resolves on the far side from a non-interactive ssh

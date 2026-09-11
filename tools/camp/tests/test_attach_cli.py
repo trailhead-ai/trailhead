@@ -1103,7 +1103,7 @@ def test_dash_a_on_a_mutating_verb_still_refuses(
 ) -> None:
     _isolated_env(tmp_path, monkeypatch)
 
-    code = _run(["kill", "-a", "some-ref"], monkeypatch)
+    code = _run(["remove", "-a", "some-ref"], monkeypatch)
 
     err = capsys.readouterr().err
     assert code != 0
