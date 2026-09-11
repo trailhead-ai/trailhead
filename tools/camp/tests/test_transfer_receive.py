@@ -1,0 +1,643 @@
+"""Tests for `camp transfer-receive` — the peer side of a workspace move.
+
+Test contract (all must RED before implementation, GREEN after):
+
+- `begin` on a host where the group is not configured refuses by name and
+  writes nothing — the state directory is byte-identical across the call.
+- `begin` against a slug present here and owned by a third host refuses,
+  names both the owner and the sender, and leaves that workspace untouched.
+- `begin` against a slug present here and owned by the sender, WITHOUT
+  `--overwrite`, refuses and leaves that workspace byte-identical.
+- `begin` against that same slug WITH `--overwrite` removes it and re-seeds
+  — a file written into the prior attempt's workspace is gone afterwards.
+- the seeded manifest's `owner` is the sender's name, not this host's
+  declared name, on both the fresh and the overwrite path.
+- `begin`'s answer reports a real basis commit for a member whose base ref
+  resolves here, and null for one whose base ref does not.
+- `finish` spawns the provisioner and returns without waiting.
+- a malformed or over-long `--owner` is refused before parsing, like the
+  probe's own bound.
+- the marker records the phase reached and its outcome, read back through
+  `read_transfer_marker`, and a transfer that dies after `begin` leaves a
+  marker naming `begin` as the last phase reached.
+- a refusal writes no marker into a workspace it refused to touch.
+- `seed_pending_workspace`'s new `owner=` is optional and keyword-only: the
+  default path (no `owner` passed) keeps self-stamping unchanged.
+"""
+
+from __future__ import annotations
+
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+from ._helpers import camp_state_env, init_git_repo
+
+_REPO_ROOT = Path(__file__).resolve().parents[3]  # trailhead root
+_PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
+
+if str(_PLUGIN_DIR) not in sys.path:
+    sys.path.insert(0, str(_PLUGIN_DIR))
+
+
+def _receive_module():
+    import importlib
+
+    return importlib.import_module("camp.transfer.receive")
+
+
+def _make_group(name: str, members: list[dict], *, branch_pattern="worktree-{slug}") -> dict:
+    return {"group": {"name": name}, "members": members, "branch_pattern": branch_pattern}
+
+
+def _snapshot(root: Path) -> dict[str, str]:
+    if not root.is_dir():
+        return {}
+    return {
+        str(p.relative_to(root)): p.read_bytes().hex()
+        for p in sorted(root.rglob("*"))
+        if p.is_file()
+    }
+
+
+@pytest.fixture()
+def one_member_group(tmp_path: Path):
+    repo_a = tmp_path / "repo_a"
+    init_git_repo(repo_a, origin=True)
+    group = _make_group(
+        "testgroup",
+        [{"name": "repo_a", "repo_root": str(repo_a), "tasks": [], "base": "origin/main"}],
+    )
+    env = camp_state_env(tmp_path)
+    return {"group": group, "repo_a": repo_a, "env": env, "tmp_path": tmp_path}
+
+
+@pytest.fixture()
+def two_member_group(tmp_path: Path):
+    """One member whose base ref resolves locally, one whose does not."""
+    repo_a = tmp_path / "repo_a"
+    repo_b = tmp_path / "repo_b"
+    init_git_repo(repo_a, origin=True)
+    init_git_repo(repo_b, origin=False)  # no origin remote — "origin/main" won't resolve
+    group = _make_group(
+        "testgroup",
+        [
+            {"name": "repo_a", "repo_root": str(repo_a), "tasks": [], "base": "origin/main"},
+            {"name": "repo_b", "repo_root": str(repo_b), "tasks": [], "base": "origin/main"},
+        ],
+    )
+    env = camp_state_env(tmp_path)
+    return {"group": group, "repo_a": repo_a, "repo_b": repo_b, "env": env, "tmp_path": tmp_path}
+
+
+def _workspace_dir(group_name: str, slug: str, env):
+    from camp.group.manifest import workspace_dir
+
+    return workspace_dir(group_name, slug, env=env)
+
+
+def _manifest_path(group_name: str, slug: str, env):
+    from camp.group.manifest import manifest_path_for
+
+    return manifest_path_for(group_name, slug, env=env)
+
+
+# ---------------------------------------------------------------------------
+# seed_pending_workspace(owner=) — default path unchanged, new path threads owner
+# ---------------------------------------------------------------------------
+
+
+class TestSeedPendingWorkspaceOwnerParameter:
+    def test_default_path_keeps_self_stamping_unchanged(self, one_member_group, tmp_path):
+        """Calling seed_pending_workspace with no owner= still self-stamps from
+        this host's declared name — the pre-existing call site's behaviour."""
+        from camp.provision.provision import seed_pending_workspace
+        from camp.group.manifest import owner_of, read_central_manifest
+
+        g = one_member_group
+        config_root = Path(g["env"]["CAMP_STATE_DIR"]).parent / "config"
+        config_root.mkdir(parents=True, exist_ok=True)
+        env = dict(g["env"])
+        env["CAMP_CONFIG_DIR"] = str(config_root)
+        (config_root / "hosts.toml").write_text('self_name = "andromeda"\n', encoding="utf-8")
+
+        mpath = seed_pending_workspace(g["group"], "feat-default", env=env)
+        data = read_central_manifest(mpath)
+        assert owner_of(data) == "andromeda"
+
+    def test_explicit_owner_stamps_that_name_not_self_declared(self, one_member_group, tmp_path):
+        """Passing owner= explicitly stamps THAT name, even when this host has
+        declared a different self_name — proves the sender's name wins."""
+        from camp.provision.provision import seed_pending_workspace
+        from camp.group.manifest import owner_of, read_central_manifest
+
+        g = one_member_group
+        config_root = Path(g["env"]["CAMP_STATE_DIR"]).parent / "config"
+        config_root.mkdir(parents=True, exist_ok=True)
+        env = dict(g["env"])
+        env["CAMP_CONFIG_DIR"] = str(config_root)
+        (config_root / "hosts.toml").write_text('self_name = "andromeda"\n', encoding="utf-8")
+
+        mpath = seed_pending_workspace(g["group"], "feat-owner", env=env, owner="sender-host")
+        data = read_central_manifest(mpath)
+        assert owner_of(data) == "sender-host"
+
+
+# ---------------------------------------------------------------------------
+# begin — refusals
+# ---------------------------------------------------------------------------
+
+
+class TestBeginRefusals:
+    def test_refuses_when_group_not_configured_and_writes_nothing(self, tmp_path):
+        receive = _receive_module()
+
+        env = camp_state_env(tmp_path)
+        state_dir = Path(env["CAMP_STATE_DIR"])
+        before = _snapshot(state_dir)
+
+        with pytest.raises(receive.GroupNotConfigured) as exc_info:
+            receive.begin(
+                groups=[],
+                group_name="testgroup",
+                slug="feat-x",
+                sender="sender-host",
+                overwrite=False,
+                env=env,
+            )
+        assert "testgroup" in str(exc_info.value)
+        assert _snapshot(state_dir) == before
+
+    def test_refuses_slug_owned_by_third_host_and_leaves_it_untouched(
+        self, one_member_group
+    ):
+        receive = _receive_module()
+        g = one_member_group
+
+        # A prior transfer already seeded this slug, owned by a third host.
+        receive.begin(
+            groups=[g["group"]],
+            group_name="testgroup",
+            slug="feat-x",
+            sender="third-host",
+            overwrite=False,
+            env=g["env"],
+        )
+        mpath = _manifest_path("testgroup", "feat-x", g["env"])
+        before = mpath.read_bytes()
+
+        with pytest.raises(receive.OwnershipConflict) as exc_info:
+            receive.begin(
+                groups=[g["group"]],
+                group_name="testgroup",
+                slug="feat-x",
+                sender="sending-host",
+                overwrite=True,  # even with --overwrite, a third host's claim wins
+                env=g["env"],
+            )
+        message = str(exc_info.value)
+        assert "third-host" in message
+        assert "sending-host" in message
+        assert mpath.read_bytes() == before
+
+    def test_refuses_sender_owned_slug_without_overwrite(self, one_member_group):
+        receive = _receive_module()
+        g = one_member_group
+
+        receive.begin(
+            groups=[g["group"]],
+            group_name="testgroup",
+            slug="feat-x",
+            sender="sending-host",
+            overwrite=False,
+            env=g["env"],
+        )
+        mpath = _manifest_path("testgroup", "feat-x", g["env"])
+        before = mpath.read_bytes()
+
+        with pytest.raises(receive.OverwriteRequired):
+            receive.begin(
+                groups=[g["group"]],
+                group_name="testgroup",
+                slug="feat-x",
+                sender="sending-host",
+                overwrite=False,
+                env=g["env"],
+            )
+        assert mpath.read_bytes() == before
+
+    def test_malformed_owner_refused_before_any_write(self, tmp_path):
+        receive = _receive_module()
+
+        env = camp_state_env(tmp_path)
+        state_dir = Path(env["CAMP_STATE_DIR"])
+        before = _snapshot(state_dir)
+
+        oversized = "a" * (receive.MAX_OWNER_NAME_BYTES + 1)
+        with pytest.raises(receive.MalformedOwnerName):
+            receive.begin(
+                groups=[],
+                group_name="testgroup",
+                slug="feat-x",
+                sender=oversized,
+                overwrite=False,
+                env=env,
+            )
+        assert _snapshot(state_dir) == before
+
+    def test_owner_exactly_at_the_byte_bound_is_not_malformed(self, tmp_path):
+        """The bound refuses what's OVER it, not what's exactly at it — an
+        owner name of precisely MAX_OWNER_NAME_BYTES bytes is accepted (it
+        goes on to refuse for the unrelated reason that no group is
+        configured, proving _validate_owner let it through)."""
+        receive = _receive_module()
+        env = camp_state_env(tmp_path)
+
+        at_bound = "a" * receive.MAX_OWNER_NAME_BYTES
+        with pytest.raises(receive.GroupNotConfigured):
+            receive.begin(
+                groups=[],
+                group_name="testgroup",
+                slug="feat-x",
+                sender=at_bound,
+                overwrite=False,
+                env=env,
+            )
+
+    def test_malformed_owner_charset_refused(self, tmp_path):
+        receive = _receive_module()
+
+        env = camp_state_env(tmp_path)
+        with pytest.raises(receive.MalformedOwnerName):
+            receive.begin(
+                groups=[],
+                group_name="testgroup",
+                slug="feat-x",
+                sender="Not Valid!",
+                overwrite=False,
+                env=env,
+            )
+
+
+# ---------------------------------------------------------------------------
+# begin — overwrite removes and re-seeds; owner is always the sender's
+# ---------------------------------------------------------------------------
+
+
+class TestBeginOverwrite:
+    def test_overwrite_removes_prior_attempt_and_reseeds(self, one_member_group):
+        """A retry after a prior attempt materialized real worktree content
+        (what the history/worktree phases produce) removes that content —
+        `--overwrite` tears down through camp's own reconcile_break, which
+        only succeeds against a real git worktree, so this sets one up."""
+        receive = _receive_module()
+        g = one_member_group
+
+        receive.begin(
+            groups=[g["group"]],
+            group_name="testgroup",
+            slug="feat-x",
+            sender="sending-host",
+            overwrite=False,
+            env=g["env"],
+        )
+        ws_dir = _workspace_dir("testgroup", "feat-x", g["env"])
+        wt_path = ws_dir / "repo_a"
+        subprocess.run(
+            ["git", "-C", str(g["repo_a"]), "worktree", "add", "-b", "worktree-feat-x", str(wt_path)],
+            check=True,
+            capture_output=True,
+        )
+        leftover = wt_path / "leftover-from-prior-attempt.txt"
+        leftover.write_text("stale content from a failed attempt\n", encoding="utf-8")
+        assert leftover.exists()
+
+        receive.begin(
+            groups=[g["group"]],
+            group_name="testgroup",
+            slug="feat-x",
+            sender="sending-host",
+            overwrite=True,
+            env=g["env"],
+        )
+
+        assert not leftover.exists()
+        assert not wt_path.exists()
+
+    def test_owner_is_sender_not_this_hosts_declared_name_fresh_path(
+        self, one_member_group
+    ):
+        receive = _receive_module()
+        g = one_member_group
+
+        config_root = Path(g["env"]["CAMP_STATE_DIR"]).parent / "config"
+        config_root.mkdir(parents=True, exist_ok=True)
+        env = dict(g["env"])
+        env["CAMP_CONFIG_DIR"] = str(config_root)
+        (config_root / "hosts.toml").write_text('self_name = "receiving-host"\n', encoding="utf-8")
+
+        receive.begin(
+            groups=[g["group"]],
+            group_name="testgroup",
+            slug="feat-fresh",
+            sender="sending-host",
+            overwrite=False,
+            env=env,
+        )
+
+        from camp.group.manifest import owner_of, read_central_manifest
+
+        mpath = _manifest_path("testgroup", "feat-fresh", env)
+        assert owner_of(read_central_manifest(mpath)) == "sending-host"
+
+    def test_owner_is_sender_not_this_hosts_declared_name_overwrite_path(
+        self, one_member_group
+    ):
+        receive = _receive_module()
+        g = one_member_group
+
+        config_root = Path(g["env"]["CAMP_STATE_DIR"]).parent / "config"
+        config_root.mkdir(parents=True, exist_ok=True)
+        env = dict(g["env"])
+        env["CAMP_CONFIG_DIR"] = str(config_root)
+        (config_root / "hosts.toml").write_text('self_name = "receiving-host"\n', encoding="utf-8")
+
+        receive.begin(
+            groups=[g["group"]],
+            group_name="testgroup",
+            slug="feat-ow",
+            sender="sending-host",
+            overwrite=False,
+            env=env,
+        )
+        receive.begin(
+            groups=[g["group"]],
+            group_name="testgroup",
+            slug="feat-ow",
+            sender="sending-host",
+            overwrite=True,
+            env=env,
+        )
+
+        from camp.group.manifest import owner_of, read_central_manifest
+
+        mpath = _manifest_path("testgroup", "feat-ow", env)
+        assert owner_of(read_central_manifest(mpath)) == "sending-host"
+
+
+# ---------------------------------------------------------------------------
+# begin — basis commit answer
+# ---------------------------------------------------------------------------
+
+
+class TestBeginBasisCommitAnswer:
+    def test_reports_real_commit_for_resolvable_base_and_null_for_unresolvable(
+        self, two_member_group
+    ):
+        receive = _receive_module()
+        g = two_member_group
+
+        from camp.gitutil import _git_out
+
+        expected_commit = _git_out(g["repo_a"], "rev-parse", "origin/main")
+        assert expected_commit
+
+        answer = receive.begin(
+            groups=[g["group"]],
+            group_name="testgroup",
+            slug="feat-basis",
+            sender="sending-host",
+            overwrite=False,
+            env=g["env"],
+        )
+
+        by_name = {m["name"]: m["basis_commit"] for m in answer["members"]}
+        assert by_name["repo_a"] == expected_commit
+        assert by_name["repo_b"] is None
+
+
+# ---------------------------------------------------------------------------
+# finish — spawns without waiting
+# ---------------------------------------------------------------------------
+
+
+class TestFinish:
+    def test_spawns_provisioner_and_returns_without_waiting(self, one_member_group, monkeypatch):
+        import camp.provision.provision as provision
+
+        g = one_member_group
+        receive = _receive_module()
+
+        receive.begin(
+            groups=[g["group"]],
+            group_name="testgroup",
+            slug="feat-finish",
+            sender="sending-host",
+            overwrite=False,
+            env=g["env"],
+        )
+
+        spawned: list[subprocess.Popen] = []
+
+        def _fake_spawn(*, group_name, slug, logfile_path, _argv=None):
+            proc = subprocess.Popen(
+                [sys.executable, "-c", "import time; time.sleep(0.6)"],
+            )
+            spawned.append(proc)
+            return proc
+
+        monkeypatch.setattr(provision, "spawn_detached_provisioner", _fake_spawn)
+
+        answer = receive.finish(
+            groups=[g["group"]], group_name="testgroup", slug="feat-finish", env=g["env"]
+        )
+
+        assert len(spawned) == 1
+        # finish returned before the (intentionally slow) provisioner exited.
+        assert spawned[0].poll() is None
+        assert answer["contract_version"] == receive.RECEIVE_CONTRACT_VERSION
+
+        spawned[0].wait(timeout=5)
+
+    def test_refuses_when_group_not_configured(self, tmp_path):
+        receive = _receive_module()
+        env = camp_state_env(tmp_path)
+
+        with pytest.raises(receive.GroupNotConfigured):
+            receive.finish(groups=[], group_name="testgroup", slug="feat-x", env=env)
+
+
+# ---------------------------------------------------------------------------
+# the durable per-transfer marker
+# ---------------------------------------------------------------------------
+
+
+class TestTransferMarker:
+    def test_begin_then_no_finish_leaves_begin_as_last_phase_reached(
+        self, one_member_group, monkeypatch
+    ):
+        receive = _receive_module()
+        g = one_member_group
+
+        receive.begin(
+            groups=[g["group"]],
+            group_name="testgroup",
+            slug="feat-marker",
+            sender="sending-host",
+            overwrite=False,
+            env=g["env"],
+        )
+
+        ws_dir = _workspace_dir("testgroup", "feat-marker", g["env"])
+        entries = receive.read_transfer_marker(ws_dir)
+
+        assert entries[-1].phase == "begin"
+        assert entries[-1].outcome == "ok"
+
+    def test_finish_appends_its_own_phase_after_begins(self, one_member_group, monkeypatch):
+        import camp.provision.provision as provision
+
+        g = one_member_group
+        receive = _receive_module()
+
+        receive.begin(
+            groups=[g["group"]],
+            group_name="testgroup",
+            slug="feat-marker2",
+            sender="sending-host",
+            overwrite=False,
+            env=g["env"],
+        )
+        monkeypatch.setattr(provision, "spawn_detached_provisioner", lambda **kw: None)
+        receive.finish(
+            groups=[g["group"]], group_name="testgroup", slug="feat-marker2", env=g["env"]
+        )
+
+        ws_dir = _workspace_dir("testgroup", "feat-marker2", g["env"])
+        entries = receive.read_transfer_marker(ws_dir)
+        phases = [e.phase for e in entries]
+        assert phases == ["begin", "finish"]
+
+    def test_a_refusal_writes_no_marker_into_the_workspace_it_refused(
+        self, one_member_group
+    ):
+        receive = _receive_module()
+        g = one_member_group
+
+        receive.begin(
+            groups=[g["group"]],
+            group_name="testgroup",
+            slug="feat-refused",
+            sender="sending-host",
+            overwrite=False,
+            env=g["env"],
+        )
+        ws_dir = _workspace_dir("testgroup", "feat-refused", g["env"])
+        before_entries = receive.read_transfer_marker(ws_dir)
+
+        with pytest.raises(receive.OverwriteRequired):
+            receive.begin(
+                groups=[g["group"]],
+                group_name="testgroup",
+                slug="feat-refused",
+                sender="sending-host",
+                overwrite=False,
+                env=g["env"],
+            )
+
+        after_entries = receive.read_transfer_marker(ws_dir)
+        assert after_entries == before_entries
+
+
+# ---------------------------------------------------------------------------
+# CLI wiring — `camp transfer-receive begin|finish` end to end
+# ---------------------------------------------------------------------------
+
+
+def _dispatch_module():
+    import importlib
+
+    return importlib.import_module("camp.cli.dispatch")
+
+
+def _run_cli(monkeypatch: pytest.MonkeyPatch, argv: list[str]) -> int:
+    """Run `camp <argv>` through the real dispatcher; return its exit code."""
+    dispatch = _dispatch_module()
+    monkeypatch.setattr(sys, "argv", ["camp", *argv])
+    with pytest.raises(SystemExit) as exc_info:
+        dispatch.main()
+    return exc_info.value.code
+
+
+def _write_group_toml(groups_dir: Path, name: str, members: list[tuple[str, str]]) -> None:
+    groups_dir.mkdir(parents=True, exist_ok=True)
+    member_tables = "\n\n".join(
+        f'[[members]]\nname = "{member_name}"\nrepo_root = "{repo_root}"'
+        for member_name, repo_root in members
+    )
+    (groups_dir / f"{name}.toml").write_text(f'[group]\nname = "{name}"\n\n{member_tables}\n')
+
+
+def test_transfer_receive_refuses_host_flag(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    monkeypatch.setenv("CAMP_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("CAMP_STATE_DIR", str(tmp_path / "state"))
+
+    code = _run_cli(
+        monkeypatch,
+        ["transfer-receive", "begin", "--group", "testgroup", "--slug", "x", "--host", "peer"],
+    )
+    assert code != 0
+    assert "--host" in capsys.readouterr().err
+
+
+def test_transfer_receive_begin_requires_owner_flag(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    monkeypatch.setenv("CAMP_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("CAMP_STATE_DIR", str(tmp_path / "state"))
+
+    code = _run_cli(
+        monkeypatch, ["transfer-receive", "begin", "--group", "testgroup", "--slug", "x"]
+    )
+    assert code != 0
+    assert "--owner" in capsys.readouterr().err
+
+
+def test_transfer_receive_begin_cli_end_to_end_prints_json_answer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    cfg = tmp_path / "config"
+    (cfg / "groups").mkdir(parents=True)
+    repo = tmp_path / "repo_a"
+    init_git_repo(repo, origin=True)
+    _write_group_toml(cfg / "groups", "testgroup", [("repo_a", str(repo))])
+
+    monkeypatch.setenv("CAMP_CONFIG_DIR", str(cfg))
+    monkeypatch.setenv("CAMP_STATE_DIR", str(tmp_path / "state"))
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "camp",
+            "transfer-receive",
+            "begin",
+            "--group",
+            "testgroup",
+            "--slug",
+            "feat-cli",
+            "--owner",
+            "sending-host",
+        ],
+    )
+
+    _dispatch_module().main()  # success path returns normally, no SystemExit
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["contract_version"] == 1
+    names = {m["name"] for m in payload["members"]}
+    assert names == {"repo_a"}

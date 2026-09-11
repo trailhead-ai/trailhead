@@ -124,6 +124,7 @@ def seed_pending_workspace(
     slug: str,
     *,
     env: dict[str, str] | None = None,
+    owner: str | None = None,
 ) -> Path:
     """Create the workspace dir + seed the manifest with every member pending.
 
@@ -132,7 +133,14 @@ def seed_pending_workspace(
     re-run of camp ai does not reset a ready member back to pending. Same
     posture for the workspace-level "owner" key: a manifest that already
     carries one keeps it unchanged; only a workspace whose ownership was
-    never recorded gets stamped, and only when this host has declared a name.
+    never recorded gets stamped.
+
+    By default (owner=None) a freshly stamped workspace is stamped with THIS
+    host's own declared name — the self-stamping every existing caller relies
+    on. A caller seeding a workspace on behalf of another host (a transfer's
+    receiving side) passes owner= explicitly to stamp that name instead; it
+    is used only when there is no prior owner to carry forward, same as the
+    self-stamped default.
     """
     from . import reconcile
     from ..group.manifest import read_central_manifest, reconcile_lock
@@ -201,7 +209,7 @@ def seed_pending_workspace(
         # when this host has declared a name to stamp.
         carry_forward_owner(manifest_data, prior_owner)
         if "owner" not in manifest_data:
-            declared = _declared_owner(env)
+            declared = owner if owner is not None else _declared_owner(env)
             if declared is not None:
                 manifest_data["owner"] = declared
         write_central_manifest(mpath, manifest_data)

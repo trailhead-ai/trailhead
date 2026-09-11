@@ -502,6 +502,19 @@ def main() -> None:
         _cmd_transfer_probe_cli(argv[1:])
         return
 
+    # 'transfer-receive' is the peer side of a workspace move (begin/finish),
+    # dispatched here before group resolution for the same reason
+    # 'transfer-probe' is: "the named group is not configured here" is a
+    # valid, distinct answer this verb must produce itself. --host has no
+    # meaning here either — this verb never asks a third host about itself.
+    if first == "transfer-receive":
+        if _flag_present(argv[1:], HOST_FLAG):
+            print(f"camp {first}: {HOST_FLAG} has no meaning here", file=sys.stderr)
+            sys.exit(1)
+        from .transfer import _cmd_transfer_receive_cli
+        _cmd_transfer_receive_cli(argv[1:])
+        return
+
     if first == "init":
         from ..spine import cmd_legacy_redirect
         cmd_legacy_redirect("init", "group")

@@ -100,6 +100,80 @@ def _cmd_transfer_probe_cli(args: list[str]) -> None:
 
 
 # ---------------------------------------------------------------------------
+# camp transfer-receive — the peer side of a workspace move (begin / finish)
+# ---------------------------------------------------------------------------
+
+
+def _cmd_transfer_receive_cli(args: list[str]) -> None:
+    """camp transfer-receive begin|finish --group <g> --slug <s> [--owner <sender>] [--overwrite]
+
+    Dispatched here exactly like `camp transfer-probe` — every local read and
+    write is this function's (and `camp.transfer.receive`'s) to make; no path
+    is ever built from a caller-supplied field. See `camp.transfer.receive`'s
+    module docstring for the full begin/finish contract.
+    """
+    from ..group.config import GroupConfigError, load_all_groups
+    from ..spine import _consume_flag_value
+    from ..transfer import receive as receive_mod
+    from .common import _groups_dir
+
+    if not args or args[0] not in ("begin", "finish"):
+        got = args[0] if args else None
+        print(
+            f"camp transfer-receive: a phase of 'begin' or 'finish' is "
+            f"required, got {got!r}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    phase = args[0]
+    rest = args[1:]
+
+    group_name = _consume_flag_value(rest, "--group")
+    if not group_name:
+        print("camp transfer-receive: --group is required", file=sys.stderr)
+        sys.exit(1)
+
+    slug = _consume_flag_value(rest, "--slug")
+    if not slug:
+        print("camp transfer-receive: --slug is required", file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        groups = load_all_groups(_groups_dir())
+    except GroupConfigError as e:
+        print(f"camp transfer-receive: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    if phase == "begin":
+        owner = _consume_flag_value(rest, "--owner")
+        if not owner:
+            print("camp transfer-receive: --owner is required for begin", file=sys.stderr)
+            sys.exit(1)
+        overwrite = "--overwrite" in rest
+        try:
+            answer = receive_mod.begin(
+                groups=groups,
+                group_name=group_name,
+                slug=slug,
+                sender=owner,
+                overwrite=overwrite,
+            )
+        except receive_mod.ReceiveRefused as e:
+            print(f"camp transfer-receive: {e}", file=sys.stderr)
+            sys.exit(1)
+        print(json.dumps(answer))
+        return
+
+    try:
+        answer = receive_mod.finish(groups=groups, group_name=group_name, slug=slug)
+    except receive_mod.ReceiveRefused as e:
+        print(f"camp transfer-receive: {e}", file=sys.stderr)
+        sys.exit(1)
+    print(json.dumps(answer))
+
+
+# ---------------------------------------------------------------------------
 # camp transfer — the operator-facing dry-run verb
 # ---------------------------------------------------------------------------
 
