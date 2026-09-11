@@ -883,3 +883,33 @@ def test_a_peer_workspace_with_no_recorded_owner_says_so_in_its_own_words() -> N
     )
     assert peer_check.detail != local_check.detail
     assert result.verdict is preflight.Verdict.NOT_CLEAN
+
+
+def test_a_peer_that_declares_no_name_is_not_a_clean_verdict() -> None:
+    """A peer with no declared name cannot record ownership when the workspace
+    lands, so "would transfer" would be a promise it cannot keep.
+
+    Its wording stays distinct from the collision it shares a check with, and
+    from this host having no name of its own.
+    """
+    preflight = _preflight_module()
+
+    result = _compose(
+        probe_result=_wire_answer(
+            self_name=None,
+            group_configured=True,
+            members=[],
+            account=None,
+            workspace_exists=False,
+            workspace_owner=None,
+        )
+    )
+
+    check = _check(result, "the peer's declared name differs from this host's")
+    assert check.status is preflight.CheckStatus.FAILED, check.detail
+    assert "no name" in check.detail, check.detail
+    assert "same name" not in check.detail, (
+        f"a nameless peer is not a collision: {check.detail!r}"
+    )
+    assert check.detail != _check(result, "this host has declared a name").detail
+    assert result.verdict is preflight.Verdict.NOT_CLEAN

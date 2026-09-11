@@ -546,3 +546,43 @@ def test_transfer_probe_is_reserved_and_never_dispatched_as_a_bare_slug(
 
     combined = capsys.readouterr()
     assert "bare slug dispatch is no longer supported" not in (combined.out + combined.err)
+
+
+def test_answering_a_probe_leaves_the_answering_hosts_state_untouched(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """The slice promises a preflight that writes nothing on EITHER host.
+
+    The sending half is pinned elsewhere in this file; this is the peer's own
+    half, which is the one an operator cannot inspect for themselves — they
+    run the command here and the writing, if any, happens over there.
+    """
+    dispatch = _dispatch_module()
+
+    cfg = tmp_path / "config"
+    (cfg / "groups").mkdir(parents=True)
+    repo = tmp_path / "repo_a"
+    repo.mkdir()
+    _write_group_toml(cfg / "groups", "trailhead", [("repo_a", str(repo))])
+    (cfg / "hosts.toml").write_text('self_name = "peer-box"\n', encoding="utf-8")
+
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+    (state_dir / "sentinel.json").write_text('{"ok": true}\n', encoding="utf-8")
+
+    monkeypatch.setenv("CAMP_CONFIG_DIR", str(cfg))
+    monkeypatch.setenv("CAMP_STATE_DIR", str(state_dir))
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["camp", "transfer-probe", "--group", "trailhead", "--slug", "feat-x"],
+    )
+
+    before = _snapshot(state_dir)
+    before_config = _snapshot(cfg)
+
+    dispatch.main()
+
+    assert json.loads(capsys.readouterr().out)["self_name"] == "peer-box"
+    assert _snapshot(state_dir) == before
+    assert _snapshot(cfg) == before_config

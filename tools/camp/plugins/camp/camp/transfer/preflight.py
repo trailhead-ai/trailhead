@@ -367,11 +367,22 @@ def compose_preflight(
         )
     else:
         unavailable = _peer_payload_unavailable(name, probe_result)
-        checks.append(
-            unavailable
-            if unavailable is not None
-            else Check(name, CheckStatus.PASSED, name)
-        )
+        if unavailable is not None:
+            checks.append(unavailable)
+        elif probe_result.self_name is None:
+            # A peer that declares no name is not a collision, but it cannot
+            # record ownership when the workspace lands there either, so this
+            # is not a difference worth passing on.
+            checks.append(
+                Check(
+                    name,
+                    CheckStatus.FAILED,
+                    "the peer declares no name of its own, so it could not "
+                    "record ownership of an arriving workspace",
+                )
+            )
+        else:
+            checks.append(Check(name, CheckStatus.PASSED, name))
 
     # 7. the peer has the group configured with existing member repo roots
     name = "the peer has the group configured with existing member repo roots"

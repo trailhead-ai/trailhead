@@ -383,7 +383,8 @@ something else.
 Each member's regenerable state — build output, installed dependencies,
 anything a transfer should recreate on the peer rather than copy — is
 declared per member as `excluded`, a list of paths relative to that
-member's own `repo_root`:
+member's worktree inside the workspace (`<workspace>/<member>`) — the tree a
+transfer would walk, not the original clone:
 
 ```toml
 [[members]]
