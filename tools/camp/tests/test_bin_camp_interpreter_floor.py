@@ -25,8 +25,6 @@ import subprocess
 import textwrap
 from pathlib import Path
 
-import pytest
-
 _REPO_ROOT = Path(__file__).resolve().parents[3]  # trailhead root
 _REAL_BIN_CAMP = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp" / "bin" / "camp"
 _BASH = shutil.which("bash")
