@@ -3304,12 +3304,17 @@ def _documented_launch_exit_codes(cli_env) -> set[int]:
     Read out of the emitter, so a code added to (or dropped from) the help
     changes what this test drives instead of silently disagreeing with it. The
     same block's prose is asserted in test_cli_surface.py.
+
+    The block ends at the next "Exit codes (" heading, not at "Flags:" — every
+    verb's exit-code block precedes that one heading, so stopping at "Flags:"
+    reads launch's block plus every block after it and attributes their codes
+    to launch.
     """
     result = _camp(cli_env, "help")
     assert result.returncode == 0, result.stderr
     block = result.stdout.split("Exit codes (camp launch):\n", 1)
     assert len(block) == 2, result.stdout
-    body = block[1].split("\nFlags:", 1)[0]
+    body = re.split(r"\nExit codes \(|\nFlags:", block[1], maxsplit=1)[0]
     return {
         int(match.group(1))
         for match in re.finditer(r"^ {2}(\d+) {2,}", body, re.MULTILINE)
