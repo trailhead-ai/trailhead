@@ -368,6 +368,13 @@ def _candidate_row_line(row: dict) -> str:
     A remote camp of a different version can omit a key this depends on;
     that is a `KeyError` a caller degrades per row, exactly as
     `render_session_row_human` does for a `sessions --host` row.
+
+    Every interpolated field — not just `root` — goes through
+    `printable_path`, which despite the name works on any relayed string:
+    `tmux_name` and `session_id` are as untrusted as `root` is, and control
+    sequences that `_strip_control_sequences` deliberately preserves
+    (newline, tab) can otherwise render one relayed row as two, forging a
+    candidate the far side never sent.
     """
     from ..launch.recovery import printable_path
 
@@ -379,7 +386,7 @@ def _candidate_row_line(row: dict) -> str:
     else:
         where = printable_path(root)
     return (
-        f"{row['tmux_name']}  {row['session_id']}  {where}  "
+        f"{printable_path(row['tmux_name'])}  {printable_path(row['session_id'])}  {where}  "
         f"{_format_age(row.get('age_seconds'))}"
     )
 
@@ -2372,10 +2379,22 @@ def _cmd_kill_host_cli(args: list[str], host: "Host", host_name: str) -> None:
         "kill", host, host_name, ["kill", ref, "--json"],
     )
 
-    if answer.obj is not None:
-        session_id = answer.obj.get("session_id")
-        tmux_name = answer.obj.get("tmux_name")
-        outcome = answer.obj.get("outcome")
+    obj = answer.obj
+    # `obj is not None` alone is not sufficient: a differently-versioned
+    # remote, or an error object like `{"ok": false, "reason": "..."}`, is
+    # a JSON object too. Only an object carrying the fields the success
+    # report actually needs — a session id, and an outcome camp recognises
+    # — is a stop's success answer; anything else falls through to the same
+    # certain-failure path an unparsable answer takes, exactly as the
+    # empty-rows case does above.
+    if (
+        obj is not None
+        and obj.get("session_id") is not None
+        and obj.get("outcome") in ("stopped", "already-down")
+    ):
+        session_id = obj.get("session_id")
+        tmux_name = obj.get("tmux_name")
+        outcome = obj.get("outcome")
         if outcome == "already-down":
             print(
                 f"camp kill: session {session_id} ({tmux_name}) on host "

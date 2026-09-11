@@ -62,7 +62,9 @@ class HostAnswer:
     """One machine's contribution to a per-host answer, produced as a value.
 
     ``rows`` are the host-stamped rows to relay — either the remote's own
-    answered rows (untouched beyond the `host` stamp), or the single
+    answered rows, host-stamped and control-stripped (a row's own values,
+    such as a session id or a multiplexer name, are the operator's next
+    decision just as much as the far side's stderr is), or the single
     ``ok: false`` row synthesized locally for a state the remote never
     answered at all. ``notices`` are the stderr lines this machine owes,
     already formatted and in the emission order the named-host surface

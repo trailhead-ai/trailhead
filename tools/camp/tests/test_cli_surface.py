@@ -630,14 +630,15 @@ def test_help_states_the_remote_kill_exit_code_contract(help_text: str) -> None:
 
 def test_help_names_the_remote_kill_addressing_form(help_text: str) -> None:
     """`camp kill <ref> --host <name>` is discoverable alongside the plain
-    `camp kill <ref>` form already documented — and only that exact form,
-    not a plausible near-miss (a different flag name, or `--host` on the
-    plain local form without `<name>`), so a help edit that mangles the
-    addressing form is caught rather than passing on partial substring
-    overlap with the correct one."""
-    assert "camp kill <ref> --host <name>" in help_text
-    assert "camp kill <ref> --machine <name>" not in help_text
-    assert "camp kill <ref> --host" in help_text  # substring of the correct form
+    `camp kill <ref>` form already documented, using the SAME flag name the
+    CLI actually parses — derived from `HOST_FLAG`, the constant the
+    flag-parsing code shares, rather than retyped. A help edit that mangles
+    the addressing form, or a `--host` rename that the help text is not
+    updated to match, turns this red."""
+    sys.path.insert(0, str(_PLUGIN_DIR))
+    from camp.cli.dispatch import HOST_FLAG
+
+    assert f"camp kill <ref> {HOST_FLAG} <name>" in help_text
 
 
 # ---------------------------------------------------------------------------
