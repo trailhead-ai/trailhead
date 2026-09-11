@@ -1145,8 +1145,14 @@ class TestKillHostAmbiguous:
 
         _call_kill_host(monkeypatch, ["sess"])
 
-        err = capsys.readouterr().err
-        assert "matches 2 sessions" in err
+        lines = capsys.readouterr().err.splitlines()
+        assert lines[0] == (
+            "camp kill: 'sess' matched more than one session on host 'andromeda' "
+            "— re-run with a longer prefix naming exactly one"
+        )
+        assert lines[1] == (
+            "camp kill: 'sess' matches 2 sessions (listed above) — re-run with a longer prefix"
+        )
 
 
 class TestKillHostUnknownOutcome:
@@ -1242,6 +1248,44 @@ class TestKillHostCertainFailure:
         _rig_payload(monkeypatch, answer)
 
         code = _call_kill_host(monkeypatch, ["sess-8"])
+
+        assert code == 1
+
+    def test_remote_exit_code_five_a_far_side_refusal_in_its_own_words_collapses_to_one(
+        self, monkeypatch, capsys: pytest.CaptureFixture
+    ) -> None:
+        # design doc, "Two reserved exit codes, not one": every certain
+        # failure is 1, including "a far-side refusal in its own words" —
+        # a RemoteRefusal carries the remote process's own raw exit code,
+        # which is not restricted to {0, 2, 3}.
+        relay = _relay_module()
+        answer = relay.HostPayloadAnswer(
+            obj=None,
+            rows=None,
+            certainty=relay.Certainty.DID_NOT_HAPPEN,
+            notices=["camp kill: directory outside allowlist"],
+            exit_code=5,
+        )
+        _rig_payload(monkeypatch, answer)
+
+        code = _call_kill_host(monkeypatch, ["sess-9"])
+
+        assert code == 1
+
+    def test_remote_exit_code_seventeen_a_far_side_refusal_in_its_own_words_collapses_to_one(
+        self, monkeypatch, capsys: pytest.CaptureFixture
+    ) -> None:
+        relay = _relay_module()
+        answer = relay.HostPayloadAnswer(
+            obj=None,
+            rows=None,
+            certainty=relay.Certainty.DID_NOT_HAPPEN,
+            notices=["camp kill: remote camp exited unexpectedly"],
+            exit_code=17,
+        )
+        _rig_payload(monkeypatch, answer)
+
+        code = _call_kill_host(monkeypatch, ["sess-10"])
 
         assert code == 1
 

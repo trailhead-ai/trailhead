@@ -2442,14 +2442,15 @@ def _cmd_kill_host_cli(args: list[str], host: "Host", host_name: str) -> None:
     for notice in answer.notices:
         print(notice, file=sys.stderr)
 
-    # Both reserved codes are collapsed here, never passed through: a remote
-    # camp that happens to exit 2 or 3 for its own reasons would otherwise
-    # impersonate camp's own "ambiguous" or "unknown" signal, and the two
-    # codes a scripted caller can branch on without parsing prose would stop
-    # meaning what they say.
-    exit_code = answer.exit_code
-    if exit_code in (0, _AMBIGUOUS_EXIT_CODE, _KILL_HOST_UNKNOWN_EXIT_CODE):
-        exit_code = 1
+    # Every certain failure is 1, full stop — never a pass-through of the
+    # remote's own exit code. The status is decided here, from the payload
+    # camp actually parsed: unreachable, unpinned or changed key, refused
+    # credentials, camp not resolvable there, a far-side refusal in its own
+    # words, or an answer camp could not parse are all the same outcome to a
+    # scripted caller. Passing an arbitrary remote code through would also
+    # let a remote camp that happens to exit 2 or 3 for its own reasons
+    # impersonate camp's own reserved "ambiguous" or "unknown" signal.
+    exit_code = 1
     if as_json:
         reason = answer.notices[-1] if answer.notices else "no session was stopped"
         print(
