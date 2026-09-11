@@ -435,7 +435,9 @@ either.
 ## Outcome report
 
 Report, per cluster: the members, the ADRs written — each named as a link, rendered per the reader
-plugin's `## Record links` rule when that rule is resident in this session, or printed as the bare
-`adr/<slug>` identifier when it is not, never hand-assembled — the decisions absorbed, the ADRs
-superseded, the area profiles re-synthesized, and the terminal outcome. Report deferrals separately
-with their reason — an in-flight member, or the zero-task-edges message.
+plugin's `## Record links` rule when that rule is resident in this session; where that rule is not
+resident, print the bare `adr/<slug>` identifier and end with a fully formed
+`lore record show adr/<slug>` line per ADR that the reader can paste as-is, never a hand-assembled
+URL — the decisions absorbed, the ADRs superseded, the area profiles re-synthesized, and the
+terminal outcome. Report deferrals separately with their reason — an in-flight member, or the
+zero-task-edges message.
