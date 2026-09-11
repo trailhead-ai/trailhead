@@ -1,0 +1,1 @@
+Review passed and the change is merged. [spec/dock-scheduling-windows](http://127.0.0.1:7313/records/harborlight/spec/dock-scheduling-windows) still has slices left — the slice loop hasn't reported it closed out. Run `/craft:slice spec/dock-scheduling-windows` to choose the next slice.

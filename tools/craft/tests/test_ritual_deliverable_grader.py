@@ -306,6 +306,18 @@ class TestRegressionAgainstOriginalMeasurement:
             "--record", "adr/dock-scheduling-windows-use-fifo-slots",
             "--command", 'lore record show adr/dock-scheduling-windows-use-fifo-slots',
         ],
+        "execute-measurable": [
+            "--record", "task/the-ledger-reconciliation-slice",
+            "--command", "/portage:pull_request",
+        ],
+        "review-loop-open": [
+            "--record", "spec/dock-scheduling-windows",
+            "--command", "/craft:slice spec/dock-scheduling-windows",
+        ],
+        "slice": [
+            "--record", "task/the-berth-allocation-slice",
+            "--command", "/craft:plan task/the-berth-allocation-slice",
+        ],
     }
 
     EVAL_RUNS_DIR = (
@@ -350,8 +362,8 @@ class TestRegressionAgainstOriginalMeasurement:
         captures = sorted(
             p for p in self.EVAL_RUNS_DIR.glob("*.txt") if not p.name.endswith(".stderr.txt")
         )
-        assert len(captures) == 30, (
-            f"expected 30 committed captures under runs/, found {len(captures)} — "
+        assert len(captures) == 45, (
+            f"expected 45 committed captures under runs/, found {len(captures)} — "
             "the regression pin's own enumeration disagrees with the task's premise"
         )
 
@@ -377,4 +389,4 @@ class TestRegressionAgainstOriginalMeasurement:
             )
             checked += 1
 
-        assert checked == 30
+        assert checked == 45
