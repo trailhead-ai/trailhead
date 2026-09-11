@@ -34,6 +34,7 @@ See ``docs/vision.md``.
 
 from __future__ import annotations
 
+import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime
@@ -91,6 +92,47 @@ class SessionRecord:
     name: str | None
     pid: int | None
     started_at: datetime | None
+
+
+#: Characters an :class:`AccountIdentity` label may never carry — the C0
+#: controls (NUL among them), DEL, and the C1 controls. A label is printed
+#: verbatim to a terminal by a caller of this seam, so this is enforced at
+#: CONSTRUCTION, here in the base class, rather than trusted to whichever
+#: harness implementation happens to produce clean values today — the seam
+#: is harness-agnostic by design, and every future harness inherits the same
+#: guarantee without having to reimplement it.
+_IDENTITY_FORBIDDEN_CHARS = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+
+
+@dataclass(frozen=True)
+class AccountIdentity:
+    """The operator-facing identity of an account a launch will land on, plus
+    whether that account has configuration behind it.
+
+    Both fields come from the SAME resolution a harness uses to produce the
+    launch binding (:meth:`Harness.session_launch_env_set`), so the identity,
+    the existence check, and the binding cannot disagree — there is no second,
+    independent reader of "does this account have configuration" answering a
+    question the binding resolution already settled.
+
+    ``label`` is the account's human-readable identity — never validated for
+    anything beyond the control-character guard below; a harness decides what
+    a label looks like. ``has_config`` is whether that account has
+    configuration on disk, independent of whether the account was declared or
+    defaulted.
+    """
+
+    label: str
+    has_config: bool
+
+    def __post_init__(self) -> None:
+        found = _IDENTITY_FORBIDDEN_CHARS.search(self.label)
+        if found:
+            raise HarnessError(
+                f"AccountIdentity: label {self.label!r} contains the control "
+                f"character {found.group()!r}. An identity is printed verbatim "
+                "to a terminal and may never carry a control or escape sequence."
+            )
 
 
 @dataclass(frozen=True)
@@ -579,6 +621,40 @@ class Harness(ABC):
 
         Returns ``None`` only from this base default — the harness cannot launch
         sessions at all.
+        """
+        return None
+
+    def session_launch_account_identity(
+        self, account: str | None, *, env: dict[str, str] | None = None
+    ) -> AccountIdentity | None:
+        """The identity of the account a launch with *account* lands on, and
+        whether that account has configuration behind it — answered from the
+        SAME resolution :meth:`session_launch_env_set` uses to produce the
+        binding, so a caller never has to read a second, harness-specific
+        resolver to learn whether the account it is about to bind to exists.
+
+        ``account`` carries the same meaning as on
+        :meth:`session_launch_env_set`: an opaque, harness-neutral string the
+        caller declared, or ``None`` for "nothing declared — resolve the
+        harness's own default".
+
+        ``None`` for the RETURN means this harness offers no account-identity
+        knowledge at all — the base-class default, and the answer for every
+        harness but the one that overrides it. A harness offering identity for
+        a declared account must offer it for the default too (a concrete
+        override must answer for both ``account=None`` and a declared
+        ``account``, or for neither): a report whose richness flips as a
+        group's declaration changes, for no reason the operator can see, is
+        worse than a uniformly plain one.
+
+        Implementations RAISE :class:`HarnessError` — the same posture as
+        :meth:`session_launch_env_set` — for an ``account`` they refuse
+        outright, naming the offending value. A refusal is never expressed by
+        returning ``None``: that stays reserved for "this harness has no
+        identity concept", so a refusal is always distinguishable from a
+        clean "no configuration behind this account" answer.
+
+        Returns ``None`` only from this base default.
         """
         return None
 

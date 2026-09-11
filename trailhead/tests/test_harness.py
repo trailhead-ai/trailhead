@@ -23,6 +23,7 @@ from trailhead.harness.base import (
     MODALITIES,
     MODALITY_TTY_REQUIRED,
     UNSUPPORTED_RULESET_NOTICE,
+    AccountIdentity,
     SessionRecord,
 )
 
@@ -785,6 +786,35 @@ class TestLaunchEnumerationBaseDefaults:
         assert h.session_enumerate(tmp_path) is None
         assert h.session_enumerate() is None
         assert h.parse_session_list("x") is None
+
+
+class TestAccountIdentityBaseDefault:
+    """The base class answers None for account-identity — varied across both
+    the declared-account and no-declaration inputs, since a harness with no
+    identity concept has nothing to say about either."""
+
+    def test_none_for_a_declared_account(self, tmp_path):
+        assert _BareHarness().session_launch_account_identity("/somewhere") is None
+
+    def test_none_for_no_declaration(self):
+        assert _BareHarness().session_launch_account_identity(None) is None
+
+
+class TestAccountIdentityForbidsControlCharacters:
+    """Pinned at the BASE class: the label is printed verbatim to a terminal
+    by a caller of this seam, so no harness implementation can construct an
+    AccountIdentity whose label carries a control or escape sequence — this
+    holds even for a harness this suite never runs against."""
+
+    def test_a_control_character_in_the_label_raises_at_construction(self):
+        with pytest.raises(HarnessError) as exc_info:
+            AccountIdentity(label="/home/user\x1b[31mevil", has_config=True)
+        assert "\\x1b" in str(exc_info.value)
+
+    def test_a_clean_label_constructs_without_raising(self):
+        identity = AccountIdentity(label="/home/user/.claude", has_config=False)
+        assert identity.label == "/home/user/.claude"
+        assert identity.has_config is False
 
 
 class _LaunchOnlyBrokenHarness(_BareHarness):
