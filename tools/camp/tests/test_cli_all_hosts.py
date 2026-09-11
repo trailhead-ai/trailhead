@@ -1049,3 +1049,396 @@ def test_every_relay_host_verb_threads_the_declared_connect_timeout(
     capsys.readouterr()
 
     assert seen == [9.0]
+
+
+# ---------------------------------------------------------------------------
+# camp doctor -a — the per-host probe section
+# `docs/design/camp-doctor-answers-for-every-declared-host.md`
+# ---------------------------------------------------------------------------
+
+
+def _doctor_hosts_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, hosts_toml: str
+) -> None:
+    """A hermetic env for `camp doctor -a`: an isolated config dir carrying
+    *hosts_toml*, isolated workspace/canonical roots (so the local checks
+    never touch a real registry), and deterministic local-check seams."""
+    (tmp_path / "hosts.toml").write_text(hosts_toml, encoding="utf-8")
+    monkeypatch.setenv("CAMP_CONFIG_DIR", str(tmp_path))
+    monkeypatch.setenv("CAMP_STATE_DIR", str(tmp_path / "state"))
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("WORKSPACE_ROOT", str(tmp_path / "workspace"))
+    monkeypatch.setenv("CAMP_CANONICAL_ROOT", str(tmp_path / "canonical"))
+    monkeypatch.setenv("CAMP_TEST_ASDF_PRESENT", "1")
+    (tmp_path / "workspace").mkdir(exist_ok=True)
+    (tmp_path / "canonical").mkdir(exist_ok=True)
+
+
+def _probe_answered(report: dict) -> "object":
+    transport = _transport_module()
+    return transport.Answered(stdout=json.dumps(report), stderr="", exit_code=0)
+
+
+def test_doctor_no_remote_hosts_declared_renders_this_machine_alone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """State — no remote hosts are declared: the host section still renders,
+    carrying this machine's row alone, and no network is contacted."""
+    _doctor_hosts_env(tmp_path, monkeypatch, "")
+    monkeypatch.setenv("CAMP_TEST_TMUX_PRESENT", "1")
+    transport = _transport_module()
+
+    def _boom(*args, **kwargs):
+        raise AssertionError("no hosts are declared — the transport must never be called")
+
+    monkeypatch.setattr(transport, "run_camp", _boom)
+
+    code = _run(monkeypatch, ["doctor", "-a", "--json"])
+    report = json.loads(capsys.readouterr().out)
+    assert code == 0
+    assert len(report["hosts"]) == 1
+    assert report["hosts"][0]["verdict"] == "PASS"
+
+
+def test_doctor_one_host_answers_fully_resolvable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """State — one declared host answers and its camp and multiplexer both
+    resolve: rendered as the fully-answerable verdict, naming the machine."""
+    _doctor_hosts_env(tmp_path, monkeypatch, "[hosts.andromeda]\n")
+    monkeypatch.setenv("CAMP_TEST_TMUX_PRESENT", "1")
+    transport = _transport_module()
+    monkeypatch.setattr(
+        transport,
+        "run_camp",
+        lambda host, remote_argv, **kw: _probe_answered(
+            {"pass": True, "checks": [], "probe": True, "multiplexer_present": True}
+        ),
+    )
+
+    code = _run(monkeypatch, ["doctor", "-a", "--json"])
+    report = json.loads(capsys.readouterr().out)
+    assert code == 0
+    row = next(h for h in report["hosts"] if h["host"] == "andromeda")
+    assert row["verdict"] == "PASS"
+
+
+def test_doctor_several_hosts_each_rendered_as_its_own_block_in_declared_order(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """State — several declared hosts answer, each rendered as its own
+    block, in declared order — even when the second-declared host answers
+    first."""
+    _doctor_hosts_env(
+        tmp_path, monkeypatch, "[hosts.andromeda]\n[hosts.lookout]\n"
+    )
+    monkeypatch.setenv("CAMP_TEST_TMUX_PRESENT", "1")
+    transport = _transport_module()
+
+    import time
+
+    def fake_run_camp(host, remote_argv, **kw):
+        if host.ssh == "andromeda":
+            time.sleep(0.05)  # declared first, completes last
+        return _probe_answered(
+            {"pass": True, "checks": [], "probe": True, "multiplexer_present": True}
+        )
+
+    monkeypatch.setattr(transport, "run_camp", fake_run_camp)
+
+    code = _run(monkeypatch, ["doctor", "-a", "--json"])
+    report = json.loads(capsys.readouterr().out)
+    assert code == 0
+    remote_names = [h["host"] for h in report["hosts"] if h["host"] != report["hosts"][0]["host"]]
+    assert remote_names == ["andromeda", "lookout"], (
+        "declared order must be preserved even though lookout answers first"
+    )
+
+
+def test_doctor_host_unreachable_within_connect_timeout_renders_down(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """State — a declared host does not answer within the connection
+    timeout: rendered with the transport's own reason, and the "down"
+    verdict — never the "warn" verdict a resolved-but-flawed connection
+    gets."""
+    _doctor_hosts_env(tmp_path, monkeypatch, "[hosts.andromeda]\n")
+    transport = _transport_module()
+    monkeypatch.setattr(
+        transport, "run_camp", lambda host, remote_argv, **kw: transport.Unreachable(reason="x")
+    )
+
+    code = _run(monkeypatch, ["doctor", "-a", "--json"])
+    report = json.loads(capsys.readouterr().out)
+    assert code == 0
+    row = next(h for h in report["hosts"] if h["host"] == "andromeda")
+    assert row["verdict"] == "DOWN"
+    assert "unreachable" in row["detail"]
+
+
+def test_doctor_host_answers_but_camp_does_not_resolve(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """State — a declared host answers but camp does not resolve there:
+    reported as its own finding, distinct from unreachability, naming the
+    camp location that failed."""
+    _doctor_hosts_env(tmp_path, monkeypatch, "[hosts.andromeda]\n")
+    transport = _transport_module()
+    monkeypatch.setattr(
+        transport, "run_camp", lambda host, remote_argv, **kw: transport.CampNotResolvable()
+    )
+
+    code = _run(monkeypatch, ["doctor", "-a", "--json"])
+    report = json.loads(capsys.readouterr().out)
+    assert code == 0
+    row = next(h for h in report["hosts"] if h["host"] == "andromeda")
+    assert row["verdict"] == "WARN"
+    assert "camp_bin" in row["detail"]
+
+
+def test_doctor_host_answers_but_no_multiplexer_present(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """State — a declared host answers but no terminal multiplexer is
+    present: a finding, distinct from the probe being unavailable — the two
+    must never render alike."""
+    _doctor_hosts_env(tmp_path, monkeypatch, "[hosts.andromeda]\n")
+    transport = _transport_module()
+    monkeypatch.setattr(
+        transport,
+        "run_camp",
+        lambda host, remote_argv, **kw: _probe_answered(
+            {"pass": True, "checks": [], "probe": True, "multiplexer_present": False}
+        ),
+    )
+
+    code = _run(monkeypatch, ["doctor", "-a", "--json"])
+    report = json.loads(capsys.readouterr().out)
+    assert code == 0
+    row = next(h for h in report["hosts"] if h["host"] == "andromeda")
+    assert row["verdict"] == "WARN"
+    assert "multiplexer" in row["detail"]
+    assert "unavailable" not in row["detail"]
+
+
+def test_doctor_without_a_option_is_unchanged_and_never_touches_the_transport(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """State — the health check is run without asking for host probing: the
+    host section is absent entirely, and the transport is never invoked —
+    asserted at the transport seam, never on printed output alone."""
+    _doctor_hosts_env(tmp_path, monkeypatch, "[hosts.andromeda]\n")
+    transport = _transport_module()
+
+    def _boom(*args, **kwargs):
+        raise AssertionError("plain `camp doctor` must never open a socket")
+
+    monkeypatch.setattr(transport, "run_camp", _boom)
+
+    code = _run(monkeypatch, ["doctor", "--json"])
+    report = json.loads(capsys.readouterr().out)
+    assert code == 0
+    assert "hosts" not in report
+    assert set(report.keys()) == {"pass", "checks"}
+
+
+def test_doctor_unreachable_host_never_changes_the_exit_status(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """The host section never contributes to the health check's exit
+    status: the same local checks, run once with the host answering and
+    once unreachable, produce the same exit code both times."""
+    _doctor_hosts_env(tmp_path, monkeypatch, "[hosts.andromeda]\n")
+    monkeypatch.setenv("CAMP_TEST_TMUX_PRESENT", "1")
+    transport = _transport_module()
+
+    monkeypatch.setattr(
+        transport,
+        "run_camp",
+        lambda host, remote_argv, **kw: _probe_answered(
+            {"pass": True, "checks": [], "probe": True, "multiplexer_present": True}
+        ),
+    )
+    code_answering = _run(monkeypatch, ["doctor", "-a", "--json"])
+    capsys.readouterr()
+
+    monkeypatch.setattr(
+        transport, "run_camp", lambda host, remote_argv, **kw: transport.Unreachable(reason="x")
+    )
+    code_unreachable = _run(monkeypatch, ["doctor", "-a", "--json"])
+    capsys.readouterr()
+
+    assert code_answering == code_unreachable == 0
+
+
+def test_doctor_json_composes_and_carries_host_findings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """`camp doctor -a --json` composes rather than being refused, and the
+    host findings are carried in the structured answer."""
+    _doctor_hosts_env(tmp_path, monkeypatch, "[hosts.andromeda]\n")
+    monkeypatch.setenv("CAMP_TEST_TMUX_PRESENT", "1")
+    transport = _transport_module()
+    monkeypatch.setattr(
+        transport,
+        "run_camp",
+        lambda host, remote_argv, **kw: _probe_answered(
+            {"pass": True, "checks": [], "probe": True, "multiplexer_present": True}
+        ),
+    )
+
+    code = _run(monkeypatch, ["doctor", "-a", "--json"])
+    report = json.loads(capsys.readouterr().out)
+    assert code == 0
+    assert isinstance(report["hosts"], list)
+    assert any(h["host"] == "andromeda" for h in report["hosts"])
+    assert isinstance(report["checks"], list)
+
+
+def test_doctor_all_hosts_reachable_through_real_cli_short_and_long_form(
+    tmp_path: Path,
+) -> None:
+    """`doctor` is reachable through the real `camp` CLI entry point under
+    both spellings of the widen-to-every-machine option — the bundled short
+    form `-a` and the long form `--all-hosts`."""
+    import subprocess
+
+    cli = _PLUGIN_DIR / "cli" / "camp"
+    (tmp_path / "hosts.toml").write_text("", encoding="utf-8")
+    env = dict(os.environ)
+    env.update(
+        {
+            "HOME": str(tmp_path / "home"),
+            "CAMP_CONFIG_DIR": str(tmp_path),
+            "CAMP_STATE_DIR": str(tmp_path / "state"),
+            "WORKSPACE_ROOT": str(tmp_path / "workspace"),
+            "CAMP_CANONICAL_ROOT": str(tmp_path / "canonical"),
+            "CAMP_TEST_ASDF_PRESENT": "1",
+            "CAMP_TEST_TMUX_PRESENT": "1",
+        }
+    )
+    (tmp_path / "workspace").mkdir()
+    (tmp_path / "canonical").mkdir()
+
+    reports = []
+    for flag in ("-a", "--all-hosts"):
+        result = subprocess.run(
+            [sys.executable, str(cli), "doctor", flag, "--json"],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        reports.append(json.loads(result.stdout))
+
+    for report in reports:
+        assert len(report["hosts"]) == 1
+        assert report["hosts"][0]["verdict"] == "PASS"
+
+
+def test_doctor_probe_decode_failure_renders_unavailable_and_does_not_crash(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """A probe answer that arrives but does not parse — truncated or
+    corrupt — renders as the probe being unavailable, exactly as a rejected
+    flag does, and never crashes the command or costs the operator the rest
+    of the report."""
+    _doctor_hosts_env(
+        tmp_path, monkeypatch, "[hosts.andromeda]\n[hosts.lookout]\n"
+    )
+    monkeypatch.setenv("CAMP_TEST_TMUX_PRESENT", "1")
+    transport = _transport_module()
+
+    def fake_run_camp(host, remote_argv, **kw):
+        if host.ssh == "andromeda":
+            return transport.Answered(stdout="not json{{{", stderr="", exit_code=0)
+        return _probe_answered(
+            {"pass": True, "checks": [], "probe": True, "multiplexer_present": True}
+        )
+
+    monkeypatch.setattr(transport, "run_camp", fake_run_camp)
+
+    code = _run(monkeypatch, ["doctor", "-a", "--json"])
+    report = json.loads(capsys.readouterr().out)
+    assert code == 0
+    corrupt_row = next(h for h in report["hosts"] if h["host"] == "andromeda")
+    fine_row = next(h for h in report["hosts"] if h["host"] == "lookout")
+    assert corrupt_row["verdict"] == "WARN"
+    assert "unavailable" in corrupt_row["detail"]
+    assert fine_row["verdict"] == "PASS", "a decode failure on one host must not cost the rest"
+
+
+def test_doctor_probe_unavailable_never_renders_as_no_multiplexer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """A far camp that answers normally but carries no probe field (the
+    shape an un-upgraded machine actually produces) renders as the probe
+    being unavailable — never as a multiplexer being absent. These are
+    distinct findings."""
+    _doctor_hosts_env(tmp_path, monkeypatch, "[hosts.andromeda]\n")
+    transport = _transport_module()
+    # The exact shape an older camp gives: well-formed, successful, no
+    # probe key at all — not even multiplexer_present.
+    monkeypatch.setattr(
+        transport,
+        "run_camp",
+        lambda host, remote_argv, **kw: _probe_answered({"pass": True, "checks": []}),
+    )
+
+    code = _run(monkeypatch, ["doctor", "-a", "--json"])
+    report = json.loads(capsys.readouterr().out)
+    assert code == 0
+    row = next(h for h in report["hosts"] if h["host"] == "andromeda")
+    assert row["verdict"] == "WARN"
+    assert "unavailable" in row["detail"]
+    assert "no multiplexer" not in row["detail"], (
+        "an un-upgraded machine's silence must never be misread as a negative finding"
+    )
+
+
+def test_doctor_probe_row_shape_matches_the_far_sides_own_producer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """The per-host row is built from the far side's own probe payload —
+    proven by running `cmd_doctor`'s real `--probe` producer once to get its
+    actual JSON, then feeding that exact string back through the `-a`
+    consumer, rather than a second, hand-guessed shape."""
+    import importlib
+
+    spine = importlib.import_module("camp.spine")
+
+    producer_env = {
+        "HOME": str(tmp_path / "producer-home"),
+        "CAMP_CONFIG_DIR": str(tmp_path / "producer-config"),
+    }
+    monkeypatch.setenv("CAMP_TEST_ASDF_PRESENT", "1")
+    monkeypatch.setenv("CAMP_TEST_TMUX_PRESENT", "1")
+    import io
+    import contextlib
+
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        try:
+            spine.cmd_doctor(["--json", "--probe"], env=producer_env)
+        except SystemExit:
+            pass
+    producer_stdout = buf.getvalue()
+    produced = json.loads(producer_stdout)
+    assert produced[spine.DOCTOR_PROBE_KEY] is True
+    assert produced[spine.DOCTOR_PROBE_MULTIPLEXER_KEY] is True
+
+    _doctor_hosts_env(tmp_path, monkeypatch, "[hosts.andromeda]\n")
+    transport = _transport_module()
+    monkeypatch.setattr(
+        transport,
+        "run_camp",
+        lambda host, remote_argv, **kw: transport.Answered(
+            stdout=producer_stdout, stderr="", exit_code=0
+        ),
+    )
+
+    code = _run(monkeypatch, ["doctor", "-a", "--json"])
+    report = json.loads(capsys.readouterr().out)
+    assert code == 0
+    row = next(h for h in report["hosts"] if h["host"] == "andromeda")
+    assert row["verdict"] == "PASS"

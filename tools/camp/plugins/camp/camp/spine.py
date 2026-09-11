@@ -1168,13 +1168,17 @@ def _doctor_multiplexer_present() -> bool:
     return bool(shutil.which("tmux"))
 
 
-def cmd_doctor(
-    args: list[str], dry_run: bool = False, *, env: dict[str, str] | None = None
-) -> None:
-    """camp doctor [--json]
+def _doctor_local_checks(
+    env: dict[str, str] | None = None,
+) -> tuple[list[dict[str, Any]], bool, str | None]:
+    """Compute doctor's local check rows and roll-up failure flag, as a
+    value — no printing, no exiting.
 
-    Minimal read-only workspace health check (worktree-relevant checks only).
-    Dev-env probes (port conflicts, instance checks) are deferred.
+    This is `cmd_doctor`'s entire local-check core, pulled out so the
+    host-probing `-a` dispatch can compute this machine's own row from the
+    same source `cmd_doctor` prints from, rather than a second copy that
+    could drift from it. `cmd_doctor` below is a thin wrapper: it calls this,
+    then prints and exits exactly as it always has.
 
     Checks:
       (a) asdf present — asdf resolvable/installed.
@@ -1184,18 +1188,10 @@ def cmd_doctor(
           own; a malformed ``hosts.toml`` fails this ONE check row (naming
           the file and the reason) rather than the whole verb.
 
-    `doctor` is a health roll-up: a broken declaration is one failed check
-    among others, not a reason to exit before the other checks run. The
-    roll-up already exits nonzero when any check fails, so a malformed
-    ``hosts.toml`` still yields a nonzero exit — via the failed row below,
-    never a raw traceback and never an early hard-exit that starves the
-    other checks of a chance to report.
-
-    Args:
-        env: Override os.environ for the self-declared-host-name check's path
-             resolution (for hermetic tests). Defaults to os.environ, same as
-             `self_host_name`'s own default — production callers never pass
-             this.
+    Returns:
+        `(checks, any_failed, host_name)` — `host_name` is the self-declared
+        name, or `None` when undeclared or when the declaration failed to
+        parse (the failure is already carried in the `host_name` check row).
     """
     from .host.config import HostConfigError, self_host_name
 
@@ -1210,9 +1206,6 @@ def cmd_doctor(
         # to (never instead of) the failed check row below, so the reason is
         # visible even to a caller that only reads stderr.
         print(f"camp: {host_name_error}", file=sys.stderr)
-
-    as_json = "--json" in args
-    as_probe = DOCTOR_PROBE_FLAG in args
 
     checks: list[dict[str, Any]] = []
     any_failed = False
@@ -1269,6 +1262,53 @@ def cmd_doctor(
             }
         )
 
+    return checks, any_failed, host_name
+
+
+def _doctor_render_checks_human(checks: list[dict[str, Any]]) -> None:
+    """Print `doctor`'s local check rows the way `cmd_doctor` always has —
+    the bracketed-verdict grammar the `-a` host section (in
+    `camp.cli.dispatch`) reuses for its own rows rather than inventing a
+    second one."""
+    print("camp doctor:")
+    for c in checks:
+        status = "PASS" if c["pass"] else "FAIL"
+        print(f"  [{status}] {c['description']}")
+        if not c["pass"] or c.get("informational"):
+            details = c.get("details")
+            if isinstance(details, list):
+                for d in details:
+                    print(f"         {d}")
+            elif details:
+                print(f"         {details}")
+
+
+def cmd_doctor(
+    args: list[str], dry_run: bool = False, *, env: dict[str, str] | None = None
+) -> None:
+    """camp doctor [--json]
+
+    Minimal read-only workspace health check (worktree-relevant checks only).
+    Dev-env probes (port conflicts, instance checks) are deferred.
+
+    `doctor` is a health roll-up: a broken declaration is one failed check
+    among others, not a reason to exit before the other checks run. The
+    roll-up already exits nonzero when any check fails, so a malformed
+    ``hosts.toml`` still yields a nonzero exit — via the failed row below,
+    never a raw traceback and never an early hard-exit that starves the
+    other checks of a chance to report.
+
+    Args:
+        env: Override os.environ for the self-declared-host-name check's path
+             resolution (for hermetic tests). Defaults to os.environ, same as
+             `self_host_name`'s own default — production callers never pass
+             this.
+    """
+    checks, any_failed, _host_name = _doctor_local_checks(env=env)
+
+    as_json = "--json" in args
+    as_probe = DOCTOR_PROBE_FLAG in args
+
     if as_json:
         report: dict[str, Any] = {"pass": not any_failed, "checks": checks}
         if as_probe:
@@ -1279,17 +1319,7 @@ def cmd_doctor(
             report[DOCTOR_PROBE_MULTIPLEXER_KEY] = _doctor_multiplexer_present()
         print(json.dumps(report))
     else:
-        print("camp doctor:")
-        for c in checks:
-            status = "PASS" if c["pass"] else "FAIL"
-            print(f"  [{status}] {c['description']}")
-            if not c["pass"] or c.get("informational"):
-                details = c.get("details")
-                if isinstance(details, list):
-                    for d in details:
-                        print(f"         {d}")
-                elif details:
-                    print(f"         {details}")
+        _doctor_render_checks_human(checks)
 
     if any_failed:
         sys.exit(1)

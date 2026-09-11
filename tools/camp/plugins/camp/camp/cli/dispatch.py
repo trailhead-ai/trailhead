@@ -70,8 +70,19 @@ _ALL_GROUPS_VERBS = frozenset({"list", "sessions"})
 #: does not apply to a ref-addressed, groupless verb (see
 #: `docs/design/attaching-reaches-a-running-session-on-any-machine.md`,
 #: "Why -a probes rather than reading the merged listing").
+#:
+#: "doctor" is here too, and is likewise dispatched through its own
+#: `_dispatch_doctor_all_hosts` rather than `_dispatch_all_hosts_command`:
+#: doctor is groupless (no group axis for `-a` to narrow) and its answer is
+#: a health report — `{"pass", "checks"}` plus a `"hosts"` section — never
+#: the row-merging shape `list`/`sessions` produce. Deliberately absent from
+#: `_HOST_VERBS` (below): `--host` (one named machine) has no meaning for a
+#: verb whose whole point under `-a` is asking every declared machine at
+#: once, and it stays out of `_STATE_CHANGING_HOST_VERBS` /
+#: `_GROUP_REQUIRED_HOST_VERBS` too — a health check reads, it never
+#: changes state, and it names no group.
 ALL_HOSTS_FLAGS = ("--all-hosts", "-a")
-_ALL_HOSTS_VERBS = frozenset({"list", "sessions", "attach"})
+_ALL_HOSTS_VERBS = frozenset({"list", "sessions", "attach", "doctor"})
 
 #: Verbs whose trailing argv is an opaque payload forwarded to something else
 #: — never camp's own flags. `camp foreach <cmd…>` forwards everything after
@@ -650,6 +661,19 @@ def main() -> None:
                 sys.exit(1)
             _dispatch_attach_all_hosts(scan_rest)
             return
+        # doctor is groupless too — same reasoning as attach above, but
+        # doctor's shape is a health report, not a merged row set, so it
+        # gets its own dispatch rather than `_dispatch_all_hosts_command`.
+        if canonical == "doctor":
+            if all_groups:
+                print(
+                    "camp doctor: --all-groups has no meaning here — doctor "
+                    "has no group axis",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+            _dispatch_doctor_all_hosts(scan_rest)
+            return
         _dispatch_all_hosts_command(
             canonical, scan_rest, all_groups=all_groups, argv=argv
         )
@@ -992,6 +1016,234 @@ def _dispatch_all_hosts_command(
         print(_json.dumps(rows))
     else:
         _render_all_hosts_human(self_name, hosts, hosts_error, rows, render_row, verb)
+
+    sys.exit(exit_code)
+
+
+#: The probe's own bracketed verdict vocabulary — deliberately never "FAIL",
+#: the word the local check rows above the host section use, because
+#: nothing in the host section can fail the health check itself
+#: (`docs/design/camp-doctor-answers-for-every-declared-host.md`, "The
+#: section reads like the rows above it"). "PASS": fully answerable — the
+#: machine answered, camp resolved, and (for a probe-supporting far camp)
+#: the multiplexer is present. "WARN": the machine answered and camp
+#: resolved, but there is something the operator should know — camp could
+#: not be run there is the one exception: it never reaches the probe step
+#: at all, but it is still a WARN because the connection itself completed.
+#: "DOWN": the connection itself never completed.
+_DOCTOR_PROBE_UNAVAILABLE_DETAIL = (
+    "the machine answers, camp resolves there, and the probe is unavailable"
+)
+
+
+def _doctor_probe_worker(
+    host_name: str, host: "Host", *, connect_timeout: float, runner
+):
+    """Ask one declared host `doctor --json --probe` about itself and
+    return its contribution to the `-a` host section, as a
+    `camp.host.relay.HostAnswer` carrying exactly one row.
+
+    Deliberately bypasses `camp.host.relay.answer_for_host`: that helper
+    parses the remote's stdout as a JSON *array* of rows (the shape every
+    other `--host` verb answers with), where `doctor --json` answers with a
+    single JSON *object* — `{"pass", "checks", ...}`. This worker runs the
+    transport directly and interprets that object shape itself, reusing
+    `camp.host.relay._classify_transport_failure` for the seven transport-
+    failure renderings so the wording (and the reason a caller reads off a
+    failure row) never drifts from what every other host verb already
+    prints for the same outcome.
+
+    A far camp that predates `--probe` answers the invocation normally —
+    exits zero, well-formed JSON — but its object carries neither
+    `camp.spine.DOCTOR_PROBE_KEY` nor `DOCTOR_PROBE_MULTIPLEXER_KEY` (see
+    that module's own comment on why). This is therefore read the same way
+    as a decode failure: the machine answered and camp resolved, but the
+    probe itself is unavailable — never rendered as "no multiplexer
+    present", which is a different, positive claim about a probe that DID
+    answer.
+    """
+    import json as _json
+
+    from ..host import transport as _transport
+    from ..host.relay import HostAnswer, _classify_transport_failure
+    from ..spine import DOCTOR_PROBE_KEY, DOCTOR_PROBE_MULTIPLEXER_KEY
+
+    outcome = _transport.run_camp(
+        host, ["doctor", "--json", "--probe"], connect_timeout=connect_timeout, runner=runner
+    )
+
+    failure = _classify_transport_failure(
+        "doctor", host, host_name, outcome, connect_timeout=connect_timeout
+    )
+    if failure is not None:
+        # The connection never completed at all (Unreachable,
+        # StoppedResponding, IdentityUnknown, IdentityChanged,
+        # CredentialsRefused) is DOWN; a connection that completed but
+        # could not run camp (CampNotResolvable) or a local producer
+        # failure is WARN — the machine is there, something about the
+        # declaration is not.
+        down = isinstance(
+            outcome,
+            (
+                _transport.Unreachable,
+                _transport.StoppedResponding,
+                _transport.IdentityUnknown,
+                _transport.IdentityChanged,
+                _transport.CredentialsRefused,
+            ),
+        )
+        return HostAnswer(
+            rows=[
+                {
+                    "host": host_name,
+                    "verdict": "DOWN" if down else "WARN",
+                    "detail": failure.reason,
+                }
+            ],
+            notices=[],
+            exit_code=0,
+            answered=False,
+        )
+
+    # Answered / RemoteRefusal both carry stdout — doctor's own nonzero exit
+    # (a failed local check on the far side) classifies as RemoteRefusal,
+    # but that has nothing to do with whether the probe itself answered, so
+    # both are parsed the same way here.
+    assert isinstance(outcome, (_transport.Answered, _transport.RemoteRefusal))
+    try:
+        parsed = _json.loads(outcome.stdout)
+    except ValueError:
+        parsed = None
+
+    if not isinstance(parsed, dict) or parsed.get(DOCTOR_PROBE_KEY) is not True:
+        return HostAnswer(
+            rows=[
+                {
+                    "host": host_name,
+                    "verdict": "WARN",
+                    "detail": _DOCTOR_PROBE_UNAVAILABLE_DETAIL,
+                }
+            ],
+            notices=[],
+            exit_code=0,
+            answered=False,
+        )
+
+    multiplexer_present = bool(parsed.get(DOCTOR_PROBE_MULTIPLEXER_KEY))
+    if multiplexer_present:
+        verdict, detail = "PASS", "camp resolves; multiplexer present"
+    else:
+        verdict, detail = "WARN", "camp resolves; no multiplexer present"
+    return HostAnswer(
+        rows=[{"host": host_name, "verdict": verdict, "detail": detail}],
+        notices=[],
+        exit_code=0,
+        answered=True,
+    )
+
+
+def _doctor_self_row(self_name: str | None) -> dict[str, Any]:
+    """This machine's own row in the `-a` host section — no network
+    involved, since the local checks and the local multiplexer resolution
+    already ran for the section above it."""
+    from ..spine import _doctor_multiplexer_present
+
+    if _doctor_multiplexer_present():
+        return {"host": self_name, "verdict": "PASS", "detail": "camp resolves; multiplexer present"}
+    return {"host": self_name, "verdict": "WARN", "detail": "camp resolves; no multiplexer present"}
+
+
+def _render_doctor_hosts_human(host_rows: list[dict[str, Any]]) -> None:
+    print("camp doctor — hosts:")
+    for row in host_rows:
+        name = row["host"] if row["host"] is not None else "(this machine)"
+        print(f"  [{row['verdict']}] {name}")
+        print(f"         {row['detail']}")
+
+
+def _dispatch_doctor_all_hosts(rest: list[str]) -> None:
+    """`camp doctor -a` — the local health check, plus one row per declared
+    host reporting whether it answers, whether camp resolves there, and
+    whether it has a terminal multiplexer.
+
+    Reached ONLY from `main()`'s early `--all-hosts`/`-a` handling. Unlike
+    `_dispatch_all_hosts_command`, doctor has no group axis and no row-
+    merging: the local checks stay exactly `cmd_doctor`'s own
+    `{"pass", "checks"}`, with a `"hosts"` section added alongside — never a
+    revision of what `camp doctor` already answers without `-a`.
+
+    The host section's exit status never contributes to the command's own:
+    the local checks alone decide it, via `_doctor_local_checks`'s
+    `any_failed` — a host that cannot be reached is a finding, not a
+    failure.
+    """
+    from ..host.config import HostConfigError, connect_timeout_seconds, load_hosts
+    from ..host.merge import answer_all_hosts_concurrently
+    from ..host.transport import DEFAULT_CONNECT_TIMEOUT_SECONDS, default_runner
+    from ..spine import _doctor_local_checks
+
+    as_json = _flag_present(rest, "--json")
+
+    try:
+        hosts = load_hosts()
+        hosts_error: str | None = None
+    except HostConfigError as exc:
+        hosts = {}
+        hosts_error = str(exc)
+
+    # Same "one operation" treatment `_dispatch_all_hosts_command` gives
+    # `connect_timeout_seconds()`'s re-read of the same file `load_hosts()`
+    # already read: when that read already failed, there is nothing to
+    # contact and the unused default is harmless.
+    if hosts_error is not None:
+        connect_timeout = DEFAULT_CONNECT_TIMEOUT_SECONDS
+    else:
+        try:
+            connect_timeout = connect_timeout_seconds()
+        except HostConfigError as exc:
+            print(f"camp doctor: {exc}", file=sys.stderr)
+            sys.exit(1)
+
+    # `answer_all_hosts_concurrently`'s local-answer shape has no slot for
+    # the self-declared host name `_doctor_local_checks` also computes — one
+    # cell shared with the closure below, filled before the fan-out returns
+    # (its own `local_future.result()` happens before this function returns
+    # to its caller, so there is no race reading it afterward).
+    self_name_cell: list[str | None] = [None]
+
+    def _local_answer() -> tuple[list[dict[str, Any]], list[str], int]:
+        checks, any_failed, host_name = _doctor_local_checks()
+        self_name_cell[0] = host_name
+        return checks, [], (1 if any_failed else 0)
+
+    def _worker(host_name: str, host: "Host"):
+        return _doctor_probe_worker(
+            host_name, host, connect_timeout=connect_timeout, runner=default_runner
+        )
+
+    (checks, _local_notices, exit_code), host_answers = answer_all_hosts_concurrently(
+        _local_answer,
+        list(hosts.items()),
+        verb="doctor",
+        remote_argv=["doctor", "--json", "--probe"],
+        connect_timeout=connect_timeout,
+        worker=_worker,
+    )
+
+    self_name = self_name_cell[0]
+    host_rows = [_doctor_self_row(self_name)] + [
+        answer.rows[0] for _host_name, answer in host_answers
+    ]
+
+    if as_json:
+        import json as _json
+
+        print(_json.dumps({"pass": exit_code == 0, "checks": checks, "hosts": host_rows}))
+    else:
+        from ..spine import _doctor_render_checks_human
+
+        _doctor_render_checks_human(checks)
+        _render_doctor_hosts_human(host_rows)
 
     sys.exit(exit_code)
 
