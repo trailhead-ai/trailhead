@@ -509,3 +509,73 @@ crashes is excluded and re-run; never scored as non-compliance).
   scoped to that one ritual's own handoff shape and re-measured against its own baseline so exactly
   one variable moves, per the parent's Delta design.
 
+
+## Extension — Task 5, the conditional AC7 remediation at `plan` and `review`
+
+**Committed before either treatment arm below is run.** Task 4's baseline measured
+`next-command: embedded` 3/3 at `plan` and 6/6 at `review` — the only two of the six rituals AC7
+falsified at. This section pre-registers the re-measurement of those two rituals only, each against
+its own already-measured `rule-only` baseline (`arms/plan-rule-only.md`, `arms/review-rule-only.md`
+— unedited prose + reader rule), so exactly one variable moves per ritual: the edited handoff shape.
+Brainstorm, gauntlet, execute, and distill are untouched and not re-measured — their `next-command`
+predicate already holds at baseline (Task 4).
+
+**The edit.** `plan/SKILL.md` step 9's handoff prompt and `review/SKILL.md`'s closing handoff (the
+loop-complete → distill outcome, the one outcome Task 4's fixture exercises) are edited so the
+single next command is printed alone, in a fenced code block, separated from the quoted prose —
+never embedded mid-sentence. No other change is made to either file: `arms/plan-treatment.md` and
+`arms/review-treatment.md` are byte-identical to `arms/plan-rule-only.md` and
+`arms/review-rule-only.md` respectively except for this one handoff's shape (confirmed by `diff`
+before dispatch — each diff touches only the handoff paragraph and its replacement fenced block, no
+other line). The record-link rule tail each arm appends is byte-identical to the tail
+`plan-rule-only.md`/`review-rule-only.md` already carry — the reader rule is not touched, per this
+task's own instruction not to restate or re-derive the record-link rule.
+
+**Fixtures reused unmodified** — `fixtures/plan-completed-run.md` and
+`fixtures/review-completed-run.md`, the same two fixtures Task 4 ran, unedited. Dispatch command is
+Task 4's own extension-dispatch shape with `RITUAL` fixed to `plan` and `review` and `-treatment`
+substituted for `-rule-only` in the arm path:
+
+```sh
+RITUAL=plan   # or review
+EVAL="$(pwd)/tools/craft/plugins/craft/evals/ritual-deliverable-names-its-record"
+COMPLETED_RUN="$EVAL/fixtures/${RITUAL}-completed-run.md"
+PROMPT="$(sed "s#FIXTURE_COMPLETED_RUN_PATH#$COMPLETED_RUN#" "$EVAL/fixtures/task-prompt.md")"
+
+claude -p "$PROMPT" --setting-sources project \
+  --append-system-prompt "$(cat "$EVAL/arms/${RITUAL}-treatment.md")" \
+  --allowedTools "Read" < /dev/null
+```
+
+**Run budget.** 3 runs per ritual, 2 rituals, 6 processes — matching Task 4's own 3-per-ritual
+budget and the parent's Given Axioms.
+
+**Pass condition, two-sided, per ritual** — graded from
+`tools/craft/scripts/ritual_deliverable_grader.py` on each captured run (`--record
+task/the-ledger-reconciliation-slice --command "/craft:execute
+task/the-ledger-reconciliation-slice"` for `plan`; `--record spec/dock-scheduling-windows --command
+"/craft:distill spec/dock-scheduling-windows"` for `review`), never an inline regex, subject to the
+same completion-marker and infrastructure-exclusion rules as every other arm in this case:
+
+- **Treatment worked (AC7 now holds at this ritual)** — `next-command: own-line` for every one of
+  the 3 counted runs. Report this as the edit moving the measurement from its own `embedded` 3/3 (or
+  6/6) baseline to `own-line` 3/3.
+- **Treatment failed (the edit did not move the measurement)** — `next-command: embedded` or
+  `absent` for any of the 3 counted runs. Report this as a negative result, exactly as
+  `expected.md`'s existing falsification language requires elsewhere in this case — never
+  reinterpreted into a weaker claim that still reads as a pass. Per the parent task's binding revert
+  rule, a ritual that fails here has its edit reverted to the pre-edit text before this task closes,
+  verified by an empty `diff` against the pre-edit baseline.
+- **A 2-1 split within either ritual's 3 runs** — re-run that ritual's arm 3 more times (6 total),
+  per Task 3's pre-registered split rule above; a combined result that is not a clean majority
+  (4-2 or another non-resolving split) is AMBIGUOUS and is treated as a failure to move the
+  measurement for purposes of the revert rule — AMBIGUOUS is not evidence the treatment worked.
+- **record-link is not re-graded here.** Neither edit touches the record-link rule or the sentence
+  it acts on; Task 4 already measured `record-link: link` 3/3 (`plan`, vacuous site — a rule-
+  violation-shaped finding, not scored) and 5/6 (`review`, PASS) against the unedited prose, and
+  this task's edit changes no text `record-link` reads. Re-running that predicate here would not be
+  measuring anything this task changed.
+
+**Contamination check.** Both treatment arms are checked identical to their own `rule-only`
+counterpart apart from the one handoff paragraph, by `diff` before dispatch (see "The edit" above) —
+no other line, including the appended reader-rule tail, differs.
