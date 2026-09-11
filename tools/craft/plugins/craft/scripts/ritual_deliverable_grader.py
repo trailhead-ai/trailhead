@@ -48,7 +48,10 @@ Exit codes:
        empty-stdin`), non-UTF-8 stdin (`reason-code: invalid-utf8-stdin`),
        or `--command` omitted without `--exempt`
        (`reason-code: missing-command`). NEVER exits 0 or 1 without having
-       actually read a gradable deliverable.
+       actually read a gradable deliverable. A missing required argument
+       (e.g. `--record`) exits 2 via argparse's own usage error instead,
+       with no `reason:`/`reason-code:` pair — argparse owns that path
+       before this module's own error handling ever runs.
 """
 
 from __future__ import annotations

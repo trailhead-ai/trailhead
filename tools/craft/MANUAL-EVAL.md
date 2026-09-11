@@ -1050,8 +1050,8 @@ observed across the whole ritual set, of which this task dispatched 24.
 | brainstorm | vacuous (no linkable prose mention) | link, link, link (3/3) | **not a PASS/FAIL — rule-violation-shaped finding**, see below | own-line x3 | **PASS** — AC7 holds |
 | gauntlet | vacuous | link, link, link (3/3) | same finding as brainstorm | own-line x3 | **PASS** — AC7 holds |
 | plan | vacuous | link, link, link (3/3) | same finding as brainstorm | embedded x3 | **FAIL** — AC7 falsified at plan |
-| execute | vacuous | link, link, bare (2/3 link, 1/3 bare) | mixed; no split-rule bucket applies (see below) | exempt x3 | **PASS** — AC7 vacuously holds (by-design zero-command close) |
-| review | linkable-mention | link, bare, link, then re-run link, link, link, link (5 link / 1 bare of 6) | **PASS** (5-1 clean majority) — AC6 holds at review, split reported explicitly | embedded x3, then embedded x3 (6/6) | **FAIL** — AC7 falsified at review |
+| execute | vacuous | link, link, bare (2/3 link, 1/3 bare) | **deviation from the pre-registered split rule** — see correction below | exempt x3 | **UNMEASURED** — see correction below |
+| review | linkable-mention | link, bare, link, then re-run link, link, link (5 link / 1 bare of 6) | **PASS** (5-1 clean majority) — AC6 holds at review, split reported explicitly | embedded x3, then embedded x3 (6/6) | **FAIL** — AC7 falsified at review |
 | distill | linkable-mention (weaker, instruction-only evidence) | bare, link, bare, then re-run link, link, bare (3 link / 3 bare of 6) | **AMBIGUOUS** (3-3 tie, not a clean majority) — not scored either way | own-line x3, then own-line x3 (6/6) | **PASS** — AC7 holds |
 
 **A finding the pre-registration's vacuity table did not anticipate the mechanism of.** At the four
@@ -1071,6 +1071,39 @@ that bucket's stated mechanism (linking the command) did not occur. Per the pre-
 closure at these four sites regardless of mechanism — that governing instruction is followed as
 written; only the *mechanism* label is corrected here from what was pre-registered.
 
+**Correction — AC7 at execute was never measured, not passed.** This row originally reported
+`next-command: PASS — AC7 vacuously holds (by-design zero-command close)`. That is wrong. All
+three committed captures (`runs/execute-1.txt`, `runs/execute-2.txt`, `runs/execute-3.txt`) print
+an optional `/portage:pull_request` command embedded mid-sentence — exactly the shape AC7
+forbids:
+
+- execute-1: "...that call is yours; run `/portage:pull_request` when you want one."
+- execute-2: "Say the word and I'll run `/portage:pull_request`."
+- execute-3: "Run `/portage:pull_request` when you want one."
+
+The root cause is a classification decision made before any run: execute was pre-registered as
+`--exempt`, on the reading that `_shared/execute.md:979-981`'s instruction — the PR decision
+belongs to the operator, the ritual must not auto-invoke `/portage:pull_request` — makes execute's
+close a genuine zero-command outcome. The grader's `--exempt` path returns `next-command: exempt`
+unconditionally and never reads the deliverable text (`ritual_deliverable_grader.py`,
+`next_command_verdict`, the `if exempt: return "exempt"` branch), so the mid-sentence command
+above was never evaluated against AC7 at all. **AC7 at execute is therefore unmeasured, not
+passed.** The `--exempt` bucket is blind by construction: it cannot detect a command at a site
+classified exempt, whether or not one is present. This does not relitigate the exempt
+classification itself — the instruction it rests on is real — it corrects only the verdict label:
+"unmeasured" replaces "PASS" for execute's next-command predicate everywhere in this log.
+
+This also corrects the record-link cell for execute. That predicate landed a 2-1 split
+(link, link, bare). Per the pre-registered split rule (`expected.md:354-368`), a 2-1 split calls
+for re-running that ritual's arm 3 more times before any verdict — PASS, FAIL, or AMBIGUOUS — is
+assigned. That re-run was never dispatched for execute. Reporting the cell as "no split-rule
+bucket applies" (as an earlier version of this row did) describes an absent rule; the rule in fact
+applies to a vacuous site exactly as it does to a linkable-mention site
+(`expected.md:485`, "at either kind of site") — what is missing is the re-run this task never
+ran, which is a **deviation from the pre-registered rule**, not evidence that none governs here.
+This is harmless to the AC6 tally regardless: execute is a vacuous site and contributes no AC6
+verdict either way, so the unresolved split changes no scored outcome.
+
 **Verbatim evidence, review split:** run 2 (bare) — "The slice loop reports
 `spec/dock-scheduling-windows` closed out"; run 1 (link) — "The slice loop reports
 [spec/dock-scheduling-windows](http://127.0.0.1:7313/records/harborlight/spec/dock-scheduling-windows)
@@ -1086,8 +1119,11 @@ use-fifo-slots` handoff command is on its own line in all 6 runs (6/6 `own-line`
 here cleanly even while record-link stays AMBIGUOUS.
 
 **U1 resolved — does the baseline already satisfy AC7 at each ritual?** Mixed, not uniform.
-AC7 holds at baseline at **brainstorm, gauntlet, execute (vacuously), and distill** — 4 of 6
-measured rituals. AC7 is **falsified at baseline at plan and review** — the command is embedded
+AC7 holds at baseline at **brainstorm, gauntlet, and distill** — 3 of 6 measured rituals.
+**Execute is unmeasured, not passed**, per the correction above: its `--exempt` classification
+short-circuits the grader before it reads the deliverable, so the mid-sentence
+`/portage:pull_request` in all three of its captures was never evaluated against AC7. AC7 is
+**falsified at baseline at plan and review** — the command is embedded
 mid-sentence in 3/3 (plan) and 6/6 (review) captured runs, matching the concrete defect shape the
 parent task's Given Axioms named. **This falsifies part of that same prediction, and is reported
 as such rather than reconciled**: the parent task's Given Axioms named brainstorm
@@ -1128,24 +1164,28 @@ own disposition — not decided here.
 **Task 5 candidates.** Per U1, the next-command predicate FAILs at **plan** and **review** only.
 Per the parent's Delta design, `task/conditional-fix-the-handoff-shape-where-the-baseline-fails-
 ac7-and-re-measure` is scoped to those two rituals' own handoff shape, each re-measured against its
-own baseline so exactly one variable moves per ritual. Brainstorm, gauntlet, execute, and distill's
-next-command predicate already holds at baseline and needs no fix.
+own baseline so exactly one variable moves per ritual. Brainstorm, gauntlet, and distill's
+next-command predicate already holds at baseline and needs no fix. Execute's next-command
+predicate is unmeasured, not held — its `--exempt` classification never reads the deliverable
+(see correction above) — but that gap does not add execute to Task 5's candidates: Task 5 is
+scoped by the parent's Delta design to rituals where the baseline predicate FAILs, and an
+unmeasured predicate is a distinct outcome from a failed one.
 
 **Containment check (Council amendment, Critical 4).** All 24 processes dispatched by this task
 used `--allowedTools "Read"` with no shell, `Edit`, `Write`, or `Bash` tool granted, and
 `--setting-sources project` to drop `~/.claude/rules/`. Post-batch diff against an independent
 pre-batch snapshot taken before wave 1:
 
-- The four lore vaults (`default`, `trailhead`, `lake-in-the-woods`, `levr`) each show new
-  `lore: sync vault` / `session: flush ...` commits landing during the batch window. `lake-in-the-
-  woods` shows no change. None of these commits touch any path this task's fixtures name
+- Of the four configured lore vaults, `default`, `trailhead`, and `levr` show new `lore: sync
+  vault` / `session: flush ...` commits landing during the batch window; `lake-in-the-woods`'s
+  HEAD is unchanged. None of these commits touch any path this task's fixtures name
   (`northlight`, `causewell`, `harborlight`, or any of the six new spec/task/adr slugs above —
-  confirmed absent from every new commit's diff), and every changed path is either this
-  controlling session's own bookkeeping (`session/*` in `trailhead`) or unrelated background sync
-  activity already in flight before this task started (`levr`'s pre-existing untracked test-audit
-  and task files, `default`'s own session-flush cycle) — consistent with a background lore sync
-  daemon and this session's own lore usage, not with any of the 24 `Read`-only arms, none of which
-  was granted a tool capable of writing anything.
+  zero fixture-slug hits, confirmed absent from every new commit's diff), and every changed path is
+  either this controlling session's own bookkeeping (`session/*` in `trailhead`) or unrelated
+  background sync activity already in flight before this task started (`levr`'s pre-existing
+  untracked test-audit and task files, `default`'s own session-flush cycle) — the movement traces
+  to other concurrent sessions, not to any of the 24 `Read`-only arms, none of which was granted a
+  tool capable of writing anything.
 - `/home/tomduffield/.claude/` shows churn only in `plugins/known_marketplaces.json`,
   `backups/.claude.json.backup.*`, and `sessions/*.json` — all files the `claude` CLI itself
   rewrites on ordinary invocation (backup rotation, session bookkeeping), present before this
