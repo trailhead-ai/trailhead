@@ -795,3 +795,74 @@ instruments. AC10's behavioural closure rests on the durable-trace claim.
 
 See `plugins/craft/evals/prototype-plan-carries-no-migration/expected.md` for the full
 pre-registration (both rounds), pass conditions, thresholds, and result writeup.
+
+---
+
+## Case: ritual deliverable names its record
+
+`plugins/craft/evals/ritual-deliverable-names-its-record/` — `expected.md` carrying three
+separately pre-registered pass conditions (baseline, treatment, reader-absent), written and
+committed (`63c0315`) before any arm ran. AC6 of
+`spec/record-mentions-in-agent-output-are-reachable`, task 2 of
+`task/the-craft-rituals-name-the-record-they-acted-on`.
+
+**Under test:** `slice/SKILL.md`'s `## Outcome` section — the closing, operator-facing report of
+the `/craft:slice` ritual — specifically whether its selection-path sentence names the new parent
+task record as a link or, as today's unedited text does, as a bare identifier plus a
+`lore record show <task-id>` command. `expected.md` states why this one site of the seven AC6
+covers was chosen (the sharpest instance of the spec's own "competes with a page of surrounding
+procedure" premise: a 581-line, 10-step procedure precedes a one-line reporting convention).
+
+**Fixture:** `fixtures/completed-run.md` stubs steps 1–10 of the procedure as already-true state
+(a chosen slice, a value claim, a new parent task id in a fixture vault) rather than running the
+ritual for real — resolving the plan's own open unknown about reaching a ritual's closing report
+affordably. `fixtures/task-prompt.md` points the arm at that file and nothing else. Surface cues
+(spec name, task id, vault, value-claim subject) all differ from `slice/SKILL.md`'s own worked
+example (`spec/streaming-export` / `task/the-streaming-export-slice`), per the contamination check
+in `expected.md`.
+
+**Why no `scripts/eval-sandbox`:** both arms are `Read`-only with no shell tool at all —
+`expected.md` states why the sandbox does not apply, same reasoning as
+`tools/outpost/plugins/outpost/evals/record-link-rendering/expected.md`.
+
+**Arms.** `arms/baseline.md` — a byte-identical copy of today's unedited `slice/SKILL.md`,
+confirmed by `diff` before dispatch. `arms/treatment.md` and `arms/reader-absent.md` do not exist
+yet; their pass conditions are pre-registered in `expected.md` so
+`task/make-the-seven-ritual-deliverables-name-their-record-as-a-link` (which owns
+`arms/treatment.md` in its own `**Files:**` list) has nothing left to decide about grading once it
+authors and runs them.
+
+| Date | Arm | Prose under test | Runs | Result | Notes |
+|------|-----|------------------|------|--------|-------|
+| 2026-09-11 | baseline (`arms/baseline.md`, today's unedited `slice/SKILL.md`) | none appended beyond the ritual's own text | 3 | **bare identifier in 3/3, no markdown link in any run** | `grep -noE '\[[^]]*\]\([^)]*\)'` over each captured response: no match, all three runs |
+
+**Result: baseline FAIL against the red-state claim, as pre-registered — this is the intended
+outcome, not an error.** All three runs report the new parent task
+(`task/the-quarterly-audit-trail-slice`) the same way today's `## Outcome` text specifies: a bare
+identifier followed by a fenced `lore record show task/the-quarterly-audit-trail-slice` command,
+never as `[kind/slug](<base>/records/...)` markdown link syntax. Verbatim run 1 (representative of
+all three): `` **Parent task:** `task/the-quarterly-audit-trail-slice` (vault: `fieldnotes`, status
+`in-progress`, linked to `spec/quarterly-audit-trail`). Read it back with: ``` lore record show
+task/the-quarterly-audit-trail-slice ``` ``. This is the red state the whole slice measures
+against, exactly as `expected.md` pre-registered it: the baseline PASS condition is that it stays
+bare, and it did, in 3/3 runs, with zero exclusions (all three processes exited 0, non-empty
+captured output, no rate-limit or crash).
+
+**Real-state check.** All three runs used `--allowedTools "Read"`, no shell/Edit/Write tool.
+`~/.config/lore/config.json` mtime unchanged before/after (`1787107526`).
+`~/.claude/rules/*.md` mtimes unchanged before/after. Every configured vault's git status
+diffed before/after the batch: `default` and `lake-in-the-woods` clean both times; `trailhead`
+carried pending changes both before and after, but the added lines between the two snapshots are
+all `task/*` and `session/*` bookkeeping (`status`/`updated-at` edits) from this plan's own
+unrelated ongoing task-status writes, not `Read`-only arms with no write tool — nothing
+attributable to these three eval runs; `levr` clean both times. No mutation attributable to this
+batch.
+
+**Not run in this task (task 3's job, per the task body's scope facts):** the treatment arm
+(edited `## Outcome` + reader's rule appended) and the reader-absent arm (edited `## Outcome`, no
+reader rule) — both measure an instruction that does not exist yet. Their pre-registered pass
+conditions are in `expected.md`.
+
+See `plugins/craft/evals/ritual-deliverable-names-its-record/expected.md` for the full
+pre-registration, dispatch command, pass conditions (all three arms), contamination check, re-run
+trigger, and limitations.
