@@ -292,10 +292,18 @@ def answer_for_host(
         # would be the one thing this whole design exists to prevent — an
         # empty answer read as "the host has nothing to report" rather than
         # "the host could not be understood".
+        # The transport does not carry the remote command's own exit status
+        # (see the module docstring's "honesty gap"), so a remote status of
+        # 0 here means "unknown", not "succeeded" — relaying it unchanged
+        # would tell every caller that does not parse rows that this host
+        # had nothing to report. A remote status that is already non-zero is
+        # real signal the far side produced and is relayed as-is rather than
+        # flattened to a fixed code.
+        exit_code = outcome.exit_code if outcome.exit_code != 0 else 1
         return HostAnswer(
             rows=[{"ok": False, "host": host_name, "reason": "remote answer could not be parsed"}],
             notices=_verbatim_notice(outcome.stderr),
-            exit_code=outcome.exit_code,
+            exit_code=exit_code,
             answered=False,
         )
 
