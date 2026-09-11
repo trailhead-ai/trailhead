@@ -1127,7 +1127,7 @@ short-circuits the grader before it reads the deliverable, so the mid-sentence
 mid-sentence in 3/3 (plan) and 6/6 (review) captured runs, matching the concrete defect shape the
 parent task's Given Axioms named. **This falsifies part of that same prediction, and is reported
 as such rather than reconciled**: the parent task's Given Axioms named brainstorm
-(`SKILL.md:552-557`), gauntlet (`SKILL.md:484-485`), and review (`SKILL.md:110-113`, post-treatment
+(`SKILL.md:552-557`), gauntlet (`SKILL.md:484-485`), and review (`SKILL.md:110-114`, post-treatment
 location — this slice moved the command onto its own line) as the sites whose
 *committed template text* embeds the command mid-sentence — true of the literal template — but
 brainstorm and gauntlet's **actual captured deliverables** placed the command on its own line in
@@ -1398,13 +1398,18 @@ withheld from commit.
 
 **Regression pin.** `test_ritual_deliverable_grader.py`'s committed-capture count moved 45 -> 54,
 with three new prefix -> grader-args entries (`execute-treated`, `review-loop-open-treated`,
-`slice-treated`); all eight pre-existing entries, including `execute`'s historical `--exempt`
-invocation, are byte-unchanged. Re-grading every committed capture (old and new) under both the
+`slice-treated`); all eleven pre-existing entries, including `execute`'s historical `--exempt`
+invocation, are byte-unchanged. (An earlier draft of this line said eight, counting the table as it
+stood before Task 4 rather than at `c00f3559`, which is the commit the claim is about.) Re-grading every committed capture (old and new) under both the
 pre-change and current grader reproduces identical verdicts and exit codes throughout — additive
 only.
 
-**AC7 verdict: covered.** The parent task record's `**Covers:** AC7` is confirmed by this
-measurement and carries a `## Criterion observations` automated-assertion line citing this run.
+**AC7 verdict: partially covered — eight of ten sites.** The parent task record carries
+`**Partially covers:** AC7`, corrected at close, and carries no `## Criterion observations` line,
+because an observation line is written only for a fully covered identifier. The three sites this
+run treated all measure `own-line`; `slice`'s spec-complete and early-stop terminations were edited
+without a baseline and never measured, and are not claimed. See "Second deviation" in this eval's
+`expected.md`.
 AC6 is untouched by this task — it remains unmeasured at the four vacuous sites (`brainstorm`,
 `gauntlet`, `plan`, `execute`) and distill's 3-3 record-link split stays open; both are explicitly
 out of this slice's scope, per the parent's "Explicitly not in this slice" list.
