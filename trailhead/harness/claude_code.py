@@ -100,6 +100,7 @@ from typing import BinaryIO
 
 from trailhead.harness.base import (
     MODALITY_TTY_REQUIRED,
+    AccountIdentity,
     Harness,
     HarnessError,
     Modality,
@@ -1159,6 +1160,43 @@ class ClaudeCodeHarness(Harness):
         config_dir = str(_account_dir(account, source))
         _refuse_conflicting_config_dirs({**source, "CLAUDE_CONFIG_DIR": config_dir})
         return {"CLAUDE_CONFIG_DIR": config_dir}
+
+    def session_launch_account_identity(
+        self, account: str | None, *, env: dict[str, str] | None = None
+    ) -> AccountIdentity:
+        """Identity and configuration-existence for *account*, from ONE resolution.
+
+        For a declared account, reuses :meth:`session_launch_env_set` itself to
+        find the config dir — so a declaration this harness would refuse when
+        actually binding a session (a relative path, a control character, a
+        conflicting ``TRAILHEAD_CLAUDE_DIR``/``CLAUDE_CONFIG_DIR`` pair) raises
+        here too, rather than reporting an identity the binding call would then
+        contradict.
+
+        For the default (``account=None``), :meth:`session_launch_env_set`
+        contributes no assignment — the default is stated as an absence, not a
+        value — so this resolves through :func:`claude_config_file` instead:
+        the same ``CLAUDE_CONFIG_DIR`` → ``HOME``/``USERPROFILE`` → real-home
+        precedence :func:`_account_home` already uses for the declared branch,
+        and DELIBERATELY not ``_claude_dir``, which honours
+        ``TRAILHEAD_CLAUDE_DIR`` — a directory neither the trust pre-seed nor
+        the launched process itself ever reads for the default account. Using
+        ``_claude_dir`` here would name an identity the launch does not
+        actually land on.
+
+        ``label`` is the config DIRECTORY (matching the value
+        :meth:`session_launch_env_set` binds ``CLAUDE_CONFIG_DIR`` to for a
+        declared account); ``has_config`` is whether that directory's
+        ``.claude.json`` exists.
+        """
+        if account is None:
+            config_file = claude_config_file(env)
+        else:
+            binding = self.session_launch_env_set(account, env=env)
+            config_file = Path(binding["CLAUDE_CONFIG_DIR"]) / _CONFIG_FILENAME
+        return AccountIdentity(
+            label=str(config_file.parent), has_config=config_file.exists()
+        )
 
     def session_enumerate(self, workspace: Path | None = None) -> list[str]:
         """Return ``["claude", "agents", "--json"]``, plus ``--cwd <workspace>``.
