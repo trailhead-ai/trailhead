@@ -53,9 +53,13 @@ The probe invokes `doctor --json --probe` on the far machine. `--probe` is what 
 report facts about its own host rather than run its ordinary checks, and because it is new, the
 invocation without it is untouched.
 
-This also decides what an older far camp looks like. A camp that predates `--probe` does not answer
-the probe, and camp reports that as *the machine answers, camp resolves there, and the probe is
-unavailable* — never as *no multiplexer present*. An absent capability rendered as a negative
+This also decides what an older far camp looks like — and it does not look like a refusal. `doctor`
+reads its one option by substring and ignores every other word on its command line, so a camp that
+predates `--probe` accepts the invocation, exits zero, and answers with its ordinary check report:
+well-formed, successful, and carrying no probe data at all. Probe support is read from the presence
+of the probe's own field in that answer, never from an exit status and never from how the transport
+classified the connection. Camp reports its absence as *the machine answers, camp resolves there,
+and the probe is unavailable* — never as *no multiplexer present*. An absent capability rendered as a negative
 finding is the mistake this spec already refuses to make about an account's authentication state,
 and a stale remote checkout is the likeliest way to meet it.
 
