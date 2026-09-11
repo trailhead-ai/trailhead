@@ -139,6 +139,82 @@ class TestLaunchJsonCarriesTheEngineReportedTmuxName:
         assert payload["session_id"] == "11111111-2222-3333-4444-555555555555"
 
 
+class TestLocalLaunchUnaffectedByHostLaunch:
+    """A local `camp launch` (no `--host`) must be byte-identical on stdout
+    AND stderr to before `--host` launch existed, for both the plain and
+    `--json` forms — pinned here because `_cmd_launch_host_cli` is a
+    brand-new sibling function and never touches `_cmd_launch_group_cli` /
+    `_report_launched`, so this contract holds unchanged."""
+
+    def test_plain_form_stdout_is_only_the_session_id_stderr_unaffected(
+        self, monkeypatch, capsys
+    ):
+        import camp.cli.session as cli_session
+        from camp.launch.session import LaunchedSession
+
+        monkeypatch.setattr(
+            "camp.cli.dispatch._slug_from_args_or_cwd", lambda *a, **k: "feat-x"
+        )
+        monkeypatch.setattr(
+            cli_session,
+            "launch_and_confirm",
+            lambda group, slug, *, env=None, **kwargs: (
+                print(
+                    "camp launch: launched session sid-local in /ws/feat-x\n"
+                    "  attach: tmux attach -t camp-feat-x-sid-loc",
+                    file=sys.stderr,
+                )
+                or print("camp launch: confirmed session sid-local", file=sys.stderr)
+                or LaunchedSession(
+                    session_id="sid-local",
+                    tmux_name="camp-feat-x-sid-loc",
+                    launch_dir=Path("/ws/feat-x"),
+                )
+            ),
+        )
+
+        cli_session._cmd_launch_group_cli(["feat-x"], GROUP, {})
+
+        captured = capsys.readouterr()
+        assert captured.out == "sid-local\n"
+        assert captured.err == (
+            "camp launch: launched session sid-local in /ws/feat-x\n"
+            "  attach: tmux attach -t camp-feat-x-sid-loc\n"
+            "camp launch: confirmed session sid-local\n"
+        )
+
+    def test_json_form_stdout_is_only_the_report_object(self, monkeypatch, capsys):
+        import camp.cli.session as cli_session
+        from camp.launch.session import LaunchedSession
+
+        monkeypatch.setattr(
+            "camp.cli.dispatch._slug_from_args_or_cwd", lambda *a, **k: "feat-x"
+        )
+        monkeypatch.setattr(
+            cli_session,
+            "launch_and_confirm",
+            lambda group, slug, *, env=None, **kwargs: LaunchedSession(
+                session_id="sid-local",
+                tmux_name="camp-feat-x-sid-loc",
+                launch_dir=Path("/ws/feat-x"),
+            ),
+        )
+
+        cli_session._cmd_launch_group_cli(["feat-x", "--json"], GROUP, {})
+
+        captured = capsys.readouterr()
+        payload = json.loads(captured.out)
+        assert payload == {
+            "workspace": "/ws/feat-x",
+            "session_id": "sid-local",
+            "tmux_name": "camp-feat-x-sid-loc",
+            "account": None,
+            "account_binding": {},
+        }
+        assert "host" not in payload
+        assert "certainty" not in payload
+
+
 class TestConfirmationReadsThePaneEnvironment:
     """The confirmation reports which config file the launched session reads.
 
