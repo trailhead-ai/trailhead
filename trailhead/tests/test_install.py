@@ -790,39 +790,3 @@ class TestProvenanceStampIntegration:
         with _patched(detected=False) as m:
             run_install(env=_env(tmp_path), quiet=True)
         m["write_stamp"].assert_not_called()
-
-
-# ---------------------------------------------------------------------------
-# EPHEMERAL — assumption probe for
-# task/resolve-how-the-ritual-link-instruction-degrades-when-the-reader-plugin-is-absent
-# Remove this class before the finding is captured; it ships no permanent
-# assertion. See lore task record for the question this answers.
-# ---------------------------------------------------------------------------
-
-
-class TestRecordLinkRuleAbsentWithoutOutpost:
-    def test_craft_only_session_receives_no_record_link_rule(self, tmp_path):
-        """Real install seam, outpost genuinely excluded from the plugin
-        selection (not merely unread) — asserts on what the harness directory
-        actually received, not on the repository source."""
-        env = {**_env(tmp_path), "TRAILHEAD_CLAUDE_DIR": str(tmp_path / "claude")}
-        with _patched(detected=True):
-            rc = run_install(env=env, plugins=["craft"], quiet=True)
-        assert rc == 0
-
-        rules_dir = tmp_path / "claude" / "rules"
-        installed_names = sorted(p.name for p in rules_dir.glob("*.md"))
-
-        # Outpost's own ruleset file must not be among what was installed —
-        # it was never wired into this session at all.
-        outpost_name, _ = _outpost_ruleset()
-        assert f"{outpost_name}.md" not in installed_names
-
-        # Across every ruleset file this craft-only install actually wrote,
-        # none carries the record-link rule's own base/path tokens.
-        for name in installed_names:
-            text = (rules_dir / name).read_text(encoding="utf-8")
-            assert _ruleset_names_the_record_link_tokens(text) is False, (
-                f"{name} unexpectedly carries the record-link rule with "
-                "outpost excluded from the install"
-            )
