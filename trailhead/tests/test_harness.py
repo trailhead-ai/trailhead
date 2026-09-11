@@ -306,6 +306,23 @@ class TestSessionTranscriptDestinationBaseDefault:
         assert _BareHarness().session_transcript_destination("sess-1", tmp_path) is None
 
 
+class TestRewriteTranscriptWorkspaceBaseDefault:
+    """Same degrading-``False`` default as the neighbouring transcript seams: a
+    harness with no rewrite concept must leave ``destination`` untouched."""
+
+    def test_default_degrades_to_false_and_writes_nothing(self, tmp_path):
+        source = tmp_path / "source.jsonl"
+        source.write_text(json.dumps({"cwd": str(tmp_path)}) + "\n")
+        destination = tmp_path / "destination.jsonl"
+
+        result = _BareHarness().rewrite_transcript_workspace(
+            source, destination, tmp_path, tmp_path / "new"
+        )
+
+        assert result is False
+        assert not destination.exists()
+
+
 class TestClaudeConfigDirRelocation:
     """Every path derived from the Claude config dir follows ``CLAUDE_CONFIG_DIR``.
 
@@ -1739,3 +1756,217 @@ class TestClaudeCodeSessionTranscripts:
         rows = ClaudeCodeHarness().session_transcripts(env=self._env(claude_dir))
         assert rows[0].modified_at.tzinfo is not None
         assert rows[0].modified_at == expected
+
+
+class TestClaudeCodeRewriteTranscriptWorkspace:
+    """``rewrite_transcript_workspace`` rewrites the ONE field a Claude Code
+    transcript structurally records a root in (``cwd``) from an old root to a
+    new one, streaming line by line, and leaves everything else alone."""
+
+    def _write(self, path, lines):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("\n".join(lines) + ("\n" if lines else ""))
+        return path
+
+    def test_every_recorded_root_is_replaced_other_fields_are_byte_identical(self, tmp_path):
+        old_root = tmp_path / "old-workspace"
+        old_root.mkdir()
+        new_root = tmp_path / "new-workspace"
+        source = self._write(
+            tmp_path / "src" / "sess.jsonl",
+            [
+                json.dumps({"cwd": str(old_root), "sessionId": "abc-123", "type": "summary"}),
+                json.dumps(
+                    {"cwd": str(old_root), "message": {"content": "hello world"}, "ts": 42}
+                ),
+            ],
+        )
+        destination = tmp_path / "dst" / "sess.jsonl"
+
+        result = ClaudeCodeHarness().rewrite_transcript_workspace(
+            source, destination, old_root, new_root
+        )
+
+        assert result is True
+        out_lines = destination.read_text().splitlines()
+        assert len(out_lines) == 2
+        for line in out_lines:
+            record = json.loads(line)
+            assert record["cwd"] == str(new_root)
+        assert json.loads(out_lines[0])["sessionId"] == "abc-123"
+        assert json.loads(out_lines[0])["type"] == "summary"
+        assert json.loads(out_lines[1])["message"] == {"content": "hello world"}
+        assert json.loads(out_lines[1])["ts"] == 42
+
+    def test_the_rewrite_varies_with_the_new_root(self, tmp_path):
+        old_root = tmp_path / "old-workspace"
+        old_root.mkdir()
+        source = self._write(
+            tmp_path / "src.jsonl", [json.dumps({"cwd": str(old_root)})]
+        )
+
+        dest_a = tmp_path / "dest-a.jsonl"
+        dest_b = tmp_path / "dest-b.jsonl"
+        ClaudeCodeHarness().rewrite_transcript_workspace(
+            source, dest_a, old_root, tmp_path / "new-a"
+        )
+        ClaudeCodeHarness().rewrite_transcript_workspace(
+            source, dest_b, old_root, tmp_path / "new-b"
+        )
+
+        assert dest_a.read_text() != dest_b.read_text()
+        assert json.loads(dest_a.read_text())["cwd"] == str(tmp_path / "new-a")
+        assert json.loads(dest_b.read_text())["cwd"] == str(tmp_path / "new-b")
+
+    def test_a_line_that_is_not_valid_json_is_passed_through_verbatim(self, tmp_path):
+        old_root = tmp_path / "old-workspace"
+        old_root.mkdir()
+        source = self._write(
+            tmp_path / "src.jsonl",
+            ["not json at all {{{", json.dumps({"cwd": str(old_root)})],
+        )
+        destination = tmp_path / "dst.jsonl"
+
+        result = ClaudeCodeHarness().rewrite_transcript_workspace(
+            source, destination, old_root, tmp_path / "new-workspace"
+        )
+
+        assert result is True
+        out_lines = destination.read_text().splitlines()
+        assert out_lines[0] == "not json at all {{{"
+        assert json.loads(out_lines[1])["cwd"] == str(tmp_path / "new-workspace")
+
+    def test_a_line_with_no_recorded_root_is_passed_through_unchanged(self, tmp_path):
+        old_root = tmp_path / "old-workspace"
+        old_root.mkdir()
+        no_root_line = json.dumps({"type": "system", "message": "no cwd here"})
+        source = self._write(tmp_path / "src.jsonl", [no_root_line])
+        destination = tmp_path / "dst.jsonl"
+
+        ClaudeCodeHarness().rewrite_transcript_workspace(
+            source, destination, old_root, tmp_path / "new-workspace"
+        )
+
+        assert destination.read_text().splitlines()[0] == no_root_line
+
+    def test_a_foreign_recorded_root_refuses_the_whole_transcript_and_writes_nothing(
+        self, tmp_path
+    ):
+        old_root = tmp_path / "old-workspace"
+        old_root.mkdir()
+        foreign_root = tmp_path / "someone-elses-workspace"
+        source = self._write(
+            tmp_path / "conversation-xyz.jsonl",
+            [
+                json.dumps({"cwd": str(old_root)}),
+                json.dumps({"cwd": str(foreign_root)}),
+            ],
+        )
+        destination = tmp_path / "dst.jsonl"
+
+        with pytest.raises(HarnessError, match="conversation-xyz.jsonl"):
+            ClaudeCodeHarness().rewrite_transcript_workspace(
+                source, destination, old_root, tmp_path / "new-workspace"
+            )
+
+        assert not destination.exists()
+
+    def test_the_refusal_is_not_weakened_by_the_head_scan_bound(self, tmp_path):
+        """A foreign recorded root past line 12 must still refuse — the 12-line
+        head-scan bound governs cheaply *reading* a root for enumeration, and
+        must not be inherited here."""
+        old_root = tmp_path / "old-workspace"
+        old_root.mkdir()
+        foreign_root = tmp_path / "someone-elses-workspace"
+        filler = [json.dumps({"cwd": str(old_root), "n": i}) for i in range(20)]
+        source = self._write(
+            tmp_path / "conversation-late.jsonl",
+            filler + [json.dumps({"cwd": str(foreign_root)})],
+        )
+        destination = tmp_path / "dst.jsonl"
+
+        with pytest.raises(HarnessError, match="conversation-late.jsonl"):
+            ClaudeCodeHarness().rewrite_transcript_workspace(
+                source, destination, old_root, tmp_path / "new-workspace"
+            )
+
+        assert not destination.exists()
+
+    def test_an_oversized_line_with_no_newline_is_never_materialized_whole(
+        self, tmp_path, monkeypatch
+    ):
+        """Mirrors the reader's own byte-cap pin
+        (``test_no_single_read_exceeds_the_byte_cap``): records the largest
+        single read/write and holds it to the cap, proving the huge line is
+        streamed in chunks rather than pulled into memory whole."""
+        from trailhead.harness import claude_code as cc
+
+        old_root = tmp_path / "old-workspace"
+        old_root.mkdir()
+        huge_no_newline_blob = "x" * 8_000_000
+        real_line = json.dumps({"cwd": str(old_root)})
+        source = self._write(
+            tmp_path / "src.jsonl", [huge_no_newline_blob, real_line]
+        )
+        destination = tmp_path / "dst.jsonl"
+
+        reads: list[int] = []
+        real_open = Path.open
+
+        def recording_open(self, *args, **kwargs):
+            handle = real_open(self, *args, **kwargs)
+            real_readline = handle.readline
+
+            def readline(*a, **k):
+                chunk = real_readline(*a, **k)
+                reads.append(len(chunk))
+                return chunk
+
+            handle.readline = readline
+            return handle
+
+        monkeypatch.setattr(Path, "open", recording_open)
+        result = ClaudeCodeHarness().rewrite_transcript_workspace(
+            source, destination, old_root, tmp_path / "new-workspace"
+        )
+
+        assert result is True
+        assert reads, "the transform never read anything"
+        assert max(reads) <= cc._CWD_SCAN_MAX_LINE_BYTES + 1, (
+            f"a single read took {max(reads)} bytes, over the "
+            f"{cc._CWD_SCAN_MAX_LINE_BYTES} cap — the cap is not bounding the read"
+        )
+        out_text = destination.read_text()
+        assert huge_no_newline_blob in out_text
+        assert json.loads(out_text.splitlines()[1])["cwd"] == str(tmp_path / "new-workspace")
+
+    def test_an_empty_transcript_produces_an_empty_output_rather_than_raising(self, tmp_path):
+        source = tmp_path / "empty.jsonl"
+        source.write_text("")
+        destination = tmp_path / "dst.jsonl"
+
+        result = ClaudeCodeHarness().rewrite_transcript_workspace(
+            source, destination, tmp_path / "old-workspace", tmp_path / "new-workspace"
+        )
+
+        assert result is True
+        assert destination.read_text() == ""
+
+    def test_a_root_recorded_only_past_the_reading_scan_bound_is_still_rewritten(self, tmp_path):
+        """The existing 12-line head-scan bound governs cheaply reading a root
+        for enumeration; applying it here would leave a stale absolute path in
+        a relocated file."""
+        old_root = tmp_path / "old-workspace"
+        old_root.mkdir()
+        filler = [json.dumps({"type": "system", "n": i}) for i in range(20)]
+        real_line = json.dumps({"cwd": str(old_root)})
+        source = self._write(tmp_path / "src.jsonl", filler + [real_line])
+        destination = tmp_path / "dst.jsonl"
+
+        result = ClaudeCodeHarness().rewrite_transcript_workspace(
+            source, destination, old_root, tmp_path / "new-workspace"
+        )
+
+        assert result is True
+        out_lines = destination.read_text().splitlines()
+        assert json.loads(out_lines[-1])["cwd"] == str(tmp_path / "new-workspace")

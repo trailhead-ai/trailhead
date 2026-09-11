@@ -213,6 +213,66 @@ def _extract_transcript_cwd(path: Path) -> Path | None:
     return None
 
 
+def _stream_rest_of_overlong_line(f_in: BinaryIO, f_out: BinaryIO) -> None:
+    """Copy the tail of a line that exceeded the byte cap, chunk by chunk.
+
+    The write-side twin of :func:`_skip_rest_of_overlong_line`: this seam
+    passes an oversized line through verbatim rather than dropping it, but
+    must still never hold more than one cap-sized chunk of it in memory at a
+    time.
+    """
+    while True:
+        chunk = f_in.readline(_CWD_SCAN_MAX_LINE_BYTES)
+        if not chunk:
+            return
+        f_out.write(chunk)
+        if chunk.endswith(b"\n"):
+            return
+
+
+def _rewrite_transcript_line(
+    chunk: bytes, old_root: Path, new_root: Path, source: Path
+) -> bytes:
+    """Rewrite one already cap-sized transcript line's ``cwd``, or pass it
+    through verbatim.
+
+    Verbatim covers: invalid JSON, JSON that is not an object, and an object
+    with no string/absolute ``cwd`` — none of those structurally record a
+    root, so none of them are this transform's business.
+
+    Raises :class:`HarnessError`, naming ``source``, when ``cwd`` IS an
+    absolute path but is not under ``old_root`` — a foreign, sending-host root
+    this transform must refuse rather than relocate.
+    """
+    ends_in_newline = chunk.endswith(b"\n")
+    text = chunk[:-1] if ends_in_newline else chunk
+    try:
+        decoded = text.decode("utf-8")
+    except UnicodeDecodeError:
+        return chunk
+    try:
+        record = json.loads(decoded)
+    except ValueError:
+        return chunk
+    if not isinstance(record, dict):
+        return chunk
+    cwd = record.get("cwd")
+    if not isinstance(cwd, str) or not cwd:
+        return chunk
+    cwd_path = Path(cwd)
+    if not cwd_path.is_absolute():
+        return chunk
+    if not cwd_path.is_relative_to(old_root):
+        raise HarnessError(
+            f"rewrite_transcript_workspace: {source.name} records a root "
+            f"({cwd_path}) outside {old_root}; refusing to rewrite the "
+            "transcript rather than pass a foreign root through unrewritten"
+        )
+    record["cwd"] = str(new_root / cwd_path.relative_to(old_root))
+    new_line = json.dumps(record).encode("utf-8")
+    return new_line + b"\n" if ends_in_newline else new_line
+
+
 def _iter_transcript_paths(projects_dir: Path) -> Iterator[Path]:
     """Yield ``<projects>/*/*.jsonl``, stopping quietly at an unreadable tree.
 
@@ -948,6 +1008,67 @@ class ClaudeCodeHarness(Harness):
                         "refusing to collide two workspaces onto one destination"
                     )
         return project_dir / f"{session_id}.jsonl"
+
+    # -- transcript workspace rewrite -------------------------------------------
+    #
+    # Claude Code's transcript structurally records a root in exactly ONE
+    # top-level field per line: ``cwd``.  A user-message body or a summary's
+    # ``lastPrompt`` can also contain an absolute path, but only as free prose —
+    # rewriting those would corrupt the conversation record rather than relocate
+    # it, so this transform touches ``cwd`` and nothing else.  The historical
+    # prose in already-recorded turns therefore keeps the sending host's path; a
+    # cosmetic residue, accepted knowingly.
+    #
+    # Streams line by line under the same byte discipline as the reader above
+    # (``_CWD_SCAN_MAX_LINE_BYTES``): a transcript can run to hundreds of
+    # megabytes and a single malformed line can be unbounded, so no single read
+    # or write ever exceeds the cap.  Unlike the reader, this has no line-count
+    # bound at all — a recorded root a thousand lines in is still rewritten.
+    #
+    # Writes to a temp file beside ``destination`` and only renames it into
+    # place once the whole source has been read without a refusal, so a raised
+    # ``HarnessError`` leaves ``destination`` exactly as it was — fail closed,
+    # never a partial or unrewritten file left where a caller might read it.
+
+    def rewrite_transcript_workspace(
+        self, source: Path, destination: Path, old_root: Path, new_root: Path
+    ) -> bool:
+        """Rewrite every ``cwd`` in ``source`` from ``old_root`` to ``new_root``,
+        streaming the result into ``destination``.
+
+        A line that fails to decode as JSON, or decodes to something other than
+        a dict with a string, absolute ``cwd``, is copied through verbatim. A
+        line whose ``cwd`` is absolute but not under ``old_root`` raises
+        :class:`HarnessError` naming ``source``, and nothing is written to
+        ``destination``.
+
+        Always returns ``True`` on completion — this harness always has a
+        transcript-rewrite concept, unlike the base class's degrading default.
+        """
+        old_root = Path(old_root)
+        new_root = Path(new_root)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        tmp_fd, tmp_name = tempfile.mkstemp(
+            dir=destination.parent, prefix=f".{destination.name}.", suffix=".tmp"
+        )
+        try:
+            with source.open("rb") as f_in, os.fdopen(tmp_fd, "wb") as f_out:
+                while True:
+                    chunk = f_in.readline(_CWD_SCAN_MAX_LINE_BYTES + 1)
+                    if not chunk:
+                        break
+                    if len(chunk) > _CWD_SCAN_MAX_LINE_BYTES:
+                        f_out.write(chunk)
+                        if not chunk.endswith(b"\n"):
+                            _stream_rest_of_overlong_line(f_in, f_out)
+                        continue
+                    rewritten = _rewrite_transcript_line(chunk, old_root, new_root, source)
+                    f_out.write(rewritten)
+        except BaseException:
+            os.unlink(tmp_name)
+            raise
+        os.replace(tmp_name, destination)
+        return True
 
     # -- session resume -------------------------------------------------------
     #
