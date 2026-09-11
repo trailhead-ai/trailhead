@@ -2665,31 +2665,165 @@ class TestTheReportIncludesHarnessIdentity:
 
 
 class TestAnAccountWithNoConfigFile:
-    def test_a_declared_account_with_no_config_file_warns_and_still_launches(
+    """AC14: the configuration-existence check reads the ONE seam answer
+    (`identity.has_config`) that `_resolve_account_identity` already produced for
+    the report — never a second, harness-specific resolver reached directly from
+    this launch path. `claude_trust.config_file` is retired from this call site;
+    these tests pin the check against `AccountIdentity`, not the filesystem."""
+
+    def test_a_declared_account_with_no_config_behind_the_identity_warns_and_still_launches(
         self, rig, tmp_path, capsys
     ):
         """A typo'd account otherwise produces a stalled launch indistinguishable
         from every other cause. The directory may legitimately not exist yet, so
         this is a warning, not a refusal."""
-        declared = tmp_path / "accounts" / "typoo"
+        from trailhead.harness.base import AccountIdentity
 
-        _launch(rig, group=_group_with_account(str(declared)), env=_poisoned(tmp_path))
+        rig["harness"] = FakeHarness(
+            account_identity=lambda account, env: AccountIdentity(
+                label="/resolved/typo-identity", has_config=False
+            )
+        )
+
+        _launch(
+            rig,
+            group=_group_with_account(str(tmp_path / "accounts" / "typoo")),
+            env=_poisoned(tmp_path),
+        )
 
         err = capsys.readouterr().err
-        assert str(declared) in err
-        assert "no harness config file" in err
+        # "at {label}" is the warning's own phrasing — anchoring on it (rather
+        # than the bare label) keeps this pinned to the warning line, since the
+        # report line above it also names the identity via "resolved to {label}".
+        assert "at /resolved/typo-identity" in err
         assert len(rig["spawn"].calls) == 1
 
-    def test_no_warning_when_the_declared_account_has_a_config_file(
+    def test_a_different_identity_produces_a_warning_naming_it_instead(
         self, rig, tmp_path, capsys
     ):
+        """Vary the identity; the warning follows it."""
+        from trailhead.harness.base import AccountIdentity
+
+        rig["harness"] = FakeHarness(
+            account_identity=lambda account, env: AccountIdentity(
+                label="/resolved/second-typo-identity", has_config=False
+            )
+        )
+
+        _launch(
+            rig,
+            group=_group_with_account(str(tmp_path / "accounts" / "typoo")),
+            env=_poisoned(tmp_path),
+        )
+
+        err = capsys.readouterr().err
+        assert "at /resolved/second-typo-identity" in err
+        assert "at /resolved/typo-identity" not in err
+
+    def test_no_warning_when_the_identity_has_config(self, rig, tmp_path, capsys):
+        from trailhead.harness.base import AccountIdentity
+
+        rig["harness"] = FakeHarness(
+            account_identity=lambda account, env: AccountIdentity(
+                label="/resolved/configured-identity", has_config=True
+            )
+        )
+
+        _launch(
+            rig,
+            group=_group_with_account(str(tmp_path / "accounts" / "levr")),
+            env=_poisoned(tmp_path),
+        )
+
+        err = capsys.readouterr().err
+        assert "no harness config file" not in err
+        assert len(rig["spawn"].calls) == 1
+
+    def test_the_warned_account_is_the_one_the_identity_checked_not_a_second_resolver(
+        self, rig, tmp_path, capsys
+    ):
+        """Regression pin for the finding that motivated this task: a second,
+        harness-specific resolver reached directly from this call site would
+        check the declared account's OWN directory — real configuration on
+        disk here — and stay silent, disagreeing with the seam's one identity
+        answer. TRAILHEAD_CLAUDE_DIR is set to a THIRD location (also carrying
+        real configuration) that a config-DIR resolver honours and a
+        config-FILE resolver deliberately ignores, so no accidental agreement
+        between resolvers can mask a divergence. Only the identity's own
+        `has_config` and `label` may decide this warning."""
+        from trailhead.harness.base import AccountIdentity
+
         declared = tmp_path / "accounts" / "levr"
         declared.mkdir(parents=True)
         (declared / ".claude.json").write_text("{}\n")
 
-        _launch(rig, group=_group_with_account(str(declared)), env=_poisoned(tmp_path))
+        trailhead_dir = tmp_path / "trailhead-relocated"
+        trailhead_dir.mkdir()
+        (trailhead_dir / ".claude.json").write_text("{}\n")
 
-        assert "no harness config file" not in capsys.readouterr().err
+        rig["harness"] = FakeHarness(
+            account_identity=lambda account, env: AccountIdentity(
+                label="/resolved/typo-identity", has_config=False
+            )
+        )
+
+        env = _poisoned(tmp_path, TRAILHEAD_CLAUDE_DIR=str(trailhead_dir))
+        _launch(rig, group=_group_with_account(str(declared)), env=env)
+
+        err = capsys.readouterr().err
+        assert "no harness config file" in err
+        assert "at /resolved/typo-identity" in err
+        assert str(declared / ".claude.json") not in err
+        assert str(trailhead_dir) not in err
+
+    def test_an_unexpected_identity_failure_leaves_the_launch_and_warning_silent(
+        self, rig, tmp_path, capsys
+    ):
+        """The seam raising unexpectedly (not a `HarnessError` refusal) degrades
+        to no identity for both the report and this warning — the same advisory
+        posture as every other probe on this path. A launch that would
+        otherwise succeed must not newly fail because this inline call raised."""
+
+        def boom(account, env):
+            raise RuntimeError("identity probe blew up")
+
+        rig["harness"] = FakeHarness(account_identity=boom)
+
+        _launch(
+            rig,
+            group=_group_with_account(str(tmp_path / "accounts" / "typoo")),
+            env=_poisoned(tmp_path),
+        )
+
+        err = capsys.readouterr().err
+        assert "no harness config file" not in err
+        assert len(rig["spawn"].calls) == 1
+
+
+class TestNoIdentityMeansNoConfigWarning:
+    """The harness offering no account-identity concept at all (`identity is
+    None`, the base-class default and the state of every harness but the one
+    shipped) must not produce a configuration warning naming an account camp
+    cannot name. Camp cannot check existence without a credential location, and
+    reaching for one of its own is precisely the constraint this task retires."""
+
+    def test_a_harness_offering_no_identity_emits_no_configuration_warning(
+        self, rig, tmp_path, capsys
+    ):
+        # FakeHarness's default (account_identity=None) reproduces the
+        # base-class `None` answer — the state every harness but one is in.
+        # The declared directory does not exist on disk, which under the
+        # retired resolver would have warned; under the seam-only contract it
+        # must not, because there is no identity to check.
+        _launch(
+            rig,
+            group=_group_with_account(str(tmp_path / "accounts" / "typoo")),
+            env=_poisoned(tmp_path),
+        )
+
+        err = capsys.readouterr().err
+        assert "no harness config file" not in err
+        assert len(rig["spawn"].calls) == 1
 
 
 class TestTheSeamRefusesTheBinding:
