@@ -1184,19 +1184,25 @@ class ClaudeCodeHarness(Harness):
         ``_claude_dir`` here would name an identity the launch does not
         actually land on.
 
-        ``label`` is the config DIRECTORY (matching the value
-        :meth:`session_launch_env_set` binds ``CLAUDE_CONFIG_DIR`` to for a
-        declared account); ``has_config`` is whether that directory's
-        ``.claude.json`` exists.
+        ``label`` is the config FILE path (``.claude.json``) — the one thing
+        genuinely in the same namespace for both branches. A declared account's
+        config file always lives inside its config directory, but the default's
+        does not: ``$HOME/.claude.json`` sits beside ``$HOME/.claude``, not
+        inside it, so a directory-shaped label would answer the two branches in
+        different namespaces (the default's `HOME`, a declared account's config
+        dir) and let two different accounts print the same string. The file
+        path is also simply the thing that decides which account a session is
+        on, so a declared account with ``account = "~"`` and the undeclared
+        default legitimately share a label: both resolve to the same
+        ``$HOME/.claude.json`` and so ARE the same account. ``has_config`` is
+        whether that file exists.
         """
         if account is None:
             config_file = claude_config_file(env)
         else:
             binding = self.session_launch_env_set(account, env=env)
-            config_file = Path(binding["CLAUDE_CONFIG_DIR"]) / _CONFIG_FILENAME
-        return AccountIdentity(
-            label=str(config_file.parent), has_config=config_file.exists()
-        )
+            config_file = claude_config_file(binding)
+        return AccountIdentity(label=str(config_file), has_config=config_file.exists())
 
     def session_enumerate(self, workspace: Path | None = None) -> list[str]:
         """Return ``["claude", "agents", "--json"]``, plus ``--cwd <workspace>``.
