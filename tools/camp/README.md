@@ -270,6 +270,16 @@ this same way before deciding where to hand the terminal.
 camp attach <ref> --resolve --json
 ```
 
+`camp attach --list --json` is `--resolve --json`'s reference-less sibling: it
+dumps this machine's own picker pool as JSON instead of prompting. Its only
+consumer is `camp attach -a` itself (the bare, no-reference form), merging
+every declared machine's own pool before presenting one combined numbered
+list.
+
+```
+camp attach --list --json
+```
+
 ## Remote hosts
 
 Declare a remote machine once, in `~/.config/camp/hosts.toml`:

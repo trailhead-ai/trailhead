@@ -2130,23 +2130,28 @@ def _cmd_kill_cli(args: list[str], env: dict[str, str] | None = None) -> None:
 
 def _attach_session_context(
     env: dict[str, str],
-) -> tuple[list[dict], list, list, "object", str | None]:
-    """The addressable pool, the ownership seam, and this machine's own name —
-    shared setup for every LOCAL `camp attach` form (bare, `<ref>`, `--resolve
-    --json`, `--list --json`). Never used by the `--host` pass-through, which
-    resolves nothing locally by design.
+) -> tuple[list[dict], list, list, "object", "object", str | None, dict[str, str | None]]:
+    """The addressable pool, the ownership seam, this machine's own name, and
+    the accounts each candidate came from — shared setup for every LOCAL
+    `camp attach` form (bare, `<ref>`, `--resolve --json`, `--list --json`).
+    Never used by the `--host` pass-through, which resolves nothing locally
+    by design.
     """
-    from ..host.config import self_host_name
+    from ..host.config import HostConfigError, self_host_name
     from ..launch.stop import Tmux
+    from ..spine import _die
 
     groups = _parsable_groups()
-    transcripts, live, answered, _accounts = _session_pool(
+    transcripts, live, answered, accounts = _session_pool(
         groups, verb="attach", env=env, live_required=True
     )
     harness = answered[0]
     tmux = Tmux()
-    machine = self_host_name(env)
-    return groups, transcripts, live, harness, tmux, machine
+    try:
+        machine = self_host_name(env)
+    except HostConfigError as exc:
+        _die(f"camp attach: {exc}")
+    return groups, transcripts, live, harness, tmux, machine, accounts
 
 
 def _attach_resolve_payload(resolution) -> dict:
@@ -2246,7 +2251,9 @@ def _cmd_attach_cli(args: list[str], env: dict[str, str] | None = None) -> None:
         _die("camp attach: --resolve and --list are machine-readable only — pass --json")
 
     resolved_env = dict(env) if env is not None else dict(os.environ)
-    groups, transcripts, live, harness, tmux, machine = _attach_session_context(resolved_env)
+    groups, transcripts, live, harness, tmux, machine, accounts = _attach_session_context(
+        resolved_env
+    )
 
     if list_only or ref is None:
         # The two reference-less forms read the identical pool: `--list --json`
@@ -2294,19 +2301,32 @@ def _cmd_attach_cli(args: list[str], env: dict[str, str] | None = None) -> None:
         print(json.dumps(_attach_resolve_payload(resolution)))
         sys.exit(0)
 
-    if isinstance(resolution, NoMatch):
-        _die(f"camp attach: no session on this machine matches {ref!r}")
     if isinstance(resolution, NotRunning):
         _die(
             f"camp attach: session {resolution.candidate.session_id} is not "
             f"running — bring it back with `camp launch --resume {ref}`"
         )
-    if isinstance(resolution, Ambiguous):
-        _print_candidates(resolution.candidates, as_json=as_json)
-        _die(
-            f"camp attach: {ref!r} matches {len(resolution.candidates)} sessions "
-            "(listed above) — re-run with a longer prefix naming exactly one",
-            code=_AMBIGUOUS_EXIT_CODE,
+    if isinstance(resolution, (NoMatch, Ambiguous)):
+        from ..launch.recovery import Ambiguous as _RecoveryAmbiguous, NoMatch as _RecoveryNoMatch
+
+        # attach's own Ambiguous/NoMatch (`camp.attach.resolve`) are never the
+        # SAME classes `_die_unresolved` checks (`camp.launch.recovery`'s) —
+        # translated here so every ref-addressed verb refuses through that one
+        # shared helper and an operator gets the identical wording (including
+        # the populated-vs-empty-pool distinction, and which account a
+        # cross-store ambiguity matched in) regardless of which verb they typed.
+        if isinstance(resolution, Ambiguous):
+            translated = _RecoveryAmbiguous(candidates=resolution.candidates)
+        else:
+            translated = _RecoveryNoMatch(pool_size=resolution.pool_size)
+        _die_unresolved(
+            translated,
+            ref,
+            verb="attach",
+            harness=harness,
+            env=resolved_env,
+            as_json=as_json,
+            accounts=accounts,
         )
     assert isinstance(resolution, Resolved)
     warn_if_nested(resolved_env)

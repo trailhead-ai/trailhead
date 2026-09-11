@@ -146,6 +146,33 @@ def test_one_candidate_still_prompts_rather_than_auto_attaching(tmp_path: Path) 
     assert outcome2.row.candidate.session_id == _UUID_A
 
 
+def test_undeclared_local_machine_renders_a_label_not_the_literal_none(tmp_path: Path) -> None:
+    """`machine=None` is a supported, default configuration (no `hosts.toml`,
+    or no `self_name` key) — see `host.config.self_host_name`'s own
+    docstring — and must never surface the literal string `None` to an
+    operator on the primary, out-of-the-box path."""
+    from camp.attach.picker import Picked, pick_session
+
+    state, env, harness, tmux, transcripts, live_records, groups = _fixture_two(tmp_path)
+    pool = _build_pool(
+        harness=harness,
+        tmux=tmux,
+        transcripts=[transcripts[0]],
+        live_records=[live_records[0]],
+        groups=groups,
+        env=env,
+        machine=None,
+    )
+
+    out = io.StringIO()
+    outcome = pick_session(pool, stdin=io.StringIO("1\n"), stdout=out, isatty=True)
+
+    assert isinstance(outcome, Picked)
+    rendered = out.getvalue()
+    assert "None" not in rendered, rendered
+    assert "this machine" in rendered, rendered
+
+
 def test_many_candidates_lists_them_all(tmp_path: Path) -> None:
     from camp.attach.picker import Picked, PoolReady, pick_session
 
