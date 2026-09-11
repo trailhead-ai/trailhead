@@ -30,7 +30,13 @@ def _record_links_tail() -> str:
     followed by the `## Record links` section of outpost's rules.md, which runs to
     end-of-file (the section IS the remainder of the file from its heading)."""
     text = OUTPOST_RULES.read_text(encoding="utf-8")
-    idx = text.index(TAIL_HEADING)
+    idx = text.find(TAIL_HEADING)
+    if idx == -1:
+        raise AssertionError(
+            f"{OUTPOST_RULES} no longer contains a {TAIL_HEADING!r} heading, so the "
+            "reader-rule tail every live arm is built from cannot be derived. The arms "
+            "are built across two tools: fix the heading or update TAIL_HEADING here."
+        )
     return "\n" + text[idx:]
 
 
