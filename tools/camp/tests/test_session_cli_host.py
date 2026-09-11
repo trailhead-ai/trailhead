@@ -777,6 +777,44 @@ def test_launch_host_exit_codes_are_mutually_distinct(
     assert len({success_code, certain_failure_code, unknown_code}) == 3
 
 
+def test_launch_host_far_side_exit_code_never_collides_with_the_unknown_code(
+    hosts_env, monkeypatch, capsys: pytest.CaptureFixture
+) -> None:
+    """A far side that refuses with the same number camp reserves for "I do not
+    know" must not be reported as uncertain.
+
+    The uncertain outcome's exit code is the one signal a scripted caller can
+    branch on without parsing prose, and its whole purpose is to mean "check
+    before you retry". A remote refusal is a CERTAIN failure — nothing was
+    started, and there is nothing to check. Passing the far side's own status
+    through unmapped lets a remote `exit 3` impersonate camp's uncertainty,
+    which is exactly the collision the council item forbids.
+    """
+    transport = _transport_module()
+
+    _rig(monkeypatch, transport.StoppedResponding(execution_timeout=60.0))
+    unknown_code = _run(
+        monkeypatch, ["launch", "ws-a", "--host", "andromeda", "--group", "demo"]
+    )
+    capsys.readouterr()
+
+    _rig(
+        monkeypatch,
+        transport.RemoteRefusal(stdout="", stderr="camp: no workspace 'ws-a'", exit_code=unknown_code),
+    )
+    refusal_code = _run(
+        monkeypatch, ["launch", "ws-a", "--host", "andromeda", "--group", "demo"]
+    )
+    err = capsys.readouterr().err
+
+    assert refusal_code != unknown_code, (
+        f"a far-side refusal exited {refusal_code}, the code reserved for the "
+        f"uncertain outcome — a caller cannot tell them apart"
+    )
+    assert refusal_code != 0
+    assert "no session was started" in err
+
+
 def test_launch_host_certain_and_uncertain_first_lines_differ_in_opening_words(
     hosts_env, monkeypatch, capsys: pytest.CaptureFixture
 ) -> None:

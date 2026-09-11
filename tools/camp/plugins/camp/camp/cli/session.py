@@ -1615,7 +1615,16 @@ def _cmd_launch_host_cli(args: list[str], host: "Host", host_name: str) -> None:
         print(notice, file=sys.stderr)
     print(f"camp launch: no session was started on host {host_name!r}", file=sys.stderr)
 
-    exit_code = answer.exit_code if answer.exit_code != 0 else 1
+    # The far side's own status is passed through where it says something,
+    # but the uncertain code is RESERVED: a remote camp that happens to exit
+    # with that number would otherwise impersonate camp's own "I do not know",
+    # and the one signal a scripted caller can branch on without parsing prose
+    # would stop meaning what it says. A refusal is certain — nothing was
+    # started and there is nothing to check — so it collapses to the shared
+    # certain-failure code instead.
+    exit_code = answer.exit_code
+    if exit_code == 0 or exit_code == _LAUNCH_HOST_UNKNOWN_EXIT_CODE:
+        exit_code = 1
     if as_json:
         reason = answer.notices[-1] if answer.notices else "no session was started"
         print(json.dumps({
