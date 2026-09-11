@@ -32,6 +32,24 @@ is what regenerates the platform-specific state a transfer does not copy. It
 does not wait for provisioning to complete — "arrived" and "ready to work
 in" are deliberately different moments.
 
+**history** receives one member's committed history, sent by
+`camp.transfer.history.send_history` as a `git bundle` on stdin, and lands
+it directly — no git remote is ever read or written on this path. The
+member's `repo_root` is resolved from THIS host's own group config, keyed
+only by `--member`; the bundle bytes carry no path. `git bundle unbundle -`
+is fed the bytes verbatim; a bundle whose prerequisite commits this host
+does not hold fails the phase by name (`BundleUnbundleFailed`, carrying
+git's own stderr) before anything is written — `unbundle` creates no refs on
+either success or failure, so there is no ref to roll back. On success the
+member's slug branch (the same `branch_pattern`-derived name
+`camp.provision.reconcile` uses) is force-updated with `git update-ref` to
+the bundle's reported tip — unconditional, so re-running `history` against a
+branch this host already has moves it rather than refusing — and the
+member's worktree is then materialized through
+`camp.provision.reconcile._add_worktree_for_member`, which reuses that
+already-present local branch (`_branch_exists_locally`) rather than
+branching a fresh one off `base`.
+
 **The marker.** Every phase, once it actually runs (never on a refusal — a
 refused phase never touches the workspace it refused), appends an entry to a
 small JSON log inside the arriving workspace naming which phase reached this
@@ -55,6 +73,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import subprocess
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -69,8 +88,12 @@ __all__ = [
     "MalformedOwnerName",
     "OwnershipConflict",
     "OverwriteRequired",
+    "MemberNotConfigured",
+    "BundleUnbundleFailed",
+    "BundleRefUnresolved",
     "begin",
     "finish",
+    "history",
     "read_transfer_marker",
 ]
 
@@ -136,6 +159,42 @@ class OverwriteRequired(ReceiveRefused):
             f"it and re-seed for sender {sender!r}, or choose a different slug"
         )
         self.sender = sender
+
+
+class MemberNotConfigured(ReceiveRefused):
+    """*member* is not declared in the named group's config on this host."""
+
+    def __init__(self, group_name: str, member: str) -> None:
+        super().__init__(
+            f"member {member!r} is not declared in group {group_name!r} on this host"
+        )
+        self.group_name = group_name
+        self.member = member
+
+
+class BundleUnbundleFailed(ReceiveRefused):
+    """`git bundle unbundle` refused the incoming bundle — its own stderr,
+    carried through unchanged. Raised before any ref is touched."""
+
+    def __init__(self, member: str, stderr: str) -> None:
+        super().__init__(
+            f"member {member!r}: git bundle unbundle refused the incoming "
+            f"bundle: {stderr.strip()}"
+        )
+        self.member = member
+        self.stderr = stderr
+
+
+class BundleRefUnresolved(ReceiveRefused):
+    """The bundle unbundled cleanly but reported no tip for the expected ref."""
+
+    def __init__(self, member: str, ref: str) -> None:
+        super().__init__(
+            f"member {member!r}: the bundle carried no tip for expected ref "
+            f"{ref!r} — refusing to update it from an unresolved commit"
+        )
+        self.member = member
+        self.ref = ref
 
 
 @dataclass(frozen=True)
@@ -354,4 +413,90 @@ def finish(
     return {
         "contract_version": RECEIVE_CONTRACT_VERSION,
         "manifest_path": str(mpath),
+    }
+
+
+def _find_member(group: dict[str, Any], member: str) -> dict[str, Any] | None:
+    return next((m for m in group["members"] if m["name"] == member), None)
+
+
+def history(
+    *,
+    groups: list[dict[str, Any]],
+    group_name: str,
+    slug: str,
+    member: str,
+    bundle_bytes: bytes,
+    env: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Land one member's bundled history, sent by
+    `camp.transfer.history.send_history`, directly into this host's clone —
+    no git remote is ever contacted. See the module docstring's `history`
+    section for the full sequence.
+
+    Raises:
+        GroupNotConfigured: *group_name* is not configured on this host.
+        MemberNotConfigured: *member* is not declared in that group here.
+        BundleUnbundleFailed: `git bundle unbundle` refused the bundle (most
+            commonly a missing prerequisite commit) — raised before any ref
+            is touched.
+        BundleRefUnresolved: the bundle unbundled cleanly but named no tip
+            for the branch this host expected.
+    """
+    group = _find_group(groups, group_name)
+    if group is None:
+        raise GroupNotConfigured(group_name)
+
+    member_cfg = _find_member(group, member)
+    if member_cfg is None:
+        raise MemberNotConfigured(group_name, member)
+
+    from ..group.manifest import workspace_dir
+    from ..provision.reconcile import DEFAULT_BASE, _add_worktree_for_member, _branch_name, _worktree_path
+
+    repo_root = Path(member_cfg["repo_root"])
+    branch_pattern: str = group.get("branch_pattern", "worktree-{slug}")
+    branch = _branch_name(slug, branch_pattern)
+    ref = f"refs/heads/{branch}"
+
+    result = subprocess.run(
+        ["git", "-C", str(repo_root), "bundle", "unbundle", "-"],
+        input=bundle_bytes,
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise BundleUnbundleFailed(member, result.stderr.decode("utf-8", errors="replace"))
+
+    tip_sha: str | None = None
+    for line in result.stdout.decode("utf-8", errors="replace").splitlines():
+        parts = line.split(None, 1)
+        if len(parts) == 2 and parts[1].strip() == ref:
+            tip_sha = parts[0]
+            break
+    if tip_sha is None:
+        raise BundleRefUnresolved(member, ref)
+
+    update_result = subprocess.run(
+        ["git", "-C", str(repo_root), "update-ref", ref, tip_sha],
+        capture_output=True,
+        check=False,
+    )
+    if update_result.returncode != 0:
+        raise BundleUnbundleFailed(
+            member, update_result.stderr.decode("utf-8", errors="replace")
+        )
+
+    wt_path = _worktree_path(group_name, slug, member, env=env)
+    base = member_cfg.get("base") or DEFAULT_BASE
+    _add_worktree_for_member(member_cfg, wt_path, branch, repo_root, base=base, slug=slug)
+
+    ws_dir = workspace_dir(group_name, slug, env=env)
+    append_marker(ws_dir, phase="history", outcome="ok")
+
+    return {
+        "contract_version": RECEIVE_CONTRACT_VERSION,
+        "member": member,
+        "branch": branch,
+        "commit": tip_sha,
     }
