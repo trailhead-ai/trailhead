@@ -836,8 +836,18 @@ authors and runs them.
 |------|-----|------------------|------|--------|-------|
 | 2026-09-11 | baseline (`arms/baseline.md`, today's unedited `slice/SKILL.md`) | none appended beyond the ritual's own text | 3 | **bare identifier in 3/3, no markdown link in any run** | `grep -noE '\[[^]]*\]\([^)]*\)'` over each captured response: no match, all three runs |
 
-**Result: baseline FAIL against the red-state claim, as pre-registered — this is the intended
-outcome, not an error.** All three runs report the new parent task
+**Result: baseline PASS for the red-state claim, as pre-registered — this is the intended
+outcome, not an error.**
+
+> **Corrected 2026-09-11.** This paragraph's verdict token first read "**FAIL** against the
+> red-state claim". That inverts `expected.md`'s own registered vocabulary, which reads
+> "**baseline — PASS for this task's red-state claim** if in 3/3 runs the response names the new
+> parent task as bare text", and contradicted this same paragraph's closing sentence ("the
+> baseline PASS condition is that it stays bare, and it did"). The observation is unchanged and
+> unaffected — bare in 3/3, zero exclusions; only the token naming it was wrong. Found by the
+> whole-change correctness review.
+
+All three runs report the new parent task
 (`task/the-quarterly-audit-trail-slice`) the same way today's `## Outcome` text specifies: a bare
 identifier followed by a fenced `lore record show task/the-quarterly-audit-trail-slice` command,
 never as `[kind/slug](<base>/records/...)` markdown link syntax. Verbatim run 1 (representative of
@@ -942,3 +952,56 @@ to the 6 `Read`-only eval runs. No mutation attributable to this batch.
 
 See `plugins/craft/evals/ritual-deliverable-names-its-record/expected.md` for the full
 pre-registration, dispatch command, and pass conditions this batch was graded against.
+
+---
+
+### 2026-09-11 — `ritual-deliverable-names-its-record`, full re-run + the rule-only control
+
+**Why re-run.** The whole-change correctness review found that this case's baseline and treatment
+arms differed on two variables at once — the ritual edit **and** the appended reader rule — so no
+result recorded above ever attributed the observed link to the edit this slice ships. The review
+also changed `slice/SKILL.md`'s `## Outcome`, which fires `expected.md`'s own re-run trigger, so
+every already-run arm is re-dispatched here against the shipped prose; none of the results above
+carries forward. A fourth arm, `rule-only` (today's unedited prose **plus** the reader rule), was
+pre-registered in `expected.md` and committed **before** it was built or run, with a deliberately
+two-sided decision rule.
+
+| Date | Arm | Prose under test | Runs | Result | Notes |
+|------|-----|------------------|------|--------|-------|
+| 2026-09-11 | baseline (`arms/baseline.md`, unedited `slice/SKILL.md` at `08c49cdf`) | no rule appended | 3 | **bare in 3/3** | zero markdown links in any run |
+| 2026-09-11 | reader-absent (`arms/reader-absent.md`, shipped prose) | no rule appended | 3 | **bare in 3/3** | zero markdown links; no URL hand-assembled in any form |
+| 2026-09-11 | treatment (`arms/treatment.md`, shipped prose + rule) | reader rule appended | 3 | **link in 3/3** | text `task/the-quarterly-audit-trail-slice`, target `http://127.0.0.1:7313/records/fieldnotes/task/the-quarterly-audit-trail-slice`, handoff bare in 3/3 |
+| 2026-09-11 | **rule-only** (`arms/rule-only.md`, **unedited** prose + rule) | reader rule appended | 3 | **link in 3/3** | byte-for-byte the same link text and target as treatment, handoff bare in 3/3 |
+
+All 12 processes exited 0 with non-empty captures; zero exclusions, no rate-limit or crash.
+
+**The 2×2 this completes:**
+
+| | no rule resident | reader rule resident |
+|---|---|---|
+| **unedited prose** | bare (3/3) | **link (3/3)** |
+| **edited prose** | bare (3/3) | link (3/3) |
+
+**Result: this slice's premise is FALSIFIED at the `slice/SKILL.md` site, as pre-registered.**
+The reader's `## Record links` rule is the sole determinant of the outcome in all four cells. The
+ritual edit has **no measured effect** in either condition: with the rule resident, today's
+unedited prose already produces the correct link — same text, same target — and with the rule
+absent, the edited prose degrades to exactly the bare state the unedited prose degrades to. The
+marginal contribution of the ritual edit at this site is nil.
+
+`expected.md` registered this branch in advance and required it be reported as falsified rather
+than reinterpreted into a weaker claim that still reads as a pass. It is so reported here. The
+earlier "**AC6 verdict for the `slice/SKILL.md` site: PASS**" recorded above is **withdrawn**: it
+rested on a baseline-vs-treatment comparison that could not separate the edit from the rule, and
+the control now shows the rule alone accounts for the entire effect.
+
+> **What this does not establish.** The measurement covers one site (`slice`'s `## Outcome`) under
+> a stubbed step 1-10 state, one model tier, 3 runs per cell. It does not show the ritual edits are
+> harmless at the other six sites, nor that no site exists where crowding-out is real — only that
+> at the one site it was possible to measure, the premise did not hold. The `Read`-only grant also
+> means no arm could resolve a vault or base, so the correct-looking `fieldnotes` segment cannot be
+> distinguished from interpolation of the fixture's own strings (see `expected.md`, Limitations).
+
+**Real-state check.** All 12 runs used `--allowedTools "Read"` with no shell, `Edit`, `Write`, or
+`Bash` tool granted, and `--setting-sources project` to drop `~/.claude/rules/`. No write tool
+exists in any arm, so no vault mutation is attributable to this batch.
