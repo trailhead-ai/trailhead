@@ -110,6 +110,29 @@ def _consuming_stream_spawner(argv, env):
     )
 
 
+def _capturing_stream_spawner(capture_path: Path):
+    """A `StreamSpawner` that writes everything fed to its stdin to
+    *capture_path* instead of discarding it, so a test can inspect the exact
+    tar bytes `send_workspace_conversations` produced end to end — including
+    the `nested_dir` that function computes itself, never a hand-built one."""
+
+    def _spawn(argv, env):
+        return subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                "import sys; open(sys.argv[1], 'wb').write(sys.stdin.buffer.read()); "
+                "sys.stdout.buffer.write(b'ok')",
+                str(capture_path),
+            ],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+    return _spawn
+
+
 def _failing_stream_spawner(argv, env):
     return subprocess.Popen(
         [sys.executable, "-c", "import sys; sys.stdin.buffer.read(); sys.exit(1)"],
@@ -306,6 +329,26 @@ class TestNestedSubtree:
         assert members["tool-results/result-1.txt"] == b"plain text tool output\n"
         assert members["tool-results/result-2.json"] == b'{"ok": true}\n'
 
+    def test_file_directly_in_session_directory_is_streamed_at_its_own_name(
+        self, tmp_path: Path
+    ) -> None:
+        from camp.transfer.conversations import build_conversation_archive_argv
+
+        transcript_path = tmp_path / "transcript.jsonl"
+        transcript_path.write_text('{"cwd": "/ws"}\n')
+        nested_dir = tmp_path / _UUID_ROOT
+        nested_dir.mkdir()
+        (nested_dir / "summary.json").write_text('{"turns": 3}\n')
+
+        argv = build_conversation_archive_argv(transcript_path, nested_dir)
+        proc = subprocess.run(argv, capture_output=True, check=True)
+
+        with tarfile.open(fileobj=io.BytesIO(proc.stdout), mode="r|") as tf:
+            members = {m.name: tf.extractfile(m).read() for m in tf}
+
+        assert set(members) == {"transcript.jsonl", "summary.json"}
+        assert members["summary.json"] == b'{"turns": 3}\n'
+
     def test_sibling_memory_directory_is_never_streamed(self, tmp_path: Path) -> None:
         from camp.transfer.conversations import build_conversation_archive_argv
 
@@ -331,6 +374,55 @@ class TestNestedSubtree:
         assert "memory/notes.md" not in members
         assert not any("memory" in name for name in members)
         assert members == {"transcript.jsonl", "subagents/agent-1.jsonl"}
+
+
+class TestNestedDirComputedBySendWorkspaceConversations:
+    """`build_conversation_archive_argv` is tested elsewhere with a hand-built
+    `nested_dir`; that never exercises the line inside
+    `send_workspace_conversations` that computes `nested_dir` from the
+    located `transcript_path` and the conversation's own session id. These
+    tests drive the real end-to-end flow instead, so the computation site
+    itself is pinned."""
+
+    def test_sibling_memory_directory_excluded_through_real_flow(self, tmp_path: Path) -> None:
+        from camp.transfer.conversations import send_workspace_conversations
+
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        claude_dir = tmp_path / "home" / ".claude"
+        munged = _munge(ws)
+        transcript_path = _make_transcript_file(claude_dir, munged, _UUID_ROOT, ws)
+        projects_key_dir = transcript_path.parent
+
+        nested_dir = projects_key_dir / _UUID_ROOT
+        (nested_dir / "subagents").mkdir(parents=True)
+        (nested_dir / "subagents" / "agent-1.jsonl").write_text('{"cwd": "/ws"}\n')
+
+        memory_dir = projects_key_dir / "memory"
+        memory_dir.mkdir()
+        (memory_dir / "notes.md").write_text("project-scoped agent memory\n")
+
+        rows = _rows(ws, transcripts=[_transcript(_UUID_ROOT, ws)])
+        assert len(rows) == 1
+
+        capture_path = tmp_path / "captured.tar"
+
+        send_workspace_conversations(
+            _host(),
+            group="g",
+            slug="s",
+            workspace=ws,
+            conversations=rows,
+            locate_transcript=lambda session_id, root: transcript_path,
+            spawn=_capturing_stream_spawner(capture_path),
+        )
+
+        with tarfile.open(capture_path, mode="r") as tf:
+            members = {m.name for m in tf}
+
+        assert members == {"transcript.jsonl", "subagents/agent-1.jsonl"}
+        assert "memory/notes.md" not in members
+        assert not any("memory" in name for name in members)
 
 
 class TestTornCopyDetection:
