@@ -260,9 +260,15 @@ def read_host_option(args: list[str]) -> tuple[list[str], str | None]:
 
 
 def _dispatch_host_command(
-    verb: str, host: "Host", host_name: str, rest: list[str]
+    verb: str, host: "Host", host_name: str, rest: list[str], connect_timeout: float
 ) -> None:
     """Hand a resolved remote `Host` off to its verb handler.
+
+    ``connect_timeout`` is the operator's resolved value
+    (`camp.host.config.connect_timeout_seconds()`, read once by `main()`'s
+    `--host` handling above), threaded to every verb below that reaches the
+    transport — "attach" hands off interactively instead and has no use for
+    it.
 
     Reached ONLY after `--host` has resolved to a declared host and every
     refusal above has passed — `main()`'s `--host` block is this function's
@@ -295,19 +301,19 @@ def _dispatch_host_command(
     if verb == "list":
         from .workspace import _cmd_ls_host_cli
 
-        _cmd_ls_host_cli(rest, host, host_name)
+        _cmd_ls_host_cli(rest, host, host_name, connect_timeout=connect_timeout)
     elif verb == "sessions":
         from .session import _cmd_sessions_host_cli
 
-        _cmd_sessions_host_cli(rest, host, host_name)
+        _cmd_sessions_host_cli(rest, host, host_name, connect_timeout=connect_timeout)
     elif verb == "launch":
         from .session import _cmd_launch_host_cli
 
-        _cmd_launch_host_cli(rest, host, host_name)
+        _cmd_launch_host_cli(rest, host, host_name, connect_timeout=connect_timeout)
     elif verb == "kill":
         from .session import _cmd_kill_host_cli
 
-        _cmd_kill_host_cli(rest, host, host_name)
+        _cmd_kill_host_cli(rest, host, host_name, connect_timeout=connect_timeout)
     else:
         assert verb == "attach"
         from .session import _cmd_attach_host_cli
@@ -741,7 +747,7 @@ def main() -> None:
             )
             sys.exit(1)
 
-        from ..host.config import load_hosts, HostConfigError
+        from ..host.config import connect_timeout_seconds, load_hosts, HostConfigError
 
         try:
             hosts = load_hosts()
@@ -767,7 +773,13 @@ def main() -> None:
                 )
             sys.exit(1)
 
-        _dispatch_host_command(canonical, host, host_name, scan_rest)
+        try:
+            connect_timeout = connect_timeout_seconds()
+        except HostConfigError as e:
+            print(f"camp {canonical}: {e}", file=sys.stderr)
+            sys.exit(1)
+
+        _dispatch_host_command(canonical, host, host_name, scan_rest, connect_timeout)
         return
 
     # ---------------------------------------------------------------------------
@@ -859,8 +871,14 @@ def _dispatch_all_hosts_command(
     invocation is always the all-groups + `--json` form, matching what
     `--host` already sends.
     """
-    from ..host.config import HostConfigError, load_hosts, self_host_name
+    from ..host.config import (
+        HostConfigError,
+        connect_timeout_seconds,
+        load_hosts,
+        self_host_name,
+    )
     from ..host.merge import answer_all_hosts_concurrently, merge_all_hosts_answer
+    from ..host.transport import DEFAULT_CONNECT_TIMEOUT_SECONDS
 
     if all_groups and _flag_present(rest, "--group"):
         print(
@@ -912,12 +930,28 @@ def _dispatch_all_hosts_command(
         hosts = {}
         hosts_error = str(exc)
 
+    # connect_timeout_seconds() re-reads the same hosts.toml load_hosts()
+    # already read above — the same "one operation" treatment self_name's
+    # own re-read gets below: when that read already failed (hosts_error is
+    # set), `hosts` is already empty and there is nothing to contact, so the
+    # unused default is harmless and a second raise here must never bypass
+    # the recovery merge_all_hosts_answer renders for exactly this state.
+    if hosts_error is not None:
+        connect_timeout = DEFAULT_CONNECT_TIMEOUT_SECONDS
+    else:
+        try:
+            connect_timeout = connect_timeout_seconds()
+        except HostConfigError as exc:
+            print(f"camp {verb}: {exc}", file=sys.stderr)
+            sys.exit(1)
+
     (local_rows, local_notices, local_exit_code), host_answers = (
         answer_all_hosts_concurrently(
             _local_answer,
             list(hosts.items()),
             verb=verb,
             remote_argv=[verb, "--all-groups", "--json"],
+            connect_timeout=connect_timeout,
         )
     )
 
@@ -1112,7 +1146,7 @@ def _dispatch_attach_all_hosts(rest: list[str]) -> None:
     from ..attach.prefix_warning import warn_if_nested
     from ..attach.resolve import Ambiguous, NotRunning, Resolved, resolve_attach_ref
     from ..host import transport as _transport
-    from ..host.config import HostConfigError, load_hosts
+    from ..host.config import HostConfigError, connect_timeout_seconds, load_hosts
     from ..host.handoff import handoff, local_argv, remote_argv
     from ..spine import _die
     from .session import _AMBIGUOUS_EXIT_CODE, _attach_session_context, _print_candidates
@@ -1132,6 +1166,12 @@ def _dispatch_attach_all_hosts(rest: list[str]) -> None:
         print(f"camp attach: {exc}", file=sys.stderr)
         sys.exit(1)
     host_items = list(hosts.items())
+
+    try:
+        connect_timeout = connect_timeout_seconds()
+    except HostConfigError as exc:
+        print(f"camp attach: {exc}", file=sys.stderr)
+        sys.exit(1)
 
     resolved_env = dict(os.environ)
 
@@ -1153,7 +1193,9 @@ def _dispatch_attach_all_hosts(rest: list[str]) -> None:
         def _probe(item: tuple[str, "Host"]):
             name, host = item
             try:
-                outcome = _transport.run_camp(host, ["attach", ref, "--resolve", "--json"])
+                outcome = _transport.run_camp(
+                    host, ["attach", ref, "--resolve", "--json"], connect_timeout=connect_timeout
+                )
             except Exception:
                 # A bug in this code, or a missing local `ssh`, must never
                 # render as a host that failed to answer via a traceback out
@@ -1264,7 +1306,9 @@ def _dispatch_attach_all_hosts(rest: list[str]) -> None:
     def _probe_list(item: tuple[str, "Host"]):
         name, host = item
         try:
-            outcome = _transport.run_camp(host, ["attach", "--list", "--json"])
+            outcome = _transport.run_camp(
+                host, ["attach", "--list", "--json"], connect_timeout=connect_timeout
+            )
         except Exception as exc:
             # Same posture as the ref-form probe above: a raise out of this
             # code must render as a host that did not answer, not a

@@ -1481,9 +1481,17 @@ def refuse_sessions_local_only_options(rest: list[str], *, widening_flag: str) -
         )
 
 
-def _cmd_sessions_host_cli(args: list[str], host: "Host", host_name: str) -> None:
+def _cmd_sessions_host_cli(
+    args: list[str], host: "Host", host_name: str, *, connect_timeout: float | None = None
+) -> None:
     """camp sessions --host <name> [--json] — every group's live sessions on
     one declared remote machine, relayed through the SSH transport.
+
+    ``connect_timeout`` is the operator's resolved value
+    (`camp.host.config.connect_timeout_seconds()`, read once by `main()`'s
+    ``--host`` handling and passed down); ``None`` (a direct call with no
+    caller-supplied value) falls back to the transport's own documented
+    default.
 
     Reached ONLY from ``cli/dispatch.py``'s ``--host`` handling in
     ``_dispatch_host_command``, after the name has resolved to a declared
@@ -1512,6 +1520,10 @@ def _cmd_sessions_host_cli(args: list[str], host: "Host", host_name: str) -> Non
     a relayed answer never do.
     """
     from ..host.relay import relay_all_groups
+    from ..host.transport import DEFAULT_CONNECT_TIMEOUT_SECONDS
+
+    if connect_timeout is None:
+        connect_timeout = DEFAULT_CONNECT_TIMEOUT_SECONDS
 
     rest = list(args)
     as_json = _consume_flag(rest, "--json")
@@ -1546,6 +1558,7 @@ def _cmd_sessions_host_cli(args: list[str], host: "Host", host_name: str) -> Non
         ["sessions", "--all-groups", "--json"],
         as_json=as_json,
         render_human_rows=_render_human_rows,
+        connect_timeout=connect_timeout,
     )
 
 
@@ -1560,13 +1573,21 @@ def _cmd_sessions_host_cli(args: list[str], host: "Host", host_name: str) -> Non
 _LAUNCH_HOST_UNKNOWN_EXIT_CODE = 3
 
 
-def _cmd_launch_host_cli(args: list[str], host: "Host", host_name: str) -> None:
+def _cmd_launch_host_cli(
+    args: list[str], host: "Host", host_name: str, *, connect_timeout: float | None = None
+) -> None:
     """camp launch <slug> --host <name> --group <group> [--json].
 
     Reached ONLY from `cli/dispatch.py`'s `--host` handling in
     `_dispatch_host_command`, after `--group` has already been required and
     validated present — a state-changing verb never infers it from this
     machine's cwd (see `HOST_FLAG`'s own comment in dispatch.py).
+
+    ``connect_timeout`` is the operator's resolved value
+    (`camp.host.config.connect_timeout_seconds()`, read once by `main()`'s
+    ``--host`` handling and passed down); ``None`` (a direct call with no
+    caller-supplied value) falls back to the transport's own documented
+    default.
 
     Relays through `camp.host.relay.answer_object_for_host` — the single-
     object counterpart to the rows relay `_cmd_sessions_host_cli` and
@@ -1585,7 +1606,11 @@ def _cmd_launch_host_cli(args: list[str], host: "Host", host_name: str) -> None:
     or the raw exit code alone.
     """
     from ..host.relay import Certainty, answer_object_for_host
+    from ..host.transport import DEFAULT_CONNECT_TIMEOUT_SECONDS
     from ..spine import _consume_flag_value, _die
+
+    if connect_timeout is None:
+        connect_timeout = DEFAULT_CONNECT_TIMEOUT_SECONDS
 
     rest = list(args)
     as_json = _consume_flag(rest, "--json")
@@ -1604,7 +1629,11 @@ def _cmd_launch_host_cli(args: list[str], host: "Host", host_name: str) -> None:
     slug = rest[0]
 
     answer = answer_object_for_host(
-        "launch", host, host_name, ["launch", slug, "--group", group, "--json"],
+        "launch",
+        host,
+        host_name,
+        ["launch", slug, "--group", group, "--json"],
+        connect_timeout=connect_timeout,
     )
 
     if answer.answer is not None:
@@ -2328,13 +2357,21 @@ def _cmd_kill_cli(args: list[str], env: dict[str, str] | None = None) -> None:
 _KILL_HOST_UNKNOWN_EXIT_CODE = 3
 
 
-def _cmd_kill_host_cli(args: list[str], host: "Host", host_name: str) -> None:
+def _cmd_kill_host_cli(
+    args: list[str], host: "Host", host_name: str, *, connect_timeout: float | None = None
+) -> None:
     """camp kill <ref> --host <name> [--json].
 
     Reached ONLY from `cli/dispatch.py`'s `--host` handling for `kill`.
     Fully groupless, exactly like the local `_cmd_kill_cli`: the reference
     names the session and the session names everything else, so `--host`
     carries the reference and nothing else.
+
+    ``connect_timeout`` is the operator's resolved value
+    (`camp.host.config.connect_timeout_seconds()`, read once by `main()`'s
+    ``--host`` handling and passed down); ``None`` (a direct call with no
+    caller-supplied value) falls back to the transport's own documented
+    default.
 
     Relays through `camp.host.relay.answer_payload_for_host`, the payload
     reader that accepts either shape a stop can answer with: one object
@@ -2353,7 +2390,11 @@ def _cmd_kill_host_cli(args: list[str], host: "Host", host_name: str) -> None:
     which the far side controls and does not even reliably reach this side.
     """
     from ..host.relay import Certainty, answer_payload_for_host
+    from ..host.transport import DEFAULT_CONNECT_TIMEOUT_SECONDS
     from ..spine import _die
+
+    if connect_timeout is None:
+        connect_timeout = DEFAULT_CONNECT_TIMEOUT_SECONDS
 
     rest = list(args)
     as_json = _consume_flag(rest, "--json")
@@ -2379,7 +2420,7 @@ def _cmd_kill_host_cli(args: list[str], host: "Host", host_name: str) -> None:
         )
 
     answer = answer_payload_for_host(
-        "kill", host, host_name, ["kill", ref, "--json"],
+        "kill", host, host_name, ["kill", ref, "--json"], connect_timeout=connect_timeout,
     )
 
     obj = answer.obj

@@ -892,3 +892,160 @@ def test_a_malformed_local_row_is_skipped_consistently_with_remote_rows(
     assert "local-ok" in captured.out
     assert "slug" in captured.err
     assert "skipping" in captured.err
+
+
+# ---------------------------------------------------------------------------
+# connect_timeout — the top-level hosts.toml scalar threads to every
+# transport call this option's two routes make
+# (task/connect-timeout-is-declared-in-the-host-file).
+# ---------------------------------------------------------------------------
+
+
+def _hosts_and_group_env_with_connect_timeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, connect_timeout_line: str
+) -> None:
+    """`hosts_and_group_env`'s same two declared hosts and one group, but
+    with the caller's own top-level ``connect_timeout`` line (or none)
+    prepended to hosts.toml — the fixture the two declared-hosts fixtures
+    above already establish, extended with the one line these tests vary."""
+    groups_dir = tmp_path / "groups"
+    groups_dir.mkdir(parents=True)
+    (groups_dir / "testgrp.toml").write_text(
+        '[group]\nname = "testgrp"\n\n'
+        '[[members]]\nname = "member-a"\nrepo_root = "/tmp/fake-member-a"\n'
+    )
+    (tmp_path / "hosts.toml").write_text(
+        f"{connect_timeout_line}[hosts.andromeda]\n[hosts.lookout]\n", encoding="utf-8"
+    )
+    monkeypatch.setenv("CAMP_CONFIG_DIR", str(tmp_path))
+    monkeypatch.setenv("CAMP_STATE_DIR", str(tmp_path / "state"))
+
+
+def test_all_hosts_fanout_threads_declared_connect_timeout_to_every_transport_call(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    _hosts_and_group_env_with_connect_timeout(tmp_path, monkeypatch, "connect_timeout = 3\n")
+    transport = _transport_module()
+    seen: list[float] = []
+
+    def fake_run_camp(host, remote_argv, **kw):
+        seen.append(kw.get("connect_timeout"))
+        return _answered([])
+
+    monkeypatch.setattr(transport, "run_camp", fake_run_camp)
+
+    code = _run(monkeypatch, ["list", "-a", "--group", "testgrp", "--json"])
+    capsys.readouterr()
+    assert code == 0
+    assert seen == [3.0, 3.0]
+
+
+def test_all_hosts_fanout_uses_a_different_declared_connect_timeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """The second of the two points that change the answer — a different
+    declared value causes the transport to be invoked with THAT value,
+    proving this is not just "any nonzero value passes through"."""
+    _hosts_and_group_env_with_connect_timeout(tmp_path, monkeypatch, "connect_timeout = 42\n")
+    transport = _transport_module()
+    seen: list[float] = []
+
+    def fake_run_camp(host, remote_argv, **kw):
+        seen.append(kw.get("connect_timeout"))
+        return _answered([])
+
+    monkeypatch.setattr(transport, "run_camp", fake_run_camp)
+
+    code = _run(monkeypatch, ["list", "-a", "--group", "testgrp", "--json"])
+    capsys.readouterr()
+    assert code == 0
+    assert seen == [42.0, 42.0]
+
+
+def test_all_hosts_fanout_uses_the_transports_default_when_connect_timeout_absent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    _hosts_and_group_env_with_connect_timeout(tmp_path, monkeypatch, "")
+    import camp.launch.session as launch_session
+
+    monkeypatch.setattr(launch_session, "enumerate_records", lambda *a, **k: [])
+    transport = _transport_module()
+    seen: list[float] = []
+
+    def fake_run_camp(host, remote_argv, **kw):
+        seen.append(kw.get("connect_timeout"))
+        return _answered([])
+
+    monkeypatch.setattr(transport, "run_camp", fake_run_camp)
+
+    code = _run(monkeypatch, ["sessions", "-a", "--group", "testgrp", "--json"])
+    capsys.readouterr()
+    assert code == 0
+    assert seen == [
+        transport.DEFAULT_CONNECT_TIMEOUT_SECONDS,
+        transport.DEFAULT_CONNECT_TIMEOUT_SECONDS,
+    ]
+
+
+def test_single_host_list_threads_declared_connect_timeout_to_the_relay(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    _hosts_and_group_env_with_connect_timeout(tmp_path, monkeypatch, "connect_timeout = 7\n")
+    transport = _transport_module()
+    seen: list[float] = []
+
+    def fake_run_camp(host, remote_argv, **kw):
+        seen.append(kw.get("connect_timeout"))
+        return _answered([])
+
+    monkeypatch.setattr(transport, "run_camp", fake_run_camp)
+
+    code = _run(monkeypatch, ["list", "--host", "andromeda", "--json"])
+    capsys.readouterr()
+    assert code == 0
+    assert seen == [7.0]
+
+
+def test_relay_route_verb_set_is_every_host_verb_except_attach() -> None:
+    """Pins the enumeration this parametrized test below drives against —
+    `_HOST_VERBS` minus `attach` (which hands off interactively, with no
+    transport seam to assert at) is exactly {list, sessions, launch, kill}.
+    A verb added to `_HOST_VERBS` without a matching case below breaks this
+    test, not silently ships uncovered."""
+    dispatch = _dispatch_module()
+    assert dispatch._HOST_VERBS - {"attach"} == {"list", "sessions", "launch", "kill"}
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["list", "--host", "andromeda", "--json"],
+        ["sessions", "--host", "andromeda", "--json"],
+        ["launch", "somews", "--host", "andromeda", "--group", "testgrp", "--json"],
+        ["kill", "ref1", "--host", "andromeda", "--json"],
+    ],
+    ids=["list", "sessions", "launch", "kill"],
+)
+def test_every_relay_host_verb_threads_the_declared_connect_timeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture, argv: list[str]
+) -> None:
+    """Drives every member of `_HOST_VERBS` reachable through the single-
+    host `--host` relay (list, sessions, launch, kill — attach's `--host`
+    path hands off interactively and is covered separately, in
+    test_attach_cli.py's cross-host probe route). A verb left reading the
+    old constant instead of the resolved value fails this test rather than
+    shipping — the exact regression a sample of two verbs would let through."""
+    _hosts_and_group_env_with_connect_timeout(tmp_path, monkeypatch, "connect_timeout = 9\n")
+    transport = _transport_module()
+    seen: list[float] = []
+
+    def fake_run_camp(host, remote_argv, **kw):
+        seen.append(kw.get("connect_timeout"))
+        return transport.Unreachable(reason="Connection timed out")
+
+    monkeypatch.setattr(transport, "run_camp", fake_run_camp)
+
+    _run(monkeypatch, argv)
+    capsys.readouterr()
+
+    assert seen == [9.0]

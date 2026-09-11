@@ -478,3 +478,64 @@ def test_default_worker_is_the_relay_worker_via_the_listing_path():
     assert answer.rows == [
         {"ok": True, "slug": "camp-attach", "host": "andromeda"}
     ]
+
+
+# ---------------------------------------------------------------------------
+# connect_timeout — threads into the default worker's own `answer_for_host`
+# call, composing with `worker=` rather than duplicating it
+# (task/connect-timeout-is-declared-in-the-host-file).
+# ---------------------------------------------------------------------------
+
+
+def test_connect_timeout_threads_into_the_default_workers_transport_call():
+    """No `worker=` injected — the default worker must still carry the
+    caller's `connect_timeout` all the way to the ssh argv the injected
+    `runner` receives, proven by inspecting that argv rather than the
+    runner's own `timeout` (execution_timeout) parameter."""
+    merge = _merge_module()
+    transport = _transport_module()
+
+    seen_argv: list[list[str]] = []
+
+    def runner(argv, timeout, env):
+        seen_argv.append(list(argv))
+        return transport.RawResult(stdout="[]", stderr="", exit_code=0)
+
+    hosts = [("andromeda", _host("andromeda-ssh"))]
+
+    merge.answer_all_hosts_concurrently(
+        _local_answer(),
+        hosts,
+        verb="list",
+        remote_argv=["list", "--all-groups", "--json"],
+        runner=runner,
+        connect_timeout=3.0,
+    )
+
+    assert len(seen_argv) == 1
+    assert "ConnectTimeout=3" in seen_argv[0]
+
+
+def test_default_worker_uses_the_transports_default_connect_timeout_when_none_given():
+    merge = _merge_module()
+    transport = _transport_module()
+
+    seen_argv: list[list[str]] = []
+
+    def runner(argv, timeout, env):
+        seen_argv.append(list(argv))
+        return transport.RawResult(stdout="[]", stderr="", exit_code=0)
+
+    hosts = [("andromeda", _host("andromeda-ssh"))]
+
+    merge.answer_all_hosts_concurrently(
+        _local_answer(),
+        hosts,
+        verb="list",
+        remote_argv=["list", "--all-groups", "--json"],
+        runner=runner,
+    )
+
+    assert len(seen_argv) == 1
+    expected = f"ConnectTimeout={transport.DEFAULT_CONNECT_TIMEOUT_SECONDS:g}"
+    assert expected in seen_argv[0]
