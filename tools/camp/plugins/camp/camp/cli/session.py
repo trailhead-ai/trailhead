@@ -2278,6 +2278,193 @@ def _cmd_kill_cli(args: list[str], env: dict[str, str] | None = None) -> None:
     _report_stop(candidate, outcome="stopped", as_json=as_json)
 
 
+#: Exit code for `camp kill --host` when the connection completed and the
+#: invocation then exceeded its bound without answering (`Certainty.UNKNOWN`).
+#: Distinct from 0 (success), from `_AMBIGUOUS_EXIT_CODE` (the reference
+#: matched more than one session), and from every certain-failure exit — the
+#: fixed `1` the six locally-classified transport failures share, or the far
+#: side's own exit code when the transport happens to propagate it — so a
+#: scripted caller can branch on "check before retrying" without parsing
+#: stderr (docs/design/stopping-a-session-on-a-named-machine.md, "Two
+#: reserved exit codes, not one"). Both this and `_AMBIGUOUS_EXIT_CODE` are
+#: RESERVED against pass-through: a remote status landing on either
+#: collapses to 1 rather than being relayed unchanged.
+_KILL_HOST_UNKNOWN_EXIT_CODE = 3
+
+
+def _cmd_kill_host_cli(args: list[str], host: "Host", host_name: str) -> None:
+    """camp kill <ref> --host <name> [--json].
+
+    Reached ONLY from `cli/dispatch.py`'s `--host` handling for `kill` —
+    that routing is a later task's job
+    (`task/kill-joins-the-host-verbs-and-the-group-requirement-stops-riding-on-state-changing`);
+    nothing in `dispatch.py` calls this yet. Fully groupless, exactly like
+    the local `_cmd_kill_cli`: the reference names the session and the
+    session names everything else, so `--host` carries the reference and
+    nothing else.
+
+    Relays through `camp.host.relay.answer_payload_for_host`, the payload
+    reader that accepts either shape a stop can answer with: one object
+    (stopped, or already down), or the candidate rows an ambiguous
+    reference produces — the same two shapes `camp kill` answers with
+    locally, now carried over the wire.
+
+    `Certainty.HAPPENED` is necessary but not sufficient here: this peer's
+    SSH transport does not propagate the remote command's own exit status
+    (see `camp.host.transport`'s module docstring), so a far side that
+    refused, crashed, or could not resolve camp still classifies as
+    `Answered`/HAPPENED. `answer.obj` / `answer.rows` being `None` is what
+    decides "nothing relayable came back" — never the certainty or the raw
+    exit code alone. Exit status is likewise decided from the payload's own
+    shape (`obj` vs `rows` vs neither) and never from `answer.exit_code`,
+    which the far side controls and does not even reliably reach this side.
+    """
+    from ..host.relay import Certainty, answer_payload_for_host
+    from ..spine import _die
+
+    rest = list(args)
+    as_json = _consume_flag(rest, "--json")
+
+    if not rest:
+        _die(
+            "camp kill: requires a session reference — an unambiguous prefix of a "
+            "session's name or id, as `camp sessions` and `camp launch --resume` "
+            "use"
+        )
+    if len(rest) > 1:
+        _die(
+            f"camp kill: one session reference, not {len(rest)} — a stop addresses "
+            "exactly one session"
+        )
+    ref = rest[0]
+    if not ref.strip():
+        _die("camp kill: requires a session reference")
+    if ref.startswith("-"):
+        _die(
+            f"camp kill: {ref!r} looks like a flag, not a session reference — a "
+            "reference may not start with a dash"
+        )
+
+    answer = answer_payload_for_host(
+        "kill", host, host_name, ["kill", ref, "--json"],
+    )
+
+    if answer.obj is not None:
+        session_id = answer.obj.get("session_id")
+        tmux_name = answer.obj.get("tmux_name")
+        outcome = answer.obj.get("outcome")
+        if outcome == "already-down":
+            print(
+                f"camp kill: session {session_id} ({tmux_name}) on host "
+                f"{host_name!r} was already down — nothing to stop",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                f"camp kill: stopped session {session_id} ({tmux_name}) on host "
+                f"{host_name!r} — its memory is reclaimed; `camp launch --resume "
+                f"{session_id} --host {host_name}` brings it back under this same "
+                "reference",
+                file=sys.stderr,
+            )
+        for notice in answer.notices:
+            print(notice, file=sys.stderr)
+        if as_json:
+            payload = dict(answer.obj)
+            payload["host"] = host_name
+            print(json.dumps(payload))
+        else:
+            print(session_id)
+        sys.exit(0)
+
+    if answer.rows is not None:
+        # The rows ARE the answer to what was asked, so — mirroring
+        # `_print_candidates` — they print on stdout before camp's own line,
+        # never suppressed by a non-zero exit.
+        if as_json:
+            print(json.dumps(answer.rows))
+        print(
+            f"camp kill: {ref!r} matched more than one session on host "
+            f"{host_name!r} — re-run with a longer prefix naming exactly one",
+            file=sys.stderr,
+        )
+        for notice in answer.notices:
+            print(notice, file=sys.stderr)
+        sys.exit(_AMBIGUOUS_EXIT_CODE)
+
+    if answer.certainty == Certainty.UNKNOWN:
+        # The instruction to check comes FIRST, before any explanation, and
+        # reads as an instruction naming the command to run. The fallback —
+        # reach the machine directly — follows it and precedes the
+        # explanation: the machine the check would ask is, by construction,
+        # the one that just stopped answering, so a report naming only the
+        # check hands an operator a loop (design doc, "A retry is the
+        # dangerous move" / "State — the connection drops after the stop
+        # was sent").
+        command = f"camp sessions --host {host_name}"
+        print(
+            f"camp kill: check before retrying — run: {command}",
+            file=sys.stderr,
+        )
+        print(
+            f"camp kill: if that check cannot answer either, reach host "
+            f"{host_name!r} directly and look",
+            file=sys.stderr,
+        )
+        print(
+            f"camp kill: camp does not know whether session {ref!r} was stopped "
+            f"on host {host_name!r} — the connection stopped answering before "
+            "the far side reported back",
+            file=sys.stderr,
+        )
+        for notice in answer.notices:
+            print(notice, file=sys.stderr)
+        if as_json:
+            print(
+                json.dumps(
+                    {
+                        "ok": False,
+                        "host": host_name,
+                        "certainty": answer.certainty.value,
+                        "reason": "connection stopped answering before the far "
+                        "side reported back",
+                    }
+                )
+            )
+        sys.exit(_KILL_HOST_UNKNOWN_EXIT_CODE)
+
+    # A certain failure: either one of the six locally-classified transport
+    # states (host unreachable, no pinned key, ...), a far-side refusal
+    # relayed in its own words, or an answer camp could not parse. Either
+    # way nothing was stopped, and there is nothing to go check — camp's own
+    # sentence leads, unconditionally before the far side's relayed words.
+    print(f"camp kill: no session was stopped on host {host_name!r}", file=sys.stderr)
+    for notice in answer.notices:
+        print(notice, file=sys.stderr)
+
+    # Both reserved codes are collapsed here, never passed through: a remote
+    # camp that happens to exit 2 or 3 for its own reasons would otherwise
+    # impersonate camp's own "ambiguous" or "unknown" signal, and the two
+    # codes a scripted caller can branch on without parsing prose would stop
+    # meaning what they say.
+    exit_code = answer.exit_code
+    if exit_code in (0, _AMBIGUOUS_EXIT_CODE, _KILL_HOST_UNKNOWN_EXIT_CODE):
+        exit_code = 1
+    if as_json:
+        reason = answer.notices[-1] if answer.notices else "no session was stopped"
+        print(
+            json.dumps(
+                {
+                    "ok": False,
+                    "host": host_name,
+                    "certainty": answer.certainty.value,
+                    "reason": reason,
+                }
+            )
+        )
+    sys.exit(exit_code)
+
+
 # ---------------------------------------------------------------------------
 # camp attach — hand the operator's terminal to a running session
 #

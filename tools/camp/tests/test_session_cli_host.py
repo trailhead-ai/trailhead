@@ -939,3 +939,361 @@ def test_launch_host_far_side_invoked_with_group_slug_and_json(
 
     remote_argv = captured_argv[0]
     assert remote_argv == ["launch", "ws-a", "--group", "demo", "--json"]
+
+
+# ---------------------------------------------------------------------------
+# camp kill --host <name> — handler-level tests
+#
+# `_cmd_kill_host_cli` is called DIRECTLY here rather than through
+# `dispatch.main()` — dispatch does not yet route `kill --host` to it (that
+# routing is a later task's job: `kill joins the host verbs`). Calling the
+# handler directly is still a real behavioural test: it executes the
+# subject and varies the payload the relay hands it, which is exactly what
+# these tests pin. The end-to-end `camp kill --host` CLI reach is the next
+# task's to prove.
+# ---------------------------------------------------------------------------
+
+
+def _relay_module():
+    return importlib.import_module("camp.host.relay")
+
+
+def _config_module():
+    return importlib.import_module("camp.host.config")
+
+
+def _kill_host() -> "object":
+    config = _config_module()
+    return config.Host(ssh="andromeda", camp_bin="camp")
+
+
+def _rig_payload(monkeypatch: pytest.MonkeyPatch, answer, *, capture_argv: list | None = None):
+    """Point `answer_payload_for_host` at a canned `HostPayloadAnswer`,
+    capturing the verb/remote_argv it was called with when given."""
+    relay = _relay_module()
+
+    def fake_answer_payload_for_host(verb, host, host_name, remote_argv, **kwargs):
+        if capture_argv is not None:
+            capture_argv.append((verb, list(remote_argv)))
+        return answer
+
+    monkeypatch.setattr(relay, "answer_payload_for_host", fake_answer_payload_for_host)
+    return relay
+
+
+def _call_kill_host(
+    monkeypatch: pytest.MonkeyPatch, args: list[str]
+) -> tuple[int, "pytest.CaptureFixture"]:
+    import camp.cli.session as cli_session
+
+    with pytest.raises(SystemExit) as excinfo:
+        cli_session._cmd_kill_host_cli(args, _kill_host(), "andromeda")
+    return excinfo.value.code
+
+
+class TestKillHostStoppedSuccess:
+    def test_stopped_object_exits_zero_stdout_is_only_the_session_id(
+        self, monkeypatch, capsys: pytest.CaptureFixture
+    ) -> None:
+        relay = _relay_module()
+        answer = relay.HostPayloadAnswer(
+            obj={"session_id": "sess-1", "tmux_name": "camp-feat-x-sess1", "outcome": "stopped"},
+            rows=None,
+            certainty=relay.Certainty.HAPPENED,
+            notices=[],
+            exit_code=0,
+        )
+        _rig_payload(monkeypatch, answer)
+
+        code = _call_kill_host(monkeypatch, ["sess-1"])
+
+        captured = capsys.readouterr()
+        assert code == 0
+        assert captured.out == "sess-1\n"
+
+    def test_stopped_object_stderr_names_machine_and_resume_reference(
+        self, monkeypatch, capsys: pytest.CaptureFixture
+    ) -> None:
+        relay = _relay_module()
+        answer = relay.HostPayloadAnswer(
+            obj={"session_id": "sess-1", "tmux_name": "camp-feat-x-sess1", "outcome": "stopped"},
+            rows=None,
+            certainty=relay.Certainty.HAPPENED,
+            notices=[],
+            exit_code=0,
+        )
+        _rig_payload(monkeypatch, answer)
+
+        _call_kill_host(monkeypatch, ["sess-1"])
+
+        err = capsys.readouterr().err
+        assert "andromeda" in err
+        assert "camp launch --resume sess-1" in err
+
+    def test_already_down_exits_zero_and_json_preserves_the_outcome_field(
+        self, monkeypatch, capsys: pytest.CaptureFixture
+    ) -> None:
+        relay = _relay_module()
+        answer = relay.HostPayloadAnswer(
+            obj={"session_id": "sess-2", "tmux_name": "camp-feat-x-sess2", "outcome": "already-down"},
+            rows=None,
+            certainty=relay.Certainty.HAPPENED,
+            notices=[],
+            exit_code=0,
+        )
+        _rig_payload(monkeypatch, answer)
+
+        code = _call_kill_host(monkeypatch, ["sess-2", "--json"])
+
+        captured = capsys.readouterr()
+        assert code == 0
+        payload = json.loads(captured.out)
+        assert payload["outcome"] == "already-down"
+        assert payload["session_id"] == "sess-2"
+
+    def test_already_down_stderr_line_is_distinct_from_the_stopped_line(
+        self, monkeypatch, capsys: pytest.CaptureFixture
+    ) -> None:
+        relay = _relay_module()
+
+        stopped_answer = relay.HostPayloadAnswer(
+            obj={"session_id": "sess-3", "tmux_name": "camp-feat-x-sess3", "outcome": "stopped"},
+            rows=None,
+            certainty=relay.Certainty.HAPPENED,
+            notices=[],
+            exit_code=0,
+        )
+        _rig_payload(monkeypatch, stopped_answer)
+        _call_kill_host(monkeypatch, ["sess-3"])
+        stopped_err = capsys.readouterr().err
+
+        already_down_answer = relay.HostPayloadAnswer(
+            obj={"session_id": "sess-3", "tmux_name": "camp-feat-x-sess3", "outcome": "already-down"},
+            rows=None,
+            certainty=relay.Certainty.HAPPENED,
+            notices=[],
+            exit_code=0,
+        )
+        _rig_payload(monkeypatch, already_down_answer)
+        _call_kill_host(monkeypatch, ["sess-3"])
+        already_down_err = capsys.readouterr().err
+
+        assert stopped_err != already_down_err
+
+    def test_well_formed_object_answer_with_nonzero_remote_exit_still_renders_success(
+        self, monkeypatch, capsys: pytest.CaptureFixture
+    ) -> None:
+        # The design doc: "A well-formed object answer whose remote status
+        # was non-zero still renders as success, because the transport does
+        # not carry that status." exit_code=1 here is the REMOTE's own exit
+        # status arriving alongside a parsed object — never read for the
+        # rendering decision.
+        relay = _relay_module()
+        answer = relay.HostPayloadAnswer(
+            obj={"session_id": "sess-4", "tmux_name": "camp-feat-x-sess4", "outcome": "stopped"},
+            rows=None,
+            certainty=relay.Certainty.HAPPENED,
+            notices=[],
+            exit_code=1,
+        )
+        _rig_payload(monkeypatch, answer)
+
+        code = _call_kill_host(monkeypatch, ["sess-4"])
+
+        assert code == 0
+
+
+class TestKillHostAmbiguous:
+    def test_ambiguous_rows_exit_two_with_candidate_rows_on_stdout(
+        self, monkeypatch, capsys: pytest.CaptureFixture
+    ) -> None:
+        relay = _relay_module()
+        rows = [
+            {"session_id": "sess-a1", "derived_name": "camp-feat-x-a1", "host": "andromeda"},
+            {"session_id": "sess-a2", "derived_name": "camp-feat-x-a2", "host": "andromeda"},
+        ]
+        answer = relay.HostPayloadAnswer(
+            obj=None,
+            rows=rows,
+            certainty=relay.Certainty.HAPPENED,
+            notices=["camp kill: 'sess' matches 2 sessions (listed above)"],
+            exit_code=2,
+        )
+        _rig_payload(monkeypatch, answer)
+
+        code = _call_kill_host(monkeypatch, ["sess", "--json"])
+
+        captured = capsys.readouterr()
+        assert code == 2
+        assert json.loads(captured.out) == rows
+
+    def test_ambiguous_rows_stderr_carries_the_far_sides_how_many_matched_sentence(
+        self, monkeypatch, capsys: pytest.CaptureFixture
+    ) -> None:
+        relay = _relay_module()
+        rows = [
+            {"session_id": "sess-a1", "derived_name": "camp-feat-x-a1", "host": "andromeda"},
+        ]
+        answer = relay.HostPayloadAnswer(
+            obj=None,
+            rows=rows,
+            certainty=relay.Certainty.HAPPENED,
+            notices=["camp kill: 'sess' matches 2 sessions (listed above) — re-run with a longer prefix"],
+            exit_code=2,
+        )
+        _rig_payload(monkeypatch, answer)
+
+        _call_kill_host(monkeypatch, ["sess"])
+
+        err = capsys.readouterr().err
+        assert "matches 2 sessions" in err
+
+
+class TestKillHostUnknownOutcome:
+    def test_unknown_outcome_exits_three_and_json_carries_certainty_unknown(
+        self, monkeypatch, capsys: pytest.CaptureFixture
+    ) -> None:
+        relay = _relay_module()
+        answer = relay.HostPayloadAnswer(
+            obj=None,
+            rows=None,
+            certainty=relay.Certainty.UNKNOWN,
+            notices=[],
+            exit_code=1,
+        )
+        _rig_payload(monkeypatch, answer)
+
+        code = _call_kill_host(monkeypatch, ["sess-5", "--json"])
+
+        captured = capsys.readouterr()
+        assert code == 3
+        payload = json.loads(captured.out)
+        assert payload["certainty"] == "unknown"
+
+    def test_unknown_outcome_stderr_ordering_check_then_fallback(
+        self, monkeypatch, capsys: pytest.CaptureFixture
+    ) -> None:
+        relay = _relay_module()
+        answer = relay.HostPayloadAnswer(
+            obj=None,
+            rows=None,
+            certainty=relay.Certainty.UNKNOWN,
+            notices=[],
+            exit_code=1,
+        )
+        _rig_payload(monkeypatch, answer)
+
+        _call_kill_host(monkeypatch, ["sess-5"])
+
+        lines = capsys.readouterr().err.splitlines()
+        assert "camp sessions --host andromeda" in lines[0]
+        assert "directly and look" in lines[1]
+
+
+class TestKillHostCertainFailure:
+    def test_certain_failure_exits_one_camps_line_strictly_before_far_side_words(
+        self, monkeypatch, capsys: pytest.CaptureFixture
+    ) -> None:
+        relay = _relay_module()
+        answer = relay.HostPayloadAnswer(
+            obj=None,
+            rows=None,
+            certainty=relay.Certainty.DID_NOT_HAPPEN,
+            notices=["camp kill: session 'sess-6' does not match any session on this machine"],
+            exit_code=1,
+        )
+        _rig_payload(monkeypatch, answer)
+
+        code = _call_kill_host(monkeypatch, ["sess-6"])
+
+        lines = capsys.readouterr().err.splitlines()
+        assert code == 1
+        assert "no session was stopped" in lines[0]
+        assert lines[1] == "camp kill: session 'sess-6' does not match any session on this machine"
+
+    def test_remote_exit_code_two_alongside_unparsable_answer_collapses_to_one(
+        self, monkeypatch, capsys: pytest.CaptureFixture
+    ) -> None:
+        relay = _relay_module()
+        answer = relay.HostPayloadAnswer(
+            obj=None,
+            rows=None,
+            certainty=relay.Certainty.HAPPENED,
+            notices=[],
+            exit_code=2,
+        )
+        _rig_payload(monkeypatch, answer)
+
+        code = _call_kill_host(monkeypatch, ["sess-7"])
+
+        assert code == 1
+
+    def test_remote_exit_code_three_alongside_unparsable_answer_collapses_to_one(
+        self, monkeypatch, capsys: pytest.CaptureFixture
+    ) -> None:
+        relay = _relay_module()
+        answer = relay.HostPayloadAnswer(
+            obj=None,
+            rows=None,
+            certainty=relay.Certainty.HAPPENED,
+            notices=[],
+            exit_code=3,
+        )
+        _rig_payload(monkeypatch, answer)
+
+        code = _call_kill_host(monkeypatch, ["sess-8"])
+
+        assert code == 1
+
+
+class TestKillHostRelaysCorrectRemoteArgv:
+    def test_relays_kill_ref_json_to_the_named_machine(
+        self, monkeypatch, capsys: pytest.CaptureFixture
+    ) -> None:
+        relay = _relay_module()
+        answer = relay.HostPayloadAnswer(
+            obj={"session_id": "sess-9", "tmux_name": "camp-feat-x-sess9", "outcome": "stopped"},
+            rows=None,
+            certainty=relay.Certainty.HAPPENED,
+            notices=[],
+            exit_code=0,
+        )
+        captured_argv: list = []
+        _rig_payload(monkeypatch, answer, capture_argv=captured_argv)
+
+        _call_kill_host(monkeypatch, ["sess-9"])
+
+        assert captured_argv == [("kill", ["kill", "sess-9", "--json"])]
+
+
+class TestKillHostLocalReRefusal:
+    def test_no_reference_refuses_locally_without_reaching_the_relay(
+        self, monkeypatch, capsys: pytest.CaptureFixture
+    ) -> None:
+        relay = _relay_module()
+        called = []
+
+        def boom(*a, **k):
+            called.append(True)
+            raise AssertionError("must not reach the relay with no reference")
+
+        monkeypatch.setattr(relay, "answer_payload_for_host", boom)
+
+        code = _call_kill_host(monkeypatch, [])
+
+        assert code != 0
+        assert called == []
+
+    def test_two_references_refuses_locally_without_reaching_the_relay(
+        self, monkeypatch, capsys: pytest.CaptureFixture
+    ) -> None:
+        relay = _relay_module()
+
+        def boom(*a, **k):
+            raise AssertionError("must not reach the relay with two references")
+
+        monkeypatch.setattr(relay, "answer_payload_for_host", boom)
+
+        code = _call_kill_host(monkeypatch, ["sess-a", "sess-b"])
+
+        assert code != 0
