@@ -65,34 +65,53 @@ resolved *transcript_path* (`send_conversation`) or a *locate_transcript*
 callable shaped exactly like `Harness.session_transcript_path`
 (`send_workspace_conversations`) — the harness boundary stays the only place
 that rule lives. What this module DOES know, because it was measured on the
-real store rather than inferred: a conversation that dispatched a subagent
-owns a sibling directory named exactly its session id, next to its own
-`<session-id>.jsonl`, holding every nested `.jsonl` file this conversation
-owns at any depth beneath it. That sibling directory is "the conversation's
-own directory" the test contract refers to — a nested file is addressed on
-the wire by its path relative to THAT directory, never to the shared
-`projects/<munged>/` directory one level up, and never by an absolute path.
+real store rather than inferred: a conversation that dispatched a subagent or
+produced tool-result artifacts owns a sibling directory named exactly its
+session id, next to its own `<session-id>.jsonl`, holding every file this
+conversation owns at any depth beneath it — `.jsonl` transcripts under
+`subagents/`, and `.txt`/`.pdf`/`.json` artifacts under `tool-results/` that
+carry no `.jsonl` at all. **The unit of transfer is that whole directory
+tree, whatever it contains — not a filtered set of transcript files.**
+Filtering by extension would both misdescribe the unit and require more code
+than streaming the directory as-is. That sibling directory is "the
+conversation's own directory" the test contract refers to — a nested file is
+addressed on the wire by its path relative to THAT directory, never to the
+shared `projects/<munged>/` directory one level up, and never by an absolute
+path. A `memory/` directory sitting beside the session directories under
+that same shared directory is project-scoped agent memory, not part of any
+conversation, and is never reachable from a conversation's own directory —
+it is excluded by construction, not by a name-based filter.
 
 **Stream format.** The sender-side producer (`build_conversation_archive_argv`
 runs this module itself as a standalone script, mirroring
 `transfer/worktree.py`'s `build_archive_argv`) emits a `tarfile` stream
 (`mode="w|"`) with exactly one member named `transcript.jsonl` — the
-conversation's own top-level transcript — followed by every nested `.jsonl`
-file, each named by its path relative to the conversation's own directory
-(e.g. `subagents/agent-<hex>.jsonl`). A conversation with no nested directory
-emits `transcript.jsonl` alone.
+conversation's own top-level transcript — followed by every file under the
+conversation's own directory, whatever its extension, each named by its path
+relative to that directory (e.g. `subagents/agent-<hex>.jsonl`,
+`tool-results/result-1.txt`). A conversation with no nested directory emits
+`transcript.jsonl` alone.
 
 **Torn-copy detection is a full-content digest, not a size or mtime check.**
 `send_conversation` hashes every file that will cross — the top-level
-transcript plus, when present, every nested `.jsonl` file, each hash entry
-labelled by its member name so a file appearing or disappearing between the
-two digests counts as a change too — once immediately before the producer is
-spawned and once immediately after `stream_camp` reports success. A mismatch
-raises :class:`TranscriptChanged`, naming the conversation, and is never
-raised when the transport itself already failed
+transcript plus, when present, every file under the nested directory, each
+hash entry labelled by its member name so a file appearing or disappearing
+between the two digests counts as a change too — once immediately before the
+producer is spawned and once immediately after `stream_camp` reports
+success. A mismatch raises :class:`TranscriptChanged`, naming the
+conversation, and is never raised when the transport itself already failed
 (:class:`~camp.host.transport.ProducerFailed` and every other non-`Answered`
 outcome are returned untouched) — so the abort is always distinguishable from
 a transport failure, never a second label for the same one.
+
+**No `--member` on the wire.** Conversations are scoped to the workspace, not
+to a member: `workspace_conversations` enumerates workspace-wide and
+`subpath` already locates a conversation that started in a member
+subdirectory, so the peer resolves the workspace directory from
+`--group`/`--slug` alone. `send_conversation` and
+`send_workspace_conversations` therefore take no `member` argument at all —
+unlike `transfer/history.py` and `transfer/worktree.py`, which are per-member
+phases and do carry one.
 """
 
 from __future__ import annotations
@@ -286,12 +305,16 @@ def _conversation_files(
     transcript_path: Path, nested_dir: Path | None
 ) -> list[tuple[str, Path]]:
     """``(member_name, path)`` for every file *one* conversation contributes
-    to the stream — the top-level transcript, always first, then every
-    nested `.jsonl` file addressed relative to *nested_dir* itself (the
-    conversation's own directory), in a stable sorted order."""
+    to the stream — the top-level transcript, always first, then every file
+    under *nested_dir* (the conversation's own directory), whatever its
+    extension, addressed relative to *nested_dir* itself, in a stable sorted
+    order. *nested_dir* is scoped to the conversation's own session-id
+    directory, never the shared projects-key directory it sits in, so a
+    sibling `memory/` directory at that outer level is never reachable from
+    here."""
     files: list[tuple[str, Path]] = [(_TRANSCRIPT_MEMBER, transcript_path)]
     if nested_dir is not None and nested_dir.is_dir():
-        for path in sorted(nested_dir.rglob("*.jsonl")):
+        for path in sorted(nested_dir.rglob("*")):
             if path.is_file():
                 files.append((path.relative_to(nested_dir).as_posix(), path))
     return files
@@ -319,9 +342,10 @@ def write_conversation_archive(
     transcript_path: Path, nested_dir: Path | None, fileobj: BinaryIO
 ) -> None:
     """Stream a tar of one conversation's files into *fileobj* — the
-    top-level transcript as `transcript.jsonl`, then every nested `.jsonl`
-    file under its path relative to *nested_dir*. See the module docstring
-    for the exact member-naming contract."""
+    top-level transcript as `transcript.jsonl`, then every file under
+    *nested_dir*, whatever its extension, named by its path relative to
+    *nested_dir*. See the module docstring for the exact member-naming
+    contract."""
     with tarfile.open(fileobj=fileobj, mode="w|") as tf:
         for name, path in _conversation_files(transcript_path, nested_dir):
             tf.add(str(path), arcname=name)
@@ -347,7 +371,6 @@ def send_conversation(
     *,
     group: str,
     slug: str,
-    member: str,
     session_id: str,
     subpath: PurePosixPath,
     transcript_path: Path,
@@ -383,8 +406,6 @@ def send_conversation(
         group,
         "--slug",
         slug,
-        "--member",
-        member,
         "--session-id",
         session_id,
         "--subpath",
@@ -414,7 +435,6 @@ def send_workspace_conversations(
     *,
     group: str,
     slug: str,
-    member: str,
     workspace: Path,
     conversations: Iterable[WorkspaceConversation],
     locate_transcript: Callable[[str, Path], Path | None],
@@ -464,7 +484,6 @@ def send_workspace_conversations(
             host,
             group=group,
             slug=slug,
-            member=member,
             session_id=conversation.session_id,
             subpath=conversation.subpath,
             transcript_path=transcript_path,
