@@ -10,6 +10,7 @@ Test contract:
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -373,6 +374,182 @@ def test_doctor_json_deeply_nested_hosts_toml_fails_host_name_row_not_a_tracebac
     host_row = next(c for c in report["checks"] if c["check"] == "host_name")
     assert host_row["pass"] is False
     assert "hosts.toml" in host_row["details"]
+
+
+# ---------------------------------------------------------------------------
+# camp doctor --probe — the far side's own answer about its host
+# ---------------------------------------------------------------------------
+
+
+def test_doctor_json_without_probe_has_no_probe_keys(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`camp doctor --json` (no `--probe`) must carry no probe-identifying
+    key and no probe row — the exact shape an older camp already answers with,
+    unchanged by this change."""
+    import json as _json
+
+    from camp.spine import DOCTOR_PROBE_KEY, DOCTOR_PROBE_MULTIPLEXER_KEY, cmd_doctor
+
+    _isolate_roots(monkeypatch, tmp_path)
+    monkeypatch.setenv("CAMP_TEST_ASDF_PRESENT", "1")
+    try:
+        cmd_doctor(["--json"], env=_isolated_config_env(tmp_path))
+    except SystemExit:
+        pass
+    report = _json.loads(capsys.readouterr().out)
+    assert set(report.keys()) == {"pass", "checks"}
+    assert DOCTOR_PROBE_KEY not in report
+    assert DOCTOR_PROBE_MULTIPLEXER_KEY not in report
+    assert {c["check"] for c in report["checks"]} == {"asdf", "consistency", "host_name"}
+
+
+def test_doctor_json_probe_reports_multiplexer_present_true(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`camp doctor --json --probe` reports the multiplexer present when one
+    resolves in the environment under test."""
+    import json as _json
+
+    from camp.spine import DOCTOR_PROBE_MULTIPLEXER_KEY, cmd_doctor
+
+    _isolate_roots(monkeypatch, tmp_path)
+    monkeypatch.setenv("CAMP_TEST_ASDF_PRESENT", "1")
+    monkeypatch.setenv("CAMP_TEST_TMUX_PRESENT", "1")
+    try:
+        cmd_doctor(["--json", "--probe"], env=_isolated_config_env(tmp_path))
+    except SystemExit:
+        pass
+    report = _json.loads(capsys.readouterr().out)
+    assert report[DOCTOR_PROBE_MULTIPLEXER_KEY] is True
+
+
+def test_doctor_json_probe_reports_multiplexer_present_false(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`camp doctor --json --probe` reports the multiplexer absent when none
+    resolves in the environment under test — the same check varied across the
+    opposite input from the sibling test above."""
+    import json as _json
+
+    from camp.spine import DOCTOR_PROBE_MULTIPLEXER_KEY, cmd_doctor
+
+    _isolate_roots(monkeypatch, tmp_path)
+    monkeypatch.setenv("CAMP_TEST_ASDF_PRESENT", "1")
+    monkeypatch.setenv("CAMP_TEST_TMUX_PRESENT", "0")
+    try:
+        cmd_doctor(["--json", "--probe"], env=_isolated_config_env(tmp_path))
+    except SystemExit:
+        pass
+    report = _json.loads(capsys.readouterr().out)
+    assert report[DOCTOR_PROBE_MULTIPLEXER_KEY] is False
+
+
+def test_doctor_probe_exit_status_unaffected_by_multiplexer_absence(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`--probe` must not change the exit status in either direction: with
+    every local check passing but no multiplexer present, `doctor --probe`
+    must not exit nonzero on the multiplexer's account — it exits the way the
+    local checks alone decide, exactly as plain `doctor --json` does for the
+    same local-check state."""
+    import json as _json
+
+    from camp.spine import DOCTOR_PROBE_MULTIPLEXER_KEY, cmd_doctor
+
+    _isolate_roots(monkeypatch, tmp_path)
+    monkeypatch.setenv("CAMP_TEST_ASDF_PRESENT", "1")
+    monkeypatch.setenv("CAMP_TEST_TMUX_PRESENT", "0")
+
+    no_probe_exit: SystemExit | None = None
+    try:
+        cmd_doctor(["--json"], env=_isolated_config_env(tmp_path))
+    except SystemExit as e:
+        no_probe_exit = e
+    capsys.readouterr()
+
+    probe_exit: SystemExit | None = None
+    try:
+        cmd_doctor(["--json", "--probe"], env=_isolated_config_env(tmp_path))
+    except SystemExit as e:
+        probe_exit = e
+    report = _json.loads(capsys.readouterr().out)
+
+    assert no_probe_exit is None, "the local checks pass; doctor must not exit nonzero"
+    assert probe_exit is None, (
+        "the multiplexer is absent but the local checks pass; --probe must not "
+        "turn that into a nonzero exit"
+    )
+    assert report["pass"] is True
+    assert report[DOCTOR_PROBE_MULTIPLEXER_KEY] is False
+
+
+def test_doctor_probe_answer_is_self_identifying(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A caller can tell a probe-supporting answer apart from the ordinary
+    answer an older camp gives back for the same invocation: the `--probe`
+    answer carries the identifying key, and the plain `--json` answer for the
+    same invocation — the shape an older camp is pinned to give back — does
+    not."""
+    import json as _json
+
+    from camp.spine import DOCTOR_PROBE_KEY, cmd_doctor
+
+    _isolate_roots(monkeypatch, tmp_path)
+    monkeypatch.setenv("CAMP_TEST_ASDF_PRESENT", "1")
+    monkeypatch.setenv("CAMP_TEST_TMUX_PRESENT", "1")
+
+    try:
+        cmd_doctor(["--json", "--probe"], env=_isolated_config_env(tmp_path))
+    except SystemExit:
+        pass
+    probe_report = _json.loads(capsys.readouterr().out)
+
+    try:
+        cmd_doctor(["--json"], env=_isolated_config_env(tmp_path))
+    except SystemExit:
+        pass
+    older_camp_report = _json.loads(capsys.readouterr().out)
+
+    assert probe_report[DOCTOR_PROBE_KEY] is True
+    assert DOCTOR_PROBE_KEY not in older_camp_report
+
+
+def test_doctor_probe_reachable_through_real_cli_entry_path(
+    tmp_path: Path,
+) -> None:
+    """`--probe` is reachable through the real `camp` CLI entry point, not
+    only by importing `cmd_doctor` directly — the way an operator's shell
+    (and the far side of an ssh relay) actually invokes it."""
+    import json as _json
+    import subprocess
+
+    cli = _PLUGIN_DIR / "cli" / "camp"
+    env = dict(os.environ)
+    env.update(
+        {
+            "HOME": str(tmp_path / "home"),
+            "CAMP_CONFIG_DIR": str(tmp_path / "config"),
+            "WORKSPACE_ROOT": str(tmp_path / "workspace"),
+            "CAMP_CANONICAL_ROOT": str(tmp_path / "canonical"),
+            "CAMP_TEST_ASDF_PRESENT": "1",
+            "CAMP_TEST_TMUX_PRESENT": "1",
+        }
+    )
+    (tmp_path / "workspace").mkdir()
+    (tmp_path / "canonical").mkdir()
+
+    result = subprocess.run(
+        [sys.executable, str(cli), "doctor", "--json", "--probe"],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    report = _json.loads(result.stdout)
+    assert report["probe"] is True
+    assert report["multiplexer_present"] is True
 
 
 # ---------------------------------------------------------------------------
