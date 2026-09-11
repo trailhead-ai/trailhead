@@ -84,6 +84,7 @@ class FakeHarness:
         env_set_keys=(ACCOUNT_KEY,),
         default_is_absence=False,
         scrub=None,
+        account_identity=None,
     ):
         self._launch_argv = launch_argv
         self._resume_argv = resume_argv
@@ -92,9 +93,22 @@ class FakeHarness:
         self.launch_calls: list[tuple[Path, str, str | None]] = []
         self.resume_calls: list[str] = []
         self.env_set_calls: list[tuple[str | None, dict[str, str]]] = []
+        self.account_identity_calls: list[tuple[str | None, dict[str, str]]] = []
         self._env_set_keys = env_set_keys
         self._default_is_absence = default_is_absence
         self._scrub = tuple(SCRUB) if scrub is None else tuple(scrub)
+        # `None` models the base-class default: this harness has no account
+        # identity concept at all. A callable models the one shipped harness
+        # that does — invoked with (account, env), returning an AccountIdentity
+        # or raising HarnessError for a declaration the identity resolution
+        # itself refuses.
+        self._account_identity = account_identity
+
+    def session_launch_account_identity(self, account, *, env=None):
+        self.account_identity_calls.append((account, dict(env or {})))
+        if self._account_identity is None:
+            return None
+        return self._account_identity(account, dict(env or {}))
 
     def session_launch(
         self, workspace, session_id, *, session_name=None, settings_path=None
@@ -2416,6 +2430,238 @@ class TestTheChosenAccountIsReported:
         assert "default" in err
         assert launched.account is None
         assert launched.account_binding == {ACCOUNT_KEY: str(tmp_path / "home")}
+
+
+def _configured_account(tmp_path: Path) -> str:
+    """A declared-account directory with configuration already behind it, so
+    the config-existence warning stays silent and an exact stderr match pins
+    only the report line under test."""
+    declared = tmp_path / "accounts" / "levr"
+    declared.mkdir(parents=True)
+    (declared / ".claude.json").write_text("{}\n")
+    return str(declared)
+
+
+class TestTheReportIncludesHarnessIdentity:
+    """AC13: when the harness answers an identity, the report states it — the
+    declared value and the resolved identity are not the same thing, and the
+    report follows whichever identity the harness names rather than restating
+    a fixed string. A harness answering nothing (the base-class default, and
+    the state of every harness but the one shipped) leaves the report exactly
+    as it is without the identity seam."""
+
+    def test_a_defaulted_launchs_report_follows_the_identity_the_harness_names(
+        self, rig, tmp_path, capsys
+    ):
+        from trailhead.harness.base import AccountIdentity
+
+        rig["harness"] = FakeHarness(
+            account_identity=lambda account, env: AccountIdentity(
+                label="/resolved/first-default", has_config=True
+            )
+        )
+
+        _launch(rig, group=_group_with_account(None), env=_poisoned(tmp_path))
+
+        assert "/resolved/first-default" in capsys.readouterr().err
+
+    def test_a_different_default_identity_produces_a_different_report(
+        self, rig, tmp_path, capsys
+    ):
+        """The report is not a constant: a second harness naming a different
+        default identity must show up as a different report, not the same
+        text the first harness produced."""
+        from trailhead.harness.base import AccountIdentity
+
+        rig["harness"] = FakeHarness(
+            account_identity=lambda account, env: AccountIdentity(
+                label="/resolved/second-default", has_config=True
+            )
+        )
+
+        _launch(rig, group=_group_with_account(None), env=_poisoned(tmp_path))
+
+        err = capsys.readouterr().err
+        assert "/resolved/second-default" in err
+        assert "/resolved/first-default" not in err
+
+    def test_a_declared_accounts_report_states_both_the_declaration_and_the_identity(
+        self, rig, tmp_path, capsys
+    ):
+        from trailhead.harness.base import AccountIdentity
+
+        declared = _configured_account(tmp_path)
+        rig["harness"] = FakeHarness(
+            account_identity=lambda account, env: AccountIdentity(
+                label="/resolved/levr-identity", has_config=True
+            )
+        )
+
+        _launch(rig, group=_group_with_account(declared), env=_poisoned(tmp_path))
+
+        err = capsys.readouterr().err
+        # Both are present, and — the point of AC13 — distinguishable: the
+        # declared value is anchored to "declared account", the resolved
+        # identity to "resolved to", so a report that swapped one for the
+        # other in the source phrase (leaving only an incidental echo of the
+        # declared value inside the binding's own printed assignment) is
+        # still caught here.
+        assert f"declared account {declared}" in err
+        assert "resolved to /resolved/levr-identity" in err
+        assert declared != "/resolved/levr-identity"
+
+    def test_a_harness_offering_no_identity_leaves_the_declared_report_byte_for_byte(
+        self, rig, tmp_path, capsys
+    ):
+        """FakeHarness's default (account_identity=None) reproduces the
+        base-class ``None`` answer — the state every harness but one is in."""
+        declared = _configured_account(tmp_path)
+
+        _launch(rig, group=_group_with_account(declared), env=_poisoned(tmp_path))
+
+        assert capsys.readouterr().err == (
+            f"camp: binding session to declared account {declared} — "
+            f"{ACCOUNT_KEY}={declared}\n"
+        )
+
+    def test_a_harness_offering_no_identity_leaves_the_default_report_byte_for_byte(
+        self, rig, tmp_path, capsys
+    ):
+        _launch(rig, group=_group_with_account(None), env=_poisoned(tmp_path))
+
+        assert capsys.readouterr().err == (
+            "camp: binding session to the harness default (no account declared) "
+            f"— {ACCOUNT_KEY}={tmp_path / 'home'}\n"
+        )
+
+    def test_a_harness_offering_no_identity_leaves_the_empty_declared_report_byte_for_byte(
+        self, rig, tmp_path, capsys
+    ):
+        declared = _configured_account(tmp_path)
+        # An empty binding means the config-existence warning resolves through
+        # HOME instead — irrelevant to the report line under test, so HOME
+        # gets its own configuration and the ambient CLAUDE_CONFIG_DIR poison
+        # is left out (this FakeHarness config does not scrub it, unlike the
+        # real harness's absence-stated default).
+        home = tmp_path / "home"
+        home.mkdir(parents=True)
+        (home / ".claude.json").write_text("{}\n")
+        rig["harness"] = FakeHarness(env_set_keys=())
+
+        _launch(
+            rig,
+            group=_group_with_account(declared),
+            env={"PATH": "/usr/bin", "HOME": str(home)},
+        )
+
+        err = capsys.readouterr().err
+        assert err == (
+            f"camp: declared account {declared} — the harness states it "
+            "with no assignment of its own\n"
+        )
+
+    def test_a_harness_offering_no_identity_leaves_the_empty_default_report_byte_for_byte(
+        self, rig, tmp_path, capsys
+    ):
+        rig["harness"] = FakeHarness(default_is_absence=True)
+
+        _launch(rig, group=_group_with_account(None), env=_poisoned(tmp_path))
+
+        err = capsys.readouterr().err
+        assert err == (
+            "camp: no account declared — the launch states no account "
+            "assignment; the pane scrubs whatever the environment carried, so "
+            "the harness's own default applies\n"
+        )
+
+    def test_an_empty_binding_with_identity_is_still_not_described_as_an_assignment(
+        self, rig, tmp_path, capsys
+    ):
+        """The existing distinction — an empty binding reads as "no assignment
+        of its own", never as an account named by the empty string — must
+        survive the identity being added to the same line."""
+        from trailhead.harness.base import AccountIdentity
+
+        rig["harness"] = FakeHarness(
+            default_is_absence=True,
+            account_identity=lambda account, env: AccountIdentity(
+                label="/resolved/absence-identity", has_config=True
+            ),
+        )
+
+        _launch(rig, group=_group_with_account(None), env=_poisoned(tmp_path))
+
+        err = capsys.readouterr().err
+        assert "/resolved/absence-identity" in err
+        assert "binding session to" not in err
+        assert " — \n" not in err
+
+    def test_the_report_is_still_emitted_before_the_pane_is_handed_over(
+        self, rig, tmp_path, capsys
+    ):
+        from trailhead.harness.base import AccountIdentity
+
+        declared = _configured_account(tmp_path)
+        rig["harness"] = FakeHarness(
+            account_identity=lambda account, env: AccountIdentity(
+                label="/resolved/order-check", has_config=True
+            )
+        )
+
+        _launch(rig, group=_group_with_account(declared), env=_poisoned(tmp_path))
+
+        assert len(rig["spawn"].calls) == 1
+        assert "/resolved/order-check" in capsys.readouterr().err
+
+    def test_a_harness_refusing_the_identity_resolution_refuses_the_launch(
+        self, rig, tmp_path
+    ):
+        """The identity seam may RAISE HarnessError for a declaration it
+        refuses — a deliberate refusal, not the same as "no identity concept"
+        (``None``) and never collapsed into it."""
+        from trailhead.harness import HarnessError
+
+        def refuse(account, env):
+            raise HarnessError("identity resolution refuses this account")
+
+        rig["harness"] = FakeHarness(account_identity=refuse)
+
+        with pytest.raises(rig["module"].LaunchError) as excinfo:
+            _launch(
+                rig,
+                group=_group_with_account("/accounts/levr"),
+                env=_poisoned(tmp_path),
+            )
+
+        assert "identity resolution refuses this account" in str(excinfo.value)
+        assert rig["spawn"].calls == []
+
+    def test_an_unexpected_identity_failure_does_not_block_a_launch_that_would_succeed(
+        self, rig, tmp_path, capsys
+    ):
+        """A non-HarnessError failure in this advisory seam is a bug in the
+        probe, not grounds to fail a launch that would otherwise succeed —
+        the same posture every other advisory probe on this path takes."""
+
+        declared = _configured_account(tmp_path)
+
+        def boom(account, env):
+            raise RuntimeError("identity probe blew up")
+
+        rig["harness"] = FakeHarness(account_identity=boom)
+
+        result = _launch(
+            rig,
+            group=_group_with_account(declared),
+            env=_poisoned(tmp_path),
+        )
+
+        assert result.session_id
+        assert len(rig["spawn"].calls) == 1
+        assert capsys.readouterr().err == (
+            f"camp: binding session to declared account {declared} — "
+            f"{ACCOUNT_KEY}={declared}\n"
+        )
 
 
 class TestAnAccountWithNoConfigFile:

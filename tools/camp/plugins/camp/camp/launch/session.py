@@ -413,6 +413,45 @@ def _resolve_account_binding(harness, profile, group: dict, env: dict[str, str])
     return account, dict(binding)
 
 
+def _resolve_account_identity(harness, profile, account: str | None, env: dict[str, str]):
+    """The account identity for *account*, from the SAME seam answer a caller
+    on this path feeds to both the report and the configuration-existence
+    check — one resolution, not a second reader either consumer invents for
+    itself.
+
+    ``None`` means this harness offers no identity concept at all — the
+    base-class default, and the state of every harness but the one that
+    overrides it. That is a real, safe state, not a degenerate one: the
+    report and the warning both fall back to exactly what they do today.
+
+    A :class:`HarnessError` here is a deliberate refusal — the harness
+    actively will not resolve an identity for *account* — and is never
+    collapsed into the ``None`` "no identity concept" absence; it refuses the
+    launch, with no process yet started. Any OTHER exception is a bug in this
+    advisory seam, not grounds to fail a launch that would otherwise succeed,
+    and degrades to the same ``None`` a harness with no identity concept
+    would answer.
+    """
+    from trailhead.harness import HarnessError
+
+    try:
+        return harness.session_launch_account_identity(account, env=env)
+    except HarnessError as exc:
+        if account is not None:
+            raise LaunchError(
+                f"camp: refusing to launch — harness "
+                f"{harness.name or profile.binary!r} will not resolve an "
+                f"identity for the declared account {account}: {exc}"
+            ) from exc
+        raise LaunchError(
+            f"camp: refusing to launch — harness "
+            f"{harness.name or profile.binary!r} will not resolve a default "
+            f"identity here: {exc}"
+        ) from exc
+    except Exception:  # noqa: BLE001 — advisory probe, never blocks a launch
+        return None
+
+
 def resolve_launch_environment(
     harness, profile, group: dict, env: dict[str, str] | None = None
 ) -> tuple[str | None, dict[str, str], tuple[str, ...], dict[str, str]]:
@@ -449,8 +488,13 @@ def resolve_launch_environment(
     return account, binding, tuple(scrub), launch_env
 
 
-def _report_account(account: str | None, binding: dict[str, str]) -> None:
-    """Name the account this launch chose, declared or defaulted.
+def _report_account(
+    account: str | None,
+    binding: dict[str, str],
+    identity: "AccountIdentity | None" = None,
+) -> None:
+    """Name the account this launch chose, declared or defaulted — and, when
+    the harness offers one, the identity it resolved that choice to.
 
     A defaulted launch is reported as loudly as a declared one: an operator
     reading the terminal must be able to tell which account a session landed on
@@ -459,8 +503,17 @@ def _report_account(account: str | None, binding: dict[str, str]) -> None:
     An empty binding gets its own wording rather than the assignment wording with
     nothing after the dash. Announcing a binding camp does not have contradicts
     the scrub line it sits beside and reads, to someone skimming, as the launch
-    having chosen an account named by the empty string.
+    having chosen an account named by the empty string. Appending the resolved
+    identity does not reintroduce that: it names the identity, never a binding.
+
+    *identity* is ``None`` for every harness but the one that offers this
+    capability — the base-class default — and in that state the report is
+    exactly what it is today, byte for byte. A harness that offers an identity
+    gets it appended to whichever branch below already applies, never a branch
+    of its own: which wording applies is still decided by the declaration and
+    the binding alone.
     """
+    suffix = f" — resolved to {identity.label}" if identity is not None else ""
     if binding:
         where = " ".join(f"{key}={value}" for key, value in sorted(binding.items()))
         source = (
@@ -468,19 +521,19 @@ def _report_account(account: str | None, binding: dict[str, str]) -> None:
             if account is not None
             else "the harness default (no account declared)"
         )
-        print(f"camp: binding session to {source} — {where}", file=sys.stderr)
+        print(f"camp: binding session to {source} — {where}{suffix}", file=sys.stderr)
         return
     if account is not None:
         print(
             f"camp: declared account {account} — the harness states it with no "
-            f"assignment of its own",
+            f"assignment of its own{suffix}",
             file=sys.stderr,
         )
         return
     print(
         "camp: no account declared — the launch states no account assignment; "
         "the pane scrubs whatever the environment carried, so the harness's own "
-        "default applies",
+        f"default applies{suffix}",
         file=sys.stderr,
     )
 
@@ -676,7 +729,12 @@ def launch_session(
     account, account_binding, scrub, launch_env = resolve_launch_environment(
         harness, profile, group, env
     )
-    _report_account(account, account_binding)
+    # The ONE identity answer, resolved against the same `env` the binding
+    # itself was resolved against — reused by every consumer that needs it, so
+    # the report and the configuration-existence check cannot read two
+    # different resolutions and disagree.
+    identity = _resolve_account_identity(harness, profile, account, env)
+    _report_account(account, account_binding, identity)
     _warn_if_account_has_no_config(account, launch_env)
 
     _assert_trust(profile, launch_dir, trust_root, launch_env)
