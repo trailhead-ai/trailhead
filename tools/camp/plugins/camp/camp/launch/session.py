@@ -25,11 +25,17 @@ same directory, so it can never be the boundary there. Sameness, not containment
 is this module's guarantee — a group that opts out of the pre-seed launches
 wherever its `[harness] cwd` template resolves to.
 
-The seam boundary. camp core spells exactly two things: `tmux` and `env -u`.
-Every harness literal — the binary, its flags, the names of the variables to
-scrub — comes from the trailhead harness seam (`harness_for` → `session_launch` /
-`session_resume` / `session_launch_env_unset` / `session_enumerate`) and is placed
-into argv whole.
+The seam boundary. camp core spells exactly three things: `tmux`, `env -u`, and
+`tmux set-environment`. Every harness literal — the binary, its flags, the names
+of the variables to scrub or bind — comes from the trailhead harness seam
+(`harness_for` → `session_launch` / `session_resume` / `session_launch_env_unset`
+/ `session_launch_env_set` / `session_enumerate`) and is placed into argv whole.
+
+Two environment scopes, never a third. The pane's own `env` operands bind the
+process camp starts; the tmux SESSION environment binds every window opened in
+that session afterwards. The server's global environment is written by neither,
+because it outlives the launch and would place unrelated sessions on this
+group's account. See :func:`_state_session_environment`.
 
 Refusal posture. A refusal raises :class:`LaunchError` and guarantees no process
 was started: an unresolvable or ineligible launch directory, a harness camp cannot
@@ -49,9 +55,9 @@ launch.
 Calling with neither addressing form, with both, or with an incomplete root triple
 is a programming error in the caller — :class:`ValueError`, raised before any work.
 
-This module ends at a successful detached spawn. Confirming the session actually
-registered is a separate concern with its own bounded wait — :func:`confirm_session`
-below.
+This module ends at a successful detached spawn and the session-environment
+statement that follows it. Confirming the session actually registered is a
+separate concern with its own bounded wait — :func:`confirm_session` below.
 """
 
 from __future__ import annotations
@@ -113,6 +119,12 @@ _CONFIRM_POLL_INTERVAL_SECONDS = 0.5
 #: work still confirms, while staying bounded so a genuinely stuck session
 #: does not hang the CLI indefinitely.
 _CONFIRM_POLL_TIMEOUT_SECONDS = 30.0
+
+#: Bound on each `tmux set-environment` call stating the session environment.
+#: These are client requests against a server that is already up (the spawn just
+#: used it), so they are fast; the bound only keeps a wedged tmux from hanging a
+#: launch that has already succeeded.
+_SET_ENVIRONMENT_TIMEOUT_SECONDS = 10
 
 #: Bound on the cleanup `tmux kill-session` call in :func:`confirm_session`. The
 #: failure was already reported by the time this runs, so a wedged or vanished
@@ -876,6 +888,8 @@ def launch_session(
             f"{tmux_name}: {detail}"
         )
 
+    _state_session_environment(tmux_name, account_binding, scrub, spawn_env)
+
     return LaunchedSession(
         session_id=session_id,
         tmux_name=tmux_name,
@@ -884,6 +898,64 @@ def launch_session(
         account_binding=account_binding,
         pane_env=dict(launch_env),
     )
+
+
+def _state_session_environment(
+    tmux_name: str,
+    account_binding: dict[str, str],
+    scrub: list[str],
+    env: dict[str, str],
+) -> None:
+    """State the account in the SESSION environment, for the windows to come.
+
+    The pane operands bind the one process camp starts and die with it, so an
+    operator who opens a second window in this session and runs the harness by
+    hand gets whatever the tmux SERVER's global happened to carry — which is the
+    stale-global accident the pane operands exist to avoid, reached a window
+    later. tmux's session environment is the scope that closes it: every window
+    and pane opened in THIS session inherits it, and no other session does. That
+    is what makes it safe to write where the server global is not — a value
+    there would outlive this launch and place unrelated sessions on this group's
+    account.
+
+    Both halves of the seam's contract are stated, in the seam's order: the
+    scrub first as `-r` removals (tmux drops the name from every process it
+    starts in this session thereafter), then the binding's assignments. The
+    order is load-bearing, not cosmetic — the account variable is itself on the
+    scrub list, so a removal stated after the value would erase it.
+
+    Best-effort by construction. By the time this runs the session exists and
+    its pane is correctly bound; a failure costs only the convenience of the
+    windows to come, so it is one stderr line and never a refusal. Silence is
+    not an option either: a later window landing on the wrong account is exactly
+    what an operator must be told about.
+    """
+    operands = [["-r", name] for name in scrub]
+    operands += [[key, value] for key, value in sorted(account_binding.items())]
+
+    for operand in operands:
+        argv = ["tmux", "set-environment", "-t", tmux_name, *operand]
+        try:
+            stated = subprocess.run(
+                argv,
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=_SET_ENVIRONMENT_TIMEOUT_SECONDS,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            detail = str(exc)
+        else:
+            if stated.returncode == 0:
+                continue
+            detail = (stated.stderr or "").strip() or f"exit status {stated.returncode}"
+        print(
+            f"camp: could not state the session environment for {tmux_name} "
+            f"({detail}) — this session is bound correctly, but new windows "
+            "opened in it may not be",
+            file=sys.stderr,
+        )
+        return
 
 
 def _poll_enumerated(

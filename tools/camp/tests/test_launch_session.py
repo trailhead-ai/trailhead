@@ -17,6 +17,10 @@ Test contract:
   unresolvable; session_launch returns None; tmux absent; unresolvable launch dir.
 - Pretrust disabled by config → spawn proceeds, stderr warning emitted.
 - Already-live sessions are reported on stderr and never refuse.
+- The tmux SESSION environment carries the same answer the pane does — the
+  seam's assignments stated as values and its scrub stated as `-r` removals,
+  removals first — so a window opened by hand in that session inherits the
+  group's account. A write tmux refuses warns and keeps the session.
 """
 
 from __future__ import annotations
@@ -153,7 +157,7 @@ class FakeHarness:
 
 
 class Recorder:
-    """Captures the single tmux spawn the engine is allowed to make.
+    """Captures tmux calls of one kind and answers like a completed process.
 
     The engine reads tmux's exit status — the session-name claim is what makes a
     second launch of the same session refuse — so the recorder answers like a
@@ -199,6 +203,7 @@ def rig(monkeypatch, tmp_path):
         "workspace": ws,
         "which": "/usr/bin/tmux",
         "spawn": Recorder(),
+        "setenv": Recorder(),
         "enumerate": lambda *a, **k: pytest.fail("unexpected enumeration"),
         "module": session,
     }
@@ -214,9 +219,11 @@ def rig(monkeypatch, tmp_path):
         return state["pretrust"]
 
     def fake_run(argv, **kwargs):
-        """Split the engine's two subprocess uses: the spawn, and everything else."""
+        """Split the engine's subprocess uses: spawn, session env, everything else."""
         if list(argv[:2]) == ["tmux", "new-session"]:
             return state["spawn"](argv, **kwargs)
+        if list(argv[:2]) == ["tmux", "set-environment"]:
+            return state["setenv"](argv, **kwargs)
         return state["enumerate"](argv, **kwargs)
 
     monkeypatch.setattr(session, "harness_for", lambda group: state["harness"])
@@ -3045,3 +3052,136 @@ class TestTheIdentityIsResolvedAgainstThePaneNotTheAmbient:
         assert harness.account_identity_calls
         _, asked_env = harness.account_identity_calls[-1]
         assert asked_env.get(ACCOUNT_KEY) == expected
+
+
+# ---------------------------------------------------------------------------
+# the session environment: what a hand-opened window in this session inherits
+# ---------------------------------------------------------------------------
+
+
+def _session_env_calls(rig, tmux_name: str) -> list[list[str]]:
+    """The operands of each `tmux set-environment` aimed at *tmux_name*.
+
+    Each entry is the argv past `-t <name>`, so a set reads `[KEY, VALUE]` and a
+    removal reads `["-r", NAME]`.
+    """
+    calls = []
+    for call in rig["setenv"].calls:
+        argv = list(call["argv"])
+        assert argv[:4] == ["tmux", "set-environment", "-t", tmux_name], argv
+        calls.append(argv[4:])
+    return calls
+
+
+class TestTheSessionEnvironmentCarriesTheAccount:
+    """A window opened by hand in this session lands on the session's account.
+
+    The pane operands bind the process camp starts and nothing else — they die
+    with that pane. tmux's SESSION environment is the scope that outlives it:
+    every window and pane later opened in this session inherits it, and no other
+    session does, which is what separates it from the server global camp
+    deliberately never writes.
+    """
+
+    def test_a_declared_account_is_stated_in_the_session_environment(self, rig, tmp_path):
+        launched = _launch(
+            rig, group=_group_with_account("/accounts/levr"), env=_poisoned(tmp_path)
+        )
+
+        assert [ACCOUNT_KEY, "/accounts/levr"] in _session_env_calls(
+            rig, launched.tmux_name
+        )
+
+    def test_a_different_account_is_stated_as_itself(self, rig, tmp_path):
+        launched = _launch(
+            rig, group=_group_with_account("/accounts/other"), env=_poisoned(tmp_path)
+        )
+
+        assert [ACCOUNT_KEY, "/accounts/other"] in _session_env_calls(
+            rig, launched.tmux_name
+        )
+
+    def test_the_variable_name_comes_from_the_seam_not_from_camp(self, rig, tmp_path):
+        """camp states whatever key the harness returned — it knows no spelling."""
+        rig["harness"] = FakeHarness(env_set_keys=("FAKE_ACCOUNT_DIR",))
+
+        launched = _launch(
+            rig, group=_group_with_account("/accounts/levr"), env=_poisoned(tmp_path)
+        )
+
+        assert ["FAKE_ACCOUNT_DIR", "/accounts/levr"] in _session_env_calls(
+            rig, launched.tmux_name
+        )
+
+    def test_the_scrub_is_stated_as_removal_so_a_new_window_is_clean(
+        self, rig, tmp_path
+    ):
+        """The parent's markers and token must not reach a hand-opened window.
+
+        `set-environment -r` is the session-scoped counterpart of the pane's
+        `env -u`: tmux removes the name from the environment of every process it
+        starts in this session thereafter.
+        """
+        launched = _launch(
+            rig, group=_group_with_account("/accounts/levr"), env=_poisoned(tmp_path)
+        )
+
+        calls = _session_env_calls(rig, launched.tmux_name)
+        for name in SCRUB:
+            assert ["-r", name] in calls
+
+    def test_a_default_stated_as_absence_removes_the_account_variable(
+        self, rig, tmp_path
+    ):
+        """A harness whose default IS the variable's absence gets the removal.
+
+        Without it a window opened in this session would inherit whatever
+        account the tmux server's global happens to name — the same wrong-account
+        landing the declared case avoids, arrived at from the other direction.
+        """
+        rig["harness"] = FakeHarness(default_is_absence=True, scrub=[ACCOUNT_KEY])
+
+        launched = _launch(rig, group=_group_with_account(None), env=_poisoned(tmp_path))
+
+        calls = _session_env_calls(rig, launched.tmux_name)
+        assert ["-r", ACCOUNT_KEY] in calls
+        assert not [c for c in calls if c[0] != "-r"]
+
+    def test_the_removal_precedes_the_binding_it_shares_a_name_with(
+        self, rig, tmp_path
+    ):
+        """Scrub first, bind second — the pane's order, for the pane's reason.
+
+        The account variable is itself on the scrub list, so stating the removal
+        after the value would erase the binding camp just made.
+        """
+        rig["harness"] = FakeHarness(scrub=[*SCRUB, ACCOUNT_KEY])
+
+        launched = _launch(
+            rig, group=_group_with_account("/accounts/levr"), env=_poisoned(tmp_path)
+        )
+
+        calls = _session_env_calls(rig, launched.tmux_name)
+        assert calls.index(["-r", ACCOUNT_KEY]) < calls.index(
+            [ACCOUNT_KEY, "/accounts/levr"]
+        )
+
+    def test_a_refused_session_env_write_warns_and_keeps_the_session(
+        self, rig, tmp_path, capsys
+    ):
+        """The session is already running and correctly bound by the pane.
+
+        Killing it over a convenience write would cost the operator the launch
+        they asked for; passing silently would let a later window land on the
+        wrong account unannounced. One stderr line, session returned.
+        """
+        rig["setenv"].returncode = 1
+        rig["setenv"].stderr = "tmux: no such session"
+
+        launched = _launch(
+            rig, group=_group_with_account("/accounts/levr"), env=_poisoned(tmp_path)
+        )
+
+        err = capsys.readouterr().err
+        assert launched.tmux_name in err
+        assert "new windows" in err
