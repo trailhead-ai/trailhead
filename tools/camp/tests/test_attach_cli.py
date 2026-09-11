@@ -819,6 +819,7 @@ def test_bare_dash_a_picker_probe_survives_a_raising_transport_worker(
 ) -> None:
     """The bare picker's own probe fan-out gets the identical guard."""
     _hosts_env(tmp_path, monkeypatch, "andromeda")
+    _wire_local_session(monkeypatch, tmp_path=tmp_path, live=False)
     transport = _host_transport_module()
 
     def raising_run_camp(host, remote_argv, **kw):
@@ -841,6 +842,7 @@ def test_bare_dash_a_nothing_to_offer_does_not_claim_a_silent_host_was_checked(
     refusal must not assert 'no running session on ... any declared
     machine' as though every declared machine had answered empty."""
     _hosts_env(tmp_path, monkeypatch, "silent-host")
+    _wire_local_session(monkeypatch, tmp_path=tmp_path, live=False)
     transport = _host_transport_module()
     monkeypatch.setattr(
         transport,
@@ -916,6 +918,7 @@ def test_bare_dash_a_picker_probes_declared_machines_concurrently_via_barrier(
     n = 4
     host_names = [f"host{i}" for i in range(n)]
     _hosts_env(tmp_path, monkeypatch, *host_names)
+    _wire_local_session(monkeypatch, tmp_path=tmp_path, live=False)
     transport = _host_transport_module()
 
     barrier = threading.Barrier(n, timeout=5)
@@ -945,6 +948,7 @@ def test_bare_dash_a_picker_drops_a_malformed_remote_row_with_a_notice_never_a_t
     stderr notice — never a `KeyError` aborting the whole widened picker,
     per `_attach_list_answer`'s own documented contract."""
     _hosts_env(tmp_path, monkeypatch, "andromeda")
+    _wire_local_session(monkeypatch, tmp_path=tmp_path, live=False)
     transport = _host_transport_module()
     monkeypatch.setattr(
         transport,

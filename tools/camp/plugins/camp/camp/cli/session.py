@@ -2142,15 +2142,20 @@ def _attach_session_context(
     from ..spine import _die
 
     groups = _parsable_groups()
+    # `self_host_name` is a local hosts.toml read with no session pool
+    # involvement, so a malformed `self_name` must refuse here, before the
+    # pool ever asks a harness to enumerate live sessions — otherwise a
+    # config mistake surfaces as a harness-probe failure instead of camp's
+    # own, more actionable refusal naming `self_name`.
+    try:
+        machine = self_host_name(env)
+    except HostConfigError as exc:
+        _die(f"camp attach: {exc}")
     transcripts, live, answered, accounts = _session_pool(
         groups, verb="attach", env=env, live_required=True
     )
     harness = answered[0]
     tmux = Tmux()
-    try:
-        machine = self_host_name(env)
-    except HostConfigError as exc:
-        _die(f"camp attach: {exc}")
     return groups, transcripts, live, harness, tmux, machine, accounts
 
 
