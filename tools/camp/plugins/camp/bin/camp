@@ -57,13 +57,21 @@ _read_requires_python_floor() {
 }
 
 # Walk upward from *dir* looking for a pyproject.toml that declares
-# requires-python, bounded to a small fixed number of levels so a detached or
-# root-adjacent PLUGIN_DIR can never turn this into an unbounded loop. Sets
-# FLOOR (via _read_requires_python_floor) on success.
+# requires-python. Sets FLOOR (via _read_requires_python_floor) on success.
+#
+# The bound is 2 because that is exactly where this launcher's OWN declaration
+# sits in a repo checkout: plugins/camp -> plugins -> tools/camp/pyproject.toml.
+# It is deliberately not "as far up as it takes to find something". Every extra
+# level widens the search into directories the install does not own, where an
+# unrelated pyproject.toml decides which interpreter camp accepts — silently
+# lowering the floor this check exists to enforce, or raising it until camp
+# refuses to run at all. A composed plugin tree legitimately has no declaration
+# within reach; that case takes the stated-notice path below, which is the
+# honest answer rather than a stranger's number.
 _find_requires_python_floor() {
     local dir="$1"
     local levels=0
-    local max_levels=6
+    local max_levels=2
     while [ "$levels" -le "$max_levels" ]; do
         if _read_requires_python_floor "$dir/pyproject.toml"; then
             return 0

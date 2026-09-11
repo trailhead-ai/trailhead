@@ -318,3 +318,45 @@ def test_claude_plugin_root_branch_with_no_discoverable_floor_notices_and_procee
     assert result.returncode == 0, f"stdout: {result.stdout}\nstderr: {result.stderr}"
     assert "could not determine" in result.stderr.lower(), result.stderr
     assert "RAN:whatever:" in result.stdout, result.stdout
+
+
+def test_declaration_far_above_the_plugin_root_is_not_adopted_as_the_floor(
+    tmp_path: Path,
+) -> None:
+    """An unrelated pyproject.toml well above the plugin root must not supply the
+    floor. The upward search exists to find the launcher's OWN declaration, which
+    sits close by; reaching far enough to pick up a stranger's file lets any
+    writable ancestor directory decide which interpreter camp accepts — either
+    silently lowering the floor this check exists to enforce, or raising it until
+    camp refuses to run at all.
+    """
+    bin_camp, plugin_root = _build_claude_plugin_root_fixture(tmp_path, requires_python=None)
+
+    # Three levels above the plugin root (camp -> plugins -> composed -> tmp_path):
+    # far outside anything the launcher's own install owns.
+    (tmp_path / "pyproject.toml").write_text(
+        textwrap.dedent(
+            """\
+            [project]
+            name = "somebody-elses-project"
+            version = "0.1.0"
+            requires-python = ">=3.99"
+            """
+        )
+    )
+
+    interp_dir = tmp_path / "some-bin"
+    _write_stub_interpreter(interp_dir, version="3.12.0", marker="present")
+
+    result = _run(
+        bin_camp,
+        [interp_dir],
+        coreutils_root=tmp_path,
+        extra_env={"CLAUDE_PLUGIN_ROOT": str(plugin_root)},
+    )
+
+    assert "3.99" not in result.stderr, (
+        "the stranger's declaration was adopted as the floor: " + result.stderr
+    )
+    assert "could not determine" in result.stderr.lower(), result.stderr
+    assert "RAN:present:" in result.stdout, f"stdout: {result.stdout}\nstderr: {result.stderr}"
