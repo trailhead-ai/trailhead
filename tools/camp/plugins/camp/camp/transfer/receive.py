@@ -1,7 +1,8 @@
 """`camp transfer-receive` — the peer side of a workspace move.
 
-Two phases, each dispatched as its own subcommand and run on whatever host
-this process executes on: :func:`begin` and :func:`finish`. Both continue
+Four phases, each dispatched as its own subcommand and run on whatever host
+this process executes on: :func:`begin`, :func:`history`, :func:`worktree`,
+and :func:`finish`, in that order. All four continue
 `camp.transfer.probe`'s stated posture — no field the caller supplies is ever
 used to construct a local path; every path this module writes to is resolved
 from this host's OWN group config, keyed only by the `--group`/`--slug` the
@@ -132,7 +133,7 @@ _DEFAULT_BASE = "origin/main"
 
 
 class ReceiveRefused(Exception):
-    """Raised when `begin` or `finish` refuses to act, by name.
+    """Raised when a phase refuses to act, by name.
 
     The caller never proceeds past this exception into a write — every
     refusal below is raised strictly before the write it would have guarded.
@@ -245,8 +246,30 @@ def _validate_owner(owner: str) -> None:
         )
 
 
-def _find_group(groups: list[dict[str, Any]], group_name: str) -> dict[str, Any] | None:
-    return next((g for g in groups if g["group"]["name"] == group_name), None)
+def _require_group(groups: list[dict[str, Any]], group_name: str) -> dict[str, Any]:
+    """This host's own config for *group_name*, or refuse.
+
+    Every phase starts here: a group this host has not configured is not a
+    group a caller can name into existence, and there is no path past this
+    refusal into a read or a write.
+    """
+    group = next((g for g in groups if g["group"]["name"] == group_name), None)
+    if group is None:
+        raise GroupNotConfigured(group_name)
+    return group
+
+
+def _require_member(group: dict[str, Any], group_name: str, member: str) -> dict[str, Any]:
+    """*group*'s own declaration of *member*, or refuse.
+
+    The content phases resolve every path they write from the entry returned
+    here — never from a field the caller sent — so a member this host has not
+    declared refuses before any path is built.
+    """
+    member_cfg = next((m for m in group["members"] if m["name"] == member), None)
+    if member_cfg is None:
+        raise MemberNotConfigured(group_name, member)
+    return member_cfg
 
 
 def _basis_commit(repo_root: Path, base: str) -> str | None:
@@ -345,9 +368,7 @@ def begin(
     """
     _validate_owner(sender)
 
-    group = _find_group(groups, group_name)
-    if group is None:
-        raise GroupNotConfigured(group_name)
+    group = _require_group(groups, group_name)
 
     from ..group.manifest import (
         ManifestError,
@@ -422,9 +443,7 @@ def finish(
     Raises:
         GroupNotConfigured: *group_name* is not configured on this host.
     """
-    group = _find_group(groups, group_name)
-    if group is None:
-        raise GroupNotConfigured(group_name)
+    group = _require_group(groups, group_name)
 
     from ..group.manifest import workspace_dir
     from ..provision.provision import bring_up_workspace
@@ -438,10 +457,6 @@ def finish(
         "contract_version": RECEIVE_CONTRACT_VERSION,
         "manifest_path": str(mpath),
     }
-
-
-def _find_member(group: dict[str, Any], member: str) -> dict[str, Any] | None:
-    return next((m for m in group["members"] if m["name"] == member), None)
 
 
 def history(
@@ -467,13 +482,9 @@ def history(
         BundleRefUnresolved: the bundle unbundled cleanly but named no tip
             for the branch this host expected.
     """
-    group = _find_group(groups, group_name)
-    if group is None:
-        raise GroupNotConfigured(group_name)
+    group = _require_group(groups, group_name)
 
-    member_cfg = _find_member(group, member)
-    if member_cfg is None:
-        raise MemberNotConfigured(group_name, member)
+    member_cfg = _require_member(group, group_name, member)
 
     from ..group.manifest import workspace_dir
     from ..provision.reconcile import DEFAULT_BASE, _add_worktree_for_member, _branch_name, _worktree_path
@@ -550,13 +561,9 @@ def worktree(
             land outside the member's worktree — refused before it is
             written.
     """
-    group = _find_group(groups, group_name)
-    if group is None:
-        raise GroupNotConfigured(group_name)
+    group = _require_group(groups, group_name)
 
-    member_cfg = _find_member(group, member)
-    if member_cfg is None:
-        raise MemberNotConfigured(group_name, member)
+    member_cfg = _require_member(group, group_name, member)
 
     from ..group.manifest import workspace_dir
     from ..provision.reconcile import _worktree_path

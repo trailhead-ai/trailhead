@@ -58,19 +58,17 @@ from ..host.transport import (
     DEFAULT_SERVER_ALIVE_COUNT_MAX,
     DEFAULT_SERVER_ALIVE_INTERVAL_SECONDS,
     ProducerFailed,
+    ProducerSpawner,
     RemoteRefusal,
     Runner,
     StreamSpawner,
     TransportOutcome,
+    default_producer_spawn,
     default_runner,
     default_stream_spawner,
     run_camp,
 )
-from .history import ProducerSpawner as HistoryProducerSpawner
-from .history import default_producer_spawn as default_history_producer_spawn
 from .history import send_history
-from .worktree import ProducerSpawner as WorktreeProducerSpawner
-from .worktree import default_producer_spawn as default_worktree_producer_spawn
 from .worktree import send_worktree
 
 __all__ = [
@@ -181,8 +179,8 @@ def move_workspace(
     on_phase: Callable[[str], None] = lambda phase: None,
     run: Runner = default_runner,
     stream_spawn: StreamSpawner = default_stream_spawner,
-    history_producer_spawn: HistoryProducerSpawner = default_history_producer_spawn,
-    worktree_producer_spawn: WorktreeProducerSpawner = default_worktree_producer_spawn,
+    history_producer_spawn: ProducerSpawner = default_producer_spawn,
+    worktree_producer_spawn: ProducerSpawner = default_producer_spawn,
     env: dict[str, str] | None = None,
     connect_timeout: float = DEFAULT_CONNECT_TIMEOUT_SECONDS,
     execution_timeout: float = 60.0,

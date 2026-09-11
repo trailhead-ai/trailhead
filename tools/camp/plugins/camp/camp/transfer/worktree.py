@@ -36,12 +36,11 @@ host's own group config, continuing `camp.transfer.probe`'s stated posture.
 
 from __future__ import annotations
 
-import subprocess
 import sys
 import tarfile
 import warnings
 from pathlib import Path
-from typing import BinaryIO, Callable, Sequence
+from typing import BinaryIO, Sequence
 
 # `build_archive_argv` below runs THIS file as a standalone script
 # (`python3 <this file> <worktree> <excluded...>`) — `stream_camp` needs a
@@ -62,8 +61,10 @@ from ..host.transport import (
     DEFAULT_CONNECT_TIMEOUT_SECONDS,
     DEFAULT_SERVER_ALIVE_COUNT_MAX,
     DEFAULT_SERVER_ALIVE_INTERVAL_SECONDS,
+    ProducerSpawner,
     StreamSpawner,
     TransportOutcome,
+    default_producer_spawn,
     default_stream_spawner,
     stream_camp,
 )
@@ -78,22 +79,10 @@ __all__ = [
     "extract_archive",
 ]
 
-#: The injected seam for the sender-side archiving subprocess — mirrors
-#: `history.ProducerSpawner`'s shape (argv in, a running `Popen[bytes]` with
-#: `stdout=PIPE` out) so tests can substitute a recording fake without
-#: touching `stream_camp`'s own seam.
-ProducerSpawner = Callable[[Sequence[str]], "subprocess.Popen[bytes]"]
-
 #: Always omitted, on top of whatever the member declares in `excluded` — the
 #: worktree's git linkage is host-specific by construction (see the module
 #: docstring) and is materialized fresh on the peer by the `history` phase.
 _ALWAYS_EXCLUDED = (".git",)
-
-
-def default_producer_spawn(argv: Sequence[str]) -> "subprocess.Popen[bytes]":
-    """Spawn *argv* with only stdout piped — the shape `stream_camp` requires
-    of a producer it will read from and classify on exit."""
-    return subprocess.Popen(list(argv), stdout=subprocess.PIPE)
 
 
 def _excluded_path_parts(excluded: Sequence[str]) -> tuple[tuple[str, ...], ...]:
