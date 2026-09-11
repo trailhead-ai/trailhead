@@ -106,16 +106,59 @@ def _build_fixture(tmp_path: Path, *, requires_python: str) -> tuple[Path, Path]
 
 
 def _run(
-    bin_camp: Path, path_dirs: list[Path], *, coreutils_root: Path
+    bin_camp: Path,
+    path_dirs: list[Path],
+    *,
+    coreutils_root: Path,
+    extra_env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     coreutils = _coreutils_dir(coreutils_root)
     path_value = ":".join(str(d) for d in [*path_dirs, coreutils])
+    env = {"PATH": path_value}
+    if extra_env:
+        env.update(extra_env)
     return subprocess.run(
         [_BASH, str(bin_camp), "--help"],
         capture_output=True,
         text=True,
-        env={"PATH": path_value},
+        env=env,
     )
+
+
+def _build_claude_plugin_root_fixture(
+    tmp_path: Path, *, requires_python: str | None
+) -> tuple[Path, Path]:
+    """Build a composed ${CLAUDE_PLUGIN_ROOT}-shaped plugin tree — cli/camp present
+    directly under the root, no bin/ sibling required since that branch never
+    self-resolves. *requires_python* of None omits pyproject.toml entirely
+    (from the root and every ancestor up to the search bound), reproducing the
+    real composed-install case where no such file exists to find. Returns
+    (bin_camp_path, plugin_root_path).
+    """
+    plugin_root = tmp_path / "composed" / "plugins" / "camp"
+    cli_dir = plugin_root / "cli"
+    cli_dir.mkdir(parents=True)
+    cli_camp = cli_dir / "camp"
+    cli_camp.write_text("# dummy cli entry point, never actually run by these tests\n")
+    cli_camp.chmod(cli_camp.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+
+    if requires_python is not None:
+        (plugin_root / "pyproject.toml").write_text(
+            textwrap.dedent(
+                f"""\
+                [project]
+                name = "camp"
+                version = "0.1.0"
+                requires-python = "{requires_python}"
+                """
+            )
+        )
+
+    bin_camp = tmp_path / "bin_camp_copy"
+    bin_camp.write_text(_REAL_BIN_CAMP.read_text())
+    bin_camp.chmod(bin_camp.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+
+    return bin_camp, plugin_root
 
 
 def test_satisfying_interpreter_elsewhere_on_path_is_invoked_over_low_bare_python3(
@@ -219,3 +262,59 @@ def test_floor_moves_with_the_declared_requires_python_not_a_hardcoded_copy(
     assert rejected.returncode != 0, f"stdout: {rejected.stdout}\nstderr: {rejected.stderr}"
     assert "3.13" in rejected.stderr, rejected.stderr
     assert "3.11" in rejected.stderr, rejected.stderr
+
+
+def test_claude_plugin_root_branch_rejects_below_floor_and_selects_satisfying(
+    tmp_path: Path,
+) -> None:
+    """The ${CLAUDE_PLUGIN_ROOT} resolution branch (Resolution order #1) must
+    apply the same floor check as the self-relative branch — a composed plugin
+    tree with a discoverable pyproject.toml rejects a below-floor bare python3
+    and selects a satisfying interpreter found elsewhere on PATH.
+    """
+    bin_camp, plugin_root = _build_claude_plugin_root_fixture(
+        tmp_path, requires_python=">=3.11"
+    )
+
+    low_dir = tmp_path / "low-bin"
+    high_dir = tmp_path / "high-bin"
+    _write_stub_interpreter(low_dir, version="3.9.6", marker="low")
+    _write_stub_interpreter(high_dir, version="3.14.0", marker="high")
+
+    result = _run(
+        bin_camp,
+        [low_dir, high_dir],
+        coreutils_root=tmp_path,
+        extra_env={"CLAUDE_PLUGIN_ROOT": str(plugin_root)},
+    )
+
+    assert result.returncode == 0, f"stdout: {result.stdout}\nstderr: {result.stderr}"
+    assert "RAN:high:" in result.stdout, result.stdout
+    assert "RAN:low:" not in result.stdout, result.stdout
+
+
+def test_claude_plugin_root_branch_with_no_discoverable_floor_notices_and_proceeds(
+    tmp_path: Path,
+) -> None:
+    """A composed plugin tree with no pyproject.toml in any ancestor up to the
+    search bound must not silently skip the floor check — it prints a stderr
+    notice naming that it could not determine the required version, then
+    proceeds on whatever python3 resolves to (not a hard failure).
+    """
+    bin_camp, plugin_root = _build_claude_plugin_root_fixture(
+        tmp_path, requires_python=None
+    )
+
+    only_dir = tmp_path / "only-bin"
+    _write_stub_interpreter(only_dir, version="3.9.6", marker="whatever")
+
+    result = _run(
+        bin_camp,
+        [only_dir],
+        coreutils_root=tmp_path,
+        extra_env={"CLAUDE_PLUGIN_ROOT": str(plugin_root)},
+    )
+
+    assert result.returncode == 0, f"stdout: {result.stdout}\nstderr: {result.stderr}"
+    assert "could not determine" in result.stderr.lower(), result.stderr
+    assert "RAN:whatever:" in result.stdout, result.stdout
