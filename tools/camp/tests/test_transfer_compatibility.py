@@ -147,7 +147,9 @@ def _no_conversations(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(transfer, "_gather_conversations", lambda **kw: ())
 
 
-def _clean_probe_answer(probe):
+def _clean_probe_answer():
+    """A peer answer on which every peer-dependent check passes."""
+    probe = _probe_module()
     return probe.ProbeAnswer(
         self_name="host-b",
         group_configured=True,
@@ -228,7 +230,6 @@ def test_every_shipped_example_group_config_loads_through_the_real_loader() -> N
 
 def test_compose_preflight_reports_never_declared_state_without_raising() -> None:
     preflight = _preflight_module()
-    probe = _probe_module()
 
     members = (preflight.MemberDeclaration(name="repo_a", excluded=None),)
 
@@ -239,7 +240,7 @@ def test_compose_preflight_reports_never_declared_state_without_raising() -> Non
         owner="host-a",
         peer_name="host-b",
         peer_declared=True,
-        probe_result=_clean_probe_answer(probe),
+        probe_result=_clean_probe_answer(),
         members=members,
         slug="feat-x",
         conversations=(),
@@ -266,10 +267,8 @@ def test_undeclared_excluded_set_refuses_by_name_through_the_full_cli(
     env.write_hosts(self_name="host-a", peers={"host-b": "host-b"})
     env.write_manifest(owner="host-a")
     env.apply(monkeypatch)
-    transfer = _transfer_module()
-    probe = _probe_module()
 
-    _fake_probe(monkeypatch, _clean_probe_answer(probe))
+    _fake_probe(monkeypatch, _clean_probe_answer())
     _no_conversations(monkeypatch)
 
     code = _run(
@@ -298,9 +297,8 @@ def test_missing_self_name_refusal_names_the_file_and_the_different_names_rule(
     env.write_manifest(owner="host-a")
     env.apply(monkeypatch)
     transfer = _transfer_module()
-    probe = _probe_module()
 
-    _fake_probe(monkeypatch, _clean_probe_answer(probe))
+    _fake_probe(monkeypatch, _clean_probe_answer())
     _no_conversations(monkeypatch)
 
     code = _run(
@@ -344,9 +342,8 @@ def test_documented_transfer_invocation_matches_the_verbs_accepted_arguments(
     env.write_manifest(owner="host-a")
     env.apply(monkeypatch)
     transfer = _transfer_module()
-    probe = _probe_module()
 
-    _fake_probe(monkeypatch, _clean_probe_answer(probe))
+    _fake_probe(monkeypatch, _clean_probe_answer())
     _no_conversations(monkeypatch)
 
     code = _run(monkeypatch, [*tokens, "--group", "trailhead"])
@@ -383,9 +380,8 @@ def test_reserved_slug_transfer_stays_reachable_via_its_documented_remedy(
     env.write_manifest(owner="host-a", slug="transfer")
     env.apply(monkeypatch)
     transfer = _transfer_module()
-    probe = _probe_module()
 
-    _fake_probe(monkeypatch, _clean_probe_answer(probe))
+    _fake_probe(monkeypatch, _clean_probe_answer())
     _no_conversations(monkeypatch)
 
     code = _run(monkeypatch, tokens)
@@ -430,7 +426,6 @@ def _readme_exit_codes() -> set[int]:
 def test_every_producible_exit_code_appears_in_the_documented_table(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
-    transfer = _transfer_module()
     probe = _probe_module()
     transport = importlib.import_module("camp.host.transport")
 
@@ -442,7 +437,7 @@ def test_every_producible_exit_code_appears_in_the_documented_table(
     env.write_hosts(self_name="host-a", peers={"host-b": "host-b"})
     env.write_manifest(owner="host-a")
     env.apply(monkeypatch)
-    _fake_probe(monkeypatch, _clean_probe_answer(probe))
+    _fake_probe(monkeypatch, _clean_probe_answer())
     _no_conversations(monkeypatch)
     produced.add(
         _run(monkeypatch, ["transfer", "feat-x", "--to", "host-b", "--group", "trailhead", "--dry-run"])
@@ -460,7 +455,7 @@ def test_every_producible_exit_code_appears_in_the_documented_table(
     env3.write_hosts(self_name="host-a", peers={"host-b": "host-b"})
     env3.write_manifest(owner="host-a")
     env3.apply(monkeypatch)
-    _fake_probe(monkeypatch, _clean_probe_answer(probe))
+    _fake_probe(monkeypatch, _clean_probe_answer())
     _no_conversations(monkeypatch)
     produced.add(
         _run(monkeypatch, ["transfer", "feat-x", "--to", "host-b", "--group", "trailhead", "--dry-run"])
@@ -472,7 +467,7 @@ def test_every_producible_exit_code_appears_in_the_documented_table(
     env4.write_hosts(self_name="host-a", peers={"host-b": "host-b"})
     env4.write_manifest(owner="host-c")
     env4.apply(monkeypatch)
-    _fake_probe(monkeypatch, _clean_probe_answer(probe))
+    _fake_probe(monkeypatch, _clean_probe_answer())
     _no_conversations(monkeypatch)
     produced.add(
         _run(monkeypatch, ["transfer", "feat-x", "--to", "host-b", "--group", "trailhead", "--dry-run"])
@@ -495,7 +490,7 @@ def test_every_producible_exit_code_appears_in_the_documented_table(
     env6.write_group(excluded={"repo_a": []})
     env6.write_hosts(self_name="host-a", peers={"host-b": "host-b"})
     env6.apply(monkeypatch)
-    _fake_probe(monkeypatch, _clean_probe_answer(probe))
+    _fake_probe(monkeypatch, _clean_probe_answer())
     _no_conversations(monkeypatch)
     produced.add(
         _run(

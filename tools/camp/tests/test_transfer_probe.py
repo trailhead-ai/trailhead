@@ -305,7 +305,6 @@ def test_a_hostile_response_never_touches_the_local_state_directory(tmp_path: Pa
     a local write path. Proven by feeding probe_peer a malicious response and
     diffing the local state directory byte-for-byte before and after."""
     probe = _probe_module()
-    transport = _transport_module()
 
     state_dir = tmp_path / "camp-state"
     state_dir.mkdir()
@@ -318,14 +317,9 @@ def test_a_hostile_response_never_touches_the_local_state_directory(tmp_path: Pa
         workspace_owner="/absolute/path/should/never/be/joined",
     )
 
-    def fake_runner(argv, execution_timeout, env):
-        return transport.RawResult(stdout=json.dumps(hostile), stderr="", exit_code=0)
-
-    from camp.host.config import Host
-
-    host = Host(ssh="peer", camp_bin="/opt/camp/bin/camp")
     result = probe.probe_peer(
-        host, group="trailhead", slug="feat-x", self_name="this-host", runner=fake_runner,
+        _host(), group="trailhead", slug="feat-x", self_name="this-host",
+        runner=_answering_runner(stdout=json.dumps(hostile)),
     )
 
     assert isinstance(result, probe.ProbeAnswer)
@@ -344,15 +338,22 @@ def _host() -> "object":
     return Host(ssh="peer-host", camp_bin="/opt/camp/bin/camp")
 
 
-def test_probe_peer_returns_a_parsed_answer_on_a_clean_response() -> None:
-    probe = _probe_module()
+def _answering_runner(*, stdout: str = "", stderr: str = "", exit_code: int = 0):
+    """A transport runner that answers every call with exactly this raw result."""
     transport = _transport_module()
 
-    def fake_runner(argv, execution_timeout, env):
-        return transport.RawResult(stdout=json.dumps(_valid_response()), stderr="", exit_code=0)
+    def runner(argv, execution_timeout, env):
+        return transport.RawResult(stdout=stdout, stderr=stderr, exit_code=exit_code)
+
+    return runner
+
+
+def test_probe_peer_returns_a_parsed_answer_on_a_clean_response() -> None:
+    probe = _probe_module()
 
     result = probe.probe_peer(
-        _host(), group="trailhead", slug="feat-x", self_name="this-host", runner=fake_runner,
+        _host(), group="trailhead", slug="feat-x", self_name="this-host",
+        runner=_answering_runner(stdout=json.dumps(_valid_response())),
     )
 
     assert isinstance(result, probe.ProbeAnswer)
@@ -360,15 +361,10 @@ def test_probe_peer_returns_a_parsed_answer_on_a_clean_response() -> None:
 
 def test_probe_peer_refuses_self_name_collision_naming_it_and_the_remedy() -> None:
     probe = _probe_module()
-    transport = _transport_module()
-
-    def fake_runner(argv, execution_timeout, env):
-        return transport.RawResult(
-            stdout=json.dumps(_valid_response(self_name="andromeda")), stderr="", exit_code=0
-        )
 
     result = probe.probe_peer(
-        _host(), group="trailhead", slug="feat-x", self_name="andromeda", runner=fake_runner,
+        _host(), group="trailhead", slug="feat-x", self_name="andromeda",
+        runner=_answering_runner(stdout=json.dumps(_valid_response(self_name="andromeda"))),
     )
 
     assert isinstance(result, probe.SelfNameCollision)
@@ -379,15 +375,10 @@ def test_probe_peer_refuses_self_name_collision_naming_it_and_the_remedy() -> No
 
 def test_probe_peer_does_not_refuse_when_self_name_never_declared_on_either_end() -> None:
     probe = _probe_module()
-    transport = _transport_module()
-
-    def fake_runner(argv, execution_timeout, env):
-        return transport.RawResult(
-            stdout=json.dumps(_valid_response(self_name=None)), stderr="", exit_code=0
-        )
 
     result = probe.probe_peer(
-        _host(), group="trailhead", slug="feat-x", self_name=None, runner=fake_runner,
+        _host(), group="trailhead", slug="feat-x", self_name=None,
+        runner=_answering_runner(stdout=json.dumps(_valid_response(self_name=None))),
     )
 
     assert isinstance(result, probe.ProbeAnswer)
@@ -408,13 +399,10 @@ def test_probe_peer_surfaces_each_transport_outcome_distinguishably(
     exit_code, stderr, expected_type_name
 ) -> None:
     probe = _probe_module()
-    transport = _transport_module()
-
-    def fake_runner(argv, execution_timeout, env):
-        return transport.RawResult(stdout="", stderr=stderr, exit_code=exit_code)
 
     result = probe.probe_peer(
-        _host(), group="trailhead", slug="feat-x", self_name="this-host", runner=fake_runner,
+        _host(), group="trailhead", slug="feat-x", self_name="this-host",
+        runner=_answering_runner(stderr=stderr, exit_code=exit_code),
     )
 
     assert type(result).__name__ == expected_type_name
@@ -443,13 +431,10 @@ def test_probe_peer_treats_a_malformed_answered_response_as_probe_refused() -> N
     not be reported as a transport failure — it is its own distinguishable
     outcome, ProbeRefused, never collapsed into RemoteRefusal or Unreachable."""
     probe = _probe_module()
-    transport = _transport_module()
-
-    def fake_runner(argv, execution_timeout, env):
-        return transport.RawResult(stdout="garbage before {\"ok\": true}", stderr="", exit_code=0)
 
     result = probe.probe_peer(
-        _host(), group="trailhead", slug="feat-x", self_name="this-host", runner=fake_runner,
+        _host(), group="trailhead", slug="feat-x", self_name="this-host",
+        runner=_answering_runner(stdout='garbage before {"ok": true}'),
     )
 
     assert isinstance(result, probe.ProbeRefused)

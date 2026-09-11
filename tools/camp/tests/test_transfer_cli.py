@@ -159,9 +159,28 @@ def _no_conversations(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(transfer, "_gather_conversations", lambda **kw: ())
 
 
+def _clean_probe_answer(**overrides):
+    """A peer answer on which every peer-dependent check passes.
+
+    Keyword overrides shift exactly one field, so a test that varies the
+    peer's answer shows which field it varied rather than restating all seven.
+    """
+    probe = _probe_module()
+    fields = {
+        "self_name": "host-b",
+        "group_configured": True,
+        "members": (probe.MemberRepoStatus(name="repo_a", repo_root_exists=True),),
+        "account": None,
+        "workspace_exists": False,
+        "workspace_owner": None,
+        "contract_version": probe.PROBE_CONTRACT_VERSION,
+    }
+    fields.update(overrides)
+    return probe.ProbeAnswer(**fields)
+
+
 def _fake_probe(monkeypatch: pytest.MonkeyPatch, result):
     probe = _probe_module()
-    transfer = _transfer_module()
 
     def _fake(host, *, group, slug, self_name):
         return result
@@ -260,20 +279,8 @@ def test_clean_verdict_prints_ordered_checks_and_exits_zero(
     env.write_manifest(owner="host-a")
     env.apply(monkeypatch)
     transfer = _transfer_module()
-    probe = _probe_module()
 
-    _fake_probe(
-        monkeypatch,
-        probe.ProbeAnswer(
-            self_name="host-b",
-            group_configured=True,
-            members=(probe.MemberRepoStatus(name="repo_a", repo_root_exists=True),),
-            account=None,
-            workspace_exists=False,
-            workspace_owner=None,
-            contract_version=probe.PROBE_CONTRACT_VERSION,
-        ),
-    )
+    _fake_probe(monkeypatch, _clean_probe_answer())
     _no_conversations(monkeypatch)
 
     code = _run(
@@ -310,20 +317,8 @@ def test_clean_verdict_json_carries_every_check_and_the_ok_discriminator(
     env.write_hosts(self_name="host-a", peers={"host-b": "host-b"})
     env.write_manifest(owner="host-a")
     env.apply(monkeypatch)
-    probe = _probe_module()
 
-    _fake_probe(
-        monkeypatch,
-        probe.ProbeAnswer(
-            self_name="host-b",
-            group_configured=True,
-            members=(probe.MemberRepoStatus(name="repo_a", repo_root_exists=True),),
-            account=None,
-            workspace_exists=False,
-            workspace_owner=None,
-            contract_version=probe.PROBE_CONTRACT_VERSION,
-        ),
-    )
+    _fake_probe(monkeypatch, _clean_probe_answer())
     _no_conversations(monkeypatch)
 
     code = _run(
@@ -365,20 +360,8 @@ def test_json_top_level_discriminator_is_false_on_a_refusal(
     env.write_hosts(self_name="host-a", peers={"host-b": "host-b"})
     env.write_manifest(owner="host-c")  # owned by neither end
     env.apply(monkeypatch)
-    probe = _probe_module()
 
-    _fake_probe(
-        monkeypatch,
-        probe.ProbeAnswer(
-            self_name="host-b",
-            group_configured=True,
-            members=(probe.MemberRepoStatus(name="repo_a", repo_root_exists=True),),
-            account=None,
-            workspace_exists=False,
-            workspace_owner=None,
-            contract_version=probe.PROBE_CONTRACT_VERSION,
-        ),
-    )
+    _fake_probe(monkeypatch, _clean_probe_answer())
     _no_conversations(monkeypatch)
 
     code = _run(
@@ -415,21 +398,9 @@ def test_zero_conversations_is_reported_explicitly_and_still_exits_zero(
     env.write_hosts(self_name="host-a", peers={"host-b": "host-b"})
     env.write_manifest(owner="host-a")
     env.apply(monkeypatch)
-    probe = _probe_module()
     transfer = _transfer_module()
 
-    _fake_probe(
-        monkeypatch,
-        probe.ProbeAnswer(
-            self_name="host-b",
-            group_configured=True,
-            members=(probe.MemberRepoStatus(name="repo_a", repo_root_exists=True),),
-            account=None,
-            workspace_exists=False,
-            workspace_owner=None,
-            contract_version=probe.PROBE_CONTRACT_VERSION,
-        ),
-    )
+    _fake_probe(monkeypatch, _clean_probe_answer())
     _no_conversations(monkeypatch)
 
     code = _run(
@@ -456,21 +427,9 @@ def test_ownership_refusal_names_owner_and_remedy_with_its_own_exit_code(
     env.write_hosts(self_name="host-a", peers={"host-b": "host-b"})
     env.write_manifest(owner="host-c")  # owned by neither end
     env.apply(monkeypatch)
-    probe = _probe_module()
     transfer = _transfer_module()
 
-    _fake_probe(
-        monkeypatch,
-        probe.ProbeAnswer(
-            self_name="host-b",
-            group_configured=True,
-            members=(probe.MemberRepoStatus(name="repo_a", repo_root_exists=True),),
-            account=None,
-            workspace_exists=False,
-            workspace_owner=None,
-            contract_version=probe.PROBE_CONTRACT_VERSION,
-        ),
-    )
+    _fake_probe(monkeypatch, _clean_probe_answer())
     _no_conversations(monkeypatch)
 
     code = _run(
@@ -619,21 +578,9 @@ def test_unknown_slug_refuses_by_name_with_its_own_exit_code(
     env.write_hosts(self_name="host-a", peers={"host-b": "host-b"})
     # No manifest written: the slug is unknown to this host.
     env.apply(monkeypatch)
-    probe = _probe_module()
     transfer = _transfer_module()
 
-    _fake_probe(
-        monkeypatch,
-        probe.ProbeAnswer(
-            self_name="host-b",
-            group_configured=True,
-            members=(probe.MemberRepoStatus(name="repo_a", repo_root_exists=True),),
-            account=None,
-            workspace_exists=False,
-            workspace_owner=None,
-            contract_version=probe.PROBE_CONTRACT_VERSION,
-        ),
-    )
+    _fake_probe(monkeypatch, _clean_probe_answer())
     _no_conversations(monkeypatch)
 
     code = _run(
@@ -726,40 +673,18 @@ def test_every_outcome_leaves_camp_state_byte_identical(
     env = _Env(tmp_path)
     env.write_group(excluded={"repo_a": []})
     env.write_hosts(self_name="host-a", peers={"host-b": "host-b"})
-    probe = _probe_module()
     transport = _transport_module()
 
-    if setup_kind == "clean":
-        env.write_manifest(owner="host-a")
-        _fake_probe(
-            monkeypatch,
-            probe.ProbeAnswer(
-                self_name="host-b",
-                group_configured=True,
-                members=(probe.MemberRepoStatus(name="repo_a", repo_root_exists=True),),
-                account=None,
-                workspace_exists=False,
-                workspace_owner=None,
-                contract_version=probe.PROBE_CONTRACT_VERSION,
-            ),
-        )
-    elif setup_kind == "ownership_refused":
-        env.write_manifest(owner="host-c")
-        _fake_probe(
-            monkeypatch,
-            probe.ProbeAnswer(
-                self_name="host-b",
-                group_configured=True,
-                members=(probe.MemberRepoStatus(name="repo_a", repo_root_exists=True),),
-                account=None,
-                workspace_exists=False,
-                workspace_owner=None,
-                contract_version=probe.PROBE_CONTRACT_VERSION,
-            ),
-        )
-    else:
-        env.write_manifest(owner="host-a")
-        _fake_probe(monkeypatch, transport.Unreachable(reason="down"))
+    # Each kind is the one input that steers the run down its own path: the
+    # recorded owner decides clean vs. ownership-refused, the peer's answer
+    # decides whether the peer was reached at all.
+    env.write_manifest(owner="host-c" if setup_kind == "ownership_refused" else "host-a")
+    _fake_probe(
+        monkeypatch,
+        transport.Unreachable(reason="down")
+        if setup_kind == "peer_unreachable"
+        else _clean_probe_answer(),
+    )
 
     env.apply(monkeypatch)
     _no_conversations(monkeypatch)
@@ -894,21 +819,9 @@ def test_unmapped_failing_check_falls_through_to_the_shared_not_clean_code(
     env.write_hosts(self_name="host-a", peers={"host-b": "host-b"})
     env.write_manifest(owner="host-a")
     env.apply(monkeypatch)
-    probe = _probe_module()
     transfer = _transfer_module()
 
-    _fake_probe(
-        monkeypatch,
-        probe.ProbeAnswer(
-            self_name="host-b",
-            group_configured=True,
-            members=(probe.MemberRepoStatus(name="repo_a", repo_root_exists=True),),
-            account=None,
-            workspace_exists=False,
-            workspace_owner=None,
-            contract_version=probe.PROBE_CONTRACT_VERSION,
-        ),
-    )
+    _fake_probe(monkeypatch, _clean_probe_answer())
     _no_conversations(monkeypatch)
 
     code = _run(

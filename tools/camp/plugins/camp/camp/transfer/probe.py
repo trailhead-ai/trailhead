@@ -28,6 +28,7 @@ ends at once.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -73,9 +74,7 @@ MAX_PROBE_RESPONSE_BYTES = 65536
 # a stored slug is validated only against path escape elsewhere and may
 # legitimately carry other characters. Replicated from spine._VALID_SLUG_RE
 # rather than importing the (heavy) spine module into this transfer-only path.
-import re as _re
-
-_VALID_SLUG_RE = _re.compile(r"^[a-z0-9-]+$")
+_VALID_SLUG_RE = re.compile(r"^[a-z0-9-]+$")
 
 
 @dataclass(frozen=True)
@@ -118,7 +117,7 @@ class SelfNameCollision:
 
     peer_self_name: str
 
-    def __str__(self) -> str:  # pragma: no cover - trivial formatting
+    def __str__(self) -> str:
         return (
             f"the peer declares its own name as {self.peer_self_name!r}, the "
             "same name this host declares — camp cannot tell the two hosts "
