@@ -28,9 +28,19 @@ Test contract:
   first.
 - A live conversation rooted in the workspace is reported as live and does
   not by itself make the verdict unclean, since nothing moves on this path.
+- A peer named but not declared in hosts.toml -> refusal naming it; a
+  declared one passes the same check.
+- A peer answering without the group configured -> refusal; a peer missing
+  member repo roots -> refusal naming every missing member, not the first;
+  every root present -> passes.
+- `regenerated` lists a member's declared exclusions and omits a member
+  declaring an explicit empty set, which has nothing to rebuild.
+- Across the whole closed transport-outcome set, pairwise, each outcome
+  yields a distinct indeterminate detail and carries its own outcome back.
 - The composition writes nothing and starts no process of its own, asserted
   by a byte-identical snapshot of the whole camp state directory across the
-  call, and emits no user-facing text, asserted on the captured streams.
+  call, by making every `subprocess` spawn entry point raise, and emits no
+  user-facing text, asserted on the captured streams.
 """
 
 from __future__ import annotations
@@ -461,3 +471,184 @@ def test_composition_emits_no_user_facing_text_of_its_own(capsys: Any) -> None:
     assert [c.detail for c in failed if c.detail], "refusals must carry their wording as data"
     assert captured.out == ""
     assert captured.err == ""
+
+
+# ---------------------------------------------------------------------------
+# The peer-side declaration and group checks, on their failing branches
+# ---------------------------------------------------------------------------
+
+
+def test_peer_not_declared_is_a_refusal_naming_the_peer() -> None:
+    """A peer named on the command line but absent from hosts.toml cannot be
+    probed, so the check that says so must fail rather than pass by default."""
+    preflight = _preflight_module()
+
+    result = _compose(peer_name="ghost-host", peer_declared=False)
+
+    check = _check(result, "the named peer is declared")
+    assert check.status is preflight.CheckStatus.FAILED
+    assert "ghost-host" in check.detail
+    assert result.verdict is preflight.Verdict.NOT_CLEAN
+
+
+def test_peer_declared_passes_that_same_check() -> None:
+    """The other side of the branch: the check's answer depends on the input."""
+    preflight = _preflight_module()
+
+    result = _compose(peer_name="peer-b", peer_declared=True)
+
+    check = _check(result, "the named peer is declared")
+    assert check.status is preflight.CheckStatus.PASSED
+    assert "peer-b" in check.detail
+
+
+def test_peer_without_the_group_configured_is_a_refusal() -> None:
+    """The peer answered, but does not have the group at all. Distinct from a
+    peer that has it configured and empty — the probe answers this explicitly
+    rather than deriving it from a member count."""
+    preflight = _preflight_module()
+
+    result = _compose(probe_result=_probe_answer(group_configured=False))
+
+    check = _check(
+        result, "the peer has the group configured with existing member repo roots"
+    )
+    assert check.status is preflight.CheckStatus.FAILED
+    assert "does not have this group configured" in check.detail
+    assert result.verdict is preflight.Verdict.NOT_CLEAN
+
+
+def test_peer_missing_member_repo_roots_names_every_one_not_just_the_first() -> None:
+    """Two members missing their repo root on the peer: both are named, so the
+    operator fixes both in one trip rather than discovering the second after."""
+    preflight = _preflight_module()
+    probe = _probe_module()
+
+    result = _compose(
+        probe_result=_probe_answer(
+            members=(
+                probe.MemberRepoStatus(name="repo-a", repo_root_exists=False),
+                probe.MemberRepoStatus(name="repo-b", repo_root_exists=True),
+                probe.MemberRepoStatus(name="repo-c", repo_root_exists=False),
+            )
+        )
+    )
+
+    check = _check(
+        result, "the peer has the group configured with existing member repo roots"
+    )
+    assert check.status is preflight.CheckStatus.FAILED
+    assert "repo-a" in check.detail
+    assert "repo-c" in check.detail, "only the first missing member was named"
+    assert "repo-b" not in check.detail, "a present member was reported missing"
+
+
+def test_peer_with_every_member_repo_root_present_passes_that_check() -> None:
+    """The passing side of the same branch."""
+    preflight = _preflight_module()
+    probe = _probe_module()
+
+    result = _compose(
+        probe_result=_probe_answer(
+            members=(
+                probe.MemberRepoStatus(name="repo-a", repo_root_exists=True),
+                probe.MemberRepoStatus(name="repo-b", repo_root_exists=True),
+            )
+        )
+    )
+
+    check = _check(
+        result, "the peer has the group configured with existing member repo roots"
+    )
+    assert check.status is preflight.CheckStatus.PASSED
+
+
+# ---------------------------------------------------------------------------
+# What a would-transfer verdict says it would regenerate
+# ---------------------------------------------------------------------------
+
+
+def test_regenerated_lists_declared_exclusions_and_omits_an_empty_declaration() -> None:
+    """`regenerated` answers "what would be rebuilt rather than carried", so a
+    member declaring an explicit empty excluded set has nothing to rebuild and
+    must not appear — the same three-valued distinction the refusal check makes,
+    holding in this field too.
+    """
+    result = _compose(
+        members=(
+            _member("has-exclusions", ("build/", "node_modules/")),
+            _member("declares-nothing", ()),
+        )
+    )
+
+    names = [m.name for m in result.regenerated]
+    assert "has-exclusions" in names
+    assert "declares-nothing" not in names, (
+        "a member declaring an explicit empty excluded set has nothing to "
+        "regenerate and must not be listed as though it did"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Every transport outcome stays distinguishable, not just the pair we sampled
+# ---------------------------------------------------------------------------
+
+
+def _every_transport_outcome() -> tuple:
+    transport = _transport_module()
+    return (
+        transport.Unreachable(reason="name or service not known"),
+        transport.StoppedResponding(execution_timeout=30.0),
+        transport.IdentityUnknown(),
+        transport.IdentityChanged(),
+        transport.CredentialsRefused(),
+        transport.CampNotResolvable(),
+        transport.RemoteRefusal(stdout="", stderr="camp: no such group", exit_code=2),
+    )
+
+
+def test_every_transport_outcome_yields_a_distinct_indeterminate_detail() -> None:
+    """Pairwise across the whole closed outcome set, not one sampled pair.
+
+    A changed host key and an ordinary timeout must not read alike, and neither
+    must any other pair: the operator's next action differs for every one of
+    them. Driven through the public composition so the detail asserted on is the
+    one a reader would actually see.
+    """
+    preflight = _preflight_module()
+
+    details: dict[str, str] = {}
+    for outcome in _every_transport_outcome():
+        result = _compose(probe_result=outcome)
+        check = _check(result, "the peer answers")
+        assert check.status is preflight.CheckStatus.INDETERMINATE
+        assert check.transport_outcome is outcome
+        details[type(outcome).__name__] = check.detail
+
+    collisions = [
+        (a, b)
+        for a in details
+        for b in details
+        if a < b and details[a] == details[b]
+    ]
+    assert not collisions, f"transport outcomes read alike: {collisions}"
+
+
+def test_composition_starts_no_subprocess(monkeypatch: Any) -> None:
+    """Purity's other half: the composition runs no process of its own.
+
+    Enforced by making every process-spawning entry point in `subprocess` raise
+    — a spawn that wrote nothing to the streams or the state directory would
+    slip past both the snapshot and the captured-stream checks.
+    """
+    import subprocess
+
+    def _refuse(*args: Any, **kwargs: Any) -> None:
+        raise AssertionError(f"compose_preflight spawned a process: {args!r}")
+
+    for name in ("run", "Popen", "call", "check_call", "check_output"):
+        monkeypatch.setattr(subprocess, name, _refuse)
+
+    result = _compose(owner="host-a")
+
+    assert result.verdict is _preflight_module().Verdict.WOULD_TRANSFER
