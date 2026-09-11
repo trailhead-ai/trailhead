@@ -387,6 +387,28 @@ def test_host_credentials_refused_state(
     assert rows == [{"ok": False, "host": "andromeda", "reason": "host refused our credentials"}]
 
 
+def test_unparsable_remote_answer_exits_nonzero_and_prints_json_row(
+    hosts_env, monkeypatch, capsys: pytest.CaptureFixture
+) -> None:
+    """A remote answer whose stdout is not a JSON array of rows (the far
+    side's camp could not answer at all) must not exit 0 — the transport
+    does not carry the remote command's own status, and passing a remote
+    status of 0 through here would tell a caller that does not parse the
+    rows that this host had nothing to report."""
+    transport = _transport_module()
+    outcome = transport.Answered(stdout="", stderr="", exit_code=0)
+    _rig(monkeypatch, outcome)
+
+    code = _run(monkeypatch, ["sessions", "--host", "andromeda", "--json"])
+
+    captured = capsys.readouterr()
+    assert code != 0
+    rows = json.loads(captured.out)
+    assert rows == [
+        {"ok": False, "host": "andromeda", "reason": "remote answer could not be parsed"}
+    ]
+
+
 def test_remote_refusal_relayed_prints_remote_stderr_unchanged(
     hosts_env, monkeypatch, capsys: pytest.CaptureFixture
 ) -> None:

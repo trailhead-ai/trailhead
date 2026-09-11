@@ -499,7 +499,10 @@ def test_malformed_remote_array_of_non_objects_does_not_crash(
     """A remote answer that decodes as a JSON array but whose elements are
     not objects (a different-versioned or misbehaving remote camp) must not
     raise — stamping `host` onto a non-dict element is a TypeError, not a
-    row to relay."""
+    row to relay. Corrected expectation: the transport does not carry the
+    remote command's own exit status, so a machine whose camp could not
+    answer at all must not exit 0 — the prior `code == 0` assertion was the
+    defect this task fixes, not a contract."""
     transport = _transport_module()
     outcome = transport.Answered(
         stdout=json.dumps(["oops", "not", "objects"]), stderr="", exit_code=0
@@ -509,7 +512,7 @@ def test_malformed_remote_array_of_non_objects_does_not_crash(
     code = _run(monkeypatch, ["list", "--host", "andromeda", "--json"])
 
     captured = capsys.readouterr()
-    assert code == 0
+    assert code != 0
     rows = json.loads(captured.out)
     assert rows == [
         {"ok": False, "host": "andromeda", "reason": "remote answer could not be parsed"}

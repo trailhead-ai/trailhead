@@ -160,6 +160,27 @@ def test_some_answered_some_failed_in_one_answer():
     assert exit_code == 0
 
 
+def test_one_host_unparsable_answer_does_not_change_merged_exit_code():
+    """The merged answer's exit status has always been decided by the local
+    answer alone — a host whose remote answer was unparsable (and so gets a
+    non-zero `HostAnswer.exit_code` from `answer_for_host`) must not flip
+    the merged exit code when the local answer itself is fine."""
+    merge = _merge_module()
+    rows, _, exit_code = merge.merge_all_hosts_answer(
+        [{"ok": True, "slug": "local-slug"}], [], 0,
+        self_name=None,
+        host_answers=[
+            ("andromeda", _host_answer(
+                [{"ok": False, "host": "andromeda", "reason": "remote answer could not be parsed"}],
+                exit_code=1,
+                answered=False,
+            )),
+        ],
+    )
+    assert [r.get("ok") for r in rows] == [True, False]
+    assert exit_code == 0
+
+
 # ---------------------------------------------------------------------------
 # no hosts declared
 

@@ -226,6 +226,46 @@ def test_unparsable_json_array_of_non_objects_row(monkeypatch) -> None:
     ]
 
 
+def test_empty_stdout_with_remote_status_zero_yields_nonzero_exit(monkeypatch) -> None:
+    """A machine whose camp could not answer at all must not look like a
+    successful, empty answer — the transport does not carry the remote
+    command's own status, so an `Answered` outcome with unparsable stdout
+    and remote status 0 must not relay exit_code 0."""
+    transport = _transport_module()
+    answer = _answer(monkeypatch, transport.Answered(stdout="", stderr="", exit_code=0))
+    assert answer.rows == [
+        {"ok": False, "host": "andromeda", "reason": "remote answer could not be parsed"}
+    ]
+    assert answer.exit_code != 0
+
+
+def test_unparsable_json_array_of_non_objects_yields_nonzero_exit(monkeypatch) -> None:
+    transport = _transport_module()
+    answer = _answer(
+        monkeypatch,
+        transport.Answered(stdout='["oops", "not", "objects"]', stderr="", exit_code=0),
+    )
+    assert answer.exit_code != 0
+
+
+def test_remote_nonzero_status_on_unparsable_answer_is_relayed_unchanged(monkeypatch) -> None:
+    """When the remote's own status is already non-zero, that status is
+    relayed as-is rather than being flattened to a fixed failure code."""
+    transport = _transport_module()
+    answer = _answer(monkeypatch, transport.Answered(stdout="not json", stderr="", exit_code=7))
+    assert answer.exit_code == 7
+
+
+def test_well_formed_empty_rows_answer_still_exits_zero(monkeypatch) -> None:
+    """An answered host with genuinely nothing to report is not a failure —
+    the empty-array case must not become non-zero just because this task
+    forces the unparsable case to be non-zero."""
+    transport = _transport_module()
+    answer = _answer(monkeypatch, transport.Answered(stdout="[]", stderr="", exit_code=0))
+    assert answer.rows == []
+    assert answer.exit_code == 0
+
+
 # ---------------------------------------------------------------------------
 # `answer_object_for_host` — the single-object relay shape, and the
 # outcome-certainty mapping every state-changing verb reuses.
