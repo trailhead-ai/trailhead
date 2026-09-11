@@ -590,9 +590,16 @@ fixes, in advance, the arm construction, the exact grader invocation, the run co
 condition, and the tie-break — so no decision here can be retrofitted after a result is seen.
 
 **The three sites** are `execute`'s completion report, `review`'s **second** outcome (the slice loop
-is *not* complete, handing back to `/craft:slice`), and `slice`'s selection handoff. `slice`'s
-worked-example sentence is **not** a site: it emits no deliverable, and is handled as prose
-consistency in the treatment task, never graded here.
+is *not* complete, handing back to `/craft:slice`), and `slice`'s selection handoff.
+
+**`slice`'s other two terminations are sites, and this pre-registration wrongly excluded them.** It
+described base `slice/SKILL.md:577` as a "worked-example sentence" that "emits no deliverable". That
+is a misreading: at base those lines are `slice`'s spec-complete and early-stop termination
+instructions, and the previous slice's pinned outcome inventory
+(`task/every-pinned-ritual-links-the-record-it-acted-on-and-prints-its-one-next-command-on-its-own-line`)
+lists both as one-command outcomes — giving `slice` three, not one. The exclusion is recorded here as
+made, not silently repaired: it is what licensed Task 5 to edit both sites as "prose consistency"
+without a baseline, and the consequence is carried in "Second deviation" below.
 
 ### Ruling — `execute` is measurable, not exempt (Council amendment, Critical, Reliability)
 
@@ -696,10 +703,11 @@ carry a filename prefix distinct from any existing one rather than extending an 
 numbering. Re-grading history under a later ruling would rewrite what the previous measurement
 actually recorded, which is precisely what the regression pin exists to prevent.
 
-## Deviation from the pre-registration — recorded after the Task 4 result was visible
+## First deviation — the `review` fixture, recorded after the Task 4 result was visible
 
-One deviation, found by the Task 4 conformance gate and disposed of here rather than by editing the
-conditions above. The conditions stay exactly as they were committed at `2dbf938d`: a protocol
+Two deviations. The first was found by the Task 4 conformance gate; the second was found by the
+whole-change correctness review at the end of the run, and is recorded in its own section below.
+Both are disposed of here rather than by editing the conditions above. The conditions stay exactly as they were committed at `2dbf938d`: a protocol
 amended after its results are known is no longer a pre-registration, so a deviation is reported, not
 legislated away.
 
@@ -733,3 +741,44 @@ conditions with the branch condition replaced, has no analogous paired bullet, a
 **A written claim was also wrong and has been corrected.** `tools/craft/MANUAL-EVAL.md` stated the
 fixture differed "in exactly one line". It now states what actually differs and why the two bullets
 flip together. The commit body at `c00f3559` makes no such claim and needs no correction.
+
+## Second deviation — the treatment arms, recorded at the whole-change review
+
+Found by the whole-change correctness review at the end of the run, after every task had closed. It
+is recorded for the same reason as the first: the conditions above stay exactly as committed at
+`2dbf938d`.
+
+**What deviated.** The per-site pre-registration states "**No new arm file is created for the
+baseline**; Task 5 creates treatment arms if and only if it edits a site." Task 5 edited three sites
+and created no treatment arm. It rebuilt four live arms in place instead — `baseline.md`,
+`rule-only.md`, `execute-rule-only.md` and `review-treatment.md` all differ from their content at
+`c00f3559`.
+
+**Why it happened, and why it was not optional.** A live arm is defined as a byte-identical rebuild
+of its declared source documents plus the derived reader-rule tail, and Task 1's contract test
+enforces exactly that. The moment Task 5 edited a source document, every live arm mirroring it had
+to be rebuilt or the suite would go red. So the pre-registered instruction and the arms contract
+pulled in opposite directions, and the contract won silently. The pre-registration's own precedent
+in this directory is the opposite one: `plan-rule-only.md` is a frozen pre-edit baseline whose
+post-edit mirror is `plan-treatment.md`. That pairing was available here and was not used.
+
+**What it costs.** The baseline captures remain valid evidence — they were taken against the arms as
+they stood at `c00f3559`, and nothing has edited a capture. What is lost is convenience: the
+baseline is no longer reproducible from the working tree, because the arm filenames in the baseline
+table now hold treatment content. It stays reproducible from history, and `MANUAL-EVAL.md` now says
+so and names the command. No frozen copies are added after the fact here: manufacturing them at the
+end of the run would put files in the tree that no measurement actually read, which is a worse
+record than a pointer to the commit that did.
+
+**The consequence the reader should carry.** Two of `slice`'s three one-command outcome sites — its
+spec-complete and early-stop terminations — were edited by Task 5 under the wrong exclusion recorded
+above, with no baseline and no re-measurement. AC7 therefore holds at eight of ten sites, not at all
+of them, and the parent task records `**Partially covers:** AC7` rather than `**Covers:**`. Closing
+those two sites needs a baseline, a fixture that reaches each termination branch, and a
+re-measurement — the same shape as the AC6 work this slice deferred, and it belongs to its own
+slice for the same reason.
+
+**One further limit, stated rather than measured.** `review`'s loop-complete outcome is counted
+among the eight on the previous slice's captures. Its own prose is byte-unchanged this slice, but the
+arm carrying it was rebuilt, so the inherited pass is an inference from unchanged prose rather than a
+measurement against the arm as it now stands.
