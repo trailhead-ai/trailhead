@@ -721,7 +721,7 @@ def test_launch_host_unknown_first_stderr_line_is_the_check_instruction(
     outcome = transport.StoppedResponding(execution_timeout=60.0)
     _rig(monkeypatch, outcome)
 
-    code = _run(
+    _run(
         monkeypatch,
         ["launch", "ws-a", "--host", "andromeda", "--group", "demo"],
     )
