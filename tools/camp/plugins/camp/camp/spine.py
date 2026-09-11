@@ -61,19 +61,19 @@ _STATIC_RESERVED = frozenset(
     {
         # Canonical group-aware/fleet verbs the taxonomy tables do not model.
         "group",
-        # Read-only group listing. Like "group", it is intercepted in cli/camp
-        # before group resolution, so it never reaches the group-aware router's
-        # RESERVED check — but it is a live verb, and a slug that shadows one is
-        # exactly what this set exists to reject.
+        # The next three are each intercepted in cli/camp BEFORE group
+        # resolution, so none of them reaches the group-aware router's RESERVED
+        # check at all: that interception, not membership here, is what stops a
+        # workspace slug of the same name shadowing the verb today. They are
+        # listed anyway so the guarantee survives the interception being
+        # reordered or removed — the router is then the backstop.
+        #
+        # Read-only group listing.
         "groups",
         # What this host answers about itself, for the transfer preflight's
-        # sending side. Like "groups", intercepted in cli/camp before group
-        # resolution — reserved so a workspace slug can never shadow it.
+        # sending side.
         "transfer-probe",
-        # The peer side of a workspace move (begin/finish). Dispatched from
-        # that same pre-group-resolution position (cli/dispatch.py, right
-        # after "transfer-probe") for the same reason — reserved so a
-        # workspace slug can never shadow it.
+        # The peer side of a workspace move (begin/finish).
         "transfer-receive",
         # The operator-facing dry-run verb. Needs a resolved group (self host,
         # workspace ownership, peer declaration) — unlike "transfer-probe" and
