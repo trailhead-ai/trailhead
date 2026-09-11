@@ -8,7 +8,11 @@ transport outcome and hold nothing across calls.
 
 Covers each of the eleven transport-reachable named-host states (the
 twelfth, "host not declared", is refused before a host is ever resolved and
-never reaches this seam — see the task report for the enumeration).
+never reaches this seam — see the task report for the enumeration), plus
+`ProducerFailed` — not reachable through `run_camp` (only `stream_camp`
+returns it, for a streamed invocation no named-host verb relays through
+this seam today) but exercised here anyway so `classify_certainty` and
+`_classify_transport_failure` stay exhaustive over every `TransportOutcome`.
 """
 from __future__ import annotations
 
@@ -128,7 +132,7 @@ def test_answer_for_host_has_no_cross_call_state(monkeypatch) -> None:
 
 
 # ---------------------------------------------------------------------------
-# the six local-classified failure states — one ok:false row, own reason
+# the seven local-classified failure states — one ok:false row, own reason
 # ---------------------------------------------------------------------------
 
 
@@ -186,6 +190,15 @@ def test_credentials_refused_reason_and_row(monkeypatch) -> None:
         {"ok": False, "host": "andromeda", "reason": "host refused our credentials"}
     ]
     assert any("ssh-add" in n for n in answer.notices)
+
+
+def test_producer_failed_reason_and_row(monkeypatch) -> None:
+    transport = _transport_module()
+    answer = _answer(monkeypatch, transport.ProducerFailed(exit_code=2))
+    assert answer.rows == [
+        {"ok": False, "host": "andromeda", "reason": "local producer failed (exit 2)"}
+    ]
+    assert any("exited 2" in n and "discarded" in n for n in answer.notices)
 
 
 # ---------------------------------------------------------------------------
@@ -294,6 +307,12 @@ def test_certainty_remote_refusal_is_did_not_happen(monkeypatch) -> None:
     assert answer.certainty == _relay_module().Certainty.DID_NOT_HAPPEN
 
 
+def test_certainty_producer_failed_is_unknown(monkeypatch) -> None:
+    transport = _transport_module()
+    answer = _object_answer(monkeypatch, transport.ProducerFailed(exit_code=2))
+    assert answer.certainty == _relay_module().Certainty.UNKNOWN
+
+
 def test_stopped_responding_is_the_only_unknown_outcome() -> None:
     """Enumerates every transport outcome type by reflection, so a later
     outcome added to `camp.host.transport` without a certainty mapping
@@ -310,6 +329,7 @@ def test_stopped_responding_is_the_only_unknown_outcome() -> None:
         transport.CampNotResolvable: transport.CampNotResolvable(),
         transport.CredentialsRefused: transport.CredentialsRefused(),
         transport.RemoteRefusal: transport.RemoteRefusal(stdout="", stderr="", exit_code=1),
+        transport.ProducerFailed: transport.ProducerFailed(exit_code=2),
     }
     subclasses = set(transport.TransportOutcome.__subclasses__())
     assert subclasses == set(sample_outcomes), (
@@ -322,7 +342,7 @@ def test_stopped_responding_is_the_only_unknown_outcome() -> None:
         for outcome_type, outcome in sample_outcomes.items()
         if relay.classify_certainty(outcome) == relay.Certainty.UNKNOWN
     }
-    assert unknown_types == {transport.StoppedResponding}
+    assert unknown_types == {transport.StoppedResponding, transport.ProducerFailed}
 
 
 def test_object_answer_relays_json_object_successfully(monkeypatch) -> None:

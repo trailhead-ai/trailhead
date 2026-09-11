@@ -43,6 +43,7 @@ from .transport import (
     DEFAULT_CONNECT_TIMEOUT_SECONDS,
     IdentityChanged,
     IdentityUnknown,
+    ProducerFailed,
     RemoteRefusal,
     Runner,
     StoppedResponding,
@@ -87,7 +88,7 @@ class Certainty(enum.Enum):
     """Whether a state-changing operation happened, for one transport
     outcome — the mapping every state-changing (non-rows) verb states once
     rather than re-deriving. Closed over :class:`~camp.host.transport.
-    TransportOutcome`'s eight-member set; see :func:`classify_certainty`.
+    TransportOutcome`'s nine-member set; see :func:`classify_certainty`.
     """
 
     #: The far side never ran camp at all (the five locally-classified
@@ -99,10 +100,13 @@ class Certainty(enum.Enum):
     #: happened.
     HAPPENED = "happened"
 
-    #: The connection completed and the invocation then exceeded its
-    #: execution bound without answering. Camp cannot tell whether the far
-    #: side's camp finished before or after the bound expired — the ONLY
-    #: outcome this mapping does not resolve.
+    #: Two shapes: the connection completed and the invocation then exceeded
+    #: its execution bound without answering (`StoppedResponding`) — camp
+    #: cannot tell whether the far side's camp finished before or after the
+    #: bound expired; or the local producer feeding a streamed invocation
+    #: exited non-zero (`ProducerFailed`) — the remote may have completed
+    #: and even reported success, but on a stream that may be truncated or
+    #: corrupt, so that report cannot be trusted either way.
     UNKNOWN = "unknown"
 
 
@@ -115,7 +119,7 @@ def classify_certainty(outcome: _transport.TransportOutcome) -> Certainty:
     A rows-shaped (read-only) verb has no use for it — nothing changed
     either way, so certainty is not a question a listing asks.
     """
-    if isinstance(outcome, StoppedResponding):
+    if isinstance(outcome, (StoppedResponding, ProducerFailed)):
         return Certainty.UNKNOWN
     if isinstance(outcome, Answered):
         return Certainty.HAPPENED
@@ -135,7 +139,7 @@ def classify_certainty(outcome: _transport.TransportOutcome) -> Certainty:
 
 @dataclass(frozen=True)
 class _TransportFailure:
-    """The verb-agnostic rendering of one of the six transport states that
+    """The verb-agnostic rendering of one of the seven transport states that
     never reach a remote camp's own answer — shared by every relay shape.
     ``rows``-specific and single-object-specific wrapping each build their
     own payload around this; this dataclass carries only what both need.
@@ -149,7 +153,7 @@ class _TransportFailure:
 def _classify_transport_failure(
     verb: str, host: Host, host_name: str, outcome: _transport.TransportOutcome
 ) -> _TransportFailure | None:
-    """The six transport-failure renderings, shared by every relay shape.
+    """The seven transport-failure renderings, shared by every relay shape.
 
     Returns ``None`` for :class:`Answered` and :class:`RemoteRefusal` — the
     two outcomes that carry the remote's own stdout/stderr for a caller to
@@ -222,6 +226,23 @@ def _classify_transport_failure(
             ],
             exit_code=1,
             reason="host refused our credentials",
+        )
+
+    if isinstance(outcome, ProducerFailed):
+        # `run_camp` never returns this today — only `stream_camp` does, for
+        # a streamed invocation no named-host verb currently relays through
+        # here. Handled anyway so this function and `classify_certainty`
+        # stay exhaustive over `TransportOutcome` together, for whenever a
+        # stream-fed relay caller lands.
+        return _TransportFailure(
+            notices=[
+                f"camp {verb}: host {host_name!r}'s local producer exited "
+                f"{outcome.exit_code} — its stream may be truncated or "
+                "corrupt, so the remote's own answer is discarded rather "
+                "than trusted"
+            ],
+            exit_code=1,
+            reason=f"local producer failed (exit {outcome.exit_code})",
         )
 
     assert isinstance(outcome, (Answered, RemoteRefusal))
@@ -391,7 +412,7 @@ class HostObjectAnswer:
     through the same control-sequence strip a rows answer's stderr already
     gets — the success path is the one an operator trusts most, so it is
     the one worth spoofing. ``answer`` is ``None`` for every outcome that
-    is not a relayable object: the six locally-classified transport
+    is not a relayable object: the seven locally-classified transport
     failures, and a remote answer whose stdout does not decode as a JSON
     object.
 
@@ -418,7 +439,7 @@ def answer_object_for_host(
     single-object answer.
 
     The single-object counterpart to :func:`answer_for_host`: same
-    transport, same six locally-classified failure states (shared via
+    transport, same seven locally-classified failure states (shared via
     :func:`_classify_transport_failure`), but the remote's own answer is
     relayed as one parsed JSON object rather than stamped rows — and every
     outcome carries a :class:`Certainty` a rows answer never needed. Never

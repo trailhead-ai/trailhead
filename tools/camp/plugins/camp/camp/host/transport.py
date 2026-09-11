@@ -207,9 +207,11 @@ class RemoteRefusal(TransportOutcome):
 
 @dataclass(frozen=True)
 class ProducerFailed(TransportOutcome):
-    """:func:`stream_camp`'s local producer exited non-zero before the stream
-    completed. The remote invocation is aborted rather than being left to
-    receive a truncated stream and answer as though nothing were wrong."""
+    """:func:`stream_camp`'s local producer exited non-zero. The remote
+    invocation's own exit code and stdout are discarded rather than trusted:
+    a nonzero producer exit means the stream it fed the remote may have been
+    truncated or corrupt, even though the remote child already ran to
+    completion and may itself have reported success."""
 
     exit_code: int
 
@@ -406,10 +408,13 @@ def stream_camp(
     ``producer`` must already be running with ``stdout=subprocess.PIPE``. Its
     bytes are copied into the remote invocation's stdin exactly as produced —
     no text encoding, no newline translation — until ``producer`` closes its
-    stdout. If ``producer`` then exits non-zero, the invocation is failed as
-    :class:`ProducerFailed` naming its exit code, rather than letting a
-    truncated stream reach the remote command and be answered as though
-    nothing were wrong.
+    stdout. The remote child is always run to completion first; only once it
+    has exited is ``producer``'s own exit checked. If ``producer`` exited
+    non-zero, the outcome is :class:`ProducerFailed` naming its exit code,
+    and the remote child's own exit code and output are discarded rather
+    than trusted — a nonzero producer exit means the stream it fed the
+    remote may have been truncated or corrupt, so even a reported remote
+    success cannot be taken at face value.
 
     There is no wall-clock execution bound — this channel is expected to run
     for minutes, bounded only by ``producer`` exiting. A connection that dies
