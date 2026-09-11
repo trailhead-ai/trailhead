@@ -434,13 +434,8 @@ either.
 
 ## Outcome report
 
-Report, per cluster: the members, the ADRs written (with their record ids), the decisions absorbed,
-the ADRs superseded, the area profiles re-synthesized, and the terminal outcome. Report deferrals
-separately with their reason — an in-flight member, or the zero-task-edges message.
-
-End with the read command for each ADR written, **fully formed** — the real record id, never a
-placeholder — so the reader can paste it into a fresh session as-is:
-
-```
-lore record show adr/record-ops-locate-by-config-order-scan
-```
+Report, per cluster: the members, the ADRs written — each named as a link, rendered per the reader
+plugin's `## Record links` rule when that rule is resident in this session, or printed as the bare
+`adr/<slug>` identifier when it is not, never hand-assembled — the decisions absorbed, the ADRs
+superseded, the area profiles re-synthesized, and the terminal outcome. Report deferrals separately
+with their reason — an in-flight member, or the zero-task-edges message.

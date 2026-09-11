@@ -565,10 +565,12 @@ operator by name rather than letting a duplicate sit undiscovered.
 ## Outcome
 
 Report the chosen slice, its value claim (or, on the enabler path, its written justification), and
-the new parent task's record id — `lore record show <task-id>` prints it back without the operator
-needing to know the CLI. End with a fully formed handoff, the real task id substituted in, never a
-placeholder — e.g. `/craft:plan task/the-streaming-export-slice` — matching the handoff convention
-other craft skills use, so it can be pasted into a fresh session as-is.
+the new parent task's record id — named as a link, rendered per the reader plugin's `## Record
+links` rule when that rule is resident in this session, or printed as the bare `task/<slug>`
+identifier when it is not; never hand-assemble the URL yourself. End with a fully formed handoff,
+the real task id substituted in, never a placeholder, bare on its own line — e.g. `/craft:plan
+task/the-streaming-export-slice` — matching the handoff convention other craft skills use, so it can
+be pasted into a fresh session as-is.
 
 On the termination path, report the spec complete (or the early stop and what remains) instead, and
 end with its own fully formed next command, never the selection path's `/craft:plan` handoff — the

@@ -562,6 +562,11 @@ as-is. **If any scope was deferred, name those tasks here too** — the handoff 
 operator reads as their marching orders, and work captured but never mentioned is work nobody
 returns to.
 
+**Name the spec as a link in the handoff's opening sentence** — the real record id in place of
+`<spec-id>`, rendered per the reader plugin's `## Record links` rule when that rule is resident in
+this session, or printed as the bare `spec/<slug>` identifier when it is not; never hand-assemble
+the URL yourself. The handoff command stays bare on its own line, as shown above.
+
 **Do not flip the spec to `ready` yourself.** Brainstorm writes the spec at `draft` and stops there;
 the `gauntlet` skill owns the flip — it runs in the accepted tail, once the operator has accepted
 the gauntlet's recommendation. That split is deliberate — it makes the review structurally

@@ -562,9 +562,11 @@ every Critical finding has a disposition. Important and Minor findings do not bl
 
 ### 9. Present for Approval
 
-Share the plan path and a short summary, then wait for explicit user approval before writing any
-implementation code. Do **not** call `ExitPlanMode` — this skill runs outside plan mode so the plan
-can be written directly into the vault.
+Share the plan — named as a link, rendered per the reader plugin's `## Record links` rule when that
+rule is resident in this session, or printed as the bare `task/<slug>` identifier when it is not;
+never hand-assemble the URL yourself — and a short summary, then wait for explicit user approval
+before writing any implementation code. Do **not** call `ExitPlanMode` — this skill runs outside
+plan mode so the plan can be written directly into the vault.
 
 **Before printing the handoff prompt, confirm every Critical finding from Step 8.5 has a disposition
 recorded in the plan's `## Council Review` section.** If any Critical is undisposed, do not print
