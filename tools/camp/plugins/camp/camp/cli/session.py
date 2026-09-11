@@ -1519,7 +1519,7 @@ def _cmd_sessions_host_cli(args: list[str], host: "Host", host_name: str) -> Non
 #: Exit code for `camp launch --host` when the connection completed and the
 #: invocation then exceeded its bound without answering (`Certainty.UNKNOWN`).
 #: Distinct from 0 (success) and from every certain-failure exit — the fixed
-#: `1` the six locally-classified transport failures share, or the far
+#: `1` the seven locally-classified transport failures share, or the far
 #: side's own exit code when the transport happens to propagate it — so a
 #: scripted caller can branch on "check before retrying" without parsing
 #: stderr (docs/design/a-session-starts-on-a-named-machine.md, "Added by
@@ -1605,7 +1605,7 @@ def _cmd_launch_host_cli(args: list[str], host: "Host", host_name: str) -> None:
             }))
         sys.exit(_LAUNCH_HOST_UNKNOWN_EXIT_CODE)
 
-    # A certain failure: either one of the six locally-classified transport
+    # A certain failure: either one of the seven locally-classified transport
     # states (host unreachable, no pinned key, ...) or a far-side refusal
     # relayed in its own words. Either way nothing was started, so the same
     # plain sentence closes the report for both — the far side's own words
