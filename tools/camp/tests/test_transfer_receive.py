@@ -218,7 +218,7 @@ class TestBeginRefusals:
         mpath = _manifest_path("testgroup", "feat-x", g["env"])
         before = mpath.read_bytes()
 
-        with pytest.raises(receive.OverwriteRequired):
+        with pytest.raises(receive.OverwriteRequired) as exc_info:
             receive.begin(
                 groups=[g["group"]],
                 group_name="testgroup",
@@ -228,6 +228,14 @@ class TestBeginRefusals:
                 env=g["env"],
             )
         assert mpath.read_bytes() == before
+        # Ownership deliberately never moves in this stage, so any
+        # uncommitted/untracked work that accumulated in the peer's copy
+        # since arrival has no way back to the sender — --overwrite
+        # destroys it outright, and the refusal an operator reads here must
+        # say so before they pass the flag.
+        message = str(exc_info.value)
+        assert "uncommitted" in message or "untracked" in message
+        assert "destroy" in message or "discard" in message
 
     def test_malformed_owner_refused_before_any_write(self, tmp_path):
         receive = _receive_module()

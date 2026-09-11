@@ -11,8 +11,7 @@ manifest, never a path component.
 
 **begin** decides whether a transfer may start, and if so prepares a place
 for it. A workspace of the given slug already present here, and recorded as
-owned by anyone other than the sender, refuses outright — this host will not
-let one peer overwrite another peer's arrived content. A workspace already
+owned by anyone other than the sender, refuses outright. A workspace already
 present and either owned by the sender itself or carrying no recorded owner
 at all requires `--overwrite` to proceed, since removing it is destructive;
 a genuinely free slug needs no such gate. The overwrite path removes the
@@ -21,6 +20,17 @@ prior attempt through camp's own teardown
 so a re-run after a partial failure never leaves the previous attempt's
 content behind. The seeded manifest's `owner` is always the sender's
 declared name — this host never stamps its own.
+
+`--owner` is bookkeeping, not an authentication boundary: it records which
+host a workspace came from, shape-validated by `_validate_owner` (length and
+charset) but never bound to the identity of whoever actually opened the ssh
+session that is invoking this phase. Anyone able to run `camp
+transfer-receive` on this host at all can claim to be any owner name and
+trigger the overwrite path — the value this check protects
+(`camp transfer-probe`) is discoverable over the same channel. The real
+trust boundary is who is permitted to invoke `camp` on this host in the
+first place; the ownership check governs which arrived workspace a
+transfer touches, not who is allowed to transfer.
 
 `begin` answers each member's basis commit: the commit this host's local
 clone already resolves for that member's declared base ref, or `null` when
@@ -170,7 +180,11 @@ class OverwriteRequired(ReceiveRefused):
     def __init__(self, slug: str, sender: str) -> None:
         super().__init__(
             f"slug {slug!r} already exists here — pass --overwrite to remove "
-            f"it and re-seed for sender {sender!r}, or choose a different slug"
+            f"it and re-seed for sender {sender!r}, or choose a different "
+            "slug; ownership never moves to this host, so --overwrite would "
+            "destroy any uncommitted or untracked work that accumulated in "
+            "that copy since it arrived, with no way for it to come back to "
+            "the sender first"
         )
         self.sender = sender
 

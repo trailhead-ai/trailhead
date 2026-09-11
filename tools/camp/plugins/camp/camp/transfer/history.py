@@ -28,6 +28,7 @@ call's `basis_commit`.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Sequence
 
@@ -47,22 +48,69 @@ from ..host.transport import (
 __all__ = [
     "ProducerSpawner",
     "default_producer_spawn",
+    "InvalidBasisCommit",
     "build_bundle_argv",
     "send_history",
 ]
+
+#: A git object id is hex, and shorter than a full sha1 (7-40) or sha256
+#: (4-64) is still a legitimate abbreviation git itself would accept —
+#: this only screens out something that cannot possibly be an object id
+#: (an option-injection attempt, free text) before it reaches git's argv.
+_BASIS_COMMIT_RE = re.compile(r"^[0-9a-f]{4,64}\Z")
+
+
+class InvalidBasisCommit(ValueError):
+    """*basis_commit* is neither `None` nor a plausible git object-id shape.
+
+    Raised before the value ever reaches `git bundle create`'s own argv
+    parsing, whose failure on a malformed value reads as a broken option
+    rather than a bad basis commit.
+    """
+
+    def __init__(self, basis_commit: str) -> None:
+        super().__init__(
+            f"basis_commit {basis_commit!r} is not a plausible git object id "
+            "(expected 4-64 lowercase hex characters) — refused before it "
+            "reached git"
+        )
+        self.basis_commit = basis_commit
+
+
+def _sender_holds_commit(repo_root: Path, basis_commit: str) -> bool:
+    """True when *repo_root*'s own object store already resolves
+    *basis_commit* to a commit — the prerequisite `git bundle create --not`
+    needs to actually shrink the bundle rather than fail outright."""
+    from ..gitutil import _git
+
+    result = _git(repo_root, "cat-file", "-e", f"{basis_commit}^{{commit}}")
+    return result.returncode == 0
 
 
 def build_bundle_argv(repo_root: Path, ref: str, *, basis_commit: str | None) -> list[str]:
     """The exact `git bundle create -` argv for one member's *ref*.
 
-    Negatived against *basis_commit* when given (the peer already holds it —
-    `begin`'s non-null answer for this member); full history when `None`
-    (the peer reported holding nothing for it). *ref* must be a branch name,
-    never a bare revision — see the module docstring's gotcha.
+    Negatived against *basis_commit* when given AND actually held by this
+    host's own object store at *repo_root* (the peer already holds it —
+    `begin`'s non-null answer for this member — but "the peer already
+    holds it" is a claim about the PEER, not this host, and the two
+    machines an operator alternates between routinely diverge in either
+    direction). Full history otherwise — negativing is an optimization,
+    never a correctness requirement, so a basis commit this host cannot
+    resolve is silently dropped rather than hard-failing the bundle git
+    itself cannot build. *ref* must be a branch name, never a bare
+    revision — see the module docstring's gotcha.
+
+    Raises:
+        InvalidBasisCommit: *basis_commit* is not `None` and not a
+            plausible git object-id shape.
     """
     argv = ["git", "-C", str(repo_root), "bundle", "create", "-", ref]
     if basis_commit:
-        argv += ["--not", basis_commit]
+        if not _BASIS_COMMIT_RE.match(basis_commit):
+            raise InvalidBasisCommit(basis_commit)
+        if _sender_holds_commit(repo_root, basis_commit):
+            argv += ["--not", basis_commit]
     return argv
 
 

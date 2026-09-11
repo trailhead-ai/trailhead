@@ -1417,6 +1417,12 @@ def test_completion_report_names_peer_workspace_regen_and_no_ownership_move(
     assert "regeneration" in out and "still running" in out
     assert "camp status --name feat-x --group trailhead" in out
     assert "credential-shaped content" in out
+    # Ownership did not move, so work accumulated on the peer since arrival
+    # has no way back to the sender — a later --overwrite would destroy it,
+    # and the completion report must name that consequence, not just the
+    # fact that ownership stayed put.
+    assert "--overwrite" in out
+    assert "destroy" in out or "discard" in out
     assert "no conversations are rooted in this workspace" in out
 
 
@@ -1505,6 +1511,10 @@ def test_phase_failure_names_the_phase_and_says_rerun_is_safe_distinctly(
     err = capsys.readouterr().err
     assert "worktree (repo_a)" in err
     assert "re-running the transfer is safe" in err
+    # A literal re-run always hits `begin`'s overwrite refusal — the first
+    # `begin` already seeded the manifest — so the remedy text must name the
+    # flag a re-run actually needs, not just claim a bare re-run is safe.
+    assert "--overwrite" in err
     # A phase failure is worded distinguishably from an OverwriteNeeded
     # refusal — it never opens with "refused" or claims to have moved
     # nothing, since some phases already crossed before the failing one.

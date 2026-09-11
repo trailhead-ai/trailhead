@@ -239,14 +239,37 @@ def _check_member(dest_root: Path, member: tarfile.TarInfo) -> None:
         )
 
 
+#: `data_filter`'s own mode mask (strips setuid/setgid/sticky and
+#: group/other write bits), applied here unconditionally rather than by
+#: depending on `data_filter` itself — see the module docstring: `data_filter`
+#: did not exist at all on Python 3.11.0-3.11.3, so a peer on one of those
+#: releases must still get this sanitization.
+_MODE_MASK = 0o755
+
+
+def _sanitize_member(member: tarfile.TarInfo) -> None:
+    """Strip setuid/setgid/sticky and group/other write bits from *member*'s
+    mode, and clear its archive-supplied ownership fields, in place —
+    mirroring `tarfile.data_filter`'s sanitization but applied unconditionally
+    (see `_MODE_MASK`)."""
+    member.mode &= _MODE_MASK
+    member.uid = 0
+    member.gid = 0
+    member.uname = ""
+    member.gname = ""
+
+
 def extract_archive(fileobj: BinaryIO, dest_root: Path) -> None:
     """Extract a tar stream produced by :func:`write_archive` into
     *dest_root*.
 
     See the module docstring for the confinement rule and why it is
-    implemented unconditionally rather than via `tarfile.data_filter`. Reads
-    incrementally — a member is checked and written before the next is
-    read off the stream.
+    implemented unconditionally rather than via `tarfile.data_filter`. The
+    same posture applies to mode sanitization: every member's mode is masked
+    to `_MODE_MASK` and its uid/gid/uname/gname are cleared before
+    extraction, unconditionally — never left to depend on `data_filter`
+    being present. Reads incrementally — a member is checked and written
+    before the next is read off the stream.
 
     Raises:
         ArchiveMemberEscaped: a member's path or link target would land
@@ -259,6 +282,7 @@ def extract_archive(fileobj: BinaryIO, dest_root: Path) -> None:
     with tarfile.open(fileobj=fileobj, mode="r|") as tf:
         for member in tf:
             _check_member(dest_root, member)
+            _sanitize_member(member)
             if data_filter is not None:
                 try:
                     data_filter(member, str(dest_root))
