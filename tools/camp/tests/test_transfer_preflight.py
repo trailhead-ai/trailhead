@@ -37,6 +37,11 @@ Test contract:
   declaring an explicit empty set, which has nothing to rebuild.
 - Across the whole closed transport-outcome set, pairwise, each outcome
   yields a distinct indeterminate detail and carries its own outcome back.
+- A malformed peer payload fails every payload-dependent check by name,
+  carrying the refusal's reason and no transport outcome; a peer that was
+  never probed fails them too, lexically distinct from the malformed case;
+  and a transport failure, a malformed payload and a never-probed peer stay
+  distinguishable from each other.
 - The composition writes nothing and starts no process of its own, asserted
   by a byte-identical snapshot of the whole camp state directory across the
   call, by making every `subprocess` spawn entry point raise, and emits no
@@ -102,6 +107,11 @@ def _probe_answer(
     )
 
 
+#: Distinguishes "caller said nothing" from "caller explicitly passed None",
+#: which is the never-probed input the composition must answer for.
+_UNSET = object()
+
+
 def _compose(
     *,
     self_name: str | None = "host-a",
@@ -110,13 +120,13 @@ def _compose(
     owner: str | None = None,
     peer_name: str = "peer-b",
     peer_declared: bool = True,
-    probe_result: Any = None,
+    probe_result: Any = _UNSET,
     members: tuple = (),
     slug: str = "my-slug",
     conversations: tuple | None = (),
 ):
     preflight = _preflight_module()
-    if probe_result is None:
+    if probe_result is _UNSET:
         probe_result = _probe_answer()
     if not members:
         members = (_member("repo-a", ("build/",)),)
@@ -652,3 +662,95 @@ def test_composition_starts_no_subprocess(monkeypatch: Any) -> None:
     result = _compose(owner="host-a")
 
     assert result.verdict is _preflight_module().Verdict.WOULD_TRANSFER
+
+
+# ---------------------------------------------------------------------------
+# The peer answered with nothing usable: a malformed payload, or never probed
+# ---------------------------------------------------------------------------
+
+#: The four checks that each need a field of the peer's parsed answer, so each
+#: owes an answer when there is no parsed answer to read.
+_PAYLOAD_DEPENDENT_CHECKS = (
+    "the peer's declared name differs from this host's",
+    "the peer has the group configured with existing member repo roots",
+    "the peer's harness account binding matches this end's",
+    "the slug is free on the peer, or present there and owned by this host",
+)
+
+
+def test_malformed_peer_response_fails_every_payload_dependent_check_by_name() -> None:
+    """A refused payload means the peer *did* answer, so this is a failure
+    rather than indeterminate - nothing about the transport is in doubt.
+
+    Each of the four checks must say so in its own right, and carry the
+    refusal's reason, rather than one of them reporting it and the rest
+    reading as satisfied.
+    """
+    preflight = _preflight_module()
+    probe = _probe_module()
+
+    result = _compose(probe_result=probe.ProbeRefused(reason="contract version 99"))
+
+    for name in _PAYLOAD_DEPENDENT_CHECKS:
+        check = _check(result, name)
+        assert check.status is preflight.CheckStatus.FAILED, name
+        assert "contract version 99" in check.detail, name
+        assert check.transport_outcome is None, (
+            f"{name}: a malformed payload is not a transport outcome"
+        )
+    assert result.verdict is preflight.Verdict.NOT_CLEAN
+
+
+def test_a_peer_that_was_never_probed_fails_every_payload_dependent_check() -> None:
+    """`None` is the never-probed input - the CLI reaches it when the named
+    peer is not declared, so there was nobody to ask.
+
+    It must not read as a pass, and must stay lexically distinct from a peer
+    that answered with something malformed.
+    """
+    preflight = _preflight_module()
+
+    result = _compose(probe_result=None)
+
+    answers = _check(result, "the peer answers")
+    assert answers.status is preflight.CheckStatus.FAILED
+    assert "never probed" in answers.detail
+
+    for name in _PAYLOAD_DEPENDENT_CHECKS:
+        check = _check(result, name)
+        assert check.status is preflight.CheckStatus.FAILED, name
+        assert "never probed" in check.detail, name
+        assert "malformed" not in check.detail, name
+    assert result.verdict is preflight.Verdict.NOT_CLEAN
+
+
+def test_the_three_unusable_peer_answers_stay_distinguishable_from_each_other() -> None:
+    """A transport failure, a malformed payload and a never-probed peer are
+    three different operator problems - retry, a version mismatch, and a
+    missing host declaration - so the checks must not collapse them.
+    """
+    preflight = _preflight_module()
+    probe = _probe_module()
+    transport = _transport_module()
+
+    details = {
+        "transport": _compose(probe_result=transport.IdentityChanged()),
+        "malformed": _compose(probe_result=probe.ProbeRefused(reason="bad shape")),
+        "never": _compose(probe_result=None),
+    }
+
+    for name in _PAYLOAD_DEPENDENT_CHECKS:
+        rendered = {k: _check(r, name).detail for k, r in details.items()}
+        assert len(set(rendered.values())) == 3, f"{name}: {rendered}"
+
+    # Only the transport case is indeterminate; the other two are failures the
+    # peer itself produced.
+    assert (
+        _check(details["transport"], _PAYLOAD_DEPENDENT_CHECKS[0]).status
+        is preflight.CheckStatus.INDETERMINATE
+    )
+    for key in ("malformed", "never"):
+        assert (
+            _check(details[key], _PAYLOAD_DEPENDENT_CHECKS[0]).status
+            is preflight.CheckStatus.FAILED
+        )

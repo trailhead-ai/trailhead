@@ -7,11 +7,12 @@ performs every local read (the manifest, the group config, the excluded
 declarations, the conversation pool) and the one peer read
 (:func:`camp.transfer.probe.probe_peer`) and hands the *results* of those
 reads to :func:`compose_preflight` here. Mirrors the purity boundary
-`camp.launch.recovery` already holds and states about itself;
-`tools/camp/tests/test_transfer_preflight.py` asserts that boundary over this
-file's own AST as a secondary signal, not the load-bearing guard — the
-load-bearing guard is the byte-identical camp-state snapshot the same test
-takes across a call.
+`camp.launch.recovery` already holds and states about itself.
+`tools/camp/tests/test_transfer_preflight.py` guards it three ways, each by
+running a composition and observing what it did: a byte-identical snapshot of
+the whole camp state directory across the call (no write), the captured
+stdout and stderr (no rendering), and every process-spawning entry point in
+`subprocess` made to raise (no process).
 
 THE CHECKS, IN ORDER, AND WHY ELEVEN. Each of the eleven checks below reports
 independently — one failing check never suppresses the rest, because the
