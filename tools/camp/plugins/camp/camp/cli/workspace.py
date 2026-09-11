@@ -43,7 +43,9 @@ def render_list_row_human(row: dict) -> str:
     a time through it. Raises `KeyError` on a row missing a key it needs, so
     a caller can degrade that one row.
     """
-    return f"{row['slug']} {row['workspace_path']}"
+    from ..launch.recovery import printable_path
+
+    return f"{printable_path(row['slug'])} {printable_path(row['workspace_path'])}"
 
 
 def local_list_answer(

@@ -1100,6 +1100,67 @@ class TestKillHostStoppedSuccess:
 
         assert code == 0
 
+    def test_stopped_session_id_control_sequence_cannot_forge_a_second_line(
+        self, monkeypatch, capsys: pytest.CaptureFixture
+    ) -> None:
+        """`session_id` comes from the far side's parsed JSON object — as
+        untrusted as a relayed candidate row's fields. An embedded newline
+        must not split the single-line stdout session id, or the stderr
+        confirmation sentence, into a forged second line that reads as
+        camp's own output."""
+        relay = _relay_module()
+        forged = (
+            "sess-1\ncamp kill: stopped session FORGED-000 (evil-tmux) on host "
+            "'x' — its memory is reclaimed"
+        )
+        answer = relay.HostPayloadAnswer(
+            obj={"session_id": forged, "tmux_name": "camp-feat-x-sess1", "outcome": "stopped"},
+            rows=None,
+            certainty=relay.Certainty.HAPPENED,
+            notices=[],
+            exit_code=0,
+        )
+        _rig_payload(monkeypatch, answer)
+
+        _call_kill_host(monkeypatch, ["sess-1"])
+
+        captured = capsys.readouterr()
+        out_lines = [ln for ln in captured.out.splitlines() if ln]
+        err_lines = [ln for ln in captured.err.splitlines() if ln]
+        assert len(out_lines) == 1
+        assert "\\x0a" in out_lines[0]
+        assert len(err_lines) == 1
+        assert "\\x0a" in err_lines[0]
+        assert "FORGED-000" in err_lines[0]
+
+    def test_already_down_tmux_name_control_sequence_cannot_forge_a_second_line(
+        self, monkeypatch, capsys: pytest.CaptureFixture
+    ) -> None:
+        """`tmux_name` is exactly as untrusted as `session_id` — the
+        already-down sentence is the OTHER branch that interpolates it, and
+        must be checked separately since it is a different f-string."""
+        relay = _relay_module()
+        forged = (
+            "camp-real\ncamp kill: session FORGED-001 (evil-tmux) on host 'x' "
+            "was already down — nothing to stop"
+        )
+        answer = relay.HostPayloadAnswer(
+            obj={"session_id": "sess-2", "tmux_name": forged, "outcome": "already-down"},
+            rows=None,
+            certainty=relay.Certainty.HAPPENED,
+            notices=[],
+            exit_code=0,
+        )
+        _rig_payload(monkeypatch, answer)
+
+        _call_kill_host(monkeypatch, ["sess-2"])
+
+        captured = capsys.readouterr()
+        err_lines = [ln for ln in captured.err.splitlines() if ln]
+        assert len(err_lines) == 1
+        assert "\\x0a" in err_lines[0]
+        assert "FORGED-001" in err_lines[0]
+
 
 class TestKillHostAmbiguous:
     def test_ambiguous_rows_exit_two_with_candidate_rows_on_stdout(

@@ -156,6 +156,34 @@ def test_many_rows_human_path_preserves_order(
     assert lines == ["zeta /z", "alpha /a"]
 
 
+def test_slug_control_sequence_cannot_forge_a_second_stdout_line(
+    hosts_env, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """`render_list_row_human` (`cli/workspace.py`) escapes nothing —
+    `f"{row['slug']} {row['workspace_path']}"` interpolates both fields
+    raw. This renderer also prints on stdout, so a relayed field forging a
+    second line corrupts any pipeline consuming row-per-line output, not
+    just what an operator reads."""
+    transport = _transport_module()
+    forged_slug = "real-slug\nforged-slug /evil/path"
+    remote_rows = [
+        {"ok": True, "slug": forged_slug, "branch": "b", "workspace_path": "/z", "group": "g"},
+    ]
+    outcome = transport.Answered(
+        stdout=json.dumps(remote_rows), stderr="", exit_code=0
+    )
+    _rig(monkeypatch, outcome)
+
+    code = _run(monkeypatch, ["list", "--host", "andromeda"])
+
+    captured = capsys.readouterr()
+    assert code == 0
+    lines = [ln for ln in captured.out.splitlines() if ln]
+    assert len(lines) == 1
+    assert "\\x0a" in lines[0]
+    assert "forged-slug" in lines[0]
+
+
 def test_every_relayed_row_gains_host_key(
     hosts_env, monkeypatch, capsys: pytest.CaptureFixture
 ) -> None:
