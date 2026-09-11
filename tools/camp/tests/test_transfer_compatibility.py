@@ -416,6 +416,31 @@ def test_reserved_slug_transfer_probe_stays_reachable_via_its_documented_remedy(
     assert payload["workspace_owner"] == "host-a"
 
 
+def test_reserved_slug_transfer_receive_stays_reachable_via_its_documented_remedy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    documented = _extract_readme_commands(
+        r"^camp transfer transfer-receive --to <peer> --dry-run --group <name>$"
+    )
+    tokens = documented.split()[1:]  # drop "camp"
+    tokens = ["host-b" if t == "<peer>" else t for t in tokens]
+    tokens = ["trailhead" if t == "<name>" else t for t in tokens]
+
+    env = _Env(tmp_path)
+    env.write_group(excluded={"repo_a": []})
+    env.write_hosts(self_name="host-a", peers={"host-b": "host-b"})
+    env.write_manifest(owner="host-a", slug="transfer-receive")
+    env.apply(monkeypatch)
+    transfer = _transfer_module()
+
+    _fake_probe(monkeypatch, _clean_probe_answer())
+    _no_conversations(monkeypatch)
+
+    code = _run(monkeypatch, tokens)
+
+    assert code == transfer.EXIT_WOULD_TRANSFER
+
+
 # ---------------------------------------------------------------------------
 # 7. Every exit code the verb can produce appears in the documented table
 # ---------------------------------------------------------------------------

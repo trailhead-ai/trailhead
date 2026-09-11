@@ -416,18 +416,25 @@ Exit codes:
 ```
 
 `transfer` and `transfer-probe` (the wire-level answer `--dry-run` reads
-from the peer) are both reserved verb names, so neither can be dispatched
-as a bare slug (`camp transfer` alone always means the verb). A workspace
-is still free to *be named* `transfer` or `transfer-probe`, and stays fully
-reachable through its group's own named verbs:
+from the peer) are reserved verb names, and so is `transfer-receive` (the
+peer side of a move), so none of the three can be dispatched as a bare slug
+(`camp transfer` alone always means the verb). `transfer-probe` and
+`transfer-receive` are each intercepted before a group is ever resolved, and
+that interception — not membership in the reserved set — is what stops a
+same-named workspace slug shadowing them today; the reserved set is the
+backstop if that interception is ever reordered or removed. A workspace is
+still free to *be named* `transfer`, `transfer-probe`, or `transfer-receive`,
+and stays fully reachable through its group's own named verbs:
 
 ```
 camp transfer transfer --to <peer> --dry-run --group <name>
 camp transfer-probe --group <name> --slug transfer-probe
+camp transfer transfer-receive --to <peer> --dry-run --group <name>
 ```
 
 The first previews a workspace literally named `transfer`; the second
-answers for one named `transfer-probe`.
+answers for one named `transfer-probe`; the third previews one named
+`transfer-receive`.
 
 ## Group setup
 
