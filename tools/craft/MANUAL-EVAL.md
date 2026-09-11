@@ -1376,10 +1376,18 @@ from its own freshly-created empty scratch cwd). All 9 processes exited 0 with e
 **Result: all three sites now hold AC7, unanimously, no tie-break triggered at any site.** The bar
 this task named was determinism, not merely improved odds, and each site cleared it: `execute` moved
 from 0/3 (two `absent`, one `embedded`) to 3/3; `review`'s second outcome moved from 1/6 to 3/3;
-`slice` moved from a 4-2 AMBIGUOUS (falsified) baseline to a clean 3/3. Combined with the four
+`slice` moved from a 4-2 AMBIGUOUS (falsified) baseline to a clean 3/3. Combined with the five
 already-passing sites (`brainstorm`, `gauntlet`, `distill` at baseline; `plan` and `review`'s
-loop-complete outcome from the previous slice), **AC7 now holds at every site in the pinned
-seven-ritual set.**
+loop-complete outcome from the previous slice), **AC7 holds at eight of the ten one-command outcome
+sites the previous slice's pinned inventory enumerates.** The two it does not cover are `slice`'s
+spec-complete and early-stop terminations — edited by Task 5, never baselined and never measured.
+See "Second deviation" in the eval's `expected.md`.
+
+**Baseline arm content is pinned at `c00f3559`, not at the current tree.** The arms named in the
+baseline table above are live arms: they mirror whatever the skill sources currently say, and Task 5
+rebuilt all four in place when it edited the prose. To reproduce a baseline row, recover that row's
+arm at the baseline commit — `git show c00f3559:<arm-path>` — rather than reading the file as it
+stands now.
 
 **Security scan.** `python3 <scratchpad>/capture_scan.py` over all 36 new capture files (9 captures
 × `.txt`/`.exit`/`.stderr.txt`): **9 hits, all class "high-entropy base64-shaped"**, every one
