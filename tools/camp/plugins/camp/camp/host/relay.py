@@ -27,6 +27,7 @@ each verb's own renderer's job (for `list`, that's
 """
 from __future__ import annotations
 
+import enum
 import json
 import re
 import sys
@@ -82,6 +83,151 @@ class HostAnswer:
     answered: bool = False
 
 
+class Certainty(enum.Enum):
+    """Whether a state-changing operation happened, for one transport
+    outcome — the mapping every state-changing (non-rows) verb states once
+    rather than re-deriving. Closed over :class:`~camp.host.transport.
+    TransportOutcome`'s eight-member set; see :func:`classify_certainty`.
+    """
+
+    #: The far side never ran camp at all (the five locally-classified
+    #: transport failures), or it ran and declined (`RemoteRefusal`). Either
+    #: way, the operation certainly did not happen.
+    DID_NOT_HAPPEN = "did_not_happen"
+
+    #: The far side ran camp and it answered. The operation certainly
+    #: happened.
+    HAPPENED = "happened"
+
+    #: The connection completed and the invocation then exceeded its
+    #: execution bound without answering. Camp cannot tell whether the far
+    #: side's camp finished before or after the bound expired — the ONLY
+    #: outcome this mapping does not resolve.
+    UNKNOWN = "unknown"
+
+
+def classify_certainty(outcome: _transport.TransportOutcome) -> Certainty:
+    """Map one transport outcome to whether the operation it carried
+    certainly happened, certainly did not, or is unknown.
+
+    Verb-agnostic and stated once: every state-changing verb that rides
+    this transport reuses this mapping rather than re-deriving it per verb.
+    A rows-shaped (read-only) verb has no use for it — nothing changed
+    either way, so certainty is not a question a listing asks.
+    """
+    if isinstance(outcome, StoppedResponding):
+        return Certainty.UNKNOWN
+    if isinstance(outcome, Answered):
+        return Certainty.HAPPENED
+    assert isinstance(
+        outcome,
+        (
+            Unreachable,
+            IdentityUnknown,
+            IdentityChanged,
+            CampNotResolvable,
+            CredentialsRefused,
+            RemoteRefusal,
+        ),
+    )
+    return Certainty.DID_NOT_HAPPEN
+
+
+@dataclass(frozen=True)
+class _TransportFailure:
+    """The verb-agnostic rendering of one of the six transport states that
+    never reach a remote camp's own answer — shared by every relay shape.
+    ``rows``-specific and single-object-specific wrapping each build their
+    own payload around this; this dataclass carries only what both need.
+    """
+
+    notices: list[str]
+    exit_code: int
+    reason: str
+
+
+def _classify_transport_failure(
+    verb: str, host: Host, host_name: str, outcome: _transport.TransportOutcome
+) -> _TransportFailure | None:
+    """The six transport-failure renderings, shared by every relay shape.
+
+    Returns ``None`` for :class:`Answered` and :class:`RemoteRefusal` — the
+    two outcomes that carry the remote's own stdout/stderr for a caller to
+    parse itself, rows or object, rather than a fixed local rendering.
+    """
+    if isinstance(outcome, Unreachable):
+        return _TransportFailure(
+            notices=[
+                f"camp {verb}: host {host_name!r} is unreachable — no response "
+                f"within {DEFAULT_CONNECT_TIMEOUT_SECONDS:g}s"
+            ],
+            exit_code=1,
+            reason=f"unreachable — no response within {DEFAULT_CONNECT_TIMEOUT_SECONDS:g}s",
+        )
+
+    if isinstance(outcome, StoppedResponding):
+        t = outcome.execution_timeout
+        return _TransportFailure(
+            notices=[
+                f"camp {verb}: host {host_name!r} connected but did not finish "
+                f"within {t:g}s — no answer was received"
+            ],
+            exit_code=1,
+            reason=f"connected but did not finish within {t:g}s",
+        )
+
+    if isinstance(outcome, IdentityUnknown):
+        return _TransportFailure(
+            notices=[
+                f"camp {verb}: host {host_name!r} has no pinned key — camp will "
+                "not accept one on first contact",
+                f"camp {verb}: pin it yourself, then re-run: ssh-keyscan "
+                f"{host.ssh} >> ~/.ssh/known_hosts",
+            ],
+            exit_code=1,
+            reason="no pinned host key",
+        )
+
+    if isinstance(outcome, IdentityChanged):
+        return _TransportFailure(
+            notices=[
+                f"camp {verb}: host {host_name!r} presented a different key "
+                "than the pinned one — refusing to connect",
+                f"camp {verb}: if this machine was not rebuilt, the connection "
+                "may be intercepted; verify before removing the pinned key",
+            ],
+            exit_code=1,
+            reason="host key differs from the pinned key",
+        )
+
+    if isinstance(outcome, CampNotResolvable):
+        return _TransportFailure(
+            notices=[
+                f"camp {verb}: host {host_name!r} answered, but camp could not "
+                "be run there — declare camp_bin for this host in hosts.toml"
+            ],
+            exit_code=1,
+            reason="camp could not be run on the host — declare camp_bin for "
+            "this host in hosts.toml",
+        )
+
+    if isinstance(outcome, CredentialsRefused):
+        return _TransportFailure(
+            notices=[
+                f"camp {verb}: host {host_name!r} refused every credential "
+                "offered — camp never ran there",
+                f"camp {verb}: load the identity authorized on that host (e.g. "
+                "ssh-add) and confirm it is in the host's authorized_keys, "
+                "then re-run",
+            ],
+            exit_code=1,
+            reason="host refused our credentials",
+        )
+
+    assert isinstance(outcome, (Answered, RemoteRefusal))
+    return None
+
+
 def answer_for_host(
     verb: str,
     host: Host,
@@ -99,61 +245,13 @@ def answer_for_host(
     """
     outcome = _transport.run_camp(host, remote_argv, runner=runner)
 
-    if isinstance(outcome, Unreachable):
-        return _fail_answer(
-            verb, host_name,
-            human=f"is unreachable — no response within {DEFAULT_CONNECT_TIMEOUT_SECONDS:g}s",
-            reason=f"unreachable — no response within {DEFAULT_CONNECT_TIMEOUT_SECONDS:g}s",
-        )
-
-    if isinstance(outcome, StoppedResponding):
-        t = outcome.execution_timeout
-        return _fail_answer(
-            verb, host_name,
-            human=f"connected but did not finish within {t:g}s — no answer was received",
-            reason=f"connected but did not finish within {t:g}s",
-        )
-
-    if isinstance(outcome, IdentityUnknown):
-        return _fail_answer(
-            verb, host_name,
-            human="has no pinned key — camp will not accept one on first contact",
-            reason="no pinned host key",
-            extra_human_line=(
-                f"pin it yourself, then re-run: ssh-keyscan {host.ssh} "
-                ">> ~/.ssh/known_hosts"
-            ),
-        )
-
-    if isinstance(outcome, IdentityChanged):
-        return _fail_answer(
-            verb, host_name,
-            human="presented a different key than the pinned one — refusing to connect",
-            reason="host key differs from the pinned key",
-            extra_human_line=(
-                "if this machine was not rebuilt, the connection may be "
-                "intercepted; verify before removing the pinned key"
-            ),
-        )
-
-    if isinstance(outcome, CampNotResolvable):
-        return _fail_answer(
-            verb, host_name,
-            human="answered, but camp could not be run there — declare camp_bin "
-            "for this host in hosts.toml",
-            reason="camp could not be run on the host — declare camp_bin for "
-            "this host in hosts.toml",
-        )
-
-    if isinstance(outcome, CredentialsRefused):
-        return _fail_answer(
-            verb, host_name,
-            human="refused every credential offered — camp never ran there",
-            reason="host refused our credentials",
-            extra_human_line=(
-                "load the identity authorized on that host (e.g. ssh-add) "
-                "and confirm it is in the host's authorized_keys, then re-run"
-            ),
+    failure = _classify_transport_failure(verb, host, host_name, outcome)
+    if failure is not None:
+        return HostAnswer(
+            rows=[{"ok": False, "host": host_name, "reason": failure.reason}],
+            notices=failure.notices,
+            exit_code=failure.exit_code,
+            answered=False,
         )
 
     # Answered / RemoteRefusal both carry stdout/stderr/exit_code. The
@@ -283,23 +381,106 @@ def _verbatim_notice(text: str) -> list[str]:
     return [stripped]
 
 
-def _fail_answer(
+@dataclass(frozen=True)
+class HostObjectAnswer:
+    """One machine's contribution to a per-host answer, for a verb whose
+    remote answer is one object rather than a list of rows.
+
+    ``answer`` is the remote's own parsed JSON object, with every string
+    value (including nested ones, e.g. inside ``account_binding``) run
+    through the same control-sequence strip a rows answer's stderr already
+    gets — the success path is the one an operator trusts most, so it is
+    the one worth spoofing. ``answer`` is ``None`` for every outcome that
+    is not a relayable object: the six locally-classified transport
+    failures, and a remote answer whose stdout does not decode as a JSON
+    object.
+
+    ``certainty`` states whether the operation the verb asked for happened,
+    from :func:`classify_certainty` — the one piece of information a rows
+    answer has no use for and this shape exists to carry.
+    """
+
+    answer: dict[str, Any] | None
+    certainty: Certainty
+    notices: list[str] = field(default_factory=list)
+    exit_code: int = 0
+
+
+def answer_object_for_host(
     verb: str,
+    host: Host,
     host_name: str,
+    remote_argv: Sequence[str],
     *,
-    human: str,
-    reason: str,
-    extra_human_line: str | None = None,
-) -> HostAnswer:
-    """The fixed answer for one of the six non-relayable failure states:
-    its own stderr notice line(s), a single `ok: false` row, and exit 1 —
-    never a raw transport error, always the operator's terms."""
-    notices = [f"camp {verb}: host {host_name!r} {human}"]
-    if extra_human_line is not None:
-        notices.append(f"camp {verb}: {extra_human_line}")
-    return HostAnswer(
-        rows=[{"ok": False, "host": host_name, "reason": reason}],
-        notices=notices,
-        exit_code=1,
-        answered=False,
+    runner: Runner = default_runner,
+) -> HostObjectAnswer:
+    """Run *remote_argv* on *host* over the transport and return its
+    single-object answer.
+
+    The single-object counterpart to :func:`answer_for_host`: same
+    transport, same six locally-classified failure states (shared via
+    :func:`_classify_transport_failure`), but the remote's own answer is
+    relayed as one parsed JSON object rather than stamped rows — and every
+    outcome carries a :class:`Certainty` a rows answer never needed. Never
+    calls ``sys.exit`` and never prints. Holds no state across calls.
+    """
+    outcome = _transport.run_camp(host, remote_argv, runner=runner)
+    certainty = classify_certainty(outcome)
+
+    failure = _classify_transport_failure(verb, host, host_name, outcome)
+    if failure is not None:
+        return HostObjectAnswer(
+            answer=None,
+            certainty=certainty,
+            notices=failure.notices,
+            exit_code=failure.exit_code,
+        )
+
+    assert isinstance(outcome, (Answered, RemoteRefusal))
+    parsed = _try_parse_object(outcome.stdout)
+    if parsed is None:
+        return HostObjectAnswer(
+            answer=None,
+            certainty=certainty,
+            notices=_verbatim_notice(outcome.stderr),
+            exit_code=outcome.exit_code,
+        )
+
+    return HostObjectAnswer(
+        answer=_strip_control_sequences_deep(parsed),
+        certainty=certainty,
+        notices=_verbatim_notice(outcome.stderr),
+        exit_code=outcome.exit_code,
     )
+
+
+def _try_parse_object(stdout: str) -> dict[str, Any] | None:
+    """The single-object counterpart to :func:`_try_parse_rows`: the far
+    side's stdout must decode as a JSON *object*, not an array — a launch
+    answers with one session, never a list of them. An array (even of rows)
+    is not a relayable object here, mirroring how a bare object is not a
+    relayable row through :func:`_try_parse_rows`."""
+    try:
+        data = json.loads(stdout)
+    except ValueError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    return data
+
+
+def _strip_control_sequences_deep(value: Any) -> Any:
+    """Recursively apply :func:`_strip_control_sequences` to every string
+    value reachable from *value* — a dict's values (including nested
+    dicts, e.g. ``account_binding``), a list's elements, and bare strings.
+    Non-string, non-container values (bool, int, float, None) pass through
+    unchanged. This is what lets a single-object answer's success path get
+    the same protection a rows answer's stderr notice already gets, without
+    this module knowing any verb's own key set."""
+    if isinstance(value, str):
+        return _strip_control_sequences(value)
+    if isinstance(value, dict):
+        return {key: _strip_control_sequences_deep(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_strip_control_sequences_deep(item) for item in value]
+    return value
