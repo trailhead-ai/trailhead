@@ -105,10 +105,9 @@ def _cmd_transfer_probe_cli(args: list[str]) -> None:
 
 
 #: The closed set of phases `camp transfer-receive` admits, in dispatch
-#: order. A future phase (the `worktree` archive stream this `history`
-#: channel is shaped to be reused by) is a one-line addition here plus a new
-#: `elif phase == "<name>":` branch below — never a second closed-tuple site.
-_PHASES = ("begin", "finish", "history")
+#: order. Admitting a new phase is a one-line addition here plus a new
+#: `if phase == "<name>":` branch below — never a second closed-tuple site.
+_PHASES = ("begin", "finish", "history", "worktree")
 
 
 def _cmd_transfer_receive_cli(args: list[str]) -> None:
@@ -186,6 +185,25 @@ def _cmd_transfer_receive_cli(args: list[str]) -> None:
                 slug=slug,
                 member=member,
                 bundle_bytes=bundle_bytes,
+            )
+        except receive_mod.ReceiveRefused as e:
+            print(f"camp transfer-receive: {e}", file=sys.stderr)
+            sys.exit(1)
+        print(json.dumps(answer))
+        return
+
+    if phase == "worktree":
+        member = _consume_flag_value(rest, "--member")
+        if not member:
+            print("camp transfer-receive: --member is required for worktree", file=sys.stderr)
+            sys.exit(1)
+        try:
+            answer = receive_mod.worktree(
+                groups=groups,
+                group_name=group_name,
+                slug=slug,
+                member=member,
+                archive_stream=sys.stdin.buffer,
             )
         except receive_mod.ReceiveRefused as e:
             print(f"camp transfer-receive: {e}", file=sys.stderr)
