@@ -213,6 +213,7 @@ def test_attach_answers_from_a_directory_belonging_to_no_group(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     _isolated_env(tmp_path, monkeypatch)
+    _wire_local_session(monkeypatch, tmp_path=tmp_path, live=False)
     code = _run(["attach", "no-such-ref"], monkeypatch)
     err = capsys.readouterr().err
     assert code != 0
@@ -231,6 +232,19 @@ def test_attach_reports_a_malformed_self_name_instead_of_a_traceback(
     (cfg / "hosts.toml").write_text('self_name = "Not-Valid!"\n', encoding="utf-8")
     monkeypatch.setenv("CAMP_CONFIG_DIR", str(cfg))
     monkeypatch.setenv("CAMP_STATE_DIR", str(tmp_path / "state"))
+
+    # Force the session pool unanswerable so this test fails deterministically
+    # (on any machine, with or without a real harness binary on PATH) if the
+    # self_name check ever again runs after the pool probe instead of before
+    # it — the ordering bug this test exists to pin.
+    cli_session = _cli_session_module()
+    launch_session = _launch_session_module()
+    monkeypatch.setattr(cli_session, "_addressable_harnesses", lambda groups, **k: [_Harness([])])
+    monkeypatch.setattr(
+        launch_session,
+        "enumerate_records",
+        lambda h, ws_, env_: (_ for _ in ()).throw(OSError("no such harness")),
+    )
 
     code = _run(["attach", "no-such-ref"], monkeypatch)
 
