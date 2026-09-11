@@ -142,7 +142,6 @@ class TestSelectionVariesWithEnumeration:
             _host(),
             group="g",
             slug="s",
-            member="m",
             workspace=ws,
             conversations=rows,
             locate_transcript=_locate,
@@ -182,7 +181,6 @@ class TestSelectionVariesWithEnumeration:
             _host(),
             group="g",
             slug="s",
-            member="m",
             workspace=ws,
             conversations=rows,
             locate_transcript=_locate,
@@ -209,7 +207,6 @@ class TestSelectionVariesWithEnumeration:
                 _host(),
                 group="g",
                 slug="s",
-                member="m",
                 workspace=ws,
                 conversations=rows,
                 locate_transcript=_locate,
@@ -233,7 +230,6 @@ class TestSelectionVariesWithEnumeration:
             _host(),
             group="g",
             slug="s",
-            member="m",
             workspace=ws,
             conversations=rows,
             locate_transcript=_locate,
@@ -282,6 +278,60 @@ class TestNestedSubtree:
 
         assert members == {"transcript.jsonl"}
 
+    def test_non_jsonl_tool_result_artifact_streams_relative_to_own_directory(
+        self, tmp_path: Path
+    ) -> None:
+        from camp.transfer.conversations import build_conversation_archive_argv
+
+        transcript_path = tmp_path / "transcript.jsonl"
+        transcript_path.write_text('{"cwd": "/ws"}\n')
+        nested_dir = tmp_path / _UUID_ROOT
+        tool_results = nested_dir / "tool-results"
+        tool_results.mkdir(parents=True)
+        (tool_results / "result-1.txt").write_text("plain text tool output\n")
+        (tool_results / "result-2.json").write_text('{"ok": true}\n')
+
+        argv = build_conversation_archive_argv(transcript_path, nested_dir)
+        proc = subprocess.run(argv, capture_output=True, check=True)
+
+        with tarfile.open(fileobj=io.BytesIO(proc.stdout), mode="r|") as tf:
+            members = {m.name: tf.extractfile(m).read() for m in tf}
+
+        assert set(members) == {
+            "transcript.jsonl",
+            "tool-results/result-1.txt",
+            "tool-results/result-2.json",
+        }
+        assert not any(name.endswith(".jsonl") for name in members if name != "transcript.jsonl")
+        assert members["tool-results/result-1.txt"] == b"plain text tool output\n"
+        assert members["tool-results/result-2.json"] == b'{"ok": true}\n'
+
+    def test_sibling_memory_directory_is_never_streamed(self, tmp_path: Path) -> None:
+        from camp.transfer.conversations import build_conversation_archive_argv
+
+        projects_key_dir = tmp_path / "projects" / "somekey"
+        transcript_path = projects_key_dir / f"{_UUID_ROOT}.jsonl"
+        transcript_path.parent.mkdir(parents=True)
+        transcript_path.write_text('{"cwd": "/ws"}\n')
+
+        nested_dir = projects_key_dir / _UUID_ROOT
+        (nested_dir / "subagents").mkdir(parents=True)
+        (nested_dir / "subagents" / "agent-1.jsonl").write_text('{"cwd": "/ws"}\n')
+
+        memory_dir = projects_key_dir / "memory"
+        memory_dir.mkdir()
+        (memory_dir / "notes.md").write_text("project-scoped agent memory\n")
+
+        argv = build_conversation_archive_argv(transcript_path, nested_dir)
+        proc = subprocess.run(argv, capture_output=True, check=True)
+
+        with tarfile.open(fileobj=io.BytesIO(proc.stdout), mode="r|") as tf:
+            members = {m.name for m in tf}
+
+        assert "memory/notes.md" not in members
+        assert not any("memory" in name for name in members)
+        assert members == {"transcript.jsonl", "subagents/agent-1.jsonl"}
+
 
 class TestTornCopyDetection:
     def test_same_size_content_change_during_stream_raises_named_error(
@@ -308,7 +358,6 @@ class TestTornCopyDetection:
                 _host(),
                 group="g",
                 slug="s",
-                member="m",
                 session_id=_UUID_ROOT,
                 subpath=PurePosixPath("."),
                 transcript_path=transcript_path,
@@ -338,7 +387,6 @@ class TestTornCopyDetection:
             _host(),
             group="g",
             slug="s",
-            member="m",
             session_id=_UUID_ROOT,
             subpath=PurePosixPath("."),
             transcript_path=transcript_path,
@@ -367,7 +415,6 @@ class TestProducerFailurePropagates:
             _host(),
             group="g",
             slug="s",
-            member="m",
             session_id=_UUID_ROOT,
             subpath=PurePosixPath("."),
             transcript_path=transcript_path,
