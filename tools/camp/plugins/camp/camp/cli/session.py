@@ -1921,8 +1921,11 @@ def render_session_row_human(row: dict) -> str:
     """
     from ..launch.recovery import printable_path
 
-    label = f" ({row['name']})" if row.get("name") else ""
-    return f"{row['session_id']}  {row['kind']}  {printable_path(row['cwd'])}{label}"
+    label = f" ({printable_path(row['name'])})" if row.get("name") else ""
+    return (
+        f"{printable_path(row['session_id'])}  {printable_path(row['kind'])}  "
+        f"{printable_path(row['cwd'])}{label}"
+    )
 
 
 def local_sessions_answer(
@@ -2392,21 +2395,25 @@ def _cmd_kill_host_cli(args: list[str], host: "Host", host_name: str) -> None:
         and obj.get("session_id") is not None
         and obj.get("outcome") in ("stopped", "already-down")
     ):
+        from ..launch.recovery import printable_path
+
         session_id = obj.get("session_id")
         tmux_name = obj.get("tmux_name")
         outcome = obj.get("outcome")
+        printable_session_id = printable_path(session_id)
+        printable_tmux_name = printable_path(tmux_name)
         if outcome == "already-down":
             print(
-                f"camp kill: session {session_id} ({tmux_name}) on host "
-                f"{host_name!r} was already down — nothing to stop",
+                f"camp kill: session {printable_session_id} ({printable_tmux_name}) "
+                f"on host {host_name!r} was already down — nothing to stop",
                 file=sys.stderr,
             )
         else:
             print(
-                f"camp kill: stopped session {session_id} ({tmux_name}) on host "
-                f"{host_name!r} — its memory is reclaimed; `camp launch --resume "
-                f"{session_id} --host {host_name}` brings it back under this same "
-                "reference",
+                f"camp kill: stopped session {printable_session_id} "
+                f"({printable_tmux_name}) on host {host_name!r} — its memory is "
+                f"reclaimed; `camp launch --resume {printable_session_id} --host "
+                f"{host_name}` brings it back under this same reference",
                 file=sys.stderr,
             )
         for notice in answer.notices:
@@ -2416,7 +2423,7 @@ def _cmd_kill_host_cli(args: list[str], host: "Host", host_name: str) -> None:
             payload["host"] = host_name
             print(json.dumps(payload))
         else:
-            print(session_id)
+            print(printable_session_id)
         sys.exit(0)
 
     if answer.rows:

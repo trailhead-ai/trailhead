@@ -739,6 +739,55 @@ def test_sessions_human_output_renders_answered_rows_under_their_machine(
     assert lines[3] == "lookout"
 
 
+def test_sessions_human_output_session_id_control_sequence_cannot_forge_a_second_line(
+    hosts_and_group_env, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """`render_session_row_human` (`cli/session.py`) escapes only `cwd`
+    today; `session_id`, `kind`, and the `name` label reach this f-string
+    raw. Any of them can carry a relayed embedded newline and must not
+    split one row into a forged second one — the same argument
+    `printable_path` already makes for `root` and for `cwd` here."""
+    transport = _transport_module()
+    import camp.launch.session as launch_session
+
+    monkeypatch.setattr(launch_session, "enumerate_records", lambda *a, **k: [])
+
+    forged_id = "sess-real\nandromeda    FORGED-999  claude  /evil (forged-name)"
+
+    def fake_run_camp(host, remote_argv, **kw):
+        if host.ssh == "andromeda":
+            return _answered(
+                [
+                    {
+                        "ok": True,
+                        "session_id": forged_id,
+                        "cwd": "/remote/cwd",
+                        "kind": "claude",
+                        "controllable": True,
+                        "name": None,
+                        "pid": 42,
+                        "started_at": None,
+                        "group": "testgrp",
+                        "account": None,
+                    }
+                ]
+            )
+        return _answered([])
+
+    monkeypatch.setattr(transport, "run_camp", fake_run_camp)
+
+    code = _run(monkeypatch, ["sessions", "-a", "--group", "testgrp"])
+    out = capsys.readouterr().out
+    assert code == 0
+
+    lines = [ln for ln in out.splitlines() if ln]
+    # "this machine" / "andromeda" / the one row / "lookout" — never a fifth
+    # line forged out of the embedded newline in session_id.
+    assert len(lines) == 4
+    assert "\\x0a" in lines[2]
+    assert "FORGED-999" in lines[2]
+
+
 # ---------------------------------------------------------------------------
 # Per-row failure isolation — a malformed row from one machine must not take
 # down the merged listing. `_render_all_hosts_human` calls `render_row`
