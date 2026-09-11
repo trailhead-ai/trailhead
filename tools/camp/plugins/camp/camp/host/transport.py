@@ -56,7 +56,21 @@ them a socket that dies without closing (a sleeping laptop, an expired NAT
 entry, a silent partition) hangs both ends for as long as the operator is
 willing to wait. Detection of that dead socket is itself bounded locally,
 derived from those same keepalive settings, rather than relying solely on
-ssh's own server-side detection.
+ssh's own server-side detection. That local bound is progress-based, not a
+total-duration cap: it measures time since the last byte observed moving in
+either direction (fed to the ssh child's stdin, or read from its stdout or
+stderr), so a transfer that keeps moving bytes keeps running for as long as
+it takes, and one that goes silent is still killed within the bound.
+
+The producer's stdout is drained to EOF unconditionally, even once the ssh
+child's stdin has broken — a peer that exits without reading stdin (a
+refusal, a wedged child) must never leave the producer blocked writing into
+a full, undrained pipe. Because the producer's stdout always has a reader,
+it is never delivered SIGPIPE by this channel, so a peer's refusal is
+classified from the ssh child's own exit and stderr rather than being masked
+by the producer's exit code. The wait on the producer once the ssh child has
+completed is itself bounded, as a backstop against a producer that keeps
+running after its output is fully drained.
 
 Security: the assembled remote command carries slugs, group names, session
 references, and the host's camp location. Nothing in this module logs it —
@@ -66,7 +80,6 @@ from __future__ import annotations
 
 import os
 import shlex
-import shutil
 import subprocess
 import threading
 import time
@@ -400,11 +413,14 @@ def stream_camp(
 
     There is no wall-clock execution bound — this channel is expected to run
     for minutes, bounded only by ``producer`` exiting. A connection that dies
-    without closing is instead caught by a local bound derived from
-    ``server_alive_interval`` and ``server_alive_count_max``
+    without closing is instead caught by a local, progress-based bound
+    derived from ``server_alive_interval`` and ``server_alive_count_max``
     (``server_alive_interval * server_alive_count_max + connect_timeout``):
-    if the remote invocation has not completed within that bound, it is
-    killed and classified as :class:`StoppedResponding`.
+    if no byte has moved in either direction — fed to the remote invocation's
+    stdin, or read from its stdout or stderr — within that bound, it is
+    killed and classified as :class:`StoppedResponding`. An actively
+    streaming transfer of any length never trips it, since every chunk
+    resets the bound.
 
     Reuses :func:`quote_and_join`, :func:`_fixed_ssh_options`, and
     :func:`_classify` — the same assembly and the same classifier
@@ -429,12 +445,35 @@ def stream_camp(
     stdout_chunks: list[bytes] = []
     stderr_chunks: list[bytes] = []
 
+    progress_lock = threading.Lock()
+    last_progress = time.monotonic()
+
+    def _touch_progress() -> None:
+        nonlocal last_progress
+        with progress_lock:
+            last_progress = time.monotonic()
+
+    def _time_since_progress() -> float:
+        with progress_lock:
+            return time.monotonic() - last_progress
+
     def _feed() -> None:
+        # Always drains producer.stdout to EOF, even after child.stdin
+        # breaks — otherwise a peer that exits without reading stdin (a
+        # refusal, a dead ssh child) leaves the producer blocked writing
+        # into a full, undrained pipe forever. Draining unconditionally
+        # also means the producer is never delivered SIGPIPE by us, so a
+        # peer refusal is never masked as a producer failure.
+        assert producer.stdout is not None
+        pipe_open = True
         try:
-            assert producer.stdout is not None
-            shutil.copyfileobj(producer.stdout, child.stdin)
-        except (BrokenPipeError, OSError):
-            pass
+            for chunk in iter(lambda: producer.stdout.read1(65536), b""):
+                _touch_progress()
+                if pipe_open:
+                    try:
+                        child.stdin.write(chunk)
+                    except (BrokenPipeError, OSError):
+                        pipe_open = False
         finally:
             try:
                 child.stdin.close()
@@ -442,8 +481,9 @@ def stream_camp(
                 pass
 
     def _drain(source, sink: list[bytes]) -> None:
-        for chunk in iter(lambda: source.read(65536), b""):
+        for chunk in iter(lambda: source.read1(65536), b""):
             sink.append(chunk)
+            _touch_progress()
 
     feeder = threading.Thread(target=_feed, daemon=True)
     stdout_reader = threading.Thread(target=_drain, args=(child.stdout, stdout_chunks), daemon=True)
@@ -452,12 +492,20 @@ def stream_camp(
     stdout_reader.start()
     stderr_reader.start()
 
+    # A progress-based bound, not a total-duration deadline: it measures
+    # time since the last observed byte (fed to the child's stdin, or read
+    # from its stdout/stderr), so an actively-streaming transfer of any
+    # length keeps running, while one that goes silent is still killed
+    # within `bound`. ssh's own ServerAliveInterval/ServerAliveCountMax is
+    # the primary dead-socket detector; this is the local backstop for a
+    # wedged ssh child.
     bound = server_alive_interval * server_alive_count_max + connect_timeout
-    deadline = time.monotonic() + bound
     child_done = False
-    while time.monotonic() < deadline:
+    while True:
         if child.poll() is not None:
             child_done = True
+            break
+        if _time_since_progress() >= bound:
             break
         time.sleep(0.02)
 
@@ -477,7 +525,11 @@ def stream_camp(
     stdout_reader.join()
     stderr_reader.join()
 
-    producer_exit = producer.wait()
+    try:
+        producer_exit = producer.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        producer.kill()
+        producer_exit = producer.wait()
     if producer_exit != 0:
         return ProducerFailed(exit_code=producer_exit)
 
