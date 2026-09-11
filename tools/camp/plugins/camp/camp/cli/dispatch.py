@@ -177,8 +177,25 @@ def _flag_present(args: list[str], flag: str) -> bool:
 #: "attach" carries its reference across untouched rather than going through
 #: the JSON relay transport `_dispatch_host_command` builds for "list"/
 #: "sessions" — see that function's own docstring.
+#:
+#: "launch" is the first STATE-CHANGING member — see
+#: `_STATE_CHANGING_HOST_VERBS` below, which every other member of this set
+#: is deliberately excluded from.
 HOST_FLAG = "--host"
-_HOST_VERBS = frozenset({"list", "sessions", "attach"})
+_HOST_VERBS = frozenset({"list", "sessions", "attach", "launch"})
+
+#: The subset of `_HOST_VERBS` that changes state on the named machine,
+#: rather than merely reading from it. Held here, once, so two refusals stay
+#: in lockstep with the same set: the `--all-hosts`/`-a` refusal below gives
+#: a member of this set its own wording — the option is refused because the
+#: verb changes state, not because it merely "has no meaning" — and the
+#: `--host`+`--group` handling exempts a member of this set from the
+#: collision refusal every OTHER `_HOST_VERBS` member gets, requiring an
+#: explicit `--group` instead: a state-changing verb needs to know which
+#: group to act on remotely, so `--group` is the value it forwards, never a
+#: value this side infers from its own cwd (`docs/design/a-session-starts-
+#: on-a-named-machine.md`, "The group is named, never inferred").
+_STATE_CHANGING_HOST_VERBS = frozenset({"launch"})
 
 
 class _HostFlagMissingValue(Exception):
@@ -233,13 +250,22 @@ def _dispatch_host_command(
     Reached ONLY after `--host` has resolved to a declared host and every
     refusal above has passed — `main()`'s `--host` block is this function's
     sole caller, and it refuses any verb outside `_HOST_VERBS` before
-    reaching here, so *verb* is always one of the three below.
+    reaching here, so *verb* is always one of the four below.
 
     "list" and "sessions" are wired to the SSH transport
     (`camp.host.transport.run_camp`, via `camp.host.relay.relay_all_groups`).
     "attach" is not: it carries the reference across untouched and hands this
     process to an interactive `ssh -t` (`camp.host.handoff`) rather than
     relaying a JSON answer — see `cli/session.py`'s `_cmd_attach_host_cli`.
+
+    "launch" is accepted by `_HOST_VERBS` — and reaches here with `--group`
+    already required and present, per the `_STATE_CHANGING_HOST_VERBS`
+    handling above — but the remote launch itself (the remote argv actually
+    sent, its answer, and the certainty-aware rendering the design doc's
+    enumerated states require) is a later task's deliverable. This branch
+    refuses cleanly rather than falling through to the `assert verb ==
+    "attach"` below, which would otherwise raise a raw traceback for a verb
+    this function is not yet wired to complete.
     """
     if verb == "list":
         from .workspace import _cmd_ls_host_cli
@@ -249,6 +275,10 @@ def _dispatch_host_command(
         from .session import _cmd_sessions_host_cli
 
         _cmd_sessions_host_cli(rest, host, host_name)
+    elif verb == "launch":
+        from ..spine import _die
+
+        _die(f"camp launch: {HOST_FLAG} is accepted, but the remote launch itself is not wired yet")
     else:
         assert verb == "attach"
         from .session import _cmd_attach_host_cli
@@ -528,7 +558,23 @@ def main() -> None:
     if all_hosts:
         canonical, _kind = _resolve_verb(first) if first else (first, "live")
         if canonical not in _ALL_HOSTS_VERBS:
-            print(f"camp {first}: --all-hosts has no meaning here", file=sys.stderr)
+            # A state-changing verb (launch) is refused for its OWN stated
+            # reason — the verb changes state, so it acts on one named
+            # machine — never the generic "has no meaning here" a verb gets
+            # when an option simply does not apply to it. The generic
+            # wording would read as an oversight; this is a decision (design
+            # doc: "Launching is never a broadcast"). The refusal names the
+            # single-host form so the operator's real intent — do this over
+            # there — is one option away.
+            if canonical in _STATE_CHANGING_HOST_VERBS:
+                print(
+                    f"camp {canonical}: --all-hosts changes state on every "
+                    f"declared machine at once — {canonical} acts on the one "
+                    f"machine you name with {HOST_FLAG} <name>",
+                    file=sys.stderr,
+                )
+            else:
+                print(f"camp {first}: --all-hosts has no meaning here", file=sys.stderr)
             sys.exit(1)
         # --host names one declared machine; --all-hosts names every declared
         # machine plus this one. Refused like the --all-groups/--host
@@ -622,7 +668,29 @@ def main() -> None:
         if canonical not in _HOST_VERBS:
             print(f"camp {first}: {HOST_FLAG} has no meaning here", file=sys.stderr)
             sys.exit(1)
-        if _flag_present(scan_rest, "--group"):
+        if canonical in _STATE_CHANGING_HOST_VERBS:
+            # A state-changing verb sends --group across untouched — the far
+            # side resolves it there, exactly as a local invocation would.
+            # No group resolves on the far side from a non-interactive ssh
+            # cwd (it lands in a home directory belonging to no workspace),
+            # so unlike the read verbs above, --group is REQUIRED here
+            # rather than refused: camp never fills the gap from its own
+            # working directory, because a local directory deciding what
+            # runs on another machine is the exact substitution the host
+            # axis exists to prevent (design doc: "The group is named,
+            # never inferred"). Checked here, before hosts.toml is even
+            # read, so the refusal costs nothing and no connection is ever
+            # attempted.
+            if not _flag_present(scan_rest, "--group"):
+                print(
+                    f"camp {canonical}: {HOST_FLAG} requires an explicit "
+                    "--group <name> — the far side resolves no group from "
+                    "its own working directory, so this machine's cwd must "
+                    "never decide what runs on another one",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+        elif _flag_present(scan_rest, "--group"):
             print(
                 f"camp {canonical}: {HOST_FLAG} and --group name one remote "
                 "host and one local group at once — pass one or the other",
