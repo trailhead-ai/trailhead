@@ -729,11 +729,15 @@ def launch_session(
     account, account_binding, scrub, launch_env = resolve_launch_environment(
         harness, profile, group, env
     )
-    # The ONE identity answer, resolved against the same `env` the binding
-    # itself was resolved against — reused by every consumer that needs it, so
-    # the report and the configuration-existence check cannot read two
-    # different resolutions and disagree.
-    identity = _resolve_account_identity(harness, profile, account, env)
+    # The ONE identity answer, resolved against `launch_env` — the environment
+    # the PANE will actually carry, after the scrub and the binding. Resolving
+    # it against the raw `env` instead would let an ambient value naming a
+    # different account decide the identity, so camp would state one account
+    # while the session started under another, with camp's own assurance
+    # attached. It is reused by every consumer that needs it, so the report and
+    # the configuration-existence check cannot read two resolutions and
+    # disagree.
+    identity = _resolve_account_identity(harness, profile, account, launch_env)
     _report_account(account, account_binding, identity)
     _warn_if_account_has_no_config(account, launch_env)
 

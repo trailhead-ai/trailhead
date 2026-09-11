@@ -2827,3 +2827,63 @@ class TestAHarnessWhoseDefaultIsAbsence:
         assert "no account declared" in err
         assert " — \n" not in err
         assert POISON not in err
+
+
+class TestTheIdentityIsResolvedAgainstThePaneNotTheAmbient:
+    """The identity camp states must name the account the pane actually lands on.
+
+    The ambient environment may name an account nobody asked for. The scrub
+    removes it before the pane is built, so a launch declaring no account lands
+    on the harness's own default — but an identity resolved against the
+    UNSCRUBBED environment names the ambient account instead, and camp then
+    states it with camp's own assurance attached. That is strictly worse than
+    saying nothing, and it is the precise failure this slice exists to close:
+    an operator reads one account while the session starts under another.
+    """
+
+    @staticmethod
+    def _identity_reading_its_env(account, env):
+        """Model the shipped harness's own precedence — the account variable
+        when the environment carries one, else the home it names."""
+        from trailhead.harness.base import AccountIdentity
+
+        return AccountIdentity(
+            label=env.get(ACCOUNT_KEY) or env["HOME"], has_config=True
+        )
+
+    def _harness(self):
+        return FakeHarness(
+            scrub=[*SCRUB, ACCOUNT_KEY],
+            default_is_absence=True,
+            account_identity=self._identity_reading_its_env,
+        )
+
+    def test_a_defaulted_launch_reports_the_panes_account_not_the_ambient_one(
+        self, rig, tmp_path, capsys
+    ):
+        rig["harness"] = self._harness()
+
+        _launch(rig, group=GROUP, env=_poisoned(tmp_path))
+
+        err = capsys.readouterr().err
+        assert POISON not in err
+        assert str(tmp_path / "home") in err
+
+    @pytest.mark.parametrize(
+        "declared,expected",
+        [(None, None), ("/accounts/levr", "/accounts/levr")],
+        ids=["no-declaration", "declared-account"],
+    )
+    def test_the_env_the_seam_is_asked_against_is_the_panes_own(
+        self, rig, tmp_path, declared, expected
+    ):
+        """Whichever the group declares, the environment the seam resolves
+        against carries the pane's account — never the ambient one."""
+        harness = self._harness()
+        rig["harness"] = harness
+
+        _launch(rig, group=_group_with_account(declared), env=_poisoned(tmp_path))
+
+        assert harness.account_identity_calls
+        _, asked_env = harness.account_identity_calls[-1]
+        assert asked_env.get(ACCOUNT_KEY) == expected
