@@ -50,6 +50,17 @@ member's worktree is then materialized through
 already-present local branch (`_branch_exists_locally`) rather than
 branching a fresh one off `base`.
 
+**worktree** receives one member's working-tree content, sent by
+`camp.transfer.worktree.send_worktree` as a stdlib `tarfile` stream on
+stdin, and extracts it directly over the member's worktree — resolved from
+THIS host's own group config, keyed only by `--member`, exactly like
+`history`. The extraction itself (`camp.transfer.worktree.extract_archive`)
+refuses any archive member whose path or link target would land outside
+that worktree before writing it; a refusal here surfaces as
+`ArchiveMemberRefused`, naming the member and the reason. Never buffers the
+whole stream — `sys.stdin.buffer` is handed to the extractor directly, and
+extraction reads it one archive member at a time.
+
 **The marker.** Every phase, once it actually runs (never on a refusal — a
 refused phase never touches the workspace it refused), appends an entry to a
 small JSON log inside the arriving workspace naming which phase reached this
@@ -91,9 +102,11 @@ __all__ = [
     "MemberNotConfigured",
     "BundleUnbundleFailed",
     "BundleRefUnresolved",
+    "ArchiveMemberRefused",
     "begin",
     "finish",
     "history",
+    "worktree",
     "read_transfer_marker",
 ]
 
@@ -195,6 +208,17 @@ class BundleRefUnresolved(ReceiveRefused):
         )
         self.member = member
         self.ref = ref
+
+
+class ArchiveMemberRefused(ReceiveRefused):
+    """`worktree`'s incoming archive carried a member whose path or link
+    target would land outside the member's worktree — refused before that
+    member was written; see `camp.transfer.worktree.ArchiveMemberEscaped`,
+    which this wraps with the phase's usual by-name-refusal shape."""
+
+    def __init__(self, member: str, detail: str) -> None:
+        super().__init__(f"member {member!r}: {detail}")
+        self.member = member
 
 
 @dataclass(frozen=True)
@@ -499,4 +523,56 @@ def history(
         "member": member,
         "branch": branch,
         "commit": tip_sha,
+    }
+
+
+def worktree(
+    *,
+    groups: list[dict[str, Any]],
+    group_name: str,
+    slug: str,
+    member: str,
+    archive_stream: Any,
+    env: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Extract one member's working-tree archive, sent by
+    `camp.transfer.worktree.send_worktree`, directly over this host's own
+    worktree for that member. See the module docstring's `worktree` section.
+
+    *archive_stream* is a binary file-like object read incrementally — never
+    a `bytes` buffer, unlike `history`'s `bundle_bytes` — so a worktree
+    larger than this process's memory budget is never fully buffered.
+
+    Raises:
+        GroupNotConfigured: *group_name* is not configured on this host.
+        MemberNotConfigured: *member* is not declared in that group here.
+        ArchiveMemberRefused: an archive member's path or link target would
+            land outside the member's worktree — refused before it is
+            written.
+    """
+    group = _find_group(groups, group_name)
+    if group is None:
+        raise GroupNotConfigured(group_name)
+
+    member_cfg = _find_member(group, member)
+    if member_cfg is None:
+        raise MemberNotConfigured(group_name, member)
+
+    from ..group.manifest import workspace_dir
+    from ..provision.reconcile import _worktree_path
+    from .worktree import ArchiveMemberEscaped, extract_archive
+
+    wt_path = _worktree_path(group_name, slug, member, env=env)
+
+    try:
+        extract_archive(archive_stream, wt_path)
+    except ArchiveMemberEscaped as e:
+        raise ArchiveMemberRefused(member, str(e)) from e
+
+    ws_dir = workspace_dir(group_name, slug, env=env)
+    append_marker(ws_dir, phase="worktree", outcome="ok")
+
+    return {
+        "contract_version": RECEIVE_CONTRACT_VERSION,
+        "member": member,
     }
