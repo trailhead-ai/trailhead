@@ -34,11 +34,17 @@ fi
 # Interpreter selection — a bare `python3` on a non-interactive ssh PATH can
 # resolve to an interpreter far below the repo's declared floor (e.g. macOS
 # system Python 3.9 when Homebrew's 3.14 isn't on that PATH). Read the floor
-# from tools/camp/pyproject.toml — two directories up from plugins/camp/ — so
-# it can never drift from the declared value, and search every `python3` on
-# PATH (in PATH order) for one that satisfies it before falling back to plain
-# `python3` when no pyproject.toml is found (e.g. an installed plugin copy).
-PYPROJECT="$PLUGIN_DIR/../../pyproject.toml"
+# from the nearest ancestor pyproject.toml declaring `requires-python`,
+# searching upward from PLUGIN_DIR (bounded, so it can never drift into an
+# unbounded walk), so it can never drift from the declared value either, and
+# search every `python3` on PATH (in PATH order) for one that satisfies it.
+# On the ${CLAUDE_PLUGIN_ROOT}-resolved branch, PLUGIN_DIR is a composed
+# plugin tree that may carry no pyproject.toml at all in any ancestor — that
+# is a real, if currently latent, case (Claude Code installs a plugin copy
+# with no such file), not a bug in the search: when the floor can't be
+# determined, proceed on bare `python3` with a loud stderr notice rather than
+# silently skipping the check or hard-failing an install with no floor to
+# enforce.
 
 _read_requires_python_floor() {
     local pyproject="$1"
@@ -48,6 +54,25 @@ _read_requires_python_floor() {
     [ -n "$line" ] || return 1
     FLOOR="$(printf '%s' "$line" | grep -oE '[0-9]+\.[0-9]+' | head -1)"
     [ -n "$FLOOR" ]
+}
+
+# Walk upward from *dir* looking for a pyproject.toml that declares
+# requires-python, bounded to a small fixed number of levels so a detached or
+# root-adjacent PLUGIN_DIR can never turn this into an unbounded loop. Sets
+# FLOOR (via _read_requires_python_floor) on success.
+_find_requires_python_floor() {
+    local dir="$1"
+    local levels=0
+    local max_levels=6
+    while [ "$levels" -le "$max_levels" ]; do
+        if _read_requires_python_floor "$dir/pyproject.toml"; then
+            return 0
+        fi
+        [ "$dir" = "/" ] && return 1
+        dir="$(dirname "$dir")"
+        levels=$((levels + 1))
+    done
+    return 1
 }
 
 _interpreter_version() {
@@ -92,13 +117,15 @@ _select_python() {
     return 1
 }
 
-if _read_requires_python_floor "$PYPROJECT"; then
+if _find_requires_python_floor "$PLUGIN_DIR"; then
     if _select_python "$FLOOR"; then
         exec "$CHOSEN_PYTHON" "$CLI" "$@"
     else
         echo "camp: requires Python >=${FLOOR}, found Python ${LAST_FOUND_VERSION:-none}" >&2
         exit 1
     fi
+else
+    echo "camp: could not determine the required Python version (no pyproject.toml declaring requires-python found above $PLUGIN_DIR); proceeding with whatever python3 resolves to" >&2
 fi
 
 exec python3 "$CLI" "$@"
