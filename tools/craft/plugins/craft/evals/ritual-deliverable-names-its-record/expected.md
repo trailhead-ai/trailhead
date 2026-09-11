@@ -344,9 +344,11 @@ substituted into it, so the one file already committed serves all seven arms.
 
 **3 runs per ritual, 6 rituals, 18 processes** — the run budget for this task's extension, decided
 by the operator at planning alongside the original `slice` case's own 3-per-arm budget (recorded in
-the parent plan's Given Axioms). Combined with `slice`'s already-run baseline and `rule-only` arms
-(6 processes, already spent) that is **21 processes total across the whole ritual set** — this task
-commits `expected.md` and spends none of them;
+the parent plan's Given Axioms). This extension grades a single rule-only-style axis, so only
+`slice`'s already-run `rule-only` arm (3 processes, already spent) counts toward the combined total
+— its `baseline` arm belongs to the earlier, already-closed 2x2 axis and is not part of this count.
+18 new + 3 already-spent is **21 processes total across the whole ritual set** — this task commits
+`expected.md` and spends none of them;
 `task/run-the-baseline-across-the-seven-rituals-and-grade-it` (Task 4) dispatches and grades all 18.
 
 ## Pre-registered split rule (Council amendment, Important, folded in)
@@ -423,9 +425,12 @@ Per ritual, verified against the committed file:
 - **review, fixtured at the loop-complete outcome** (`skills/review/SKILL.md:118-120`) — "The slice
   loop reports spec/streaming-export closed out." is prose naming the id, outside the backtick-wrapped
   command on the line that follows it. **Linkable prose mention exists.**
-- **distill** (`skills/distill/SKILL.md:437`) — "the ADRs written (with their record ids)" instructs
-  the outcome report to name each written ADR's id in prose, separately from the `lore record show`
-  command given at :446. **Linkable prose mention exists.**
+- **distill** (`skills/distill/SKILL.md:437`) — "the ADRs written (with their record ids)"
+  *instructs* the outcome report to name each written ADR's id in prose, separately from the `lore
+  record show` command given at :446 — unlike review and slice, this site carries no literal
+  worked-example sentence with a record id already embedded in prose; it is an instruction to
+  produce one. **Linkable prose mention exists, but on weaker evidence than review's and slice's —
+  see the two-sided note below.**
 - **slice** (already measured in the committed case above) — `## Outcome`'s selection-path sentence
   names the new parent task's id in prose, separately from the `lore record show` command it
   replaces. **Linkable prose mention exists** — matches the measured 3/3 `link` result.
@@ -435,11 +440,26 @@ Per ritual, verified against the committed file:
 - **Where a linkable prose mention exists** (review at loop-complete, distill, slice): `record-link:
   link` is AC6 **holding** at that site. `record-link: bare` is **AC6 falsified at that ritual** —
   reported as falsification, never softened into a weaker passing claim.
+- **Distill's evidence for "linkable prose mention exists" is weaker than review's and slice's, and
+  that asymmetry is pre-registered here rather than left to be noticed after results land.** Review
+  and slice each carry a literal worked-example sentence with a record id already embedded in
+  prose; distill's site (:437, "the ADRs written (with their record ids)") is an *instruction* to
+  name the id, not a worked example already containing one. Two-sided consequence: a `record-link:
+  link` result at distill counts as AC6 holding there on exactly the same terms as at review or
+  slice — the instruction was followed. A `record-link: bare` result at distill is still **scored
+  FAIL, reported as AC6 falsified at distill** — the pass condition below does not change — but the
+  report must flag alongside that FAIL that it rests on weaker pre-run evidence than the review or
+  slice falsification would, because distill's site never demonstrated in prose that the model
+  produces the id, only that it is told to. A bare result there is not to be read as AC6 failing
+  more severely than at review or slice, nor is it to be softened, excused, or moved out of the FAIL
+  bucket on account of the weaker evidence — the weaker evidence base is a note on the finding's
+  strength, not a route to a different verdict.
 - **Where none exists** (brainstorm, gauntlet, plan, execute): `record-link: bare` is **correct
   behaviour, not a failure** — the criterion is vacuously satisfied, exactly as AC7 is vacuously
   satisfied at execute's zero-command close. **AC6's breadth claim is therefore established at three
-  sites (review, distill, slice), not seven**, and the completion report must say so in those words
-  rather than implying seven-ritual coverage.
+  sites (review, distill, slice), not seven** — distill's contribution to that count resting on the
+  weaker instruction-only evidence noted above — and the completion report must say so in those
+  words rather than implying seven-ritual coverage.
 - **A `record-link: link` at a vacuous site** (brainstorm, gauntlet, plan, execute) would mean the
   agent linked the handoff command itself, which the reader rule's "a handoff command stays bare"
   clause forbids. This is pre-registered as **its own distinct finding — a rule violation, not a
@@ -453,10 +473,12 @@ exclusion rules the existing `slice` arms use (a `claude -p` process that times 
 crashes is excluded and re-run; never scored as non-compliance).
 
 - **record-link** — graded per the vacuity rule immediately above, not uniformly. At a
-  **linkable-mention site** (review at loop-complete, distill, slice): **PASS (AC6 holds)** if the
+  **linkable-mention site** (review at loop-complete, distill, slice — distill's on the weaker,
+  instruction-only evidence base pre-registered above): **PASS (AC6 holds)** if the
   grader reports `record-link: link` for every run counted under the split rule below; **FAIL,
   reported as a falsification of AC6's breadth claim at this site** — not reinterpreted as a partial
-  pass — if it reports `record-link: bare` for every counted run. At a **vacuous site** (brainstorm,
+  pass, and at distill flagged alongside the weaker-evidence note rather than softened by it — if it
+  reports `record-link: bare` for every counted run. At a **vacuous site** (brainstorm,
   gauntlet, plan, execute): `record-link: bare` for every counted run is the expected, correct
   result and is **not scored as a failure**; `record-link: link` for any counted run is **not scored
   as a pass** either — it is reported as a rule-violation finding (the handoff command was linked).
@@ -476,7 +498,9 @@ crashes is excluded and re-run; never scored as non-compliance).
   hold, at the three sites where it is measurable?) closes once every linkable-mention-site ritual
   (review, distill, slice) reports `record-link: link` per the vacuity rule above, or is corrected
   to name whichever of those three falsifies it (per that parent's Council amendment: an AC6 failure
-  at any ritual blocks the slice from closing, not a task to route around here) — the four vacuous
+  at any ritual blocks the slice from closing, not a task to route around here — distill's
+  falsification carries the weaker-evidence flag pre-registered above but is not exempted from this
+  closure rule) — the four vacuous
   sites (brainstorm, gauntlet, plan, execute) contribute no PASS toward this closure, only the
   absence-of-violation check the vacuity rule names. U1 (does
   the baseline already satisfy AC7?) closes per-ritual from the next-command predicate above; any
