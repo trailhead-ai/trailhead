@@ -1172,12 +1172,61 @@ class TestKillHostAmbiguous:
         assert len(out_lines) == 2
         assert out_lines[0] != out_lines[1]
 
-    def test_ambiguous_rows_human_mode_stdout_precedes_stderr_line(
+    def test_ambiguous_rows_tmux_name_control_sequence_cannot_forge_a_second_row(
         self, monkeypatch, capsys: pytest.CaptureFixture
     ) -> None:
-        """The candidate rows are the answer to what was asked, so they
-        print on stdout even though the exit is non-zero — mirroring
-        `_print_candidates`'s own ordering guarantee."""
+        """A relayed row's `tmux_name` is exactly as untrusted as the far
+        side's stderr — an embedded newline must not render as a second,
+        forged candidate line the operator could then act on. Camp already
+        strips control sequences from stderr and from relayed rows before
+        this renderer ever sees them, but newline and tab are deliberately
+        PRESERVED by that strip (`_strip_control_sequences`), so the human
+        renderer itself is the only place left that can stop a relayed
+        field from forging camp's own output shape — exactly the argument
+        `printable_path` already makes for `root`."""
+        relay = _relay_module()
+        rows = [
+            {
+                "session_id": "sess-a1",
+                "tmux_name": "camp-real\ncamp-forged  sess-FAKE  /work/other  2m",
+                "root": "/work/feat-x",
+                "age_seconds": 120,
+                "root_missing": False,
+                "host": "andromeda",
+            },
+        ]
+        answer = relay.HostPayloadAnswer(
+            obj=None,
+            rows=rows,
+            certainty=relay.Certainty.HAPPENED,
+            notices=[],
+            exit_code=2,
+        )
+        _rig_payload(monkeypatch, answer)
+
+        _call_kill_host(monkeypatch, ["sess"])
+
+        captured = capsys.readouterr()
+        # The forged text still appears (escaping neutralizes the control
+        # character, it does not hide the field), but it is confined to the
+        # ONE line this row relayed — never split into a second row an
+        # operator could mistake for its own candidate.
+        out_lines = [line for line in captured.out.splitlines() if line.strip()]
+        assert len(out_lines) == 1
+        assert "\\x0a" in out_lines[0]
+        assert "sess-FAKE" in out_lines[0]
+
+    def test_ambiguous_rows_stdout_precedes_stderr_line_when_interleaved(
+        self, monkeypatch
+    ) -> None:
+        """The candidate rows are the answer to what was asked, so they must
+        actually be WRITTEN before camp's own stderr line — not merely
+        present somewhere on each stream, which two independently-captured
+        streams (capsys splits them) cannot distinguish from the opposite
+        order. Redirect both streams to one shared buffer so the real write
+        order is observable."""
+        import io
+
         relay = _relay_module()
         rows = [
             {
@@ -1198,10 +1247,16 @@ class TestKillHostAmbiguous:
         )
         _rig_payload(monkeypatch, answer)
 
+        shared = io.StringIO()
+        monkeypatch.setattr(sys, "stdout", shared)
+        monkeypatch.setattr(sys, "stderr", shared)
+
         _call_kill_host(monkeypatch, ["sess"])
 
-        captured = capsys.readouterr()
-        assert "sess-a1" in captured.out
+        output = shared.getvalue()
+        row_index = output.index("sess-a1")
+        stderr_index = output.index("matched more than one session")
+        assert row_index < stderr_index
 
     def test_ambiguous_rows_stderr_carries_the_far_sides_how_many_matched_sentence(
         self, monkeypatch, capsys: pytest.CaptureFixture
@@ -1299,6 +1354,34 @@ class TestKillHostCertainFailure:
         assert code == 1
         assert "no session was stopped" in lines[0]
         assert lines[1] == "camp kill: session 'sess-6' does not match any session on this machine"
+
+    def test_degenerate_object_missing_required_fields_is_a_certain_failure_not_success(
+        self, monkeypatch, capsys: pytest.CaptureFixture
+    ) -> None:
+        """A far side that answers with SOME JSON object camp did not
+        expect — a differently-versioned remote, or an error object like
+        `{"ok": false, "reason": "..."}` — must not take the success branch
+        just because `answer.obj is not None`. This is the exact mirror of
+        the empty-rows finding above: the object has to carry the fields
+        the success contract requires (`session_id`, and an `outcome` camp
+        recognises) or it falls through to the same certain-failure path an
+        unparsable answer takes."""
+        relay = _relay_module()
+        answer = relay.HostPayloadAnswer(
+            obj={"ok": False, "reason": "unexpected shape from a newer remote"},
+            rows=None,
+            certainty=relay.Certainty.HAPPENED,
+            notices=[],
+            exit_code=0,
+        )
+        _rig_payload(monkeypatch, answer)
+
+        code = _call_kill_host(monkeypatch, ["sess-11"])
+
+        captured = capsys.readouterr()
+        assert code == 1
+        assert captured.out == ""
+        assert "no session was stopped" in captured.err
 
     def test_empty_rows_array_is_a_certain_failure_not_an_ambiguous_answer(
         self, monkeypatch, capsys: pytest.CaptureFixture

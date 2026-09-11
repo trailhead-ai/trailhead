@@ -605,7 +605,8 @@ def main() -> None:
             # named machine — never the generic "has no meaning here" a verb gets
             # when an option simply does not apply to it. The generic
             # wording would read as an oversight; this is a decision (design
-            # doc: "Launching is never a broadcast"). The refusal names the
+            # docs: launch's "Launching is never a broadcast", kill's
+            # "Stopping is never a broadcast"). The refusal names the
             # single-host form so the operator's real intent — do this over
             # there — is one option away.
             if canonical in _STATE_CHANGING_HOST_VERBS:
