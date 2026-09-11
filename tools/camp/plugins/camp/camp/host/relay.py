@@ -142,9 +142,12 @@ def classify_certainty(outcome: _transport.TransportOutcome) -> Certainty:
 @dataclass(frozen=True)
 class _TransportFailure:
     """The verb-agnostic rendering of one of the seven transport states that
-    never reach a remote camp's own answer — shared by every relay shape.
-    ``rows``-specific and single-object-specific wrapping each build their
-    own payload around this; this dataclass carries only what both need.
+    never yield a trustable remote answer — shared by every relay shape.
+    (Six never reach a remote camp's own answer at all; `ProducerFailed` is
+    the exception — the remote may have answered, but that answer is
+    discarded as untrustworthy, not absent.) ``rows``-specific and
+    single-object-specific wrapping each build their own payload around
+    this; this dataclass carries only what both need.
     """
 
     notices: list[str]
