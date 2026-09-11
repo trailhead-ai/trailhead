@@ -39,9 +39,27 @@ equals `--command`'s value exactly. `embedded` if the command text occurs
 somewhere in the deliverable but never alone on its own line this way.
 `absent` if the command text does not occur anywhere at all.
 
+## exempt-observation predicate
+
+An `exempt` outcome still passes, but it must never report a verdict about a
+deliverable nobody looked at (per the active lesson `a-classification-that-
+routes-a-site-around-the-predicate-makes-that-site-unmeasurable`). Printed
+only when `--exempt` is passed, alongside the unchanged `next-command:
+exempt` line — it never moves the `exempt` verdict or the exit code.
+
+If `--command` was also supplied, this reports the same shape the non-exempt
+path would have computed — `own-line`, `embedded`, or `absent` — so an
+exempt site whose deliverable actually contains command-shaped text is
+observed, not silently passed. If `--command` was omitted (the only
+argument shape AC7's genuine branches and by-design zero-command closes
+actually have), this reports `not-observed` and says why: there is nothing
+to observe a shape against.
+
 Exit codes:
     0  both predicates pass — record-link is `link` and next-command is
-       `own-line` or `exempt`
+       `own-line` or `exempt`. An `exempt-observation:` line (see below) may
+       report `embedded` or `absent` on a 0 exit — it is an additive
+       observation, never a third predicate the exit code weighs.
     1  at least one predicate fails — record-link is `bare`, or
        next-command is `embedded` or `absent`
     2  could not grade — fail-closed: empty stdin (`reason-code:
@@ -79,11 +97,8 @@ def record_link_verdict(text: str, record: str) -> str:
     return "bare"
 
 
-def next_command_verdict(text: str, command: str | None, *, exempt: bool) -> str:
-    """`exempt`, `own-line`, `embedded`, or `absent` — see module docstring."""
-    if exempt:
-        return "exempt"
-    assert command is not None
+def _command_shape(text: str, command: str) -> str:
+    """`own-line`, `embedded`, or `absent` — where `command` occurs in `text`."""
     for line in text.splitlines():
         stripped = line.strip()
         if len(stripped) >= 2 and stripped[0] == "`" and stripped[-1] == "`":
@@ -93,6 +108,25 @@ def next_command_verdict(text: str, command: str | None, *, exempt: bool) -> str
     if command in text:
         return "embedded"
     return "absent"
+
+
+def next_command_verdict(text: str, command: str | None, *, exempt: bool) -> str:
+    """`exempt`, `own-line`, `embedded`, or `absent` — see module docstring."""
+    if exempt:
+        return "exempt"
+    assert command is not None
+    return _command_shape(text, command)
+
+
+def exempt_observation(text: str, command: str | None) -> str:
+    """What an exempt outcome's deliverable actually shows, so `exempt` never
+    reports a verdict about an artifact nobody looked at. `own-line`,
+    `embedded`, or `absent` — same vocabulary as the non-exempt shape — when a
+    `--command` was supplied to compare against; `not-observed` with a reason
+    when it was not, since there is nothing to observe a shape against."""
+    if command is None:
+        return "not-observed (no --command was supplied to compare against)"
+    return _command_shape(text, command)
 
 
 def main(argv: list[str]) -> int:
@@ -138,6 +172,8 @@ def main(argv: list[str]) -> int:
 
     print(f"record-link: {link_verdict}")
     print(f"next-command: {command_verdict}")
+    if args.exempt:
+        print(f"exempt-observation: {exempt_observation(text, args.command)}")
 
     ok = link_verdict == "link" and command_verdict in ("own-line", "exempt")
     return 0 if ok else 1
