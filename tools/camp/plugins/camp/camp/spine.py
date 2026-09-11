@@ -70,6 +70,11 @@ _STATIC_RESERVED = frozenset(
         # sending side. Like "groups", intercepted in cli/camp before group
         # resolution — reserved so a workspace slug can never shadow it.
         "transfer-probe",
+        # The peer side of a workspace move (begin/finish). Dispatched from
+        # that same pre-group-resolution position (cli/dispatch.py, right
+        # after "transfer-probe") for the same reason — reserved so a
+        # workspace slug can never shadow it.
+        "transfer-receive",
         # The operator-facing dry-run verb. Needs a resolved group (self host,
         # workspace ownership, peer declaration) — unlike "transfer-probe" and
         # "groups" above, it is NOT intercepted before group resolution;
