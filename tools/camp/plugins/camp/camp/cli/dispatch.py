@@ -1323,6 +1323,7 @@ def _dispatch_group_command(
         _cmd_ls_group_cli,
     )
     from .status import _cmd_status_group_cli
+    from .transfer import _cmd_transfer_group_cli
 
     # One resolver classifies alias→disabled→legacy in a single defined order,
     # shared with spine.main, so a token routes identically at both entry points
@@ -1359,6 +1360,9 @@ def _dispatch_group_command(
 
         handler = _cmd_launch_group_cli if cmd == "launch" else _cmd_sessions_group_cli
         handler(rest, group, group_env)
+        return
+    if cmd == "transfer":
+        _cmd_transfer_group_cli(rest, group, group_env, dry_run)
         return
     # Bare slug removed: any non-RESERVED token that isn't a known verb → error
     # (shared message, defined in verb_taxonomy).
