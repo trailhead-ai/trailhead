@@ -837,15 +837,15 @@ def _dispatch_all_hosts_command(
     sys.exit(exit_code)
 
 
-def _attach_resolve_answer(outcome) -> bool | None:
-    """Classify one host's `<camp_bin> attach <ref> --resolve --json` answer.
+def _attach_probe_object(outcome) -> dict | None:
+    """One host's answer to an attach probe, decoded — or `None` if the host
+    did not answer the question at all.
 
-    `True`/`False` is the far side's own `ok` field — it resolved, or it
-    definitely did not. `None` means the host did not answer a resolvable
-    question at all (unreachable, timed out, refused credentials, answered
-    with something that is not the JSON this probe expects) — the "declared
-    host did not answer" state the design doc requires `-a` to refuse on
-    rather than silently treat as "didn't match".
+    `None` covers every way an answer can fail to be one: the transport never
+    reached a running camp, the far side exited non-zero, its stdout was not
+    JSON, or it was JSON that is not an object. Both probe sub-modes
+    (`--resolve --json` and `--list --json`) ask their own question of the
+    decoded object; this decides only whether there is an object to ask.
     """
     import json as _json
 
@@ -857,7 +857,23 @@ def _attach_resolve_answer(outcome) -> bool | None:
         data = _json.loads(outcome.stdout)
     except ValueError:
         return None
-    if not isinstance(data, dict) or "ok" not in data:
+    if not isinstance(data, dict):
+        return None
+    return data
+
+
+def _attach_resolve_answer(outcome) -> bool | None:
+    """Classify one host's `<camp_bin> attach <ref> --resolve --json` answer.
+
+    `True`/`False` is the far side's own `ok` field — it resolved, or it
+    definitely did not. `None` means the host did not answer a resolvable
+    question at all (unreachable, timed out, refused credentials, answered
+    with something that is not the JSON this probe expects) — the "declared
+    host did not answer" state the design doc requires `-a` to refuse on
+    rather than silently treat as "didn't match".
+    """
+    data = _attach_probe_object(outcome)
+    if data is None or "ok" not in data:
         return None
     return bool(data["ok"])
 
@@ -869,17 +885,8 @@ def _attach_list_answer(outcome) -> list[dict] | None:
     for is dropped from the picker with a stderr notice rather than
     aborting the whole widened picker (see `_dispatch_attach_all_hosts`).
     """
-    import json as _json
-
-    from ..host.transport import Answered
-
-    if not isinstance(outcome, Answered) or outcome.exit_code != 0:
-        return None
-    try:
-        data = _json.loads(outcome.stdout)
-    except ValueError:
-        return None
-    if not isinstance(data, dict) or not data.get("ok"):
+    data = _attach_probe_object(outcome)
+    if data is None or not data.get("ok"):
         return None
     rows = data.get("rows")
     if not isinstance(rows, list) or not all(isinstance(r, dict) for r in rows):
@@ -949,7 +956,7 @@ def _dispatch_attach_all_hosts(rest: list[str]) -> None:
     from ..attach.prefix_warning import warn_if_nested
     from ..attach.resolve import Resolved, resolve_attach_ref
     from ..host import transport as _transport
-    from ..host.config import HostConfigError, load_hosts, self_host_name
+    from ..host.config import HostConfigError, load_hosts
     from ..host.handoff import handoff, local_argv, remote_argv
     from ..spine import _die
     from .session import _AMBIGUOUS_EXIT_CODE, _attach_session_context
@@ -971,10 +978,9 @@ def _dispatch_attach_all_hosts(rest: list[str]) -> None:
     host_items = list(hosts.items())
 
     resolved_env = dict(os.environ)
-    self_name = self_host_name(resolved_env)
 
     if ref is not None:
-        groups, transcripts, live, harness, tmux, _machine = _attach_session_context(
+        groups, transcripts, live, harness, tmux, self_name = _attach_session_context(
             resolved_env
         )
         local_resolution = resolve_attach_ref(
@@ -1035,7 +1041,7 @@ def _dispatch_attach_all_hosts(rest: list[str]) -> None:
         return
 
     # Bare cross-host picker.
-    groups, transcripts, live, harness, tmux, _machine = _attach_session_context(
+    groups, transcripts, live, harness, tmux, self_name = _attach_session_context(
         resolved_env
     )
     local_result = local_pool(

@@ -2248,7 +2248,10 @@ def _cmd_attach_cli(args: list[str], env: dict[str, str] | None = None) -> None:
     resolved_env = dict(env) if env is not None else dict(os.environ)
     groups, transcripts, live, harness, tmux, machine = _attach_session_context(resolved_env)
 
-    if list_only:
+    if list_only or ref is None:
+        # The two reference-less forms read the identical pool: `--list --json`
+        # dumps it for the cross-host picker to merge, the bare form presents
+        # it. Read once, here, rather than twice below.
         pool = local_pool(
             harness=harness,
             tmux=tmux,
@@ -2258,19 +2261,10 @@ def _cmd_attach_cli(args: list[str], env: dict[str, str] | None = None) -> None:
             env=resolved_env,
             machine=machine,
         )
-        print(json.dumps(_attach_pool_payload(pool)))
-        sys.exit(0)
+        if list_only:
+            print(json.dumps(_attach_pool_payload(pool)))
+            sys.exit(0)
 
-    if ref is None:
-        pool = local_pool(
-            harness=harness,
-            tmux=tmux,
-            transcripts=transcripts,
-            live_records=live,
-            groups=groups,
-            env=resolved_env,
-            machine=machine,
-        )
         result = pick_session(
             pool,
             stdin=sys.stdin,
