@@ -567,15 +567,27 @@ operator by name rather than letting a duplicate sit undiscovered.
 Report the chosen slice, its value claim (or, on the enabler path, its written justification), and
 the new parent task's record id — `lore record show <task-id>` prints it back without the operator
 needing to know the CLI. End with a fully formed handoff, the real task id substituted in, never a
-placeholder — e.g. `/craft:plan task/the-streaming-export-slice` — matching the handoff convention
-other craft skills use, so it can be pasted into a fresh session as-is.
+placeholder, matching the handoff convention other craft skills use, so it can be pasted into a
+fresh session as-is:
+
+```
+/craft:plan task/the-streaming-export-slice
+```
 
 On the termination path, report the spec complete (or the early stop and what remains) instead, and
 end with its own fully formed next command, never the selection path's `/craft:plan` handoff — the
 operator must always know what to run next:
 
 - **Spec complete:** hand off to distill, fully formed, matching review/SKILL.md's own closing
-  handoff — e.g. `Run /craft:distill spec/streaming-export when you're ready to distill this work
-  into the ADR log.`
+  handoff — e.g. "Run this when you're ready to distill this work into the ADR log":
+
+  ```
+  /craft:distill spec/streaming-export
+  ```
+
 - **Early stop:** name what remains, then hand off to re-running this skill once it clears — e.g.
-  `Run /craft:slice spec/streaming-export again once <what's blocking> is resolved.`
+  "Run this again once `<what's blocking>` is resolved":
+
+  ```
+  /craft:slice spec/streaming-export
+  ```

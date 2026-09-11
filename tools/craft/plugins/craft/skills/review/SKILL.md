@@ -107,8 +107,11 @@ review closes one slice, not the spec: once the reviewed diff is merged, end wit
 handoff back into `/craft:slice` for the spec's next pass — the real spec id, never a
 `<placeholder>`:
 
-> "Review passed and the change is merged. Run `/craft:slice spec/streaming-export` to choose the
-> next slice."
+> "Review passed and the change is merged. Run this to choose the next slice."
+
+```
+/craft:slice spec/streaming-export
+```
 
 Hand off to distill instead, fully formed the same way, but only once the slice loop reports the
 spec closed out (`craft/slice-loop=complete`, per `../_shared/status-ownership.md`) — never as the
