@@ -7,7 +7,7 @@ Test contract (all must RED before implementation, GREEN after):
   in the peer's repository after the phase, reachable from the slug branch.
 - the peer's worktree for that member is checked out at that commit.
 - no git remote is contacted: a sender whose `origin` points at an
-  unreachable URL still succeeds the phase (AC22).
+  unreachable URL still succeeds the phase.
 - the bundle is negatived — a transfer whose peer already holds the base
   sends a bundle materially smaller than a full-history one, and both still
   produce the same checked-out commit.
@@ -166,7 +166,7 @@ class TestHistoryLandsContent:
 
 class TestNoRemoteContacted:
     def test_phase_succeeds_with_sender_origin_pointed_at_unreachable_url(self, sender_and_peer):
-        """AC22: the whole content channel is local-object-store to
+        """The whole content channel is local-object-store to
         local-object-store. Pointing the SENDER's origin at a URL that
         cannot resolve must not matter — nothing on this path ever reads it."""
         from camp.transfer import receive
