@@ -430,27 +430,41 @@ def _resolve_account_identity(harness, profile, account: str | None, env: dict[s
     overrides it. That is a real, safe state, not a degenerate one: the
     report and the warning both fall back to exactly what they do today.
 
-    A :class:`HarnessError` here is a deliberate refusal — the harness
-    actively will not resolve an identity for *account* — and is never
-    collapsed into the ``None`` "no identity concept" absence; it refuses the
-    launch, with no process yet started. Any OTHER exception is a bug in this
-    advisory seam, not grounds to fail a launch that would otherwise succeed,
-    and degrades to the same ``None`` a harness with no identity concept
-    would answer.
+    A :class:`HarnessError` for a DECLARED account is a deliberate refusal —
+    the harness actively will not resolve an identity for the declaration
+    camp was given — and is never collapsed into the ``None`` "no identity
+    concept" absence; it refuses the launch, with no process yet started.
+
+    A :class:`HarnessError` for the DEFAULT (``account is None``) mirrors
+    :func:`_resolve_account_binding`'s own default-branch posture rather than
+    refusing: the failure is a contradiction already present in *env* that no
+    group declaration can clear, so every launch in such an environment would
+    otherwise be blocked on a condition camp cannot ask the operator to fix by
+    editing their group. Camp says so loudly and degrades to ``None`` — the
+    same "no identity" state a harness with no identity concept at all would
+    answer — rather than refusing.
+
+    Any OTHER exception is a bug in this advisory seam, not grounds to fail a
+    launch that would otherwise succeed, and degrades to the same ``None`` a
+    harness with no identity concept would answer.
     """
     from trailhead.harness import HarnessError
 
     try:
         return harness.session_launch_account_identity(account, env=env)
     except HarnessError as exc:
-        what = (
-            f"an identity for the declared account {account}"
-            if account is not None
-            else "a default identity here"
-        )
+        if account is None:
+            print(
+                f"camp: no account declared and harness "
+                f"{harness.name or profile.binary!r} will not resolve a default "
+                f"identity here: {exc} — launching with NO identity",
+                file=sys.stderr,
+            )
+            return None
         raise LaunchError(
             f"camp: refusing to launch — harness "
-            f"{harness.name or profile.binary!r} will not resolve {what}: {exc}"
+            f"{harness.name or profile.binary!r} will not resolve an identity "
+            f"for the declared account {account}: {exc}"
         ) from exc
     except Exception:  # noqa: BLE001 — advisory probe, never blocks a launch
         return None

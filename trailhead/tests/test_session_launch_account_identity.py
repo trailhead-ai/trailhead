@@ -41,7 +41,7 @@ class TestTwoInputsTwoAnswers:
         assert isinstance(default_identity, AccountIdentity)
         assert isinstance(declared_identity, AccountIdentity)
         assert default_identity.label != declared_identity.label
-        assert declared_identity.label == str(declared)
+        assert declared_identity.label == str(declared / ".claude.json")
 
 
 class TestAntiDivergencePin:
@@ -64,8 +64,8 @@ class TestAntiDivergencePin:
 
         identity = harness.session_launch_account_identity(None, env=env)
 
-        assert identity.label == str(claude_config_file(env).parent)
-        assert identity.label != str(_claude_dir(env))
+        assert identity.label == str(claude_config_file(env))
+        assert identity.label != str(_claude_dir(env) / ".claude.json")
 
 
 class TestExistenceAgreesWithIdentity:

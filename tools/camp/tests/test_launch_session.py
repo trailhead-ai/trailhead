@@ -2590,17 +2590,45 @@ class TestTheReportIncludesHarnessIdentity:
         assert " — \n" not in err
 
     def test_the_report_is_still_emitted_before_the_pane_is_handed_over(
-        self, rig, tmp_path, capsys
+        self, rig, tmp_path, monkeypatch
     ):
+        """Pins the ORDER, not merely that both happened: the report is the
+        point of resolving an identity before a pane exists to hand over, so a
+        test that cannot tell "printed after the spawn" from "printed before
+        it" does not pin what its name claims. A shared event ledger records
+        each stderr write carrying the identity and each tmux spawn AS THEY
+        HAPPEN, and the report's event must land first."""
         declared = _configured_account(tmp_path)
-        rig["harness"] = FakeHarness(
-            account_identity=_identity("/resolved/order-check")
-        )
+        rig["harness"] = FakeHarness(account_identity=_identity("/resolved/order-check"))
+
+        events: list[str] = []
+        real_stderr = sys.stderr
+
+        class OrderTrackingStderr:
+            def write(self, s):
+                if "/resolved/order-check" in s:
+                    events.append("report")
+                return real_stderr.write(s)
+
+            def flush(self):
+                real_stderr.flush()
+
+        monkeypatch.setattr(sys, "stderr", OrderTrackingStderr())
+
+        original_spawn = rig["spawn"]
+
+        def tracking_spawn(argv, **kwargs):
+            events.append("spawn")
+            return original_spawn(argv, **kwargs)
+
+        rig["spawn"] = tracking_spawn
 
         _launch(rig, group=_group_with_account(declared), env=_poisoned(tmp_path))
 
-        assert len(rig["spawn"].calls) == 1
-        assert "/resolved/order-check" in capsys.readouterr().err
+        assert len(original_spawn.calls) == 1
+        assert "report" in events
+        assert "spawn" in events
+        assert events.index("report") < events.index("spawn")
 
     def test_a_harness_refusing_the_identity_resolution_refuses_the_launch(
         self, rig, tmp_path
@@ -2624,6 +2652,29 @@ class TestTheReportIncludesHarnessIdentity:
 
         assert "identity resolution refuses this account" in str(excinfo.value)
         assert rig["spawn"].calls == []
+
+    def test_a_harness_refusing_the_default_identity_resolution_warns_and_still_launches(
+        self, rig, tmp_path, capsys
+    ):
+        """The default (undeclared) arm mirrors `_resolve_account_binding`'s
+        own default-branch posture: a harness that will not resolve an
+        identity for an UNDECLARED account is refusing on a condition no group
+        declaration can clear, so camp warns and launches with no identity
+        rather than blocking every launch in such an environment — the same
+        posture a declared refusal (above) deliberately does NOT take."""
+        from trailhead.harness import HarnessError
+
+        def refuse(account, env):
+            raise HarnessError("default identity refuses to resolve here")
+
+        rig["harness"] = FakeHarness(account_identity=refuse)
+
+        result = _launch(rig, group=_group_with_account(None), env=_poisoned(tmp_path))
+
+        assert result.session_id
+        assert len(rig["spawn"].calls) == 1
+        err = capsys.readouterr().err
+        assert "default identity refuses to resolve here" in err
 
     def test_an_unexpected_identity_failure_does_not_block_a_launch_that_would_succeed(
         self, rig, tmp_path, capsys
