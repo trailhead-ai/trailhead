@@ -1125,12 +1125,97 @@ class TestKillHostAmbiguous:
         assert code == 2
         assert json.loads(captured.out) == rows
 
+    def test_ambiguous_rows_human_mode_renders_each_candidate_on_stdout(
+        self, monkeypatch, capsys: pytest.CaptureFixture
+    ) -> None:
+        """Default (non-`--json`) mode is the mode operators actually use —
+        the candidate rows must render on stdout there too, not only under
+        `--json`. Two distinguishable candidates, both present."""
+        relay = _relay_module()
+        rows = [
+            {
+                "session_id": "sess-a1",
+                "tmux_name": "camp-feat-x-a1",
+                "root": "/work/feat-x",
+                "age_seconds": 120,
+                "root_missing": False,
+                "host": "andromeda",
+            },
+            {
+                "session_id": "sess-a2",
+                "tmux_name": "camp-feat-x-a2",
+                "root": "/work/feat-x-2",
+                "age_seconds": 60,
+                "root_missing": False,
+                "host": "andromeda",
+            },
+        ]
+        answer = relay.HostPayloadAnswer(
+            obj=None,
+            rows=rows,
+            certainty=relay.Certainty.HAPPENED,
+            notices=["camp kill: 'sess' matches 2 sessions (listed above)"],
+            exit_code=2,
+        )
+        _rig_payload(monkeypatch, answer)
+
+        code = _call_kill_host(monkeypatch, ["sess"])
+
+        captured = capsys.readouterr()
+        assert code == 2
+        assert "sess-a1" in captured.out
+        assert "sess-a2" in captured.out
+        assert "camp-feat-x-a1" in captured.out
+        assert "camp-feat-x-a2" in captured.out
+        # distinguishable — not the same line repeated
+        out_lines = [line for line in captured.out.splitlines() if line.strip()]
+        assert len(out_lines) == 2
+        assert out_lines[0] != out_lines[1]
+
+    def test_ambiguous_rows_human_mode_stdout_precedes_stderr_line(
+        self, monkeypatch, capsys: pytest.CaptureFixture
+    ) -> None:
+        """The candidate rows are the answer to what was asked, so they
+        print on stdout even though the exit is non-zero — mirroring
+        `_print_candidates`'s own ordering guarantee."""
+        relay = _relay_module()
+        rows = [
+            {
+                "session_id": "sess-a1",
+                "tmux_name": "camp-feat-x-a1",
+                "root": "/work/feat-x",
+                "age_seconds": 120,
+                "root_missing": False,
+                "host": "andromeda",
+            },
+        ]
+        answer = relay.HostPayloadAnswer(
+            obj=None,
+            rows=rows,
+            certainty=relay.Certainty.HAPPENED,
+            notices=[],
+            exit_code=2,
+        )
+        _rig_payload(monkeypatch, answer)
+
+        _call_kill_host(monkeypatch, ["sess"])
+
+        captured = capsys.readouterr()
+        assert "sess-a1" in captured.out
+
     def test_ambiguous_rows_stderr_carries_the_far_sides_how_many_matched_sentence(
         self, monkeypatch, capsys: pytest.CaptureFixture
     ) -> None:
         relay = _relay_module()
         rows = [
-            {"session_id": "sess-a1", "derived_name": "camp-feat-x-a1", "host": "andromeda"},
+            {
+                "session_id": "sess-a1",
+                "tmux_name": "camp-feat-x-a1",
+                "root": "/work/feat-x",
+                "age_seconds": 120,
+                "root_missing": False,
+                "host": "andromeda",
+            },
         ]
         answer = relay.HostPayloadAnswer(
             obj=None,
@@ -1214,6 +1299,29 @@ class TestKillHostCertainFailure:
         assert code == 1
         assert "no session was stopped" in lines[0]
         assert lines[1] == "camp kill: session 'sess-6' does not match any session on this machine"
+
+    def test_empty_rows_array_is_a_certain_failure_not_an_ambiguous_answer(
+        self, monkeypatch, capsys: pytest.CaptureFixture
+    ) -> None:
+        """An empty rows array is not a well-formed ambiguous answer — zero
+        candidates cannot be what `camp kill: … matched more than one
+        session` claims. Route it to the same certain-failure exit 1 an
+        unparsable answer gets, not exit 2 (`_AMBIGUOUS_EXIT_CODE`)."""
+        relay = _relay_module()
+        answer = relay.HostPayloadAnswer(
+            obj=None,
+            rows=[],
+            certainty=relay.Certainty.HAPPENED,
+            notices=[],
+            exit_code=2,
+        )
+        _rig_payload(monkeypatch, answer)
+
+        code = _call_kill_host(monkeypatch, ["sess-9"])
+
+        captured = capsys.readouterr()
+        assert code == 1
+        assert "no session was stopped" in captured.err
 
     def test_remote_exit_code_two_alongside_unparsable_answer_collapses_to_one(
         self, monkeypatch, capsys: pytest.CaptureFixture

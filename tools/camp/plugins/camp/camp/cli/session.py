@@ -358,6 +358,32 @@ def _candidate_line(candidate) -> str:
     )
 
 
+def _candidate_row_line(row: dict) -> str:
+    """A relayed `--host` candidate row, human-rendered — the JSON-shaped
+    counterpart to :func:`_candidate_line`, from a `_candidate_payload`-shaped
+    dict (``session_id``, ``tmux_name``, ``root``, ``age_seconds``,
+    ``root_missing``) rather than a `Candidate` object, because a relayed
+    ambiguous answer's rows never carry the local resolver's own type.
+
+    A remote camp of a different version can omit a key this depends on;
+    that is a `KeyError` a caller degrades per row, exactly as
+    `render_session_row_human` does for a `sessions --host` row.
+    """
+    from ..launch.recovery import printable_path
+
+    root = row.get("root")
+    if root is None:
+        where = "directory unknown"
+    elif row.get("root_missing"):
+        where = f"{printable_path(root)} (gone)"
+    else:
+        where = printable_path(root)
+    return (
+        f"{row['tmux_name']}  {row['session_id']}  {where}  "
+        f"{_format_age(row.get('age_seconds'))}"
+    )
+
+
 def _print_candidates(candidates, *, as_json: bool) -> None:
     """Print candidate rows on STDOUT — the one print site both listings use.
 
@@ -2374,12 +2400,26 @@ def _cmd_kill_host_cli(args: list[str], host: "Host", host_name: str) -> None:
             print(session_id)
         sys.exit(0)
 
-    if answer.rows is not None:
+    if answer.rows:
         # The rows ARE the answer to what was asked, so — mirroring
         # `_print_candidates` — they print on stdout before camp's own line,
-        # never suppressed by a non-zero exit.
+        # never suppressed by a non-zero exit. Human mode gets the same
+        # per-candidate rendering `_print_candidates` gives a local
+        # ambiguity; `--json` relays the far side's own row shape verbatim.
         if as_json:
             print(json.dumps(answer.rows))
+        else:
+            for row in answer.rows:
+                try:
+                    rendered = _candidate_row_line(row)
+                except KeyError as e:
+                    print(
+                        f"camp kill: host {host_name!r} sent a candidate row "
+                        f"missing {e.args[0]!r} — skipping",
+                        file=sys.stderr,
+                    )
+                    continue
+                print(rendered)
         print(
             f"camp kill: {ref!r} matched more than one session on host "
             f"{host_name!r} — re-run with a longer prefix naming exactly one",
