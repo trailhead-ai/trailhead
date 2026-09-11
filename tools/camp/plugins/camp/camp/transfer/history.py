@@ -15,9 +15,9 @@ resolved to a sha first.
 
 No git remote is ever contacted on this path — `git bundle create` reads only
 this host's local object store, and the transport is `stream_camp`'s direct
-ssh pipe, never a fetch or push through the group's shared remote. This is
-the property AC22 names, and the reason this channel exists at all: a
-commit made on the sender's branch and never pushed anywhere still crosses.
+ssh pipe, never a fetch or push through the group's shared remote. That is
+the reason this channel exists at all: a commit made on the sender's branch
+and never pushed anywhere still crosses.
 
 **Peer side** lives in `camp.transfer.receive.history` — this module carries
 only the sending half, continuing `camp.transfer.receive`'s module docstring
