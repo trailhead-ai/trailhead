@@ -241,6 +241,60 @@ def test_attach_reports_a_malformed_self_name_instead_of_a_traceback(
     assert "self_name" in err
 
 
+def test_a_declared_host_named_the_same_as_self_name_is_a_refusal_not_a_crash(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """Minor (second review pass, dispatch.py:1145): nothing in
+    `host/config.py` rejects a declared host sharing this machine's own
+    `self_name` at config time. Left unguarded, the bare `-a` picker can
+    route a `_RemoteAttachCandidate` row down the local handoff branch
+    (`row.machine == self_name`) and raise `AttributeError: derived_name`
+    when it is chosen — a camp refusal is owed instead.
+
+    Drives the picker all the way to a selection (fake tty, remote row
+    answered) rather than stopping at the "no terminal" refusal — otherwise
+    this test would pass identically whether or not the guard exists, and
+    would never actually reach the crash site it is pinning."""
+    cfg = tmp_path / "config"
+    cfg.mkdir()
+    cfg_text = 'self_name = "andromeda"\n\n[hosts.andromeda]\n'
+    (cfg / "hosts.toml").write_text(cfg_text, encoding="utf-8")
+    monkeypatch.setenv("CAMP_CONFIG_DIR", str(cfg))
+    monkeypatch.setenv("CAMP_STATE_DIR", str(tmp_path / "state"))
+    _wire_local_session(monkeypatch, tmp_path=tmp_path)
+    transport = _host_transport_module()
+    monkeypatch.setattr(
+        transport,
+        "run_camp",
+        lambda host, remote_argv, **kw: transport.Answered(
+            stdout=json.dumps(
+                {
+                    "ok": True,
+                    "rows": [
+                        {
+                            "session_id": "s-evil",
+                            "derived_name": "camp-evil",
+                            "group": "g2",
+                            "slug": "evil",
+                        }
+                    ],
+                }
+            ),
+            stderr="",
+            exit_code=0,
+        ),
+    )
+    monkeypatch.setattr(sys, "stdin", _FakeTTY("2\n"))
+    monkeypatch.setattr(sys, "stdout", _FakeTTY())
+
+    code = _run(["attach", "-a"], monkeypatch)
+
+    err = capsys.readouterr().err
+    assert code != 0
+    assert err.startswith("camp attach:"), err
+    assert "andromeda" in err
+
+
 # ---------------------------------------------------------------------------
 # Contract item 2 — each of the six forms reaches its intended path
 # ---------------------------------------------------------------------------
@@ -262,6 +316,28 @@ def test_bare_picker_reaches_the_local_picker_path(
     assert "no terminal to prompt into" in err, err
 
 
+def test_bare_local_picker_handoff_uses_the_derived_name_not_the_session_id(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Finding 2 (second review pass): `camp attach` (no ref, no `-a`), on a
+    local pick, must exec `tmux attach -t <derived_name>` — never the
+    harness's own `session_id`, which `local_argv`'s own docstring warns
+    "addresses nothing in tmux". No prior test drove the local picker
+    selection all the way to a captured handoff argv."""
+    _isolated_env(tmp_path, monkeypatch)
+    env, derived, _tmux = _wire_local_session(monkeypatch, tmp_path=tmp_path)
+    handoff = _host_handoff_module()
+    seen: list = []
+    monkeypatch.setattr(handoff, "handoff", lambda argv: seen.append(argv))
+    monkeypatch.setattr(sys, "stdin", _FakeTTY("1\n"))
+    monkeypatch.setattr(sys, "stdout", _FakeTTY())
+
+    code = _run(["attach"], monkeypatch)
+
+    assert code == 0
+    assert seen == [["tmux", "attach", "-t", derived]]
+
+
 def test_ref_form_reaches_local_resolution(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
@@ -272,19 +348,20 @@ def test_ref_form_reaches_local_resolution(
 
     err = capsys.readouterr().err
     assert code != 0
-    # Routed through `_die_unresolved` (finding 7): a populated pool with no
-    # match is a ref problem, and the message points at the listing —
-    # `camp kill`'s and `camp launch --resume`'s own wording for this case.
-    assert "no candidate matched" in err, err
-    assert "camp sessions --recoverable" in err, err
+    # Finding 3 (second review pass): a populated pool with no match names
+    # the pool THIS attach searched — never `camp sessions --recoverable`,
+    # which lists exactly the stopped sessions attach refuses to touch.
+    assert "no session on this machine matches" in err, err
+    assert "camp sessions --recoverable" not in err, err
 
 
 def test_ref_form_no_match_against_an_empty_pool_names_the_retention_window(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
-    """Finding 7: an empty pool is not a ref problem at all, and `_die_unresolved`
-    says so in the harness's own retention terms — distinct from the populated-
-    pool wording asserted above."""
+    """Finding 3 (second review pass): an empty pool is not a ref problem at
+    all, and attach's own no-match wording says so in the harness's own
+    retention terms — distinct from the populated-pool wording asserted
+    above, the empty-vs-populated split `_die_unresolved` provides."""
     _isolated_env(tmp_path, monkeypatch)
     cli_session = _cli_session_module()
     launch_session = _launch_session_module()
@@ -299,7 +376,7 @@ def test_ref_form_no_match_against_an_empty_pool_names_the_retention_window(
     err = capsys.readouterr().err
     assert code != 0
     assert "reports no sessions at all" in err, err
-    assert "no candidate matched" not in err, err
+    assert "no session on this machine matches" not in err, err
 
 
 def test_ref_form_ambiguous_match_prints_candidates_and_exits_2(
@@ -330,6 +407,26 @@ def test_resolve_json_form_reaches_the_machine_readable_probe(
     out = json.loads(capsys.readouterr().out)
     assert code == 0
     assert out == {"ok": False, "state": "no_match"}
+
+
+def test_ref_form_local_handoff_uses_the_derived_name_not_the_session_id(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Finding 2 (second review pass): `camp attach <ref>` (no `-a`), on a
+    successful local resolution, must exec `tmux attach -t <derived_name>` —
+    never `session_id`. No prior test drove this success path to a captured
+    handoff argv; the whole suite stayed green under the
+    `derived_name` -> `session_id` mutation this test now catches."""
+    _isolated_env(tmp_path, monkeypatch)
+    env, derived, _tmux = _wire_local_session(monkeypatch, tmp_path=tmp_path)
+    handoff = _host_handoff_module()
+    seen: list = []
+    monkeypatch.setattr(handoff, "handoff", lambda argv: seen.append(argv))
+
+    code = _run(["attach", _UUID_A[:8]], monkeypatch)
+
+    assert code == 0
+    assert seen == [["tmux", "attach", "-t", derived]]
 
 
 def test_host_form_reaches_the_untouched_pass_through(
@@ -376,6 +473,7 @@ def test_ref_all_hosts_form_reaches_the_cross_host_probe(
     _hosts_env(tmp_path, monkeypatch, "andromeda")
     _wire_local_session(monkeypatch, tmp_path=tmp_path)
     transport = _host_transport_module()
+    handoff = _host_handoff_module()
 
     calls: list = []
 
@@ -384,6 +482,15 @@ def test_ref_all_hosts_form_reaches_the_cross_host_probe(
         return transport.Answered(stdout=json.dumps({"ok": False}), stderr="", exit_code=0)
 
     monkeypatch.setattr(transport, "run_camp", fake_run_camp)
+    # Minor (second review pass): a live, camp-owned local session is wired
+    # above with no ref match expected — a mutation that wrongly treats this
+    # as a match must not be able to reach a real `os.execvp` in this
+    # process.
+    monkeypatch.setattr(
+        handoff, "handoff", lambda argv: (_ for _ in ()).throw(AssertionError(
+            "must refuse — this ref has no match anywhere, never hand off"
+        ))
+    )
 
     code = _run(["attach", "no-such-ref", "-a"], monkeypatch)
 
@@ -443,6 +550,25 @@ def test_dash_a_with_exactly_one_remote_match_hands_off_to_that_machine(
     assert "attach not-the-local-one" in seen[0][-1]
 
 
+def test_dash_a_ref_form_local_match_hands_off_using_the_derived_name_not_the_session_id(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Finding 2 (second review pass, dispatch.py): `camp attach <ref> -a`
+    with the sole match on THIS machine must exec `tmux attach -t
+    <derived_name>` — never `session_id`. No declared host answers, so the
+    only match is local."""
+    _isolated_env(tmp_path, monkeypatch)
+    env, derived, _tmux = _wire_local_session(monkeypatch, tmp_path=tmp_path)
+    handoff = _host_handoff_module()
+    seen: list = []
+    monkeypatch.setattr(handoff, "handoff", lambda argv: seen.append(argv))
+
+    code = _run(["attach", _UUID_A[:8], "-a"], monkeypatch)
+
+    assert code == 0
+    assert seen == [["tmux", "attach", "-t", derived]]
+
+
 def test_dash_a_with_two_machines_matching_refuses_and_names_both(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
@@ -471,6 +597,43 @@ def test_dash_a_with_two_machines_matching_refuses_and_names_both(
     err = capsys.readouterr().err
     assert code == 2
     assert "andromeda" in err and "vega" in err
+
+
+def test_dash_a_with_a_local_ambiguity_plus_one_remote_match_refuses_naming_both(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """Finding 1 (second review pass): a ref that is locally ambiguous (two
+    sessions on THIS machine) plus one remote machine answering `ok: true`
+    must refuse exit 2 naming both — a local `Ambiguous` is itself evidence
+    THIS machine matched, and must count toward the cross-machine tally
+    rather than being read as "no local match" and silently handed to the
+    remote machine (the previous fix's bug, reproduced here)."""
+    _hosts_env(tmp_path, monkeypatch, "andromeda")
+    _wire_local_ambiguous(monkeypatch, tmp_path=tmp_path)
+    transport = _host_transport_module()
+    handoff = _host_handoff_module()
+
+    monkeypatch.setattr(
+        transport,
+        "run_camp",
+        lambda host, remote_argv, **kw: transport.Answered(
+            stdout=json.dumps({"ok": True, "session_id": "s-remote"}), stderr="", exit_code=0
+        ),
+    )
+    # A real exec here IS the defect this test exists to catch.
+    monkeypatch.setattr(
+        handoff, "handoff", lambda argv: (_ for _ in ()).throw(AssertionError(
+            "must refuse — a local ambiguity plus a remote match is still an "
+            "ambiguous reference, never hand off"
+        ))
+    )
+
+    code = _run(["attach", "camp-feat-", "-a"], monkeypatch)
+
+    err = capsys.readouterr().err
+    assert code == 2
+    assert "andromeda" in err
+    assert "this machine" in err
 
 
 def test_dash_a_with_no_matches_names_every_machine_asked(
@@ -520,9 +683,15 @@ def test_dash_a_ref_form_with_no_hosts_declared_still_reports_a_local_ambiguity(
 
     code = _run(["attach", "camp-feat-", "-a"], monkeypatch)
 
-    err = capsys.readouterr().err
+    captured = capsys.readouterr()
     assert code == 2
-    assert "matches" in err and "2 sessions" in err
+    assert "matches" in captured.err and "2 sessions" in captured.err
+    # Minor (second review pass, dispatch.py:1031): the `-a` local-ambiguity
+    # refusal must list the candidates, like the plain form's
+    # `_die_unresolved` path and the plan's own axiom that an ambiguous ref
+    # "exits 2 and lists candidates" — not just a bare count.
+    assert f"camp-feat-a-{_UUID_A[:8]}" in captured.out
+    assert f"camp-feat-b-{_UUID_B[:8]}" in captured.out
 
 
 def test_dash_a_ref_form_with_no_hosts_declared_still_reports_local_not_running(
@@ -546,6 +715,42 @@ def test_dash_a_ref_form_with_no_hosts_declared_still_reports_local_not_running(
     assert code != 0
     assert "not running" in err
     assert "camp launch --resume" in err
+
+
+def test_dash_a_ref_form_with_a_remote_not_running_state_hands_off_rather_than_a_generic_no_match(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Minor (second review pass, dispatch.py:1043): a remote host's
+    `not_running` state is a match (a session THAT machine holds, just
+    stopped) — never the generic 'no session on any declared machine
+    matches'. `--host`'s own posture applies: the far side resolves and
+    refuses in its own words (its own `camp launch --resume` hint), so the
+    local probe hands off rather than fabricating a message about a machine
+    it never fully resolved."""
+    _hosts_env(tmp_path, monkeypatch, "andromeda")
+    _wire_local_session(monkeypatch, tmp_path=tmp_path)  # local: no match for this ref
+    transport = _host_transport_module()
+    handoff = _host_handoff_module()
+
+    monkeypatch.setattr(
+        transport,
+        "run_camp",
+        lambda host, remote_argv, **kw: transport.Answered(
+            stdout=json.dumps(
+                {"ok": False, "state": "not_running", "session_id": "s-stopped"}
+            ),
+            stderr="",
+            exit_code=0,
+        ),
+    )
+    seen: list = []
+    monkeypatch.setattr(handoff, "handoff", lambda argv: seen.append(argv))
+
+    code = _run(["attach", "not-the-local-one", "-a"], monkeypatch)
+
+    assert code == 0
+    assert len(seen) == 1
+    assert "attach not-the-local-one" in seen[0][-1]
 
 
 # ---------------------------------------------------------------------------
@@ -768,6 +973,15 @@ def test_list_json_wire_payload_has_non_empty_rows_end_to_end(
     green through."""
     _isolated_env(tmp_path, monkeypatch)
     _wire_local_session(monkeypatch, tmp_path=tmp_path)
+    handoff = _host_handoff_module()
+    # Minor (second review pass): `--list --json` never hands off — a
+    # mutation that wrongly did so must not be able to reach a real
+    # `os.execvp` in this process.
+    monkeypatch.setattr(
+        handoff, "handoff", lambda argv: (_ for _ in ()).throw(AssertionError(
+            "must never hand off for --list --json"
+        ))
+    )
 
     code = _run(["attach", "--list", "--json"], monkeypatch)
 
@@ -829,6 +1043,37 @@ def test_bare_dash_a_picker_hands_off_to_a_selected_remote_row(
     argv = seen[0]
     assert argv[0] == "ssh"
     assert "attach s-remote" in argv[-1]
+
+
+def test_dash_a_bare_picker_local_selection_uses_the_derived_name_not_the_session_id(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Finding 2 (second review pass, dispatch.py:1145): the bare `-a`
+    picker's LOCAL row (row 1 — local rows are listed before any remote
+    row) must hand off via `tmux attach -t <derived_name>` — never
+    `session_id`. The sibling test above only ever exercised the remote
+    selection; this is the local one it was missing."""
+    _hosts_env(tmp_path, monkeypatch, "andromeda")
+    env, derived, _tmux = _wire_local_session(monkeypatch, tmp_path=tmp_path)
+    transport = _host_transport_module()
+    handoff = _host_handoff_module()
+
+    monkeypatch.setattr(
+        transport,
+        "run_camp",
+        lambda host, remote_argv, **kw: transport.Answered(
+            stdout=json.dumps({"ok": True, "rows": []}), stderr="", exit_code=0
+        ),
+    )
+    seen: list = []
+    monkeypatch.setattr(handoff, "handoff", lambda argv: seen.append(argv))
+    monkeypatch.setattr(sys, "stdin", _FakeTTY("1\n"))
+    monkeypatch.setattr(sys, "stdout", _FakeTTY())
+
+    code = _run(["attach", "-a"], monkeypatch)
+
+    assert code == 0
+    assert seen == [["tmux", "attach", "-t", derived]]
 
 
 # ---------------------------------------------------------------------------
