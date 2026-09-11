@@ -77,6 +77,9 @@ _STATIC_RESERVED = frozenset(
         # session names everything else. Reserved so a workspace slug called
         # "kill" can never shadow the verb.
         "kill",
+        # Same posture as "kill" — a reference names the session to attach to,
+        # so a workspace slug called "attach" can never shadow the verb.
+        "attach",
         # Meta verbs.
         "help",
         "version",
@@ -480,6 +483,19 @@ def cmd_help(_args: list[str]) -> None:
         "                                    Stopping one that is already down is\n"
         "                                    success; a ref matching more than one\n"
         "                                    session lists them on stdout and exits 2\n"
+        "  camp attach                      Numbered picker over this machine's\n"
+        "                                    running, camp-owned sessions; picking\n"
+        "                                    one hands it your terminal\n"
+        "  camp attach <ref>                 Attach directly, from any cwd, by\n"
+        "                                    unambiguous prefix of a session's name\n"
+        "                                    or id, like camp kill\n"
+        "  camp attach <ref> --host <name>   Attach on one declared remote machine;\n"
+        "                                    the far side resolves and refuses in\n"
+        "                                    its own words\n"
+        "  camp attach -a | <ref> -a         Widen the picker, or the reference,\n"
+        "                                    across every declared machine; a ref\n"
+        "                                    matching on more than one machine\n"
+        "                                    refuses and names each one\n"
         "  camp sessions [<slug>] [--dir <path>] [--all-groups|-g] [--json]\n"
         "                                    List the LIVE harness sessions camp can\n"
         "                                    see, scoped to a workspace or to a\n"
@@ -532,6 +548,15 @@ def cmd_help(_args: list[str]) -> None:
         "                   the memory was not reclaimed, so the command failed\n"
         "  2                The ref matched more than one session — the candidates\n"
         "                   are on stdout to choose between, not a failure\n"
+        "\n"
+        "Exit codes (camp attach):\n"
+        "  0                camp's own part succeeded — the exit status becomes\n"
+        "                   the attached multiplexer's own once the handoff happens\n"
+        "  1                Refused — nothing was attached; camp's reason is on\n"
+        "                   stderr\n"
+        "  2                The reference matched more than one session (one\n"
+        "                   machine, or more than one under -a) — refuses rather\n"
+        "                   than guessing which was meant\n"
         "\n"
         "Flags:\n"
         "  --name <slug>    Target a specific worktree from any cwd\n"
@@ -1283,6 +1308,15 @@ def main() -> None:
         from .cli.session import _cmd_kill_cli
 
         _cmd_kill_cli(rest)
+    # Attach is ref-addressed the same way a stop is: the reference names the
+    # session, so it must answer from any cwd too. `--host` and `-a` are
+    # intercepted earlier, in cli/dispatch.py, before spine is ever reached
+    # (see cli/session.py's "camp attach" section comment) — only the local
+    # forms (bare picker, `<ref>`, `<ref> --resolve --json`) land here.
+    elif first == "attach":
+        from .cli.session import _cmd_attach_cli
+
+        _cmd_attach_cli(rest)
     # Canonical verb surface — these need a resolved group; reaching spine
     # means none resolved (single NEEDS_GROUP_VERBS source of truth).
     elif first in NEEDS_GROUP_VERBS:
