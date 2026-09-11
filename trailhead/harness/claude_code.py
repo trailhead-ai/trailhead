@@ -896,6 +896,59 @@ class ClaudeCodeHarness(Harness):
         candidate = _claude_dir(_env) / _PROJECTS_SUBDIR / munged / f"{session_id}.jsonl"
         return candidate if candidate.is_file() else None
 
+    # -- session transcript destination ----------------------------------------
+    #
+    # Composes the same ``<claude-dir>/projects/<munged>/<session-id>.jsonl``
+    # layout as ``session_transcript_path`` above, but for a destination that may
+    # not exist yet — the write side of an incoming transfer. The munge is
+    # LOSSY (both '/' and '.' collapse to '-'), so two distinct workspaces can
+    # legitimately compose to the same projects key (e.g. ``repo.a`` and
+    # ``repo/a``). That collision is undetectable from a single call in
+    # isolation, so this checks whatever is ALREADY at the computed key: if a
+    # transcript is there recording a DIFFERENT cwd than ``workspace``, writing
+    # to the composed path would silently mix two sessions' history, so this
+    # raises rather than handing back that path.
+
+    def session_transcript_destination(
+        self, session_id: str, workspace: Path, *, env: dict[str, str] | None = None
+    ) -> Path | None:
+        """Compose the destination for ``session_id`` under ``workspace``, or None.
+
+        Returns None when the session id is not a usable path component, or when
+        ``workspace`` is not absolute (never resolved against this process's own
+        cwd — mirroring how :meth:`session_transcripts` drops a relative
+        recorded root rather than anchoring it to the caller).
+
+        Raises :class:`HarnessError` when the computed destination's projects
+        key already holds a transcript recorded against a DIFFERENT workspace —
+        the reachable collision the lossy munge allows. A caller must treat that
+        raise as a hard refusal, exactly like ``None``, and must never fall back
+        to composing a destination path of its own.
+        """
+        if not _is_session_id(session_id):
+            return None
+        workspace = Path(workspace)
+        if not workspace.is_absolute():
+            return None
+        resolved = workspace.resolve()
+        _env = env if env is not None else dict(os.environ)
+        munged = str(resolved).replace("/", "-").replace(".", "-")
+        project_dir = _claude_dir(_env) / _PROJECTS_SUBDIR / munged
+        if project_dir.is_dir():
+            try:
+                existing_paths = list(project_dir.glob("*.jsonl"))
+            except OSError:
+                existing_paths = []
+            for existing in existing_paths:
+                other_cwd = _extract_transcript_cwd(existing)
+                if other_cwd is not None and other_cwd.resolve() != resolved:
+                    raise HarnessError(
+                        f"session_transcript_destination: projects key {munged!r} "
+                        "already holds a transcript for a different workspace; "
+                        "refusing to collide two workspaces onto one destination"
+                    )
+        return project_dir / f"{session_id}.jsonl"
+
     # -- session resume -------------------------------------------------------
     #
     # ``claude --resume <session-id>`` re-enters a session.  (``-r`` is the
