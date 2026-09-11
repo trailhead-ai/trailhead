@@ -1266,3 +1266,89 @@ Captured run outputs (6 processes' stdout/stderr/exit sidecars) are committed un
 
 See `plugins/craft/evals/ritual-deliverable-names-its-record/expected.md`, "Extension — Task 5,
 the conditional AC7 remediation at `plan` and `review`", for the full pre-registration.
+
+---
+
+### 2026-09-11 — Task 4: baseline the three remaining AC7 outcome sites
+
+Run by `task/baseline-the-three-ac7-sites-against-committed-prose` against the pre-registration
+appended to `expected.md` (section "Extension — Task 3, pre-registration for the three remaining
+AC7 outcome sites"), committed before any arm below was run. Every one of these three sites was
+UNMEASURED, not passing, going in.
+
+**The three sites.** `execute`'s completion report (re-graded as measurable, not `--exempt` — see
+the pre-registration's ruling), `review`'s **second** outcome (the slice loop not complete, handing
+back to `/craft:slice`), and `slice`'s selection handoff.
+
+**New fixtures.** `fixtures/review-loop-open-completed-run.md` differs from the already-committed
+`fixtures/review-completed-run.md` in exactly one line — the `craft/slice-loop` marker reads as
+*not* complete instead of `complete` — confirmed reachable by the fixture landing on the
+`/craft:slice` branch rather than `/craft:distill` in every captured run. `fixtures/slice-completed-
+run.md` asserts the spec, its ledger, and the chosen slice as already decided, so the deliverable is
+the selection handoff alone with no vault write required to reach it — confirmed reachable the same
+way, by every captured run landing on the handoff with no tool beyond `Read` used.
+
+**cwd-scoping check (Council amendment item 2).** `--setting-sources project` reads project settings
+from the process's cwd, so scoping each arm's cwd away from the repository (as the amendment
+requires) means no project settings are found — a different condition from the repo-root cwd the
+assumption-prover's single-run probes used. One scoped probe was run first for each of `review` and
+`slice` and compared against the prover's single-run finding: the first scoped `review` probe came
+back `own-line` against the prover's `embedded`, an apparent disagreement. Rather than treat one
+pair of runs as conclusive either way, two more probes were run — one more repo-root (unscoped) and
+one more scoped — for `review`, plus one scoped probe for `slice`. Result: **repo-root cwd produced
+both `own-line` and `embedded` across its own two runs, and scoped cwd produced both `own-line` and
+`embedded` across its own two runs** — the same split inside each condition as between them. This is
+ordinary run-to-run variance at these two sites, not a cwd effect (confirmed further by the full
+9-plus-6 measurement below, which shows the same non-unanimous pattern under scoped cwd throughout).
+**Conclusion: scoping changes nothing attributable to scoping.** All 15 measurement runs below were
+dispatched from a dedicated empty scratch directory per run (`mkdir` fresh, never reused), holding
+nothing but the run's own captured output.
+
+**Dispatch.** 9 base processes (3 per site) as separate `claude -p` processes, never subagents,
+`--setting-sources project --allowedTools "Read" < /dev/null`, each in its own freshly-created empty
+cwd. All 9 exited 0 with empty stderr. `execute-measurable` came back 0/3 `own-line` (unanimous
+falsification, no split) — no tie-break triggered. `review-loop-open` and `slice` each split 2-1 in
+their first 3 runs, triggering the pre-registered tie-break: 3 more runs each (6 total), also all
+exit 0 / empty stderr.
+
+| Date | Site | Arm | Fixture | Runs | next-command verdict |
+|------|------|-----|---------|------|----------------------|
+| 2026-09-11 | `execute` | `arms/execute-rule-only.md` | `execute-completed-run.md` | 3 | **absent, absent, embedded — 0/3 own-line, AC7 falsified** |
+| 2026-09-11 | `review` (2nd outcome) | `arms/review-treatment.md` | `review-loop-open-completed-run.md` | 3, then 6 (tie-break) | 3-run split 1 own-line / 2 embedded; 6-run: **own-line, embedded×5 — 1/6 own-line, clean majority embedded, AC7 falsified** |
+| 2026-09-11 | `slice` | `arms/rule-only.md` | `slice-completed-run.md` | 3, then 6 (tie-break) | 3-run split 2 own-line / 1 embedded; 6-run: **own-line×4, embedded×2 — 4/6, a non-resolving split named explicitly by the pre-registration ("4-2, or any other non-resolving split"), AMBIGUOUS, treated as AC7 falsified** |
+
+**Result: all three sites falsify AC7 at baseline.** None reaches the pre-registered "AC7 holds"
+condition (`own-line` for all 3, or all 6, counted runs). `execute`'s two `absent` runs never even
+contain the literal command text ("No pull request has been opened — that call is yours."); its one
+`embedded` run names it mid-sentence ("...I haven't invoked `` `/portage:pull_request` ``."). All
+6 `review-loop-open` runs link the record (`record-link: link`, not scored per the
+pre-registration) but only 1 of 6 puts the handoff command alone on its own line. `slice` is the one
+genuinely ambiguous site — 4/6 own-line is a real majority but not the clean one the tie-break
+requires, so it resolves to falsified by the pre-registration's own explicit rule rather than by any
+judgment call made here.
+
+`next-command: exempt` was not observed at any of the 15 runs, matching the pre-registration's
+statement that it is not a reachable verdict at these three sites (no invocation passed `--exempt`).
+
+**Security scan (Council amendment item 1).** `python3 <scratchpad>/capture_scan.py` run over all 45
+new capture files (15 captures × `.txt`/`.exit`/`.stderr.txt`): **18 hits, all class "high-entropy
+base64-shaped", all matching the pre-characterised false-positive pattern** — a record URL path
+segment such as `7313/records/harborlight/spec/dock` or `7313/records/harborlight/task/the`, never
+a credential shape. Every hit was inspected individually; none is an operator-path or username hit,
+and none is any class other than the one already characterised across the 20 pre-existing hits in
+the committed corpus. `execute-measurable-{1,2,3}` produced zero hits. No leak found; nothing
+withheld from commit.
+
+**Real-state check.** All 15 processes used `--allowedTools "Read"`, no shell/Edit/Write/Bash tool
+granted, `--setting-sources project`, and ran from a dedicated freshly-created empty directory under
+the scratchpad rather than the repository root.
+
+Captured run outputs (15 processes' stdout/stderr/exit sidecars — `execute-measurable-{1..3}`,
+`review-loop-open-{1..6}`, `slice-{1..6}`) are committed under
+`plugins/craft/evals/ritual-deliverable-names-its-record/runs/`. New filename prefixes
+(`execute-measurable-*`, `review-loop-open-*`, `slice-*`) are distinct from every existing one, per
+the pre-registration's instruction that `execute`'s historical `--exempt` invocation (prefix
+`execute-*`) and its new measurable invocation must both survive under separate prefixes.
+
+See `plugins/craft/evals/ritual-deliverable-names-its-record/expected.md`, "Extension — Task 3,
+pre-registration for the three remaining AC7 outcome sites", for the full pre-registration.

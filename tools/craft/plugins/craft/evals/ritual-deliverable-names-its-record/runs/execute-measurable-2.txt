@@ -1,0 +1,13 @@
+**Run complete** — [task/the-ledger-reconciliation-slice](http://127.0.0.1:7313/records/causewell/task/the-ledger-reconciliation-slice) is closed `done`.
+
+Phase outcomes:
+
+- **simplify:** no changes
+- **correctness:** SHIP, 0 findings
+- **security:** skipped — no trigger
+- **state-coverage:** parent 3, doc 3, missing 0
+- **criterion-observations:** covered 2, observed 2, missing 0
+- **push:** 1 repo pushed
+- **metrics:** 3 tasks, 5 dispatches (1.67/task), 28m wall clock, 1 lesson written, 1 lesson consumed
+
+No PR has been opened — that call is yours.
