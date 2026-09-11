@@ -882,7 +882,13 @@ string-equality check over both files' full text (40,530 bytes, exact match). `a
 == that same committed `slice/SKILL.md` text, followed by a blank line and the `## Record links`
 section of `tools/outpost/plugins/outpost/rules.md` (lines 43–56), confirmed the same way: the
 prefix matches the committed file exactly, and the appended tail matches the outpost section's
-text exactly (901 bytes appended). Neither arm was hand-edited after extraction.
+text exactly (981 bytes appended). Neither arm was hand-edited after extraction.
+
+> **Corrected 2026-09-11.** This paragraph first recorded the appended tail as 901 bytes.
+> Re-measured at review: `arms/treatment.md` is 41,511 bytes and `slice/SKILL.md` is 40,530,
+> so the tail is **981** bytes. The byte-identity claim itself re-verified and holds — the
+> prefix matches the committed file exactly and the tail matches the outpost section exactly;
+> only the quoted magnitude was wrong, so no arm was rebuilt and no run was re-dispatched.
 
 **Dispatch:** each of the 6 runs (3 treatment, 3 reader-absent) a separate `claude -p` process,
 `--setting-sources project --allowedTools "Read" < /dev/null`, foreground, one at a time, per
