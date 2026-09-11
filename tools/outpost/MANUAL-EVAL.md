@@ -391,6 +391,126 @@ writes — those predate this batch), none of it touching `rules.md`,
 something a `Read`-only, no-shell arm could have produced. No mutation
 attributable to this batch's six arm runs plus probe.
 
+### Re-run (2026-09-10, commit `c123d11f` — base-URL validation + ASCII-anchored grammar)
+
+**What fired the trigger.** Commit `c123d11f` edited the `## Record links`
+section of `rules.md` itself, per `expected.md`'s third re-run-trigger
+bullet ("the `## Record links` section ... itself, in any way") — this is a
+security fix, not a response to a prior eval FAIL. It added a fourth clause:
+a base resolved from `LORE_RECORD_URL_BASE` or `record_url_base` is used
+only if `http`/`https`, has a host, and carries no query, fragment, or `@`
+(credentials), otherwise the rule falls back to `http://127.0.0.1:7313` —
+mirroring the rejection conditions the record-URL contract module itself
+enforces (`tools/lore/plugins/lore/lore/record_url.py:65-108`,
+`_validate_base`). It also reworded the grammar fallback from "lowercase
+alphanumerics and hyphens" to an explicit ASCII anchor ("a character outside
+ASCII `a`-`z`, `0`-`9`, `-`"). No other clause (link target form,
+visible-text contract, base/vault resolution precedence, vaults-root
+definition, the path-standard and unresolvable-vault fallback triggers,
+first-mention/table rules) changed in substance. `arms/treatment.md`'s
+`## Record links` section was re-synced and confirmed byte-identical to
+`rules.md`'s before any arm was dispatched:
+`diff <(awk '/^## Record links/,0' rules.md) <(awk '/^## Record links/,0'
+arms/treatment.md)` → empty. Commit ordering: `c123d11f` (the rule edit) is
+the tip of `git log --oneline -2` at the moment the fixture was built and
+every arm dispatched — confirmed by running `git log --oneline -2`
+immediately before the first `claude -p` call, showing `c123d11f` as the
+sole new commit ahead of the eval's own prior re-sync commit, with no
+subsequent commit landing until this results-log entry itself.
+
+3 runs each of `arms/treatment.md` and `arms/baseline.md`, as separate
+`claude -p` processes (`--setting-sources project`, `--allowedTools "Read"`,
+`< /dev/null`), each with `LORE_STATE_DIR` set to the fixture run directory
+in that process's own environment, against a freshly built fixture
+(`fixtures/make-fixture-env.sh`).
+
+**Per-run tally, confirmed by exact-string grep across the raw output
+files:**
+
+```
+$ grep -oE '\[[^]]*\]\(http://127\.0\.0\.1:9199[^)]*\)' treatment-{1,2,3}.out
+treatment-1.out:[note/rotate-tires](http://127.0.0.1:9199/records/gearshed/note/rotate-tires)
+treatment-2.out:[note/rotate-tires](http://127.0.0.1:9199/records/gearshed/note/rotate-tires)
+treatment-3.out:[note/rotate-tires](http://127.0.0.1:9199/records/gearshed/note/rotate-tires)
+$ grep -nE '\[[^]]*(attic-archive|ghost-vault|Rotate_Tires|Field Note)[^]]*\]\(' treatment-{1,2,3}.out
+(no match)
+```
+
+| Date | Arm | Prose under test | Runs | Result | Notes |
+|------|-----|------------------|------|--------|-------|
+| 2026-09-10 (re-run, `c123d11f`) | treatment (Record links section appended, `c123d11f` text — base-URL validation clause + ASCII-anchored grammar) | link form + visible-text contract + validated base/vault resolution + ASCII grammar and path fallbacks | 3 | Record 1 linked with the right target AND right visible text (`kind/slug`) in 3/3; records 2–5 bare in 3/3 | condition 1 (link rendering) **PASSes**, 3/3; conditions 2 and 3 (vault-resolution and grammar fallbacks) **PASS**, 3/3 each |
+| 2026-09-10 (re-run, `c123d11f`) | baseline (`--setting-sources project`, no ruleset) | none | 3 | linked record 1 in 3/3, all 3 with a wrong target (missing `/records/`, full `vault/kind/slug` visible text); linked record 2 (non-standard-path vault) in 3/3; bare on records 3–5 in 3/3 | included per protocol; graded for contrast only |
+
+**Result: PASS on all three conditions of `expected.md`, unmodified — no
+regression.** Condition 1 (link rendering): 3/3 treatment runs correct on
+both visible text (`note/rotate-tires`) and target
+(`.../records/gearshed/note/rotate-tires`), so the FAIL threshold ("mislinks
+record 1 ... in more than 1/3 runs") is not met. Condition 2
+(vault-resolution fallback): records 2 and 3 bare in 3/3 treatment runs.
+Condition 3 (grammar fallback): records 4 and 5 bare in 3/3 treatment runs.
+**The `kind/slug` visible-text contract still holds 3/3** — the regression
+this re-run was watching for (recorded in the commit body as the specific
+risk of reflowing the same paragraph the `bda10d7`/`78049293` batches
+fought over) did not recur.
+
+**INCONCLUSIVE check.** Baseline was correct on record 1 in 0/3 (all 3
+missing `/records/`), treatment in 3/3 — not "as often," so INCONCLUSIVE is
+not triggered.
+
+**What this re-run does and does not answer.** The new base-validation
+clause is **UNMEASURED by this eval.** The fixture's record-URL base is
+fixed at `http://127.0.0.1:9199` in every run — no arm, treatment or
+baseline, is ever handed a base carrying credentials, a query, a fragment,
+or a non-`http`/`https` scheme, so nothing in this batch exercises whether
+an agent given a hostile base actually falls back to the default rather than
+assembling a link from it. This re-run's whole purpose was to confirm the
+prose edit that added that clause did not regress the three conditions
+`expected.md` already measures — not to validate the clause itself. A future
+case would need a sixth fixture record (or a modified task prompt) supplying
+a hostile `LORE_RECORD_URL_BASE` to close that gap; none exists yet.
+
+**No-tools probe, run before trusting the baseline.** Two probes this batch:
+(1) under `--setting-sources project` with no ruleset appended, asking to
+quote every rule mentioning "record" or "link" — quoted lore/craft-plugin
+ruleset text and Memory-section `[[wikilink]]` prose unrelated to record
+links, plus `symlink`/`readlink` substring hits; no `## Record links`
+section was quoted, consistent with the installed
+`~/.claude/rules/trailhead-outpost.md` still predating `bin/trailhead
+install` being re-run (confirmed again: `grep -n "Record links"
+~/.claude/rules/trailhead-outpost.md` → no match). (2) a second probe under
+the same flags but with `arms/treatment.md` appended via
+`--append-system-prompt`, confirming the arm prose — including the new
+base-validation clause — actually reaches the process before any of the six
+scored runs were trusted: the probe's transcript quoted the `## Record
+links` section verbatim, including the line "used only if `http`/`https`,
+with a host, and no query, fragment, or `@` (credentials)".
+
+**Real-state check, after this batch's six `claude -p` processes plus two
+probes (8 total, all `--allowedTools "Read"`, no shell/Edit/Write tool):**
+`~/.config/lore/config.json` mtime `2026-08-18 21:45:26` — unchanged from
+every prior batch. `~/.claude/rules/trailhead-outpost.md` mtime
+`2026-08-14 07:31:44` — unchanged, still carries no `## Record links`
+section. Every configured vault checked directly via `lore vault ls` plus
+`git status --porcelain` on each vault path (`default`, `trailhead`,
+`lake-in-the-woods`, `levr`): `lake-in-the-woods` clean; `default` carries
+pending `area/*` and `session/*` changes; `trailhead` carries pending
+`session/*`, `spec/*`, and `task/*` changes plus several untracked
+`lesson/*`, `session/*`, and `task/*` files; `levr` carries pending and
+untracked `task/*` changes — all of it `status`/`updated-at`/content
+bookkeeping from unrelated ongoing plan/session work, none of it touching
+`rules.md`, `expected.md`, `arms/`, fixtures, or `MANUAL-EVAL.md` itself, and
+none of it something a `Read`-only, no-shell arm could have produced. No
+mutation attributable to this batch's six arm runs plus two probes.
+
+**Correction to a note in this dispatch's own instructions, re-verified
+directly per the dispatch lessons rather than taken on report.** An earlier
+entry in this log (the first "Re-run" section above) claimed
+`--setting-sources project` drops `~/.claude/rules/trailhead-outpost.md`
+from an arm's context; a later entry (the `78049293` batch) already
+corrected this, and this batch's own first probe reproduces that correction
+independently: the flag scopes which `settings.json` layers apply, not
+whether `~/.claude/rules/*.md` is read. Not reintroduced here.
+
 ## Case: publish-routing
 
 `plugins/outpost/evals/publish-routing/` — seven fixtures over a scratch
