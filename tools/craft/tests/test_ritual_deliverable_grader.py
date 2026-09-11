@@ -96,6 +96,26 @@ class TestNextCommandPredicate:
         result = run(deliverable, "--record", RECORD, "--command", COMMAND)
         assert "next-command: absent" in result.stdout.splitlines()
 
+    def test_command_wrapped_in_one_pair_of_backticks_alone_on_its_own_line_passes(self):
+        # A captured deliverable renders the handoff command as an inline
+        # code span, e.g. `` `/craft:gauntlet spec/x` `` — the line still
+        # carries only that one command once its wrapping backticks are
+        # stripped, so it counts as own-line, same as a bare line would.
+        deliverable = f"Record: [{RECORD}](http://x/{RECORD})\n\n`{COMMAND}`\n"
+        result = run(deliverable, "--record", RECORD, "--command", COMMAND)
+        assert "next-command: own-line" in result.stdout.splitlines()
+
+    def test_same_backtick_wrapped_command_embedded_mid_sentence_fails(self):
+        # Same backtick-wrapped command text as above, embedded in a
+        # sentence instead of standing alone on its own line — the only
+        # thing that varies.
+        deliverable = (
+            f"Record: [{RECORD}](http://x/{RECORD})\n\n"
+            f"Next, run `{COMMAND}` to continue.\n"
+        )
+        result = run(deliverable, "--record", RECORD, "--command", COMMAND)
+        assert "next-command: embedded" in result.stdout.splitlines()
+
 
 class TestExitCodes:
     def test_both_predicates_passing_exits_zero(self):
@@ -106,6 +126,24 @@ class TestExitCodes:
     def test_a_failing_predicate_exits_one(self):
         deliverable = f"{RECORD}\n\n{COMMAND}\n"
         result = run(deliverable, "--record", RECORD, "--command", COMMAND)
+        assert result.returncode == 1
+
+    def test_exempt_outcome_with_record_linked_exits_zero(self):
+        # next-command is exempt (an always-passing verdict) and record-link
+        # is `link`, so the exit code must be 0 — half of the exit-code
+        # contract that the --exempt path exercises and the stdout-only
+        # assertions elsewhere in this file never pin.
+        deliverable = f"[{RECORD}](http://x/{RECORD})\n\nSome closing prose.\n"
+        result = run(deliverable, "--record", RECORD, "--exempt")
+        assert result.returncode == 0
+
+    def test_exempt_outcome_with_record_bare_still_exits_one(self):
+        # Same deliverable shape as above, but the record is bare instead
+        # of linked — the only thing that varies — so record-link fails
+        # even though next-command stays exempt, and the combined exit
+        # code must still be 1.
+        deliverable = f"{RECORD}\n\nSome closing prose.\n"
+        result = run(deliverable, "--record", RECORD, "--exempt")
         assert result.returncode == 1
 
     def test_empty_stdin_exits_two_with_reason(self):
