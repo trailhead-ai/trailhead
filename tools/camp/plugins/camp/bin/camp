@@ -15,6 +15,7 @@
 set -euo pipefail
 
 if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -x "${CLAUDE_PLUGIN_ROOT}/cli/camp" ]; then
+    PLUGIN_DIR="${CLAUDE_PLUGIN_ROOT}"
     CLI="${CLAUDE_PLUGIN_ROOT}/cli/camp"
 else
     # Symlink-safe self-resolution (macOS does not ship GNU readlink -f).
@@ -28,6 +29,76 @@ else
     BIN_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
     PLUGIN_DIR="$(cd -P "$BIN_DIR/.." && pwd)"
     CLI="$PLUGIN_DIR/cli/camp"
+fi
+
+# Interpreter selection — a bare `python3` on a non-interactive ssh PATH can
+# resolve to an interpreter far below the repo's declared floor (e.g. macOS
+# system Python 3.9 when Homebrew's 3.14 isn't on that PATH). Read the floor
+# from tools/camp/pyproject.toml — two directories up from plugins/camp/ — so
+# it can never drift from the declared value, and search every `python3` on
+# PATH (in PATH order) for one that satisfies it before falling back to plain
+# `python3` when no pyproject.toml is found (e.g. an installed plugin copy).
+PYPROJECT="$PLUGIN_DIR/../../pyproject.toml"
+
+_read_requires_python_floor() {
+    local pyproject="$1"
+    [ -f "$pyproject" ] || return 1
+    local line
+    line="$(grep -m1 '^requires-python' "$pyproject" || true)"
+    [ -n "$line" ] || return 1
+    FLOOR="$(printf '%s' "$line" | grep -oE '[0-9]+\.[0-9]+' | head -1)"
+    [ -n "$FLOOR" ]
+}
+
+_interpreter_version() {
+    local interp="$1" out
+    out="$("$interp" --version 2>&1)" || return 1
+    printf '%s' "$out" | grep -oE '[0-9]+\.[0-9]+' | head -1
+}
+
+_version_ge() {
+    local c_major="${1%%.*}" c_minor="${1#*.}" f_major="${2%%.*}" f_minor="${2#*.}"
+    if [ "$c_major" -gt "$f_major" ]; then return 0; fi
+    if [ "$c_major" -lt "$f_major" ]; then return 1; fi
+    [ "$c_minor" -ge "$f_minor" ]
+}
+
+# Search every `python3` on PATH (PATH order) for one meeting FLOOR. Sets
+# CHOSEN_PYTHON on success; sets LAST_FOUND_VERSION regardless, for the error
+# message when nothing satisfies. Walks PATH directories directly rather than
+# `command -v -a` (a bashism some `command` builtins don't support) so it works
+# wherever this script's own `#!/usr/bin/env bash` shebang resolves.
+_select_python() {
+    local floor="$1"
+    CHOSEN_PYTHON=""
+    LAST_FOUND_VERSION=""
+    local dir interp v
+    local saved_ifs="$IFS"
+    IFS=':'
+    for dir in $PATH; do
+        IFS="$saved_ifs"
+        [ -n "$dir" ] || continue
+        interp="$dir/python3"
+        [ -x "$interp" ] || continue
+        v="$(_interpreter_version "$interp")" || continue
+        LAST_FOUND_VERSION="$v"
+        if _version_ge "$v" "$floor"; then
+            CHOSEN_PYTHON="$interp"
+            return 0
+        fi
+        IFS=':'
+    done
+    IFS="$saved_ifs"
+    return 1
+}
+
+if _read_requires_python_floor "$PYPROJECT"; then
+    if _select_python "$FLOOR"; then
+        exec "$CHOSEN_PYTHON" "$CLI" "$@"
+    else
+        echo "camp: requires Python >=${FLOOR}, found Python ${LAST_FOUND_VERSION:-none}" >&2
+        exit 1
+    fi
 fi
 
 exec python3 "$CLI" "$@"
