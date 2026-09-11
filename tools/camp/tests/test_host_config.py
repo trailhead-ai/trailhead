@@ -21,6 +21,19 @@ Test contract:
   placed by transport.py into the local `ssh` argv in OPTION position (e.g.
   `ssh = "-oProxyCommand=..."` is option injection), so it must never survive
   loading.
+
+`connect_timeout_seconds` — the reserved top-level scalar bounding the SSH
+handshake:
+- An absent key returns the transport's own documented default.
+- An explicit value returns that value.
+- A non-numeric value, zero, and a negative value each raise, naming the
+  key — one test per shape.
+- Malformed TOML fails the same way `load_hosts`'s malformed-file path
+  fails (`HostConfigError`, not a traceback).
+- An unrecognised top-level scalar sitting alongside `connect_timeout` does
+  not stop `load_hosts` from loading the declared hosts — the document's top
+  level tolerates an unknown key, so a camp that predates a future top-level
+  addition is not broken by it either.
 """
 
 from __future__ import annotations
@@ -35,7 +48,12 @@ _PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
 if str(_PLUGIN_DIR) not in sys.path:
     sys.path.insert(0, str(_PLUGIN_DIR))
 
-from camp.host.config import HostConfigError, load_hosts  # noqa: E402
+from camp.host.config import (  # noqa: E402
+    HostConfigError,
+    connect_timeout_seconds,
+    load_hosts,
+)
+from camp.host.transport import DEFAULT_CONNECT_TIMEOUT_SECONDS  # noqa: E402
 
 
 def _point_at(monkeypatch: pytest.MonkeyPatch, config_dir: Path) -> None:
@@ -213,3 +231,96 @@ def test_ssh_value_beginning_with_dash_raises_naming_the_host(
         load_hosts()
 
     assert "andromeda" in str(exc_info.value)
+
+
+# ---------------------------------------------------------------------------
+# connect_timeout_seconds — the reserved top-level scalar
+# ---------------------------------------------------------------------------
+
+
+def test_absent_connect_timeout_key_returns_the_transports_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_dir = tmp_path / "cfg"
+    _point_at(monkeypatch, config_dir)
+    _write_hosts(config_dir, "[hosts.andromeda]\n")
+
+    assert connect_timeout_seconds() == DEFAULT_CONNECT_TIMEOUT_SECONDS
+
+
+def test_explicit_connect_timeout_resolves_to_that_value(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_dir = tmp_path / "cfg"
+    _point_at(monkeypatch, config_dir)
+    _write_hosts(config_dir, "connect_timeout = 3\n[hosts.andromeda]\n")
+
+    assert connect_timeout_seconds() == 3.0
+
+
+def test_non_numeric_connect_timeout_raises_naming_the_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_dir = tmp_path / "cfg"
+    _point_at(monkeypatch, config_dir)
+    _write_hosts(config_dir, 'connect_timeout = "soon"\n')
+
+    with pytest.raises(HostConfigError) as exc_info:
+        connect_timeout_seconds()
+
+    assert "connect_timeout" in str(exc_info.value)
+
+
+def test_zero_connect_timeout_raises_naming_the_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_dir = tmp_path / "cfg"
+    _point_at(monkeypatch, config_dir)
+    _write_hosts(config_dir, "connect_timeout = 0\n")
+
+    with pytest.raises(HostConfigError) as exc_info:
+        connect_timeout_seconds()
+
+    assert "connect_timeout" in str(exc_info.value)
+
+
+def test_negative_connect_timeout_raises_naming_the_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_dir = tmp_path / "cfg"
+    _point_at(monkeypatch, config_dir)
+    _write_hosts(config_dir, "connect_timeout = -5\n")
+
+    with pytest.raises(HostConfigError) as exc_info:
+        connect_timeout_seconds()
+
+    assert "connect_timeout" in str(exc_info.value)
+
+
+def test_malformed_toml_fails_connect_timeout_seconds_the_same_way_load_hosts_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_dir = tmp_path / "cfg"
+    _point_at(monkeypatch, config_dir)
+    hosts_file = _write_hosts(config_dir, "this is not [ valid toml")
+
+    with pytest.raises(HostConfigError) as exc_info:
+        connect_timeout_seconds()
+
+    assert str(hosts_file) in str(exc_info.value)
+
+
+def test_unrecognised_top_level_key_does_not_block_load_hosts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_dir = tmp_path / "cfg"
+    _point_at(monkeypatch, config_dir)
+    _write_hosts(
+        config_dir,
+        'connect_timeout = 5\nsome_future_key = "unrecognised"\n[hosts.andromeda]\n',
+    )
+
+    hosts = load_hosts()
+
+    assert hosts["andromeda"].ssh == "andromeda"
+    assert connect_timeout_seconds() == 5.0

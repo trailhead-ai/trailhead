@@ -8,6 +8,7 @@ group-config tree.
 
 Schema:
   self_name = "<name>"       # optional; this host's own declared name
+  connect_timeout = <seconds>  # optional; overrides the transport's ConnectTimeout
   [hosts.<name>]
   ssh = "<ssh destination>"   # optional; defaults to the table key <name>
   camp_bin = "<path or bare command>"  # optional; defaults to "camp"
@@ -18,6 +19,13 @@ per-table loader's strict-key allowlist is scoped to keys *inside* a host
 table, not to the document's top level. The local machine is never declared
 under ``[hosts.<name>]`` — camp still names no remote host of its own there;
 ``self_name`` is how a host learns its own name.
+
+``connect_timeout`` is a second reserved top-level scalar, for the same
+reason: it bounds the SSH handshake every declared host shares, not any one
+host's own table. Nothing validates the document's top level beyond the
+keys this module itself recognizes, so an older camp that predates this key
+tolerates a file that carries it, exactly as it already tolerates
+``self_name``.
 """
 from __future__ import annotations
 
@@ -217,3 +225,72 @@ def self_host_name(env: dict[str, str] | None = None) -> str | None:
         )
 
     return name
+
+
+def connect_timeout_seconds(env: dict[str, str] | None = None) -> float:
+    """Return the operator-declared SSH connect timeout, bounding the
+    handshake every declared host shares.
+
+    Reads the reserved top-level scalar ``connect_timeout`` from
+    ``config_dir("camp")/hosts.toml`` — a plain top-level scalar, the same
+    shape as ``self_name`` and read the same way: no file, or a file with no
+    ``connect_timeout`` key, returns
+    :data:`camp.host.transport.DEFAULT_CONNECT_TIMEOUT_SECONDS` — the
+    transport's own documented default — rather than raising.
+
+    Args:
+        env: Override os.environ for path resolution (for hermetic tests).
+             Defaults to os.environ.
+
+    Raises:
+        HostConfigError: If hosts.toml cannot be read, is malformed TOML, or
+            is nested deeply enough to exhaust the parser's recursion limit,
+            or ``connect_timeout`` is present but not a positive number —
+            text, zero, or negative all refuse rather than silently falling
+            back to the default.
+    """
+    import trailhead.paths as _paths
+
+    from .transport import DEFAULT_CONNECT_TIMEOUT_SECONDS
+
+    path = _paths.config_dir("camp", env=env) / "hosts.toml"
+
+    if not path.is_file():
+        return DEFAULT_CONNECT_TIMEOUT_SECONDS
+
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as e:
+        raise HostConfigError(f"{path}: cannot read file — {e}") from e
+
+    try:
+        raw: dict[str, Any] = tomllib.loads(text)
+    except tomllib.TOMLDecodeError as e:
+        raise HostConfigError(f"{path}: TOML parse error — {e}") from e
+    except RecursionError as e:
+        # Same rationale as self_host_name()'s identical guard above: a
+        # pathologically nested hosts.toml exhausts tomllib's recursion
+        # limit rather than raising TOMLDecodeError, and this must surface
+        # as the same HostConfigError either way.
+        raise HostConfigError(f"{path}: TOML parse error — {e}") from e
+
+    if "connect_timeout" not in raw:
+        return DEFAULT_CONNECT_TIMEOUT_SECONDS
+
+    value = raw["connect_timeout"]
+
+    # bool is a subclass of int in Python, so it is excluded explicitly —
+    # `connect_timeout = true` must refuse as "not a number", not silently
+    # coerce to 1.0.
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise HostConfigError(
+            f"{path}: field 'connect_timeout' must be a positive number, "
+            f"got {value!r}"
+        )
+    if value <= 0:
+        raise HostConfigError(
+            f"{path}: field 'connect_timeout' must be a positive number, "
+            f"got {value!r}"
+        )
+
+    return float(value)

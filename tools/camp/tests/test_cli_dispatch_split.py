@@ -334,7 +334,7 @@ def test_host_option_both_spellings_hand_the_same_clean_argv_downstream(
         pytest.fail(f"unexpected exit {exc.code} before reaching the handler")
 
     assert len(calls) == 1, calls
-    canonical, host, host_name, rest = calls[0]
+    canonical, host, host_name, rest, _connect_timeout = calls[0]
     assert canonical == verb
     assert host_name == "andromeda"
     assert host.ssh == "andromeda"
@@ -598,7 +598,7 @@ def test_host_launch_remote_argv_carries_only_the_named_group_never_cwd_resolved
         pytest.fail(f"unexpected exit {exc.code} before reaching the handler")
 
     assert len(calls) == 1, calls
-    canonical, host, host_name, rest = calls[0]
+    canonical, host, host_name, rest, _connect_timeout = calls[0]
     assert canonical == "launch"
     assert host_name == "andromeda"
     assert "--group" in rest and "prodgroup" in rest, rest

@@ -43,7 +43,7 @@ from typing import Any, Callable, Sequence
 
 from .config import Host
 from .relay import HostAnswer, answer_for_host
-from .transport import Runner, default_runner
+from .transport import DEFAULT_CONNECT_TIMEOUT_SECONDS, Runner, default_runner
 
 #: The reason stamped on a host's row when its worker raised something
 #: outside the transport's closed outcome set — a bug in camp's own
@@ -144,6 +144,7 @@ def answer_all_hosts_concurrently(
     *,
     verb: str,
     remote_argv: Sequence[str],
+    connect_timeout: float = DEFAULT_CONNECT_TIMEOUT_SECONDS,
     runner: Runner = default_runner,
     worker: HostWorker | None = None,
 ) -> tuple[tuple[list[dict[str, Any]], list[str], int], list[tuple[str, HostAnswer]]]:
@@ -172,6 +173,13 @@ def answer_all_hosts_concurrently(
             `answer_for_host` call — the same all-groups, JSON remote
             command every `--host` verb already builds. Unused when
             *worker* is injected.
+        connect_timeout: The operator's resolved connect timeout
+            (`camp.host.config.connect_timeout_seconds()`), passed through
+            to the default worker's `answer_for_host` call so it composes
+            with an injected *worker* rather than duplicating it — an
+            injected *worker* decides its own timeout handling and this
+            value is unused for it. Defaults to the transport's own
+            documented default.
         runner: Injected transport runner, used by the default worker.
             Unused when *worker* is injected.
         worker: Injected per-host worker, called as `worker(host_name,
@@ -192,7 +200,7 @@ def answer_all_hosts_concurrently(
     """
     active_worker: HostWorker = worker if worker is not None else (
         lambda host_name, host: answer_for_host(
-            verb, host, host_name, remote_argv, runner=runner
+            verb, host, host_name, remote_argv, connect_timeout=connect_timeout, runner=runner
         )
     )
 

@@ -204,6 +204,19 @@ def _hosts_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *hosts: str) -> 
     monkeypatch.setenv("CAMP_STATE_DIR", str(tmp_path / "state"))
 
 
+def _hosts_env_with_connect_timeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, connect_timeout_line: str, *hosts: str
+) -> None:
+    """`_hosts_env`, with the caller's own top-level ``connect_timeout``
+    line (or none) prepended to hosts.toml."""
+    cfg = tmp_path / "config"
+    cfg.mkdir(exist_ok=True)
+    body = connect_timeout_line + "".join(f"[hosts.{name}]\n" for name in hosts)
+    (cfg / "hosts.toml").write_text(body, encoding="utf-8")
+    monkeypatch.setenv("CAMP_CONFIG_DIR", str(cfg))
+    monkeypatch.setenv("CAMP_STATE_DIR", str(tmp_path / "state"))
+
+
 # ---------------------------------------------------------------------------
 # Contract item 1 — groupless, like `camp kill`
 # ---------------------------------------------------------------------------
@@ -1146,3 +1159,70 @@ def test_a_mistyped_attach_only_flag_is_not_silently_accepted_elsewhere(
 
     err = capsys.readouterr().err
     assert "camp attach:" not in err
+
+
+# ---------------------------------------------------------------------------
+# connect_timeout — the third route: attach's own cross-host probes, called
+# directly from cli/dispatch.py rather than through camp.host.relay
+# (task/connect-timeout-is-declared-in-the-host-file).
+# ---------------------------------------------------------------------------
+
+
+def test_ref_form_cross_host_probe_threads_declared_connect_timeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _hosts_env_with_connect_timeout(tmp_path, monkeypatch, "connect_timeout = 5\n", "andromeda")
+    _wire_local_session(monkeypatch, tmp_path=tmp_path)
+    transport = _host_transport_module()
+
+    seen: list = []
+
+    def fake_run_camp(host, remote_argv, **kw):
+        seen.append(kw.get("connect_timeout"))
+        return transport.Answered(stdout=json.dumps({"ok": False}), stderr="", exit_code=0)
+
+    monkeypatch.setattr(transport, "run_camp", fake_run_camp)
+
+    _run(["attach", "no-such-ref", "-a"], monkeypatch)
+
+    assert seen == [5.0]
+
+
+def test_bare_picker_cross_host_probe_threads_declared_connect_timeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _hosts_env_with_connect_timeout(tmp_path, monkeypatch, "connect_timeout = 6\n", "andromeda")
+    _wire_local_session(monkeypatch, tmp_path=tmp_path)
+    transport = _host_transport_module()
+
+    seen: list = []
+
+    def fake_run_camp(host, remote_argv, **kw):
+        seen.append(kw.get("connect_timeout"))
+        return transport.Answered(stdout=json.dumps({"ok": True, "rows": []}), stderr="", exit_code=0)
+
+    monkeypatch.setattr(transport, "run_camp", fake_run_camp)
+
+    _run(["attach", "-a"], monkeypatch)
+
+    assert seen == [6.0]
+
+
+def test_cross_host_probes_use_the_transports_default_connect_timeout_when_absent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _hosts_env(tmp_path, monkeypatch, "andromeda")
+    _wire_local_session(monkeypatch, tmp_path=tmp_path)
+    transport = _host_transport_module()
+
+    seen: list = []
+
+    def fake_run_camp(host, remote_argv, **kw):
+        seen.append(kw.get("connect_timeout"))
+        return transport.Answered(stdout=json.dumps({"ok": False}), stderr="", exit_code=0)
+
+    monkeypatch.setattr(transport, "run_camp", fake_run_camp)
+
+    _run(["attach", "no-such-ref", "-a"], monkeypatch)
+
+    assert seen == [transport.DEFAULT_CONNECT_TIMEOUT_SECONDS]

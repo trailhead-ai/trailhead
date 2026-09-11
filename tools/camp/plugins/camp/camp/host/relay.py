@@ -153,22 +153,32 @@ class _TransportFailure:
 
 
 def _classify_transport_failure(
-    verb: str, host: Host, host_name: str, outcome: _transport.TransportOutcome
+    verb: str,
+    host: Host,
+    host_name: str,
+    outcome: _transport.TransportOutcome,
+    *,
+    connect_timeout: float = DEFAULT_CONNECT_TIMEOUT_SECONDS,
 ) -> _TransportFailure | None:
     """The seven transport-failure renderings, shared by every relay shape.
 
     Returns ``None`` for :class:`Answered` and :class:`RemoteRefusal` — the
     two outcomes that carry the remote's own stdout/stderr for a caller to
     parse itself, rows or object, rather than a fixed local rendering.
+
+    ``connect_timeout`` is the value the transport call was actually made
+    with (the operator's declared value, or the transport's own default) —
+    the `Unreachable` message names it, since it reports how long the
+    handshake was given before it was classified as unreachable.
     """
     if isinstance(outcome, Unreachable):
         return _TransportFailure(
             notices=[
                 f"camp {verb}: host {host_name!r} is unreachable — no response "
-                f"within {DEFAULT_CONNECT_TIMEOUT_SECONDS:g}s"
+                f"within {connect_timeout:g}s"
             ],
             exit_code=1,
-            reason=f"unreachable — no response within {DEFAULT_CONNECT_TIMEOUT_SECONDS:g}s",
+            reason=f"unreachable — no response within {connect_timeout:g}s",
         )
 
     if isinstance(outcome, StoppedResponding):
@@ -257,18 +267,27 @@ def answer_for_host(
     host_name: str,
     remote_argv: Sequence[str],
     *,
+    connect_timeout: float = DEFAULT_CONNECT_TIMEOUT_SECONDS,
     runner: Runner = default_runner,
 ) -> HostAnswer:
     """Run *remote_argv* on *host* over the transport and return its answer.
+
+    ``connect_timeout`` is passed straight through to
+    :func:`camp.host.transport.run_camp` — the operator's resolved value
+    (``camp.host.config.connect_timeout_seconds()``), threaded explicitly by
+    the caller rather than read here, so this module never opens hosts.toml
+    itself. Defaults to the transport's own documented default.
 
     Never calls ``sys.exit`` and never prints — every transport outcome
     becomes a :class:`HostAnswer` instead. Holds no state across calls, so
     it is safe to call once per declared host, including from several
     threads at once.
     """
-    outcome = _transport.run_camp(host, remote_argv, runner=runner)
+    outcome = _transport.run_camp(host, remote_argv, connect_timeout=connect_timeout, runner=runner)
 
-    failure = _classify_transport_failure(verb, host, host_name, outcome)
+    failure = _classify_transport_failure(
+        verb, host, host_name, outcome, connect_timeout=connect_timeout
+    )
     if failure is not None:
         return HostAnswer(
             rows=[{"ok": False, "host": host_name, "reason": failure.reason}],
@@ -331,9 +350,13 @@ def relay_all_groups(
     *,
     as_json: bool,
     render_human_rows: RenderHumanRows,
+    connect_timeout: float = DEFAULT_CONNECT_TIMEOUT_SECONDS,
     runner: Runner = default_runner,
 ) -> None:
     """Run *remote_argv* on *host* over the transport and render the answer.
+
+    ``connect_timeout`` is passed straight through to
+    :func:`answer_for_host` — see its own docstring.
 
     Exits the process in every branch — there is no return path a caller
     needs to handle further, mirroring the fixed-message refusals `main()`
@@ -341,7 +364,9 @@ def relay_all_groups(
     :func:`answer_for_host`: this is that value, printed and exited on
     immediately.
     """
-    answer = answer_for_host(verb, host, host_name, remote_argv, runner=runner)
+    answer = answer_for_host(
+        verb, host, host_name, remote_argv, connect_timeout=connect_timeout, runner=runner
+    )
 
     if answer.answered:
         if as_json:
@@ -474,11 +499,16 @@ def answer_payload_for_host(
     host_name: str,
     remote_argv: Sequence[str],
     *,
+    connect_timeout: float = DEFAULT_CONNECT_TIMEOUT_SECONDS,
     runner: Runner = default_runner,
 ) -> HostPayloadAnswer:
     """Run *remote_argv* on *host* over the transport and return whichever
     payload shape it answered with — one object, an array of rows, or
     nothing camp could parse.
+
+    ``connect_timeout`` is passed straight through to
+    :func:`camp.host.transport.run_camp` — see :func:`answer_for_host`'s
+    docstring for the same contract.
 
     Same transport, same six locally-classified failure states (shared via
     :func:`_classify_transport_failure`), and the same :class:`Certainty`
@@ -486,10 +516,12 @@ def answer_payload_for_host(
     :func:`answer_object_for_host` is re-expressed on top of. Never calls
     ``sys.exit`` and never prints. Holds no state across calls.
     """
-    outcome = _transport.run_camp(host, remote_argv, runner=runner)
+    outcome = _transport.run_camp(host, remote_argv, connect_timeout=connect_timeout, runner=runner)
     certainty = classify_certainty(outcome)
 
-    failure = _classify_transport_failure(verb, host, host_name, outcome)
+    failure = _classify_transport_failure(
+        verb, host, host_name, outcome, connect_timeout=connect_timeout
+    )
     if failure is not None:
         return HostPayloadAnswer(
             obj=None,
@@ -539,10 +571,14 @@ def answer_object_for_host(
     host_name: str,
     remote_argv: Sequence[str],
     *,
+    connect_timeout: float = DEFAULT_CONNECT_TIMEOUT_SECONDS,
     runner: Runner = default_runner,
 ) -> HostObjectAnswer:
     """Run *remote_argv* on *host* over the transport and return its
     single-object answer.
+
+    ``connect_timeout`` is passed straight through to
+    :func:`answer_payload_for_host` — see its own docstring.
 
     Re-expressed on top of :func:`answer_payload_for_host`: same transport,
     same six locally-classified failure states, same :class:`Certainty` —
@@ -551,7 +587,9 @@ def answer_object_for_host(
     ``answer=None`` here. Never calls ``sys.exit`` and never prints. Holds
     no state across calls.
     """
-    payload = answer_payload_for_host(verb, host, host_name, remote_argv, runner=runner)
+    payload = answer_payload_for_host(
+        verb, host, host_name, remote_argv, connect_timeout=connect_timeout, runner=runner
+    )
     return HostObjectAnswer(
         answer=payload.obj,
         certainty=payload.certainty,

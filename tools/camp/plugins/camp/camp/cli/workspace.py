@@ -169,7 +169,9 @@ def _cmd_ls_all_groups_cli(args: list[str], env: dict[str, str] | None) -> None:
     render_workspace_list(entries, as_json=as_json, group_failures=unparsable)
 
 
-def _cmd_ls_host_cli(args: list[str], host: "Host", host_name: str) -> None:
+def _cmd_ls_host_cli(
+    args: list[str], host: "Host", host_name: str, *, connect_timeout: float | None = None
+) -> None:
     """camp list --host <name> [--json] — every group's workspaces on one
     declared remote machine, relayed through the SSH transport.
 
@@ -181,6 +183,12 @@ def _cmd_ls_host_cli(args: list[str], host: "Host", host_name: str) -> None:
     remote invocation must never carry — refused earlier in `main()`), so a
     remote answer always spans that machine's groups.
 
+    ``connect_timeout`` is the operator's resolved value
+    (`camp.host.config.connect_timeout_seconds()`, read once by
+    `main()`'s ``--host`` handling and passed down); ``None`` (a direct call
+    with no caller-supplied value) falls back to the transport's own
+    documented default.
+
     Delegates everything downstream of "what argv to send" and "how to print
     an ok row" to :func:`camp.host.relay.relay_all_groups` — the shared
     seam every `--host` verb dispatches through — which owns the transport
@@ -188,6 +196,10 @@ def _cmd_ls_host_cli(args: list[str], host: "Host", host_name: str) -> None:
     "how do I print one answered row" callback.
     """
     from ..host.relay import relay_all_groups
+    from ..host.transport import DEFAULT_CONNECT_TIMEOUT_SECONDS
+
+    if connect_timeout is None:
+        connect_timeout = DEFAULT_CONNECT_TIMEOUT_SECONDS
 
     as_json = "--json" in args
 
@@ -219,6 +231,7 @@ def _cmd_ls_host_cli(args: list[str], host: "Host", host_name: str) -> None:
         ["list", "--all-groups", "--json"],
         as_json=as_json,
         render_human_rows=_render_human_rows,
+        connect_timeout=connect_timeout,
     )
 
 
