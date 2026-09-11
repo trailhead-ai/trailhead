@@ -1777,13 +1777,6 @@ def test_launch_unknown_key_still_raises_with_account_known(tmp_path: Path) -> N
 # ---------------------------------------------------------------------------
 
 
-def _member_toml(extra: str) -> str:
-    return (
-        "[group]\nname = 'testgroup'\n\n"
-        "[[members]]\nname = 'myrepo'\nrepo_root = '/tmp/myrepo'\n" + extra
-    )
-
-
 def test_excluded_single_entry_loads_as_normalized_relative_string(tmp_path: Path) -> None:
     """A single excluded entry loads as a normalized relative path string —
     resolution against the member's own worktree happens at consumption time,
@@ -1893,7 +1886,7 @@ def _load_pre_change_baseline_group(toml_text: str, tmp_path: Path):
         # prior loader out of, and a source tree with no `.git` carries none
         # either. The invariant this comparison strengthens is pinned
         # independently of history by
-        # `test_member_with_no_excluded_key_loads_as_never_declared`, so skipping
+        # `test_excluded_absent_key_is_none`, so skipping
         # here loses a stronger form of an already-covered claim rather than the
         # claim itself.
         pytest.skip(

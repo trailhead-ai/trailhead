@@ -165,6 +165,50 @@ def _transport_detail(outcome: TransportOutcome) -> str:
     return f"peer transport outcome: {kind}"  # pragma: no cover - exhaustive above
 
 
+def _peer_payload_unavailable(
+    name: str,
+    probe_result: TransportOutcome | ProbeAnswer | ProbeRefused | SelfNameCollision | None,
+) -> Check | None:
+    """The check named *name* answered from the peer's non-answer alone.
+
+    Checks 6-9 each need a field of the peer's parsed
+    :class:`~camp.transfer.probe.ProbeAnswer`, and every one of them owes the
+    same answer when there is no such answer to read: INDETERMINATE carrying
+    the `TransportOutcome` that stopped the peer from answering, FAILED for a
+    malformed payload or a self-name collision (the peer *did* answer, so
+    neither is a transport failure), and FAILED when the peer was never
+    probed at all. `None` means the peer returned a parsed answer, so the
+    caller evaluates its own predicate against it.
+
+    The collision detail here is the generic one, for a check that cannot
+    evaluate its own question while the two hosts are indistinguishable. The
+    check whose question *is* the collision states it specifically, at its
+    own site, before consulting this.
+    """
+    if isinstance(probe_result, TransportOutcome):
+        return Check(
+            name,
+            CheckStatus.INDETERMINATE,
+            f"indeterminate — {_transport_detail(probe_result)}",
+            transport_outcome=probe_result,
+        )
+    if isinstance(probe_result, ProbeRefused):
+        return Check(
+            name,
+            CheckStatus.FAILED,
+            f"cannot evaluate — the peer's response was malformed: {probe_result.reason}",
+        )
+    if isinstance(probe_result, SelfNameCollision):
+        return Check(
+            name,
+            CheckStatus.FAILED,
+            "cannot evaluate — the peer declares the same name as this host",
+        )
+    if not isinstance(probe_result, ProbeAnswer):
+        return Check(name, CheckStatus.FAILED, "the peer was never probed")
+    return None
+
+
 def compose_preflight(
     *,
     self_name: str | None,
@@ -285,222 +329,96 @@ def compose_preflight(
         checks.append(Check("the peer answers", CheckStatus.PASSED, "the peer responded"))
 
     # 6. the peer's declared name differs from this host's
-    if isinstance(probe_result, TransportOutcome):
+    name = "the peer's declared name differs from this host's"
+    if isinstance(probe_result, SelfNameCollision):
+        # This check's own question IS the collision, so it names it rather
+        # than reporting the generic "cannot evaluate" every other
+        # peer-dependent check gives for the same input.
         checks.append(
             Check(
-                "the peer's declared name differs from this host's",
-                CheckStatus.INDETERMINATE,
-                f"indeterminate — {_transport_detail(probe_result)}",
-                transport_outcome=probe_result,
-            )
-        )
-    elif isinstance(probe_result, ProbeRefused):
-        checks.append(
-            Check(
-                "the peer's declared name differs from this host's",
-                CheckStatus.FAILED,
-                f"cannot evaluate — the peer's response was malformed: {probe_result.reason}",
-            )
-        )
-    elif isinstance(probe_result, SelfNameCollision):
-        checks.append(
-            Check(
-                "the peer's declared name differs from this host's",
+                name,
                 CheckStatus.FAILED,
                 f"the peer declares its own name as {probe_result.peer_self_name!r}, "
                 "the same name this host declares",
             )
         )
-    elif isinstance(probe_result, ProbeAnswer):
-        checks.append(
-            Check(
-                "the peer's declared name differs from this host's",
-                CheckStatus.PASSED,
-                "the peer's declared name differs from this host's",
-            )
-        )
     else:
+        unavailable = _peer_payload_unavailable(name, probe_result)
         checks.append(
-            Check(
-                "the peer's declared name differs from this host's",
-                CheckStatus.FAILED,
-                "the peer was never probed",
-            )
+            unavailable
+            if unavailable is not None
+            else Check(name, CheckStatus.PASSED, name)
         )
 
     # 7. the peer has the group configured with existing member repo roots
-    if isinstance(probe_result, TransportOutcome):
+    name = "the peer has the group configured with existing member repo roots"
+    unavailable = _peer_payload_unavailable(name, probe_result)
+    if unavailable is not None:
+        checks.append(unavailable)
+    elif not probe_result.group_configured:
         checks.append(
-            Check(
-                "the peer has the group configured with existing member repo roots",
-                CheckStatus.INDETERMINATE,
-                f"indeterminate — {_transport_detail(probe_result)}",
-                transport_outcome=probe_result,
-            )
+            Check(name, CheckStatus.FAILED, "the peer does not have this group configured")
         )
-    elif isinstance(probe_result, ProbeRefused):
-        checks.append(
-            Check(
-                "the peer has the group configured with existing member repo roots",
-                CheckStatus.FAILED,
-                f"cannot evaluate — the peer's response was malformed: {probe_result.reason}",
-            )
-        )
-    elif isinstance(probe_result, SelfNameCollision):
-        checks.append(
-            Check(
-                "the peer has the group configured with existing member repo roots",
-                CheckStatus.FAILED,
-                "cannot evaluate — the peer declares the same name as this host",
-            )
-        )
-    elif isinstance(probe_result, ProbeAnswer):
-        if not probe_result.group_configured:
+    else:
+        missing = [m.name for m in probe_result.members if not m.repo_root_exists]
+        if missing:
             checks.append(
                 Check(
-                    "the peer has the group configured with existing member repo roots",
+                    name,
                     CheckStatus.FAILED,
-                    "the peer does not have this group configured",
+                    "the peer is missing member repo root(s): " + ", ".join(missing),
                 )
             )
         else:
-            missing = [m.name for m in probe_result.members if not m.repo_root_exists]
-            if missing:
-                checks.append(
-                    Check(
-                        "the peer has the group configured with existing member repo roots",
-                        CheckStatus.FAILED,
-                        "the peer is missing member repo root(s): " + ", ".join(missing),
-                    )
+            checks.append(
+                Check(
+                    name,
+                    CheckStatus.PASSED,
+                    "the peer has the group configured with every member repo root present",
                 )
-            else:
-                checks.append(
-                    Check(
-                        "the peer has the group configured with existing member repo roots",
-                        CheckStatus.PASSED,
-                        "the peer has the group configured with every member repo root present",
-                    )
-                )
-    else:
-        checks.append(
-            Check(
-                "the peer has the group configured with existing member repo roots",
-                CheckStatus.FAILED,
-                "the peer was never probed",
             )
-        )
 
     # 8. the peer's harness account binding matches this end's
-    if isinstance(probe_result, TransportOutcome):
+    name = "the peer's harness account binding matches this end's"
+    unavailable = _peer_payload_unavailable(name, probe_result)
+    if unavailable is not None:
+        checks.append(unavailable)
+    elif probe_result.account == self_account:
         checks.append(
-            Check(
-                "the peer's harness account binding matches this end's",
-                CheckStatus.INDETERMINATE,
-                f"indeterminate — {_transport_detail(probe_result)}",
-                transport_outcome=probe_result,
-            )
+            Check(name, CheckStatus.PASSED, f"account binding matches ({self_account!r})")
         )
-    elif isinstance(probe_result, ProbeRefused):
-        checks.append(
-            Check(
-                "the peer's harness account binding matches this end's",
-                CheckStatus.FAILED,
-                f"cannot evaluate — the peer's response was malformed: {probe_result.reason}",
-            )
-        )
-    elif isinstance(probe_result, SelfNameCollision):
-        checks.append(
-            Check(
-                "the peer's harness account binding matches this end's",
-                CheckStatus.FAILED,
-                "cannot evaluate — the peer declares the same name as this host",
-            )
-        )
-    elif isinstance(probe_result, ProbeAnswer):
-        if probe_result.account == self_account:
-            checks.append(
-                Check(
-                    "the peer's harness account binding matches this end's",
-                    CheckStatus.PASSED,
-                    f"account binding matches ({self_account!r})",
-                )
-            )
-        else:
-            checks.append(
-                Check(
-                    "the peer's harness account binding matches this end's",
-                    CheckStatus.FAILED,
-                    f"the peer's harness account binding is {probe_result.account!r}, "
-                    f"this end's is {self_account!r}",
-                )
-            )
     else:
         checks.append(
             Check(
-                "the peer's harness account binding matches this end's",
+                name,
                 CheckStatus.FAILED,
-                "the peer was never probed",
+                f"the peer's harness account binding is {probe_result.account!r}, "
+                f"this end's is {self_account!r}",
             )
         )
 
     # 9. the slug is free on the peer, or present there and owned by this host
-    if isinstance(probe_result, TransportOutcome):
+    name = "the slug is free on the peer, or present there and owned by this host"
+    unavailable = _peer_payload_unavailable(name, probe_result)
+    if unavailable is not None:
+        checks.append(unavailable)
+    elif not probe_result.workspace_exists:
+        checks.append(Check(name, CheckStatus.PASSED, f"slug {slug!r} is free on the peer"))
+    elif probe_result.workspace_owner == self_name:
         checks.append(
             Check(
-                "the slug is free on the peer, or present there and owned by this host",
-                CheckStatus.INDETERMINATE,
-                f"indeterminate — {_transport_detail(probe_result)}",
-                transport_outcome=probe_result,
+                name,
+                CheckStatus.PASSED,
+                f"slug {slug!r} exists on the peer but is owned by this host",
             )
         )
-    elif isinstance(probe_result, ProbeRefused):
-        checks.append(
-            Check(
-                "the slug is free on the peer, or present there and owned by this host",
-                CheckStatus.FAILED,
-                f"cannot evaluate — the peer's response was malformed: {probe_result.reason}",
-            )
-        )
-    elif isinstance(probe_result, SelfNameCollision):
-        checks.append(
-            Check(
-                "the slug is free on the peer, or present there and owned by this host",
-                CheckStatus.FAILED,
-                "cannot evaluate — the peer declares the same name as this host",
-            )
-        )
-    elif isinstance(probe_result, ProbeAnswer):
-        if not probe_result.workspace_exists:
-            checks.append(
-                Check(
-                    "the slug is free on the peer, or present there and owned by this host",
-                    CheckStatus.PASSED,
-                    f"slug {slug!r} is free on the peer",
-                )
-            )
-        elif probe_result.workspace_owner == self_name:
-            checks.append(
-                Check(
-                    "the slug is free on the peer, or present there and owned by this host",
-                    CheckStatus.PASSED,
-                    f"slug {slug!r} exists on the peer but is owned by this host",
-                )
-            )
-        else:
-            checks.append(
-                Check(
-                    "the slug is free on the peer, or present there and owned by this host",
-                    CheckStatus.FAILED,
-                    f"slug {slug!r} exists on the peer, owned by "
-                    f"{probe_result.workspace_owner!r}",
-                )
-            )
     else:
         checks.append(
             Check(
-                "the slug is free on the peer, or present there and owned by this host",
+                name,
                 CheckStatus.FAILED,
-                "the peer was never probed",
+                f"slug {slug!r} exists on the peer, owned by "
+                f"{probe_result.workspace_owner!r}",
             )
         )
 
