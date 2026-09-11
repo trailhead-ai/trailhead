@@ -1146,6 +1146,28 @@ def _doctor_asdf_present() -> bool:
     return bool(shutil.which("asdf"))
 
 
+# --- the probe answer's shape — defined once here, the contract the
+#     host-probing consumer reads rather than re-guessing downstream. ---
+#
+# An older camp reads `doctor`'s one flag by substring and ignores the rest,
+# so it answers a `--probe` invocation normally with its ordinary check
+# report — well-formed, successful, and carrying neither of these keys. A
+# probe-supporting answer is therefore self-identifying by the PRESENCE of
+# `DOCTOR_PROBE_KEY`, never by an exit status or a transport outcome.
+DOCTOR_PROBE_FLAG = "--probe"
+DOCTOR_PROBE_KEY = "probe"
+DOCTOR_PROBE_MULTIPLEXER_KEY = "multiplexer_present"
+
+
+def _doctor_multiplexer_present() -> bool:
+    seam = os.environ.get("CAMP_TEST_TMUX_PRESENT")
+    if seam == "0":
+        return False
+    if seam == "1":
+        return True
+    return bool(shutil.which("tmux"))
+
+
 def cmd_doctor(
     args: list[str], dry_run: bool = False, *, env: dict[str, str] | None = None
 ) -> None:
@@ -1190,6 +1212,7 @@ def cmd_doctor(
         print(f"camp: {host_name_error}", file=sys.stderr)
 
     as_json = "--json" in args
+    as_probe = DOCTOR_PROBE_FLAG in args
 
     checks: list[dict[str, Any]] = []
     any_failed = False
@@ -1247,7 +1270,13 @@ def cmd_doctor(
         )
 
     if as_json:
-        report = {"pass": not any_failed, "checks": checks}
+        report: dict[str, Any] = {"pass": not any_failed, "checks": checks}
+        if as_probe:
+            # Reported outside `checks` — the far side's own facts about its
+            # host, never a check row that could turn the exit status on
+            # multiplexer presence (contract: `--probe` never changes it).
+            report[DOCTOR_PROBE_KEY] = True
+            report[DOCTOR_PROBE_MULTIPLEXER_KEY] = _doctor_multiplexer_present()
         print(json.dumps(report))
     else:
         print("camp doctor:")
