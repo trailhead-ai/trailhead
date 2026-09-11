@@ -427,6 +427,102 @@ class HostObjectAnswer:
     exit_code: int = 0
 
 
+@dataclass(frozen=True)
+class HostPayloadAnswer:
+    """One machine's contribution to a per-host answer, for a verb whose
+    remote answer may come back as *either* shape — a stop answers with one
+    object until the reference is ambiguous, at which point it answers with
+    an array of candidate rows.
+
+    Exactly one of ``obj`` / ``rows`` is set for a relayable answer; both are
+    ``None`` for every state that carries no payload — the six
+    locally-classified transport failures, and a remote answer whose stdout
+    decodes as neither a JSON object nor a JSON array of row objects.
+
+    ``obj`` is control-stripped the same way :attr:`HostObjectAnswer.answer`
+    is. ``rows`` are host-stamped the same way :func:`answer_for_host`
+    stamps them, and are control-stripped too — the far side's stderr and a
+    relayed object's fields already get that treatment, and a row's own
+    values (a session id, a multiplexer name) are the operator's next
+    decision just as much as either of those.
+
+    ``certainty`` states whether the operation the verb asked for happened,
+    from :func:`classify_certainty` — the same mapping
+    :class:`HostObjectAnswer` carries.
+    """
+
+    obj: dict[str, Any] | None
+    rows: list[dict[str, Any]] | None
+    certainty: Certainty
+    notices: list[str] = field(default_factory=list)
+    exit_code: int = 0
+
+
+def answer_payload_for_host(
+    verb: str,
+    host: Host,
+    host_name: str,
+    remote_argv: Sequence[str],
+    *,
+    runner: Runner = default_runner,
+) -> HostPayloadAnswer:
+    """Run *remote_argv* on *host* over the transport and return whichever
+    payload shape it answered with — one object, an array of rows, or
+    nothing camp could parse.
+
+    Same transport, same six locally-classified failure states (shared via
+    :func:`_classify_transport_failure`), and the same :class:`Certainty`
+    :func:`answer_object_for_host` carries — this is the general reader
+    :func:`answer_object_for_host` is re-expressed on top of. Never calls
+    ``sys.exit`` and never prints. Holds no state across calls.
+    """
+    outcome = _transport.run_camp(host, remote_argv, runner=runner)
+    certainty = classify_certainty(outcome)
+
+    failure = _classify_transport_failure(verb, host, host_name, outcome)
+    if failure is not None:
+        return HostPayloadAnswer(
+            obj=None,
+            rows=None,
+            certainty=certainty,
+            notices=failure.notices,
+            exit_code=failure.exit_code,
+        )
+
+    assert isinstance(outcome, (Answered, RemoteRefusal))
+    notices = _verbatim_notice(outcome.stderr)
+
+    parsed_obj = _try_parse_object(outcome.stdout)
+    if parsed_obj is not None:
+        return HostPayloadAnswer(
+            obj=_strip_control_sequences_deep(parsed_obj),
+            rows=None,
+            certainty=certainty,
+            notices=notices,
+            exit_code=outcome.exit_code,
+        )
+
+    parsed_rows = _try_parse_rows(outcome.stdout)
+    if parsed_rows is not None:
+        for row in parsed_rows:
+            row["host"] = host_name
+        return HostPayloadAnswer(
+            obj=None,
+            rows=_strip_control_sequences_deep(parsed_rows),
+            certainty=certainty,
+            notices=notices,
+            exit_code=outcome.exit_code,
+        )
+
+    return HostPayloadAnswer(
+        obj=None,
+        rows=None,
+        certainty=certainty,
+        notices=notices,
+        exit_code=outcome.exit_code,
+    )
+
+
 def answer_object_for_host(
     verb: str,
     host: Host,
@@ -438,40 +534,19 @@ def answer_object_for_host(
     """Run *remote_argv* on *host* over the transport and return its
     single-object answer.
 
-    The single-object counterpart to :func:`answer_for_host`: same
-    transport, same seven locally-classified failure states (shared via
-    :func:`_classify_transport_failure`), but the remote's own answer is
-    relayed as one parsed JSON object rather than stamped rows — and every
-    outcome carries a :class:`Certainty` a rows answer never needed. Never
-    calls ``sys.exit`` and never prints. Holds no state across calls.
+    Re-expressed on top of :func:`answer_payload_for_host`: same transport,
+    same six locally-classified failure states, same :class:`Certainty` —
+    only the payload reader's ``obj`` field is exposed, so a rows-shaped
+    answer (including an array of row objects) still relays as
+    ``answer=None`` here. Never calls ``sys.exit`` and never prints. Holds
+    no state across calls.
     """
-    outcome = _transport.run_camp(host, remote_argv, runner=runner)
-    certainty = classify_certainty(outcome)
-
-    failure = _classify_transport_failure(verb, host, host_name, outcome)
-    if failure is not None:
-        return HostObjectAnswer(
-            answer=None,
-            certainty=certainty,
-            notices=failure.notices,
-            exit_code=failure.exit_code,
-        )
-
-    assert isinstance(outcome, (Answered, RemoteRefusal))
-    parsed = _try_parse_object(outcome.stdout)
-    if parsed is None:
-        return HostObjectAnswer(
-            answer=None,
-            certainty=certainty,
-            notices=_verbatim_notice(outcome.stderr),
-            exit_code=outcome.exit_code,
-        )
-
+    payload = answer_payload_for_host(verb, host, host_name, remote_argv, runner=runner)
     return HostObjectAnswer(
-        answer=_strip_control_sequences_deep(parsed),
-        certainty=certainty,
-        notices=_verbatim_notice(outcome.stderr),
-        exit_code=outcome.exit_code,
+        answer=payload.obj,
+        certainty=payload.certainty,
+        notices=payload.notices,
+        exit_code=payload.exit_code,
     )
 
 
