@@ -641,3 +641,92 @@ def test_transfer_receive_begin_cli_end_to_end_prints_json_answer(
     assert payload["contract_version"] == 1
     names = {m["name"] for m in payload["members"]}
     assert names == {"repo_a"}
+
+
+# ---------------------------------------------------------------------------
+# Reservation — a workspace slug named "transfer-receive" cannot shadow the verb
+# ---------------------------------------------------------------------------
+
+
+class _ReachedSpineFallback(Exception):
+    """Sentinel proving the group-aware router treated its token as RESERVED
+    and fell through to spine's fallback branch, rather than dying immediately
+    on the removed-bare-slug path."""
+
+
+def test_transfer_receive_slug_reaches_the_reserved_fallback_unlike_an_ordinary_slug(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`_dispatch_group_command` is the ONLY consumer of RESERVED (cli/dispatch.py
+    consults it once, to decide between two branches for a token that matched no
+    known verb): a reserved token falls through to spine's fallback branch,
+    while an ordinary slug dies immediately as a removed bare-slug dispatch.
+    `transfer-probe` already takes the reserved branch (test_transfer_probe.py's
+    sibling section); `transfer-receive` must take the same branch, dispatched
+    from the same pre-group-resolution position (cli/dispatch.py:504, mirroring
+    transfer-probe's :497) — so a slug of that name is exactly what RESERVED
+    exists to reject. Varying the slug across the reserved token and an ordinary
+    one must land in the two different branches."""
+    from camp import spine
+    from camp.cli import dispatch as dispatch_mod
+
+    def _fake_spine_main() -> None:
+        raise _ReachedSpineFallback()
+
+    monkeypatch.setattr(spine, "main", _fake_spine_main)
+
+    group = {"group": {"name": "testgroup"}, "members": []}
+
+    # Reserved: falls through to the spine fallback branch (our sentinel fires).
+    with pytest.raises(_ReachedSpineFallback):
+        dispatch_mod._dispatch_group_command("transfer-receive", [], group, {}, False)
+
+    # Not reserved: dies immediately on the removed-bare-slug path, never
+    # reaching the spine fallback our sentinel would have caught.
+    with pytest.raises(SystemExit):
+        dispatch_mod._dispatch_group_command("totally-unclaimed-slug-zzz", [], group, {}, False)
+
+
+def test_transfer_receive_begin_still_dispatches_when_another_workspace_exists(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """The reservation must not break ordinary routing: `camp transfer-receive
+    begin …` still reaches the real verb handler on a host that already has a
+    workspace under some OTHER slug."""
+    from camp.provision.provision import seed_pending_workspace
+
+    cfg = tmp_path / "config"
+    (cfg / "groups").mkdir(parents=True)
+    repo = tmp_path / "repo_a"
+    init_git_repo(repo, origin=True)
+    _write_group_toml(cfg / "groups", "testgroup", [("repo_a", str(repo))])
+
+    state_dir = tmp_path / "state"
+    env = {"CAMP_CONFIG_DIR": str(cfg), "CAMP_STATE_DIR": str(state_dir)}
+    group = _make_group("testgroup", [{"name": "repo_a", "repo_root": str(repo)}])
+    seed_pending_workspace(group, "some-other-workspace", env=env)
+
+    monkeypatch.setenv("CAMP_CONFIG_DIR", str(cfg))
+    monkeypatch.setenv("CAMP_STATE_DIR", str(state_dir))
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "camp",
+            "transfer-receive",
+            "begin",
+            "--group",
+            "testgroup",
+            "--slug",
+            "feat-cli-2",
+            "--owner",
+            "sending-host",
+        ],
+    )
+
+    _dispatch_module().main()  # success path returns normally, no SystemExit
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["contract_version"] == 1
+    names = {m["name"] for m in payload["members"]}
+    assert names == {"repo_a"}
