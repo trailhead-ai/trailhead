@@ -394,9 +394,8 @@ def test_every_documented_attach_form_dispatches_through_the_real_entry_point(
         monkeypatch.setattr(sys, "argv", argv)
         try:
             dispatch.main()
-            code = 0
-        except SystemExit as exc:
-            code = exc.code if isinstance(exc.code, int) else 1
+        except SystemExit:
+            pass
         err = capsys.readouterr().err
         assert "bare slug dispatch is no longer supported" not in err, (line, err)
         assert "camp: bare slug" not in err, (line, err)
