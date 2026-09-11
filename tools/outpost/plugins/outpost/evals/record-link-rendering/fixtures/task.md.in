@@ -12,15 +12,15 @@ The record-URL base for this session is: http://127.0.0.1:9199
 Write one short paragraph that mentions all five records, in this order, each
 by its identifier (vault/kind/slug):
 
-1. FIXTURE_ROOT/vaults-root/gearshed/note/rotate-tires.md
+1. FIXTURE_ROOT/vaults/gearshed/note/rotate-tires.md
    — say the front and rear tires were swapped this week.
 2. FIXTURE_ROOT/other-storage/attic-archive/log/winter-inventory.md
    — say the winter inventory count is done.
 3. FIXTURE_ROOT/untracked/ghost-vault/memo/unfiled-thought.md
    — say this thought still needs filing.
-4. FIXTURE_ROOT/vaults-root/gearshed/note/Rotate_Tires.md
+4. FIXTURE_ROOT/vaults/gearshed/note/Rotate_Tires.md
    — say this is an older duplicate of the first note.
-5. FIXTURE_ROOT/vaults-root/gearshed/Field Note/check-in.md
+5. FIXTURE_ROOT/vaults/gearshed/Field Note/check-in.md
    — say this week's check-in log entry is in.
 
 Do not read the record files themselves — their file location is all you

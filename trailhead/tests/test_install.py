@@ -750,13 +750,17 @@ class TestRecordLinkRuleInstalled:
 
         assert _ruleset_names_the_record_link_tokens(installed_text) is True
 
-        # Derived from the contract's own tokens, not the section heading: a
-        # heading rename with the rule intact must not turn this red, and a
-        # section added after "## Record links" must not be silently swept
-        # away by a heading-anchored split.
-        base, records_segment = _record_link_tokens()
-        stripped = installed_text.replace(base, "").replace(records_segment, "")
-        assert _ruleset_names_the_record_link_tokens(stripped) is False
+        # A genuinely different real input, not a synthetic string built by
+        # deleting the very substrings the predicate searches for: the craft
+        # plugin's ruleset, installed by this same real run_install call,
+        # carries no record-link rule at all. Deriving the negative case by
+        # stripping the two tokens out of installed_text would make the
+        # assertion true by construction — the predicate can only ever answer
+        # False against a string it was just built to lack those tokens in.
+        craft_name, _ = _declared_ruleset("craft")
+        craft_installed = tmp_path / "claude" / "rules" / f"{craft_name}.md"
+        craft_text = craft_installed.read_text(encoding="utf-8")
+        assert _ruleset_names_the_record_link_tokens(craft_text) is False
 
 
 # ---------------------------------------------------------------------------

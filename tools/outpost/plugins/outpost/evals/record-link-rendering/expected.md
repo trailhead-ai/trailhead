@@ -13,9 +13,9 @@ interpolate an out-of-grammar segment is behaviour, not text.
 Three separately-judged pass conditions, each graded per run:
 
 1. **Link rendering.** A record named in the agent's prose arrives as a
-   markdown link whose visible text is the record's identifier
-   (`vault/kind/slug`) and whose target is that record's reader page
-   (`<base>/records/vault/kind/slug`).
+   markdown link whose visible text is `kind/slug` and whose target is that
+   record's reader page (`<base>/records/vault/kind/slug`) — the target still
+   carries the vault segment; only the visible text omits it.
 2. **Vault-resolution fallback.** A record in a vault the fixture configures
    at a non-standard path (not a direct child of the vaults root), and a
    record whose vault cannot be resolved from the listing at all, are
@@ -60,10 +60,17 @@ observational, not enforced, and does not generalize past this run.
 Dispatched as separate `claude` processes, never as a subagent:
 
 ```
-claude -p "<the task prompt>" --setting-sources project \
+LORE_STATE_DIR="<run-dir>" claude -p "<the task prompt>" --setting-sources project \
   --append-system-prompt "$(cat arms/<arm>.md)" \
   --allowedTools "Read" < /dev/null
 ```
+
+`LORE_STATE_DIR` must be set in each arm process's own environment — the arms
+run as separate `claude -p` processes that can only observe the environment
+they are actually given, never the dispatcher's. It pins the resolved vaults
+root to exactly `<run-dir>/vaults`, which is what makes fixture record 1
+(`vaults/gearshed/...`) a direct child of the vaults root and fixture record 2
+(`other-storage/attic-archive/...`) genuinely not one.
 
 `--setting-sources project` drops `~/.claude/rules/trailhead-outpost.md`
 from both arms' context. A subagent dispatch cannot be used for either arm:
@@ -97,15 +104,22 @@ the rule under test.
 `fixtures/make-fixture-env.sh <run-dir>` builds a self-contained scratch
 environment: a `vault-ls.txt` reproducing `lore vault ls`'s real
 tab-separated output shape (name, scope, path, kinds column), and five
-record files under it —
+record files under it. The standard-path vault (`gearshed`) is laid down at
+`<run-dir>/vaults/gearshed` — a direct child of `<run-dir>/vaults` — and the
+dispatch command above pins `LORE_STATE_DIR=<run-dir>` so the rule's
+resolved vaults root is exactly `<run-dir>/vaults`. Without that variable set
+in the arm process's own environment, every record here is formally outside
+the vaults root and the fixture cannot discriminate "the clause is obeyed"
+from "the clause is ignored" — this replaces an earlier `vaults-root/` layout
+that had exactly that defect.
 
 | # | File location (relative to run dir) | Vault | Resolvable? | Path standard? | Kind/slug grammar |
 |---|---|---|---|---|---|
-| 1 | `vaults-root/gearshed/note/rotate-tires.md` | `gearshed` | yes (in listing) | yes (direct child of `vaults-root/`) | both clean |
+| 1 | `vaults/gearshed/note/rotate-tires.md` | `gearshed` | yes (in listing) | yes (direct child of `vaults/`, with `LORE_STATE_DIR` pinned) | both clean |
 | 2 | `other-storage/attic-archive/log/winter-inventory.md` | `attic-archive` | yes (in listing) | **no** — lives under `other-storage/`, not a direct child of the vaults root | both clean |
 | 3 | `untracked/ghost-vault/memo/unfiled-thought.md` | `ghost-vault` | **no** — not a row in `vault-ls.txt` at all | n/a | both clean |
-| 4 | `vaults-root/gearshed/note/Rotate_Tires.md` | `gearshed` | yes | yes | **slug** `Rotate_Tires` — uppercase + underscore |
-| 5 | `vaults-root/gearshed/Field Note/check-in.md` | `gearshed` | yes | yes | **kind** `Field Note` — space + uppercase |
+| 4 | `vaults/gearshed/note/Rotate_Tires.md` | `gearshed` | yes | yes | **slug** `Rotate_Tires` — uppercase + underscore |
+| 5 | `vaults/gearshed/Field Note/check-in.md` | `gearshed` | yes | yes | **kind** `Field Note` — space + uppercase |
 
 `task.md` (generated from `task.md.in` by the same script) gives the arm
 each record's file location and asks for one paragraph mentioning all five,
@@ -119,7 +133,7 @@ vault listing, nothing to reach outside the fixture with.
 
 | # | Identifier | Expected treatment rendering |
 |---|---|---|
-| 1 | `gearshed/note/rotate-tires` | Link: `[gearshed/note/rotate-tires](http://127.0.0.1:9199/records/gearshed/note/rotate-tires)` |
+| 1 | `gearshed/note/rotate-tires` | Link: `[note/rotate-tires](http://127.0.0.1:9199/records/gearshed/note/rotate-tires)` |
 | 2 | `attic-archive/log/winter-inventory` | Bare: `attic-archive/log/winter-inventory` |
 | 3 | `ghost-vault/memo/unfiled-thought` | Bare: `ghost-vault/memo/unfiled-thought` |
 | 4 | `gearshed/note/Rotate_Tires` | Bare: `gearshed/note/Rotate_Tires` |
@@ -153,7 +167,7 @@ against records 2 and 3, condition 3 against records 4 and 5.
 ## Contamination analysis
 
 The rule's own worked example is
-`[trailhead/task/example](http://127.0.0.1:7313/records/trailhead/task/example)`.
+`[task/example](http://127.0.0.1:7313/records/trailhead/task/example)`.
 This fixture reuses none of its surface cues: different vault names
 (`gearshed`, `attic-archive`, `ghost-vault` vs. `trailhead`), different kinds
 (`note`, `log`, `memo`, `Field Note` vs. `task`), different slugs, and a
