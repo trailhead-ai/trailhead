@@ -19,6 +19,7 @@ Exit-code contract:
 
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -165,3 +166,215 @@ class TestExitCodes:
         result = run(deliverable, "--record", RECORD)
         assert result.returncode == 2
         assert "reason-code: missing-command" in result.stderr
+
+
+class TestExemptObservation:
+    """An exempt outcome still passes, but per the active lesson `a-classification-
+    that-routes-a-site-around-the-predicate-makes-that-site-unmeasurable`, it must
+    now carry an observation of the deliverable rather than emit a verdict about
+    nothing. When `--command` is supplied alongside `--exempt`, the grader reports
+    the shape it actually found; when it is not, the grader says plainly that
+    nothing was observed and why."""
+
+    def test_exempt_with_command_embedded_mid_sentence_reports_embedded(self):
+        deliverable = (
+            f"Record: [{RECORD}](http://x/{RECORD})\n\n"
+            f"Next, run {COMMAND} to continue.\n"
+        )
+        result = run(deliverable, "--record", RECORD, "--command", COMMAND, "--exempt")
+        lines = result.stdout.splitlines()
+        assert "exempt-observation: embedded" in lines
+        # the exempt verdict itself is unchanged by the observation
+        assert "next-command: exempt" in lines
+
+    def test_exempt_with_command_on_its_own_line_reports_own_line(self):
+        # Same command text as above, alone on its own line instead of
+        # embedded mid-sentence — the only thing that varies.
+        deliverable = f"Record: [{RECORD}](http://x/{RECORD})\n\n{COMMAND}\n"
+        result = run(deliverable, "--record", RECORD, "--command", COMMAND, "--exempt")
+        lines = result.stdout.splitlines()
+        assert "exempt-observation: own-line" in lines
+        assert "next-command: exempt" in lines
+
+    def test_exempt_without_command_reports_no_observation_and_why(self):
+        deliverable = f"[{RECORD}](http://x/{RECORD})\n\nSome closing prose.\n"
+        result = run(deliverable, "--record", RECORD, "--exempt")
+        lines = result.stdout.splitlines()
+        observation_lines = [line for line in lines if line.startswith("exempt-observation:")]
+        assert len(observation_lines) == 1
+        assert "not-observed" in observation_lines[0]
+        assert "--command" in observation_lines[0]
+        # the exempt verdict, record-link verdict, and exit code stay exactly
+        # what they were before --command was accepted alongside --exempt
+        assert "next-command: exempt" in lines
+        assert "record-link: link" in lines
+        assert result.returncode == 0
+
+    def test_exempt_verdict_and_exit_code_unaffected_by_command_shape(self):
+        # Same record-linked deliverable, exempt either way; whether the
+        # supplied command is found own-line or embedded must not move the
+        # exempt verdict or the exit code — only the new observation line.
+        own_line = f"[{RECORD}](http://x/{RECORD})\n\n{COMMAND}\n"
+        embedded = f"[{RECORD}](http://x/{RECORD})\n\nRun {COMMAND} now.\n"
+        for deliverable in (own_line, embedded):
+            result = run(deliverable, "--record", RECORD, "--command", COMMAND, "--exempt")
+            assert "next-command: exempt" in result.stdout.splitlines()
+            assert result.returncode == 0
+
+
+class TestObservationVariesWithTheDeliverable:
+    """Council amendment: every verdict branch must read the deliverable before
+    returning. Proven behaviorally — for every branch capable of observing
+    something, changing only the deliverable's content changes what that branch
+    reports. `next_command_verdict`'s `if exempt: return "exempt"` used to be the
+    one branch that returned without ever looking at the text; this pins that the
+    exempt-with-command branch no longer does."""
+
+    def test_every_observable_branch_reports_differently_for_a_different_deliverable(self):
+        own_line_command_text = f"[{RECORD}](http://x/{RECORD})\n\n{COMMAND}\n"
+        embedded_command_text = f"[{RECORD}](http://x/{RECORD})\n\nRun {COMMAND} now.\n"
+        linked_record_text = f"[{RECORD}](http://x/{RECORD})\n\n{COMMAND}\n"
+        bare_record_text = f"{RECORD}\n\n{COMMAND}\n"
+
+        cases = [
+            # (args, deliverable A, deliverable B, prefix of the line that must differ)
+            (
+                ["--record", RECORD, "--command", COMMAND],
+                own_line_command_text,
+                embedded_command_text,
+                "next-command:",
+            ),
+            (
+                ["--record", RECORD, "--command", COMMAND, "--exempt"],
+                own_line_command_text,
+                embedded_command_text,
+                "exempt-observation:",
+            ),
+            (
+                ["--record", RECORD, "--command", COMMAND],
+                linked_record_text,
+                bare_record_text,
+                "record-link:",
+            ),
+        ]
+
+        for args, deliverable_a, deliverable_b, prefix in cases:
+            result_a = run(deliverable_a, *args)
+            result_b = run(deliverable_b, *args)
+            [line_a] = [l for l in result_a.stdout.splitlines() if l.startswith(prefix)]
+            [line_b] = [l for l in result_b.stdout.splitlines() if l.startswith(prefix)]
+            assert line_a != line_b, f"{prefix} did not vary with the deliverable"
+
+
+class TestRegressionAgainstOriginalMeasurement:
+    """Re-grading every capture committed under the eval case's `runs/` directory
+    with the changed grader must reproduce the original measurement's record-link
+    and next-command verdicts, and exit code, exactly — the fix is additive only.
+    Compares the changed grader's output against the pre-change grader (read from
+    its git blob at the base commit, never edited in place) run over the same
+    captures, so nothing here is a transcribed table."""
+
+    BASE_SHA = "0336687c"
+
+    RITUAL_GRADER_ARGS = {
+        "brainstorm": [
+            "--record", "spec/warehouse-picking-batches",
+            "--command", "/craft:gauntlet spec/warehouse-picking-batches",
+        ],
+        "gauntlet": [
+            "--record", "spec/permit-renewal-workflow",
+            "--command", "/craft:slice spec/permit-renewal-workflow",
+        ],
+        "plan": [
+            "--record", "task/the-ledger-reconciliation-slice",
+            "--command", "/craft:execute task/the-ledger-reconciliation-slice",
+        ],
+        "plan-treatment": [
+            "--record", "task/the-ledger-reconciliation-slice",
+            "--command", "/craft:execute task/the-ledger-reconciliation-slice",
+        ],
+        "execute": ["--record", "task/the-ledger-reconciliation-slice", "--exempt"],
+        "review": [
+            "--record", "spec/dock-scheduling-windows",
+            "--command", "/craft:distill spec/dock-scheduling-windows",
+        ],
+        "review-treatment": [
+            "--record", "spec/dock-scheduling-windows",
+            "--command", "/craft:distill spec/dock-scheduling-windows",
+        ],
+        "distill": [
+            "--record", "adr/dock-scheduling-windows-use-fifo-slots",
+            "--command", 'lore record show adr/dock-scheduling-windows-use-fifo-slots',
+        ],
+    }
+
+    EVAL_RUNS_DIR = (
+        REPO_ROOT / "plugins" / "craft" / "evals"
+        / "ritual-deliverable-names-its-record" / "runs"
+    )
+
+    RITUAL_NAME_RE = re.compile(r"^(.+)-\d+\.txt$")
+
+    def _pre_change_grader(self, tmp_path: Path) -> Path:
+        git_root = Path(
+            subprocess.run(
+                ["git", "rev-parse", "--show-toplevel"],
+                cwd=REPO_ROOT, capture_output=True, text=True, check=True,
+            ).stdout.strip()
+        )
+        rel_path = GRADER.relative_to(git_root)
+        blob = subprocess.run(
+            ["git", "show", f"{self.BASE_SHA}:{rel_path.as_posix()}"],
+            cwd=git_root, capture_output=True, text=True, check=True,
+        ).stdout
+        pre_change = tmp_path / "pre_change_grader.py"
+        pre_change.write_text(blob)
+        return pre_change
+
+    def _verdict_lines_and_exit(self, grader: Path, args: list[str], stdin_bytes: bytes):
+        result = subprocess.run(
+            [sys.executable, str(grader), *args],
+            input=stdin_bytes,
+            capture_output=True,
+        )
+        stdout = result.stdout.decode("utf-8")
+        verdict_lines = [
+            line for line in stdout.splitlines()
+            if line.startswith("record-link:") or line.startswith("next-command:")
+        ]
+        return verdict_lines, result.returncode
+
+    def test_regrading_every_committed_capture_reproduces_the_original_verdicts(self, tmp_path):
+        pre_change_grader = self._pre_change_grader(tmp_path)
+
+        captures = sorted(
+            p for p in self.EVAL_RUNS_DIR.glob("*.txt") if not p.name.endswith(".stderr.txt")
+        )
+        assert len(captures) == 30, (
+            f"expected 30 committed captures under runs/, found {len(captures)} — "
+            "the regression pin's own enumeration disagrees with the task's premise"
+        )
+
+        checked = 0
+        for capture in captures:
+            match = self.RITUAL_NAME_RE.match(capture.name)
+            assert match, f"capture filename {capture.name!r} did not match the expected shape"
+            ritual = match.group(1)
+            args = self.RITUAL_GRADER_ARGS[ritual]
+            stdin_bytes = capture.read_bytes()
+
+            old_lines, old_exit = self._verdict_lines_and_exit(
+                pre_change_grader, args, stdin_bytes
+            )
+            new_lines, new_exit = self._verdict_lines_and_exit(GRADER, args, stdin_bytes)
+
+            assert new_lines == old_lines, (
+                f"{capture.name}: record-link/next-command verdict moved — "
+                f"was {old_lines}, now {new_lines}"
+            )
+            assert new_exit == old_exit, (
+                f"{capture.name}: exit code moved — was {old_exit}, now {new_exit}"
+            )
+            checked += 1
+
+        assert checked == 30
