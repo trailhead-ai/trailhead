@@ -65,6 +65,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from ..group.manifest import workspace_dir
 from .claude_trust import pretrust_workspace, trust_status
@@ -76,6 +77,11 @@ from .recovery import (
     sanitize_name_component,
     workspace_root_for,
 )
+
+if TYPE_CHECKING:
+    # Annotation-only: trailhead is imported inside functions on this module's
+    # runtime paths, never at import time.
+    from trailhead.harness.base import AccountIdentity
 
 #: Seconds to wait on the pre-spawn enumeration probe. It is advisory output
 #: only, so it must never be able to hold up a launch.
@@ -437,16 +443,14 @@ def _resolve_account_identity(harness, profile, account: str | None, env: dict[s
     try:
         return harness.session_launch_account_identity(account, env=env)
     except HarnessError as exc:
-        if account is not None:
-            raise LaunchError(
-                f"camp: refusing to launch — harness "
-                f"{harness.name or profile.binary!r} will not resolve an "
-                f"identity for the declared account {account}: {exc}"
-            ) from exc
+        what = (
+            f"an identity for the declared account {account}"
+            if account is not None
+            else "a default identity here"
+        )
         raise LaunchError(
             f"camp: refusing to launch — harness "
-            f"{harness.name or profile.binary!r} will not resolve a default "
-            f"identity here: {exc}"
+            f"{harness.name or profile.binary!r} will not resolve {what}: {exc}"
         ) from exc
     except Exception:  # noqa: BLE001 — advisory probe, never blocks a launch
         return None
@@ -491,7 +495,7 @@ def resolve_launch_environment(
 def _report_account(
     account: str | None,
     binding: dict[str, str],
-    identity: "AccountIdentity | None" = None,
+    identity: AccountIdentity | None,
 ) -> None:
     """Name the account this launch chose, declared or defaulted — and, when
     the harness offers one, the identity it resolved that choice to.
@@ -539,7 +543,7 @@ def _report_account(
 
 
 def _warn_if_account_has_no_config(
-    account: str | None, identity: "AccountIdentity | None"
+    account: str | None, identity: AccountIdentity | None
 ) -> None:
     """Warn when a declared account has no configuration behind it yet.
 

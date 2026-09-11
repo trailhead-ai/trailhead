@@ -2432,6 +2432,15 @@ class TestTheChosenAccountIsReported:
         assert launched.account_binding == {ACCOUNT_KEY: str(tmp_path / "home")}
 
 
+def _identity(label: str, *, has_config: bool = True):
+    """A `FakeHarness(account_identity=...)` callable answering one fixed
+    identity, whatever account or environment it is asked about — so each test
+    below spells out only the label (and existence) it varies."""
+    from trailhead.harness.base import AccountIdentity
+
+    return lambda account, env: AccountIdentity(label=label, has_config=has_config)
+
+
 def _configured_account(tmp_path: Path) -> str:
     """A declared-account directory with configuration already behind it, so
     the config-existence warning stays silent and an exact stderr match pins
@@ -2453,12 +2462,8 @@ class TestTheReportIncludesHarnessIdentity:
     def test_a_defaulted_launchs_report_follows_the_identity_the_harness_names(
         self, rig, tmp_path, capsys
     ):
-        from trailhead.harness.base import AccountIdentity
-
         rig["harness"] = FakeHarness(
-            account_identity=lambda account, env: AccountIdentity(
-                label="/resolved/first-default", has_config=True
-            )
+            account_identity=_identity("/resolved/first-default")
         )
 
         _launch(rig, group=_group_with_account(None), env=_poisoned(tmp_path))
@@ -2471,12 +2476,8 @@ class TestTheReportIncludesHarnessIdentity:
         """The report is not a constant: a second harness naming a different
         default identity must show up as a different report, not the same
         text the first harness produced."""
-        from trailhead.harness.base import AccountIdentity
-
         rig["harness"] = FakeHarness(
-            account_identity=lambda account, env: AccountIdentity(
-                label="/resolved/second-default", has_config=True
-            )
+            account_identity=_identity("/resolved/second-default")
         )
 
         _launch(rig, group=_group_with_account(None), env=_poisoned(tmp_path))
@@ -2488,13 +2489,9 @@ class TestTheReportIncludesHarnessIdentity:
     def test_a_declared_accounts_report_states_both_the_declaration_and_the_identity(
         self, rig, tmp_path, capsys
     ):
-        from trailhead.harness.base import AccountIdentity
-
         declared = _configured_account(tmp_path)
         rig["harness"] = FakeHarness(
-            account_identity=lambda account, env: AccountIdentity(
-                label="/resolved/levr-identity", has_config=True
-            )
+            account_identity=_identity("/resolved/levr-identity")
         )
 
         _launch(rig, group=_group_with_account(declared), env=_poisoned(tmp_path))
@@ -2580,13 +2577,9 @@ class TestTheReportIncludesHarnessIdentity:
         """The existing distinction — an empty binding reads as "no assignment
         of its own", never as an account named by the empty string — must
         survive the identity being added to the same line."""
-        from trailhead.harness.base import AccountIdentity
-
         rig["harness"] = FakeHarness(
             default_is_absence=True,
-            account_identity=lambda account, env: AccountIdentity(
-                label="/resolved/absence-identity", has_config=True
-            ),
+            account_identity=_identity("/resolved/absence-identity"),
         )
 
         _launch(rig, group=_group_with_account(None), env=_poisoned(tmp_path))
@@ -2599,13 +2592,9 @@ class TestTheReportIncludesHarnessIdentity:
     def test_the_report_is_still_emitted_before_the_pane_is_handed_over(
         self, rig, tmp_path, capsys
     ):
-        from trailhead.harness.base import AccountIdentity
-
         declared = _configured_account(tmp_path)
         rig["harness"] = FakeHarness(
-            account_identity=lambda account, env: AccountIdentity(
-                label="/resolved/order-check", has_config=True
-            )
+            account_identity=_identity("/resolved/order-check")
         )
 
         _launch(rig, group=_group_with_account(declared), env=_poisoned(tmp_path))
@@ -2677,12 +2666,8 @@ class TestAnAccountWithNoConfigFile:
         """A typo'd account otherwise produces a stalled launch indistinguishable
         from every other cause. The directory may legitimately not exist yet, so
         this is a warning, not a refusal."""
-        from trailhead.harness.base import AccountIdentity
-
         rig["harness"] = FakeHarness(
-            account_identity=lambda account, env: AccountIdentity(
-                label="/resolved/typo-identity", has_config=False
-            )
+            account_identity=_identity("/resolved/typo-identity", has_config=False)
         )
 
         _launch(
@@ -2702,12 +2687,8 @@ class TestAnAccountWithNoConfigFile:
         self, rig, tmp_path, capsys
     ):
         """Vary the identity; the warning follows it."""
-        from trailhead.harness.base import AccountIdentity
-
         rig["harness"] = FakeHarness(
-            account_identity=lambda account, env: AccountIdentity(
-                label="/resolved/second-typo-identity", has_config=False
-            )
+            account_identity=_identity("/resolved/second-typo-identity", has_config=False)
         )
 
         _launch(
@@ -2721,12 +2702,8 @@ class TestAnAccountWithNoConfigFile:
         assert "at /resolved/typo-identity" not in err
 
     def test_no_warning_when_the_identity_has_config(self, rig, tmp_path, capsys):
-        from trailhead.harness.base import AccountIdentity
-
         rig["harness"] = FakeHarness(
-            account_identity=lambda account, env: AccountIdentity(
-                label="/resolved/configured-identity", has_config=True
-            )
+            account_identity=_identity("/resolved/configured-identity")
         )
 
         _launch(
@@ -2751,8 +2728,6 @@ class TestAnAccountWithNoConfigFile:
         config-FILE resolver deliberately ignores, so no accidental agreement
         between resolvers can mask a divergence. Only the identity's own
         `has_config` and `label` may decide this warning."""
-        from trailhead.harness.base import AccountIdentity
-
         declared = tmp_path / "accounts" / "levr"
         declared.mkdir(parents=True)
         (declared / ".claude.json").write_text("{}\n")
@@ -2762,9 +2737,7 @@ class TestAnAccountWithNoConfigFile:
         (trailhead_dir / ".claude.json").write_text("{}\n")
 
         rig["harness"] = FakeHarness(
-            account_identity=lambda account, env: AccountIdentity(
-                label="/resolved/typo-identity", has_config=False
-            )
+            account_identity=_identity("/resolved/typo-identity", has_config=False)
         )
 
         env = _poisoned(tmp_path, TRAILHEAD_CLAUDE_DIR=str(trailhead_dir))
