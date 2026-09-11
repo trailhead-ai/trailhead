@@ -866,3 +866,73 @@ conditions are in `expected.md`.
 See `plugins/craft/evals/ritual-deliverable-names-its-record/expected.md` for the full
 pre-registration, dispatch command, pass conditions (all three arms), contamination check, re-run
 trigger, and limitations.
+
+---
+
+## Case: ritual deliverable names its record — treatment and reader-absent arms
+
+`plugins/craft/evals/ritual-deliverable-names-its-record/` — same case as above, run to
+completion by `task/make-the-seven-ritual-deliverables-name-their-record-as-a-link` (task 3 of
+`task/the-craft-rituals-name-the-record-they-acted-on`), against `slice/SKILL.md`'s `## Outcome`
+section as edited and committed by this task (`8806b76f`).
+
+**Byte-identity, verified programmatically before dispatch:** `arms/reader-absent.md` ==
+`tools/craft/plugins/craft/skills/slice/SKILL.md` at commit `8806b76f`, confirmed by a Python
+string-equality check over both files' full text (40,530 bytes, exact match). `arms/treatment.md`
+== that same committed `slice/SKILL.md` text, followed by a blank line and the `## Record links`
+section of `tools/outpost/plugins/outpost/rules.md` (lines 43–56), confirmed the same way: the
+prefix matches the committed file exactly, and the appended tail matches the outpost section's
+text exactly (901 bytes appended). Neither arm was hand-edited after extraction.
+
+**Dispatch:** each of the 6 runs (3 treatment, 3 reader-absent) a separate `claude -p` process,
+`--setting-sources project --allowedTools "Read" < /dev/null`, foreground, one at a time, per
+`expected.md`'s `## Dispatch` command. All 6 processes exited 0 with non-empty captured stdout
+(completion marker present); zero infrastructure failures, zero re-runs needed.
+
+| Date | Arm | Prose under test | Runs | Result | Notes |
+|------|-----|------------------|------|--------|-------|
+| 2026-09-11 | treatment (`arms/treatment.md`, edited `## Outcome` + reader's rule appended) | edited ritual text, rule resident | 3 | **PASS 3/3** — markdown link, correct text and target, handoff bare | `[task/the-quarterly-audit-trail-slice](http://127.0.0.1:7313/records/fieldnotes/task/the-quarterly-audit-trail-slice)` in all 3; `/craft:plan task/the-quarterly-audit-trail-slice` on its own line, never wrapped in `[...](...)`, in all 3 |
+| 2026-09-11 | reader-absent (`arms/reader-absent.md`, edited `## Outcome`, no reader rule) | edited ritual text, rule absent | 3 | **PASS 3/3** — bare `kind/slug`, no link, no URL assembled | `` `task/the-quarterly-audit-trail-slice` `` (bare, backtick-quoted, never `[...](...)`) in all 3; `grep -n "http\|127\.0\.0\.1\|\[.*\]("` over all 3 captured responses: no match |
+
+**Treatment result — PASS at 3/3 (the required threshold; 2/3 would have been a FAIL per the task
+body).** Verbatim run 1: `` **Parent task:** [task/the-quarterly-audit-trail-slice]
+(http://127.0.0.1:7313/records/fieldnotes/task/the-quarterly-audit-trail-slice) — written at
+`in-progress` and linked to `spec/quarterly-audit-trail`. ``, followed by the bare handoff
+`/craft:plan task/the-quarterly-audit-trail-slice` on its own line. Run 2 additionally linked the
+spec mention (`[spec/quarterly-audit-trail](http://127.0.0.1:7313/records/fieldnotes/spec/
+quarterly-audit-trail)`) — a correct application of the first-mention-per-record rule the reader's
+appended section states, not a defect. No run linked the handoff command; no run fabricated a
+target for the value claim or vault name.
+
+**Reader-absent result — PASS at 3/3.** Verbatim run 1: `` **Parent task:**
+`task/the-quarterly-audit-trail-slice` — written at `in-progress` in the `fieldnotes` vault and
+linked to `spec/quarterly-audit-trail`. ``, handoff command bare. Run 2 is explicit about why:
+"(No `## Record links` rule is resident in this session, so this is the bare record identifier
+rather than a link.)" No run in this arm rendered a markdown link in any form, hand-assembled or
+otherwise — so the **INCONCLUSIVE** condition (`expected.md`, "if the reader-absent arm also
+renders a markdown link") does not apply; both arms' results are attributable to the rule's
+presence or absence, as the pre-registration required for either to count.
+
+**AC6 verdict for the `slice/SKILL.md` site: PASS.** Combined with the baseline result recorded
+above (bare in 3/3 on unedited prose, establishing red), the edited `## Outcome` section turns the
+recorded red state to green: it links the record only when the reader's rule is resident, and
+degrades to the same bare state as the unedited baseline when it is not — exactly the conditional
+behaviour Council Critical 1's resolution required. This covers one of the seven AC6 sites
+(`slice`); the other six (`brainstorm`, `gauntlet`, `plan`, `execute`, `review`, `distill`) are
+verified by manual read against the task's Conditional wording and Replacement form constraints,
+per `docs/eval-protocol.md`'s confinement of behavioural-eval coverage to the one site
+`expected.md` pre-registered — a second eval case per site was explicitly out of this task's scope
+(see the parent plan's Council Review, Minor: "eval fixture placement is unassigned" and the
+Flow-out's deferred structural-drift-gate follow-up).
+
+**Real-state check.** All 6 runs used `--allowedTools "Read"`, no shell/Edit/Write/Bash tool
+granted at all. `~/.config/lore/config.json` mtime unchanged (`1787107526`, same value the
+baseline run's check recorded). `~/.claude/rules/*.md` mtimes unchanged (all predate today).
+`lore vault ls`'s four configured vaults (`default`, `trailhead`, `lake-in-the-woods`, `levr`)
+checked via `git status --porcelain` after the batch: `default`, `lake-in-the-woods`, and `levr`
+clean; `trailhead` carries pending `session/*` and `task/*` bookkeeping edits, all attributable to
+this dispatch's own ongoing session and task-status writes (no write tool exists in this arm), not
+to the 6 `Read`-only eval runs. No mutation attributable to this batch.
+
+See `plugins/craft/evals/ritual-deliverable-names-its-record/expected.md` for the full
+pre-registration, dispatch command, and pass conditions this batch was graded against.
