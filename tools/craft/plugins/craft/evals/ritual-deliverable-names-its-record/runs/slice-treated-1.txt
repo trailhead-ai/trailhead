@@ -1,0 +1,15 @@
+**Slice chosen:** "The berth allocation slice" — from [spec/dock-scheduling](http://127.0.0.1:7313/records/harborlight/spec/dock-scheduling).
+
+**Value claim:** lets a dock operator assign an inbound vessel to a specific berth and see the assignment reflected on the schedule board, closing the gap between "vessel is expected" and "vessel has a berth."
+
+**Parent task:** [task/the-berth-allocation-slice](http://127.0.0.1:7313/records/harborlight/task/the-berth-allocation-slice) — status `in-progress`, linked to the spec. Print it back with:
+
+```
+lore record show task/the-berth-allocation-slice
+```
+
+Designing and building this slice is the next step:
+
+```
+/craft:plan task/the-berth-allocation-slice
+```

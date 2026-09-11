@@ -1,0 +1,17 @@
+**Chosen slice: "The berth allocation slice"** — the smallest next slice above the value floor within the current phase of [spec/dock-scheduling](http://127.0.0.1:7313/records/harborlight/spec/dock-scheduling).
+
+**Value claim:** lets a dock operator assign an inbound vessel to a specific berth and see the assignment reflected on the schedule board, closing the gap between "vessel is expected" and "vessel has a berth."
+
+It touches no visual surface beyond the schedule board update an earlier slice already covers, so the parent carries no `## Enumerated states` section. It makes AC3 fully green and no acceptance criterion only partially green.
+
+**Parent task:** [task/the-berth-allocation-slice](http://127.0.0.1:7313/records/harborlight/task/the-berth-allocation-slice) — status `in-progress`, linked to the spec. To read it back:
+
+```
+lore record show task/the-berth-allocation-slice
+```
+
+Design and build it next:
+
+```
+/craft:plan task/the-berth-allocation-slice
+```

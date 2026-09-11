@@ -1082,7 +1082,7 @@ forbids:
 - execute-3: "Run `/portage:pull_request` when you want one."
 
 The root cause is a classification decision made before any run: execute was pre-registered as
-`--exempt`, on the reading that `_shared/execute.md:979-981`'s instruction — the PR decision
+`--exempt`, on the reading that `_shared/execute.md:978-979`'s instruction — the PR decision
 belongs to the operator, the ritual must not auto-invoke `/portage:pull_request` — makes execute's
 close a genuine zero-command outcome. The grader's `--exempt` path returns `next-command: exempt`
 unconditionally and never reads the deliverable text (`ritual_deliverable_grader.py`,
@@ -1127,7 +1127,8 @@ short-circuits the grader before it reads the deliverable, so the mid-sentence
 mid-sentence in 3/3 (plan) and 6/6 (review) captured runs, matching the concrete defect shape the
 parent task's Given Axioms named. **This falsifies part of that same prediction, and is reported
 as such rather than reconciled**: the parent task's Given Axioms named brainstorm
-(`SKILL.md:552-557`), gauntlet (`SKILL.md:484-485`), and review (`SKILL.md:110`) as the sites whose
+(`SKILL.md:552-557`), gauntlet (`SKILL.md:484-485`), and review (`SKILL.md:110-113`, post-treatment
+location — this slice moved the command onto its own line) as the sites whose
 *committed template text* embeds the command mid-sentence — true of the literal template — but
 brainstorm and gauntlet's **actual captured deliverables** placed the command on its own line in
 every run (the model did not reproduce the template's mid-sentence phrasing verbatim), while
@@ -1356,3 +1357,46 @@ the pre-registration's instruction that `execute`'s historical `--exempt` invoca
 
 See `plugins/craft/evals/ritual-deliverable-names-its-record/expected.md`, "Extension — Task 3,
 pre-registration for the three remaining AC7 outcome sites", for the full pre-registration.
+
+## Task 6 — re-measuring the three treated sites (2026-09-11)
+
+Task 5 treated all three baseline-falsifying sites by removing the command from its sentence and
+printing it alone in a fenced block beneath — the shape the previous slice measured effective at
+`review`'s loop-complete outcome. Re-measured against the same arms, fixtures, and grader
+invocations as the baseline above, 3 runs per site, dispatched the same way (separate `claude -p`
+processes, never subagents, `--setting-sources project --allowedTools "Read" < /dev/null`, each
+from its own freshly-created empty scratch cwd). All 9 processes exited 0 with empty stderr.
+
+| Date | Site | Arm | Fixture | Runs | next-command verdict |
+|------|------|-----|---------|------|----------------------|
+| 2026-09-11 | `execute` | `arms/execute-rule-only.md` | `execute-completed-run.md` | 3 | **own-line, own-line, own-line — 3/3, AC7 holds** |
+| 2026-09-11 | `review` (2nd outcome) | `arms/review-treatment.md` | `review-loop-open-completed-run.md` | 3 | **own-line, own-line, own-line — 3/3, AC7 holds** |
+| 2026-09-11 | `slice` | `arms/rule-only.md` | `slice-completed-run.md` | 3 | **own-line, own-line, own-line — 3/3, AC7 holds** |
+
+**Result: all three sites now hold AC7, unanimously, no tie-break triggered at any site.** The bar
+this task named was determinism, not merely improved odds, and each site cleared it: `execute` moved
+from 0/3 (two `absent`, one `embedded`) to 3/3; `review`'s second outcome moved from 1/6 to 3/3;
+`slice` moved from a 4-2 AMBIGUOUS (falsified) baseline to a clean 3/3. Combined with the four
+already-passing sites (`brainstorm`, `gauntlet`, `distill` at baseline; `plan` and `review`'s
+loop-complete outcome from the previous slice), **AC7 now holds at every site in the pinned
+seven-ritual set.**
+
+**Security scan.** `python3 <scratchpad>/capture_scan.py` over all 36 new capture files (9 captures
+× `.txt`/`.exit`/`.stderr.txt`): **9 hits, all class "high-entropy base64-shaped"**, every one
+matching the same pre-characterised record-URL false-positive pattern as every prior scan in this
+case (`7313/records/harborlight/spec/dock`, `7313/records/harborlight/task/the`); zero
+operator-path hits, zero username hits, zero hits of any other class. No leak found; nothing
+withheld from commit.
+
+**Regression pin.** `test_ritual_deliverable_grader.py`'s committed-capture count moved 45 -> 54,
+with three new prefix -> grader-args entries (`execute-treated`, `review-loop-open-treated`,
+`slice-treated`); all eight pre-existing entries, including `execute`'s historical `--exempt`
+invocation, are byte-unchanged. Re-grading every committed capture (old and new) under both the
+pre-change and current grader reproduces identical verdicts and exit codes throughout — additive
+only.
+
+**AC7 verdict: covered.** The parent task record's `**Covers:** AC7` is confirmed by this
+measurement and carries a `## Criterion observations` automated-assertion line citing this run.
+AC6 is untouched by this task — it remains unmeasured at the four vacuous sites (`brainstorm`,
+`gauntlet`, `plan`, `execute`) and distill's 3-3 record-link split stays open; both are explicitly
+out of this slice's scope, per the parent's "Explicitly not in this slice" list.
