@@ -371,14 +371,14 @@ forward — it never falls back to the legacy standalone-worktree source.
 ## Transferring a workspace
 
 ```
-camp transfer <slug> --to <peer> --dry-run [--json]
+camp transfer <slug> --to <peer> [--dry-run] [--overwrite] [--json]
 ```
 
-Previews moving a workspace and its live conversations to a declared peer
-host (see [Remote hosts](#remote-hosts) for declaring one). `--dry-run` is
-**required** — the mover itself is a later slice, so a bare invocation
-refuses rather than silently previewing under a name that will soon mean
-something else.
+Moves a workspace's committed history and working-tree content directly to a
+declared peer host (see [Remote hosts](#remote-hosts) for declaring one).
+`--dry-run` previews the same checks without moving anything. A workspace
+already present on the peer and owned by this host needs `--overwrite` to be
+replaced; ownership itself does not move.
 
 Each member's regenerable state — build output, installed dependencies,
 anything a transfer should recreate on the peer rather than copy — is
@@ -402,14 +402,17 @@ an empty list is a legitimate answer, silence is not.
 Exit codes:
 
 ```
-0  every check passed — a clean verdict
+0  every check passed — a clean verdict with --dry-run, or (without it) the
+   transfer completed
 1  an unexpected/local error (bad flags, malformed config)
-2  --dry-run was omitted — nothing was read from the peer
 3  not clean, for a reason with no more specific code below
 4  this host does not own the workspace
 5  the peer could not be reached
 6  no workspace is recorded here for that slug
 7  the named peer is not declared in hosts.toml
+8  the workspace already exists on the peer, owned by this host — pass
+   --overwrite to replace it
+9  a move phase failed — nothing after it ran; re-running the transfer is safe
 ```
 
 `transfer` and `transfer-probe` (the wire-level answer `--dry-run` reads

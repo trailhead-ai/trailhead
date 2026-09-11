@@ -323,14 +323,19 @@ def test_documented_transfer_invocation_matches_the_verbs_accepted_arguments(
 ) -> None:
     readme = _readme_text()
     match = re.search(
-        r"^camp transfer <slug> --to <peer> --dry-run \[--json\]$", readme, re.MULTILINE
+        r"^camp transfer <slug> --to <peer> \[--dry-run\] \[--overwrite\] \[--json\]$",
+        readme,
+        re.MULTILINE,
     )
     assert match is not None, "the documented invocation line has drifted or vanished"
     documented = match.group(0)
 
     # Concretize the documented invocation for a clean, fully-passing setup:
-    # required tokens only (the bracketed [--json] is optional and dropped).
-    tokens = documented.replace("[--json]", "").split()
+    # required tokens only (every bracketed token is optional and dropped),
+    # then `--dry-run` is added back so this test exercises the preview path
+    # — the moving path's own wiring is covered in test_transfer_cli.py.
+    tokens = documented.replace("[--overwrite]", "").replace("[--json]", "")
+    tokens = tokens.replace("[--dry-run]", "--dry-run").split()
     assert tokens[0] == "camp"
     tokens = tokens[1:]  # drop "camp"; argv starts at the verb
     tokens = ["feat-x" if t == "<slug>" else t for t in tokens]
@@ -446,9 +451,6 @@ def test_every_producible_exit_code_appears_in_the_documented_table(
     # 1 EXIT_ERROR — --to omitted
     produced.add(_run(monkeypatch, ["transfer", "feat-x", "--dry-run", "--group", "trailhead"]))
 
-    # 2 EXIT_DRY_RUN_REQUIRED — --dry-run omitted
-    produced.add(_run(monkeypatch, ["transfer", "feat-x", "--to", "host-b", "--group", "trailhead"]))
-
     # 3 EXIT_NOT_CLEAN — a failing check with no exit code of its own
     env3 = _Env(tmp_path / "notclean")
     env3.write_group()  # no excluded declared -> unmapped failure
@@ -518,6 +520,43 @@ def test_every_producible_exit_code_appears_in_the_documented_table(
         )
     )
 
+    # 8 EXIT_OVERWRITE_REQUIRED — the peer's begin refused without --overwrite
+    move = importlib.import_module("camp.transfer.move")
+    env8 = _Env(tmp_path / "overwrite")
+    env8.write_group(excluded={"repo_a": []})
+    env8.write_hosts(self_name="host-a", peers={"host-b": "host-b"})
+    env8.write_manifest(owner="host-a")
+    env8.apply(monkeypatch)
+    _fake_probe(monkeypatch, _clean_probe_answer())
+    _no_conversations(monkeypatch)
+    monkeypatch.setattr(
+        move,
+        "move_workspace",
+        lambda **kw: (_ for _ in ()).throw(
+            move.OverwriteNeeded("slug 'feat-x' already exists here — pass --overwrite")
+        ),
+    )
+    produced.add(
+        _run(monkeypatch, ["transfer", "feat-x", "--to", "host-b", "--group", "trailhead"])
+    )
+
+    # 9 EXIT_PHASE_FAILED — a move phase failed after a clean preflight
+    env9 = _Env(tmp_path / "phasefailed")
+    env9.write_group(excluded={"repo_a": []})
+    env9.write_hosts(self_name="host-a", peers={"host-b": "host-b"})
+    env9.write_manifest(owner="host-a")
+    env9.apply(monkeypatch)
+    _fake_probe(monkeypatch, _clean_probe_answer())
+    _no_conversations(monkeypatch)
+    monkeypatch.setattr(
+        move,
+        "move_workspace",
+        lambda **kw: (_ for _ in ()).throw(move.PhaseFailed("history (repo_a)", "boom")),
+    )
+    produced.add(
+        _run(monkeypatch, ["transfer", "feat-x", "--to", "host-b", "--group", "trailhead"])
+    )
+
     documented = _readme_exit_codes()
-    assert produced == {0, 1, 2, 3, 4, 5, 6, 7}
+    assert produced == {0, 1, 3, 4, 5, 6, 7, 8, 9}
     assert documented == produced
