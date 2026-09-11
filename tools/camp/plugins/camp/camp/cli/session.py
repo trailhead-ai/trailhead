@@ -1611,9 +1611,21 @@ def _cmd_launch_host_cli(args: list[str], host: "Host", host_name: str) -> None:
     # plain sentence closes the report for both — the far side's own words
     # (when there are any) are relayed exactly as `answer.notices` already
     # carries them, unwrapped, before it.
+    # Camp's own sentence leads, and the far side's words follow it.
+    #
+    # The order is load-bearing, not cosmetic. The first stderr line is what
+    # carries the certain/uncertain distinction to an operator who skims, and
+    # a line the far side authored cannot carry it: a declared host is trusted
+    # to run commands, not to write camp's most consequential sentence. Left
+    # in front, a refusal crafted to read like the check-before-retry
+    # instruction would send the operator hunting for a session that was never
+    # started — the exact confusion that wording exists to prevent.
+    #
+    # The refusal itself is still relayed in the far side's own words,
+    # unwrapped; only the leading position is camp's.
+    print(f"camp launch: no session was started on host {host_name!r}", file=sys.stderr)
     for notice in answer.notices:
         print(notice, file=sys.stderr)
-    print(f"camp launch: no session was started on host {host_name!r}", file=sys.stderr)
 
     # The far side's own status is passed through where it says something,
     # but the uncertain code is RESERVED: a remote camp that happens to exit

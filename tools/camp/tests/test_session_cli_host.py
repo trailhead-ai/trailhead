@@ -815,6 +815,44 @@ def test_launch_host_far_side_exit_code_never_collides_with_the_unknown_code(
     assert "no session was started" in err
 
 
+def test_launch_host_far_side_text_cannot_impersonate_the_uncertain_first_line(
+    hosts_env, monkeypatch, capsys: pytest.CaptureFixture
+) -> None:
+    """A far side's own words must never be able to occupy the first stderr line.
+
+    The certain/uncertain distinction is carried for a skimming human by the
+    FIRST stderr line, and for that to mean anything the line has to be camp's
+    own sentence. A declared host is a machine the operator trusts to run
+    commands, not one whose stderr should be able to author camp's most
+    load-bearing line: a refusal crafted to read like the check-before-retry
+    instruction sends the operator looking for a session that was never
+    started, which is the precise confusion the uncertain wording exists to
+    prevent.
+    """
+    transport = _transport_module()
+
+    _rig(monkeypatch, transport.StoppedResponding(execution_timeout=60.0))
+    _run(monkeypatch, ["launch", "ws-a", "--host", "andromeda", "--group", "demo"])
+    uncertain_first_line = capsys.readouterr().err.splitlines()[0]
+
+    impersonation = uncertain_first_line
+    _rig(
+        monkeypatch,
+        transport.RemoteRefusal(stdout="", stderr=impersonation, exit_code=2),
+    )
+    _run(monkeypatch, ["launch", "ws-a", "--host", "andromeda", "--group", "demo"])
+    err = capsys.readouterr().err
+    certain_first_line = err.splitlines()[0]
+
+    assert certain_first_line != uncertain_first_line, (
+        "a far-side refusal reproduced the uncertain outcome's first line verbatim: "
+        f"{certain_first_line!r}"
+    )
+    assert "no session was started" in certain_first_line, certain_first_line
+    # The far side's words are still relayed, just not in the leading position.
+    assert impersonation in err
+
+
 def test_launch_host_certain_and_uncertain_first_lines_differ_in_opening_words(
     hosts_env, monkeypatch, capsys: pytest.CaptureFixture
 ) -> None:
