@@ -404,6 +404,48 @@ class Harness(ABC):
         """
         return None
 
+    # -- session transcript destination ---------------------------------------
+    #
+    # A transcript DESTINATION is where an arriving conversation's transcript
+    # must be WRITTEN on this machine, computed for a target directory whether
+    # or not any transcript is there yet — the write-side sibling of
+    # ``session_transcript_path`` above, which only ever resolves a file already
+    # on disk. Same asymmetry as the two seams above it: CONCRETE with a safe
+    # default, so a harness with no transcript concept doesn't have to implement
+    # composition either. Everything about how a destination is derived (the
+    # projects-directory layout, the munging rule) is that harness's own
+    # knowledge and stays in its module.
+    #
+    # The default degrades to ``None`` — "this harness cannot tell you where an
+    # arriving transcript belongs". Callers must treat ``None`` as an
+    # unresolvable hard refusal and must never synthesize a destination path of
+    # their own; a harness that DOES implement this may also raise
+    # ``HarnessError`` for a refusal a caller cannot safely treat as "just
+    # unresolvable" (for example, a computed destination that collides with
+    # another workspace's existing transcript) — a caller must treat that raise
+    # the same way it treats ``None``: a hard stop, never a path of its own.
+
+    def session_transcript_destination(
+        self, session_id: str, workspace: Path, *, env: dict[str, str] | None = None
+    ) -> Path | None:
+        """Compose the path an arriving transcript for ``session_id`` MUST occupy
+        under ``workspace``, or ``None``.
+
+        ``workspace`` is the TARGET machine's directory the session will run
+        under — the same start-of-session meaning ``session_transcript_path``
+        gives it, never inferred from the caller's own cwd.
+
+        Returns ``None`` when the harness has no transcript-destination concept,
+        when ``session_id`` is not a usable path component, or when
+        ``workspace`` is not an absolute path (never resolved against this
+        process's own cwd — a relative workspace names nothing safe to write
+        into).
+
+        ``env`` overrides the process environment, exactly as in
+        :meth:`session_transcript_path`.
+        """
+        return None
+
     # -- session retention ----------------------------------------------------
     #
     # Harnesses delete their own session transcripts on a schedule.  A caller

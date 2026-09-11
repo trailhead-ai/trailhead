@@ -293,6 +293,19 @@ class TestUserRulesetBaseDefault:
         assert not (tmp_path / "claude").exists()  # nothing written anywhere
 
 
+class TestSessionTranscriptDestinationBaseDefault:
+    """Same degrading-``None`` default as the transcript/resume seams next to it.
+
+    A harness that never overrides this member still answers it — through the
+    base class — with the same unresolvable refusal its neighbours use, so a
+    caller can treat ``None`` uniformly across harnesses without knowing which
+    ones implement destination composition.
+    """
+
+    def test_default_degrades_to_none(self, tmp_path):
+        assert _BareHarness().session_transcript_destination("sess-1", tmp_path) is None
+
+
 class TestClaudeConfigDirRelocation:
     """Every path derived from the Claude config dir follows ``CLAUDE_CONFIG_DIR``.
 
@@ -540,6 +553,109 @@ class TestClaudeCodeSessionTranscriptPath:
                 )
                 is None
             )
+
+    def test_none_when_candidate_path_is_not_a_file(self, tmp_path):
+        """A path that exists but is a directory is not a resolvable transcript."""
+        claude_dir = tmp_path / ".claude"
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        munged = str(ws.resolve()).replace("/", "-").replace(".", "-")
+        (claude_dir / "projects" / munged / "sess-1.jsonl").mkdir(parents=True)
+        got = ClaudeCodeHarness().session_transcript_path(
+            "sess-1", ws, env={"TRAILHEAD_CLAUDE_DIR": str(claude_dir)}
+        )
+        assert got is None
+
+
+class TestClaudeCodeSessionTranscriptDestination:
+    """Composes the path a transcript MUST occupy for a target directory, whether
+    or not anything is there yet — the write-side sibling of
+    ``session_transcript_path`` (which only ever resolves an EXISTING file)."""
+
+    def _env(self, claude_dir):
+        return {"TRAILHEAD_CLAUDE_DIR": str(claude_dir), "HOME": str(claude_dir.parent)}
+
+    def test_composes_a_destination_when_nothing_exists_yet(self, tmp_path):
+        claude_dir = tmp_path / ".claude"
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        env = self._env(claude_dir)
+        # the resolving reader has nothing to find here
+        assert ClaudeCodeHarness().session_transcript_path("sess-1", ws, env=env) is None
+        munged = str(ws.resolve()).replace("/", "-").replace(".", "-")
+        got = ClaudeCodeHarness().session_transcript_destination("sess-1", ws, env=env)
+        assert got == claude_dir / "projects" / munged / "sess-1.jsonl"
+
+    def test_varies_with_target_directory(self, tmp_path):
+        claude_dir = tmp_path / ".claude"
+        ws1 = tmp_path / "ws1"
+        ws1.mkdir()
+        ws2 = tmp_path / "ws2"
+        ws2.mkdir()
+        env = self._env(claude_dir)
+        d1 = ClaudeCodeHarness().session_transcript_destination("sess-1", ws1, env=env)
+        d2 = ClaudeCodeHarness().session_transcript_destination("sess-1", ws2, env=env)
+        assert d1 != d2
+        assert d1.parent != d2.parent  # not merely a filename difference
+
+    def test_varies_with_session_id(self, tmp_path):
+        claude_dir = tmp_path / ".claude"
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        env = self._env(claude_dir)
+        d1 = ClaudeCodeHarness().session_transcript_destination("sess-1", ws, env=env)
+        d2 = ClaudeCodeHarness().session_transcript_destination("sess-2", ws, env=env)
+        assert d1 != d2
+        assert d1.parent == d2.parent
+
+    def test_rejects_a_session_id_that_is_not_a_plain_token(self, tmp_path):
+        """Reuses ``_is_session_id`` — the same guard ``session_transcript_path``
+        applies — because this id arrives over the wire, not from a local caller."""
+        claude_dir = tmp_path / ".claude"
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        env = self._env(claude_dir)
+        for bad in ("../../../.ssh/authorized_keys", "/etc/passwd"):
+            assert (
+                ClaudeCodeHarness().session_transcript_destination(bad, ws, env=env) is None
+            ), bad
+
+    def test_rejects_a_relative_target_directory(self, tmp_path, monkeypatch):
+        """A relative workspace is refused, never resolved against this process's
+        own cwd — mirroring how the transcript enumerator drops a relative
+        recorded root instead of anchoring it to the caller's cwd."""
+        claude_dir = tmp_path / ".claude"
+        monkeypatch.chdir(tmp_path)
+        env = self._env(claude_dir)
+        got = ClaudeCodeHarness().session_transcript_destination(
+            "sess-1", Path("relative/dir"), env=env
+        )
+        assert got is None
+
+    def test_collision_between_a_dot_segment_and_a_slash_segment_is_reported(self, tmp_path):
+        """'/' and '.' both collapse to '-', so ``repo.a`` and ``repo/a`` munge to
+        the identical projects key. Composing for either alone succeeds — the
+        collision is only reachable once one of them has actually written a
+        transcript there under a DIFFERENT recorded cwd, and that must raise
+        rather than hand back a path that would silently mix the two sessions."""
+        claude_dir = tmp_path / ".claude"
+        dir_a = tmp_path / "ws" / "repo.a"
+        dir_b = tmp_path / "ws" / "repo" / "a"
+        dir_a.mkdir(parents=True)
+        dir_b.mkdir(parents=True)
+        env = self._env(claude_dir)
+        h = ClaudeCodeHarness()
+
+        dest_a = h.session_transcript_destination("sess-a", dir_a, env=env)
+        dest_b = h.session_transcript_destination("sess-b", dir_b, env=env)
+        assert dest_a is not None and dest_b is not None
+        assert dest_a.parent == dest_b.parent  # the reachable collision
+
+        dest_a.parent.mkdir(parents=True, exist_ok=True)
+        dest_a.write_text(json.dumps({"cwd": str(dir_a)}) + "\n")
+
+        with pytest.raises(HarnessError, match="collide"):
+            h.session_transcript_destination("sess-b", dir_b, env=env)
 
 
 class TestClaudeCodeSessionResume:
