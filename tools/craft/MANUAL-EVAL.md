@@ -795,3 +795,225 @@ instruments. AC10's behavioural closure rests on the durable-trace claim.
 
 See `plugins/craft/evals/prototype-plan-carries-no-migration/expected.md` for the full
 pre-registration (both rounds), pass conditions, thresholds, and result writeup.
+
+---
+
+## Case: ritual deliverable names its record
+
+`plugins/craft/evals/ritual-deliverable-names-its-record/` — `expected.md` carrying three
+separately pre-registered pass conditions (baseline, treatment, reader-absent), written and
+committed (`63c0315`) before any arm ran. AC6 of
+`spec/record-mentions-in-agent-output-are-reachable`, task 2 of
+`task/the-craft-rituals-name-the-record-they-acted-on`.
+
+**Under test:** `slice/SKILL.md`'s `## Outcome` section — the closing, operator-facing report of
+the `/craft:slice` ritual — specifically whether its selection-path sentence names the new parent
+task record as a link or, as today's unedited text does, as a bare identifier plus a
+`lore record show <task-id>` command. `expected.md` states why this one site of the seven AC6
+covers was chosen (the sharpest instance of the spec's own "competes with a page of surrounding
+procedure" premise: a 581-line, 10-step procedure precedes a one-line reporting convention).
+
+**Fixture:** `fixtures/completed-run.md` stubs steps 1–10 of the procedure as already-true state
+(a chosen slice, a value claim, a new parent task id in a fixture vault) rather than running the
+ritual for real — resolving the plan's own open unknown about reaching a ritual's closing report
+affordably. `fixtures/task-prompt.md` points the arm at that file and nothing else. Surface cues
+(spec name, task id, vault, value-claim subject) all differ from `slice/SKILL.md`'s own worked
+example (`spec/streaming-export` / `task/the-streaming-export-slice`), per the contamination check
+in `expected.md`.
+
+**Why no `scripts/eval-sandbox`:** both arms are `Read`-only with no shell tool at all —
+`expected.md` states why the sandbox does not apply, same reasoning as
+`tools/outpost/plugins/outpost/evals/record-link-rendering/expected.md`.
+
+**Arms.** `arms/baseline.md` — a byte-identical copy of today's unedited `slice/SKILL.md`,
+confirmed by `diff` before dispatch. `arms/treatment.md` and `arms/reader-absent.md` do not exist
+yet; their pass conditions are pre-registered in `expected.md` so
+`task/make-the-seven-ritual-deliverables-name-their-record-as-a-link` (which owns
+`arms/treatment.md` in its own `**Files:**` list) has nothing left to decide about grading once it
+authors and runs them.
+
+| Date | Arm | Prose under test | Runs | Result | Notes |
+|------|-----|------------------|------|--------|-------|
+| 2026-09-11 | baseline (`arms/baseline.md`, today's unedited `slice/SKILL.md`) | none appended beyond the ritual's own text | 3 | **bare identifier in 3/3, no markdown link in any run** | `grep -noE '\[[^]]*\]\([^)]*\)'` over each captured response: no match, all three runs |
+
+**Result: baseline PASS for the red-state claim, as pre-registered — this is the intended
+outcome, not an error.**
+
+> **Corrected 2026-09-11.** This paragraph's verdict token first read "**FAIL** against the
+> red-state claim". That inverts `expected.md`'s own registered vocabulary, which reads
+> "**baseline — PASS for this task's red-state claim** if in 3/3 runs the response names the new
+> parent task as bare text", and contradicted this same paragraph's closing sentence ("the
+> baseline PASS condition is that it stays bare, and it did"). The observation is unchanged and
+> unaffected — bare in 3/3, zero exclusions; only the token naming it was wrong. Found by the
+> whole-change correctness review.
+
+All three runs report the new parent task
+(`task/the-quarterly-audit-trail-slice`) the same way today's `## Outcome` text specifies: a bare
+identifier followed by a fenced `lore record show task/the-quarterly-audit-trail-slice` command,
+never as `[kind/slug](<base>/records/...)` markdown link syntax. Verbatim run 1 (representative of
+all three): `` **Parent task:** `task/the-quarterly-audit-trail-slice` (vault: `fieldnotes`, status
+`in-progress`, linked to `spec/quarterly-audit-trail`). Read it back with: ``` lore record show
+task/the-quarterly-audit-trail-slice ``` ``. This is the red state the whole slice measures
+against, exactly as `expected.md` pre-registered it: the baseline PASS condition is that it stays
+bare, and it did, in 3/3 runs, with zero exclusions (all three processes exited 0, non-empty
+captured output, no rate-limit or crash).
+
+**Real-state check.** All three runs used `--allowedTools "Read"`, no shell/Edit/Write tool.
+`~/.config/lore/config.json` mtime unchanged before/after (`1787107526`).
+`~/.claude/rules/*.md` mtimes unchanged before/after. Every configured vault's git status
+diffed before/after the batch: `default` and `lake-in-the-woods` clean both times; `trailhead`
+carried pending changes both before and after, but the added lines between the two snapshots are
+all `task/*` and `session/*` bookkeeping (`status`/`updated-at` edits) from this plan's own
+unrelated ongoing task-status writes, not `Read`-only arms with no write tool — nothing
+attributable to these three eval runs; `levr` clean both times. No mutation attributable to this
+batch.
+
+**Not run in this task (task 3's job, per the task body's scope facts):** the treatment arm
+(edited `## Outcome` + reader's rule appended) and the reader-absent arm (edited `## Outcome`, no
+reader rule) — both measure an instruction that does not exist yet. Their pre-registered pass
+conditions are in `expected.md`.
+
+See `plugins/craft/evals/ritual-deliverable-names-its-record/expected.md` for the full
+pre-registration, dispatch command, pass conditions (all three arms), contamination check, re-run
+trigger, and limitations.
+
+---
+
+## Case: ritual deliverable names its record — treatment and reader-absent arms
+
+`plugins/craft/evals/ritual-deliverable-names-its-record/` — same case as above, run to
+completion by `task/make-the-seven-ritual-deliverables-name-their-record-as-a-link` (task 3 of
+`task/the-craft-rituals-name-the-record-they-acted-on`), against `slice/SKILL.md`'s `## Outcome`
+section as edited and committed by this task (`8806b76f`).
+
+**Byte-identity, verified programmatically before dispatch:** `arms/reader-absent.md` ==
+`tools/craft/plugins/craft/skills/slice/SKILL.md` at commit `8806b76f`, confirmed by a Python
+string-equality check over both files' full text (40,530 bytes, exact match). `arms/treatment.md`
+== that same committed `slice/SKILL.md` text, followed by a blank line and the `## Record links`
+section of `tools/outpost/plugins/outpost/rules.md` (lines 43–56), confirmed the same way: the
+prefix matches the committed file exactly, and the appended tail matches the outpost section's
+text exactly (981 bytes appended). Neither arm was hand-edited after extraction.
+
+> **Corrected 2026-09-11.** This paragraph first recorded the appended tail as 901 bytes.
+> Re-measured at review: `arms/treatment.md` is 41,511 bytes and `slice/SKILL.md` is 40,530,
+> so the tail is **981** bytes. The byte-identity claim itself re-verified and holds — the
+> prefix matches the committed file exactly and the tail matches the outpost section exactly;
+> only the quoted magnitude was wrong, so no arm was rebuilt and no run was re-dispatched.
+
+**Dispatch:** each of the 6 runs (3 treatment, 3 reader-absent) a separate `claude -p` process,
+`--setting-sources project --allowedTools "Read" < /dev/null`, foreground, one at a time, per
+`expected.md`'s `## Dispatch` command. All 6 processes exited 0 with non-empty captured stdout
+(completion marker present); zero infrastructure failures, zero re-runs needed.
+
+| Date | Arm | Prose under test | Runs | Result | Notes |
+|------|-----|------------------|------|--------|-------|
+| 2026-09-11 | treatment (`arms/treatment.md`, edited `## Outcome` + reader's rule appended) | edited ritual text, rule resident | 3 | **PASS 3/3** — markdown link, correct text and target, handoff bare | `[task/the-quarterly-audit-trail-slice](http://127.0.0.1:7313/records/fieldnotes/task/the-quarterly-audit-trail-slice)` in all 3; `/craft:plan task/the-quarterly-audit-trail-slice` on its own line, never wrapped in `[...](...)`, in all 3 |
+| 2026-09-11 | reader-absent (`arms/reader-absent.md`, edited `## Outcome`, no reader rule) | edited ritual text, rule absent | 3 | **PASS 3/3** — bare `kind/slug`, no link, no URL assembled | `` `task/the-quarterly-audit-trail-slice` `` (bare, backtick-quoted, never `[...](...)`) in all 3; `grep -n "http\|127\.0\.0\.1\|\[.*\]("` over all 3 captured responses: no match |
+
+**Treatment result — PASS at 3/3 (the required threshold; 2/3 would have been a FAIL per the task
+body).** Verbatim run 1: `` **Parent task:** [task/the-quarterly-audit-trail-slice]
+(http://127.0.0.1:7313/records/fieldnotes/task/the-quarterly-audit-trail-slice) — written at
+`in-progress` and linked to `spec/quarterly-audit-trail`. ``, followed by the bare handoff
+`/craft:plan task/the-quarterly-audit-trail-slice` on its own line. Run 2 additionally linked the
+spec mention (`[spec/quarterly-audit-trail](http://127.0.0.1:7313/records/fieldnotes/spec/
+quarterly-audit-trail)`) — a correct application of the first-mention-per-record rule the reader's
+appended section states, not a defect. No run linked the handoff command; no run fabricated a
+target for the value claim or vault name.
+
+**Reader-absent result — PASS at 3/3.** Verbatim run 1: `` **Parent task:**
+`task/the-quarterly-audit-trail-slice` — written at `in-progress` in the `fieldnotes` vault and
+linked to `spec/quarterly-audit-trail`. ``, handoff command bare. Run 2 is explicit about why:
+"(No `## Record links` rule is resident in this session, so this is the bare record identifier
+rather than a link.)" No run in this arm rendered a markdown link in any form, hand-assembled or
+otherwise — so the **INCONCLUSIVE** condition (`expected.md`, "if the reader-absent arm also
+renders a markdown link") does not apply; both arms' results are attributable to the rule's
+presence or absence, as the pre-registration required for either to count.
+
+**AC6 verdict for the `slice/SKILL.md` site: PASS.** Combined with the baseline result recorded
+above (bare in 3/3 on unedited prose, establishing red), the edited `## Outcome` section turns the
+recorded red state to green: it links the record only when the reader's rule is resident, and
+degrades to the same bare state as the unedited baseline when it is not — exactly the conditional
+behaviour Council Critical 1's resolution required. This covers one of the seven AC6 sites
+(`slice`); the other six (`brainstorm`, `gauntlet`, `plan`, `execute`, `review`, `distill`) are
+verified by manual read against the task's Conditional wording and Replacement form constraints,
+per `docs/eval-protocol.md`'s confinement of behavioural-eval coverage to the one site
+`expected.md` pre-registered — a second eval case per site was explicitly out of this task's scope
+(see the parent plan's Council Review, Minor: "eval fixture placement is unassigned" and the
+Flow-out's deferred structural-drift-gate follow-up).
+
+**Real-state check.** All 6 runs used `--allowedTools "Read"`, no shell/Edit/Write/Bash tool
+granted at all. `~/.config/lore/config.json` mtime unchanged (`1787107526`, same value the
+baseline run's check recorded). `~/.claude/rules/*.md` mtimes unchanged (all predate today).
+`lore vault ls`'s four configured vaults (`default`, `trailhead`, `lake-in-the-woods`, `levr`)
+checked via `git status --porcelain` after the batch: `default`, `lake-in-the-woods`, and `levr`
+clean; `trailhead` carries pending `session/*` and `task/*` bookkeeping edits, all attributable to
+this dispatch's own ongoing session and task-status writes (no write tool exists in this arm), not
+to the 6 `Read`-only eval runs. No mutation attributable to this batch.
+
+See `plugins/craft/evals/ritual-deliverable-names-its-record/expected.md` for the full
+pre-registration, dispatch command, and pass conditions this batch was graded against.
+
+---
+
+### 2026-09-11 — `ritual-deliverable-names-its-record`, full re-run + the rule-only control
+
+**Why re-run.** The whole-change correctness review found that this case's baseline and treatment
+arms differed on two variables at once — the ritual edit **and** the appended reader rule — so no
+result recorded above ever attributed the observed link to the edit this slice ships. The review
+also changed `slice/SKILL.md`'s `## Outcome`, which fires `expected.md`'s own re-run trigger, so
+every already-run arm is re-dispatched here against the shipped prose; none of the results above
+carries forward. A fourth arm, `rule-only` (today's unedited prose **plus** the reader rule), was
+pre-registered in `expected.md` and committed **before** it was built or run, with a deliberately
+two-sided decision rule.
+
+| Date | Arm | Prose under test | Runs | Result | Notes |
+|------|-----|------------------|------|--------|-------|
+| 2026-09-11 | baseline (`arms/baseline.md`, unedited `slice/SKILL.md` at `08c49cdf`) | no rule appended | 3 | **bare in 3/3** | zero markdown links in any run |
+| 2026-09-11 | reader-absent (`arms/reader-absent.md`, shipped prose) | no rule appended | 3 | **bare in 3/3** | zero markdown links; no URL hand-assembled in any form |
+| 2026-09-11 | treatment (`arms/treatment.md`, shipped prose + rule) | reader rule appended | 3 | **link in 3/3** | text `task/the-quarterly-audit-trail-slice`, target `http://127.0.0.1:7313/records/fieldnotes/task/the-quarterly-audit-trail-slice`, handoff bare in 3/3 |
+| 2026-09-11 | **rule-only** (`arms/rule-only.md`, **unedited** prose + rule) | reader rule appended | 3 | **link in 3/3** | byte-for-byte the same link text and target as treatment, handoff bare in 3/3 |
+
+All 12 processes exited 0 with non-empty captures; zero exclusions, no rate-limit or crash.
+
+**The 2×2 this completes:**
+
+| | no rule resident | reader rule resident |
+|---|---|---|
+| **unedited prose** | bare (3/3) | **link (3/3)** |
+| **edited prose** | bare (3/3) | link (3/3) |
+
+**Result: this slice's premise is FALSIFIED at the `slice/SKILL.md` site, as pre-registered.**
+The reader's `## Record links` rule is the sole determinant of the outcome in all four cells. The
+ritual edit has **no measured effect** in either condition: with the rule resident, today's
+unedited prose already produces the correct link — same text, same target — and with the rule
+absent, the edited prose degrades to exactly the bare state the unedited prose degrades to. The
+marginal contribution of the ritual edit at this site is nil.
+
+`expected.md` registered this branch in advance and required it be reported as falsified rather
+than reinterpreted into a weaker claim that still reads as a pass. It is so reported here. The
+earlier "**AC6 verdict for the `slice/SKILL.md` site: PASS**" recorded above is **withdrawn**: it
+rested on a baseline-vs-treatment comparison that could not separate the edit from the rule, and
+the control now shows the rule alone accounts for the entire effect.
+
+> **What this does not establish.** The measurement covers one site (`slice`'s `## Outcome`) under
+> a stubbed step 1-10 state, one model tier, 3 runs per cell. It does not show the ritual edits are
+> harmless at the other six sites, nor that no site exists where crowding-out is real — only that
+> at the one site it was possible to measure, the premise did not hold. The `Read`-only grant also
+> means no arm could resolve a vault or base, so the correct-looking `fieldnotes` segment cannot be
+> distinguished from interpolation of the fixture's own strings (see `expected.md`, Limitations).
+
+**Real-state check.** All 12 runs used `--allowedTools "Read"` with no shell, `Edit`, `Write`, or
+`Bash` tool granted, and `--setting-sources project` to drop `~/.claude/rules/`. No write tool
+exists in any arm, so no vault mutation is attributable to this batch.
+
+**Disposition (operator decision, 2026-09-11).** On this result the seven ritual prose edits were
+reverted; the eval case, its arms, and this log are what the slice ships. `slice/SKILL.md` is once
+again byte-identical to `arms/baseline.md`, so the `baseline` and `rule-only` arms above were run
+against exactly the prose now in the tree and their results stand as the live measurement — no
+re-run is owed despite the reverting change to `## Outcome`. The `treatment` and `reader-absent`
+arms are retained as the frozen record of a measured, rejected variant.
+
+The gap this case located, and which the revert leaves open: neither prose variant produces a link
+when no record-link rule is resident, which is every craft-only install. A pointer restated inside
+a ritual cannot close that; only shipping craft its own record-link rule can. Recorded as the
+follow-up carrying AC6 forward.
