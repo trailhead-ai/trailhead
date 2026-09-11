@@ -33,8 +33,30 @@ timeout, or on an interrupt unwinding through this call) bounds only the local
 side. The remote command is reparented and is not terminated by it — an
 interrupted or timed-out invocation may leave a remote camp process running
 until it exits on its own. A pty would close that gap by delivering SIGHUP on
-channel close, and would also apply CRLF translation to the byte-verbatim
-``--json`` stream this transport exists to relay, so it is not taken here.
+channel close, but is not taken here — not, as this module once claimed,
+because a pty would mangle the byte-verbatim stream: CRLF translation is not
+exclusive to a pty. CPython's own text-mode ``Popen`` (:func:`default_runner`,
+via ``encoding="utf-8"``) applies universal-newlines translation on its own,
+with no pty and no ssh anywhere — measured 2026-09-11, a bare CR rewritten to
+LF locally, before this module ever saw it. :func:`default_runner` is
+therefore unusable for a binary-verbatim payload with or without a pty, and it
+also passes no ``stdin=PIPE`` at all — the :data:`Runner` signature carries no
+input parameter, so it cannot feed a producer regardless of buffering.
+
+A second channel, :func:`stream_camp`, exists for exactly that payload: one
+local producer's stdout, piped verbatim and binary into one remote camp
+invocation's stdin. It opens its own ``subprocess.Popen`` in binary mode —
+no ``encoding=``, no ``text=True`` — and bypasses :func:`default_runner`
+entirely, reusing only :func:`quote_and_join` and the fixed ssh options, and
+:func:`_classify` for outcome classification, so a peer failure is never
+classified two different ways depending on which channel saw it. It carries
+no wall-clock execution bound — the bound is the producer exiting — so it adds
+``ServerAliveInterval``/``ServerAliveCountMax`` among its ssh options: without
+them a socket that dies without closing (a sleeping laptop, an expired NAT
+entry, a silent partition) hangs both ends for as long as the operator is
+willing to wait. Detection of that dead socket is itself bounded locally,
+derived from those same keepalive settings, rather than relying solely on
+ssh's own server-side detection.
 
 Security: the assembled remote command carries slugs, group names, session
 references, and the host's camp location. Nothing in this module logs it —
@@ -44,7 +66,10 @@ from __future__ import annotations
 
 import os
 import shlex
+import shutil
 import subprocess
+import threading
+import time
 from dataclasses import dataclass
 from typing import Callable, Mapping, Sequence
 
@@ -58,6 +83,16 @@ DEFAULT_CONNECT_TIMEOUT_SECONDS = 10.0
 #: however long the remote camp takes to answer. Operator-facing default;
 #: override via the ``execution_timeout`` parameter.
 DEFAULT_EXECUTION_TIMEOUT_SECONDS = 60.0
+
+#: ssh's own keepalive probe interval, seconds — :func:`stream_camp`'s
+#: ``ServerAliveInterval``. Operator-facing default; override via the
+#: ``server_alive_interval`` parameter.
+DEFAULT_SERVER_ALIVE_INTERVAL_SECONDS = 15.0
+
+#: How many unanswered keepalive probes ssh tolerates before it gives up —
+#: :func:`stream_camp`'s ``ServerAliveCountMax``. Operator-facing default;
+#: override via the ``server_alive_count_max`` parameter.
+DEFAULT_SERVER_ALIVE_COUNT_MAX = 3
 
 # Transport-level failure substrings, measured against real ssh on
 # 2026-09-10 under LC_ALL=C. All three share exit code 255 with every other
@@ -158,6 +193,15 @@ class RemoteRefusal(TransportOutcome):
 
 
 @dataclass(frozen=True)
+class ProducerFailed(TransportOutcome):
+    """:func:`stream_camp`'s local producer exited non-zero before the stream
+    completed. The remote invocation is aborted rather than being left to
+    receive a truncated stream and answer as though nothing were wrong."""
+
+    exit_code: int
+
+
+@dataclass(frozen=True)
 class RawResult:
     """What a :data:`Runner` hands back from one completed invocation."""
 
@@ -222,6 +266,18 @@ def quote_and_join(camp_bin: str, remote_argv: Sequence[str]) -> str:
     return " ".join(shlex.quote(part) for part in (camp_bin, *remote_argv))
 
 
+def _fixed_ssh_options(connect_timeout: float) -> list[str]:
+    """The three fixed ``-o`` pairs every remote camp invocation carries —
+    shared by :func:`run_camp` and :func:`stream_camp` so there is exactly
+    one place that decides them, never a second assembly of the same three
+    options."""
+    return [
+        "-o", "BatchMode=yes",
+        "-o", "StrictHostKeyChecking=yes",
+        "-o", f"ConnectTimeout={connect_timeout:g}",
+    ]
+
+
 def run_camp(
     host: Host,
     remote_argv: Sequence[str],
@@ -239,12 +295,7 @@ def run_camp(
     a throwaway file; production callers pass none.
     """
     remote_command = quote_and_join(host.camp_bin, remote_argv)
-    ssh_argv: list[str] = [
-        "ssh",
-        "-o", "BatchMode=yes",
-        "-o", "StrictHostKeyChecking=yes",
-        "-o", f"ConnectTimeout={connect_timeout:g}",
-    ]
+    ssh_argv: list[str] = ["ssh", *_fixed_ssh_options(connect_timeout)]
     for option in extra_ssh_options:
         ssh_argv += ["-o", option]
     ssh_argv += [host.ssh, remote_command]
@@ -284,3 +335,140 @@ def _classify(raw: RawResult) -> TransportOutcome:
         return CampNotResolvable()
 
     return RemoteRefusal(stdout=raw.stdout, stderr=raw.stderr, exit_code=raw.exit_code)
+
+
+# -----------------------------------------------------------------------
+# stream_camp — the binary streaming sibling of run_camp.
+# -----------------------------------------------------------------------
+
+#: The injected seam for :func:`stream_camp` — a callable rather than the
+#: ``Runner`` seam above, because this channel needs the live child process
+#: (its ``stdin``/``stdout``/``stderr`` pipes and ``poll()``) to pump a
+#: producer's bytes into it while it runs, not a single buffered result.
+StreamSpawner = Callable[[Sequence[str], Mapping[str, str]], "subprocess.Popen[bytes]"]
+
+
+def default_stream_spawner(
+    argv: Sequence[str], env: Mapping[str, str]
+) -> "subprocess.Popen[bytes]":
+    """Spawn ``argv`` in binary mode — no ``encoding=``, no ``text=True`` —
+    with its stdin, stdout, and stderr all piped, so :func:`stream_camp` can
+    feed it a producer's bytes and drain its output concurrently."""
+    return subprocess.Popen(
+        list(argv),
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=dict(env),
+    )
+
+
+def stream_camp(
+    host: Host,
+    remote_argv: Sequence[str],
+    producer: "subprocess.Popen[bytes]",
+    *,
+    connect_timeout: float = DEFAULT_CONNECT_TIMEOUT_SECONDS,
+    server_alive_interval: float = DEFAULT_SERVER_ALIVE_INTERVAL_SECONDS,
+    server_alive_count_max: int = DEFAULT_SERVER_ALIVE_COUNT_MAX,
+    extra_ssh_options: Sequence[str] = (),
+    spawn: StreamSpawner = default_stream_spawner,
+) -> TransportOutcome:
+    """Run ``camp <remote_argv...>`` on ``host``, piping ``producer``'s stdout
+    into its stdin verbatim and binary, and classify the outcome.
+
+    ``producer`` must already be running with ``stdout=subprocess.PIPE``. Its
+    bytes are copied into the remote invocation's stdin exactly as produced —
+    no text encoding, no newline translation — until ``producer`` closes its
+    stdout. If ``producer`` then exits non-zero, the invocation is failed as
+    :class:`ProducerFailed` naming its exit code, rather than letting a
+    truncated stream reach the remote command and be answered as though
+    nothing were wrong.
+
+    There is no wall-clock execution bound — this channel is expected to run
+    for minutes, bounded only by ``producer`` exiting. A connection that dies
+    without closing is instead caught by a local bound derived from
+    ``server_alive_interval`` and ``server_alive_count_max``
+    (``server_alive_interval * server_alive_count_max + connect_timeout``):
+    if the remote invocation has not completed within that bound, it is
+    killed and classified as :class:`StoppedResponding`.
+
+    Reuses :func:`quote_and_join`, :func:`_fixed_ssh_options`, and
+    :func:`_classify` — the same assembly and the same classifier
+    :func:`run_camp` uses, so a peer failure is never classified two
+    different ways depending on which channel observed it.
+    """
+    remote_command = quote_and_join(host.camp_bin, remote_argv)
+    ssh_argv: list[str] = [
+        "ssh",
+        *_fixed_ssh_options(connect_timeout),
+        "-o", f"ServerAliveInterval={server_alive_interval:g}",
+        "-o", f"ServerAliveCountMax={server_alive_count_max}",
+    ]
+    for option in extra_ssh_options:
+        ssh_argv += ["-o", option]
+    ssh_argv += [host.ssh, remote_command]
+
+    env = {**os.environ, "LC_ALL": "C"}
+
+    child = spawn(ssh_argv, env)
+
+    stdout_chunks: list[bytes] = []
+    stderr_chunks: list[bytes] = []
+
+    def _feed() -> None:
+        try:
+            assert producer.stdout is not None
+            shutil.copyfileobj(producer.stdout, child.stdin)
+        except (BrokenPipeError, OSError):
+            pass
+        finally:
+            try:
+                child.stdin.close()
+            except OSError:
+                pass
+
+    def _drain(source, sink: list[bytes]) -> None:
+        for chunk in iter(lambda: source.read(65536), b""):
+            sink.append(chunk)
+
+    feeder = threading.Thread(target=_feed, daemon=True)
+    stdout_reader = threading.Thread(target=_drain, args=(child.stdout, stdout_chunks), daemon=True)
+    stderr_reader = threading.Thread(target=_drain, args=(child.stderr, stderr_chunks), daemon=True)
+    feeder.start()
+    stdout_reader.start()
+    stderr_reader.start()
+
+    bound = server_alive_interval * server_alive_count_max + connect_timeout
+    deadline = time.monotonic() + bound
+    child_done = False
+    while time.monotonic() < deadline:
+        if child.poll() is not None:
+            child_done = True
+            break
+        time.sleep(0.02)
+
+    if not child_done:
+        _kill(child)
+        feeder.join(timeout=5)
+        stdout_reader.join(timeout=5)
+        stderr_reader.join(timeout=5)
+        try:
+            producer.kill()
+            producer.wait(timeout=5)
+        except Exception:
+            pass
+        return StoppedResponding(execution_timeout=bound)
+
+    feeder.join()
+    stdout_reader.join()
+    stderr_reader.join()
+
+    producer_exit = producer.wait()
+    if producer_exit != 0:
+        return ProducerFailed(exit_code=producer_exit)
+
+    stdout = b"".join(stdout_chunks).decode("utf-8", errors="surrogateescape")
+    stderr = b"".join(stderr_chunks).decode("utf-8", errors="surrogateescape")
+    raw = RawResult(stdout=stdout, stderr=stderr, exit_code=child.returncode)
+    return _classify(raw)
