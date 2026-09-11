@@ -210,6 +210,28 @@ def _peer_payload_unavailable(
     return None
 
 
+def _peer_group_unconfigured(name: str, probe_result: ProbeAnswer) -> Check | None:
+    """The check named *name* answered from the peer lacking the group alone.
+
+    A peer without the group configured answers no account, no member list and
+    no slug state — the answering side sends those fields null by
+    construction. The checks that read them have therefore observed nothing,
+    and a check that observed nothing may not report a pass. FAILED rather
+    than INDETERMINATE for the same reason a malformed payload is: the peer
+    did answer, so nothing about the transport is in doubt.
+
+    `None` means the group is configured, so the caller evaluates its own
+    predicate.
+    """
+    if probe_result.group_configured:
+        return None
+    return Check(
+        name,
+        CheckStatus.FAILED,
+        "cannot evaluate — the peer does not have this group configured",
+    )
+
+
 def compose_preflight(
     *,
     self_name: str | None,
@@ -382,6 +404,8 @@ def compose_preflight(
     # 8. the peer's harness account binding matches this end's
     name = "the peer's harness account binding matches this end's"
     unavailable = _peer_payload_unavailable(name, probe_result)
+    if unavailable is None:
+        unavailable = _peer_group_unconfigured(name, probe_result)
     if unavailable is not None:
         checks.append(unavailable)
     elif probe_result.account == self_account:
@@ -401,10 +425,21 @@ def compose_preflight(
     # 9. the slug is free on the peer, or present there and owned by this host
     name = "the slug is free on the peer, or present there and owned by this host"
     unavailable = _peer_payload_unavailable(name, probe_result)
+    if unavailable is None:
+        unavailable = _peer_group_unconfigured(name, probe_result)
     if unavailable is not None:
         checks.append(unavailable)
     elif not probe_result.workspace_exists:
         checks.append(Check(name, CheckStatus.PASSED, f"slug {slug!r} is free on the peer"))
+    elif probe_result.workspace_owner is None:
+        checks.append(
+            Check(
+                name,
+                CheckStatus.FAILED,
+                f"slug {slug!r} exists on the peer and its ownership there was "
+                "never recorded",
+            )
+        )
     elif probe_result.workspace_owner == self_name:
         checks.append(
             Check(

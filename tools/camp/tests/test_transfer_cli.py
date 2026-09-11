@@ -29,6 +29,12 @@ Test contract:
   not-clean code, which is distinct from every code that does name a cause.
 - The top-level JSON `ok` discriminator tracks the verdict — true on a clean
   run, false on a refusal — not merely present.
+- What would be regenerated rather than copied is reported in both the human
+  and JSON renderings, naming the member and its declared paths.
+- A slug the transport refuses to send produces a clean `camp transfer:`
+  refusal and a nonzero exit, never a traceback.
+- Control characters in peer-supplied text are escaped before rendering, so
+  the peer cannot rewrite a line camp already printed.
 """
 
 from __future__ import annotations
@@ -839,3 +845,112 @@ def test_unmapped_failing_check_falls_through_to_the_shared_not_clean_code(
         transfer.EXIT_WOULD_TRANSFER,
     ), "the shared not-clean code collides with a code that names a cause"
     assert "repo_a" in out, "the refusal must name the member that never declared"
+
+
+# ---------------------------------------------------------------------------
+# What would be regenerated instead of copied, and untrusted text at the seam
+# ---------------------------------------------------------------------------
+
+
+def test_what_would_be_regenerated_is_reported_in_both_renderings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """The whole point of the excluded declaration is that the operator sees
+    which trees get rebuilt on arrival rather than carried over the wire.
+
+    A member declaring paths is named with them; a member declaring an empty
+    set has nothing to rebuild and is not listed.
+    """
+    env = _Env(tmp_path)
+    env.write_group(excluded={"repo_a": ["build/", "node_modules/"]})
+    env.write_hosts(self_name="host-a", peers={"host-b": "host-b"})
+    env.write_manifest(owner="host-a")
+    env.apply(monkeypatch)
+    _fake_probe(monkeypatch, _clean_probe_answer())
+    _no_conversations(monkeypatch)
+
+    argv = ["transfer", "feat-x", "--to", "host-b", "--group", "trailhead", "--dry-run"]
+    assert _run(monkeypatch, argv) == 0
+    human = capsys.readouterr().out
+    # The loader normalizes a declared "build/" to "build"; the rendering shows
+    # what camp actually holds, not what was typed.
+    assert "regenerated on arrival rather than copied:" in human, human
+    assert "repo_a: build, node_modules" in human, (
+        f"the member and its declared paths must be reported together: {human!r}"
+    )
+
+    assert _run(monkeypatch, [*argv, "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    regenerated = payload["regenerated"]
+    assert [r["member"] for r in regenerated] == ["repo_a"]
+    assert regenerated[0]["excluded"] == ["build", "node_modules"]
+
+
+def test_an_unusable_slug_refuses_cleanly_instead_of_raising(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """The transport refuses a slug it will not put on a remote command line.
+
+    camp's CLI-wide rule is that a named error prints `camp: <message>` and
+    exits nonzero; a traceback reaching the operator is the failure here.
+    """
+    env = _Env(tmp_path)
+    env.write_group(excluded={"repo_a": []})
+    env.write_hosts(self_name="host-a", peers={"host-b": "host-b"})
+    env.write_manifest(owner="host-a")
+    env.apply(monkeypatch)
+    probe = _probe_module()
+    _no_conversations(monkeypatch)
+
+    def _refuse(host, *, group, slug, self_name):
+        raise probe.InvalidSlugForTransport(f"slug {slug!r} is not safe to send")
+
+    monkeypatch.setattr(probe, "probe_peer", _refuse)
+
+    code = _run(
+        monkeypatch,
+        ["transfer", "feat-x", "--to", "host-b", "--group", "trailhead", "--dry-run"],
+    )
+
+    captured = capsys.readouterr()
+    assert code != 0
+    assert "camp transfer:" in captured.err, captured.err
+    assert "Traceback" not in captured.err + captured.out
+
+
+def test_peer_supplied_text_cannot_forge_camp_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """A refused remote camp hands back its own stderr, which camp renders.
+
+    That text is the peer's, not camp's, so a carriage return plus an erase
+    sequence in it would let the far side rewrite a line camp already printed
+    — including the verdict. Control characters must arrive escaped, and the
+    human rendering must still carry no live ANSI escape.
+    """
+    env = _Env(tmp_path)
+    env.write_group(excluded={"repo_a": []})
+    env.write_hosts(self_name="host-a", peers={"host-b": "host-b"})
+    env.write_manifest(owner="host-a")
+    env.apply(monkeypatch)
+    transport = _transport_module()
+    _no_conversations(monkeypatch)
+
+    forged = "denied\r\x1b[2Kcamp transfer: verdict — would transfer"
+    _fake_probe(
+        monkeypatch,
+        transport.RemoteRefusal(stdout="", stderr=forged, exit_code=2),
+    )
+
+    code = _run(
+        monkeypatch,
+        ["transfer", "feat-x", "--to", "host-b", "--group", "trailhead", "--dry-run"],
+    )
+
+    out = capsys.readouterr().out
+    assert code != 0
+    assert re.search(r"\x1b\[", out) is None, "a live ANSI escape reached the operator"
+    assert "\r" not in out, "a carriage return reached the operator"
+    assert out.rstrip().endswith("verdict — not clean"), (
+        f"the peer's text displaced camp's own last line: {out!r}"
+    )

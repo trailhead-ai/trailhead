@@ -186,6 +186,10 @@ def _conversation_payload(conversation) -> dict:
     }
 
 
+def _regenerated_payload(member) -> dict:
+    return {"member": member.name, "excluded": list(member.excluded or ())}
+
+
 def _json_payload(result, *, slug: str, peer_name: str) -> dict:
     from ..transfer.preflight import Verdict
 
@@ -196,6 +200,7 @@ def _json_payload(result, *, slug: str, peer_name: str) -> dict:
         "peer": peer_name,
         "checks": [_check_payload(c) for c in result.checks],
         "conversations": [_conversation_payload(c) for c in result.conversations],
+        "regenerated": [_regenerated_payload(m) for m in result.regenerated],
     }
 
 
@@ -207,12 +212,23 @@ _STATUS_MARKER = {
 
 
 def _render_human(result, *, slug: str, peer_name: str) -> None:
+    """Render the composition for a human.
+
+    Two of the strings here originate outside camp — a check detail carrying a
+    refused peer's own stderr, and a conversation subpath read out of a
+    transcript the harness wrote — so both go through
+    `camp.launch.recovery.printable_path`, camp's established escaper for text
+    it does not author. Its docstring carries the reason: a bare carriage
+    return plus an erase sequence rewrites a line already printed, and the
+    operator then reads a verdict camp never gave.
+    """
+    from ..launch.recovery import printable_path
     from ..transfer.preflight import Verdict
 
     print(f"camp transfer: {slug!r} -> {peer_name!r}")
     for check in result.checks:
         marker = _STATUS_MARKER[check.status.value]
-        print(f"  [{marker}] {check.name}: {check.detail}")
+        print(f"  [{marker}] {check.name}: {printable_path(check.detail)}")
 
     if not result.conversations:
         print("  no conversations are rooted in this workspace")
@@ -222,7 +238,16 @@ def _render_human(result, *, slug: str, peer_name: str) -> None:
                 print(f"    ? {conversation.session_id} — root could not be resolved")
             else:
                 live_tag = " (live)" if conversation.live else ""
-                print(f"    {conversation.session_id} @ {conversation.subpath}{live_tag}")
+                subpath = printable_path(conversation.subpath)
+                print(f"    {conversation.session_id} @ {subpath}{live_tag}")
+
+    if not result.regenerated:
+        print("  no member declares state that would be regenerated")
+    else:
+        print("  regenerated on arrival rather than copied:")
+        for member in result.regenerated:
+            declared = ", ".join(printable_path(e) for e in member.excluded or ())
+            print(f"    {member.name}: {declared}")
 
     verdict_text = "would transfer" if result.verdict is Verdict.WOULD_TRANSFER else "not clean"
     print(f"camp transfer: verdict — {verdict_text}")
@@ -323,7 +348,7 @@ def _cmd_transfer_group_cli(
     from ..host.config import HostConfigError, load_hosts, self_host_name
     from ..spine import _consume_flag_value, _die
     from ..transfer.preflight import MemberDeclaration, compose_preflight
-    from ..transfer.probe import probe_peer
+    from ..transfer.probe import InvalidSlugForTransport, probe_peer
     from .dispatch import _slug_from_args_or_cwd
     from .session import _parsable_groups
 
@@ -374,11 +399,14 @@ def _cmd_transfer_group_cli(
         _die(f"camp transfer: {e}", code=EXIT_ERROR)
 
     peer_declared = peer_name in hosts
-    probe_result = (
-        probe_peer(hosts[peer_name], group=group_name, slug=slug, self_name=self_name)
-        if peer_declared
-        else None
-    )
+    probe_result = None
+    if peer_declared:
+        try:
+            probe_result = probe_peer(
+                hosts[peer_name], group=group_name, slug=slug, self_name=self_name
+            )
+        except InvalidSlugForTransport as e:
+            _die(f"camp transfer: {e}", code=EXIT_ERROR)
 
     members = tuple(
         MemberDeclaration(name=m["name"], excluded=m.get("excluded"))
