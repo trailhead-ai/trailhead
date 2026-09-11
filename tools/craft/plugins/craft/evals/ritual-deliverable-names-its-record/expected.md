@@ -83,6 +83,14 @@ that is an observational constraint, not an enforced one.
   proved receives no record-link rule at all. **Not run in this task.** Its pass condition is
   pre-registered below for the same reason.
 
+- **rule-only** (`arms/rule-only.md`) — today's unedited `slice/SKILL.md`, byte-identical to
+  `arms/baseline.md`, with the reader's `## Record links` rule appended: a session where the reader
+  plugin is installed but no ritual edit was ever made. **Added after the whole-change correctness
+  review**, which found that baseline and treatment differ on two variables at once — the ritual
+  edit *and* the appended rule — leaving the ritual edit's own contribution unmeasured. This arm is
+  that missing control. Its decision rule is registered below, and committed before the arm is
+  built or run.
+
 Both unrun arms are added by `task/make-the-seven-ritual-deliverables-name-their-record-as-a-link`
 once the edited wording exists, per that task's own `**Files:**` list, which already names
 `arms/treatment.md`. Authoring their prose now is not possible without writing the ritual edit
@@ -157,6 +165,17 @@ log line a run wrote about itself, per `docs/eval-protocol.md`.
   edit but no resident link rule must degrade to the same bare state as today's baseline, never
   hand-assemble a URL from the grammar it was never given.
 
+- **rule-only** — **not scored pass/fail.** This arm *attributes* the treatment result, and both
+  of its outcomes are reportable findings rather than errors. If in 3/3 runs the new parent task is
+  rendered as a markdown link, the reader's rule alone is sufficient at this site and the ritual
+  edit's marginal contribution to producing the link is nil — this slice's own premise (that the
+  instruction is crowded out by 581 lines of surrounding procedure) is **falsified at this site**,
+  and must be reported as falsified, never reinterpreted into a weaker claim that still reads as a
+  pass. If any of the 3 runs leaves the identifier bare, the rule alone is not reliable here and
+  the ritual edit carries measurable weight; report the count. Registering both branches before the
+  arm exists is what stops either result from being graded retrospectively into the answer this
+  slice wanted.
+
 **INCONCLUSIVE (applies to treatment vs. reader-absent, once both are run):** if the reader-absent
 arm also renders a markdown link (correct or not), the "conditional on the rule being resident"
 claim is unmeasured — the model produced a link with no rule to have derived the form from, which
@@ -188,6 +207,13 @@ about what it reports once there. One model tier, 3 runs per arm (this task) plu
 two arms not yet run. `Read`-only tools, no shell, no PreToolUse hook (settings-sources project
 drops user-level hooks along with rules) — so, as with the outpost precedent, this case says
 nothing about what happens when an arm can reach for a shell instead of following the instruction.
+The `Read`-only grant means no arm can run `lore vault ls` or read `config.json` or
+`LORE_RECORD_URL_BASE`, so a run's correct-looking `fieldnotes` vault segment and
+`http://127.0.0.1:7313` base cannot be distinguished from interpolation of the fixture's own
+strings, and the rule's own "print it bare when the vault can't be resolved" branch is never
+exercised here. Until the rule-only arm above was added, baseline and treatment differed on two
+variables at once, so no result in this case attributed the link to the ritual edit rather than to
+the appended rule; that confound is what the rule-only arm exists to resolve.
 Does not cover first-mention-vs-every-row behaviour in a table/list, adherence late in a long
 session, or the other six rituals' own crowding conditions, which may differ in shape and severity
 from `slice`'s.
