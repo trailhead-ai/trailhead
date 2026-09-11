@@ -66,6 +66,10 @@ _STATIC_RESERVED = frozenset(
         # RESERVED check — but it is a live verb, and a slug that shadows one is
         # exactly what this set exists to reject.
         "groups",
+        # What this host answers about itself, for the transfer preflight's
+        # sending side. Like "groups", intercepted in cli/camp before group
+        # resolution — reserved so a workspace slug can never shadow it.
+        "transfer-probe",
         "list",
         "status",
         "sync",
