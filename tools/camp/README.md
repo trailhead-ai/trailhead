@@ -33,6 +33,7 @@ camp launch --resume <ref>   # bring a dead session back where it started
 camp sessions        # list the live harness sessions camp can see
 camp sessions --recoverable  # list the dead ones that could be brought back
 camp kill <ref>      # stop one session and reclaim its memory
+camp attach <ref>    # hand your terminal to a running session
 camp remove          # tear down a worktree (alias: rm)
 camp --help          # full command reference
 camp --version       # show version + resolved binary path
@@ -219,6 +220,55 @@ might include sessions running right now. It has two refusals instead, because
 neither has an empty listing as an honest answer: camp cannot name a harness for
 any configured group, or the harnesses it can name keep no transcripts it can
 read. An unusable `--limit` refuses too.
+
+## Attach
+
+`camp attach` hands your terminal to a running session, on this machine or a
+declared one, without working out which machine it's on first:
+
+```
+camp attach
+camp attach -a
+camp attach <ref>
+camp attach <ref> --host <name>
+camp attach <ref> -a
+```
+
+With no reference, it offers a numbered picker over this machine's running,
+camp-owned sessions — most recently active first — and reads one choice;
+`-a` widens that picker across every declared machine too. `<ref>` is the
+same unambiguous prefix `camp kill` and `camp launch --resume` already
+accept, resolved by the identical rule so the three verbs never drift into
+three grammars.
+
+`<ref> --host <name>` carries the reference across untouched: the named
+machine's own camp resolves it and refuses in its own words, exactly as if
+you had run `camp attach <ref>` there yourself. `<ref> -a` instead asks
+every declared machine to resolve the reference and counts how many did:
+none is no match, more than one refuses and names every machine that
+matched, and a machine that did not answer refuses the whole attempt rather
+than guessing — the one place this surface departs from a plain listing,
+which can report an unreachable machine as a row and still succeed. Attach
+cannot, because the silent machine might have held the only match.
+
+Only a session camp itself launched is offered — the same ownership check
+`camp kill` applies. A resolved session that is not currently running
+refuses and names `camp launch --resume <ref>` as the way to bring it back,
+rather than reporting "not found" for a session that does exist.
+
+Exit status is the attaching multiplexer's own once the handoff happens, and
+camp's own before it: `1` for a refusal, `2` for a reference matching more
+than one session (one machine, or more than one under `-a`), matching `camp
+kill`.
+
+`camp attach <ref> --resolve --json` is machine-readable and never attaches
+anything — it just answers whether `<ref>` resolves here, as JSON. Its only
+consumer is `camp attach <ref> -a` itself, probing every declared machine
+this same way before deciding where to hand the terminal.
+
+```
+camp attach <ref> --resolve --json
+```
 
 ## Remote hosts
 

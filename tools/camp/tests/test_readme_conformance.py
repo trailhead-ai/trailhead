@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import importlib
 import io
+import json
 import re
 import shlex
 import sys
@@ -56,6 +57,15 @@ _ALL_HOSTS_INVOCATION = re.compile(
 )
 
 
+#: The exact invocation lines the README's "Attach" section documents — the
+#: six forms `task/wire-camp-attach-into-the-cli-with-host-and-all-hosts`
+#: names, one call form per line.
+_ATTACH_INVOCATION = re.compile(
+    r"^camp attach(?: -a| <ref>(?: --host <name>| -a| --resolve --json)?)?$",
+    re.MULTILINE,
+)
+
+
 def _toml_blocks() -> list[str]:
     return _TOML_BLOCK.findall(README.read_text())
 
@@ -66,6 +76,10 @@ def _host_invocation_lines() -> list[str]:
 
 def _all_hosts_invocation_lines() -> list[str]:
     return _ALL_HOSTS_INVOCATION.findall(README.read_text())
+
+
+def _attach_invocation_lines() -> list[str]:
+    return _ATTACH_INVOCATION.findall(README.read_text())
 
 
 @pytest.mark.parametrize("block", _toml_blocks())
@@ -330,3 +344,61 @@ def test_documented_all_hosts_invocation_forms_produce_an_answer_against_a_stub_
         captured = capsys.readouterr()
         if "--json" in argv:
             assert captured.out.strip() == "[]"
+
+
+# ---------------------------------------------------------------------------
+# camp attach — the README's six documented forms, run through the real
+# dispatcher (`test_attach_cli.py` covers the behavior in depth; this test's
+# only job is proving each documented LINE parses and dispatches).
+# ---------------------------------------------------------------------------
+
+
+def test_every_documented_attach_form_dispatches_through_the_real_entry_point(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """Every `camp attach …` line the README documents must reach camp's own
+    attach code — never the bare-slug or unknown-verb error a typo in the
+    README would otherwise produce silently."""
+    lines = _attach_invocation_lines()
+    assert lines, "README no longer documents a camp attach invocation form"
+    assert len(lines) == 6, f"expected all six documented forms — {lines!r}"
+
+    dispatch = importlib.import_module("camp.cli.dispatch")
+    transport = importlib.import_module("camp.host.transport")
+    handoff = importlib.import_module("camp.host.handoff")
+    launch_session = importlib.import_module("camp.launch.session")
+
+    cfg = tmp_path / "config"
+    cfg.mkdir()
+    (cfg / "hosts.toml").write_text("[hosts.andromeda]\n", encoding="utf-8")
+    monkeypatch.setenv("CAMP_CONFIG_DIR", str(cfg))
+    monkeypatch.setenv("CAMP_STATE_DIR", str(tmp_path / "state"))
+
+    monkeypatch.setattr(launch_session, "enumerate_records", lambda *a, **k: [])
+    monkeypatch.setattr(
+        transport,
+        "run_camp",
+        lambda host, remote_argv, **kw: transport.Answered(
+            stdout=json.dumps({"ok": False, "rows": []}), stderr="", exit_code=0
+        ),
+    )
+    monkeypatch.setattr(handoff, "handoff", lambda argv: None)
+
+    from camp.spine import RESERVED
+
+    assert "attach" in RESERVED
+
+    for line in lines:
+        argv = shlex.split(
+            line.replace("<ref>", "no-such-ref").replace("<name>", "andromeda")
+        )
+        assert argv[0] == "camp"
+        monkeypatch.setattr(sys, "argv", argv)
+        try:
+            dispatch.main()
+            code = 0
+        except SystemExit as exc:
+            code = exc.code if isinstance(exc.code, int) else 1
+        err = capsys.readouterr().err
+        assert "bare slug dispatch is no longer supported" not in err, (line, err)
+        assert "camp: bare slug" not in err, (line, err)

@@ -2114,3 +2114,241 @@ def _cmd_kill_cli(args: list[str], env: dict[str, str] | None = None) -> None:
         file=sys.stderr,
     )
     _report_stop(candidate, outcome="stopped", as_json=as_json)
+
+
+# ---------------------------------------------------------------------------
+# camp attach — hand the operator's terminal to a running session
+#
+# Fully groupless, exactly like `camp kill`: the reference names the session,
+# so the local forms below never resolve a group. Two forms never reach these
+# functions at all — `<ref> --host <name>` (`_cmd_attach_host_cli`) and
+# `-a` in either shape (`camp.cli.dispatch._dispatch_attach_all_hosts`) — both
+# are dispatched before `camp.spine`'s fallback is ever reached, per
+# `docs/design/attaching-reaches-a-running-session-on-any-machine.md`.
+# ---------------------------------------------------------------------------
+
+
+def _attach_session_context(
+    env: dict[str, str],
+) -> tuple[list[dict], list, list, "object", str | None]:
+    """The addressable pool, the ownership seam, and this machine's own name —
+    shared setup for every LOCAL `camp attach` form (bare, `<ref>`, `--resolve
+    --json`, `--list --json`). Never used by the `--host` pass-through, which
+    resolves nothing locally by design.
+    """
+    from ..host.config import self_host_name
+    from ..launch.stop import Tmux
+
+    groups = _parsable_groups()
+    transcripts, live, answered, _accounts = _session_pool(
+        groups, verb="attach", env=env, live_required=True
+    )
+    harness = answered[0]
+    tmux = Tmux()
+    machine = self_host_name(env)
+    return groups, transcripts, live, harness, tmux, machine
+
+
+def _attach_resolve_payload(resolution) -> dict:
+    """`resolve_attach_ref`'s answer as JSON — the wire shape `--resolve --json`
+    prints and `camp attach -a` (ref form) parses back. Not a public API: its
+    sole consumer is camp's own `-a` probe, per the design doc's own framing
+    of `--resolve` as "reachable only through a flag that did not exist
+    before … its only consumer is `camp attach -a` itself"."""
+    from ..attach.resolve import Ambiguous, NoMatch, NotRunning, Resolved
+
+    if isinstance(resolution, Resolved):
+        candidate = resolution.candidate
+        return {
+            "ok": True,
+            "session_id": candidate.session_id,
+            "derived_name": candidate.derived_name,
+        }
+    if isinstance(resolution, NotRunning):
+        return {"ok": False, "state": "not_running", "session_id": resolution.candidate.session_id}
+    if isinstance(resolution, Ambiguous):
+        return {
+            "ok": False,
+            "state": "ambiguous",
+            "candidates": [_candidate_payload(c) for c in resolution.candidates],
+        }
+    assert isinstance(resolution, NoMatch)
+    return {"ok": False, "state": "no_match"}
+
+
+def _attach_pool_payload(pool) -> dict:
+    """A local picker pool as JSON — the wire shape `--list --json` prints and
+    the cross-host bare picker (`camp attach -a`, no reference) parses back.
+    Also internal-only, the bare-picker sibling of `_attach_resolve_payload`.
+    """
+    from ..attach.picker import PoolReady
+
+    if isinstance(pool, PoolReady):
+        return {
+            "ok": True,
+            "rows": [
+                {
+                    "session_id": row.candidate.session_id,
+                    "derived_name": row.candidate.derived_name,
+                    "group": row.group,
+                    "slug": row.slug,
+                }
+                for row in pool.rows
+            ],
+        }
+    return {"ok": False, "reason": pool.reason}
+
+
+def _cmd_attach_cli(args: list[str], env: dict[str, str] | None = None) -> None:
+    """camp attach [<ref>] [--resolve --json] [--list --json].
+
+    The three forms this function itself answers — the numbered picker with
+    no reference, `camp attach <ref>`, and the machine-readable `<ref>
+    --resolve --json` probe sub-mode — all resolve against THIS machine's own
+    pool. `--host` and `-a` are intercepted earlier, in `cli/dispatch.py`,
+    and never reach this function (see the module-section comment above).
+
+    Posture matches `camp kill`: every refusal is one `camp attach: …` line on
+    stderr, empty stdout, non-zero exit — except an ambiguous reference, which
+    prints its candidates on stdout and exits 2, the same convention
+    `_die_unresolved` documents for every ref-addressed verb.
+    """
+    from ..attach.picker import NothingToOffer, Picked, PoolUnreadable, local_pool, pick_session
+    from ..attach.prefix_warning import warn_if_nested
+    from ..attach.resolve import Ambiguous, NoMatch, NotRunning, Resolved, resolve_attach_ref
+    from ..host.handoff import handoff, local_argv
+    from ..spine import _consume_flag_value, _die
+
+    rest = list(args)
+    _consume_flag_value(rest, "--group")  # a ref names the session; no group needed
+    as_json = _consume_flag(rest, "--json")
+    resolve_only = _consume_flag(rest, "--resolve")
+    list_only = _consume_flag(rest, "--list")
+
+    if len(rest) > 1:
+        _die(
+            f"camp attach: one session reference, not {len(rest)} — an attach "
+            "addresses exactly one session"
+        )
+    ref = rest[0] if rest else None
+    if ref is not None and not ref.strip():
+        _die("camp attach: requires a session reference")
+    if ref is not None and ref.startswith("-"):
+        _die(
+            f"camp attach: {ref!r} looks like a flag, not a session reference — "
+            "a reference may not start with a dash"
+        )
+    if resolve_only and ref is None:
+        _die("camp attach: --resolve requires a session reference")
+    if list_only and ref is not None:
+        _die("camp attach: --list takes no session reference")
+    if (resolve_only or list_only) and not as_json:
+        _die("camp attach: --resolve and --list are machine-readable only — pass --json")
+
+    resolved_env = dict(env) if env is not None else dict(os.environ)
+    groups, transcripts, live, harness, tmux, machine = _attach_session_context(resolved_env)
+
+    if list_only:
+        pool = local_pool(
+            harness=harness,
+            tmux=tmux,
+            transcripts=transcripts,
+            live_records=live,
+            groups=groups,
+            env=resolved_env,
+            machine=machine,
+        )
+        print(json.dumps(_attach_pool_payload(pool)))
+        sys.exit(0)
+
+    if ref is None:
+        pool = local_pool(
+            harness=harness,
+            tmux=tmux,
+            transcripts=transcripts,
+            live_records=live,
+            groups=groups,
+            env=resolved_env,
+            machine=machine,
+        )
+        result = pick_session(
+            pool,
+            stdin=sys.stdin,
+            stdout=sys.stdout,
+            isatty=sys.stdin.isatty() and sys.stdout.isatty(),
+        )
+        if isinstance(result, PoolUnreadable):
+            _die(f"camp attach: {result.reason}")
+        if isinstance(result, NothingToOffer):
+            _die("camp attach: no running session found on this machine")
+        assert isinstance(result, Picked)
+        warn_if_nested(resolved_env)
+        handoff(local_argv(result.row.candidate.derived_name))
+        return
+
+    resolution = resolve_attach_ref(
+        ref,
+        harness=harness,
+        tmux=tmux,
+        transcripts=transcripts,
+        live_records=live,
+        groups=groups,
+        env=resolved_env,
+    )
+
+    if resolve_only:
+        print(json.dumps(_attach_resolve_payload(resolution)))
+        sys.exit(0)
+
+    if isinstance(resolution, NoMatch):
+        _die(f"camp attach: no session on this machine matches {ref!r}")
+    if isinstance(resolution, NotRunning):
+        _die(
+            f"camp attach: session {resolution.candidate.session_id} is not "
+            f"running — bring it back with `camp launch --resume {ref}`"
+        )
+    if isinstance(resolution, Ambiguous):
+        _print_candidates(resolution.candidates, as_json=as_json)
+        _die(
+            f"camp attach: {ref!r} matches {len(resolution.candidates)} sessions "
+            "(listed above) — re-run with a longer prefix naming exactly one",
+            code=_AMBIGUOUS_EXIT_CODE,
+        )
+    assert isinstance(resolution, Resolved)
+    warn_if_nested(resolved_env)
+    handoff(local_argv(resolution.candidate.derived_name))
+
+
+def _cmd_attach_host_cli(
+    args: list[str],
+    host: "Host",
+    host_name: str,
+    env: dict[str, str] | None = None,
+) -> None:
+    """camp attach <ref> --host <name> — carry the reference across untouched.
+
+    Resolves nothing locally: the far side's own `camp attach <ref>` decides
+    and refuses in its own words (`docs/design/attaching-reaches-a-running-
+    session-on-any-machine.md`, "Resolution is not the same question on each
+    axis"). The nested-multiplexer warning is still decided from THIS
+    machine's own environment before the handoff — it is a property of the
+    local terminal, not of the target — per that same design doc's "The
+    key-prefix conflict warning is decided locally".
+    """
+    from ..attach.prefix_warning import warn_if_nested
+    from ..host.handoff import handoff, remote_argv
+    from ..spine import _die
+
+    rest = list(args)
+    if len(rest) != 1:
+        _die(
+            f"camp attach: --host requires exactly one session reference, got "
+            f"{len(rest)}"
+        )
+    ref = rest[0]
+    if not ref.strip() or ref.startswith("-"):
+        _die(f"camp attach: {ref!r} is not a valid session reference")
+
+    resolved_env = dict(env) if env is not None else dict(os.environ)
+    warn_if_nested(resolved_env)
+    handoff(remote_argv(host, ref))

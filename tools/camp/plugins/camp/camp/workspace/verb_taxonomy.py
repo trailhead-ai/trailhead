@@ -94,8 +94,9 @@ LEGACY_REDIRECTS: dict[str, str] = {
 # wording: "new"/"setup" point the user at configuring a group; the rest emit the
 # standard "pass --group" error.
 #
-# `kill` is deliberately ABSENT: it addresses a session by ref, and a ref is the
-# thing you look up without knowing its group, so spine serves it directly.
+# `kill` and `attach` are deliberately ABSENT: both address a session by ref,
+# and a ref is the thing you look up without knowing its group, so spine
+# serves them directly.
 NEEDS_GROUP_VERBS = frozenset(
     {"new", "remove", "pwd", "activate", "setup", "launch", "sessions"}
 )
