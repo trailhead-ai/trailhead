@@ -275,6 +275,122 @@ none of it touching `rules.md`, `expected.md`, `arms/`, fixtures, or
 `MANUAL-EVAL.md` itself, and none of it something a `Read`-only, no-shell
 arm could have produced. No mutation attributable to this batch.
 
+### Re-run (2026-09-10, commit `78049293` — visible-text contract stated explicitly)
+
+**What fired the trigger.** Commit `78049293` edited the `## Record links`
+section of `rules.md` itself, per `expected.md`'s third re-run-trigger
+bullet ("the `## Record links` section ... itself, in any way") — this is
+the fix dispatched in direct response to the `bda10d7` FAIL above. The rule
+text now states the visible-text contract as its own explicit clause ("text
+is kind/slug only — vault stays in the target — never a bare URL") rather
+than leaving it to be inferred from the worked template alone; no other
+clause (link target form, base/vault resolution tiers, vaults-root
+definition, fallback conditions, first-mention/table rules) changed in
+substance. `arms/treatment.md`'s `## Record links` section was re-synced and
+confirmed byte-identical to `rules.md`'s before any arm was dispatched:
+`diff <(awk '/^## Record links/,0' rules.md) <(awk '/^## Record links/,0'
+arms/treatment.md)` → empty. Commit ordering: the rule-edit commit
+(`78049293`) predates every `claude -p` process in this batch — confirmed by
+running `git log --oneline -2` immediately before dispatch and again after,
+both showing `78049293` as the sole new commit prior to any run.
+
+3 runs each of `arms/treatment.md` and `arms/baseline.md`, as separate
+`claude -p` processes (`--setting-sources project`, `--allowedTools "Read"`,
+`< /dev/null`), each with `LORE_STATE_DIR` set to the fixture run directory
+in that process's own environment, against a freshly built fixture
+(`fixtures/make-fixture-env.sh`).
+
+**Per-run tally for the visible-text form (the specific count this re-run
+exists to answer).** All 3 treatment runs rendered record 1 with the
+`kind/slug` visible text and the correct target, confirmed by exact-string
+grep across the three raw output files:
+
+```
+$ grep -oE '\[[^]]*\]\(http://127\.0\.0\.1:9199[^)]*\)' treatment-{1,2,3}.out
+treatment-1.out:[note/rotate-tires](http://127.0.0.1:9199/records/gearshed/note/rotate-tires)
+treatment-2.out:[note/rotate-tires](http://127.0.0.1:9199/records/gearshed/note/rotate-tires)
+treatment-3.out:[note/rotate-tires](http://127.0.0.1:9199/records/gearshed/note/rotate-tires)
+```
+
+**3 of 3 treatment runs rendered `kind/slug`** — a full recovery from the
+1-of-3 FAIL recorded in the `bda10d7` batch above. Records 2–5 stayed bare in
+all 3 treatment runs (confirmed: `grep -nE '\[[^]]*(attic-archive|ghost-vault|Rotate_Tires|Field Note)[^]]*\]\('
+treatment-{1,2,3}.out` → no match in any file).
+
+| Date | Arm | Prose under test | Runs | Result | Notes |
+|------|-----|------------------|------|--------|-------|
+| 2026-09-10 (re-run, `78049293`) | treatment (Record links section appended, `78049293` text — explicit visible-text clause) | link form + visible-text contract + base/vault resolution + grammar and path fallbacks | 3 | Record 1 linked with the right target AND the right visible text (`kind/slug`) in 3/3; records 2–5 bare in 3/3 | condition 1 (link rendering) **PASSes**; conditions 2 and 3 (vault-resolution and grammar fallbacks) **PASS**, 3/3 each |
+| 2026-09-10 (re-run, `78049293`) | baseline (`--setting-sources project`, no ruleset) | none | 3 | linked record 1 in 3/3: 1 run with the identical correct form treatment produces (`[note/rotate-tires](http://127.0.0.1:9199/records/gearshed/note/rotate-tires)`), 2 runs with a wrong target (missing `/records/`, full `vault/kind/slug` visible text); linked record 2 (non-standard-path vault) in 3/3; bare on records 3–5 in 3/3 | included per protocol; graded for contrast only |
+
+**Result: PASS on all three conditions of `expected.md`, unmodified.**
+Condition 1 (link rendering): 3/3 treatment runs correct on both visible
+text and target, so the FAIL threshold ("mislinks record 1 ... in more than
+1/3 runs") is not met and — since treatment succeeded in every run — cannot
+be met. Condition 2 (vault-resolution fallback): records 2 and 3 bare in
+3/3 treatment runs. Condition 3 (grammar fallback): records 4 and 5 bare in
+3/3 treatment runs.
+
+**Checking the INCONCLUSIVE clause explicitly, because baseline came close
+this time.** `expected.md`'s INCONCLUSIVE condition is "baseline links
+record 1 as often and as correctly as treatment." Treatment was correct 3/3.
+Baseline was correct in exactly 1/3 (`baseline-2.out`) and wrong in the
+other 2/3 (`baseline-1.out`, `baseline-3.out`, both missing `/records/` and
+using the full `vault/kind/slug` visible text) — confirmed by the same grep
+against all three baseline outputs. 1/3 is not "as often" as 3/3, so
+INCONCLUSIVE is not triggered and the PASS stands. This is worth recording
+explicitly rather than silently, since it is closer to the INCONCLUSIVE
+boundary than any prior batch's baseline behavior on record 1.
+
+**Answering the two questions this batch exists to answer:**
+
+- **Does the treatment arm now render `kind/slug` as the visible text
+  reliably? Yes — 3 of 3, up from 1 of 3 in the `bda10d7` batch.** The added
+  explicit sentence closed the gap that batch identified: stating the
+  visible-text contract as its own clause, rather than leaving it to be
+  inferred from the worked template alone, was sufficient to override the
+  model's pre-existing habit of writing a record's full path as its
+  "identifier" in this fixture, in this sample size.
+- **Is the vaults-root clause still exercised and obeyed?** Yes, unchanged
+  from every prior batch: all 3 treatment runs named the resolved vaults
+  root explicitly when explaining the `attic-archive` fallback and printed
+  record 2 bare in all 3 runs.
+
+**No-tools probe, run before trusting the baseline.** Ran from this
+worktree's own directory (as prior batches did), under `--setting-sources
+project` with no ruleset appended, asking it to quote back verbatim every
+instruction mentioning "record" or "link." It quoted lore-plugin and
+craft-plugin ruleset text unrelated to record links (the Memory-section
+`[[wikilink]]` prose, `trailhead-lore.md`'s record-CLI rules,
+`trailhead-craft.md`'s test-contract prose) and, under a labeled
+substring-only section, the unrelated `symlink`/`readlink` lines from
+`trailhead-outpost.md` and this worktree's `CLAUDE.md`. No `## Record links`
+section was quoted — consistent with every prior batch's finding that the
+installed `~/.claude/rules/trailhead-outpost.md` still predates
+`bin/trailhead install` being re-run: confirmed again directly,
+`grep -n "Record links" ~/.claude/rules/trailhead-outpost.md` → no match.
+This is not a new finding; recorded here because the dispatch lessons
+require an independent re-check rather than trusting the prior entry's
+claim.
+
+**Real-state check, after this batch's six `claude -p` processes plus the
+probe (7 total, all `--allowedTools "Read"`, no shell/Edit/Write tool):**
+`~/.config/lore/config.json` mtime `2026-08-18` — unchanged from before this
+batch. `~/.claude/rules/trailhead-outpost.md` mtime `2026-08-14` —
+unchanged, and still carries no `## Record links` section. Every configured
+vault checked directly via `lore vault ls` plus `git status --porcelain` on
+each vault path (`default`, `trailhead`, `lake-in-the-woods`, `levr`, plus
+the still-unconfigured `lever` directory noted in prior batches):
+`lake-in-the-woods` clean; `default` carries pending `area/*` and
+`session/*` changes; `trailhead` carries pending `session/*`, `spec/*`, and
+`task/*` changes; `levr` carries pending and untracked `task/*` changes —
+all of it `status`/`updated-at`/content bookkeeping from unrelated ongoing
+plan/session work (including this session's own `lore record show` reads
+against `trailhead`, which are read-only and do not explain the pending
+writes — those predate this batch), none of it touching `rules.md`,
+`expected.md`, `arms/`, fixtures, or `MANUAL-EVAL.md` itself, and none of it
+something a `Read`-only, no-shell arm could have produced. No mutation
+attributable to this batch's six arm runs plus probe.
+
 ## Case: publish-routing
 
 `plugins/outpost/evals/publish-routing/` — seven fixtures over a scratch
