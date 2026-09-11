@@ -1040,6 +1040,12 @@ to say still gets a line, so a reader can tell it ran. Worked example:
 > state-coverage: parent 4, doc 4, missing 0; criterion-observations: covered 3, observed 3, missing
 > 0; push: 2 repos pushed, 1 already up to date; metrics: 4 tasks, 7 dispatches (1.75/task), 42m
 > wall clock, 1 lesson written, 2 lessons consumed
+>
+> No PR was opened — that call is yours. Run this when you're ready:
+
+```
+/portage:pull_request
+```
 
 **Measurement tally.** For each correctness Critical/Important finding, record it **cited against
 the specific plan section it was classified under** — not a bare count. Each finding is classified
