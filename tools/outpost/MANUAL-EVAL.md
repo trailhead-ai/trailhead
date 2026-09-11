@@ -173,6 +173,108 @@ directory) checked directly: `default` and `lake-in-the-woods` clean;
 nothing a `Read`-only, no-shell arm could have produced. No mutation
 attributable to these six runs.
 
+### Re-run (2026-09-10, commit `bda10d7` — FIX E link-text + FIX B fixture repoint)
+
+**What fired the trigger.** Two edits to the prose and fixture under test,
+both landing before any arm in this batch was dispatched (`bda10d7`): (1) the
+rule's link visible text changed from `vault/kind/slug` to `kind/slug` — an
+operator decision, since no consumer accepted the old form (`lore record show
+<vault>/<kind>/<slug>` returns "record not found"; the target URL is
+unchanged) — and (2) the fixture's standard-path vault moved from
+`vaults-root/gearshed` to `vaults/gearshed`, with the dispatch command now
+pinning `LORE_STATE_DIR=<run-dir>` in each arm process's own environment so
+the resolved vaults root is exactly `<run-dir>/vaults`. Under the prior
+layout every fixture record was formally outside the vaults root, so the
+vaults-root clause was unexercised by design, not merely unobserved — this
+re-run's whole purpose is to close that gap. `arms/treatment.md`'s `## Record
+links` section confirmed byte-identical to `rules.md`'s before dispatch:
+`diff <(awk '/^## Record links/,0' rules.md) <(awk '/^## Record links/,0'
+arms/treatment.md)` → empty.
+
+3 runs each of `arms/treatment.md` and `arms/baseline.md`, as separate
+`claude -p` processes (`--setting-sources project`, `--allowedTools "Read"`,
+`< /dev/null`), each with `LORE_STATE_DIR` set to the fixture run directory
+in that process's own environment, against a freshly built fixture
+(`fixtures/make-fixture-env.sh`).
+
+| Date | Arm | Prose under test | Runs | Result | Notes |
+|------|-----|------------------|------|--------|-------|
+| 2026-09-10 (re-run, `bda10d7`) | treatment (Record links section appended, `bda10d7` text — `kind/slug` visible text, `LORE_STATE_DIR` tier) | link form + base/vault resolution + grammar and path fallbacks | 3 | Record 1 linked with the **right target** in 3/3, but the **right visible text** (`kind/slug`) in only 1/3 — the other two runs rendered `vault/kind/slug`, the pre-FIX-E form; records 2–5 bare in 3/3 | condition 1 (link rendering) **FAILs** per `expected.md`'s own threshold (mislinks record 1 in more than 1/3 runs); conditions 2 and 3 (vault-resolution and grammar fallbacks) **PASS**, 3/3 each |
+| 2026-09-10 (re-run, `bda10d7`) | baseline (`--setting-sources project`, no ruleset) | none | 3 | linked record 1 in 3/3 with a wrong target (missing `/records/`); linked record 2 (non-standard-path vault) in 2/3; bare on records 3–5 in 3/3 | unchanged prose (`arms/baseline.md`); included per protocol |
+
+**Result: FAIL on condition 1 (link rendering), reported as a genuine
+regression rather than smoothed toward the earlier PASS.** Two of three
+treatment runs (`treatment-2`, `treatment-3`) rendered record 1 as
+`[gearshed/note/rotate-tires](http://127.0.0.1:9199/records/gearshed/note/rotate-tires)`
+— the full `vault/kind/slug` identifier as visible text, not the `kind/slug`
+form FIX E specifies — even though the rule text they were given states
+`[kind/slug](<base>/records/vault/kind/slug)` verbatim and correctly, and
+even though `treatment-1` (identical prose, identical fixture) rendered it
+correctly as `[note/rotate-tires](http://127.0.0.1:9199/records/gearshed/note/rotate-tires)`.
+Per `expected.md`'s own FAIL threshold — "mislinks record 1 (wrong visible
+text or wrong target) ... in more than 1/3 runs for that record" — 2/3
+exceeds that bar. This is not attributable to the rule text being wrong (the
+rule states the correct form, confirmed byte-identical to `rules.md`) but to
+the model not reliably applying it: the pre-existing habit of writing the
+full path as a record's "identifier" competes with the newly-shortened
+visible-text instruction and won two of three times in this small sample.
+
+**Answering the two questions this batch exists to answer:**
+
+- **Is the vaults-root clause now exercised and obeyed? Yes, on both counts.**
+  Exercised: with `LORE_STATE_DIR` pinned, `gearshed` is a genuine direct
+  child of the resolved vaults root and `attic-archive` genuinely is not —
+  every treatment run's own reasoning named the resolved vaults root path
+  explicitly when explaining why `attic-archive` stayed bare (e.g.
+  "`attic-archive` resolves in the vault listing, but its path
+  (`…/other-storage/attic-archive`) is not a direct child of the vaults
+  root"), which the prior `vaults-root/` layout could not have produced
+  honestly. Obeyed: all 3 treatment runs printed record 2 bare.
+- **Does the treatment arm render `kind/slug` as the visible text? Only
+  sometimes — 1 of 3 runs.** This is the regression above. Reported plainly:
+  FIX E's rule text is correctly in place and correctly worded, but this
+  batch does not show the model reliably obeying the visible-text half of
+  it. Contrast: baseline's record-1 link in this batch also used the full
+  `vault/kind/slug` form in all 3 runs, so 2/3 treatment runs matching
+  baseline's `vault/kind/slug` habit *and* diverging from the rule's own
+  wording is consistent with the shortened visible text competing with a
+  stronger default than the rule currently overrides.
+
+**No-tools probe, and a correction to a prior entry's claim.** Ran the probe
+prescribed above (`--setting-sources project`, no ruleset, asked to quote
+every rule mentioning "record" or "link"), from this worktree's own
+directory rather than the isolated fixture. It quoted a line verbatim from
+the installed `~/.claude/rules/trailhead-outpost.md`
+("Rejected before anything is written: symlinks or non-regular files...").
+**This contradicts an earlier entry's framing** (2026-09-10, first re-run
+above), which read the probe's silence on `## Record links` as evidence that
+`--setting-sources project` drops that file. It does not: this run shows the
+file is still loaded and its content still reaches the model — `--setting-
+sources project` scopes which `settings.json` layers apply, not whether
+`~/.claude/rules/*.md` is read. The probe's `## Record links` silence in
+every run to date has one correct explanation only: the installed copy at
+`~/.claude/rules/trailhead-outpost.md` predates `bin/trailhead install`
+being re-run and genuinely carries no such section
+(confirmed again: `grep -n "Record links" ~/.claude/rules/trailhead-outpost.md`
+→ no match). The measured baseline/treatment split in this case has never
+rested on the file being dropped — the arms' controlling prose reaches them
+through `--append-system-prompt` regardless — but the earlier claim about
+the mechanism was wrong and is corrected here rather than repeated.
+
+**Real-state check, after this batch's six `claude -p` processes plus the
+probe (7 total, all `--allowedTools "Read"`, no shell/Edit/Write tool):**
+`~/.config/lore/config.json` mtime `2026-08-18` — unchanged from before this
+batch. `~/.claude/rules/trailhead-outpost.md` mtime `2026-08-14` — unchanged,
+and still carries no `## Record links` section. Every configured vault's git
+status checked directly (`default`, `lake-in-the-woods`, `lever`, `levr`,
+`trailhead`): `default` and `lake-in-the-woods` clean; `lever` clean; `levr`
+carries pending `task/*` changes plus one new untracked `task/*.json`, and
+`trailhead` carries pending `session/*` and `task/*` changes — all of it
+`status`/`updated-at` bookkeeping from unrelated ongoing plan/session work,
+none of it touching `rules.md`, `expected.md`, `arms/`, fixtures, or
+`MANUAL-EVAL.md` itself, and none of it something a `Read`-only, no-shell
+arm could have produced. No mutation attributable to this batch.
+
 ## Case: publish-routing
 
 `plugins/outpost/evals/publish-routing/` — seven fixtures over a scratch
