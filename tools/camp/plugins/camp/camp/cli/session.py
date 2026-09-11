@@ -1562,14 +1562,17 @@ def _cmd_sessions_host_cli(
     )
 
 
-#: Exit code for `camp launch --host` when the connection completed and the
-#: invocation then exceeded its bound without answering (`Certainty.UNKNOWN`).
-#: Distinct from 0 (success) and from every certain-failure exit — the fixed
-#: `1` the seven locally-classified transport failures share, or the far
-#: side's own exit code when the transport happens to propagate it — so a
-#: scripted caller can branch on "check before retrying" without parsing
-#: stderr (docs/design/a-session-starts-on-a-named-machine.md, "Added by
-#: council review (Critical)").
+#: Exit code for `camp launch --host` when certainty is unknown
+#: (`Certainty.UNKNOWN`) — either the connection completed and the
+#: invocation then exceeded its bound without answering, or a local
+#: producer feeding a streamed invocation failed after the remote already
+#: ran. Distinct from 0 (success) and from every certain-failure exit — the
+#: fixed `1` the five locally-classified transport failures reachable here
+#: share, or the far side's own exit code when the transport happens to
+#: propagate it — so a scripted caller can branch on "check before
+#: retrying" without parsing stderr
+#: (docs/design/a-session-starts-on-a-named-machine.md, "Added by council
+#: review (Critical)").
 _LAUNCH_HOST_UNKNOWN_EXIT_CODE = 3
 
 
@@ -1650,10 +1653,15 @@ def _cmd_launch_host_cli(
             f"camp launch: check before retrying — run: {command}",
             file=sys.stderr,
         )
+        # UNKNOWN now covers two shapes (`Certainty.UNKNOWN`'s docstring at
+        # relay.py's Certainty enum) — a connection that stopped answering,
+        # or a local producer that failed after the remote already ran. This
+        # line names neither mechanism; `answer.notices` (printed next)
+        # already carries the outcome-specific sentence for whichever one it
+        # was.
         print(
             f"camp launch: camp does not know whether a session was started "
-            f"on host {host_name!r} — the connection stopped answering "
-            "before the far side reported back",
+            f"on host {host_name!r} — the outcome could not be confirmed",
             file=sys.stderr,
         )
         for notice in answer.notices:
@@ -1663,13 +1671,14 @@ def _cmd_launch_host_cli(
                 "ok": False,
                 "host": host_name,
                 "certainty": answer.certainty.value,
-                "reason": "connection stopped answering before the far side reported back",
+                "reason": "outcome could not be confirmed",
             }))
         sys.exit(_LAUNCH_HOST_UNKNOWN_EXIT_CODE)
 
-    # A certain failure: either one of the seven locally-classified transport
-    # states (host unreachable, no pinned key, ...) or a far-side refusal
-    # relayed in its own words. Either way nothing was started, so the same
+    # A certain failure: either one of the five locally-classified transport
+    # states reachable here (host unreachable, no pinned key, ...) or a
+    # far-side refusal relayed in its own words. Either way nothing was
+    # started, so the same
     # plain sentence closes the report for both — the far side's own words
     # (when there are any) are relayed exactly as `answer.notices` already
     # carries them, unwrapped, before it.

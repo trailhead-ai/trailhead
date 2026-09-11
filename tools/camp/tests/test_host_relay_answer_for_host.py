@@ -371,7 +371,7 @@ def test_certainty_producer_failed_is_unknown(monkeypatch) -> None:
     assert answer.certainty == _relay_module().Certainty.UNKNOWN
 
 
-def test_stopped_responding_is_the_only_unknown_outcome() -> None:
+def test_exactly_stopped_responding_and_producer_failed_are_unknown() -> None:
     """Enumerates every transport outcome type by reflection, so a later
     outcome added to `camp.host.transport` without a certainty mapping
     entry fails this test rather than silently defaulting to certain."""

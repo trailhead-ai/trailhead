@@ -180,6 +180,23 @@ def test_remote_nonzero_exit_classifies_as_remote_refusal_with_exit_code_and_std
     assert outcome.stderr == "camp transfer-receive: bad bundle\n"
 
 
+def test_producer_failure_takes_precedence_over_remote_refusal() -> None:
+    """If BOTH the producer and the remote exit non-zero, the outcome is
+    `ProducerFailed`, never `RemoteRefusal` — the remote's own exit code and
+    stderr are never trustworthy once the stream it read may have been
+    truncated or corrupt, per `stream_camp`'s docstring."""
+    producer = _quick_producer(b"partial-bundle-bytes", exit_code=7)
+    calls: list = []
+    child = _FakeChild(exit_code=1, stdout=b"", stderr=b"camp transfer-receive: bad bundle\n")
+
+    outcome = transport.stream_camp(
+        _HOST, ["transfer-receive", "history"], producer, spawn=_fake_spawn(calls, child)
+    )
+
+    assert isinstance(outcome, transport.ProducerFailed)
+    assert outcome.exit_code == 7
+
+
 # ---------------------------------------------------------------------------
 # 4. Shared classifier — Unreachable and IdentityChanged
 # ---------------------------------------------------------------------------
