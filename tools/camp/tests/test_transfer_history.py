@@ -102,7 +102,17 @@ def sender_and_peer(tmp_path: Path):
     _git(peer_repo, "init", "-q", "-b", "main")
     (peer_repo / "peer-only.md").write_text("# peer's own unrelated history\n")
     _git(peer_repo, "add", "peer-only.md")
-    _git(peer_repo, "-c", "user.email=peer@test.com", "-c", "user.name=Peer", "commit", "-m", "peer init", "--no-gpg-sign")
+    _git(
+        peer_repo,
+        "-c",
+        "user.email=peer@test.com",
+        "-c",
+        "user.name=Peer",
+        "commit",
+        "-m",
+        "peer init",
+        "--no-gpg-sign",
+    )
 
     env = camp_state_env(tmp_path)
     group = _member_group(peer_repo)
@@ -343,7 +353,17 @@ class TestForceUpdateOnRerun:
 
         (g["sender_repo"] / "second.txt").write_text("more\n")
         _git(g["sender_repo"], "add", "second.txt")
-        _git(g["sender_repo"], "-c", "user.email=t@t.com", "-c", "user.name=t", "commit", "-m", "second", "--no-gpg-sign")
+        _git(
+            g["sender_repo"],
+            "-c",
+            "user.email=t@t.com",
+            "-c",
+            "user.name=t",
+            "commit",
+            "-m",
+            "second",
+            "--no-gpg-sign",
+        )
         new_tip = _git_out(g["sender_repo"], "rev-parse", "HEAD")
         second_bundle = _bundle_bytes(g["sender_repo"], g["branch"])
 
