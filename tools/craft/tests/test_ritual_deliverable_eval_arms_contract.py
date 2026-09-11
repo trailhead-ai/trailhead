@@ -56,13 +56,23 @@ LIVE_ARMS = {
     "execute-rule-only.md": (["execute/SKILL.md", "_shared/execute.md"], True),
 }
 
-FROZEN_ARMS = {
-    "treatment.md": "frozen record of a rejected prose variant, kept as evidence (expected.md, 'What that means for the arms')",
-    "reader-absent.md": "frozen record of a rejected prose variant, kept as evidence (expected.md, 'What that means for the arms')",
-    "plan-rule-only.md": "frozen pre-edit baseline; post-edit mirror is plan-treatment.md (expected.md, 'Extension — Task 5')",
-    "review-rule-only.md": "frozen pre-edit baseline; post-edit mirror is review-treatment.md (expected.md, 'Extension — Task 5')",
-}
+_REJECTED_VARIANT = (
+    "frozen record of a rejected prose variant, kept as evidence "
+    "(expected.md, 'What that means for the arms')"
+)
 
+FROZEN_ARMS = {
+    "treatment.md": _REJECTED_VARIANT,
+    "reader-absent.md": _REJECTED_VARIANT,
+    "plan-rule-only.md": (
+        "frozen pre-edit baseline; post-edit mirror is plan-treatment.md "
+        "(expected.md, 'Extension — Task 5')"
+    ),
+    "review-rule-only.md": (
+        "frozen pre-edit baseline; post-edit mirror is review-treatment.md "
+        "(expected.md, 'Extension — Task 5')"
+    ),
+}
 
 
 def _drift_message(arm_name, sources, with_tail, expected, actual) -> str:
@@ -78,6 +88,7 @@ def _drift_message(arm_name, sources, with_tail, expected, actual) -> str:
         f"  expected: {expected[lo:hi]!r}\n"
         f"  actual:   {actual[lo:hi]!r}"
     )
+
 
 def _arm_files() -> list[Path]:
     return sorted(ARMS_DIR.glob("*.md"))

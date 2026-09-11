@@ -261,8 +261,8 @@ class TestObservationVariesWithTheDeliverable:
         for args, deliverable_a, deliverable_b, prefix in cases:
             result_a = run(deliverable_a, *args)
             result_b = run(deliverable_b, *args)
-            [line_a] = [l for l in result_a.stdout.splitlines() if l.startswith(prefix)]
-            [line_b] = [l for l in result_b.stdout.splitlines() if l.startswith(prefix)]
+            [line_a] = [ln for ln in result_a.stdout.splitlines() if ln.startswith(prefix)]
+            [line_b] = [ln for ln in result_b.stdout.splitlines() if ln.startswith(prefix)]
             assert line_a != line_b, f"{prefix} did not vary with the deliverable"
 
 
@@ -379,7 +379,6 @@ class TestRegressionAgainstOriginalMeasurement:
             "the regression pin's own enumeration disagrees with the task's premise"
         )
 
-        checked = 0
         for capture in captures:
             match = self.RITUAL_NAME_RE.match(capture.name)
             assert match, f"capture filename {capture.name!r} did not match the expected shape"
@@ -399,6 +398,3 @@ class TestRegressionAgainstOriginalMeasurement:
             assert new_exit == old_exit, (
                 f"{capture.name}: exit code moved — was {old_exit}, now {new_exit}"
             )
-            checked += 1
-
-        assert checked == 54
