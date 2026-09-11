@@ -363,6 +363,19 @@ def default_stream_spawner(
     )
 
 
+#: The injected seam for the local producer :func:`stream_camp` reads from —
+#: argv in, a running ``Popen[bytes]`` with ``stdout=PIPE`` out — so a caller
+#: assembling a producer can substitute a recording fake without touching
+#: :data:`StreamSpawner`, the separate seam for the ssh child itself.
+ProducerSpawner = Callable[[Sequence[str]], "subprocess.Popen[bytes]"]
+
+
+def default_producer_spawn(argv: Sequence[str]) -> "subprocess.Popen[bytes]":
+    """Spawn *argv* with only stdout piped — the shape :func:`stream_camp`
+    requires of a producer it will read from and classify on exit."""
+    return subprocess.Popen(list(argv), stdout=subprocess.PIPE)
+
+
 def stream_camp(
     host: Host,
     remote_argv: Sequence[str],

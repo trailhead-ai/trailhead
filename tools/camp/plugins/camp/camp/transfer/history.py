@@ -28,17 +28,18 @@ call's `basis_commit`.
 
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
-from typing import Callable, Sequence
+from typing import Sequence
 
 from ..host.config import Host
 from ..host.transport import (
     DEFAULT_CONNECT_TIMEOUT_SECONDS,
     DEFAULT_SERVER_ALIVE_COUNT_MAX,
     DEFAULT_SERVER_ALIVE_INTERVAL_SECONDS,
+    ProducerSpawner,
     StreamSpawner,
     TransportOutcome,
+    default_producer_spawn,
     default_stream_spawner,
     stream_camp,
 )
@@ -49,18 +50,6 @@ __all__ = [
     "build_bundle_argv",
     "send_history",
 ]
-
-#: The injected seam for the sender-side git subprocess — mirrors
-#: `host.transport.StreamSpawner`'s shape (argv in, a running `Popen[bytes]`
-#: with `stdout=PIPE` out) so tests can substitute a recording fake without
-#: touching `stream_camp`'s own seam.
-ProducerSpawner = Callable[[Sequence[str]], "subprocess.Popen[bytes]"]
-
-
-def default_producer_spawn(argv: Sequence[str]) -> "subprocess.Popen[bytes]":
-    """Spawn *argv* with only stdout piped — the shape `stream_camp` requires
-    of a producer it will read from and classify on exit."""
-    return subprocess.Popen(list(argv), stdout=subprocess.PIPE)
 
 
 def build_bundle_argv(repo_root: Path, ref: str, *, basis_commit: str | None) -> list[str]:

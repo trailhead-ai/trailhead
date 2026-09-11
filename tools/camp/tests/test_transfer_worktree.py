@@ -53,10 +53,6 @@ def _git(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-def _git_out(repo: Path, *args: str) -> str:
-    return _git(repo, *args).stdout.strip()
-
-
 def _archive_bytes(worktree: Path, excluded: tuple[str, ...] = ()) -> bytes:
     from camp.transfer.worktree import write_archive
 

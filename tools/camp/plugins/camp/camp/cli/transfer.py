@@ -123,23 +123,25 @@ def _cmd_transfer_probe_cli(args: list[str]) -> None:
 
 
 # ---------------------------------------------------------------------------
-# camp transfer-receive — the peer side of a workspace move (begin / finish)
+# camp transfer-receive — the peer side of a workspace move
 # ---------------------------------------------------------------------------
 
 
 #: The closed set of phases `camp transfer-receive` admits, in dispatch
-#: order. Admitting a new phase is a one-line addition here plus a new
-#: `if phase == "<name>":` branch below — never a second closed-tuple site.
+#: order. Each name is also the `camp.transfer.receive` entry point it
+#: dispatches to, so admitting a new phase is a one-line addition here plus —
+#: only if it carries arguments of its own — a branch in the argument
+#: gathering below, never a second closed-set site.
 _PHASES = ("begin", "finish", "history", "worktree")
 
 
 def _cmd_transfer_receive_cli(args: list[str]) -> None:
-    """camp transfer-receive begin|finish|history --group <g> --slug <s> [...]
+    """camp transfer-receive begin|finish|history|worktree --group <g> --slug <s> [...]
 
     Dispatched here exactly like `camp transfer-probe` — every local read and
     write is this function's (and `camp.transfer.receive`'s) to make; no path
     is ever built from a caller-supplied field. See `camp.transfer.receive`'s
-    module docstring for the full begin/finish/history contract.
+    module docstring for each phase's contract.
     """
     from ..group.config import GroupConfigError, load_all_groups
     from ..spine import _consume_flag_value
@@ -175,67 +177,40 @@ def _cmd_transfer_receive_cli(args: list[str]) -> None:
         print(f"camp transfer-receive: {e}", file=sys.stderr)
         sys.exit(1)
 
+    # Each branch below gathers only the arguments its own phase adds; the
+    # call/refusal/print tail is shared, so every phase answers on stdout and
+    # refuses on stderr in exactly one way. `phase` is looked up on
+    # `receive_mod` by name, which is safe precisely because it was already
+    # checked against the closed `_PHASES` set above — a caller cannot reach
+    # any other attribute of that module through it.
+    phase_kwargs: dict = {}
     if phase == "begin":
         owner = _consume_flag_value(rest, "--owner")
         if not owner:
             print("camp transfer-receive: --owner is required for begin", file=sys.stderr)
             sys.exit(1)
-        overwrite = "--overwrite" in rest
-        try:
-            answer = receive_mod.begin(
-                groups=groups,
-                group_name=group_name,
-                slug=slug,
-                sender=owner,
-                overwrite=overwrite,
-            )
-        except receive_mod.ReceiveRefused as e:
-            print(f"camp transfer-receive: {e}", file=sys.stderr)
-            sys.exit(1)
-        print(json.dumps(answer))
-        return
-
-    if phase == "history":
+        phase_kwargs = {"sender": owner, "overwrite": "--overwrite" in rest}
+    elif phase in ("history", "worktree"):
         member = _consume_flag_value(rest, "--member")
         if not member:
-            print("camp transfer-receive: --member is required for history", file=sys.stderr)
-            sys.exit(1)
-        bundle_bytes = sys.stdin.buffer.read()
-        try:
-            answer = receive_mod.history(
-                groups=groups,
-                group_name=group_name,
-                slug=slug,
-                member=member,
-                bundle_bytes=bundle_bytes,
+            print(
+                f"camp transfer-receive: --member is required for {phase}",
+                file=sys.stderr,
             )
-        except receive_mod.ReceiveRefused as e:
-            print(f"camp transfer-receive: {e}", file=sys.stderr)
             sys.exit(1)
-        print(json.dumps(answer))
-        return
-
-    if phase == "worktree":
-        member = _consume_flag_value(rest, "--member")
-        if not member:
-            print("camp transfer-receive: --member is required for worktree", file=sys.stderr)
-            sys.exit(1)
-        try:
-            answer = receive_mod.worktree(
-                groups=groups,
-                group_name=group_name,
-                slug=slug,
-                member=member,
-                archive_stream=sys.stdin.buffer,
-            )
-        except receive_mod.ReceiveRefused as e:
-            print(f"camp transfer-receive: {e}", file=sys.stderr)
-            sys.exit(1)
-        print(json.dumps(answer))
-        return
+        phase_kwargs = {"member": member}
+        if phase == "history":
+            phase_kwargs["bundle_bytes"] = sys.stdin.buffer.read()
+        else:
+            phase_kwargs["archive_stream"] = sys.stdin.buffer
 
     try:
-        answer = receive_mod.finish(groups=groups, group_name=group_name, slug=slug)
+        answer = getattr(receive_mod, phase)(
+            groups=groups,
+            group_name=group_name,
+            slug=slug,
+            **phase_kwargs,
+        )
     except receive_mod.ReceiveRefused as e:
         print(f"camp transfer-receive: {e}", file=sys.stderr)
         sys.exit(1)
