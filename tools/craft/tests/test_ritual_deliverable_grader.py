@@ -167,6 +167,24 @@ class TestExitCodes:
         assert result.returncode == 2
         assert "reason-code: missing-command" in result.stderr
 
+    def test_empty_command_exits_two_rather_than_matching_a_blank_line(self):
+        # An empty --command makes the own-line test match any blank line, so the
+        # grader would report a pass at a deliverable naming no command at all.
+        # Fail closed at parse time instead: the shape is unobservable, not passing.
+        deliverable = f"[{RECORD}](http://x/{RECORD})\n\nClosing prose, no command.\n"
+        result = run(deliverable, "--record", RECORD, "--command", "")
+        assert result.returncode == 2
+        assert "reason-code: empty-command" in result.stderr
+        assert "next-command: own-line" not in result.stdout
+
+    def test_empty_command_exits_two_even_when_exempt(self):
+        # The exempt path reads the deliverable through the same shape helper, so
+        # it inherits the same fail-open and must refuse the same way.
+        deliverable = f"[{RECORD}](http://x/{RECORD})\n\nClosing prose.\n"
+        result = run(deliverable, "--record", RECORD, "--command", "", "--exempt")
+        assert result.returncode == 2
+        assert "reason-code: empty-command" in result.stderr
+
 
 class TestExemptObservation:
     """An exempt outcome still passes, but per the active lesson `a-classification-

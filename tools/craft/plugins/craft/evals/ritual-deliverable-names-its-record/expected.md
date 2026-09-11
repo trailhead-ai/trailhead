@@ -529,7 +529,9 @@ never embedded mid-sentence. No other change is made to either file: `arms/plan-
 `arms/review-treatment.md` are byte-identical to `arms/plan-rule-only.md` and
 `arms/review-rule-only.md` respectively except for this one handoff's shape (confirmed by `diff`
 before dispatch — each diff touches only the handoff paragraph and its replacement fenced block, no
-other line). The record-link rule tail each arm appends is byte-identical to the tail
+other line). *As-of-then, like the citations above: this was true when the section was written and
+is not a present-tense property. Task 5 of the following slice fenced `review`'s second handoff too,
+so `review-treatment.md` now differs from `review-rule-only.md` at two handoffs rather than one.* The record-link rule tail each arm appends is byte-identical to the tail
 `plan-rule-only.md`/`review-rule-only.md` already carry — the reader rule is not touched, per this
 task's own instruction not to restate or re-derive the record-link rule.
 
@@ -580,7 +582,8 @@ same completion-marker and infrastructure-exclusion rules as every other arm in 
 
 **Contamination check.** Both treatment arms are checked identical to their own `rule-only`
 counterpart apart from the one handoff paragraph, by `diff` before dispatch (see "The edit" above) —
-no other line, including the appended reader-rule tail, differs.
+no other line, including the appended reader-rule tail, differs. *As-of-then: `review-treatment.md`
+now differs at two handoffs, per the note under "The edit".*
 
 ## Extension — Task 3, pre-registration for the three remaining AC7 outcome sites
 

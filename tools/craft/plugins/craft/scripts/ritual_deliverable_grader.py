@@ -64,8 +64,11 @@ Exit codes:
        next-command is `embedded` or `absent`
     2  could not grade — fail-closed: empty stdin (`reason-code:
        empty-stdin`), non-UTF-8 stdin (`reason-code: invalid-utf8-stdin`),
-       or `--command` omitted without `--exempt`
-       (`reason-code: missing-command`). NEVER exits 0 or 1 without having
+       `--command` omitted without `--exempt`
+       (`reason-code: missing-command`), or a `--command` that is empty or
+       only whitespace (`reason-code: empty-command`) — an empty command
+       would make the own-line test match any blank line, reporting a pass
+       at a deliverable naming no command at all. NEVER exits 0 or 1 without having
        actually read a gradable deliverable. A missing required argument
        (e.g. `--record`) exits 2 via argparse's own usage error instead,
        with no `reason:`/`reason-code:` pair — argparse owns that path
@@ -83,6 +86,7 @@ _LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
 _EMPTY_STDIN_REASON_CODE = "empty-stdin"
 _INVALID_UTF8_STDIN_REASON_CODE = "invalid-utf8-stdin"
 _MISSING_COMMAND_REASON_CODE = "missing-command"
+_EMPTY_COMMAND_REASON_CODE = "empty-command"
 
 
 def _err(msg: str) -> None:
@@ -147,6 +151,12 @@ def main(argv: list[str]) -> int:
     if not args.exempt and args.command is None:
         _err("reason: --command is required unless --exempt is set")
         _err(f"reason-code: {_MISSING_COMMAND_REASON_CODE}")
+        return 2
+
+    if args.command is not None and not args.command.strip():
+        _err("reason: --command is empty or only whitespace, so no command shape")
+        _err("reason: can be observed — an empty command matches every blank line")
+        _err(f"reason-code: {_EMPTY_COMMAND_REASON_CODE}")
         return 2
 
     raw = sys.stdin.buffer.read()
