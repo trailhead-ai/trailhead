@@ -25,6 +25,7 @@ import os
 import shlex
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -279,6 +280,144 @@ def test_connection_dying_without_closing_is_classified_within_a_bounded_time() 
     assert isinstance(outcome, transport.StoppedResponding)
     assert outcome.execution_timeout == expected_bound
     assert elapsed < 5.0
+
+
+# ---------------------------------------------------------------------------
+# 6b. The liveness bound is progress-based, not an absolute deadline — a
+# transfer that keeps moving bytes past the bound must not be killed.
+# ---------------------------------------------------------------------------
+
+
+def test_streaming_past_the_bound_with_continuous_progress_is_not_killed() -> None:
+    chunk_count = 12
+    interval_between_chunks = 0.1
+    script = (
+        "import sys, time\n"
+        f"for _ in range({chunk_count}):\n"
+        "    sys.stdout.buffer.write(b'x' * 1024)\n"
+        "    sys.stdout.flush()\n"
+        f"    time.sleep({interval_between_chunks})\n"
+    )
+    producer = subprocess.Popen([sys.executable, "-c", script], stdout=subprocess.PIPE)
+
+    def _drain_stdin_spawn(argv, env):
+        return subprocess.Popen(
+            [sys.executable, "-c", "import sys; sys.stdin.buffer.read()"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+    interval, count_max, connect_timeout = 0.05, 2, 0.01
+    bound = interval * count_max + connect_timeout
+    total_streaming_time = chunk_count * interval_between_chunks
+
+    started = time.monotonic()
+    outcome = transport.stream_camp(
+        _HOST,
+        ["transfer-receive", "history"],
+        producer,
+        connect_timeout=connect_timeout,
+        server_alive_interval=interval,
+        server_alive_count_max=count_max,
+        spawn=_drain_stdin_spawn,
+    )
+    elapsed = time.monotonic() - started
+
+    assert bound < total_streaming_time, "fixture must exceed the local bound to be discriminating"
+    assert isinstance(outcome, transport.Answered)
+    assert elapsed >= total_streaming_time * 0.8
+
+
+# ---------------------------------------------------------------------------
+# 8. The producer's stdout is drained so it never blocks writing into a full
+# pipe when the remote refuses before consuming the stream, and the wait on
+# it is bounded rather than indefinite.
+# ---------------------------------------------------------------------------
+
+
+def test_producer_stdout_is_drained_so_it_never_blocks_on_early_peer_refusal() -> None:
+    def _refuse_immediately_spawn(argv, env):
+        return subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                "import sys; sys.stderr.write('refused: bad remote\\n'); sys.exit(1)",
+            ],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+    producer = subprocess.Popen(
+        [sys.executable, "-c", "import sys, os; sys.stdout.buffer.write(os.urandom(5 * 1024 * 1024))"],
+        stdout=subprocess.PIPE,
+    )
+
+    result: dict = {}
+
+    def _run() -> None:
+        result["outcome"] = transport.stream_camp(
+            _HOST, ["transfer-receive", "history"], producer, spawn=_refuse_immediately_spawn
+        )
+
+    thread = threading.Thread(target=_run, daemon=True)
+    started = time.monotonic()
+    thread.start()
+    thread.join(timeout=10.0)
+    elapsed = time.monotonic() - started
+
+    assert not thread.is_alive(), (
+        f"stream_camp did not return within {elapsed:.1f}s — producer.wait() "
+        "likely hung on an undrained producer.stdout pipe"
+    )
+
+    outcome = result["outcome"]
+    assert isinstance(outcome, transport.RemoteRefusal)
+    assert outcome.exit_code == 1
+    assert "refused: bad remote" in outcome.stderr
+
+
+# ---------------------------------------------------------------------------
+# 8b. The wait on the producer, once the ssh child has completed and the
+# producer's output is fully drained, is itself bounded — a producer that
+# keeps running after closing its stdout is killed rather than hung on.
+# ---------------------------------------------------------------------------
+
+
+def test_producer_wait_is_bounded_after_its_output_is_fully_drained() -> None:
+    producer = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            "import sys, os, time\n"
+            "sys.stdout.buffer.write(b'tiny-payload')\n"
+            "sys.stdout.flush()\n"
+            "os.close(sys.stdout.fileno())\n"
+            "time.sleep(30)\n",
+        ],
+        stdout=subprocess.PIPE,
+    )
+
+    def _consume_stdin_spawn(argv, env):
+        return subprocess.Popen(
+            [sys.executable, "-c", "import sys; sys.stdin.buffer.read()"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+    started = time.monotonic()
+    outcome = transport.stream_camp(
+        _HOST, ["transfer-receive", "history"], producer, spawn=_consume_stdin_spawn
+    )
+    elapsed = time.monotonic() - started
+
+    assert elapsed < 10.0, f"producer.wait() was not bounded — took {elapsed:.1f}s"
+    assert isinstance(outcome, transport.ProducerFailed)
+    assert outcome.exit_code != 0
+
+    producer.wait(timeout=5)
 
 
 # ---------------------------------------------------------------------------
