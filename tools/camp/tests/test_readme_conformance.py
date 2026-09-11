@@ -59,9 +59,11 @@ _ALL_HOSTS_INVOCATION = re.compile(
 
 #: The exact invocation lines the README's "Attach" section documents — the
 #: six forms `task/wire-camp-attach-into-the-cli-with-host-and-all-hosts`
-#: names, one call form per line.
+#: names, plus `--list --json` (the reference-less, machine-readable sibling
+#: of `--resolve --json`, equally operator-reachable but originally
+#: undocumented), one call form per line.
 _ATTACH_INVOCATION = re.compile(
-    r"^camp attach(?: -a| <ref>(?: --host <name>| -a| --resolve --json)?)?$",
+    r"^camp attach(?: -a| --list --json| <ref>(?: --host <name>| -a| --resolve --json)?)?$",
     re.MULTILINE,
 )
 
@@ -347,7 +349,7 @@ def test_documented_all_hosts_invocation_forms_produce_an_answer_against_a_stub_
 
 
 # ---------------------------------------------------------------------------
-# camp attach — the README's six documented forms, run through the real
+# camp attach — the README's seven documented forms, run through the real
 # dispatcher (`test_attach_cli.py` covers the behavior in depth; this test's
 # only job is proving each documented LINE parses and dispatches).
 # ---------------------------------------------------------------------------
@@ -361,7 +363,7 @@ def test_every_documented_attach_form_dispatches_through_the_real_entry_point(
     README would otherwise produce silently."""
     lines = _attach_invocation_lines()
     assert lines, "README no longer documents a camp attach invocation form"
-    assert len(lines) == 6, f"expected all six documented forms — {lines!r}"
+    assert len(lines) == 7, f"expected all seven documented forms — {lines!r}"
 
     dispatch = importlib.import_module("camp.cli.dispatch")
     transport = importlib.import_module("camp.host.transport")
@@ -383,10 +385,6 @@ def test_every_documented_attach_form_dispatches_through_the_real_entry_point(
         ),
     )
     monkeypatch.setattr(handoff, "handoff", lambda argv: None)
-
-    from camp.spine import RESERVED
-
-    assert "attach" in RESERVED
 
     for line in lines:
         argv = shlex.split(

@@ -207,7 +207,7 @@ def pick_session(
     while True:
         stdout.write("Running sessions:\n")
         for index, row in enumerate(rows, start=1):
-            stdout.write(f"  {index}) {row.machine}  {row.group or '-'}  {row.slug}\n")
+            stdout.write(f"  {index}) {row.machine or 'this machine'}  {row.group or '-'}  {row.slug}\n")
         stdout.write("> ")
         stdout.flush()
 

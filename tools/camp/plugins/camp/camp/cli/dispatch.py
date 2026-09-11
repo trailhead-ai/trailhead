@@ -904,12 +904,12 @@ class _RemoteAttachCandidate:
     row is always handed off via `camp.host.handoff.remote_argv(host,
     session_id)` — the far side resolves and re-derives everything else
     itself, the same "carry the reference across untouched" posture `--host`
-    uses.
+    uses. `session_id` is the only field a handoff needs; the wire payload's
+    `derived_name` is never read here.
     """
 
-    def __init__(self, session_id: str, derived_name: str) -> None:
+    def __init__(self, session_id: str) -> None:
         self.session_id = session_id
-        self.derived_name = derived_name
 
 
 def _dispatch_attach_all_hosts(rest: list[str]) -> None:
@@ -954,7 +954,7 @@ def _dispatch_attach_all_hosts(rest: list[str]) -> None:
         pick_session,
     )
     from ..attach.prefix_warning import warn_if_nested
-    from ..attach.resolve import Resolved, resolve_attach_ref
+    from ..attach.resolve import Ambiguous, NotRunning, Resolved, resolve_attach_ref
     from ..host import transport as _transport
     from ..host.config import HostConfigError, load_hosts
     from ..host.handoff import handoff, local_argv, remote_argv
@@ -980,7 +980,7 @@ def _dispatch_attach_all_hosts(rest: list[str]) -> None:
     resolved_env = dict(os.environ)
 
     if ref is not None:
-        groups, transcripts, live, harness, tmux, self_name = _attach_session_context(
+        groups, transcripts, live, harness, tmux, self_name, _accounts = _attach_session_context(
             resolved_env
         )
         local_resolution = resolve_attach_ref(
@@ -995,7 +995,13 @@ def _dispatch_attach_all_hosts(rest: list[str]) -> None:
 
         def _probe(item: tuple[str, "Host"]):
             name, host = item
-            outcome = _transport.run_camp(host, ["attach", ref, "--resolve", "--json"])
+            try:
+                outcome = _transport.run_camp(host, ["attach", ref, "--resolve", "--json"])
+            except Exception:
+                # A bug in this code, or a missing local `ssh`, must never
+                # render as a host that failed to answer via a traceback out
+                # of `pool.map` — see `host/merge.py`'s `_answer_one_host`.
+                return name, None
             return name, _attach_resolve_answer(outcome)
 
         probed: list[tuple[str, bool | None]] = []
@@ -1021,6 +1027,18 @@ def _dispatch_attach_all_hosts(rest: list[str]) -> None:
         matches.extend(name for name, answer in probed if answer)
 
         if not matches:
+            if isinstance(local_resolution, Ambiguous):
+                _die(
+                    f"camp attach: {ref!r} matches {len(local_resolution.candidates)} "
+                    "sessions on this machine — re-run with a longer prefix naming "
+                    "exactly one",
+                    code=_AMBIGUOUS_EXIT_CODE,
+                )
+            if isinstance(local_resolution, NotRunning):
+                _die(
+                    f"camp attach: session {local_resolution.candidate.session_id} is "
+                    f"not running — bring it back with `camp launch --resume {ref}`"
+                )
             asked = ", ".join([self_name or "this machine"] + [n for n, _ in host_items])
             _die(f"camp attach: no session on any declared machine matches {ref!r} (asked: {asked})")
 
@@ -1041,7 +1059,7 @@ def _dispatch_attach_all_hosts(rest: list[str]) -> None:
         return
 
     # Bare cross-host picker.
-    groups, transcripts, live, harness, tmux, self_name = _attach_session_context(
+    groups, transcripts, live, harness, tmux, self_name, _accounts = _attach_session_context(
         resolved_env
     )
     local_result = local_pool(
@@ -1056,10 +1074,27 @@ def _dispatch_attach_all_hosts(rest: list[str]) -> None:
     if isinstance(local_result, PoolUnreadable):
         _die(f"camp attach: {local_result.reason}")
 
+    def _probe_list(item: tuple[str, "Host"]):
+        name, host = item
+        try:
+            outcome = _transport.run_camp(host, ["attach", "--list", "--json"])
+        except Exception as exc:
+            # Same posture as the ref-form probe above: a raise out of this
+            # code must render as a host that did not answer, not a
+            # traceback out of `pool.map`.
+            outcome = _transport.Unreachable(reason=str(exc))
+        return name, host, outcome
+
+    probed_list: list[tuple[str, "Host", object]] = []
+    if host_items:
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=len(host_items)
+        ) as pool:
+            probed_list = list(pool.map(_probe_list, host_items))
+
     rows = list(local_result.rows)
     remote_hosts: dict[str, "Host"] = {}
-    for name, host in host_items:
-        outcome = _transport.run_camp(host, ["attach", "--list", "--json"])
+    for name, host, outcome in probed_list:
         parsed = _attach_list_answer(outcome)
         if parsed is None:
             print(
@@ -1069,14 +1104,21 @@ def _dispatch_attach_all_hosts(rest: list[str]) -> None:
             continue
         remote_hosts[name] = host
         for row in parsed:
+            try:
+                session_id = row["session_id"]
+            except KeyError as e:
+                print(
+                    f"camp attach: {name} sent a row missing {e.args[0]!r} — "
+                    "skipping",
+                    file=sys.stderr,
+                )
+                continue
             rows.append(
                 Row(
                     machine=name,
                     group=row.get("group"),
                     slug=row.get("slug", ""),
-                    candidate=_RemoteAttachCandidate(
-                        row["session_id"], row["derived_name"]
-                    ),
+                    candidate=_RemoteAttachCandidate(session_id),
                 )
             )
 
@@ -1089,6 +1131,13 @@ def _dispatch_attach_all_hosts(rest: list[str]) -> None:
     if isinstance(result, PoolUnreadable):
         _die(f"camp attach: {result.reason}")
     if isinstance(result, NothingToOffer):
+        omitted = sorted(name for name, _ in host_items if name not in remote_hosts)
+        if omitted:
+            _die(
+                "camp attach: no running session found on this machine or any "
+                f"declared machine that answered — {', '.join(omitted)} did not "
+                "answer and could not be checked"
+            )
         _die("camp attach: no running session found on this machine or any declared machine")
     assert isinstance(result, Picked)
     warn_if_nested(resolved_env)
