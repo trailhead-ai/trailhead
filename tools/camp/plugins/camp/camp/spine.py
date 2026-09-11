@@ -70,6 +70,13 @@ _STATIC_RESERVED = frozenset(
         # sending side. Like "groups", intercepted in cli/camp before group
         # resolution — reserved so a workspace slug can never shadow it.
         "transfer-probe",
+        # The operator-facing dry-run verb. Needs a resolved group (self host,
+        # workspace ownership, peer declaration) — unlike "transfer-probe" and
+        # "groups" above, it is NOT intercepted before group resolution;
+        # main() reaches spine.main() for it only when no group resolves,
+        # which routes it through cmd_needs_group below like every other
+        # group-dependent verb.
+        "transfer",
         "list",
         "status",
         "sync",
@@ -529,6 +536,14 @@ def cmd_help(_args: list[str]) -> None:
         "                                    row whose directory is gone is listed and\n"
         "                                    marked, never hidden; bring one back with\n"
         "                                    camp launch --resume <ref>\n"
+        "  camp transfer <slug> --to <peer> --dry-run [--json]\n"
+        "                                    Preview moving a workspace and its\n"
+        "                                    live conversations to a declared peer\n"
+        "                                    host. --dry-run is REQUIRED — camp\n"
+        "                                    transfer only previews today; the\n"
+        "                                    moving half is not built yet, and a\n"
+        "                                    bare invocation refuses rather than\n"
+        "                                    silently starting to move something\n"
         "  camp remove [--force] [--name <slug>] Tear down a worktree (alias: rm);\n"
         "                                    run from inside it, returns you to the group repo\n"
         "  camp sync [--force]               Fast-forward canonical siblings to origin/main\n"
@@ -537,6 +552,17 @@ def cmd_help(_args: list[str]) -> None:
         "\n"
         "Health:\n"
         "  camp doctor [--json]              Read-only workspace health check\n"
+        "\n"
+        "Exit codes (camp transfer):\n"
+        "  0                Every check passed — a clean verdict\n"
+        "  1                An unexpected/local error (bad flags, malformed config)\n"
+        "  2                --dry-run was omitted — nothing was read from the peer\n"
+        "  3                Not clean, for a reason with no more specific code\n"
+        "                   below — read the rendered checks\n"
+        "  4                This host does not own the workspace\n"
+        "  5                The peer could not be reached\n"
+        "  6                No workspace is recorded here for that slug\n"
+        "  7                The named peer is not declared in hosts.toml\n"
         "\n"
         "Exit codes (camp launch):\n"
         "  0                Launched — stdout is the session id and nothing else\n"
@@ -1321,6 +1347,13 @@ def main() -> None:
         from .cli.session import _cmd_attach_cli
 
         _cmd_attach_cli(rest)
+    # "transfer" needs a resolved group exactly like NEEDS_GROUP_VERBS does,
+    # but it is not a member of that taxonomy set (its real handler lives on
+    # the group-aware path via an explicit dispatch, not the taxonomy-derived
+    # routing those verbs share) — reaching spine.main() for it means no
+    # group resolved, same fallback message.
+    elif first == "transfer":
+        cmd_needs_group(first)
     # Canonical verb surface — these need a resolved group; reaching spine
     # means none resolved (single NEEDS_GROUP_VERBS source of truth).
     elif first in NEEDS_GROUP_VERBS:
