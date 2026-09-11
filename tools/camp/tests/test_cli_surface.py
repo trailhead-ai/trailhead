@@ -551,6 +551,70 @@ def _launch_exit_code_contract(help_text: str) -> dict[int, str]:
 
 
 # ---------------------------------------------------------------------------
+# camp help — the remote stop's addressing form and its exit-code contract.
+#
+# `camp kill <ref> --host <name>` is a fifth `--host` verb. The help menu is
+# the operator's index of what camp can do, so a verb reachable only by
+# reading the source is not shipped — these assert against the real binary's
+# `camp help` output, not against a copy of the block.
+# ---------------------------------------------------------------------------
+
+
+def test_help_names_the_remote_kill_addressing_form(help_text: str) -> None:
+    """`camp kill <ref> --host <name>` is discoverable alongside the plain
+    `camp kill <ref>` form already documented."""
+    assert "camp kill <ref> --host <name>" in help_text
+
+
+def _exit_code_contract(help_text: str, verb: str) -> dict[int, str]:
+    """The exit codes `camp help` documents for `camp <verb>`, code → its prose.
+
+    Read out of the emitter rather than compared against a literal, so an
+    added or dropped code changes what these assertions see. Blocks end at
+    the next blank line, since another "Exit codes (camp ...)" heading (or
+    "Flags:") follows immediately after.
+    """
+    heading = re.search(rf"^Exit codes \(camp {verb}\):$", help_text, re.MULTILINE)
+    assert heading, f"no {verb} exit-code contract in:\n{help_text}"
+    block = help_text[heading.end() :]
+    block = block.split("\n\n", 1)[0]
+
+    contract: dict[int, str] = {}
+    current: int | None = None
+    for line in block.splitlines():
+        match = re.match(r"^\s{2}(\d+)\s{2,}(.*)$", line)
+        if match:
+            current = int(match.group(1))
+            contract[current] = match.group(2).strip()
+        elif current is not None and line.strip():
+            contract[current] += " " + line.strip()
+    return contract
+
+
+def test_help_states_the_remote_kill_exit_code_contract(help_text: str) -> None:
+    """The design doc's closed four-value set, as documented for `camp kill`:
+    0 for a stop that happened or a session already down (told apart by the
+    answer's own outcome field, never by status), 2 for an ambiguous
+    reference with candidates listed, 3 for an outcome camp could not
+    determine, and 1 for every certain failure — including a far side that
+    refuses in its own words."""
+    contract = _exit_code_contract(help_text, "kill")
+
+    assert 0 in contract
+    assert "already down" in contract[0]
+
+    assert 2 in contract
+    assert "more than one session" in contract[2]
+
+    assert 3 in contract
+    assert "outcome" in contract[3].lower()
+    assert "could not" in contract[3].lower() or "unknown" in contract[3].lower()
+
+    assert 1 in contract
+    assert "refuses" in contract[1].lower() or "own words" in contract[1].lower()
+
+
+# ---------------------------------------------------------------------------
 # --host <name> — option seam, applicability, and refusal ordering.
 #
 # Mirrors the --all-groups section above: `corrupt_sibling_env` proves a
