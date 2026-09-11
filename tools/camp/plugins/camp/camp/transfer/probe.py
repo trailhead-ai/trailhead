@@ -207,6 +207,15 @@ def parse_probe_response(raw: str) -> ProbeAnswer | ProbeRefused:
         data = json.loads(raw)
     except json.JSONDecodeError as e:
         return ProbeRefused(reason=f"response is not valid JSON — {e}")
+    except RecursionError:
+        # Nesting costs one byte per level, so a payload can sit well inside
+        # the byte bound and still exhaust the interpreter's stack while being
+        # parsed. The size bound cannot see shape, so the refusal answers it
+        # here rather than letting the exception leave this function — every
+        # other malformed response is refused by name, and this one is too.
+        return ProbeRefused(
+            reason="response nests too deeply to parse — refused unparsed"
+        )
 
     if not isinstance(data, dict):
         return ProbeRefused(

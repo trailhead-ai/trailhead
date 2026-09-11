@@ -586,3 +586,41 @@ def test_answering_a_probe_leaves_the_answering_hosts_state_untouched(
     assert json.loads(capsys.readouterr().out)["self_name"] == "peer-box"
     assert _snapshot(state_dir) == before
     assert _snapshot(cfg) == before_config
+
+
+def test_deeply_nested_response_is_refused_rather_than_raising() -> None:
+    """The parser's contract is that hostile input is refused by name, never
+    partially trusted — and never allowed to propagate as an exception.
+
+    A payload can sit well inside the byte bound and still be pathological in
+    shape: nesting costs one byte per level, so a few tens of kilobytes
+    exhausts the interpreter's stack while parsing. The byte bound cannot see
+    this, so the refusal has to.
+    """
+    probe = _probe_module()
+
+    nested = "[" * 20000 + "]" * 20000
+    assert len(nested) < probe.MAX_PROBE_RESPONSE_BYTES, (
+        "this case must stay inside the size bound, or it tests the bound instead"
+    )
+
+    result = probe.parse_probe_response(nested)
+
+    assert isinstance(result, probe.ProbeRefused), result
+    assert result.reason
+
+
+def test_a_refused_nested_response_still_surfaces_through_probe_peer() -> None:
+    """The refusal has to survive the call the CLI actually makes, not just a
+    direct call to the parser."""
+    probe = _probe_module()
+
+    result = probe.probe_peer(
+        _host(),
+        group="trailhead",
+        slug="feat-x",
+        self_name="host-a",
+        runner=_answering_runner(stdout="[" * 20000 + "]" * 20000),
+    )
+
+    assert isinstance(result, probe.ProbeRefused), result
