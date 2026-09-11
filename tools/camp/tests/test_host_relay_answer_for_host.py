@@ -101,6 +101,24 @@ def test_answered_ok_row_not_touched_beyond_host_stamp(monkeypatch) -> None:
     ]
 
 
+def test_answered_row_value_strips_ansi_cursor_control_sequence(monkeypatch) -> None:
+    """`answer_for_host` serves `camp list --host` and `camp sessions --host`
+    — a row value carrying a control sequence must come back stripped, the
+    same as `answer_payload_for_host`'s row path already does."""
+    transport = _transport_module()
+    stdout = json.dumps([{"ok": True, "slug": "ws-a\x1b[2Kghost"}])
+    answer = _answer(monkeypatch, transport.Answered(stdout=stdout, stderr="", exit_code=0))
+    assert answer.rows[0]["slug"] == "ws-a[2Kghost"
+
+
+def test_answered_row_value_keeps_newline_and_tab(monkeypatch) -> None:
+    """Matches the existing strip's own carve-out for newline and tab."""
+    transport = _transport_module()
+    stdout = json.dumps([{"ok": True, "slug": "ws-a\nline\ttwo"}])
+    answer = _answer(monkeypatch, transport.Answered(stdout=stdout, stderr="", exit_code=0))
+    assert answer.rows[0]["slug"] == "ws-a\nline\ttwo"
+
+
 def test_answered_carries_remote_exit_code_and_stderr_notice(monkeypatch) -> None:
     transport = _transport_module()
     answer = _answer(

@@ -308,13 +308,13 @@ def answer_for_host(
         )
 
     # Stamp `host` on each row in place — never re-sort, never drop a row,
-    # never touch any other field. This is the entire local contribution to
-    # a relayed row.
+    # never touch any other field beyond the strip below. This is the
+    # entire local contribution to a relayed row.
     for row in rows:
         row["host"] = host_name
 
     return HostAnswer(
-        rows=rows,
+        rows=_strip_control_sequences_deep(rows),
         notices=_verbatim_notice(outcome.stderr),
         exit_code=outcome.exit_code,
         answered=True,

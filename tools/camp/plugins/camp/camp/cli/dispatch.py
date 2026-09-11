@@ -600,9 +600,9 @@ def main() -> None:
     if all_hosts:
         canonical, _kind = _resolve_verb(first) if first else (first, "live")
         if canonical not in _ALL_HOSTS_VERBS:
-            # A state-changing verb (launch) is refused for its OWN stated
-            # reason — the verb changes state, so it acts on one named
-            # machine — never the generic "has no meaning here" a verb gets
+            # A state-changing verb (launch, kill) is refused for its OWN
+            # stated reason — the verb changes state, so it acts on one
+            # named machine — never the generic "has no meaning here" a verb gets
             # when an option simply does not apply to it. The generic
             # wording would read as an oversight; this is a decision (design
             # doc: "Launching is never a broadcast"). The refusal names the
