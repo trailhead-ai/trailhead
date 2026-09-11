@@ -37,6 +37,10 @@ Test contract:
   declaring an explicit empty set, which has nothing to rebuild.
 - Across the whole closed transport-outcome set, pairwise, each outcome
   yields a distinct indeterminate detail and carries its own outcome back.
+- A peer that does not have the group configured answers no account, member
+  list or slug state, so the checks reading those fields report no pass.
+- A host with no declared name is never told a peer workspace whose ownership
+  was never recorded is owned by this host.
 - A malformed peer payload fails every payload-dependent check by name,
   carrying the refusal's reason and no transport outcome; a peer that was
   never probed fails them too, lexically distinct from the malformed case;
@@ -50,6 +54,7 @@ Test contract:
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 from typing import Any
@@ -754,3 +759,127 @@ def test_the_three_unusable_peer_answers_stay_distinguishable_from_each_other() 
             _check(details[key], _PAYLOAD_DEPENDENT_CHECKS[0]).status
             is preflight.CheckStatus.FAILED
         )
+
+
+# ---------------------------------------------------------------------------
+# Fields the peer never answered must not be reported as observations
+# ---------------------------------------------------------------------------
+
+
+def _wire_answer(**overrides) -> Any:
+    """A ProbeAnswer built by running the real parser over a real wire payload.
+
+    Hand-built ProbeAnswer fixtures can express field combinations the
+    answering side never emits and the parser never produces — an unconfigured
+    group carrying a populated member list, say. Routing through
+    `parse_probe_response` keeps these cases honest about what can actually
+    arrive.
+    """
+    probe = _probe_module()
+    payload = {
+        "contract_version": probe.PROBE_CONTRACT_VERSION,
+        "self_name": "peer-b",
+        "group_configured": False,
+        "members": None,
+        "account": None,
+        "workspace_exists": None,
+        "workspace_owner": None,
+    }
+    payload.update(overrides)
+    answer = probe.parse_probe_response(json.dumps(payload))
+    assert isinstance(answer, probe.ProbeAnswer), answer
+    return answer
+
+
+def test_an_unconfigured_peer_group_leaves_its_dependent_checks_unsatisfied() -> None:
+    """When the peer lacks the group, it answers no account, no member list and
+    no slug state — so the checks reading those fields have observed nothing.
+
+    Reporting them as passes would tell the operator the account binding
+    matches and the slug is free on a host that never looked, and check 9's
+    comparison is the overwrite authorization a later slice inherits.
+    """
+    preflight = _preflight_module()
+
+    result = _compose(probe_result=_wire_answer())
+
+    for name in (
+        "the peer's harness account binding matches this end's",
+        "the slug is free on the peer, or present there and owned by this host",
+    ):
+        check = _check(result, name)
+        assert check.status is not preflight.CheckStatus.PASSED, (
+            f"{name}: reported a pass from a field the peer never answered — "
+            f"{check.detail!r}"
+        )
+        assert "cannot evaluate" in check.detail, (
+            f"{name}: must say it could not evaluate, not merely restate check "
+            f"7's own failure — {check.detail!r}"
+        )
+        assert "this group configured" in check.detail, f"{name}: {check.detail!r}"
+    assert result.verdict is preflight.Verdict.NOT_CLEAN
+
+
+def test_a_nameless_host_is_never_told_the_peer_workspace_is_its_own() -> None:
+    """With no declared name here and no owner recorded on the peer, both
+    values are None and an equality test reads as a match.
+
+    A host that cannot name itself cannot own anything, so the slug check must
+    not claim it does.
+    """
+    preflight = _preflight_module()
+
+    result = _compose(
+        self_name=None,
+        probe_result=_wire_answer(
+            group_configured=True,
+            members=[],
+            account=None,
+            workspace_exists=True,
+            workspace_owner=None,
+        ),
+    )
+
+    check = _check(
+        result, "the slug is free on the peer, or present there and owned by this host"
+    )
+    assert check.status is not preflight.CheckStatus.PASSED, check.detail
+    assert "owned by this host" not in check.detail, (
+        f"claimed ownership from a None-to-None comparison: {check.detail!r}"
+    )
+
+
+def test_a_peer_workspace_with_no_recorded_owner_says_so_in_its_own_words() -> None:
+    """A slug present on the peer whose ownership was never recorded there is
+    not this host's to overwrite, and is not the same condition as ownership
+    never having been recorded *here*.
+
+    Both readings must stay lexically distinct, because the remedy differs:
+    one is fixed on this machine and the other on the far one.
+    """
+    preflight = _preflight_module()
+
+    result = _compose(
+        self_name="host-a",
+        owner="host-a",
+        probe_result=_wire_answer(
+            group_configured=True,
+            members=[],
+            account=None,
+            workspace_exists=True,
+            workspace_owner=None,
+        ),
+    )
+
+    peer_check = _check(
+        result, "the slug is free on the peer, or present there and owned by this host"
+    )
+    local_check = _check(result, "this host owns it, or it was never recorded")
+
+    assert peer_check.status is preflight.CheckStatus.FAILED, peer_check.detail
+    assert "never recorded" in peer_check.detail
+    assert "peer" in peer_check.detail, (
+        f"must say where the unrecorded ownership is: {peer_check.detail!r}"
+    )
+    assert peer_check.detail != local_check.detail
+    assert result.verdict is preflight.Verdict.NOT_CLEAN
