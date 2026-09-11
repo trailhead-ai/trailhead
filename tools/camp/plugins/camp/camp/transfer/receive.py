@@ -577,7 +577,9 @@ def worktree(
     """
     group = _require_group(groups, group_name)
 
-    member_cfg = _require_member(group, group_name, member)
+    # Validated for its raise-if-absent side effect; the worktree path below
+    # is resolved independently via `_worktree_path`.
+    _require_member(group, group_name, member)
 
     from ..group.manifest import workspace_dir
     from ..provision.reconcile import _worktree_path
