@@ -1005,7 +1005,7 @@ def test_single_host_list_threads_declared_connect_timeout_to_the_relay(
     assert seen == [7.0]
 
 
-def test_relay_route_verb_set_is_every_host_verb_except_attach():  # inert-gate: allow closed-vocabulary smoke — compares `_HOST_VERBS` against a hand-copied literal, not the parametrize table below, so it cannot detect the table drifting from the source; kept as a wiring reminder that a verb added to `_HOST_VERBS` needs a matching case there
+def test_relay_route_verb_set_is_every_host_verb_except_attach():  # inert-gate: allow verb-set drift reminder
     """Pins the enumeration this parametrized test below drives against —
     `_HOST_VERBS` minus `attach` (which hands off interactively, with no
     transport seam to assert at) is exactly {list, sessions, launch, kill}.
