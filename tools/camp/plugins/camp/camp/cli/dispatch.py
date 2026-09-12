@@ -1022,9 +1022,8 @@ def _dispatch_all_hosts_command(
 
 #: The probe's own bracketed verdict vocabulary — deliberately never "FAIL",
 #: the word the local check rows above the host section use, because
-#: nothing in the host section can fail the health check itself
-#: (`docs/design/camp-doctor-answers-for-every-declared-host.md`, "The
-#: section reads like the rows above it"). "PASS": fully answerable — the
+#: nothing in the host section can fail the health check itself.
+#: "PASS": fully answerable — the
 #: machine answered, camp resolved, and (for a probe-supporting far camp)
 #: the multiplexer is present. "WARN": the machine answered and camp
 #: resolved, but there is something the operator should know — camp could

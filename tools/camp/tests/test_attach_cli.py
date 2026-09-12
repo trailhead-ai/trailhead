@@ -1163,8 +1163,7 @@ def test_a_mistyped_attach_only_flag_is_not_silently_accepted_elsewhere(
 
 # ---------------------------------------------------------------------------
 # connect_timeout — the third route: attach's own cross-host probes, called
-# directly from cli/dispatch.py rather than through camp.host.relay
-# (task/connect-timeout-is-declared-in-the-host-file).
+# directly from cli/dispatch.py rather than through camp.host.relay.
 # ---------------------------------------------------------------------------
 
 

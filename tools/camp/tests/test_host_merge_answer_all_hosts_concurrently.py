@@ -482,8 +482,7 @@ def test_default_worker_is_the_relay_worker_via_the_listing_path():
 
 # ---------------------------------------------------------------------------
 # connect_timeout — threads into the default worker's own `answer_for_host`
-# call, composing with `worker=` rather than duplicating it
-# (task/connect-timeout-is-declared-in-the-host-file).
+# call, composing with `worker=` rather than duplicating it.
 # ---------------------------------------------------------------------------
 
 
