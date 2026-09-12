@@ -144,6 +144,17 @@ def _is_session_id(session_id: object) -> bool:
     return isinstance(session_id, str) and _SESSION_ID_RE.match(session_id) is not None
 
 
+def _projects_key(resolved: Path) -> str:
+    """Munge a resolved absolute path into its Claude Code projects-dir key.
+
+    Both ``/`` and ``.`` collapse to ``-``, so this is lossy: distinct paths can
+    munge to the same key (see the callers' handling of that collision). This
+    is the one place the encoding is derived; every seam member composing a
+    projects-dir path calls through here rather than re-deriving it.
+    """
+    return str(resolved).replace("/", "-").replace(".", "-")
+
+
 #: Bounded head-scan limits for extracting a session's start cwd out of a
 #: transcript (see :func:`_extract_transcript_cwd`). Real transcripts run to
 #: hundreds of megabytes, so this seam must never read one in full:
@@ -987,7 +998,7 @@ class ClaudeCodeHarness(Harness):
         if not _is_session_id(session_id):
             return None
         _env = env if env is not None else dict(os.environ)
-        munged = str(Path(workspace).resolve()).replace("/", "-").replace(".", "-")
+        munged = _projects_key(Path(workspace).resolve())
         candidate = _claude_dir(_env) / _PROJECTS_SUBDIR / munged / f"{session_id}.jsonl"
         return candidate if candidate.is_file() else None
 
@@ -1027,7 +1038,7 @@ class ClaudeCodeHarness(Harness):
             return None
         resolved = workspace.resolve()
         _env = env if env is not None else dict(os.environ)
-        munged = str(resolved).replace("/", "-").replace(".", "-")
+        munged = _projects_key(resolved)
         project_dir = _claude_dir(_env) / _PROJECTS_SUBDIR / munged
         if project_dir.is_dir():
             try:
