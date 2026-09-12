@@ -1422,17 +1422,11 @@ def _recoverable_rows(env: dict[str, str]) -> list[dict]:
     return json.loads(result.stdout)
 
 
-def _live_session_ids(env: dict[str, str]) -> set[str]:
-    result = _run_camp(env, "sessions", "--group", "testgroup", "--json")
-    assert result.returncode == 0, result.stderr
-    return {row["session_id"] for row in json.loads(result.stdout)}
-
-
 class TestConversationResumesOnARealPeer:
     def test_root_conversation_is_listed_and_its_own_resume_path_accepts_it(
         self, conv_env
     ):
-        """AC3/AC5/AC6: a conversation rooted at the workspace root crosses,
+        """A conversation rooted at the workspace root crosses,
         and on the peer it is BOTH listed among the recoverable conversations
         AND accepted by camp's own resume path — asserted as two separate
         observations, since the criterion this pins is precisely that the
@@ -1479,7 +1473,7 @@ class TestConversationResumesOnARealPeer:
         assert marker in peer_transcript.read_text()
 
     def test_member_subdirectory_conversation_resumes_rooted_there(self, conv_env):
-        """AC3: a conversation started inside the `repo_a` member
+        """A conversation started inside the `repo_a` member
         subdirectory crosses and resumes ROOTED AT the peer's corresponding
         subdirectory — asserted on the directory the resume actually spawned
         into (the tmux pane's own `-c` launch directory), never on the
@@ -1509,11 +1503,19 @@ class TestConversationResumesOnARealPeer:
         ).resolve()
         assert launch_dir == str(expected_member_dir)
 
-    def test_arrived_conversation_is_recoverable_but_not_live(self, conv_env):
-        """AC4 (through the CLI): the conversation that crossed shows up in
-        the DEAD/recoverable listing and is absent from the LIVE listing —
-        camp never offers a session that is actually still running as
-        something to bring back."""
+    def test_arrived_conversation_is_listed_as_recoverable(self, conv_env):
+        """A conversation that crossed is offered as something to bring back:
+        it appears in the peer's recoverable listing, keyed by the id it
+        arrived under.
+
+        The mirror half — that it is absent from the LIVE listing — is not
+        asserted here. Nothing in this fixture can put a session into the live
+        listing, so that listing is always empty and such an assertion would
+        hold for any id at all, including one that never crossed. Liveness is
+        pinned where it can actually vary, in the recovery layer's own tests,
+        which drive both a live and a dead record through the same
+        subtraction.
+        """
         from pathlib import PurePosixPath
 
         c = conv_env
@@ -1524,7 +1526,6 @@ class TestConversationResumesOnARealPeer:
         )
 
         assert session_id in {row["session_id"] for row in _recoverable_rows(c["peer_cli_env"])}
-        assert session_id not in _live_session_ids(c["peer_cli_env"])
 
     def test_every_recoverable_conversation_the_peer_lists_is_resumable(self, conv_env):
         """The criterion forbidding a listed-but-unresumable conversation,
