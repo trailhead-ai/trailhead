@@ -896,8 +896,7 @@ def test_a_malformed_local_row_is_skipped_consistently_with_remote_rows(
 
 # ---------------------------------------------------------------------------
 # connect_timeout — the top-level hosts.toml scalar threads to every
-# transport call this option's two routes make
-# (task/connect-timeout-is-declared-in-the-host-file).
+# transport call this option's two routes make.
 # ---------------------------------------------------------------------------
 
 
@@ -1053,7 +1052,6 @@ def test_every_relay_host_verb_threads_the_declared_connect_timeout(
 
 # ---------------------------------------------------------------------------
 # camp doctor -a — the per-host probe section
-# `docs/design/camp-doctor-answers-for-every-declared-host.md`
 # ---------------------------------------------------------------------------
 
 
