@@ -26,8 +26,8 @@ Test contract:
 handshake:
 - An absent key returns the transport's own documented default.
 - An explicit value returns that value.
-- A non-numeric value, zero, and a negative value each raise, naming the
-  key — one test per shape.
+- A non-numeric value, zero, a negative value, NaN, and +/-infinity each
+  raise, naming the key — one test per shape.
 - Malformed TOML fails the same way `load_hosts`'s malformed-file path
   fails (`HostConfigError`, not a traceback).
 - An unrecognised top-level scalar sitting alongside `connect_timeout` does
@@ -305,6 +305,38 @@ def test_negative_connect_timeout_raises_naming_the_key(
     config_dir = tmp_path / "cfg"
     _point_at(monkeypatch, config_dir)
     _write_hosts(config_dir, "connect_timeout = -5\n")
+
+    with pytest.raises(HostConfigError) as exc_info:
+        connect_timeout_seconds()
+
+    assert "connect_timeout" in str(exc_info.value)
+
+
+def test_nan_connect_timeout_raises_naming_the_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`nan` compares false against both `> 0` and `<= 0`, so a bare
+    positivity check lets it slide through untouched — it must still
+    refuse, the same as any other non-positive value."""
+    config_dir = tmp_path / "cfg"
+    _point_at(monkeypatch, config_dir)
+    _write_hosts(config_dir, "connect_timeout = nan\n")
+
+    with pytest.raises(HostConfigError) as exc_info:
+        connect_timeout_seconds()
+
+    assert "connect_timeout" in str(exc_info.value)
+
+
+def test_infinite_connect_timeout_raises_naming_the_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`inf` is positive, so it must be refused by a finiteness check
+    rather than a bare positivity check — an infinite bound is not a
+    connect timeout ssh can be handed."""
+    config_dir = tmp_path / "cfg"
+    _point_at(monkeypatch, config_dir)
+    _write_hosts(config_dir, "connect_timeout = inf\n")
 
     with pytest.raises(HostConfigError) as exc_info:
         connect_timeout_seconds()

@@ -1074,13 +1074,22 @@ def _doctor_multiplexer_row(host_name: str | None, present: bool) -> dict[str, A
     return _doctor_host_row(host_name, "WARN", "camp resolves; no multiplexer present")
 
 
-def _doctor_probe_answer(row: dict[str, Any], *, answered: bool):
+def _doctor_probe_answer(
+    row: dict[str, Any], *, answered: bool, notices: list[str] | None = None
+):
     """One probed host's contribution to the `-a` host section: exactly one
-    row, no notices, and no exit-code contribution — the host section never
-    decides the health check's own status."""
+    row and no exit-code contribution — the host section never decides the
+    health check's own status. `notices` carries whatever the shared
+    transport-failure classifier produced for this outcome (e.g. the
+    key-mismatch's own "may be intercepted" remediation) so it reaches the
+    operator instead of being computed and discarded; defaults to none for
+    the states nothing classifies (an answered probe, or a state this
+    worker maps without going through the shared classifier)."""
     from ..host.relay import HostAnswer
 
-    return HostAnswer(rows=[row], notices=[], exit_code=0, answered=answered)
+    return HostAnswer(
+        rows=[row], notices=list(notices) if notices else [], exit_code=0, answered=answered
+    )
 
 
 def _doctor_probe_answer_from_parsed(host_name: str, parsed: Any):
@@ -1149,7 +1158,9 @@ def _doctor_probe_worker(host_name: str, host: "Host", *, connect_timeout: float
             "doctor", host, host_name, outcome, connect_timeout=connect_timeout
         )
         return _doctor_probe_answer(
-            _doctor_host_row(host_name, "DOWN", failure.reason), answered=False
+            _doctor_host_row(host_name, "DOWN", failure.reason),
+            answered=False,
+            notices=failure.notices,
         )
 
     # The connection completed and then the invocation wedged past its
@@ -1161,18 +1172,29 @@ def _doctor_probe_worker(host_name: str, host: "Host", *, connect_timeout: float
             "doctor", host, host_name, outcome, connect_timeout=connect_timeout
         )
         return _doctor_probe_answer(
-            _doctor_host_row(host_name, "WARN", failure.reason), answered=False
+            _doctor_host_row(host_name, "WARN", failure.reason),
+            answered=False,
+            notices=failure.notices,
         )
 
     # The connection completed but the declared camp could not be run —
     # named with the actual configured location so the correction needs no
-    # construction, never just the generic remedy.
+    # construction, never just the generic remedy. Still run through the
+    # shared classifier for its notices, even though the row's own detail
+    # here is doctor's more specific wording naming the actual camp_bin.
     if isinstance(outcome, _transport.CampNotResolvable):
+        failure = _classify_transport_failure(
+            "doctor", host, host_name, outcome, connect_timeout=connect_timeout
+        )
         detail = (
             f"answered; camp could not be run — camp_bin {host.camp_bin!r} "
             "did not resolve on this host"
         )
-        return _doctor_probe_answer(_doctor_host_row(host_name, "WARN", detail), answered=False)
+        return _doctor_probe_answer(
+            _doctor_host_row(host_name, "WARN", detail),
+            answered=False,
+            notices=failure.notices if failure is not None else None,
+        )
 
     if isinstance(outcome, _transport.ProducerFailed):
         # `run_camp` never returns this today — only `stream_camp` does,
@@ -1183,7 +1205,9 @@ def _doctor_probe_worker(host_name: str, host: "Host", *, connect_timeout: float
             "doctor", host, host_name, outcome, connect_timeout=connect_timeout
         )
         return _doctor_probe_answer(
-            _doctor_host_row(host_name, "WARN", failure.reason), answered=False
+            _doctor_host_row(host_name, "WARN", failure.reason),
+            answered=False,
+            notices=failure.notices,
         )
 
     if isinstance(outcome, _transport.RemoteRefusal):

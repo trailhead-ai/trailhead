@@ -1205,6 +1205,51 @@ def test_doctor_host_unreachable_within_connect_timeout_renders_down(
     assert "unreachable" in row["detail"]
 
 
+def test_doctor_host_identity_unknown_renders_down_and_the_remediation_notice(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """An unpinned host key is a `DOWN` row, and the operator must also see
+    the shared classifier's own remediation notice on stderr — the same
+    text every other `--host` verb prints for this outcome — not have it
+    computed and discarded."""
+    _doctor_hosts_env(tmp_path, monkeypatch, "[hosts.andromeda]\n")
+    transport = _transport_module()
+    monkeypatch.setattr(
+        transport, "run_camp", lambda host, remote_argv, **kw: transport.IdentityUnknown()
+    )
+
+    code = _run(monkeypatch, ["doctor", "-a", "--json"])
+    captured = capsys.readouterr()
+    report = json.loads(captured.out)
+    assert code == 0
+    row = next(h for h in report["hosts"] if h["host"] == "andromeda")
+    assert row["verdict"] == "DOWN"
+    assert "ssh-keyscan" in captured.err
+
+
+def test_doctor_host_identity_changed_renders_down_and_the_interception_notice(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """A changed host key is the possible machine-in-the-middle case: the
+    operator must see the "may be intercepted" remediation on stderr, the
+    same notice every other `--host` verb prints for this outcome — not
+    have it silently dropped by the doctor probe path."""
+    _doctor_hosts_env(tmp_path, monkeypatch, "[hosts.andromeda]\n")
+    transport = _transport_module()
+    monkeypatch.setattr(
+        transport, "run_camp", lambda host, remote_argv, **kw: transport.IdentityChanged()
+    )
+
+    code = _run(monkeypatch, ["doctor", "-a", "--json"])
+    captured = capsys.readouterr()
+    report = json.loads(captured.out)
+    assert code == 0
+    row = next(h for h in report["hosts"] if h["host"] == "andromeda")
+    assert row["verdict"] == "DOWN"
+    assert "may be intercepted" in captured.err
+    assert "verify before removing the pinned key" in captured.err
+
+
 def test_doctor_host_answers_but_camp_does_not_resolve(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
