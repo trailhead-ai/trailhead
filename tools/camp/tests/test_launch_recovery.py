@@ -887,7 +887,7 @@ class TestModuleBoundary:
         assert _render_or_exit_offenders(dirty) == [".exit"]
         assert _render_or_exit_offenders(clean) == []
 
-    def test_the_real_recovery_module_imports_and_renders_nothing_forbidden(self):  # inert-gate: allow real production module, no fixture input to vary
+    def test_the_real_recovery_module_imports_and_renders_nothing_forbidden(self):  # inert-gate: allow module, no input
         tree = _recovery_ast()
 
         assert _import_offenders(tree) == []

@@ -152,10 +152,10 @@ class TestSweepScope:
 
 
 class TestProductionTreeIsClean:
-    def test_the_camp_production_tree_derives_the_rule_nowhere(self):  # inert-gate: allow real production tree swept whole, no fixture input to vary
+    def test_the_camp_production_tree_derives_the_rule_nowhere(self):  # inert-gate: allow prod tree, no input to vary
         assert _sweep(_CAMP_PROD_ROOT) == {}
 
-    def test_the_harness_module_derives_the_rule_exactly_once(self):  # inert-gate: allow real production file swept whole, no fixture input to vary
+    def test_the_harness_module_derives_the_rule_exactly_once(self):  # inert-gate: allow prod file, no input to vary
         tree = ast.parse(_HARNESS_MODULE.read_text(encoding="utf-8"), filename=str(_HARNESS_MODULE))
 
         assert len(_projects_key_offenders(tree)) == 1
