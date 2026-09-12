@@ -72,6 +72,50 @@ that worktree before writing it; a refusal here surfaces as
 whole stream — `sys.stdin.buffer` is handed to the extractor directly, and
 extraction reads it one archive member at a time.
 
+**conversations** receives one arriving conversation, sent by
+`camp.transfer.conversations.send_conversation` as a `tarfile` stream on
+stdin, and places it on this host through the harness boundary
+(`trailhead.harness.base.Harness.session_transcript_destination` /
+`rewrite_transcript_workspace`) — never by composing a destination path of
+its own. `--subpath` names a location WITHIN this host's OWN resolved
+workspace (`camp.group.manifest.workspace_dir`, keyed only by
+`--group`/`--slug`), never a path to resolve against anything else; an
+absolute `--subpath`, one carrying a `..` segment, or one that would resolve
+outside the workspace is refused, before anything is written, as
+`ConversationSubpathRefused`, naming the offending subpath. Archive-member
+confinement is the same posture `worktree.extract_archive` already applies
+(`transfer/worktree.py:200-239`), reused by
+`camp.transfer.conversations.extract_conversation_archive` rather than
+reimplemented; a refusal there surfaces as `ArchiveMemberRefused`, exactly
+like `worktree`'s own phase. The harness boundary itself refuses a
+destination-key collision — two distinct workspace directories that munge to
+the same projects key, one of them already holding an arrived transcript —
+which this phase surfaces as `ConversationDestinationRefused` rather than an
+unhandled exception or a silent write.
+
+This phase creates the destination's own parent directories itself
+(`Path.mkdir(parents=True, exist_ok=True)`) — the harness's
+`rewrite_transcript_workspace` does not, by design; the harness itself
+creates its own `projects/<key>/` tree lazily on next real use of that
+workspace, but that is later than this phase's write. Re-running this phase
+for a conversation already placed overwrites it rather than failing or
+duplicating, so a re-run after a partial failure converges.
+
+**Ordering, and the limit it does not close.** Each conversation is written
+in full — extracted, then its recorded root rewritten — before this function
+returns, and only then does the NEXT `conversations` call (the next
+invocation of this phase, for the next conversation in the sender's
+sequential loop) compose its own destination. This is what lets the
+destination-key collision above be detected at all: collision detection reads
+whatever transcript is ALREADY on disk at the computed key, so two
+conversations transferred one after another are covered — the first one's
+write is what the second one sees. It does NOT cover two colliding workspaces
+transferred CONCURRENTLY, where neither has written a transcript yet when
+both destinations are composed; closing that needs a lock across transfers,
+which is disproportionate to this phase (it moves no ownership — a collided
+placement here is a re-runnable fault, not a lost workspace) and belongs with
+whatever slice makes the move exclusive.
+
 **The marker.** Every phase, once it actually runs (never on a refusal — a
 refused phase never touches the workspace it refused), appends an entry to a
 small JSON log inside the arriving workspace naming which phase reached this
@@ -114,10 +158,13 @@ __all__ = [
     "BundleUnbundleFailed",
     "BundleRefUnresolved",
     "ArchiveMemberRefused",
+    "ConversationSubpathRefused",
+    "ConversationDestinationRefused",
     "begin",
     "finish",
     "history",
     "worktree",
+    "conversations",
     "read_transfer_marker",
 ]
 
@@ -234,6 +281,32 @@ class ArchiveMemberRefused(ReceiveRefused):
     def __init__(self, member: str, detail: str) -> None:
         super().__init__(f"member {member!r}: {detail}")
         self.member = member
+
+
+class ConversationSubpathRefused(ReceiveRefused):
+    """`conversations`'s `--subpath` is absolute, carries a `..` segment, or
+    resolves outside the workspace — see
+    `camp.transfer.conversations.ConversationSubpathEscaped`, which this
+    wraps with the phase's usual by-name-refusal shape. Raised before
+    anything is written."""
+
+    def __init__(self, subpath: str, detail: str) -> None:
+        super().__init__(f"subpath {subpath!r} refused: {detail}")
+        self.subpath = subpath
+
+
+class ConversationDestinationRefused(ReceiveRefused):
+    """The harness boundary refused to compose, or to rewrite the recorded
+    root of, an arriving conversation's destination — see
+    `trailhead.harness.base.Harness.session_transcript_destination` and
+    `rewrite_transcript_workspace`: a harness with no such concept, a
+    `session_id` that is not a usable path component, or a projects-key
+    collision with a transcript already recorded for a different
+    workspace."""
+
+    def __init__(self, session_id: str, detail: str) -> None:
+        super().__init__(f"conversation {session_id!r}: {detail}")
+        self.session_id = session_id
 
 
 @dataclass(frozen=True)
@@ -598,4 +671,104 @@ def worktree(
     return {
         "contract_version": RECEIVE_CONTRACT_VERSION,
         "member": member,
+    }
+
+
+def conversations(
+    *,
+    groups: list[dict[str, Any]],
+    group_name: str,
+    slug: str,
+    session_id: str,
+    subpath: str,
+    archive_stream: Any,
+    env: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Place one arriving conversation, sent by
+    `camp.transfer.conversations.send_conversation`, on this host. See the
+    module docstring's `conversations` section for the full contract.
+
+    *archive_stream* is a binary file-like object read incrementally, exactly
+    like `worktree`'s *archive_stream*.
+
+    Raises:
+        GroupNotConfigured: *group_name* is not configured on this host.
+        ConversationSubpathRefused: *subpath* is absolute, carries a `..`
+            segment, or resolves outside the workspace — refused before
+            anything is written.
+        ConversationDestinationRefused: the harness boundary refused to
+            compose a destination, or to rewrite the placed transcript's
+            recorded root — no transcript-destination concept, an unusable
+            *session_id*, or a projects-key collision with a transcript
+            already recorded for a different workspace.
+        ArchiveMemberRefused: an archive member's path or link target would
+            land outside the conversation's own directory — refused before
+            it is written.
+    """
+    from trailhead.harness.base import HarnessError
+
+    from ..group.manifest import workspace_dir
+    from ..launch.profile import harness_for
+    from .conversations import (
+        ConversationSubpathEscaped,
+        extract_conversation_archive,
+        resolve_conversation_subpath,
+    )
+    from .worktree import ArchiveMemberEscaped
+
+    group = _require_group(groups, group_name)
+    ws_root = workspace_dir(group_name, slug, env=env).resolve()
+
+    try:
+        conversation_root = resolve_conversation_subpath(ws_root, subpath)
+    except ConversationSubpathEscaped as e:
+        raise ConversationSubpathRefused(subpath, e.reason) from e
+
+    harness = harness_for(group)
+    if harness is None:
+        raise ConversationDestinationRefused(
+            session_id, "this group's harness has no transcript-destination concept"
+        )
+
+    try:
+        destination = harness.session_transcript_destination(
+            session_id, conversation_root, env=env
+        )
+    except HarnessError as e:
+        raise ConversationDestinationRefused(session_id, str(e)) from e
+    if destination is None:
+        raise ConversationDestinationRefused(
+            session_id, "the harness could not compose a destination for this conversation"
+        )
+
+    nested_dir = destination.parent / session_id
+
+    try:
+        extract_conversation_archive(archive_stream, destination, nested_dir)
+    except ArchiveMemberEscaped as e:
+        raise ArchiveMemberRefused(e.name, str(e)) from e
+
+    old_root = next(
+        (
+            row.cwd
+            for row in (harness.session_transcripts(env=env) or ())
+            if row.session_id == session_id
+        ),
+        None,
+    )
+    if old_root is not None and old_root.resolve() != conversation_root:
+        try:
+            harness.rewrite_transcript_workspace(
+                destination, destination, old_root, conversation_root
+            )
+        except HarnessError as e:
+            raise ConversationDestinationRefused(session_id, str(e)) from e
+
+    ws_dir = workspace_dir(group_name, slug, env=env)
+    append_marker(ws_dir, phase="conversations", outcome="ok")
+
+    return {
+        "contract_version": RECEIVE_CONTRACT_VERSION,
+        "session_id": session_id,
+        "subpath": subpath,
     }

@@ -112,11 +112,46 @@ subdirectory, so the peer resolves the workspace directory from
 `send_workspace_conversations` therefore take no `member` argument at all —
 unlike `transfer/history.py` and `transfer/worktree.py`, which are per-member
 phases and do carry one.
+
+---
+
+The third part of this module is the PEER side of the channel, called from
+`camp.transfer.receive.conversations`: :func:`resolve_conversation_subpath`
+turns the wire's `--subpath` into an absolute directory under the peer's own
+resolved workspace, and :func:`extract_conversation_archive` places the
+archive `send_conversation` streamed.
+
+**No path from the wire, ever.** `--subpath` names a location WITHIN the
+peer's own workspace, never a path to resolve against anything else —
+continuing the posture every phase in `camp.transfer.receive` already holds.
+`resolve_conversation_subpath` refuses, before anything is written, an
+absolute `--subpath`, one carrying a `..` segment, or one that (once resolved,
+following any real symlink already on disk) would land outside the workspace
+— raising :class:`ConversationSubpathEscaped`, named after
+`camp.transfer.worktree.ArchiveMemberEscaped`'s confinement posture, applied
+here to this different kind of wire input.
+
+**Archive confinement is the SAME check `worktree.extract_archive` already
+applies** (`transfer/worktree.py:200-239`), reused rather than reimplemented:
+`extract_conversation_archive` calls the same `_check_member` /
+`_sanitize_member` helpers against the conversation's own nested directory as
+`dest_root`, so an absolute member path, a `..` segment, a symlink or hardlink
+whose target escapes, or a device/special file all raise
+`worktree.ArchiveMemberEscaped` before that member is written — the peer never
+trusts a member name to place a file of its own choosing. The `transcript.jsonl`
+member is placed at the caller-supplied `destination` (already the
+harness-composed `<session-id>.jsonl` path); every other member lands under
+the conversation's own nested directory at its own relative name. Each member
+is written to a temp file beside its target and renamed into place, so a
+re-run after a partial failure overwrites cleanly rather than merging stale
+content with new.
 """
 
 from __future__ import annotations
 
 import hashlib
+import os
+import shutil
 import sys
 import tarfile
 from collections.abc import Callable, Iterable, Mapping
@@ -166,6 +201,9 @@ __all__ = [
     "write_conversation_archive",
     "send_conversation",
     "send_workspace_conversations",
+    "ConversationSubpathEscaped",
+    "resolve_conversation_subpath",
+    "extract_conversation_archive",
 ]
 
 #: The fixed tar member name for a conversation's own top-level transcript —
@@ -498,6 +536,96 @@ def send_workspace_conversations(
         results.append((conversation.session_id, outcome))
 
     return tuple(results)
+
+
+# ---------------------------------------------------------------------------
+# Peer side — subpath confinement + archive placement.
+# ---------------------------------------------------------------------------
+
+
+class ConversationSubpathEscaped(Exception):
+    """*subpath* is absolute, carries a `..` segment, or (once resolved,
+    following any real symlink already on disk) would land outside the
+    workspace — refused before anything is written.
+
+    Named after `camp.transfer.worktree.ArchiveMemberEscaped`'s confinement
+    posture, applied here to the `--subpath` wire argument instead of an
+    archive member's path.
+    """
+
+    def __init__(self, subpath: str, reason: str) -> None:
+        super().__init__(f"subpath {subpath!r} refused: {reason}")
+        self.subpath = subpath
+        self.reason = reason
+
+
+def resolve_conversation_subpath(ws_root: Path, subpath: str) -> Path:
+    """Resolve the wire's `--subpath` to an absolute directory under
+    *ws_root* — the peer's OWN already-resolved workspace directory, never a
+    value taken from the wire itself.
+
+    *ws_root* must already be resolved (``Path.resolve()``'d) by the caller;
+    this function trusts it as the confinement boundary and does not re-derive
+    it. ``"."`` names the workspace root itself.
+
+    Raises:
+        ConversationSubpathEscaped: *subpath* is absolute, carries a `..`
+            segment, or resolves (following any real symlink) outside
+            *ws_root*.
+    """
+    raw = PurePosixPath(subpath)
+    if raw.is_absolute():
+        raise ConversationSubpathEscaped(subpath, "absolute path")
+    if any(part == ".." for part in raw.parts):
+        raise ConversationSubpathEscaped(subpath, "contains a '..' segment")
+
+    candidate = ws_root if raw == PurePosixPath(".") else ws_root.joinpath(*raw.parts)
+    resolved = candidate.resolve()
+    try:
+        resolved.relative_to(ws_root)
+    except ValueError:
+        raise ConversationSubpathEscaped(subpath, "resolves outside the workspace") from None
+    return resolved
+
+
+def extract_conversation_archive(fileobj: BinaryIO, destination: Path, nested_dir: Path) -> None:
+    """Extract one conversation's archive (see the module docstring's stream
+    format) onto disk.
+
+    The `transcript.jsonl` member lands at *destination* — already the
+    harness-composed `<session-id>.jsonl` path, named by the caller, never by
+    an archive member. Every other member lands under *nested_dir* at its own
+    path relative to it.
+
+    Confinement is checked against *nested_dir*, reusing
+    `camp.transfer.worktree`'s own `_check_member` / `_sanitize_member` — see
+    the module docstring.
+
+    Raises:
+        camp.transfer.worktree.ArchiveMemberEscaped: a member's path or link
+            target would land outside *nested_dir* — refused before that
+            member is written.
+    """
+    from .worktree import _check_member, _sanitize_member
+
+    nested_dir = nested_dir.resolve()
+
+    with tarfile.open(fileobj=fileobj, mode="r|") as tf:
+        for member in tf:
+            _check_member(nested_dir, member)
+            _sanitize_member(member)
+
+            target = destination if member.name == _TRANSCRIPT_MEMBER else nested_dir / member.name
+            target.parent.mkdir(parents=True, exist_ok=True)
+
+            extracted = tf.extractfile(member)
+            if extracted is None:
+                continue
+
+            tmp = target.parent / f".{target.name}.tmp"
+            with open(tmp, "wb") as out:
+                shutil.copyfileobj(extracted, out)
+            os.replace(tmp, target)
 
 
 def _cli_main(argv: Sequence[str]) -> None:
