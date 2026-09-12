@@ -29,6 +29,7 @@ tolerates a file that carries it, exactly as it already tolerates
 """
 from __future__ import annotations
 
+import math
 import re
 import tomllib
 from dataclasses import dataclass
@@ -245,9 +246,9 @@ def connect_timeout_seconds(env: dict[str, str] | None = None) -> float:
     Raises:
         HostConfigError: If hosts.toml cannot be read, is malformed TOML, or
             is nested deeply enough to exhaust the parser's recursion limit,
-            or ``connect_timeout`` is present but not a positive number —
-            text, zero, or negative all refuse rather than silently falling
-            back to the default.
+            or ``connect_timeout`` is present but not a positive, finite
+            number — text, zero, negative, NaN, and +/-infinity all refuse
+            rather than silently falling back to the default.
     """
     import trailhead.paths as _paths
 
@@ -287,7 +288,12 @@ def connect_timeout_seconds(env: dict[str, str] | None = None) -> float:
             f"{path}: field 'connect_timeout' must be a positive number, "
             f"got {value!r}"
         )
-    if value <= 0:
+    # `math.isfinite` rules out both NaN and +/-inf. NaN compares false
+    # against every ordering operator, including `<= 0`, so a bare
+    # positivity check alone lets it through untouched; `inf` is positive,
+    # so it passes a positivity check too but is not a bound ssh can be
+    # handed.
+    if not math.isfinite(value) or value <= 0:
         raise HostConfigError(
             f"{path}: field 'connect_timeout' must be a positive number, "
             f"got {value!r}"
