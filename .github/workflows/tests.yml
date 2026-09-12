@@ -45,6 +45,11 @@ jobs:
     steps:
       - name: Check out the repository
         uses: actions/checkout@v4
+        with:
+          # Full history: tools/craft's regression test reads a grader's blob
+          # out of an earlier commit via `git show <sha>:<path>` — the default
+          # shallow (depth-1) checkout doesn't carry that object.
+          fetch-depth: 0
 
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
