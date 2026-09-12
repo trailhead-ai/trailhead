@@ -23,13 +23,35 @@ Test contract (all must RED before implementation, GREEN after):
 - a refusal writes no marker into a workspace it refused to touch.
 - `seed_pending_workspace`'s new `owner=` is optional and keyword-only: the
   default path (no `owner` passed) keeps self-stamping unchanged.
+
+`conversations` (all must RED before implementation, GREEN after):
+
+- a conversation arriving for the workspace root lands at the destination the
+  harness boundary composes for the peer's own workspace directory, and its
+  recorded root reads as that directory afterwards.
+- a conversation arriving with a member subpath lands rooted at the peer's
+  corresponding subdirectory, not at the workspace root.
+- a subpath carrying a `..` segment, an absolute subpath, or a subpath whose
+  resolution escapes the workspace through a real symlink is refused before
+  anything is written, naming the offending subpath.
+- a destination-key collision (two distinct workspace directories that munge
+  to the same projects key) becomes a named refusal, not an unhandled
+  exception and not a silent write — provable only because the first
+  conversation's write completes, and is visible on disk, before the second
+  conversation's destination is composed.
+- re-running the phase for a conversation already placed overwrites it rather
+  than failing or duplicating.
+- a destination whose parent directory does not exist yet is created by this
+  phase itself.
 """
 
 from __future__ import annotations
 
+import io
 import json
 import subprocess
 import sys
+import tarfile
 from pathlib import Path
 
 import pytest
@@ -738,3 +760,324 @@ def test_transfer_receive_begin_still_dispatches_when_another_workspace_exists(
     assert payload["contract_version"] == 1
     names = {m["name"] for m in payload["members"]}
     assert names == {"repo_a"}
+
+
+# ---------------------------------------------------------------------------
+# conversations — peer placement, confinement, collision, re-run, mkdir
+# ---------------------------------------------------------------------------
+
+
+def _conversation_env(g: dict) -> dict[str, str]:
+    """*g*'s own `camp_state_env`, plus a fresh, never-yet-created Claude Code
+    config dir — so a test can assert on whether `projects/` gets created."""
+    env = dict(g["env"])
+    env["TRAILHEAD_CLAUDE_DIR"] = str(g["tmp_path"] / "claude-dir")
+    return env
+
+
+def _archive_bytes(transcript: bytes, nested: dict[str, bytes] | None = None) -> bytes:
+    """A tar stream shaped exactly like
+    `camp.transfer.conversations.write_conversation_archive`'s output: a
+    `transcript.jsonl` member, then whatever *nested* names."""
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w") as tf:
+        info = tarfile.TarInfo("transcript.jsonl")
+        info.size = len(transcript)
+        tf.addfile(info, io.BytesIO(transcript))
+        for name, content in (nested or {}).items():
+            info = tarfile.TarInfo(name)
+            info.size = len(content)
+            tf.addfile(info, io.BytesIO(content))
+    return buf.getvalue()
+
+
+def _seed_workspace(g: dict, slug: str) -> Path:
+    from camp.group.manifest import workspace_dir
+    from camp.provision.provision import seed_pending_workspace
+
+    seed_pending_workspace(g["group"], slug, env=g["env"])
+    return workspace_dir("testgroup", slug, env=g["env"]).resolve()
+
+
+class TestConversationSubpathConfinement:
+    def test_traversal_segment_refused_and_nothing_written(self, one_member_group):
+        """`a/../a` never actually escapes the workspace once resolved — this
+        subpath is refused ONLY because it carries a literal `..` segment, a
+        rule pinned unconditionally rather than as an incidental side effect
+        of the resolved-escape check below."""
+        from camp.transfer import receive
+
+        g = one_member_group
+        _seed_workspace(g, "feat-x")
+        env = _conversation_env(g)
+        before = _snapshot(Path(env["TRAILHEAD_CLAUDE_DIR"]))
+
+        with pytest.raises(receive.ConversationSubpathRefused) as exc_info:
+            receive.conversations(
+                groups=[g["group"]],
+                group_name="testgroup",
+                slug="feat-x",
+                session_id="11111111-1111-4111-8111-111111111111",
+                subpath="a/../a",
+                archive_stream=io.BytesIO(_archive_bytes(b'{"cwd": "/whatever"}\n')),
+                env=env,
+            )
+
+        assert "a/../a" in str(exc_info.value)
+        assert _snapshot(Path(env["TRAILHEAD_CLAUDE_DIR"])) == before
+
+    def test_absolute_subpath_refused_and_nothing_written(self, one_member_group):
+        """Pins the 'no path from the wire' posture on its own terms: the
+        absolute path used here happens to resolve INSIDE the workspace (it is
+        literally `ws_root / "nested"`), so a resolve-based confinement check
+        alone would let it through. It must still be refused for the sole
+        reason that it arrived as an absolute path at all."""
+        from camp.transfer import receive
+
+        g = one_member_group
+        ws_root = _seed_workspace(g, "feat-x")
+        env = _conversation_env(g)
+        before = _snapshot(Path(env["TRAILHEAD_CLAUDE_DIR"]))
+        coincidentally_safe_absolute_subpath = str(ws_root / "nested")
+
+        with pytest.raises(receive.ConversationSubpathRefused) as exc_info:
+            receive.conversations(
+                groups=[g["group"]],
+                group_name="testgroup",
+                slug="feat-x",
+                session_id="11111111-1111-4111-8111-111111111111",
+                subpath=coincidentally_safe_absolute_subpath,
+                archive_stream=io.BytesIO(_archive_bytes(b'{"cwd": "/whatever"}\n')),
+                env=env,
+            )
+
+        assert coincidentally_safe_absolute_subpath in str(exc_info.value)
+        assert _snapshot(Path(env["TRAILHEAD_CLAUDE_DIR"])) == before
+
+    def test_symlink_escape_refused_and_nothing_written(self, one_member_group, tmp_path):
+        from camp.transfer import receive
+
+        g = one_member_group
+        ws_root = _seed_workspace(g, "feat-x")
+        outside = tmp_path / "outside-the-workspace"
+        outside.mkdir()
+        (ws_root / "escape").symlink_to(outside)
+
+        env = _conversation_env(g)
+        before = _snapshot(Path(env["TRAILHEAD_CLAUDE_DIR"]))
+
+        with pytest.raises(receive.ConversationSubpathRefused) as exc_info:
+            receive.conversations(
+                groups=[g["group"]],
+                group_name="testgroup",
+                slug="feat-x",
+                session_id="11111111-1111-4111-8111-111111111111",
+                subpath="escape/conv",
+                archive_stream=io.BytesIO(_archive_bytes(b'{"cwd": "/whatever"}\n')),
+                env=env,
+            )
+
+        assert "escape/conv" in str(exc_info.value)
+        assert _snapshot(Path(env["TRAILHEAD_CLAUDE_DIR"])) == before
+
+
+class TestConversationRootLanding:
+    def test_conversation_at_workspace_root_lands_and_rewrites_recorded_root(
+        self, one_member_group
+    ):
+        from camp.transfer import receive
+        from trailhead.harness.claude_code import ClaudeCodeHarness
+
+        g = one_member_group
+        ws_root = _seed_workspace(g, "feat-x")
+        env = _conversation_env(g)
+        session_id = "11111111-1111-4111-8111-111111111111"
+
+        # The Claude Code config dir has never been touched — proves this
+        # phase creates its own destination parents, not just writes into an
+        # already-provisioned tree.
+        assert not (Path(env["TRAILHEAD_CLAUDE_DIR"]) / "projects").exists()
+
+        archive = _archive_bytes(
+            json.dumps({"cwd": "/home/sender/some-other-workspace", "type": "summary"}).encode()
+            + b"\n"
+        )
+
+        result = receive.conversations(
+            groups=[g["group"]],
+            group_name="testgroup",
+            slug="feat-x",
+            session_id=session_id,
+            subpath=".",
+            archive_stream=io.BytesIO(archive),
+            env=env,
+        )
+
+        assert result["session_id"] == session_id
+
+        harness = ClaudeCodeHarness()
+        found = harness.session_transcript_path(session_id, ws_root, env=env)
+        assert found is not None
+        record = json.loads(found.read_text().splitlines()[0])
+        assert record["cwd"] == str(ws_root)
+        assert record["type"] == "summary"
+
+
+class TestConversationMemberSubpathLanding:
+    def test_conversation_with_member_subpath_lands_at_corresponding_subdirectory(
+        self, one_member_group
+    ):
+        from camp.transfer import receive
+        from trailhead.harness.claude_code import ClaudeCodeHarness
+
+        g = one_member_group
+        ws_root = _seed_workspace(g, "feat-x")
+        member_dir = ws_root / "repo_a"
+        member_dir.mkdir(parents=True, exist_ok=True)
+        env = _conversation_env(g)
+        session_id = "22222222-2222-4222-8222-222222222222"
+
+        archive = _archive_bytes(
+            json.dumps({"cwd": "/home/sender/some-workspace/repo_a"}).encode() + b"\n"
+        )
+
+        receive.conversations(
+            groups=[g["group"]],
+            group_name="testgroup",
+            slug="feat-x",
+            session_id=session_id,
+            subpath="repo_a",
+            archive_stream=io.BytesIO(archive),
+            env=env,
+        )
+
+        harness = ClaudeCodeHarness()
+        found_at_member = harness.session_transcript_path(session_id, member_dir, env=env)
+        found_at_root = harness.session_transcript_path(session_id, ws_root, env=env)
+        # The property a same-subpath test cannot show: varying the subpath
+        # varies WHERE the conversation is found.
+        assert found_at_member is not None
+        assert found_at_root is None
+        record = json.loads(found_at_member.read_text().splitlines()[0])
+        assert record["cwd"] == str(member_dir.resolve())
+
+
+class TestConversationDestinationCollision:
+    def test_collision_refused_after_first_write_second_never_touches_disk(
+        self, one_member_group
+    ):
+        """Two DIFFERENT resolved directories — `repo.a` and `repo/a` — munge
+        to the SAME projects key (the lossy `/` and `.` collapse). The first
+        conversation's write is what lets the second one's destination
+        composition detect the collision at all — pinning the ordering
+        contract alongside the refusal itself."""
+        from camp.transfer import receive
+        from trailhead.harness.claude_code import ClaudeCodeHarness
+
+        g = one_member_group
+        ws_root = _seed_workspace(g, "feat-x")
+        (ws_root / "repo.a").mkdir(parents=True, exist_ok=True)
+        (ws_root / "repo" / "a").mkdir(parents=True, exist_ok=True)
+        env = _conversation_env(g)
+
+        session_a = "33333333-3333-4333-8333-333333333333"
+        session_b = "44444444-4444-4444-8444-444444444444"
+
+        receive.conversations(
+            groups=[g["group"]],
+            group_name="testgroup",
+            slug="feat-x",
+            session_id=session_a,
+            subpath="repo.a",
+            archive_stream=io.BytesIO(
+                _archive_bytes(json.dumps({"cwd": "/sender/a"}).encode() + b"\n")
+            ),
+            env=env,
+        )
+
+        with pytest.raises(receive.ConversationDestinationRefused) as exc_info:
+            receive.conversations(
+                groups=[g["group"]],
+                group_name="testgroup",
+                slug="feat-x",
+                session_id=session_b,
+                subpath="repo/a",
+                archive_stream=io.BytesIO(
+                    _archive_bytes(json.dumps({"cwd": "/sender/b"}).encode() + b"\n")
+                ),
+                env=env,
+            )
+
+        assert session_b in str(exc_info.value)
+
+        harness = ClaudeCodeHarness()
+        found_a = harness.session_transcript_path(
+            session_a, (ws_root / "repo.a").resolve(), env=env
+        )
+        found_b = harness.session_transcript_path(
+            session_b, (ws_root / "repo" / "a").resolve(), env=env
+        )
+        assert found_a is not None
+        assert found_b is None
+
+
+class TestConversationRerun:
+    def test_rerunning_overwrites_rather_than_duplicating(self, one_member_group):
+        from camp.transfer import receive
+        from trailhead.harness.claude_code import ClaudeCodeHarness
+
+        g = one_member_group
+        ws_root = _seed_workspace(g, "feat-x")
+        env = _conversation_env(g)
+        session_id = "55555555-5555-4555-8555-555555555555"
+
+        for n in (1, 2):
+            receive.conversations(
+                groups=[g["group"]],
+                group_name="testgroup",
+                slug="feat-x",
+                session_id=session_id,
+                subpath=".",
+                archive_stream=io.BytesIO(
+                    _archive_bytes(
+                        json.dumps({"cwd": f"/sender/attempt-{n}", "n": n}).encode() + b"\n"
+                    )
+                ),
+                env=env,
+            )
+
+        harness = ClaudeCodeHarness()
+        found = harness.session_transcript_path(session_id, ws_root, env=env)
+        lines = found.read_text().splitlines()
+        assert len(lines) == 1
+        record = json.loads(lines[0])
+        assert record["n"] == 2
+        assert record["cwd"] == str(ws_root)
+
+
+class TestConversationArchiveMemberConfinement:
+    def test_nested_member_traversal_refused_by_name(self, one_member_group):
+        from camp.transfer import receive
+
+        g = one_member_group
+        _seed_workspace(g, "feat-x")
+        env = _conversation_env(g)
+        session_id = "66666666-6666-4666-8666-666666666666"
+
+        archive = _archive_bytes(
+            json.dumps({"cwd": "/sender/root"}).encode() + b"\n",
+            nested={"../../etc/passwd": b"pwned"},
+        )
+
+        with pytest.raises(receive.ArchiveMemberRefused) as exc_info:
+            receive.conversations(
+                groups=[g["group"]],
+                group_name="testgroup",
+                slug="feat-x",
+                session_id=session_id,
+                subpath=".",
+                archive_stream=io.BytesIO(archive),
+                env=env,
+            )
+
+        assert "../../etc/passwd" in str(exc_info.value)
