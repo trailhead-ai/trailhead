@@ -484,7 +484,8 @@ class Harness(ABC):
 
         Every field this harness structurally records a root in is rewritten
         from ``old_root`` to ``new_root``; every other field is byte-identical
-        to the input.
+        to the input. ``destination``'s parent directory must already exist —
+        creating it is the caller's responsibility, not this method's.
 
         Returns ``False`` when this harness has no transcript-rewrite concept —
         ``destination`` is left untouched. Returns ``True`` on a completed

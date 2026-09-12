@@ -230,24 +230,51 @@ def _stream_rest_of_overlong_line(f_in: BinaryIO, f_out: BinaryIO) -> None:
             return
 
 
+#: Matches a top-level ``"cwd"`` object key and its JSON string value in a
+#: transcript line's raw bytes. Group 1 is the key, colon, and any
+#: surrounding whitespace, preserved verbatim; group 2 is the value's raw
+#: (still-escaped) content between the quotes.
+#:
+#: An occurrence of ``cwd`` inside escaped JSON-string *content* — free prose
+#: quoting another record, e.g. ``\"cwd\":\"...\"`` — does not match: the
+#: backslash JSON uses to escape that inner quote sits between the ``d`` and
+#: the quote this pattern requires immediately after it, so the literal
+#: ``"cwd":"`` sequence this regex looks for is never present there.
+_CWD_FIELD_RE = re.compile(rb'("cwd"\s*:\s*)"((?:\\.|[^"\\])*)"')
+
+
 def _rewrite_transcript_line(
     chunk: bytes, old_root: Path, new_root: Path, source: Path
 ) -> bytes:
-    """Rewrite one already cap-sized transcript line's ``cwd``, or pass it
-    through verbatim.
+    """Rewrite one already cap-sized transcript line's ``cwd`` in place, or
+    pass it through verbatim.
 
     Verbatim covers: invalid JSON, JSON that is not an object, and an object
     with no string/absolute ``cwd`` — none of those structurally record a
     root, so none of them are this transform's business.
 
+    The rewrite is a targeted byte substitution, not a re-serialization: only
+    the bytes of the ``cwd`` value's own JSON string literal are replaced
+    (via :data:`_CWD_FIELD_RE`), so every other byte on the line — separator
+    spacing, key order, other fields' escaping and number formatting — is
+    untouched. This is required, not cosmetic:
+    ``Harness.rewrite_transcript_workspace``'s contract is byte-identical
+    output outside the rewritten root, and re-serializing the whole record
+    (e.g. via ``json.dumps``) would reformat every field on the line to
+    Python's own JSON spacing, silently breaking that contract on a real,
+    compactly-written transcript.
+
     Raises :class:`HarnessError`, naming ``source``, when ``cwd`` IS an
     absolute path but is not under ``old_root`` — a foreign, sending-host root
-    this transform must refuse rather than relocate.
+    this transform must refuse rather than relocate — and also when ``cwd``
+    was decoded from the line but this pattern cannot locate its own literal
+    bytes to substitute, which would otherwise force a fall back to
+    re-serialization.
     """
     ends_in_newline = chunk.endswith(b"\n")
-    text = chunk[:-1] if ends_in_newline else chunk
+    body = chunk[:-1] if ends_in_newline else chunk
     try:
-        decoded = text.decode("utf-8")
+        decoded = body.decode("utf-8")
     except UnicodeDecodeError:
         return chunk
     try:
@@ -268,9 +295,17 @@ def _rewrite_transcript_line(
             f"({cwd_path}) outside {old_root}; refusing to rewrite the "
             "transcript rather than pass a foreign root through unrewritten"
         )
-    record["cwd"] = str(new_root / cwd_path.relative_to(old_root))
-    new_line = json.dumps(record).encode("utf-8")
-    return new_line + b"\n" if ends_in_newline else new_line
+    match = _CWD_FIELD_RE.search(body)
+    if match is None or json.loads(b'"' + match.group(2) + b'"') != cwd:
+        raise HarnessError(
+            f"rewrite_transcript_workspace: {source.name} records a cwd this "
+            "transform cannot byte-preservingly locate; refusing rather than "
+            "falling back to re-serializing the line"
+        )
+    new_value = str(new_root / cwd_path.relative_to(old_root))
+    replacement = match.group(1) + json.dumps(new_value).encode("utf-8")
+    new_body = body[: match.start()] + replacement + body[match.end() :]
+    return new_body + b"\n" if ends_in_newline else new_body
 
 
 def _iter_transcript_paths(projects_dir: Path) -> Iterator[Path]:
@@ -1037,17 +1072,30 @@ class ClaudeCodeHarness(Harness):
         streaming the result into ``destination``.
 
         A line that fails to decode as JSON, or decodes to something other than
-        a dict with a string, absolute ``cwd``, is copied through verbatim. A
-        line whose ``cwd`` is absolute but not under ``old_root`` raises
+        a dict with a string, absolute ``cwd``, is copied through verbatim — a
+        relative ``cwd`` in particular is passed through unrewritten rather
+        than refused. That pass-through is a live decision, not an oversight:
+        this method reaches only conversations camp has already resolved a
+        root for. ``session_transcripts`` collapses a relative recorded ``cwd``
+        to ``cwd=None`` (`trailhead/harness/claude_code.py:1150-1154`), which
+        marks the conversation unresolved, and the sender refuses an
+        unresolved conversation outright before it ever streams a transcript
+        here (`tools/camp/plugins/camp/camp/transfer/conversations.py:266`).
+        A non-camp caller of this harness-boundary method directly, without
+        that same refusal in front of it, would not have that guarantee.
+
+        A line whose ``cwd`` is absolute but not under ``old_root`` raises
         :class:`HarnessError` naming ``source``, and nothing is written to
         ``destination``.
+
+        ``destination``'s parent directory must already exist — creating it
+        is the caller's responsibility, not this transform's.
 
         Always returns ``True`` on completion — this harness always has a
         transcript-rewrite concept, unlike the base class's degrading default.
         """
         old_root = Path(old_root)
         new_root = Path(new_root)
-        destination.parent.mkdir(parents=True, exist_ok=True)
         tmp_fd, tmp_name = tempfile.mkstemp(
             dir=destination.parent, prefix=f".{destination.name}.", suffix=".tmp"
         )
