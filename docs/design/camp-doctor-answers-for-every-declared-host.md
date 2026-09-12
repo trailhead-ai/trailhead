@@ -86,9 +86,11 @@ Absent, it is the stated default. It applies to every verb that relays over this
 (`list`, `sessions`, `launch`, `kill`, `attach`, and doctor's own probe) rather than to the probe
 alone, because it describes the machines, not the question being asked of them — and because camp
 scans argv by hand, so an option would have to be taught to every verb that reads it, and could
-then disagree between them. The transfer verbs stream over a separate channel and still read the
-transport's own default rather than this declared value — a narrower follow-up, not part of this
-slice.
+then disagree between them. The transfer verbs still read the transport's own default rather than
+this declared value — not because they all stream over a separate channel (at least one of them
+reaches the far side over the very same `run_camp` channel the relay verbs and doctor's probe use),
+but because threading the declared value through them was not done here — a narrower follow-up, not
+part of this slice.
 
 **What it bounds, exactly.** This is the handshake — how long camp waits for a machine to answer at
 all. A machine that answers and then wedges partway through its own checks is bounded separately,

@@ -1098,6 +1098,37 @@ def test_doctor_no_remote_hosts_declared_renders_this_machine_alone(
     assert report["hosts"][0]["verdict"] == "PASS"
 
 
+def test_doctor_hosts_file_read_error_is_rendered_in_the_host_section(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """When hosts.toml itself fails to parse, the declared hosts can never
+    be enumerated — the section renders only this machine today, with
+    nothing saying why. The all-hosts path for other verbs already surfaces
+    this failure (`merge_all_hosts_answer`'s own `ok: false` row); the
+    doctor host section must say so too, in its own grammar.
+
+    Valid TOML with a malformed `[hosts]` table, rather than a TOML syntax
+    error, so the pre-existing self-declared-host-name check (which reads
+    only the unrelated `self_name` key) stays unaffected — isolating this
+    assertion to the host section's own exit-status contract rather than
+    the local check that already fails on a genuine parse error."""
+    _doctor_hosts_env(tmp_path, monkeypatch, 'hosts = "not a table"\n')
+    monkeypatch.setenv("CAMP_TEST_TMUX_PRESENT", "1")
+    transport = _transport_module()
+
+    def _boom(*args, **kwargs):
+        raise AssertionError("hosts.toml never parsed — the transport must never be called")
+
+    monkeypatch.setattr(transport, "run_camp", _boom)
+
+    code = _run(monkeypatch, ["doctor", "-a", "--json"])
+    report = json.loads(capsys.readouterr().out)
+    assert code == 0, "a hosts.toml read failure must never change the exit status"
+    assert len(report["hosts"]) == 2, "this machine's row, plus a row for the read failure"
+    error_row = next(h for h in report["hosts"] if h["host"] != report["hosts"][0]["host"])
+    assert "[hosts]" in error_row["detail"]
+
+
 def test_doctor_one_host_answers_fully_resolvable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
@@ -1557,6 +1588,36 @@ def test_doctor_remote_refusal_with_unparseable_stdout_renders_down(
     row = next(h for h in report["hosts"] if h["host"] == "andromeda")
     assert row["verdict"] == "DOWN"
     assert "unreachable" in row["detail"]
+
+
+def test_doctor_remote_refusal_with_nonzero_exit_and_unparseable_stdout_renders_warn(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """A `RemoteRefusal` whose exit code is NOT ssh's own 255 catch-all means
+    the remote command actually ran — a login shell writing a banner to
+    stdout that will not parse as JSON is still an answering machine, never
+    "could not be reached at all". Only an unrecognized 255 gets the DOWN
+    verdict; every other exit code means camp (or the far shell) ran and
+    the probe is simply unavailable on that machine."""
+    _doctor_hosts_env(tmp_path, monkeypatch, "[hosts.andromeda]\n")
+    transport = _transport_module()
+    monkeypatch.setattr(
+        transport,
+        "run_camp",
+        lambda host, remote_argv, **kw: transport.RemoteRefusal(
+            stdout="a login banner, not JSON", stderr="", exit_code=17
+        ),
+    )
+
+    code = _run(monkeypatch, ["doctor", "-a", "--json"])
+    report = json.loads(capsys.readouterr().out)
+    assert code == 0
+    row = next(h for h in report["hosts"] if h["host"] == "andromeda")
+    assert row["verdict"] == "WARN", (
+        "exit code 17 means the remote command ran; rendering it as "
+        "unreachable claims the machine never answered when it did"
+    )
+    assert "unavailable" in row["detail"]
 
 
 def test_doctor_remote_refusal_with_parseable_stdout_reads_probe_availability(
