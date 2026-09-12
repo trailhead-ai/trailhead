@@ -50,6 +50,7 @@ Test contract:
 from __future__ import annotations
 
 import importlib
+import importlib.util
 import json
 import os
 import re
@@ -100,6 +101,21 @@ def _conversations_module():
 
 def _move_module():
     return importlib.import_module("camp.transfer.move")
+
+
+def _session_cli_module():
+    """Load `test_session_cli.py` by path, to reuse its `FakeHarness`
+    registration source (`_SITECUSTOMIZE`) and its tmux stand-in
+    (`_TMUX_STUB`) rather than re-authoring the same real-`camp launch`
+    convention a second time. Importing it only reads module-level
+    definitions (functions, fixtures, classes) — nothing here executes any
+    of its tests."""
+    source = Path(__file__).resolve().parent / "test_session_cli.py"
+    spec = importlib.util.spec_from_file_location("camp_tests_session_cli", source)
+    assert spec and spec.loader, source
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 # ---------------------------------------------------------------------------
@@ -1211,6 +1227,7 @@ def move_env(tmp_path: Path):
         "group": _move_group(sender_repo),
         "host": Host(ssh="fake-peer", camp_bin="/opt/camp/bin/camp"),
         "sender_env": sender_env,
+        "sender_repo": sender_repo,
         "wt_path": wt_path,
         "tmp_path": tmp_path,
         "peer_repo": peer_repo,
@@ -1221,6 +1238,379 @@ def move_env(tmp_path: Path):
         "run": _peer_runner(peer_cfg, peer_state, peer_claude_dir),
         "stream_spawn": _peer_stream_spawn(peer_cfg, peer_state, peer_claude_dir),
     }
+
+
+# ---------------------------------------------------------------------------
+# camp.transfer.move — proving a crossed conversation resumes on a real peer,
+# through `camp`'s own CLI rather than at the handler. Reuses `move_env`'s
+# real sender worktree + real peer subprocess, plus the `FakeHarness`/tmux
+# stand-in convention `test_session_cli.py`'s `cli_env` fixture already
+# establishes for running a real `camp launch`/`camp sessions` without a real
+# Claude Code install or a real tmux.
+# ---------------------------------------------------------------------------
+
+
+def _harness_shim(tmp_path: Path, tag: str) -> dict:
+    """The PATH/PYTHONPATH additions plus the fake session store files a
+    `camp` subprocess needs to list/launch/resume sessions without touching a
+    real harness or a real tmux — `test_session_cli.py`'s `_SITECUSTOMIZE`
+    (registers `FakeHarness` under the `claude_code` registry key) and
+    `_TMUX_STUB` (a tiny session table backed by two files), reused rather
+    than re-authored."""
+    session_cli = _session_cli_module()
+
+    shim_dir = tmp_path / f"{tag}-shim"
+    shim_dir.mkdir()
+    (shim_dir / "sitecustomize.py").write_text(session_cli._SITECUSTOMIZE, encoding="utf-8")
+
+    bin_dir = tmp_path / f"{tag}-bin"
+    bin_dir.mkdir()
+    tmux = bin_dir / "tmux"
+    tmux.write_text(session_cli._TMUX_STUB, encoding="utf-8")
+    tmux.chmod(0o755)
+
+    sessions_file = tmp_path / f"{tag}-sessions.tsv"
+    sessions_file.write_text("", encoding="utf-8")
+    tmux_argv_file = tmp_path / f"{tag}-tmux-argv.tsv"
+    tmux_argv_file.write_text("", encoding="utf-8")
+    tmux_table_file = tmp_path / f"{tag}-tmux-table.json"
+    tmux_table_file.write_text("{}", encoding="utf-8")
+
+    return {
+        "shim_dir": shim_dir,
+        "bin_dir": bin_dir,
+        "sessions_file": sessions_file,
+        "tmux_argv_file": tmux_argv_file,
+        "tmux_table_file": tmux_table_file,
+    }
+
+
+def _camp_subprocess_env(*, cfg: Path, state: Path, claude_dir: Path, shim: dict) -> dict[str, str]:
+    """The full environment for a real `camp` CLI subprocess against one
+    isolated config/state/harness-store triple, with *shim*'s fake tmux and
+    fake harness wired in via PATH/PYTHONPATH."""
+    env = dict(os.environ)
+    env["CAMP_CONFIG_DIR"] = str(cfg)
+    env["CAMP_STATE_DIR"] = str(state)
+    env["TRAILHEAD_CLAUDE_DIR"] = str(claude_dir)
+    env["CAMP_FAKE_SESSIONS_FILE"] = str(shim["sessions_file"])
+    env["CAMP_FAKE_TMUX_ARGV_FILE"] = str(shim["tmux_argv_file"])
+    env["CAMP_FAKE_TMUX_TABLE_FILE"] = str(shim["tmux_table_file"])
+    env["PATH"] = f"{shim['bin_dir']}{os.pathsep}{env.get('PATH', '')}"
+    env["PYTHONPATH"] = os.pathsep.join(
+        [str(shim["shim_dir"]), str(_REPO_ROOT), *([env["PYTHONPATH"]] if env.get("PYTHONPATH") else [])]
+    )
+    env.pop("CAMP_SHELL_INTEGRATION", None)
+    return env
+
+
+def _run_camp(env: dict[str, str], *camp_args: str) -> subprocess.CompletedProcess[str]:
+    """Run `camp <camp_args>` as a real subprocess under *env* — the same
+    dispatcher-by-path mechanism `_peer_runner`/`_peer_stream_spawn` already
+    use for the transport phases, reused here to drive the operator-facing
+    verbs directly."""
+    return subprocess.run(
+        [sys.executable, "-c", _peer_dispatch_script(list(camp_args))],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+
+@pytest.fixture()
+def conv_env(move_env, tmp_path: Path):
+    """`move_env` plus a real config+harness-store for the SENDER (so the
+    slice's boundary — the sender keeps its own resumable copy — can be
+    checked through the CLI too) and the harness/tmux shim on both sides."""
+    g = move_env
+
+    sender_cfg = tmp_path / "sender-config"
+    (sender_cfg / "groups").mkdir(parents=True)
+    _write_group_toml(sender_cfg / "groups", "testgroup", [("repo_a", str(g["sender_repo"]))])
+    sender_claude_dir = tmp_path / "sender-claude"
+
+    sender_shim = _harness_shim(tmp_path, "sender")
+    peer_shim = _harness_shim(tmp_path, "peer")
+
+    sender_cli_env = _camp_subprocess_env(
+        cfg=sender_cfg,
+        state=Path(g["sender_env"]["CAMP_STATE_DIR"]),
+        claude_dir=sender_claude_dir,
+        shim=sender_shim,
+    )
+    peer_cli_env = _camp_subprocess_env(
+        cfg=g["peer_cfg"], state=g["peer_state"], claude_dir=g["peer_claude_dir"], shim=peer_shim
+    )
+
+    return {
+        **g,
+        "sender_cfg": sender_cfg,
+        "sender_claude_dir": sender_claude_dir,
+        "sender_cli_env": sender_cli_env,
+        "peer_cli_env": peer_cli_env,
+        "sender_shim": sender_shim,
+        "peer_shim": peer_shim,
+    }
+
+
+def _cross_one_conversation(
+    c: dict,
+    *,
+    session_id: str,
+    subpath,
+    marker: str,
+    conversation_producer_spawn=None,
+    overwrite: bool = False,
+):
+    """Seed one conversation with identifiable prior content at *subpath*
+    under the sender workspace, in the sender's own real harness store, then
+    drive it across with `move_workspace` exactly as `move_env`'s own
+    end-to-end tests do. Returns `(result, phases, sender_transcript_path)`."""
+    from camp.group.manifest import workspace_dir
+    from camp.transfer.conversations import WorkspaceConversation
+    from camp.transfer.move import move_workspace
+    from trailhead.harness.claude_code import ClaudeCodeHarness
+
+    harness = ClaudeCodeHarness()
+    sender_ws_root = workspace_dir("testgroup", c["slug"], env=c["sender_env"]).resolve()
+    conv_root = sender_ws_root if str(subpath) == "." else c["wt_path"]
+
+    sender_claude_env = {"TRAILHEAD_CLAUDE_DIR": str(c["sender_claude_dir"])}
+    dest = harness.session_transcript_destination(session_id, conv_root, env=sender_claude_env)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_text(
+        json.dumps({"type": "summary", "cwd": str(conv_root)})
+        + "\n"
+        + json.dumps({"type": "user", "message": {"role": "user", "content": marker}})
+        + "\n",
+        encoding="utf-8",
+    )
+
+    conversation = WorkspaceConversation(
+        session_id=session_id, subpath=subpath, live=False, unresolved=False
+    )
+
+    def _locate(sid, root):
+        return harness.session_transcript_path(sid, root, env=sender_claude_env)
+
+    kwargs = {}
+    if conversation_producer_spawn is not None:
+        kwargs["conversation_producer_spawn"] = conversation_producer_spawn
+
+    phases: list[str] = []
+    result = move_workspace(
+        host=c["host"],
+        group=c["group"],
+        group_name="testgroup",
+        slug=c["slug"],
+        sender_name="host-a",
+        overwrite=overwrite,
+        on_phase=phases.append,
+        env=c["sender_env"],
+        run=c["run"],
+        stream_spawn=c["stream_spawn"],
+        conversations=(conversation,),
+        locate_transcript=_locate,
+        **kwargs,
+    )
+    return result, phases, dest
+
+
+def _recoverable_rows(env: dict[str, str]) -> list[dict]:
+    result = _run_camp(env, "sessions", "--group", "testgroup", "--recoverable", "--all", "--json")
+    assert result.returncode == 0, result.stderr
+    return json.loads(result.stdout)
+
+
+def _live_session_ids(env: dict[str, str]) -> set[str]:
+    result = _run_camp(env, "sessions", "--group", "testgroup", "--json")
+    assert result.returncode == 0, result.stderr
+    return {row["session_id"] for row in json.loads(result.stdout)}
+
+
+class TestConversationResumesOnARealPeer:
+    def test_root_conversation_is_listed_and_its_own_resume_path_accepts_it(
+        self, conv_env
+    ):
+        """AC3/AC5/AC6: a conversation rooted at the workspace root crosses,
+        and on the peer it is BOTH listed among the recoverable conversations
+        AND accepted by camp's own resume path — asserted as two separate
+        observations, since the criterion this pins is precisely that the
+        two agree."""
+        from pathlib import PurePosixPath
+
+        c = conv_env
+        session_id = "11111111-1111-4111-8111-111111111111"
+        marker = "root-conversation-marker-4f9c"
+
+        result, phases, _ = _cross_one_conversation(
+            c, session_id=session_id, subpath=PurePosixPath("."), marker=marker
+        )
+        assert phases == [
+            "begin",
+            "history: repo_a",
+            "worktree: repo_a",
+            "conversations",
+            "finish",
+        ]
+        assert result.conversations[0].session_id == session_id
+
+        # Observation 1: it is listed among the recoverable conversations.
+        rows = _recoverable_rows(c["peer_cli_env"])
+        assert session_id in {row["session_id"] for row in rows}, rows
+
+        # Observation 2: camp's own resume path accepts it — a separate
+        # invocation, never inferred from the listing above.
+        resume = _run_camp(c["peer_cli_env"], "launch", "--resume", session_id)
+        assert resume.returncode == 0, resume.stderr
+        assert resume.stdout.strip() == session_id, resume.stdout
+
+        # The prior history travelled with it: the transcript the peer
+        # resumed carries the exact content written before the move.
+        from camp.group.manifest import workspace_dir
+
+        peer_ws_root = workspace_dir("testgroup", c["slug"], env=c["peer_env"]).resolve()
+        from trailhead.harness.claude_code import ClaudeCodeHarness
+
+        peer_transcript = ClaudeCodeHarness().session_transcript_path(
+            session_id, peer_ws_root, env=c["peer_env"]
+        )
+        assert peer_transcript is not None
+        assert marker in peer_transcript.read_text()
+
+    def test_member_subdirectory_conversation_resumes_rooted_there(self, conv_env):
+        """AC3: a conversation started inside the `repo_a` member
+        subdirectory crosses and resumes ROOTED AT the peer's corresponding
+        subdirectory — asserted on the directory the resume actually spawned
+        into (the tmux pane's own `-c` launch directory), never on the
+        `subpath` recorded in the transcript."""
+        from pathlib import PurePosixPath
+
+        from camp.provision.reconcile import _worktree_path
+
+        c = conv_env
+        session_id = "22222222-2222-4222-8222-222222222222"
+        marker = "member-subdir-marker-a170"
+
+        _cross_one_conversation(
+            c, session_id=session_id, subpath=PurePosixPath("repo_a"), marker=marker
+        )
+
+        resume = _run_camp(c["peer_cli_env"], "launch", "--resume", session_id)
+        assert resume.returncode == 0, resume.stderr
+
+        session_cli = _session_cli_module()
+        spawned = session_cli._tmux_new_session_argv(c["peer_shim"])
+        assert len(spawned) == 1, spawned
+        launch_dir = session_cli._flag_value(spawned[0], "-c")
+
+        expected_member_dir = _worktree_path(
+            "testgroup", c["slug"], "repo_a", env=c["peer_env"]
+        ).resolve()
+        assert launch_dir == str(expected_member_dir)
+
+    def test_arrived_conversation_is_recoverable_but_not_live(self, conv_env):
+        """AC4 (through the CLI): the conversation that crossed shows up in
+        the DEAD/recoverable listing and is absent from the LIVE listing —
+        camp never offers a session that is actually still running as
+        something to bring back."""
+        from pathlib import PurePosixPath
+
+        c = conv_env
+        session_id = "33333333-3333-4333-8333-333333333333"
+
+        _cross_one_conversation(
+            c, session_id=session_id, subpath=PurePosixPath("."), marker="live-vs-dead-marker"
+        )
+
+        assert session_id in {row["session_id"] for row in _recoverable_rows(c["peer_cli_env"])}
+        assert session_id not in _live_session_ids(c["peer_cli_env"])
+
+    def test_every_recoverable_conversation_the_peer_lists_is_resumable(self, conv_env):
+        """The criterion forbidding a listed-but-unresumable conversation,
+        exercised as agreement: the session id fed to `--resume` is read
+        BACK OUT of the peer's own recoverable listing, never hand-written
+        into the test, so the listing and the resume path cannot drift apart
+        here either."""
+        from pathlib import PurePosixPath
+
+        c = conv_env
+        session_id = "44444444-4444-4444-8444-444444444444"
+
+        _cross_one_conversation(
+            c, session_id=session_id, subpath=PurePosixPath("."), marker="agreement-marker"
+        )
+
+        rows = _recoverable_rows(c["peer_cli_env"])
+        assert rows, "expected at least one recoverable row to test resume-agreement against"
+        for row in rows:
+            resume = _run_camp(c["peer_cli_env"], "launch", "--resume", row["session_id"])
+            assert resume.returncode == 0, resume.stderr
+
+    def test_sending_host_keeps_ownership_and_its_own_resumable_copy(self, conv_env):
+        """The slice's boundary: the sender is unchanged by the move.
+        Ownership has not moved — camp names no `--overwrite`-style
+        transport toward the sender at all, this is a same-host check — and
+        the sender still holds a conversation that is BOTH listed as
+        recoverable AND accepted by its own resume path, exactly as the
+        peer's copy is. Asserted positively, not merely "no error"."""
+        from pathlib import PurePosixPath
+
+        c = conv_env
+        session_id = "55555555-5555-4555-8555-555555555555"
+
+        _cross_one_conversation(
+            c, session_id=session_id, subpath=PurePosixPath("."), marker="sender-unchanged-marker"
+        )
+
+        sender_rows = _recoverable_rows(c["sender_cli_env"])
+        assert session_id in {row["session_id"] for row in sender_rows}, sender_rows
+
+        resume = _run_camp(c["sender_cli_env"], "launch", "--resume", session_id)
+        assert resume.returncode == 0, resume.stderr
+        assert resume.stdout.strip() == session_id, resume.stdout
+
+    def test_rerun_after_a_conversations_phase_failure_converges(self, conv_env):
+        """A re-run after a `conversations`-phase failure lands the
+        conversation exactly once and leaves it resumable — never duplicating
+        the row, and never refusing forever."""
+        from pathlib import PurePosixPath
+
+        from camp.transfer.move import PhaseFailed
+
+        c = conv_env
+        session_id = "66666666-6666-4666-8666-666666666666"
+
+        def _corrupt_conversation_producer(argv):
+            return subprocess.Popen(
+                [sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'not a tarball')"],
+                stdout=subprocess.PIPE,
+            )
+
+        with pytest.raises(PhaseFailed) as exc_info:
+            _cross_one_conversation(
+                c,
+                session_id=session_id,
+                subpath=PurePosixPath("."),
+                marker="rerun-converges-marker",
+                conversation_producer_spawn=_corrupt_conversation_producer,
+            )
+        assert exc_info.value.phase.startswith("conversations")
+
+        _cross_one_conversation(
+            c,
+            session_id=session_id,
+            subpath=PurePosixPath("."),
+            marker="rerun-converges-marker",
+            overwrite=True,
+        )
+
+        rows = _recoverable_rows(c["peer_cli_env"])
+        matching = [row for row in rows if row["session_id"] == session_id]
+        assert len(matching) == 1, rows
+
+        resume = _run_camp(c["peer_cli_env"], "launch", "--resume", session_id)
+        assert resume.returncode == 0, resume.stderr
 
 
 class TestMoveWorkspaceEndToEnd:
