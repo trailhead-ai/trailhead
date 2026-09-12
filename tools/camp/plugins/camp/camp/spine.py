@@ -1304,10 +1304,19 @@ def cmd_doctor(
              `self_host_name`'s own default — production callers never pass
              this.
     """
-    checks, any_failed, _host_name = _doctor_local_checks(env=env)
-
     as_json = "--json" in args
     as_probe = DOCTOR_PROBE_FLAG in args
+
+    if as_probe and not as_json:
+        # The far side's probe answer is reported only in machine-readable
+        # form (`DOCTOR_PROBE_KEY`/`DOCTOR_PROBE_MULTIPLEXER_KEY` inside the
+        # `--json` report) — there is no human rendering for it. Accepting
+        # the combination and silently discarding the probe answer would be
+        # a no-op with no way for the caller to notice; refuse it instead
+        # and name what the flag needs.
+        _die("camp doctor: --probe requires --json — the probe answer is reported only in machine-readable form")
+
+    checks, any_failed, _host_name = _doctor_local_checks(env=env)
 
     if as_json:
         report: dict[str, Any] = {"pass": not any_failed, "checks": checks}

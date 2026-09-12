@@ -516,6 +516,27 @@ def test_doctor_probe_answer_is_self_identifying(
     assert DOCTOR_PROBE_KEY not in older_camp_report
 
 
+def test_doctor_probe_without_json_refuses_naming_what_the_flag_needs(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`--probe` without `--json` is refused rather than silently discarding
+    the probe answer: the far side's own facts about its host are reported
+    only in machine-readable form, so a human invocation asking for both
+    gets told what the flag needs instead of a blank probe."""
+    from camp.spine import cmd_doctor
+
+    _isolate_roots(monkeypatch, tmp_path)
+    monkeypatch.setenv("CAMP_TEST_ASDF_PRESENT", "1")
+    monkeypatch.setenv("CAMP_TEST_TMUX_PRESENT", "1")
+
+    with pytest.raises(SystemExit) as exc_info:
+        cmd_doctor(["--probe"], env=_isolated_config_env(tmp_path))
+
+    assert exc_info.value.code != 0
+    err = capsys.readouterr().err
+    assert "--json" in err
+
+
 def test_doctor_probe_reachable_through_real_cli_entry_path(
     tmp_path: Path,
 ) -> None:

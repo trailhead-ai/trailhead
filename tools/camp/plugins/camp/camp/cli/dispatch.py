@@ -1043,9 +1043,12 @@ def _dispatch_all_hosts_command(
 #:
 #: "DOWN": the connection itself never completed at all — the transport's
 #: `Unreachable`, `IdentityUnknown`, `IdentityChanged`, `CredentialsRefused`,
-#: or a `RemoteRefusal` whose stdout will not parse (ssh's own exit-255
-#: catch-all for a failure it does not recognize by message: camp never
-#: ran, so this is never read as an answer).
+#: or a `RemoteRefusal` whose exit code is ssh's own 255 catch-all (a
+#: failure it does not recognize by message) AND whose stdout will not
+#: parse: camp never ran, so this is never read as an answer. A
+#: `RemoteRefusal` carrying any OTHER exit code means the remote command
+#: itself ran and exited on its own — that machine answered, whether or
+#: not its stdout parses.
 #:
 #: The mapping below is total over `camp.host.transport`'s closed outcome
 #: set: every member is named explicitly, and the trailing `assert` on
@@ -1188,15 +1191,16 @@ def _doctor_probe_worker(host_name: str, host: "Host", *, connect_timeout: float
             parsed = _json.loads(outcome.stdout)
         except ValueError:
             parsed = None
-        if not isinstance(parsed, dict):
-            # The transport classifies ANY ssh exit 255 whose stderr
-            # matches none of its recognized substrings as a
-            # `RemoteRefusal` — camp's own nonzero exit is indistinguishable
-            # from an unrecognized transport failure by exit code alone.
-            # When the stdout that "refusal" carries will not even parse,
-            # camp never ran: rendering it as an answer (the probe being
-            # merely unavailable) would claim the machine answered when it
-            # did not, so it is read as unreachable instead.
+        # ssh reserves exit 255 for its OWN failures — every substring the
+        # transport recognizes is matched against a 255 first, so an
+        # otherwise-unmatched 255 is ssh's catch-all for a failure it
+        # cannot name, and camp never ran. Exit 127 is already classified
+        # separately as `CampNotResolvable` above. Any OTHER exit code
+        # means the remote command actually RAN and exited on its own —
+        # the machine is up and answering, so an unparseable stdout there
+        # is "answered, but the probe is unavailable", never "could not be
+        # reached at all". Only an unparseable 255 is read as unreachable.
+        if outcome.exit_code == 255 and not isinstance(parsed, dict):
             return _doctor_probe_answer(
                 _doctor_host_row(
                     host_name,
@@ -1381,6 +1385,14 @@ def _dispatch_doctor_all_hosts(rest: list[str]) -> None:
 
     self_name = self_name_cell[0]
     host_rows = [_doctor_self_row(self_name)]
+    if hosts_error is not None:
+        # hosts.toml itself failed to parse — the declared hosts could
+        # never be enumerated, so there is nothing to fan out to. The
+        # all-hosts path for every other verb already surfaces this via
+        # `merge_all_hosts_answer`'s own `ok: false` row; the host section
+        # renders it too, in its own verdict/detail grammar, rather than
+        # silently reading as "only this machine is declared".
+        host_rows.append(_doctor_host_row("hosts.toml", "WARN", hosts_error))
     for host_name, answer in host_answers:
         for notice in answer.notices:
             print(notice, file=sys.stderr)

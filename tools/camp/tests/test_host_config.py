@@ -271,6 +271,21 @@ def test_non_numeric_connect_timeout_raises_naming_the_key(
     assert "connect_timeout" in str(exc_info.value)
 
 
+def test_boolean_connect_timeout_raises_naming_the_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`bool` is a subclass of `int` in Python, so `connect_timeout = true`
+    must be refused explicitly rather than silently coercing to `1.0`."""
+    config_dir = tmp_path / "cfg"
+    _point_at(monkeypatch, config_dir)
+    _write_hosts(config_dir, "connect_timeout = true\n")
+
+    with pytest.raises(HostConfigError) as exc_info:
+        connect_timeout_seconds()
+
+    assert "connect_timeout" in str(exc_info.value)
+
+
 def test_zero_connect_timeout_raises_naming_the_key(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
