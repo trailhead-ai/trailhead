@@ -634,6 +634,55 @@ def test_transfer_receive_refuses_host_flag(
     assert "--host" in capsys.readouterr().err
 
 
+def test_transfer_receive_still_refuses_a_phase_name_the_closed_set_never_admitted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """Adding `conversations` to the closed phase set must not turn it into
+    an open one — a phase name the set never admitted is refused exactly as
+    it was before this phase existed."""
+    monkeypatch.setenv("CAMP_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("CAMP_STATE_DIR", str(tmp_path / "state"))
+
+    code = _run_cli(
+        monkeypatch,
+        ["transfer-receive", "not-a-real-phase", "--group", "testgroup", "--slug", "x"],
+    )
+    assert code == 1
+    err = capsys.readouterr().err
+    assert "not-a-real-phase" in err
+    assert "conversations" in err  # the closed set the message names includes the new phase
+
+
+def test_transfer_receive_conversations_requires_session_id_and_subpath_flags(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    monkeypatch.setenv("CAMP_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("CAMP_STATE_DIR", str(tmp_path / "state"))
+
+    code = _run_cli(
+        monkeypatch,
+        ["transfer-receive", "conversations", "--group", "testgroup", "--slug", "x"],
+    )
+    assert code != 0
+    assert "--session-id" in capsys.readouterr().err
+
+    code = _run_cli(
+        monkeypatch,
+        [
+            "transfer-receive",
+            "conversations",
+            "--group",
+            "testgroup",
+            "--slug",
+            "x",
+            "--session-id",
+            "11111111-1111-4111-8111-111111111111",
+        ],
+    )
+    assert code != 0
+    assert "--subpath" in capsys.readouterr().err
+
+
 def test_transfer_receive_begin_requires_owner_flag(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
