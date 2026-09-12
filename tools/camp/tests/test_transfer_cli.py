@@ -313,6 +313,49 @@ def test_omitting_dry_run_on_a_clean_preflight_drives_the_move(
     assert "arrived on 'host-b'" in out
 
 
+def test_the_gathered_conversations_are_threaded_into_move_workspace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """The pool `_gather_conversations` enumerated for the preflight preview
+    is the SAME object handed to `move_workspace` — never re-enumerated —
+    so the move can never disagree with what the operator was shown."""
+    env = _Env(tmp_path)
+    env.write_group(excluded={"repo_a": []})
+    env.write_hosts(self_name="host-a", peers={"host-b": "host-b"})
+    env.write_manifest(owner="host-a")
+    env.apply(monkeypatch)
+    transfer = _transfer_module()
+    conversations_mod = _conversations_module()
+
+    _fake_probe(monkeypatch, _clean_probe_answer())
+    gathered = (
+        conversations_mod.WorkspaceConversation(
+            session_id="55555555-5555-4555-8555-555555555555",
+            subpath=__import__("pathlib").PurePosixPath("."),
+            live=False,
+            unresolved=False,
+        ),
+    )
+    monkeypatch.setattr(transfer, "_gather_conversations", lambda **kw: gathered)
+
+    move = _move_module()
+    calls = []
+
+    def _fake_move(**kw):
+        calls.append(kw)
+        kw["on_phase"]("begin")
+        return move.MoveResult(members=("repo_a",))
+
+    monkeypatch.setattr(move, "move_workspace", _fake_move)
+
+    code = _run(monkeypatch, ["transfer", "feat-x", "--to", "host-b", "--group", "trailhead"])
+
+    assert code == transfer.EXIT_WOULD_TRANSFER
+    assert len(calls) == 1
+    assert calls[0]["conversations"] == gathered
+    assert callable(calls[0]["locate_transcript"])
+
+
 # ---------------------------------------------------------------------------
 # --to is required
 # ---------------------------------------------------------------------------
@@ -1055,14 +1098,15 @@ def _peer_dispatch_script(camp_args: list[str]) -> str:
     )
 
 
-def _peer_child_env(peer_cfg: Path, peer_state: Path) -> dict[str, str]:
+def _peer_child_env(peer_cfg: Path, peer_state: Path, peer_claude_dir: Path) -> dict[str, str]:
     child_env = dict(os.environ)
     child_env["CAMP_CONFIG_DIR"] = str(peer_cfg)
     child_env["CAMP_STATE_DIR"] = str(peer_state)
+    child_env["TRAILHEAD_CLAUDE_DIR"] = str(peer_claude_dir)
     return child_env
 
 
-def _peer_runner(peer_cfg: Path, peer_state: Path):
+def _peer_runner(peer_cfg: Path, peer_state: Path, peer_claude_dir: Path):
     """A `Runner` that runs the actual `camp transfer-receive begin|finish
     ...` invocation `move_workspace` assembled, parsed off the ssh argv, as a
     real dispatcher subprocess isolated to its own peer config/state."""
@@ -1077,7 +1121,7 @@ def _peer_runner(peer_cfg: Path, peer_state: Path):
             [sys.executable, "-c", _peer_dispatch_script(camp_args)],
             capture_output=True,
             text=True,
-            env=_peer_child_env(peer_cfg, peer_state),
+            env=_peer_child_env(peer_cfg, peer_state, peer_claude_dir),
             timeout=execution_timeout,
         )
         return RawResult(stdout=result.stdout, stderr=result.stderr, exit_code=result.returncode)
@@ -1085,7 +1129,7 @@ def _peer_runner(peer_cfg: Path, peer_state: Path):
     return _run
 
 
-def _peer_stream_spawn(peer_cfg: Path, peer_state: Path):
+def _peer_stream_spawn(peer_cfg: Path, peer_state: Path, peer_claude_dir: Path):
     """A `StreamSpawner` mirroring `_peer_runner`, for the `history` and
     `worktree` phases `move_workspace` drives over `stream_camp`."""
     import shlex
@@ -1098,7 +1142,7 @@ def _peer_stream_spawn(peer_cfg: Path, peer_state: Path):
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            env=_peer_child_env(peer_cfg, peer_state),
+            env=_peer_child_env(peer_cfg, peer_state, peer_claude_dir),
         )
 
     return _spawn
@@ -1154,7 +1198,12 @@ def move_env(tmp_path: Path):
     (peer_cfg / "groups").mkdir(parents=True)
     _write_group_toml(peer_cfg / "groups", "testgroup", [("repo_a", str(peer_repo))])
     peer_state = tmp_path / "peer-state"
-    peer_env = {"CAMP_CONFIG_DIR": str(peer_cfg), "CAMP_STATE_DIR": str(peer_state)}
+    peer_claude_dir = tmp_path / "peer-claude"
+    peer_env = {
+        "CAMP_CONFIG_DIR": str(peer_cfg),
+        "CAMP_STATE_DIR": str(peer_state),
+        "TRAILHEAD_CLAUDE_DIR": str(peer_claude_dir),
+    }
 
     return {
         "slug": slug,
@@ -1163,12 +1212,14 @@ def move_env(tmp_path: Path):
         "host": Host(ssh="fake-peer", camp_bin="/opt/camp/bin/camp"),
         "sender_env": sender_env,
         "wt_path": wt_path,
+        "tmp_path": tmp_path,
         "peer_repo": peer_repo,
         "peer_cfg": peer_cfg,
         "peer_state": peer_state,
+        "peer_claude_dir": peer_claude_dir,
         "peer_env": peer_env,
-        "run": _peer_runner(peer_cfg, peer_state),
-        "stream_spawn": _peer_stream_spawn(peer_cfg, peer_state),
+        "run": _peer_runner(peer_cfg, peer_state, peer_claude_dir),
+        "stream_spawn": _peer_stream_spawn(peer_cfg, peer_state, peer_claude_dir),
     }
 
 
@@ -1285,6 +1336,110 @@ class TestMoveWorkspaceEndToEnd:
         peer_wt = _worktree_path("testgroup", g["slug"], "repo_a", env=g["peer_env"])
         assert (peer_wt / "committed.txt").read_text() == "committed on the sender\n"
 
+    def test_conversation_crosses_after_worktree_and_lands_rewritten_on_the_peer(
+        self, move_env
+    ):
+        """The `conversations` phase runs after the last `worktree` phase and
+        before `finish` — pinned by the recorded order of `on_phase` calls,
+        not by reading the source — and the conversation that crosses lands
+        on the peer with its recorded root rewritten to the peer's own
+        worktree, exactly as `camp.transfer.receive.conversations` (already
+        built) does for any caller."""
+        from pathlib import PurePosixPath
+
+        from camp.group.manifest import workspace_dir
+        from camp.transfer.conversations import WorkspaceConversation
+        from camp.transfer.move import move_workspace
+        from trailhead.harness.claude_code import ClaudeCodeHarness
+
+        g = move_env
+        session_id = "11111111-1111-4111-8111-111111111111"
+        sender_ws_root = workspace_dir("testgroup", g["slug"], env=g["sender_env"])
+        sender_transcript = g["tmp_path"] / "sender-transcript.jsonl"
+        sender_transcript.write_text(
+            json.dumps({"cwd": str(sender_ws_root), "type": "summary"}) + "\n"
+        )
+
+        conversation = WorkspaceConversation(
+            session_id=session_id,
+            subpath=PurePosixPath("."),
+            live=False,
+            unresolved=False,
+        )
+
+        phases: list[str] = []
+        result = move_workspace(
+            host=g["host"],
+            group=g["group"],
+            group_name="testgroup",
+            slug=g["slug"],
+            sender_name="host-a",
+            overwrite=False,
+            on_phase=phases.append,
+            env=g["sender_env"],
+            run=g["run"],
+            stream_spawn=g["stream_spawn"],
+            conversations=(conversation,),
+            locate_transcript=lambda sid, root: sender_transcript,
+        )
+
+        assert phases == [
+            "begin",
+            "history: repo_a",
+            "worktree: repo_a",
+            "conversations",
+            "finish",
+        ]
+        assert result.conversations == (
+            _move_module().ConversationCrossed(
+                session_id=session_id, subpath=PurePosixPath(".")
+            ),
+        )
+
+        peer_ws_root = workspace_dir("testgroup", g["slug"], env=g["peer_env"])
+        harness = ClaudeCodeHarness()
+        landed = harness.session_transcript_path(session_id, peer_ws_root, env=g["peer_env"])
+        assert landed is not None
+        record = json.loads(landed.read_text().splitlines()[0])
+        assert record["cwd"] == str(peer_ws_root.resolve())
+        assert record["type"] == "summary"
+
+    def test_unresolved_conversation_fails_the_named_conversations_phase(self, move_env):
+        """A row the enumeration reported UNRESOLVED must never reach the
+        completion report — it fails the `conversations` phase by name,
+        the same re-runnable shape every other phase failure uses, rather
+        than silently completing the move without it."""
+        from pathlib import PurePosixPath
+
+        from camp.transfer.conversations import WorkspaceConversation
+        from camp.transfer.move import PhaseFailed, move_workspace
+
+        g = move_env
+        conversation = WorkspaceConversation(
+            session_id="22222222-2222-4222-8222-222222222222",
+            subpath=None,
+            live=False,
+            unresolved=True,
+        )
+
+        with pytest.raises(PhaseFailed) as exc_info:
+            move_workspace(
+                host=g["host"],
+                group=g["group"],
+                group_name="testgroup",
+                slug=g["slug"],
+                sender_name="host-a",
+                overwrite=False,
+                env=g["sender_env"],
+                run=g["run"],
+                stream_spawn=g["stream_spawn"],
+                conversations=(conversation,),
+                locate_transcript=lambda sid, root: None,
+            )
+
+        assert exc_info.value.phase == "conversations"
+        assert "22222222-2222-4222-8222-222222222222" in exc_info.value.detail
+
 
 def test_move_workspace_reports_each_phase_before_a_slow_one_completes():
     """A slow `finish` proves the ordering contract mechanically: `on_phase`
@@ -1381,6 +1536,127 @@ def test_move_workspace_reports_each_phase_before_a_slow_one_completes():
     assert result_box["result"].members == ("repo_a",)
 
 
+def test_conversations_phase_announced_before_its_own_slow_transport_completes():
+    """`on_phase("conversations")` fires between the `worktree` phase and
+    `finish` — and, mechanically like the `finish` case above, BEFORE the
+    conversations transport call it precedes has returned, so a caller
+    rendering each label as it arrives never sits through a silent wait
+    while a transcript streams."""
+    import json as json_mod
+    from pathlib import PurePosixPath
+
+    from camp.host.config import Host
+    from camp.host.transport import RawResult
+    from camp.transfer.conversations import WorkspaceConversation
+    from camp.transfer.move import move_workspace
+
+    conversations_started = threading.Event()
+    release_conversations = threading.Event()
+
+    def _run(argv, execution_timeout, env):
+        remote_command = argv[-1]
+        if "finish" in remote_command:
+            return RawResult(
+                stdout=json_mod.dumps({"contract_version": 1, "manifest_path": "x"}),
+                stderr="",
+                exit_code=0,
+            )
+        return RawResult(
+            stdout=json_mod.dumps(
+                {"contract_version": 1, "members": [{"name": "repo_a", "basis_commit": None}]}
+            ),
+            stderr="",
+            exit_code=0,
+        )
+
+    def _tiny_producer(argv):
+        return subprocess.Popen(
+            [sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'x')"],
+            stdout=subprocess.PIPE,
+        )
+
+    def _fast_stream_spawn(argv, env):
+        remote_command = argv[-1]
+        if "conversations" in remote_command:
+            conversations_started.set()
+            assert release_conversations.wait(timeout=5), (
+                "test deadlocked waiting to release conversations"
+            )
+        return subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                "import sys,json; sys.stdin.buffer.read(); "
+                "sys.stdout.write(json.dumps({'contract_version': 1}))",
+            ],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+    phases: list[str] = []
+    phases_lock = threading.Lock()
+
+    def _on_phase(phase: str) -> None:
+        with phases_lock:
+            phases.append(phase)
+
+    group = {
+        "group": {"name": "testgroup"},
+        "members": [{"name": "repo_a", "repo_root": "/nonexistent", "excluded": []}],
+        "branch_pattern": "worktree-{slug}",
+    }
+
+    def _drive(transcript_path):
+        return move_workspace(
+            host=Host(ssh="fake-peer", camp_bin="/opt/camp/bin/camp"),
+            group=group,
+            group_name="testgroup",
+            slug="feat-slow-conv",
+            sender_name="host-a",
+            overwrite=False,
+            on_phase=_on_phase,
+            run=_run,
+            stream_spawn=_fast_stream_spawn,
+            history_producer_spawn=_tiny_producer,
+            worktree_producer_spawn=_tiny_producer,
+            conversation_producer_spawn=_tiny_producer,
+            conversations=(
+                WorkspaceConversation(
+                    session_id="44444444-4444-4444-8444-444444444444",
+                    subpath=PurePosixPath("."),
+                    live=False,
+                    unresolved=False,
+                ),
+            ),
+            locate_transcript=lambda sid, root: transcript_path,
+        )
+
+    import tempfile
+
+    with tempfile.NamedTemporaryFile(suffix=".jsonl") as tf:
+        tf.write(b'{"cwd": "/whatever"}\n')
+        tf.flush()
+
+        result_box: dict = {}
+        thread = threading.Thread(
+            target=lambda: result_box.__setitem__("result", _drive(Path(tf.name)))
+        )
+        thread.start()
+        try:
+            assert conversations_started.wait(timeout=5), "conversations phase never started"
+            with phases_lock:
+                snapshot = list(phases)
+            assert snapshot == ["begin", "history: repo_a", "worktree: repo_a", "conversations"]
+        finally:
+            release_conversations.set()
+            thread.join(timeout=5)
+
+    with phases_lock:
+        final = list(phases)
+    assert final == ["begin", "history: repo_a", "worktree: repo_a", "conversations", "finish"]
+
+
 # ---------------------------------------------------------------------------
 # The moving CLI path — rendering, exit codes, and flag wiring, with
 # `move.move_workspace` faked wholesale (see the section header above for why
@@ -1424,6 +1700,47 @@ def test_completion_report_names_peer_workspace_regen_and_no_ownership_move(
     assert "--overwrite" in out
     assert "destroy" in out or "discard" in out
     assert "no conversations are rooted in this workspace" in out
+
+
+def test_completion_report_names_arrived_conversations_and_the_literal_resume_command(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """The operator reads this on the machine they just moved to, having
+    forgotten where they left the work — an identifier they must turn into a
+    command themselves reintroduces exactly the recall `camp launch --resume`
+    exists to remove."""
+    from pathlib import PurePosixPath
+
+    env = _Env(tmp_path)
+    env.write_group(excluded={"repo_a": []})
+    env.write_hosts(self_name="host-a", peers={"host-b": "host-b"})
+    env.write_manifest(owner="host-a")
+    env.apply(monkeypatch)
+    transfer = _transfer_module()
+
+    _fake_probe(monkeypatch, _clean_probe_answer())
+    _no_conversations(monkeypatch)
+
+    move = _move_module()
+    session_id = "33333333-3333-4333-8333-333333333333"
+    monkeypatch.setattr(
+        move,
+        "move_workspace",
+        lambda **kw: move.MoveResult(
+            members=("repo_a",),
+            conversations=(
+                move.ConversationCrossed(session_id=session_id, subpath=PurePosixPath(".")),
+            ),
+        ),
+    )
+
+    code = _run(monkeypatch, ["transfer", "feat-x", "--to", "host-b", "--group", "trailhead"])
+
+    assert code == transfer.EXIT_WOULD_TRANSFER
+    out = capsys.readouterr().out
+    assert session_id in out
+    assert f"camp launch --resume {session_id}" in out
+    assert "no conversations are rooted in this workspace" not in out
 
 
 def test_overwrite_needed_names_the_flag_with_its_own_exit_code(

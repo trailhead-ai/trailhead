@@ -48,8 +48,8 @@ half-finished attempt survives into the next one.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Any, Callable
+from pathlib import Path, PurePosixPath
+from typing import Any, Callable, Iterable
 
 from ..host.config import Host
 from ..host.transport import (
@@ -68,6 +68,13 @@ from ..host.transport import (
     default_stream_spawner,
     run_camp,
 )
+from .conversations import (
+    TranscriptChanged,
+    TranscriptUnavailable,
+    UnresolvedConversation,
+    WorkspaceConversation,
+    send_workspace_conversations,
+)
 from .history import send_history
 from .worktree import send_worktree
 
@@ -75,6 +82,7 @@ __all__ = [
     "MoveRefused",
     "OverwriteNeeded",
     "PhaseFailed",
+    "ConversationCrossed",
     "MoveResult",
     "move_workspace",
 ]
@@ -115,10 +123,22 @@ class PhaseFailed(MoveRefused):
 
 
 @dataclass(frozen=True)
+class ConversationCrossed:
+    """One conversation `move_workspace` streamed to the peer and the peer
+    placed successfully — never a row that was UNRESOLVED or that failed in
+    transit, since either of those raises `PhaseFailed` before this is
+    built. `subpath` is always resolved (never `None`) for the same reason."""
+
+    session_id: str
+    subpath: PurePosixPath
+
+
+@dataclass(frozen=True)
 class MoveResult:
     """What `move_workspace` moved, once every phase has answered."""
 
     members: tuple[str, ...]
+    conversations: tuple[ConversationCrossed, ...] = ()
 
 
 def _outcome_detail(outcome: TransportOutcome) -> str:
@@ -181,6 +201,9 @@ def move_workspace(
     stream_spawn: StreamSpawner = default_stream_spawner,
     history_producer_spawn: ProducerSpawner = default_producer_spawn,
     worktree_producer_spawn: ProducerSpawner = default_producer_spawn,
+    conversation_producer_spawn: ProducerSpawner = default_producer_spawn,
+    conversations: Iterable[WorkspaceConversation] = (),
+    locate_transcript: Callable[[str, Path], Path | None] | None = None,
     env: dict[str, str] | None = None,
     connect_timeout: float = DEFAULT_CONNECT_TIMEOUT_SECONDS,
     execution_timeout: float = 60.0,
@@ -191,15 +214,27 @@ def move_workspace(
     working tree, minus each member's declared `excluded` set — to *host*.
 
     Calls `on_phase` with a short label before `begin`, before each member's
-    `history` and `worktree` phase, and before `finish` — see the module
-    docstring for the ordering and timing contract.
+    `history` and `worktree` phase, before `conversations` (once, only when
+    *conversations* is non-empty — a workspace with nothing rooted in it
+    never announces a phase with nothing to do), and before `finish` — see
+    the module docstring for the ordering and timing contract.
+
+    *conversations* is the already-enumerated pool the caller showed the
+    operator at preflight — never re-enumerated here, so the move can never
+    disagree with what was previewed. *locate_transcript* is required when
+    *conversations* is non-empty and is passed straight through to
+    `camp.transfer.conversations.send_workspace_conversations`.
 
     Raises:
         OverwriteNeeded: `begin` refused because the workspace already
             exists on the peer, owned by the sender, and *overwrite* is
             False. Nothing crossed.
-        PhaseFailed: any other phase refused or the transport failed.
-            Nothing after the failing phase was attempted.
+        PhaseFailed: any other phase refused or the transport failed. A
+            conversation that was UNRESOLVED, whose transcript could not be
+            located, whose content changed mid-stream, or whose transport
+            failed is reported as phase `"conversations"` — the same
+            re-runnable shape every other phase failure uses. Nothing after
+            the failing phase was attempted.
     """
     from ..provision.reconcile import _branch_name, _worktree_path
 
@@ -271,10 +306,42 @@ def move_workspace(
         if not isinstance(outcome, Answered):
             raise PhaseFailed(f"worktree ({name})", _outcome_detail(outcome))
 
+    conversations = tuple(conversations)
+    crossed: list[ConversationCrossed] = []
+    if conversations:
+        on_phase("conversations")
+        from ..group.manifest import workspace_dir
+
+        assert locate_transcript is not None  # required whenever conversations is non-empty
+        try:
+            outcomes = send_workspace_conversations(
+                host,
+                group=group_name,
+                slug=slug,
+                workspace=workspace_dir(group_name, slug, env=env),
+                conversations=conversations,
+                locate_transcript=locate_transcript,
+                connect_timeout=connect_timeout,
+                server_alive_interval=server_alive_interval,
+                server_alive_count_max=server_alive_count_max,
+                spawn=stream_spawn,
+                producer_spawn=conversation_producer_spawn,
+            )
+        except (UnresolvedConversation, TranscriptUnavailable, TranscriptChanged) as e:
+            raise PhaseFailed("conversations", str(e)) from e
+
+        by_id = {c.session_id: c for c in conversations}
+        for session_id, outcome in outcomes:
+            if not isinstance(outcome, Answered):
+                raise PhaseFailed(f"conversations ({session_id})", _outcome_detail(outcome))
+            subpath = by_id[session_id].subpath
+            assert subpath is not None  # unresolved rows never reach here
+            crossed.append(ConversationCrossed(session_id=session_id, subpath=subpath))
+
     on_phase("finish")
     finish_argv = ["transfer-receive", "finish", "--group", group_name, "--slug", slug]
     _run_camp_phase(
         host, finish_argv, run=run, connect_timeout=connect_timeout, execution_timeout=execution_timeout
     )
 
-    return MoveResult(members=tuple(m["name"] for m in members))
+    return MoveResult(members=tuple(m["name"] for m in members), conversations=tuple(crossed))

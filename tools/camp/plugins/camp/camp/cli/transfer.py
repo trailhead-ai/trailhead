@@ -132,7 +132,7 @@ def _cmd_transfer_probe_cli(args: list[str]) -> None:
 #: dispatches to, so admitting a new phase is a one-line addition here plus —
 #: only if it carries arguments of its own — a branch in the argument
 #: gathering below, never a second closed-set site.
-_PHASES = ("begin", "finish", "history", "worktree")
+_PHASES = ("begin", "conversations", "finish", "history", "worktree")
 
 
 def _cmd_transfer_receive_cli(args: list[str]) -> None:
@@ -190,6 +190,26 @@ def _cmd_transfer_receive_cli(args: list[str]) -> None:
             print("camp transfer-receive: --owner is required for begin", file=sys.stderr)
             sys.exit(1)
         phase_kwargs = {"sender": owner, "overwrite": "--overwrite" in rest}
+    elif phase == "conversations":
+        session_id = _consume_flag_value(rest, "--session-id")
+        if not session_id:
+            print(
+                "camp transfer-receive: --session-id is required for conversations",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        subpath = _consume_flag_value(rest, "--subpath")
+        if not subpath:
+            print(
+                "camp transfer-receive: --subpath is required for conversations",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        phase_kwargs = {
+            "session_id": session_id,
+            "subpath": subpath,
+            "archive_stream": sys.stdin.buffer,
+        }
     elif phase in ("history", "worktree"):
         member = _consume_flag_value(rest, "--member")
         if not member:
@@ -406,6 +426,29 @@ def _gather_conversations(*, group_name: str, slug: str, session_groups, resolve
         return None
 
 
+def _locate_transcript(session_groups, resolved_env):
+    """A `locate_transcript` callable shaped like
+    `Harness.session_transcript_path` for `move.move_workspace`'s
+    `conversations` phase: tries every store in `_addressable_harnesses`'
+    pool — the same pool `_gather_conversations` reads — in turn, until one
+    names a file. Reaches the harness only through
+    `HarnessStore.session_transcript_path`, never by naming a projects
+    directory itself.
+    """
+    from .session import _addressable_harnesses
+
+    stores = _addressable_harnesses(session_groups, env=resolved_env)
+
+    def _locate(session_id: str, root):
+        for store in stores:
+            path = store.session_transcript_path(session_id, root, env=store.env)
+            if path is not None:
+                return path
+        return None
+
+    return _locate
+
+
 _MISSING_SELF_NAME_CHECK = "this host has declared a name"
 
 
@@ -449,7 +492,7 @@ def _augment_missing_self_name_check(result, *, env: dict[str, str]):
 
 
 def _render_move_completion(
-    result, *, slug: str, peer_name: str, group_name: str, self_name: str
+    move_result, *, slug: str, peer_name: str, group_name: str, self_name: str
 ) -> None:
     """The report printed once `move_workspace` returns successfully.
 
@@ -460,6 +503,19 @@ def _render_move_completion(
     destroys it), and names the interim risk that nothing scans what crossed
     for credential-shaped content — untracked files routinely carry them and
     the peer now holds a cleartext copy.
+
+    *move_result* is `move.MoveResult`, not the preflight preview: it names
+    only conversations the `conversations` phase actually placed on the
+    peer. A row the preflight showed as UNRESOLVED never reaches this
+    function at all — `move_workspace`'s `conversations` phase raises
+    `PhaseFailed` on such a row before `move_workspace` returns, so there is
+    no "could not be resolved" case for a *successful* move to render; see
+    `camp.transfer.move.ConversationCrossed`.
+
+    Each arrived conversation gets the literal command that resumes it —
+    `camp launch --resume <session-id>`, the same reference-addressed resume
+    flavor `camp.cli.session._launch_resume` implements — rather than an
+    identifier the operator would have to turn into a command themselves.
     """
     from ..launch.recovery import printable_path
 
@@ -481,16 +537,13 @@ def _render_move_completion(
         "untracked files routinely carry them and the peer now holds a "
         "cleartext copy; review it yourself"
     )
-    if not result.conversations:
+    if not move_result.conversations:
         print("  no conversations are rooted in this workspace")
     else:
-        for conversation in result.conversations:
-            if conversation.unresolved:
-                print(f"    ? {conversation.session_id} — root could not be resolved")
-            else:
-                live_tag = " (live)" if conversation.live else ""
-                subpath = printable_path(conversation.subpath)
-                print(f"    {conversation.session_id} @ {subpath}{live_tag}")
+        for conversation in move_result.conversations:
+            subpath = printable_path(conversation.subpath)
+            print(f"    {conversation.session_id} @ {subpath}")
+            print(f"      resume with: camp launch --resume {conversation.session_id}")
 
 
 def _cmd_transfer_group_cli(
@@ -602,7 +655,7 @@ def _cmd_transfer_group_cli(
         print(f"camp transfer: phase — {phase}")
 
     try:
-        move_workspace(
+        move_result = move_workspace(
             host=hosts[peer_name],
             group=group,
             group_name=group_name,
@@ -611,6 +664,10 @@ def _cmd_transfer_group_cli(
             overwrite=overwrite,
             on_phase=_on_phase,
             env=resolved_env,
+            conversations=conversations,
+            locate_transcript=(
+                _locate_transcript(session_groups, resolved_env) if conversations else None
+            ),
         )
     except OverwriteNeeded as e:
         print(
@@ -630,6 +687,6 @@ def _cmd_transfer_group_cli(
         sys.exit(EXIT_PHASE_FAILED)
 
     _render_move_completion(
-        result, slug=slug, peer_name=peer_name, group_name=group_name, self_name=self_name
+        move_result, slug=slug, peer_name=peer_name, group_name=group_name, self_name=self_name
     )
     sys.exit(EXIT_WOULD_TRANSFER)
