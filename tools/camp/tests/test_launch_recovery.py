@@ -852,6 +852,48 @@ def _recovery_ast() -> ast.Module:
     return ast.parse(Path(recovery.__file__).read_text(encoding="utf-8"))
 
 
+class TestModuleBoundary:
+    """recovery.py is pure data-to-data: no process, no terminal, no CLI import.
+
+    The offender lists are the checkers' whole subject; a fixture module that
+    imports a forbidden root, or references a rendering/exiting builtin, must
+    be named, while a clean module of the same shape must not."""
+
+    def test_a_forbidden_import_is_named_and_a_clean_one_is_not(self):
+        dirty = ast.parse("import sys\n")
+        clean = ast.parse("import os\n")
+
+        assert _import_offenders(dirty) == ["import sys"]
+        assert _import_offenders(clean) == []
+
+    def test_reaching_into_the_cli_package_is_named_an_offender(self):
+        dirty = ast.parse("from camp.cli import group\n")
+        clean = ast.parse("from camp.launch import recovery\n")
+
+        assert _import_offenders(dirty) != _import_offenders(clean)
+        assert _import_offenders(clean) == []
+
+    def test_a_render_or_exit_reference_is_named_and_a_clean_one_is_not(self):
+        dirty = ast.parse("print('x')\n")
+        clean = ast.parse("value = 'x'\n")
+
+        assert _render_or_exit_offenders(dirty) == ["print"]
+        assert _render_or_exit_offenders(clean) == []
+
+    def test_sys_exit_attribute_access_is_named_an_offender(self):
+        dirty = ast.parse("import sys\nsys.exit(1)\n")
+        clean = ast.parse("import sys\nsys.argv\n")
+
+        assert _render_or_exit_offenders(dirty) == [".exit"]
+        assert _render_or_exit_offenders(clean) == []
+
+    def test_the_real_recovery_module_imports_and_renders_nothing_forbidden(self):  # inert-gate: allow real production module, no fixture input to vary
+        tree = _recovery_ast()
+
+        assert _import_offenders(tree) == []
+        assert _render_or_exit_offenders(tree) == []
+
+
 # ---------------------------------------------------------------------------
 # Name components tmux can address
 # ---------------------------------------------------------------------------
