@@ -1163,6 +1163,10 @@ class TestConversationNestedRootOutsideWorkspaceRefused:
         assert harness.session_transcript_path(session_id, ws_root, env=env) is None
         claude_dir = Path(env["TRAILHEAD_CLAUDE_DIR"])
         assert list(claude_dir.rglob(f"{session_id}*")) == []
+        # The staged rewrites are dot-prefixed, so the sweep above cannot see
+        # them: a leftover would be an un-rewritten transcript surviving a
+        # refusal under a name nothing else looks for.
+        assert list(claude_dir.rglob("*rewrite-staged*")) == []
 
 
 class TestConversationUnknownRootRefused:
@@ -1194,3 +1198,7 @@ class TestConversationUnknownRootRefused:
         assert harness.session_transcript_path(session_id, ws_root, env=env) is None
         claude_dir = Path(env["TRAILHEAD_CLAUDE_DIR"])
         assert list(claude_dir.rglob(f"{session_id}*")) == []
+        # The staged rewrites are dot-prefixed, so the sweep above cannot see
+        # them: a leftover would be an un-rewritten transcript surviving a
+        # refusal under a name nothing else looks for.
+        assert list(claude_dir.rglob("*rewrite-staged*")) == []
