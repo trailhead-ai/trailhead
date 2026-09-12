@@ -27,6 +27,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from typing import Any
+
     from ..host.config import Host
 
 # Single source of truth for the verb dispatch tables. verb_taxonomy is a
@@ -268,6 +270,31 @@ def read_host_option(args: list[str]) -> tuple[list[str], str | None]:
     if host_name == "":
         raise _HostFlagMissingValue()
     return remaining, host_name
+
+
+def _resolve_connect_timeout(verb: str, *, hosts_error: str | None = None) -> float:
+    """The operator's declared SSH connect timeout, or the transport's own
+    default — resolved once per invocation, the single reader every host-axis
+    route in this module shares.
+
+    ``hosts_error`` is the failure a caller's own ``load_hosts()`` already hit
+    on the same file. When it is set there is nothing left to contact, so the
+    unused default is returned rather than raising a second time — a second
+    raise here must never bypass the recovery a caller renders for exactly
+    that state. Otherwise a malformed ``connect_timeout`` refuses, naming
+    *verb*, the way every other host-axis configuration refusal does.
+    """
+    from ..host.config import HostConfigError, connect_timeout_seconds
+    from ..host.transport import DEFAULT_CONNECT_TIMEOUT_SECONDS
+
+    if hosts_error is not None:
+        return DEFAULT_CONNECT_TIMEOUT_SECONDS
+
+    try:
+        return connect_timeout_seconds()
+    except HostConfigError as exc:
+        print(f"camp {verb}: {exc}", file=sys.stderr)
+        sys.exit(1)
 
 
 def _dispatch_host_command(
@@ -771,7 +798,7 @@ def main() -> None:
             )
             sys.exit(1)
 
-        from ..host.config import connect_timeout_seconds, load_hosts, HostConfigError
+        from ..host.config import load_hosts, HostConfigError
 
         try:
             hosts = load_hosts()
@@ -797,13 +824,9 @@ def main() -> None:
                 )
             sys.exit(1)
 
-        try:
-            connect_timeout = connect_timeout_seconds()
-        except HostConfigError as e:
-            print(f"camp {canonical}: {e}", file=sys.stderr)
-            sys.exit(1)
-
-        _dispatch_host_command(canonical, host, host_name, scan_rest, connect_timeout)
+        _dispatch_host_command(
+            canonical, host, host_name, scan_rest, _resolve_connect_timeout(canonical)
+        )
         return
 
     # ---------------------------------------------------------------------------
@@ -895,14 +918,8 @@ def _dispatch_all_hosts_command(
     invocation is always the all-groups + `--json` form, matching what
     `--host` already sends.
     """
-    from ..host.config import (
-        HostConfigError,
-        connect_timeout_seconds,
-        load_hosts,
-        self_host_name,
-    )
+    from ..host.config import HostConfigError, load_hosts, self_host_name
     from ..host.merge import answer_all_hosts_concurrently, merge_all_hosts_answer
-    from ..host.transport import DEFAULT_CONNECT_TIMEOUT_SECONDS
 
     if all_groups and _flag_present(rest, "--group"):
         print(
@@ -954,20 +971,10 @@ def _dispatch_all_hosts_command(
         hosts = {}
         hosts_error = str(exc)
 
-    # connect_timeout_seconds() re-reads the same hosts.toml load_hosts()
-    # already read above — the same "one operation" treatment self_name's
-    # own re-read gets below: when that read already failed (hosts_error is
-    # set), `hosts` is already empty and there is nothing to contact, so the
-    # unused default is harmless and a second raise here must never bypass
-    # the recovery merge_all_hosts_answer renders for exactly this state.
-    if hosts_error is not None:
-        connect_timeout = DEFAULT_CONNECT_TIMEOUT_SECONDS
-    else:
-        try:
-            connect_timeout = connect_timeout_seconds()
-        except HostConfigError as exc:
-            print(f"camp {verb}: {exc}", file=sys.stderr)
-            sys.exit(1)
+    # The timeout reader re-reads the same hosts.toml load_hosts() already
+    # read above — the same "one operation" treatment self_name's own re-read
+    # gets below.
+    connect_timeout = _resolve_connect_timeout(verb, hosts_error=hosts_error)
 
     (local_rows, local_notices, local_exit_code), host_answers = (
         answer_all_hosts_concurrently(
@@ -1035,9 +1042,31 @@ _DOCTOR_PROBE_UNAVAILABLE_DETAIL = (
 )
 
 
-def _doctor_probe_worker(
-    host_name: str, host: "Host", *, connect_timeout: float, runner
-):
+def _doctor_host_row(host_name: str | None, verdict: str, detail: str) -> dict[str, Any]:
+    """One row of the `-a` host section. `host_name` is `None` for this
+    machine, which `_render_doctor_hosts_human` names rather than omits."""
+    return {"host": host_name, "verdict": verdict, "detail": detail}
+
+
+def _doctor_multiplexer_row(host_name: str | None, present: bool) -> dict[str, Any]:
+    """The row for a machine whose camp resolved and whose multiplexer
+    question was actually answered — the one wording shared by this machine's
+    own row and every probed host's, so the two can never drift apart."""
+    if present:
+        return _doctor_host_row(host_name, "PASS", "camp resolves; multiplexer present")
+    return _doctor_host_row(host_name, "WARN", "camp resolves; no multiplexer present")
+
+
+def _doctor_probe_answer(row: dict[str, Any], *, answered: bool):
+    """One probed host's contribution to the `-a` host section: exactly one
+    row, no notices, and no exit-code contribution — the host section never
+    decides the health check's own status."""
+    from ..host.relay import HostAnswer
+
+    return HostAnswer(rows=[row], notices=[], exit_code=0, answered=answered)
+
+
+def _doctor_probe_worker(host_name: str, host: "Host", *, connect_timeout: float):
     """Ask one declared host `doctor --json --probe` about itself and
     return its contribution to the `-a` host section, as a
     `camp.host.relay.HostAnswer` carrying exactly one row.
@@ -1064,11 +1093,11 @@ def _doctor_probe_worker(
     import json as _json
 
     from ..host import transport as _transport
-    from ..host.relay import HostAnswer, _classify_transport_failure
+    from ..host.relay import _classify_transport_failure
     from ..spine import DOCTOR_PROBE_KEY, DOCTOR_PROBE_MULTIPLEXER_KEY
 
     outcome = _transport.run_camp(
-        host, ["doctor", "--json", "--probe"], connect_timeout=connect_timeout, runner=runner
+        host, ["doctor", "--json", "--probe"], connect_timeout=connect_timeout
     )
 
     failure = _classify_transport_failure(
@@ -1091,16 +1120,8 @@ def _doctor_probe_worker(
                 _transport.CredentialsRefused,
             ),
         )
-        return HostAnswer(
-            rows=[
-                {
-                    "host": host_name,
-                    "verdict": "DOWN" if down else "WARN",
-                    "detail": failure.reason,
-                }
-            ],
-            notices=[],
-            exit_code=0,
+        return _doctor_probe_answer(
+            _doctor_host_row(host_name, "DOWN" if down else "WARN", failure.reason),
             answered=False,
         )
 
@@ -1115,28 +1136,13 @@ def _doctor_probe_worker(
         parsed = None
 
     if not isinstance(parsed, dict) or parsed.get(DOCTOR_PROBE_KEY) is not True:
-        return HostAnswer(
-            rows=[
-                {
-                    "host": host_name,
-                    "verdict": "WARN",
-                    "detail": _DOCTOR_PROBE_UNAVAILABLE_DETAIL,
-                }
-            ],
-            notices=[],
-            exit_code=0,
+        return _doctor_probe_answer(
+            _doctor_host_row(host_name, "WARN", _DOCTOR_PROBE_UNAVAILABLE_DETAIL),
             answered=False,
         )
 
-    multiplexer_present = bool(parsed.get(DOCTOR_PROBE_MULTIPLEXER_KEY))
-    if multiplexer_present:
-        verdict, detail = "PASS", "camp resolves; multiplexer present"
-    else:
-        verdict, detail = "WARN", "camp resolves; no multiplexer present"
-    return HostAnswer(
-        rows=[{"host": host_name, "verdict": verdict, "detail": detail}],
-        notices=[],
-        exit_code=0,
+    return _doctor_probe_answer(
+        _doctor_multiplexer_row(host_name, bool(parsed.get(DOCTOR_PROBE_MULTIPLEXER_KEY))),
         answered=True,
     )
 
@@ -1147,9 +1153,7 @@ def _doctor_self_row(self_name: str | None) -> dict[str, Any]:
     already ran for the section above it."""
     from ..spine import _doctor_multiplexer_present
 
-    if _doctor_multiplexer_present():
-        return {"host": self_name, "verdict": "PASS", "detail": "camp resolves; multiplexer present"}
-    return {"host": self_name, "verdict": "WARN", "detail": "camp resolves; no multiplexer present"}
+    return _doctor_multiplexer_row(self_name, _doctor_multiplexer_present())
 
 
 def _render_doctor_hosts_human(host_rows: list[dict[str, Any]]) -> None:
@@ -1176,9 +1180,8 @@ def _dispatch_doctor_all_hosts(rest: list[str]) -> None:
     `any_failed` — a host that cannot be reached is a finding, not a
     failure.
     """
-    from ..host.config import HostConfigError, connect_timeout_seconds, load_hosts
+    from ..host.config import HostConfigError, load_hosts
     from ..host.merge import answer_all_hosts_concurrently
-    from ..host.transport import DEFAULT_CONNECT_TIMEOUT_SECONDS, default_runner
     from ..spine import _doctor_local_checks
 
     as_json = _flag_present(rest, "--json")
@@ -1190,18 +1193,7 @@ def _dispatch_doctor_all_hosts(rest: list[str]) -> None:
         hosts = {}
         hosts_error = str(exc)
 
-    # Same "one operation" treatment `_dispatch_all_hosts_command` gives
-    # `connect_timeout_seconds()`'s re-read of the same file `load_hosts()`
-    # already read: when that read already failed, there is nothing to
-    # contact and the unused default is harmless.
-    if hosts_error is not None:
-        connect_timeout = DEFAULT_CONNECT_TIMEOUT_SECONDS
-    else:
-        try:
-            connect_timeout = connect_timeout_seconds()
-        except HostConfigError as exc:
-            print(f"camp doctor: {exc}", file=sys.stderr)
-            sys.exit(1)
+    connect_timeout = _resolve_connect_timeout("doctor", hosts_error=hosts_error)
 
     # `answer_all_hosts_concurrently`'s local-answer shape has no slot for
     # the self-declared host name `_doctor_local_checks` also computes — one
@@ -1216,9 +1208,7 @@ def _dispatch_doctor_all_hosts(rest: list[str]) -> None:
         return checks, [], (1 if any_failed else 0)
 
     def _worker(host_name: str, host: "Host"):
-        return _doctor_probe_worker(
-            host_name, host, connect_timeout=connect_timeout, runner=default_runner
-        )
+        return _doctor_probe_worker(host_name, host, connect_timeout=connect_timeout)
 
     (checks, _local_notices, exit_code), host_answers = answer_all_hosts_concurrently(
         _local_answer,
@@ -1397,7 +1387,7 @@ def _dispatch_attach_all_hosts(rest: list[str]) -> None:
     from ..attach.prefix_warning import warn_if_nested
     from ..attach.resolve import Ambiguous, NotRunning, Resolved, resolve_attach_ref
     from ..host import transport as _transport
-    from ..host.config import HostConfigError, connect_timeout_seconds, load_hosts
+    from ..host.config import HostConfigError, load_hosts
     from ..host.handoff import handoff, local_argv, remote_argv
     from ..spine import _die
     from .session import _AMBIGUOUS_EXIT_CODE, _attach_session_context, _print_candidates
@@ -1418,11 +1408,7 @@ def _dispatch_attach_all_hosts(rest: list[str]) -> None:
         sys.exit(1)
     host_items = list(hosts.items())
 
-    try:
-        connect_timeout = connect_timeout_seconds()
-    except HostConfigError as exc:
-        print(f"camp attach: {exc}", file=sys.stderr)
-        sys.exit(1)
+    connect_timeout = _resolve_connect_timeout("attach")
 
     resolved_env = dict(os.environ)
 

@@ -195,20 +195,14 @@ def _run(argv: list[str], monkeypatch: pytest.MonkeyPatch) -> int:
         return exc.code if isinstance(exc.code, int) else 1
 
 
-def _hosts_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *hosts: str) -> None:
-    cfg = tmp_path / "config"
-    cfg.mkdir(exist_ok=True)
-    body = "".join(f"[hosts.{name}]\n" for name in hosts)
-    (cfg / "hosts.toml").write_text(body, encoding="utf-8")
-    monkeypatch.setenv("CAMP_CONFIG_DIR", str(cfg))
-    monkeypatch.setenv("CAMP_STATE_DIR", str(tmp_path / "state"))
-
-
-def _hosts_env_with_connect_timeout(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, connect_timeout_line: str, *hosts: str
+def _hosts_env(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *hosts: str,
+    connect_timeout_line: str = "",
 ) -> None:
-    """`_hosts_env`, with the caller's own top-level ``connect_timeout``
-    line (or none) prepended to hosts.toml."""
+    """An isolated config dir declaring *hosts*, optionally preceded by the
+    caller's own top-level ``connect_timeout`` line."""
     cfg = tmp_path / "config"
     cfg.mkdir(exist_ok=True)
     body = connect_timeout_line + "".join(f"[hosts.{name}]\n" for name in hosts)
@@ -1170,7 +1164,7 @@ def test_a_mistyped_attach_only_flag_is_not_silently_accepted_elsewhere(
 def test_ref_form_cross_host_probe_threads_declared_connect_timeout(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _hosts_env_with_connect_timeout(tmp_path, monkeypatch, "connect_timeout = 5\n", "andromeda")
+    _hosts_env(tmp_path, monkeypatch, "andromeda", connect_timeout_line="connect_timeout = 5\n")
     _wire_local_session(monkeypatch, tmp_path=tmp_path)
     transport = _host_transport_module()
 
@@ -1190,7 +1184,7 @@ def test_ref_form_cross_host_probe_threads_declared_connect_timeout(
 def test_bare_picker_cross_host_probe_threads_declared_connect_timeout(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _hosts_env_with_connect_timeout(tmp_path, monkeypatch, "connect_timeout = 6\n", "andromeda")
+    _hosts_env(tmp_path, monkeypatch, "andromeda", connect_timeout_line="connect_timeout = 6\n")
     _wire_local_session(monkeypatch, tmp_path=tmp_path)
     transport = _host_transport_module()
 
