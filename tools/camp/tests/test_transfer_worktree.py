@@ -392,8 +392,16 @@ class TestIncrementalConsumption:
         consumer = threading.Thread(target=_consume, daemon=True)
         consumer.start()
 
+        def _first_bin_size() -> int:
+            first_bin = peer_wt / "first.bin"
+            return first_bin.stat().st_size if first_bin.exists() else -1
+
+        # Poll on the fully-written size, not mere existence: tarfile opens
+        # (and truncates) the target file before copying any of its data in,
+        # so `.exists()` alone can observe a real but still-empty file under
+        # scheduling contention (seen under CI's parallel test workers).
         deadline = time.monotonic() + 5
-        while time.monotonic() < deadline and not (peer_wt / "first.bin").exists():
+        while time.monotonic() < deadline and _first_bin_size() != first_size:
             time.sleep(0.02)
 
         assert (peer_wt / "first.bin").exists(), (
