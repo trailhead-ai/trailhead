@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from typing import Any
 
     from ..host.config import Host
+    from ..host.relay import HostAnswer
 
 # Single source of truth for the verb dispatch tables. verb_taxonomy is a
 # tiny pure-data module (no regex/subprocess/spine), so importing it at module
