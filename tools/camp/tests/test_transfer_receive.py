@@ -43,6 +43,15 @@ Test contract (all must RED before implementation, GREEN after):
   than failing or duplicating.
 - a destination whose parent directory does not exist yet is created by this
   phase itself.
+- a nested transcript under the conversation's own subagent/tool-result
+  directory carries its own recorded root and is rewritten too, not only the
+  top-level transcript.
+- a nested transcript recording a root outside the workspace refuses the
+  whole placement by name, and nothing of the conversation is left at the
+  destination.
+- an unresolvable recorded root (the peer cannot determine where the
+  conversation ran) refuses by name rather than silently landing an
+  un-rewritten transcript, and nothing of the conversation is left behind.
 """
 
 from __future__ import annotations
@@ -1081,3 +1090,107 @@ class TestConversationArchiveMemberConfinement:
             )
 
         assert "../../etc/passwd" in str(exc_info.value)
+
+
+class TestConversationNestedSubtreeRewrite:
+    def test_nested_transcript_recorded_root_rewritten(self, one_member_group):
+        from camp.transfer import receive
+        from trailhead.harness.claude_code import ClaudeCodeHarness
+
+        g = one_member_group
+        ws_root = _seed_workspace(g, "feat-x")
+        env = _conversation_env(g)
+        session_id = "77777777-7777-4777-8777-777777777777"
+        sender_root = "/home/sender/some-other-workspace"
+
+        nested_line = json.dumps({"cwd": sender_root, "type": "agent"}).encode() + b"\n"
+        archive = _archive_bytes(
+            json.dumps({"cwd": sender_root}).encode() + b"\n",
+            nested={"subagents/agent-1.jsonl": nested_line},
+        )
+
+        receive.conversations(
+            groups=[g["group"]],
+            group_name="testgroup",
+            slug="feat-x",
+            session_id=session_id,
+            subpath=".",
+            archive_stream=io.BytesIO(archive),
+            env=env,
+        )
+
+        harness = ClaudeCodeHarness()
+        destination = harness.session_transcript_path(session_id, ws_root, env=env)
+        assert destination is not None
+        nested_path = destination.parent / session_id / "subagents" / "agent-1.jsonl"
+        assert nested_path.is_file()
+        record = json.loads(nested_path.read_text().splitlines()[0])
+        assert record["cwd"] == str(ws_root)
+        assert record["type"] == "agent"
+
+
+class TestConversationNestedRootOutsideWorkspaceRefused:
+    def test_nested_transcript_foreign_root_refuses_and_leaves_nothing(self, one_member_group):
+        from camp.transfer import receive
+        from trailhead.harness.claude_code import ClaudeCodeHarness
+
+        g = one_member_group
+        ws_root = _seed_workspace(g, "feat-x")
+        env = _conversation_env(g)
+        session_id = "88888888-8888-4888-8888-888888888888"
+        sender_root = "/home/sender/some-other-workspace"
+
+        foreign_nested = json.dumps({"cwd": "/entirely/unrelated/root"}).encode() + b"\n"
+        archive = _archive_bytes(
+            json.dumps({"cwd": sender_root}).encode() + b"\n",
+            nested={"subagents/agent-1.jsonl": foreign_nested},
+        )
+
+        with pytest.raises(receive.ConversationDestinationRefused) as exc_info:
+            receive.conversations(
+                groups=[g["group"]],
+                group_name="testgroup",
+                slug="feat-x",
+                session_id=session_id,
+                subpath=".",
+                archive_stream=io.BytesIO(archive),
+                env=env,
+            )
+
+        assert session_id in str(exc_info.value)
+
+        harness = ClaudeCodeHarness()
+        assert harness.session_transcript_path(session_id, ws_root, env=env) is None
+        claude_dir = Path(env["TRAILHEAD_CLAUDE_DIR"])
+        assert list(claude_dir.rglob(f"{session_id}*")) == []
+
+
+class TestConversationUnknownRootRefused:
+    def test_unresolvable_recorded_root_refuses_named_and_leaves_nothing(self, one_member_group):
+        from camp.transfer import receive
+        from trailhead.harness.claude_code import ClaudeCodeHarness
+
+        g = one_member_group
+        ws_root = _seed_workspace(g, "feat-x")
+        env = _conversation_env(g)
+        session_id = "99999999-9999-4999-8999-999999999999"
+
+        archive = _archive_bytes(json.dumps({"type": "summary"}).encode() + b"\n")
+
+        with pytest.raises(receive.ConversationRootUnresolved) as exc_info:
+            receive.conversations(
+                groups=[g["group"]],
+                group_name="testgroup",
+                slug="feat-x",
+                session_id=session_id,
+                subpath=".",
+                archive_stream=io.BytesIO(archive),
+                env=env,
+            )
+
+        assert session_id in str(exc_info.value)
+
+        harness = ClaudeCodeHarness()
+        assert harness.session_transcript_path(session_id, ws_root, env=env) is None
+        claude_dir = Path(env["TRAILHEAD_CLAUDE_DIR"])
+        assert list(claude_dir.rglob(f"{session_id}*")) == []

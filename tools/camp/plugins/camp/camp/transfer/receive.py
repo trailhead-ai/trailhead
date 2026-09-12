@@ -93,6 +93,35 @@ the same projects key, one of them already holding an arrived transcript —
 which this phase surfaces as `ConversationDestinationRefused` rather than an
 unhandled exception or a silent write.
 
+**The rewrite spans the whole extracted subtree, not only the conversation's
+own top-level transcript.** A conversation that dispatched a subagent, or
+produced tool-result artifacts, owns a nested directory of its own
+(`camp.transfer.conversations`'s module docstring) containing further
+`.jsonl` files that each carry their own recorded root — a subagent runs in
+the same working directory as the conversation that dispatched it, so the
+same `old_root`/`new_root` pair this phase derives for the top-level
+transcript applies unchanged to every nested one. This phase walks the
+extracted subtree directly for `.jsonl` files rather than asking the harness
+to enumerate them — `session_transcripts` globs two levels deep by design and
+never sees this subtree at all. A nested transcript whose recorded root falls
+outside the recorded root this conversation was extracted under is refused by
+the transform itself, the same as the top-level file.
+
+**Placement is all-or-nothing.** The recorded root this phase reconciles
+against comes from a scan of this host's own transcript store keyed by
+`session_id` — necessarily read back from the just-extracted top-level file
+itself, since nothing else on this host names it yet. A root this scan
+cannot resolve at all is refused as `ConversationRootUnresolved` rather than
+silently leaving the transcript's sending-host path in place. Every
+transcript in the subtree is rewritten into a staged sibling file first, and
+none of them is moved into its final place until all have succeeded; a
+refusal at any point in the rewrite — an unresolvable root, or a nested
+transcript recording a foreign one — discards everything this phase
+extracted for that conversation (the top-level file and the whole nested
+directory), so a refused placement never leaves an un-rewritten transcript,
+carrying a foreign host's absolute path, sitting in the correct projects-key
+directory.
+
 This phase creates the destination's own parent directories itself
 (`Path.mkdir(parents=True, exist_ok=True)`) — the harness's
 `rewrite_transcript_workspace` does not, by design; the harness itself
@@ -139,6 +168,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -160,6 +190,7 @@ __all__ = [
     "ArchiveMemberRefused",
     "ConversationSubpathRefused",
     "ConversationDestinationRefused",
+    "ConversationRootUnresolved",
     "begin",
     "finish",
     "history",
@@ -306,6 +337,30 @@ class ConversationDestinationRefused(ReceiveRefused):
 
     def __init__(self, session_id: str, detail: str) -> None:
         super().__init__(f"conversation {session_id!r}: {detail}")
+        self.session_id = session_id
+
+
+class ConversationRootUnresolved(ReceiveRefused):
+    """`conversations` could not determine the arriving transcript's recorded
+    root from this host's own transcript store after extraction.
+
+    The sender already refuses an UNRESOLVED conversation before it ever
+    streams one (`camp.transfer.conversations.UnresolvedConversation`,
+    raised in `send_workspace_conversations`), so a caller that goes through
+    that path never reaches this refusal. This phase is directly callable
+    and directly tested independent of that caller, though, so it does not
+    rely on an upstream guard it cannot see — an unresolvable root is refused
+    here too, fail-closed, rather than silently landing a transcript that
+    still carries the sending host's path. Nothing of the conversation is
+    left at the destination when this is raised.
+    """
+
+    def __init__(self, session_id: str) -> None:
+        super().__init__(
+            f"conversation {session_id!r}: could not determine its recorded "
+            "root from this host's transcript store; refusing rather than "
+            "landing a transcript that keeps the sending host's path"
+        )
         self.session_id = session_id
 
 
@@ -674,6 +729,20 @@ def worktree(
     }
 
 
+def _discard_conversation_artifacts(destination: Path, nested_dir: Path) -> None:
+    """Remove everything `conversations` extracted for one conversation.
+
+    Called only when a step after extraction refuses — an unresolvable
+    recorded root, or a nested transcript recording a root outside the
+    workspace — so the destination is left exactly as it was before this
+    call touched it, never holding an un-rewritten transcript that already
+    passed the earlier confinement checks.
+    """
+    destination.unlink(missing_ok=True)
+    if nested_dir.is_dir():
+        shutil.rmtree(nested_dir)
+
+
 def conversations(
     *,
     groups: list[dict[str, Any]],
@@ -697,10 +766,17 @@ def conversations(
             segment, or resolves outside the workspace — refused before
             anything is written.
         ConversationDestinationRefused: the harness boundary refused to
-            compose a destination, or to rewrite the placed transcript's
-            recorded root — no transcript-destination concept, an unusable
-            *session_id*, or a projects-key collision with a transcript
-            already recorded for a different workspace.
+            compose a destination, or to rewrite the recorded root of the
+            placed transcript OR of any nested transcript in its extracted
+            subtree — no transcript-destination concept, an unusable
+            *session_id*, a projects-key collision with a transcript already
+            recorded for a different workspace, or a nested transcript
+            recording a root outside the one this conversation was
+            extracted under. Nothing of the conversation is left at the
+            destination on this refusal.
+        ConversationRootUnresolved: this host's own transcript store could
+            not report a recorded root for *session_id* after extraction.
+            Nothing of the conversation is left at the destination.
         ArchiveMemberRefused: an archive member's path or link target would
             land outside the conversation's own directory — refused before
             it is written.
@@ -756,13 +832,43 @@ def conversations(
         ),
         None,
     )
-    if old_root is not None and old_root.resolve() != conversation_root:
+    if old_root is None:
+        _discard_conversation_artifacts(destination, nested_dir)
+        raise ConversationRootUnresolved(session_id)
+
+    if old_root.resolve() != conversation_root:
+        # Every transcript in the extracted subtree — not only the top-level
+        # one — was written against the sender's root: a subagent runs in the
+        # same working directory as the conversation that dispatched it, so
+        # the same old_root/new_root pair applies unchanged to each nested
+        # file. Walked directly off disk rather than through
+        # `session_transcripts` (depth-2 only, and blind to this subtree by
+        # design).
+        transcripts_to_rewrite = [destination]
+        if nested_dir.is_dir():
+            transcripts_to_rewrite.extend(sorted(nested_dir.rglob("*.jsonl")))
+
+        # Rewrite every file into a staged sibling first and commit none of
+        # them until all have succeeded — a refusal partway (a nested file
+        # recording a root outside old_root, refused by the transform itself)
+        # must leave the already-extracted, still-un-rewritten originals
+        # nowhere on disk, not merely leave them un-rewritten in place.
+        staged: list[tuple[Path, Path]] = []
         try:
-            harness.rewrite_transcript_workspace(
-                destination, destination, old_root, conversation_root
-            )
+            for transcript_path in transcripts_to_rewrite:
+                staged_path = transcript_path.parent / f".{transcript_path.name}.rewrite-staged"
+                harness.rewrite_transcript_workspace(
+                    transcript_path, staged_path, old_root, conversation_root
+                )
+                staged.append((transcript_path, staged_path))
         except HarnessError as e:
+            for _, staged_path in staged:
+                staged_path.unlink(missing_ok=True)
+            _discard_conversation_artifacts(destination, nested_dir)
             raise ConversationDestinationRefused(session_id, str(e)) from e
+
+        for transcript_path, staged_path in staged:
+            os.replace(staged_path, transcript_path)
 
     ws_dir = workspace_dir(group_name, slug, env=env)
     append_marker(ws_dir, phase="conversations", outcome="ok")
