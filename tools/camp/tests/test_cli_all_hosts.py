@@ -1005,7 +1005,7 @@ def test_single_host_list_threads_declared_connect_timeout_to_the_relay(
     assert seen == [7.0]
 
 
-def test_relay_route_verb_set_is_every_host_verb_except_attach() -> None:
+def test_relay_route_verb_set_is_every_host_verb_except_attach():  # inert-gate: allow closed-vocabulary smoke — compares `_HOST_VERBS` against a hand-copied literal, not the parametrize table below, so it cannot detect the table drifting from the source; kept as a wiring reminder that a verb added to `_HOST_VERBS` needs a matching case there
     """Pins the enumeration this parametrized test below drives against —
     `_HOST_VERBS` minus `attach` (which hands off interactively, with no
     transport seam to assert at) is exactly {list, sessions, launch, kill}.
@@ -1440,3 +1440,366 @@ def test_doctor_probe_row_shape_matches_the_far_sides_own_producer(
     assert code == 0
     row = next(h for h in report["hosts"] if h["host"] == "andromeda")
     assert row["verdict"] == "PASS"
+
+
+# ---------------------------------------------------------------------------
+# Defect A — a row reaching the doctor renderer from a path that did not
+# build it (the fan-out's own internal-fault row) must be converted at the
+# boundary, in both render paths, and the fault must be surfaced rather
+# than discarded.
+# ---------------------------------------------------------------------------
+
+
+def test_doctor_fanout_internal_fault_renders_as_host_row_not_foreign_shape(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """A worker that raises (e.g. `ssh` absent from PATH) is caught by
+    `camp.host.merge`'s fan-out and turned into its own `{"ok", "host",
+    "reason"}` row — a shape the doctor host section never built. It must
+    be converted to this section's `{"host", "verdict", "detail"}` shape,
+    never passed through, and never cost the rest of the report."""
+    _doctor_hosts_env(tmp_path, monkeypatch, "[hosts.andromeda]\n[hosts.lookout]\n")
+    monkeypatch.setenv("CAMP_TEST_TMUX_PRESENT", "1")
+    transport = _transport_module()
+
+    def fake_run_camp(host, remote_argv, **kw):
+        if host.ssh == "andromeda":
+            raise FileNotFoundError(2, "No such file or directory: 'ssh'")
+        return _probe_answered(
+            {"pass": True, "checks": [], "probe": True, "multiplexer_present": True}
+        )
+
+    monkeypatch.setattr(transport, "run_camp", fake_run_camp)
+
+    code = _run(monkeypatch, ["doctor", "-a", "--json"])
+    out, err = capsys.readouterr()
+    report = json.loads(out)
+    assert code == 0
+    fault_row = next(h for h in report["hosts"] if h["host"] == "andromeda")
+    assert set(fault_row) == {"host", "verdict", "detail"}, (
+        "the foreign {'ok', 'reason'} shape must never reach the JSON output"
+    )
+    fine_row = next(h for h in report["hosts"] if h["host"] == "lookout")
+    assert fine_row["verdict"] == "PASS", "one host's internal fault must not cost the rest"
+    assert "andromeda" in err, "the internal fault must be surfaced, never silently discarded"
+
+
+def test_doctor_fanout_internal_fault_never_crashes_the_human_render(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """The same fault, through the human render path — this is where the
+    real defect actually crashed: `camp doctor -a` died part-way through
+    printing rather than finishing the report."""
+    _doctor_hosts_env(tmp_path, monkeypatch, "[hosts.andromeda]\n")
+    monkeypatch.setenv("CAMP_TEST_TMUX_PRESENT", "1")
+    transport = _transport_module()
+
+    def fake_run_camp(host, remote_argv, **kw):
+        raise FileNotFoundError(2, "No such file or directory: 'ssh'")
+
+    monkeypatch.setattr(transport, "run_camp", fake_run_camp)
+
+    code = _run(monkeypatch, ["doctor", "-a"])
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "camp doctor — hosts:" in out
+    assert "andromeda" in out
+
+
+# ---------------------------------------------------------------------------
+# Defect B — the outcome-to-verdict mapping, made total and explicit.
+# ---------------------------------------------------------------------------
+
+
+def test_doctor_stopped_responding_renders_warn_never_down(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """A machine that connected and then stopped responding must never be
+    reported with the "could not be reached at all" verdict — its own
+    detail says it connected."""
+    _doctor_hosts_env(tmp_path, monkeypatch, "[hosts.andromeda]\n")
+    transport = _transport_module()
+    monkeypatch.setattr(
+        transport,
+        "run_camp",
+        lambda host, remote_argv, **kw: transport.StoppedResponding(execution_timeout=60.0),
+    )
+
+    code = _run(monkeypatch, ["doctor", "-a", "--json"])
+    report = json.loads(capsys.readouterr().out)
+    assert code == 0
+    row = next(h for h in report["hosts"] if h["host"] == "andromeda")
+    assert row["verdict"] == "WARN"
+    assert "connected" in row["detail"]
+
+
+def test_doctor_remote_refusal_with_unparseable_stdout_renders_down(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """ssh's own exit-255 catch-all — an unrecognized transport failure the
+    transport classifies as `RemoteRefusal` — must never be read as an
+    answer just because its stdout does not parse. Rendering it as "the
+    probe is unavailable" would claim the machine answered when it did
+    not, the collapse this whole slice exists to prevent."""
+    _doctor_hosts_env(tmp_path, monkeypatch, "[hosts.andromeda]\n")
+    transport = _transport_module()
+    monkeypatch.setattr(
+        transport,
+        "run_camp",
+        lambda host, remote_argv, **kw: transport.RemoteRefusal(
+            stdout="", stderr="some unrecognized ssh failure", exit_code=255
+        ),
+    )
+
+    code = _run(monkeypatch, ["doctor", "-a", "--json"])
+    report = json.loads(capsys.readouterr().out)
+    assert code == 0
+    row = next(h for h in report["hosts"] if h["host"] == "andromeda")
+    assert row["verdict"] == "DOWN"
+    assert "unreachable" in row["detail"]
+
+
+def test_doctor_remote_refusal_with_parseable_stdout_reads_probe_availability(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """A `RemoteRefusal` whose stdout DOES parse — camp actually ran and
+    exited nonzero from one of its own failed local checks — is read for
+    probe availability exactly as an `Answered` outcome is: the exit code
+    has nothing to do with whether the probe itself answered."""
+    _doctor_hosts_env(tmp_path, monkeypatch, "[hosts.andromeda]\n")
+    transport = _transport_module()
+    monkeypatch.setattr(
+        transport,
+        "run_camp",
+        lambda host, remote_argv, **kw: transport.RemoteRefusal(
+            stdout=json.dumps({"pass": False, "checks": []}), stderr="", exit_code=1
+        ),
+    )
+
+    code = _run(monkeypatch, ["doctor", "-a", "--json"])
+    report = json.loads(capsys.readouterr().out)
+    assert code == 0
+    row = next(h for h in report["hosts"] if h["host"] == "andromeda")
+    assert row["verdict"] == "WARN"
+    assert "unavailable" in row["detail"]
+
+
+def test_doctor_camp_not_resolvable_names_the_camp_bin_location(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """The row names the actual configured camp_bin location that failed
+    to run — not only the generic remedy — so the correction needs no
+    construction."""
+    _doctor_hosts_env(
+        tmp_path, monkeypatch, '[hosts.andromeda]\ncamp_bin = "/opt/weird/camp"\n'
+    )
+    transport = _transport_module()
+    monkeypatch.setattr(
+        transport, "run_camp", lambda host, remote_argv, **kw: transport.CampNotResolvable()
+    )
+
+    code = _run(monkeypatch, ["doctor", "-a", "--json"])
+    report = json.loads(capsys.readouterr().out)
+    assert code == 0
+    row = next(h for h in report["hosts"] if h["host"] == "andromeda")
+    assert row["verdict"] == "WARN"
+    assert "/opt/weird/camp" in row["detail"]
+
+
+# ---------------------------------------------------------------------------
+# Defect C — a malformed connect_timeout must render as a finding, never a
+# hard exit that starves the checks.
+# ---------------------------------------------------------------------------
+
+
+def test_doctor_malformed_connect_timeout_still_prints_every_check(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """Doctor's own contract: a broken declaration is one failed check row
+    among others, never a reason to exit before the rest run — the
+    precedent the malformed self-name path already sets, extended to a
+    malformed connect_timeout."""
+    _doctor_hosts_env(tmp_path, monkeypatch, 'connect_timeout = "abc"\n[hosts.andromeda]\n')
+    monkeypatch.setenv("CAMP_TEST_TMUX_PRESENT", "1")
+    transport = _transport_module()
+    monkeypatch.setattr(
+        transport,
+        "run_camp",
+        lambda host, remote_argv, **kw: _probe_answered(
+            {"pass": True, "checks": [], "probe": True, "multiplexer_present": True}
+        ),
+    )
+
+    code = _run(monkeypatch, ["doctor", "-a", "--json"])
+    report = json.loads(capsys.readouterr().out)
+    assert code == 1, "a malformed declaration is a failed check, not a refusal"
+    check_names = [c["check"] for c in report["checks"]]
+    assert "asdf" in check_names and "consistency" in check_names
+    timeout_check = next(c for c in report["checks"] if c["check"] == "connect_timeout")
+    assert timeout_check["pass"] is False
+    assert len(report["hosts"]) == 2, "the host section still runs, using the transport's default"
+
+
+# ---------------------------------------------------------------------------
+# Defect D — the human render path, exercised at least once per verdict.
+# ---------------------------------------------------------------------------
+
+
+def test_doctor_human_render_grammar_pass_verdict(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """The host section reuses the local check rows' own grammar: a
+    bracketed verdict, the name, and an indented detail line beneath —
+    this machine's own row labeled distinctly from a probed host's."""
+    _doctor_hosts_env(tmp_path, monkeypatch, "[hosts.andromeda]\n")
+    monkeypatch.setenv("CAMP_TEST_TMUX_PRESENT", "1")
+    transport = _transport_module()
+    monkeypatch.setattr(
+        transport,
+        "run_camp",
+        lambda host, remote_argv, **kw: _probe_answered(
+            {"pass": True, "checks": [], "probe": True, "multiplexer_present": True}
+        ),
+    )
+
+    code = _run(monkeypatch, ["doctor", "-a"])
+    lines = capsys.readouterr().out.splitlines()
+    assert code == 0
+    assert "camp doctor — hosts:" in lines
+    assert "  [PASS] (this machine)" in lines
+    assert "  [PASS] andromeda" in lines
+    assert "         camp resolves; multiplexer present" in lines
+
+
+def test_doctor_human_render_grammar_warn_verdict_names_camp_bin(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    _doctor_hosts_env(
+        tmp_path, monkeypatch, '[hosts.andromeda]\ncamp_bin = "/opt/weird/camp"\n'
+    )
+    transport = _transport_module()
+    monkeypatch.setattr(
+        transport, "run_camp", lambda host, remote_argv, **kw: transport.CampNotResolvable()
+    )
+
+    code = _run(monkeypatch, ["doctor", "-a"])
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "  [WARN] andromeda" in out.splitlines()
+    assert "/opt/weird/camp" in out
+
+
+def test_doctor_human_render_grammar_down_verdict(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    _doctor_hosts_env(tmp_path, monkeypatch, "[hosts.andromeda]\n")
+    transport = _transport_module()
+    monkeypatch.setattr(
+        transport, "run_camp", lambda host, remote_argv, **kw: transport.Unreachable(reason="x")
+    )
+
+    code = _run(monkeypatch, ["doctor", "-a"])
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "  [DOWN] andromeda" in out.splitlines()
+
+
+# ---------------------------------------------------------------------------
+# Defect E — the operator's declared connect_timeout actually reaches the
+# probe's transport call, proven across two different declared values.
+# ---------------------------------------------------------------------------
+
+
+def test_doctor_all_hosts_threads_declared_connect_timeout_to_the_probe(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    _doctor_hosts_env(tmp_path, monkeypatch, "connect_timeout = 4\n[hosts.andromeda]\n")
+    transport = _transport_module()
+    seen: list[float] = []
+
+    def fake_run_camp(host, remote_argv, **kw):
+        seen.append(kw.get("connect_timeout"))
+        return transport.Unreachable(reason="x")
+
+    monkeypatch.setattr(transport, "run_camp", fake_run_camp)
+
+    code = _run(monkeypatch, ["doctor", "-a", "--json"])
+    capsys.readouterr()
+    assert code == 0
+    assert seen == [4.0]
+
+
+def test_doctor_all_hosts_uses_a_different_declared_connect_timeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """The second of the two points that change the answer — a different
+    declared value causes the transport to be invoked with THAT value."""
+    _doctor_hosts_env(tmp_path, monkeypatch, "connect_timeout = 8\n[hosts.andromeda]\n")
+    transport = _transport_module()
+    seen: list[float] = []
+
+    def fake_run_camp(host, remote_argv, **kw):
+        seen.append(kw.get("connect_timeout"))
+        return transport.Unreachable(reason="x")
+
+    monkeypatch.setattr(transport, "run_camp", fake_run_camp)
+
+    code = _run(monkeypatch, ["doctor", "-a", "--json"])
+    capsys.readouterr()
+    assert code == 0
+    assert seen == [8.0]
+
+
+# ---------------------------------------------------------------------------
+# Defect F — the shared connect_timeout refusal branch, pinned at the CLI
+# level on at least one route.
+# ---------------------------------------------------------------------------
+
+
+def test_single_host_list_malformed_connect_timeout_refuses_naming_the_verb(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """The `--host` single-machine route (list/sessions/launch/kill's
+    shared `_resolve_connect_timeout` refusal) names the verb and exits
+    nonzero — pinned at the CLI level, not just at the underlying reader."""
+    (tmp_path / "hosts.toml").write_text(
+        'connect_timeout = "nope"\n[hosts.andromeda]\n', encoding="utf-8"
+    )
+    monkeypatch.setenv("CAMP_CONFIG_DIR", str(tmp_path))
+    monkeypatch.setenv("CAMP_STATE_DIR", str(tmp_path / "state"))
+
+    code = _run(monkeypatch, ["list", "--host", "andromeda", "--json"])
+    err = capsys.readouterr().err
+    assert code == 1
+    assert "camp list:" in err
+    assert "connect_timeout" in err
+
+
+# ---------------------------------------------------------------------------
+# Defect H2 — the doctor fan-out excludes this machine's own declared name.
+# ---------------------------------------------------------------------------
+
+
+def test_doctor_excludes_host_declared_under_this_machines_own_self_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """A host file declaring this machine's own self_name must never
+    produce two rows bearing the same name — one local, one probed over
+    ssh — in a section whose whole purpose is telling machines apart."""
+    _doctor_hosts_env(
+        tmp_path, monkeypatch, 'self_name = "andromeda"\n[hosts.andromeda]\n'
+    )
+    monkeypatch.setenv("CAMP_TEST_TMUX_PRESENT", "1")
+    transport = _transport_module()
+
+    def _boom(*args, **kwargs):
+        raise AssertionError("this machine's own declared name must never be probed over ssh")
+
+    monkeypatch.setattr(transport, "run_camp", _boom)
+
+    code = _run(monkeypatch, ["doctor", "-a", "--json"])
+    out, err = capsys.readouterr()
+    report = json.loads(out)
+    assert code == 0
+    names = [h["host"] for h in report["hosts"]]
+    assert names.count("andromeda") == 1
