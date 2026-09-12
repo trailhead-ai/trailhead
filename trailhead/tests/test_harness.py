@@ -1782,6 +1782,7 @@ class TestClaudeCodeRewriteTranscriptWorkspace:
             ],
         )
         destination = tmp_path / "dst" / "sess.jsonl"
+        destination.parent.mkdir(parents=True)
 
         result = ClaudeCodeHarness().rewrite_transcript_workspace(
             source, destination, old_root, new_root
@@ -1970,3 +1971,92 @@ class TestClaudeCodeRewriteTranscriptWorkspace:
         assert result is True
         out_lines = destination.read_text().splitlines()
         assert json.loads(out_lines[-1])["cwd"] == str(tmp_path / "new-workspace")
+
+    def test_the_rewritten_line_is_byte_identical_outside_the_recorded_root(
+        self, tmp_path
+    ):
+        """A real Claude Code transcript line is strictly compact — no space
+        after any ``:`` or ``,``. Re-serializing the record (e.g. via
+        ``json.dumps``) would insert those spaces back in, so this fixture is
+        a literal compact string, never built with ``json.dumps``, and the
+        assertion is a byte comparison against a literal expected string —
+        not a semantic field-by-field read-back."""
+        old_root = tmp_path / "old-workspace"
+        new_root = tmp_path / "new-workspace"
+        old = str(old_root)
+        new = str(new_root)
+        line = (
+            '{"type":"queue-operation","operation":"enqueue","timestamp":'
+            '"2026-01-01T00:00:00Z","sessionId":"abc-123","cwd":"' + old + '"}\n'
+        )
+        expected = (
+            '{"type":"queue-operation","operation":"enqueue","timestamp":'
+            '"2026-01-01T00:00:00Z","sessionId":"abc-123","cwd":"' + new + '"}\n'
+        )
+        source = tmp_path / "src.jsonl"
+        source.write_bytes(line.encode("utf-8"))
+        destination = tmp_path / "dst.jsonl"
+
+        result = ClaudeCodeHarness().rewrite_transcript_workspace(
+            source, destination, old_root, new_root
+        )
+
+        assert result is True
+        assert destination.read_bytes() == expected.encode("utf-8")
+
+    def test_a_prose_or_escaped_occurrence_of_the_old_root_is_never_touched(
+        self, tmp_path
+    ):
+        """A blanket string replace of the old root across the whole line
+        would also rewrite an absolute path that appears in free prose, and
+        an escaped ``\\"cwd\\":\\"...\\"``-looking fragment pasted into that
+        prose — corrupting the conversation record rather than relocating it.
+        This fixture carries both, positioned BEFORE the real ``cwd`` key in
+        the raw bytes, and both must come out byte-for-byte unchanged."""
+        old_root = tmp_path / "old-workspace"
+        new_root = tmp_path / "new-workspace"
+        old = str(old_root)
+        new = str(new_root)
+        line = (
+            '{"type":"user","message":{"content":"see ' + old
+            + ' then this pasted line: \\"cwd\\":\\"' + old + '\\" end"},"cwd":"'
+            + old + '"}\n'
+        )
+        # Sanity: this is valid JSON whose top-level cwd decodes to `old`, and
+        # the escaped fragment is genuinely inside the message content, not a
+        # second top-level cwd key.
+        decoded = json.loads(line)
+        assert decoded["cwd"] == old
+        assert '"cwd":"' + old + '"' in decoded["message"]["content"]
+
+        expected = (
+            '{"type":"user","message":{"content":"see ' + old
+            + ' then this pasted line: \\"cwd\\":\\"' + old + '\\" end"},"cwd":"'
+            + new + '"}\n'
+        )
+        source = tmp_path / "src.jsonl"
+        source.write_bytes(line.encode("utf-8"))
+        destination = tmp_path / "dst.jsonl"
+
+        result = ClaudeCodeHarness().rewrite_transcript_workspace(
+            source, destination, old_root, new_root
+        )
+
+        assert result is True
+        assert destination.read_bytes() == expected.encode("utf-8")
+
+    def test_destination_parent_must_already_exist(self, tmp_path):
+        """Creating ``destination``'s parent directory is the arriving peer's
+        job (a sibling task's contract), not this per-file transform's — a
+        pure transform doing that too would be provisioning directories on
+        the side."""
+        old_root = tmp_path / "old-workspace"
+        source = self._write(
+            tmp_path / "src.jsonl", [json.dumps({"cwd": str(old_root)})]
+        )
+        destination = tmp_path / "does-not-exist-yet" / "dst.jsonl"
+
+        with pytest.raises(OSError):
+            ClaudeCodeHarness().rewrite_transcript_workspace(
+                source, destination, old_root, tmp_path / "new-workspace"
+            )
