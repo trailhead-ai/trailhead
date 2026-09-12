@@ -51,12 +51,48 @@ separately-maintained copy of the scaffolding could drift into driving something
 else and the cross-cutting guarantee would quietly stop covering the real flows.
 HOME is redirected for every command here, so a launch that pre-seeds harness
 trust writes into a temporary home rather than the developer's own.
+
+A workspace that arrived by transfer looks, to `camp launch --resume` and
+`camp sessions --recoverable`, like any other workspace whose manifest names a
+foreign owner — ownership never moves on arrival, so its central manifest keeps
+recording the sending host as owner even once the workspace is fully usable
+here. The walk below seeds exactly that: a workspace this host provisioned
+itself but whose manifest owner is overwritten to a name that is not this
+host's own, then resumes, stops, and re-resumes a session rooted in it, and
+lists it under `--recoverable`, the same way the rest of this file drives the
+non-transfer flows.
+
+`camp transfer-probe` and `camp transfer --dry-run` are the transfer
+preflight's two read-only surfaces — see `camp.cli.transfer`'s module
+docstring — and are walked here too, under the same blanket snapshot equality,
+but scored separately from the launch/sessions/kill walk's own exit-code
+bookkeeping below: their exit codes come from a disjoint vocabulary (see that
+module's EXIT CODES table) and folding them into the `{0, 1, 2}` closed-set
+check further down would make that check assert something it was never meant
+to.
+
+**The mutating move path is deliberately excluded, not silently omitted.**
+`camp transfer` WITHOUT `--dry-run`, once every preflight check has passed,
+drives `camp.transfer.move.move_workspace` — it force-updates git refs,
+extracts archives over a peer's worktree, and writes a transfer marker, by
+design. A byte-identical `CAMP_STATE_DIR` after that path would mean the
+transfer failed, not that it was clean, so this file cannot hold it to the
+same assertion the rest of the walk uses without asserting the opposite of
+what the path is for. Nor is `camp transfer-receive` walked here: it is the
+peer-side half of that same mutating path, reachable only from a remote
+`camp transfer` invocation over ssh, never from a single local host's own
+command line. What each of them writes, and where, is `camp.transfer.move`'s
+and `camp.transfer.receive`'s own test coverage
+(`test_transfer_cli.py::TestMoveWorkspaceEndToEnd`, `test_transfer_receive.py`)
+to hold, not this file's.
 """
 
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -79,7 +115,13 @@ _PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
 if str(_PLUGIN_DIR) not in sys.path:
     sys.path.insert(0, str(_PLUGIN_DIR))
 
-from camp.group.manifest import manifest_path_for, owner_of, read_central_manifest  # noqa: E402
+from camp.cli.transfer import EXIT_PEER_UNREACHABLE  # noqa: E402
+from camp.group.manifest import (  # noqa: E402
+    manifest_path_for,
+    owner_of,
+    read_central_manifest,
+    write_central_manifest,
+)
 
 from ._helpers import init_git_repo  # noqa: E402
 
@@ -105,6 +147,11 @@ _ID_LIVE = "55555555-5555-4555-8555-555555555555"
 _ID_GONE = "66666666-6666-4666-8666-666666666666"
 _ID_INELIGIBLE = "77777777-7777-4777-8777-777777777777"
 _ID_UNREADABLE = "88888888-8888-4888-8888-888888888888"
+#: A conversation whose recorded root already sits under a workspace this
+#: host provisioned itself — standing in for one that arrived by transfer,
+#: whose recorded root the receiving host rewrites to its own workspace
+#: directory on arrival (see `camp.transfer.receive`'s `conversations` phase).
+_ID_ARRIVED = "99999999-9999-4999-8999-999999999999"
 
 
 def _snapshot(root: Path) -> dict[str, tuple[str, object]]:
@@ -172,9 +219,16 @@ def test_no_new_launch_flow_writes_anything_under_the_state_dir(cli_env) -> None
 
     # A declared self-name so `camp new` below stamps an owner on the fixture's
     # live workspace — see the precondition assertion after `live_workspace`.
+    # The declared peer is never actually reached: its ssh name resolves to
+    # nothing, so `camp transfer --dry-run` below hits a real, fast DNS
+    # failure rather than a fake transport this file would have to maintain.
     Path(cli_env["config_dir"]).mkdir(parents=True, exist_ok=True)
     (Path(cli_env["config_dir"]) / "hosts.toml").write_text(
-        'self_name = "statelessness-host"\n', encoding="utf-8"
+        'self_name = "statelessness-host"\n'
+        "\n"
+        "[hosts.unreachable-peer]\n"
+        'ssh = "camp-statelessness-guard-no-such-host"\n',
+        encoding="utf-8",
     )
 
     # A third group, harnessed like mygroup but with no [launch] roots at all —
@@ -201,6 +255,15 @@ def test_no_new_launch_flow_writes_anything_under_the_state_dir(cli_env) -> None
     amb_one = _workspace_launch_dir(cli_env, "feat-amb-one")
     amb_two = _workspace_launch_dir(cli_env, "feat-amb-two")
     live_workspace = Path(_new_workspace(cli_env, "feat-live")).resolve()
+    arrived_workspace = Path(_new_workspace(cli_env, "feat-arrived")).resolve()
+
+    # This host provisioned `feat-arrived` itself, but a workspace that
+    # arrived by transfer never gets its ownership moved to the receiving
+    # host — the manifest keeps naming the sender. Overwriting it to a name
+    # that is not this host's own is what makes the fixture stand in for an
+    # arrived workspace rather than an ordinary one.
+    arrived_manifest = manifest_path_for("mygroup", "feat-arrived", env=cli_env["env"])
+    write_central_manifest(arrived_manifest, {"owner": "sender-host"}, allow_owner_change=True)
 
     # Precondition: the workspace this walk actually drives must already carry
     # an owner, read back through the real manifest reader — otherwise the
@@ -221,6 +284,7 @@ def test_no_new_launch_flow_writes_anything_under_the_state_dir(cli_env) -> None
     _seed_transcript(cli_env, _ID_GONE, roots / "torn-down")
     _seed_transcript(cli_env, _ID_INELIGIBLE, elsewhere)
     _seed_transcript(cli_env, _ID_UNREADABLE, None)
+    _seed_transcript(cli_env, _ID_ARRIVED, arrived_workspace)
     _register_live(cli_env, _ID_LIVE, live_workspace)
 
     hermetic = {"HOME": str(home)}
@@ -247,9 +311,12 @@ def test_no_new_launch_flow_writes_anything_under_the_state_dir(cli_env) -> None
         ("--resume an unreadable transcript", ["launch", "--resume", _ID_UNREADABLE], tmp_path),
         ("--resume matching nothing", ["launch", "--resume", "nothing-matches-this"], tmp_path),
         ("--resume with no value", ["launch", "--resume"], tmp_path),
+        ("--resume a transferred workspace session", ["launch", "--resume", _ID_ARRIVED], tmp_path),
         # --- camp sessions: every scope and every degradation ---
         ("--recoverable everywhere", ["sessions", "--recoverable", "--group", "mygroup"], None),
         ("--recoverable in a workspace", ["sessions", "--recoverable", "feat-stateless", "--group", "mygroup"], None),
+        ("--recoverable in a transferred workspace",
+         ["sessions", "--recoverable", "feat-arrived", "--group", "mygroup"], None),
         ("--recoverable under a directory",
          ["sessions", "--recoverable", "--dir", str(roots), "--group", "mygroup"], None),
         ("--recoverable under a vanished directory",
@@ -272,6 +339,12 @@ def test_no_new_launch_flow_writes_anything_under_the_state_dir(cli_env) -> None
         ("kill a live session owning no tmux session", ["kill", _ID_LIVE], tmp_path),
         ("kill an ambiguous ref", ["kill", "camp-feat-amb-"], tmp_path),
         ("resume the stopped session", ["launch", "--resume", _ID_ROOTED, "--group", "mygroup"], tmp_path),
+        # The same park/resume round trip, on the transferred workspace's own
+        # session — the sharpest case for a foreign-owned workspace exactly as
+        # it is for an ordinary one: nothing may be set on the stop or cleared
+        # on the resume just because the manifest names another host as owner.
+        ("kill the transferred workspace's session", ["kill", _ID_ARRIVED], tmp_path),
+        ("resume the transferred workspace after stop", ["launch", "--resume", _ID_ARRIVED], tmp_path),
     ]
 
     baseline = _settled_snapshot(state_dir)
@@ -329,6 +402,67 @@ def test_no_new_launch_flow_writes_anything_under_the_state_dir(cli_env) -> None
     assert codes["resume the stopped session"] == 0, errors["resume the stopped session"]
     refusals = [label for label, code in codes.items() if code == 1]
     assert len(refusals) >= 15, refusals
+
+    # The transferred-workspace round trip, same rule: each step actually ran
+    # rather than bouncing off argument parsing.
+    assert codes["--resume a transferred workspace session"] == 0, errors[
+        "--resume a transferred workspace session"
+    ]
+    assert codes["kill the transferred workspace's session"] == 0, errors[
+        "kill the transferred workspace's session"
+    ]
+    assert "stopped session" in errors["kill the transferred workspace's session"]
+    assert codes["resume the transferred workspace after stop"] == 0, errors[
+        "resume the transferred workspace after stop"
+    ]
+    assert codes["--recoverable in a transferred workspace"] == 0, errors[
+        "--recoverable in a transferred workspace"
+    ]
+
+    # --- camp transfer-probe and camp transfer --dry-run: the transfer
+    # preflight's two read-only surfaces. Walked under the same blanket
+    # snapshot equality as every flow above, but scored in their own dicts:
+    # their exit codes come from a vocabulary disjoint from the launch/
+    # sessions/kill walk's {0, 1, 2} (see `camp.cli.transfer`'s EXIT CODES
+    # table), so folding them into `codes` would corrupt the closed-set
+    # assertion above rather than extend it. The mutating move path —
+    # `camp transfer` without `--dry-run` — is deliberately excluded; see the
+    # module docstring for why.
+    transfer_flows: list[tuple[str, list[str]]] = [
+        ("transfer-probe", ["transfer-probe", "--group", "mygroup", "--slug", "feat-stateless"]),
+        (
+            "transfer --dry-run against an unreachable peer",
+            [
+                "transfer", "feat-stateless", "--to", "unreachable-peer",
+                "--group", "mygroup", "--dry-run",
+            ],
+        ),
+    ]
+    transfer_results: dict[str, subprocess.CompletedProcess] = {}
+    for label, argv in transfer_flows:
+        result = _camp(cli_env, *argv, extra_env=hermetic, cwd=tmp_path)
+        transfer_results[label] = result
+        assert _snapshot(state_dir) == baseline, (
+            f"{label} wrote under CAMP_STATE_DIR: {_diff(baseline, _snapshot(state_dir))}\n"
+            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+
+    # Non-vacuity: the probe actually answered about this host's own group
+    # and slug, rather than refusing before it ever built an answer.
+    probe_result = transfer_results["transfer-probe"]
+    assert probe_result.returncode == 0, probe_result.stderr
+    probe_payload = json.loads(probe_result.stdout)
+    assert probe_payload["group_configured"] is True, probe_payload
+    assert probe_payload["workspace_exists"] is True, probe_payload
+    assert probe_payload["workspace_owner"] == "statelessness-host", probe_payload
+
+    # Non-vacuity: the dry run actually reached the transport and classified
+    # a real, unresolvable ssh target — not a local argument-parsing refusal
+    # that never touched the peer-reachability check at all.
+    dry_run_result = transfer_results["transfer --dry-run against an unreachable peer"]
+    assert dry_run_result.returncode == EXIT_PEER_UNREACHABLE, dry_run_result.stderr
+    assert "the peer answers" in dry_run_result.stdout
+    assert "INDETERMINATE" in dry_run_result.stdout
 
     # The owner value itself, read directly — not just implied by the snapshot
     # equality above — so a flow that rewrote it to a same-length value would
