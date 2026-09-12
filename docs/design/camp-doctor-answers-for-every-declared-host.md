@@ -82,10 +82,13 @@ already knows is down. The bound is declared once, beside the hosts it applies t
 connect_timeout = 3.0
 ```
 
-Absent, it is the stated default. It applies to every host verb rather than to the probe alone,
-because it describes the machines, not the question being asked of them — and because camp scans
-argv by hand, so an option would have to be taught to every verb that reads it, and could then
-disagree between them.
+Absent, it is the stated default. It applies to every verb that relays over this transport
+(`list`, `sessions`, `launch`, `kill`, `attach`, and doctor's own probe) rather than to the probe
+alone, because it describes the machines, not the question being asked of them — and because camp
+scans argv by hand, so an option would have to be taught to every verb that reads it, and could
+then disagree between them. The transfer verbs stream over a separate channel and still read the
+transport's own default rather than this declared value — a narrower follow-up, not part of this
+slice.
 
 **What it bounds, exactly.** This is the handshake — how long camp waits for a machine to answer at
 all. A machine that answers and then wedges partway through its own checks is bounded separately,

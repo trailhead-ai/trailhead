@@ -356,7 +356,7 @@ def _dispatch_host_command(
         assert verb == "attach"
         from .session import _cmd_attach_host_cli
 
-        _cmd_attach_host_cli(rest, host, host_name)
+        _cmd_attach_host_cli(rest, host, host_name, connect_timeout=connect_timeout)
 
 
 def _not_on_path_warning() -> None:
@@ -1030,13 +1030,27 @@ def _dispatch_all_hosts_command(
 #: The probe's own bracketed verdict vocabulary — deliberately never "FAIL",
 #: the word the local check rows above the host section use, because
 #: nothing in the host section can fail the health check itself.
-#: "PASS": fully answerable — the
-#: machine answered, camp resolved, and (for a probe-supporting far camp)
-#: the multiplexer is present. "WARN": the machine answered and camp
-#: resolved, but there is something the operator should know — camp could
-#: not be run there is the one exception: it never reaches the probe step
-#: at all, but it is still a WARN because the connection itself completed.
-#: "DOWN": the connection itself never completed.
+#:
+#: "PASS": fully answerable — the machine answered, camp resolved, and (for
+#: a probe-supporting far camp) the multiplexer is present.
+#:
+#: "WARN": the connection completed — camp ran, or ssh itself answered —
+#: but there is something the operator should know: camp could not be run
+#: there, the probe is unavailable (an un-upgraded far camp, or an answer
+#: that will not parse), or the connection completed and then wedged past
+#: its execution bound (`StoppedResponding`) — the machine is there, the
+#: finding is not "unreachable".
+#:
+#: "DOWN": the connection itself never completed at all — the transport's
+#: `Unreachable`, `IdentityUnknown`, `IdentityChanged`, `CredentialsRefused`,
+#: or a `RemoteRefusal` whose stdout will not parse (ssh's own exit-255
+#: catch-all for a failure it does not recognize by message: camp never
+#: ran, so this is never read as an answer).
+#:
+#: The mapping below is total over `camp.host.transport`'s closed outcome
+#: set: every member is named explicitly, and the trailing `assert` on
+#: `Answered` means a future member added to that set fails loudly here
+#: rather than silently taking a default.
 _DOCTOR_PROBE_UNAVAILABLE_DETAIL = (
     "the machine answers, camp resolves there, and the probe is unavailable"
 )
@@ -1066,6 +1080,26 @@ def _doctor_probe_answer(row: dict[str, Any], *, answered: bool):
     return HostAnswer(rows=[row], notices=[], exit_code=0, answered=answered)
 
 
+def _doctor_probe_answer_from_parsed(host_name: str, parsed: Any):
+    """Read a probe answer's decoded stdout for probe availability — shared
+    by every outcome that carries a remote's own stdout (`Answered`, and a
+    `RemoteRefusal` whose stdout DOES parse), so an un-upgraded far camp and
+    a genuinely corrupt answer render identically regardless of which
+    outcome the transport classified them as.
+    """
+    from ..spine import DOCTOR_PROBE_KEY, DOCTOR_PROBE_MULTIPLEXER_KEY
+
+    if not isinstance(parsed, dict) or parsed.get(DOCTOR_PROBE_KEY) is not True:
+        return _doctor_probe_answer(
+            _doctor_host_row(host_name, "WARN", _DOCTOR_PROBE_UNAVAILABLE_DETAIL),
+            answered=False,
+        )
+    return _doctor_probe_answer(
+        _doctor_multiplexer_row(host_name, bool(parsed.get(DOCTOR_PROBE_MULTIPLEXER_KEY))),
+        answered=True,
+    )
+
+
 def _doctor_probe_worker(host_name: str, host: "Host", *, connect_timeout: float):
     """Ask one declared host `doctor --json --probe` about itself and
     return its contribution to the `-a` host section, as a
@@ -1075,76 +1109,111 @@ def _doctor_probe_worker(host_name: str, host: "Host", *, connect_timeout: float
     parses the remote's stdout as a JSON *array* of rows (the shape every
     other `--host` verb answers with), where `doctor --json` answers with a
     single JSON *object* — `{"pass", "checks", ...}`. This worker runs the
-    transport directly and interprets that object shape itself, reusing
-    `camp.host.relay._classify_transport_failure` for the seven transport-
-    failure renderings so the wording (and the reason a caller reads off a
-    failure row) never drifts from what every other host verb already
-    prints for the same outcome.
+    transport directly and interprets that object shape itself.
 
-    A far camp that predates `--probe` answers the invocation normally —
-    exits zero, well-formed JSON — but its object carries neither
-    `camp.spine.DOCTOR_PROBE_KEY` nor `DOCTOR_PROBE_MULTIPLEXER_KEY` (see
-    that module's own comment on why). This is therefore read the same way
-    as a decode failure: the machine answered and camp resolved, but the
-    probe itself is unavailable — never rendered as "no multiplexer
-    present", which is a different, positive claim about a probe that DID
-    answer.
+    The mapping onto the host section's three-verdict vocabulary is total
+    over `camp.host.transport`'s closed outcome set — see
+    `_DOCTOR_PROBE_UNAVAILABLE_DETAIL`'s own comment for the table. Each
+    member is handled by its own `isinstance` branch rather than a single
+    boolean split, so a mis-mapped member (a machine that connected then
+    wedged rendered as unreachable; a transport-level failure ssh could not
+    name rendered as an answer) fails loudly at the branch that owns it
+    instead of falling into a shared default.
     """
     import json as _json
 
     from ..host import transport as _transport
     from ..host.relay import _classify_transport_failure
-    from ..spine import DOCTOR_PROBE_KEY, DOCTOR_PROBE_MULTIPLEXER_KEY
 
     outcome = _transport.run_camp(
         host, ["doctor", "--json", "--probe"], connect_timeout=connect_timeout
     )
 
-    failure = _classify_transport_failure(
-        "doctor", host, host_name, outcome, connect_timeout=connect_timeout
-    )
-    if failure is not None:
-        # The connection never completed at all (Unreachable,
-        # StoppedResponding, IdentityUnknown, IdentityChanged,
-        # CredentialsRefused) is DOWN; a connection that completed but
-        # could not run camp (CampNotResolvable) or a local producer
-        # failure is WARN — the machine is there, something about the
-        # declaration is not.
-        down = isinstance(
-            outcome,
-            (
-                _transport.Unreachable,
-                _transport.StoppedResponding,
-                _transport.IdentityUnknown,
-                _transport.IdentityChanged,
-                _transport.CredentialsRefused,
-            ),
+    # The connection never completed at all — a name that will not
+    # resolve, a refusal, an unpinned or changed key, or every credential
+    # refused. "Could not be reached at all" is exactly this verdict's
+    # meaning.
+    if isinstance(
+        outcome,
+        (
+            _transport.Unreachable,
+            _transport.IdentityUnknown,
+            _transport.IdentityChanged,
+            _transport.CredentialsRefused,
+        ),
+    ):
+        failure = _classify_transport_failure(
+            "doctor", host, host_name, outcome, connect_timeout=connect_timeout
         )
         return _doctor_probe_answer(
-            _doctor_host_row(host_name, "DOWN" if down else "WARN", failure.reason),
-            answered=False,
+            _doctor_host_row(host_name, "DOWN", failure.reason), answered=False
         )
 
-    # Answered / RemoteRefusal both carry stdout — doctor's own nonzero exit
-    # (a failed local check on the far side) classifies as RemoteRefusal,
-    # but that has nothing to do with whether the probe itself answered, so
-    # both are parsed the same way here.
-    assert isinstance(outcome, (_transport.Answered, _transport.RemoteRefusal))
+    # The connection completed and then the invocation wedged past its
+    # execution bound — the machine IS there; the detail says so. Rendering
+    # this as "could not be reached at all" would contradict its own text,
+    # which is precisely the defect this mapping exists to rule out.
+    if isinstance(outcome, _transport.StoppedResponding):
+        failure = _classify_transport_failure(
+            "doctor", host, host_name, outcome, connect_timeout=connect_timeout
+        )
+        return _doctor_probe_answer(
+            _doctor_host_row(host_name, "WARN", failure.reason), answered=False
+        )
+
+    # The connection completed but the declared camp could not be run —
+    # named with the actual configured location so the correction needs no
+    # construction, never just the generic remedy.
+    if isinstance(outcome, _transport.CampNotResolvable):
+        detail = (
+            f"answered; camp could not be run — camp_bin {host.camp_bin!r} "
+            "did not resolve on this host"
+        )
+        return _doctor_probe_answer(_doctor_host_row(host_name, "WARN", detail), answered=False)
+
+    if isinstance(outcome, _transport.ProducerFailed):
+        # `run_camp` never returns this today — only `stream_camp` does,
+        # for a channel doctor's probe never uses. Handled anyway so this
+        # mapping stays total over the closed outcome set rather than
+        # relying on the trailing assert to also cover it.
+        failure = _classify_transport_failure(
+            "doctor", host, host_name, outcome, connect_timeout=connect_timeout
+        )
+        return _doctor_probe_answer(
+            _doctor_host_row(host_name, "WARN", failure.reason), answered=False
+        )
+
+    if isinstance(outcome, _transport.RemoteRefusal):
+        try:
+            parsed = _json.loads(outcome.stdout)
+        except ValueError:
+            parsed = None
+        if not isinstance(parsed, dict):
+            # The transport classifies ANY ssh exit 255 whose stderr
+            # matches none of its recognized substrings as a
+            # `RemoteRefusal` — camp's own nonzero exit is indistinguishable
+            # from an unrecognized transport failure by exit code alone.
+            # When the stdout that "refusal" carries will not even parse,
+            # camp never ran: rendering it as an answer (the probe being
+            # merely unavailable) would claim the machine answered when it
+            # did not, so it is read as unreachable instead.
+            return _doctor_probe_answer(
+                _doctor_host_row(
+                    host_name,
+                    "DOWN",
+                    f"unreachable — ssh exited {outcome.exit_code} with no "
+                    "recognized reason",
+                ),
+                answered=False,
+            )
+        return _doctor_probe_answer_from_parsed(host_name, parsed)
+
+    assert isinstance(outcome, _transport.Answered)
     try:
         parsed = _json.loads(outcome.stdout)
     except ValueError:
         parsed = None
-
-    if not isinstance(parsed, dict) or parsed.get(DOCTOR_PROBE_KEY) is not True:
-        return _doctor_probe_answer(
-            _doctor_host_row(host_name, "WARN", _DOCTOR_PROBE_UNAVAILABLE_DETAIL),
-            answered=False,
-        )
-
-    return _doctor_probe_answer(
-        _doctor_multiplexer_row(host_name, bool(parsed.get(DOCTOR_PROBE_MULTIPLEXER_KEY))),
-        answered=True,
-    )
+    return _doctor_probe_answer_from_parsed(host_name, parsed)
 
 
 def _doctor_self_row(self_name: str | None) -> dict[str, Any]:
@@ -1164,6 +1233,58 @@ def _render_doctor_hosts_human(host_rows: list[dict[str, Any]]) -> None:
         print(f"         {row['detail']}")
 
 
+def _doctor_row_from_host_answer(host_name: str, answer: "HostAnswer") -> dict[str, Any]:
+    """Convert one declared host's fan-out contribution into the host
+    section's own row shape, at the boundary where it enters this section.
+
+    `_doctor_probe_worker` (the only worker this dispatch injects) always
+    returns `_doctor_host_row`'s own shape (`{"host", "verdict", "detail"}`),
+    so that row passes through unchanged. Anything else reaching here was
+    built by something the doctor path does not own — most notably
+    `camp.host.merge`'s own internal-fault row (`{"ok", "host", "reason"}`,
+    synthesized when a worker raises something outside the transport's
+    closed outcome set) — and is converted here rather than trusted: a row
+    this section did not build must never reach its renderer carrying a
+    different shape, human or JSON.
+    """
+    row = answer.rows[0] if answer.rows else None
+    if isinstance(row, dict) and "verdict" in row and "detail" in row:
+        return row
+    reason = row.get("reason") if isinstance(row, dict) else None
+    detail = (
+        reason if isinstance(reason, str) else "camp's own fan-out could not answer for this host"
+    )
+    return _doctor_host_row(host_name, "WARN", detail)
+
+
+def _doctor_resolve_connect_timeout(hosts_error: str | None) -> tuple[float, str | None]:
+    """Resolve `doctor -a`'s connect timeout without ever hard-exiting.
+
+    Doctor's own contract — already set by the malformed-self-name check
+    row `_doctor_local_checks` renders — is that a malformed declaration is
+    a finding, never a refusal that starves every other check of a chance
+    to report. `_resolve_connect_timeout` (the shared reader every other
+    host-axis route uses) prints and exits on a `HostConfigError`, so
+    doctor reads the value itself instead of going through it.
+
+    Returns `(connect_timeout, error)`: `error` is `None` on success, or the
+    message a caller renders as its own failed check row. `connect_timeout`
+    is always the transport's own default when `error` is set, so the
+    fan-out still runs with a usable bound.
+    """
+    from ..host.config import HostConfigError, connect_timeout_seconds
+    from ..host.transport import DEFAULT_CONNECT_TIMEOUT_SECONDS
+
+    if hosts_error is not None:
+        return DEFAULT_CONNECT_TIMEOUT_SECONDS, None
+
+    try:
+        return connect_timeout_seconds(), None
+    except HostConfigError as exc:
+        print(f"camp doctor: {exc}", file=sys.stderr)
+        return DEFAULT_CONNECT_TIMEOUT_SECONDS, str(exc)
+
+
 def _dispatch_doctor_all_hosts(rest: list[str]) -> None:
     """`camp doctor -a` — the local health check, plus one row per declared
     host reporting whether it answers, whether camp resolves there, and
@@ -1178,9 +1299,12 @@ def _dispatch_doctor_all_hosts(rest: list[str]) -> None:
     The host section's exit status never contributes to the command's own:
     the local checks alone decide it, via `_doctor_local_checks`'s
     `any_failed` — a host that cannot be reached is a finding, not a
-    failure.
+    failure. A malformed `connect_timeout` is the one addition to that
+    roll-up: it is rendered as its own failed check row rather than
+    refusing the verb (see `_doctor_resolve_connect_timeout`), so it DOES
+    turn the exit status nonzero, the same way a malformed self-name does.
     """
-    from ..host.config import HostConfigError, load_hosts
+    from ..host.config import HostConfigError, load_hosts, self_host_name
     from ..host.merge import answer_all_hosts_concurrently
     from ..spine import _doctor_local_checks
 
@@ -1193,7 +1317,32 @@ def _dispatch_doctor_all_hosts(rest: list[str]) -> None:
         hosts = {}
         hosts_error = str(exc)
 
-    connect_timeout = _resolve_connect_timeout("doctor", hosts_error=hosts_error)
+    connect_timeout, timeout_error = _doctor_resolve_connect_timeout(hosts_error)
+
+    # A host file declaring this machine's own self_name under
+    # `[hosts.<name>]` must never be probed over ssh: the resulting row
+    # would bear the same name as the local row above it, in a section
+    # whose whole purpose is telling machines apart. Read once, before the
+    # fan-out starts — tolerating a HostConfigError here silently, since a
+    # malformed self_name is already rendered as its own failed check row
+    # by `_doctor_local_checks` below; a second raise here must never
+    # bypass that rendering.
+    try:
+        self_name_for_exclusion = self_host_name() if hosts_error is None else None
+    except HostConfigError:
+        self_name_for_exclusion = None
+
+    fanout_hosts = list(hosts.items())
+    if self_name_for_exclusion is not None and self_name_for_exclusion in hosts:
+        fanout_hosts = [
+            (name, host) for name, host in fanout_hosts if name != self_name_for_exclusion
+        ]
+        print(
+            f"camp doctor: hosts.toml declares {self_name_for_exclusion!r} as a "
+            "remote host — the same name this machine's own self_name uses; "
+            "that entry is skipped so its row is not counted twice",
+            file=sys.stderr,
+        )
 
     # `answer_all_hosts_concurrently`'s local-answer shape has no slot for
     # the self-declared host name `_doctor_local_checks` also computes — one
@@ -1212,17 +1361,30 @@ def _dispatch_doctor_all_hosts(rest: list[str]) -> None:
 
     (checks, _local_notices, exit_code), host_answers = answer_all_hosts_concurrently(
         _local_answer,
-        list(hosts.items()),
+        fanout_hosts,
         verb="doctor",
         remote_argv=["doctor", "--json", "--probe"],
         connect_timeout=connect_timeout,
         worker=_worker,
     )
 
+    if timeout_error is not None:
+        checks.append(
+            {
+                "check": "connect_timeout",
+                "description": "declared connect timeout",
+                "pass": False,
+                "details": timeout_error,
+            }
+        )
+        exit_code = 1
+
     self_name = self_name_cell[0]
-    host_rows = [_doctor_self_row(self_name)] + [
-        answer.rows[0] for _host_name, answer in host_answers
-    ]
+    host_rows = [_doctor_self_row(self_name)]
+    for host_name, answer in host_answers:
+        for notice in answer.notices:
+            print(notice, file=sys.stderr)
+        host_rows.append(_doctor_row_from_host_answer(host_name, answer))
 
     if as_json:
         import json as _json

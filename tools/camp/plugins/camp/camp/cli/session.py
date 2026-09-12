@@ -2814,6 +2814,8 @@ def _cmd_attach_host_cli(
     host: "Host",
     host_name: str,
     env: dict[str, str] | None = None,
+    *,
+    connect_timeout: float | None = None,
 ) -> None:
     """camp attach <ref> --host <name> — carry the reference across untouched.
 
@@ -2824,10 +2826,21 @@ def _cmd_attach_host_cli(
     machine's own environment before the handoff — it is a property of the
     local terminal, not of the target — per that same design doc's "The
     key-prefix conflict warning is decided locally".
+
+    ``connect_timeout`` is the operator's resolved value
+    (`camp.host.config.connect_timeout_seconds()`, read once by `main()`'s
+    `--host` handling), threaded to the interactive ssh handoff exactly as
+    it is to every other `--host` verb — `None` falls back to the
+    transport's own documented default, for a caller with no resolved value
+    in hand.
     """
     from ..attach.prefix_warning import warn_if_nested
     from ..host.handoff import handoff, remote_argv
+    from ..host.transport import DEFAULT_CONNECT_TIMEOUT_SECONDS
     from ..spine import _die
+
+    if connect_timeout is None:
+        connect_timeout = DEFAULT_CONNECT_TIMEOUT_SECONDS
 
     rest = list(args)
     if len(rest) != 1:
@@ -2841,4 +2854,4 @@ def _cmd_attach_host_cli(
 
     resolved_env = dict(env) if env is not None else dict(os.environ)
     warn_if_nested(resolved_env)
-    handoff(remote_argv(host, ref))
+    handoff(remote_argv(host, ref, connect_timeout=connect_timeout))

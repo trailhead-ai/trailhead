@@ -466,6 +466,42 @@ def test_host_form_reaches_the_untouched_pass_through(
     assert argv[-1].endswith("attach myref") or "attach myref" in argv[-1]
 
 
+def test_host_form_threads_the_declared_connect_timeout_to_the_handoff(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The interactive `--host` handoff is a host-axis verb like every
+    other — its ssh invocation must carry the operator's declared
+    connect_timeout, not the transport's own module constant, exactly as
+    the non-interactive relay verbs already do."""
+    _hosts_env(tmp_path, monkeypatch, "andromeda", connect_timeout_line="connect_timeout = 11\n")
+    handoff = _host_handoff_module()
+    seen: list = []
+    monkeypatch.setattr(handoff, "handoff", lambda argv: seen.append(argv))
+
+    code = _run(["attach", "myref", "--host", "andromeda"], monkeypatch)
+
+    assert code == 0
+    assert len(seen) == 1
+    assert "ConnectTimeout=11" in " ".join(seen[0])
+
+
+def test_host_form_uses_a_different_declared_connect_timeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The second of the two points that change the answer — proving the
+    value threads through rather than any nonzero value passing."""
+    _hosts_env(tmp_path, monkeypatch, "andromeda", connect_timeout_line="connect_timeout = 4\n")
+    handoff = _host_handoff_module()
+    seen: list = []
+    monkeypatch.setattr(handoff, "handoff", lambda argv: seen.append(argv))
+
+    code = _run(["attach", "myref", "--host", "andromeda"], monkeypatch)
+
+    assert code == 0
+    assert len(seen) == 1
+    assert "ConnectTimeout=4" in " ".join(seen[0])
+
+
 def test_remote_attach_from_inside_a_local_multiplexer_warns_via_the_real_entry_point(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
