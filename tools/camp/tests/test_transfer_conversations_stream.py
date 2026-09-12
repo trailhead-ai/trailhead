@@ -484,7 +484,7 @@ class TestTornCopyDetection:
         self, tmp_path: Path
     ) -> None:
         from camp.host.transport import ProducerFailed
-        from camp.transfer.conversations import TranscriptChanged, send_conversation
+        from camp.transfer.conversations import send_conversation
 
         transcript_path = tmp_path / "transcript.jsonl"
         transcript_path.write_bytes(b'{"cwd": "/ws", "n": 1}\n')

@@ -1800,8 +1800,6 @@ class TestMoveWorkspaceEndToEnd:
         completion report — it fails the `conversations` phase by name,
         the same re-runnable shape every other phase failure uses, rather
         than silently completing the move without it."""
-        from pathlib import PurePosixPath
-
         from camp.transfer.conversations import WorkspaceConversation
         from camp.transfer.move import PhaseFailed, move_workspace
 
