@@ -450,7 +450,7 @@ def _readme_exit_codes() -> set[int]:
     readme = _readme_text()
     section = readme[readme.index("## Transferring a workspace") :]
     table = section[section.index("Exit codes:") : section.index("`transfer` and `transfer-probe`")]
-    return {int(n) for n in re.findall(r"^(\d)\s+\S", table, re.MULTILINE)}
+    return {int(n) for n in re.findall(r"^(\d+)\s+\S", table, re.MULTILINE)}
 
 
 def test_every_producible_exit_code_appears_in_the_documented_table(
@@ -582,6 +582,29 @@ def test_every_producible_exit_code_appears_in_the_documented_table(
         _run(monkeypatch, ["transfer", "feat-x", "--to", "host-b", "--group", "trailhead"])
     )
 
+    # 10 EXIT_PHASE_FAILED_POST_COMMIT — `claim` already answered, `finish`
+    # then failed: ownership already moved, driven through the real
+    # `PhaseFailed(claimed_owner=...)` shape rather than a bare integer.
+    env10 = _Env(tmp_path / "postcommit")
+    env10.write_group(excluded={"repo_a": []})
+    env10.write_hosts(self_name="host-a", peers={"host-b": "host-b"})
+    env10.write_manifest(owner="host-a")
+    env10.apply(monkeypatch)
+    _fake_probe(monkeypatch, _clean_probe_answer())
+    _no_conversations(monkeypatch)
+    release = importlib.import_module("camp.transfer.release")
+    monkeypatch.setattr(release, "release_conversations", lambda **kw: ())
+    monkeypatch.setattr(
+        move,
+        "move_workspace",
+        lambda **kw: (_ for _ in ()).throw(
+            move.PhaseFailed("finish", "boom", claimed_owner="host-b-declared")
+        ),
+    )
+    produced.add(
+        _run(monkeypatch, ["transfer", "feat-x", "--to", "host-b", "--group", "trailhead"])
+    )
+
     documented = _readme_exit_codes()
-    assert produced == {0, 1, 3, 4, 5, 6, 7, 8, 9}
+    assert produced == {0, 1, 3, 4, 5, 6, 7, 8, 9, 10}
     assert documented == produced

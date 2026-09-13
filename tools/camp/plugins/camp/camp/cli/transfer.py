@@ -51,10 +51,20 @@ inputs are checked:
   8  EXIT_OVERWRITE_REQUIRED  the workspace already exists on the peer, owned
                                by this host, and `--overwrite` was not passed
                                — nothing crossed
-  9  EXIT_PHASE_FAILED        a move phase (begin/history/worktree/claim/finish)
-                               failed after the preflight passed — nothing
-                               after the failing phase ran; re-running the
-                               transfer is safe
+  9  EXIT_PHASE_FAILED        a move phase (begin/history/worktree/conversations/
+                               claim) failed BEFORE `claim` answered — ownership
+                               never moved, nothing after the failing phase ran,
+                               and re-running the transfer (with --overwrite) is
+                               safe
+ 10  EXIT_PHASE_FAILED_POST_COMMIT  `claim` already answered and `finish` then
+                               failed — ownership has already moved to the peer.
+                               A re-run is NOT safe here: the peer already owns
+                               the workspace and would refuse a re-run's opening
+                               `begin`. The conversations that already crossed
+                               are still released from this host; this host's
+                               own manifest is deliberately left stale, and the
+                               printed remedy names the peer and directs the
+                               operator to continue the work there
 
 Code 2 is absent from the set deliberately: it is never produced, and it is
 held unused rather than reassigned, so a script that checks for it
@@ -72,10 +82,11 @@ collision, peer group/account/slug checks, the excluded-set declaration, and
 conversation enumeration) do not need their own operator-visible exit code —
 their distinguishing detail is carried in the rendered check text and (for
 `--json`) in the check's own `status`/`detail`/`transport_outcome` fields, not
-in the process exit code. `EXIT_OVERWRITE_REQUIRED` and `EXIT_PHASE_FAILED`
-are never produced by the preflight itself — they come from
-`camp.transfer.move.move_workspace`, reached only once every check has
-PASSED.
+in the process exit code. `EXIT_OVERWRITE_REQUIRED`, `EXIT_PHASE_FAILED`, and
+`EXIT_PHASE_FAILED_POST_COMMIT` are never produced by the preflight itself —
+they come from `camp.transfer.move.move_workspace`, reached only once every
+check has PASSED. The last two are told apart by whether the raised
+`PhaseFailed` carries a `claimed_owner` — see that class's own docstring.
 """
 
 from __future__ import annotations
@@ -250,6 +261,7 @@ EXIT_UNKNOWN_SLUG = 6
 EXIT_UNKNOWN_PEER = 7
 EXIT_OVERWRITE_REQUIRED = 8
 EXIT_PHASE_FAILED = 9
+EXIT_PHASE_FAILED_POST_COMMIT = 10
 
 #: Check name -> exit code, for the checks that get their own. Looked up by
 #: `_exit_code_for` while walking `PreflightResult.checks` in order; a check
@@ -694,6 +706,44 @@ def _cmd_transfer_group_cli(
         )
         sys.exit(EXIT_OVERWRITE_REQUIRED)
     except PhaseFailed as e:
+        if e.claimed_owner is not None:
+            # `claim` already answered before `finish` failed — ownership
+            # has already moved to the peer (see `PhaseFailed`'s own
+            # docstring). The conversations that already crossed are still
+            # released, exactly as a successful move would release them, but
+            # `flip_sender_ownership` never runs: this host's own record
+            # stays stale on purpose, since a wrong flip here would claim a
+            # handover this host cannot confirm actually finished on the
+            # peer.
+            from ..group.manifest import workspace_dir
+            from ..transfer.release import release_conversations
+
+            release_conversations(
+                group=group_name,
+                slug=slug,
+                workspace_root=workspace_dir(group_name, slug, env=resolved_env),
+                conversations=e.conversations,
+                locate_transcript=(
+                    _locate_transcript(session_groups, resolved_env)
+                    if e.conversations
+                    else (lambda session_id, root: None)
+                ),
+                env=resolved_env,
+            )
+            print(
+                f"camp transfer: phase {e.phase!r} failed after ownership had "
+                f"already moved to {e.claimed_owner!r} — {e.detail}. This is "
+                f"not a re-runnable failure: {e.claimed_owner!r} now owns "
+                f"the workspace and holds its content; this host's own "
+                f"record is stale. Continue the work on {e.claimed_owner!r} "
+                "rather than retrying here — the two hosts' records now "
+                f"disagree, and comparing this host's manifest against the "
+                f"one held by {e.claimed_owner!r} (`camp transfer-probe "
+                f"--group {group_name} --slug {slug}`) is how you confirm "
+                "that.",
+                file=sys.stderr,
+            )
+            sys.exit(EXIT_PHASE_FAILED_POST_COMMIT)
         print(
             f"camp transfer: phase {e.phase!r} failed — {e.detail}. This is a "
             "failure, not a refusal: everything up to this phase already "
