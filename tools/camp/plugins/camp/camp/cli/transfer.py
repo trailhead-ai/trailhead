@@ -492,7 +492,7 @@ def _augment_missing_self_name_check(result, *, env: dict[str, str]):
 
 
 def _render_move_completion(
-    move_result, *, slug: str, peer_name: str, group_name: str
+    move_result, *, slug: str, peer_name: str, group_name: str, release_results
 ) -> None:
     """The report printed once `move_workspace` returns successfully.
 
@@ -519,8 +519,16 @@ def _render_move_completion(
     `camp launch --resume <session-id>`, the same reference-addressed resume
     flavor `camp.cli.session._launch_resume` implements — rather than an
     identifier the operator would have to turn into a command themselves.
+
+    *release_results* is `camp.transfer.release.release_conversations`'s own
+    return value — one `ConversationRelease` per crossed conversation,
+    reported here individually rather than as a single aggregate line, so an
+    operator can tell exactly which conversations are now peer-only and
+    which are still sitting resumable on this host because their release
+    failed.
     """
     from ..launch.recovery import printable_path
+    from ..transfer.release import ReleaseOutcome
 
     print(f"camp transfer: {slug!r} arrived on {peer_name!r}")
     print(f"  ownership moved to {move_result.claimed_owner!r}")
@@ -538,10 +546,21 @@ def _render_move_completion(
     if not move_result.conversations:
         print("  no conversations are rooted in this workspace")
     else:
+        release_by_id = {r.session_id: r for r in release_results}
         for conversation in move_result.conversations:
             subpath = printable_path(conversation.subpath)
             print(f"    {conversation.session_id} @ {subpath}")
             print(f"      resume with: camp launch --resume {conversation.session_id}")
+            released = release_by_id.get(conversation.session_id)
+            if released is None:
+                continue
+            if released.outcome is ReleaseOutcome.FAILED:
+                print(
+                    f"      this host still holds a resumable copy — release "
+                    f"failed: {released.detail}"
+                )
+            else:
+                print(f"      released from this host — archived at {released.archive_path}")
 
 
 def _cmd_transfer_group_cli(
@@ -684,7 +703,27 @@ def _cmd_transfer_group_cli(
         )
         sys.exit(EXIT_PHASE_FAILED)
 
+    from ..group.manifest import workspace_dir
+    from ..transfer.release import release_conversations
+
+    release_results = release_conversations(
+        group=group_name,
+        slug=slug,
+        workspace_root=workspace_dir(group_name, slug, env=resolved_env),
+        conversations=move_result.conversations,
+        locate_transcript=(
+            _locate_transcript(session_groups, resolved_env)
+            if move_result.conversations
+            else (lambda session_id, root: None)
+        ),
+        env=resolved_env,
+    )
+
     _render_move_completion(
-        move_result, slug=slug, peer_name=peer_name, group_name=group_name
+        move_result,
+        slug=slug,
+        peer_name=peer_name,
+        group_name=group_name,
+        release_results=release_results,
     )
     sys.exit(EXIT_WOULD_TRANSFER)

@@ -1619,6 +1619,190 @@ class TestConversationResumesOnARealPeer:
         assert resume.returncode == 0, resume.stderr
 
 
+def _sender_locate(c: dict):
+    """A `locate_transcript` callable against the SENDER's own real harness
+    store, mirroring `_cross_one_conversation`'s own `_locate` closure."""
+    from trailhead.harness.claude_code import ClaudeCodeHarness
+
+    harness = ClaudeCodeHarness()
+    sender_claude_env = {"TRAILHEAD_CLAUDE_DIR": str(c["sender_claude_dir"])}
+
+    def _locate(session_id: str, root):
+        return harness.session_transcript_path(session_id, root, env=sender_claude_env)
+
+    return _locate
+
+
+class TestReleaseOnARealPeer:
+    """`camp.transfer.release` driven directly against `conv_env`'s real
+    sender harness store, exactly as `move_workspace` is driven directly in
+    `TestConversationResumesOnARealPeer` above rather than through the full
+    `camp transfer` CLI — the release module has no CLI entry point of its
+    own; `camp transfer`'s wiring to it is covered separately, with
+    `move_workspace` faked, in the CLI-wiring section of this file."""
+
+    def test_after_release_the_sender_no_longer_lists_or_resumes_it(self, conv_env):
+        from pathlib import PurePosixPath
+
+        from camp.group.manifest import workspace_dir
+        from camp.transfer.release import ReleaseOutcome, release_conversations
+
+        c = conv_env
+        session_id = "77777777-7777-4777-8777-777777777777"
+
+        result, _phases, _dest = _cross_one_conversation(
+            c, session_id=session_id, subpath=PurePosixPath("."), marker="release-listing-marker"
+        )
+
+        # Before release, the sender still offers and resumes it (pinned
+        # directly by `test_sending_host_keeps_ownership_and_its_own_resumable_copy`
+        # above) — the change this test pins is what happens AFTER release.
+        sender_ws_root = workspace_dir("testgroup", c["slug"], env=c["sender_env"]).resolve()
+        release_results = release_conversations(
+            group="testgroup",
+            slug=c["slug"],
+            workspace_root=sender_ws_root,
+            conversations=result.conversations,
+            locate_transcript=_sender_locate(c),
+            env=c["sender_env"],
+        )
+        assert release_results[0].outcome is ReleaseOutcome.ARCHIVED
+
+        sender_rows = _recoverable_rows(c["sender_cli_env"])
+        assert session_id not in {row["session_id"] for row in sender_rows}, sender_rows
+
+        resume = _run_camp(c["sender_cli_env"], "launch", "--resume", session_id)
+        assert resume.returncode != 0, resume.stdout
+
+    def test_archived_bytes_match_and_the_peer_is_unaffected(self, conv_env):
+        """The peer's own copy (already pinned resumable by
+        `TestConversationResumesOnARealPeer`) is untouched by the sender's
+        release — this test drives the release and then checks the peer
+        again, rather than assuming a sender-local operation cannot reach it."""
+        from pathlib import PurePosixPath
+
+        from camp.group.manifest import workspace_dir
+        from camp.transfer.release import ReleaseOutcome, release_conversations
+
+        c = conv_env
+        session_id = "77777777-7777-4777-8777-777777777776"
+        marker = "archived-bytes-marker-e21c"
+
+        result, _phases, sender_transcript = _cross_one_conversation(
+            c, session_id=session_id, subpath=PurePosixPath("."), marker=marker
+        )
+        before_bytes = sender_transcript.read_bytes()
+
+        sender_ws_root = workspace_dir("testgroup", c["slug"], env=c["sender_env"]).resolve()
+        release_results = release_conversations(
+            group="testgroup",
+            slug=c["slug"],
+            workspace_root=sender_ws_root,
+            conversations=result.conversations,
+            locate_transcript=_sender_locate(c),
+            env=c["sender_env"],
+        )
+        assert release_results[0].outcome is ReleaseOutcome.ARCHIVED
+        assert release_results[0].archive_path.read_bytes() == before_bytes
+
+        peer_rows = _recoverable_rows(c["peer_cli_env"])
+        assert session_id in {row["session_id"] for row in peer_rows}, peer_rows
+        resume = _run_camp(c["peer_cli_env"], "launch", "--resume", session_id)
+        assert resume.returncode == 0, resume.stderr
+
+    def test_archive_sits_outside_the_workspace_tree_and_the_harness_store(self, conv_env):
+        """Proven by running the two real sweeps that could otherwise pick
+        the archive back up: the working-tree content walk
+        (`camp.transfer.worktree.write_archive`, over the sender's real
+        worktree) and conversation enumeration (the sender's real harness
+        store scan) — neither reports it."""
+        import io
+        import tarfile
+        from pathlib import PurePosixPath
+
+        from camp.group.manifest import workspace_dir
+        from camp.transfer.release import archive_dir, release_conversations
+        from camp.transfer.worktree import write_archive
+        from trailhead.harness.claude_code import ClaudeCodeHarness
+
+        c = conv_env
+        session_id = "77777777-7777-4777-8777-777777777775"
+
+        result, _phases, _dest = _cross_one_conversation(
+            c, session_id=session_id, subpath=PurePosixPath("."), marker="archive-location-marker"
+        )
+
+        sender_ws_root = workspace_dir("testgroup", c["slug"], env=c["sender_env"]).resolve()
+        release_conversations(
+            group="testgroup",
+            slug=c["slug"],
+            workspace_root=sender_ws_root,
+            conversations=result.conversations,
+            locate_transcript=_sender_locate(c),
+            env=c["sender_env"],
+        )
+
+        archive_root = archive_dir("testgroup", c["slug"], env=c["sender_env"])
+        assert archive_root.is_dir()
+        assert not archive_root.is_relative_to(sender_ws_root)
+        assert not archive_root.is_relative_to(Path(c["sender_claude_dir"]).resolve())
+
+        buf = io.BytesIO()
+        write_archive(c["wt_path"], (), buf)
+        buf.seek(0)
+        with tarfile.open(fileobj=buf, mode="r|") as tf:
+            worktree_member_names = [m.name for m in tf]
+        assert not any(session_id in name for name in worktree_member_names)
+
+        sender_claude_env = {"TRAILHEAD_CLAUDE_DIR": str(c["sender_claude_dir"])}
+        remaining = ClaudeCodeHarness().session_transcripts(env=sender_claude_env)
+        assert session_id not in {t.session_id for t in remaining}, remaining
+
+    def test_rerunning_release_after_a_successful_archive_does_not_duplicate(self, conv_env):
+        from pathlib import PurePosixPath
+
+        from camp.group.manifest import workspace_dir
+        from camp.transfer.release import (
+            ReleaseOutcome,
+            read_release_marker,
+            release_conversations,
+        )
+
+        c = conv_env
+        session_id = "77777777-7777-4777-8777-777777777774"
+
+        result, _phases, _dest = _cross_one_conversation(
+            c, session_id=session_id, subpath=PurePosixPath("."), marker="rerun-marker"
+        )
+
+        sender_ws_root = workspace_dir("testgroup", c["slug"], env=c["sender_env"]).resolve()
+        locate = _sender_locate(c)
+
+        first = release_conversations(
+            group="testgroup",
+            slug=c["slug"],
+            workspace_root=sender_ws_root,
+            conversations=result.conversations,
+            locate_transcript=locate,
+            env=c["sender_env"],
+        )
+        assert first[0].outcome is ReleaseOutcome.ARCHIVED
+
+        second = release_conversations(
+            group="testgroup",
+            slug=c["slug"],
+            workspace_root=sender_ws_root,
+            conversations=result.conversations,
+            locate_transcript=locate,
+            env=c["sender_env"],
+        )
+        assert second[0].outcome is ReleaseOutcome.ALREADY_ARCHIVED
+
+        marker = read_release_marker("testgroup", c["slug"], env=c["sender_env"])
+        matching = [entry for entry in marker if entry["session_id"] == session_id]
+        assert len(matching) == 1, marker
+
+
 class TestMoveWorkspaceEndToEnd:
     def test_content_crosses_in_phase_order_against_a_real_peer(self, move_env):
         from camp.provision.reconcile import _worktree_path
@@ -2656,3 +2840,200 @@ def test_not_passed_preflight_on_the_moving_path_never_reaches_the_mover(
 
     assert code == transfer.EXIT_OWNERSHIP_REFUSED
     capsys.readouterr()
+
+
+# ---------------------------------------------------------------------------
+# camp.transfer.release wiring — `move.move_workspace` faked wholesale
+# exactly like the moving-CLI-path section above; the release module's own
+# behaviour (idempotency, collision, cross-filesystem, per-conversation
+# failure) is covered hermetically in test_transfer_conversations.py, and the
+# sender-forgets-it behaviour is covered against a real peer below in
+# `TestReleaseOnARealPeer`.
+# ---------------------------------------------------------------------------
+
+
+def _release_module():
+    return importlib.import_module("camp.transfer.release")
+
+
+def test_release_conversations_is_called_after_a_successful_move(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """Once `move_workspace` returns successfully, the CLI drives the
+    release step over exactly the conversations `MoveResult` reports as
+    crossed — never re-enumerated — for this same group/slug/workspace."""
+    from pathlib import PurePosixPath
+
+    env = _Env(tmp_path)
+    env.write_group(excluded={"repo_a": []})
+    env.write_hosts(self_name="host-a", peers={"host-b": "host-b"})
+    env.write_manifest(owner="host-a")
+    env.apply(monkeypatch)
+    transfer = _transfer_module()
+
+    _fake_probe(monkeypatch, _clean_probe_answer())
+    _no_conversations(monkeypatch)
+
+    move = _move_module()
+    session_id = "99999999-9999-4999-8999-999999999999"
+    crossed = move.ConversationCrossed(session_id=session_id, subpath=PurePosixPath("."))
+    monkeypatch.setattr(
+        move,
+        "move_workspace",
+        lambda **kw: move.MoveResult(
+            members=("repo_a",), conversations=(crossed,), claimed_owner="host-b-declared"
+        ),
+    )
+
+    release = _release_module()
+    calls = []
+
+    def _fake_release(**kw):
+        calls.append(kw)
+        return ()
+
+    monkeypatch.setattr(release, "release_conversations", _fake_release)
+
+    code = _run(monkeypatch, ["transfer", "feat-x", "--to", "host-b", "--group", "trailhead"])
+
+    assert code == transfer.EXIT_WOULD_TRANSFER
+    assert len(calls) == 1
+    assert calls[0]["group"] == "trailhead"
+    assert calls[0]["slug"] == "feat-x"
+    assert calls[0]["conversations"] == (crossed,)
+    assert callable(calls[0]["locate_transcript"])
+
+
+def test_release_conversations_is_never_called_on_a_dry_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    env = _Env(tmp_path)
+    env.write_group(excluded={"repo_a": []})
+    env.write_hosts(self_name="host-a", peers={"host-b": "host-b"})
+    env.write_manifest(owner="host-a")
+    env.apply(monkeypatch)
+    transfer = _transfer_module()
+
+    _fake_probe(monkeypatch, _clean_probe_answer())
+    _no_conversations(monkeypatch)
+
+    move = _move_module()
+
+    def _boom_move(**kw):
+        raise AssertionError("move_workspace must not run on a dry run")
+
+    monkeypatch.setattr(move, "move_workspace", _boom_move)
+
+    release = _release_module()
+
+    def _boom_release(**kw):
+        raise AssertionError("release_conversations must not run on a dry run")
+
+    monkeypatch.setattr(release, "release_conversations", _boom_release)
+
+    code = _run(
+        monkeypatch,
+        ["transfer", "feat-x", "--to", "host-b", "--group", "trailhead", "--dry-run"],
+    )
+
+    assert code == transfer.EXIT_WOULD_TRANSFER
+    capsys.readouterr()
+
+
+def test_release_conversations_is_never_called_when_a_phase_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """A phase failure means `move_workspace` never returns — there is no
+    `MoveResult` to release against, and running the release step against an
+    unconfirmed handover is exactly the one move this slice must never make."""
+    env = _Env(tmp_path)
+    env.write_group(excluded={"repo_a": []})
+    env.write_hosts(self_name="host-a", peers={"host-b": "host-b"})
+    env.write_manifest(owner="host-a")
+    env.apply(monkeypatch)
+    transfer = _transfer_module()
+
+    _fake_probe(monkeypatch, _clean_probe_answer())
+    _no_conversations(monkeypatch)
+
+    move = _move_module()
+
+    def _fail(**kw):
+        raise move.PhaseFailed("finish", "peer unreachable mid-finish")
+
+    monkeypatch.setattr(move, "move_workspace", _fail)
+
+    release = _release_module()
+
+    def _boom_release(**kw):
+        raise AssertionError("release_conversations must not run when a phase failed")
+
+    monkeypatch.setattr(release, "release_conversations", _boom_release)
+
+    code = _run(monkeypatch, ["transfer", "feat-x", "--to", "host-b", "--group", "trailhead"])
+
+    assert code == transfer.EXIT_PHASE_FAILED
+    capsys.readouterr()
+
+
+def test_completion_report_names_each_conversations_release_outcome(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """The operator reads, per conversation, whether it was archived off this
+    host or is still sitting here because the release failed — never a single
+    aggregate line that would hide which conversations are now peer-only."""
+    from pathlib import PurePosixPath
+
+    env = _Env(tmp_path)
+    env.write_group(excluded={"repo_a": []})
+    env.write_hosts(self_name="host-a", peers={"host-b": "host-b"})
+    env.write_manifest(owner="host-a")
+    env.apply(monkeypatch)
+    transfer = _transfer_module()
+
+    _fake_probe(monkeypatch, _clean_probe_answer())
+    _no_conversations(monkeypatch)
+
+    move = _move_module()
+    archived_id = "aaaaaaaa-0000-4000-8000-000000000001"
+    failed_id = "bbbbbbbb-0000-4000-8000-000000000002"
+    crossed = (
+        move.ConversationCrossed(session_id=archived_id, subpath=PurePosixPath(".")),
+        move.ConversationCrossed(session_id=failed_id, subpath=PurePosixPath(".")),
+    )
+    monkeypatch.setattr(
+        move,
+        "move_workspace",
+        lambda **kw: move.MoveResult(
+            members=("repo_a",), conversations=crossed, claimed_owner="host-b-declared"
+        ),
+    )
+
+    release = _release_module()
+    archive_path = tmp_path / "archive" / f"{archived_id}.jsonl"
+
+    def _fake_release(**kw):
+        return (
+            release.ConversationRelease(
+                session_id=archived_id,
+                outcome=release.ReleaseOutcome.ARCHIVED,
+                archive_path=archive_path,
+            ),
+            release.ConversationRelease(
+                session_id=failed_id,
+                outcome=release.ReleaseOutcome.FAILED,
+                archive_path=None,
+                detail="destination unwritable",
+            ),
+        )
+
+    monkeypatch.setattr(release, "release_conversations", _fake_release)
+
+    code = _run(monkeypatch, ["transfer", "feat-x", "--to", "host-b", "--group", "trailhead"])
+
+    assert code == transfer.EXIT_WOULD_TRANSFER
+    out = capsys.readouterr().out
+    assert archived_id in out
+    assert str(archive_path) in out
+    assert failed_id in out
+    assert "destination unwritable" in out

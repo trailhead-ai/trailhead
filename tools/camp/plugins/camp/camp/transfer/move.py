@@ -13,8 +13,19 @@ itself as the workspace's owner and answers with the name it wrote (see
 `transfer-receive finish` over `run_camp` again. `claim` runs strictly
 before `finish` because `finish` triggers a manifest rebuild that only
 carries an owner forward, never sets one; a claim not yet durable on disk
-when that rebuild runs would not be preserved. Every path this function
-reads from is the SENDER's own —
+when that rebuild runs would not be preserved.
+
+Once `move_workspace` returns (every phase, including `finish`, has
+answered), the CLI layer (`camp.cli.transfer._cmd_transfer_group_cli`) drives
+one more, purely local step this module does not perform itself:
+`camp.transfer.release.release_conversations` moves the sender's own copies
+of `MoveResult.conversations` out of the harness's transcript store into a
+camp-owned archive, so the sender stops offering and resuming them. That
+step never runs when `move_workspace` raises — a `PhaseFailed` after `claim`
+but before `finish` answers is indistinguishable, from this module's own
+exceptions, from one before `claim`, so the CLI treats every raised phase
+failure as "ownership has not been confirmed to have moved" and releases
+nothing. Every path this function reads from is the SENDER's own —
 `group["members"]` entries' `repo_root`, the sender's own worktree path
 (`camp.provision.reconcile._worktree_path`), the sender's own slug branch
 name — continuing `camp.transfer.probe`'s stated posture that no field the
