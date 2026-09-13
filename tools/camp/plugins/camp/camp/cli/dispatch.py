@@ -1188,6 +1188,48 @@ def _doctor_account_rows(
     ]
 
 
+#: A declared host controls how many account rows its probe answer carries
+#: and how long each `account` / `reason` string is — nothing upstream caps
+#: either before this reader parses, strips, and renders them, so a
+#: malicious host could otherwise flood the operator's terminal and this
+#: side's memory with an unbounded roster. Follows the same shape as
+#: `trailhead/harness/claude_code.py`'s `_ERROR_EXCERPT_LIMIT`: a fixed
+#: bound applied at the point the untrusted payload is parsed, not at the
+#: transport (widening the transport-wide stdout cap is explicitly out of
+#: scope here — see that module's own docstring).
+_DOCTOR_ACCOUNT_ROW_LIMIT = 50
+_DOCTOR_ACCOUNT_FIELD_LIMIT = 200
+
+
+def _doctor_account_truncate_field(value: object) -> object:
+    """Bound one remote-authored `account`/`reason` string to
+    `_DOCTOR_ACCOUNT_FIELD_LIMIT` characters, marking the cut with an
+    ellipsis so a truncated value stays honest rather than reading as a
+    short, complete one. Anything that is not a string passes through
+    unchanged — `_doctor_account_row` already coerces a non-string to
+    `None` (or its own stated fallback) before it is rendered, so there is
+    no string here to bound."""
+    if not isinstance(value, str) or len(value) <= _DOCTOR_ACCOUNT_FIELD_LIMIT:
+        return value
+    return value[:_DOCTOR_ACCOUNT_FIELD_LIMIT] + "…"
+
+
+def _doctor_account_truncate_fact(fact: object) -> object:
+    """Apply the field-length cap to one roster member's `account` and
+    `reason` values, leaving every other key (notably `verdict`, which is
+    never echoed verbatim — it is mapped through the closed vocabulary in
+    `_doctor_account_verdict_token`) untouched. A non-dict member passes
+    through unchanged; `_doctor_account_rows` already drops it."""
+    if not isinstance(fact, dict):
+        return fact
+    truncated = dict(fact)
+    if "account" in truncated:
+        truncated["account"] = _doctor_account_truncate_field(truncated["account"])
+    if "reason" in truncated:
+        truncated["reason"] = _doctor_account_truncate_field(truncated["reason"])
+    return truncated
+
+
 def _doctor_account_rows_from_parsed(
     host_name: str | None, parsed: dict[str, Any]
 ) -> list[dict[str, Any]]:
@@ -1210,10 +1252,15 @@ def _doctor_account_rows_from_parsed(
     answered with something camp merely could not parse.
 
     Every string here is remote-authored (the declared account, and any
-    failure reason), so it passes through the same recursive
-    control-sequence strip every other relay path already applies — run
-    here, not only where the rows are printed, so the machine-readable form
-    is stripped at the point the roster is produced.
+    failure reason), so each is bounded to `_DOCTOR_ACCOUNT_FIELD_LIMIT`
+    characters and the roster itself to `_DOCTOR_ACCOUNT_ROW_LIMIT` rows —
+    both applied here, at the point the roster is parsed, before it passes
+    through the same recursive control-sequence strip every other relay
+    path already applies. Run here, not only where the rows are printed, so
+    the machine-readable form is bounded and stripped at the point the
+    roster is produced. A roster longer than the cap says so, in its own
+    row, rather than silently rendering fewer accounts than the far side
+    sent.
     """
     from ..host.relay import _strip_control_sequences_deep
     from ..spine import DOCTOR_PROBE_ACCOUNTS_KEY
@@ -1221,9 +1268,22 @@ def _doctor_account_rows_from_parsed(
     facts = parsed.get(DOCTOR_PROBE_ACCOUNTS_KEY)
     if not isinstance(facts, list) or not facts:
         return [_doctor_account_row(host_name, None, "cannot-tell", None)]
-    rows = _doctor_account_rows(host_name, _strip_control_sequences_deep(facts))
+    reported_count = len(facts)
+    bounded_facts = [
+        _doctor_account_truncate_fact(fact) for fact in facts[:_DOCTOR_ACCOUNT_ROW_LIMIT]
+    ]
+    rows = _doctor_account_rows(host_name, _strip_control_sequences_deep(bounded_facts))
     if not rows:
         return [_doctor_account_row(host_name, None, "cannot-tell", None)]
+    if reported_count > _DOCTOR_ACCOUNT_ROW_LIMIT:
+        rows.append(
+            _doctor_host_row(
+                host_name,
+                "WARN",
+                f"the account roster reported {reported_count} accounts; only the "
+                f"first {_DOCTOR_ACCOUNT_ROW_LIMIT} are shown",
+            )
+        )
     return rows
 
 
@@ -1436,7 +1496,18 @@ def _render_doctor_hosts_human(host_rows: list[dict[str, Any]]) -> None:
     """Group the section's rows by machine, naming each machine once and
     indenting every fact it contributed beneath it — a machine contributing
     several account facts (plus its reachability fact) names itself once
-    rather than repeating its name on every line."""
+    rather than repeating its name on every line.
+
+    `detail` carries remote-authored text on the account axis (the
+    declared account name, and any failure reason) — data a declared host
+    fully controls. It already passes through `_strip_control_sequences_deep`
+    on the way in, but that strip deliberately preserves newline and tab, so
+    it alone does not stop an embedded newline from turning one printed row
+    into two. `printable_path` (despite the name, usable on any relayed
+    string — see `cli/session.py`'s `_candidate_row_line`) closes that gap
+    here, at the one place every host-section detail is printed."""
+    from ..launch.recovery import printable_path
+
     print("camp doctor — hosts:")
     grouped: dict[str | None, list[dict[str, Any]]] = {}
     for row in host_rows:
@@ -1445,7 +1516,7 @@ def _render_doctor_hosts_human(host_rows: list[dict[str, Any]]) -> None:
         label = name if name is not None else "(this machine)"
         print(f"  {label}:")
         for row in rows:
-            print(f"    [{row['verdict']}] {row['detail']}")
+            print(f"    [{row['verdict']}] {printable_path(row['detail'])}")
 
 
 def _doctor_rows_from_host_answer(
