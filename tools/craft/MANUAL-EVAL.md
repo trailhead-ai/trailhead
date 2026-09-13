@@ -1491,3 +1491,96 @@ itself, evidence about the treatment (live) prose — the treatment arm's measur
 task's job, per the pre-registration's own per-site table. See "Extension — Task 1 of
 `task/both-slice-termination-outcomes-are-measured-not-assumed`" in this eval's `expected.md` for
 the full pre-registration.
+
+### 2026-09-12 — `slice`'s two termination sites, treatment arm — AC7 closes at ten of ten sites
+
+Run by `task/measure-the-treatment-and-state-the-ac7-verdict` against the same pre-registration
+("Extension — Task 1 of `task/both-slice-termination-outcomes-are-measured-not-assumed`" in this
+eval's `expected.md`). The prior task measured the frozen baseline arm only; this task measures the
+one variable the pre-registration reserved — `arms/rule-only.md`, the live committed prose — holding
+the fixture, the tail, the run count, and the `--command` string identical to the baseline task.
+
+**Dispatch.** 6 processes (3 per site), separate `claude -p` processes, never subagents,
+`--setting-sources project --allowedTools "Read" < /dev/null`, each from its own freshly-created
+empty scratch directory. All 6 exited 0 with empty stderr — no infra failure, nothing discarded.
+
+| Date | Site | Arm | Fixture | Runs | next-command verdict |
+|------|------|-----|---------|------|----------------------|
+| 2026-09-12 | `slice` spec-complete | `arms/rule-only.md` | `slice-spec-complete-run.md` | 3 | **own-line, own-line, own-line — 3/3, AC7 holds** |
+| 2026-09-12 | `slice` early-stop | `arms/rule-only.md` | `slice-early-stop-run.md` | 3 | **own-line, own-line, own-line — 3/3, AC7 holds** |
+
+**Result: treatment (live prose) holds AC7 at both sites, unanimously, no tie-break triggered.**
+All 6 runs placed the handoff command alone on its own line, wrapped in a fenced code block
+(`` /craft:distill spec/orchard-irrigation `` and `` /craft:slice spec/glacier-survey-logistics ``
+respectively), separated from the surrounding prose. `record-link` was `link` in all 6 runs — not
+scored for this task's pass condition, but reported below as AC6 evidence per the pre-registration.
+
+**Baseline vs. treatment, at both sites.** The frozen pre-change arm (`arms/slice-frozen-rule-
+only.md`) put the command mid-sentence in all 6 counted runs (0/6 `own-line`, both sites falsified);
+the live arm (`arms/rule-only.md`) puts it alone on its own line in all 6 counted runs (6/6
+`own-line`, both sites hold). The only variable that moved between the two dispatch batches is the
+arm; fixture, tail, run count, and `--command` string are byte-identical across both, per the
+pre-registration. The comparison therefore measures the `## Outcome` prose change (`bd72afa1`,
++17/−5 across three hunks at `slice/SKILL.md:570-593`) and nothing else.
+
+**AC7's full site inventory, re-derived from
+`task/every-pinned-ritual-links-the-record-it-acted-on-and-prints-its-one-next-command-on-its-own-
+line`, `## U3 resolved`** (not inherited from this plan, the "Second deviation" section above, or
+this file's own prior entries): brainstorm (1), gauntlet (1), `slice` selection / spec-complete /
+early-stop (3), plan (1), execute (1, ruled measurable per "Extension — Task 3"'s Council amendment,
+not exempt), review loop-complete / second-outcome (2), distill (1) — ten sites. Eight were already
+measured holding `own-line` (see the "eight of the ten" entry above); this task's two treatment
+results bring the remaining two to `own-line` as well.
+
+**AC7 verdict: all ten of its one-command outcome sites now measure `own-line`. AC7 holds in full.**
+This corrects the "Second deviation" section of `expected.md`, whose "AC7 therefore holds at eight
+of ten sites" sentence was accurate when written and is now stale; a correction is recorded there
+pointing back to this entry rather than the original sentence being rewritten.
+
+**AC6 evidence, at two sites that have never had any — does not close AC6.** `record-link` was
+`link` in all 6 baseline runs and all 6 treatment runs at both termination sites (12/12). This is
+new AC6 evidence, consistent with the previous slice's finding that the reader plugin's rule is the
+sole determinant. **It does not close AC6**: distill's 3-3 `record-link` split (see the "own-line
+x3, then own-line x3" entry above) stays AMBIGUOUS and open, and the four rituals that name their
+acted-on record only inside the handoff command (`plan`, `execute`, `gauntlet`, `brainstorm` — the
+handoff-command-only sites the reader's rule deliberately keeps bare) remain correct-as-bare, not
+newly measured by this task.
+
+**No falsification, no owed task record.** Both sites held at treatment; the council amendment's
+"a falsified site gets an owner, not just a diagnosis" clause does not trigger.
+
+**Security scan.** `python3 tools/craft/plugins/craft/scripts/capture_scan.py <dir>` over all 18 new
+capture files (6 captures × `.txt`/`.exit`/`.stderr.txt`): **6 hits, all class
+"path-or-url-shape"**, each a fabricated fixture record-URL segment
+(`7313/records/meadowbrook/spec/orchard`, `7313/records/meadowbrook/spec/glacier`), the same
+pre-characterised false-positive class as every prior scan in this case. Exit code **0** (clean).
+Zero operator-path hits, zero username hits, zero hits of any other class. No leak found; nothing
+withheld from commit.
+
+Captured run outputs (6 treatment processes' stdout/stderr/exit sidecars —
+`slice-spec-complete-treatment-{1..3}`, `slice-early-stop-treatment-{1..3}`) are committed under
+`plugins/craft/evals/ritual-deliverable-names-its-record/runs/`. New filename prefixes
+(`slice-spec-complete-treatment-*`, `slice-early-stop-treatment-*`) are distinct from every existing
+one, including the baseline task's `slice-spec-complete-baseline-*` / `slice-early-stop-baseline-*`.
+
+**Regression pin.** `test_ritual_deliverable_grader.py`'s committed-capture count moved 60 -> 66,
+with two new prefix -> grader-args entries (`slice-spec-complete-treatment`,
+`slice-early-stop-treatment`); all existing entries are byte-unchanged. Confirmed red first: the pin
+failed with "expected 60 committed captures under runs/, found 66" before the count was updated,
+then green after.
+
+**Deviation carried forward from the baseline task.** The baseline task's own dispatch script also
+ran this treatment arm against both fixtures (6 further processes, all exit 0) before this task
+existed — outside that task's own stated scope ("This task measures the baseline arm only... do not
+run it"). Those 6 captures were discarded uncommitted, never copied into `runs/`, never graded into
+any verdict, and confirmed absent from `runs/`. This task does not treat them as evidence and did
+not seek out their results — the 6 treatment runs graded above are freshly dispatched by this task,
+independent of that earlier, discarded batch. Recorded here so the complete dispatch history is
+visible: 6 baseline (prior task, counted) + 6 treatment (prior task, discarded, scope deviation) + 6
+treatment (this task, counted) = 18 processes across the two tasks for these two sites, of which 12
+are counted evidence and 6 are a disclosed, uniformly-discarded scope deviation.
+
+**AC7 verdict at these two sites, and overall: measured, holding.** Baseline falsifies (0/6
+`own-line`, matching the pre-change prose's known defect); treatment holds (6/6 `own-line`, matching
+the currently-shipped prose). Combined with the eight already-measured sites, **AC7 holds at all ten
+of its one-command outcome sites** — the criterion this slice exists to close is closed.

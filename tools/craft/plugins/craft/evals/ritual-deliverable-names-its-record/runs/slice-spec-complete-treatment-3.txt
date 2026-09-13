@@ -1,0 +1,9 @@
+Slice loop closed out for [spec/orchard-irrigation](http://127.0.0.1:7313/records/meadowbrook/spec/orchard-irrigation).
+
+**termination basis: gate-certified** — `candidates: none`, `complete-eligible: yes`. Every acceptance criterion in the spec is covered by a `## Slices` ledger entry, and every ledger line attesting that coverage carries a coverage token in the canonical bullet shape. The spec is labelled `craft/slice-loop=complete`; no slice was chosen or materialized on this pass.
+
+Run this when you're ready to distill this work into the ADR log:
+
+```
+/craft:distill spec/orchard-irrigation
+```
