@@ -12,11 +12,13 @@ this suite pins.
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import pytest
 
 REPO_ROOT = Path(__file__).parent.parent
+GIT_ROOT = REPO_ROOT.parent.parent
 SKILLS_DIR = REPO_ROOT / "plugins" / "craft" / "skills"
 EVAL_DIR = REPO_ROOT / "plugins" / "craft" / "evals" / "ritual-deliverable-names-its-record"
 ARMS_DIR = EVAL_DIR / "arms"
@@ -78,6 +80,13 @@ FROZEN_ARMS = {
         "frozen pre-edit baseline; post-edit mirror is review-treatment.md "
         "(expected.md, 'Extension — Task 5')"
     ),
+    "slice-frozen-rule-only.md": (
+        "frozen pre-change baseline for slice's two termination sites, recovered from "
+        "git show 0336687c:.../slice/SKILL.md (historical by construction — its source "
+        "revision predates the treatment commit and can never be a live rebuild); "
+        "post-change mirror is rule-only.md (expected.md, 'Extension — Task 1 of "
+        "task/both-slice-termination-outcomes-are-measured-not-assumed')"
+    ),
 }
 
 
@@ -118,3 +127,69 @@ def test_live_arm_rebuilds_byte_identically(arm_name: str):
     expected = _rebuild(sources, with_tail)
     actual = (ARMS_DIR / arm_name).read_text(encoding="utf-8")
     assert actual == expected, _drift_message(arm_name, sources, with_tail, expected, actual)
+
+
+# The frozen arm's source revision: the run base of the slice that treated slice's
+# two termination sites (bd72afa1), so its content is slice/SKILL.md as it stood
+# immediately before that edit.
+FROZEN_SLICE_ARM = "slice-frozen-rule-only.md"
+FROZEN_SLICE_SOURCE_COMMIT = "0336687c"
+FROZEN_SLICE_SOURCE_PATH = "tools/craft/plugins/craft/skills/slice/SKILL.md"
+
+
+def _git_show(commit: str, path: str) -> str:
+    """Read a historical blob via `git show`, never the working tree.
+
+    This couples the test to reading repository history at full depth — the same
+    coupling that failed under CI's shallow clone until `fetch-depth: 0` landed
+    (fix(craft): fetch full history in CI so the grader regression test can read
+    its base-commit blob, currently `.github/workflows/tests.yml`). If that
+    setting is ever reverted, `git show` fails here for an environment reason,
+    not a content one, and the assertion below names that possibility explicitly
+    rather than letting a shallow-clone failure read as arm corruption.
+    """
+    result = subprocess.run(
+        ["git", "show", f"{commit}:{path}"],
+        cwd=GIT_ROOT,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise AssertionError(
+            f"`git show {commit}:{path}` failed (exit {result.returncode}): "
+            f"{result.stderr.strip()}\n"
+            "This most often means the checkout is shallow and does not carry "
+            f"commit {commit} — confirm `fetch-depth: 0` is still set in "
+            ".github/workflows/tests.yml before treating this as arm corruption."
+        )
+    return result.stdout
+
+
+def test_frozen_slice_arm_matches_its_declared_provenance():
+    """Pins that slice-frozen-rule-only.md really is `git show 0336687c:.../SKILL.md`
+    plus the reader-rule tail — not a hand-edit, a wrong commit, or a stale
+    concatenation — so a corrupted baseline cannot pass this suite on existence
+    alone (the risk `test_every_arm_on_disk_has_a_manifest_entry` does not cover
+    for a frozen entry).
+
+    Design decision on tail drift: this reconstructs against the *current* reader
+    tail via `_record_links_tail()`, the same helper the live arms use, rather than
+    pinning the tail to a fixed revision of its own. A live arm with a tail is
+    already coupled to today's `## Record links` section the same way, so this
+    frozen arm inherits an existing coupling rather than introducing a new one. If
+    the tail changes, this test goes red for the same reason every tailed live arm
+    would — `_drift_message` below reports the offset, which lands inside the tail
+    region (at or after the historical source's own length) and is distinguishable
+    from a drift inside the source region, which would instead indicate a wrong
+    commit or a hand-edit.
+    """
+    historical_source = _git_show(FROZEN_SLICE_SOURCE_COMMIT, FROZEN_SLICE_SOURCE_PATH)
+    expected = historical_source + _record_links_tail()
+    actual = (ARMS_DIR / FROZEN_SLICE_ARM).read_text(encoding="utf-8")
+    assert actual == expected, _drift_message(
+        FROZEN_SLICE_ARM,
+        [f"{FROZEN_SLICE_SOURCE_COMMIT}:{FROZEN_SLICE_SOURCE_PATH}"],
+        True,
+        expected,
+        actual,
+    )
