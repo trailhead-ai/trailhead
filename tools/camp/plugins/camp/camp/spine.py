@@ -1157,6 +1157,7 @@ def _doctor_asdf_present() -> bool:
 DOCTOR_PROBE_FLAG = "--probe"
 DOCTOR_PROBE_KEY = "probe"
 DOCTOR_PROBE_MULTIPLEXER_KEY = "multiplexer_present"
+DOCTOR_PROBE_ACCOUNTS_KEY = "accounts"
 
 
 def _doctor_multiplexer_present() -> bool:
@@ -1166,6 +1167,74 @@ def _doctor_multiplexer_present() -> bool:
     if seam == "1":
         return True
     return bool(shutil.which("tmux"))
+
+
+def _doctor_account_roster(env: dict[str, str] | None = None) -> list[dict[str, Any]]:
+    """This machine's own account roster, paired with each account's harness
+    authentication verdict — the value behind `DOCTOR_PROBE_ACCOUNTS_KEY`.
+
+    Built from every group config THIS machine's own group-config directory
+    holds, fed into the same addressable-store pool `camp sessions`/`camp
+    kill`/etc already answer from (:func:`camp.cli.session._addressable_harnesses`,
+    read here, never rebuilt) — deduplicated by each store's RESOLVED
+    binding, not by the declared account string, so two groups spelling one
+    account differently still produce one entry. That pool always includes
+    the default (no-account) store, so a machine with no declared accounts
+    still yields one roster entry rather than an empty list.
+
+    Rows are ordered by declared account string — the identity an operator
+    actually sees — with the always-present default store sorted last,
+    since it names no declared identity of its own. This is an EXPLICIT key,
+    not the incidental order the group-config directory glob happens to
+    yield (alphabetical by filename, which accounts merely inherit from
+    whichever group declared them first).
+
+    A row is either resolved (``verdict`` carries the harness's own answer,
+    ``reason`` is ``None``) or a failure (``verdict`` is ``None``, ``reason``
+    names what went wrong) — one group's unreadable config, or a harness
+    that resolved but refused to bind its declared account, never discards
+    what the rest of the machine's groups resolved.
+
+    Every string reaching a row — a declared account, or a failure's reason
+    — is remote-authored (an operator or a group config wrote it), so it
+    passes through the same recursive control-sequence strip the host-relay
+    layer already applies to a remote answer's own fields, applied HERE, at
+    the point the roster is produced, not only where a caller renders it.
+    """
+    from .cli.common import _groups_dir
+    from .cli.session import _addressable_harnesses
+    from .group.config import load_group
+    from .host.relay import _strip_control_sequences_deep
+
+    resolved_env = dict(env) if env is not None else dict(os.environ)
+
+    configs: list[dict[str, Any]] = []
+    failures: list[str] = []
+    directory = _groups_dir()
+    if directory.is_dir():
+        for path in sorted(directory.glob("*.toml")):
+            try:
+                configs.append(load_group(path))
+            except Exception as e:  # noqa: BLE001 — one broken config is named, never hides the rest
+                failures.append(f"{path.stem}: {e}")
+
+    def on_drop(config: dict[str, Any], error: Exception) -> None:
+        name = (config.get("group") or {}).get("name", "?")
+        failures.append(f"{name}: {error}")
+
+    stores = _addressable_harnesses(configs, env=resolved_env, on_drop=on_drop)
+
+    rows: list[dict[str, Any]] = []
+    for store in stores:
+        verdict = store.session_launch_account_authentication(store.account, env=store.env)
+        rows.append({"account": store.account, "verdict": verdict.value, "reason": None})
+
+    rows.sort(key=lambda row: (row["account"] is None, row["account"] or ""))
+
+    for reason in failures:
+        rows.append({"account": None, "verdict": None, "reason": reason})
+
+    return _strip_control_sequences_deep(rows)
 
 
 def _doctor_local_checks(
@@ -1326,6 +1395,7 @@ def cmd_doctor(
             # multiplexer presence (contract: `--probe` never changes it).
             report[DOCTOR_PROBE_KEY] = True
             report[DOCTOR_PROBE_MULTIPLEXER_KEY] = _doctor_multiplexer_present()
+            report[DOCTOR_PROBE_ACCOUNTS_KEY] = _doctor_account_roster(env=env)
         print(json.dumps(report))
     else:
         _doctor_render_checks_human(checks)
