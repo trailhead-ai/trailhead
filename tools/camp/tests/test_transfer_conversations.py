@@ -17,6 +17,26 @@ Test contract:
 - The enumeration writes nothing and starts no process of its own, asserted by
   a byte-identical snapshot of the whole camp state directory across the call.
 
+`camp.transfer.release` (the sender's own post-claim archive step) is also
+covered here, hermetically:
+
+- A conversation's transcript is relocated into the archive with its bytes
+  identical to what was on disk before the move.
+- Re-running the release for an already-archived conversation reports
+  `ALREADY_ARCHIVED`, never a second `ARCHIVED`, and the durable marker gains
+  no second entry for it.
+- Two distinct conversations that share a subpath archive to two distinct,
+  non-colliding destinations, keyed by session id rather than by path.
+- A relocation across a filesystem boundary (`os.rename` raising as it would
+  for `EXDEV`) still succeeds, via `shutil.move`'s copy-then-remove fallback.
+- An unwritable archive destination is reported `FAILED`, distinguishable
+  from `ARCHIVED` and carrying a detail naming why.
+- In a multi-conversation release where one conversation's relocation fails,
+  every conversation is still reported individually — the failure of one
+  never suppresses or aggregates the outcome of the others.
+- An empty conversation pool releases cleanly and creates no archive
+  directory.
+
 Every path comes from ``tmp_path`` and every group state dir from an injected
 ``CAMP_STATE_DIR``, so no test reads the operator's real state.
 """
@@ -36,6 +56,13 @@ _PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
 
 if str(_PLUGIN_DIR) not in sys.path:
     sys.path.insert(0, str(_PLUGIN_DIR))
+
+# `camp.transfer.release` reaches `trailhead.paths` (via `central_state_dir`),
+# which is not importable from a bare `PYTHONPATH=plugins/camp` invocation —
+# bootstrap it here exactly as `test_transfer_cli.py` does.
+import _bootstrap  # noqa: E402
+
+_bootstrap.ensure_trailhead_importable()
 
 _NOW = datetime(2026, 8, 20, 12, 0, 0, tzinfo=timezone.utc)
 
@@ -294,3 +321,239 @@ def test_enumeration_writes_nothing_to_camp_state(tmp_path: Path) -> None:
     )
     after = _snapshot(state_root)
     assert before == after
+
+
+# ---------------------------------------------------------------------------
+# camp.transfer.release — the sender's own post-claim archive step.
+# ---------------------------------------------------------------------------
+
+
+def _crossed(session_id: str, subpath: PurePosixPath = PurePosixPath(".")):
+    from camp.transfer.move import ConversationCrossed
+
+    return ConversationCrossed(session_id=session_id, subpath=subpath)
+
+
+def _seed_transcript(root: Path, session_id: str, content: bytes) -> Path:
+    path = root / f"{session_id}.jsonl"
+    path.write_bytes(content)
+    return path
+
+
+def test_release_relocates_the_transcript_byte_identical(tmp_path: Path) -> None:
+    from camp.transfer.release import ReleaseOutcome, release_conversations
+
+    env = _env(tmp_path)
+    source_root = tmp_path / "harness-store"
+    source_root.mkdir()
+    content = "line one\nline two — π marker\n".encode("utf-8")
+    transcript = _seed_transcript(source_root, _UUID_A, content)
+    before_bytes = transcript.read_bytes()
+
+    results = release_conversations(
+        group="g",
+        slug="ws",
+        workspace_root=tmp_path / "ws",
+        conversations=(_crossed(_UUID_A),),
+        locate_transcript=lambda sid, root: transcript,
+        env=env,
+    )
+
+    assert len(results) == 1
+    assert results[0].outcome is ReleaseOutcome.ARCHIVED
+    assert results[0].archive_path is not None
+    assert results[0].archive_path.read_bytes() == before_bytes
+
+
+def test_rerun_after_archiving_reports_already_archived_and_marker_gains_no_second_entry(
+    tmp_path: Path,
+) -> None:
+    from camp.transfer.release import ReleaseOutcome, read_release_marker, release_conversations
+
+    env = _env(tmp_path)
+    source_root = tmp_path / "harness-store"
+    source_root.mkdir()
+    transcript = _seed_transcript(source_root, _UUID_A, b"first run content\n")
+
+    first = release_conversations(
+        group="g",
+        slug="ws",
+        workspace_root=tmp_path / "ws",
+        conversations=(_crossed(_UUID_A),),
+        locate_transcript=lambda sid, root: transcript,
+        env=env,
+    )
+    assert first[0].outcome is ReleaseOutcome.ARCHIVED
+
+    def _boom(sid, root):
+        raise AssertionError("locate_transcript must not be consulted once already archived")
+
+    second = release_conversations(
+        group="g",
+        slug="ws",
+        workspace_root=tmp_path / "ws",
+        conversations=(_crossed(_UUID_A),),
+        locate_transcript=_boom,
+        env=env,
+    )
+    assert second[0].outcome is ReleaseOutcome.ALREADY_ARCHIVED
+
+    marker = read_release_marker("g", "ws", env=env)
+    matching = [entry for entry in marker if entry["session_id"] == _UUID_A]
+    assert len(matching) == 1, marker
+
+
+def test_two_conversations_sharing_a_subpath_archive_to_distinct_destinations(
+    tmp_path: Path,
+) -> None:
+    from camp.transfer.release import ReleaseOutcome, release_conversations
+
+    env = _env(tmp_path)
+    source_root = tmp_path / "harness-store"
+    source_root.mkdir()
+    transcript_a = _seed_transcript(source_root, _UUID_A, b"conversation A content\n")
+    transcript_b = _seed_transcript(source_root, _UUID_B, b"conversation B content\n")
+
+    def _locate(session_id: str, root: Path) -> Path:
+        return transcript_a if session_id == _UUID_A else transcript_b
+
+    results = release_conversations(
+        group="g",
+        slug="ws",
+        workspace_root=tmp_path / "ws",
+        conversations=(_crossed(_UUID_A), _crossed(_UUID_B)),
+        locate_transcript=_locate,
+        env=env,
+    )
+
+    by_id = {r.session_id: r for r in results}
+    assert by_id[_UUID_A].outcome is ReleaseOutcome.ARCHIVED
+    assert by_id[_UUID_B].outcome is ReleaseOutcome.ARCHIVED
+    assert by_id[_UUID_A].archive_path != by_id[_UUID_B].archive_path
+    assert by_id[_UUID_A].archive_path.read_bytes() == b"conversation A content\n"
+    assert by_id[_UUID_B].archive_path.read_bytes() == b"conversation B content\n"
+
+
+def test_relocation_across_a_filesystem_boundary_still_succeeds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from camp.transfer.release import ReleaseOutcome, release_conversations
+
+    env = _env(tmp_path)
+    source_root = tmp_path / "harness-store"
+    source_root.mkdir()
+    transcript = _seed_transcript(source_root, _UUID_A, b"cross-device content\n")
+
+    real_rename = os.rename
+    calls = {"raised": 0}
+
+    def _cross_device_rename(src, dst):
+        calls["raised"] += 1
+        raise OSError(18, "Invalid cross-device link")  # errno.EXDEV on Linux
+
+    monkeypatch.setattr(os, "rename", _cross_device_rename)
+    try:
+        results = release_conversations(
+            group="g",
+            slug="ws",
+            workspace_root=tmp_path / "ws",
+            conversations=(_crossed(_UUID_A),),
+            locate_transcript=lambda sid, root: transcript,
+            env=env,
+        )
+    finally:
+        monkeypatch.setattr(os, "rename", real_rename)
+
+    assert calls["raised"] > 0, "the fallback was never exercised"
+    assert results[0].outcome is ReleaseOutcome.ARCHIVED
+    assert results[0].archive_path.read_bytes() == b"cross-device content\n"
+    assert not transcript.exists()
+
+
+def test_unwritable_archive_destination_is_reported_failed_distinct_from_success(
+    tmp_path: Path,
+) -> None:
+    from camp.transfer.release import ReleaseOutcome, archive_dir, release_conversations
+
+    env = _env(tmp_path)
+    source_root = tmp_path / "harness-store"
+    source_root.mkdir()
+    transcript = _seed_transcript(source_root, _UUID_A, b"blocked content\n")
+
+    root = archive_dir("g", "ws", env=env)
+    root.mkdir(parents=True)
+    root.chmod(0o500)
+    try:
+        results = release_conversations(
+            group="g",
+            slug="ws",
+            workspace_root=tmp_path / "ws",
+            conversations=(_crossed(_UUID_A),),
+            locate_transcript=lambda sid, root: transcript,
+            env=env,
+        )
+    finally:
+        root.chmod(0o700)
+
+    assert results[0].outcome is ReleaseOutcome.FAILED
+    assert results[0].outcome is not ReleaseOutcome.ARCHIVED
+    assert results[0].archive_path is None
+    assert results[0].detail
+
+
+def test_multi_conversation_release_reports_each_outcome_individually_on_partial_failure(
+    tmp_path: Path,
+) -> None:
+    from camp.transfer.release import ReleaseOutcome, release_conversations
+
+    env = _env(tmp_path)
+    source_root = tmp_path / "harness-store"
+    source_root.mkdir()
+    transcript_a = _seed_transcript(source_root, _UUID_A, b"conversation A\n")
+    missing_b_path = source_root / f"{_UUID_B}.jsonl"  # never written — vanished
+    session_c = "cccccccc-3333-4333-8333-333333333333"
+    transcript_c = _seed_transcript(source_root, session_c, b"conversation C\n")
+
+    def _locate(session_id: str, root: Path):
+        return {
+            _UUID_A: transcript_a,
+            _UUID_B: missing_b_path,
+            session_c: transcript_c,
+        }[session_id]
+
+    results = release_conversations(
+        group="g",
+        slug="ws",
+        workspace_root=tmp_path / "ws",
+        conversations=(_crossed(_UUID_A), _crossed(_UUID_B), _crossed(session_c)),
+        locate_transcript=_locate,
+        env=env,
+    )
+
+    by_id = {r.session_id: r for r in results}
+    assert len(by_id) == 3
+    assert by_id[_UUID_A].outcome is ReleaseOutcome.ARCHIVED
+    assert by_id[session_c].outcome is ReleaseOutcome.ARCHIVED
+    assert by_id[_UUID_B].outcome is ReleaseOutcome.FAILED
+    assert by_id[_UUID_B].detail
+
+
+def test_empty_conversation_pool_releases_cleanly_with_no_archive_directory(
+    tmp_path: Path,
+) -> None:
+    from camp.transfer.release import archive_dir, read_release_marker, release_conversations
+
+    env = _env(tmp_path)
+
+    results = release_conversations(
+        group="g",
+        slug="ws",
+        workspace_root=tmp_path / "ws",
+        conversations=(),
+        locate_transcript=lambda sid, root: None,
+        env=env,
+    )
+
+    assert results == ()
+    assert not archive_dir("g", "ws", env=env).exists()
+    assert read_release_marker("g", "ws", env=env) == ()
