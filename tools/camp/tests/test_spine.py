@@ -950,6 +950,90 @@ def test_doctor_probe_accounts_strips_control_sequences_from_failure_reason(
     assert "bad" in failures[0]["reason"] and "account" in failures[0]["reason"]
 
 
+def test_doctor_probe_accounts_harness_resolves_but_refuses_to_bind_is_a_failure_row(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """State — the account capability fails on a host, one of its named
+    sub-cases: a harness that camp CAN name resolves fine, but refuses to
+    bind the declared account (states no launch support at all). This is
+    routed through `_addressable_harnesses`'s `on_drop` callback, distinct
+    from an unreadable group config, which never reaches `on_drop` at all
+    — pinned on its own so the `on_drop=` wiring cannot be dropped silently."""
+    import json as _json
+
+    import camp.cli.common as cli_common
+    import camp.launch.profile as profile
+    from camp.spine import DOCTOR_PROBE_ACCOUNTS_KEY, cmd_doctor
+
+    class _NoLaunchSupportHarness:
+        name = "nolaunchsupportharness"
+
+        def session_launch_env_set(self, account, *, env=None):
+            return None
+
+        def session_launch_env_unset(self):
+            return None
+
+    groups_dir = tmp_path / "groups"
+    groups_dir.mkdir()
+    _write_group(groups_dir, "g1.toml", "refuser", account="acct-refused")
+    monkeypatch.setattr(cli_common, "_groups_dir", lambda: groups_dir)
+    monkeypatch.setattr(profile, "harness_for", lambda group: _NoLaunchSupportHarness())
+
+    monkeypatch.setenv("CAMP_TEST_ASDF_PRESENT", "1")
+    monkeypatch.setenv("CAMP_TEST_TMUX_PRESENT", "1")
+    _isolate_roots(monkeypatch, tmp_path)
+    try:
+        cmd_doctor(["--json", "--probe"], env=_isolated_config_env(tmp_path))
+    except SystemExit:
+        pass
+    report = _json.loads(capsys.readouterr().out)
+    accounts = report[DOCTOR_PROBE_ACCOUNTS_KEY]
+    failures = [a for a in accounts if a.get("reason")]
+    assert len(failures) == 1
+    assert "refuser" in failures[0]["reason"]
+    assert "declares no launch support" in failures[0]["reason"]
+
+
+def test_doctor_probe_roster_production_raising_never_crashes_the_probe_report(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A raise from roster PRODUCTION itself — as opposed to one store's own
+    verdict call, which the roster already guards per-store — must not
+    crash the whole `--probe` report on the side answering it: the local
+    checks and the multiplexer fact were already computed and must still
+    reach the caller, exactly like the `-a` dispatch side's own guard
+    against the same class of failure."""
+    import json as _json
+
+    import camp.spine as spine_module
+    from camp.spine import DOCTOR_PROBE_ACCOUNTS_KEY
+
+    def _boom(env=None):
+        raise RuntimeError("roster production blew up")
+
+    monkeypatch.setattr(spine_module, "_doctor_account_roster", _boom)
+
+    monkeypatch.setenv("CAMP_TEST_ASDF_PRESENT", "1")
+    monkeypatch.setenv("CAMP_TEST_TMUX_PRESENT", "1")
+    _isolate_roots(monkeypatch, tmp_path)
+    exit_code = None
+    try:
+        spine_module.cmd_doctor(["--json", "--probe"], env=_isolated_config_env(tmp_path))
+    except SystemExit as e:
+        exit_code = e.code
+    report = _json.loads(capsys.readouterr().out)
+
+    assert "checks" in report
+    assert report["probe"] is True
+    assert report["multiplexer_present"] is True
+    accounts = report[DOCTOR_PROBE_ACCOUNTS_KEY]
+    failure = next(a for a in accounts if a.get("reason"))
+    assert failure["verdict"] is None
+    assert "roster production blew up" in failure["reason"]
+    assert exit_code is None
+
+
 def test_doctor_probe_accounts_verdict_call_raising_yields_a_failure_row_not_a_crash(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -1000,6 +1084,60 @@ def test_doctor_probe_accounts_verdict_call_raising_yields_a_failure_row_not_a_c
     failure = next(a for a in accounts if a["account"] == "acct-crashy")
     assert failure["verdict"] is None
     assert "harness blew up mid-check" in failure["reason"]
+    assert exit_code is None
+
+
+def test_doctor_probe_accounts_verdict_call_returning_none_yields_a_failure_row_not_a_crash(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`session_launch_account_authentication` answering `None` — the
+    convention every OTHER capability on the base seam uses for "no such
+    concept", and one `base.py`'s own docstring flags as a deliberate
+    deviation on this particular method — must not crash the roster (or the
+    report around it) any more than an outright raise does. One harness's
+    bad return contributes a failure row and every other field the report
+    carries still comes through."""
+    import json as _json
+
+    import camp.cli.common as cli_common
+    import camp.launch.profile as profile
+    from camp.spine import DOCTOR_PROBE_ACCOUNTS_KEY, cmd_doctor
+
+    class _NoneReturningHarness:
+        name = "nonereturningharness"
+
+        def session_launch_env_unset(self):
+            return []
+
+        def session_launch_env_set(self, account, *, env=None):
+            if account is None:
+                return {}
+            return {"FAKE_STORE_DIR": account}
+
+        def session_launch_account_authentication(self, account, *, env=None):
+            return None
+
+    groups_dir = tmp_path / "groups"
+    groups_dir.mkdir()
+    _write_group(groups_dir, "g1.toml", "g1", account="acct-none")
+    monkeypatch.setattr(cli_common, "_groups_dir", lambda: groups_dir)
+    monkeypatch.setattr(profile, "harness_for", lambda group: _NoneReturningHarness())
+
+    monkeypatch.setenv("CAMP_TEST_ASDF_PRESENT", "1")
+    monkeypatch.setenv("CAMP_TEST_TMUX_PRESENT", "1")
+    _isolate_roots(monkeypatch, tmp_path)
+    exit_code = None
+    try:
+        cmd_doctor(["--json", "--probe"], env=_isolated_config_env(tmp_path))
+    except SystemExit as e:
+        exit_code = e.code
+    report = _json.loads(capsys.readouterr().out)
+
+    assert report["probe"] is True
+    assert report["multiplexer_present"] is True
+    accounts = report[DOCTOR_PROBE_ACCOUNTS_KEY]
+    failure = next(a for a in accounts if a["account"] == "acct-none")
+    assert failure["verdict"] is None
     assert exit_code is None
 
 

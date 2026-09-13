@@ -2371,6 +2371,57 @@ def test_doctor_account_far_camp_answering_empty_list_renders_unavailable_human(
     assert "not authenticated" not in account_lines[0]
 
 
+def test_doctor_account_far_camp_answering_all_malformed_members_renders_unavailable_json(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """A far camp answering `"accounts"` with a non-empty list whose members
+    are all non-dicts renders as unavailable — the same collapse the empty-
+    list case above closes, but for a list the filter empties out instead
+    of one that started empty. Zero account rows is the rendering this
+    section reserves for a host that never answered; an all-malformed list
+    must not fall through to it."""
+    _doctor_hosts_env(tmp_path, monkeypatch, "[hosts.andromeda]\n")
+    transport = _transport_module()
+    monkeypatch.setattr(
+        transport,
+        "run_camp",
+        lambda host, remote_argv, **kw: _probe_answered_accounts(["not-a-dict", 42]),
+    )
+
+    code = _run(monkeypatch, ["doctor", "-a", "--json"])
+    report = json.loads(capsys.readouterr().out)
+    assert code == 0
+    account_rows = [
+        h for h in report["hosts"] if h["host"] == "andromeda" and "multiplexer" not in h["detail"]
+    ]
+    assert len(account_rows) == 1, "an all-malformed list must not render as no account lines at all"
+    assert account_rows[0]["verdict"] != "WARN"
+    assert "not authenticated" not in account_rows[0]["detail"]
+
+
+def test_doctor_account_far_camp_answering_all_malformed_members_renders_unavailable_human(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """The same state, on the human render path."""
+    _doctor_hosts_env(tmp_path, monkeypatch, "[hosts.andromeda]\n")
+    transport = _transport_module()
+    monkeypatch.setattr(
+        transport,
+        "run_camp",
+        lambda host, remote_argv, **kw: _probe_answered_accounts(["not-a-dict", 42]),
+    )
+
+    code = _run(monkeypatch, ["doctor", "-a"])
+    lines = capsys.readouterr().out.splitlines()
+    assert code == 0
+    andromeda_block = _machine_block(lines, "andromeda")
+    account_lines = [line for line in andromeda_block if "multiplexer" not in line]
+    assert len(account_lines) == 1, "an all-malformed list must not render as no account lines at all"
+    token = _verdict_token(account_lines[0])
+    assert token != "WARN"
+    assert "not authenticated" not in account_lines[0]
+
+
 def test_doctor_account_capability_failure_preserves_reachability_and_other_hosts(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
@@ -2410,6 +2461,72 @@ def test_doctor_account_capability_failure_preserves_reachability_and_other_host
         h for h in report["hosts"] if h["host"] == "lookout" and "acct-fine" in h["detail"]
     )
     assert lookout_row["verdict"] == "PASS"
+
+
+def test_doctor_account_local_roster_raising_preserves_reachability_and_remote_hosts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """A raise while building THIS machine's own account roster — not one
+    harness's own verdict call, which the roster already guards, but the
+    roster-production call itself — must not discard the already-computed
+    local checks section, this machine's own multiplexer row, or any
+    remote host's row. It contributes a failure row in their place."""
+    _doctor_hosts_env(tmp_path, monkeypatch, "[hosts.lookout]\n")
+    monkeypatch.setenv("CAMP_TEST_TMUX_PRESENT", "1")
+    transport = _transport_module()
+    monkeypatch.setattr(
+        transport,
+        "run_camp",
+        lambda host, remote_argv, **kw: _probe_answered_accounts(
+            [{"account": "acct-fine", "verdict": "authenticated", "reason": None}]
+        ),
+    )
+
+    import camp.spine as spine_module
+
+    def _boom(env=None):
+        raise RuntimeError("roster production blew up")
+
+    monkeypatch.setattr(spine_module, "_doctor_account_roster", _boom)
+
+    code = _run(monkeypatch, ["doctor", "-a", "--json"])
+    report = json.loads(capsys.readouterr().out)
+    assert code == 0
+    assert len(report["checks"]) > 0
+    self_multiplexer = next(
+        h for h in report["hosts"] if h["host"] is None and "multiplexer" in h["detail"]
+    )
+    assert self_multiplexer["verdict"] == "PASS"
+    self_failure = next(
+        h for h in report["hosts"] if h["host"] is None and "multiplexer" not in h["detail"]
+    )
+    assert self_failure["verdict"] == "WARN"
+    assert "roster production blew up" in self_failure["detail"]
+    lookout_row = next(
+        h for h in report["hosts"] if h["host"] == "lookout" and "acct-fine" in h["detail"]
+    )
+    assert lookout_row["verdict"] == "PASS"
+
+
+def test_doctor_account_local_roster_raising_reaches_human_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """The same raise, on the human render path: the local checks section
+    still prints, and the failure reason reaches the operator."""
+    _doctor_hosts_env(tmp_path, monkeypatch, "")
+    monkeypatch.setenv("CAMP_TEST_TMUX_PRESENT", "1")
+
+    import camp.spine as spine_module
+
+    def _boom(env=None):
+        raise RuntimeError("roster production blew up")
+
+    monkeypatch.setattr(spine_module, "_doctor_account_roster", _boom)
+
+    code = _run(monkeypatch, ["doctor", "-a"])
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "roster production blew up" in out
 
 
 def test_doctor_account_capability_failure_reason_reaches_human_path(
@@ -2855,6 +2972,53 @@ def test_doctor_account_malformed_account_and_reason_types_never_crash(
     assert "{'not': 'a string'}" not in account_rows[1]["detail"], (
         "a malformed reason must never leak its raw repr into the rendered text"
     )
+
+
+def test_doctor_account_null_reason_never_renders_the_python_literal_json(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """A failure row whose `reason` is JSON `null` — as opposed to a
+    malformed non-string reason, which already falls back — must not
+    stringify to the Python literal `None` in operator-facing text."""
+    _doctor_hosts_env(tmp_path, monkeypatch, "[hosts.andromeda]\n")
+    transport = _transport_module()
+    monkeypatch.setattr(
+        transport,
+        "run_camp",
+        lambda host, remote_argv, **kw: _probe_answered_accounts(
+            [{"account": "acct-x", "verdict": None, "reason": None}]
+        ),
+    )
+
+    code = _run(monkeypatch, ["doctor", "-a", "--json"])
+    report = json.loads(capsys.readouterr().out)
+    assert code == 0
+    failure_row = next(
+        h for h in report["hosts"] if h["host"] == "andromeda" and "acct-x" in h["detail"]
+    )
+    assert failure_row["verdict"] == "WARN"
+    assert "None" not in failure_row["detail"]
+
+
+def test_doctor_account_null_reason_never_renders_the_python_literal_human(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """The same state, on the human render path."""
+    _doctor_hosts_env(tmp_path, monkeypatch, "[hosts.andromeda]\n")
+    transport = _transport_module()
+    monkeypatch.setattr(
+        transport,
+        "run_camp",
+        lambda host, remote_argv, **kw: _probe_answered_accounts(
+            [{"account": "acct-x", "verdict": None, "reason": None}]
+        ),
+    )
+
+    code = _run(monkeypatch, ["doctor", "-a"])
+    lines = capsys.readouterr().out.splitlines()
+    assert code == 0
+    failure_line = next(line for line in lines if "acct-x" in line)
+    assert "None" not in failure_line
 
 
 # ---------------------------------------------------------------------------
