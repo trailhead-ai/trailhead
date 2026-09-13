@@ -574,6 +574,455 @@ def test_doctor_probe_reachable_through_real_cli_entry_path(
 
 
 # ---------------------------------------------------------------------------
+# camp doctor --probe accounts — this machine's own account roster
+# ---------------------------------------------------------------------------
+
+
+class _RosterHarness:
+    """A harness stand-in whose account binding and authentication verdict
+    are both simple, opaque mappings — proving the roster reads the
+    harness's own answer rather than any credential path of its own."""
+
+    name = "rosterharness"
+
+    def __init__(self, verdicts):
+        self._verdicts = verdicts
+
+    def session_launch_env_unset(self):
+        return []
+
+    def session_launch_env_set(self, account, *, env=None):
+        if account is None:
+            return {}
+        return {"FAKE_STORE_DIR": account}
+
+    def session_launch_account_authentication(self, account, *, env=None):
+        from trailhead.harness.base import AccountAuthentication
+
+        return self._verdicts.get(account, AccountAuthentication.CANNOT_TELL)
+
+
+def _write_group(directory: Path, filename: str, name: str, account: str | None = None) -> None:
+    body = f'[group]\nname = "{name}"\n[[members]]\nname = "m1"\nrepo_root = "/repo"\n'
+    if account is not None:
+        body += f'[launch]\naccount = "{account}"\n'
+    (directory / filename).write_text(body, encoding="utf-8")
+
+
+def test_doctor_probe_accounts_no_declared_groups_yields_one_default_entry(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A machine whose groups declare no account still produces exactly one
+    roster entry — the default account — never an empty list."""
+    import json as _json
+
+    from camp.spine import DOCTOR_PROBE_ACCOUNTS_KEY, cmd_doctor
+
+    _isolate_roots(monkeypatch, tmp_path)
+    monkeypatch.setenv("CAMP_TEST_ASDF_PRESENT", "1")
+    monkeypatch.setenv("CAMP_TEST_TMUX_PRESENT", "1")
+    try:
+        cmd_doctor(["--json", "--probe"], env=_isolated_config_env(tmp_path))
+    except SystemExit:
+        pass
+    report = _json.loads(capsys.readouterr().out)
+    accounts = report[DOCTOR_PROBE_ACCOUNTS_KEY]
+    assert len(accounts) == 1
+    assert accounts[0]["account"] is None
+
+
+def test_doctor_probe_accounts_one_declared_account_carries_verdict_and_string_verbatim(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A machine declaring one account produces that account with the
+    harness's verdict carried through unchanged, with the declared string
+    verbatim."""
+    import json as _json
+
+    import camp.cli.common as cli_common
+    import camp.launch.profile as profile
+    from camp.spine import DOCTOR_PROBE_ACCOUNTS_KEY, cmd_doctor
+    from trailhead.harness.base import AccountAuthentication
+
+    groups_dir = tmp_path / "groups"
+    groups_dir.mkdir()
+    _write_group(groups_dir, "g1.toml", "g1", account="acct-primary")
+    monkeypatch.setattr(cli_common, "_groups_dir", lambda: groups_dir)
+
+    harness = _RosterHarness({"acct-primary": AccountAuthentication.AUTHENTICATED})
+    monkeypatch.setattr(profile, "harness_for", lambda group: harness)
+
+    monkeypatch.setenv("CAMP_TEST_ASDF_PRESENT", "1")
+    monkeypatch.setenv("CAMP_TEST_TMUX_PRESENT", "1")
+    _isolate_roots(monkeypatch, tmp_path)
+    try:
+        cmd_doctor(["--json", "--probe"], env=_isolated_config_env(tmp_path))
+    except SystemExit:
+        pass
+    report = _json.loads(capsys.readouterr().out)
+    accounts = report[DOCTOR_PROBE_ACCOUNTS_KEY]
+    declared = next(a for a in accounts if a["account"] == "acct-primary")
+    assert declared["verdict"] == "authenticated"
+
+
+def test_doctor_probe_accounts_two_groups_spelling_one_account_differently_dedupe_to_one(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Two groups spelling one account differently — textually distinct, but
+    binding to the same resolved store — produce ONE roster entry, not two.
+    The dedupe key is the resolved binding, not the declared string, so this
+    would collapse wrongly under a declared-string comparison only by
+    accident (it wouldn't collapse at all)."""
+    import json as _json
+
+    import camp.cli.common as cli_common
+    import camp.launch.profile as profile
+    from camp.spine import DOCTOR_PROBE_ACCOUNTS_KEY, cmd_doctor
+    from trailhead.harness.base import AccountAuthentication
+
+    groups_dir = tmp_path / "groups"
+    groups_dir.mkdir()
+    _write_group(groups_dir, "g1.toml", "g1", account="/acct/w")
+    _write_group(groups_dir, "g2.toml", "g2", account="/acct/w/")
+    monkeypatch.setattr(cli_common, "_groups_dir", lambda: groups_dir)
+
+    class _NormalizingHarness(_RosterHarness):
+        def session_launch_env_set(self, account, *, env=None):
+            if account is None:
+                return {}
+            return {"FAKE_STORE_DIR": account.rstrip("/")}
+
+    harness = _NormalizingHarness({"/acct/w": AccountAuthentication.AUTHENTICATED})
+    monkeypatch.setattr(profile, "harness_for", lambda group: harness)
+
+    monkeypatch.setenv("CAMP_TEST_ASDF_PRESENT", "1")
+    monkeypatch.setenv("CAMP_TEST_TMUX_PRESENT", "1")
+    _isolate_roots(monkeypatch, tmp_path)
+    try:
+        cmd_doctor(["--json", "--probe"], env=_isolated_config_env(tmp_path))
+    except SystemExit:
+        pass
+    report = _json.loads(capsys.readouterr().out)
+    accounts = report[DOCTOR_PROBE_ACCOUNTS_KEY]
+    declared = [a for a in accounts if a["account"] is not None]
+    assert len(declared) == 1
+
+
+def test_doctor_probe_accounts_unresolvable_group_does_not_discard_the_rest(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A group whose harness cannot be resolved, or whose config is
+    unreadable, does not discard the other entries: the roster still
+    carries what it could resolve and names what failed."""
+    import json as _json
+
+    import camp.cli.common as cli_common
+    import camp.launch.profile as profile
+    from camp.spine import DOCTOR_PROBE_ACCOUNTS_KEY, cmd_doctor
+    from trailhead.harness.base import AccountAuthentication
+
+    groups_dir = tmp_path / "groups"
+    groups_dir.mkdir()
+    (groups_dir / "broken.toml").write_text("not valid toml [[[", encoding="utf-8")
+    _write_group(groups_dir, "good.toml", "good", account="acct-good")
+    monkeypatch.setattr(cli_common, "_groups_dir", lambda: groups_dir)
+
+    harness = _RosterHarness({"acct-good": AccountAuthentication.AUTHENTICATED})
+    monkeypatch.setattr(profile, "harness_for", lambda group: harness)
+
+    monkeypatch.setenv("CAMP_TEST_ASDF_PRESENT", "1")
+    monkeypatch.setenv("CAMP_TEST_TMUX_PRESENT", "1")
+    _isolate_roots(monkeypatch, tmp_path)
+    try:
+        cmd_doctor(["--json", "--probe"], env=_isolated_config_env(tmp_path))
+    except SystemExit:
+        pass
+    report = _json.loads(capsys.readouterr().out)
+    accounts = report[DOCTOR_PROBE_ACCOUNTS_KEY]
+    resolved = [a for a in accounts if a["account"] == "acct-good"]
+    assert len(resolved) == 1
+    assert resolved[0]["verdict"] == "authenticated"
+    failures = [a for a in accounts if a.get("reason")]
+    assert any("broken" in f["reason"] for f in failures)
+
+
+def test_doctor_probe_accounts_absent_without_probe(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The probe answer carries the new field only when probing was asked
+    for; a plain `--json` invocation carries neither it nor the existing
+    probe keys."""
+    import json as _json
+
+    from camp.spine import DOCTOR_PROBE_ACCOUNTS_KEY, cmd_doctor
+
+    _isolate_roots(monkeypatch, tmp_path)
+    monkeypatch.setenv("CAMP_TEST_ASDF_PRESENT", "1")
+    try:
+        cmd_doctor(["--json"], env=_isolated_config_env(tmp_path))
+    except SystemExit:
+        pass
+    report = _json.loads(capsys.readouterr().out)
+    assert DOCTOR_PROBE_ACCOUNTS_KEY not in report
+
+
+def test_doctor_probe_accounts_field_outside_checks_never_changes_exit_status(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The new field is outside `checks`, and an unauthenticated account
+    does not change the exit status — assert the status directly, across an
+    authenticated and an unauthenticated fixture."""
+    import json as _json
+
+    import camp.cli.common as cli_common
+    import camp.launch.profile as profile
+    from camp.spine import DOCTOR_PROBE_ACCOUNTS_KEY, cmd_doctor
+    from trailhead.harness.base import AccountAuthentication
+
+    def run(verdict):
+        groups_dir = tmp_path / f"groups-{verdict.value}"
+        groups_dir.mkdir()
+        _write_group(groups_dir, "g1.toml", "g1", account="acct-x")
+        monkeypatch.setattr(cli_common, "_groups_dir", lambda d=groups_dir: d)
+
+        harness = _RosterHarness({"acct-x": verdict})
+        monkeypatch.setattr(profile, "harness_for", lambda group: harness)
+
+        exit_code = None
+        try:
+            cmd_doctor(["--json", "--probe"], env=_isolated_config_env(tmp_path))
+        except SystemExit as e:
+            exit_code = e.code
+        report = _json.loads(capsys.readouterr().out)
+        return exit_code, report
+
+    monkeypatch.setenv("CAMP_TEST_ASDF_PRESENT", "1")
+    monkeypatch.setenv("CAMP_TEST_TMUX_PRESENT", "1")
+    _isolate_roots(monkeypatch, tmp_path)
+
+    auth_exit, auth_report = run(AccountAuthentication.AUTHENTICATED)
+    not_auth_exit, not_auth_report = run(AccountAuthentication.NOT_AUTHENTICATED)
+
+    assert "checks" in auth_report
+    assert DOCTOR_PROBE_ACCOUNTS_KEY not in auth_report["checks"]
+    assert auth_exit is None
+    assert not_auth_exit is None
+
+
+def test_doctor_probe_accounts_declared_string_order_beats_incidental_filename_order(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Iteration order is imposed explicitly by the declared account string,
+    with the default no-account store sorted last — not inherited from
+    whichever group config filename happened to sort first. This fixture
+    declares accounts in an order that comes out DIFFERENTLY under the
+    incidental filename order than under the declared-string order, so the
+    test fails if the explicit key is dropped."""
+    import json as _json
+
+    import camp.cli.common as cli_common
+    import camp.launch.profile as profile
+    from camp.spine import DOCTOR_PROBE_ACCOUNTS_KEY, cmd_doctor
+    from trailhead.harness.base import AccountAuthentication
+
+    groups_dir = tmp_path / "groups"
+    groups_dir.mkdir()
+    # Filename order (alphabetical, what globbing yields): a-file -> "zzz",
+    # then z-file -> "aaa" — the OPPOSITE of declared-string order.
+    _write_group(groups_dir, "a-file.toml", "g1", account="zzz")
+    _write_group(groups_dir, "z-file.toml", "g2", account="aaa")
+    monkeypatch.setattr(cli_common, "_groups_dir", lambda: groups_dir)
+
+    harness = _RosterHarness(
+        {"zzz": AccountAuthentication.AUTHENTICATED, "aaa": AccountAuthentication.AUTHENTICATED}
+    )
+    monkeypatch.setattr(profile, "harness_for", lambda group: harness)
+
+    monkeypatch.setenv("CAMP_TEST_ASDF_PRESENT", "1")
+    monkeypatch.setenv("CAMP_TEST_TMUX_PRESENT", "1")
+    _isolate_roots(monkeypatch, tmp_path)
+    try:
+        cmd_doctor(["--json", "--probe"], env=_isolated_config_env(tmp_path))
+    except SystemExit:
+        pass
+    report = _json.loads(capsys.readouterr().out)
+    accounts = report[DOCTOR_PROBE_ACCOUNTS_KEY]
+    declared_order = [a["account"] for a in accounts if a["account"] is not None]
+    assert declared_order == ["aaa", "zzz"]
+    assert accounts[-1]["account"] is None
+
+
+def test_doctor_probe_accounts_strips_control_sequences_from_declared_string(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """An account string carrying an ANSI escape sequence, a cursor-move
+    code, and a NUL is stripped in the produced field.
+
+    `load_group` already refuses a control character in `launch.account` at
+    load time (a group config can never carry one through this loader), so
+    this drives the dirty value through the roster builder's OWN
+    `load_group` call, bypassed, the way a future account source that skips
+    that loader's guard would — proving the strip in `_doctor_account_roster`
+    is real defense-in-depth, not a property that only holds because a
+    sibling validator happens to run first.
+    """
+    import json as _json
+
+    import camp.cli.common as cli_common
+    import camp.group.config as group_config
+    import camp.launch.profile as profile
+    from camp.spine import DOCTOR_PROBE_ACCOUNTS_KEY, cmd_doctor
+    from trailhead.harness.base import AccountAuthentication
+
+    dirty = "acct\x1b[31mred\x1b[2Dmove\x00end"
+    # Only the C0/C1 control BYTES are stripped (matching the existing
+    # recursive strip this reuses) — the printable payload that followed
+    # each escape introducer is left in place, exactly as it is for a
+    # relayed remote's stderr.
+    clean = "acct[31mred[2Dmoveend"
+
+    groups_dir = tmp_path / "groups"
+    groups_dir.mkdir()
+    (groups_dir / "g1.toml").write_text("placeholder", encoding="utf-8")
+    monkeypatch.setattr(cli_common, "_groups_dir", lambda: groups_dir)
+    monkeypatch.setattr(
+        group_config,
+        "load_group",
+        lambda path: {"group": {"name": "g1"}, "launch": {"account": dirty}},
+    )
+
+    harness = _RosterHarness({dirty: AccountAuthentication.AUTHENTICATED})
+    monkeypatch.setattr(profile, "harness_for", lambda group: harness)
+
+    monkeypatch.setenv("CAMP_TEST_ASDF_PRESENT", "1")
+    monkeypatch.setenv("CAMP_TEST_TMUX_PRESENT", "1")
+    _isolate_roots(monkeypatch, tmp_path)
+    try:
+        cmd_doctor(["--json", "--probe"], env=_isolated_config_env(tmp_path))
+    except SystemExit:
+        pass
+    report = _json.loads(capsys.readouterr().out)
+    accounts = report[DOCTOR_PROBE_ACCOUNTS_KEY]
+    declared = next(a for a in accounts if a["account"] is not None)
+    assert declared["account"] == clean
+
+
+def test_doctor_probe_accounts_strips_control_sequences_from_failure_reason(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A failure reason carried from a harness error is stripped the same
+    way as a declared account string."""
+    import json as _json
+
+    import camp.cli.common as cli_common
+    import camp.launch.profile as profile
+    from camp.spine import DOCTOR_PROBE_ACCOUNTS_KEY, cmd_doctor
+
+    class _RaisingHarness:
+        name = "raisingharness"
+
+        def session_launch_env_set(self, account, *, env=None):
+            raise ValueError("bad \x1b[31maccount\x00")
+
+        def session_launch_env_unset(self):
+            return []
+
+    groups_dir = tmp_path / "groups"
+    groups_dir.mkdir()
+    _write_group(groups_dir, "g1.toml", "flaky", account="rel/path")
+    monkeypatch.setattr(cli_common, "_groups_dir", lambda: groups_dir)
+    monkeypatch.setattr(profile, "harness_for", lambda group: _RaisingHarness())
+
+    monkeypatch.setenv("CAMP_TEST_ASDF_PRESENT", "1")
+    monkeypatch.setenv("CAMP_TEST_TMUX_PRESENT", "1")
+    _isolate_roots(monkeypatch, tmp_path)
+    try:
+        cmd_doctor(["--json", "--probe"], env=_isolated_config_env(tmp_path))
+    except SystemExit:
+        pass
+    report = _json.loads(capsys.readouterr().out)
+    accounts = report[DOCTOR_PROBE_ACCOUNTS_KEY]
+    failures = [a for a in accounts if a.get("reason")]
+    assert len(failures) == 1
+    assert "\x1b" not in failures[0]["reason"]
+    assert "\x00" not in failures[0]["reason"]
+    assert "bad" in failures[0]["reason"] and "account" in failures[0]["reason"]
+
+
+def test_doctor_probe_accounts_stripping_does_not_alter_an_ordinary_string(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Stripping does not alter an ordinary account string — the negative
+    control, so the test fails if stripping is over-broad as well as if it
+    is absent."""
+    import json as _json
+
+    import camp.cli.common as cli_common
+    import camp.launch.profile as profile
+    from camp.spine import DOCTOR_PROBE_ACCOUNTS_KEY, cmd_doctor
+    from trailhead.harness.base import AccountAuthentication
+
+    ordinary = "acct-ordinary_2024.work"
+
+    groups_dir = tmp_path / "groups"
+    groups_dir.mkdir()
+    _write_group(groups_dir, "g1.toml", "g1", account=ordinary)
+    monkeypatch.setattr(cli_common, "_groups_dir", lambda: groups_dir)
+
+    harness = _RosterHarness({ordinary: AccountAuthentication.AUTHENTICATED})
+    monkeypatch.setattr(profile, "harness_for", lambda group: harness)
+
+    monkeypatch.setenv("CAMP_TEST_ASDF_PRESENT", "1")
+    monkeypatch.setenv("CAMP_TEST_TMUX_PRESENT", "1")
+    _isolate_roots(monkeypatch, tmp_path)
+    try:
+        cmd_doctor(["--json", "--probe"], env=_isolated_config_env(tmp_path))
+    except SystemExit:
+        pass
+    report = _json.loads(capsys.readouterr().out)
+    accounts = report[DOCTOR_PROBE_ACCOUNTS_KEY]
+    declared = next(a for a in accounts if a["account"] is not None)
+    assert declared["account"] == ordinary
+
+
+def test_doctor_probe_accounts_reachable_through_real_cli_entry_path(
+    tmp_path: Path,
+) -> None:
+    """The accounts field is reachable through the real `camp` CLI entry
+    point, not only by importing `cmd_doctor` directly."""
+    import json as _json
+    import subprocess
+
+    cli = _PLUGIN_DIR / "cli" / "camp"
+    env = dict(os.environ)
+    env.update(
+        {
+            "HOME": str(tmp_path / "home"),
+            "CAMP_CONFIG_DIR": str(tmp_path / "config"),
+            "WORKSPACE_ROOT": str(tmp_path / "workspace"),
+            "CAMP_CANONICAL_ROOT": str(tmp_path / "canonical"),
+            "CAMP_TEST_ASDF_PRESENT": "1",
+            "CAMP_TEST_TMUX_PRESENT": "1",
+        }
+    )
+    (tmp_path / "workspace").mkdir()
+    (tmp_path / "canonical").mkdir()
+
+    result = subprocess.run(
+        [sys.executable, str(cli), "doctor", "--json", "--probe"],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    report = _json.loads(result.stdout)
+    accounts = report["accounts"]
+    assert len(accounts) == 1
+    assert accounts[0]["account"] is None
+    assert accounts[0]["verdict"] == "not-authenticated"
+
+
+# ---------------------------------------------------------------------------
 # Import guard: legible ImportError, not raw traceback
 # ---------------------------------------------------------------------------
 
