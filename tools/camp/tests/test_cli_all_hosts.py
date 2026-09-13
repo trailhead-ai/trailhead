@@ -1081,7 +1081,8 @@ def test_doctor_no_remote_hosts_declared_renders_this_machine_alone(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     """State — no remote hosts are declared: the host section still renders,
-    carrying this machine's row alone, and no network is contacted."""
+    carrying this machine's rows alone (its multiplexer fact, plus its own
+    account fact), and no network is contacted."""
     _doctor_hosts_env(tmp_path, monkeypatch, "")
     monkeypatch.setenv("CAMP_TEST_TMUX_PRESENT", "1")
     transport = _transport_module()
@@ -1094,7 +1095,7 @@ def test_doctor_no_remote_hosts_declared_renders_this_machine_alone(
     code = _run(monkeypatch, ["doctor", "-a", "--json"])
     report = json.loads(capsys.readouterr().out)
     assert code == 0
-    assert len(report["hosts"]) == 1
+    assert all(h["host"] is None for h in report["hosts"])
     assert report["hosts"][0]["verdict"] == "PASS"
 
 
@@ -1124,8 +1125,7 @@ def test_doctor_hosts_file_read_error_is_rendered_in_the_host_section(
     code = _run(monkeypatch, ["doctor", "-a", "--json"])
     report = json.loads(capsys.readouterr().out)
     assert code == 0, "a hosts.toml read failure must never change the exit status"
-    assert len(report["hosts"]) == 2, "this machine's row, plus a row for the read failure"
-    error_row = next(h for h in report["hosts"] if h["host"] != report["hosts"][0]["host"])
+    error_row = next(h for h in report["hosts"] if h["host"] == "hosts.toml")
     assert "[hosts]" in error_row["detail"]
 
 
@@ -1178,7 +1178,11 @@ def test_doctor_several_hosts_each_rendered_as_its_own_block_in_declared_order(
     code = _run(monkeypatch, ["doctor", "-a", "--json"])
     report = json.loads(capsys.readouterr().out)
     assert code == 0
-    remote_names = [h["host"] for h in report["hosts"] if h["host"] != report["hosts"][0]["host"]]
+    remote_names = list(
+        dict.fromkeys(
+            h["host"] for h in report["hosts"] if h["host"] != report["hosts"][0]["host"]
+        )
+    )
     assert remote_names == ["andromeda", "lookout"], (
         "declared order must be preserved even though lookout answers first"
     )
@@ -1406,7 +1410,7 @@ def test_doctor_all_hosts_reachable_through_real_cli_short_and_long_form(
         reports.append(json.loads(result.stdout))
 
     for report in reports:
-        assert len(report["hosts"]) == 1
+        assert all(h["host"] is None for h in report["hosts"])
         assert report["hosts"][0]["verdict"] == "PASS"
 
 
@@ -1743,7 +1747,9 @@ def test_doctor_malformed_connect_timeout_still_prints_every_check(
     assert "asdf" in check_names and "consistency" in check_names
     timeout_check = next(c for c in report["checks"] if c["check"] == "connect_timeout")
     assert timeout_check["pass"] is False
-    assert len(report["hosts"]) == 2, "the host section still runs, using the transport's default"
+    assert {h["host"] for h in report["hosts"]} == {None, "andromeda"}, (
+        "the host section still runs, using the transport's default"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1754,9 +1760,9 @@ def test_doctor_malformed_connect_timeout_still_prints_every_check(
 def test_doctor_human_render_grammar_pass_verdict(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
-    """The host section reuses the local check rows' own grammar: a
-    bracketed verdict, the name, and an indented detail line beneath —
-    this machine's own row labeled distinctly from a probed host's."""
+    """The host section groups by machine: a machine name header, then a
+    bracketed verdict and detail on one line per fact it contributed —
+    this machine's own block labeled distinctly from a probed host's."""
     _doctor_hosts_env(tmp_path, monkeypatch, "[hosts.andromeda]\n")
     monkeypatch.setenv("CAMP_TEST_TMUX_PRESENT", "1")
     transport = _transport_module()
@@ -1772,9 +1778,9 @@ def test_doctor_human_render_grammar_pass_verdict(
     lines = capsys.readouterr().out.splitlines()
     assert code == 0
     assert "camp doctor — hosts:" in lines
-    assert "  [PASS] (this machine)" in lines
-    assert "  [PASS] andromeda" in lines
-    assert "         camp resolves; multiplexer present" in lines
+    assert "  (this machine):" in lines
+    assert "  andromeda:" in lines
+    assert "    [PASS] camp resolves; multiplexer present" in lines
 
 
 def test_doctor_human_render_grammar_warn_verdict_names_camp_bin(
@@ -1791,7 +1797,9 @@ def test_doctor_human_render_grammar_warn_verdict_names_camp_bin(
     code = _run(monkeypatch, ["doctor", "-a"])
     out = capsys.readouterr().out
     assert code == 0
-    assert "  [WARN] andromeda" in out.splitlines()
+    lines = out.splitlines()
+    assert "  andromeda:" in lines
+    assert any(line.startswith("    [WARN]") for line in lines)
     assert "/opt/weird/camp" in out
 
 
@@ -1805,9 +1813,10 @@ def test_doctor_human_render_grammar_down_verdict(
     )
 
     code = _run(monkeypatch, ["doctor", "-a"])
-    out = capsys.readouterr().out
+    lines = capsys.readouterr().out.splitlines()
     assert code == 0
-    assert "  [DOWN] andromeda" in out.splitlines()
+    assert "  andromeda:" in lines
+    assert any(line.startswith("    [DOWN]") for line in lines)
 
 
 # ---------------------------------------------------------------------------
@@ -1890,8 +1899,11 @@ def test_doctor_excludes_host_declared_under_this_machines_own_self_name(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     """A host file declaring this machine's own self_name must never
-    produce two rows bearing the same name — one local, one probed over
-    ssh — in a section whose whole purpose is telling machines apart."""
+    produce two REACHABILITY facts bearing the same name — one local, one
+    probed over ssh — in a section whose whole purpose is telling machines
+    apart. (Several facts sharing that one name — its account lines among
+    them — are the grouping this section is built for; the pin is on the
+    reachability fact, which must be singular.)"""
     _doctor_hosts_env(
         tmp_path, monkeypatch, 'self_name = "andromeda"\n[hosts.andromeda]\n'
     )
@@ -1907,5 +1919,618 @@ def test_doctor_excludes_host_declared_under_this_machines_own_self_name(
     out, err = capsys.readouterr()
     report = json.loads(out)
     assert code == 0
-    names = [h["host"] for h in report["hosts"]]
-    assert names.count("andromeda") == 1
+    reachability_hosts = [
+        h["host"] for h in report["hosts"] if "multiplexer" in h["detail"]
+    ]
+    assert reachability_hosts.count("andromeda") == 1
+
+
+# ---------------------------------------------------------------------------
+# camp doctor -a — the account axis (per-machine authentication facts)
+# ---------------------------------------------------------------------------
+
+
+def _probe_answered_accounts(accounts: list[dict] | None, *, multiplexer: bool = True):
+    """A probe answer carrying the given account facts. `accounts=None` omits
+    the key entirely — the shape a camp that predates this work produces."""
+    payload = {"pass": True, "checks": [], "probe": True, "multiplexer_present": multiplexer}
+    if accounts is not None:
+        payload["accounts"] = accounts
+    return _probe_answered(payload)
+
+
+def test_doctor_account_no_declared_accounts_renders_one_default_line(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """State — a host declares no accounts: the roster is the default one
+    alone, and the block carries exactly one account line naming it —
+    proven on the local machine, which computes its own account facts with
+    no network."""
+    _doctor_hosts_env(tmp_path, monkeypatch, "")
+    monkeypatch.setenv("CAMP_TEST_TMUX_PRESENT", "1")
+
+    code = _run(monkeypatch, ["doctor", "-a", "--json"])
+    report = json.loads(capsys.readouterr().out)
+    assert code == 0
+    self_rows = [h for h in report["hosts"] if h["host"] is None]
+    account_rows = [h for h in self_rows if "multiplexer" not in h["detail"]]
+    assert len(account_rows) == 1
+    assert "the default account" in account_rows[0]["detail"]
+
+
+def test_doctor_account_no_declared_accounts_renders_one_default_line_human(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """The same state, on the human render path."""
+    _doctor_hosts_env(tmp_path, monkeypatch, "")
+    monkeypatch.setenv("CAMP_TEST_TMUX_PRESENT", "1")
+
+    code = _run(monkeypatch, ["doctor", "-a"])
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "the default account" in out
+
+
+def test_doctor_account_one_declared_authenticated_renders_pass_verbatim(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """State — one declared account, authenticated: PASS, naming the
+    account as the group declared it, carried verbatim."""
+    _doctor_hosts_env(tmp_path, monkeypatch, "[hosts.andromeda]\n")
+    transport = _transport_module()
+    monkeypatch.setattr(
+        transport,
+        "run_camp",
+        lambda host, remote_argv, **kw: _probe_answered_accounts(
+            [{"account": "acct-primary", "verdict": "authenticated", "reason": None}]
+        ),
+    )
+
+    code = _run(monkeypatch, ["doctor", "-a", "--json"])
+    report = json.loads(capsys.readouterr().out)
+    assert code == 0
+    account_rows = [
+        h for h in report["hosts"] if h["host"] == "andromeda" and "multiplexer" not in h["detail"]
+    ]
+    assert len(account_rows) == 1
+    assert account_rows[0]["verdict"] == "PASS"
+    assert "acct-primary" in account_rows[0]["detail"]
+
+
+def test_doctor_account_one_declared_authenticated_renders_pass_verbatim_human(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """The same state, on the human render path."""
+    _doctor_hosts_env(tmp_path, monkeypatch, "[hosts.andromeda]\n")
+    transport = _transport_module()
+    monkeypatch.setattr(
+        transport,
+        "run_camp",
+        lambda host, remote_argv, **kw: _probe_answered_accounts(
+            [{"account": "acct-primary", "verdict": "authenticated", "reason": None}]
+        ),
+    )
+
+    code = _run(monkeypatch, ["doctor", "-a"])
+    lines = capsys.readouterr().out.splitlines()
+    assert code == 0
+    matches = [line for line in lines if line.strip().startswith("[PASS]") and "acct-primary" in line]
+    assert len(matches) == 1
+
+
+def test_doctor_account_several_declared_one_lapsed_stable_order(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """State — several declared accounts, each carrying its own verdict, in
+    a stable order across two runs — including a machine where one of
+    three has lapsed."""
+    _doctor_hosts_env(tmp_path, monkeypatch, "[hosts.andromeda]\n")
+    transport = _transport_module()
+    accounts = [
+        {"account": "acct-a", "verdict": "authenticated", "reason": None},
+        {"account": "acct-b", "verdict": "not-authenticated", "reason": None},
+        {"account": "acct-c", "verdict": "authenticated", "reason": None},
+    ]
+    monkeypatch.setattr(
+        transport, "run_camp", lambda host, remote_argv, **kw: _probe_answered_accounts(accounts)
+    )
+
+    orders = []
+    for _ in range(2):
+        code = _run(monkeypatch, ["doctor", "-a", "--json"])
+        report = json.loads(capsys.readouterr().out)
+        assert code == 0
+        account_rows = [
+            h
+            for h in report["hosts"]
+            if h["host"] == "andromeda" and "multiplexer" not in h["detail"]
+        ]
+        assert len(account_rows) == 3
+        orders.append([(r["verdict"], r["detail"]) for r in account_rows])
+
+    assert orders[0] == orders[1], "the account order must be diffable across runs"
+    verdicts = [v for v, _ in orders[0]]
+    assert verdicts.count("PASS") == 2
+    assert verdicts.count("WARN") == 1
+    account_order = [detail.split(" ", 1)[0] for _, detail in orders[0]]
+    assert account_order == ["acct-a", "acct-b", "acct-c"], (
+        "the far side's own declared order must be preserved, not merely repeatable"
+    )
+
+
+def test_doctor_account_not_authenticated_renders_warn_never_down(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """State — a declared account that is not authenticated: WARN, never
+    DOWN — the machine is reachable and camp works there."""
+    _doctor_hosts_env(tmp_path, monkeypatch, "[hosts.andromeda]\n")
+    transport = _transport_module()
+    monkeypatch.setattr(
+        transport,
+        "run_camp",
+        lambda host, remote_argv, **kw: _probe_answered_accounts(
+            [{"account": "acct-lapsed", "verdict": "not-authenticated", "reason": None}]
+        ),
+    )
+
+    code = _run(monkeypatch, ["doctor", "-a", "--json"])
+    report = json.loads(capsys.readouterr().out)
+    assert code == 0
+    account_row = next(
+        h for h in report["hosts"] if h["host"] == "andromeda" and "acct-lapsed" in h["detail"]
+    )
+    assert account_row["verdict"] == "WARN"
+    assert account_row["verdict"] != "DOWN"
+
+
+def test_doctor_account_not_authenticated_renders_warn_never_down_human(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """The same state, on the human render path."""
+    _doctor_hosts_env(tmp_path, monkeypatch, "[hosts.andromeda]\n")
+    transport = _transport_module()
+    monkeypatch.setattr(
+        transport,
+        "run_camp",
+        lambda host, remote_argv, **kw: _probe_answered_accounts(
+            [{"account": "acct-lapsed", "verdict": "not-authenticated", "reason": None}]
+        ),
+    )
+
+    code = _run(monkeypatch, ["doctor", "-a"])
+    lines = capsys.readouterr().out.splitlines()
+    assert code == 0
+    matches = [line for line in lines if "acct-lapsed" in line]
+    assert len(matches) == 1
+    assert matches[0].strip().startswith("[WARN]")
+    assert "[DOWN]" not in matches[0]
+
+
+def test_doctor_account_cannot_tell_is_its_own_token_wording_implies_no_credential_problem(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """State — the platform does not expose an authentication check: its
+    own verdict token, distinct from PASS/WARN/DOWN, and wording that
+    states unavailability without implying a credential problem."""
+    _doctor_hosts_env(tmp_path, monkeypatch, "[hosts.andromeda]\n")
+    transport = _transport_module()
+    monkeypatch.setattr(
+        transport,
+        "run_camp",
+        lambda host, remote_argv, **kw: _probe_answered_accounts(
+            [{"account": "acct-x", "verdict": "cannot-tell", "reason": None}]
+        ),
+    )
+
+    code = _run(monkeypatch, ["doctor", "-a", "--json"])
+    report = json.loads(capsys.readouterr().out)
+    assert code == 0
+    account_row = next(
+        h for h in report["hosts"] if h["host"] == "andromeda" and "acct-x" in h["detail"]
+    )
+    assert account_row["verdict"] not in {"PASS", "WARN", "DOWN"}
+    for word in ("not authenticated", "log in", "invalid", "expired"):
+        assert word not in account_row["detail"]
+
+
+def test_doctor_account_far_camp_omitting_the_field_renders_unavailable_not_unauthenticated(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """A far camp that omits the accounts field lands in the same
+    unavailable state rather than crashing or reporting unauthenticated."""
+    _doctor_hosts_env(tmp_path, monkeypatch, "[hosts.andromeda]\n")
+    transport = _transport_module()
+    monkeypatch.setattr(
+        transport,
+        "run_camp",
+        lambda host, remote_argv, **kw: _probe_answered_accounts(None),
+    )
+
+    code = _run(monkeypatch, ["doctor", "-a", "--json"])
+    report = json.loads(capsys.readouterr().out)
+    assert code == 0
+    account_rows = [
+        h for h in report["hosts"] if h["host"] == "andromeda" and "multiplexer" not in h["detail"]
+    ]
+    assert len(account_rows) == 1
+    assert account_rows[0]["verdict"] != "WARN"
+    assert "not authenticated" not in account_rows[0]["detail"]
+
+
+def test_doctor_account_capability_failure_preserves_reachability_and_other_hosts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """State — the account capability fails on a host: that machine keeps
+    its reachability facts, and the failure never costs another machine's
+    answer."""
+    _doctor_hosts_env(
+        tmp_path, monkeypatch, "[hosts.andromeda]\n[hosts.lookout]\n"
+    )
+    monkeypatch.setenv("CAMP_TEST_TMUX_PRESENT", "1")
+    transport = _transport_module()
+
+    def fake_run_camp(host, remote_argv, **kw):
+        if host.ssh == "andromeda":
+            return _probe_answered_accounts(
+                [{"account": None, "verdict": None, "reason": "g1: broken config"}]
+            )
+        return _probe_answered_accounts(
+            [{"account": "acct-fine", "verdict": "authenticated", "reason": None}]
+        )
+
+    monkeypatch.setattr(transport, "run_camp", fake_run_camp)
+
+    code = _run(monkeypatch, ["doctor", "-a", "--json"])
+    report = json.loads(capsys.readouterr().out)
+    assert code == 0
+    andromeda_reachability = next(
+        h for h in report["hosts"] if h["host"] == "andromeda" and "multiplexer" in h["detail"]
+    )
+    assert andromeda_reachability["verdict"] == "PASS"
+    failure_row = next(
+        h for h in report["hosts"] if h["host"] == "andromeda" and "multiplexer" not in h["detail"]
+    )
+    assert failure_row["verdict"] == "WARN"
+    assert "broken config" in failure_row["detail"]
+    lookout_row = next(
+        h for h in report["hosts"] if h["host"] == "lookout" and "acct-fine" in h["detail"]
+    )
+    assert lookout_row["verdict"] == "PASS"
+
+
+def test_doctor_account_capability_failure_reason_reaches_human_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """The failure row's reason reaches the operator on the human path
+    rather than being dropped."""
+    _doctor_hosts_env(tmp_path, monkeypatch, "[hosts.andromeda]\n")
+    transport = _transport_module()
+    monkeypatch.setattr(
+        transport,
+        "run_camp",
+        lambda host, remote_argv, **kw: _probe_answered_accounts(
+            [{"account": None, "verdict": None, "reason": "g1: broken config"}]
+        ),
+    )
+
+    code = _run(monkeypatch, ["doctor", "-a"])
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "broken config" in out
+
+
+def test_doctor_account_unreachable_machine_renders_no_account_lines(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """A machine that never answered renders no account lines at all —
+    driven through an unreachable fixture, asserted as the consequence of
+    that machine's own state rather than a bare absence check."""
+    _doctor_hosts_env(tmp_path, monkeypatch, "[hosts.andromeda]\n")
+    transport = _transport_module()
+    monkeypatch.setattr(
+        transport, "run_camp", lambda host, remote_argv, **kw: transport.Unreachable(reason="x")
+    )
+
+    code = _run(monkeypatch, ["doctor", "-a", "--json"])
+    report = json.loads(capsys.readouterr().out)
+    assert code == 0
+    andromeda_rows = [h for h in report["hosts"] if h["host"] == "andromeda"]
+    assert len(andromeda_rows) == 1
+    assert andromeda_rows[0]["verdict"] == "DOWN"
+
+
+def test_doctor_account_human_render_groups_several_facts_under_one_header(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """The human renderer groups by machine: a machine contributing several
+    account facts (plus its own reachability fact) names itself once."""
+    _doctor_hosts_env(tmp_path, monkeypatch, "[hosts.andromeda]\n")
+    transport = _transport_module()
+    monkeypatch.setattr(
+        transport,
+        "run_camp",
+        lambda host, remote_argv, **kw: _probe_answered_accounts(
+            [
+                {"account": "acct-a", "verdict": "authenticated", "reason": None},
+                {"account": "acct-b", "verdict": "not-authenticated", "reason": None},
+            ]
+        ),
+    )
+
+    code = _run(monkeypatch, ["doctor", "-a"])
+    lines = capsys.readouterr().out.splitlines()
+    assert code == 0
+    assert lines.count("  andromeda:") == 1
+    assert any("acct-a" in line for line in lines)
+    assert any("acct-b" in line for line in lines)
+
+
+def test_doctor_account_unauthenticated_never_changes_exit_status(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """An unauthenticated account does not change the exit status."""
+    _doctor_hosts_env(tmp_path, monkeypatch, "[hosts.andromeda]\n")
+    monkeypatch.setenv("CAMP_TEST_TMUX_PRESENT", "1")
+    transport = _transport_module()
+    monkeypatch.setattr(
+        transport,
+        "run_camp",
+        lambda host, remote_argv, **kw: _probe_answered_accounts(
+            [{"account": "acct-lapsed", "verdict": "not-authenticated", "reason": None}]
+        ),
+    )
+
+    code = _run(monkeypatch, ["doctor", "-a", "--json"])
+    capsys.readouterr()
+    assert code == 0
+
+
+# ---------------------------------------------------------------------------
+# Council fix 2 — cannot-tell gets its own verdict, distinct from both
+# unauthenticated and a failed capability.
+# ---------------------------------------------------------------------------
+
+
+def test_doctor_account_unauthenticated_and_unavailable_render_different_tokens(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """An unauthenticated account and an unavailable check render different
+    verdict tokens — assert the tokens differ, not merely that the detail
+    strings differ."""
+    _doctor_hosts_env(
+        tmp_path, monkeypatch, "[hosts.andromeda]\n[hosts.lookout]\n"
+    )
+    transport = _transport_module()
+
+    def fake_run_camp(host, remote_argv, **kw):
+        if host.ssh == "andromeda":
+            return _probe_answered_accounts(
+                [{"account": "acct-x", "verdict": "not-authenticated", "reason": None}]
+            )
+        return _probe_answered_accounts(
+            [{"account": "acct-x", "verdict": "cannot-tell", "reason": None}]
+        )
+
+    monkeypatch.setattr(transport, "run_camp", fake_run_camp)
+
+    code = _run(monkeypatch, ["doctor", "-a", "--json"])
+    report = json.loads(capsys.readouterr().out)
+    assert code == 0
+    unauth_row = next(
+        h for h in report["hosts"] if h["host"] == "andromeda" and "acct-x" in h["detail"]
+    )
+    unavailable_row = next(
+        h for h in report["hosts"] if h["host"] == "lookout" and "acct-x" in h["detail"]
+    )
+    assert unauth_row["verdict"] != unavailable_row["verdict"]
+
+
+def test_doctor_account_failed_capability_and_unavailable_render_different_tokens(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """A failed capability and an unavailable check render different
+    verdict tokens from each other."""
+    _doctor_hosts_env(
+        tmp_path, monkeypatch, "[hosts.andromeda]\n[hosts.lookout]\n"
+    )
+    transport = _transport_module()
+
+    def fake_run_camp(host, remote_argv, **kw):
+        if host.ssh == "andromeda":
+            return _probe_answered_accounts(
+                [{"account": None, "verdict": None, "reason": "g1: broken config"}]
+            )
+        return _probe_answered_accounts(
+            [{"account": "acct-x", "verdict": "cannot-tell", "reason": None}]
+        )
+
+    monkeypatch.setattr(transport, "run_camp", fake_run_camp)
+
+    code = _run(monkeypatch, ["doctor", "-a", "--json"])
+    report = json.loads(capsys.readouterr().out)
+    assert code == 0
+    failed_row = next(
+        h
+        for h in report["hosts"]
+        if h["host"] == "andromeda" and "multiplexer" not in h["detail"]
+    )
+    unavailable_row = next(
+        h for h in report["hosts"] if h["host"] == "lookout" and "acct-x" in h["detail"]
+    )
+    assert failed_row["verdict"] != unavailable_row["verdict"]
+
+
+def test_doctor_account_cannot_tell_token_appears_only_for_cannot_tell_states(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """The new token appears in machine-readable output for exactly the
+    cannot-tell states and nowhere else."""
+    _doctor_hosts_env(
+        tmp_path, monkeypatch, "[hosts.andromeda]\n[hosts.lookout]\n"
+    )
+    monkeypatch.setenv("CAMP_TEST_TMUX_PRESENT", "1")
+    transport = _transport_module()
+
+    def fake_run_camp(host, remote_argv, **kw):
+        if host.ssh == "andromeda":
+            return _probe_answered_accounts(
+                [
+                    {"account": "acct-pass", "verdict": "authenticated", "reason": None},
+                    {"account": "acct-warn", "verdict": "not-authenticated", "reason": None},
+                    {"account": None, "verdict": None, "reason": "g1: broken config"},
+                ]
+            )
+        return _probe_answered_accounts(
+            [{"account": "acct-unknown", "verdict": "cannot-tell", "reason": None}]
+        )
+
+    monkeypatch.setattr(transport, "run_camp", fake_run_camp)
+
+    code = _run(monkeypatch, ["doctor", "-a", "--json"])
+    report = json.loads(capsys.readouterr().out)
+    assert code == 0
+    cannot_tell_token = next(
+        h for h in report["hosts"] if h["host"] == "lookout" and "acct-unknown" in h["detail"]
+    )["verdict"]
+    for row in report["hosts"]:
+        if row["host"] == "lookout" and "acct-unknown" in row["detail"]:
+            assert row["verdict"] == cannot_tell_token
+        else:
+            assert row["verdict"] != cannot_tell_token
+
+
+# ---------------------------------------------------------------------------
+# Added at execute time — the null-verdict failure row is a fourth state,
+# distinct from the cannot-tell verdict.
+# ---------------------------------------------------------------------------
+
+
+def test_doctor_account_null_verdict_failure_and_cannot_tell_render_different_tokens_json(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """A null-verdict failure row and a cannot-tell verdict render different
+    verdict tokens, on the machine-readable path."""
+    _doctor_hosts_env(tmp_path, monkeypatch, "[hosts.andromeda]\n")
+    transport = _transport_module()
+    monkeypatch.setattr(
+        transport,
+        "run_camp",
+        lambda host, remote_argv, **kw: _probe_answered_accounts(
+            [
+                {"account": None, "verdict": None, "reason": "g1: broken config"},
+                {"account": "acct-unknown", "verdict": "cannot-tell", "reason": None},
+            ]
+        ),
+    )
+
+    code = _run(monkeypatch, ["doctor", "-a", "--json"])
+    report = json.loads(capsys.readouterr().out)
+    assert code == 0
+    failure_row = next(
+        h
+        for h in report["hosts"]
+        if h["host"] == "andromeda" and "broken config" in h["detail"]
+    )
+    cannot_tell_row = next(
+        h
+        for h in report["hosts"]
+        if h["host"] == "andromeda" and "acct-unknown" in h["detail"]
+    )
+    assert failure_row["verdict"] != cannot_tell_row["verdict"]
+
+
+def test_doctor_account_null_verdict_failure_and_cannot_tell_render_different_tokens_human(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """The same distinction, on the human render path."""
+    _doctor_hosts_env(tmp_path, monkeypatch, "[hosts.andromeda]\n")
+    transport = _transport_module()
+    monkeypatch.setattr(
+        transport,
+        "run_camp",
+        lambda host, remote_argv, **kw: _probe_answered_accounts(
+            [
+                {"account": None, "verdict": None, "reason": "g1: broken config"},
+                {"account": "acct-unknown", "verdict": "cannot-tell", "reason": None},
+            ]
+        ),
+    )
+
+    code = _run(monkeypatch, ["doctor", "-a"])
+    lines = capsys.readouterr().out.splitlines()
+    assert code == 0
+    failure_line = next(line for line in lines if "broken config" in line)
+    cannot_tell_line = next(line for line in lines if "acct-unknown" in line)
+    failure_token = failure_line.strip().split("]")[0].lstrip("[")
+    cannot_tell_token = cannot_tell_line.strip().split("]")[0].lstrip("[")
+    assert failure_token != cannot_tell_token
+
+
+# ---------------------------------------------------------------------------
+# Council fix 1 — every remote-authored account string is stripped of
+# control sequences before it reaches a rendered line.
+# ---------------------------------------------------------------------------
+
+
+def test_doctor_account_control_sequences_are_stripped_before_rendering(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """A declared account carrying an escape sequence must never move the
+    cursor, clear a line, or hide another machine's row from the block —
+    asserted on the rendered text."""
+    _doctor_hosts_env(
+        tmp_path, monkeypatch, "[hosts.andromeda]\n[hosts.lookout]\n"
+    )
+    monkeypatch.setenv("CAMP_TEST_TMUX_PRESENT", "1")
+    transport = _transport_module()
+
+    hostile_account = "acct\x1b[2K\x1b[1A\x1b[?25lhostile"
+
+    def fake_run_camp(host, remote_argv, **kw):
+        if host.ssh == "andromeda":
+            return _probe_answered_accounts(
+                [{"account": hostile_account, "verdict": "authenticated", "reason": None}]
+            )
+        return _probe_answered_accounts(
+            [{"account": "acct-fine", "verdict": "authenticated", "reason": None}]
+        )
+
+    monkeypatch.setattr(transport, "run_camp", fake_run_camp)
+
+    code = _run(monkeypatch, ["doctor", "-a"])
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "\x1b" not in out, "no escape sequence may reach the rendered block"
+    lines = out.splitlines()
+    assert lines.count("  lookout:") == 1, (
+        "the hostile account must never hide lookout's own row from the block"
+    )
+    assert any("acct-fine" in line for line in lines)
+
+
+def test_doctor_account_control_sequences_stripped_in_json_at_the_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """The machine-readable form is stripped at the point the roster is
+    produced, not only where it is printed — a consumer parsing camp's JSON
+    must never inherit a control sequence."""
+    _doctor_hosts_env(tmp_path, monkeypatch, "[hosts.andromeda]\n")
+    transport = _transport_module()
+    hostile_account = "acct\x1b[2Khostile"
+    monkeypatch.setattr(
+        transport,
+        "run_camp",
+        lambda host, remote_argv, **kw: _probe_answered_accounts(
+            [{"account": hostile_account, "verdict": "authenticated", "reason": None}]
+        ),
+    )
+
+    code = _run(monkeypatch, ["doctor", "-a", "--json"])
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "\x1b" not in out
+    report = json.loads(out)
+    account_row = next(
+        h for h in report["hosts"] if h["host"] == "andromeda" and "hostile" in h["detail"]
+    )
+    assert "\x1b" not in account_row["detail"]

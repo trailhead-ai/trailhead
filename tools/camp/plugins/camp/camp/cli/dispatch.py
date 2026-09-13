@@ -1075,12 +1075,105 @@ def _doctor_multiplexer_row(host_name: str | None, present: bool) -> dict[str, A
     return _doctor_host_row(host_name, "WARN", "camp resolves; no multiplexer present")
 
 
+#: The account axis's own closed verdict vocabulary — stated once here and
+#: read from nowhere else. Deliberately four values where the surrounding
+#: host section has three ("PASS"/"WARN"/"DOWN"): a check camp could not
+#: perform must never share a token with either an authenticated account or
+#: a genuinely failed one, so it gets "UNKNOWN" rather than folding into
+#: "WARN". A `verdict` of `None` (a failure row: an unreadable group config,
+#: or a harness that resolved but refused to bind) is a warning — something
+#: is broken and the operator can fix it, which is exactly what separates it
+#: from a platform that never offered the check at all.
+_DOCTOR_ACCOUNT_VERDICT_TOKENS = {
+    "authenticated": "PASS",
+    "not-authenticated": "WARN",
+    "cannot-tell": "UNKNOWN",
+}
+
+
+def _doctor_account_verdict_token(verdict: str | None) -> str:
+    if verdict is None:
+        return "WARN"
+    return _DOCTOR_ACCOUNT_VERDICT_TOKENS.get(verdict, "WARN")
+
+
+def _doctor_account_label(account: str | None) -> str:
+    return account if account is not None else "the default account"
+
+
+def _doctor_account_detail(account: str | None, verdict: str | None, reason: str | None) -> str:
+    """The account axis's own rendered wording, one branch per state the
+    design doc fixes. The `cannot-tell` wording never implies a credential
+    problem — there is no evidence of one — and the `not-authenticated`
+    wording never tells the operator to log in, since camp does not know
+    whether he wants that account on that machine at all."""
+    if verdict is None:
+        return f"account check failed — {reason}"
+    label = _doctor_account_label(account)
+    if verdict == "authenticated":
+        return f"{label} is authenticated"
+    if verdict == "not-authenticated":
+        return f"{label} is not authenticated"
+    return f"{label}: authentication status cannot be determined here"
+
+
+def _doctor_account_row(
+    host_name: str | None, account: str | None, verdict: str | None, reason: str | None
+) -> dict[str, Any]:
+    """One account fact, in the host section's own closed row shape — a
+    fact is a row exactly as reachability is a row, never nested inside a
+    host's own row."""
+    return _doctor_host_row(
+        host_name,
+        _doctor_account_verdict_token(verdict),
+        _doctor_account_detail(account, verdict, reason),
+    )
+
+
+def _doctor_account_rows_from_parsed(
+    host_name: str | None, parsed: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """The far side's account roster, converted into this section's rows.
+
+    A far camp that predates the accounts field (or that answers with a
+    shape this reader does not recognize) omits the key entirely — read as
+    the same `cannot-tell` state a harness that declines to answer produces,
+    per the design doc: from the operator's side the two are deliberately
+    indistinguishable, since in both, camp cannot tell him.
+
+    Every string here is remote-authored (the declared account, and any
+    failure reason), so it passes through the same recursive
+    control-sequence strip every other relay path already applies — run
+    here, not only where the rows are printed, so the machine-readable form
+    is stripped at the point the roster is produced.
+    """
+    from ..host.relay import _strip_control_sequences_deep
+    from ..spine import DOCTOR_PROBE_ACCOUNTS_KEY
+
+    facts = parsed.get(DOCTOR_PROBE_ACCOUNTS_KEY)
+    if not isinstance(facts, list):
+        return [_doctor_account_row(host_name, None, "cannot-tell", None)]
+    facts = _strip_control_sequences_deep(facts)
+    return [
+        _doctor_account_row(
+            host_name, fact.get("account"), fact.get("verdict"), fact.get("reason")
+        )
+        for fact in facts
+        if isinstance(fact, dict)
+    ]
+
+
 def _doctor_probe_answer(
-    row: dict[str, Any], *, answered: bool, notices: list[str] | None = None
+    row: dict[str, Any],
+    *,
+    answered: bool,
+    notices: list[str] | None = None,
+    extra_rows: list[dict[str, Any]] | None = None,
 ):
-    """One probed host's contribution to the `-a` host section: exactly one
-    row and no exit-code contribution — the host section never decides the
-    health check's own status. `notices` carries whatever the shared
+    """One probed host's contribution to the `-a` host section: the
+    reachability/multiplexer row plus zero or more account rows, and no
+    exit-code contribution — the host section never decides the health
+    check's own status. `notices` carries whatever the shared
     transport-failure classifier produced for this outcome (e.g. the
     key-mismatch's own "may be intercepted" remediation) so it reaches the
     operator instead of being computed and discarded; defaults to none for
@@ -1088,8 +1181,11 @@ def _doctor_probe_answer(
     worker maps without going through the shared classifier)."""
     from ..host.relay import HostAnswer
 
+    rows = [row]
+    if extra_rows:
+        rows.extend(extra_rows)
     return HostAnswer(
-        rows=[row], notices=list(notices) if notices else [], exit_code=0, answered=answered
+        rows=rows, notices=list(notices) if notices else [], exit_code=0, answered=answered
     )
 
 
@@ -1110,6 +1206,7 @@ def _doctor_probe_answer_from_parsed(host_name: str, parsed: Any):
     return _doctor_probe_answer(
         _doctor_multiplexer_row(host_name, bool(parsed.get(DOCTOR_PROBE_MULTIPLEXER_KEY))),
         answered=True,
+        extra_rows=_doctor_account_rows_from_parsed(host_name, parsed),
     )
 
 
@@ -1245,45 +1342,75 @@ def _doctor_probe_worker(host_name: str, host: "Host", *, connect_timeout: float
     return _doctor_probe_answer_from_parsed(host_name, parsed)
 
 
-def _doctor_self_row(self_name: str | None) -> dict[str, Any]:
-    """This machine's own row in the `-a` host section — no network
-    involved, since the local checks and the local multiplexer resolution
-    already ran for the section above it."""
-    from ..spine import _doctor_multiplexer_present
+def _doctor_self_rows(self_name: str | None) -> list[dict[str, Any]]:
+    """This machine's own rows in the `-a` host section: the multiplexer
+    row, plus its own account facts — no network involved for either, since
+    the local checks, the local multiplexer resolution, and the local
+    account roster all run with no network."""
+    from ..spine import _doctor_account_roster, _doctor_multiplexer_present
 
-    return _doctor_multiplexer_row(self_name, _doctor_multiplexer_present())
+    rows = [_doctor_multiplexer_row(self_name, _doctor_multiplexer_present())]
+    for fact in _doctor_account_roster():
+        rows.append(
+            _doctor_account_row(
+                self_name, fact.get("account"), fact.get("verdict"), fact.get("reason")
+            )
+        )
+    return rows
 
 
 def _render_doctor_hosts_human(host_rows: list[dict[str, Any]]) -> None:
+    """Group the section's rows by machine, naming each machine once and
+    indenting every fact it contributed beneath it — a machine contributing
+    several account facts (plus its reachability fact) names itself once
+    rather than repeating its name on every line."""
     print("camp doctor — hosts:")
+    grouped: dict[str | None, list[dict[str, Any]]] = {}
     for row in host_rows:
-        name = row["host"] if row["host"] is not None else "(this machine)"
-        print(f"  [{row['verdict']}] {name}")
-        print(f"         {row['detail']}")
+        grouped.setdefault(row["host"], []).append(row)
+    for name, rows in grouped.items():
+        label = name if name is not None else "(this machine)"
+        print(f"  {label}:")
+        for row in rows:
+            print(f"    [{row['verdict']}] {row['detail']}")
 
 
-def _doctor_row_from_host_answer(host_name: str, answer: "HostAnswer") -> dict[str, Any]:
+def _doctor_rows_from_host_answer(
+    host_name: str, answer: "HostAnswer"
+) -> list[dict[str, Any]]:
     """Convert one declared host's fan-out contribution into the host
     section's own row shape, at the boundary where it enters this section.
 
-    `_doctor_probe_worker` (the only worker this dispatch injects) always
-    returns `_doctor_host_row`'s own shape (`{"host", "verdict", "detail"}`),
-    so that row passes through unchanged. Anything else reaching here was
-    built by something the doctor path does not own — most notably
+    `_doctor_probe_worker` (the only worker this dispatch injects) returns
+    one reachability/multiplexer row plus zero or more account rows, every
+    one already in `_doctor_host_row`'s own shape (`{"host", "verdict",
+    "detail"}`), so each passes through unchanged. Anything else reaching
+    here was built by something the doctor path does not own — most notably
     `camp.host.merge`'s own internal-fault row (`{"ok", "host", "reason"}`,
     synthesized when a worker raises something outside the transport's
     closed outcome set) — and is converted here rather than trusted: a row
     this section did not build must never reach its renderer carrying a
     different shape, human or JSON.
     """
-    row = answer.rows[0] if answer.rows else None
-    if isinstance(row, dict) and "verdict" in row and "detail" in row:
-        return row
-    reason = row.get("reason") if isinstance(row, dict) else None
-    detail = (
-        reason if isinstance(reason, str) else "camp's own fan-out could not answer for this host"
-    )
-    return _doctor_host_row(host_name, "WARN", detail)
+    if not answer.rows:
+        return [
+            _doctor_host_row(
+                host_name, "WARN", "camp's own fan-out could not answer for this host"
+            )
+        ]
+    converted: list[dict[str, Any]] = []
+    for row in answer.rows:
+        if isinstance(row, dict) and "verdict" in row and "detail" in row:
+            converted.append(row)
+            continue
+        reason = row.get("reason") if isinstance(row, dict) else None
+        detail = (
+            reason
+            if isinstance(reason, str)
+            else "camp's own fan-out could not answer for this host"
+        )
+        converted.append(_doctor_host_row(host_name, "WARN", detail))
+    return converted
 
 
 def _doctor_resolve_connect_timeout(hosts_error: str | None) -> tuple[float, str | None]:
@@ -1409,7 +1536,7 @@ def _dispatch_doctor_all_hosts(rest: list[str]) -> None:
         exit_code = 1
 
     self_name = self_name_cell[0]
-    host_rows = [_doctor_self_row(self_name)]
+    host_rows = list(_doctor_self_rows(self_name))
     if hosts_error is not None:
         # hosts.toml itself failed to parse — the declared hosts could
         # never be enumerated, so there is nothing to fan out to. The
@@ -1421,7 +1548,7 @@ def _dispatch_doctor_all_hosts(rest: list[str]) -> None:
     for host_name, answer in host_answers:
         for notice in answer.notices:
             print(notice, file=sys.stderr)
-        host_rows.append(_doctor_row_from_host_answer(host_name, answer))
+        host_rows.extend(_doctor_rows_from_host_answer(host_name, answer))
 
     if as_json:
         import json as _json
