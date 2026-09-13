@@ -1164,6 +1164,70 @@ def _peer_stream_spawn(peer_cfg: Path, peer_state: Path, peer_claude_dir: Path):
     return _spawn
 
 
+def _fake_ssh_forwarding_script(peer_cfg: Path, peer_state: Path, peer_claude_dir: Path) -> str:
+    """Source for a literal `ssh` executable — installed first on `$PATH` so
+    `camp.host.transport`'s real `default_runner`/`default_stream_spawner`
+    invoke it exactly as they would invoke real `ssh`. It ignores every ssh
+    option and the destination, extracts the remote camp invocation from its
+    own last argv element (the same parse `_peer_runner`/`_peer_stream_spawn`
+    apply to the argv they receive directly), and runs it as a real
+    dispatcher subprocess against the peer's isolated config/state/harness
+    store — so `camp transfer`, invoked exactly as the operator invokes it,
+    reaches a real peer without a real network hop."""
+    return textwrap.dedent(
+        f"""\
+        #!/usr/bin/env python3
+        import os
+        import shlex
+        import subprocess
+        import sys
+
+        _PEER_ENV = {{
+            "CAMP_CONFIG_DIR": {str(peer_cfg)!r},
+            "CAMP_STATE_DIR": {str(peer_state)!r},
+            "TRAILHEAD_CLAUDE_DIR": {str(peer_claude_dir)!r},
+        }}
+        _PLUGIN_DIR = {str(_PLUGIN_DIR)!r}
+
+        remote_command = sys.argv[-1]
+        camp_args = shlex.split(remote_command)[1:]
+        script = (
+            "import sys\\n"
+            "sys.path.insert(0, " + repr(_PLUGIN_DIR) + ")\\n"
+            "sys.argv = ['camp'] + " + repr(camp_args) + "\\n"
+            "from camp.cli import dispatch\\n"
+            "dispatch.main()\\n"
+        )
+        env = dict(os.environ)
+        env.update(_PEER_ENV)
+        stdin_bytes = sys.stdin.buffer.read()
+        proc = subprocess.run(
+            [sys.executable, "-c", script],
+            input=stdin_bytes,
+            capture_output=True,
+            env=env,
+        )
+        sys.stdout.buffer.write(proc.stdout)
+        sys.stderr.buffer.write(proc.stderr)
+        sys.exit(proc.returncode)
+        """
+    )
+
+
+def _install_fake_ssh(bin_dir: Path, peer_cfg: Path, peer_state: Path, peer_claude_dir: Path) -> None:
+    """Writes a literal `ssh` executable into *bin_dir*, forwarding to the
+    peer described by *peer_cfg*/*peer_state*/*peer_claude_dir*. The caller
+    is responsible for putting *bin_dir* first on the subprocess `PATH`."""
+    import stat
+
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    script = bin_dir / "ssh"
+    script.write_text(
+        _fake_ssh_forwarding_script(peer_cfg, peer_state, peer_claude_dir), encoding="utf-8"
+    )
+    script.chmod(script.stat().st_mode | stat.S_IEXEC)
+
+
 def _move_group(sender_repo: Path) -> dict:
     return {
         "group": {"name": "testgroup"},
@@ -1323,9 +1387,10 @@ def _run_camp(env: dict[str, str], *camp_args: str) -> subprocess.CompletedProce
 
 @pytest.fixture()
 def conv_env(move_env, tmp_path: Path):
-    """`move_env` plus a real config+harness-store for the SENDER (so the
-    slice's boundary — the sender keeps its own resumable copy — can be
-    checked through the CLI too) and the harness/tmux shim on both sides."""
+    """`move_env` plus a real config+harness-store for the SENDER (so what
+    the sender's own recoverable listing and resume path show — before and
+    after the handover commits — can be checked through the CLI too) and the
+    harness/tmux shim on both sides."""
     g = move_env
 
     sender_cfg = tmp_path / "sender-config"
@@ -1355,6 +1420,164 @@ def conv_env(move_env, tmp_path: Path):
         "sender_shim": sender_shim,
         "peer_shim": peer_shim,
     }
+
+
+@pytest.fixture()
+def e2e_env(conv_env, tmp_path: Path):
+    """`conv_env` wired so `camp transfer` itself — not `move_workspace`
+    imported directly — is the thing under test: the sender's own group
+    config declares `excluded` (preflight check 10, otherwise refused
+    before anything moves), hosts.toml declares both ends, a real `ssh`
+    executable is installed first on the sender's `$PATH` so
+    `camp.host.transport`'s real transport reaches the real peer subprocess
+    (see `_install_fake_ssh`), and the sender's own manifest starts owned by
+    itself — exactly the state an operator's workspace is in before running
+    `camp transfer`."""
+    c = conv_env
+
+    _write_group_toml(
+        c["sender_cfg"] / "groups",
+        "testgroup",
+        [("repo_a", str(c["sender_repo"]))],
+        excluded={"repo_a": []},
+    )
+    _write_hosts_toml(c["sender_cfg"], self_name="host-a", peers={"host-b": "fake-peer"})
+
+    from camp.group.manifest import manifest_path_for, write_central_manifest
+
+    write_central_manifest(
+        manifest_path_for("testgroup", c["slug"], env=c["sender_env"]), {"owner": "host-a"}
+    )
+
+    fake_ssh_dir = tmp_path / "fake-ssh-bin"
+    _install_fake_ssh(fake_ssh_dir, c["peer_cfg"], c["peer_state"], c["peer_claude_dir"])
+
+    sender_cli_env = dict(c["sender_cli_env"])
+    sender_cli_env["PATH"] = f"{fake_ssh_dir}{os.pathsep}{sender_cli_env['PATH']}"
+
+    return {**c, "sender_cli_env": sender_cli_env}
+
+
+def _seed_conversation(c: dict, *, session_id: str, marker: str) -> None:
+    """Writes one real transcript, with identifiable prior content, rooted
+    at the sender workspace root — in the sender's own real harness store —
+    without driving anything across. `camp transfer` itself (via
+    `_gather_conversations`/`_locate_transcript`) is what discovers and
+    crosses it in the tests that use this."""
+    from camp.group.manifest import workspace_dir
+    from trailhead.harness.claude_code import ClaudeCodeHarness
+
+    harness = ClaudeCodeHarness()
+    sender_ws_root = workspace_dir("testgroup", c["slug"], env=c["sender_env"]).resolve()
+    sender_claude_env = {"TRAILHEAD_CLAUDE_DIR": str(c["sender_claude_dir"])}
+    dest = harness.session_transcript_destination(session_id, sender_ws_root, env=sender_claude_env)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_text(
+        json.dumps({"type": "summary", "cwd": str(sender_ws_root)})
+        + "\n"
+        + json.dumps({"type": "user", "message": {"role": "user", "content": marker}})
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+class TestTransferEndToEndThroughTheRealEntryPath:
+    """`camp transfer` itself, invoked as a real subprocess exactly as the
+    operator invokes it, against a real peer reached through a real `ssh`
+    executable on `$PATH` (see `_install_fake_ssh`) — proving the whole
+    slice as one thing rather than through any imported module."""
+
+    def test_the_peers_record_the_senders_record_and_the_senders_offer_agree_in_one_run(
+        self, e2e_env
+    ):
+        """The slice's claim is that three things hold together after one
+        `camp transfer` run: the peer's own record names the peer, the
+        sender's own record names the peer (not this host's own alias for
+        it), and the sender's own recoverable listing no longer offers the
+        conversation that just crossed. Asserted from the one run, not
+        three separate ones."""
+        from camp.group.manifest import manifest_path_for, owner_of, read_central_manifest
+
+        c = e2e_env
+        session_id = "e0e00000-0000-4000-8000-0000000000e1"
+        _seed_conversation(c, session_id=session_id, marker="e2e-commit-marker-1")
+
+        result = _run_camp(
+            c["sender_cli_env"], "transfer", c["slug"], "--to", "host-b", "--group", "testgroup"
+        )
+        assert result.returncode == 0, result.stderr
+
+        peer_manifest = manifest_path_for("testgroup", c["slug"], env=c["peer_env"])
+        assert owner_of(read_central_manifest(peer_manifest)) == "host-b"
+
+        sender_manifest = manifest_path_for("testgroup", c["slug"], env=c["sender_env"])
+        assert owner_of(read_central_manifest(sender_manifest)) == "host-b"
+
+        sender_rows = _recoverable_rows(c["sender_cli_env"])
+        assert session_id not in {row["session_id"] for row in sender_rows}, sender_rows
+
+    def test_the_same_run_leaves_the_conversation_resumable_on_the_peer_with_its_prior_history(
+        self, e2e_env
+    ):
+        c = e2e_env
+        session_id = "e0e00000-0000-4000-8000-0000000000e2"
+        marker = "e2e-resumable-history-marker-2"
+        _seed_conversation(c, session_id=session_id, marker=marker)
+
+        result = _run_camp(
+            c["sender_cli_env"], "transfer", c["slug"], "--to", "host-b", "--group", "testgroup"
+        )
+        assert result.returncode == 0, result.stderr
+
+        peer_rows = _recoverable_rows(c["peer_cli_env"])
+        assert session_id in {row["session_id"] for row in peer_rows}, peer_rows
+
+        resume = _run_camp(c["peer_cli_env"], "launch", "--resume", session_id)
+        assert resume.returncode == 0, resume.stderr
+        assert resume.stdout.strip() == session_id, resume.stdout
+
+        from camp.group.manifest import workspace_dir
+        from trailhead.harness.claude_code import ClaudeCodeHarness
+
+        peer_ws_root = workspace_dir("testgroup", c["slug"], env=c["peer_env"]).resolve()
+        peer_transcript = ClaudeCodeHarness().session_transcript_path(
+            session_id, peer_ws_root, env=c["peer_env"]
+        )
+        assert peer_transcript is not None
+        assert marker in peer_transcript.read_text()
+
+    def test_completion_output_names_the_new_owner_and_each_conversations_new_home(
+        self, e2e_env
+    ):
+        c = e2e_env
+        session_id = "e0e00000-0000-4000-8000-0000000000e3"
+        _seed_conversation(c, session_id=session_id, marker="e2e-completion-marker-3")
+
+        result = _run_camp(
+            c["sender_cli_env"], "transfer", c["slug"], "--to", "host-b", "--group", "testgroup"
+        )
+        assert result.returncode == 0, result.stderr
+
+        assert "ownership moved to 'host-b'" in result.stdout
+        assert session_id in result.stdout
+        assert f"camp launch --resume {session_id}" in result.stdout
+        assert "released from this host — archived at" in result.stdout
+
+    def test_a_workspace_with_no_conversations_completes_the_handover_and_says_so(
+        self, e2e_env
+    ):
+        c = e2e_env
+
+        result = _run_camp(
+            c["sender_cli_env"], "transfer", c["slug"], "--to", "host-b", "--group", "testgroup"
+        )
+        assert result.returncode == 0, result.stderr
+        assert "no conversations are rooted in this workspace" in result.stdout
+
+        from camp.group.manifest import manifest_path_for, owner_of, read_central_manifest
+
+        peer_manifest = manifest_path_for("testgroup", c["slug"], env=c["peer_env"])
+        assert owner_of(read_central_manifest(peer_manifest)) == "host-b"
 
 
 def _cross_one_conversation(
@@ -1553,21 +1776,40 @@ class TestConversationResumesOnARealPeer:
             resume = _run_camp(c["peer_cli_env"], "launch", "--resume", row["session_id"])
             assert resume.returncode == 0, resume.stderr
 
-    def test_sending_host_keeps_ownership_and_its_own_resumable_copy(self, conv_env):
-        """The slice's boundary: the sender is unchanged by the move.
-        Ownership has not moved — camp names no `--overwrite`-style
-        transport toward the sender at all, this is a same-host check — and
-        the sender still holds a conversation that is BOTH listed as
-        recoverable AND accepted by its own resume path, exactly as the
-        peer's copy is. Asserted positively, not merely "no error"."""
+    def test_move_workspace_alone_claims_ownership_for_the_peer_but_leaves_release_and_the_flip_to_the_caller(
+        self, conv_env
+    ):
+        """Repair of the pre-handover test that asserted the sender "keeps
+        ownership" after a move — that framing is now wrong: `move_workspace`
+        itself drives `claim`, so by the time it returns the PEER's own
+        record already names the peer as owner (asserted directly here,
+        never inferred). What is still true, and is the actual boundary this
+        test now pins, is that `move_workspace` alone is not the whole verb:
+        it never calls `release_conversations` or `flip_sender_ownership` —
+        those are `camp transfer`'s CLI-layer job, run only after
+        `move_workspace` returns (see `TestTransferEndToEndThroughTheRealEntryPath`
+        for the full verb's end state). So immediately after `move_workspace`
+        returns, the sender still physically holds a resumable copy of the
+        conversation — asserted positively, exactly as the original test
+        did. This is not a weaker claim than the original: it adds the
+        peer-ownership assertion the original omitted entirely (proving
+        ownership already moved, contradicting the original's framing), and
+        keeps the "still resumable on the sender" claim scoped to the one
+        layer where it is actually still true."""
         from pathlib import PurePosixPath
+
+        from camp.group.manifest import manifest_path_for, owner_of, read_central_manifest
 
         c = conv_env
         session_id = "55555555-5555-4555-8555-555555555555"
 
-        _cross_one_conversation(
+        result, _phases, _dest = _cross_one_conversation(
             c, session_id=session_id, subpath=PurePosixPath("."), marker="sender-unchanged-marker"
         )
+
+        assert result.claimed_owner == "host-b"
+        peer_manifest = manifest_path_for("testgroup", c["slug"], env=c["peer_env"])
+        assert owner_of(read_central_manifest(peer_manifest)) == "host-b"
 
         sender_rows = _recoverable_rows(c["sender_cli_env"])
         assert session_id in {row["session_id"] for row in sender_rows}, sender_rows
