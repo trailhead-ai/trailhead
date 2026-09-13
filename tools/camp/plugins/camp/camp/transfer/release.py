@@ -59,7 +59,14 @@ per-conversation report.
 `ARCHIVED` outcome appends one entry — session id, archive path, timestamp —
 to `<archive_dir>/.release-marker.json`, read back by
 `read_release_marker`. Never written for `ALREADY_ARCHIVED` (nothing new
-happened) or `FAILED` (nothing moved).
+happened) or `FAILED` (nothing moved). The append's own read-modify-write
+is serialized by the workspace's `reconcile_lock` (see `_append_marker`),
+the same lock `flip_sender_ownership` below takes on the same workspace —
+this call site is not the marker's only writer (a post-commit failure
+branch archives too), so the exclusion is load-bearing, not defensive. A
+write that cannot take the lock is reported `FAILED` for that
+conversation rather than silently dropping the entry or corrupting the
+file.
 
 **`flip_sender_ownership` is the sender's last write of the whole verb.**
 Called by the CLI only after `release_conversations` has returned — every
@@ -133,27 +140,42 @@ def _marker_path(root: Path) -> Path:
     return root / _MARKER_FILENAME
 
 
-def _append_marker(root: Path, entry: dict[str, Any]) -> None:
+def _append_marker(
+    root: Path, entry: dict[str, Any], *, group: str, slug: str, env: dict[str, str] | None = None
+) -> None:
     """Append one entry to the archive's durable marker. Called only
-    immediately after the move it records has already succeeded."""
-    root.mkdir(parents=True, exist_ok=True)
-    path = _marker_path(root)
+    immediately after the move it records has already succeeded.
 
-    existing: list[dict[str, Any]] = []
-    if path.is_file():
-        try:
-            raw = json.loads(path.read_text(encoding="utf-8"))
-            if isinstance(raw, list):
-                existing = raw
-        except (OSError, json.JSONDecodeError):
-            existing = []
+    The read-modify-write is wrapped in the SAME `reconcile_lock` this
+    workspace's manifest write already takes (see `flip_sender_ownership`
+    below) — keyed on `workspace_dir(group, slug)`, never on the archive
+    root itself, so a marker append and a manifest mutation on the same
+    workspace serialize on the one lock a workspace owns. This is what
+    makes a second concurrent append survive rather than losing an entry
+    through the unlocked window this function used to have.
+    """
+    from ..group.manifest import reconcile_lock, workspace_dir
 
-    existing.append(entry)
+    ws_dir = workspace_dir(group, slug, env=env)
+    with reconcile_lock(ws_dir):
+        root.mkdir(parents=True, exist_ok=True)
+        path = _marker_path(root)
 
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(existing), encoding="utf-8")
-    os.chmod(tmp, 0o600)
-    os.replace(tmp, path)
+        existing: list[dict[str, Any]] = []
+        if path.is_file():
+            try:
+                raw = json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(raw, list):
+                    existing = raw
+            except (OSError, json.JSONDecodeError):
+                existing = []
+
+        existing.append(entry)
+
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(existing), encoding="utf-8")
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, path)
 
 
 def read_release_marker(
@@ -253,14 +275,29 @@ def release_conversations(
             )
             continue
 
-        _append_marker(
-            root,
-            {
-                "session_id": session_id,
-                "archive_path": str(dest),
-                "at": datetime.now(timezone.utc).isoformat(),
-            },
-        )
+        try:
+            _append_marker(
+                root,
+                {
+                    "session_id": session_id,
+                    "archive_path": str(dest),
+                    "at": datetime.now(timezone.utc).isoformat(),
+                },
+                group=group,
+                slug=slug,
+                env=env,
+            )
+        except OSError as e:
+            results.append(
+                ConversationRelease(
+                    session_id=session_id,
+                    outcome=ReleaseOutcome.FAILED,
+                    archive_path=None,
+                    detail=f"archived but could not record the durable marker: {e}",
+                )
+            )
+            continue
+
         results.append(
             ConversationRelease(
                 session_id=session_id, outcome=ReleaseOutcome.ARCHIVED, archive_path=dest

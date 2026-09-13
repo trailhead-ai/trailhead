@@ -45,6 +45,8 @@ from __future__ import annotations
 
 import os
 import sys
+import threading
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -557,3 +559,149 @@ def test_empty_conversation_pool_releases_cleanly_with_no_archive_directory(
     assert results == ()
     assert not archive_dir("g", "ws", env=env).exists()
     assert read_release_marker("g", "ws", env=env) == ()
+
+
+# ---------------------------------------------------------------------------
+# the durable marker's mutual exclusion across more than one writer
+# ---------------------------------------------------------------------------
+
+
+def test_normal_sequential_release_writes_marker_entries_in_call_order(
+    tmp_path: Path,
+) -> None:
+    from camp.transfer.release import read_release_marker, release_conversations
+
+    env = _env(tmp_path)
+    source_root = tmp_path / "harness-store"
+    source_root.mkdir()
+    transcript_a = _seed_transcript(source_root, _UUID_A, b"a\n")
+    session_c = "cccccccc-3333-4333-8333-333333333333"
+    transcript_c = _seed_transcript(source_root, session_c, b"c\n")
+
+    def _locate(session_id: str, root: Path) -> Path:
+        return {_UUID_A: transcript_a, session_c: transcript_c}[session_id]
+
+    release_conversations(
+        group="g",
+        slug="ws",
+        workspace_root=tmp_path / "ws",
+        conversations=(_crossed(_UUID_A), _crossed(session_c)),
+        locate_transcript=_locate,
+        env=env,
+    )
+
+    marker = read_release_marker("g", "ws", env=env)
+    assert [entry["session_id"] for entry in marker] == [_UUID_A, session_c]
+
+
+def test_two_appends_racing_across_a_real_contention_window_both_survive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A real contention window, not an ordering assertion: the first
+    append's real production write is paused mid-flight, between its own
+    read of the marker and its own write of it, while the second append's
+    real production call is landed inside that window from a second thread.
+    Neither entry may be lost."""
+    from camp.transfer import release as release_module
+    from camp.transfer.release import read_release_marker, release_conversations
+
+    env = _env(tmp_path)
+    source_root = tmp_path / "harness-store"
+    source_root.mkdir()
+    transcript_a = _seed_transcript(source_root, _UUID_A, b"first\n")
+    transcript_b = _seed_transcript(source_root, _UUID_B, b"second\n")
+
+    in_window = threading.Event()
+    release_write = threading.Event()
+    order: list[str] = []
+    order_lock = threading.Lock()
+
+    real_dumps = release_module.json.dumps
+    paused = {"done": False}
+
+    def _paused_dumps(data):
+        if not paused["done"]:
+            paused["done"] = True
+            in_window.set()
+            assert release_write.wait(timeout=5), "second append never attempted to land"
+        return real_dumps(data)
+
+    monkeypatch.setattr(release_module.json, "dumps", _paused_dumps)
+
+    def _append_a() -> None:
+        release_conversations(
+            group="g",
+            slug="ws",
+            workspace_root=tmp_path / "ws",
+            conversations=(_crossed(_UUID_A),),
+            locate_transcript=lambda sid, root: transcript_a,
+            env=env,
+        )
+        with order_lock:
+            order.append("a-wrote")
+
+    thread_a = threading.Thread(target=_append_a)
+    thread_a.start()
+    assert in_window.wait(timeout=5), "first append never reached its window"
+
+    def _append_b() -> None:
+        release_conversations(
+            group="g",
+            slug="ws",
+            workspace_root=tmp_path / "ws",
+            conversations=(_crossed(_UUID_B),),
+            locate_transcript=lambda sid, root: transcript_b,
+            env=env,
+        )
+        with order_lock:
+            order.append("b-wrote")
+
+    thread_b = threading.Thread(target=_append_b)
+    thread_b.start()
+
+    time.sleep(0.3)
+    with order_lock:
+        assert order == [], "second append landed before the first released the lock"
+
+    release_write.set()
+    thread_a.join(timeout=5)
+    thread_b.join(timeout=5)
+    assert not thread_a.is_alive()
+    assert not thread_b.is_alive()
+
+    marker = read_release_marker("g", "ws", env=env)
+    ids = {entry["session_id"] for entry in marker}
+    assert ids == {_UUID_A, _UUID_B}, marker
+
+
+def test_append_that_cannot_take_the_exclusion_is_reported_failed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import camp.group.manifest as manifest_module
+    from camp.transfer.release import ReleaseOutcome, read_release_marker, release_conversations
+
+    env = _env(tmp_path)
+    source_root = tmp_path / "harness-store"
+    source_root.mkdir()
+    transcript = _seed_transcript(source_root, _UUID_A, b"locked out\n")
+
+    def _boom(ws_dir):
+        raise OSError("simulated lock acquisition failure")
+
+    monkeypatch.setattr(manifest_module, "reconcile_lock", _boom)
+
+    results = release_conversations(
+        group="g",
+        slug="ws",
+        workspace_root=tmp_path / "ws",
+        conversations=(_crossed(_UUID_A),),
+        locate_transcript=lambda sid, root: transcript,
+        env=env,
+    )
+
+    assert results[0].outcome is ReleaseOutcome.FAILED
+    assert results[0].outcome is not ReleaseOutcome.ARCHIVED
+    assert results[0].detail
+
+    marker = read_release_marker("g", "ws", env=env)
+    assert marker == ()
