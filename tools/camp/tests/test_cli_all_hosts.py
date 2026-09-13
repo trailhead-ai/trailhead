@@ -2058,6 +2058,42 @@ def test_doctor_account_several_declared_one_lapsed_stable_order(
     )
 
 
+def test_doctor_account_several_declared_one_lapsed_stable_order_human(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """The same state, on the human render path: a stable, diffable order
+    across two runs, with the lapsed account's own WARN line among two
+    PASS lines."""
+    _doctor_hosts_env(tmp_path, monkeypatch, "[hosts.andromeda]\n")
+    transport = _transport_module()
+    accounts = [
+        {"account": "acct-a", "verdict": "authenticated", "reason": None},
+        {"account": "acct-b", "verdict": "not-authenticated", "reason": None},
+        {"account": "acct-c", "verdict": "authenticated", "reason": None},
+    ]
+    monkeypatch.setattr(
+        transport, "run_camp", lambda host, remote_argv, **kw: _probe_answered_accounts(accounts)
+    )
+
+    orders = []
+    for _ in range(2):
+        code = _run(monkeypatch, ["doctor", "-a"])
+        out = capsys.readouterr().out
+        assert code == 0
+        account_lines = [
+            line.strip()
+            for line in out.splitlines()
+            if any(acct in line for acct in ("acct-a", "acct-b", "acct-c"))
+        ]
+        assert len(account_lines) == 3
+        orders.append(account_lines)
+
+    assert orders[0] == orders[1], "the rendered account order must be diffable across runs"
+    assert orders[0][0].startswith("[PASS]") and "acct-a" in orders[0][0]
+    assert orders[0][1].startswith("[WARN]") and "acct-b" in orders[0][1]
+    assert orders[0][2].startswith("[PASS]") and "acct-c" in orders[0][2]
+
+
 def test_doctor_account_not_authenticated_renders_warn_never_down(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
@@ -2133,6 +2169,32 @@ def test_doctor_account_cannot_tell_is_its_own_token_wording_implies_no_credenti
         assert word not in account_row["detail"]
 
 
+def test_doctor_account_cannot_tell_is_its_own_token_wording_implies_no_credential_problem_human(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """The same state, on the human render path: its own token — distinct
+    from PASS/WARN/DOWN — and wording that never implies a credential
+    problem."""
+    _doctor_hosts_env(tmp_path, monkeypatch, "[hosts.andromeda]\n")
+    transport = _transport_module()
+    monkeypatch.setattr(
+        transport,
+        "run_camp",
+        lambda host, remote_argv, **kw: _probe_answered_accounts(
+            [{"account": "acct-x", "verdict": "cannot-tell", "reason": None}]
+        ),
+    )
+
+    code = _run(monkeypatch, ["doctor", "-a"])
+    lines = capsys.readouterr().out.splitlines()
+    assert code == 0
+    account_line = next(line for line in lines if "acct-x" in line)
+    token = account_line.strip().split("]")[0].lstrip("[")
+    assert token not in {"PASS", "WARN", "DOWN"}
+    for word in ("not authenticated", "log in", "invalid", "expired"):
+        assert word not in account_line
+
+
 def test_doctor_account_far_camp_omitting_the_field_renders_unavailable_not_unauthenticated(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
@@ -2155,6 +2217,35 @@ def test_doctor_account_far_camp_omitting_the_field_renders_unavailable_not_unau
     assert len(account_rows) == 1
     assert account_rows[0]["verdict"] != "WARN"
     assert "not authenticated" not in account_rows[0]["detail"]
+
+
+def test_doctor_account_far_camp_omitting_the_field_renders_unavailable_not_unauthenticated_human(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """The same state, on the human render path: a far camp that omits the
+    accounts field renders as unavailable rather than unauthenticated."""
+    _doctor_hosts_env(tmp_path, monkeypatch, "[hosts.andromeda]\n")
+    transport = _transport_module()
+    monkeypatch.setattr(
+        transport,
+        "run_camp",
+        lambda host, remote_argv, **kw: _probe_answered_accounts(None),
+    )
+
+    code = _run(monkeypatch, ["doctor", "-a"])
+    lines = capsys.readouterr().out.splitlines()
+    assert code == 0
+    header_index = lines.index("  andromeda:")
+    andromeda_block = []
+    for line in lines[header_index + 1 :]:
+        if not line.startswith("    "):
+            break
+        andromeda_block.append(line)
+    account_lines = [line for line in andromeda_block if "default account" in line]
+    assert len(account_lines) == 1
+    token = account_lines[0].strip().split("]")[0].lstrip("[")
+    assert token != "WARN"
+    assert "not authenticated" not in account_lines[0]
 
 
 def test_doctor_account_capability_failure_preserves_reachability_and_other_hosts(
@@ -2237,6 +2328,31 @@ def test_doctor_account_unreachable_machine_renders_no_account_lines(
     andromeda_rows = [h for h in report["hosts"] if h["host"] == "andromeda"]
     assert len(andromeda_rows) == 1
     assert andromeda_rows[0]["verdict"] == "DOWN"
+
+
+def test_doctor_account_unreachable_machine_renders_no_account_lines_human(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """The same state, on the human render path: a machine that never
+    answered contributes exactly its one reachability line beneath its
+    header, and no account lines at all."""
+    _doctor_hosts_env(tmp_path, monkeypatch, "[hosts.andromeda]\n")
+    transport = _transport_module()
+    monkeypatch.setattr(
+        transport, "run_camp", lambda host, remote_argv, **kw: transport.Unreachable(reason="x")
+    )
+
+    code = _run(monkeypatch, ["doctor", "-a"])
+    lines = capsys.readouterr().out.splitlines()
+    assert code == 0
+    header_index = lines.index("  andromeda:")
+    andromeda_block = []
+    for line in lines[header_index + 1 :]:
+        if not line.startswith("    "):
+            break
+        andromeda_block.append(line)
+    assert len(andromeda_block) == 1
+    assert andromeda_block[0].strip().startswith("[DOWN]")
 
 
 def test_doctor_account_human_render_groups_several_facts_under_one_header(
@@ -2470,6 +2586,76 @@ def test_doctor_account_null_verdict_failure_and_cannot_tell_render_different_to
 # Council fix 1 — every remote-authored account string is stripped of
 # control sequences before it reaches a rendered line.
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# An unrecognized verdict string routes to the cannot-tell token, never to
+# WARN — WARN asserts an actionable credential problem, and a verdict this
+# renderer does not recognize is by definition a thing it cannot tell
+# anything about.
+# ---------------------------------------------------------------------------
+
+
+def test_doctor_account_unrecognized_verdict_routes_to_cannot_tell_json(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """A verdict string outside the closed vocabulary must never be read as
+    an actionable credential problem — it routes to the same token as
+    cannot-tell, not to WARN."""
+    _doctor_hosts_env(tmp_path, monkeypatch, "[hosts.andromeda]\n[hosts.lookout]\n")
+    transport = _transport_module()
+
+    def fake_run_camp(host, remote_argv, **kw):
+        if host.ssh == "andromeda":
+            return _probe_answered_accounts(
+                [{"account": "acct-x", "verdict": "some-future-verdict", "reason": None}]
+            )
+        return _probe_answered_accounts(
+            [{"account": "acct-y", "verdict": "cannot-tell", "reason": None}]
+        )
+
+    monkeypatch.setattr(transport, "run_camp", fake_run_camp)
+
+    code = _run(monkeypatch, ["doctor", "-a", "--json"])
+    report = json.loads(capsys.readouterr().out)
+    assert code == 0
+    unrecognized_row = next(
+        h for h in report["hosts"] if h["host"] == "andromeda" and "acct-x" in h["detail"]
+    )
+    cannot_tell_row = next(
+        h for h in report["hosts"] if h["host"] == "lookout" and "acct-y" in h["detail"]
+    )
+    assert unrecognized_row["verdict"] != "WARN"
+    assert unrecognized_row["verdict"] == cannot_tell_row["verdict"]
+
+
+def test_doctor_account_unrecognized_verdict_routes_to_cannot_tell_human(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """The same routing, on the human render path."""
+    _doctor_hosts_env(tmp_path, monkeypatch, "[hosts.andromeda]\n[hosts.lookout]\n")
+    transport = _transport_module()
+
+    def fake_run_camp(host, remote_argv, **kw):
+        if host.ssh == "andromeda":
+            return _probe_answered_accounts(
+                [{"account": "acct-x", "verdict": "some-future-verdict", "reason": None}]
+            )
+        return _probe_answered_accounts(
+            [{"account": "acct-y", "verdict": "cannot-tell", "reason": None}]
+        )
+
+    monkeypatch.setattr(transport, "run_camp", fake_run_camp)
+
+    code = _run(monkeypatch, ["doctor", "-a"])
+    lines = capsys.readouterr().out.splitlines()
+    assert code == 0
+    unrecognized_line = next(line for line in lines if "acct-x" in line)
+    cannot_tell_line = next(line for line in lines if "acct-y" in line)
+    unrecognized_token = unrecognized_line.strip().split("]")[0].lstrip("[")
+    cannot_tell_token = cannot_tell_line.strip().split("]")[0].lstrip("[")
+    assert unrecognized_token != "WARN"
+    assert unrecognized_token == cannot_tell_token
 
 
 def test_doctor_account_control_sequences_are_stripped_before_rendering(
