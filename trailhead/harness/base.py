@@ -34,6 +34,7 @@ See ``docs/vision.md``.
 
 from __future__ import annotations
 
+import enum
 import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -133,6 +134,22 @@ class AccountIdentity:
                 f"character {found.group()!r}. An identity is printed verbatim "
                 "to a terminal and may never carry a control or escape sequence."
             )
+
+
+class AccountAuthentication(enum.Enum):
+    """Whether an account can authenticate — three-valued by construction.
+
+    A plain ``bool`` (or ``Optional[bool]``) makes "cannot tell" representable
+    only as ``None``/``False`` under a truthiness test, so a caller who forgets
+    to special-case it silently reads "cannot tell" as "not authenticated" —
+    exactly the confident wrong answer this seam exists to remove. An enum
+    member has no truthiness a caller can fall back on by accident: every
+    caller must name the member it means.
+    """
+
+    AUTHENTICATED = "authenticated"
+    NOT_AUTHENTICATED = "not-authenticated"
+    CANNOT_TELL = "cannot-tell"
 
 
 @dataclass(frozen=True)
@@ -657,6 +674,39 @@ class Harness(ABC):
         Returns ``None`` only from this base default.
         """
         return None
+
+    def session_launch_account_authentication(
+        self, account: str | None, *, env: dict[str, str] | None = None
+    ) -> AccountAuthentication:
+        """Whether the account a launch with *account* lands on is authenticated.
+
+        ``account`` carries the same meaning as on
+        :meth:`session_launch_env_set`: an opaque, harness-neutral string the
+        caller declared, or ``None`` for "nothing declared — resolve the
+        harness's own default". ``None`` resolves to the harness's own
+        default rather than inheriting whatever the ambient environment
+        happens to carry — the same posture :meth:`session_launch_env_set`
+        takes on the same input.
+
+        Every other seam on this class answers ``None`` for "this harness has
+        no such concept" — but ``None`` is exactly the collapse
+        :class:`AccountAuthentication` exists to make impossible to write by
+        accident, so this method departs from that convention deliberately:
+        the base default is :attr:`AccountAuthentication.CANNOT_TELL`, not
+        ``None``. Here, "no such concept" and "cannot tell" are the same
+        honest answer — a harness with nothing to say about authentication
+        genuinely cannot tell whether an account is authenticated — so a
+        caller renders them identically rather than having to treat a missing
+        capability as a separate case from an unreadable signal.
+
+        Never prompts, never blocks on a network call, and never spawns an
+        interactive process: a concrete override answers from a signal already
+        at rest, not one it goes and fetches.
+
+        Returns :attr:`AccountAuthentication.CANNOT_TELL` only from this base
+        default.
+        """
+        return AccountAuthentication.CANNOT_TELL
 
     def session_enumerate(self, workspace: Path | None = None) -> list[str] | None:
         """Return the argv that lists this harness's live sessions, or ``None``.

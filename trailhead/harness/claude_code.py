@@ -100,6 +100,7 @@ from typing import BinaryIO
 
 from trailhead.harness.base import (
     MODALITY_TTY_REQUIRED,
+    AccountAuthentication,
     AccountIdentity,
     Harness,
     HarnessError,
@@ -294,6 +295,14 @@ _CONFIG_FILENAME = ".claude.json"
 _CLEANUP_PERIOD_KEY = "cleanupPeriodDays"
 _DEFAULT_CLEANUP_PERIOD_DAYS = 30
 
+#: The OAuth credentials file inside an account's config dir — the
+#: authentication signal :meth:`ClaudeCodeHarness.session_launch_account_authentication`
+#: reads. Lives inside the config dir for BOTH a declared account and the
+#: default (unlike ``.claude.json``, which for the default splits off to
+#: ``$HOME`` — see ``claude_config_file``'s docstring), so one resolution
+#: serves both branches.
+_CREDENTIALS_FILENAME = ".credentials.json"
+
 _TOOL_DESCRIPTIONS: dict[str, str] = {
     "lore": (
         "Portable knowledge-management plugin: session lifecycle, capture skills, and vault recall."
@@ -353,6 +362,66 @@ def _claude_dir(env: dict[str, str]) -> Path:
     home = env.get("HOME") or env.get("USERPROFILE")
     base = Path(home) if home else Path.home()
     return base / ".claude"
+
+
+def _default_account_credentials_dir(env: Mapping[str, str]) -> Path:
+    """Resolve the DEFAULT account's config dir for reading credentials.
+
+    Same precedence as :func:`claude_config_file` — ``CLAUDE_CONFIG_DIR`` then
+    ``HOME``/``USERPROFILE``, falling back to the real home — and, like that
+    function, DELIBERATELY not ``TRAILHEAD_CLAUDE_DIR``: that variable is a
+    trailhead-only test seam Claude Code has never heard of, and the real
+    launched process never reads it for the default account (see
+    :func:`claude_config_file` and ``session_launch_account_identity``'s
+    anti-divergence pin). Reading credentials through ``_claude_dir`` here
+    would report on a directory the actual session never touches.
+
+    Unlike ``claude_config_file``, the fallback appends ``.claude`` rather
+    than resolving to a bare ``HOME``-level file: the credentials file lives
+    INSIDE the config dir for the default account too (only ``.claude.json``
+    splits off to sit beside it).
+    """
+    config_dir = env.get("CLAUDE_CONFIG_DIR")
+    if config_dir:
+        return Path(config_dir)
+    home = env.get("HOME") or env.get("USERPROFILE")
+    base = Path(home) if home else Path.home()
+    return base / ".claude"
+
+
+def _read_account_authentication(config_dir: Path) -> AccountAuthentication:
+    """The U1 signal: one file read plus one JSON parse, sub-millisecond.
+
+    Non-empty ``claudeAiOauth.accessToken`` means authenticated. A missing
+    credentials file, a missing ``claudeAiOauth`` key, or an empty token mean
+    not authenticated — the account has no live credential, which is a plain,
+    knowable fact. An unreadable file (permissions, a locked network mount)
+    or a file that fails to parse as JSON mean CANNOT_TELL: the signal exists
+    but could not be read, which is a genuinely different fact from "no
+    credential" and must never collapse into it.
+
+    Never spawns a subprocess, never touches the network, and never blocks on
+    anything beyond a local filesystem read — a stat plus a bounded read of
+    an already-at-rest file.
+    """
+    path = config_dir / _CREDENTIALS_FILENAME
+    try:
+        raw = path.read_text()
+    except FileNotFoundError:
+        return AccountAuthentication.NOT_AUTHENTICATED
+    except OSError:
+        return AccountAuthentication.CANNOT_TELL
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return AccountAuthentication.CANNOT_TELL
+    oauth = data.get("claudeAiOauth") if isinstance(data, dict) else None
+    if not isinstance(oauth, dict):
+        return AccountAuthentication.NOT_AUTHENTICATED
+    token = oauth.get("accessToken")
+    if isinstance(token, str) and token:
+        return AccountAuthentication.AUTHENTICATED
+    return AccountAuthentication.NOT_AUTHENTICATED
 
 
 def _refuse_conflicting_config_dirs(env: Mapping[str, str]) -> None:
@@ -1203,6 +1272,37 @@ class ClaudeCodeHarness(Harness):
             binding = self.session_launch_env_set(account, env=env)
             config_file = claude_config_file(binding)
         return AccountIdentity(label=str(config_file), has_config=config_file.exists())
+
+    def session_launch_account_authentication(
+        self, account: str | None, *, env: dict[str, str] | None = None
+    ) -> AccountAuthentication:
+        """Read authentication from the account's credentials file (U1).
+
+        For a declared account, reuses :meth:`session_launch_env_set` to find
+        the config dir — the same resolution the launch binding itself uses,
+        so a declaration that binding would refuse (a relative path, a
+        control character, a conflicting ``TRAILHEAD_CLAUDE_DIR`` /
+        ``CLAUDE_CONFIG_DIR`` pair) raises here too, rather than reporting an
+        authentication verdict for an account the launch would never bind to.
+
+        For the default (``account=None``), resolves through
+        :func:`_default_account_credentials_dir` — the same
+        ``CLAUDE_CONFIG_DIR`` → ``HOME``/``USERPROFILE`` → real-home
+        precedence :func:`claude_config_file` uses, and deliberately not
+        ``_claude_dir``, for the same reason
+        :meth:`session_launch_account_identity` avoids it: ``_claude_dir``
+        honors ``TRAILHEAD_CLAUDE_DIR``, a trailhead-only test seam the real
+        launched session never reads for the default account.
+
+        See :func:`_read_account_authentication` for the signal itself.
+        """
+        source = env if env is not None else dict(os.environ)
+        if account is None:
+            config_dir = _default_account_credentials_dir(source)
+        else:
+            binding = self.session_launch_env_set(account, env=source)
+            config_dir = Path(binding["CLAUDE_CONFIG_DIR"])
+        return _read_account_authentication(config_dir)
 
     def session_enumerate(self, workspace: Path | None = None) -> list[str]:
         """Return ``["claude", "agents", "--json"]``, plus ``--cwd <workspace>``.

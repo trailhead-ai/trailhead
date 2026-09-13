@@ -23,6 +23,7 @@ from trailhead.harness.base import (
     MODALITIES,
     MODALITY_TTY_REQUIRED,
     UNSUPPORTED_RULESET_NOTICE,
+    AccountAuthentication,
     AccountIdentity,
     SessionRecord,
 )
@@ -798,6 +799,23 @@ class TestAccountIdentityBaseDefault:
 
     def test_none_for_no_declaration(self):
         assert _BareHarness().session_launch_account_identity(None) is None
+
+
+class TestAccountAuthenticationBaseDefault:
+    """The base class answers CANNOT_TELL for account-authentication — varied
+    across both the declared-account and no-declaration inputs, since a
+    harness with no authentication concept has nothing to say about either.
+    CANNOT_TELL, never ``None``: the whole point of the enum is that a
+    caller cannot collapse "no such concept" into "not authenticated" by
+    forgetting a branch, the way a bare ``None``/``False`` would let them."""
+
+    def test_cannot_tell_for_a_declared_account(self):
+        result = _BareHarness().session_launch_account_authentication("/somewhere")
+        assert result is AccountAuthentication.CANNOT_TELL
+
+    def test_cannot_tell_for_no_declaration(self):
+        result = _BareHarness().session_launch_account_authentication(None)
+        assert result is AccountAuthentication.CANNOT_TELL
 
 
 class TestAccountIdentityForbidsControlCharacters:
