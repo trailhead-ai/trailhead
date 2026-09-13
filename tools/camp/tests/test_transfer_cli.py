@@ -1779,23 +1779,18 @@ class TestConversationResumesOnARealPeer:
     def test_move_workspace_alone_claims_ownership_for_the_peer_but_leaves_release_and_the_flip_to_the_caller(
         self, conv_env
     ):
-        """Repair of the pre-handover test that asserted the sender "keeps
-        ownership" after a move — that framing is now wrong: `move_workspace`
-        itself drives `claim`, so by the time it returns the PEER's own
-        record already names the peer as owner (asserted directly here,
-        never inferred). What is still true, and is the actual boundary this
-        test now pins, is that `move_workspace` alone is not the whole verb:
-        it never calls `release_conversations` or `flip_sender_ownership` —
-        those are `camp transfer`'s CLI-layer job, run only after
-        `move_workspace` returns (see `TestTransferEndToEndThroughTheRealEntryPath`
-        for the full verb's end state). So immediately after `move_workspace`
-        returns, the sender still physically holds a resumable copy of the
-        conversation — asserted positively, exactly as the original test
-        did. This is not a weaker claim than the original: it adds the
-        peer-ownership assertion the original omitted entirely (proving
-        ownership already moved, contradicting the original's framing), and
-        keeps the "still resumable on the sender" claim scoped to the one
-        layer where it is actually still true."""
+        """`move_workspace` drives `claim`, so by the time it returns the
+        peer's own record already names the peer as owner — asserted
+        directly here, never inferred.
+
+        `move_workspace` alone is not the whole verb: it never calls
+        `release_conversations` or `flip_sender_ownership`. Those are
+        `camp transfer`'s CLI-layer job, run only after `move_workspace`
+        returns, so immediately after it returns the sender still holds a
+        resumable copy of the conversation. That boundary — ownership
+        already moved, release not yet run — is what this test pins. See
+        `TestTransferEndToEndThroughTheRealEntryPath` for the full verb's
+        end state."""
         from pathlib import PurePosixPath
 
         from camp.group.manifest import manifest_path_for, owner_of, read_central_manifest
