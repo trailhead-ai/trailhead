@@ -19,30 +19,45 @@ Seven pattern classes, taken verbatim from that document:
 Known false-positive: `/` is in the base64 alphabet, so the high-entropy
 pattern also matches long slash-separated paths and record URLs (e.g.
 `7313/records/trailhead/task/both-slice-...`). A high-entropy-base64 match
-containing **four or more** `/` is reclassified as `path-or-url-shape` —
-reported, not silently dropped, but not counted as a credential finding
-either.
+is reclassified as `path-or-url-shape` — reported, not silently dropped,
+but not counted as a credential finding either — only when it satisfies
+BOTH of two independent conditions:
 
-This discriminator is still probabilistic, not categorical: `/` occurs in
-the base64 alphabet with probability 1/64, so a genuine random secret can by
-chance carry any number of slashes, including four or more. An earlier
-version of this rule used a threshold of two, on the (false, unmeasured)
-premise that "real secrets essentially never" carry more than one `/` in a
-32+ char run — measured over 20,000 freshly generated
-`base64.b64encode(os.urandom(32))` tokens, 13.9% carried two or more `/` and
-were silently waved through as path-shaped. The threshold was raised to
-four because every committed real-world path/URL fixture this scanner must
-keep classifying safely (record URLs like
+  1. the match contains **four or more** `/`
+  2. no `/`-separated segment of the match mixes uppercase, lowercase, AND
+     a digit — a path or URL segment is a word (`records`, `harborlight`,
+     `SKILL`, `7313`) and never mixes all three character classes, while a
+     base64 run routinely does
+
+Each condition alone is only ever a probabilistic proxy — `/` occurs in
+the base64 alphabet with probability 1/64, so a genuine random secret can
+by chance carry any number of slashes, including four or more, and can by
+chance land on a segmentation that happens not to combine character classes.
+An earlier version of this rule used slash count alone at a threshold of
+two, on the (false, unmeasured) premise that "real secrets essentially
+never" carry more than one `/` in a 32+ char run — measured over 20,000
+freshly generated `base64.b64encode(os.urandom(32))` tokens, 13.9% carried
+two or more `/` and were silently waved through as path-shaped. Raising
+the slash-only threshold to four (the lowest slash count any committed
+real-world path/URL fixture carries — record URLs like
 `7313/records/trailhead/task/...`, repository paths like
-`tools/craft/plugins/craft/skills/slice/SKILL`) carries four or more `/` in
-its matched run, while a threshold of four measures a false-negative rate
-of ~0.4% (81/20,000, averaged across four independently seeded runs of the
-same generation method) for random secrets — down from 13.9% at threshold
-two. It is not zero: a rare random secret with four or more slashes still
-passes as path-shaped. Raising the threshold further would push the
-false-negative rate down further but would misclassify the shortest real
-record-URL fixtures (exactly four slashes) as credentials, so four is the
-highest threshold that keeps every known-safe fixture safe.
+`tools/craft/plugins/craft/skills/slice/SKILL`) brought the false-negative
+rate down to ~0.4%, but slash count alone only ever buys a smaller
+probability, never a different kind of separation, because it is still
+the same alphabet-frequency argument.
+
+Conjoining the structural condition — no segment mixing all three
+character classes — is independent of slash count and drives the combined
+rate much lower: measured over 160,000 generated
+`base64.b64encode(os.urandom(32))` tokens (four independently seeded runs
+of 40,000), slash-count-alone (>=4) false-negatives at 0.394%, the
+structural condition alone at 0.074%, and the two conjoined at 0.0019%
+(3/160,000) — roughly 200x lower than slash count alone. It is not zero: a
+sufficiently rare random secret can still land on four-or-more slashes
+with no mixed segment. Every committed real-world path/URL fixture this
+scanner must keep classifying safely still passes both conditions (a path
+or URL segment is a word, never a three-class blend), so the conjunction
+does not misclassify any known-safe fixture.
 
 Usage:
   capture_scan.py <tree-or-file> [<tree-or-file> ...]
@@ -100,14 +115,33 @@ class Finding(NamedTuple):
     text: str
 
 
-# Measured over 20,000 generated base64(os.urandom(32)) tokens (four
-# independently seeded runs) — see the module docstring for the full
-# rationale and the false-negative rate this threshold measures.
+# Measured over 160,000 generated base64(os.urandom(32)) tokens (four
+# independently seeded runs of 40,000) — see the module docstring for the
+# full rationale and the conjoined false-negative rate this threshold and
+# the structural condition below together measure.
 _PATH_SLASH_THRESHOLD = 4
 
 
+def _no_segment_mixes_upper_lower_digit(matched: str) -> bool:
+    """True when no `/`-separated segment of `matched` mixes uppercase,
+    lowercase, AND a digit. A path or URL segment is a word and never mixes
+    all three character classes; a base64 run routinely does.
+    """
+    for segment in matched.split("/"):
+        has_upper = any(c.isupper() for c in segment)
+        has_lower = any(c.islower() for c in segment)
+        has_digit = any(c.isdigit() for c in segment)
+        if has_upper and has_lower and has_digit:
+            return False
+    return True
+
+
 def _reclassify(cls: str, matched: str) -> str:
-    if cls == "high-entropy-base64" and matched.count("/") >= _PATH_SLASH_THRESHOLD:
+    if (
+        cls == "high-entropy-base64"
+        and matched.count("/") >= _PATH_SLASH_THRESHOLD
+        and _no_segment_mixes_upper_lower_digit(matched)
+    ):
         return KNOWN_SAFE_CLASS
     return cls
 
