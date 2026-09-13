@@ -1059,6 +1059,11 @@ _DOCTOR_PROBE_UNAVAILABLE_DETAIL = (
     "the machine answers, camp resolves there, and the probe is unavailable"
 )
 
+#: Detail for a host whose fan-out contribution carried nothing this section
+#: can read — no rows at all, or a row shape the doctor path does not own.
+#: Stated once so both of those branches can never drift apart in wording.
+_DOCTOR_FANOUT_UNANSWERED_DETAIL = "camp's own fan-out could not answer for this host"
+
 
 def _doctor_host_row(host_name: str | None, verdict: str, detail: str) -> dict[str, Any]:
     """One row of the `-a` host section. `host_name` is `None` for this
@@ -1136,6 +1141,26 @@ def _doctor_account_row(
     )
 
 
+def _doctor_account_rows(
+    host_name: str | None, facts: list[Any]
+) -> list[dict[str, Any]]:
+    """Convert a machine's account roster into this section's rows — the one
+    place that knows a fact's field names, shared by the local roster and a
+    far side's alike, so the two can never read the same roster differently.
+
+    A non-dict member contributes nothing rather than failing the machine:
+    the roster is remote-authored on the probe path, so a member whose shape
+    this reader does not recognize must not cost the rows beside it.
+    """
+    return [
+        _doctor_account_row(
+            host_name, fact.get("account"), fact.get("verdict"), fact.get("reason")
+        )
+        for fact in facts
+        if isinstance(fact, dict)
+    ]
+
+
 def _doctor_account_rows_from_parsed(
     host_name: str | None, parsed: dict[str, Any]
 ) -> list[dict[str, Any]]:
@@ -1159,14 +1184,7 @@ def _doctor_account_rows_from_parsed(
     facts = parsed.get(DOCTOR_PROBE_ACCOUNTS_KEY)
     if not isinstance(facts, list):
         return [_doctor_account_row(host_name, None, "cannot-tell", None)]
-    facts = _strip_control_sequences_deep(facts)
-    return [
-        _doctor_account_row(
-            host_name, fact.get("account"), fact.get("verdict"), fact.get("reason")
-        )
-        for fact in facts
-        if isinstance(fact, dict)
-    ]
+    return _doctor_account_rows(host_name, _strip_control_sequences_deep(facts))
 
 
 def _doctor_probe_answer(
@@ -1356,12 +1374,7 @@ def _doctor_self_rows(self_name: str | None) -> list[dict[str, Any]]:
     from ..spine import _doctor_account_roster, _doctor_multiplexer_present
 
     rows = [_doctor_multiplexer_row(self_name, _doctor_multiplexer_present())]
-    for fact in _doctor_account_roster():
-        rows.append(
-            _doctor_account_row(
-                self_name, fact.get("account"), fact.get("verdict"), fact.get("reason")
-            )
-        )
+    rows.extend(_doctor_account_rows(self_name, _doctor_account_roster()))
     return rows
 
 
@@ -1399,22 +1412,14 @@ def _doctor_rows_from_host_answer(
     different shape, human or JSON.
     """
     if not answer.rows:
-        return [
-            _doctor_host_row(
-                host_name, "WARN", "camp's own fan-out could not answer for this host"
-            )
-        ]
+        return [_doctor_host_row(host_name, "WARN", _DOCTOR_FANOUT_UNANSWERED_DETAIL)]
     converted: list[dict[str, Any]] = []
     for row in answer.rows:
         if isinstance(row, dict) and "verdict" in row and "detail" in row:
             converted.append(row)
             continue
         reason = row.get("reason") if isinstance(row, dict) else None
-        detail = (
-            reason
-            if isinstance(reason, str)
-            else "camp's own fan-out could not answer for this host"
-        )
+        detail = reason if isinstance(reason, str) else _DOCTOR_FANOUT_UNANSWERED_DETAIL
         converted.append(_doctor_host_row(host_name, "WARN", detail))
     return converted
 
