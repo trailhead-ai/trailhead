@@ -1,0 +1,11 @@
+**Slice loop stopped early — no slice chosen this pass.**
+
+The candidate-set gate returned `candidates: none` with `complete-eligible: no`. An empty candidate set alone does not terminate the loop: because the union is not certified complete, the spec cannot be reported complete, and there is nothing above the value floor left to select either. One `## Slices` ledger entry attests coverage of AC4 but carries no coverage token, so that coverage cannot be certified.
+
+**Criteria still unmet:** AC4.
+
+The stop is recorded on [spec/glacier-survey-logistics](http://127.0.0.1:7313/records/meadowbrook/spec/glacier-survey-logistics) — `craft/slice-loop=stopped`, with the body note — so the next reader finds the stopping point rather than silence. Print it back with `lore record show spec/glacier-survey-logistics`.
+
+To clear the stop: correct the ledger entry attesting AC4 so it carries a coverage token (by correcting its parent record and re-running the reconcile, under the append-only invariant), then:
+
+Run /craft:slice spec/glacier-survey-logistics again once the AC4 ledger entry carries a coverage token.
