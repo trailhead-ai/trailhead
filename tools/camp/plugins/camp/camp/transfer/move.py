@@ -1,18 +1,28 @@
 """`camp transfer` (no `--dry-run`) — the sender side that actually moves a
-workspace, by driving the four peer-side phases in order.
+workspace, by driving the peer-side phases in order.
 
 :func:`move_workspace` is the whole verb: it calls `transfer-receive begin`
 over `camp.host.transport.run_camp`, then per member streams that member's
 committed history (`camp.transfer.history.send_history`) and working-tree
 content (`camp.transfer.worktree.send_worktree`) over
-`camp.host.transport.stream_camp`, then calls `transfer-receive finish` over
-`run_camp` again. Every path this function reads from is the SENDER's own —
+`camp.host.transport.stream_camp`, then (whenever there is anything rooted in
+the workspace) streams each conversation, then calls `transfer-receive
+claim` over `run_camp` — the peer's single commit point, where it writes
+itself as the workspace's owner and answers with the name it wrote (see
+`camp.transfer.receive`'s `claim` section) — and finally calls
+`transfer-receive finish` over `run_camp` again. `claim` runs strictly
+before `finish` because `finish` triggers a manifest rebuild that only
+carries an owner forward, never sets one; a claim not yet durable on disk
+when that rebuild runs would not be preserved. Every path this function
+reads from is the SENDER's own —
 `group["members"]` entries' `repo_root`, the sender's own worktree path
 (`camp.provision.reconcile._worktree_path`), the sender's own slug branch
 name — continuing `camp.transfer.probe`'s stated posture that no field the
-peer returns is ever used to build a path; the only peer-returned field this
-module consumes is each member's `basis_commit`, a git sha used only to
-negative a bundle, never to build a path.
+peer returns is ever used to build a path; the two peer-returned fields this
+module consumes are each member's `basis_commit` (a git sha used only to
+negative a bundle, never to build a path) and `claim`'s `owner` (a name
+stamped into the caller's own `MoveResult`, never used to build a path
+either).
 
 **Two refusal shapes, not one.** `begin` on the peer already refuses a
 workspace present there and owned by a third host, and refuses one present
@@ -135,10 +145,18 @@ class ConversationCrossed:
 
 @dataclass(frozen=True)
 class MoveResult:
-    """What `move_workspace` moved, once every phase has answered."""
+    """What `move_workspace` moved, once every phase has answered.
+
+    `claimed_owner` is the exact name the peer's `claim` phase answered —
+    its own declared host name, never the sender's local alias for it (see
+    `camp.transfer.receive.claim`). Always populated once `move_workspace`
+    returns; `None` only for a `MoveResult` a test constructs directly
+    without driving `claim`.
+    """
 
     members: tuple[str, ...]
     conversations: tuple[ConversationCrossed, ...] = ()
+    claimed_owner: str | None = None
 
 
 def _outcome_detail(outcome: TransportOutcome) -> str:
@@ -216,8 +234,16 @@ def move_workspace(
     Calls `on_phase` with a short label before `begin`, before each member's
     `history` and `worktree` phase, before `conversations` (once, only when
     *conversations* is non-empty — a workspace with nothing rooted in it
-    never announces a phase with nothing to do), and before `finish` — see
-    the module docstring for the ordering and timing contract.
+    never announces a phase with nothing to do), before `claim`, and before
+    `finish` — see the module docstring for the ordering and timing
+    contract.
+
+    This function deliberately does not observe whatever provisioning the
+    peer's `finish` phase spawns — it does not block on it and does not poll
+    it. By the time `claim` has answered, ownership is already settled and
+    every byte that crosses has already crossed, so a provisioning failure
+    on the peer afterward is a pending bring-up, not data loss, and the peer
+    already owns detecting and remedying it.
 
     *conversations* is the already-enumerated pool the caller showed the
     operator at preflight — never re-enumerated here, so the move can never
@@ -233,8 +259,11 @@ def move_workspace(
             conversation that was UNRESOLVED, whose transcript could not be
             located, whose content changed mid-stream, or whose transport
             failed is reported as phase `"conversations"` — the same
-            re-runnable shape every other phase failure uses. Nothing after
-            the failing phase was attempted.
+            re-runnable shape every other phase failure uses. A peer that
+            does not recognize the `claim` subcommand at all (an older camp
+            build) refuses it the same way any unrecognized phase refuses,
+            surfacing here as `PhaseFailed("claim", ...)` — ownership moves
+            on neither host. Nothing after the failing phase was attempted.
     """
     from ..provision.reconcile import _branch_name, _worktree_path
 
@@ -338,10 +367,22 @@ def move_workspace(
             assert subpath is not None  # unresolved rows never reach here
             crossed.append(ConversationCrossed(session_id=session_id, subpath=subpath))
 
+    on_phase("claim")
+    claim_argv = ["transfer-receive", "claim", "--group", group_name, "--slug", slug]
+    claim_answer = _run_camp_phase(
+        host, claim_argv, run=run, connect_timeout=connect_timeout, execution_timeout=execution_timeout
+    )
+    claim_payload = json.loads(claim_answer.stdout)
+    claimed_owner = claim_payload["owner"]
+
     on_phase("finish")
     finish_argv = ["transfer-receive", "finish", "--group", group_name, "--slug", slug]
     _run_camp_phase(
         host, finish_argv, run=run, connect_timeout=connect_timeout, execution_timeout=execution_timeout
     )
 
-    return MoveResult(members=tuple(m["name"] for m in members), conversations=tuple(crossed))
+    return MoveResult(
+        members=tuple(m["name"] for m in members),
+        conversations=tuple(crossed),
+        claimed_owner=claimed_owner,
+    )

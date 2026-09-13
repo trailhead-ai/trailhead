@@ -1,8 +1,8 @@
 """`camp transfer-receive` — the peer side of a workspace move.
 
-Four phases, each dispatched as its own subcommand and run on whatever host
+Five phases, each dispatched as its own subcommand and run on whatever host
 this process executes on: :func:`begin`, :func:`history`, :func:`worktree`,
-and :func:`finish`, in that order. All four continue
+:func:`claim`, and :func:`finish`, in that order. All five continue
 `camp.transfer.probe`'s stated posture — no field the caller supplies is ever
 used to construct a local path; every path this module writes to is resolved
 from this host's OWN group config, keyed only by the `--group`/`--slug` the
@@ -37,11 +37,33 @@ clone already resolves for that member's declared base ref, or `null` when
 it does not resolve here at all. A later phase negatives its content
 transfer against exactly these commits.
 
+**claim** is the transfer's single commit point: this host writes ITSELF as
+the workspace's owner, under the manifest's guarded ownership-change opt-in
+(`camp.group.manifest.write_central_manifest`'s `allow_owner_change=True`),
+using its own declared name (`camp.host.config.self_host_name`) — never a
+name the sender supplied. A host that has not declared a name refuses,
+`SelfNameNotDeclared`, before touching the manifest: there is no name to
+claim under. The write happens while holding the SAME workspace reconcile
+lock (`camp.group.manifest.reconcile_lock`) `finish`'s manifest rebuild takes,
+so the claim can never land mid-rebuild and get silently carried over by a
+rebuild that read the stale prior owner — see `finish` below for why the
+write must run BEFORE it, not concurrently with or after it. The answer
+carries the exact name this host wrote, so a caller (the sender) records the
+peer's own name rather than whatever alias it uses locally for this peer.
+
 **finish** writes the workspace docs/hooks and spawns camp's existing
 detached provisioner (`camp.provision.provision.bring_up_workspace`), which
-is what regenerates the platform-specific state a transfer does not copy. It
-does not wait for provisioning to complete — "arrived" and "ready to work
-in" are deliberately different moments.
+is what regenerates the platform-specific state a transfer does not copy.
+Before spawning it, `bring_up_workspace` performs a synchronous,
+lock-protected manifest rebuild (`seed_pending_workspace`) that reads
+whatever owner is currently on disk and carries it forward
+(`camp.group.manifest.carry_forward_owner`) — a pure read-and-preserve, never
+a set or a clear. This is why `claim` must run, and be durable on disk,
+strictly before `finish`: a write already committed there is preserved
+unconditionally by this rebuild, and by every later one the detached
+provisioner performs. `finish` itself does not wait for provisioning to
+complete — "arrived" and "ready to work in" are deliberately different
+moments.
 
 **history** receives one member's committed history, sent by
 `camp.transfer.history.send_history` as a `git bundle` on stdin, and lands
@@ -191,11 +213,13 @@ __all__ = [
     "ConversationSubpathRefused",
     "ConversationDestinationRefused",
     "ConversationRootUnresolved",
+    "SelfNameNotDeclared",
     "begin",
     "finish",
     "history",
     "worktree",
     "conversations",
+    "claim",
     "read_transfer_marker",
 ]
 
@@ -259,7 +283,8 @@ class OverwriteRequired(ReceiveRefused):
         super().__init__(
             f"slug {slug!r} already exists here — pass --overwrite to remove "
             f"it and re-seed for sender {sender!r}, or choose a different "
-            "slug; ownership never moves to this host, so --overwrite would "
+            "slug; this workspace's ownership has not moved to this host yet "
+            "(the recorded owner is still the sender), so --overwrite would "
             "destroy any uncommitted or untracked work that accumulated in "
             "that copy since it arrived, with no way for it to come back to "
             "the sender first"
@@ -362,6 +387,12 @@ class ConversationRootUnresolved(ReceiveRefused):
             "landing a transcript that keeps the sending host's path"
         )
         self.session_id = session_id
+
+
+class SelfNameNotDeclared(ReceiveRefused):
+    """`claim` refuses when this host has no declared `self_name` — it would
+    otherwise have no name of its own to write as owner. Raised before the
+    manifest is touched."""
 
 
 @dataclass(frozen=True)
@@ -726,6 +757,82 @@ def worktree(
     return {
         "contract_version": RECEIVE_CONTRACT_VERSION,
         "member": member,
+    }
+
+
+def claim(
+    *,
+    groups: list[dict[str, Any]],
+    group_name: str,
+    slug: str,
+    env: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """The transfer's single commit point: this host claims ownership.
+
+    Writes THIS host's own declared name (`camp.host.config.self_host_name`)
+    as the workspace's owner — never a name the caller supplied, and never
+    the sender's name, which is what `begin` seeded the manifest with. The
+    write goes through `write_central_manifest`'s guarded
+    `allow_owner_change=True` opt-in, the same bypass-proof gate every
+    deliberate ownership change uses, and runs while holding the workspace's
+    `reconcile_lock` — the SAME lock `finish`'s manifest rebuild
+    (`seed_pending_workspace`) takes — so the two can never interleave. See
+    the module docstring's `claim` and `finish` sections for why this
+    ordering and this lock are both load-bearing, not merely defensive.
+
+    Returns the JSON-serializable answer: this transfer's contract version
+    and the exact owner name this host wrote, so a caller (the sender) can
+    record the peer's own declared name rather than whatever local alias it
+    uses for this peer.
+
+    Raises:
+        GroupNotConfigured: *group_name* is not configured on this host.
+        SelfNameNotDeclared: this host has no declared `self_name` — there
+            is no name to claim ownership under. Raised before the manifest
+            is read or written.
+    """
+    _require_group(groups, group_name)
+
+    from trailhead.paths import PathResolutionError
+
+    from ..host.config import HostConfigError, self_host_name
+
+    try:
+        self_name = self_host_name(env=env)
+    except HostConfigError as e:
+        raise SelfNameNotDeclared(str(e)) from e
+    except PathResolutionError as e:
+        # Same posture as `camp.provision.provision._declared_owner`: an
+        # environment that cannot even resolve a config dir (no HOME) is
+        # treated like a host that never declared a name, not a hard error.
+        raise SelfNameNotDeclared(str(e)) from e
+    if self_name is None:
+        raise SelfNameNotDeclared(
+            "this host has not declared a self_name in hosts.toml — refusing "
+            "to claim ownership under a name it does not have"
+        )
+
+    from ..group.manifest import (
+        manifest_path_for,
+        read_central_manifest,
+        reconcile_lock,
+        workspace_dir,
+        write_central_manifest,
+    )
+
+    mpath = manifest_path_for(group_name, slug, env=env)
+    ws_dir = workspace_dir(group_name, slug, env=env)
+
+    with reconcile_lock(ws_dir):
+        data = read_central_manifest(mpath)
+        data["owner"] = self_name
+        write_central_manifest(mpath, data, allow_owner_change=True)
+
+    append_marker(ws_dir, phase="claim", outcome="ok")
+
+    return {
+        "contract_version": RECEIVE_CONTRACT_VERSION,
+        "owner": self_name,
     }
 
 

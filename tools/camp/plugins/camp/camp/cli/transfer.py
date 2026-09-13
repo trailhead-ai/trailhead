@@ -14,7 +14,7 @@ below is this module's to make; `compose_preflight` makes none of them.
 **The same preflight governs both paths.** `--dry-run` renders the composed
 checks and stops. Its absence runs the identical composition and, only on a
 clean verdict, drives `camp.transfer.move.move_workspace` — begin, then per
-member history and worktree, then finish. Any check that is not PASSED
+member history and worktree, then claim, then finish. Any check that is not PASSED
 refuses on either path, before `move_workspace` is ever called, so a member
 that never declared an `excluded` set (or any other failing check) moves
 nothing whether or not `--dry-run` was given — see
@@ -51,7 +51,7 @@ inputs are checked:
   8  EXIT_OVERWRITE_REQUIRED  the workspace already exists on the peer, owned
                                by this host, and `--overwrite` was not passed
                                — nothing crossed
-  9  EXIT_PHASE_FAILED        a move phase (begin/history/worktree/finish)
+  9  EXIT_PHASE_FAILED        a move phase (begin/history/worktree/claim/finish)
                                failed after the preflight passed — nothing
                                after the failing phase ran; re-running the
                                transfer is safe
@@ -132,7 +132,7 @@ def _cmd_transfer_probe_cli(args: list[str]) -> None:
 #: dispatches to, so admitting a new phase is a one-line addition here plus —
 #: only if it carries arguments of its own — a branch in the argument
 #: gathering below, never a second closed-set site.
-_PHASES = ("begin", "conversations", "finish", "history", "worktree")
+_PHASES = ("begin", "claim", "conversations", "finish", "history", "worktree")
 
 
 def _cmd_transfer_receive_cli(args: list[str]) -> None:
@@ -492,15 +492,18 @@ def _augment_missing_self_name_check(result, *, env: dict[str, str]):
 
 
 def _render_move_completion(
-    move_result, *, slug: str, peer_name: str, group_name: str, self_name: str
+    move_result, *, slug: str, peer_name: str, group_name: str
 ) -> None:
     """The report printed once `move_workspace` returns successfully.
 
-    Distinguishes "arrived" from "ready to work in" (regeneration is spawned,
-    not awaited — see `camp.transfer.receive`'s `finish`), states plainly
-    that ownership did not move, names the consequence of that (work the
-    peer accumulates has no way back to the sender, so a later --overwrite
-    destroys it), and names the interim risk that nothing scans what crossed
+    Distinguishes "arrived" from "ready to work in" — regeneration is
+    spawned, not awaited (see `camp.transfer.receive`'s `finish`), and this
+    function deliberately does not poll or block on it; it states that the
+    peer may still be provisioning and names both the check and the retry —
+    states plainly that ownership moved to the peer, naming the exact owner
+    name the peer's `claim` phase answered
+    (`move_result.claimed_owner`) rather than this function's own `peer_name`
+    alias for it, and names the interim risk that nothing scans what crossed
     for credential-shaped content — untracked files routinely carry them and
     the peer now holds a cleartext copy.
 
@@ -520,17 +523,12 @@ def _render_move_completion(
     from ..launch.recovery import printable_path
 
     print(f"camp transfer: {slug!r} arrived on {peer_name!r}")
-    print(f"  ownership did not move — {self_name!r} still owns {slug!r}")
+    print(f"  ownership moved to {move_result.claimed_owner!r}")
     print(
-        f"  work accumulated on {peer_name!r} after this point has no way "
-        f"back to {self_name!r} — a later transfer of {slug!r} with "
-        "--overwrite would destroy any uncommitted or untracked work in "
-        "that copy"
-    )
-    print(
-        f"  regeneration of each member's excluded state is still running on "
-        f"{peer_name!r} — check its progress there with "
-        f"`camp status --name {slug} --group {group_name}`"
+        f"  the peer may still be provisioning — regeneration of each "
+        f"member's excluded state was spawned there, not awaited; check its "
+        f"progress with `camp status --name {slug} --group {group_name}` "
+        "and retry any failed or pending member with `camp setup`"
     )
     print(
         "  nothing scanned what crossed for credential-shaped content — "
@@ -687,6 +685,6 @@ def _cmd_transfer_group_cli(
         sys.exit(EXIT_PHASE_FAILED)
 
     _render_move_completion(
-        move_result, slug=slug, peer_name=peer_name, group_name=group_name, self_name=self_name
+        move_result, slug=slug, peer_name=peer_name, group_name=group_name
     )
     sys.exit(EXIT_WOULD_TRANSFER)
