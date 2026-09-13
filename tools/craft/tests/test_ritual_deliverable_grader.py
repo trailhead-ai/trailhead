@@ -348,6 +348,14 @@ class TestRegressionAgainstOriginalMeasurement:
             "--record", "task/the-berth-allocation-slice",
             "--command", "/craft:plan task/the-berth-allocation-slice",
         ],
+        "slice-spec-complete-baseline": [
+            "--record", "spec/orchard-irrigation",
+            "--command", "/craft:distill spec/orchard-irrigation",
+        ],
+        "slice-early-stop-baseline": [
+            "--record", "spec/glacier-survey-logistics",
+            "--command", "/craft:slice spec/glacier-survey-logistics",
+        ],
     }
 
     EVAL_RUNS_DIR = (
@@ -392,8 +400,8 @@ class TestRegressionAgainstOriginalMeasurement:
         captures = sorted(
             p for p in self.EVAL_RUNS_DIR.glob("*.txt") if not p.name.endswith(".stderr.txt")
         )
-        assert len(captures) == 54, (
-            f"expected 54 committed captures under runs/, found {len(captures)} — "
+        assert len(captures) == 60, (
+            f"expected 60 committed captures under runs/, found {len(captures)} — "
             "the regression pin's own enumeration disagrees with the task's premise"
         )
 

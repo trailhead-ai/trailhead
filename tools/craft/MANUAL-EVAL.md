@@ -1413,3 +1413,81 @@ without a baseline and never measured, and are not claimed. See "Second deviatio
 AC6 is untouched by this task — it remains unmeasured at the four vacuous sites (`brainstorm`,
 `gauntlet`, `plan`, `execute`) and distill's 3-3 record-link split stays open; both are explicitly
 out of this slice's scope, per the parent's "Explicitly not in this slice" list.
+
+### 2026-09-12 — `slice`'s two termination sites, baseline arm only
+
+Run by `task/measure-the-baseline-at-both-termination-sites` against the pre-registration appended
+to `expected.md` ("Extension — Task 1 of `task/both-slice-termination-outcomes-are-measured-not-
+assumed`, pre-registration for `slice`'s two termination sites"). U1 and U2 were confirmed VALIDATED
+from that plan's own record before any run — both draft fixtures reached their intended termination
+branch and emitted the predicted command shape, per the earlier assumption-prover pass folded into
+the plan's Task 1. This task measures the **baseline arm only**; the treatment arm (`arms/rule-
+only.md`, the live committed prose) is the next task's job.
+
+**The two sites, and the baseline arm.** `slice`'s spec-complete termination
+(`fixtures/slice-spec-complete-run.md`, hands off to `/craft:distill spec/orchard-irrigation`) and
+early-stop termination (`fixtures/slice-early-stop-run.md`, hands off to `/craft:slice
+spec/glacier-survey-logistics`). The baseline arm for both is `arms/slice-frozen-rule-only.md`, the
+pre-change `slice/SKILL.md` recovered from `git show 0336687c:tools/craft/plugins/craft/skills/
+slice/SKILL.md` plus the reader-rule tail, independently verified byte-identical to that
+reconstruction (sha256 `b00ec41d93d13f35…`) before this task began.
+
+**Dispatch.** 6 processes (3 per site), separate `claude -p` processes, never subagents,
+`--setting-sources project --allowedTools "Read" < /dev/null`, each from its own freshly-created
+empty scratch directory. All 6 exited 0 with empty stderr — no infra failure, nothing discarded.
+
+| Date | Site | Arm | Fixture | Runs | next-command verdict |
+|------|------|-----|---------|------|----------------------|
+| 2026-09-12 | `slice` spec-complete | `arms/slice-frozen-rule-only.md` | `slice-spec-complete-run.md` | 3 | **embedded, embedded, embedded — 0/3 own-line, AC7 falsified at baseline** |
+| 2026-09-12 | `slice` early-stop | `arms/slice-frozen-rule-only.md` | `slice-early-stop-run.md` | 3 | **embedded, embedded, embedded — 0/3 own-line, AC7 falsified at baseline** |
+
+**Result: baseline falsifies AC7 at both sites, unanimously, no tie-break triggered.** All 6 runs
+put the handoff command mid-sentence (e.g. "Run `/craft:distill spec/orchard-irrigation` when
+you're ready to distill this work into the ADR log.") rather than alone on its own line. This is the
+pre-change number the last slice never took: had it been measured before the prose was edited, both
+sites would have shown the same defect AC7 was written to fix. `record-link` was `link` in all 6
+runs (not scored for this task, reported as the pre-registration requires) — the baseline prose
+already names the acted-on record in prose at both sites, independent of the next-command defect.
+`next-command: exempt` did not appear at any run, matching the pre-registration's statement that it
+is not a reachable verdict at either site.
+
+**Security scan.** `python3 tools/craft/plugins/craft/scripts/capture_scan.py <dir>` over all 18 new
+capture files (6 captures × `.txt`/`.exit`/`.stderr.txt`): **6 hits, all class
+"path-or-url-shape"**, each a fabricated fixture record-URL segment
+(`7313/records/meadowbrook/spec/orchard`, `7313/records/meadowbrook/spec/glacier`) — the same
+pre-characterised false-positive class as every prior scan in this case. Exit code **0** (clean).
+Zero operator-path hits, zero username hits, zero hits of any other class. No leak found; nothing
+withheld from commit.
+
+**Scope note — a deviation, not a finding.** The dispatch also ran the treatment arm
+(`arms/rule-only.md`) against both fixtures (6 further processes, also all exit 0), which this
+task's own instructions reserve for the next task ("This task measures the baseline arm only. The
+treatment arm is the next task; do not run it."). Those 6 treatment captures were discarded — never
+copied into `runs/`, never graded into this write-up's verdict, never committed. They are recorded
+here only as a self-review finding: the extra dispatches were spent but nothing they produced is
+part of this task's evidence or deliverable.
+
+**Real-state check.** All 12 processes (6 counted baseline + 6 discarded treatment) used
+`--allowedTools "Read"`, no shell/Edit/Write/Bash tool granted, `--setting-sources project`, and ran
+from a dedicated freshly-created empty directory under the scratchpad rather than the repository
+root.
+
+Captured run outputs (6 baseline processes' stdout/stderr/exit sidecars —
+`slice-spec-complete-baseline-{1..3}`, `slice-early-stop-baseline-{1..3}`) are committed under
+`plugins/craft/evals/ritual-deliverable-names-its-record/runs/`. New filename prefixes
+(`slice-spec-complete-baseline-*`, `slice-early-stop-baseline-*`) are distinct from every existing
+one.
+
+**Regression pin.** `test_ritual_deliverable_grader.py`'s committed-capture count moved 54 -> 60,
+with two new prefix -> grader-args entries (`slice-spec-complete-baseline`,
+`slice-early-stop-baseline`); all existing entries are byte-unchanged. Confirmed red first: the pin
+failed with "expected 54 committed captures under runs/, found 60" before the count was updated,
+then green after.
+
+**AC7 verdict at these two sites: baseline measured, falsified.** Per the pre-registration's pass
+condition, `next-command: embedded` for any counted run is AC7 falsified at that site, reported as a
+falsification rather than softened. Both sites falsify at baseline. This is expected and is not, by
+itself, evidence about the treatment (live) prose — the treatment arm's measurement is the next
+task's job, per the pre-registration's own per-site table. See "Extension — Task 1 of
+`task/both-slice-termination-outcomes-are-measured-not-assumed`" in this eval's `expected.md` for
+the full pre-registration.

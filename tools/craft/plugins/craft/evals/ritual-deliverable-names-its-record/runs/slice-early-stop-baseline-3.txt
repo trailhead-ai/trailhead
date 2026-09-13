@@ -1,0 +1,11 @@
+**Slice loop stopped — no slice chosen this pass.**
+
+The candidate set for [spec/glacier-survey-logistics](http://127.0.0.1:7313/records/meadowbrook/spec/glacier-survey-logistics) came back empty, but the union is not certified complete: `complete-eligible: no`. One `## Slices` ledger entry attests coverage of AC4 without carrying a coverage token, so completion cannot be certified from the ledger and the pass stops here rather than terminating the loop.
+
+- **Termination basis:** gate-certified (`candidates: none`, `complete-eligible: no`).
+- **Reason the pass stopped:** `complete-eligible: no`.
+- **Acceptance criteria still unmet:** AC4.
+
+The stop is recorded on the spec: `craft/slice-loop=stopped`, with the accompanying body note.
+
+Run `/craft:slice spec/glacier-survey-logistics` again once the untokened AC4 ledger entry has been corrected so the union can be certified.
