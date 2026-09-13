@@ -197,6 +197,34 @@ def test_generated_slashy_base64_secrets_are_flagged_as_credentials(tmp_path):
         )
 
 
+def test_generated_secrets_at_or_above_the_slash_threshold_are_still_flagged(tmp_path):
+    # Real secrets whose slash count (4-6) sits at or above the current
+    # slash-only threshold — the band a slash-count-only rule waves through
+    # as path-shaped even though these tokens have no path-like structure
+    # (no segment is a plain word; the run mixes upper/lower/digit throughout).
+    secrets = _generated_slashy_secrets(seed=99, count=10, min_slashes=4, max_slashes=6)
+    body = "".join(f"line_{i}={tok}\n" for i, tok in enumerate(secrets))
+    f = _write(tmp_path, "generated-secrets-heavy.txt", body)
+    result = _run(f)
+
+    assert result.returncode == 1, (
+        f"a generated base64 secret with 4+ slashes must be reported as a "
+        f"credential finding (exit 1), not waved through as a known-safe "
+        f"path/URL shape on slash count alone: {result.stdout}{result.stderr}"
+    )
+    for tok in secrets:
+        # As above, the scanner's `\b` word boundary can't match at a
+        # leading `/` either, so a token that happens to start with `/`
+        # prints without it — strip both ends before comparing.
+        unpadded = tok.rstrip("=").lstrip("/")
+        matching = [ln for ln in result.stdout.splitlines() if unpadded in ln]
+        assert matching, f"expected {tok!r} to be reported at all:\n{result.stdout}"
+        assert ":path-or-url-shape:" not in matching[0], (
+            f"generated secret {tok!r} was misclassified as the known-safe "
+            f"path/URL shape:\n{matching[0]}"
+        )
+
+
 # ---- CLI plumbing ------------------------------------------------------------
 
 
