@@ -797,3 +797,112 @@ slice for the same reason.
 among the eight on the previous slice's captures. Its own prose is byte-unchanged this slice, but the
 arm carrying it was rebuilt, so the inherited pass is an inference from unchanged prose rather than a
 measurement against the arm as it now stands.
+
+## Extension — Task 1 of `task/both-slice-termination-outcomes-are-measured-not-assumed`, pre-registration for `slice`'s two termination sites
+
+**Committed before any capture for either site exists.** This task writes this section and the two
+fixtures it names; a later task in the same slice recovers the frozen baseline arm and dispatches
+the runs. No arm, capture, or verdict for either site is created here.
+
+**The site inventory, re-derived from the pinned source record — not inherited.** Re-derived from
+`task/every-pinned-ritual-links-the-record-it-acted-on-and-prints-its-one-next-command-on-its-own-line`,
+section `## U3 resolved`, directly — not from this plan's own restatement of it, not from this
+file's existing "Second deviation" section, and not from `MANUAL-EVAL.md`. That record lists `slice`
+with three one-command outcomes: the selection handoff (already measured, `arms/rule-only.md` /
+`fixtures/slice-completed-run.md`, per the table above), the spec-complete termination
+(`/craft:distill spec/<id>`, `SKILL.md:573-575`), and the early-stop termination (`/craft:slice
+spec/<id>`, `SKILL.md:576-577`). The two termination sites are the ones this task's fixtures reach;
+this file's "Second deviation" section already names them as edited under an earlier, mistaken
+exclusion and left unmeasured — this pre-registration is what closes that gap.
+
+### Per-site pre-registration
+
+| Site | Arm (baseline) | Arm (treatment) | Fixture | Grader invocation | Runs |
+|---|---|---|---|---|---|
+| `slice` spec-complete termination | frozen pre-change arm recovered from `git show 0336687c:tools/craft/plugins/craft/skills/slice/SKILL.md` plus the reader-rule tail (built by a later task in this slice; not yet on disk) | `arms/rule-only.md` | `fixtures/slice-spec-complete-run.md` | `--record spec/orchard-irrigation --command "/craft:distill spec/orchard-irrigation"` | 3 per arm |
+| `slice` early-stop termination | same frozen baseline arm as above | `arms/rule-only.md` | `fixtures/slice-early-stop-run.md` | `--record spec/glacier-survey-logistics --command "/craft:slice spec/glacier-survey-logistics"` | 3 per arm |
+
+**Run budget: 12 processes** — 3 baseline + 3 treatment per site, 2 sites.
+
+Both arms carry the identical reader-rule tail and differ only in which revision of
+`slice/SKILL.md` they contain — `git diff 0336687c..HEAD` on that file is +17/−5 from exactly one
+commit (`bd72afa1`), in three hunks all inside lines 570–593, the `## Outcome` termination region
+this measurement targets. No other line differs between the two arms.
+
+**No `--exempt` at either site.** Both terminations determine exactly one next command; passing
+`--exempt` at either would mean the invocation drifted from this pre-registration and is a defect in
+the run, not a result.
+
+**`record-link` is observed and reported at both sites, but not scored here.** The grader emits a
+`record-link` verdict on every invocation regardless of what is being measured; this task's slice
+covers AC7 at these two sites and **partially** covers AC6, so `record-link`'s output is recorded in
+the write-up as evidence but does not gate either site's pass condition below.
+
+### Pass condition, per site — two-sided, in the grader's published tokens
+
+Graded only by `tools/craft/plugins/craft/scripts/ritual_deliverable_grader.py`, never an inline
+regex, matching this file's existing sites:
+
+- **AC7 holds at this site (treatment)** — `next-command: own-line` for all 3 counted treatment
+  runs.
+- **Baseline is measured, not assumed** — the baseline arm's 3 runs are captured and graded the same
+  way, so the write-up can state what the pre-change prose actually produced rather than presuming
+  `absent` or `embedded` by construction.
+- **AC7 falsified at this site (treatment)** — `next-command: embedded` or `next-command: absent`
+  for any of the 3 counted treatment runs. Reported as a falsification, never softened into a weaker
+  claim that still reads as a pass. A falsified site gets its own task record per this slice's
+  council amendment, rather than being carried forward as an unowned gap.
+- **`next-command: exempt` is not a reachable verdict at either site**, since no invocation above
+  passes `--exempt`. Its appearance means the invocation drifted from this pre-registration and is a
+  defect in the run.
+
+### Tie-break — a 2-1 split within one arm's 3 runs, at either site
+
+Re-run that arm 3 more times (6 total for that arm at that site), matching this file's existing
+tie-break rule. A clean majority across the 6 resolves it. A combined result that is not a clean
+majority (4-2, or any other non-resolving split) is **AMBIGUOUS**, and AMBIGUOUS resolves as
+**AC7 falsified** for the treatment arm at that site — never as evidence the site passes. This
+applies independently to the baseline and treatment arm at each site.
+
+### What counts as a reachable fixture — extended to these two sites
+
+The three conditions this file already states for `slice`'s selection fixture, under "What counts
+as a reachable fixture for `review`'s second outcome", apply unchanged to both new fixtures: each
+asserts its ritual's pre-handoff state as already true and asks only for the closing report (no tool
+beyond `Read`, no vault write performed by the arm itself), each differs from a neighbouring fixture
+only in the state that selects its branch, and each captured deliverable must land on its own
+termination — the spec-complete fixture naming `/craft:distill` and the early-stop fixture naming
+`/craft:slice`, never the selection handoff's `/craft:plan`. A capture landing on the wrong branch is
+a fixture defect, discarded and rebuilt; it is never graded. If either site proves unreachable under
+these conditions it is reported unmeasured, never estimated or inferred from the other site.
+
+### The infra-failure carve-out
+
+A dispatch that crashes, times out, returns a truncated response, or exits non-zero is not a
+measurement: it is discarded and re-dispatched, and never counts toward either arm's 3 (or 6). Every
+discard is logged in the run write-up by ordinal and reason (e.g. "run 2 of 3, treatment,
+spec-complete: timed out after Ns, discarded and re-dispatched"), so a discarded run is visible in
+the record rather than silently absent from a tally that reads clean.
+
+### Captured deliverables are scanned before commit
+
+Any capture taken for either site is run through the committed scanner —
+`python3 tools/craft/plugins/craft/scripts/capture_scan.py <path>` — before it is committed under
+`runs/`. Exit `0` is clean; note that a clean run still prints known-safe-class lines to stdout, so
+the caller checks the exit code, never whether stdout is empty. Exit `1` (credential finding) or `2`
+(fail-closed error) blocks the commit until resolved.
+
+### The recorded deviation — baseline recovered from history, not taken before treating
+
+Both termination sites already carry the treated prose in the working tree and in
+`arms/rule-only.md` — the edit that produced it predates this slice. The normal order for this
+case's other sites was baseline-then-treat, arms built from the working tree before any edit landed.
+That order is not available here: there is no pre-treatment working tree left to build a baseline
+arm from, so the baseline is instead recovered from commit `0336687c`, the run base of the slice that
+applied the treatment. This is a departure from the order used elsewhere in this file, named here
+rather than argued away, and it is not revisited if the measured result comes out either way.
+
+### Ordering evidence
+
+The pre-registration above and both fixtures are committed together, in this task, before any
+capture for either site exists. At this task's own commit, `git log --oneline --all -- 'tools/craft/plugins/craft/evals/ritual-deliverable-names-its-record/runs/*slice-spec-complete*' 'tools/craft/plugins/craft/evals/ritual-deliverable-names-its-record/runs/*slice-early-stop*'` returns nothing: no capture for either site exists under `runs/` at this commit.
