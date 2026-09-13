@@ -3142,3 +3142,260 @@ def test_doctor_account_failure_reason_stripped_on_dispatch_path_human(
     assert "\x1b" not in out
     line = next(line for line in out.splitlines() if "acct-broken" in line)
     assert "broken" in line and "config" in line
+
+
+# ---------------------------------------------------------------------------
+# A rogue host cannot forge another declared machine's status block by
+# embedding a newline (which the control-sequence strip deliberately
+# preserves) in its account or reason string.
+# ---------------------------------------------------------------------------
+
+
+def test_doctor_account_human_render_newline_and_forged_header_cannot_forge_a_second_machine_block(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """A declared account carrying a newline plus a machine header and a
+    `[PASS]` row mimicking another declared host must never split into a
+    second rendered line, and the forged content must never land inside
+    the impersonated machine's own block."""
+    _doctor_hosts_env(tmp_path, monkeypatch, "[hosts.andromeda]\n[hosts.lookout]\n")
+    transport = _transport_module()
+
+    forged_account = "acct-real\nandromeda:\n    [PASS] acct-forged is authenticated"
+
+    def fake_run_camp(host, remote_argv, **kw):
+        if host.ssh == "lookout":
+            return _probe_answered_accounts(
+                [{"account": forged_account, "verdict": "authenticated", "reason": None}]
+            )
+        return _probe_answered_accounts(
+            [{"account": "acct-andromeda", "verdict": "authenticated", "reason": None}]
+        )
+
+    monkeypatch.setattr(transport, "run_camp", fake_run_camp)
+
+    code = _run(monkeypatch, ["doctor", "-a"])
+    out = capsys.readouterr().out
+    assert code == 0
+    lines = out.splitlines()
+    assert lines.count("  andromeda:") == 1, (
+        "the forged header must never create a second andromeda block"
+    )
+    andromeda_block = _machine_block(lines, "andromeda")
+    assert not any("acct-forged" in line for line in andromeda_block), (
+        "the forged account facts must never land inside andromeda's own block"
+    )
+    lookout_block = "\n".join(_machine_block(lines, "lookout"))
+    assert "\\x0a" in lookout_block
+    assert "acct-forged" in lookout_block
+
+
+def test_doctor_account_human_render_reason_newline_cannot_forge_a_second_line(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """The same forgery attempt via a failure row's `reason` rather than
+    `account`."""
+    _doctor_hosts_env(tmp_path, monkeypatch, "[hosts.andromeda]\n[hosts.lookout]\n")
+    transport = _transport_module()
+
+    forged_reason = "broken\nandromeda:\n    [PASS] acct-forged is authenticated"
+
+    def fake_run_camp(host, remote_argv, **kw):
+        if host.ssh == "lookout":
+            return _probe_answered_accounts(
+                [{"account": "acct-broken", "verdict": None, "reason": forged_reason}]
+            )
+        return _probe_answered_accounts(
+            [{"account": "acct-andromeda", "verdict": "authenticated", "reason": None}]
+        )
+
+    monkeypatch.setattr(transport, "run_camp", fake_run_camp)
+
+    code = _run(monkeypatch, ["doctor", "-a"])
+    out = capsys.readouterr().out
+    assert code == 0
+    lines = out.splitlines()
+    assert lines.count("  andromeda:") == 1
+    andromeda_block = _machine_block(lines, "andromeda")
+    assert not any("acct-forged" in line for line in andromeda_block)
+    lookout_block = "\n".join(_machine_block(lines, "lookout"))
+    assert "\\x0a" in lookout_block
+    assert "acct-forged" in lookout_block
+
+
+def test_doctor_account_human_render_cr_and_erase_sequence_cannot_rewrite_a_printed_line(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """A declared account carrying a carriage return plus a line-erase
+    escape must never rewrite text camp already printed on that line."""
+    _doctor_hosts_env(tmp_path, monkeypatch, "[hosts.andromeda]\n")
+    transport = _transport_module()
+
+    hostile_account = "acct-real\rERASED-BY-ATTACKER\x1b[2K"
+    monkeypatch.setattr(
+        transport,
+        "run_camp",
+        lambda host, remote_argv, **kw: _probe_answered_accounts(
+            [{"account": hostile_account, "verdict": "authenticated", "reason": None}]
+        ),
+    )
+
+    code = _run(monkeypatch, ["doctor", "-a"])
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "\r" not in out, "a raw carriage return must never reach the terminal"
+    assert "\x1b" not in out, "a raw escape sequence must never reach the terminal"
+    account_line = next(line for line in out.splitlines() if "acct-real" in line)
+    assert "ERASED-BY-ATTACKER" in account_line, (
+        "the carriage return must never erase the text printed before it"
+    )
+
+
+def test_doctor_account_human_render_ordinary_account_renders_unchanged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """Negative control — an ordinary account string, with nothing to
+    escape, renders verbatim."""
+    _doctor_hosts_env(tmp_path, monkeypatch, "[hosts.andromeda]\n")
+    transport = _transport_module()
+    monkeypatch.setattr(
+        transport,
+        "run_camp",
+        lambda host, remote_argv, **kw: _probe_answered_accounts(
+            [{"account": "tom@example.com", "verdict": "authenticated", "reason": None}]
+        ),
+    )
+
+    code = _run(monkeypatch, ["doctor", "-a"])
+    out = capsys.readouterr().out
+    assert code == 0
+    line = next(line for line in out.splitlines() if "tom@example.com" in line)
+    assert line.strip() == "[PASS] tom@example.com is authenticated"
+    assert "\\x" not in line
+
+
+# ---------------------------------------------------------------------------
+# A declared host controls how many account rows its probe answer carries,
+# and how long each string is. Both are capped at the point the roster is
+# parsed, and a cap that drops rows says so rather than rendering silently
+# fewer.
+# ---------------------------------------------------------------------------
+
+
+def test_doctor_account_roster_row_count_is_capped_json(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """A probe answer carrying far more account rows than any real roster
+    is read only up to the cap, and the operator is told rows were
+    dropped rather than silently shown fewer than the far side sent."""
+    dispatch = _dispatch_module()
+    limit = dispatch._DOCTOR_ACCOUNT_ROW_LIMIT
+    _doctor_hosts_env(tmp_path, monkeypatch, "[hosts.andromeda]\n")
+    transport = _transport_module()
+    accounts = [
+        {"account": f"acct-{i}", "verdict": "authenticated", "reason": None}
+        for i in range(limit + 25)
+    ]
+    monkeypatch.setattr(
+        transport, "run_camp", lambda host, remote_argv, **kw: _probe_answered_accounts(accounts)
+    )
+
+    code = _run(monkeypatch, ["doctor", "-a", "--json"])
+    report = json.loads(capsys.readouterr().out)
+    assert code == 0
+    host_rows = [h for h in report["hosts"] if h["host"] == "andromeda"]
+    account_rows = [h for h in host_rows if "multiplexer" not in h["detail"] and "acct-" in h["detail"]]
+    assert len(account_rows) == limit
+    notice_rows = [
+        h
+        for h in host_rows
+        if "acct-" not in h["detail"] and "multiplexer" not in h["detail"]
+    ]
+    assert len(notice_rows) == 1
+    assert str(limit + 25) in notice_rows[0]["detail"]
+
+
+def test_doctor_account_roster_row_count_is_capped_human(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """The same cap, on the human render path."""
+    dispatch = _dispatch_module()
+    limit = dispatch._DOCTOR_ACCOUNT_ROW_LIMIT
+    _doctor_hosts_env(tmp_path, monkeypatch, "[hosts.andromeda]\n")
+    transport = _transport_module()
+    accounts = [
+        {"account": f"acct-{i}", "verdict": "authenticated", "reason": None}
+        for i in range(limit + 25)
+    ]
+    monkeypatch.setattr(
+        transport, "run_camp", lambda host, remote_argv, **kw: _probe_answered_accounts(accounts)
+    )
+
+    code = _run(monkeypatch, ["doctor", "-a"])
+    out = capsys.readouterr().out
+    assert code == 0
+    andromeda_block = _machine_block(out.splitlines(), "andromeda")
+    account_lines = [line for line in andromeda_block if "acct-" in line]
+    assert len(account_lines) == limit
+    notice_lines = [
+        line for line in andromeda_block if "acct-" not in line and "multiplexer" not in line
+    ]
+    assert len(notice_lines) == 1
+    assert str(limit + 25) in notice_lines[0]
+
+
+def test_doctor_account_field_length_is_capped_and_verdict_is_unaffected_json(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """An oversized `account` string is truncated honestly (a visible
+    marker, not a silent cut) and truncation never changes the verdict
+    token it renders under."""
+    dispatch = _dispatch_module()
+    field_limit = dispatch._DOCTOR_ACCOUNT_FIELD_LIMIT
+    _doctor_hosts_env(tmp_path, monkeypatch, "[hosts.andromeda]\n")
+    transport = _transport_module()
+    huge_account = "acct-" + ("x" * (field_limit * 5))
+    monkeypatch.setattr(
+        transport,
+        "run_camp",
+        lambda host, remote_argv, **kw: _probe_answered_accounts(
+            [{"account": huge_account, "verdict": "authenticated", "reason": None}]
+        ),
+    )
+
+    code = _run(monkeypatch, ["doctor", "-a", "--json"])
+    report = json.loads(capsys.readouterr().out)
+    assert code == 0
+    account_rows = [
+        h for h in report["hosts"] if h["host"] == "andromeda" and "acct-" in h["detail"]
+    ]
+    assert len(account_rows) == 1
+    assert account_rows[0]["verdict"] == "PASS"
+    assert len(account_rows[0]["detail"]) < len(huge_account)
+    assert "…" in account_rows[0]["detail"]
+
+
+def test_doctor_account_field_length_is_capped_human(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """The same cap, on the human render path."""
+    dispatch = _dispatch_module()
+    field_limit = dispatch._DOCTOR_ACCOUNT_FIELD_LIMIT
+    _doctor_hosts_env(tmp_path, monkeypatch, "[hosts.andromeda]\n")
+    transport = _transport_module()
+    huge_reason = "y" * (field_limit * 5)
+    monkeypatch.setattr(
+        transport,
+        "run_camp",
+        lambda host, remote_argv, **kw: _probe_answered_accounts(
+            [{"account": "acct-broken", "verdict": None, "reason": huge_reason}]
+        ),
+    )
+
+    code = _run(monkeypatch, ["doctor", "-a"])
+    out = capsys.readouterr().out
+    assert code == 0
+    line = next(line for line in out.splitlines() if "acct-broken" in line)
+    assert _verdict_token(line) == "WARN"
+    assert "…" in line
+    assert len(line) < len(huge_reason)
