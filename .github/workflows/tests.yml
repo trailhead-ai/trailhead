@@ -49,6 +49,9 @@ jobs:
           # Full history: tools/craft's regression test reads a grader's blob
           # out of an earlier commit via `git show <sha>:<path>` — the default
           # shallow (depth-1) checkout doesn't carry that object.
+          # test_frozen_slice_arm_matches_its_declared_provenance (in
+          # tools/craft/tests/test_ritual_deliverable_eval_arms_contract.py)
+          # depends on this too, for the same reason (`git show 0336687c:...`).
           fetch-depth: 0
 
       - name: Set up Python ${{ matrix.python-version }}

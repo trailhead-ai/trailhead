@@ -1414,6 +1414,12 @@ AC6 is untouched by this task — it remains unmeasured at the four vacuous site
 `gauntlet`, `plan`, `execute`) and distill's 3-3 record-link split stays open; both are explicitly
 out of this slice's scope, per the parent's "Explicitly not in this slice" list.
 
+> **Superseded 2026-09-12.** This "eight of ten" verdict is stale. The remaining two sites
+> (`slice`'s spec-complete and early-stop terminations) have since been baselined and measured;
+> see this file's `2026-09-12 — slice's two termination sites, treatment arm` entry below, whose
+> own "AC7 verdict: all ten of its one-command outcome sites now measure `own-line`. AC7 holds
+> in full." replaces the verdict stated here.
+
 ### 2026-09-12 — `slice`'s two termination sites, baseline arm only
 
 Run by `task/measure-the-baseline-at-both-termination-sites` against the pre-registration appended
@@ -1545,6 +1551,19 @@ x3, then own-line x3" entry above) stays AMBIGUOUS and open, and the four ritual
 acted-on record only inside the handoff command (`plan`, `execute`, `gauntlet`, `brainstorm` — the
 handoff-command-only sites the reader's rule deliberately keeps bare) remain correct-as-bare, not
 newly measured by this task.
+
+> **Corrected 2026-09-12.** The sentence above — that `plan`, `execute`, `gauntlet`, and
+> `brainstorm` "remain correct-as-bare" — is contradicted by the already-committed captures for
+> those four sites and should not have been written as a correctness claim. Re-grading the
+> committed runs directly (`ritual_deliverable_grader.py --record ... --command ...` over each
+> site's three captures) gives `record-link: link` for all twelve: brainstorm 3/3 `link`,
+> gauntlet 3/3 `link`, plan 3/3 `link`, and `execute-treated` (the measurable, non-`--exempt`
+> re-capture) 3/3 `link`. None of the four is bare, correctly or otherwise. What is true, and
+> is what the original sentence was reaching for: `record-link` is **reported, not scored** for
+> these four sites per the pre-registration, so this 12/12 `link` result is additional AC6
+> evidence, exactly like the two termination sites' 12/12 above — it does not itself close AC6,
+> since distill's 3-3 split stays AMBIGUOUS and open. Found by the whole-change correctness
+> review of `task/both-slice-termination-outcomes-are-measured-not-assumed`.
 
 **No falsification, no owed task record.** Both sites held at treatment; the council amendment's
 "a falsified site gets an owner, not just a diagnosis" clause does not trigger.

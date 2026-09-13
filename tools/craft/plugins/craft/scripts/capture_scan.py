@@ -69,12 +69,18 @@ Exit codes:
      finding", not "nothing printed". Callers must check the exit code, not
      whether stdout is empty.
   1  finding(s) — prints `relpath:lineno:class:token` per hit, commit blocked
-  2  error — fail-closed: a given path does not exist
+  2  error — fail-closed: a given path does not exist, or exists but cannot
+     be read (a file or directory this process lacks permission to open).
+     A read failure must never fall through as an empty result: for a
+     control whose whole purpose is to be fail-closed before raw
+     transcripts reach a shared repo, "I could not read it" must never
+     render as "it is fine".
 """
 
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import sys
 from pathlib import Path
@@ -113,6 +119,13 @@ class Finding(NamedTuple):
     lineno: int
     cls: str
     text: str
+
+
+class ScanError(Exception):
+    """A path exists but could not be read. The caller must fail closed (exit
+    2) rather than let this resolve into an empty — and therefore falsely
+    clean — result.
+    """
 
 
 # Measured over 160,000 generated base64(os.urandom(32)) tokens (four
@@ -162,20 +175,27 @@ def scan_text(text: str) -> list[Finding]:
 def scan_file(path: Path) -> list[Finding]:
     try:
         text = path.read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return []
+    except OSError as exc:
+        raise ScanError(f"cannot read {path}: {exc.strerror or exc}") from exc
     return scan_text(text)
+
+
+def _skip_dir(name: str) -> bool:
+    return name.startswith("__pycache__") or name == ".git"
 
 
 def _iter_files(tree: Path):
     if tree.is_file():
         yield tree
         return
-    for p in sorted(tree.rglob("*")):
-        if p.is_file() and not any(
-            part.startswith("__pycache__") or part == ".git" for part in p.parts
-        ):
-            yield p
+
+    def _onerror(exc: OSError) -> None:
+        raise ScanError(f"cannot read {exc.filename}: {exc.strerror or exc}") from exc
+
+    for dirpath, dirnames, filenames in os.walk(tree, onerror=_onerror):
+        dirnames[:] = sorted(d for d in dirnames if not _skip_dir(d))
+        for name in sorted(filenames):
+            yield Path(dirpath) / name
 
 
 def _err(msg: str) -> None:
@@ -194,18 +214,22 @@ def main(argv: list[str]) -> int:
             return 2
 
     total = 0
-    for t in trees:
-        base = t if t.is_dir() else t.parent
-        base = base.resolve()
-        for f in _iter_files(t):
-            for finding in scan_file(f):
-                try:
-                    rel = f.resolve().relative_to(base)
-                except ValueError:
-                    rel = f
-                print(f"{rel}:{finding.lineno}:{finding.cls}:{finding.text}")
-                if is_credential_class(finding.cls):
-                    total += 1
+    try:
+        for t in trees:
+            base = t if t.is_dir() else t.parent
+            base = base.resolve()
+            for f in _iter_files(t):
+                for finding in scan_file(f):
+                    try:
+                        rel = f.resolve().relative_to(base)
+                    except ValueError:
+                        rel = f
+                    print(f"{rel}:{finding.lineno}:{finding.cls}:{finding.text}")
+                    if is_credential_class(finding.cls):
+                        total += 1
+    except ScanError as exc:
+        _err(str(exc))
+        return 2
     if total:
         _err(f"{total} credential finding(s) — commit blocked")
         return 1

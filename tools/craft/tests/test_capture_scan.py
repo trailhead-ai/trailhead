@@ -23,7 +23,9 @@ credential_are_classified_differently` pins that behaviour directly.
 from __future__ import annotations
 
 import base64
+import os
 import random
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -33,6 +35,11 @@ import pytest
 REPO_ROOT = Path(__file__).parent.parent
 SCANNER = REPO_ROOT / "plugins" / "craft" / "scripts" / "capture_scan.py"
 EVALS_ROOT = REPO_ROOT / "plugins" / "craft" / "evals"
+# Every tool's evals tree, repo-wide — not just craft's — so a capture batch
+# committed under another tool's evals/, or in a nested runs/, is not skipped
+# by construction. tools/<name>/plugins/<name>/evals/**/runs matches both the
+# flat layout craft uses today and any nested runs/ a future tool adds.
+TOOLS_ROOT = REPO_ROOT.parent
 
 
 def _run(*paths: Path) -> subprocess.CompletedProcess:
@@ -234,6 +241,64 @@ def test_a_missing_tree_fails_closed(tmp_path):
     assert "does not exist" in result.stderr
 
 
+@pytest.mark.skipif(os.geteuid() == 0, reason="root bypasses file permission checks")
+def test_an_unreadable_file_fails_closed_instead_of_reporting_clean(tmp_path):
+    # A file with a real credential finding is caught (exit 1) while readable;
+    # once it cannot be read, the scan must refuse (exit 2), never fall through
+    # to exit 0 as though the tree were clean.
+    secret = _write(tmp_path, "secret.txt", "AWS_SECRET_ACCESS_KEY=zQ9pLxR2vT8mN0kW\n")
+    readable = _run(secret)
+    assert readable.returncode == 1, f"expected a finding first: {readable.stdout}"
+
+    secret.chmod(0)
+    try:
+        result = _run(secret)
+    finally:
+        secret.chmod(stat.S_IRUSR | stat.S_IWUSR)
+
+    assert result.returncode == 2, (
+        f"an unreadable file must fail closed (exit 2), not report clean: "
+        f"exit={result.returncode} stdout={result.stdout!r} stderr={result.stderr!r}"
+    )
+    assert "cannot read" in result.stderr
+    assert result.stdout == ""
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root bypasses file permission checks")
+def test_an_unreadable_directory_fails_closed_instead_of_reporting_clean(tmp_path):
+    locked = tmp_path / "locked"
+    locked.mkdir()
+    _write(locked, "secret.txt", "AWS_SECRET_ACCESS_KEY=zQ9pLxR2vT8mN0kW\n")
+
+    locked.chmod(0)
+    try:
+        result = _run(tmp_path)
+    finally:
+        locked.chmod(stat.S_IRWXU)
+
+    assert result.returncode == 2, (
+        f"an unreadable directory must fail closed (exit 2), not report clean: "
+        f"exit={result.returncode} stdout={result.stdout!r} stderr={result.stderr!r}"
+    )
+    assert "cannot read" in result.stderr
+
+
+def test_nested_directory_traversal_finds_a_planted_secret_at_its_relative_path(tmp_path):
+    nested = tmp_path / "a" / "b" / "c"
+    nested.mkdir(parents=True)
+    _write(nested, "deep.txt", "AWS_SECRET_ACCESS_KEY=zQ9pLxR2vT8mN0kW\n")
+    _write(tmp_path, "shallow.txt", "nothing to see here\n")
+
+    result = _run(tmp_path)
+
+    assert result.returncode == 1, f"expected the nested secret to be found: {result.stdout}"
+    lines = [ln for ln in result.stdout.splitlines() if ":key-like:" in ln]
+    assert lines, f"expected a key-like finding in:\n{result.stdout}"
+    assert lines[0].startswith(str(Path("a") / "b" / "c" / "deep.txt") + ":"), (
+        f"expected the finding's relpath to reflect the nested location: {lines[0]!r}"
+    )
+
+
 def test_a_clean_multi_line_capture_exits_zero(tmp_path):
     f = _write(
         tmp_path,
@@ -249,8 +314,18 @@ def test_a_clean_multi_line_capture_exits_zero(tmp_path):
 
 
 def test_the_committed_eval_captures_pass_the_scan():
-    runs_dirs = sorted(EVALS_ROOT.glob("*/runs"))
+    # Widened repo-wide (was EVALS_ROOT/*/runs, craft-only) so a capture batch
+    # committed under another tool's evals/, or in a nested runs/, cannot land
+    # unscanned — the CI gate this test stands in for scans the whole repo, not
+    # one tool's tree.
+    runs_dirs = sorted(
+        p for p in TOOLS_ROOT.glob("*/plugins/*/evals/**/runs") if p.is_dir()
+    )
     assert runs_dirs, "expected at least one committed evals/**/runs directory"
+    assert any(EVALS_ROOT in p.parents for p in runs_dirs), (
+        f"expected craft's own committed runs/ dir among the widened glob's results, "
+        f"got: {runs_dirs}"
+    )
     result = _run(*runs_dirs)
     assert result.returncode == 0, (
         f"a committed capture tripped the credential scan — this is a real "
