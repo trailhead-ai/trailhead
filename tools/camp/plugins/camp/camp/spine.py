@@ -1226,7 +1226,11 @@ def _doctor_account_roster(env: dict[str, str] | None = None) -> list[dict[str, 
 
     rows: list[dict[str, Any]] = []
     for store in stores:
-        verdict = store.session_launch_account_authentication(store.account, env=store.env)
+        try:
+            verdict = store.session_launch_account_authentication(store.account, env=store.env)
+        except Exception as e:  # noqa: BLE001 — one harness's failure never discards the rest
+            rows.append({"account": store.account, "verdict": None, "reason": str(e)})
+            continue
         rows.append({"account": store.account, "verdict": verdict.value, "reason": None})
 
     rows.sort(key=lambda row: (row["account"] is None, row["account"] or ""))
