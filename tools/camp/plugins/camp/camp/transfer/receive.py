@@ -802,6 +802,11 @@ def claim(
     record the peer's own declared name rather than whatever local alias it
     uses for this peer.
 
+    The manifest write above is this phase's commit point; the marker
+    append that follows it is purely diagnostic, and a failure appending it
+    is swallowed rather than raised — a claim that has already landed on
+    disk must never be reported to the caller as a failure.
+
     Raises:
         GroupNotConfigured: *group_name* is not configured on this host.
         MalformedOwnerName: *sender* is oversized or malformed — checked
@@ -858,7 +863,14 @@ def claim(
         data["owner"] = self_name
         write_central_manifest(mpath, data, allow_owner_change=True)
 
-    append_marker(ws_dir, phase="claim", outcome="ok")
+    try:
+        append_marker(ws_dir, phase="claim", outcome="ok")
+    except OSError:
+        # The manifest write above is the commit point and has already
+        # landed — this host is the recorded owner regardless of whether
+        # the diagnostic marker could be appended. Swallowing this failure
+        # is what keeps a landed claim from ever exiting nonzero.
+        pass
 
     return {
         "contract_version": RECEIVE_CONTRACT_VERSION,

@@ -245,7 +245,20 @@ def _run_camp_phase(
     run: Runner,
     connect_timeout: float,
     execution_timeout: float,
+    promote_overwrite: bool = False,
 ) -> Answered:
+    """Run one `transfer-receive` phase and classify the outcome.
+
+    *promote_overwrite* scopes the `--overwrite` substring promotion to the
+    one phase it is meaningful for: `begin`, the only phase `--overwrite`
+    governs. Every other phase this function drives runs after `claim` has
+    already answered, so a refusal whose stderr happens to mention the flag
+    for any incidental reason must never be promoted to `OverwriteNeeded` —
+    that exception is caught nowhere past `claim` (see `move_workspace`'s
+    own `except PhaseFailed` around its `finish` call), so promoting it here
+    would escape as an uncaught "nothing crossed" refusal after ownership
+    had, in fact, already moved.
+    """
     outcome = run_camp(
         host,
         remote_argv,
@@ -255,7 +268,7 @@ def _run_camp_phase(
     )
     if isinstance(outcome, Answered):
         return outcome
-    if isinstance(outcome, RemoteRefusal) and _OVERWRITE_MARKER in outcome.stderr:
+    if promote_overwrite and isinstance(outcome, RemoteRefusal) and _OVERWRITE_MARKER in outcome.stderr:
         raise OverwriteNeeded(outcome.stderr.strip())
     raise PhaseFailed(remote_argv[1] if len(remote_argv) > 1 else remote_argv[0], _outcome_detail(outcome))
 
@@ -269,19 +282,32 @@ def _reprobe_claim(
     run: Runner,
     connect_timeout: float,
     execution_timeout: float,
+    remote_confirmed_exited: bool,
 ) -> tuple[bool | None, str | None]:
     """Ask *host* itself, via `camp.transfer.probe.probe_peer`, whether a
     `claim` this module could not read directly actually landed there.
 
     Returns `(True, owner)` when the peer's own probe answer names ITSELF as
     the workspace's owner — `claim` landed, and *owner* is the exact name to
-    carry forward as `PhaseFailed.claimed_owner`. Returns `(False, None)`
-    when the probe answers cleanly but the peer does not (yet) consider
-    itself the owner — `claim` did not land. Returns `(None, None)` when the
-    probe itself could not establish either — unreachable, refused, a
-    malformed wire response, or a declared-name collision — so the caller
+    carry forward as `PhaseFailed.claimed_owner`. Returns `(None, None)`
+    when the probe itself could not establish either — unreachable, refused,
+    a malformed wire response, or a declared-name collision — so the caller
     must not guess and should raise with `indeterminate=True` instead of
     picking one of the other two.
+
+    A probe answering cleanly with the peer NOT (yet) considering itself the
+    owner is only conclusive — `(False, None)`, "claim did not land" — when
+    *remote_confirmed_exited* is `True`: the original outcome this call is
+    resolving was itself proof the remote `claim` invocation had already run
+    to completion (an `Answered` exit 0 with an unusable body, or a
+    `RemoteRefusal`'s own nonzero exit — either way the ssh session
+    completed). When *remote_confirmed_exited* is `False` — a
+    `StoppedResponding` timeout, where only the LOCAL connection is known to
+    have ended — a negative reading is not proof of anything: the remote
+    `claim` may still be running, blocked on the workspace lock its own
+    provisioner holds for minutes, and land moments after this probe
+    returns. That case is reported `(None, None)` too, so the caller raises
+    `indeterminate=True` rather than the pre-commit "safe to retry" shape.
     """
     from .probe import ProbeAnswer, probe_peer
 
@@ -298,6 +324,8 @@ def _reprobe_claim(
         return None, None
     if probe_result.workspace_owner == probe_result.self_name:
         return True, probe_result.self_name
+    if not remote_confirmed_exited:
+        return None, None
     return False, None
 
 
@@ -393,7 +421,12 @@ def move_workspace(
     if overwrite:
         begin_argv.append("--overwrite")
     begin_answer = _run_camp_phase(
-        host, begin_argv, run=run, connect_timeout=connect_timeout, execution_timeout=execution_timeout
+        host,
+        begin_argv,
+        run=run,
+        connect_timeout=connect_timeout,
+        execution_timeout=execution_timeout,
+        promote_overwrite=True,
     )
 
     import json
@@ -521,6 +554,7 @@ def move_workspace(
                 run=run,
                 connect_timeout=connect_timeout,
                 execution_timeout=execution_timeout,
+                remote_confirmed_exited=True,
             )
             detail = f"peer answered but the response body was not usable: {e}"
             if landed:
@@ -532,8 +566,10 @@ def move_workspace(
             raise PhaseFailed("claim", detail, indeterminate=True) from e
     elif isinstance(claim_outcome, StoppedResponding):
         # The connection completed, so the peer may have run `claim` to
-        # completion before this host lost the response — never assumed
-        # either way; see `_reprobe_claim`.
+        # completion before this host lost the response — but the LOCAL
+        # timeout proves nothing about whether the remote invocation itself
+        # ever terminated, so a negative reprobe reading is not conclusive
+        # either (`remote_confirmed_exited=False`); see `_reprobe_claim`.
         landed, owner = _reprobe_claim(
             host,
             group_name=group_name,
@@ -542,6 +578,30 @@ def move_workspace(
             run=run,
             connect_timeout=connect_timeout,
             execution_timeout=execution_timeout,
+            remote_confirmed_exited=False,
+        )
+        detail = _outcome_detail(claim_outcome)
+        if landed:
+            raise PhaseFailed("claim", detail, claimed_owner=owner, conversations=tuple(crossed))
+        if landed is False:
+            raise PhaseFailed("claim", detail)
+        raise PhaseFailed("claim", detail, indeterminate=True)
+    elif isinstance(claim_outcome, RemoteRefusal):
+        # A nonzero remote exit is not proof `claim` never ran: it is
+        # equally the shape a crash AFTER the manifest write would produce
+        # (see `camp.transfer.receive.claim` and its own marker-append
+        # note). The remote process is confirmed to have fully exited here,
+        # though — unlike `StoppedResponding` — so a negative reprobe
+        # reading IS conclusive (`remote_confirmed_exited=True`).
+        landed, owner = _reprobe_claim(
+            host,
+            group_name=group_name,
+            slug=slug,
+            sender_name=sender_name,
+            run=run,
+            connect_timeout=connect_timeout,
+            execution_timeout=execution_timeout,
+            remote_confirmed_exited=True,
         )
         detail = _outcome_detail(claim_outcome)
         if landed:
@@ -550,12 +610,12 @@ def move_workspace(
             raise PhaseFailed("claim", detail)
         raise PhaseFailed("claim", detail, indeterminate=True)
     else:
-        # Every other outcome (an explicit `RemoteRefusal`, or a transport
-        # failure before the remote ever ran — `Unreachable`,
-        # `IdentityUnknown`/`IdentityChanged`, `CampNotResolvable`,
-        # `CredentialsRefused`) means `claim` either never ran on the peer at
-        # all or ran and explicitly refused — ownership never moved, so this
-        # is the ordinary, safe-to-retry shape.
+        # Every remaining outcome — a transport failure before the remote
+        # ever ran (`Unreachable`, `IdentityUnknown`/`IdentityChanged`,
+        # `CampNotResolvable`, `CredentialsRefused`) — means the connection
+        # itself never completed, so `claim` never ran on the peer at all:
+        # the ordinary, safe-to-retry shape, with no need to re-probe (a
+        # probe would only fail to connect the same way).
         raise PhaseFailed("claim", _outcome_detail(claim_outcome))
 
     on_phase("finish")

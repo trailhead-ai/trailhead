@@ -56,25 +56,36 @@ inputs are checked:
                                never moved, nothing after the failing phase ran,
                                and re-running the transfer (with --overwrite) is
                                safe
- 10  EXIT_PHASE_FAILED_POST_COMMIT  `claim` already answered and `finish` then
-                               failed — ownership has already moved to the peer.
-                               A re-run is NOT safe here: the peer already owns
-                               the workspace and would refuse a re-run's opening
-                               `begin`. The conversations that already crossed
-                               are still released from this host; this host's
-                               own manifest is deliberately left stale, and the
-                               printed remedy names the peer and directs the
-                               operator to continue the work there
- 11  EXIT_RELEASE_INCOMPLETE  Every phase answered and this host's own record
-                               was flipped to the peer — a clean handover — but
+ 10  EXIT_PHASE_FAILED_POST_COMMIT  `claim` has answered — ownership has already
+                               moved to the peer — and either `finish` then
+                               failed, or `claim`'s own outcome could not be
+                               read directly but a re-probe of the peer
+                               confirmed it landed anyway, in which case
+                               `finish` never even ran (see
+                               `camp.transfer.move.PhaseFailed`). A re-run is
+                               NOT safe here: the peer already owns the
+                               workspace and would refuse a re-run's opening
+                               `begin`. The conversations that already
+                               crossed are still released from this host;
+                               this host's own manifest is deliberately left
+                               stale, and the printed remedy names the peer
+                               and directs the operator to continue the work
+                               there
+ 11  EXIT_RELEASE_INCOMPLETE  `claim` has answered — ownership has already moved
+                               to the peer — but completing the local handover
+                               on this host did not go entirely cleanly: either
                                at least one crossed conversation's release came
-                               back FAILED, so this host still holds a
-                               resumable copy of something the peer now
-                               believes it owns alone. Distinct from
+                               back FAILED (this host MAY still hold a
+                               resumable copy of it — a FAILED release whose
+                               transcript already relocated, with only its
+                               durable marker unrecorded, does not, and the
+                               printed summary says which), or an unexpected
+                               error interrupted archiving and/or flipping
+                               this host's own record. Distinct from
                                `EXIT_WOULD_TRANSFER` precisely so a caller
                                reading the exit code alone can tell a fully
-                               clean transfer from one that needs a
-                               conversation cleaned up by hand.
+                               clean transfer from one that needs checking by
+                               hand.
  12  EXIT_PHASE_INDETERMINATE `claim` failed in a way `move_workspace` could
                                not resolve even after re-probing the peer
                                (`camp.transfer.move.PhaseFailed.indeterminate`)
@@ -811,6 +822,22 @@ def _cmd_transfer_group_cli(
             # handover this host cannot confirm actually finished on the
             # peer.
             post_commit_release_results = _release_crossed(e.conversations)
+            if e.phase == "finish":
+                bring_up_note = (
+                    "The phase that failed is exactly the one that performs "
+                    "bring-up, so the peer's workspace has had no setup at "
+                    "all yet"
+                )
+            else:
+                # `claim` resolved as landed only via a re-probe (its own
+                # outcome could not be read directly) — `finish`, the phase
+                # that performs bring-up, never even ran on the peer.
+                bring_up_note = (
+                    f"The phase that failed ({e.phase!r}) never reaches "
+                    "bring-up itself, and `finish` — the phase that does — "
+                    "never ran either, so the peer's workspace has had no "
+                    "setup at all yet"
+                )
             print(
                 f"camp transfer: phase {e.phase!r} failed after ownership had "
                 f"already moved to {e.claimed_owner!r} — {e.detail}. This is "
@@ -822,11 +849,10 @@ def _cmd_transfer_group_cli(
                 f"{group_name} --slug {slug}` ON THE PEER ({e.claimed_owner!r}) "
                 "against this host is how you confirm that; run here it "
                 "would only report that this host's own record is stale, "
-                "which you already know. The phase that failed is exactly "
-                "the one that performs bring-up, so the peer's workspace "
-                "has had no setup at all yet — check its progress there with "
-                f"`camp status --name {slug} --group {group_name}` and retry "
-                "any failed or pending member with `camp setup`.",
+                f"which you already know. {bring_up_note} — check its "
+                f"progress there with `camp status --name {slug} --group "
+                f"{group_name}` and retry any failed or pending member with "
+                "`camp setup`.",
                 file=sys.stderr,
             )
             if e.conversations:
@@ -845,14 +871,34 @@ def _cmd_transfer_group_cli(
 
     from ..transfer.release import flip_sender_ownership
 
-    release_results = _release_crossed(move_result.conversations)
+    try:
+        release_results = _release_crossed(move_result.conversations)
 
-    # This host's own last write of the whole verb — after release_conversations
-    # has archived and marked every crossed conversation, never before. See
-    # camp.transfer.release's module docstring for why the ordering is load-bearing.
-    flip_sender_ownership(
-        group=group_name, slug=slug, owner=move_result.claimed_owner, env=resolved_env
-    )
+        # This host's own last write of the whole verb — after release_conversations
+        # has archived and marked every crossed conversation, never before. See
+        # camp.transfer.release's module docstring for why the ordering is load-bearing.
+        flip_sender_ownership(
+            group=group_name, slug=slug, owner=move_result.claimed_owner, env=resolved_env
+        )
+    except Exception as e:
+        # `claim` has already answered by this point — ownership has already
+        # moved to `move_result.claimed_owner` regardless of what happens
+        # next. An unexpected error completing the local archive-and-flip
+        # tail must never escape as a raw traceback and exit 1 — that code
+        # is reserved for a local/config error before anything has crossed —
+        # so this is routed to the same honest, documented outcome an
+        # incomplete release already gets.
+        print(
+            f"camp transfer: ownership already moved to "
+            f"{move_result.claimed_owner!r} — but completing the local "
+            f"handover on this host (archiving crossed conversations and/or "
+            f"flipping this host's own record) failed unexpectedly: {e}. "
+            "This host's own manifest and its archived conversations may be "
+            "in an inconsistent state; check them by hand rather than "
+            "retrying the transfer.",
+            file=sys.stderr,
+        )
+        sys.exit(EXIT_RELEASE_INCOMPLETE)
 
     _render_move_completion(
         move_result,
@@ -864,12 +910,29 @@ def _cmd_transfer_group_cli(
 
     from ..transfer.release import ReleaseOutcome
 
-    if any(r.outcome is ReleaseOutcome.FAILED for r in release_results):
-        print(
-            "camp transfer: ownership moved cleanly, but at least one "
-            "conversation's release failed — see the FAILED line(s) above "
-            "for which one(s) still need cleaning up on this host.",
-            file=sys.stderr,
-        )
+    failed_releases = [r for r in release_results if r.outcome is ReleaseOutcome.FAILED]
+    if failed_releases:
+        if any(r.archive_path is None for r in failed_releases):
+            # At least one FAILED release never relocated its transcript at
+            # all — this host genuinely may still hold a resumable copy.
+            print(
+                "camp transfer: ownership moved cleanly, but at least one "
+                "conversation's release failed — see the FAILED line(s) "
+                "above for which one(s) still need cleaning up on this "
+                "host.",
+                file=sys.stderr,
+            )
+        else:
+            # Every FAILED release here is the marker-only shape: the
+            # transcript already left this host and only the durable
+            # release marker could not be recorded — nothing is sitting
+            # here to clean up.
+            print(
+                "camp transfer: ownership moved cleanly, and every crossed "
+                "conversation's transcript has already left this host, but "
+                "at least one durable release marker could not be recorded "
+                "— see the FAILED line(s) above.",
+                file=sys.stderr,
+            )
         sys.exit(EXIT_RELEASE_INCOMPLETE)
     sys.exit(EXIT_WOULD_TRANSFER)

@@ -82,12 +82,15 @@ even attempted; only a `FAILED` outcome whose relocation itself never
 happened carries `archive_path=None`.
 
 **`flip_sender_ownership` is the sender's last write of the whole verb.**
-Called by the CLI only after `release_conversations` has returned — every
-crossed conversation already archived and its marker entry already
-appended — it writes *this* host's own manifest to name the peer as owner,
-using the exact name `camp.transfer.move.MoveResult.claimed_owner` carries
-(the peer's own declared name, never the sender's `--to` alias for it).
-Like `camp.transfer.receive.claim`'s write on the peer side, it goes through
+Called by the CLI unconditionally once `release_conversations` has
+returned — regardless of whether every crossed conversation's own release
+came back `ARCHIVED`: a per-conversation `FAILED` outcome is reported to
+the operator, never treated as a reason to withhold the flip, since
+ownership has already moved to the peer by the time either function runs.
+It writes *this* host's own manifest to name the peer as owner, using the
+exact name `camp.transfer.move.MoveResult.claimed_owner` carries (the
+peer's own declared name, never the sender's `--to` alias for it). Like
+`camp.transfer.receive.claim`'s write on the peer side, it goes through
 `write_central_manifest`'s guarded `allow_owner_change=True` opt-in — the
 same bypass-proof gate every deliberate ownership change uses — under the
 same `reconcile_lock` every other manifest mutation on this workspace
@@ -213,6 +216,39 @@ def read_release_marker(
     return tuple(raw)
 
 
+def _move_aside_and_replace(dest: Path, source: Path) -> None:
+    """Relocate *source* onto *dest*, never by deleting a pre-existing
+    *dest* up front.
+
+    A stale *dest* (a file or a directory — this is used for both the
+    top-level transcript and the nested subtree) is moved aside to a sibling
+    path first; only once *source* has landed at *dest* is the stale copy
+    actually discarded. A failure moving *source* in restores the stale copy
+    exactly, so a failed replacement never leaves the operator with less
+    than they started with — no archive at all, instead of the prior one.
+    """
+    backup = dest.with_name(f".{dest.name}.stale")
+    had_prior = dest.exists()
+    if had_prior:
+        if backup.exists():
+            if backup.is_dir():
+                shutil.rmtree(backup)
+            else:
+                backup.unlink()
+        shutil.move(str(dest), str(backup))
+    try:
+        shutil.move(str(source), str(dest))
+    except OSError:
+        if had_prior:
+            shutil.move(str(backup), str(dest))
+        raise
+    if had_prior:
+        if backup.is_dir():
+            shutil.rmtree(backup)
+        else:
+            backup.unlink()
+
+
 def release_conversations(
     *,
     group: str,
@@ -272,15 +308,16 @@ def release_conversations(
 
         nested_source = transcript_path.parent / session_id
 
+        # The top-level transcript is relocated FIRST, never the nested
+        # subtree — `archive_path` is this loop's only signal of what
+        # actually moved, and only the top-level file's destination is ever
+        # reported as `archive_path`. Relocating it first means a failure
+        # from here on always has a truthful `archive_path` to report:
+        # `None` while nothing has moved yet, `dest` once it has, in either
+        # order the subsequent nested-subtree step can fail.
         try:
             root.mkdir(parents=True, exist_ok=True)
-            if nested_source.is_dir():
-                if nested_dest.exists():
-                    shutil.rmtree(nested_dest)
-                shutil.move(str(nested_source), str(nested_dest))
-            if dest.exists():
-                dest.unlink()
-            shutil.move(str(transcript_path), str(dest))
+            _move_aside_and_replace(dest, transcript_path)
         except OSError as e:
             results.append(
                 ConversationRelease(
@@ -291,6 +328,24 @@ def release_conversations(
                 )
             )
             continue
+
+        if nested_source.is_dir():
+            try:
+                _move_aside_and_replace(nested_dest, nested_source)
+            except OSError as e:
+                results.append(
+                    ConversationRelease(
+                        session_id=session_id,
+                        outcome=ReleaseOutcome.FAILED,
+                        archive_path=dest,
+                        detail=(
+                            "the top-level transcript was archived but its "
+                            f"nested subagent/tool-result subtree could not "
+                            f"be relocated: {e}"
+                        ),
+                    )
+                )
+                continue
 
         try:
             _append_marker(
