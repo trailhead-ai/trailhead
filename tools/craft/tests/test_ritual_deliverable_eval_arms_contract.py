@@ -182,14 +182,35 @@ def test_frozen_slice_arm_matches_its_declared_provenance():
     region (at or after the historical source's own length) and is distinguishable
     from a drift inside the source region, which would instead indicate a wrong
     commit or a hand-edit.
+
+    IF THIS GOES RED BECAUSE OUTPOST'S `## Record links` SECTION CHANGED: the
+    cheapest-looking fix — regenerating `slice-frozen-rule-only.md` from the new
+    tail — is wrong. This arm is frozen precisely so the committed captures under
+    `evals/ritual-deliverable-names-its-record/runs/` stay measured against the
+    exact prose they were actually dispatched against; regenerating it would
+    silently rewrite that evidence out from under the already-committed captures
+    without re-running anything. The correct fix is to re-record the measurement —
+    dispatch new baseline runs against the frozen arm's real historical tail (built
+    from the `## Record links` section as it stood at the commit named by
+    `FROZEN_SLICE_SOURCE_COMMIT`'s neighborhood, not today's), and commit the new
+    captures alongside a corrected arm. Never edit this arm to make the test pass.
     """
     historical_source = _git_show(FROZEN_SLICE_SOURCE_COMMIT, FROZEN_SLICE_SOURCE_PATH)
     expected = historical_source + _record_links_tail()
     actual = (ARMS_DIR / FROZEN_SLICE_ARM).read_text(encoding="utf-8")
-    assert actual == expected, _drift_message(
-        FROZEN_SLICE_ARM,
-        [f"{FROZEN_SLICE_SOURCE_COMMIT}:{FROZEN_SLICE_SOURCE_PATH}"],
-        True,
-        expected,
-        actual,
+    assert actual == expected, (
+        _drift_message(
+            FROZEN_SLICE_ARM,
+            [f"{FROZEN_SLICE_SOURCE_COMMIT}:{FROZEN_SLICE_SOURCE_PATH}"],
+            True,
+            expected,
+            actual,
+        )
+        + "\n\nIf this drift lands inside the tail region (outpost's `## Record "
+        "links` section changed): do NOT regenerate slice-frozen-rule-only.md to "
+        "match. This frozen arm preserves the exact prose the committed captures "
+        "under evals/ritual-deliverable-names-its-record/runs/ were measured "
+        "against — regenerating it silently rewrites that evidence. The fix is to "
+        "re-record the measurement (dispatch new runs against the historical tail, "
+        "commit new captures), never to edit this file."
     )
