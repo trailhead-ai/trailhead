@@ -17,12 +17,15 @@ These tests pin that split:
     land in, rather than inheriting whatever the ambient environment selects.
 """
 
+import json
 import os
+import time
 from pathlib import Path
 
 import pytest
 
 from trailhead.doctor import run_doctor
+from trailhead.harness.base import AccountAuthentication
 from trailhead.harness.claude_code import ClaudeCodeHarness
 
 from .test_doctor import _claude_dir, _fake_py, _make_tree
@@ -220,3 +223,119 @@ class TestComposedTreeSharing:
 
         assert h.composed_tree_in_use_elsewhere(composed_root, env=_env(personal)) is False
         assert h.composed_tree_in_use_elsewhere(composed_root, env=_env(second)) is True
+
+
+def _write_credentials(config_dir: Path, access_token: str) -> None:
+    config_dir.mkdir(parents=True, exist_ok=True)
+    (config_dir / ".credentials.json").write_text(
+        json.dumps({"claudeAiOauth": {"accessToken": access_token, "expiresAt": 1}})
+    )
+
+
+class TestAccountAuthenticationVariesWithTheSignal:
+    """The Claude Code override answers from the account's credentials file —
+    same input shape (a declared account), different content, different
+    verdict. This is the dependency the method exists to protect."""
+
+    def test_a_non_empty_access_token_reads_as_authenticated(self, tmp_path):
+        account_dir = tmp_path / "acct"
+        _write_credentials(account_dir, "sk-ant-oat01-fake")
+
+        result = ClaudeCodeHarness().session_launch_account_authentication(
+            str(account_dir), env={"HOME": str(tmp_path / "home")}
+        )
+
+        assert result is AccountAuthentication.AUTHENTICATED
+
+    def test_an_empty_access_token_reads_as_not_authenticated(self, tmp_path):
+        account_dir = tmp_path / "acct"
+        _write_credentials(account_dir, "")
+
+        result = ClaudeCodeHarness().session_launch_account_authentication(
+            str(account_dir), env={"HOME": str(tmp_path / "home")}
+        )
+
+        assert result is AccountAuthentication.NOT_AUTHENTICATED
+
+
+class TestAccountAuthenticationCannotTell:
+    """Unreadable or malformed signal reads as CANNOT_TELL — distinguishable
+    by the caller from NOT_AUTHENTICATED, never collapsed into it."""
+
+    def test_a_credentials_file_that_cannot_be_read_is_cannot_tell(self, tmp_path):
+        account_dir = tmp_path / "acct"
+        account_dir.mkdir()
+        # A directory in place of the file: reading it raises OSError (not
+        # FileNotFoundError), simulating an unreadable signal without
+        # depending on chmod/root-privilege behavior.
+        (account_dir / ".credentials.json").mkdir()
+
+        result = ClaudeCodeHarness().session_launch_account_authentication(
+            str(account_dir), env={"HOME": str(tmp_path / "home")}
+        )
+
+        assert result is AccountAuthentication.CANNOT_TELL
+        assert result is not AccountAuthentication.NOT_AUTHENTICATED
+
+    def test_malformed_json_is_cannot_tell(self, tmp_path):
+        account_dir = tmp_path / "acct"
+        account_dir.mkdir()
+        (account_dir / ".credentials.json").write_text("{not valid json")
+
+        result = ClaudeCodeHarness().session_launch_account_authentication(
+            str(account_dir), env={"HOME": str(tmp_path / "home")}
+        )
+
+        assert result is AccountAuthentication.CANNOT_TELL
+        assert result is not AccountAuthentication.NOT_AUTHENTICATED
+
+
+class TestAccountAuthenticationNeverBlocks:
+    """Invoking the probe against a realistic-sized fixture returns a value
+    rather than waiting — the observable consequence of "no subprocess, no
+    network call": a bounded wall-clock time."""
+
+    def test_reading_a_realistic_sized_credentials_file_is_fast(self, tmp_path):
+        account_dir = tmp_path / "acct"
+        account_dir.mkdir()
+        padding = {f"Claude_Code_Remote|{i:x}": {"accessToken": ""} for i in range(40)}
+        (account_dir / ".credentials.json").write_text(
+            json.dumps(
+                {
+                    "mcpOAuth": padding,
+                    "claudeAiOauth": {"accessToken": "sk-ant-oat01-fake", "expiresAt": 1},
+                }
+            )
+        )
+
+        start = time.perf_counter()
+        result = ClaudeCodeHarness().session_launch_account_authentication(
+            str(account_dir), env={"HOME": str(tmp_path / "home")}
+        )
+        elapsed = time.perf_counter() - start
+
+        assert result is AccountAuthentication.AUTHENTICATED
+        assert elapsed < 0.05
+
+
+class TestAccountAuthenticationDefaultAccountResolution:
+    """``None`` means "the caller declared nothing" and resolves to the
+    harness's own default rather than inheriting from the ambient
+    environment. ``TRAILHEAD_CLAUDE_DIR`` is a trailhead-only test seam the
+    real launched process never reads for the default account (the same
+    axiom ``session_launch_account_identity`` pins against ``_claude_dir``)
+    — so a conflicting value planted there must be ignored in favor of the
+    real default, ``HOME``/.claude."""
+
+    def test_default_account_ignores_the_trailhead_seam_not_the_real_default(self, tmp_path):
+        real_home = tmp_path / "home"
+        _write_credentials(real_home / ".claude", "sk-ant-oat01-real")
+
+        decoy = tmp_path / "decoy-claude"
+        _write_credentials(decoy, "")
+
+        env = {"HOME": str(real_home), "TRAILHEAD_CLAUDE_DIR": str(decoy)}
+
+        result = ClaudeCodeHarness().session_launch_account_authentication(None, env=env)
+
+        assert result is AccountAuthentication.AUTHENTICATED
