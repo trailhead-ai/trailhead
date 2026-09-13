@@ -798,6 +798,15 @@ among the eight on the previous slice's captures. Its own prose is byte-unchange
 arm carrying it was rebuilt, so the inherited pass is an inference from unchanged prose rather than a
 measurement against the arm as it now stands.
 
+> **Corrected by `task/measure-the-treatment-and-state-the-ac7-verdict`.** The "eight of ten, not
+> all of them" claim above is superseded. Both remaining sites were measured against `arms/rule-
+> only.md` (the live, current prose) — 3/3 `own-line` at the spec-complete termination and 3/3
+> `own-line` at the early-stop termination — and both were also measured against the recovered
+> pre-change baseline arm, falsifying at 0/3 `own-line` each, confirming the defect these two sites
+> were never previously shown to have. **AC7 now holds at all ten of its one-command outcome
+> sites.** See "Extension — Task 1" below for the pre-registration and `MANUAL-EVAL.md`'s
+> `2026-09-12 — slice's two termination sites, treatment arm` entry for the full result.
+
 ## Extension — Task 1 of `task/both-slice-termination-outcomes-are-measured-not-assumed`, pre-registration for `slice`'s two termination sites
 
 **Committed before any capture for either site exists.** This task writes this section and the two

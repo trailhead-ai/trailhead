@@ -1,0 +1,13 @@
+**Slice loop stopped — [spec/glacier-survey-logistics](http://127.0.0.1:7313/records/meadowbrook/spec/glacier-survey-logistics)**
+
+No slice was chosen on this pass. The candidate set came back empty (`candidates: none`), but the gate could not certify the union as complete (`complete-eligible: no`) — one `## Slices` ledger entry attests coverage of an acceptance criterion but carries no coverage token, so the coverage union is known incomplete and completion cannot be certified from it. The gate emits no per-entry signal, so I can't name which entry is at fault beyond what it certified.
+
+**Still unmet:** AC4.
+
+The stop is recorded on the spec: `craft/slice-loop=stopped`, with a body note.
+
+Run this again once the untokened ledger entry is corrected and the union can be certified:
+
+```
+/craft:slice spec/glacier-survey-logistics
+```
