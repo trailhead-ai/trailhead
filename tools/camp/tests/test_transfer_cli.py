@@ -2858,6 +2858,82 @@ def test_claim_phase_fails_closed_against_a_peer_that_does_not_know_the_subcomma
     assert not finish_calls, "finish must never run when the peer refused claim"
 
 
+def test_a_finish_refusal_whose_stderr_mentions_overwrite_is_not_promoted_to_overwrite_needed():
+    """The `--overwrite` substring match that turns a `begin` refusal into
+    `OverwriteNeeded` is meaningful only for `begin`, the phase that flag
+    actually governs. `claim` has already answered by the time `finish`
+    runs, so a `finish` refusal whose stderr happens to mention the flag —
+    for any incidental reason — must still surface as the ordinary
+    post-commit `PhaseFailed`, never as `OverwriteNeeded`: that exception
+    is caught nowhere past `claim`, so promoting it here would escape
+    `move_workspace` entirely and read to the caller as "nothing crossed"
+    when ownership had, in fact, already moved."""
+    import json as json_mod
+
+    from camp.host.transport import RawResult
+    from camp.transfer.move import PhaseFailed, move_workspace
+
+    def _run(argv, execution_timeout, env):
+        remote_command = argv[-1]
+        if "claim" in remote_command:
+            return RawResult(
+                stdout=json_mod.dumps({"contract_version": 1, "owner": "host-b"}),
+                stderr="",
+                exit_code=0,
+            )
+        if "finish" in remote_command:
+            return RawResult(
+                stdout="",
+                stderr="camp transfer-receive: pass --overwrite to proceed",
+                exit_code=1,
+            )
+        return RawResult(
+            stdout=json_mod.dumps(
+                {"contract_version": 1, "members": [{"name": "repo_a", "basis_commit": None}]}
+            ),
+            stderr="",
+            exit_code=0,
+        )
+
+    def _tiny_producer(argv):
+        return subprocess.Popen(
+            [sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'x')"],
+            stdout=subprocess.PIPE,
+        )
+
+    def _fast_stream_spawn(argv, env):
+        return subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                "import sys,json; sys.stdin.buffer.read(); "
+                "sys.stdout.write(json.dumps({'contract_version': 1}))",
+            ],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+    group, host = _claim_fixture_group_and_host()
+
+    with pytest.raises(PhaseFailed) as exc_info:
+        move_workspace(
+            host=host,
+            group=group,
+            group_name="testgroup",
+            slug="feat-lastphase-overwrite-x",
+            sender_name="host-a",
+            overwrite=False,
+            run=_run,
+            stream_spawn=_fast_stream_spawn,
+            history_producer_spawn=_tiny_producer,
+            worktree_producer_spawn=_tiny_producer,
+        )
+
+    assert exc_info.value.phase == "finish"
+    assert exc_info.value.claimed_owner == "host-b"
+
+
 def test_claim_failure_detail_distinguishes_a_timeout_from_an_explicit_refusal():
     """The same `PhaseFailed("claim", ...)` shape carries a materially
     different `.detail` depending on WHY the peer's claim failed — the
@@ -3035,15 +3111,101 @@ def test_a_timed_out_claim_that_reprobes_as_committed_is_treated_as_post_commit(
     assert failure.claimed_owner == "host-b"
 
 
-def test_a_timed_out_claim_that_reprobes_as_not_landed_is_treated_as_pre_commit():
-    """The peer's `transfer-probe` shows the workspace still owned by the
-    sender (or unowned) — the timed-out `claim` never actually landed, so
-    this is the ordinary, safe-to-retry shape: no `claimed_owner`."""
+def test_a_timed_out_claims_negative_reprobe_is_indeterminate_not_pre_commit():
+    """Killing the local transport (`StoppedResponding`) does not terminate
+    the remote `claim` invocation — it may still be running, blocked on the
+    workspace lock its own provisioner holds for minutes. A probe reading
+    "not yet owner" right afterward is therefore not proof the claim will
+    never land — it can still complete moments later — so this must be
+    reported `indeterminate`, never the ordinary safe-to-retry shape a
+    conclusively-failed claim gets."""
     run = _make_claim_timeout_run(probe_answer_kwargs={"workspace_owner": "host-a"})
     failure = _drive_claim_timeout(run)
 
     assert failure.phase == "claim"
     assert failure.claimed_owner is None
+    assert failure.indeterminate is True
+
+
+def _make_claim_refusal_run(*, stderr: str, probe_answer_kwargs: dict | None):
+    """A `Runner` whose `claim` invocation exits nonzero with *stderr*
+    (`RemoteRefusal` — the ssh session completed, so the remote process
+    fully ran to that exit, unlike a `StoppedResponding` timeout) and whose
+    `transfer-probe` invocation, if the fix re-probes, answers with
+    *probe_answer_kwargs* — `None` means the probe itself cannot be reached
+    either."""
+    import subprocess as subprocess_mod
+
+    from camp.host.transport import RawResult
+
+    def _run(argv, execution_timeout, env):
+        import json as json_mod
+
+        remote_command = argv[-1]
+        if "transfer-receive" in remote_command and "claim" in remote_command:
+            return RawResult(stdout="", stderr=stderr, exit_code=1)
+        if "transfer-probe" in remote_command:
+            if probe_answer_kwargs is None:
+                raise subprocess_mod.TimeoutExpired(cmd=argv, timeout=execution_timeout)
+            payload = {
+                "self_name": "host-b",
+                "group_configured": True,
+                "members": [],
+                "account": None,
+                "workspace_exists": True,
+                "workspace_owner": None,
+                "contract_version": 1,
+            }
+            payload.update(probe_answer_kwargs)
+            return RawResult(stdout=json_mod.dumps(payload), stderr="", exit_code=0)
+        if "finish" in remote_command:
+            return RawResult(
+                stdout=json_mod.dumps({"contract_version": 1, "manifest_path": "x"}),
+                stderr="",
+                exit_code=0,
+            )
+        return RawResult(
+            stdout=json_mod.dumps(
+                {"contract_version": 1, "members": [{"name": "repo_a", "basis_commit": None}]}
+            ),
+            stderr="",
+            exit_code=0,
+        )
+
+    return _run
+
+
+def test_a_claim_explicitly_refused_that_reprobes_as_landed_is_treated_as_post_commit():
+    """A nonzero `claim` exit (`RemoteRefusal`) is not proof the claim never
+    landed — the remote process could have crashed AFTER its manifest write
+    already committed. The peer's own probe showing itself as owner settles
+    it: this must be treated exactly like a `finish` failure after a
+    successful `claim`, never assumed safe-to-retry merely because the exit
+    code was nonzero."""
+    run = _make_claim_refusal_run(
+        stderr="camp transfer-receive: unexpected error after writing owner",
+        probe_answer_kwargs={"workspace_owner": "host-b"},
+    )
+    failure = _drive_claim_timeout(run)
+
+    assert failure.phase == "claim"
+    assert failure.claimed_owner == "host-b"
+
+
+def test_a_claim_explicitly_refused_that_reprobes_as_not_landed_is_treated_as_pre_commit():
+    """Unlike a `StoppedResponding` timeout, a `RemoteRefusal` means the
+    remote process is confirmed to have fully exited — so a probe reading
+    "not owner" right afterward is conclusive, not merely a snapshot of a
+    claim still in flight. This is the ordinary, safe-to-retry shape."""
+    run = _make_claim_refusal_run(
+        stderr="camp transfer-receive: this host has not declared a self_name",
+        probe_answer_kwargs={"workspace_owner": "host-a"},
+    )
+    failure = _drive_claim_timeout(run)
+
+    assert failure.phase == "claim"
+    assert failure.claimed_owner is None
+    assert failure.indeterminate is False
 
 
 def test_a_timed_out_claim_whose_reprobe_also_fails_is_reported_indeterminate():
@@ -3485,6 +3647,49 @@ def test_post_commit_remedy_names_the_peer_side_setup_commands_and_where_to_prob
     assert "camp status --name feat-x --group trailhead" in err
     assert "camp setup" in err
     assert "on the peer" in err.lower() or "on host-b-declared" in err.lower()
+
+
+def test_post_commit_remedy_never_claims_claim_itself_performed_bring_up(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """When the outcome resolved as post-commit is `claim` itself (a claim
+    whose outcome could not be read directly but a re-probe confirmed
+    landed — see `camp.transfer.move.PhaseFailed`), `finish` never even ran.
+    The remedy text must not assert that the FAILING phase is the one that
+    performs bring-up — that phase is `finish`, and it never ran, whether
+    the failure is reported against `claim` or `finish`."""
+    env = _Env(tmp_path)
+    env.write_group(excluded={"repo_a": []})
+    env.write_hosts(self_name="host-a", peers={"host-b": "host-b"})
+    env.write_manifest(owner="host-a")
+    env.apply(monkeypatch)
+
+    _fake_probe(monkeypatch, _clean_probe_answer())
+    _no_conversations(monkeypatch)
+
+    move = _move_module()
+
+    def _fail(**kw):
+        raise move.PhaseFailed(
+            "claim", "no response within 60.0s", claimed_owner="host-b-declared"
+        )
+
+    monkeypatch.setattr(move, "move_workspace", _fail)
+
+    release = _release_module()
+    monkeypatch.setattr(release, "release_conversations", lambda **kw: ())
+    monkeypatch.setattr(
+        release,
+        "flip_sender_ownership",
+        lambda **kw: (_ for _ in ()).throw(AssertionError("must not flip")),
+    )
+
+    _run(monkeypatch, ["transfer", "feat-x", "--to", "host-b", "--group", "trailhead"])
+
+    err = capsys.readouterr().err
+    assert "camp status --name feat-x --group trailhead" in err
+    assert "camp setup" in err
+    assert "the phase that failed is exactly the one that performs bring-up" not in err.lower()
 
 
 def test_post_commit_phase_failure_reports_each_conversations_release_outcome(
@@ -3979,6 +4184,61 @@ def test_a_failed_release_that_already_moved_the_transcript_is_not_reported_resu
     assert "still holds a resumable copy" in unmoved_section
 
 
+def test_marker_only_release_failure_summary_never_claims_a_resumable_copy_remains(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """The printed summary line for `EXIT_RELEASE_INCOMPLETE` says a
+    conversation "still need[s] cleaning up on this host" — true when a
+    release's `archive_path` is `None` (the transcript never left), false
+    when it is populated (a marker-only failure: the transcript is already
+    gone from this host). When every FAILED release is the marker-only
+    shape, the summary must not claim anything is still sitting on this
+    host to clean up."""
+    from pathlib import PurePosixPath
+
+    env = _Env(tmp_path)
+    env.write_group(excluded={"repo_a": []})
+    env.write_hosts(self_name="host-a", peers={"host-b": "host-b"})
+    env.write_manifest(owner="host-a")
+    env.apply(monkeypatch)
+    transfer = _transfer_module()
+
+    _fake_probe(monkeypatch, _clean_probe_answer())
+    _no_conversations(monkeypatch)
+
+    move = _move_module()
+    moved_id = "eeeeeeee-0000-4000-8000-000000000009"
+    crossed = (move.ConversationCrossed(session_id=moved_id, subpath=PurePosixPath(".")),)
+    monkeypatch.setattr(
+        move,
+        "move_workspace",
+        lambda **kw: move.MoveResult(
+            members=("repo_a",), conversations=crossed, claimed_owner="host-b-declared"
+        ),
+    )
+
+    release = _release_module()
+    moved_archive_path = tmp_path / "archive" / f"{moved_id}.jsonl"
+
+    def _fake_release(**kw):
+        return (
+            release.ConversationRelease(
+                session_id=moved_id,
+                outcome=release.ReleaseOutcome.FAILED,
+                archive_path=moved_archive_path,
+                detail="archived but could not record the durable marker: boom",
+            ),
+        )
+
+    monkeypatch.setattr(release, "release_conversations", _fake_release)
+
+    code = _run(monkeypatch, ["transfer", "feat-x", "--to", "host-b", "--group", "trailhead"])
+
+    assert code == transfer.EXIT_RELEASE_INCOMPLETE
+    err = capsys.readouterr().err
+    assert "still need cleaning up on this host" not in err
+
+
 def test_exit_code_distinguishes_a_clean_transfer_from_one_that_left_resumable_copies(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
@@ -4174,7 +4434,13 @@ def test_flip_never_lands_when_release_fails_before_it(
     """A failure injected between the archive/marker step and the flip must
     leave the sender's own record exactly as it was before the transfer —
     proving the ordering by the state a mid-sequence failure leaves behind,
-    not by recording which function was called first."""
+    not by recording which function was called first.
+
+    An unexpected error here must never escape as a raw traceback: `claim`
+    has already answered by this point (`move_workspace` returned
+    normally), so the operator is at the highest-stakes moment in the whole
+    verb — this is guarded and routed to an honest, documented exit code,
+    exactly like every other post-commit outcome."""
     from camp.group.manifest import read_central_manifest
 
     env = _Env(tmp_path)
@@ -4182,6 +4448,7 @@ def test_flip_never_lands_when_release_fails_before_it(
     env.write_hosts(self_name="host-a", peers={"host-b": "host-b"})
     env.write_manifest(owner="host-a")
     env.apply(monkeypatch)
+    transfer = _transfer_module()
 
     _fake_probe(monkeypatch, _clean_probe_answer())
     _no_conversations(monkeypatch)
@@ -4200,15 +4467,16 @@ def test_flip_never_lands_when_release_fails_before_it(
 
     monkeypatch.setattr(release, "release_conversations", _boom_release)
 
-    dispatch = _dispatch_module()
-    monkeypatch.setattr(
-        sys, "argv", ["camp", "transfer", "feat-x", "--to", "host-b", "--group", "trailhead"]
-    )
-    with pytest.raises(RuntimeError, match="archive step failed mid-flight"):
-        dispatch.main()
+    code = _run(monkeypatch, ["transfer", "feat-x", "--to", "host-b", "--group", "trailhead"])
+
+    assert code == transfer.EXIT_RELEASE_INCOMPLETE
 
     manifest = read_central_manifest(env.manifest_path())
     assert manifest["owner"] == "host-a"
+
+    err = capsys.readouterr().err
+    assert "host-b-declared" in err
+    assert "archive step failed mid-flight" in err
 
 
 def test_after_a_completed_transfer_this_hosts_own_preflight_refuses_naming_the_peer(

@@ -775,6 +775,48 @@ class TestClaim:
 
         assert owner_of(read_central_manifest(mpath)) == "peer-declared"
 
+    def test_claim_answers_even_when_the_marker_append_fails(self, one_member_group, monkeypatch):
+        """The manifest write is `claim`'s commit point; the marker append
+        runs strictly after it and is purely diagnostic. A failure appending
+        the marker must not turn an already-landed claim into a raised
+        exception — the caller (`camp transfer-receive`'s CLI dispatch) would
+        otherwise exit nonzero for a claim that, on disk, already
+        succeeded."""
+        import camp.transfer.receive as receive_module
+
+        receive = _receive_module()
+        g = one_member_group
+        env = _with_self_name(g["env"], "peer-declared")
+
+        receive.begin(
+            groups=[g["group"]],
+            group_name="testgroup",
+            slug="feat-marker-boom",
+            sender="sender-alpha",
+            overwrite=False,
+            env=env,
+        )
+
+        def _boom(ws_dir, *, phase, outcome):
+            raise OSError("simulated marker append failure")
+
+        monkeypatch.setattr(receive_module, "append_marker", _boom)
+
+        answer = receive.claim(
+            groups=[g["group"]],
+            group_name="testgroup",
+            slug="feat-marker-boom",
+            sender="sender-alpha",
+            env=env,
+        )
+
+        assert answer["owner"] == "peer-declared"
+
+        from camp.group.manifest import owner_of, read_central_manifest
+
+        mpath = _manifest_path("testgroup", "feat-marker-boom", env)
+        assert owner_of(read_central_manifest(mpath)) == "peer-declared"
+
 
 # ---------------------------------------------------------------------------
 # the durable per-transfer marker

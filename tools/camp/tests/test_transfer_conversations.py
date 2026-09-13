@@ -511,6 +511,96 @@ def test_unwritable_archive_destination_is_reported_failed_distinct_from_success
     assert results[0].detail
 
 
+def test_a_failed_replacement_leaves_the_prior_archive_intact_rather_than_deleted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The stale archive used to be deleted before the replacement move, so
+    a replacement that then failed left neither a complete archive nor a
+    marker entry for it — worse than what a retry started with. A failed
+    replacement must instead leave the prior archive exactly as it was."""
+    import shutil as shutil_module
+
+    from camp.transfer.release import ReleaseOutcome, archive_dir, release_conversations
+
+    env = _env(tmp_path)
+    source_root = tmp_path / "harness-store"
+    source_root.mkdir()
+    transcript = _seed_transcript(source_root, _UUID_A, b"fresh-content\n")
+
+    root = archive_dir("g", "ws", env=env)
+    root.mkdir(parents=True)
+    stale_dest = root / f"{_UUID_A}.jsonl"
+    stale_dest.write_bytes(b"stale-content\n")
+
+    real_move = shutil_module.move
+
+    def _move_that_fails_moving_the_transcript_in(src, dst, *a, **kw):
+        if str(src) == str(transcript):
+            raise OSError("simulated replacement failure")
+        return real_move(src, dst, *a, **kw)
+
+    monkeypatch.setattr(shutil_module, "move", _move_that_fails_moving_the_transcript_in)
+
+    results = release_conversations(
+        group="g",
+        slug="ws",
+        workspace_root=tmp_path / "ws",
+        conversations=(_crossed(_UUID_A),),
+        locate_transcript=lambda sid, root: transcript,
+        env=env,
+    )
+
+    assert results[0].outcome is ReleaseOutcome.FAILED
+    assert stale_dest.is_file()
+    assert stale_dest.read_bytes() == b"stale-content\n"
+
+
+def test_a_failure_relocating_the_nested_subtree_after_the_transcript_moved_reports_the_archived_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The nested subtree used to relocate BEFORE the top-level transcript,
+    so a failure between the two reported `archive_path=None` — "nothing
+    moved" — while the nested content had, in fact, already left the
+    harness's store. With the transcript relocated first, a failure
+    relocating only the nested subtree must report the path the transcript
+    actually landed at, never `None`."""
+    import shutil as shutil_module
+
+    from camp.transfer.release import ReleaseOutcome, release_conversations
+
+    env = _env(tmp_path)
+    source_root = tmp_path / "harness-store"
+    source_root.mkdir()
+    transcript = _seed_transcript(source_root, _UUID_A, b"top-level content\n")
+    nested_source = source_root / _UUID_A
+    nested_source.mkdir()
+    (nested_source / "subagent.jsonl").write_bytes(b"nested content\n")
+
+    real_move = shutil_module.move
+
+    def _move_that_fails_on_the_nested_dir(src, dst, *a, **kw):
+        if str(src) == str(nested_source):
+            raise OSError("simulated nested relocation failure")
+        return real_move(src, dst, *a, **kw)
+
+    monkeypatch.setattr(shutil_module, "move", _move_that_fails_on_the_nested_dir)
+
+    results = release_conversations(
+        group="g",
+        slug="ws",
+        workspace_root=tmp_path / "ws",
+        conversations=(_crossed(_UUID_A),),
+        locate_transcript=lambda sid, root: transcript,
+        env=env,
+    )
+
+    assert len(results) == 1
+    assert results[0].outcome is ReleaseOutcome.FAILED
+    assert results[0].archive_path is not None
+    assert results[0].archive_path.is_file()
+    assert results[0].archive_path.read_bytes() == b"top-level content\n"
+
+
 def test_multi_conversation_release_reports_each_outcome_individually_on_partial_failure(
     tmp_path: Path,
 ) -> None:
