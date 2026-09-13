@@ -3037,3 +3037,169 @@ def test_completion_report_names_each_conversations_release_outcome(
     assert str(archive_path) in out
     assert failed_id in out
     assert "destination unwritable" in out
+
+
+# ---------------------------------------------------------------------------
+# The handover commit — the sender's own record names the peer as owner,
+# written only after release_conversations has finished archiving and
+# marking. Driven through the real dispatcher exactly like the sections
+# above; only `move.move_workspace` and `release.release_conversations` are
+# faked, so `camp.transfer.release.flip_sender_ownership` runs for real.
+# ---------------------------------------------------------------------------
+
+
+def test_completed_transfer_names_the_peers_declared_owner_not_the_senders_alias(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """The sender's own manifest still exists and now names the owner the
+    peer's `claim` phase actually answered with (`claimed_owner`) — never
+    this host's own `--to host-b` alias for that peer, which is a different
+    string on purpose here."""
+    from camp.group.manifest import read_central_manifest
+
+    env = _Env(tmp_path)
+    env.write_group(excluded={"repo_a": []})
+    env.write_hosts(self_name="host-a", peers={"host-b": "host-b"})
+    env.write_manifest(owner="host-a")
+    env.apply(monkeypatch)
+    transfer = _transfer_module()
+
+    _fake_probe(monkeypatch, _clean_probe_answer())
+    _no_conversations(monkeypatch)
+
+    move = _move_module()
+    monkeypatch.setattr(
+        move,
+        "move_workspace",
+        lambda **kw: move.MoveResult(members=("repo_a",), claimed_owner="host-b-declared"),
+    )
+
+    release = _release_module()
+    monkeypatch.setattr(release, "release_conversations", lambda **kw: ())
+
+    code = _run(monkeypatch, ["transfer", "feat-x", "--to", "host-b", "--group", "trailhead"])
+
+    assert code == transfer.EXIT_WOULD_TRANSFER
+    manifest = read_central_manifest(env.manifest_path())
+    assert manifest["owner"] == "host-b-declared"
+    assert manifest["owner"] != "host-b"
+
+
+def test_ownerless_workspace_still_transfers_and_ends_owned_by_the_peer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """A workspace that never recorded an owner is not a refusal — it
+    transfers exactly like an owned one, and ends with the sender's record
+    naming the peer."""
+    from camp.group.manifest import read_central_manifest
+
+    env = _Env(tmp_path)
+    env.write_group(excluded={"repo_a": []})
+    env.write_hosts(self_name="host-a", peers={"host-b": "host-b"})
+    env.write_manifest(owner=None)
+    env.apply(monkeypatch)
+    transfer = _transfer_module()
+
+    _fake_probe(monkeypatch, _clean_probe_answer())
+    _no_conversations(monkeypatch)
+
+    move = _move_module()
+    monkeypatch.setattr(
+        move,
+        "move_workspace",
+        lambda **kw: move.MoveResult(members=("repo_a",), claimed_owner="host-b-declared"),
+    )
+
+    release = _release_module()
+    monkeypatch.setattr(release, "release_conversations", lambda **kw: ())
+
+    code = _run(monkeypatch, ["transfer", "feat-x", "--to", "host-b", "--group", "trailhead"])
+
+    assert code == transfer.EXIT_WOULD_TRANSFER
+    manifest = read_central_manifest(env.manifest_path())
+    assert manifest["owner"] == "host-b-declared"
+
+
+def test_flip_never_lands_when_release_fails_before_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """A failure injected between the archive/marker step and the flip must
+    leave the sender's own record exactly as it was before the transfer —
+    proving the ordering by the state a mid-sequence failure leaves behind,
+    not by recording which function was called first."""
+    from camp.group.manifest import read_central_manifest
+
+    env = _Env(tmp_path)
+    env.write_group(excluded={"repo_a": []})
+    env.write_hosts(self_name="host-a", peers={"host-b": "host-b"})
+    env.write_manifest(owner="host-a")
+    env.apply(monkeypatch)
+
+    _fake_probe(monkeypatch, _clean_probe_answer())
+    _no_conversations(monkeypatch)
+
+    move = _move_module()
+    monkeypatch.setattr(
+        move,
+        "move_workspace",
+        lambda **kw: move.MoveResult(members=("repo_a",), claimed_owner="host-b-declared"),
+    )
+
+    release = _release_module()
+
+    def _boom_release(**kw):
+        raise RuntimeError("archive step failed mid-flight")
+
+    monkeypatch.setattr(release, "release_conversations", _boom_release)
+
+    dispatch = _dispatch_module()
+    monkeypatch.setattr(
+        sys, "argv", ["camp", "transfer", "feat-x", "--to", "host-b", "--group", "trailhead"]
+    )
+    with pytest.raises(RuntimeError, match="archive step failed mid-flight"):
+        dispatch.main()
+
+    manifest = read_central_manifest(env.manifest_path())
+    assert manifest["owner"] == "host-a"
+
+
+def test_after_a_completed_transfer_this_hosts_own_preflight_refuses_naming_the_peer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """Once this host's own record has been flipped, its own preflight for a
+    further transfer of the same workspace refuses on the ownership check —
+    the exact same check that governs a peer-owned workspace today — and
+    names the peer as the owner in the refusal."""
+    env = _Env(tmp_path)
+    env.write_group(excluded={"repo_a": []})
+    env.write_hosts(self_name="host-a", peers={"host-b": "host-b"})
+    env.write_manifest(owner="host-a")
+    env.apply(monkeypatch)
+    transfer = _transfer_module()
+
+    _fake_probe(monkeypatch, _clean_probe_answer())
+    _no_conversations(monkeypatch)
+
+    move = _move_module()
+    monkeypatch.setattr(
+        move,
+        "move_workspace",
+        lambda **kw: move.MoveResult(members=("repo_a",), claimed_owner="host-b-declared"),
+    )
+
+    release = _release_module()
+    monkeypatch.setattr(release, "release_conversations", lambda **kw: ())
+
+    code = _run(monkeypatch, ["transfer", "feat-x", "--to", "host-b", "--group", "trailhead"])
+    assert code == transfer.EXIT_WOULD_TRANSFER
+    capsys.readouterr()
+
+    code = _run(
+        monkeypatch,
+        ["transfer", "feat-x", "--to", "host-b", "--group", "trailhead", "--dry-run"],
+    )
+
+    assert code == transfer.EXIT_OWNERSHIP_REFUSED
+    out = capsys.readouterr().out
+    assert "host-b-declared" in out
+    assert "run this preflight from" in out

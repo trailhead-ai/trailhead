@@ -60,6 +60,20 @@ per-conversation report.
 to `<archive_dir>/.release-marker.json`, read back by
 `read_release_marker`. Never written for `ALREADY_ARCHIVED` (nothing new
 happened) or `FAILED` (nothing moved).
+
+**`flip_sender_ownership` is the sender's last write of the whole verb.**
+Called by the CLI only after `release_conversations` has returned — every
+crossed conversation already archived and its marker entry already
+appended — it writes *this* host's own manifest to name the peer as owner,
+using the exact name `camp.transfer.move.MoveResult.claimed_owner` carries
+(the peer's own declared name, never the sender's `--to` alias for it).
+Like `camp.transfer.receive.claim`'s write on the peer side, it goes through
+`write_central_manifest`'s guarded `allow_owner_change=True` opt-in — the
+same bypass-proof gate every deliberate ownership change uses — under the
+same `reconcile_lock` every other manifest mutation on this workspace
+takes. A workspace that never recorded an owner is not a special case: the
+guard accepts any write when the on-disk manifest carries no owner,
+opt-in or not, so this call is identical either way.
 """
 
 from __future__ import annotations
@@ -81,6 +95,7 @@ __all__ = [
     "archive_dir",
     "release_conversations",
     "read_release_marker",
+    "flip_sender_ownership",
 ]
 
 _MARKER_FILENAME = ".release-marker.json"
@@ -253,3 +268,29 @@ def release_conversations(
         )
 
     return tuple(results)
+
+
+def flip_sender_ownership(
+    *, group: str, slug: str, owner: str, env: dict[str, str] | None = None
+) -> None:
+    """Write this host's own manifest to name *owner* as the workspace's
+    owner — the sender's last write of the whole verb. See the module
+    docstring for why this must run only after `release_conversations` has
+    finished archiving and marking every crossed conversation, and why the
+    guarded `allow_owner_change=True` opt-in is used unconditionally.
+    """
+    from ..group.manifest import (
+        manifest_path_for,
+        read_central_manifest,
+        reconcile_lock,
+        workspace_dir,
+        write_central_manifest,
+    )
+
+    mpath = manifest_path_for(group, slug, env=env)
+    ws_dir = workspace_dir(group, slug, env=env)
+
+    with reconcile_lock(ws_dir):
+        data = read_central_manifest(mpath)
+        data["owner"] = owner
+        write_central_manifest(mpath, data, allow_owner_change=True)

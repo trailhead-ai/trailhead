@@ -1067,3 +1067,34 @@ class TestRemoveOwnershipNoticeMalformedHostsTomlIsCleanError:
         err = capsys.readouterr().err
         assert err.startswith("camp remove: ")
         assert "Traceback" not in err
+
+
+# ---------------------------------------------------------------------------
+# The sender's handover flip — `camp.transfer.release.flip_sender_ownership`
+# — writes this host's own manifest to name the peer as owner. Runs the real
+# function directly (no CLI mocking needed for a plain guard property) and
+# proves it goes through the SAME bypass-proof `allow_owner_change` opt-in
+# every other deliberate ownership change already uses.
+# ---------------------------------------------------------------------------
+
+
+class TestFlipSenderOwnershipGoesThroughTheGuardedOptIn:
+    def test_flip_writes_the_named_owner_and_the_manifest_still_exists(
+        self, tmp_path: Path
+    ) -> None:
+        from camp.group.manifest import (
+            manifest_path_for,
+            read_central_manifest,
+            write_central_manifest,
+        )
+        from camp.transfer.release import flip_sender_ownership
+
+        env = _env(tmp_path)
+        mpath = manifest_path_for("owng", "feat-o", env=env)
+        write_central_manifest(mpath, {"owner": "host-a", "members": []})
+
+        flip_sender_ownership(group="owng", slug="feat-o", owner="host-b-declared", env=env)
+
+        assert mpath.is_file()
+        manifest = read_central_manifest(mpath)
+        assert manifest["owner"] == "host-b-declared"
