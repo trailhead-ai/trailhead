@@ -1133,9 +1133,10 @@ def _doctor_account_detail(account: str | None, verdict: str | None, reason: str
         # can name an account whose harness resolved and then refused to
         # answer, and that name must reach the operator; a null verdict
         # never discards it just because it CAN be absent.
+        stated_reason = reason if reason is not None else "no reason given"
         if account is not None:
-            return f"{_doctor_account_label(account)}: account check failed — {reason}"
-        return f"account check failed — {reason}"
+            return f"{_doctor_account_label(account)}: account check failed — {stated_reason}"
+        return f"account check failed — {stated_reason}"
     label = _doctor_account_label(account)
     if verdict == "authenticated":
         return f"{label} is authenticated"
@@ -1202,7 +1203,11 @@ def _doctor_account_rows_from_parsed(
     the roster always includes the default store, so a genuine answer is
     never empty, and rendering an empty list as no lines at all is the
     rendering this section reserves for a host that never answered — the
-    two must not collapse into each other.
+    two must not collapse into each other. A non-empty list whose members
+    are all shapes `_doctor_account_rows` cannot recognize collapses to the
+    same empty result once filtered, so it gets the same fallback: the
+    operator must never read "the host never answered" for a host that
+    answered with something camp merely could not parse.
 
     Every string here is remote-authored (the declared account, and any
     failure reason), so it passes through the same recursive
@@ -1216,7 +1221,10 @@ def _doctor_account_rows_from_parsed(
     facts = parsed.get(DOCTOR_PROBE_ACCOUNTS_KEY)
     if not isinstance(facts, list) or not facts:
         return [_doctor_account_row(host_name, None, "cannot-tell", None)]
-    return _doctor_account_rows(host_name, _strip_control_sequences_deep(facts))
+    rows = _doctor_account_rows(host_name, _strip_control_sequences_deep(facts))
+    if not rows:
+        return [_doctor_account_row(host_name, None, "cannot-tell", None)]
+    return rows
 
 
 def _doctor_probe_answer(
@@ -1402,11 +1410,25 @@ def _doctor_self_rows(self_name: str | None) -> list[dict[str, Any]]:
     """This machine's own rows in the `-a` host section: the multiplexer
     row, plus its own account facts — no network involved for either, since
     the local checks, the local multiplexer resolution, and the local
-    account roster all run with no network."""
+    account roster all run with no network.
+
+    Roster PRODUCTION itself — as opposed to one store's own verdict call,
+    which `_doctor_account_roster` already guards per-store — can still
+    raise (a broken group-config directory, an `_addressable_harnesses`
+    failure). That must not cost this machine's already-built multiplexer
+    row, any other machine's row, or the local checks section printed
+    around this call: it becomes a failure row here, exactly like any other
+    account-axis failure the operator already knows how to read.
+    """
     from ..spine import _doctor_account_roster, _doctor_multiplexer_present
 
     rows = [_doctor_multiplexer_row(self_name, _doctor_multiplexer_present())]
-    rows.extend(_doctor_account_rows(self_name, _doctor_account_roster()))
+    try:
+        facts = _doctor_account_roster()
+    except Exception as e:  # noqa: BLE001 — one machine's roster failure never discards its reachability facts
+        rows.append(_doctor_host_row(self_name, "WARN", f"account check failed — {e}"))
+    else:
+        rows.extend(_doctor_account_rows(self_name, facts))
     return rows
 
 

@@ -92,6 +92,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import tempfile
 from collections.abc import Iterator, Mapping
 from datetime import datetime, timezone
@@ -389,26 +390,70 @@ def _default_account_credentials_dir(env: Mapping[str, str]) -> Path:
     return base / ".claude"
 
 
-def _read_account_authentication(config_dir: Path) -> AccountAuthentication:
+def _credentials_file_is_authoritative(platform: str) -> bool:
+    """Whether the credentials file is Claude Code's actual credential store
+    on *platform*.
+
+    True on Linux and Windows: the file is where Claude Code keeps its OAuth
+    credentials, so its absence or content is a plain, knowable fact about
+    the account. False on macOS (``darwin``): Claude Code stores its OAuth
+    credentials in the login Keychain there instead (see
+    ``docs/eval-protocol.md`` and camp's launch eligibility profile, both
+    already treating the Keychain as this harness's real store on darwin),
+    so the file is not authoritative and a negative or unreadable reading of
+    it proves nothing about whether the account is logged in. Reading the
+    Keychain itself is out of scope for this seam: it would require a
+    subprocess and can prompt for interaction, both forbidden here.
+    """
+    return platform != "darwin"
+
+
+def _read_account_authentication(
+    config_dir: Path, *, platform: str | None = None
+) -> AccountAuthentication:
     """Reads the credentials-file signal: one file read plus one JSON parse, sub-millisecond.
 
-    Non-empty ``claudeAiOauth.accessToken`` means authenticated. A missing
-    credentials file, a missing ``claudeAiOauth`` key, or an empty token mean
-    not authenticated — the account has no live credential, which is a plain,
-    knowable fact. An unreadable file (permissions, a locked network mount)
-    or a file that fails to parse as JSON mean CANNOT_TELL: the signal exists
-    but could not be read, which is a genuinely different fact from "no
-    credential" and must never collapse into it.
+    Non-empty ``claudeAiOauth.accessToken`` always means authenticated — a
+    positive finding is conclusive on every platform, since Claude Code
+    would not have written it there without a live credential.
+
+    Everywhere else, the answer depends on whether this file is the
+    platform's actual credential store (see
+    :func:`_credentials_file_is_authoritative`). Where it is, a missing
+    credentials file, a missing ``claudeAiOauth`` key, a missing
+    ``accessToken`` key, or an empty token mean NOT_AUTHENTICATED — the
+    account has no live credential, which is a plain, knowable fact. Where
+    it is not (macOS), none of those same readings are evidence of
+    anything — the credential may simply live in the Keychain, which this
+    function never reads — so they all mean CANNOT_TELL instead.
+
+    An unreadable file (permissions, a locked network mount), a file that
+    fails to parse as JSON, a ``claudeAiOauth`` value that is not an object,
+    or an ``accessToken`` value that is not a string all mean CANNOT_TELL
+    unconditionally, on every platform: the signal exists but could not be
+    read or does not have the shape this function knows how to interpret,
+    which is a genuinely different fact from "no credential" and must never
+    collapse into it.
 
     Never spawns a subprocess, never touches the network, and never blocks on
     anything beyond a local filesystem read — a stat plus a bounded read of
     an already-at-rest file.
     """
+    plat = platform if platform is not None else sys.platform
+    authoritative = _credentials_file_is_authoritative(plat)
+
+    def _absent_or_empty() -> AccountAuthentication:
+        return (
+            AccountAuthentication.NOT_AUTHENTICATED
+            if authoritative
+            else AccountAuthentication.CANNOT_TELL
+        )
+
     path = config_dir / _CREDENTIALS_FILENAME
     try:
         raw = path.read_text()
     except FileNotFoundError:
-        return AccountAuthentication.NOT_AUTHENTICATED
+        return _absent_or_empty()
     except OSError:
         return AccountAuthentication.CANNOT_TELL
     try:
@@ -416,12 +461,18 @@ def _read_account_authentication(config_dir: Path) -> AccountAuthentication:
     except json.JSONDecodeError:
         return AccountAuthentication.CANNOT_TELL
     oauth = data.get("claudeAiOauth") if isinstance(data, dict) else None
+    if oauth is None:
+        return _absent_or_empty()
     if not isinstance(oauth, dict):
-        return AccountAuthentication.NOT_AUTHENTICATED
+        return AccountAuthentication.CANNOT_TELL
     token = oauth.get("accessToken")
-    if isinstance(token, str) and token:
+    if token is None:
+        return _absent_or_empty()
+    if not isinstance(token, str):
+        return AccountAuthentication.CANNOT_TELL
+    if token:
         return AccountAuthentication.AUTHENTICATED
-    return AccountAuthentication.NOT_AUTHENTICATED
+    return _absent_or_empty()
 
 
 def _refuse_conflicting_config_dirs(env: Mapping[str, str]) -> None:

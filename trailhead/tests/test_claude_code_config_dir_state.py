@@ -30,6 +30,7 @@ import json
 import os
 import socket
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -275,7 +276,6 @@ class TestAccountAuthenticationVariesWithTheSignal:
         )
 
         assert result is AccountAuthentication.NOT_AUTHENTICATED
-        assert result is not AccountAuthentication.CANNOT_TELL
 
     def test_credentials_missing_the_oauth_key_reads_as_not_authenticated(self, tmp_path):
         account_dir = tmp_path / "acct"
@@ -287,7 +287,6 @@ class TestAccountAuthenticationVariesWithTheSignal:
         )
 
         assert result is AccountAuthentication.NOT_AUTHENTICATED
-        assert result is not AccountAuthentication.CANNOT_TELL
 
 
 class TestAccountAuthenticationCannotTell:
@@ -307,7 +306,6 @@ class TestAccountAuthenticationCannotTell:
         )
 
         assert result is AccountAuthentication.CANNOT_TELL
-        assert result is not AccountAuthentication.NOT_AUTHENTICATED
 
     def test_malformed_json_is_cannot_tell(self, tmp_path):
         account_dir = tmp_path / "acct"
@@ -319,7 +317,98 @@ class TestAccountAuthenticationCannotTell:
         )
 
         assert result is AccountAuthentication.CANNOT_TELL
-        assert result is not AccountAuthentication.NOT_AUTHENTICATED
+
+    def test_claude_ai_oauth_that_is_not_an_object_is_cannot_tell(self, tmp_path):
+        account_dir = tmp_path / "acct"
+        account_dir.mkdir()
+        (account_dir / ".credentials.json").write_text(
+            json.dumps({"claudeAiOauth": "not-an-object"})
+        )
+
+        result = ClaudeCodeHarness().session_launch_account_authentication(
+            str(account_dir), env={"HOME": str(tmp_path / "home")}
+        )
+
+        assert result is AccountAuthentication.CANNOT_TELL
+
+    def test_a_non_string_access_token_is_cannot_tell(self, tmp_path):
+        account_dir = tmp_path / "acct"
+        account_dir.mkdir()
+        (account_dir / ".credentials.json").write_text(
+            json.dumps({"claudeAiOauth": {"accessToken": 12345}})
+        )
+
+        result = ClaudeCodeHarness().session_launch_account_authentication(
+            str(account_dir), env={"HOME": str(tmp_path / "home")}
+        )
+
+        assert result is AccountAuthentication.CANNOT_TELL
+
+
+class TestAccountAuthenticationPlatformAuthority:
+    """The credentials file is Claude Code's actual credential store on
+    Linux/Windows, but not on macOS — Claude Code stores OAuth credentials
+    in the login Keychain there instead (see docs/eval-protocol.md and
+    camp's launch eligibility profile, both already treating the Keychain
+    as this harness's real store on darwin). The SAME fixture state must
+    therefore produce DIFFERENT verdicts depending on which platform is
+    reading it, driven through the real entry point
+    (`session_launch_account_authentication`) with the platform injected
+    through `sys.platform` — never a directly-imported helper, and never
+    skipped based on the host's own OS."""
+
+    def test_an_absent_credentials_file_is_not_authenticated_where_the_file_is_authoritative(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setattr(sys, "platform", "linux")
+        account_dir = tmp_path / "acct"
+
+        result = ClaudeCodeHarness().session_launch_account_authentication(
+            str(account_dir), env={"HOME": str(tmp_path / "home")}
+        )
+
+        assert result is AccountAuthentication.NOT_AUTHENTICATED
+
+    def test_the_same_absent_credentials_file_is_cannot_tell_where_the_keychain_is_authoritative(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setattr(sys, "platform", "darwin")
+        account_dir = tmp_path / "acct"
+
+        result = ClaudeCodeHarness().session_launch_account_authentication(
+            str(account_dir), env={"HOME": str(tmp_path / "home")}
+        )
+
+        assert result is AccountAuthentication.CANNOT_TELL
+
+    def test_a_non_empty_access_token_is_still_authenticated_on_macos(
+        self, tmp_path, monkeypatch
+    ):
+        """A positive finding is conclusive even where the file is not
+        authoritative — only the negative/unreadable cases widen to
+        cannot-tell."""
+        monkeypatch.setattr(sys, "platform", "darwin")
+        account_dir = tmp_path / "acct"
+        _write_credentials(account_dir, "sk-ant-oat01-fake")
+
+        result = ClaudeCodeHarness().session_launch_account_authentication(
+            str(account_dir), env={"HOME": str(tmp_path / "home")}
+        )
+
+        assert result is AccountAuthentication.AUTHENTICATED
+
+    def test_an_empty_access_token_is_cannot_tell_on_macos_not_not_authenticated(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setattr(sys, "platform", "darwin")
+        account_dir = tmp_path / "acct"
+        _write_credentials(account_dir, "")
+
+        result = ClaudeCodeHarness().session_launch_account_authentication(
+            str(account_dir), env={"HOME": str(tmp_path / "home")}
+        )
+
+        assert result is AccountAuthentication.CANNOT_TELL
 
 
 class TestAccountAuthenticationNeverBlocks:

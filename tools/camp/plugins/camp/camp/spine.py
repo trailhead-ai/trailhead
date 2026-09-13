@@ -1228,10 +1228,11 @@ def _doctor_account_roster(env: dict[str, str] | None = None) -> list[dict[str, 
     for store in stores:
         try:
             verdict = store.session_launch_account_authentication(store.account, env=store.env)
+            verdict_value = verdict.value
         except Exception as e:  # noqa: BLE001 — one harness's failure never discards the rest
             rows.append({"account": store.account, "verdict": None, "reason": str(e)})
             continue
-        rows.append({"account": store.account, "verdict": verdict.value, "reason": None})
+        rows.append({"account": store.account, "verdict": verdict_value, "reason": None})
 
     rows.sort(key=lambda row: (row["account"] is None, row["account"] or ""))
 
@@ -1399,7 +1400,18 @@ def cmd_doctor(
             # multiplexer presence (contract: `--probe` never changes it).
             report[DOCTOR_PROBE_KEY] = True
             report[DOCTOR_PROBE_MULTIPLEXER_KEY] = _doctor_multiplexer_present()
-            report[DOCTOR_PROBE_ACCOUNTS_KEY] = _doctor_account_roster(env=env)
+            # Roster PRODUCTION itself — as opposed to one store's own
+            # verdict call, which `_doctor_account_roster` already guards
+            # per-store — can still raise (a broken group-config directory,
+            # an `_addressable_harnesses` failure). That must not cost the
+            # `checks`/multiplexer facts already computed above: it becomes
+            # a failure row instead, the same posture the `-a` dispatch
+            # side takes on the same class of failure.
+            try:
+                accounts = _doctor_account_roster(env=env)
+            except Exception as e:  # noqa: BLE001 — one machine's roster failure never discards its other facts
+                accounts = [{"account": None, "verdict": None, "reason": str(e)}]
+            report[DOCTOR_PROBE_ACCOUNTS_KEY] = accounts
         print(json.dumps(report))
     else:
         _doctor_render_checks_human(checks)
