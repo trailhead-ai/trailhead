@@ -510,6 +510,224 @@ class TestFinish:
 
 
 # ---------------------------------------------------------------------------
+# claim — the transfer's single commit point
+# ---------------------------------------------------------------------------
+
+
+def _with_self_name(env: dict[str, str], name: str) -> dict[str, str]:
+    config_root = Path(env["CAMP_STATE_DIR"]).parent / "config"
+    config_root.mkdir(parents=True, exist_ok=True)
+    merged = dict(env)
+    merged["CAMP_CONFIG_DIR"] = str(config_root)
+    (config_root / "hosts.toml").write_text(f'self_name = "{name}"\n', encoding="utf-8")
+    return merged
+
+
+class TestClaim:
+    def test_writes_this_hosts_own_declared_name_as_owner(self, one_member_group):
+        """The peer's manifest names the peer as owner after the claim,
+        where it named the sender before it — and the answer carries that
+        exact name."""
+        receive = _receive_module()
+        g = one_member_group
+        env = _with_self_name(g["env"], "peer-declared")
+
+        receive.begin(
+            groups=[g["group"]],
+            group_name="testgroup",
+            slug="feat-claim",
+            sender="sender-alpha",
+            overwrite=False,
+            env=env,
+        )
+        from camp.group.manifest import owner_of, read_central_manifest
+
+        mpath = _manifest_path("testgroup", "feat-claim", env)
+        assert owner_of(read_central_manifest(mpath)) == "sender-alpha"
+
+        answer = receive.claim(groups=[g["group"]], group_name="testgroup", slug="feat-claim", env=env)
+
+        assert answer["owner"] == "peer-declared"
+        assert owner_of(read_central_manifest(mpath)) == "peer-declared"
+
+    def test_owner_written_does_not_move_with_the_seeded_sender_name(self, one_member_group):
+        """The owner value the peer writes is its OWN declared name, never
+        whatever sender name the manifest happened to be seeded with —
+        varied here across two slugs seeded by two different senders, both
+        of which must claim to the SAME peer-declared name."""
+        receive = _receive_module()
+        g = one_member_group
+        env = _with_self_name(g["env"], "peer-declared")
+
+        for slug, sender in (("feat-a", "sender-alpha"), ("feat-b", "sender-beta")):
+            receive.begin(
+                groups=[g["group"]],
+                group_name="testgroup",
+                slug=slug,
+                sender=sender,
+                overwrite=False,
+                env=env,
+            )
+            answer = receive.claim(groups=[g["group"]], group_name="testgroup", slug=slug, env=env)
+            assert answer["owner"] == "peer-declared"
+
+        from camp.group.manifest import owner_of, read_central_manifest
+
+        for slug in ("feat-a", "feat-b"):
+            mpath = _manifest_path("testgroup", slug, env)
+            assert owner_of(read_central_manifest(mpath)) == "peer-declared"
+
+    def test_refuses_when_this_host_has_no_declared_self_name(self, one_member_group):
+        receive = _receive_module()
+        g = one_member_group
+
+        receive.begin(
+            groups=[g["group"]],
+            group_name="testgroup",
+            slug="feat-noname",
+            sender="sender-alpha",
+            overwrite=False,
+            env=g["env"],
+        )
+        from camp.group.manifest import owner_of, read_central_manifest
+
+        mpath = _manifest_path("testgroup", "feat-noname", g["env"])
+
+        with pytest.raises(receive.SelfNameNotDeclared):
+            receive.claim(
+                groups=[g["group"]], group_name="testgroup", slug="feat-noname", env=g["env"]
+            )
+
+        assert owner_of(read_central_manifest(mpath)) == "sender-alpha"
+
+    def test_claim_survives_finishs_synchronous_manifest_rebuild(self, one_member_group, monkeypatch):
+        """The ownership write is durable before `finish` runs its own
+        lock-protected manifest rebuild (`seed_pending_workspace`) and spawns
+        the detached provisioner — the rebuild's pure carry-forward must read
+        the claim, not the pre-claim sender."""
+        import camp.provision.provision as provision
+
+        receive = _receive_module()
+        g = one_member_group
+        env = _with_self_name(g["env"], "peer-declared")
+
+        receive.begin(
+            groups=[g["group"]],
+            group_name="testgroup",
+            slug="feat-survive",
+            sender="sender-alpha",
+            overwrite=False,
+            env=env,
+        )
+        receive.claim(groups=[g["group"]], group_name="testgroup", slug="feat-survive", env=env)
+
+        monkeypatch.setattr(
+            provision,
+            "spawn_detached_provisioner",
+            lambda **kw: subprocess.Popen([sys.executable, "-c", "pass"]),
+        )
+        receive.finish(groups=[g["group"]], group_name="testgroup", slug="feat-survive", env=env)
+
+        from camp.group.manifest import owner_of, read_central_manifest
+
+        mpath = _manifest_path("testgroup", "feat-survive", env)
+        assert owner_of(read_central_manifest(mpath)) == "peer-declared"
+
+    def test_claim_write_is_excluded_by_the_reconcile_lock_from_a_real_rebuild(
+        self, one_member_group
+    ):
+        """A real contention window, not a two-write ordering: a rebuild
+        that reads the prior owner then (still holding `reconcile_lock`)
+        pauses before writing must never interleave with `claim`'s own
+        write. `claim` must block until the rebuild releases the lock, then
+        land cleanly — proven by recording acquisition order, not merely the
+        final value."""
+        import threading
+
+        from camp.group.manifest import (
+            carry_forward_owner,
+            owner_of,
+            read_central_manifest,
+            reconcile_lock,
+            write_central_manifest,
+        )
+
+        receive = _receive_module()
+        g = one_member_group
+        env = _with_self_name(g["env"], "peer-declared")
+
+        receive.begin(
+            groups=[g["group"]],
+            group_name="testgroup",
+            slug="feat-lock",
+            sender="sender-alpha",
+            overwrite=False,
+            env=env,
+        )
+        mpath = _manifest_path("testgroup", "feat-lock", env)
+        ws_dir = _workspace_dir("testgroup", "feat-lock", env)
+
+        rebuild_in_window = threading.Event()
+        release_rebuild = threading.Event()
+        order: list[str] = []
+        order_lock = threading.Lock()
+
+        def _rebuild_mid_flight() -> None:
+            # Mimics reconcile_worktree/seed_pending_workspace's shape: read
+            # the prior owner, hold the lock across an artificial pause, then
+            # carry it forward into a freshly rebuilt manifest.
+            with reconcile_lock(ws_dir):
+                prior = read_central_manifest(mpath)
+                prior_owner = owner_of(prior)
+                rebuild_in_window.set()
+                assert release_rebuild.wait(timeout=5), "claim never attempted to acquire"
+                rebuilt = {
+                    "schema_version": 1,
+                    "group": "testgroup",
+                    "slug": "feat-lock",
+                    "branch": "worktree-feat-lock",
+                    "members": [],
+                }
+                carry_forward_owner(rebuilt, prior_owner)
+                write_central_manifest(mpath, rebuilt)
+                with order_lock:
+                    order.append("rebuild-wrote")
+
+        rebuild_thread = threading.Thread(target=_rebuild_mid_flight)
+        rebuild_thread.start()
+        assert rebuild_in_window.wait(timeout=5), "rebuild never reached its window"
+
+        def _claim() -> None:
+            receive.claim(
+                groups=[g["group"]], group_name="testgroup", slug="feat-lock", env=env
+            )
+            with order_lock:
+                order.append("claim-wrote")
+
+        claim_thread = threading.Thread(target=_claim)
+        claim_thread.start()
+
+        # The claim must not have landed yet — the rebuild still holds the
+        # lock and hasn't released it.
+        import time
+
+        time.sleep(0.3)
+        with order_lock:
+            assert order == [], "claim landed before the rebuild released the lock"
+
+        release_rebuild.set()
+        rebuild_thread.join(timeout=5)
+        claim_thread.join(timeout=5)
+        assert not rebuild_thread.is_alive()
+        assert not claim_thread.is_alive()
+
+        with order_lock:
+            assert order == ["rebuild-wrote", "claim-wrote"]
+
+        assert owner_of(read_central_manifest(mpath)) == "peer-declared"
+
+
+# ---------------------------------------------------------------------------
 # the durable per-transfer marker
 # ---------------------------------------------------------------------------
 

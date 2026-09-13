@@ -1213,6 +1213,10 @@ def move_env(tmp_path: Path):
     peer_cfg = tmp_path / "peer-config"
     (peer_cfg / "groups").mkdir(parents=True)
     _write_group_toml(peer_cfg / "groups", "testgroup", [("repo_a", str(peer_repo))])
+    # `finish` now runs only after `claim`, and `claim` refuses when the peer
+    # has no declared self_name — every move_env-based test drives a real
+    # `finish`, so the peer needs one.
+    _write_hosts_toml(peer_cfg, self_name="host-b")
     peer_state = tmp_path / "peer-state"
     peer_claude_dir = tmp_path / "peer-claude"
     peer_env = {
@@ -1445,6 +1449,7 @@ class TestConversationResumesOnARealPeer:
             "history: repo_a",
             "worktree: repo_a",
             "conversations",
+            "claim",
             "finish",
         ]
         assert result.conversations[0].session_id == session_id
@@ -1635,8 +1640,9 @@ class TestMoveWorkspaceEndToEnd:
             stream_spawn=g["stream_spawn"],
         )
 
-        assert phases == ["begin", "history: repo_a", "worktree: repo_a", "finish"]
+        assert phases == ["begin", "history: repo_a", "worktree: repo_a", "claim", "finish"]
         assert result.members == ("repo_a",)
+        assert result.claimed_owner == "host-b"
 
         landed = _git_out(g["peer_repo"], "rev-parse", f"refs/heads/{g['branch']}")
         sender_tip = _git_out(g["wt_path"], "rev-parse", "HEAD")
@@ -1645,6 +1651,11 @@ class TestMoveWorkspaceEndToEnd:
         peer_wt = _worktree_path("testgroup", g["slug"], "repo_a", env=g["peer_env"])
         assert (peer_wt / "committed.txt").read_text() == "committed on the sender\n"
         assert (peer_wt / "untracked.txt").read_text() == "never committed\n"
+
+        from camp.group.manifest import manifest_path_for, owner_of, read_central_manifest
+
+        peer_manifest = manifest_path_for("testgroup", g["slug"], env=g["peer_env"])
+        assert owner_of(read_central_manifest(peer_manifest)) == "host-b"
 
     def test_failure_then_overwrite_refusal_then_successful_rerun(
         self, move_env, tmp_path: Path
@@ -1779,6 +1790,7 @@ class TestMoveWorkspaceEndToEnd:
             "history: repo_a",
             "worktree: repo_a",
             "conversations",
+            "claim",
             "finish",
         ]
         assert result.conversations == (
@@ -1854,6 +1866,12 @@ def test_move_workspace_reports_each_phase_before_a_slow_one_completes():
                 stderr="",
                 exit_code=0,
             )
+        if "claim" in remote_command:
+            return RawResult(
+                stdout=json_mod.dumps({"contract_version": 1, "owner": "host-b"}),
+                stderr="",
+                exit_code=0,
+            )
         return RawResult(
             stdout=json_mod.dumps(
                 {"contract_version": 1, "members": [{"name": "repo_a", "basis_commit": None}]}
@@ -1917,7 +1935,7 @@ def test_move_workspace_reports_each_phase_before_a_slow_one_completes():
         assert finish_started.wait(timeout=5), "finish phase never started"
         with phases_lock:
             snapshot = list(phases)
-        assert snapshot == ["begin", "history: repo_a", "worktree: repo_a", "finish"]
+        assert snapshot == ["begin", "history: repo_a", "worktree: repo_a", "claim", "finish"]
     finally:
         release_finish.set()
         thread.join(timeout=5)
@@ -1947,6 +1965,12 @@ def test_conversations_phase_announced_before_its_own_slow_transport_completes()
         if "finish" in remote_command:
             return RawResult(
                 stdout=json_mod.dumps({"contract_version": 1, "manifest_path": "x"}),
+                stderr="",
+                exit_code=0,
+            )
+        if "claim" in remote_command:
+            return RawResult(
+                stdout=json_mod.dumps({"contract_version": 1, "owner": "host-b"}),
                 stderr="",
                 exit_code=0,
             )
@@ -2043,7 +2067,347 @@ def test_conversations_phase_announced_before_its_own_slow_transport_completes()
 
     with phases_lock:
         final = list(phases)
-    assert final == ["begin", "history: repo_a", "worktree: repo_a", "conversations", "finish"]
+    assert final == [
+        "begin",
+        "history: repo_a",
+        "worktree: repo_a",
+        "conversations",
+        "claim",
+        "finish",
+    ]
+
+
+def _claim_fixture_group_and_host():
+    from camp.host.config import Host
+
+    group = {
+        "group": {"name": "testgroup"},
+        "members": [{"name": "repo_a", "repo_root": "/nonexistent", "excluded": []}],
+        "branch_pattern": "worktree-{slug}",
+    }
+    host = Host(ssh="fake-peer", camp_bin="/opt/camp/bin/camp")
+    return group, host
+
+
+def test_claim_phase_announced_before_its_own_network_call_completes():
+    """`on_phase("claim")` fires — mechanically, like `finish` and
+    `conversations` above — BEFORE the remote call it precedes has
+    returned, not merely once the whole move has finished."""
+    import json as json_mod
+
+    from camp.host.transport import RawResult
+    from camp.transfer.move import move_workspace
+
+    claim_started = threading.Event()
+    release_claim = threading.Event()
+
+    def _run(argv, execution_timeout, env):
+        remote_command = argv[-1]
+        if "claim" in remote_command:
+            claim_started.set()
+            assert release_claim.wait(timeout=5), "test deadlocked waiting to release claim"
+            return RawResult(
+                stdout=json_mod.dumps({"contract_version": 1, "owner": "host-b"}),
+                stderr="",
+                exit_code=0,
+            )
+        if "finish" in remote_command:
+            return RawResult(
+                stdout=json_mod.dumps({"contract_version": 1, "manifest_path": "x"}),
+                stderr="",
+                exit_code=0,
+            )
+        return RawResult(
+            stdout=json_mod.dumps(
+                {"contract_version": 1, "members": [{"name": "repo_a", "basis_commit": None}]}
+            ),
+            stderr="",
+            exit_code=0,
+        )
+
+    def _tiny_producer(argv):
+        return subprocess.Popen(
+            [sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'x')"],
+            stdout=subprocess.PIPE,
+        )
+
+    def _fast_stream_spawn(argv, env):
+        return subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                "import sys,json; sys.stdin.buffer.read(); "
+                "sys.stdout.write(json.dumps({'contract_version': 1}))",
+            ],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+    phases: list[str] = []
+    phases_lock = threading.Lock()
+
+    def _on_phase(phase: str) -> None:
+        with phases_lock:
+            phases.append(phase)
+
+    group, host = _claim_fixture_group_and_host()
+
+    result_box: dict = {}
+
+    def _drive():
+        result_box["result"] = move_workspace(
+            host=host,
+            group=group,
+            group_name="testgroup",
+            slug="feat-slow-x",
+            sender_name="host-a",
+            overwrite=False,
+            on_phase=_on_phase,
+            run=_run,
+            stream_spawn=_fast_stream_spawn,
+            history_producer_spawn=_tiny_producer,
+            worktree_producer_spawn=_tiny_producer,
+        )
+
+    thread = threading.Thread(target=_drive)
+    thread.start()
+    try:
+        assert claim_started.wait(timeout=5), "claim phase never started"
+        with phases_lock:
+            snapshot = list(phases)
+        assert snapshot == ["begin", "history: repo_a", "worktree: repo_a", "claim"]
+    finally:
+        release_claim.set()
+        thread.join(timeout=5)
+
+    assert result_box["result"].claimed_owner == "host-b"
+
+
+def test_claim_phase_failure_is_named_and_never_swallowed_into_success():
+    """A claim that cannot be completed — the peer's own explicit refusal —
+    surfaces as its own named phase failure, and `finish` is never reached."""
+    from camp.host.transport import RawResult
+    from camp.transfer.move import PhaseFailed, move_workspace
+
+    finish_calls: list[str] = []
+
+    def _run(argv, execution_timeout, env):
+        import json as json_mod
+
+        remote_command = argv[-1]
+        if "claim" in remote_command:
+            return RawResult(
+                stdout="",
+                stderr="camp transfer-receive: this host has not declared a self_name",
+                exit_code=1,
+            )
+        if "finish" in remote_command:
+            finish_calls.append(remote_command)
+            return RawResult(
+                stdout=json_mod.dumps({"contract_version": 1, "manifest_path": "x"}),
+                stderr="",
+                exit_code=0,
+            )
+        return RawResult(
+            stdout=json_mod.dumps(
+                {"contract_version": 1, "members": [{"name": "repo_a", "basis_commit": None}]}
+            ),
+            stderr="",
+            exit_code=0,
+        )
+
+    def _tiny_producer(argv):
+        return subprocess.Popen(
+            [sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'x')"],
+            stdout=subprocess.PIPE,
+        )
+
+    def _fast_stream_spawn(argv, env):
+        return subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                "import sys,json; sys.stdin.buffer.read(); "
+                "sys.stdout.write(json.dumps({'contract_version': 1}))",
+            ],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+    group, host = _claim_fixture_group_and_host()
+
+    with pytest.raises(PhaseFailed) as exc_info:
+        move_workspace(
+            host=host,
+            group=group,
+            group_name="testgroup",
+            slug="feat-fail-x",
+            sender_name="host-a",
+            overwrite=False,
+            run=_run,
+            stream_spawn=_fast_stream_spawn,
+            history_producer_spawn=_tiny_producer,
+            worktree_producer_spawn=_tiny_producer,
+        )
+
+    assert exc_info.value.phase == "claim"
+    assert "self_name" in exc_info.value.detail
+    assert not finish_calls, "finish must never run after claim failed"
+
+
+def test_claim_phase_fails_closed_against_a_peer_that_does_not_know_the_subcommand():
+    """A peer running an older camp build refuses `claim` the same way it
+    refuses any other unrecognized phase — the SAME generic mechanism a
+    real old dispatcher's `_cmd_transfer_receive_cli` produces — and ownership
+    moves on neither host: the move raises before `finish` runs at all."""
+    from camp.transfer.move import PhaseFailed, move_workspace
+
+    old_build_phases = "', '".join(("begin", "conversations", "finish", "history", "worktree"))
+    old_build_stderr = (
+        f"camp transfer-receive: a phase of '{old_build_phases}' is required, got 'claim'"
+    )
+
+    finish_calls: list[str] = []
+
+    def _run(argv, execution_timeout, env):
+        import json as json_mod
+        from camp.host.transport import RawResult
+
+        remote_command = argv[-1]
+        if "claim" in remote_command:
+            return RawResult(stdout="", stderr=old_build_stderr, exit_code=1)
+        if "finish" in remote_command:
+            finish_calls.append(remote_command)
+            return RawResult(
+                stdout=json_mod.dumps({"contract_version": 1, "manifest_path": "x"}),
+                stderr="",
+                exit_code=0,
+            )
+        return RawResult(
+            stdout=json_mod.dumps(
+                {"contract_version": 1, "members": [{"name": "repo_a", "basis_commit": None}]}
+            ),
+            stderr="",
+            exit_code=0,
+        )
+
+    def _tiny_producer(argv):
+        return subprocess.Popen(
+            [sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'x')"],
+            stdout=subprocess.PIPE,
+        )
+
+    def _fast_stream_spawn(argv, env):
+        return subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                "import sys,json; sys.stdin.buffer.read(); "
+                "sys.stdout.write(json.dumps({'contract_version': 1}))",
+            ],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+    group, host = _claim_fixture_group_and_host()
+
+    with pytest.raises(PhaseFailed) as exc_info:
+        move_workspace(
+            host=host,
+            group=group,
+            group_name="testgroup",
+            slug="feat-oldpeer-x",
+            sender_name="host-a",
+            overwrite=False,
+            run=_run,
+            stream_spawn=_fast_stream_spawn,
+            history_producer_spawn=_tiny_producer,
+            worktree_producer_spawn=_tiny_producer,
+        )
+
+    assert exc_info.value.phase == "claim"
+    assert "got 'claim'" in exc_info.value.detail
+    assert not finish_calls, "finish must never run when the peer refused claim"
+
+
+def test_claim_failure_detail_distinguishes_a_timeout_from_an_explicit_refusal():
+    """The same `PhaseFailed("claim", ...)` shape carries a materially
+    different `.detail` depending on WHY the peer's claim failed — the
+    peer's own stderr for an explicit refusal, versus a distinct
+    "no response" message for a timeout — so an operator (and any remedy
+    text keyed on it) can tell the two apart."""
+    import subprocess as subprocess_mod
+
+    from camp.transfer.move import PhaseFailed, move_workspace
+
+    def _make_run(*, timeout: bool, stderr: str = ""):
+        def _run(argv, execution_timeout, env):
+            import json as json_mod
+            from camp.host.transport import RawResult
+
+            remote_command = argv[-1]
+            if "claim" in remote_command:
+                if timeout:
+                    raise subprocess_mod.TimeoutExpired(cmd=argv, timeout=execution_timeout)
+                return RawResult(stdout="", stderr=stderr, exit_code=1)
+            return RawResult(
+                stdout=json_mod.dumps(
+                    {"contract_version": 1, "members": [{"name": "repo_a", "basis_commit": None}]}
+                ),
+                stderr="",
+                exit_code=0,
+            )
+
+        return _run
+
+    def _tiny_producer(argv):
+        return subprocess.Popen(
+            [sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'x')"],
+            stdout=subprocess.PIPE,
+        )
+
+    def _fast_stream_spawn(argv, env):
+        return subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                "import sys,json; sys.stdin.buffer.read(); "
+                "sys.stdout.write(json.dumps({'contract_version': 1}))",
+            ],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+    group, host = _claim_fixture_group_and_host()
+
+    def _drive(run):
+        with pytest.raises(PhaseFailed) as exc_info:
+            move_workspace(
+                host=host,
+                group=group,
+                group_name="testgroup",
+                slug="feat-detail-x",
+                sender_name="host-a",
+                overwrite=False,
+                run=run,
+                stream_spawn=_fast_stream_spawn,
+                history_producer_spawn=_tiny_producer,
+                worktree_producer_spawn=_tiny_producer,
+            )
+        return exc_info.value.detail
+
+    refusal_detail = _drive(
+        _make_run(timeout=False, stderr="camp transfer-receive: refused explicitly")
+    )
+    timeout_detail = _drive(_make_run(timeout=True))
+
+    assert "refused explicitly" in refusal_detail
+    assert "no response within" in timeout_detail
+    assert refusal_detail != timeout_detail
 
 
 # ---------------------------------------------------------------------------
@@ -2054,9 +2418,15 @@ def test_conversations_phase_announced_before_its_own_slow_transport_completes()
 # ---------------------------------------------------------------------------
 
 
-def test_completion_report_names_peer_workspace_regen_and_no_ownership_move(
+def test_completion_report_names_the_claimed_owner_and_the_provisioning_remedy(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
+    """Ownership moved as part of this transfer — the completion report
+    names the exact owner name the peer's `claim` phase answered, not this
+    host's own alias for the peer (`--to host-b` here, `claimed_owner`
+    deliberately a different string, so an assertion on the wrong value
+    would catch it), and states the peer may still be provisioning, naming
+    both the status check and the retry remedy."""
     env = _Env(tmp_path)
     env.write_group(excluded={"repo_a": []})
     env.write_hosts(self_name="host-a", peers={"host-b": "host-b"})
@@ -2069,7 +2439,9 @@ def test_completion_report_names_peer_workspace_regen_and_no_ownership_move(
 
     move = _move_module()
     monkeypatch.setattr(
-        move, "move_workspace", lambda **kw: move.MoveResult(members=("repo_a",))
+        move,
+        "move_workspace",
+        lambda **kw: move.MoveResult(members=("repo_a",), claimed_owner="host-b-declared"),
     )
 
     code = _run(monkeypatch, ["transfer", "feat-x", "--to", "host-b", "--group", "trailhead"])
@@ -2077,17 +2449,12 @@ def test_completion_report_names_peer_workspace_regen_and_no_ownership_move(
     assert code == transfer.EXIT_WOULD_TRANSFER
     out = capsys.readouterr().out
     assert "'feat-x' arrived on 'host-b'" in out
-    assert "ownership did not move" in out
-    assert "'host-a' still owns 'feat-x'" in out
-    assert "regeneration" in out and "still running" in out
+    assert "ownership moved to 'host-b-declared'" in out
+    assert "still owns" not in out
+    assert "peer may still be provisioning" in out
     assert "camp status --name feat-x --group trailhead" in out
+    assert "camp setup" in out
     assert "credential-shaped content" in out
-    # Ownership did not move, so work accumulated on the peer since arrival
-    # has no way back to the sender — a later --overwrite would destroy it,
-    # and the completion report must name that consequence, not just the
-    # fact that ownership stayed put.
-    assert "--overwrite" in out
-    assert "destroy" in out or "discard" in out
     assert "no conversations are rooted in this workspace" in out
 
 
@@ -2226,6 +2593,11 @@ def test_phase_failure_names_the_phase_and_says_rerun_is_safe_distinctly(
     # nothing, since some phases already crossed before the failing one.
     assert "camp transfer: refused" not in err
     assert "moves nothing" not in err
+    # The success path's completion report states the peer may still be
+    # provisioning — a phase failure renders none of that, since a phase
+    # failure never reaches `_render_move_completion` at all.
+    assert "provisioning" not in err
+    assert "ownership moved" not in err
     assert "This is a failure, not a refusal" in err
 
 
