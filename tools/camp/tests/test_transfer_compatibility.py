@@ -605,6 +605,65 @@ def test_every_producible_exit_code_appears_in_the_documented_table(
         _run(monkeypatch, ["transfer", "feat-x", "--to", "host-b", "--group", "trailhead"])
     )
 
+    # 11 EXIT_RELEASE_INCOMPLETE — ownership moved cleanly but a crossed
+    # conversation's release came back FAILED, driven through the real
+    # `move_workspace` success path plus a `release_conversations` that
+    # reports one FAILED outcome, never a bare integer.
+    env11 = _Env(tmp_path / "releaseincomplete")
+    env11.write_group(excluded={"repo_a": []})
+    env11.write_hosts(self_name="host-a", peers={"host-b": "host-b"})
+    env11.write_manifest(owner="host-a")
+    env11.apply(monkeypatch)
+    _fake_probe(monkeypatch, _clean_probe_answer())
+    _no_conversations(monkeypatch)
+    from pathlib import PurePosixPath
+
+    crossed = move.ConversationCrossed(session_id="sess-11", subpath=PurePosixPath("a/b.jsonl"))
+    monkeypatch.setattr(
+        move,
+        "move_workspace",
+        lambda **kw: move.MoveResult(
+            members=("repo_a",), conversations=(crossed,), claimed_owner="host-b"
+        ),
+    )
+    release11 = importlib.import_module("camp.transfer.release")
+    monkeypatch.setattr(
+        release11,
+        "release_conversations",
+        lambda **kw: (
+            release11.ConversationRelease(
+                session_id="sess-11",
+                outcome=release11.ReleaseOutcome.FAILED,
+                archive_path=None,
+                detail="disk full",
+            ),
+        ),
+    )
+    produced.add(
+        _run(monkeypatch, ["transfer", "feat-x", "--to", "host-b", "--group", "trailhead"])
+    )
+
+    # 12 EXIT_PHASE_INDETERMINATE — `claim` failed in a way `move_workspace`
+    # could not resolve even after re-probing the peer, driven through the
+    # real `PhaseFailed(indeterminate=True)` shape rather than a bare integer.
+    env12 = _Env(tmp_path / "indeterminate")
+    env12.write_group(excluded={"repo_a": []})
+    env12.write_hosts(self_name="host-a", peers={"host-b": "host-b"})
+    env12.write_manifest(owner="host-a")
+    env12.apply(monkeypatch)
+    _fake_probe(monkeypatch, _clean_probe_answer())
+    _no_conversations(monkeypatch)
+    monkeypatch.setattr(
+        move,
+        "move_workspace",
+        lambda **kw: (_ for _ in ()).throw(
+            move.PhaseFailed("claim", "boom", indeterminate=True)
+        ),
+    )
+    produced.add(
+        _run(monkeypatch, ["transfer", "feat-x", "--to", "host-b", "--group", "trailhead"])
+    )
+
     documented = _readme_exit_codes()
-    assert produced == {0, 1, 3, 4, 5, 6, 7, 8, 9, 10}
+    assert produced == {0, 1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}
     assert documented == produced

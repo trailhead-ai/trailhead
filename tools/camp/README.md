@@ -438,6 +438,13 @@ Exit codes:
 10 a move phase failed after ownership had already moved to the peer — a
    re-run is NOT safe; continue the work on the peer and compare the two
    hosts' records to confirm they disagree
+11 ownership moved cleanly but at least one crossed conversation's release
+   failed — this host may still hold a resumable copy of it; see the
+   FAILED line(s) printed for which conversation(s) still need cleaning up
+   by hand
+12 whether ownership moved is genuinely unknown, even after re-probing the
+   peer — check the peer directly with `camp transfer-probe` before doing
+   anything else
 ```
 
 `transfer` and `transfer-probe` (the wire-level answer `--dry-run` reads
