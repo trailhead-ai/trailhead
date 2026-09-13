@@ -680,6 +680,33 @@ def _cmd_transfer_group_cli(
 
     from ..transfer.move import OverwriteNeeded, PhaseFailed, move_workspace
 
+    def _release_crossed(crossed: tuple) -> tuple:
+        """Archive this host's own copies of the conversations that crossed.
+
+        Both places a completed `claim` leaves conversations sitting
+        resumable on this host reach the release through here — the
+        successful move, and the post-commit `finish` failure — so the two
+        can never drift apart in what they archive or how they locate it.
+        `locate_transcript` is built only when there is something to locate:
+        `release_conversations` never consults it for an empty pool, and
+        building it walks every harness store this host can address.
+        """
+        from ..group.manifest import workspace_dir
+        from ..transfer.release import release_conversations
+
+        return release_conversations(
+            group=group_name,
+            slug=slug,
+            workspace_root=workspace_dir(group_name, slug, env=resolved_env),
+            conversations=crossed,
+            locate_transcript=(
+                _locate_transcript(session_groups, resolved_env)
+                if crossed
+                else (lambda session_id, root: None)
+            ),
+            env=resolved_env,
+        )
+
     def _on_phase(phase: str) -> None:
         print(f"camp transfer: phase — {phase}")
 
@@ -715,21 +742,7 @@ def _cmd_transfer_group_cli(
             # stays stale on purpose, since a wrong flip here would claim a
             # handover this host cannot confirm actually finished on the
             # peer.
-            from ..group.manifest import workspace_dir
-            from ..transfer.release import release_conversations
-
-            release_conversations(
-                group=group_name,
-                slug=slug,
-                workspace_root=workspace_dir(group_name, slug, env=resolved_env),
-                conversations=e.conversations,
-                locate_transcript=(
-                    _locate_transcript(session_groups, resolved_env)
-                    if e.conversations
-                    else (lambda session_id, root: None)
-                ),
-                env=resolved_env,
-            )
+            _release_crossed(e.conversations)
             print(
                 f"camp transfer: phase {e.phase!r} failed after ownership had "
                 f"already moved to {e.claimed_owner!r} — {e.detail}. This is "
@@ -753,21 +766,9 @@ def _cmd_transfer_group_cli(
         )
         sys.exit(EXIT_PHASE_FAILED)
 
-    from ..group.manifest import workspace_dir
-    from ..transfer.release import flip_sender_ownership, release_conversations
+    from ..transfer.release import flip_sender_ownership
 
-    release_results = release_conversations(
-        group=group_name,
-        slug=slug,
-        workspace_root=workspace_dir(group_name, slug, env=resolved_env),
-        conversations=move_result.conversations,
-        locate_transcript=(
-            _locate_transcript(session_groups, resolved_env)
-            if move_result.conversations
-            else (lambda session_id, root: None)
-        ),
-        env=resolved_env,
-    )
+    release_results = _release_crossed(move_result.conversations)
 
     # This host's own last write of the whole verb — after release_conversations
     # has archived and marked every crossed conversation, never before. See
