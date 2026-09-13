@@ -2040,6 +2040,67 @@ class TestReleaseOnARealPeer:
         matching = [entry for entry in marker if entry["session_id"] == session_id]
         assert len(matching) == 1, marker
 
+    def test_second_outbound_release_of_a_round_tripped_conversation_leaves_nothing_resumable(
+        self, conv_env
+    ):
+        """A→B→A→B: the conversation is archived once (first outbound leg),
+        then a fresh copy lands back on the sender (the round trip's return
+        leg — reproduced here the same way `_seed_conversation` seeds any
+        arriving conversation, since the defect this pins lives entirely in
+        `release_conversations`'s idempotency check and not in the transport
+        that lands the returning copy), then the sender sends it outbound a
+        second time. The old destination-only check finds the stale archive
+        from the first leg, short-circuits to ALREADY_ARCHIVED, and never
+        looks at the freshly-returned live copy — leaving it sitting
+        resumable while the peer believes it owns the workspace. Proven
+        through camp's own listing and resume paths, exactly like
+        `test_after_release_the_sender_no_longer_lists_or_resumes_it` above."""
+        from pathlib import PurePosixPath
+
+        from camp.group.manifest import workspace_dir
+        from camp.transfer.move import ConversationCrossed
+        from camp.transfer.release import ReleaseOutcome, release_conversations
+
+        c = conv_env
+        session_id = "77777777-7777-4777-8777-777777777773"
+        crossed = (ConversationCrossed(session_id=session_id, subpath=PurePosixPath(".")),)
+        sender_ws_root = workspace_dir("testgroup", c["slug"], env=c["sender_env"]).resolve()
+        locate = _sender_locate(c)
+
+        # Leg 1: outbound A -> B, then archived on A.
+        _seed_conversation(c, session_id=session_id, marker="round-trip-leg-1")
+        first = release_conversations(
+            group="testgroup",
+            slug=c["slug"],
+            workspace_root=sender_ws_root,
+            conversations=crossed,
+            locate_transcript=locate,
+            env=c["sender_env"],
+        )
+        assert first[0].outcome is ReleaseOutcome.ARCHIVED
+
+        # Leg 2: the round trip's return, B -> A — a fresh, live, resumable
+        # copy lands back on the sender's own harness store.
+        _seed_conversation(c, session_id=session_id, marker="round-trip-leg-2-returned")
+        assert session_id in {row["session_id"] for row in _recoverable_rows(c["sender_cli_env"])}
+
+        # Leg 3: outbound A -> B again.
+        second = release_conversations(
+            group="testgroup",
+            slug=c["slug"],
+            workspace_root=sender_ws_root,
+            conversations=crossed,
+            locate_transcript=locate,
+            env=c["sender_env"],
+        )
+        assert second[0].outcome is ReleaseOutcome.ARCHIVED
+
+        sender_rows = _recoverable_rows(c["sender_cli_env"])
+        assert session_id not in {row["session_id"] for row in sender_rows}, sender_rows
+
+        resume = _run_camp(c["sender_cli_env"], "launch", "--resume", session_id)
+        assert resume.returncode != 0, resume.stdout
+
 
 class TestMoveWorkspaceEndToEnd:
     def test_content_crosses_in_phase_order_against_a_real_peer(self, move_env):
@@ -2874,6 +2935,210 @@ def test_claim_failure_detail_distinguishes_a_timeout_from_an_explicit_refusal()
     assert refusal_detail != timeout_detail
 
 
+def _make_claim_timeout_run(*, probe_answer_kwargs: dict | None):
+    """A `Runner` whose `claim` invocation times out (`StoppedResponding` —
+    the connection completed, so the peer may have actually run `claim`
+    before the response was lost) and whose `transfer-probe` invocation, if
+    the fix re-probes, answers with *probe_answer_kwargs* — `None` means the
+    probe itself is unreachable, so the re-probe cannot resolve anything
+    either."""
+    import subprocess as subprocess_mod
+
+    from camp.host.transport import RawResult
+
+    def _run(argv, execution_timeout, env):
+        import json as json_mod
+
+        remote_command = argv[-1]
+        if "transfer-receive" in remote_command and "claim" in remote_command:
+            raise subprocess_mod.TimeoutExpired(cmd=argv, timeout=execution_timeout)
+        if "transfer-probe" in remote_command:
+            if probe_answer_kwargs is None:
+                raise subprocess_mod.TimeoutExpired(cmd=argv, timeout=execution_timeout)
+            payload = {
+                "self_name": "host-b",
+                "group_configured": True,
+                "members": [],
+                "account": None,
+                "workspace_exists": True,
+                "workspace_owner": None,
+                "contract_version": 1,
+            }
+            payload.update(probe_answer_kwargs)
+            return RawResult(stdout=json_mod.dumps(payload), stderr="", exit_code=0)
+        if "finish" in remote_command:
+            return RawResult(
+                stdout=json_mod.dumps({"contract_version": 1, "manifest_path": "x"}),
+                stderr="",
+                exit_code=0,
+            )
+        return RawResult(
+            stdout=json_mod.dumps(
+                {"contract_version": 1, "members": [{"name": "repo_a", "basis_commit": None}]}
+            ),
+            stderr="",
+            exit_code=0,
+        )
+
+    return _run
+
+
+def _drive_claim_timeout(run):
+    from camp.transfer.move import PhaseFailed, move_workspace
+
+    group, host = _claim_fixture_group_and_host()
+
+    def _tiny_producer(argv):
+        return subprocess.Popen(
+            [sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'x')"],
+            stdout=subprocess.PIPE,
+        )
+
+    def _fast_stream_spawn(argv, env):
+        return subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                "import sys,json; sys.stdin.buffer.read(); "
+                "sys.stdout.write(json.dumps({'contract_version': 1}))",
+            ],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+    with pytest.raises(PhaseFailed) as exc_info:
+        move_workspace(
+            host=host,
+            group=group,
+            group_name="testgroup",
+            slug="feat-indoubt-x",
+            sender_name="host-a",
+            overwrite=False,
+            run=run,
+            stream_spawn=_fast_stream_spawn,
+            history_producer_spawn=_tiny_producer,
+            worktree_producer_spawn=_tiny_producer,
+        )
+    return exc_info.value
+
+
+def test_a_timed_out_claim_that_reprobes_as_committed_is_treated_as_post_commit():
+    """The peer's `transfer-probe` shows its own manifest now names ITSELF
+    as owner — the `claim` that timed out actually landed — so this must be
+    the post-commit shape: `claimed_owner` populated, exactly like a
+    `finish` failure after a successful `claim`."""
+    run = _make_claim_timeout_run(probe_answer_kwargs={"workspace_owner": "host-b"})
+    failure = _drive_claim_timeout(run)
+
+    assert failure.phase == "claim"
+    assert failure.claimed_owner == "host-b"
+
+
+def test_a_timed_out_claim_that_reprobes_as_not_landed_is_treated_as_pre_commit():
+    """The peer's `transfer-probe` shows the workspace still owned by the
+    sender (or unowned) — the timed-out `claim` never actually landed, so
+    this is the ordinary, safe-to-retry shape: no `claimed_owner`."""
+    run = _make_claim_timeout_run(probe_answer_kwargs={"workspace_owner": "host-a"})
+    failure = _drive_claim_timeout(run)
+
+    assert failure.phase == "claim"
+    assert failure.claimed_owner is None
+
+
+def test_a_timed_out_claim_whose_reprobe_also_fails_is_reported_indeterminate():
+    """Neither the original `claim` call nor the re-probe could establish
+    what happened on the peer — guessing either the pre-commit or the
+    post-commit remedy would be a coin flip the operator cannot verify, so
+    this must be its own distinct outcome rather than silently defaulting to
+    one of the other two."""
+    run = _make_claim_timeout_run(probe_answer_kwargs=None)
+    failure = _drive_claim_timeout(run)
+
+    assert failure.phase == "claim"
+    assert failure.claimed_owner is None
+    assert failure.indeterminate is True
+
+
+def test_a_claim_answer_that_is_not_parseable_json_never_raises_unhandled():
+    """`claim` answered exit 0 — the remote phase ran to completion and
+    already wrote itself as owner (see `camp.transfer.receive.claim`) —
+    but stdout is not the expected JSON body (shell-profile noise on the
+    remote is the classic cause). This must route through the normal
+    `PhaseFailed` shape, re-probing to confirm the commit, never an
+    unguarded `KeyError`/`json.JSONDecodeError` escaping past the commit
+    point."""
+    import json as json_mod
+
+    from camp.host.transport import RawResult
+
+    def _run(argv, execution_timeout, env):
+        remote_command = argv[-1]
+        if "transfer-receive" in remote_command and "claim" in remote_command:
+            return RawResult(stdout="bienvenue sur bash\n", stderr="", exit_code=0)
+        if "transfer-probe" in remote_command:
+            payload = {
+                "self_name": "host-b",
+                "group_configured": True,
+                "members": [],
+                "account": None,
+                "workspace_exists": True,
+                "workspace_owner": "host-b",
+                "contract_version": 1,
+            }
+            return RawResult(stdout=json_mod.dumps(payload), stderr="", exit_code=0)
+        if "finish" in remote_command:
+            return RawResult(
+                stdout=json_mod.dumps({"contract_version": 1, "manifest_path": "x"}),
+                stderr="",
+                exit_code=0,
+            )
+        return RawResult(
+            stdout=json_mod.dumps(
+                {"contract_version": 1, "members": [{"name": "repo_a", "basis_commit": None}]}
+            ),
+            stderr="",
+            exit_code=0,
+        )
+
+    failure = _drive_claim_timeout(_run)
+
+    assert failure.phase == "claim"
+    assert failure.claimed_owner == "host-b"
+
+
+def test_a_malformed_begin_answer_raises_the_ordinary_pre_commit_phase_failure():
+    """The same unguarded-parse shape on `begin` is pre-commit and
+    survivable — a malformed response there must still surface as an
+    ordinary `PhaseFailed("begin", ...)`, never an unhandled parse
+    exception, and never with a `claimed_owner` (nothing has committed
+    yet)."""
+    from camp.host.transport import RawResult
+    from camp.transfer.move import PhaseFailed, move_workspace
+
+    group, host = _claim_fixture_group_and_host()
+
+    def _run(argv, execution_timeout, env):
+        remote_command = argv[-1]
+        if "begin" in remote_command:
+            return RawResult(stdout="not json at all", stderr="", exit_code=0)
+        raise AssertionError("no phase after begin should ever be reached")
+
+    with pytest.raises(PhaseFailed) as exc_info:
+        move_workspace(
+            host=host,
+            group=group,
+            group_name="testgroup",
+            slug="feat-badbegin-x",
+            sender_name="host-a",
+            overwrite=False,
+            run=_run,
+        )
+
+    assert exc_info.value.phase == "begin"
+    assert exc_info.value.claimed_owner is None
+
+
 # ---------------------------------------------------------------------------
 # The moving CLI path — rendering, exit codes, and flag wiring, with
 # `move.move_workspace` faked wholesale (see the section header above for why
@@ -2956,7 +3221,11 @@ def test_completion_report_names_arrived_conversations_and_the_literal_resume_co
 
     code = _run(monkeypatch, ["transfer", "feat-x", "--to", "host-b", "--group", "trailhead"])
 
-    assert code == transfer.EXIT_WOULD_TRANSFER
+    # `release_conversations` is not faked here, so the real one runs against
+    # this test's isolated (empty) harness store — it cannot locate a
+    # transcript for `session_id` there and reports FAILED, which is exactly
+    # the outcome `EXIT_RELEASE_INCOMPLETE` exists to surface distinctly.
+    assert code == transfer.EXIT_RELEASE_INCOMPLETE
     out = capsys.readouterr().out
     assert session_id in out
     assert f"camp launch --resume {session_id}" in out
@@ -3175,6 +3444,117 @@ def test_post_commit_phase_failure_archives_without_flipping_and_names_the_peer(
     assert "moves nothing" not in err
 
 
+def test_post_commit_remedy_names_the_peer_side_setup_commands_and_where_to_probe(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """The post-commit failure is exactly the case where `finish` — the
+    phase that performs bring-up — never completed, so the peer's workspace
+    has had no setup at all. The remedy must name `camp status` and
+    `camp setup`, exactly as the success path's own completion report does
+    (see `test_completion_report_names_the_claimed_owner_and_the_provisioning_
+    remedy`), and must say the comparison probe command runs ON THE PEER —
+    run locally it would only report that this host's own record is stale,
+    which the operator already knows."""
+    env = _Env(tmp_path)
+    env.write_group(excluded={"repo_a": []})
+    env.write_hosts(self_name="host-a", peers={"host-b": "host-b"})
+    env.write_manifest(owner="host-a")
+    env.apply(monkeypatch)
+
+    _fake_probe(monkeypatch, _clean_probe_answer())
+    _no_conversations(monkeypatch)
+
+    move = _move_module()
+
+    def _fail(**kw):
+        raise move.PhaseFailed("finish", "peer bring-up crashed", claimed_owner="host-b-declared")
+
+    monkeypatch.setattr(move, "move_workspace", _fail)
+
+    release = _release_module()
+    monkeypatch.setattr(release, "release_conversations", lambda **kw: ())
+    monkeypatch.setattr(
+        release,
+        "flip_sender_ownership",
+        lambda **kw: (_ for _ in ()).throw(AssertionError("must not flip")),
+    )
+
+    _run(monkeypatch, ["transfer", "feat-x", "--to", "host-b", "--group", "trailhead"])
+
+    err = capsys.readouterr().err
+    assert "camp status --name feat-x --group trailhead" in err
+    assert "camp setup" in err
+    assert "on the peer" in err.lower() or "on host-b-declared" in err.lower()
+
+
+def test_post_commit_phase_failure_reports_each_conversations_release_outcome(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """The post-commit failure branch is the one outcome where the operator
+    must decide which machine to keep working on — per-conversation
+    reporting matters here at least as much as on the success path (see
+    `test_completion_report_names_each_conversations_release_outcome`), yet
+    it discards `_release_crossed`'s return value entirely. Each conversation
+    must be reported by id with its own outcome here too."""
+    from pathlib import PurePosixPath
+
+    env = _Env(tmp_path)
+    env.write_group(excluded={"repo_a": []})
+    env.write_hosts(self_name="host-a", peers={"host-b": "host-b"})
+    env.write_manifest(owner="host-a")
+    env.apply(monkeypatch)
+    transfer = _transfer_module()
+
+    _fake_probe(monkeypatch, _clean_probe_answer())
+    _no_conversations(monkeypatch)
+
+    move = _move_module()
+    archived_id = "eeeeeeee-0000-4000-8000-000000000005"
+    failed_id = "ffffffff-0000-4000-8000-000000000006"
+    crossed = (
+        move.ConversationCrossed(session_id=archived_id, subpath=PurePosixPath(".")),
+        move.ConversationCrossed(session_id=failed_id, subpath=PurePosixPath(".")),
+    )
+
+    def _fail(**kw):
+        raise move.PhaseFailed(
+            "finish", "peer bring-up crashed", claimed_owner="host-b-declared", conversations=crossed
+        )
+
+    monkeypatch.setattr(move, "move_workspace", _fail)
+
+    release = _release_module()
+    archive_path = tmp_path / "archive" / f"{archived_id}.jsonl"
+
+    def _fake_release(**kw):
+        return (
+            release.ConversationRelease(
+                session_id=archived_id,
+                outcome=release.ReleaseOutcome.ARCHIVED,
+                archive_path=archive_path,
+            ),
+            release.ConversationRelease(
+                session_id=failed_id,
+                outcome=release.ReleaseOutcome.FAILED,
+                archive_path=None,
+                detail="destination unwritable",
+            ),
+        )
+
+    monkeypatch.setattr(release, "release_conversations", _fake_release)
+    monkeypatch.setattr(release, "flip_sender_ownership", lambda **kw: None)
+
+    code = _run(monkeypatch, ["transfer", "feat-x", "--to", "host-b", "--group", "trailhead"])
+
+    assert code == transfer.EXIT_PHASE_FAILED_POST_COMMIT
+
+    err = capsys.readouterr().err
+    assert archived_id in err
+    assert str(archive_path) in err
+    assert failed_id in err
+    assert "destination unwritable" in err
+
+
 def test_the_three_move_failure_exit_codes_are_pairwise_distinct(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
@@ -3206,6 +3586,59 @@ def test_the_three_move_failure_exit_codes_are_pairwise_distinct(
     )
 
     assert len({overwrite_code, pre_commit_code, post_commit_code}) == 3
+
+
+def test_indeterminate_claim_never_claims_a_re_run_is_safe_and_has_its_own_exit_code(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """`PhaseFailed(indeterminate=True)` must not fall into the pre-commit
+    branch, which tells the operator a re-run is safe — that claim would be
+    unverified here by construction. It gets its own exit code, distinct
+    from every other outcome, and the printed remedy says plainly that
+    whether ownership moved could not be established."""
+    env = _Env(tmp_path)
+    env.write_group(excluded={"repo_a": []})
+    env.write_hosts(self_name="host-a", peers={"host-b": "host-b"})
+    env.write_manifest(owner="host-a")
+    env.apply(monkeypatch)
+    transfer = _transfer_module()
+
+    _fake_probe(monkeypatch, _clean_probe_answer())
+    _no_conversations(monkeypatch)
+
+    move = _move_module()
+
+    def _fail(**kw):
+        raise move.PhaseFailed("claim", "no response within 60.0s", indeterminate=True)
+
+    monkeypatch.setattr(move, "move_workspace", _fail)
+
+    release = _release_module()
+
+    def _boom_release(**kw):
+        raise AssertionError("release_conversations must not run on an indeterminate claim")
+
+    monkeypatch.setattr(release, "release_conversations", _boom_release)
+
+    code = _run(monkeypatch, ["transfer", "feat-x", "--to", "host-b", "--group", "trailhead"])
+
+    assert code not in (
+        transfer.EXIT_WOULD_TRANSFER,
+        transfer.EXIT_PHASE_FAILED,
+        transfer.EXIT_PHASE_FAILED_POST_COMMIT,
+        transfer.EXIT_OVERWRITE_REQUIRED,
+    )
+    assert code == transfer.EXIT_PHASE_INDETERMINATE
+
+    from camp.group.manifest import owner_of, read_central_manifest
+
+    manifest = read_central_manifest(env.manifest_path())
+    assert owner_of(manifest) == "host-a"
+
+    err = capsys.readouterr().err
+    assert "re-running the transfer is safe" not in err
+    assert "moves nothing" not in err
+    assert "could not" in err.lower()
 
 
 def test_undeclared_excluded_set_refuses_on_the_moving_path_and_never_calls_move(
@@ -3382,7 +3815,12 @@ def test_release_conversations_is_never_called_when_a_phase_fails(
     move = _move_module()
 
     def _fail(**kw):
-        raise move.PhaseFailed("finish", "peer unreachable mid-finish")
+        # A genuinely pre-commit phase — `move_workspace` never wraps a
+        # `worktree` failure with `claimed_owner`, unlike `finish` (which
+        # always fails post-commit once `claim` has answered; see
+        # `PhaseFailed`'s own docstring) — so this shape cannot be confused
+        # with the post-commit branch this test is NOT covering.
+        raise move.PhaseFailed("worktree (repo_a)", "peer unreachable mid-worktree")
 
     monkeypatch.setattr(move, "move_workspace", _fail)
 
@@ -3454,12 +3892,199 @@ def test_completion_report_names_each_conversations_release_outcome(
 
     code = _run(monkeypatch, ["transfer", "feat-x", "--to", "host-b", "--group", "trailhead"])
 
-    assert code == transfer.EXIT_WOULD_TRANSFER
+    # One of the two releases is FAILED, so this is exactly the partial
+    # outcome `EXIT_RELEASE_INCOMPLETE` exists to distinguish from a fully
+    # clean transfer — see `test_exit_code_distinguishes_a_clean_transfer_
+    # from_one_that_left_resumable_copies` for that property on its own.
+    assert code == transfer.EXIT_RELEASE_INCOMPLETE
     out = capsys.readouterr().out
     assert archived_id in out
     assert str(archive_path) in out
     assert failed_id in out
     assert "destination unwritable" in out
+
+
+def test_a_failed_release_that_already_moved_the_transcript_is_not_reported_resumable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """A FAILED release whose `archive_path` is populated (the relocation
+    succeeded; only the durable marker append failed — see
+    `camp.transfer.release`'s marker-append failure) must never be rendered
+    with the same "this host still holds a resumable copy" text a FAILED
+    release with `archive_path=None` (nothing moved at all) gets — that text
+    is false for the former: the transcript is gone from this host's store."""
+    from pathlib import PurePosixPath
+
+    env = _Env(tmp_path)
+    env.write_group(excluded={"repo_a": []})
+    env.write_hosts(self_name="host-a", peers={"host-b": "host-b"})
+    env.write_manifest(owner="host-a")
+    env.apply(monkeypatch)
+    transfer = _transfer_module()
+
+    _fake_probe(monkeypatch, _clean_probe_answer())
+    _no_conversations(monkeypatch)
+
+    move = _move_module()
+    moved_id = "cccccccc-0000-4000-8000-000000000003"
+    unmoved_id = "dddddddd-0000-4000-8000-000000000004"
+    crossed = (
+        move.ConversationCrossed(session_id=moved_id, subpath=PurePosixPath(".")),
+        move.ConversationCrossed(session_id=unmoved_id, subpath=PurePosixPath(".")),
+    )
+    monkeypatch.setattr(
+        move,
+        "move_workspace",
+        lambda **kw: move.MoveResult(
+            members=("repo_a",), conversations=crossed, claimed_owner="host-b-declared"
+        ),
+    )
+
+    release = _release_module()
+    moved_archive_path = tmp_path / "archive" / f"{moved_id}.jsonl"
+
+    def _fake_release(**kw):
+        return (
+            release.ConversationRelease(
+                session_id=moved_id,
+                outcome=release.ReleaseOutcome.FAILED,
+                archive_path=moved_archive_path,
+                detail="archived but could not record the durable marker: boom",
+            ),
+            release.ConversationRelease(
+                session_id=unmoved_id,
+                outcome=release.ReleaseOutcome.FAILED,
+                archive_path=None,
+                detail="transcript could not be located on this host",
+            ),
+        )
+
+    monkeypatch.setattr(release, "release_conversations", _fake_release)
+
+    code = _run(monkeypatch, ["transfer", "feat-x", "--to", "host-b", "--group", "trailhead"])
+
+    # Both releases here are FAILED (one moved-but-unmarked, one never
+    # moved) — the exit code this test asserts on is a side effect of the
+    # fixture, not its subject; see `test_exit_code_distinguishes_a_clean_
+    # transfer_from_one_that_left_resumable_copies` for that property.
+    assert code == transfer.EXIT_RELEASE_INCOMPLETE
+    out = capsys.readouterr().out
+
+    moved_lines = out[out.index(moved_id) :]
+    moved_section = moved_lines[: moved_lines.index(unmoved_id)]
+    assert "still holds a resumable copy" not in moved_section
+    assert str(moved_archive_path) in moved_section
+
+    unmoved_section = out[out.index(unmoved_id) :]
+    assert "still holds a resumable copy" in unmoved_section
+
+
+def test_exit_code_distinguishes_a_clean_transfer_from_one_that_left_resumable_copies(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """Ownership committing is not the same outcome as ownership committing
+    AND every conversation actually leaving this host — a transfer whose
+    release step reports even one FAILED conversation must exit differently
+    from a fully clean one, so a script watching the exit code alone can
+    tell the two apart. The record flip itself still runs either way (this
+    host's own manifest still says so), only the exit code and message
+    change."""
+    from pathlib import PurePosixPath
+
+    from camp.group.manifest import read_central_manifest
+
+    env = _Env(tmp_path)
+    env.write_group(excluded={"repo_a": []})
+    env.write_hosts(self_name="host-a", peers={"host-b": "host-b"})
+    env.write_manifest(owner="host-a")
+    env.apply(monkeypatch)
+    transfer = _transfer_module()
+
+    _fake_probe(monkeypatch, _clean_probe_answer())
+    _no_conversations(monkeypatch)
+
+    move = _move_module()
+    failed_id = "11111111-2222-4222-8222-222222222222"
+    crossed = (move.ConversationCrossed(session_id=failed_id, subpath=PurePosixPath(".")),)
+    monkeypatch.setattr(
+        move,
+        "move_workspace",
+        lambda **kw: move.MoveResult(
+            members=("repo_a",), conversations=crossed, claimed_owner="host-b-declared"
+        ),
+    )
+
+    release = _release_module()
+
+    def _fake_release(**kw):
+        return (
+            release.ConversationRelease(
+                session_id=failed_id,
+                outcome=release.ReleaseOutcome.FAILED,
+                archive_path=None,
+                detail="destination unwritable",
+            ),
+        )
+
+    monkeypatch.setattr(release, "release_conversations", _fake_release)
+
+    code = _run(monkeypatch, ["transfer", "feat-x", "--to", "host-b", "--group", "trailhead"])
+
+    assert code != transfer.EXIT_WOULD_TRANSFER
+    assert code == transfer.EXIT_RELEASE_INCOMPLETE
+
+    manifest = read_central_manifest(env.manifest_path())
+    assert manifest["owner"] == "host-b-declared"
+
+    capsys.readouterr()
+
+
+def test_clean_release_of_every_conversation_still_exits_the_would_transfer_code(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """The new code is reserved for a partial release, not raised whenever
+    conversations crossed at all — a fully ARCHIVED outcome still exits 0,
+    exactly as before this fix."""
+    from pathlib import PurePosixPath
+
+    env = _Env(tmp_path)
+    env.write_group(excluded={"repo_a": []})
+    env.write_hosts(self_name="host-a", peers={"host-b": "host-b"})
+    env.write_manifest(owner="host-a")
+    env.apply(monkeypatch)
+    transfer = _transfer_module()
+
+    _fake_probe(monkeypatch, _clean_probe_answer())
+    _no_conversations(monkeypatch)
+
+    move = _move_module()
+    archived_id = "33333333-4444-4444-8444-444444444444"
+    crossed = (move.ConversationCrossed(session_id=archived_id, subpath=PurePosixPath(".")),)
+    monkeypatch.setattr(
+        move,
+        "move_workspace",
+        lambda **kw: move.MoveResult(
+            members=("repo_a",), conversations=crossed, claimed_owner="host-b-declared"
+        ),
+    )
+
+    release = _release_module()
+
+    def _fake_release(**kw):
+        return (
+            release.ConversationRelease(
+                session_id=archived_id,
+                outcome=release.ReleaseOutcome.ARCHIVED,
+                archive_path=tmp_path / "archive" / f"{archived_id}.jsonl",
+            ),
+        )
+
+    monkeypatch.setattr(release, "release_conversations", _fake_release)
+
+    code = _run(monkeypatch, ["transfer", "feat-x", "--to", "host-b", "--group", "trailhead"])
+
+    assert code == transfer.EXIT_WOULD_TRANSFER
+    capsys.readouterr()
 
 
 # ---------------------------------------------------------------------------

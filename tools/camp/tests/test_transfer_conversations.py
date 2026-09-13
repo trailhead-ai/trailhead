@@ -22,9 +22,14 @@ covered here, hermetically:
 
 - A conversation's transcript is relocated into the archive with its bytes
   identical to what was on disk before the move.
-- Re-running the release for an already-archived conversation reports
-  `ALREADY_ARCHIVED`, never a second `ARCHIVED`, and the durable marker gains
-  no second entry for it.
+- Re-running the release for an already-archived conversation whose source
+  transcript no longer exists on this host reports `ALREADY_ARCHIVED`, never
+  a second `ARCHIVED`, and the durable marker gains no second entry for it.
+  A live source found at the destination's session id — a round-tripped
+  conversation sent outward again — is always relocated instead, replacing
+  the stale archive.
+- A marker-append failure that happens after the transcript has already been
+  relocated reports the destination it moved to, not `None`.
 - Two distinct conversations that share a subpath archive to two distinct,
   non-colliding destinations, keyed by session id rather than by path.
 - A relocation across a filesystem boundary (`os.rename` raising as it would
@@ -387,15 +392,18 @@ def test_rerun_after_archiving_reports_already_archived_and_marker_gains_no_seco
     )
     assert first[0].outcome is ReleaseOutcome.ARCHIVED
 
-    def _boom(sid, root):
-        raise AssertionError("locate_transcript must not be consulted once already archived")
-
+    # The first run already relocated the transcript away from its source —
+    # a real re-run's `locate_transcript` (the harness store lookup) finds
+    # nothing there any more, exactly like this closure. It IS consulted
+    # (see `test_marker_append_failure_still_reports_where_the_transcript_
+    # already_moved_to` and the module docstring for why a live source must
+    # always be checked), it just has nothing to report.
     second = release_conversations(
         group="g",
         slug="ws",
         workspace_root=tmp_path / "ws",
         conversations=(_crossed(_UUID_A),),
-        locate_transcript=_boom,
+        locate_transcript=lambda sid, root: None,
         env=env,
     )
     assert second[0].outcome is ReleaseOutcome.ALREADY_ARCHIVED
@@ -705,3 +713,41 @@ def test_append_that_cannot_take_the_exclusion_is_reported_failed(
 
     marker = read_release_marker("g", "ws", env=env)
     assert marker == ()
+
+
+def test_marker_append_failure_still_reports_where_the_transcript_already_moved_to(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The relocation itself (`shutil.move`) already succeeded by the time
+    the marker append is attempted — a caller rendering this `FAILED`
+    outcome needs to know the transcript is no longer at its source, not
+    just that recording it failed. `archive_path` must name the destination
+    the file actually landed at, not `None` (which the renderer reserves for
+    "nothing moved")."""
+    import camp.group.manifest as manifest_module
+    from camp.transfer.release import ReleaseOutcome, archive_dir, release_conversations
+
+    env = _env(tmp_path)
+    source_root = tmp_path / "harness-store"
+    source_root.mkdir()
+    transcript = _seed_transcript(source_root, _UUID_A, b"moved but unmarked\n")
+
+    def _boom(ws_dir):
+        raise OSError("simulated lock acquisition failure")
+
+    monkeypatch.setattr(manifest_module, "reconcile_lock", _boom)
+
+    results = release_conversations(
+        group="g",
+        slug="ws",
+        workspace_root=tmp_path / "ws",
+        conversations=(_crossed(_UUID_A),),
+        locate_transcript=lambda sid, root: transcript,
+        env=env,
+    )
+
+    assert results[0].outcome is ReleaseOutcome.FAILED
+    expected_dest = archive_dir("g", "ws", env=env) / f"{_UUID_A}.jsonl"
+    assert results[0].archive_path == expected_dest
+    assert expected_dest.is_file()
+    assert not transcript.exists()

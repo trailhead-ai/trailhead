@@ -545,7 +545,9 @@ class TestClaim:
         mpath = _manifest_path("testgroup", "feat-claim", env)
         assert owner_of(read_central_manifest(mpath)) == "sender-alpha"
 
-        answer = receive.claim(groups=[g["group"]], group_name="testgroup", slug="feat-claim", env=env)
+        answer = receive.claim(
+            groups=[g["group"]], group_name="testgroup", slug="feat-claim", sender="sender-alpha", env=env
+        )
 
         assert answer["owner"] == "peer-declared"
         assert owner_of(read_central_manifest(mpath)) == "peer-declared"
@@ -568,7 +570,9 @@ class TestClaim:
                 overwrite=False,
                 env=env,
             )
-            answer = receive.claim(groups=[g["group"]], group_name="testgroup", slug=slug, env=env)
+            answer = receive.claim(
+                groups=[g["group"]], group_name="testgroup", slug=slug, sender=sender, env=env
+            )
             assert answer["owner"] == "peer-declared"
 
         from camp.group.manifest import owner_of, read_central_manifest
@@ -595,7 +599,46 @@ class TestClaim:
 
         with pytest.raises(receive.SelfNameNotDeclared):
             receive.claim(
-                groups=[g["group"]], group_name="testgroup", slug="feat-noname", env=g["env"]
+                groups=[g["group"]],
+                group_name="testgroup",
+                slug="feat-noname",
+                sender="sender-alpha",
+                env=g["env"],
+            )
+
+        assert owner_of(read_central_manifest(mpath)) == "sender-alpha"
+
+    def test_claim_refuses_when_the_manifest_names_a_different_sender(self, one_member_group):
+        """`begin` already enforces that only the sender it seeded a
+        workspace for may claim it later — a third host dispatching `claim`
+        directly (bypassing `begin`'s own guard) against a workspace `begin`
+        seeded for a DIFFERENT sender must be refused the same way `begin`
+        itself refuses a third host's overwrite attempt, never silently
+        flip ownership to this host regardless of who actually sent it."""
+        receive = _receive_module()
+        g = one_member_group
+        env = _with_self_name(g["env"], "peer-declared")
+
+        receive.begin(
+            groups=[g["group"]],
+            group_name="testgroup",
+            slug="feat-mismatch",
+            sender="sender-alpha",
+            overwrite=False,
+            env=env,
+        )
+
+        from camp.group.manifest import owner_of, read_central_manifest
+
+        mpath = _manifest_path("testgroup", "feat-mismatch", env)
+
+        with pytest.raises(receive.OwnershipConflict):
+            receive.claim(
+                groups=[g["group"]],
+                group_name="testgroup",
+                slug="feat-mismatch",
+                sender="sender-mallory",
+                env=env,
             )
 
         assert owner_of(read_central_manifest(mpath)) == "sender-alpha"
@@ -619,7 +662,9 @@ class TestClaim:
             overwrite=False,
             env=env,
         )
-        receive.claim(groups=[g["group"]], group_name="testgroup", slug="feat-survive", env=env)
+        receive.claim(
+            groups=[g["group"]], group_name="testgroup", slug="feat-survive", sender="sender-alpha", env=env
+        )
 
         monkeypatch.setattr(
             provision,
@@ -699,7 +744,11 @@ class TestClaim:
 
         def _claim() -> None:
             receive.claim(
-                groups=[g["group"]], group_name="testgroup", slug="feat-lock", env=env
+                groups=[g["group"]],
+                group_name="testgroup",
+                slug="feat-lock",
+                sender="sender-alpha",
+                env=env,
             )
             with order_lock:
                 order.append("claim-wrote")

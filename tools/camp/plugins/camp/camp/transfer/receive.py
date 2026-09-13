@@ -43,13 +43,20 @@ the workspace's owner, under the manifest's guarded ownership-change opt-in
 using its own declared name (`camp.host.config.self_host_name`) — never a
 name the sender supplied. A host that has not declared a name refuses,
 `SelfNameNotDeclared`, before touching the manifest: there is no name to
-claim under. The write happens while holding the SAME workspace reconcile
-lock (`camp.group.manifest.reconcile_lock`) `finish`'s manifest rebuild takes,
-so the claim can never land mid-rebuild and get silently carried over by a
-rebuild that read the stale prior owner — see `finish` below for why the
-write must run BEFORE it, not concurrently with or after it. The answer
-carries the exact name this host wrote, so a caller (the sender) records the
-peer's own name rather than whatever alias it uses locally for this peer.
+claim under. `claim` takes `--owner` too, exactly like `begin` — the sender
+this claim is for — and refuses, `OwnershipConflict`, before touching the
+manifest, when the manifest already names an owner other than that sender:
+the same guard `begin` applies to a third host's overwrite attempt, applied
+here so a `claim` dispatched directly (out of `move_workspace`'s own
+begin-then-claim sequence) cannot flip ownership on a workspace `begin`
+seeded for someone else. The write happens while holding the SAME workspace
+reconcile lock (`camp.group.manifest.reconcile_lock`) `finish`'s manifest
+rebuild takes, so the claim can never land mid-rebuild and get silently
+carried over by a rebuild that read the stale prior owner — see `finish`
+below for why the write must run BEFORE it, not concurrently with or after
+it. The answer carries the exact name this host wrote, so a caller (the
+sender) records the peer's own name rather than whatever alias it uses
+locally for this peer.
 
 **finish** writes the workspace docs/hooks and spawns camp's existing
 detached provisioner (`camp.provision.provision.bring_up_workspace`), which
@@ -765,6 +772,7 @@ def claim(
     groups: list[dict[str, Any]],
     group_name: str,
     slug: str,
+    sender: str,
     env: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """The transfer's single commit point: this host claims ownership.
@@ -780,6 +788,15 @@ def claim(
     the module docstring's `claim` and `finish` sections for why this
     ordering and this lock are both load-bearing, not merely defensive.
 
+    *sender* must name the same sender `begin` seeded this workspace for —
+    checked before the manifest is touched, the same guard `begin` itself
+    applies to a third host's overwrite attempt (see `OwnershipConflict`).
+    `--owner`/*sender* is bookkeeping, not an authentication boundary here
+    either (see the module docstring's own note on that for `begin`); this
+    check exists so a `claim` dispatched directly, out of `move_workspace`'s
+    own sequence, cannot flip ownership on a workspace `begin` seeded for a
+    DIFFERENT sender than the one now claiming it.
+
     Returns the JSON-serializable answer: this transfer's contract version
     and the exact owner name this host wrote, so a caller (the sender) can
     record the peer's own declared name rather than whatever local alias it
@@ -787,10 +804,16 @@ def claim(
 
     Raises:
         GroupNotConfigured: *group_name* is not configured on this host.
+        MalformedOwnerName: *sender* is oversized or malformed — checked
+            before anything else runs, exactly like `begin`'s own *sender*.
+        OwnershipConflict: the manifest here already names an owner other
+            than *sender* — the same refusal `begin` raises for a third
+            host's overwrite attempt. Raised before the manifest is written.
         SelfNameNotDeclared: this host has no declared `self_name` — there
             is no name to claim ownership under. Raised before the manifest
             is read or written.
     """
+    _validate_owner(sender)
     _require_group(groups, group_name)
 
     from trailhead.paths import PathResolutionError
@@ -812,7 +835,9 @@ def claim(
         )
 
     from ..group.manifest import (
+        ManifestError,
         manifest_path_for,
+        owner_of,
         read_central_manifest,
         reconcile_lock,
         workspace_dir,
@@ -824,6 +849,12 @@ def claim(
 
     with reconcile_lock(ws_dir):
         data = read_central_manifest(mpath)
+        try:
+            existing_owner = owner_of(data)
+        except ManifestError:
+            existing_owner = None
+        if existing_owner is not None and existing_owner != sender:
+            raise OwnershipConflict(slug, existing_owner, sender)
         data["owner"] = self_name
         write_central_manifest(mpath, data, allow_owner_change=True)
 
