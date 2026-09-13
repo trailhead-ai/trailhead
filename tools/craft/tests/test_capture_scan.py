@@ -22,6 +22,8 @@ credential_are_classified_differently` pins that behaviour directly.
 
 from __future__ import annotations
 
+import base64
+import random
 import subprocess
 import sys
 from pathlib import Path
@@ -149,6 +151,50 @@ def test_a_slash_heavy_path_alone_does_not_trip_the_exit_code(tmp_path):
         f"a bare slash-heavy path must not be reported as a credential finding: "
         f"{result.stdout}{result.stderr}"
     )
+
+
+def _generated_slashy_secrets(seed: int, count: int, min_slashes: int, max_slashes: int):
+    """Deterministically generate real base64(32 random bytes) secrets whose
+    matched token carries a slash count in [min_slashes, max_slashes] — the
+    band a naive "2 or more slashes ⇒ path" rule would misclassify as safe,
+    since `/` is a base64-alphabet character a genuine secret can carry by
+    chance, not just a path separator.
+    """
+    rng = random.Random(seed)
+    found = []
+    while len(found) < count:
+        token = base64.b64encode(rng.randbytes(32)).decode()
+        slashes = token.count("/")
+        if min_slashes <= slashes <= max_slashes:
+            found.append(token)
+    return found
+
+
+def test_generated_slashy_base64_secrets_are_flagged_as_credentials(tmp_path):
+    # Real secrets, not a hand-picked example: base64(os.urandom(32))-shaped
+    # tokens whose slash count (2-3) sits in the band a slash-count-only
+    # allowlist rule used to treat as "path-shaped" and wave through.
+    secrets = _generated_slashy_secrets(seed=42, count=10, min_slashes=2, max_slashes=3)
+    body = "".join(f"line_{i}={tok}\n" for i, tok in enumerate(secrets))
+    f = _write(tmp_path, "generated-secrets.txt", body)
+    result = _run(f)
+
+    assert result.returncode == 1, (
+        f"a generated base64 secret with 2-3 slashes must be reported as a "
+        f"credential finding (exit 1), not waved through as a known-safe "
+        f"path/URL shape: {result.stdout}{result.stderr}"
+    )
+    for tok in secrets:
+        # The scanner's trailing `={0,2}` requires a following word/non-word
+        # boundary it cannot find at end-of-line, so the printed match omits
+        # any base64 padding — compare against the unpadded token.
+        unpadded = tok.rstrip("=")
+        matching = [ln for ln in result.stdout.splitlines() if unpadded in ln]
+        assert matching, f"expected {tok!r} to be reported at all:\n{result.stdout}"
+        assert ":path-or-url-shape:" not in matching[0], (
+            f"generated secret {tok!r} was misclassified as the known-safe "
+            f"path/URL shape:\n{matching[0]}"
+        )
 
 
 # ---- CLI plumbing ------------------------------------------------------------
