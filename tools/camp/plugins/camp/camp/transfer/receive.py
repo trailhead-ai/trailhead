@@ -799,12 +799,11 @@ def claim(
 
     try:
         self_name = self_host_name(env=env)
-    except HostConfigError as e:
-        raise SelfNameNotDeclared(str(e)) from e
-    except PathResolutionError as e:
-        # Same posture as `camp.provision.provision._declared_owner`: an
-        # environment that cannot even resolve a config dir (no HOME) is
-        # treated like a host that never declared a name, not a hard error.
+    except (HostConfigError, PathResolutionError) as e:
+        # A hosts.toml this host cannot read, and an environment that cannot
+        # even resolve a config dir (no HOME), both leave it with no name to
+        # claim under — the latter is the same posture
+        # `camp.provision.provision._declared_owner` already takes.
         raise SelfNameNotDeclared(str(e)) from e
     if self_name is None:
         raise SelfNameNotDeclared(

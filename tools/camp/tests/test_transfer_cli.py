@@ -1897,7 +1897,8 @@ class TestReleaseOnARealPeer:
         )
 
         # Before release, the sender still offers and resumes it (pinned
-        # directly by `test_sending_host_keeps_ownership_and_its_own_resumable_copy`
+        # directly by
+        # `test_move_workspace_alone_claims_ownership_for_the_peer_but_leaves_release_and_the_flip_to_the_caller`
         # above) — the change this test pins is what happens AFTER release.
         sender_ws_root = workspace_dir("testgroup", c["slug"], env=c["sender_env"]).resolve()
         release_results = release_conversations(
