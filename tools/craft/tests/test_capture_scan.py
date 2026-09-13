@@ -232,6 +232,70 @@ def test_generated_secrets_at_or_above_the_slash_threshold_are_still_flagged(tmp
         )
 
 
+def _chunked(token: str, chunk_size: int, case_fn=None) -> str:
+    chunks = [token[i : i + chunk_size] for i in range(0, len(token), chunk_size)]
+    if case_fn is not None:
+        chunks = [case_fn(c, i) for i, c in enumerate(chunks)]
+    return "/".join(chunks)
+
+
+def _shaped_secret_base32(seed: int) -> str:
+    # A real 256-bit secret, base32-encoded and chunked 4 chars per segment —
+    # base32's alphabet (A-Z2-7) never mixes upper+lower+digit within a
+    # segment, so the old character-class discriminator waved every segment
+    # through as "word-shaped" regardless of chunk boundary choice.
+    rng = random.Random(seed)
+    token = base64.b32encode(rng.randbytes(32)).decode().rstrip("=")
+    return _chunked(token, 4)
+
+
+def _shaped_secret_hex_single_case(seed: int) -> str:
+    # A real secret, hex-encoded, chunked, with each chunk forced to a single
+    # case (alternating upper/lower across chunks) — an attacker picks the
+    # case per chunk deliberately, defeating the old per-segment
+    # upper+lower+digit mix check without needing base32 specifically.
+    rng = random.Random(seed)
+    token = rng.randbytes(32).hex()
+    return _chunked(token, 4, case_fn=lambda c, i: c.upper() if i % 2 == 0 else c.lower())
+
+
+def _shaped_secret_decimal(seed: int) -> str:
+    # A real secret represented as decimal digits, chunked — digit-only
+    # segments never mix upper+lower+digit either (no letters at all), so
+    # this shape was already immune to the old check with no shaping effort.
+    rng = random.Random(seed)
+    token = "".join(str(rng.randint(0, 9)) for _ in range(52))
+    return _chunked(token, 4)
+
+
+SHAPED_EVASIONS = {
+    "base32-chunked": _shaped_secret_base32,
+    "hex-single-case-per-chunk": _shaped_secret_hex_single_case,
+    "decimal-chunked": _shaped_secret_decimal,
+}
+
+
+@pytest.mark.parametrize("name,make", SHAPED_EVASIONS.items(), ids=list(SHAPED_EVASIONS))
+def test_a_shaped_secret_is_not_waved_through_as_a_known_safe_shape(tmp_path, name, make):
+    secret = make(seed=1234)
+    f = _write(tmp_path, "shaped.txt", f"leaked: {secret}\n")
+    result = _run(f)
+
+    matching = [ln for ln in result.stdout.splitlines() if secret in ln]
+    assert matching, (
+        f"expected the {name} shaped secret to be reported at all:\n{result.stdout}"
+    )
+    assert ":path-or-url-shape:" not in matching[0], (
+        f"a {name} shaped secret was waved through as the known-safe path/url "
+        f"shape merely by choosing a single character class per `/`-separated "
+        f"chunk:\n{matching[0]}"
+    )
+    assert result.returncode == 1, (
+        f"a {name} shaped secret must trip the exit code as a credential "
+        f"finding: {result.stdout}{result.stderr}"
+    )
+
+
 # ---- CLI plumbing ------------------------------------------------------------
 
 

@@ -16,48 +16,71 @@ Seven pattern classes, taken verbatim from that document:
   high-entropy-hex    40+ hex chars
   pem-private-key     a PEM private-key header
 
+This scanner is a tripwire for ACCIDENTAL leakage in a `claude -p` transcript
+— it is not, and cannot be, a defense against an agent (or an attacker
+shaping the agent's output) that deliberately encodes a secret to evade a
+regex. Any character-class or entropy heuristic can be defeated by an author
+who controls the bytes being scanned: pick an alphabet, a chunking, a case
+pattern, or a delimiter that the heuristic doesn't recognize, and the scan
+passes. The controls for a deliberate exfiltration attempt are outside this
+script entirely — the read-only tool grant given to the process producing
+the transcript, and (on a host that provides one; absent on this Linux host)
+an OS-level sandbox around it. Treat every exit-0 result here as "nothing
+that looks like an accidental credential leak," never as "nothing was
+exfiltrated."
+
 Known false-positive: `/` is in the base64 alphabet, so the high-entropy
-pattern also matches long slash-separated paths and record URLs (e.g.
-`7313/records/trailhead/task/both-slice-...`). A high-entropy-base64 match
-is reclassified as `path-or-url-shape` — reported, not silently dropped,
-but not counted as a credential finding either — only when it satisfies
-BOTH of two independent conditions:
+pattern also matches long slash-separated paths and record URLs. Exactly
+two such shapes occur in this repository:
 
-  1. the match contains **four or more** `/`
-  2. no `/`-separated segment of the match mixes uppercase, lowercase, AND
-     a digit — a path or URL segment is a word (`records`, `harborlight`,
-     `SKILL`, `7313`) and never mixes all three character classes, while a
-     base64 run routinely does
+  - lore record URLs, e.g. `7313/records/harborlight/spec/dock` — a
+    `records/<vault>/<kind>/<slug-fragment>` segment run
+  - repository paths, e.g. `tools/craft/plugins/craft/skills/slice/SKILL`
+    (printed without its extension — `.` is not in the base64 character
+    class, so the match truncates at the first `.`)
 
-Each condition alone is only ever a probabilistic proxy — `/` occurs in
-the base64 alphabet with probability 1/64, so a genuine random secret can
-by chance carry any number of slashes, including four or more, and can by
-chance land on a segmentation that happens not to combine character classes.
-An earlier version of this rule used slash count alone at a threshold of
-two, on the (false, unmeasured) premise that "real secrets essentially
-never" carry more than one `/` in a 32+ char run — measured over 20,000
-freshly generated `base64.b64encode(os.urandom(32))` tokens, 13.9% carried
-two or more `/` and were silently waved through as path-shaped. Raising
-the slash-only threshold to four (the lowest slash count any committed
-real-world path/URL fixture carries — record URLs like
-`7313/records/trailhead/task/...`, repository paths like
-`tools/craft/plugins/craft/skills/slice/SKILL`) brought the false-negative
-rate down to ~0.4%, but slash count alone only ever buys a smaller
-probability, never a different kind of separation, because it is still
-the same alphabet-frequency argument.
+A high-entropy-base64 match is reclassified as `path-or-url-shape` —
+reported, not silently dropped, but not counted as a credential finding
+either — only when it carries at least four `/` AND matches one of those
+two shapes *structurally*:
 
-Conjoining the structural condition — no segment mixing all three
-character classes — is independent of slash count and drives the combined
-rate much lower: measured over 160,000 generated
-`base64.b64encode(os.urandom(32))` tokens (four independently seeded runs
-of 40,000), slash-count-alone (>=4) false-negatives at 0.394%, the
-structural condition alone at 0.074%, and the two conjoined at 0.0019%
-(3/160,000) — roughly 200x lower than slash count alone. It is not zero: a
-sufficiently rare random secret can still land on four-or-more slashes
-with no mixed segment. Every committed real-world path/URL fixture this
-scanner must keep classifying safely still passes both conditions (a path
-or URL segment is a word, never a three-class blend), so the conjunction
-does not misclassify any known-safe fixture.
+  1. `_record_url_shape` — some `/`-separated segment is the literal word
+     "records", followed by at least three more segments (vault, kind,
+     slug-fragment). This keys on a fixed ASCII word actually occurring in
+     the match, not on which characters make it up.
+  2. `_resolves_to_repo_path` — walking the match's segments from the repo
+     root, each one exactly names (or is a truncation-safe prefix of) a
+     real directory or file, ending on a real filesystem entry. This keys
+     on the repository's actual file tree, not on an alphabet property.
+
+An earlier version of this rule instead asked whether any segment mixed
+uppercase, lowercase, AND a digit, on the premise that a path/URL segment
+is "a word" and a base64 run "routinely" is not. That is an alphabet-shape
+heuristic, and alphabet shape is exactly the property an author of the
+scanned content chooses: chunking a real secret into segments that are
+each single-case (all of one letter case, or digits only — base32,
+hex-with-per-chunk-case, or decimal encodings all do this trivially) passed
+every segment through unchanged, regardless of chunk boundary. That
+character-class condition is retired; the two structural checks above key
+on recognizable path/URL structure instead, which is not a property the
+scanned content's author gets to shape by choice of alphabet.
+
+Both structural checks still key on `/`-separated segmentation, so this
+rule remains scoped by an entropy measurement, not a claim of exhaustive
+coverage: measured over 160,000 generated `base64.b64encode(os.urandom(32))`
+tokens (four independently seeded runs of 40,000), zero matched either
+structural shape — the record-url shape needs the literal word "records" to
+occur verbatim as a segment, and the repo-path shape needs several
+consecutive segments to name real, adjacent entries in this repository's
+actual directory tree, neither of which a randomly generated token
+produces by chance in any observed run. That measurement describes
+randomly generated tokens only; it says nothing about a token an author
+deliberately shapes to mimic one of these two structures, which remains
+possible in principle — a determined evasion of a regex-based scan can
+still make it target either shape on purpose. Every committed real-world
+path/URL fixture this scanner must keep classifying safely satisfies one
+of the two structural checks, so neither retirement nor tightening
+misclassifies a known-safe fixture.
 
 Usage:
   capture_scan.py <tree-or-file> [<tree-or-file> ...]
@@ -67,7 +90,10 @@ Exit codes:
      known-safe-class line (e.g. `path-or-url-shape`) is still printed to
      stdout on this exit — 0 means "nothing that counts as a credential
      finding", not "nothing printed". Callers must check the exit code, not
-     whether stdout is empty.
+     whether stdout is empty. A trailer line on stderr states the
+     known-safe match count explicitly, so a human skimming terminal
+     output during the manual eval protocol does not mistake N printed
+     known-safe lines for N unaddressed findings.
   1  finding(s) — prints `relpath:lineno:class:token` per hit, commit blocked
   2  error — fail-closed: a given path does not exist, or exists but cannot
      be read (a file or directory this process lacks permission to open).
@@ -128,33 +154,59 @@ class ScanError(Exception):
     """
 
 
-# Measured over 160,000 generated base64(os.urandom(32)) tokens (four
-# independently seeded runs of 40,000) — see the module docstring for the
-# full rationale and the conjoined false-negative rate this threshold and
-# the structural condition below together measure.
+# The coarse gate before either structural check runs — a path/URL fixture
+# this scanner must classify safely never carries fewer than this many `/`
+# (see the module docstring). This bounds the cost of the repo-path walk; it
+# is not itself the discriminator.
 _PATH_SLASH_THRESHOLD = 4
 
+# scripts/capture_scan.py lives at <repo-root>/tools/craft/plugins/craft/scripts.
+_REPO_ROOT = Path(__file__).resolve().parents[5]
 
-def _no_segment_mixes_upper_lower_digit(matched: str) -> bool:
-    """True when no `/`-separated segment of `matched` mixes uppercase,
-    lowercase, AND a digit. A path or URL segment is a word and never mixes
-    all three character classes; a base64 run routinely does.
+
+def _record_url_shape(segments: list[str]) -> bool:
+    """True when some segment is the literal word "records", followed by at
+    least three more segments — the `records/<vault>/<kind>/<slug-fragment>`
+    shape every lore record URL takes. Keys on a fixed word actually present
+    in the match, not on the alphabet of the surrounding characters.
     """
-    for segment in matched.split("/"):
-        has_upper = any(c.isupper() for c in segment)
-        has_lower = any(c.islower() for c in segment)
-        has_digit = any(c.isdigit() for c in segment)
-        if has_upper and has_lower and has_digit:
+    for i, segment in enumerate(segments):
+        if segment == "records" and len(segments) - i - 1 >= 3:
+            return True
+    return False
+
+
+def _resolves_to_repo_path(segments: list[str]) -> bool:
+    """True when `segments`, walked from the repo root, name a real file or
+    directory at every step. The base64 character class excludes `.`, `-`,
+    and other path-legal characters, so a real path involving them (e.g.
+    `skills/slice/SKILL.md`, `evals/ritual-deliverable-.../runs`) prints
+    truncated — a segment is accepted when it exactly names an entry, or is
+    an unambiguous prefix of exactly one entry, at that level.
+    """
+    current = _REPO_ROOT
+    for segment in segments:
+        if not segment:
             return False
+        try:
+            entries = [e.name for e in current.iterdir()]
+        except OSError:
+            return False
+        if segment in entries:
+            current = current / segment
+            continue
+        prefix_matches = [e for e in entries if e.startswith(segment)]
+        if len(prefix_matches) != 1:
+            return False
+        current = current / prefix_matches[0]
     return True
 
 
 def _reclassify(cls: str, matched: str) -> str:
-    if (
-        cls == "high-entropy-base64"
-        and matched.count("/") >= _PATH_SLASH_THRESHOLD
-        and _no_segment_mixes_upper_lower_digit(matched)
-    ):
+    if cls != "high-entropy-base64" or matched.count("/") < _PATH_SLASH_THRESHOLD:
+        return cls
+    segments = matched.split("/")
+    if _record_url_shape(segments) or _resolves_to_repo_path(segments):
         return KNOWN_SAFE_CLASS
     return cls
 
@@ -214,6 +266,7 @@ def main(argv: list[str]) -> int:
             return 2
 
     total = 0
+    known_safe_total = 0
     try:
         for t in trees:
             base = t if t.is_dir() else t.parent
@@ -227,12 +280,15 @@ def main(argv: list[str]) -> int:
                     print(f"{rel}:{finding.lineno}:{finding.cls}:{finding.text}")
                     if is_credential_class(finding.cls):
                         total += 1
+                    else:
+                        known_safe_total += 1
     except ScanError as exc:
         _err(str(exc))
         return 2
     if total:
         _err(f"{total} credential finding(s) — commit blocked")
         return 1
+    _err(f"{known_safe_total} known-safe match(es), 0 credential findings — clean")
     return 0
 
 
