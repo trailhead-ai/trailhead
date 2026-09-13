@@ -643,6 +643,47 @@ class TestClaim:
 
         assert owner_of(read_central_manifest(mpath)) == "sender-alpha"
 
+    def test_claim_accepts_a_workspace_whose_manifest_records_no_owner(
+        self, one_member_group
+    ):
+        """A workspace that never recorded an owner is claimable, not
+        refused: the handover has to work for workspaces predating ownership
+        tracking, so an absent owner reads as "nobody has claimed this"
+        rather than as a conflict. The refusal is reserved for a manifest
+        naming a DIFFERENT sender."""
+        receive = _receive_module()
+        g = one_member_group
+        env = _with_self_name(g["env"], "peer-declared")
+
+        receive.begin(
+            groups=[g["group"]],
+            group_name="testgroup",
+            slug="feat-ownerless",
+            sender="sender-alpha",
+            overwrite=False,
+            env=env,
+        )
+
+        import json
+
+        from camp.group.manifest import owner_of, read_central_manifest
+
+        mpath = _manifest_path("testgroup", "feat-ownerless", env)
+        data = read_central_manifest(mpath)
+        data.pop("owner", None)
+        mpath.write_text(json.dumps(data), encoding="utf-8")
+
+        answer = receive.claim(
+            groups=[g["group"]],
+            group_name="testgroup",
+            slug="feat-ownerless",
+            sender="sender-alpha",
+            env=env,
+        )
+
+        assert answer["owner"] == "peer-declared"
+        assert owner_of(read_central_manifest(mpath)) == "peer-declared"
+
     def test_claim_survives_finishs_synchronous_manifest_rebuild(self, one_member_group, monkeypatch):
         """The ownership write is durable before `finish` runs its own
         lock-protected manifest rebuild (`seed_pending_workspace`) and spawns
