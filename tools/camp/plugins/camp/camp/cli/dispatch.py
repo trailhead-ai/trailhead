@@ -1092,9 +1092,15 @@ _DOCTOR_ACCOUNT_VERDICT_TOKENS = {
 
 
 def _doctor_account_verdict_token(verdict: str | None) -> str:
+    """A `None` verdict is a failure row and warns deliberately (see the
+    vocabulary comment above). Any other string outside the closed
+    vocabulary is, by definition, a thing this renderer cannot tell
+    anything about — it must never be read as WARN's actionable "not
+    authenticated / capability failed" meaning, so it falls back to the
+    same token as `cannot-tell` rather than to WARN."""
     if verdict is None:
         return "WARN"
-    return _DOCTOR_ACCOUNT_VERDICT_TOKENS.get(verdict, "WARN")
+    return _DOCTOR_ACCOUNT_VERDICT_TOKENS.get(verdict, _DOCTOR_ACCOUNT_VERDICT_TOKENS["cannot-tell"])
 
 
 def _doctor_account_label(account: str | None) -> str:
