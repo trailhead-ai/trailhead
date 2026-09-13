@@ -2025,6 +2025,48 @@ class TestMoveWorkspaceEndToEnd:
         assert exc_info.value.phase == "conversations"
         assert "22222222-2222-4222-8222-222222222222" in exc_info.value.detail
 
+    def test_finish_failure_after_a_successful_claim_carries_the_claimed_owner(
+        self, move_env
+    ):
+        """`claim` runs for real against the real peer and answers before
+        `finish` is ever called — this test fails `finish` alone, so the
+        raised `PhaseFailed` must carry the exact owner name `claim`
+        answered with, proving the peer's manifest and this exception agree
+        about who owns the workspace now."""
+        from camp.host.transport import RawResult
+        from camp.transfer.move import PhaseFailed, move_workspace
+
+        g = move_env
+        real_run = g["run"]
+
+        def _fail_finish_only(argv, execution_timeout, env):
+            if "finish" in argv[-1]:
+                return RawResult(
+                    stdout="", stderr="simulated bring-up crash", exit_code=1
+                )
+            return real_run(argv, execution_timeout, env)
+
+        with pytest.raises(PhaseFailed) as exc_info:
+            move_workspace(
+                host=g["host"],
+                group=g["group"],
+                group_name="testgroup",
+                slug=g["slug"],
+                sender_name="host-a",
+                overwrite=False,
+                env=g["sender_env"],
+                run=_fail_finish_only,
+                stream_spawn=g["stream_spawn"],
+            )
+
+        assert exc_info.value.phase == "finish"
+        assert exc_info.value.claimed_owner == "host-b"
+
+        from camp.group.manifest import manifest_path_for, owner_of, read_central_manifest
+
+        peer_manifest = manifest_path_for("testgroup", g["slug"], env=g["peer_env"])
+        assert owner_of(read_central_manifest(peer_manifest)) == "host-b"
+
 
 def test_move_workspace_reports_each_phase_before_a_slow_one_completes():
     """A slow `finish` proves the ordering contract mechanically: `on_phase`
@@ -2783,6 +2825,149 @@ def test_phase_failure_names_the_phase_and_says_rerun_is_safe_distinctly(
     assert "provisioning" not in err
     assert "ownership moved" not in err
     assert "This is a failure, not a refusal" in err
+
+
+# ---------------------------------------------------------------------------
+# The commit point's two failure shapes: before `claim` answers, ownership
+# never moved and the sender's own record must still say so; after `claim`
+# answers, ownership already moved and the sender's own record must NOT be
+# flipped, since flipping it is `flip_sender_ownership`'s job alone and only
+# once release has finished. Each pre-commit phase gets its own test, per the
+# task's own enumeration, rather than one parametrized case standing in for
+# all five — the property is "at every phase", so every phase is driven.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "phase_label",
+    ["begin", "history (repo_a)", "worktree (repo_a)", "conversations", "claim"],
+)
+def test_sender_manifest_still_names_the_sender_after_a_pre_commit_phase_failure(
+    phase_label: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """None of these five phases has answered `claim` yet, so ownership never
+    moved anywhere — this host's own manifest must still name itself,
+    checked by actually reading it back after the CLI run, not by asserting
+    a function was or wasn't called."""
+    from camp.group.manifest import owner_of, read_central_manifest
+
+    env = _Env(tmp_path)
+    env.write_group(excluded={"repo_a": []})
+    env.write_hosts(self_name="host-a", peers={"host-b": "host-b"})
+    env.write_manifest(owner="host-a")
+    env.apply(monkeypatch)
+    transfer = _transfer_module()
+
+    _fake_probe(monkeypatch, _clean_probe_answer())
+    _no_conversations(monkeypatch)
+
+    move = _move_module()
+
+    def _fail(**kw):
+        raise move.PhaseFailed(phase_label, "boom")
+
+    monkeypatch.setattr(move, "move_workspace", _fail)
+
+    code = _run(monkeypatch, ["transfer", "feat-x", "--to", "host-b", "--group", "trailhead"])
+
+    assert code == transfer.EXIT_PHASE_FAILED
+    capsys.readouterr()
+
+    manifest = read_central_manifest(env.manifest_path())
+    assert owner_of(manifest) == "host-a"
+
+
+def test_post_commit_phase_failure_archives_without_flipping_and_names_the_peer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """A `finish` failure that carries a `claimed_owner` is the one genuinely
+    new outcome this task adds: the sender's own record must stay exactly as
+    it was (never flipped), the conversations that already crossed are still
+    archived, the exit code is distinct from every other outcome, and the
+    printed remedy never claims a re-run is safe — it names the peer as the
+    new owner, says this host's record is stale, and tells the operator to
+    continue on the peer rather than retry here."""
+    from camp.group.manifest import owner_of, read_central_manifest
+
+    env = _Env(tmp_path)
+    env.write_group(excluded={"repo_a": []})
+    env.write_hosts(self_name="host-a", peers={"host-b": "host-b"})
+    env.write_manifest(owner="host-a")
+    env.apply(monkeypatch)
+    transfer = _transfer_module()
+
+    _fake_probe(monkeypatch, _clean_probe_answer())
+    _no_conversations(monkeypatch)
+
+    move = _move_module()
+
+    def _fail(**kw):
+        raise move.PhaseFailed("finish", "peer bring-up crashed", claimed_owner="host-b-declared")
+
+    monkeypatch.setattr(move, "move_workspace", _fail)
+
+    release = _release_module()
+    release_calls = []
+
+    def _fake_release(**kw):
+        release_calls.append(kw)
+        return ()
+
+    monkeypatch.setattr(release, "release_conversations", _fake_release)
+
+    def _boom_flip(**kw):
+        raise AssertionError("flip_sender_ownership must not run on a post-commit failure")
+
+    monkeypatch.setattr(release, "flip_sender_ownership", _boom_flip)
+
+    code = _run(monkeypatch, ["transfer", "feat-x", "--to", "host-b", "--group", "trailhead"])
+
+    assert code == transfer.EXIT_PHASE_FAILED_POST_COMMIT
+    assert code != transfer.EXIT_PHASE_FAILED
+    assert len(release_calls) == 1
+
+    manifest = read_central_manifest(env.manifest_path())
+    assert owner_of(manifest) == "host-a"
+
+    err = capsys.readouterr().err
+    assert "host-b-declared" in err
+    assert "stale" in err
+    assert "continue" in err.lower()
+    assert "re-running the transfer is safe" not in err
+    assert "moves nothing" not in err
+
+
+def test_the_three_move_failure_exit_codes_are_pairwise_distinct(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """`--overwrite` refusal, a pre-commit phase failure, and a post-commit
+    phase failure are three different outcomes with three different remedies
+    — an operator scripting against the exit code must be able to tell them
+    apart, driven here through the real CLI exit path for each."""
+    move = _move_module()
+    release = _release_module()
+    monkeypatch.setattr(release, "release_conversations", lambda **kw: ())
+
+    def _run_with(exc: Exception) -> int:
+        env = _Env(tmp_path / str(id(exc)))
+        env.write_group(excluded={"repo_a": []})
+        env.write_hosts(self_name="host-a", peers={"host-b": "host-b"})
+        env.write_manifest(owner="host-a")
+        env.apply(monkeypatch)
+        _fake_probe(monkeypatch, _clean_probe_answer())
+        _no_conversations(monkeypatch)
+        monkeypatch.setattr(move, "move_workspace", lambda **kw: (_ for _ in ()).throw(exc))
+        code = _run(monkeypatch, ["transfer", "feat-x", "--to", "host-b", "--group", "trailhead"])
+        capsys.readouterr()
+        return code
+
+    overwrite_code = _run_with(move.OverwriteNeeded("already exists — pass --overwrite"))
+    pre_commit_code = _run_with(move.PhaseFailed("worktree (repo_a)", "boom"))
+    post_commit_code = _run_with(
+        move.PhaseFailed("finish", "boom", claimed_owner="host-b-declared")
+    )
+
+    assert len({overwrite_code, pre_commit_code, post_commit_code}) == 3
 
 
 def test_undeclared_excluded_set_refuses_on_the_moving_path_and_never_calls_move(

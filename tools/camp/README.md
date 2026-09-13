@@ -393,11 +393,13 @@ forward — it never falls back to the legacy standalone-worktree source.
 camp transfer <slug> --to <peer> [--dry-run] [--overwrite] [--json]
 ```
 
-Moves a workspace's committed history and working-tree content directly to a
-declared peer host (see [Remote hosts](#remote-hosts) for declaring one).
-`--dry-run` previews the same checks without moving anything. A workspace
-already present on the peer and owned by this host needs `--overwrite` to be
-replaced; ownership itself does not move.
+Moves a workspace's committed history, working-tree content, and every
+conversation rooted in it directly to a declared peer host (see [Remote
+hosts](#remote-hosts) for declaring one) — and, as the transfer's last step,
+ownership itself: the peer becomes the recorded owner, and this host stops
+offering the conversations that just crossed. `--dry-run` previews the same
+checks without moving anything. A workspace already present on the peer and
+owned by this host needs `--overwrite` to be replaced.
 
 Each member's regenerable state — build output, installed dependencies,
 anything a transfer should recreate on the peer rather than copy — is
@@ -431,7 +433,11 @@ Exit codes:
 7  the named peer is not declared in hosts.toml
 8  the workspace already exists on the peer, owned by this host — pass
    --overwrite to replace it
-9  a move phase failed — nothing after it ran; re-running the transfer is safe
+9  a move phase failed before ownership moved — nothing after it ran;
+   re-running the transfer is safe
+10 a move phase failed after ownership had already moved to the peer — a
+   re-run is NOT safe; continue the work on the peer and compare the two
+   hosts' records to confirm they disagree
 ```
 
 `transfer` and `transfer-probe` (the wire-level answer `--dry-run` reads

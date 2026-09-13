@@ -62,12 +62,17 @@ caller decides what "immediately" renders as (a printed line, a log
 record); this module's only contract is the ordering and the timing
 relative to the call it precedes.
 
-**Re-running after a phase failure is safe.** `begin` (see
-`camp.transfer.receive.begin`) removes any workspace already present under
-this slug on the peer wholesale before seeding a fresh one when `overwrite`
-is set, so a retry after `history`, `worktree`, or `finish` fails is a
-fresh `begin` call with `--overwrite`, never a resume — nothing from a
-half-finished attempt survives into the next one.
+**Re-running after a phase failure is safe, UNLESS `claim` already
+answered.** `begin` (see `camp.transfer.receive.begin`) removes any
+workspace already present under this slug on the peer wholesale before
+seeding a fresh one when `overwrite` is set, so a retry after `begin`,
+`history`, `worktree`, or `conversations` fails is a fresh `begin` call with
+`--overwrite`, never a resume — nothing from a half-finished attempt
+survives into the next one. `finish` is the one phase this does not hold
+for: it runs strictly after `claim`, the commit point, so a `finish` failure
+raises `PhaseFailed` with `claimed_owner` populated — see that class's own
+docstring — and a re-run would find the peer already owns the workspace and
+refuse `begin`'s own opening check.
 """
 
 from __future__ import annotations
@@ -137,14 +142,34 @@ class PhaseFailed(MoveRefused):
     """One phase failed — every phase after it was never attempted.
 
     Re-running the whole verb (with `--overwrite` if the workspace now
-    exists on the peer, which it will once `begin` has run) is always safe;
-    see the module docstring.
+    exists on the peer, which it will once `begin` has run) is safe UNLESS
+    `claimed_owner` is populated, in which case `claim` had already answered
+    before `finish` failed — the peer already owns the workspace and would
+    refuse a re-run's opening `begin`, since `begin` only tears down a prior
+    attempt owned by the sender. `claimed_owner` and `conversations` are
+    `None`/empty for every phase failure before `claim` answers (`begin`,
+    `history`, `worktree`, `conversations`, or `claim` itself failing); they
+    carry the exact values `MoveResult` would have carried on success — the
+    peer's own declared name and the pool of conversations that already
+    crossed — only when the failing phase is `finish`, so the caller can
+    still archive what already crossed without flipping this host's own
+    ownership record, which stays correctly stale until the two hosts'
+    manifests are reconciled by hand.
     """
 
-    def __init__(self, phase: str, detail: str) -> None:
+    def __init__(
+        self,
+        phase: str,
+        detail: str,
+        *,
+        claimed_owner: str | None = None,
+        conversations: tuple[ConversationCrossed, ...] = (),
+    ) -> None:
         super().__init__(f"{phase}: {detail}")
         self.phase = phase
         self.detail = detail
+        self.claimed_owner = claimed_owner
+        self.conversations = conversations
 
 
 @dataclass(frozen=True)
@@ -279,6 +304,12 @@ def move_workspace(
             build) refuses it the same way any unrecognized phase refuses,
             surfacing here as `PhaseFailed("claim", ...)` — ownership moves
             on neither host. Nothing after the failing phase was attempted.
+            A `finish` failure is the one exception to all of the above: it
+            runs after `claim` has already answered, so the raised
+            `PhaseFailed` carries `claimed_owner` and `conversations`
+            populated exactly as a successful `MoveResult` would — see
+            `PhaseFailed`'s own docstring for what that changes for the
+            caller.
     """
     from ..provision.reconcile import _branch_name, _worktree_path
 
@@ -392,9 +423,19 @@ def move_workspace(
 
     on_phase("finish")
     finish_argv = ["transfer-receive", "finish", "--group", group_name, "--slug", slug]
-    _run_camp_phase(
-        host, finish_argv, run=run, connect_timeout=connect_timeout, execution_timeout=execution_timeout
-    )
+    try:
+        _run_camp_phase(
+            host, finish_argv, run=run, connect_timeout=connect_timeout, execution_timeout=execution_timeout
+        )
+    except PhaseFailed as e:
+        # `claim` already answered by this point — ownership has already
+        # moved to the peer, so this failure is not the re-runnable kind
+        # every earlier phase's `PhaseFailed` is. Carry what `MoveResult`
+        # would have carried on success so the caller can still archive what
+        # already crossed without treating the handover as unconfirmed.
+        raise PhaseFailed(
+            e.phase, e.detail, claimed_owner=claimed_owner, conversations=tuple(crossed)
+        ) from e
 
     return MoveResult(
         members=tuple(m["name"] for m in members),
