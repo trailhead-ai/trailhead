@@ -801,7 +801,7 @@ def test_doctor_probe_accounts_field_outside_checks_never_changes_exit_status(
     _isolate_roots(monkeypatch, tmp_path)
 
     auth_exit, auth_report = run(AccountAuthentication.AUTHENTICATED)
-    not_auth_exit, not_auth_report = run(AccountAuthentication.NOT_AUTHENTICATED)
+    not_auth_exit, _ = run(AccountAuthentication.NOT_AUTHENTICATED)
 
     assert "checks" in auth_report
     assert DOCTOR_PROBE_ACCOUNTS_KEY not in auth_report["checks"]

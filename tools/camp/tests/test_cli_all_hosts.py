@@ -1930,13 +1930,34 @@ def test_doctor_excludes_host_declared_under_this_machines_own_self_name(
 # ---------------------------------------------------------------------------
 
 
-def _probe_answered_accounts(accounts: list[dict] | None, *, multiplexer: bool = True):
+def _probe_answered_accounts(accounts: list[dict] | None):
     """A probe answer carrying the given account facts. `accounts=None` omits
     the key entirely — the shape a camp that predates this work produces."""
-    payload = {"pass": True, "checks": [], "probe": True, "multiplexer_present": multiplexer}
+    payload = {"pass": True, "checks": [], "probe": True, "multiplexer_present": True}
     if accounts is not None:
         payload["accounts"] = accounts
     return _probe_answered(payload)
+
+
+def _verdict_token(line: str) -> str:
+    """The bracketed verdict token from one rendered account/host line — the
+    render grammar's `    [TOKEN] detail`, parsed in one place so a change to
+    that grammar has a single site to follow."""
+    return line.strip().split("]")[0].lstrip("[")
+
+
+def _machine_block(lines: list[str], name: str) -> list[str]:
+    """Every indented fact line the named machine's header owns, up to the
+    next machine — the human form groups facts under one header per
+    machine, so a per-machine assertion reads that block, not the whole
+    output."""
+    start = lines.index(f"  {name}:")
+    block = []
+    for line in lines[start + 1 :]:
+        if not line.startswith("    "):
+            break
+        block.append(line)
+    return block
 
 
 def test_doctor_account_no_declared_accounts_renders_one_default_line(
@@ -2189,7 +2210,7 @@ def test_doctor_account_cannot_tell_is_its_own_token_wording_implies_no_credenti
     lines = capsys.readouterr().out.splitlines()
     assert code == 0
     account_line = next(line for line in lines if "acct-x" in line)
-    token = account_line.strip().split("]")[0].lstrip("[")
+    token = _verdict_token(account_line)
     assert token not in {"PASS", "WARN", "DOWN"}
     for word in ("not authenticated", "log in", "invalid", "expired"):
         assert word not in account_line
@@ -2235,15 +2256,10 @@ def test_doctor_account_far_camp_omitting_the_field_renders_unavailable_not_unau
     code = _run(monkeypatch, ["doctor", "-a"])
     lines = capsys.readouterr().out.splitlines()
     assert code == 0
-    header_index = lines.index("  andromeda:")
-    andromeda_block = []
-    for line in lines[header_index + 1 :]:
-        if not line.startswith("    "):
-            break
-        andromeda_block.append(line)
+    andromeda_block = _machine_block(lines, "andromeda")
     account_lines = [line for line in andromeda_block if "default account" in line]
     assert len(account_lines) == 1
-    token = account_lines[0].strip().split("]")[0].lstrip("[")
+    token = _verdict_token(account_lines[0])
     assert token != "WARN"
     assert "not authenticated" not in account_lines[0]
 
@@ -2345,12 +2361,7 @@ def test_doctor_account_unreachable_machine_renders_no_account_lines_human(
     code = _run(monkeypatch, ["doctor", "-a"])
     lines = capsys.readouterr().out.splitlines()
     assert code == 0
-    header_index = lines.index("  andromeda:")
-    andromeda_block = []
-    for line in lines[header_index + 1 :]:
-        if not line.startswith("    "):
-            break
-        andromeda_block.append(line)
+    andromeda_block = _machine_block(lines, "andromeda")
     assert len(andromeda_block) == 1
     assert andromeda_block[0].strip().startswith("[DOWN]")
 
@@ -2577,15 +2588,9 @@ def test_doctor_account_null_verdict_failure_and_cannot_tell_render_different_to
     assert code == 0
     failure_line = next(line for line in lines if "broken config" in line)
     cannot_tell_line = next(line for line in lines if "acct-unknown" in line)
-    failure_token = failure_line.strip().split("]")[0].lstrip("[")
-    cannot_tell_token = cannot_tell_line.strip().split("]")[0].lstrip("[")
+    failure_token = _verdict_token(failure_line)
+    cannot_tell_token = _verdict_token(cannot_tell_line)
     assert failure_token != cannot_tell_token
-
-
-# ---------------------------------------------------------------------------
-# Council fix 1 — every remote-authored account string is stripped of
-# control sequences before it reaches a rendered line.
-# ---------------------------------------------------------------------------
 
 
 # ---------------------------------------------------------------------------
@@ -2652,10 +2657,16 @@ def test_doctor_account_unrecognized_verdict_routes_to_cannot_tell_human(
     assert code == 0
     unrecognized_line = next(line for line in lines if "acct-x" in line)
     cannot_tell_line = next(line for line in lines if "acct-y" in line)
-    unrecognized_token = unrecognized_line.strip().split("]")[0].lstrip("[")
-    cannot_tell_token = cannot_tell_line.strip().split("]")[0].lstrip("[")
+    unrecognized_token = _verdict_token(unrecognized_line)
+    cannot_tell_token = _verdict_token(cannot_tell_line)
     assert unrecognized_token != "WARN"
     assert unrecognized_token == cannot_tell_token
+
+
+# ---------------------------------------------------------------------------
+# Every remote-authored account string is stripped of control sequences
+# before it reaches a rendered line.
+# ---------------------------------------------------------------------------
 
 
 def test_doctor_account_control_sequences_are_stripped_before_rendering(
