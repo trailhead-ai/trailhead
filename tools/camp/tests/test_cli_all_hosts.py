@@ -1992,6 +1992,57 @@ def test_doctor_account_no_declared_accounts_renders_one_default_line_human(
     assert "the default account" in out
 
 
+def test_doctor_account_local_authenticated_account_renders_pass_json(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """End to end, with no remote fixture involved: a real credentials file
+    planted under the fixture HOME drives a LOCALLY-produced AUTHENTICATED
+    verdict all the way from the harness enum's serialized value through
+    the renderer's vocabulary. Every other PASS test in this section hand-
+    writes ``"authenticated"`` into a remote payload; a drift between the
+    harness's own serialization and the renderer's closed vocabulary would
+    render every authenticated account as cannot-tell with nothing here
+    going red, since nothing else drives the local path."""
+    _doctor_hosts_env(tmp_path, monkeypatch, "")
+    monkeypatch.setenv("CAMP_TEST_TMUX_PRESENT", "1")
+    creds_dir = tmp_path / "home" / ".claude"
+    creds_dir.mkdir(parents=True, exist_ok=True)
+    (creds_dir / ".credentials.json").write_text(
+        json.dumps({"claudeAiOauth": {"accessToken": "sk-ant-oat01-fake", "expiresAt": 1}})
+    )
+
+    code = _run(monkeypatch, ["doctor", "-a", "--json"])
+    report = json.loads(capsys.readouterr().out)
+    assert code == 0
+    self_rows = [h for h in report["hosts"] if h["host"] is None]
+    account_rows = [h for h in self_rows if "multiplexer" not in h["detail"]]
+    assert len(account_rows) == 1
+    assert account_rows[0]["verdict"] == "PASS"
+    assert "is authenticated" in account_rows[0]["detail"]
+
+
+def test_doctor_account_local_authenticated_account_renders_pass_human(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """The same state, on the human render path."""
+    _doctor_hosts_env(tmp_path, monkeypatch, "")
+    monkeypatch.setenv("CAMP_TEST_TMUX_PRESENT", "1")
+    creds_dir = tmp_path / "home" / ".claude"
+    creds_dir.mkdir(parents=True, exist_ok=True)
+    (creds_dir / ".credentials.json").write_text(
+        json.dumps({"claudeAiOauth": {"accessToken": "sk-ant-oat01-fake", "expiresAt": 1}})
+    )
+
+    code = _run(monkeypatch, ["doctor", "-a"])
+    out = capsys.readouterr().out
+    assert code == 0
+    lines = out.splitlines()
+    block = _machine_block(lines, "(this machine)")
+    account_line = next(line for line in block if "multiplexer" not in line)
+    assert _verdict_token(account_line) == "PASS"
+    assert "is authenticated" in account_line
+
+
 def test_doctor_account_one_declared_authenticated_renders_pass_verbatim(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
@@ -2047,10 +2098,14 @@ def test_doctor_account_several_declared_one_lapsed_stable_order(
     three has lapsed."""
     _doctor_hosts_env(tmp_path, monkeypatch, "[hosts.andromeda]\n")
     transport = _transport_module()
+    # Deliberately NOT alphabetical: a renderer that silently sorted the
+    # roster would produce the same result as one that preserved the far
+    # side's own order if this fixture happened to already be sorted, so
+    # the two hypotheses must give different answers.
     accounts = [
-        {"account": "acct-a", "verdict": "authenticated", "reason": None},
-        {"account": "acct-b", "verdict": "not-authenticated", "reason": None},
         {"account": "acct-c", "verdict": "authenticated", "reason": None},
+        {"account": "acct-a", "verdict": "not-authenticated", "reason": None},
+        {"account": "acct-b", "verdict": "authenticated", "reason": None},
     ]
     monkeypatch.setattr(
         transport, "run_camp", lambda host, remote_argv, **kw: _probe_answered_accounts(accounts)
@@ -2074,7 +2129,7 @@ def test_doctor_account_several_declared_one_lapsed_stable_order(
     assert verdicts.count("PASS") == 2
     assert verdicts.count("WARN") == 1
     account_order = [detail.split(" ", 1)[0] for _, detail in orders[0]]
-    assert account_order == ["acct-a", "acct-b", "acct-c"], (
+    assert account_order == ["acct-c", "acct-a", "acct-b"], (
         "the far side's own declared order must be preserved, not merely repeatable"
     )
 
@@ -2087,10 +2142,11 @@ def test_doctor_account_several_declared_one_lapsed_stable_order_human(
     PASS lines."""
     _doctor_hosts_env(tmp_path, monkeypatch, "[hosts.andromeda]\n")
     transport = _transport_module()
+    # Deliberately NOT alphabetical — see the JSON-path sibling test for why.
     accounts = [
-        {"account": "acct-a", "verdict": "authenticated", "reason": None},
-        {"account": "acct-b", "verdict": "not-authenticated", "reason": None},
         {"account": "acct-c", "verdict": "authenticated", "reason": None},
+        {"account": "acct-a", "verdict": "not-authenticated", "reason": None},
+        {"account": "acct-b", "verdict": "authenticated", "reason": None},
     ]
     monkeypatch.setattr(
         transport, "run_camp", lambda host, remote_argv, **kw: _probe_answered_accounts(accounts)
@@ -2110,9 +2166,9 @@ def test_doctor_account_several_declared_one_lapsed_stable_order_human(
         orders.append(account_lines)
 
     assert orders[0] == orders[1], "the rendered account order must be diffable across runs"
-    assert orders[0][0].startswith("[PASS]") and "acct-a" in orders[0][0]
-    assert orders[0][1].startswith("[WARN]") and "acct-b" in orders[0][1]
-    assert orders[0][2].startswith("[PASS]") and "acct-c" in orders[0][2]
+    assert orders[0][0].startswith("[PASS]") and "acct-c" in orders[0][0]
+    assert orders[0][1].startswith("[WARN]") and "acct-a" in orders[0][1]
+    assert orders[0][2].startswith("[PASS]") and "acct-b" in orders[0][2]
 
 
 def test_doctor_account_not_authenticated_renders_warn_never_down(
@@ -2259,6 +2315,57 @@ def test_doctor_account_far_camp_omitting_the_field_renders_unavailable_not_unau
     andromeda_block = _machine_block(lines, "andromeda")
     account_lines = [line for line in andromeda_block if "default account" in line]
     assert len(account_lines) == 1
+    token = _verdict_token(account_lines[0])
+    assert token != "WARN"
+    assert "not authenticated" not in account_lines[0]
+
+
+def test_doctor_account_far_camp_answering_empty_list_renders_unavailable_json(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """A far camp answering `"accounts": []` renders as unavailable, the
+    same as an omitted field — never as no account lines at all, which is
+    the rendering this section reserves for a host that never answered.
+    The roster always includes the default store, so a genuine answer is
+    never empty; an empty list is camp being unable to tell, not a machine
+    with nothing to report."""
+    _doctor_hosts_env(tmp_path, monkeypatch, "[hosts.andromeda]\n")
+    transport = _transport_module()
+    monkeypatch.setattr(
+        transport,
+        "run_camp",
+        lambda host, remote_argv, **kw: _probe_answered_accounts([]),
+    )
+
+    code = _run(monkeypatch, ["doctor", "-a", "--json"])
+    report = json.loads(capsys.readouterr().out)
+    assert code == 0
+    account_rows = [
+        h for h in report["hosts"] if h["host"] == "andromeda" and "multiplexer" not in h["detail"]
+    ]
+    assert len(account_rows) == 1, "an empty list must not render as no account lines at all"
+    assert account_rows[0]["verdict"] != "WARN"
+    assert "not authenticated" not in account_rows[0]["detail"]
+
+
+def test_doctor_account_far_camp_answering_empty_list_renders_unavailable_human(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """The same state, on the human render path."""
+    _doctor_hosts_env(tmp_path, monkeypatch, "[hosts.andromeda]\n")
+    transport = _transport_module()
+    monkeypatch.setattr(
+        transport,
+        "run_camp",
+        lambda host, remote_argv, **kw: _probe_answered_accounts([]),
+    )
+
+    code = _run(monkeypatch, ["doctor", "-a"])
+    lines = capsys.readouterr().out.splitlines()
+    assert code == 0
+    andromeda_block = _machine_block(lines, "andromeda")
+    account_lines = [line for line in andromeda_block if "multiplexer" not in line]
+    assert len(account_lines) == 1, "an empty list must not render as no account lines at all"
     token = _verdict_token(account_lines[0])
     assert token != "WARN"
     assert "not authenticated" not in account_lines[0]
@@ -2663,6 +2770,93 @@ def test_doctor_account_unrecognized_verdict_routes_to_cannot_tell_human(
     assert unrecognized_token == cannot_tell_token
 
 
+def test_doctor_account_malformed_verdict_type_routes_to_cannot_tell_not_a_crash_json(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """A remote answering with a non-string, non-null `verdict` (a JSON
+    array or object rather than a recognized token) must never crash the
+    lookup — `_DOCTOR_ACCOUNT_VERDICT_TOKENS.get(verdict, ...)` raises
+    `TypeError: unhashable type` on a list or dict — and must never be read
+    as anything actionable, only as cannot-tell. Proven for both unhashable
+    shapes, so the whole host still answers with its other facts intact."""
+    _doctor_hosts_env(tmp_path, monkeypatch, "[hosts.andromeda]\n[hosts.lookout]\n")
+    monkeypatch.setenv("CAMP_TEST_TMUX_PRESENT", "1")
+    transport = _transport_module()
+
+    def fake_run_camp(host, remote_argv, **kw):
+        if host.ssh == "andromeda":
+            return _probe_answered_accounts(
+                [{"account": "acct-list", "verdict": [], "reason": None}]
+            )
+        return _probe_answered_accounts(
+            [{"account": "acct-dict", "verdict": {}, "reason": None}]
+        )
+
+    monkeypatch.setattr(transport, "run_camp", fake_run_camp)
+
+    code = _run(monkeypatch, ["doctor", "-a", "--json"])
+    report = json.loads(capsys.readouterr().out)
+    assert code == 0
+    list_row = next(
+        h for h in report["hosts"] if h["host"] == "andromeda" and "acct-list" in h["detail"]
+    )
+    dict_row = next(
+        h for h in report["hosts"] if h["host"] == "lookout" and "acct-dict" in h["detail"]
+    )
+    assert list_row["verdict"] != "WARN"
+    assert list_row["verdict"] != "PASS"
+    assert dict_row["verdict"] != "WARN"
+    assert dict_row["verdict"] != "PASS"
+    assert list_row["verdict"] == dict_row["verdict"]
+    # Both hosts' multiplexer facts still came through — a malformed verdict
+    # on one account must not cost either machine its other facts.
+    assert any(
+        h["host"] == "andromeda" and "multiplexer" in h["detail"] for h in report["hosts"]
+    )
+    assert any(
+        h["host"] == "lookout" and "multiplexer" in h["detail"] for h in report["hosts"]
+    )
+
+
+def test_doctor_account_malformed_account_and_reason_types_never_crash(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """`account` and `reason` are wire data too — a remote sending a JSON
+    array or object for either field must never crash the dispatch path,
+    the same way a malformed `verdict` must not, and must never leak the
+    raw Python repr of a list/dict into the rendered detail text (which an
+    f-string would otherwise happily stringify)."""
+    _doctor_hosts_env(tmp_path, monkeypatch, "[hosts.andromeda]\n")
+    transport = _transport_module()
+    monkeypatch.setattr(
+        transport,
+        "run_camp",
+        lambda host, remote_argv, **kw: _probe_answered_accounts(
+            [
+                {"account": ["not", "a", "string"], "verdict": "authenticated", "reason": None},
+                {"account": None, "verdict": None, "reason": {"not": "a string"}},
+            ]
+        ),
+    )
+
+    code = _run(monkeypatch, ["doctor", "-a", "--json"])
+    report = json.loads(capsys.readouterr().out)
+    assert code == 0
+    account_rows = [
+        h for h in report["hosts"] if h["host"] == "andromeda" and "multiplexer" not in h["detail"]
+    ]
+    assert len(account_rows) == 2
+    assert account_rows[0]["verdict"] == "PASS"
+    assert "not" not in account_rows[0]["detail"], (
+        "a malformed account must never leak its raw repr into the rendered text"
+    )
+    assert "the default account" in account_rows[0]["detail"]
+    assert account_rows[1]["verdict"] == "WARN"
+    assert "{'not': 'a string'}" not in account_rows[1]["detail"], (
+        "a malformed reason must never leak its raw repr into the rendered text"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Every remote-authored account string is stripped of control sequences
 # before it reaches a rendered line.
@@ -2731,3 +2925,56 @@ def test_doctor_account_control_sequences_stripped_in_json_at_the_source(
         h for h in report["hosts"] if h["host"] == "andromeda" and "hostile" in h["detail"]
     )
     assert "\x1b" not in account_row["detail"]
+
+
+def test_doctor_account_failure_reason_stripped_on_dispatch_path_json(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """A remote failure row's REASON — not only its account string — is
+    stripped of control sequences before it reaches the machine-readable
+    form. Every other stripping test in this section drives a hostile
+    account string; this is the one that drives a hostile reason instead."""
+    _doctor_hosts_env(tmp_path, monkeypatch, "[hosts.andromeda]\n")
+    transport = _transport_module()
+    hostile_reason = "broken\x1b[2Kconfig"
+    monkeypatch.setattr(
+        transport,
+        "run_camp",
+        lambda host, remote_argv, **kw: _probe_answered_accounts(
+            [{"account": "acct-broken", "verdict": None, "reason": hostile_reason}]
+        ),
+    )
+
+    code = _run(monkeypatch, ["doctor", "-a", "--json"])
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "\x1b" not in out
+    report = json.loads(out)
+    failure_row = next(
+        h for h in report["hosts"] if h["host"] == "andromeda" and "acct-broken" in h["detail"]
+    )
+    assert "\x1b" not in failure_row["detail"]
+    assert "broken" in failure_row["detail"] and "config" in failure_row["detail"]
+
+
+def test_doctor_account_failure_reason_stripped_on_dispatch_path_human(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """The same state, on the human render path."""
+    _doctor_hosts_env(tmp_path, monkeypatch, "[hosts.andromeda]\n")
+    transport = _transport_module()
+    hostile_reason = "broken\x1b[2Kconfig"
+    monkeypatch.setattr(
+        transport,
+        "run_camp",
+        lambda host, remote_argv, **kw: _probe_answered_accounts(
+            [{"account": "acct-broken", "verdict": None, "reason": hostile_reason}]
+        ),
+    )
+
+    code = _run(monkeypatch, ["doctor", "-a"])
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "\x1b" not in out
+    line = next(line for line in out.splitlines() if "acct-broken" in line)
+    assert "broken" in line and "config" in line

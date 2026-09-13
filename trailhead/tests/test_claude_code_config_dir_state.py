@@ -15,11 +15,21 @@ These tests pin that split:
     untouched;
   - each ``claude plugin …`` invocation names the config dir it is meant to
     land in, rather than inheriting whatever the ambient environment selects.
+
+They also pin the DEFAULT account's authentication read: the credentials
+signal varies with the file's content (authenticated / not authenticated /
+cannot tell, never collapsed into each other), the config-dir resolution
+precedence a caller's `env` decides (``CLAUDE_CONFIG_DIR`` over
+``HOME``/``USERPROFILE`` over the real home — deliberately not
+``TRAILHEAD_CLAUDE_DIR``, the test-only seam the real launched session never
+reads for this account), and that the read never spawns a subprocess, never
+makes a network call, and never blocks on interaction.
 """
 
 import json
 import os
-import time
+import socket
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -314,10 +324,17 @@ class TestAccountAuthenticationCannotTell:
 
 class TestAccountAuthenticationNeverBlocks:
     """Invoking the probe against a realistic-sized fixture returns a value
-    rather than waiting — the observable consequence of "no subprocess, no
-    network call": a bounded wall-clock time."""
+    without spawning a subprocess, opening a network connection, or
+    otherwise blocking on interaction — the actual behaviour "no
+    subprocess, no network call" promises. Pinned directly, on the
+    subprocess and socket seams themselves, rather than through a
+    wall-clock budget: a millisecond threshold flakes under parallel test
+    execution (`pytest -n auto`) for reasons that have nothing to do with
+    whether this method blocks."""
 
-    def test_reading_a_realistic_sized_credentials_file_is_fast(self, tmp_path):
+    def test_reading_a_realistic_sized_credentials_file_never_spawns_or_dials_out(
+        self, tmp_path, monkeypatch
+    ):
         account_dir = tmp_path / "acct"
         account_dir.mkdir()
         padding = {f"Claude_Code_Remote|{i:x}": {"accessToken": ""} for i in range(40)}
@@ -330,14 +347,67 @@ class TestAccountAuthenticationNeverBlocks:
             )
         )
 
-        start = time.perf_counter()
+        def _boom_subprocess(*args, **kwargs):
+            raise AssertionError("must never spawn a subprocess")
+
+        def _boom_connect(*args, **kwargs):
+            raise AssertionError("must never open a network connection")
+
+        monkeypatch.setattr(subprocess, "run", _boom_subprocess)
+        monkeypatch.setattr(subprocess, "Popen", _boom_subprocess)
+        monkeypatch.setattr(socket.socket, "connect", _boom_connect)
+
         result = ClaudeCodeHarness().session_launch_account_authentication(
             str(account_dir), env={"HOME": str(tmp_path / "home")}
         )
-        elapsed = time.perf_counter() - start
 
         assert result is AccountAuthentication.AUTHENTICATED
-        assert elapsed < 0.05
+
+
+class TestDefaultAccountCredentialsDirPrecedence:
+    """`_default_account_credentials_dir`'s precedence chain, pinned one
+    branch at a time: `CLAUDE_CONFIG_DIR` beats `HOME`, `USERPROFILE`
+    stands in when `HOME` is absent, and `Path.home()` is the final
+    fallback when neither environment variable is set. Each test plants a
+    DECOY credentials file at the location a wrong precedence would read
+    instead, so a swapped or dropped branch reads NOT_AUTHENTICATED from
+    the decoy rather than accidentally passing."""
+
+    def test_claude_config_dir_wins_over_home(self, tmp_path: Path):
+        winner = tmp_path / "winner"
+        _write_credentials(winner, "sk-ant-oat01-winner")
+        decoy_home = tmp_path / "decoy-home"
+        _write_credentials(decoy_home / ".claude", "")
+
+        env = {"CLAUDE_CONFIG_DIR": str(winner), "HOME": str(decoy_home)}
+        result = ClaudeCodeHarness().session_launch_account_authentication(None, env=env)
+
+        assert result is AccountAuthentication.AUTHENTICATED
+
+    def test_userprofile_used_when_home_is_absent(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        profile_home = tmp_path / "userprofile-home"
+        _write_credentials(profile_home / ".claude", "sk-ant-oat01-fake")
+        decoy_real_home = tmp_path / "decoy-real-home"
+        _write_credentials(decoy_real_home / ".claude", "")
+        monkeypatch.setattr(Path, "home", lambda: decoy_real_home)
+
+        env = {"USERPROFILE": str(profile_home)}
+        result = ClaudeCodeHarness().session_launch_account_authentication(None, env=env)
+
+        assert result is AccountAuthentication.AUTHENTICATED
+
+    def test_falls_back_to_path_home_when_neither_env_var_is_set(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        real_home = tmp_path / "real-home"
+        _write_credentials(real_home / ".claude", "sk-ant-oat01-fake")
+        monkeypatch.setattr(Path, "home", lambda: real_home)
+
+        result = ClaudeCodeHarness().session_launch_account_authentication(None, env={})
+
+        assert result is AccountAuthentication.AUTHENTICATED
 
 
 class TestAccountAuthenticationDefaultAccountResolution:

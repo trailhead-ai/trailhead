@@ -804,7 +804,8 @@ def test_doctor_probe_accounts_field_outside_checks_never_changes_exit_status(
     not_auth_exit, _ = run(AccountAuthentication.NOT_AUTHENTICATED)
 
     assert "checks" in auth_report
-    assert DOCTOR_PROBE_ACCOUNTS_KEY not in auth_report["checks"]
+    assert DOCTOR_PROBE_ACCOUNTS_KEY in auth_report
+    assert all(DOCTOR_PROBE_ACCOUNTS_KEY not in check for check in auth_report["checks"])
     assert auth_exit is None
     assert not_auth_exit is None
 
@@ -947,6 +948,59 @@ def test_doctor_probe_accounts_strips_control_sequences_from_failure_reason(
     assert "\x1b" not in failures[0]["reason"]
     assert "\x00" not in failures[0]["reason"]
     assert "bad" in failures[0]["reason"] and "account" in failures[0]["reason"]
+
+
+def test_doctor_probe_accounts_verdict_call_raising_yields_a_failure_row_not_a_crash(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A harness that resolves and binds an account fine, then raises while
+    answering the authentication verdict itself, must not crash the whole
+    roster (or the report around it) — it contributes a failure row like
+    any other broken account, and every other field this report carries
+    (the probe/multiplexer facts) still comes through."""
+    import json as _json
+
+    import camp.cli.common as cli_common
+    import camp.launch.profile as profile
+    from camp.spine import DOCTOR_PROBE_ACCOUNTS_KEY, cmd_doctor
+
+    class _RaisingVerdictHarness:
+        name = "raisingverdictharness"
+
+        def session_launch_env_unset(self):
+            return []
+
+        def session_launch_env_set(self, account, *, env=None):
+            if account is None:
+                return {}
+            return {"FAKE_STORE_DIR": account}
+
+        def session_launch_account_authentication(self, account, *, env=None):
+            raise RuntimeError("harness blew up mid-check")
+
+    groups_dir = tmp_path / "groups"
+    groups_dir.mkdir()
+    _write_group(groups_dir, "g1.toml", "g1", account="acct-crashy")
+    monkeypatch.setattr(cli_common, "_groups_dir", lambda: groups_dir)
+    monkeypatch.setattr(profile, "harness_for", lambda group: _RaisingVerdictHarness())
+
+    monkeypatch.setenv("CAMP_TEST_ASDF_PRESENT", "1")
+    monkeypatch.setenv("CAMP_TEST_TMUX_PRESENT", "1")
+    _isolate_roots(monkeypatch, tmp_path)
+    exit_code = None
+    try:
+        cmd_doctor(["--json", "--probe"], env=_isolated_config_env(tmp_path))
+    except SystemExit as e:
+        exit_code = e.code
+    report = _json.loads(capsys.readouterr().out)
+
+    assert report["probe"] is True
+    assert report["multiplexer_present"] is True
+    accounts = report[DOCTOR_PROBE_ACCOUNTS_KEY]
+    failure = next(a for a in accounts if a["account"] == "acct-crashy")
+    assert failure["verdict"] is None
+    assert "harness blew up mid-check" in failure["reason"]
+    assert exit_code is None
 
 
 def test_doctor_probe_accounts_stripping_does_not_alter_an_ordinary_string(
