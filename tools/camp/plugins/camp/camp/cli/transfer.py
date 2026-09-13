@@ -704,7 +704,7 @@ def _cmd_transfer_group_cli(
         sys.exit(EXIT_PHASE_FAILED)
 
     from ..group.manifest import workspace_dir
-    from ..transfer.release import release_conversations
+    from ..transfer.release import flip_sender_ownership, release_conversations
 
     release_results = release_conversations(
         group=group_name,
@@ -717,6 +717,13 @@ def _cmd_transfer_group_cli(
             else (lambda session_id, root: None)
         ),
         env=resolved_env,
+    )
+
+    # This host's own last write of the whole verb — after release_conversations
+    # has archived and marked every crossed conversation, never before. See
+    # camp.transfer.release's module docstring for why the ordering is load-bearing.
+    flip_sender_ownership(
+        group=group_name, slug=slug, owner=move_result.claimed_owner, env=resolved_env
     )
 
     _render_move_completion(
