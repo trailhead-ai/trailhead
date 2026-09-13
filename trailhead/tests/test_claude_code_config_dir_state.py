@@ -257,6 +257,28 @@ class TestAccountAuthenticationVariesWithTheSignal:
 
         assert result is AccountAuthentication.NOT_AUTHENTICATED
 
+    def test_a_missing_credentials_file_reads_as_not_authenticated(self, tmp_path):
+        account_dir = tmp_path / "acct"
+
+        result = ClaudeCodeHarness().session_launch_account_authentication(
+            str(account_dir), env={"HOME": str(tmp_path / "home")}
+        )
+
+        assert result is AccountAuthentication.NOT_AUTHENTICATED
+        assert result is not AccountAuthentication.CANNOT_TELL
+
+    def test_credentials_missing_the_oauth_key_reads_as_not_authenticated(self, tmp_path):
+        account_dir = tmp_path / "acct"
+        account_dir.mkdir(parents=True)
+        (account_dir / ".credentials.json").write_text(json.dumps({"unrelated": True}))
+
+        result = ClaudeCodeHarness().session_launch_account_authentication(
+            str(account_dir), env={"HOME": str(tmp_path / "home")}
+        )
+
+        assert result is AccountAuthentication.NOT_AUTHENTICATED
+        assert result is not AccountAuthentication.CANNOT_TELL
+
 
 class TestAccountAuthenticationCannotTell:
     """Unreadable or malformed signal reads as CANNOT_TELL — distinguishable

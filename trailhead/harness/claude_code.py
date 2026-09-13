@@ -390,7 +390,7 @@ def _default_account_credentials_dir(env: Mapping[str, str]) -> Path:
 
 
 def _read_account_authentication(config_dir: Path) -> AccountAuthentication:
-    """The U1 signal: one file read plus one JSON parse, sub-millisecond.
+    """Reads the credentials-file signal: one file read plus one JSON parse, sub-millisecond.
 
     Non-empty ``claudeAiOauth.accessToken`` means authenticated. A missing
     credentials file, a missing ``claudeAiOauth`` key, or an empty token mean
@@ -1276,7 +1276,7 @@ class ClaudeCodeHarness(Harness):
     def session_launch_account_authentication(
         self, account: str | None, *, env: dict[str, str] | None = None
     ) -> AccountAuthentication:
-        """Read authentication from the account's credentials file (U1).
+        """Read authentication from the account's credentials file.
 
         For a declared account, reuses :meth:`session_launch_env_set` to find
         the config dir — the same resolution the launch binding itself uses,
