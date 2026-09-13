@@ -33,12 +33,22 @@ workspace paths would munge to the same key under the harness's own lossy
 `_projects_key` rule) still land at two distinct archive paths, because
 nothing about that munge is ever re-derived or reused here.
 
-**Idempotent per conversation.** Before touching a conversation,
-`release_conversations` checks whether its archive destination already
-exists; if so, it reports `ALREADY_ARCHIVED` and touches nothing further —
-*locate_transcript* is not even consulted — so a re-run after a partial
-release never duplicates an already-archived transcript and never reports
-one as newly archived.
+**Idempotent per conversation, keyed on the live source, not the archive.**
+Before touching a conversation, `release_conversations` always asks
+*locate_transcript* whether a live copy still sits in this host's harness
+store. Only when it does not — the ordinary case for a re-run after a
+successful archive, since the earlier run already moved the file away — does
+an existing archive destination short-circuit to `ALREADY_ARCHIVED` with
+nothing further touched. A live copy that IS found is always relocated,
+replacing any stale archive already at that destination. This is what a
+round-tripped conversation needs: a conversation this host archived,
+received back from the peer, and is now sending outward a second time has a
+fresh live transcript sitting where the first archive's destination path
+still exists from the earlier leg — checking the destination alone would
+report `ALREADY_ARCHIVED` and leave that fresh copy sitting resumable on
+this host while the peer believes it now owns the only copy. Checking the
+source first closes that: a live copy is never left behind merely because
+some earlier transfer once archived this session id.
 
 **Relocation uses `shutil.move`, not a bare rename.** A camp-owned archive
 and the harness's own transcript store are not guaranteed to share a
@@ -66,7 +76,10 @@ this call site is not the marker's only writer (a post-commit failure
 branch archives too), so the exclusion is load-bearing, not defensive. A
 write that cannot take the lock is reported `FAILED` for that
 conversation rather than silently dropping the entry or corrupting the
-file.
+file — with `archive_path` still naming the destination the relocation
+already landed at, since that move happened before the marker append was
+even attempted; only a `FAILED` outcome whose relocation itself never
+happened carries `archive_path=None`.
 
 **`flip_sender_ownership` is the sender's last write of the whole verb.**
 Called by the CLI only after `release_conversations` has returned — every
@@ -230,31 +243,31 @@ def release_conversations(
         dest = root / f"{session_id}.jsonl"
         nested_dest = root / session_id
 
-        if dest.exists():
-            results.append(
-                ConversationRelease(
-                    session_id=session_id,
-                    outcome=ReleaseOutcome.ALREADY_ARCHIVED,
-                    archive_path=dest,
-                )
-            )
-            continue
-
         conversation_root = (
             workspace_root
             if str(conversation.subpath) == "."
             else workspace_root.joinpath(*conversation.subpath.parts)
         )
         transcript_path = locate_transcript(session_id, conversation_root)
+
         if transcript_path is None:
-            results.append(
-                ConversationRelease(
-                    session_id=session_id,
-                    outcome=ReleaseOutcome.FAILED,
-                    archive_path=None,
-                    detail="transcript could not be located on this host",
+            if dest.exists():
+                results.append(
+                    ConversationRelease(
+                        session_id=session_id,
+                        outcome=ReleaseOutcome.ALREADY_ARCHIVED,
+                        archive_path=dest,
+                    )
                 )
-            )
+            else:
+                results.append(
+                    ConversationRelease(
+                        session_id=session_id,
+                        outcome=ReleaseOutcome.FAILED,
+                        archive_path=None,
+                        detail="transcript could not be located on this host",
+                    )
+                )
             continue
 
         nested_source = transcript_path.parent / session_id
@@ -262,7 +275,11 @@ def release_conversations(
         try:
             root.mkdir(parents=True, exist_ok=True)
             if nested_source.is_dir():
+                if nested_dest.exists():
+                    shutil.rmtree(nested_dest)
                 shutil.move(str(nested_source), str(nested_dest))
+            if dest.exists():
+                dest.unlink()
             shutil.move(str(transcript_path), str(dest))
         except OSError as e:
             results.append(
@@ -288,11 +305,17 @@ def release_conversations(
                 env=env,
             )
         except OSError as e:
+            # The relocation above has already succeeded by this point — the
+            # transcript is no longer at its source, only the marker append
+            # failed — so `archive_path` names where it actually landed
+            # rather than `None`, which the CLI's renderer reserves for
+            # "nothing moved". See `_render_move_completion`'s FAILED
+            # handling in `camp.cli.transfer`.
             results.append(
                 ConversationRelease(
                     session_id=session_id,
                     outcome=ReleaseOutcome.FAILED,
-                    archive_path=None,
+                    archive_path=dest,
                     detail=f"archived but could not record the durable marker: {e}",
                 )
             )

@@ -91,6 +91,7 @@ from ..host.transport import (
     ProducerSpawner,
     RemoteRefusal,
     Runner,
+    StoppedResponding,
     StreamSpawner,
     TransportOutcome,
     default_producer_spawn,
@@ -143,18 +144,29 @@ class PhaseFailed(MoveRefused):
 
     Re-running the whole verb (with `--overwrite` if the workspace now
     exists on the peer, which it will once `begin` has run) is safe UNLESS
-    `claimed_owner` is populated, in which case `claim` had already answered
-    before `finish` failed — the peer already owns the workspace and would
+    `claimed_owner` is populated OR `indeterminate` is `True`. `claimed_owner`
+    populated means `claim` is known to have already answered — either
+    `finish` failed after it, or `claim` itself failed in a way this module
+    could confirm actually landed on the peer (a network-layer timeout after
+    the connection completed, or an unparseable answer body on an
+    otherwise-successful exit — both re-probe the peer via `camp
+    transfer-probe` to find out rather than guessing; see `move_workspace`'s
+    own `claim` handling) — the peer already owns the workspace and would
     refuse a re-run's opening `begin`, since `begin` only tears down a prior
-    attempt owned by the sender. `claimed_owner` and `conversations` are
-    `None`/empty for every phase failure before `claim` answers (`begin`,
-    `history`, `worktree`, `conversations`, or `claim` itself failing); they
-    carry the exact values `MoveResult` would have carried on success — the
-    peer's own declared name and the pool of conversations that already
-    crossed — only when the failing phase is `finish`, so the caller can
-    still archive what already crossed without flipping this host's own
-    ownership record, which stays correctly stale until the two hosts'
-    manifests are reconciled by hand.
+    attempt owned by the sender. `indeterminate` is `True` when `claim`'s own
+    outcome AND the re-probe used to resolve it both failed to establish
+    whether the claim landed — neither the pre-commit nor the post-commit
+    remedy is safe to assume here, and the operator must check the peer by
+    hand before doing anything. `claimed_owner`/`conversations`/
+    `indeterminate` are `None`/empty/`False` for every phase failure known
+    NOT to have landed (`begin`, `history`, `worktree`, `conversations`, or a
+    `claim` explicitly refused or never reaching the peer at all);
+    `claimed_owner`/`conversations` carry the exact values `MoveResult` would
+    have carried on success — the peer's own declared name and the pool of
+    conversations that already crossed — whenever a landed `claim` is
+    confirmed, so the caller can still archive what already crossed without
+    flipping this host's own ownership record, which stays correctly stale
+    until the two hosts' manifests are reconciled by hand.
     """
 
     def __init__(
@@ -164,12 +176,14 @@ class PhaseFailed(MoveRefused):
         *,
         claimed_owner: str | None = None,
         conversations: tuple[ConversationCrossed, ...] = (),
+        indeterminate: bool = False,
     ) -> None:
         super().__init__(f"{phase}: {detail}")
         self.phase = phase
         self.detail = detail
         self.claimed_owner = claimed_owner
         self.conversations = conversations
+        self.indeterminate = indeterminate
 
 
 @dataclass(frozen=True)
@@ -246,6 +260,47 @@ def _run_camp_phase(
     raise PhaseFailed(remote_argv[1] if len(remote_argv) > 1 else remote_argv[0], _outcome_detail(outcome))
 
 
+def _reprobe_claim(
+    host: Host,
+    *,
+    group_name: str,
+    slug: str,
+    sender_name: str,
+    run: Runner,
+    connect_timeout: float,
+    execution_timeout: float,
+) -> tuple[bool | None, str | None]:
+    """Ask *host* itself, via `camp.transfer.probe.probe_peer`, whether a
+    `claim` this module could not read directly actually landed there.
+
+    Returns `(True, owner)` when the peer's own probe answer names ITSELF as
+    the workspace's owner — `claim` landed, and *owner* is the exact name to
+    carry forward as `PhaseFailed.claimed_owner`. Returns `(False, None)`
+    when the probe answers cleanly but the peer does not (yet) consider
+    itself the owner — `claim` did not land. Returns `(None, None)` when the
+    probe itself could not establish either — unreachable, refused, a
+    malformed wire response, or a declared-name collision — so the caller
+    must not guess and should raise with `indeterminate=True` instead of
+    picking one of the other two.
+    """
+    from .probe import ProbeAnswer, probe_peer
+
+    probe_result = probe_peer(
+        host,
+        group=group_name,
+        slug=slug,
+        self_name=sender_name,
+        connect_timeout=connect_timeout,
+        execution_timeout=execution_timeout,
+        runner=run,
+    )
+    if not isinstance(probe_result, ProbeAnswer) or probe_result.self_name is None:
+        return None, None
+    if probe_result.workspace_owner == probe_result.self_name:
+        return True, probe_result.self_name
+    return False, None
+
+
 def move_workspace(
     *,
     host: Host,
@@ -302,14 +357,25 @@ def move_workspace(
             re-runnable shape every other phase failure uses. A peer that
             does not recognize the `claim` subcommand at all (an older camp
             build) refuses it the same way any unrecognized phase refuses,
-            surfacing here as `PhaseFailed("claim", ...)` — ownership moves
-            on neither host. Nothing after the failing phase was attempted.
-            A `finish` failure is the one exception to all of the above: it
-            runs after `claim` has already answered, so the raised
-            `PhaseFailed` carries `claimed_owner` and `conversations`
-            populated exactly as a successful `MoveResult` would — see
-            `PhaseFailed`'s own docstring for what that changes for the
-            caller.
+            surfacing here as `PhaseFailed("claim", ...)` with no
+            `claimed_owner` — ownership never moved, since the peer's own
+            explicit refusal means `claim` never ran there at all. A `claim`
+            outcome this module cannot read directly — a network-layer
+            timeout after the connection completed, or exit 0 with an
+            answer body that will not parse — is never assumed either way:
+            it is resolved by re-probing the peer (`camp.transfer.probe`)
+            before raising, so the resulting `PhaseFailed` carries
+            `claimed_owner` (and `conversations`) when the probe confirms
+            the claim landed, carries neither when the probe confirms it did
+            not, and carries `indeterminate=True` when the probe itself
+            could not tell — see `PhaseFailed`'s own docstring for the full
+            three-way split. Nothing after the failing phase was attempted
+            in any of these cases. A `finish` failure is the other case that
+            carries `claimed_owner`: it runs after `claim` has already
+            answered, so the raised `PhaseFailed` carries `claimed_owner`
+            and `conversations` populated exactly as a successful
+            `MoveResult` would — see `PhaseFailed`'s own docstring for what
+            that changes for the caller.
     """
     from ..provision.reconcile import _branch_name, _worktree_path
 
@@ -332,8 +398,16 @@ def move_workspace(
 
     import json
 
-    begin_payload = json.loads(begin_answer.stdout)
-    basis_by_member = {m["name"]: m["basis_commit"] for m in begin_payload["members"]}
+    try:
+        begin_payload = json.loads(begin_answer.stdout)
+        basis_by_member = {m["name"]: m["basis_commit"] for m in begin_payload["members"]}
+    except (json.JSONDecodeError, KeyError, TypeError) as e:
+        # `begin` is always pre-commit — an exit-0 answer with an unusable
+        # body (shell-profile noise on the remote is the classic cause) is
+        # no different from any other `begin` failure: nothing has written
+        # anything anywhere yet, so this is the ordinary, safe-to-retry
+        # shape, never `claimed_owner`.
+        raise PhaseFailed("begin", f"peer answered but the response body was not usable: {e}") from e
 
     branch_pattern: str = group.get("branch_pattern", "worktree-{slug}")
     branch = _branch_name(slug, branch_pattern)
@@ -414,12 +488,75 @@ def move_workspace(
             crossed.append(ConversationCrossed(session_id=session_id, subpath=subpath))
 
     on_phase("claim")
-    claim_argv = ["transfer-receive", "claim", "--group", group_name, "--slug", slug]
-    claim_answer = _run_camp_phase(
-        host, claim_argv, run=run, connect_timeout=connect_timeout, execution_timeout=execution_timeout
+    claim_argv = [
+        "transfer-receive",
+        "claim",
+        "--group",
+        group_name,
+        "--slug",
+        slug,
+        "--owner",
+        sender_name,
+    ]
+    claim_outcome = run_camp(
+        host, claim_argv, connect_timeout=connect_timeout, execution_timeout=execution_timeout, runner=run
     )
-    claim_payload = json.loads(claim_answer.stdout)
-    claimed_owner = claim_payload["owner"]
+
+    if isinstance(claim_outcome, Answered):
+        try:
+            claim_payload = json.loads(claim_outcome.stdout)
+            claimed_owner = claim_payload["owner"]
+        except (json.JSONDecodeError, KeyError, TypeError) as e:
+            # Exit 0 means the remote `claim` phase ran to completion and
+            # already wrote itself as owner (see
+            # `camp.transfer.receive.claim`) before producing this unusable
+            # body — this is a commit hidden behind a parse failure, not an
+            # ordinary pre-commit one. Resolve it exactly like a claim that
+            # timed out below: re-probe rather than guess.
+            landed, owner = _reprobe_claim(
+                host,
+                group_name=group_name,
+                slug=slug,
+                sender_name=sender_name,
+                run=run,
+                connect_timeout=connect_timeout,
+                execution_timeout=execution_timeout,
+            )
+            detail = f"peer answered but the response body was not usable: {e}"
+            if landed:
+                raise PhaseFailed(
+                    "claim", detail, claimed_owner=owner, conversations=tuple(crossed)
+                ) from e
+            if landed is False:
+                raise PhaseFailed("claim", detail) from e
+            raise PhaseFailed("claim", detail, indeterminate=True) from e
+    elif isinstance(claim_outcome, StoppedResponding):
+        # The connection completed, so the peer may have run `claim` to
+        # completion before this host lost the response — never assumed
+        # either way; see `_reprobe_claim`.
+        landed, owner = _reprobe_claim(
+            host,
+            group_name=group_name,
+            slug=slug,
+            sender_name=sender_name,
+            run=run,
+            connect_timeout=connect_timeout,
+            execution_timeout=execution_timeout,
+        )
+        detail = _outcome_detail(claim_outcome)
+        if landed:
+            raise PhaseFailed("claim", detail, claimed_owner=owner, conversations=tuple(crossed))
+        if landed is False:
+            raise PhaseFailed("claim", detail)
+        raise PhaseFailed("claim", detail, indeterminate=True)
+    else:
+        # Every other outcome (an explicit `RemoteRefusal`, or a transport
+        # failure before the remote ever ran — `Unreachable`,
+        # `IdentityUnknown`/`IdentityChanged`, `CampNotResolvable`,
+        # `CredentialsRefused`) means `claim` either never ran on the peer at
+        # all or ran and explicitly refused — ownership never moved, so this
+        # is the ordinary, safe-to-retry shape.
+        raise PhaseFailed("claim", _outcome_detail(claim_outcome))
 
     on_phase("finish")
     finish_argv = ["transfer-receive", "finish", "--group", group_name, "--slug", slug]
