@@ -153,15 +153,9 @@ def is_credential_class(cls: str) -> bool:
 def scan_text(text: str) -> list[Finding]:
     findings: list[Finding] = []
     for lineno, line in enumerate(text.splitlines(), start=1):
-        seen: set[tuple[int, str, tuple[int, int]]] = set()
         for cls, pattern in _PATTERNS:
             for m in pattern.finditer(line):
-                actual_cls = _reclassify(cls, m.group(0))
-                key = (lineno, actual_cls, m.span())
-                if key in seen:
-                    continue
-                seen.add(key)
-                findings.append(Finding(lineno, actual_cls, m.group(0)))
+                findings.append(Finding(lineno, _reclassify(cls, m.group(0)), m.group(0)))
     return findings
 
 
