@@ -1,0 +1,3 @@
+**`spec/orchard-irrigation` is complete** — every acceptance criterion is covered by the [spec/orchard-irrigation](http://127.0.0.1:7313/records/meadowbrook/spec/orchard-irrigation) `## Slices` ledger, and every ledger line attesting that coverage carries a coverage token. The slice loop is closed out; no further slice was chosen this pass, and the spec is now labelled `craft/slice-loop=complete`.
+
+Run /craft:distill spec/orchard-irrigation when you're ready to distill this work into the ADR log.
