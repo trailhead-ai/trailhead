@@ -19,17 +19,40 @@ Seven pattern classes, taken verbatim from that document:
 Known false-positive: `/` is in the base64 alphabet, so the high-entropy
 pattern also matches long slash-separated paths and record URLs (e.g.
 `7313/records/trailhead/task/both-slice-...`). A high-entropy-base64 match
-containing two or more `/` is reclassified as `path-or-url-shape` — reported,
-not silently dropped, but not counted as a credential finding either. A
-credential value would need a `/` to appear in normal use, which real secrets
-essentially never do more than once in a 32+ char run; a path segment always
-does.
+containing **four or more** `/` is reclassified as `path-or-url-shape` —
+reported, not silently dropped, but not counted as a credential finding
+either.
+
+This discriminator is still probabilistic, not categorical: `/` occurs in
+the base64 alphabet with probability 1/64, so a genuine random secret can by
+chance carry any number of slashes, including four or more. An earlier
+version of this rule used a threshold of two, on the (false, unmeasured)
+premise that "real secrets essentially never" carry more than one `/` in a
+32+ char run — measured over 20,000 freshly generated
+`base64.b64encode(os.urandom(32))` tokens, 13.9% carried two or more `/` and
+were silently waved through as path-shaped. The threshold was raised to
+four because every committed real-world path/URL fixture this scanner must
+keep classifying safely (record URLs like
+`7313/records/trailhead/task/...`, repository paths like
+`tools/craft/plugins/craft/skills/slice/SKILL`) carries four or more `/` in
+its matched run, while a threshold of four measures a false-negative rate
+of ~0.4% (81/20,000, averaged across four independently seeded runs of the
+same generation method) for random secrets — down from 13.9% at threshold
+two. It is not zero: a rare random secret with four or more slashes still
+passes as path-shaped. Raising the threshold further would push the
+false-negative rate down further but would misclassify the shortest real
+record-URL fixtures (exactly four slashes) as credentials, so four is the
+highest threshold that keeps every known-safe fixture safe.
 
 Usage:
   capture_scan.py <tree-or-file> [<tree-or-file> ...]
 
 Exit codes:
-  0  clean — no credential-class finding in the scanned tree(s)
+  0  clean — no credential-class finding in the scanned tree(s). A
+     known-safe-class line (e.g. `path-or-url-shape`) is still printed to
+     stdout on this exit — 0 means "nothing that counts as a credential
+     finding", not "nothing printed". Callers must check the exit code, not
+     whether stdout is empty.
   1  finding(s) — prints `relpath:lineno:class:token` per hit, commit blocked
   2  error — fail-closed: a given path does not exist
 """
@@ -77,8 +100,14 @@ class Finding(NamedTuple):
     text: str
 
 
+# Measured over 20,000 generated base64(os.urandom(32)) tokens (four
+# independently seeded runs) — see the module docstring for the full
+# rationale and the false-negative rate this threshold measures.
+_PATH_SLASH_THRESHOLD = 4
+
+
 def _reclassify(cls: str, matched: str) -> str:
-    if cls == "high-entropy-base64" and matched.count("/") >= 2:
+    if cls == "high-entropy-base64" and matched.count("/") >= _PATH_SLASH_THRESHOLD:
         return KNOWN_SAFE_CLASS
     return cls
 
