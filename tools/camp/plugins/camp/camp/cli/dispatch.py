@@ -1096,15 +1096,24 @@ _DOCTOR_ACCOUNT_VERDICT_TOKENS = {
 }
 
 
-def _doctor_account_verdict_token(verdict: str | None) -> str:
+def _doctor_account_verdict_token(verdict: object) -> str:
     """A `None` verdict is a failure row and warns deliberately (see the
     vocabulary comment above). Any other string outside the closed
     vocabulary is, by definition, a thing this renderer cannot tell
     anything about — it must never be read as WARN's actionable "not
     authenticated / capability failed" meaning, so it falls back to the
-    same token as `cannot-tell` rather than to WARN."""
+    same token as `cannot-tell` rather than to WARN.
+
+    A remote answer is untrusted wire data: `verdict` can arrive as any
+    JSON type, including an unhashable one (a list or a dict) that would
+    raise straight out of a dict lookup. Anything that is not a `str`
+    (and not `None`, handled above) is exactly as untellable as an
+    unrecognized string, so it takes the same `cannot-tell` fallback
+    rather than being allowed to crash the lookup."""
     if verdict is None:
         return "WARN"
+    if not isinstance(verdict, str):
+        return _DOCTOR_ACCOUNT_VERDICT_TOKENS["cannot-tell"]
     return _DOCTOR_ACCOUNT_VERDICT_TOKENS.get(verdict, _DOCTOR_ACCOUNT_VERDICT_TOKENS["cannot-tell"])
 
 
@@ -1119,6 +1128,13 @@ def _doctor_account_detail(account: str | None, verdict: str | None, reason: str
     wording never tells the operator to log in, since camp does not know
     whether he wants that account on that machine at all."""
     if verdict is None:
+        # Spine's own failure rows (an unreadable group config) carry no
+        # bound account yet, so `account` is `None` there — but a remote
+        # can name an account whose harness resolved and then refused to
+        # answer, and that name must reach the operator; a null verdict
+        # never discards it just because it CAN be absent.
+        if account is not None:
+            return f"{_doctor_account_label(account)}: account check failed — {reason}"
         return f"account check failed — {reason}"
     label = _doctor_account_label(account)
     if verdict == "authenticated":
@@ -1129,11 +1145,21 @@ def _doctor_account_detail(account: str | None, verdict: str | None, reason: str
 
 
 def _doctor_account_row(
-    host_name: str | None, account: str | None, verdict: str | None, reason: str | None
+    host_name: str | None, account: object, verdict: object, reason: object
 ) -> dict[str, Any]:
     """One account fact, in the host section's own closed row shape — a
     fact is a row exactly as reachability is a row, never nested inside a
-    host's own row."""
+    host's own row.
+
+    `account`, `verdict`, and `reason` all arrive here as untrusted wire
+    data on the remote path (a local caller always passes a `str | None`
+    already), so each is coerced to the type this section's wording
+    expects before it is rendered — never trusted at face value just
+    because the field name matches."""
+    if account is not None and not isinstance(account, str):
+        account = None
+    if reason is not None and not isinstance(reason, str):
+        reason = "the failure reason camp received was not a string"
     return _doctor_host_row(
         host_name,
         _doctor_account_verdict_token(verdict),
@@ -1172,6 +1198,12 @@ def _doctor_account_rows_from_parsed(
     per the design doc: from the operator's side the two are deliberately
     indistinguishable, since in both, camp cannot tell him.
 
+    An empty list is read the same way rather than as "nothing to report":
+    the roster always includes the default store, so a genuine answer is
+    never empty, and rendering an empty list as no lines at all is the
+    rendering this section reserves for a host that never answered — the
+    two must not collapse into each other.
+
     Every string here is remote-authored (the declared account, and any
     failure reason), so it passes through the same recursive
     control-sequence strip every other relay path already applies — run
@@ -1182,7 +1214,7 @@ def _doctor_account_rows_from_parsed(
     from ..spine import DOCTOR_PROBE_ACCOUNTS_KEY
 
     facts = parsed.get(DOCTOR_PROBE_ACCOUNTS_KEY)
-    if not isinstance(facts, list):
+    if not isinstance(facts, list) or not facts:
         return [_doctor_account_row(host_name, None, "cannot-tell", None)]
     return _doctor_account_rows(host_name, _strip_control_sequences_deep(facts))
 
