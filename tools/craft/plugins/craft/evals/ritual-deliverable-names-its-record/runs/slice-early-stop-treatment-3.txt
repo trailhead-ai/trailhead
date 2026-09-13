@@ -1,0 +1,15 @@
+**Stopped early — `spec/glacier-survey-logistics` is not complete.**
+
+The candidate-set gate returned `candidates: none` with `complete-eligible: no`. An empty candidate set alone does not terminate the loop: because the union is not certified complete, the pass stops here rather than reporting the spec complete.
+
+- **Reason for stopping:** `complete-eligible: no` — the ledger's coverage union could not be certified. Some `## Slices` entry attesting coverage carries no coverage token; the gate emits no per-entry signal, so this pass names only what it certified and does not identify which entry is at fault.
+- **Acceptance criteria still unmet:** AC4.
+- **Recorded:** `craft/slice-loop=stopped` is written on [spec/glacier-survey-logistics](http://127.0.0.1:7313/records/meadowbrook/spec/glacier-survey-logistics), with the body note, so the next reader finds the stop recorded rather than silence.
+
+No slice was chosen and no parent task was written on this pass.
+
+Run this again once the uncertified ledger entry is corrected — bring its named parent's `**Covers:**` field up to date, then re-run so the reconcile can backfill the line's coverage token:
+
+```
+/craft:slice spec/glacier-survey-logistics
+```
