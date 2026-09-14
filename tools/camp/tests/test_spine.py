@@ -1315,11 +1315,13 @@ def test_doctor_probe_group_policy_wire_shape_pins_normal_absent_and_unreadable(
     normal = next(r for r in rows if r["group"] == "good")
     assert normal == {
         "group": "good",
+        "file": "good",
         "projection": project_group_policy(load_group(groups_dir / "good.toml")),
         "error": None,
     }
 
-    unreadable = next(r for r in rows if r["group"] == "broken")
+    unreadable = next(r for r in rows if r["file"] == "broken")
+    assert unreadable["group"] is None
     assert unreadable["projection"] is None
     assert isinstance(unreadable["error"], str) and unreadable["error"]
 
@@ -1383,7 +1385,8 @@ def test_doctor_probe_group_policy_one_malformed_file_does_not_lose_the_rest(
     assert len(rows) == 3
     ok_groups = {r["group"] for r in rows if r["error"] is None}
     assert ok_groups == {"alpha", "gamma"}
-    broken = next(r for r in rows if r["group"] == "broken")
+    broken = next(r for r in rows if r["file"] == "broken")
+    assert broken["group"] is None
     assert broken["error"] is not None
 
 
@@ -1403,13 +1406,18 @@ def test_doctor_probe_group_policy_unreadable_directory_produces_failure_entry(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """An unreadable group directory produces a failure entry rather than
-    an absent key or an empty collection."""
+    an absent key or an empty collection.
+
+    A2: the stub takes `env=None` because production calls
+    `_groups_dir(env=env)` — a stub with no `env` parameter raises its own
+    `TypeError` on that call, which the assertion would then be observing
+    instead of the `PermissionError` this test means to pin."""
     import json as _json
 
     import camp.cli.common as cli_common
     from camp.spine import DOCTOR_PROBE_GROUP_POLICY_KEY, cmd_doctor
 
-    monkeypatch.setattr(cli_common, "_groups_dir", lambda: _UnreadableGroupsDir())
+    monkeypatch.setattr(cli_common, "_groups_dir", lambda env=None: _UnreadableGroupsDir())
 
     monkeypatch.setenv("CAMP_TEST_ASDF_PRESENT", "1")
     monkeypatch.setenv("CAMP_TEST_TMUX_PRESENT", "1")
@@ -1422,7 +1430,50 @@ def test_doctor_probe_group_policy_unreadable_directory_produces_failure_entry(
     rows = report[DOCTOR_PROBE_GROUP_POLICY_KEY]
 
     assert rows != []
-    assert rows == [{"group": None, "projection": None, "error": rows[0]["error"]}]
+    assert len(rows) == 1
+    assert rows[0]["group"] is None
+    assert rows[0]["projection"] is None
+    assert "permission denied enumerating group configs" in rows[0]["error"]
+
+
+def test_doctor_probe_group_policy_directory_blocked_by_non_directory_ancestor_is_a_failure_entry(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A5: `Path.is_dir()` silently swallows `NotADirectoryError` and
+    returns `False` when a path component ABOVE the groups directory is a
+    plain file rather than a directory — a real, reproducible way for the
+    groups directory to be "unreadable because its parent is
+    non-traversable". A naive `if directory.is_dir():` therefore reads this
+    exactly like a groups directory that legitimately does not exist,
+    yielding `[]` — which the consumer reads as "configures no groups" and
+    would render a confident answer camp does not actually have. This must
+    surface as a failure entry instead, on the same real filesystem
+    condition (no stub), never a silently empty collection."""
+    import json as _json
+
+    from camp.spine import DOCTOR_PROBE_GROUP_POLICY_KEY, cmd_doctor
+
+    config_dir_blocker = tmp_path / "config_is_a_file"
+    config_dir_blocker.write_text("not a directory", encoding="utf-8")
+    env = {
+        "HOME": str(tmp_path / "home"),
+        "CAMP_CONFIG_DIR": str(config_dir_blocker),
+    }
+
+    monkeypatch.setenv("CAMP_TEST_ASDF_PRESENT", "1")
+    monkeypatch.setenv("CAMP_TEST_TMUX_PRESENT", "1")
+    _isolate_roots(monkeypatch, tmp_path)
+    try:
+        cmd_doctor(["--json", "--probe"], env=env)
+    except SystemExit:
+        pass
+    report = _json.loads(capsys.readouterr().out)
+    rows = report[DOCTOR_PROBE_GROUP_POLICY_KEY]
+
+    assert rows != []
+    assert len(rows) == 1
+    assert rows[0]["group"] is None
+    assert rows[0]["projection"] is None
     assert isinstance(rows[0]["error"], str) and rows[0]["error"]
 
 

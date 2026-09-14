@@ -1253,15 +1253,31 @@ def _doctor_group_policy(env: dict[str, str] | None = None) -> list[dict[str, An
     payloads.
 
     One row per group-config file, in filename order:
-      `{"group": <stem>, "projection": <dict>, "error": None}` for a group
-      that loaded and projected normally, or
-      `{"group": <stem>, "projection": None, "error": <str>}` for a group
-      whose file could not be read or parsed — named by its file stem since
-      a config that fails to load never yields a declared group name.
+      `{"group": <declared name>, "file": <stem>, "projection": <dict>,
+      "error": None}` for a group that loaded and projected normally —
+      keyed on the group's declared `[group].name`, the same identity
+      `--group` and every other camp surface use to address a group, never
+      the filename stem: two hosts are free to name the same declared
+      group's file differently, and a comparison keyed on the stem would
+      never recognize them as the same group. Or
+      `{"group": None, "file": <stem>, "projection": None, "error": <str>}`
+      for a group whose file could not be read or parsed — `group` stays
+      `None` because a config that fails to load never yields a declared
+      name, and it must never be mistaken for one; `file` still names the
+      stem, so an unreadable file names something useful even though it
+      cannot be identified as a particular declared group.
     A group this machine does not configure simply has no row: the
     consumer's "absent" case is ordinary dict/list non-membership, not a
     marker of its own. An empty groups directory yields `[]` — present and
     empty, never omitted.
+
+    A groups directory blocked by a non-directory path component above it
+    (e.g. `CAMP_CONFIG_DIR` pointed through a plain file) is itself a
+    failure the caller must catch, never a silent `[]`: `Path.is_dir()`
+    swallows exactly that `NotADirectoryError` internally and returns
+    `False`, indistinguishable from "the directory legitimately does not
+    exist" unless probed again with `Path.stat()`, which does not swallow
+    it.
     """
     from .cli.common import _groups_dir
     from .group.config import load_group
@@ -1272,11 +1288,30 @@ def _doctor_group_policy(env: dict[str, str] | None = None) -> list[dict[str, An
     if directory.is_dir():
         for path in sorted(directory.glob("*.toml")):
             try:
-                projection = project_group_policy(load_group(path))
+                config = load_group(path)
+                projection = project_group_policy(config)
             except Exception as e:  # noqa: BLE001 — one broken group config is named, never hides the rest
-                rows.append({"group": path.stem, "projection": None, "error": str(e)})
+                rows.append({"group": None, "file": path.stem, "projection": None, "error": str(e)})
                 continue
-            rows.append({"group": path.stem, "projection": projection, "error": None})
+            rows.append(
+                {
+                    "group": projection.get("group_name"),
+                    "file": path.stem,
+                    "projection": projection,
+                    "error": None,
+                }
+            )
+    else:
+        try:
+            directory.stat()
+        except FileNotFoundError:
+            pass
+        # Any other `OSError` (e.g. `NotADirectoryError` from a blocking
+        # ancestor, or `PermissionError`) propagates to the caller, exactly
+        # like `directory.glob(...)` raising above — the caller's own
+        # "producing the whole collection can raise" guard turns it into a
+        # failure entry rather than this function ever returning `[]` for a
+        # directory it could not actually determine was empty.
     return rows
 
 

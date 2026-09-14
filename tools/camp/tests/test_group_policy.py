@@ -212,7 +212,7 @@ repo_root = "/tmp/m1-elsewhere"
         project_group_policy(load_group(a)), project_group_policy(load_group(b))
     )
     assert result.matches is False
-    assert any("m2" in d and "only in a" in d for d in result.differences)
+    assert any("m2" in d and "only in local" in d for d in result.differences)
 
 
 def test_member_only_in_b_is_reported(tmp_path: Path) -> None:
@@ -245,7 +245,7 @@ repo_root = "/tmp/m2"
         project_group_policy(load_group(a)), project_group_policy(load_group(b))
     )
     assert result.matches is False
-    assert any("m2" in d and "only in b" in d for d in result.differences)
+    assert any("m2" in d and "only in remote" in d for d in result.differences)
 
 
 # ---------------------------------------------------------------------------

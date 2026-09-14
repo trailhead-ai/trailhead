@@ -1217,6 +1217,15 @@ _DOCTOR_GROUP_FIELD_LIMIT = 200
 #: than silently dropped.
 _DOCTOR_GROUP_DIMENSION_LIMIT = 20
 
+#: The per-field cap and the dimension-count cap bound each PIECE of a
+#: differing group's detail, but not the assembled whole: up to
+#: `_DOCTOR_GROUP_DIMENSION_LIMIT` fields at up to `_DOCTOR_GROUP_FIELD_LIMIT`
+#: characters each still assembles a multi-thousand-character row — the
+#: same shape (a single oversized row) that motivated the per-field cap in
+#: the first place. This is the row's own total bound, applied after
+#: assembly, stating the cut rather than silently shortening it.
+_DOCTOR_GROUP_DETAIL_LIMIT = 1000
+
 
 def _doctor_truncate_field(value: object, limit: int) -> object:
     """Bound one remote-authored string to `limit` characters, marking the
@@ -1416,12 +1425,18 @@ def _doctor_self_group_projections() -> tuple[dict[str, dict[str, Any]] | None, 
     projections: dict[str, dict[str, Any]] = {}
     unreadable: dict[str, str] = {}
     for entry in entries:
-        name = entry.get("group")
-        if not isinstance(name, str):
-            continue
         error = entry.get("error")
         if error is not None:
-            unreadable[name] = str(error)
+            # An error row's `group` is `None` (per `_doctor_group_policy`'s
+            # own contract): a config that fails to load never yields a
+            # declared name. `file` still names the stem, so the failure
+            # is reported against something useful rather than going
+            # unnamed.
+            file = entry.get("file")
+            unreadable[file if isinstance(file, str) else "?"] = str(error)
+            continue
+        name = entry.get("group")
+        if not isinstance(name, str):
             continue
         projections[name] = entry.get("projection") or {}
     return projections, unreadable
@@ -1493,11 +1508,25 @@ def _doctor_group_rows_from_parsed(
             f"— {_doctor_group_error_text(bounded[0].get('error'))}",
         )
 
+    # A far entry whose `error` is set AND whose `group` is still a real
+    # declared name (an older far camp's wire shape, which named an error
+    # row by its file stem rather than `None`) stays matchable by name, the
+    # same as it always has. But an entry carrying an `error` with no name
+    # at all (this fix's own shape, per `_doctor_group_policy`'s contract)
+    # can never be matched to a specific self-declared group, so it is
+    # never silently dropped either — it is remembered as "the far side has
+    # at least one group it could not read", so a self-declared group with
+    # no OTHER match does not read as a confident "does not configure" when
+    # it might be the very group behind that unreadable, unnamed file.
     far_by_group: dict[str, Any] = {}
+    far_has_unnamed_unreadable_group = False
     for entry in bounded:
         if not isinstance(entry, dict):
             continue
         name = entry.get("group")
+        if entry.get("error") is not None and not isinstance(name, str):
+            far_has_unnamed_unreadable_group = True
+            continue
         if not isinstance(name, str):
             continue
         far_by_group[name] = entry
@@ -1518,6 +1547,16 @@ def _doctor_group_rows_from_parsed(
                         "UNKNOWN",
                         f"{name}: {host_name} reported more groups than are shown, so "
                         "it cannot be determined whether it configures this group",
+                    )
+                )
+            elif far_has_unnamed_unreadable_group:
+                rows.append(
+                    _doctor_host_row(
+                        host_name,
+                        "UNKNOWN",
+                        f"{name}: {host_name} has a group configuration it could not "
+                        "read, so it cannot be determined whether it configures this "
+                        "group",
                     )
                 )
             else:
@@ -1580,9 +1619,11 @@ def _doctor_group_rows_from_parsed(
                     f", and {total_dims - _DOCTOR_GROUP_DIMENSION_LIMIT} more "
                     "dimension(s) not shown"
                 )
-            rows.append(
-                _doctor_host_row(host_name, "WARN", f"{name}: group policy differs — {dims}")
-            )
+            detail = f"{name}: group policy differs — {dims}"
+            if len(detail) > _DOCTOR_GROUP_DETAIL_LIMIT:
+                suffix = "… (detail truncated)"
+                detail = detail[: _DOCTOR_GROUP_DETAIL_LIMIT - len(suffix)] + suffix
+            rows.append(_doctor_host_row(host_name, "WARN", detail))
 
     if reported_count > _DOCTOR_GROUP_ROW_LIMIT:
         rows.append(

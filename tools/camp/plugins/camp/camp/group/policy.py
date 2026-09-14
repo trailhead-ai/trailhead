@@ -150,7 +150,14 @@ class PolicyComparison:
 
 
 def compare_group_policy(a: dict[str, Any], b: dict[str, Any]) -> PolicyComparison:
-    """Compare two policy projections, naming every dimension that differs."""
+    """Compare two policy projections, naming every dimension that differs.
+
+    `a`/`b` are labeled "local"/"remote" in the dimension strings this
+    returns, matching this module's one caller (`dispatch.py`'s doctor
+    fan-out, which always passes this machine's own projection as `a` and
+    a probed host's as `b`) — a bare "only in a"/"only in b" tells the
+    operator a direction exists but not which side it names, which is
+    exactly the fact the dimension exists to convey."""
     differences: list[str] = []
 
     if a.get("group_name") != b.get("group_name"):
@@ -162,9 +169,9 @@ def compare_group_policy(a: dict[str, Any], b: dict[str, Any]) -> PolicyComparis
     members_b: dict[str, Any] = b.get("members") or {}
 
     for name in sorted(set(members_a) - set(members_b)):
-        differences.append(f"member only in a: {name}")
+        differences.append(f"member only in local: {name}")
     for name in sorted(set(members_b) - set(members_a)):
-        differences.append(f"member only in b: {name}")
+        differences.append(f"member only in remote: {name}")
 
     for name in sorted(set(members_a) & set(members_b)):
         member_a = members_a[name]
@@ -177,9 +184,9 @@ def compare_group_policy(a: dict[str, Any], b: dict[str, Any]) -> PolicyComparis
         tasks_a = {t.get("name"): t for t in tasks_a_list}
         tasks_b = {t.get("name"): t for t in tasks_b_list}
         for task_name in sorted(set(tasks_a) - set(tasks_b)):
-            differences.append(f"member:{name}.task only in a: {task_name}")
+            differences.append(f"member:{name}.task only in local: {task_name}")
         for task_name in sorted(set(tasks_b) - set(tasks_a)):
-            differences.append(f"member:{name}.task only in b: {task_name}")
+            differences.append(f"member:{name}.task only in remote: {task_name}")
         for task_name in sorted(set(tasks_a) & set(tasks_b)):
             if tasks_a[task_name] != tasks_b[task_name]:
                 differences.append(f"member:{name}.task:{task_name}")
