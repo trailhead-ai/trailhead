@@ -239,7 +239,7 @@ class TestBeginRefusals:
         self, one_member_group
     ):
         """A workspace whose manifest never recorded an owner at all belongs
-        to whichever host it is already on — AC12 — so it must be refused
+        to whichever host it is already on, so it must be refused
         exactly like a third host's workspace, not silently torn down under
         `--overwrite` the way today's code (which only checks `existing_owner
         != sender` after excluding `None`) currently treats it."""
