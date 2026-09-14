@@ -502,6 +502,74 @@ class TestBeginBranchCollision:
 
 
 # ---------------------------------------------------------------------------
+# begin — a wire-supplied slug must pass the strict identifier grammar
+# before it is used to derive a branch name (`git branch --list` takes a
+# glob, not a literal)
+# ---------------------------------------------------------------------------
+
+
+class TestBeginWireSlugGrammar:
+    def test_glob_slug_is_refused_as_malformed_not_as_a_false_branch_collision(
+        self, one_member_group
+    ):
+        """A peer sending `--slug '*'` must not produce a false
+        `UnattributedBranch` collision against some UNRELATED, legitimately
+        created camp branch — `worktree-*` is a glob against
+        `_branch_exists_locally`'s `git branch --list`, so it matches any
+        camp-managed branch already on this host, not just one actually
+        named after this slug."""
+        receive = _receive_module()
+        g = one_member_group
+        repo_a = g["repo_a"]
+
+        # A branch a real, unrelated prior transfer legitimately left behind
+        # — nothing to do with the slug this call carries.
+        subprocess.run(
+            ["git", "-C", str(repo_a), "branch", "worktree-legit-other"],
+            check=True,
+            capture_output=True,
+        )
+
+        with pytest.raises(receive.MalformedSlug) as exc_info:
+            receive.begin(
+                groups=[g["group"]],
+                group_name="testgroup",
+                slug="*",
+                sender="sending-host",
+                overwrite=False,
+                env=g["env"],
+            )
+        assert "*" in str(exc_info.value)
+
+        mpath = _manifest_path("testgroup", "*", g["env"])
+        assert not mpath.exists()
+
+    def test_legitimate_slug_still_transfers_normally(self, one_member_group):
+        """The strict grammar refuses the glob slug above but must not
+        refuse an ordinary, legitimately captured slug — the same host,
+        with the same unrelated branch present, still proceeds."""
+        receive = _receive_module()
+        g = one_member_group
+        repo_a = g["repo_a"]
+
+        subprocess.run(
+            ["git", "-C", str(repo_a), "branch", "worktree-legit-other"],
+            check=True,
+            capture_output=True,
+        )
+
+        result = receive.begin(
+            groups=[g["group"]],
+            group_name="testgroup",
+            slug="feat-x",
+            sender="sending-host",
+            overwrite=False,
+            env=g["env"],
+        )
+        assert result["members"][0]["name"] == "repo_a"
+
+
+# ---------------------------------------------------------------------------
 # begin — overwrite removes and re-seeds; owner is always the sender's
 # ---------------------------------------------------------------------------
 

@@ -220,6 +220,7 @@ __all__ = [
     "ReceiveRefused",
     "GroupNotConfigured",
     "MalformedOwnerName",
+    "MalformedSlug",
     "OwnershipConflict",
     "UnattributedWorkspace",
     "UnattributedBranch",
@@ -272,6 +273,32 @@ class ReceiveRefused(Exception):
 
 class MalformedOwnerName(ReceiveRefused):
     """`--owner` is oversized or fails the declared-name charset."""
+
+
+class MalformedSlug(ReceiveRefused):
+    """`--slug` fails the strict capture-time identifier grammar — refused
+    before it is used to derive a branch name or resolve any path.
+
+    `validate_workspace_slug` (`camp.group.resolve`) is a path-confinement
+    filter only, deliberately looser than this: it blocks `/`, `\\`, NUL, and
+    `.`/`..`, but lets through spaces and shell/glob metacharacters, any of
+    which a slug already stored in a manifest may legitimately carry. A
+    wire-supplied slug is different — `begin`'s branch-collision check hands
+    it to `git branch --list`, whose argument is a **glob**, not a literal
+    name, so an unvalidated `*` would match every camp-managed branch
+    already on this host and produce a false collision refusal. Every slug
+    this host or a peer legitimately creates already satisfies the strict
+    grammar `camp.spine._VALID_SLUG_RE` enforces at capture time, so this
+    refuses nothing legitimate.
+    """
+
+    def __init__(self, slug: str) -> None:
+        super().__init__(
+            f"slug {slug!r} fails the strict identifier grammar "
+            "^[a-z0-9-]+$ — refused before it is used to derive a branch "
+            "name or resolve any path"
+        )
+        self.slug = slug
 
 
 class GroupNotConfigured(ReceiveRefused):
@@ -653,8 +680,16 @@ def begin(
             workspace record exists — a branch alongside a workspace record
             naming *sender* is exactly what a legitimate retry finds, and is
             handled by the teardown/reseed path above instead.
+        MalformedSlug: *slug* fails the strict identifier grammar — checked
+            before anything else runs, since it is about to be interpolated
+            into a `git branch --list` glob further down.
     """
     _validate_owner(sender)
+
+    from .probe import _VALID_SLUG_RE
+
+    if not slug or not _VALID_SLUG_RE.match(slug):
+        raise MalformedSlug(slug)
 
     group = _require_group(groups, group_name)
 
