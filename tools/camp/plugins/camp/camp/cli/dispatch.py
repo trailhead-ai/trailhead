@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
     from typing import Any
 
     from ..host.config import Host
@@ -1210,17 +1211,19 @@ _DOCTOR_GROUP_ROW_LIMIT = 50
 _DOCTOR_GROUP_FIELD_LIMIT = 200
 
 
-def _doctor_account_truncate_field(value: object) -> object:
-    """Bound one remote-authored `account`/`reason` string to
-    `_DOCTOR_ACCOUNT_FIELD_LIMIT` characters, marking the cut with an
-    ellipsis so a truncated value stays honest rather than reading as a
-    short, complete one. Anything that is not a string passes through
-    unchanged — `_doctor_account_row` already coerces a non-string to
-    `None` (or its own stated fallback) before it is rendered, so there is
-    no string here to bound."""
-    if not isinstance(value, str) or len(value) <= _DOCTOR_ACCOUNT_FIELD_LIMIT:
+def _doctor_truncate_field(value: object, limit: int) -> object:
+    """Bound one remote-authored string to `limit` characters, marking the
+    cut with an ellipsis so a truncated value stays honest rather than
+    reading as a short, complete one. Each axis of the host section passes
+    its own cap — `_DOCTOR_ACCOUNT_FIELD_LIMIT`, `_DOCTOR_GROUP_FIELD_LIMIT`
+    — so the two remain independently adjustable. Anything that is not a
+    string passes through unchanged: every caller either coerces a
+    non-string to `None` (or its own stated fallback) before it is
+    rendered, or names its own fallback wording, so there is no string
+    here to bound."""
+    if not isinstance(value, str) or len(value) <= limit:
         return value
-    return value[:_DOCTOR_ACCOUNT_FIELD_LIMIT] + "…"
+    return value[:limit] + "…"
 
 
 def _doctor_account_truncate_fact(fact: object) -> object:
@@ -1233,9 +1236,13 @@ def _doctor_account_truncate_fact(fact: object) -> object:
         return fact
     truncated = dict(fact)
     if "account" in truncated:
-        truncated["account"] = _doctor_account_truncate_field(truncated["account"])
+        truncated["account"] = _doctor_truncate_field(
+            truncated["account"], _DOCTOR_ACCOUNT_FIELD_LIMIT
+        )
     if "reason" in truncated:
-        truncated["reason"] = _doctor_account_truncate_field(truncated["reason"])
+        truncated["reason"] = _doctor_truncate_field(
+            truncated["reason"], _DOCTOR_ACCOUNT_FIELD_LIMIT
+        )
     return truncated
 
 
@@ -1322,15 +1329,27 @@ def _doctor_probe_answer(
     )
 
 
-def _doctor_group_truncate_field(value: object) -> object:
-    """Bound one remote-authored `group`/`error` string to
-    `_DOCTOR_GROUP_FIELD_LIMIT` characters, marking the cut with an
-    ellipsis — the group axis's own copy of
-    `_doctor_account_truncate_field`'s posture. Anything that is not a
-    string passes through unchanged."""
-    if not isinstance(value, str) or len(value) <= _DOCTOR_GROUP_FIELD_LIMIT:
-        return value
-    return value[:_DOCTOR_GROUP_FIELD_LIMIT] + "…"
+def _doctor_group_error_text(value: object) -> str:
+    """One remote-authored group `error` value as detail text: bounded to
+    `_DOCTOR_GROUP_FIELD_LIMIT` characters with the cut marked, and
+    replaced by a stated fallback when the far side sent something that is
+    not a string at all — a missing or malformed explanation must still
+    read as cannot-tell, never as an empty one."""
+    bounded = _doctor_truncate_field(value, _DOCTOR_GROUP_FIELD_LIMIT)
+    return bounded if isinstance(bounded, str) else "an unspecified error"
+
+
+def _doctor_group_unknown_rows(
+    host_name: str, group_names: "Iterable[str]", detail: str
+) -> list[dict[str, Any]]:
+    """One `cannot-tell` row per named group, each carrying the same stated
+    reason — the shape every undeterminable group-policy outcome renders,
+    which must stay distinct from both agreement and divergence. Names are
+    rendered sorted, so a host's rows are stable across runs."""
+    return [
+        _doctor_host_row(host_name, "UNKNOWN", f"{name}: {detail}")
+        for name in sorted(group_names)
+    ]
 
 
 def _doctor_self_group_projections() -> tuple[dict[str, dict[str, Any]] | None, dict[str, str]]:
@@ -1395,44 +1414,30 @@ def _doctor_group_rows_from_parsed(
     if not self_projections and not self_unreadable:
         return []
 
-    rows: list[dict[str, Any]] = []
-
-    for name in sorted(self_unreadable):
-        rows.append(
-            _doctor_host_row(
-                host_name,
-                "UNKNOWN",
-                f"{name}: this machine's own configuration for this group could not "
-                "be read, so divergence cannot be determined",
-            )
-        )
+    rows = _doctor_group_unknown_rows(
+        host_name,
+        self_unreadable,
+        "this machine's own configuration for this group could not be read, "
+        "so divergence cannot be determined",
+    )
 
     if not self_projections:
         return rows
 
     if not isinstance(parsed, dict) or DOCTOR_PROBE_GROUP_POLICY_KEY not in parsed:
-        for name in sorted(self_projections):
-            rows.append(
-                _doctor_host_row(
-                    host_name,
-                    "UNKNOWN",
-                    f"{name}: group policy support unavailable — this host predates it",
-                )
-            )
-        return rows
+        return rows + _doctor_group_unknown_rows(
+            host_name,
+            self_projections,
+            "group policy support unavailable — this host predates it",
+        )
 
     far_value = parsed.get(DOCTOR_PROBE_GROUP_POLICY_KEY)
     if not isinstance(far_value, list):
-        for name in sorted(self_projections):
-            rows.append(
-                _doctor_host_row(
-                    host_name,
-                    "UNKNOWN",
-                    f"{name}: group policy answer was malformed, so divergence "
-                    "cannot be determined",
-                )
-            )
-        return rows
+        return rows + _doctor_group_unknown_rows(
+            host_name,
+            self_projections,
+            "group policy answer was malformed, so divergence cannot be determined",
+        )
 
     reported_count = len(far_value)
     bounded = _strip_control_sequences_deep(far_value[:_DOCTOR_GROUP_ROW_LIMIT])
@@ -1442,18 +1447,12 @@ def _doctor_group_rows_from_parsed(
         and isinstance(bounded[0], dict)
         and bounded[0].get("group") is None
     ):
-        error = _doctor_group_truncate_field(bounded[0].get("error"))
-        error_text = error if isinstance(error, str) else "an unspecified error"
-        for name in sorted(self_projections):
-            rows.append(
-                _doctor_host_row(
-                    host_name,
-                    "UNKNOWN",
-                    f"{name}: {host_name} could not produce its group policy answer "
-                    f"— {error_text}",
-                )
-            )
-        return rows
+        return rows + _doctor_group_unknown_rows(
+            host_name,
+            self_projections,
+            f"{host_name} could not produce its group policy answer "
+            f"— {_doctor_group_error_text(bounded[0].get('error'))}",
+        )
 
     far_by_group: dict[str, Any] = {}
     for entry in bounded:
@@ -1475,14 +1474,12 @@ def _doctor_group_rows_from_parsed(
             continue
         error = entry.get("error")
         if error is not None:
-            error_text = _doctor_group_truncate_field(error)
-            error_text = error_text if isinstance(error_text, str) else "an unspecified error"
             rows.append(
                 _doctor_host_row(
                     host_name,
                     "UNKNOWN",
                     f"{name}: {host_name}'s configuration for this group could not "
-                    f"be read — {error_text}",
+                    f"be read — {_doctor_group_error_text(error)}",
                 )
             )
             continue
@@ -1522,8 +1519,8 @@ def _doctor_group_rows_from_parsed(
 def _doctor_probe_answer_from_parsed(
     host_name: str,
     parsed: Any,
-    self_group_projections: dict[str, dict[str, Any]] | None = None,
-    self_group_unreadable: dict[str, str] | None = None,
+    self_group_projections: dict[str, dict[str, Any]],
+    self_group_unreadable: dict[str, str],
 ):
     """Read a probe answer's decoded stdout for probe availability — shared
     by every outcome that carries a remote's own stdout (`Answered`, and a
@@ -1541,7 +1538,7 @@ def _doctor_probe_answer_from_parsed(
     extra_rows = _doctor_account_rows_from_parsed(host_name, parsed)
     extra_rows.extend(
         _doctor_group_rows_from_parsed(
-            host_name, parsed, self_group_projections or {}, self_group_unreadable or {}
+            host_name, parsed, self_group_projections, self_group_unreadable
         )
     )
     return _doctor_probe_answer(
@@ -1556,8 +1553,8 @@ def _doctor_probe_worker(
     host: "Host",
     *,
     connect_timeout: float,
-    self_group_projections: dict[str, dict[str, Any]] | None = None,
-    self_group_unreadable: dict[str, str] | None = None,
+    self_group_projections: dict[str, dict[str, Any]],
+    self_group_unreadable: dict[str, str],
 ):
     """Ask one declared host `doctor --json --probe` about itself and
     return its contribution to the `-a` host section, as a
