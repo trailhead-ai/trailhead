@@ -662,6 +662,68 @@ class TestBeginOverwriteReachesTranscriptStore:
 
         assert harness.session_transcript_path(session_id, ws_root, env=env) is None
 
+    def test_overwrite_purges_a_previously_placed_transcript_nested_subtree(
+        self, one_member_group
+    ):
+        """A conversation carrying nested subagent/tool-artifact content
+        (`_archive_bytes(..., nested={...})`, placed via `receive.conversations`
+        exactly as `test_nested_transcript_recorded_root_rewritten` proves it
+        lands) must have that nested subtree removed by an `--overwrite` retry's
+        teardown too — not just its top-level `transcript.jsonl`. A retry that
+        leaves nested content behind leaves credential-bearing transcripts on
+        disk after the operator believes the workspace was torn down."""
+        from camp.transfer import receive
+
+        g = one_member_group
+        env = dict(g["env"])
+        session_id = "44444444-4444-4444-8444-444444444444"
+
+        receive.begin(
+            groups=[g["group"]],
+            group_name="testgroup",
+            slug="feat-nested",
+            sender="sending-host",
+            overwrite=False,
+            env=env,
+        )
+        ws_root = _workspace_dir("testgroup", "feat-nested", env).resolve()
+
+        sender_root = "/home/sender/some-other-workspace"
+        nested_line = json.dumps({"cwd": sender_root, "type": "agent"}).encode() + b"\n"
+        archive = _archive_bytes(
+            json.dumps({"cwd": sender_root}).encode() + b"\n",
+            nested={"subagents/agent-1.jsonl": nested_line},
+        )
+        receive.conversations(
+            groups=[g["group"]],
+            group_name="testgroup",
+            slug="feat-nested",
+            session_id=session_id,
+            subpath=".",
+            archive_stream=io.BytesIO(archive),
+            env=env,
+        )
+
+        from trailhead.harness.claude_code import ClaudeCodeHarness
+
+        harness = ClaudeCodeHarness()
+        placed = harness.session_transcript_path(session_id, ws_root, env=env)
+        assert placed is not None, "the conversation must actually land before this proves anything"
+        nested_path = placed.parent / session_id / "subagents" / "agent-1.jsonl"
+        assert nested_path.is_file(), "the nested content must actually land before this proves anything"
+
+        receive.begin(
+            groups=[g["group"]],
+            group_name="testgroup",
+            slug="feat-nested",
+            sender="sending-host",
+            overwrite=True,
+            env=env,
+        )
+
+        assert harness.session_transcript_path(session_id, ws_root, env=env) is None
+        assert not nested_path.parent.exists()
+
 
 # ---------------------------------------------------------------------------
 # begin — basis commit answer

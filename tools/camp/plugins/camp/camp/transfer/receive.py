@@ -222,6 +222,7 @@ __all__ = [
     "MalformedOwnerName",
     "OwnershipConflict",
     "UnattributedWorkspace",
+    "UnattributedBranch",
     "OverwriteRequired",
     "MemberNotConfigured",
     "BundleUnbundleFailed",

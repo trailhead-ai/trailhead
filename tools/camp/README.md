@@ -447,8 +447,9 @@ Exit codes:
    anything else
 13 the peer already holds something of this slug's name whose own record
    does not attribute it to this host — a workspace owned by a third host,
-   or one that never recorded an owner at all — refused regardless of
-   --overwrite; remove or rename it on the peer, or choose a different slug
+   one that never recorded an owner at all, or a same-named git branch with
+   no workspace record at all — refused regardless of --overwrite; remove
+   or rename it on the peer, or choose a different slug
 ```
 
 `transfer` and `transfer-probe` (the wire-level answer `--dry-run` reads

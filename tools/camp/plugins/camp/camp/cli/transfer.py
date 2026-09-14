@@ -103,9 +103,9 @@ inputs are checked:
                                regardless of `--overwrite`; nothing crossed.
                                `camp.transfer.move.UnattributedCollision`
                                carries a stable `kind` discriminant
-                               (`"workspace"` today) so a script branching
-                               on this exit code alone can still tell which
-                               kind of same-named collision it is.
+                               (`"workspace"` or `"branch"`) so a script
+                               branching on this exit code alone can still
+                               tell which kind of same-named collision it is.
 
 Code 2 is absent from the set deliberately: it is never produced, and it is
 held unused rather than reassigned, so a script that checks for it
@@ -123,12 +123,17 @@ collision, peer group/account/slug checks, the excluded-set declaration, and
 conversation enumeration) do not need their own operator-visible exit code —
 their distinguishing detail is carried in the rendered check text and (for
 `--json`) in the check's own `status`/`detail`/`transport_outcome` fields, not
-in the process exit code. `EXIT_OVERWRITE_REQUIRED`, `EXIT_UNATTRIBUTED_COLLISION`,
-`EXIT_PHASE_FAILED`, and `EXIT_PHASE_FAILED_POST_COMMIT` are never produced by
-the preflight itself — they come from `camp.transfer.move.move_workspace`,
-reached only once every check has PASSED. The last two are told apart by
-whether the raised `PhaseFailed` carries a `claimed_owner` — see that class's
-own docstring.
+in the process exit code. `EXIT_OVERWRITE_REQUIRED`, `EXIT_PHASE_FAILED`, and
+`EXIT_PHASE_FAILED_POST_COMMIT` are never produced by the preflight itself —
+they come from `camp.transfer.move.move_workspace`, reached only once every
+check has PASSED. The last two are told apart by whether the raised
+`PhaseFailed` carries a `claimed_owner` — see that class's own docstring.
+`EXIT_UNATTRIBUTED_COLLISION` is different: check 9 (the slug is free on the
+peer, or present there and owned by this host) maps a FAILED verdict straight
+to it, so the workspace-kind collision is caught by the preflight itself —
+the common case. The branch-kind collision, and a workspace-kind collision
+introduced by a race between preflight and move, still surface it from
+`move_workspace` instead, once every check has PASSED.
 """
 
 from __future__ import annotations
