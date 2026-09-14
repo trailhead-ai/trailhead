@@ -365,6 +365,132 @@ class TestBeginRefusals:
 
 
 # ---------------------------------------------------------------------------
+# begin — a colliding branch with no workspace record at all
+# ---------------------------------------------------------------------------
+
+
+class TestBeginBranchCollision:
+    def test_refuses_branch_with_no_workspace_record_and_leaves_its_sha_unchanged(
+        self, one_member_group
+    ):
+        """No manifest exists at all for this slug, but a branch of the
+        member's slug name already exists on this host — refused, and the
+        branch's resolved SHA must be unchanged afterwards, not merely
+        present, or this assertion could not tell "refused" apart from
+        "force-updated to the same value"."""
+        receive = _receive_module()
+        g = one_member_group
+        repo_a = g["repo_a"]
+
+        subprocess.run(
+            ["git", "-C", str(repo_a), "branch", "worktree-feat-x"],
+            check=True,
+            capture_output=True,
+        )
+        before_sha = subprocess.run(
+            ["git", "-C", str(repo_a), "rev-parse", "worktree-feat-x"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+
+        with pytest.raises(receive.UnattributedBranch) as exc_info:
+            receive.begin(
+                groups=[g["group"]],
+                group_name="testgroup",
+                slug="feat-x",
+                sender="sending-host",
+                overwrite=True,
+                env=g["env"],
+            )
+
+        assert exc_info.value.kind == "branch"
+        assert "repo_a" in str(exc_info.value)
+        assert "worktree-feat-x" in str(exc_info.value)
+
+        after_sha = subprocess.run(
+            ["git", "-C", str(repo_a), "rev-parse", "worktree-feat-x"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        assert after_sha == before_sha
+
+        mpath = _manifest_path("testgroup", "feat-x", g["env"])
+        ws_dir = _workspace_dir("testgroup", "feat-x", g["env"])
+        assert not mpath.exists()
+        assert not ws_dir.exists()
+
+    def test_legit_retry_with_branch_and_owner_matching_sender_still_proceeds(
+        self, one_member_group
+    ):
+        """A branch of the slug name existing is EXACTLY what every real
+        retry finds — the sender's own prior attempt left it there. Refusing
+        that would break the retry the preceding task just made work, so a
+        workspace record naming the sender as owner must still let
+        `--overwrite` proceed even though the branch is present."""
+        receive = _receive_module()
+        g = one_member_group
+        repo_a = g["repo_a"]
+
+        receive.begin(
+            groups=[g["group"]],
+            group_name="testgroup",
+            slug="feat-x",
+            sender="sending-host",
+            overwrite=False,
+            env=g["env"],
+        )
+        ws_dir = _workspace_dir("testgroup", "feat-x", g["env"])
+        wt_path = ws_dir / "repo_a"
+        subprocess.run(
+            ["git", "-C", str(repo_a), "worktree", "add", "-b", "worktree-feat-x", str(wt_path)],
+            check=True,
+            capture_output=True,
+        )
+
+        result = receive.begin(
+            groups=[g["group"]],
+            group_name="testgroup",
+            slug="feat-x",
+            sender="sending-host",
+            overwrite=True,
+            env=g["env"],
+        )
+        assert result["members"][0]["name"] == "repo_a"
+
+    def test_multi_member_branch_collision_on_second_member_refuses(
+        self, two_member_group
+    ):
+        """A branch collision on the SECOND member refuses too — the check
+        must cover every member, not only the first one begin's loop
+        reaches."""
+        receive = _receive_module()
+        g = two_member_group
+
+        subprocess.run(
+            ["git", "-C", str(g["repo_b"]), "branch", "worktree-feat-x"],
+            check=True,
+            capture_output=True,
+        )
+
+        with pytest.raises(receive.UnattributedBranch) as exc_info:
+            receive.begin(
+                groups=[g["group"]],
+                group_name="testgroup",
+                slug="feat-x",
+                sender="sending-host",
+                overwrite=False,
+                env=g["env"],
+            )
+        assert exc_info.value.kind == "branch"
+        assert "repo_b" in str(exc_info.value)
+
+        mpath = _manifest_path("testgroup", "feat-x", g["env"])
+        assert not mpath.exists()
+
+
+# ---------------------------------------------------------------------------
 # begin — overwrite removes and re-seeds; owner is always the sender's
 # ---------------------------------------------------------------------------
 

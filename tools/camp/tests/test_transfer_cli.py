@@ -2263,6 +2263,161 @@ class TestMoveWorkspaceEndToEnd:
         after = _snapshot(g["peer_state"])
         assert before == after
 
+    def test_branch_collision_refuses_through_the_real_promotion_and_leaves_branch_sha_unchanged(
+        self, move_env
+    ):
+        """A branch of the member's slug name already on the peer, with NO
+        workspace record at all, is a different collision than the
+        workspace one above — `begin` raises it on the real peer subprocess,
+        and `move_workspace`'s own `_run_camp_phase` must promote it to
+        `UnattributedCollision(kind="branch")`, not fall through to a
+        generic `PhaseFailed`. The branch's resolved SHA is asserted
+        unchanged, not merely present, and nothing crosses to the peer."""
+        from camp.group.manifest import manifest_path_for, workspace_dir
+        from camp.transfer.move import UnattributedCollision, move_workspace
+
+        g = move_env
+
+        _git(g["peer_repo"], "branch", g["branch"])
+        before_sha = _git_out(g["peer_repo"], "rev-parse", g["branch"])
+
+        def _snapshot(root: Path) -> dict[str, bytes]:
+            return {
+                str(p.relative_to(root)): p.read_bytes()
+                for p in sorted(root.rglob("*"))
+                if p.is_file()
+            }
+
+        before = _snapshot(g["peer_state"])
+
+        with pytest.raises(UnattributedCollision) as exc_info:
+            move_workspace(
+                host=g["host"],
+                group=g["group"],
+                group_name="testgroup",
+                slug=g["slug"],
+                sender_name="host-a",
+                overwrite=False,
+                env=g["sender_env"],
+                run=g["run"],
+                stream_spawn=g["stream_spawn"],
+            )
+
+        assert exc_info.value.kind == "branch"
+        assert "repo_a" in exc_info.value.detail
+        assert g["branch"] in exc_info.value.detail
+
+        after_sha = _git_out(g["peer_repo"], "rev-parse", g["branch"])
+        assert after_sha == before_sha
+
+        after = _snapshot(g["peer_state"])
+        assert before == after
+        assert not manifest_path_for("testgroup", g["slug"], env=g["peer_env"]).exists()
+        assert not workspace_dir("testgroup", g["slug"], env=g["peer_env"]).exists()
+
+    def test_branch_collision_on_second_member_refuses_before_any_member_crosses(
+        self, tmp_path: Path
+    ):
+        """The check runs for every member `begin` iterates, not only the
+        first: a collision on the SECOND member refuses the whole transfer,
+        and the first member's content never reaches the peer at all —
+        `history`/`worktree` for repo_a run only after `begin` answers, and
+        `begin` never answers here."""
+        from camp.group.manifest import manifest_path_for, workspace_dir
+        from camp.host.config import Host
+        from camp.provision.reconcile import _worktree_path
+        from camp.transfer.move import UnattributedCollision, move_workspace
+
+        slug = "feat-move"
+        branch = f"worktree-{slug}"
+
+        sender_env = camp_state_env(tmp_path / "sender")
+
+        def _make_sender_member(name: str) -> Path:
+            repo = tmp_path / f"sender_{name}"
+            init_git_repo(repo, origin=False)
+            wt_path = _worktree_path("testgroup", slug, name, env=sender_env)
+            _git(repo, "worktree", "add", str(wt_path), "-b", branch)
+            (wt_path / "committed.txt").write_text("committed on the sender\n")
+            _git(wt_path, "add", "committed.txt")
+            _git(
+                wt_path,
+                "-c", "user.email=t@t.com",
+                "-c", "user.name=t",
+                "commit", "-m", "sender content", "--no-gpg-sign",
+            )
+            return repo
+
+        sender_repo_a = _make_sender_member("repo_a")
+        sender_repo_b = _make_sender_member("repo_b")
+
+        peer_repo_a = tmp_path / "peer_repo_a"
+        peer_repo_b = tmp_path / "peer_repo_b"
+        init_git_repo(peer_repo_a, origin=False)
+        init_git_repo(peer_repo_b, origin=False)
+        # The colliding branch sits on the SECOND member only — no workspace
+        # record for this slug exists on the peer at all.
+        _git(peer_repo_b, "branch", branch)
+
+        peer_cfg = tmp_path / "peer-config"
+        (peer_cfg / "groups").mkdir(parents=True)
+        _write_group_toml(
+            peer_cfg / "groups",
+            "testgroup",
+            [("repo_a", str(peer_repo_a)), ("repo_b", str(peer_repo_b))],
+        )
+        _write_hosts_toml(peer_cfg, self_name="host-b")
+        peer_state = tmp_path / "peer-state"
+        peer_claude_dir = tmp_path / "peer-claude"
+        peer_env = {
+            "CAMP_CONFIG_DIR": str(peer_cfg),
+            "CAMP_STATE_DIR": str(peer_state),
+            "TRAILHEAD_CLAUDE_DIR": str(peer_claude_dir),
+        }
+
+        group = {
+            "group": {"name": "testgroup"},
+            "members": [
+                {
+                    "name": "repo_a",
+                    "repo_root": str(sender_repo_a),
+                    "tasks": [],
+                    "base": "no-such-base",
+                    "excluded": [],
+                },
+                {
+                    "name": "repo_b",
+                    "repo_root": str(sender_repo_b),
+                    "tasks": [],
+                    "base": "no-such-base",
+                    "excluded": [],
+                },
+            ],
+            "branch_pattern": "worktree-{slug}",
+        }
+
+        with pytest.raises(UnattributedCollision) as exc_info:
+            move_workspace(
+                host=Host(ssh="fake-peer", camp_bin="/opt/camp/bin/camp"),
+                group=group,
+                group_name="testgroup",
+                slug=slug,
+                sender_name="host-a",
+                overwrite=False,
+                env=sender_env,
+                run=_peer_runner(peer_cfg, peer_state, peer_claude_dir),
+                stream_spawn=_peer_stream_spawn(peer_cfg, peer_state, peer_claude_dir),
+            )
+
+        assert exc_info.value.kind == "branch"
+        assert "repo_b" in exc_info.value.detail
+
+        assert not manifest_path_for("testgroup", slug, env=peer_env).exists()
+        assert not workspace_dir("testgroup", slug, env=peer_env).exists()
+        # first member's branch never received the sender's history either —
+        # begin refused before any per-member phase ran.
+        assert _git_out(peer_repo_a, "branch", "--list", branch) == ""
+
     def test_conversation_crosses_after_worktree_and_lands_rewritten_on_the_peer(
         self, move_env
     ):

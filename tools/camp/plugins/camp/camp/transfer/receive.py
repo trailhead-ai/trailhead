@@ -316,6 +316,33 @@ class UnattributedWorkspace(ReceiveRefused):
         self.sender = sender
 
 
+class UnattributedBranch(ReceiveRefused):
+    """`begin` refused: no workspace of this slug exists here at all, but a
+    git branch of the member's slug name already does, and there is no
+    manifest to attribute it to *sender* — refused regardless of
+    `--overwrite`, since there is nothing here for a teardown to remove.
+
+    `kind` is the same stable discriminant `UnattributedWorkspace.kind`
+    carries — `"branch"` is this class's only value — so `camp.transfer.move`
+    can tell the two collision shapes apart by value.
+    """
+
+    kind = "branch"
+
+    def __init__(self, slug: str, member: str, branch: str, sender: str) -> None:
+        super().__init__(
+            f"member {member!r}: branch {branch!r} already exists on this "
+            f"host and no workspace record here attributes it to sender "
+            f"{sender!r} — this is refused regardless of --overwrite; "
+            "remove or rename the branch on this host first, or transfer "
+            "to a different slug"
+        )
+        self.slug = slug
+        self.member = member
+        self.branch = branch
+        self.sender = sender
+
+
 class OverwriteRequired(ReceiveRefused):
     """A workspace of this slug already exists and needs `--overwrite`."""
 
@@ -579,6 +606,12 @@ def begin(
             recorded, or none at all. Raised regardless of *overwrite*.
         OverwriteRequired: a workspace of *slug* already exists, owned by
             *sender*, and *overwrite* is False.
+        UnattributedBranch: no workspace of *slug* exists here at all, but a
+            git branch of some member's slug name already does, and there is
+            no manifest to attribute it to *sender*. Checked only when no
+            workspace record exists — a branch alongside a workspace record
+            naming *sender* is exactly what a legitimate retry finds, and is
+            handled by the teardown/reseed path above instead.
     """
     _validate_owner(sender)
 
@@ -621,6 +654,15 @@ def begin(
                 raise OverwriteRequired(slug, sender)
 
             needs_teardown = True
+        else:
+            from ..provision.reconcile import _branch_exists_locally, _branch_name
+
+            branch_pattern = group.get("branch_pattern", "worktree-{slug}")
+            branch = _branch_name(slug, branch_pattern)
+            for member in group["members"]:
+                repo_root = Path(member["repo_root"])
+                if _branch_exists_locally(repo_root, branch):
+                    raise UnattributedBranch(slug, member["name"], branch, sender)
 
     if needs_teardown:
         reconcile_break(group, slug, env=env, force=True)
