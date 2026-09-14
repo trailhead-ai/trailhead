@@ -221,3 +221,126 @@ procedure"). A future
 re-run against the real committed ruleset with the section stripped, rather
 than a synthetic brief, would close this gap; this run does not, and the
 recorded PASS above should be read accordingly.
+
+## Table vs paragraph condition — U1
+
+**Written before any run of either condition is dispatched.** This section
+answers `task/prove-whether-table-cell-context-is-what-splits-record-link-rendering`'s
+Known Unknown U1: is table-cell rendering context the discriminator behind
+`distill`'s split record-link rendering, or a confound? It reuses the exact
+fixture, arm, and dispatch shape above (`arms/treatment.md`, unmodified,
+`--setting-sources project`, `--allowedTools "Read"`, `LORE_STATE_DIR` pinned
+to the run directory) and varies exactly one thing: the rendering context
+`task.md` asks for.
+
+### Condition selector
+
+`fixtures/make-fixture-env.sh <run-dir> <condition>` — `<condition>` is now a
+required second positional argument, one of `table` or `paragraph`. Both
+conditions copy the identical five-record set and `vault-ls.txt` (the
+generator's vault-tree and listing steps do not depend on the condition);
+only the generated `task.md`'s requested output shape differs:
+
+- `paragraph` selects `fixtures/task.md.in` — "Write one short paragraph
+  that mentions all five records" (the existing, previously-measured
+  condition; unchanged from the case's earlier rows above).
+- `table` selects `fixtures/table-task.md.in` — "Write a short table with
+  two columns, Record and Note, one row per record" over the same five
+  records in the same order, with the same per-record notes.
+
+An unrecognized condition (anything other than `table` or `paragraph`) is
+refused with a nonzero exit and no `task.md` written — never silently
+defaulted to either condition.
+
+Both generated files are named `task.md` inside their own run directory;
+since each condition is built into its own fresh run directory (never both
+conditions into one), there is no collision. The other generated files
+(`vault-ls.txt`, the copied `vaults/`, `other-storage/`, `untracked/` trees)
+are condition-independent and byte-identical in content (modulo the
+run-directory-specific absolute paths each run resolves for itself).
+
+### Per-record expected rendering, per condition
+
+Records 2–5 are expected bare under **both** conditions — their bareness is
+caused by the rule's vault-resolution and grammar fallbacks (Conditions 2
+and 3 above), which have nothing to do with rendering context. If a run
+links any of records 2–5 under either condition, or renders them
+differently between conditions, that is a confound in its own right and
+must be reported as a finding distinct from the U1 verdict, not folded into
+it.
+
+Record 1 (`gearshed/note/rotate-tires`, the only record with nothing wrong —
+resolvable vault, standard path, clean grammar) is the one whose rendering
+this section measures:
+
+| Record | Paragraph condition (expected if H0: table-ness has no effect) | Table condition (expected if H0 holds) |
+|---|---|---|
+| 1 — `gearshed/note/rotate-tires` | Link: `[note/rotate-tires](http://127.0.0.1:9199/records/gearshed/note/rotate-tires)` | Link: `[note/rotate-tires](http://127.0.0.1:9199/records/gearshed/note/rotate-tires)` |
+| 2 — `attic-archive/log/winter-inventory` | Bare | Bare |
+| 3 — `ghost-vault/memo/unfiled-thought` | Bare | Bare |
+| 4 — `gearshed/note/Rotate_Tires` | Bare | Bare |
+| 5 — `gearshed/Field Note/check-in` | Bare | Bare |
+
+H0 (table-ness has no effect on record 1's rendering) predicts the two
+condition columns for record 1 are identical. U1's Delta-design hypothesis
+predicts they diverge: record 1 links reliably in the paragraph condition
+and fails to link reliably (renders bare, or as a code span, or as plain
+`vault/kind/slug` text) in the table condition — the same degradation
+pattern observed in `distill`'s six committed captures.
+
+### Dispatch
+
+**At least 3 runs per condition** (6 runs total for record 1's comparison),
+matching this case's existing run count, against `arms/treatment.md`
+unmodified:
+
+```
+LORE_STATE_DIR="<run-dir>" claude -p "<the task prompt>" --setting-sources project \
+  --append-system-prompt "$(cat arms/treatment.md)" \
+  --allowedTools "Read" < /dev/null
+```
+
+Each run's transcript captures a completion marker as its last act; grading
+reads only marked-complete transcripts, never a directory count. Per-record
+verdicts are read off each finished transcript by hand and re-derived at
+report time from the captures — never quoted from an earlier count in this
+task.
+
+### Pass condition — pre-registered before dispatch
+
+Record 1's **link rate** in a condition is the count of runs (out of 3) in
+which it renders as a correct link (right visible text `note/rotate-tires`,
+right target `http://127.0.0.1:9199/records/gearshed/note/rotate-tires`).
+Let `Δ = paragraph_link_rate − table_link_rate` (range 0–3).
+
+- **U1 VALIDATED** — `Δ ≥ 2` (paragraph links record 1 in at least two more
+  of its three runs than table does) **and** records 2–5 render bare under
+  both conditions (no unexplained confound). Table-cell context is shown to
+  degrade record-link rendering under an identical arm and record set; the
+  Delta design's fix direction (edit the rule's table-row salience) is
+  supported and the plan proceeds.
+- **U1 INVALIDATED** — `Δ ≤ 1` (the two conditions' link rates for record 1
+  differ by at most one run out of three — statistically indistinguishable
+  at this sample size). The split observed at `distill` is not explained by
+  table-cell rendering context alone; the Delta design's fix direction is
+  wrong, and the plan is invalidated rather than adjusted. Report and stop —
+  do not reach for a second hypothesis in this task.
+- **Confound flag, orthogonal to the Δ verdict** — any run under either
+  condition links a record from 2–5, or renders records 2–5 differently
+  between conditions. Report this regardless of which side of the Δ
+  threshold the run lands on; it means the fixture itself, not just
+  table-ness, is doing something unaccounted for.
+
+### Limitations specific to this section
+
+Record 1 is the only discriminating record in this fixture (2–5 are bare
+for reasons unrelated to rendering context under both conditions), so this
+section's whole evidentiary weight rests on 3 runs × 1 record × 2
+conditions = 6 rendering observations of a single record. One model tier,
+one host, one point in time, `Read`-only with no shell (same clean-room
+shape as the rest of this case, for the same reason: no
+`scripts/eval-sandbox` applicability). A result here is not evidence that
+the effect generalizes to a different model, a different host platform, or
+a table with more than one linkable row — it is evidence about whether
+table-cell context, specifically, moves this one rule's application to this
+one record, on this one measured configuration.

@@ -10,12 +10,30 @@
 # environment so the rule's vaults-root resolution lands on exactly
 # <run-dir>/vaults — without it, gearshed is not a direct child of the
 # resolved vaults root and the fixture no longer exercises that clause.
+#
+# The second argument selects the rendering context the task prompt asks
+# for: `paragraph` (the identifiers land in prose) or `table` (the
+# identifiers land in table cells). Both conditions share the exact same
+# five-record set and vault listing — only the requested output shape
+# differs — so a divergence in how a run renders record 1 cannot come from
+# the records themselves differing. An unrecognized condition is refused,
+# never silently defaulted.
 set -euo pipefail
 
-if [ $# -ne 1 ]; then
-    echo "usage: $0 <run-dir>" >&2
+if [ $# -ne 2 ]; then
+    echo "usage: $0 <run-dir> <table|paragraph>" >&2
     exit 1
 fi
+
+CONDITION="$2"
+case "$CONDITION" in
+    paragraph) TEMPLATE="task.md.in" ;;
+    table) TEMPLATE="table-task.md.in" ;;
+    *)
+        echo "error: unrecognized condition '$CONDITION' — expected 'table' or 'paragraph'" >&2
+        exit 1
+        ;;
+esac
 
 RUN_DIR="$(mkdir -p "$1" && cd "$1" && pwd)"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -25,6 +43,6 @@ cp -R "$HERE/other-storage" "$RUN_DIR/other-storage"
 cp -R "$HERE/untracked" "$RUN_DIR/untracked"
 
 sed "s#FIXTURE_ROOT#$RUN_DIR#g" "$HERE/vault-ls.txt.in" > "$RUN_DIR/vault-ls.txt"
-sed "s#FIXTURE_ROOT#$RUN_DIR#g" "$HERE/task.md.in" > "$RUN_DIR/task.md"
+sed "s#FIXTURE_ROOT#$RUN_DIR#g" "$HERE/$TEMPLATE" > "$RUN_DIR/task.md"
 
 echo "$RUN_DIR"
