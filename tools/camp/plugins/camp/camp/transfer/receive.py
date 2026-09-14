@@ -19,9 +19,15 @@ on, not to whoever asks to overwrite it next. A workspace already present
 and owned by the sender itself requires `--overwrite` to proceed, since
 removing it is destructive; a genuinely free slug needs no such gate. The
 overwrite path removes the prior attempt through camp's own teardown
-(`camp.provision.reconcile.reconcile_break`) before seeding a fresh manifest,
-so a re-run after a partial failure never leaves the previous attempt's
-content behind. The seeded manifest's `owner` is always the sender's
+(`camp.provision.reconcile.reconcile_break`), and ALSO purges any transcript
+the harness boundary already placed for this workspace
+(`_purge_transferred_transcripts`, read-only against
+`Harness.session_transcripts` / `Harness.session_transcript_path`) —
+`reconcile_break` alone reaches only the workspace directory's worktrees and
+manifest, never the separate harness projects tree the `conversations` phase
+writes into — before seeding a fresh manifest, so a re-run after a partial
+failure never leaves the previous attempt's content, worktree or
+conversation, behind. The seeded manifest's `owner` is always the sender's
 declared name — this host never stamps its own.
 
 `--owner` is bookkeeping, not an authentication boundary: it records which
@@ -581,6 +587,40 @@ def read_transfer_marker(ws_dir: Path) -> tuple[MarkerEntry, ...]:
     return tuple(entries)
 
 
+def _purge_transferred_transcripts(
+    group: dict[str, Any], ws_dir: Path, *, env: dict[str, str] | None = None
+) -> None:
+    """Remove every harness transcript already recorded under *ws_dir*, so a
+    retried transfer's teardown reaches the harness's own transcript store
+    and not only the workspace directory `reconcile_break` tears down.
+
+    Resolved entirely through the harness boundary
+    (`Harness.session_transcripts` / `Harness.session_transcript_path`) —
+    this never re-derives where a transcript lives itself. A group with no
+    recognized harness, or a harness with no transcript-store concept,
+    leaves nothing to purge.
+    """
+    from ..launch.profile import harness_for
+
+    harness = harness_for(group)
+    if harness is None:
+        return
+
+    rows = harness.session_transcripts(workspace=ws_dir, env=env)
+    if rows is None:
+        return
+
+    for row in rows:
+        if row.cwd is None:
+            continue
+        transcript_path = harness.session_transcript_path(row.session_id, row.cwd, env=env)
+        if transcript_path is None:
+            continue
+        nested_dir = transcript_path.parent / row.session_id
+        transcript_path.unlink(missing_ok=True)
+        shutil.rmtree(nested_dir, ignore_errors=True)
+
+
 def begin(
     *,
     groups: list[dict[str, Any]],
@@ -665,6 +705,7 @@ def begin(
                     raise UnattributedBranch(slug, member["name"], branch, sender)
 
     if needs_teardown:
+        _purge_transferred_transcripts(group, ws_dir, env=env)
         reconcile_break(group, slug, env=env, force=True)
 
     seed_pending_workspace(group, slug, env=env, owner=sender)

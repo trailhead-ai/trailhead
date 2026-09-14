@@ -521,6 +521,10 @@ class TestRerunDropsStaleContent:
             [{"name": "repo_a", "repo_root": str(peer_repo), "tasks": [], "base": "origin/main"}],
         )
         env = camp_state_env(tmp_path)
+        # `begin`'s overwrite teardown now also consults the harness boundary
+        # (to purge any placed transcript) — an isolated Claude Code config
+        # dir keeps that resolution off the developer's real home.
+        env["TRAILHEAD_CLAUDE_DIR"] = str(tmp_path / "claude-dir")
 
         def _bundle(basis: str | None = None) -> bytes:
             from camp.transfer.history import build_bundle_argv

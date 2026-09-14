@@ -2221,6 +2221,135 @@ class TestMoveWorkspaceEndToEnd:
         peer_wt = _worktree_path("testgroup", g["slug"], "repo_a", env=g["peer_env"])
         assert (peer_wt / "committed.txt").read_text() == "committed on the sender\n"
 
+    def test_retry_after_content_lands_leaves_none_of_the_failed_attempts_content_behind(
+        self, move_env
+    ):
+        """The retry claim proven non-vacuously: attempt one lands a real
+        worktree file and a real conversation transcript on the peer, THEN
+        fails (in the `conversations` phase, after the first conversation
+        already landed) — not in `history`, which never proves the teardown
+        removes anything. Attempt one's worktree file and conversation are
+        both distinguishable from attempt two's, so their absence after the
+        successful retry is proof the teardown reached them, not merely that
+        the retry's own content arrived."""
+        from pathlib import PurePosixPath
+
+        from camp.group.manifest import workspace_dir
+        from camp.provision.reconcile import _worktree_path
+        from camp.transfer.conversations import WorkspaceConversation
+        from camp.transfer.move import PhaseFailed, move_workspace
+        from trailhead.harness.claude_code import ClaudeCodeHarness
+
+        g = move_env
+        sender_ws_root = workspace_dir("testgroup", g["slug"], env=g["sender_env"])
+
+        landed_session_id = "44444444-4444-4444-8444-444444444444"
+        failing_session_id = "55555555-5555-4555-8555-555555555555"
+
+        landed_transcript = g["tmp_path"] / "attempt-one-landed.jsonl"
+        landed_transcript.write_text(
+            json.dumps({"cwd": str(sender_ws_root), "type": "summary"}) + "\n"
+            + json.dumps(
+                {"type": "user", "message": {"role": "user", "content": "attempt-one-only-marker"}}
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        failing_transcript = g["tmp_path"] / "attempt-one-failing.jsonl"
+        failing_transcript.write_text(
+            json.dumps({"cwd": str(sender_ws_root), "type": "summary"}) + "\n",
+            encoding="utf-8",
+        )
+        transcripts_by_id = {
+            landed_session_id: landed_transcript,
+            failing_session_id: failing_transcript,
+        }
+
+        def _locate(session_id, root):
+            return transcripts_by_id[session_id]
+
+        calls = {"n": 0}
+
+        def _conversation_producer(argv):
+            calls["n"] += 1
+            if calls["n"] == 2:
+                return subprocess.Popen(
+                    [sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'not a tarball')"],
+                    stdout=subprocess.PIPE,
+                )
+            return subprocess.Popen(list(argv), stdout=subprocess.PIPE)
+
+        conversations = (
+            WorkspaceConversation(
+                session_id=landed_session_id, subpath=PurePosixPath("."), live=False, unresolved=False
+            ),
+            WorkspaceConversation(
+                session_id=failing_session_id, subpath=PurePosixPath("."), live=False, unresolved=False
+            ),
+        )
+
+        # Attempt one: a worktree file no retry will carry, plus the two
+        # conversations above — the second one's corrupted producer fails
+        # the `conversations` phase only after the first has already landed.
+        (g["wt_path"] / "attempt-one-only.txt").write_text("only in attempt one\n")
+
+        with pytest.raises(PhaseFailed) as exc_info:
+            move_workspace(
+                host=g["host"],
+                group=g["group"],
+                group_name="testgroup",
+                slug=g["slug"],
+                sender_name="host-a",
+                overwrite=False,
+                env=g["sender_env"],
+                run=g["run"],
+                stream_spawn=g["stream_spawn"],
+                conversations=conversations,
+                locate_transcript=_locate,
+                conversation_producer_spawn=_conversation_producer,
+            )
+        assert exc_info.value.phase.startswith("conversations")
+
+        peer_ws_root = workspace_dir("testgroup", g["slug"], env=g["peer_env"])
+        harness = ClaudeCodeHarness()
+        peer_wt = _worktree_path("testgroup", g["slug"], "repo_a", env=g["peer_env"])
+
+        # Content genuinely landed before the failure — otherwise the
+        # teardown this test proves would have nothing to remove.
+        assert (peer_wt / "attempt-one-only.txt").exists()
+        assert harness.session_transcript_path(
+            landed_session_id, peer_ws_root, env=g["peer_env"]
+        ) is not None
+
+        # Attempt two: the distinguishing worktree file is gone, a fresh one
+        # takes its place, and the landed conversation is never resent.
+        (g["wt_path"] / "attempt-one-only.txt").unlink()
+        (g["wt_path"] / "attempt-two-only.txt").write_text("only in attempt two\n")
+
+        result = move_workspace(
+            host=g["host"],
+            group=g["group"],
+            group_name="testgroup",
+            slug=g["slug"],
+            sender_name="host-a",
+            overwrite=True,
+            env=g["sender_env"],
+            run=g["run"],
+            stream_spawn=g["stream_spawn"],
+        )
+
+        assert result.members == ("repo_a",)
+        landed = _git_out(g["peer_repo"], "rev-parse", f"refs/heads/{g['branch']}")
+        sender_tip = _git_out(g["wt_path"], "rev-parse", "HEAD")
+        assert landed == sender_tip
+
+        assert (peer_wt / "attempt-two-only.txt").exists()
+        assert not (peer_wt / "attempt-one-only.txt").exists()
+        assert (
+            harness.session_transcript_path(landed_session_id, peer_ws_root, env=g["peer_env"])
+            is None
+        )
+
     def test_unattributed_workspace_refuses_even_with_overwrite_and_leaves_peer_untouched(
         self, move_env
     ):

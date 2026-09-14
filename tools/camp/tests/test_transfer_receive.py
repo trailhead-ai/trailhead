@@ -23,6 +23,9 @@ Test contract (all must RED before implementation, GREEN after):
 - a refusal writes no marker into a workspace it refused to touch.
 - `seed_pending_workspace`'s new `owner=` is optional and keyword-only: the
   default path (no `owner` passed) keeps self-stamping unchanged.
+- `begin`'s `--overwrite` teardown reaches the harness transcript store, not
+  only the workspace directory: a conversation transcript placed by a prior
+  attempt is gone after the retry.
 
 `conversations` (all must RED before implementation, GREEN after):
 
@@ -103,6 +106,10 @@ def one_member_group(tmp_path: Path):
         [{"name": "repo_a", "repo_root": str(repo_a), "tasks": [], "base": "origin/main"}],
     )
     env = camp_state_env(tmp_path)
+    # `begin`'s overwrite teardown now also consults the harness boundary
+    # (to purge any placed transcript) — an isolated Claude Code config dir
+    # keeps that resolution off the developer's real home.
+    env["TRAILHEAD_CLAUDE_DIR"] = str(tmp_path / "claude-dir")
     return {"group": group, "repo_a": repo_a, "env": env, "tmp_path": tmp_path}
 
 
@@ -121,6 +128,7 @@ def two_member_group(tmp_path: Path):
         ],
     )
     env = camp_state_env(tmp_path)
+    env["TRAILHEAD_CLAUDE_DIR"] = str(tmp_path / "claude-dir")
     return {"group": group, "repo_a": repo_a, "repo_b": repo_b, "env": env, "tmp_path": tmp_path}
 
 
@@ -594,6 +602,62 @@ class TestBeginOverwrite:
 
         mpath = _manifest_path("testgroup", "feat-ow", env)
         assert owner_of(read_central_manifest(mpath)) == "sending-host"
+
+
+class TestBeginOverwriteReachesTranscriptStore:
+    def test_overwrite_purges_a_previously_placed_transcript(self, one_member_group):
+        """The defect this task fixes: `reconcile_break` only tears down the
+        workspace directory's worktrees and manifest, never the harness's own
+        transcript store. A conversation placed by a first attempt (real
+        content, run through `receive.conversations` exactly as the wire
+        would) must be gone from that store after an `--overwrite` retry —
+        not merely absent from the workspace directory."""
+        from camp.transfer import receive
+
+        g = one_member_group
+        env = _conversation_env(g)
+        session_id = "33333333-3333-4333-8333-333333333333"
+
+        receive.begin(
+            groups=[g["group"]],
+            group_name="testgroup",
+            slug="feat-x",
+            sender="sending-host",
+            overwrite=False,
+            env=env,
+        )
+        ws_root = _workspace_dir("testgroup", "feat-x", env).resolve()
+
+        archive = _archive_bytes(
+            json.dumps({"cwd": "/home/sender/some-other-workspace", "type": "summary"}).encode()
+            + b"\n"
+        )
+        receive.conversations(
+            groups=[g["group"]],
+            group_name="testgroup",
+            slug="feat-x",
+            session_id=session_id,
+            subpath=".",
+            archive_stream=io.BytesIO(archive),
+            env=env,
+        )
+
+        from trailhead.harness.claude_code import ClaudeCodeHarness
+
+        harness = ClaudeCodeHarness()
+        placed = harness.session_transcript_path(session_id, ws_root, env=env)
+        assert placed is not None, "the conversation must actually land before this proves anything"
+
+        receive.begin(
+            groups=[g["group"]],
+            group_name="testgroup",
+            slug="feat-x",
+            sender="sending-host",
+            overwrite=True,
+            env=env,
+        )
+
+        assert harness.session_transcript_path(session_id, ws_root, env=env) is None
 
 
 # ---------------------------------------------------------------------------
