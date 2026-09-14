@@ -1158,6 +1158,7 @@ DOCTOR_PROBE_FLAG = "--probe"
 DOCTOR_PROBE_KEY = "probe"
 DOCTOR_PROBE_MULTIPLEXER_KEY = "multiplexer_present"
 DOCTOR_PROBE_ACCOUNTS_KEY = "accounts"
+DOCTOR_PROBE_GROUP_POLICY_KEY = "group_policy"
 
 
 def _doctor_multiplexer_present() -> bool:
@@ -1240,6 +1241,43 @@ def _doctor_account_roster(env: dict[str, str] | None = None) -> list[dict[str, 
         rows.append({"account": None, "verdict": None, "reason": reason})
 
     return _strip_control_sequences_deep(rows)
+
+
+def _doctor_group_policy(env: dict[str, str] | None = None) -> list[dict[str, Any]]:
+    """This machine's own policy projection for every group it configures —
+    the value behind `DOCTOR_PROBE_GROUP_POLICY_KEY`.
+
+    Ships facts only: this machine never receives another machine's
+    projection here and never computes or decides whether anything
+    diverges — that is a consumer's job, done elsewhere from two of these
+    payloads.
+
+    One row per group-config file, in filename order:
+      `{"group": <stem>, "projection": <dict>, "error": None}` for a group
+      that loaded and projected normally, or
+      `{"group": <stem>, "projection": None, "error": <str>}` for a group
+      whose file could not be read or parsed — named by its file stem since
+      a config that fails to load never yields a declared group name.
+    A group this machine does not configure simply has no row: the
+    consumer's "absent" case is ordinary dict/list non-membership, not a
+    marker of its own. An empty groups directory yields `[]` — present and
+    empty, never omitted.
+    """
+    from .cli.common import _groups_dir
+    from .group.config import load_group
+    from .group.policy import project_group_policy
+
+    rows: list[dict[str, Any]] = []
+    directory = _groups_dir()
+    if directory.is_dir():
+        for path in sorted(directory.glob("*.toml")):
+            try:
+                projection = project_group_policy(load_group(path))
+            except Exception as e:  # noqa: BLE001 — one broken group config is named, never hides the rest
+                rows.append({"group": path.stem, "projection": None, "error": str(e)})
+                continue
+            rows.append({"group": path.stem, "projection": projection, "error": None})
+    return rows
 
 
 def _doctor_local_checks(
@@ -1412,6 +1450,16 @@ def cmd_doctor(
             except Exception as e:  # noqa: BLE001 — one machine's roster failure never discards its other facts
                 accounts = [{"account": None, "verdict": None, "reason": str(e)}]
             report[DOCTOR_PROBE_ACCOUNTS_KEY] = accounts
+            # Same posture as the roster above: PRODUCING the whole
+            # group_policy collection can raise (a broken group-config
+            # directory) even though `_doctor_group_policy` already guards
+            # each individual group file. That must not cost the
+            # checks/multiplexer/accounts facts already computed above.
+            try:
+                group_policy = _doctor_group_policy(env=env)
+            except Exception as e:  # noqa: BLE001 — one machine's group-policy failure never discards its other facts
+                group_policy = [{"group": None, "projection": None, "error": str(e)}]
+            report[DOCTOR_PROBE_GROUP_POLICY_KEY] = group_policy
         print(json.dumps(report))
     else:
         _doctor_render_checks_human(checks)

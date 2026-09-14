@@ -1215,6 +1215,268 @@ def test_doctor_probe_accounts_reachable_through_real_cli_entry_path(
 
 
 # ---------------------------------------------------------------------------
+# camp doctor --probe group_policy — this machine's own group policy
+# projections
+# ---------------------------------------------------------------------------
+
+
+def test_doctor_probe_group_policy_matches_projection_computed_directly(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The probe answer's group_policy entry for a normally-configured group
+    matches `project_group_policy` computed directly from the same config —
+    the producer must not diverge from the function it wraps."""
+    import json as _json
+
+    import camp.cli.common as cli_common
+    from camp.group.config import load_group
+    from camp.group.policy import project_group_policy
+    from camp.spine import DOCTOR_PROBE_GROUP_POLICY_KEY, cmd_doctor
+
+    groups_dir = tmp_path / "groups"
+    groups_dir.mkdir()
+    _write_group(groups_dir, "levr.toml", "levr", account="acct-levr")
+    monkeypatch.setattr(cli_common, "_groups_dir", lambda: groups_dir)
+
+    monkeypatch.setenv("CAMP_TEST_ASDF_PRESENT", "1")
+    monkeypatch.setenv("CAMP_TEST_TMUX_PRESENT", "1")
+    _isolate_roots(monkeypatch, tmp_path)
+    try:
+        cmd_doctor(["--json", "--probe"], env=_isolated_config_env(tmp_path))
+    except SystemExit:
+        pass
+    report = _json.loads(capsys.readouterr().out)
+
+    expected = project_group_policy(load_group(groups_dir / "levr.toml"))
+    row = next(r for r in report[DOCTOR_PROBE_GROUP_POLICY_KEY] if r["group"] == "levr")
+    assert row["projection"] == expected
+
+
+def test_doctor_probe_group_policy_wire_shape_pins_normal_absent_and_unreadable(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The literal wire shape distinguishes the three cases a consumer must
+    tell apart: a group projected normally (a `projection` dict, `error`
+    None), a group this host does not configure (no row at all — ordinary
+    non-membership, not a marker), and a group whose file could not be
+    parsed (`projection` None, `error` a string)."""
+    import json as _json
+
+    import camp.cli.common as cli_common
+    from camp.group.config import load_group
+    from camp.group.policy import project_group_policy
+    from camp.spine import DOCTOR_PROBE_GROUP_POLICY_KEY, cmd_doctor
+
+    groups_dir = tmp_path / "groups"
+    groups_dir.mkdir()
+    _write_group(groups_dir, "good.toml", "good")
+    (groups_dir / "broken.toml").write_text("not valid toml [[[", encoding="utf-8")
+    monkeypatch.setattr(cli_common, "_groups_dir", lambda: groups_dir)
+
+    monkeypatch.setenv("CAMP_TEST_ASDF_PRESENT", "1")
+    monkeypatch.setenv("CAMP_TEST_TMUX_PRESENT", "1")
+    _isolate_roots(monkeypatch, tmp_path)
+    try:
+        cmd_doctor(["--json", "--probe"], env=_isolated_config_env(tmp_path))
+    except SystemExit:
+        pass
+    report = _json.loads(capsys.readouterr().out)
+    rows = report[DOCTOR_PROBE_GROUP_POLICY_KEY]
+
+    normal = next(r for r in rows if r["group"] == "good")
+    assert normal == {
+        "group": "good",
+        "projection": project_group_policy(load_group(groups_dir / "good.toml")),
+        "error": None,
+    }
+
+    unreadable = next(r for r in rows if r["group"] == "broken")
+    assert unreadable["projection"] is None
+    assert isinstance(unreadable["error"], str) and unreadable["error"]
+
+    assert next((r for r in rows if r["group"] == "nonexistent"), None) is None
+
+
+def test_doctor_probe_group_policy_no_groups_yields_empty_list_not_absent(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A machine configuring no groups carries the key with an empty
+    collection — present and empty, not absent (absence is reserved for a
+    camp too old to know the key)."""
+    import json as _json
+
+    import camp.cli.common as cli_common
+    from camp.spine import DOCTOR_PROBE_GROUP_POLICY_KEY, cmd_doctor
+
+    groups_dir = tmp_path / "groups"
+    groups_dir.mkdir()
+    monkeypatch.setattr(cli_common, "_groups_dir", lambda: groups_dir)
+
+    monkeypatch.setenv("CAMP_TEST_ASDF_PRESENT", "1")
+    monkeypatch.setenv("CAMP_TEST_TMUX_PRESENT", "1")
+    _isolate_roots(monkeypatch, tmp_path)
+    try:
+        cmd_doctor(["--json", "--probe"], env=_isolated_config_env(tmp_path))
+    except SystemExit:
+        pass
+    report = _json.loads(capsys.readouterr().out)
+    assert DOCTOR_PROBE_GROUP_POLICY_KEY in report
+    assert report[DOCTOR_PROBE_GROUP_POLICY_KEY] == []
+
+
+def test_doctor_probe_group_policy_one_malformed_file_does_not_lose_the_rest(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """One malformed group file produces a failure entry for that group
+    while the other groups still report their projections."""
+    import json as _json
+
+    import camp.cli.common as cli_common
+    from camp.spine import DOCTOR_PROBE_GROUP_POLICY_KEY, cmd_doctor
+
+    groups_dir = tmp_path / "groups"
+    groups_dir.mkdir()
+    _write_group(groups_dir, "alpha.toml", "alpha")
+    _write_group(groups_dir, "gamma.toml", "gamma")
+    (groups_dir / "broken.toml").write_text("not valid toml [[[", encoding="utf-8")
+    monkeypatch.setattr(cli_common, "_groups_dir", lambda: groups_dir)
+
+    monkeypatch.setenv("CAMP_TEST_ASDF_PRESENT", "1")
+    monkeypatch.setenv("CAMP_TEST_TMUX_PRESENT", "1")
+    _isolate_roots(monkeypatch, tmp_path)
+    try:
+        cmd_doctor(["--json", "--probe"], env=_isolated_config_env(tmp_path))
+    except SystemExit:
+        pass
+    report = _json.loads(capsys.readouterr().out)
+    rows = report[DOCTOR_PROBE_GROUP_POLICY_KEY]
+
+    assert len(rows) == 3
+    ok_groups = {r["group"] for r in rows if r["error"] is None}
+    assert ok_groups == {"alpha", "gamma"}
+    broken = next(r for r in rows if r["group"] == "broken")
+    assert broken["error"] is not None
+
+
+class _UnreadableGroupsDir:
+    """A `_groups_dir()` stand-in whose `glob` raises — simulating a group
+    directory this process cannot read, without depending on chmod's
+    behavior under an unknown test-runner uid."""
+
+    def is_dir(self) -> bool:
+        return True
+
+    def glob(self, pattern: str):
+        raise PermissionError("permission denied enumerating group configs")
+
+
+def test_doctor_probe_group_policy_unreadable_directory_produces_failure_entry(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """An unreadable group directory produces a failure entry rather than
+    an absent key or an empty collection."""
+    import json as _json
+
+    import camp.cli.common as cli_common
+    from camp.spine import DOCTOR_PROBE_GROUP_POLICY_KEY, cmd_doctor
+
+    monkeypatch.setattr(cli_common, "_groups_dir", lambda: _UnreadableGroupsDir())
+
+    monkeypatch.setenv("CAMP_TEST_ASDF_PRESENT", "1")
+    monkeypatch.setenv("CAMP_TEST_TMUX_PRESENT", "1")
+    _isolate_roots(monkeypatch, tmp_path)
+    try:
+        cmd_doctor(["--json", "--probe"], env=_isolated_config_env(tmp_path))
+    except SystemExit:
+        pass
+    report = _json.loads(capsys.readouterr().out)
+    rows = report[DOCTOR_PROBE_GROUP_POLICY_KEY]
+
+    assert rows != []
+    assert rows == [{"group": None, "projection": None, "error": rows[0]["error"]}]
+    assert isinstance(rows[0]["error"], str) and rows[0]["error"]
+
+
+def test_doctor_probe_group_policy_whole_collection_exception_preserves_other_probe_keys(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A top-level exception while producing the whole group_policy
+    collection still yields the existing multiplexer and account keys, plus
+    a whole-collection failure marker — never an aborted payload. Mirrors
+    the guard already wrapping the account roster."""
+    import json as _json
+
+    import camp.spine as spine
+    from camp.spine import (
+        DOCTOR_PROBE_ACCOUNTS_KEY,
+        DOCTOR_PROBE_GROUP_POLICY_KEY,
+        DOCTOR_PROBE_MULTIPLEXER_KEY,
+        cmd_doctor,
+    )
+
+    def _boom(env=None):
+        raise RuntimeError("group-config directory exploded")
+
+    monkeypatch.setattr(spine, "_doctor_group_policy", _boom)
+
+    monkeypatch.setenv("CAMP_TEST_ASDF_PRESENT", "1")
+    monkeypatch.setenv("CAMP_TEST_TMUX_PRESENT", "1")
+    _isolate_roots(monkeypatch, tmp_path)
+    try:
+        cmd_doctor(["--json", "--probe"], env=_isolated_config_env(tmp_path))
+    except SystemExit:
+        pass
+    report = _json.loads(capsys.readouterr().out)
+
+    assert "checks" in report
+    assert DOCTOR_PROBE_MULTIPLEXER_KEY in report
+    assert DOCTOR_PROBE_ACCOUNTS_KEY in report
+    rows = report[DOCTOR_PROBE_GROUP_POLICY_KEY]
+    assert rows == [{"group": None, "projection": None, "error": rows[0]["error"]}]
+    assert "exploded" in rows[0]["error"]
+
+
+def test_doctor_probe_group_policy_absent_without_probe_and_no_network(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A non-probe `camp doctor --json` invocation does not carry the key at
+    all, and contacts no network — group-policy production is pure local
+    TOML parsing, so a plain invocation must never even attempt a socket."""
+    import json as _json
+    import socket as _socket
+
+    from camp.spine import DOCTOR_PROBE_GROUP_POLICY_KEY, cmd_doctor
+
+    def _no_network(*args, **kwargs):
+        raise AssertionError("camp doctor --json (no --probe) must contact no network")
+
+    monkeypatch.setattr(_socket, "socket", _no_network)
+    monkeypatch.setattr(_socket, "create_connection", _no_network)
+
+    _isolate_roots(monkeypatch, tmp_path)
+    monkeypatch.setenv("CAMP_TEST_ASDF_PRESENT", "1")
+    try:
+        cmd_doctor(["--json"], env=_isolated_config_env(tmp_path))
+    except SystemExit:
+        pass
+    report = _json.loads(capsys.readouterr().out)
+    assert DOCTOR_PROBE_GROUP_POLICY_KEY not in report
+
+
+def test_doctor_probe_without_json_still_refused_unchanged(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`--probe` without `--json` stays refused, unchanged by the new key."""
+    from camp.spine import cmd_doctor
+
+    _isolate_roots(monkeypatch, tmp_path)
+    with pytest.raises(SystemExit):
+        cmd_doctor(["--probe"], env=_isolated_config_env(tmp_path))
+    err = capsys.readouterr().err
+    assert "--probe requires --json" in err
+
+
+# ---------------------------------------------------------------------------
 # Import guard: legible ImportError, not raw traceback
 # ---------------------------------------------------------------------------
 
