@@ -191,3 +191,67 @@ def test_non_ascii_content_not_mangled(monkeypatch) -> None:
     outcome = transport.RemoteRefusal(stdout="", stderr=stderr, exit_code=1)
     answer = _answer_via_host_path(monkeypatch, outcome)
     assert answer.notices == ["camp list: café-ソフト group not found: [31m✗[0m"]
+
+
+# ---------------------------------------------------------------------------
+# Depth bound: the deep strip walks remote-authored structure, so a hostile
+# payload must not be able to exhaust the interpreter stack through it.
+# ---------------------------------------------------------------------------
+
+
+def test_deep_strip_bounds_recursion_on_a_pathologically_nested_payload() -> None:
+    """`json.loads` accepts nesting far deeper than a simply-recursive
+    Python walker can follow — its C decoder is not stack-bound the way
+    this function is. A remote camp therefore controls a payload it can
+    decode but this walker cannot traverse, and an escaping RecursionError
+    is caught only by the generic per-host fault handler, which discards
+    that host's whole contribution — its multiplexer and account facts
+    included. The walk is bounded so a pathological value degrades to a
+    single unusable value instead of taking the answer down with it."""
+    import json
+
+    relay = _relay_module()
+    deep = json.loads("[" * 5_000 + "]" * 5_000)
+
+    # The bound holds where the unbounded walk raised.
+    stripped = relay._strip_control_sequences_deep({"projection": deep})
+
+    # The returned structure is finite: the over-deep branch terminates in a
+    # plain None at the bound rather than reproducing 5,000 levels of input.
+    depth = 0
+    node = stripped["projection"]
+    while isinstance(node, list) and node:
+        depth += 1
+        node = node[0]
+    assert node is None
+    assert depth <= relay._MAX_RELAY_STRIP_DEPTH + 1
+
+
+def test_deep_strip_still_traverses_a_realistic_payload_unchanged() -> None:
+    """The bound must not clip a legitimate answer. A real probe payload
+    nests only a handful of levels — group, members, tasks, steps, cmd —
+    so a realistic shape passes through with its strings stripped and its
+    structure intact."""
+    relay = _relay_module()
+
+    payload = {
+        "group_policy": [
+            {
+                "group": "g1",
+                "projection": {
+                    "group_name": "g1",
+                    "members": {
+                        "m1": {
+                            "base": "origin/main",
+                            "tasks": [{"name": "boot", "steps": [["npm", "ci\x1b[31m"]]}],
+                        }
+                    },
+                },
+                "error": None,
+            }
+        ]
+    }
+    out = relay._strip_control_sequences_deep(payload)
+    member = out["group_policy"][0]["projection"]["members"]["m1"]
+    assert member["base"] == "origin/main"
+    assert member["tasks"][0]["steps"][0] == ["npm", "ci[31m"]

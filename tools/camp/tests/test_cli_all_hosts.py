@@ -4057,6 +4057,125 @@ def test_doctor_group_structurally_malformed_projection_degrades_only_the_group_
     assert group_row["verdict"] == "UNKNOWN"
 
 
+def test_doctor_group_projection_with_runaway_member_count_renders_cannot_tell_json(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """The row cap bounds how many GROUPS a far host can make this side
+    consider, and the field/dimension/detail caps bound what is RENDERED —
+    but all of those apply after `compare_group_policy` has already walked
+    the whole projection. A far host controls the member count inside one
+    group, so a single oversized projection drives real CPU and memory here
+    before any of those caps engage. Cardinality is bounded at the same
+    parse point the other caps are, and an over-large projection is not a
+    comparison this side attempts: it is cannot-tell, never a confident
+    verdict derived from a payload we declined to process."""
+    _doctor_hosts_env(tmp_path, monkeypatch, "[hosts.andromeda]\n")
+    _write_self_group(tmp_path, "g1", _GROUP_G1_BASE)
+    transport = _transport_module()
+    runaway = {
+        f"m{i}": {"base": "origin/main", "tasks": []}
+        for i in range(_dispatch_module()._DOCTOR_GROUP_MEMBER_LIMIT + 1)
+    }
+
+    def fake_run_camp(host, remote_argv, **kw):
+        payload = {
+            "pass": True,
+            "checks": [],
+            "probe": True,
+            "multiplexer_present": True,
+            "accounts": [
+                {"account": "andromeda-account", "verdict": "authenticated", "reason": None}
+            ],
+            "group_policy": [
+                {
+                    "group": "g1",
+                    "projection": {
+                        "group_name": "g1",
+                        "branch_pattern": "worktree-{slug}",
+                        "members": runaway,
+                        "account": None,
+                        "shared_vaults": [],
+                        "lore_scopes": [],
+                    },
+                    "error": None,
+                }
+            ],
+        }
+        return _probe_answered(payload)
+
+    monkeypatch.setattr(transport, "run_camp", fake_run_camp)
+
+    code = _run(monkeypatch, ["doctor", "-a", "--json"])
+    report = json.loads(capsys.readouterr().out)
+    assert code == 0
+    group_row = _group_row(report["hosts"], "andromeda")
+    assert group_row["verdict"] == "UNKNOWN"
+    assert "differs" not in group_row["detail"]
+    andromeda_rows = [h for h in report["hosts"] if h["host"] == "andromeda"]
+    multiplexer_row = next(h for h in andromeda_rows if "multiplexer" in h["detail"])
+    assert multiplexer_row["verdict"] == "PASS"
+
+
+def test_doctor_group_pathologically_nested_projection_degrades_only_the_group_not_the_host(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """The same axis-isolation invariant as the C1 case above, reached
+    through a different door. `json.loads` decodes nesting thousands of
+    levels deep, but the deep control-sequence strip that runs over every
+    remote-authored payload is a plain recursive walk — so a peer can hand
+    this side a few KB of JSON it can parse but could not traverse. The
+    resulting RecursionError escaped BEFORE the guarded comparison, so the
+    C1 guard never saw it, and the generic per-host fault handler discarded
+    the host's whole contribution: multiplexer and account facts included.
+    A hostile nesting depth degrades exactly one group to cannot-tell."""
+    _doctor_hosts_env(tmp_path, monkeypatch, "[hosts.andromeda]\n")
+    _write_self_group(tmp_path, "g1", _GROUP_G1_BASE)
+    transport = _transport_module()
+    deep = json.loads("[" * 5_000 + "]" * 5_000)
+
+    def fake_run_camp(host, remote_argv, **kw):
+        payload = {
+            "pass": True,
+            "checks": [],
+            "probe": True,
+            "multiplexer_present": True,
+            "accounts": [
+                {"account": "andromeda-account", "verdict": "authenticated", "reason": None}
+            ],
+            "group_policy": [
+                {
+                    "group": "g1",
+                    "projection": {
+                        "group_name": "g1",
+                        "branch_pattern": "worktree-{slug}",
+                        "members": {"alpha": deep},
+                        "account": None,
+                        "shared_vaults": [],
+                        "lore_scopes": [],
+                    },
+                    "error": None,
+                }
+            ],
+        }
+        return _probe_answered(payload)
+
+    monkeypatch.setattr(transport, "run_camp", fake_run_camp)
+
+    code = _run(monkeypatch, ["doctor", "-a", "--json"])
+    report = json.loads(capsys.readouterr().out)
+    assert code == 0
+    andromeda_rows = [h for h in report["hosts"] if h["host"] == "andromeda"]
+    assert not any(
+        "internal camp fault" in h["detail"] for h in andromeda_rows
+    ), andromeda_rows
+    multiplexer_row = next(h for h in andromeda_rows if "multiplexer" in h["detail"])
+    assert multiplexer_row["verdict"] == "PASS"
+    account_row = next(h for h in andromeda_rows if "andromeda-account" in h["detail"])
+    assert account_row["verdict"] == "PASS"
+    group_row = _group_row(report["hosts"], "andromeda")
+    assert group_row["verdict"] == "UNKNOWN"
+
+
 def test_doctor_group_empty_dict_projection_renders_cannot_tell_not_divergence_json(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:

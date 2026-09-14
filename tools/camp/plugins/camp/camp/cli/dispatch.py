@@ -1226,6 +1226,18 @@ _DOCTOR_GROUP_DIMENSION_LIMIT = 20
 #: assembly, stating the cut rather than silently shortening it.
 _DOCTOR_GROUP_DETAIL_LIMIT = 1000
 
+#: Cardinality bound on ONE far group's projection, applied before the
+#: comparison walks it. The row cap above bounds how many groups a peer can
+#: make this side consider, and the field/dimension/detail caps bound what is
+#: rendered — but every one of those applies AFTER `compare_group_policy` has
+#: already traversed the whole projection, so a peer that puts its payload
+#: into a single group's member set pays none of them. A projection larger
+#: than this is not compared at all: it is cannot-tell, because a verdict
+#: derived from a payload this side declined to process would be a claim it
+#: cannot support. Sized far above any real group (the operator's largest
+#: declares four members) and far below a count that costs real memory.
+_DOCTOR_GROUP_MEMBER_LIMIT = 500
+
 
 def _doctor_truncate_field(value: object, limit: int) -> object:
     """Bound one remote-authored string to `limit` characters, marking the
@@ -1383,6 +1395,11 @@ def _doctor_group_projection_is_well_formed(value: object) -> bool:
     if not isinstance(value.get("shared_vaults"), list):
         return False
     if not isinstance(value.get("lore_scopes"), list):
+        return False
+    # Cardinality, checked here rather than after the comparison: every other
+    # cap on this axis applies to what gets RENDERED, which is too late to
+    # stop a peer that puts its whole payload inside one group's member set.
+    if len(value["members"]) > _DOCTOR_GROUP_MEMBER_LIMIT:
         return False
     return True
 

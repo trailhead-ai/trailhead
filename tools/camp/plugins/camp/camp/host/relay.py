@@ -616,18 +616,46 @@ def _try_parse_object(stdout: str) -> dict[str, Any] | None:
     return data
 
 
-def _strip_control_sequences_deep(value: Any) -> Any:
+#: How deep :func:`_strip_control_sequences_deep` will follow a remote-authored
+#: payload before refusing to go further. Every caller of that function passes
+#: structure a *remote* camp authored, and `json.loads` will happily decode
+#: nesting thousands of levels deep — its decoder is not simply-recursive, so it
+#: is not stack-bound the way a plain recursive Python walk is. Without a bound
+#: a peer can therefore hand this side a payload it can parse but cannot walk,
+#: and the resulting `RecursionError` escapes into the generic per-host fault
+#: handler, which discards that host's ENTIRE contribution — its multiplexer and
+#: account facts along with whatever carried the hostile value. Real payloads
+#: nest a handful of levels (group → members → tasks → steps → cmd), so this
+#: bound is far above anything legitimate and far below the interpreter's limit.
+_MAX_RELAY_STRIP_DEPTH = 64
+
+
+def _strip_control_sequences_deep(value: Any, _depth: int = 0) -> Any:
     """Recursively apply :func:`_strip_control_sequences` to every string
     value reachable from *value* — a dict's values (including nested
     dicts, e.g. ``account_binding``), a list's elements, and bare strings.
     Non-string, non-container values (bool, int, float, None) pass through
     unchanged. This is what lets a single-object answer's success path get
     the same protection a rows answer's stderr notice already gets, without
-    this module knowing any verb's own key set."""
+    this module knowing any verb's own key set.
+
+    The walk is bounded at :data:`_MAX_RELAY_STRIP_DEPTH`. A branch nested
+    deeper than that is replaced by ``None`` rather than followed: the value
+    is unusable to any consumer either way, and ``None`` is a value every
+    consumer already handles (a shape check rejects it, a verdict maps it to
+    cannot-tell), whereas an escaping ``RecursionError`` costs the whole host
+    its answer. Truncating a pathological branch is a fact this side can still
+    report; a stack overflow is not.
+    """
+    if _depth > _MAX_RELAY_STRIP_DEPTH:
+        return None
     if isinstance(value, str):
         return _strip_control_sequences(value)
     if isinstance(value, dict):
-        return {key: _strip_control_sequences_deep(item) for key, item in value.items()}
+        return {
+            key: _strip_control_sequences_deep(item, _depth + 1)
+            for key, item in value.items()
+        }
     if isinstance(value, list):
-        return [_strip_control_sequences_deep(item) for item in value]
+        return [_strip_control_sequences_deep(item, _depth + 1) for item in value]
     return value
