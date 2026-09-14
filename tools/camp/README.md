@@ -445,6 +445,10 @@ Exit codes:
 12 whether ownership moved is genuinely unknown, even after re-probing the
    peer — check the peer directly with `camp transfer-probe` before doing
    anything else
+13 the peer already holds something of this slug's name whose own record
+   does not attribute it to this host — a workspace owned by a third host,
+   or one that never recorded an owner at all — refused regardless of
+   --overwrite; remove or rename it on the peer, or choose a different slug
 ```
 
 `transfer` and `transfer-probe` (the wire-level answer `--dry-run` reads

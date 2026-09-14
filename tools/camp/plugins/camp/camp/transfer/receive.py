@@ -10,12 +10,15 @@ caller names. The sender's declared name (`--owner`) is data stamped into the
 manifest, never a path component.
 
 **begin** decides whether a transfer may start, and if so prepares a place
-for it. A workspace of the given slug already present here, and recorded as
-owned by anyone other than the sender, refuses outright. A workspace already
-present and either owned by the sender itself or carrying no recorded owner
-at all requires `--overwrite` to proceed, since removing it is destructive;
-a genuinely free slug needs no such gate. The overwrite path removes the
-prior attempt through camp's own teardown
+for it. A workspace of the given slug already present here, and whose own
+record does not name the sender as its owner, refuses outright — regardless
+of `--overwrite` — as `UnattributedWorkspace`: this covers both a third
+host's own workspace and one that never recorded an owner at all, since a
+workspace with no recorded owner belongs to whichever host it is already
+on, not to whoever asks to overwrite it next. A workspace already present
+and owned by the sender itself requires `--overwrite` to proceed, since
+removing it is destructive; a genuinely free slug needs no such gate. The
+overwrite path removes the prior attempt through camp's own teardown
 (`camp.provision.reconcile.reconcile_break`) before seeding a fresh manifest,
 so a re-run after a partial failure never leaves the previous attempt's
 content behind. The seeded manifest's `owner` is always the sender's
@@ -212,6 +215,7 @@ __all__ = [
     "GroupNotConfigured",
     "MalformedOwnerName",
     "OwnershipConflict",
+    "UnattributedWorkspace",
     "OverwriteRequired",
     "MemberNotConfigured",
     "BundleUnbundleFailed",
@@ -279,6 +283,35 @@ class OwnershipConflict(ReceiveRefused):
             f"slug {slug!r} already exists here, owned by {owner!r} — refusing "
             f"to let sender {sender!r} overwrite another host's workspace"
         )
+        self.owner = owner
+        self.sender = sender
+
+
+class UnattributedWorkspace(ReceiveRefused):
+    """`begin` refused: a workspace of this slug already exists here, and its
+    own record does not name *sender* as the owner — either a third host is
+    recorded, or no owner is recorded at all. Refused regardless of
+    `--overwrite`: this host was never handed this workspace by *sender*, so
+    overwriting it on *sender*'s say-so is not this transfer's call to make.
+
+    `kind` is a stable discriminant, not a rendering detail — carried so a
+    caller two layers up (`camp.transfer.move`, then `camp.cli.transfer`)
+    can tell this collision apart from a same-named *branch* collision with
+    no workspace record at all, by value rather than by parsing this
+    exception's message. `"workspace"` is this class's only value.
+    """
+
+    kind = "workspace"
+
+    def __init__(self, slug: str, owner: str | None, sender: str) -> None:
+        holds = f"is owned by {owner!r}" if owner is not None else "records no owner at all"
+        super().__init__(
+            f"slug {slug!r} already exists here and {holds} — sender "
+            f"{sender!r} was never handed this workspace, so this is refused "
+            "regardless of --overwrite; remove or rename the workspace on "
+            "this host first, or transfer to a different slug"
+        )
+        self.slug = slug
         self.owner = owner
         self.sender = sender
 
@@ -541,10 +574,11 @@ def begin(
         MalformedOwnerName: *sender* is oversized or malformed — checked
             before anything else runs.
         GroupNotConfigured: *group_name* is not configured on this host.
-        OwnershipConflict: a workspace of *slug* is recorded as owned by a
-            host other than *sender*.
-        OverwriteRequired: a workspace of *slug* already exists and
-            *overwrite* is False.
+        UnattributedWorkspace: a workspace of *slug* already exists and its
+            own record does not name *sender* as the owner — a third host is
+            recorded, or none at all. Raised regardless of *overwrite*.
+        OverwriteRequired: a workspace of *slug* already exists, owned by
+            *sender*, and *overwrite* is False.
     """
     _validate_owner(sender)
 
@@ -580,8 +614,8 @@ def begin(
             except ManifestError:
                 existing_owner = None
 
-            if existing_owner is not None and existing_owner != sender:
-                raise OwnershipConflict(slug, existing_owner, sender)
+            if existing_owner != sender:
+                raise UnattributedWorkspace(slug, existing_owner, sender)
 
             if not overwrite:
                 raise OverwriteRequired(slug, sender)

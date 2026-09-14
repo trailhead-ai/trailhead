@@ -664,6 +664,30 @@ def test_every_producible_exit_code_appears_in_the_documented_table(
         _run(monkeypatch, ["transfer", "feat-x", "--to", "host-b", "--group", "trailhead"])
     )
 
+    # 13 EXIT_UNATTRIBUTED_COLLISION — the peer's begin refused because its
+    # own record does not attribute the pre-existing workspace to the
+    # sender, driven through the real `UnattributedCollision` shape rather
+    # than a bare integer.
+    env13 = _Env(tmp_path / "unattributed")
+    env13.write_group(excluded={"repo_a": []})
+    env13.write_hosts(self_name="host-a", peers={"host-b": "host-b"})
+    env13.write_manifest(owner="host-a")
+    env13.apply(monkeypatch)
+    _fake_probe(monkeypatch, _clean_probe_answer())
+    _no_conversations(monkeypatch)
+    monkeypatch.setattr(
+        move,
+        "move_workspace",
+        lambda **kw: (_ for _ in ()).throw(
+            move.UnattributedCollision(
+                "slug 'feat-x' already exists here and records no owner", kind="workspace"
+            )
+        ),
+    )
+    produced.add(
+        _run(monkeypatch, ["transfer", "feat-x", "--to", "host-b", "--group", "trailhead"])
+    )
+
     documented = _readme_exit_codes()
-    assert produced == {0, 1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}
+    assert produced == {0, 1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13}
     assert documented == produced

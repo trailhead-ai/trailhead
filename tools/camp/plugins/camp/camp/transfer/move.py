@@ -39,19 +39,21 @@ negative a bundle, never to build a path) and `claim`'s `owner` (a name
 stamped into the caller's own `MoveResult`, never used to build a path
 either).
 
-**Two refusal shapes, not one.** `begin` on the peer already refuses a
-workspace present there and owned by a third host, and refuses one present
-and owned by the sender unless `--overwrite` is passed (see
-`camp.transfer.receive`'s module docstring). The second of those is common
-enough — an operator re-running a transfer — that it is raised here as its
-own :class:`OverwriteNeeded`, distinguishable from every other phase
-failure's :class:`PhaseFailed`, so the CLI layer can give it its own exit
-code and remedy text rather than folding it into a generic failure. Both are
-raised strictly before the phase's own write — `begin` itself never writes
-past either refusal (see `camp.transfer.receive.begin`), and every later
-phase is never reached when an earlier one raises, so a caller never needs to
-reason about a partial move: whatever raised is the last thing that touched
-the peer.
+**Three refusal shapes, not one.** `begin` on the peer already refuses a
+workspace present there whose own record does not name the sender as owner
+— a third host's own workspace, or one that never recorded an owner at all
+— regardless of `--overwrite`, and refuses one owned by the sender unless
+`--overwrite` is passed (see `camp.transfer.receive`'s module docstring).
+The overwrite-required case is common enough — an operator re-running a
+transfer — that it is raised here as its own :class:`OverwriteNeeded`; the
+unattributed case is raised as :class:`UnattributedCollision`. Both are
+distinguishable from every other phase failure's :class:`PhaseFailed`, so
+the CLI layer can give each its own exit code and remedy text rather than
+folding it into a generic failure. All three are raised strictly before the
+phase's own write — `begin` itself never writes past any of them (see
+`camp.transfer.receive.begin`), and every later phase is never reached when
+an earlier one raises, so a caller never needs to reason about a partial
+move: whatever raised is the last thing that touched the peer.
 
 **Phase order and progress.** `on_phase` is called with a short label
 immediately BEFORE each phase's network call is made — never after, and
@@ -112,6 +114,7 @@ from .worktree import send_worktree
 __all__ = [
     "MoveRefused",
     "OverwriteNeeded",
+    "UnattributedCollision",
     "PhaseFailed",
     "ConversationCrossed",
     "MoveResult",
@@ -125,6 +128,12 @@ __all__ = [
 #: stderr text for a refused remote invocation.
 _OVERWRITE_MARKER = "--overwrite"
 
+#: The substring `camp.transfer.receive.UnattributedWorkspace`'s message
+#: always carries — checked BEFORE `_OVERWRITE_MARKER` below, since that
+#: message also mentions `--overwrite` (to say the refusal is not lifted by
+#: it) and would otherwise be misread as `OverwriteNeeded`.
+_UNATTRIBUTED_MARKER = "was never handed this workspace"
+
 
 class MoveRefused(Exception):
     """Base of the two ways `move_workspace` stops before completing."""
@@ -137,6 +146,24 @@ class OverwriteNeeded(MoveRefused):
     def __init__(self, detail: str) -> None:
         super().__init__(detail)
         self.detail = detail
+
+
+class UnattributedCollision(MoveRefused):
+    """`begin` refused: the peer already holds something of this slug's name
+    whose own record does not attribute it to the sender — refused
+    regardless of `--overwrite`.
+
+    `kind` is the stable discriminant a caller inspects instead of parsing
+    `detail`: `"workspace"` (this module's only value today) means a
+    pre-existing workspace record naming a different owner, or none at all;
+    `"branch"` is reserved for a same-named git branch collision with no
+    workspace record at all.
+    """
+
+    def __init__(self, detail: str, *, kind: str) -> None:
+        super().__init__(detail)
+        self.detail = detail
+        self.kind = kind
 
 
 class PhaseFailed(MoveRefused):
@@ -246,6 +273,7 @@ def _run_camp_phase(
     connect_timeout: float,
     execution_timeout: float,
     promote_overwrite: bool = False,
+    promote_unattributed: bool = False,
 ) -> Answered:
     """Run one `transfer-receive` phase and classify the outcome.
 
@@ -258,6 +286,13 @@ def _run_camp_phase(
     own `except PhaseFailed` around its `finish` call), so promoting it here
     would escape as an uncaught "nothing crossed" refusal after ownership
     had, in fact, already moved.
+
+    *promote_unattributed* scopes the `UnattributedCollision` promotion the
+    same way, to the same one phase — `begin` is the only phase that can
+    raise `camp.transfer.receive.UnattributedWorkspace`. Checked BEFORE the
+    overwrite promotion: that refusal's own message also contains
+    `--overwrite` (to say the refusal is not lifted by it), so checking
+    overwrite first would misclassify it.
     """
     outcome = run_camp(
         host,
@@ -268,6 +303,8 @@ def _run_camp_phase(
     )
     if isinstance(outcome, Answered):
         return outcome
+    if promote_unattributed and isinstance(outcome, RemoteRefusal) and _UNATTRIBUTED_MARKER in outcome.stderr:
+        raise UnattributedCollision(outcome.stderr.strip(), kind="workspace")
     if promote_overwrite and isinstance(outcome, RemoteRefusal) and _OVERWRITE_MARKER in outcome.stderr:
         raise OverwriteNeeded(outcome.stderr.strip())
     raise PhaseFailed(remote_argv[1] if len(remote_argv) > 1 else remote_argv[0], _outcome_detail(outcome))
@@ -378,6 +415,11 @@ def move_workspace(
         OverwriteNeeded: `begin` refused because the workspace already
             exists on the peer, owned by the sender, and *overwrite* is
             False. Nothing crossed.
+        UnattributedCollision: `begin` refused because the workspace already
+            exists on the peer and its own record does not attribute it to
+            the sender — a third host's own workspace, or one that never
+            recorded an owner at all. Raised regardless of *overwrite*.
+            Nothing crossed.
         PhaseFailed: any other phase refused or the transport failed. A
             conversation that was UNRESOLVED, whose transcript could not be
             located, whose content changed mid-stream, or whose transport
@@ -427,6 +469,7 @@ def move_workspace(
         connect_timeout=connect_timeout,
         execution_timeout=execution_timeout,
         promote_overwrite=True,
+        promote_unattributed=True,
     )
 
     import json

@@ -2221,6 +2221,48 @@ class TestMoveWorkspaceEndToEnd:
         peer_wt = _worktree_path("testgroup", g["slug"], "repo_a", env=g["peer_env"])
         assert (peer_wt / "committed.txt").read_text() == "committed on the sender\n"
 
+    def test_unattributed_workspace_refuses_even_with_overwrite_and_leaves_peer_untouched(
+        self, move_env
+    ):
+        """A workspace already present on the peer whose own manifest records
+        no owner at all is refused regardless of `--overwrite` — it belongs
+        to whichever host it is already on, not to whoever sends next — and
+        the exception carries a stable `kind` discriminant, driven end to
+        end through the real peer-side `begin`, not a mock."""
+        from camp.group.manifest import manifest_path_for, write_central_manifest
+        from camp.transfer.move import UnattributedCollision, move_workspace
+
+        g = move_env
+
+        peer_manifest = manifest_path_for("testgroup", g["slug"], env=g["peer_env"])
+        write_central_manifest(peer_manifest, {"owner": None})
+
+        def _snapshot(root: Path) -> dict[str, bytes]:
+            return {
+                str(p.relative_to(root)): p.read_bytes()
+                for p in sorted(root.rglob("*"))
+                if p.is_file()
+            }
+
+        before = _snapshot(g["peer_state"])
+
+        with pytest.raises(UnattributedCollision) as exc_info:
+            move_workspace(
+                host=g["host"],
+                group=g["group"],
+                group_name="testgroup",
+                slug=g["slug"],
+                sender_name="host-a",
+                overwrite=True,
+                env=g["sender_env"],
+                run=g["run"],
+                stream_spawn=g["stream_spawn"],
+            )
+
+        assert exc_info.value.kind == "workspace"
+        after = _snapshot(g["peer_state"])
+        assert before == after
+
     def test_conversation_crosses_after_worktree_and_lands_rewritten_on_the_peer(
         self, move_env
     ):
@@ -3419,6 +3461,45 @@ def test_overwrite_needed_names_the_flag_with_its_own_exit_code(
     assert code == transfer.EXIT_OVERWRITE_REQUIRED
     err = capsys.readouterr().err
     assert "--overwrite" in err
+    assert "moves nothing" in err
+
+
+def test_unattributed_workspace_collision_gets_its_own_exit_code_and_discriminant(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """The peer holding a workspace of this name that its own manifest does
+    not attribute to the sender is a different refusal than "owned by this
+    host, needs --overwrite" and than the ordinary phase-failed shape — it
+    gets its own exit code, distinct from both, and its own discriminant
+    value so a later collision kind sharing this same exit code (a colliding
+    branch) can still be told apart from this one without parsing the
+    message text."""
+    env = _Env(tmp_path)
+    env.write_group(excluded={"repo_a": []})
+    env.write_hosts(self_name="host-a", peers={"host-b": "host-b"})
+    env.write_manifest(owner="host-a")
+    env.apply(monkeypatch)
+    transfer = _transfer_module()
+
+    _fake_probe(monkeypatch, _clean_probe_answer())
+    _no_conversations(monkeypatch)
+
+    move = _move_module()
+
+    def _refuse(**kw):
+        raise move.UnattributedCollision(
+            "slug 'feat-x' already exists here and its own record does not "
+            "attribute it to sender 'host-a'",
+            kind="workspace",
+        )
+
+    monkeypatch.setattr(move, "move_workspace", _refuse)
+
+    code = _run(monkeypatch, ["transfer", "feat-x", "--to", "host-b", "--group", "trailhead"])
+
+    assert code == transfer.EXIT_UNATTRIBUTED_COLLISION
+    assert code not in (transfer.EXIT_OVERWRITE_REQUIRED, transfer.EXIT_OWNERSHIP_REFUSED)
+    err = capsys.readouterr().err
     assert "moves nothing" in err
 
 

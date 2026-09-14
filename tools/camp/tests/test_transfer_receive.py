@@ -220,7 +220,7 @@ class TestBeginRefusals:
         mpath = _manifest_path("testgroup", "feat-x", g["env"])
         before = mpath.read_bytes()
 
-        with pytest.raises(receive.OwnershipConflict) as exc_info:
+        with pytest.raises(receive.UnattributedWorkspace) as exc_info:
             receive.begin(
                 groups=[g["group"]],
                 group_name="testgroup",
@@ -232,6 +232,49 @@ class TestBeginRefusals:
         message = str(exc_info.value)
         assert "third-host" in message
         assert "sending-host" in message
+        assert exc_info.value.kind == "workspace"
+        assert mpath.read_bytes() == before
+
+    def test_refuses_slug_recording_no_owner_even_with_overwrite_and_leaves_it_untouched(
+        self, one_member_group
+    ):
+        """A workspace whose manifest never recorded an owner at all belongs
+        to whichever host it is already on — AC12 — so it must be refused
+        exactly like a third host's workspace, not silently torn down under
+        `--overwrite` the way today's code (which only checks `existing_owner
+        != sender` after excluding `None`) currently treats it."""
+        receive = _receive_module()
+        g = one_member_group
+
+        # A prior transfer seeded this slug, then its manifest lost its
+        # recorded owner entirely (predates ownership tracking, or was
+        # hand-edited) — this host never recorded who it belongs to.
+        receive.begin(
+            groups=[g["group"]],
+            group_name="testgroup",
+            slug="feat-x",
+            sender="original-sender",
+            overwrite=False,
+            env=g["env"],
+        )
+        mpath = _manifest_path("testgroup", "feat-x", g["env"])
+        import json as _json
+
+        data = _json.loads(mpath.read_text())
+        data.pop("owner", None)
+        mpath.write_text(_json.dumps(data), encoding="utf-8")
+        before = mpath.read_bytes()
+
+        with pytest.raises(receive.UnattributedWorkspace) as exc_info:
+            receive.begin(
+                groups=[g["group"]],
+                group_name="testgroup",
+                slug="feat-x",
+                sender="sending-host",
+                overwrite=True,
+                env=g["env"],
+            )
+        assert exc_info.value.kind == "workspace"
         assert mpath.read_bytes() == before
 
     def test_refuses_sender_owned_slug_without_overwrite(self, one_member_group):

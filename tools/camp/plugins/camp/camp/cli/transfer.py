@@ -95,6 +95,17 @@ inputs are checked:
                                nor the post-commit one is asserted; the
                                operator must check the peer by hand
                                (`camp transfer-probe`) before doing anything.
+ 13  EXIT_UNATTRIBUTED_COLLISION  the peer already holds something of this
+                               slug's name whose own record does not
+                               attribute it to this host — a workspace
+                               recorded as owned by a third host, or one
+                               that never recorded an owner at all — refused
+                               regardless of `--overwrite`; nothing crossed.
+                               `camp.transfer.move.UnattributedCollision`
+                               carries a stable `kind` discriminant
+                               (`"workspace"` today) so a script branching
+                               on this exit code alone can still tell which
+                               kind of same-named collision it is.
 
 Code 2 is absent from the set deliberately: it is never produced, and it is
 held unused rather than reassigned, so a script that checks for it
@@ -112,11 +123,12 @@ collision, peer group/account/slug checks, the excluded-set declaration, and
 conversation enumeration) do not need their own operator-visible exit code —
 their distinguishing detail is carried in the rendered check text and (for
 `--json`) in the check's own `status`/`detail`/`transport_outcome` fields, not
-in the process exit code. `EXIT_OVERWRITE_REQUIRED`, `EXIT_PHASE_FAILED`, and
-`EXIT_PHASE_FAILED_POST_COMMIT` are never produced by the preflight itself —
-they come from `camp.transfer.move.move_workspace`, reached only once every
-check has PASSED. The last two are told apart by whether the raised
-`PhaseFailed` carries a `claimed_owner` — see that class's own docstring.
+in the process exit code. `EXIT_OVERWRITE_REQUIRED`, `EXIT_UNATTRIBUTED_COLLISION`,
+`EXIT_PHASE_FAILED`, and `EXIT_PHASE_FAILED_POST_COMMIT` are never produced by
+the preflight itself — they come from `camp.transfer.move.move_workspace`,
+reached only once every check has PASSED. The last two are told apart by
+whether the raised `PhaseFailed` carries a `claimed_owner` — see that class's
+own docstring.
 """
 
 from __future__ import annotations
@@ -300,6 +312,7 @@ EXIT_PHASE_FAILED = 9
 EXIT_PHASE_FAILED_POST_COMMIT = 10
 EXIT_RELEASE_INCOMPLETE = 11
 EXIT_PHASE_INDETERMINATE = 12
+EXIT_UNATTRIBUTED_COLLISION = 13
 
 #: Check name -> exit code, for the checks that get their own. Looked up by
 #: `_exit_code_for` while walking `PreflightResult.checks` in order; a check
@@ -738,7 +751,7 @@ def _cmd_transfer_group_cli(
             _render_human(result, slug=slug, peer_name=peer_name)
         sys.exit(_exit_code_for(result))
 
-    from ..transfer.move import OverwriteNeeded, PhaseFailed, move_workspace
+    from ..transfer.move import OverwriteNeeded, PhaseFailed, UnattributedCollision, move_workspace
 
     def _release_crossed(crossed: tuple) -> tuple:
         """Archive this host's own copies of the conversations that crossed.
@@ -792,6 +805,13 @@ def _cmd_transfer_group_cli(
             file=sys.stderr,
         )
         sys.exit(EXIT_OVERWRITE_REQUIRED)
+    except UnattributedCollision as e:
+        print(
+            f"camp transfer: refused — {e.detail} — moves nothing; remove "
+            f"or rename the peer's {e.kind}, or choose a different slug",
+            file=sys.stderr,
+        )
+        sys.exit(EXIT_UNATTRIBUTED_COLLISION)
     except PhaseFailed as e:
         if e.indeterminate:
             # Neither the pre-commit remedy below (re-running is safe) nor
