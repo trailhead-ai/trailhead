@@ -511,6 +511,119 @@ corrected this, and this batch's own first probe reproduces that correction
 independently: the flag scopes which `settings.json` layers apply, not
 whether `~/.claude/rules/*.md` is read. Not reintroduced here.
 
+### Table vs paragraph condition — U1 (2026-09-14, task `prove-whether-table-cell-context-is-what-splits-record-link-rendering`)
+
+**What this measured.** `task/record-mentions-in-table-rows-link-as-reliably-as-they-do-in-prose`'s
+Known Unknown U1: is table-cell rendering context the discriminator behind
+`distill`'s split record-link rendering (3 markdown links / 3 code spans
+across six committed captures), or a confound? `expected.md`'s new "Table
+vs paragraph condition — U1" section was written and committed
+(`4e77632e`) before any run of either condition was dispatched. The
+fixture generator (`fixtures/make-fixture-env.sh`) now takes a required
+second argument, `table` or `paragraph`, selecting which template
+(`fixtures/task.md.in` or the new `fixtures/table-task.md.in`) becomes
+`task.md` — both conditions copy the identical five-record set and
+`vault-ls.txt`, so only the requested rendering shape varies.
+
+`arms/treatment.md` unmodified, `arms/baseline.md` not run this batch (this
+task measures a within-arm comparison, not a treatment-vs-baseline one).
+3 runs per condition (6 total), each a separate `claude -p` process:
+
+```
+LORE_STATE_DIR="<run-dir>" claude -p "<task.md content>" --setting-sources project \
+  --append-system-prompt "$(cat arms/treatment.md)" \
+  --allowedTools "Read" < /dev/null
+```
+
+Each run's captured output had a completion marker appended by the
+dispatching wrapper as its last act (`===EVAL_RUN_COMPLETE rc=0===` on
+success); all six runs completed successfully — none graded from an
+unmarked or partial capture.
+
+**Per-record, per-condition tally — re-derived directly from the six
+capture files at report time, not from an earlier count:**
+
+```
+$ grep -lF '[note/rotate-tires](http://127.0.0.1:9199/records/gearshed/note/rotate-tires)' paragraph-{1,2,3}.txt
+paragraph-1.txt paragraph-2.txt paragraph-3.txt
+$ grep -lF '[note/rotate-tires](http://127.0.0.1:9199/records/gearshed/note/rotate-tires)' table-{1,2,3}.txt
+table-1.txt table-2.txt table-3.txt
+$ grep -nF '[attic-archive/log/winter-inventory](' *.txt   # and the same for ghost-vault/…, Rotate_Tires, Field Note/…
+(no match, any of the four identifiers, either condition)
+```
+
+| Record | Paragraph condition | Table condition |
+|---|---|---|
+| 1 — `gearshed/note/rotate-tires` | Linked correctly in 3/3 (`paragraph-1`, `paragraph-2`, `paragraph-3`) | Linked correctly in 3/3 (`table-1`, `table-2`, `table-3`) |
+| 2 — `attic-archive/log/winter-inventory` | Bare in 3/3 | Bare in 3/3 |
+| 3 — `ghost-vault/memo/unfiled-thought` | Bare in 3/3 | Bare in 3/3 |
+| 4 — `gearshed/note/Rotate_Tires` | Bare in 3/3 | Bare in 3/3 |
+| 5 — `gearshed/Field Note/check-in` | Bare in 3/3 | Bare in 3/3 |
+
+Record 1's link rate: paragraph 3/3, table 3/3. `Δ = paragraph_link_rate −
+table_link_rate = 3 − 3 = 0`.
+
+**Result: U1 INVALIDATED**, per `expected.md`'s pre-registered threshold
+(`Δ ≥ 2` VALIDATED, `Δ ≤ 1` INVALIDATED). `Δ = 0` is the strongest possible
+INVALIDATED reading available under this design — not a borderline call.
+Table-cell rendering context, on its own, under an identical arm and an
+identical record set, did not degrade record 1's link rendering at all in
+this batch: the model linked it correctly in the table condition exactly as
+reliably as in the paragraph condition, including producing the correct
+`kind/slug` visible text and the correct `.../records/...` target in every
+table-condition run. No confound flag: records 2–5 rendered bare under both
+conditions in every run, with no unexplained divergence between conditions.
+
+**What this means for the plan.** The Delta design's fix direction — that
+the rule's table-row clause is present but insufficiently salient — rests
+on table-cell context being the discriminator. This measurement finds no
+such effect at this fixture's single linkable record, on this model, on
+this host, in this batch. Per the task's own instruction: report and stop
+rather than reaching for a second hypothesis. The `distill` split is not
+shown to be explained by table-ness; it remains open which of the other
+differences named in U1's framing (a different skill document, a different
+deliverable shape, or `distill` instructing the model to *name* the record
+id rather than showing a worked example that already contains one) is the
+actual discriminator — untested by this task and not a claim this task
+makes.
+
+**What this result is not evidence for.** One Linux host (`Linux
+6.8.0-139-generic`), one model tier, one point in time (2026-09-14), one
+model conversation length (a short single-turn dispatch, not a long
+session), one linkable record out of five, 3 runs per condition. It does
+not speak to: whether the same null result holds on a different model or a
+different platform (the corpus's own `platform-invariant` lesson applies
+directly — this signal has not been checked for platform invariance and
+should not be assumed to transfer); whether a table with more than one
+linkable row, or a table nested deeper in a longer response, behaves the
+same way; or whether `distill`'s specific skill-document context (which
+this fixture does not reproduce — `arms/treatment.md` is the same synthetic
+five-line brief used throughout this case, not `distill`'s own skill
+document) would show the same null result if table-ness were varied there
+instead of here. It also inherits every limitation already stated for this
+case's clean-room shape (`Read`-only, no shell, no `scripts/eval-sandbox`).
+
+**Real-state check, after this batch's six `claude -p` processes (all
+`--allowedTools "Read"`, no shell/Edit/Write tool):**
+`~/.config/lore/config.json` mtime `2026-08-18 21:45:26` — unchanged.
+`~/.claude/rules/trailhead-outpost.md` mtime `2026-09-11 09:10:29` —
+unchanged across this batch (checked immediately before and after
+dispatch). Every configured vault's git status checked directly
+(`default`, `trailhead`, `lake-in-the-woods`, `levr`): all pending changes
+are `area/*`, `session/*`, `spec/*`, and `task/*` bookkeeping from
+unrelated ongoing plan/session work (status/updated-at edits, new session
+files); none of it touches `rules.md`, `expected.md`, `arms/`, fixtures, or
+`MANUAL-EVAL.md`, and none of it is something a `Read`-only, no-shell arm
+could have produced. No mutation attributable to this batch.
+
+**Raw captures not committed to the repository.** Consistent with this
+case's existing convention (no prior batch in this log committed raw
+`claude -p` output either), the six capture files were scanned with
+`tools/craft/plugins/craft/scripts/capture_scan.py` before being discarded
+from the run's scratch directory — all six returned exit 0 (clean, only
+known-safe `path-or-url-shape` matches on the fixture's own record URLs).
+The per-record tallies above are the durable record of what they contained.
+
 ## Case: publish-routing
 
 `plugins/outpost/evals/publish-routing/` — seven fixtures over a scratch
