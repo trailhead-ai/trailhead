@@ -325,6 +325,16 @@ _EXIT_BY_CHECK_NAME = {
     "the workspace exists here": EXIT_UNKNOWN_SLUG,
     "this host owns it, or it was never recorded": EXIT_OWNERSHIP_REFUSED,
     "the named peer is declared": EXIT_UNKNOWN_PEER,
+    # This check's own two PASSED branches (slug free; owned by this host)
+    # never reach this table — `_exit_code_for` only consults it for a
+    # non-PASSED check. Its FAILED branches are reached only once every
+    # earlier check has already passed (a peer that hasn't answered, or one
+    # without the group configured, fails an earlier check first), so a
+    # FAILED verdict here means only the two unattributed-collision reasons:
+    # the peer's workspace records no owner, or records a third host.
+    "the slug is free on the peer, or present there and owned by this host": (
+        EXIT_UNATTRIBUTED_COLLISION
+    ),
 }
 
 

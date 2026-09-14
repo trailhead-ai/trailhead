@@ -688,6 +688,38 @@ def test_every_producible_exit_code_appears_in_the_documented_table(
         _run(monkeypatch, ["transfer", "feat-x", "--to", "host-b", "--group", "trailhead"])
     )
 
+    # 13 EXIT_UNATTRIBUTED_COLLISION, again — this time provoked through the
+    # real preflight (an ownerless peer workspace) rather than a mocked
+    # `move_workspace`, since that is the path a real refusal takes: check 9
+    # fails and `move_workspace` is never reached.
+    env13b = _Env(tmp_path / "unattributed-preflight")
+    env13b.write_group(excluded={"repo_a": []})
+    env13b.write_hosts(self_name="host-a", peers={"host-b": "host-b"})
+    env13b.write_manifest(owner="host-a")
+    env13b.apply(monkeypatch)
+    probe = _probe_module()
+    _fake_probe(
+        monkeypatch,
+        probe.ProbeAnswer(
+            self_name="host-b",
+            group_configured=True,
+            members=(probe.MemberRepoStatus(name="repo_a", repo_root_exists=True),),
+            account=None,
+            workspace_exists=True,
+            workspace_owner=None,
+            contract_version=probe.PROBE_CONTRACT_VERSION,
+        ),
+    )
+    _no_conversations(monkeypatch)
+
+    def _boom(**kw):
+        raise AssertionError("move_workspace must not run when the peer's owner is unrecorded")
+
+    monkeypatch.setattr(move, "move_workspace", _boom)
+    produced.add(
+        _run(monkeypatch, ["transfer", "feat-x", "--to", "host-b", "--group", "trailhead"])
+    )
+
     documented = _readme_exit_codes()
     assert produced == {0, 1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13}
     assert documented == produced

@@ -930,9 +930,9 @@ def test_gather_conversations_returns_a_different_answer_for_a_different_pool(
 def test_unmapped_failing_check_falls_through_to_the_shared_not_clean_code(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
-    """Only three checks name an exit code of their own. Every other failure -
+    """Only four checks name an exit code of their own. Every other failure -
     here a member that never declared an excluded set - resolves to the shared
-    not-clean code, and that code must not collide with any of the three that
+    not-clean code, and that code must not collide with any of the four that
     do name a cause, or an operator scripting on the code would read the wrong
     reason.
 
@@ -963,6 +963,7 @@ def test_unmapped_failing_check_falls_through_to_the_shared_not_clean_code(
         transfer.EXIT_UNKNOWN_PEER,
         transfer.EXIT_PEER_UNREACHABLE,
         transfer.EXIT_WOULD_TRANSFER,
+        transfer.EXIT_UNATTRIBUTED_COLLISION,
     ), "the shared not-clean code collides with a code that names a cause"
     assert "repo_a" in out, "the refusal must name the member that never declared"
 
@@ -3785,6 +3786,152 @@ def test_unattributed_workspace_collision_gets_its_own_exit_code_and_discriminan
     assert code not in (transfer.EXIT_OVERWRITE_REQUIRED, transfer.EXIT_OWNERSHIP_REFUSED)
     err = capsys.readouterr().err
     assert "moves nothing" in err
+
+
+@pytest.mark.parametrize("overwrite", [False, True])
+def test_ownerless_peer_workspace_refuses_through_preflight_at_its_own_exit_code(
+    overwrite: bool, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """The peer's own probe answer — not a mocked `move_workspace` — reports
+    a workspace already at this slug with no recorded owner. Preflight check
+    9 fails before `move_workspace` is ever reached, and that failure must
+    resolve to the same exit code the unattributed-collision refusal is
+    documented as producing, on both the omitted and the passed `--overwrite`
+    path — `compose_preflight` takes no `overwrite` parameter, so nothing
+    downstream of it can vary by the flag."""
+    env = _Env(tmp_path)
+    env.write_group(excluded={"repo_a": []})
+    env.write_hosts(self_name="host-a", peers={"host-b": "host-b"})
+    env.write_manifest(owner="host-a")
+    env.apply(monkeypatch)
+    transfer = _transfer_module()
+
+    _fake_probe(
+        monkeypatch,
+        _clean_probe_answer(workspace_exists=True, workspace_owner=None),
+    )
+    _no_conversations(monkeypatch)
+
+    move = _move_module()
+
+    def _boom(**kw):
+        raise AssertionError("move_workspace must not run when the peer's owner is unrecorded")
+
+    monkeypatch.setattr(move, "move_workspace", _boom)
+
+    argv = ["transfer", "feat-x", "--to", "host-b", "--group", "trailhead"]
+    if overwrite:
+        argv.append("--overwrite")
+    code = _run(monkeypatch, argv)
+
+    assert code == transfer.EXIT_UNATTRIBUTED_COLLISION
+    assert code != transfer.EXIT_NOT_CLEAN
+    err_or_out = capsys.readouterr()
+    assert "never recorded" in err_or_out.out
+
+
+def test_third_host_owned_peer_workspace_refuses_through_preflight_at_its_own_exit_code(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """The same preflight-driven refusal, for the other reason check 9 fails:
+    the peer's workspace of this slug is recorded as owned by a third host,
+    not the sender. This is mechanically the same check failing for a
+    different detail, so it must land on the same exit code as the
+    unrecorded-owner case above, not the shared not-clean fallback."""
+    env = _Env(tmp_path)
+    env.write_group(excluded={"repo_a": []})
+    env.write_hosts(self_name="host-a", peers={"host-b": "host-b"})
+    env.write_manifest(owner="host-a")
+    env.apply(monkeypatch)
+    transfer = _transfer_module()
+
+    _fake_probe(
+        monkeypatch,
+        _clean_probe_answer(workspace_exists=True, workspace_owner="host-c"),
+    )
+    _no_conversations(monkeypatch)
+
+    move = _move_module()
+
+    def _boom(**kw):
+        raise AssertionError("move_workspace must not run when a third host owns the peer slug")
+
+    monkeypatch.setattr(move, "move_workspace", _boom)
+
+    code = _run(monkeypatch, ["transfer", "feat-x", "--to", "host-b", "--group", "trailhead"])
+
+    assert code == transfer.EXIT_UNATTRIBUTED_COLLISION
+    assert code != transfer.EXIT_NOT_CLEAN
+    out = capsys.readouterr().out
+    assert "host-c" in out
+
+
+def test_peer_workspace_owned_by_this_host_still_proceeds_not_the_collision_code(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """The legitimate retry path: the peer already holds this slug, but its
+    own record attributes it to this host. Check 9 passes exactly as it does
+    today, so the transfer must still reach `move_workspace` and complete —
+    it must NOT be caught by the new unattributed-collision mapping."""
+    env = _Env(tmp_path)
+    env.write_group(excluded={"repo_a": []})
+    env.write_hosts(self_name="host-a", peers={"host-b": "host-b"})
+    env.write_manifest(owner="host-a")
+    env.apply(monkeypatch)
+    transfer = _transfer_module()
+
+    _fake_probe(
+        monkeypatch,
+        _clean_probe_answer(workspace_exists=True, workspace_owner="host-a"),
+    )
+    _no_conversations(monkeypatch)
+
+    move = _move_module()
+    calls = []
+
+    def _fake_move(**kw):
+        calls.append(kw)
+        return move.MoveResult(members=("repo_a",))
+
+    monkeypatch.setattr(move, "move_workspace", _fake_move)
+
+    code = _run(monkeypatch, ["transfer", "feat-x", "--to", "host-b", "--group", "trailhead"])
+
+    assert code == transfer.EXIT_WOULD_TRANSFER
+    assert code != transfer.EXIT_UNATTRIBUTED_COLLISION
+    assert len(calls) == 1
+
+
+def test_peer_owned_by_this_host_but_a_later_check_fails_reports_not_clean_not_collision(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """Check 9 shares one `Check.name` across all four of its outcomes,
+    including its two PASSED ones. This drives a run where check 9 PASSES
+    (the peer's workspace is owned by this host) but a later check fails
+    (no member declared an excluded set) — the mapping keys on that shared
+    name, so a mapping that fires on the name alone, rather than only on a
+    FAILED check 9, would misreport this as the collision code instead of
+    the shared not-clean one."""
+    env = _Env(tmp_path)
+    env.write_group()  # no excluded key at all -> check 10 fails
+    env.write_hosts(self_name="host-a", peers={"host-b": "host-b"})
+    env.write_manifest(owner="host-a")
+    env.apply(monkeypatch)
+    transfer = _transfer_module()
+
+    _fake_probe(
+        monkeypatch,
+        _clean_probe_answer(workspace_exists=True, workspace_owner="host-a"),
+    )
+    _no_conversations(monkeypatch)
+
+    code = _run(
+        monkeypatch,
+        ["transfer", "feat-x", "--to", "host-b", "--group", "trailhead", "--dry-run"],
+    )
+
+    assert code == transfer.EXIT_NOT_CLEAN
+    assert code != transfer.EXIT_UNATTRIBUTED_COLLISION
 
 
 def test_overwrite_flag_threads_through_to_move_workspace(
