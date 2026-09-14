@@ -1200,6 +1200,15 @@ def _doctor_account_rows(
 _DOCTOR_ACCOUNT_ROW_LIMIT = 50
 _DOCTOR_ACCOUNT_FIELD_LIMIT = 200
 
+#: The group-policy axis's own caps, at the same measured point as the
+#: account axis's own (U3, resolved): there is no transport bound on this
+#: path (`MAX_PROBE_RESPONSE_BYTES` in `transfer/probe.py` is enforced only
+#: by the `transfer-probe` verb, never by the doctor fan-out), so this
+#: section applies its own row and field caps at its own parse point,
+#: mirroring `_DOCTOR_ACCOUNT_ROW_LIMIT` / `_DOCTOR_ACCOUNT_FIELD_LIMIT`.
+_DOCTOR_GROUP_ROW_LIMIT = 50
+_DOCTOR_GROUP_FIELD_LIMIT = 200
+
 
 def _doctor_account_truncate_field(value: object) -> object:
     """Bound one remote-authored `account`/`reason` string to
@@ -1313,7 +1322,209 @@ def _doctor_probe_answer(
     )
 
 
-def _doctor_probe_answer_from_parsed(host_name: str, parsed: Any):
+def _doctor_group_truncate_field(value: object) -> object:
+    """Bound one remote-authored `group`/`error` string to
+    `_DOCTOR_GROUP_FIELD_LIMIT` characters, marking the cut with an
+    ellipsis — the group axis's own copy of
+    `_doctor_account_truncate_field`'s posture. Anything that is not a
+    string passes through unchanged."""
+    if not isinstance(value, str) or len(value) <= _DOCTOR_GROUP_FIELD_LIMIT:
+        return value
+    return value[:_DOCTOR_GROUP_FIELD_LIMIT] + "…"
+
+
+def _doctor_self_group_projections() -> tuple[dict[str, dict[str, Any]] | None, dict[str, str]]:
+    """This machine's own group projections, keyed by group name, for
+    comparison against every declared host's own answer.
+
+    Calls `camp.spine._doctor_group_policy` — the same producer a probed
+    far camp uses to answer THIS section's own `group_policy` key, so this
+    machine's own facts and a far machine's are read from one source of
+    truth rather than two implementations that could drift. Raising here
+    (a broken group-config directory, mirroring `_doctor_account_roster`'s
+    own raise posture) is the caller's to catch: it means the WHOLE
+    collection could not be produced, not that one group failed.
+
+    Returns `(projections, unreadable)`: `projections` maps each group
+    this machine both declares and could read to its comparable
+    projection. `unreadable` maps each group this machine declares but
+    could NOT read individually to its own error message — comparison
+    against that group is undeterminable too, even though the collection
+    as a whole was producible.
+    """
+    from ..spine import _doctor_group_policy
+
+    entries = _doctor_group_policy()
+    projections: dict[str, dict[str, Any]] = {}
+    unreadable: dict[str, str] = {}
+    for entry in entries:
+        name = entry.get("group")
+        if not isinstance(name, str):
+            continue
+        error = entry.get("error")
+        if error is not None:
+            unreadable[name] = str(error)
+            continue
+        projections[name] = entry.get("projection") or {}
+    return projections, unreadable
+
+
+def _doctor_group_rows_from_parsed(
+    host_name: str,
+    parsed: Any,
+    self_projections: dict[str, dict[str, Any]],
+    self_unreadable: dict[str, str],
+) -> list[dict[str, Any]]:
+    """One declared host's group-policy rows: one row per group THIS
+    machine declares, reporting whether that host's projection matches —
+    never a row for a group only the far side declares, since this
+    section's whole question is "does this host agree with ME".
+
+    Renders nothing at all when this machine has nothing to compare (no
+    readable groups and nothing individually unreadable either) — the
+    natural fallout of an empty `self_projections`/`self_unreadable`,
+    which is also exactly how a total local group-config failure (`None`,
+    normalized to `{}` by the caller) suppresses every per-host row: this
+    machine cannot state its own policy, so no host can be told it agrees
+    or differs.
+    """
+    from ..group.policy import compare_group_policy
+    from ..host.relay import _strip_control_sequences_deep
+    from ..spine import DOCTOR_PROBE_GROUP_POLICY_KEY
+
+    if not self_projections and not self_unreadable:
+        return []
+
+    rows: list[dict[str, Any]] = []
+
+    for name in sorted(self_unreadable):
+        rows.append(
+            _doctor_host_row(
+                host_name,
+                "UNKNOWN",
+                f"{name}: this machine's own configuration for this group could not "
+                "be read, so divergence cannot be determined",
+            )
+        )
+
+    if not self_projections:
+        return rows
+
+    if not isinstance(parsed, dict) or DOCTOR_PROBE_GROUP_POLICY_KEY not in parsed:
+        for name in sorted(self_projections):
+            rows.append(
+                _doctor_host_row(
+                    host_name,
+                    "UNKNOWN",
+                    f"{name}: group policy support unavailable — this host predates it",
+                )
+            )
+        return rows
+
+    far_value = parsed.get(DOCTOR_PROBE_GROUP_POLICY_KEY)
+    if not isinstance(far_value, list):
+        for name in sorted(self_projections):
+            rows.append(
+                _doctor_host_row(
+                    host_name,
+                    "UNKNOWN",
+                    f"{name}: group policy answer was malformed, so divergence "
+                    "cannot be determined",
+                )
+            )
+        return rows
+
+    reported_count = len(far_value)
+    bounded = _strip_control_sequences_deep(far_value[:_DOCTOR_GROUP_ROW_LIMIT])
+
+    if (
+        len(bounded) == 1
+        and isinstance(bounded[0], dict)
+        and bounded[0].get("group") is None
+    ):
+        error = _doctor_group_truncate_field(bounded[0].get("error"))
+        error_text = error if isinstance(error, str) else "an unspecified error"
+        for name in sorted(self_projections):
+            rows.append(
+                _doctor_host_row(
+                    host_name,
+                    "UNKNOWN",
+                    f"{name}: {host_name} could not produce its group policy answer "
+                    f"— {error_text}",
+                )
+            )
+        return rows
+
+    far_by_group: dict[str, Any] = {}
+    for entry in bounded:
+        if not isinstance(entry, dict):
+            continue
+        name = entry.get("group")
+        if not isinstance(name, str):
+            continue
+        far_by_group[name] = entry
+
+    for name in sorted(self_projections):
+        entry = far_by_group.get(name)
+        if entry is None:
+            rows.append(
+                _doctor_host_row(
+                    host_name, "WARN", f"{name}: {host_name} does not configure this group"
+                )
+            )
+            continue
+        error = entry.get("error")
+        if error is not None:
+            error_text = _doctor_group_truncate_field(error)
+            error_text = error_text if isinstance(error_text, str) else "an unspecified error"
+            rows.append(
+                _doctor_host_row(
+                    host_name,
+                    "UNKNOWN",
+                    f"{name}: {host_name}'s configuration for this group could not "
+                    f"be read — {error_text}",
+                )
+            )
+            continue
+        far_projection = entry.get("projection")
+        if not isinstance(far_projection, dict):
+            rows.append(
+                _doctor_host_row(
+                    host_name,
+                    "UNKNOWN",
+                    f"{name}: {host_name}'s group policy answer was malformed, so "
+                    "divergence cannot be determined",
+                )
+            )
+            continue
+        comparison = compare_group_policy(self_projections[name], far_projection)
+        if comparison.matches:
+            rows.append(_doctor_host_row(host_name, "PASS", f"{name}: group policy matches"))
+        else:
+            dims = ", ".join(comparison.differences)
+            rows.append(
+                _doctor_host_row(host_name, "WARN", f"{name}: group policy differs — {dims}")
+            )
+
+    if reported_count > _DOCTOR_GROUP_ROW_LIMIT:
+        rows.append(
+            _doctor_host_row(
+                host_name,
+                "WARN",
+                f"{host_name} reported {reported_count} groups; only the first "
+                f"{_DOCTOR_GROUP_ROW_LIMIT} are shown",
+            )
+        )
+
+    return rows
+
+
+def _doctor_probe_answer_from_parsed(
+    host_name: str,
+    parsed: Any,
+    self_group_projections: dict[str, dict[str, Any]] | None = None,
+    self_group_unreadable: dict[str, str] | None = None,
+):
     """Read a probe answer's decoded stdout for probe availability — shared
     by every outcome that carries a remote's own stdout (`Answered`, and a
     `RemoteRefusal` whose stdout DOES parse), so an un-upgraded far camp and
@@ -1327,17 +1538,36 @@ def _doctor_probe_answer_from_parsed(host_name: str, parsed: Any):
             _doctor_host_row(host_name, "WARN", _DOCTOR_PROBE_UNAVAILABLE_DETAIL),
             answered=False,
         )
+    extra_rows = _doctor_account_rows_from_parsed(host_name, parsed)
+    extra_rows.extend(
+        _doctor_group_rows_from_parsed(
+            host_name, parsed, self_group_projections or {}, self_group_unreadable or {}
+        )
+    )
     return _doctor_probe_answer(
         _doctor_multiplexer_row(host_name, bool(parsed.get(DOCTOR_PROBE_MULTIPLEXER_KEY))),
         answered=True,
-        extra_rows=_doctor_account_rows_from_parsed(host_name, parsed),
+        extra_rows=extra_rows,
     )
 
 
-def _doctor_probe_worker(host_name: str, host: "Host", *, connect_timeout: float):
+def _doctor_probe_worker(
+    host_name: str,
+    host: "Host",
+    *,
+    connect_timeout: float,
+    self_group_projections: dict[str, dict[str, Any]] | None = None,
+    self_group_unreadable: dict[str, str] | None = None,
+):
     """Ask one declared host `doctor --json --probe` about itself and
     return its contribution to the `-a` host section, as a
     `camp.host.relay.HostAnswer` carrying exactly one row.
+
+    `self_group_projections`/`self_group_unreadable` are THIS machine's own
+    group facts, computed once before the fan-out starts (group-policy
+    comparison is per-host, but what this machine itself declares is not)
+    and threaded through to every outcome that reads the far side's own
+    stdout.
 
     Deliberately bypasses `camp.host.relay.answer_for_host`: that helper
     parses the remote's stdout as a JSON *array* of rows (the shape every
@@ -1456,21 +1686,32 @@ def _doctor_probe_worker(host_name: str, host: "Host", *, connect_timeout: float
                 ),
                 answered=False,
             )
-        return _doctor_probe_answer_from_parsed(host_name, parsed)
+        return _doctor_probe_answer_from_parsed(
+            host_name, parsed, self_group_projections, self_group_unreadable
+        )
 
     assert isinstance(outcome, _transport.Answered)
     try:
         parsed = _json.loads(outcome.stdout)
     except ValueError:
         parsed = None
-    return _doctor_probe_answer_from_parsed(host_name, parsed)
+    return _doctor_probe_answer_from_parsed(
+        host_name, parsed, self_group_projections, self_group_unreadable
+    )
 
 
-def _doctor_self_rows(self_name: str | None) -> list[dict[str, Any]]:
+def _doctor_self_rows(
+    self_name: str | None,
+    *,
+    self_group_projections: dict[str, dict[str, Any]] | None,
+    self_group_unreadable: dict[str, str] | None,
+    self_group_failure: str | None,
+) -> list[dict[str, Any]]:
     """This machine's own rows in the `-a` host section: the multiplexer
-    row, plus its own account facts — no network involved for either, since
-    the local checks, the local multiplexer resolution, and the local
-    account roster all run with no network.
+    row, its own account facts, and one line stating this machine's own
+    group-policy axis state — no network involved for any of them, since
+    the local checks, the local multiplexer resolution, the local account
+    roster, and the local group-config directory all run with no network.
 
     Roster PRODUCTION itself — as opposed to one store's own verdict call,
     which `_doctor_account_roster` already guards per-store — can still
@@ -1479,6 +1720,16 @@ def _doctor_self_rows(self_name: str | None) -> list[dict[str, Any]]:
     row, any other machine's row, or the local checks section printed
     around this call: it becomes a failure row here, exactly like any other
     account-axis failure the operator already knows how to read.
+
+    `self_group_projections`/`self_group_unreadable`/`self_group_failure`
+    are already computed by the caller (`_doctor_self_group_projections`,
+    guarded the same way) — never recomputed here, so the same raise this
+    machine's fan-out workers already saw (or didn't) is the one this line
+    reports on, rather than a second, possibly different, attempt. A total
+    failure (`self_group_failure` set) renders the local-failure line; a
+    genuinely empty local group-config directory (no groups, no failures)
+    renders the distinct nothing-to-compare line; anything else renders no
+    extra line here — the per-host rows already say what needs saying.
     """
     from ..spine import _doctor_account_roster, _doctor_multiplexer_present
 
@@ -1489,6 +1740,18 @@ def _doctor_self_rows(self_name: str | None) -> list[dict[str, Any]]:
         rows.append(_doctor_host_row(self_name, "WARN", f"account check failed — {e}"))
     else:
         rows.extend(_doctor_account_rows(self_name, facts))
+
+    if self_group_failure is not None:
+        rows.append(
+            _doctor_host_row(
+                self_name,
+                "WARN",
+                f"this machine's own group config cannot be read — {self_group_failure}",
+            )
+        )
+    elif not self_group_projections and not self_group_unreadable:
+        rows.append(_doctor_host_row(self_name, "PASS", "this machine configures no groups"))
+
     return rows
 
 
@@ -1648,8 +1911,31 @@ def _dispatch_doctor_all_hosts(rest: list[str]) -> None:
         self_name_cell[0] = host_name
         return checks, [], (1 if any_failed else 0)
 
+    # Computed once, before the fan-out starts: what this machine itself
+    # declares does not depend on which host is being asked, so every
+    # worker compares against the same snapshot rather than each re-reading
+    # (and possibly re-failing) the local group-config directory on its
+    # own. A raise here — the whole collection could not be produced —
+    # is caught exactly like `_doctor_account_roster`'s own raise posture:
+    # it becomes this machine's own local-failure row, and (via the empty
+    # dict passed to every worker) suppresses every per-host group row
+    # rather than rendering a false agreement or divergence.
+    try:
+        self_group_projections, self_group_unreadable = _doctor_self_group_projections()
+        self_group_failure: str | None = None
+    except Exception as e:  # noqa: BLE001 — mirrors the account roster's own raise posture
+        self_group_projections = None
+        self_group_unreadable = {}
+        self_group_failure = str(e)
+
     def _worker(host_name: str, host: "Host"):
-        return _doctor_probe_worker(host_name, host, connect_timeout=connect_timeout)
+        return _doctor_probe_worker(
+            host_name,
+            host,
+            connect_timeout=connect_timeout,
+            self_group_projections=self_group_projections or {},
+            self_group_unreadable=self_group_unreadable,
+        )
 
     (checks, _local_notices, exit_code), host_answers = answer_all_hosts_concurrently(
         _local_answer,
@@ -1672,7 +1958,14 @@ def _dispatch_doctor_all_hosts(rest: list[str]) -> None:
         exit_code = 1
 
     self_name = self_name_cell[0]
-    host_rows = list(_doctor_self_rows(self_name))
+    host_rows = list(
+        _doctor_self_rows(
+            self_name,
+            self_group_projections=self_group_projections,
+            self_group_unreadable=self_group_unreadable,
+            self_group_failure=self_group_failure,
+        )
+    )
     if hosts_error is not None:
         # hosts.toml itself failed to parse — the declared hosts could
         # never be enumerated, so there is nothing to fan out to. The
