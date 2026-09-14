@@ -5031,3 +5031,173 @@ def test_after_a_completed_transfer_this_hosts_own_preflight_refuses_naming_the_
     out = capsys.readouterr().out
     assert "host-b-declared" in out
     assert "run this preflight from" in out
+
+
+class TestRefusalsAndRetryThroughTheRealEntryPath:
+    """The two collision refusals and a mid-transfer retry, proven through
+    the real `camp` binary over the faked `ssh` boundary (`e2e_env`) rather
+    than through any imported module. A refusal that only holds at
+    `camp.transfer.move.move_workspace`'s own call boundary is not the same
+    claim as one that holds for the verb an operator actually types — this
+    class is the guard against losing that distinction again."""
+
+    @pytest.mark.parametrize("overwrite", [False, True])
+    def test_ownerless_peer_workspace_refuses_with_the_remedy_on_stdout(
+        self, e2e_env, overwrite: bool
+    ):
+        """A receiving host already holding a workspace of this slug whose
+        own record names no owner refuses through the real preflight
+        short-circuit — before `move_workspace` is ever reached — at the
+        documented collision exit code, on both the omitted and passed
+        `--overwrite` path. The remedy lands on stdout and stderr is empty:
+        `_render_human` prints the whole check report to stdout with no
+        `file=sys.stderr` anywhere in it, true of every preflight refusal."""
+        from camp.group.manifest import manifest_path_for, write_central_manifest
+
+        c = e2e_env
+        write_central_manifest(
+            manifest_path_for("testgroup", c["slug"], env=c["peer_env"]), {"owner": None}
+        )
+
+        argv = ["transfer", c["slug"], "--to", "host-b", "--group", "testgroup"]
+        if overwrite:
+            argv.append("--overwrite")
+        result = _run_camp(c["sender_cli_env"], *argv)
+
+        assert result.returncode == 13
+        assert result.stderr == ""
+        assert (
+            f"slug {c['slug']!r} exists on the peer and its ownership there "
+            "was never recorded" in result.stdout
+        )
+
+    def test_colliding_branch_with_no_workspace_record_refuses_with_the_remedy_on_stderr(
+        self, e2e_env
+    ):
+        """A bare git branch of the member's slug name already on the peer,
+        with no workspace record there at all, passes preflight check 9
+        (which only inspects the manifest) and is refused instead from
+        inside `move_workspace`'s `begin` promotion, caught by the
+        `except UnattributedCollision` handler — which prints to stderr, not
+        stdout. The same collision exit code as the workspace case, on the
+        other stream."""
+        c = e2e_env
+        _git(c["peer_repo"], "branch", c["branch"])
+
+        result = _run_camp(
+            c["sender_cli_env"], "transfer", c["slug"], "--to", "host-b", "--group", "testgroup"
+        )
+
+        assert result.returncode == 13
+        assert "already exists on this host" in result.stderr
+        assert "remove or rename the peer's branch" in result.stderr
+
+    def test_retry_after_content_lands_through_the_real_binary_leaves_none_of_it_behind(
+        self, e2e_env
+    ):
+        """The retry claim, proven through the real binary rather than an
+        imported `move_workspace` call: attempt one lands a real worktree
+        file AND a real conversation transcript on the peer, then fails for
+        real — a chmod'd-unreadable nested conversation file makes the real
+        tar-producer subprocess hit a genuine permission-denied failure in
+        the `conversations` phase, which runs after `worktree` and after one
+        whole conversation has already crossed. Attempt two, run after
+        fixing what failed, succeeds, and the artifacts unique to attempt
+        one — the worktree file and the landed transcript, the latter no
+        longer even offered by the sender — are both gone from the peer
+        afterward, proven by re-reading the peer's own harness store, not by
+        recalling what attempt one put there."""
+        from camp.group.manifest import workspace_dir
+        from camp.provision.reconcile import _worktree_path
+        from trailhead.harness.claude_code import ClaudeCodeHarness
+
+        c = e2e_env
+        harness = ClaudeCodeHarness()
+        sender_ws_root = workspace_dir("testgroup", c["slug"], env=c["sender_env"]).resolve()
+        sender_claude_env = {"TRAILHEAD_CLAUDE_DIR": str(c["sender_claude_dir"])}
+
+        landed_session_id = "66666666-6666-4666-8666-666666666666"
+        failing_session_id = "77777777-7777-4777-8777-777777777777"
+
+        # A conversation that will fully cross before the phase fails.
+        _seed_conversation(c, session_id=landed_session_id, marker="e2e-retry-landed-marker")
+
+        # A second conversation whose top-level transcript is perfectly
+        # readable (so preflight's own enumeration resolves it as rooted
+        # here, never UNRESOLVED) but whose nested per-session directory
+        # holds a file with no read permission — the real tar-producer
+        # subprocess (`write_conversation_archive`) hits a genuine
+        # `PermissionError` trying to add it, after the transcript itself
+        # was already opened successfully for the top-level member.
+        _seed_conversation(c, session_id=failing_session_id, marker="e2e-retry-failing-marker")
+        failing_transcript = harness.session_transcript_destination(
+            failing_session_id, sender_ws_root, env=sender_claude_env
+        )
+        nested_dir = failing_transcript.parent / failing_session_id
+        nested_dir.mkdir(parents=True, exist_ok=True)
+        unreadable_file = nested_dir / "unreadable.bin"
+        unreadable_file.write_bytes(b"nested conversation content")
+        unreadable_file.chmod(0o000)
+
+        sender_wt_path = c["wt_path"]
+        (sender_wt_path / "attempt-one-only.txt").write_text("only in attempt one\n")
+
+        try:
+            attempt_one = _run_camp(
+                c["sender_cli_env"],
+                "transfer",
+                c["slug"],
+                "--to",
+                "host-b",
+                "--group",
+                "testgroup",
+            )
+        finally:
+            unreadable_file.chmod(0o644)
+
+        assert attempt_one.returncode != 0, attempt_one.stdout
+
+        peer_ws_root = workspace_dir("testgroup", c["slug"], env=c["peer_env"]).resolve()
+        peer_wt = _worktree_path("testgroup", c["slug"], "repo_a", env=c["peer_env"])
+
+        # Content genuinely reached the peer before the failure — otherwise
+        # the retry's teardown claim below would have nothing to prove.
+        assert (peer_wt / "attempt-one-only.txt").exists()
+        assert (
+            harness.session_transcript_path(landed_session_id, peer_ws_root, env=c["peer_env"])
+            is not None
+        )
+
+        # Fix what failed and remove the landed conversation from the
+        # sender's own store, so attempt two never resends it — its
+        # continued absence on the peer after a successful retry is then
+        # proof the peer's own stale copy was purged, not that it simply
+        # arrived again unchanged.
+        unreadable_file.unlink()
+        landed_transcript = harness.session_transcript_destination(
+            landed_session_id, sender_ws_root, env=sender_claude_env
+        )
+        landed_transcript.unlink()
+        failing_transcript.unlink()
+
+        (sender_wt_path / "attempt-one-only.txt").unlink()
+        (sender_wt_path / "attempt-two-only.txt").write_text("only in attempt two\n")
+
+        attempt_two = _run_camp(
+            c["sender_cli_env"],
+            "transfer",
+            c["slug"],
+            "--to",
+            "host-b",
+            "--group",
+            "testgroup",
+            "--overwrite",
+        )
+        assert attempt_two.returncode == 0, attempt_two.stderr
+
+        assert not (peer_wt / "attempt-one-only.txt").exists()
+        assert (peer_wt / "attempt-two-only.txt").exists()
+        assert (
+            harness.session_transcript_path(landed_session_id, peer_ws_root, env=c["peer_env"])
+            is None
+        )
