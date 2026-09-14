@@ -128,23 +128,20 @@ __all__ = [
 #: stderr text for a refused remote invocation.
 _OVERWRITE_MARKER = "--overwrite"
 
-#: The substring `camp.transfer.receive.UnattributedWorkspace`'s message
-#: always carries — checked BEFORE `_OVERWRITE_MARKER` below, since that
-#: message also mentions `--overwrite` (to say the refusal is not lifted by
-#: it) and would otherwise be misread as `OverwriteNeeded`.
-_UNATTRIBUTED_MARKER = "was never handed this workspace"
-
-#: The substring `camp.transfer.receive.UnattributedBranch`'s message always
-#: carries — the same-shaped signal as `_UNATTRIBUTED_MARKER` above, for the
-#: other collision kind: a same-named branch with no workspace record at
-#: all. Checked alongside `_UNATTRIBUTED_MARKER`, for the same reason: this
-#: message also mentions `--overwrite`, and would otherwise be misread as
-#: `OverwriteNeeded`.
-_UNATTRIBUTED_BRANCH_MARKER = "no workspace record here attributes it"
+#: Marker substring -> the `UnattributedCollision.kind` it names, one entry
+#: per refusal `camp.transfer.receive` raises that `--overwrite` does not
+#: lift: `UnattributedWorkspace` and `UnattributedBranch`. Every entry is
+#: checked BEFORE `_OVERWRITE_MARKER` above, since each of those messages
+#: also mentions `--overwrite` (to say the refusal is not lifted by it) and
+#: would otherwise be misread as `OverwriteNeeded`.
+_UNATTRIBUTED_MARKERS = {
+    "was never handed this workspace": "workspace",
+    "no workspace record here attributes it": "branch",
+}
 
 
 class MoveRefused(Exception):
-    """Base of the two ways `move_workspace` stops before completing."""
+    """Base of the three ways `move_workspace` stops before completing."""
 
 
 class OverwriteNeeded(MoveRefused):
@@ -296,11 +293,10 @@ def _run_camp_phase(
 
     *promote_unattributed* scopes the `UnattributedCollision` promotion the
     same way, to the same one phase — `begin` is the only phase that can
-    raise `camp.transfer.receive.UnattributedWorkspace` or
-    `camp.transfer.receive.UnattributedBranch`, the two markers checked
-    here. Both are checked BEFORE the overwrite promotion: each refusal's
-    own message also contains `--overwrite` (to say the refusal is not
-    lifted by it), so checking overwrite first would misclassify it.
+    raise either refusal `_UNATTRIBUTED_MARKERS` names. Every one of those
+    markers is checked BEFORE the overwrite promotion: each refusal's own
+    message also contains `--overwrite` (to say the refusal is not lifted
+    by it), so checking overwrite first would misclassify it.
     """
     outcome = run_camp(
         host,
@@ -311,14 +307,10 @@ def _run_camp_phase(
     )
     if isinstance(outcome, Answered):
         return outcome
-    if promote_unattributed and isinstance(outcome, RemoteRefusal) and _UNATTRIBUTED_MARKER in outcome.stderr:
-        raise UnattributedCollision(outcome.stderr.strip(), kind="workspace")
-    if (
-        promote_unattributed
-        and isinstance(outcome, RemoteRefusal)
-        and _UNATTRIBUTED_BRANCH_MARKER in outcome.stderr
-    ):
-        raise UnattributedCollision(outcome.stderr.strip(), kind="branch")
+    if promote_unattributed and isinstance(outcome, RemoteRefusal):
+        for marker, kind in _UNATTRIBUTED_MARKERS.items():
+            if marker in outcome.stderr:
+                raise UnattributedCollision(outcome.stderr.strip(), kind=kind)
     if promote_overwrite and isinstance(outcome, RemoteRefusal) and _OVERWRITE_MARKER in outcome.stderr:
         raise OverwriteNeeded(outcome.stderr.strip())
     raise PhaseFailed(remote_argv[1] if len(remote_argv) > 1 else remote_argv[0], _outcome_detail(outcome))

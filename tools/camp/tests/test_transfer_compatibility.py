@@ -147,18 +147,24 @@ def _no_conversations(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(transfer, "_gather_conversations", lambda **kw: ())
 
 
-def _clean_probe_answer():
-    """A peer answer on which every peer-dependent check passes."""
+def _clean_probe_answer(**overrides):
+    """A peer answer on which every peer-dependent check passes.
+
+    Keyword overrides shift exactly one field, so a test that varies the
+    peer's answer shows which field it varied rather than restating all seven.
+    """
     probe = _probe_module()
-    return probe.ProbeAnswer(
-        self_name="host-b",
-        group_configured=True,
-        members=(probe.MemberRepoStatus(name="repo_a", repo_root_exists=True),),
-        account=None,
-        workspace_exists=False,
-        workspace_owner=None,
-        contract_version=probe.PROBE_CONTRACT_VERSION,
-    )
+    fields = {
+        "self_name": "host-b",
+        "group_configured": True,
+        "members": (probe.MemberRepoStatus(name="repo_a", repo_root_exists=True),),
+        "account": None,
+        "workspace_exists": False,
+        "workspace_owner": None,
+        "contract_version": probe.PROBE_CONTRACT_VERSION,
+    }
+    fields.update(overrides)
+    return probe.ProbeAnswer(**fields)
 
 
 def _fake_probe(monkeypatch: pytest.MonkeyPatch, result):
@@ -697,18 +703,9 @@ def test_every_producible_exit_code_appears_in_the_documented_table(
     env13b.write_hosts(self_name="host-a", peers={"host-b": "host-b"})
     env13b.write_manifest(owner="host-a")
     env13b.apply(monkeypatch)
-    probe = _probe_module()
     _fake_probe(
         monkeypatch,
-        probe.ProbeAnswer(
-            self_name="host-b",
-            group_configured=True,
-            members=(probe.MemberRepoStatus(name="repo_a", repo_root_exists=True),),
-            account=None,
-            workspace_exists=True,
-            workspace_owner=None,
-            contract_version=probe.PROBE_CONTRACT_VERSION,
-        ),
+        _clean_probe_answer(workspace_exists=True, workspace_owner=None),
     )
     _no_conversations(monkeypatch)
 

@@ -106,9 +106,10 @@ def one_member_group(tmp_path: Path):
         [{"name": "repo_a", "repo_root": str(repo_a), "tasks": [], "base": "origin/main"}],
     )
     env = camp_state_env(tmp_path)
-    # `begin`'s overwrite teardown now also consults the harness boundary
-    # (to purge any placed transcript) — an isolated Claude Code config dir
-    # keeps that resolution off the developer's real home.
+    # A fresh, never-yet-created Claude Code config dir: it keeps every
+    # harness-boundary resolution (`begin`'s teardown purge, `conversations`'
+    # transcript placement) off the developer's real home, and lets a test
+    # assert on whether `projects/` gets created at all.
     env["TRAILHEAD_CLAUDE_DIR"] = str(tmp_path / "claude-dir")
     return {"group": group, "repo_a": repo_a, "env": env, "tmp_path": tmp_path}
 
@@ -128,6 +129,8 @@ def two_member_group(tmp_path: Path):
         ],
     )
     env = camp_state_env(tmp_path)
+    # Same isolated Claude Code config dir as `one_member_group`, for the
+    # same reason.
     env["TRAILHEAD_CLAUDE_DIR"] = str(tmp_path / "claude-dir")
     return {"group": group, "repo_a": repo_a, "repo_b": repo_b, "env": env, "tmp_path": tmp_path}
 
@@ -615,7 +618,7 @@ class TestBeginOverwriteReachesTranscriptStore:
         from camp.transfer import receive
 
         g = one_member_group
-        env = _conversation_env(g)
+        env = dict(g["env"])
         session_id = "33333333-3333-4333-8333-333333333333"
 
         receive.begin(
@@ -1408,14 +1411,6 @@ def test_transfer_receive_begin_still_dispatches_when_another_workspace_exists(
 # ---------------------------------------------------------------------------
 
 
-def _conversation_env(g: dict) -> dict[str, str]:
-    """*g*'s own `camp_state_env`, plus a fresh, never-yet-created Claude Code
-    config dir — so a test can assert on whether `projects/` gets created."""
-    env = dict(g["env"])
-    env["TRAILHEAD_CLAUDE_DIR"] = str(g["tmp_path"] / "claude-dir")
-    return env
-
-
 def _archive_bytes(transcript: bytes, nested: dict[str, bytes] | None = None) -> bytes:
     """A tar stream shaped exactly like
     `camp.transfer.conversations.write_conversation_archive`'s output: a
@@ -1450,7 +1445,7 @@ class TestConversationSubpathConfinement:
 
         g = one_member_group
         _seed_workspace(g, "feat-x")
-        env = _conversation_env(g)
+        env = dict(g["env"])
         before = _snapshot(Path(env["TRAILHEAD_CLAUDE_DIR"]))
 
         with pytest.raises(receive.ConversationSubpathRefused) as exc_info:
@@ -1477,7 +1472,7 @@ class TestConversationSubpathConfinement:
 
         g = one_member_group
         ws_root = _seed_workspace(g, "feat-x")
-        env = _conversation_env(g)
+        env = dict(g["env"])
         before = _snapshot(Path(env["TRAILHEAD_CLAUDE_DIR"]))
         coincidentally_safe_absolute_subpath = str(ws_root / "nested")
 
@@ -1504,7 +1499,7 @@ class TestConversationSubpathConfinement:
         outside.mkdir()
         (ws_root / "escape").symlink_to(outside)
 
-        env = _conversation_env(g)
+        env = dict(g["env"])
         before = _snapshot(Path(env["TRAILHEAD_CLAUDE_DIR"]))
 
         with pytest.raises(receive.ConversationSubpathRefused) as exc_info:
@@ -1531,7 +1526,7 @@ class TestConversationRootLanding:
 
         g = one_member_group
         ws_root = _seed_workspace(g, "feat-x")
-        env = _conversation_env(g)
+        env = dict(g["env"])
         session_id = "11111111-1111-4111-8111-111111111111"
 
         # The Claude Code config dir has never been touched — proves this
@@ -1575,7 +1570,7 @@ class TestConversationMemberSubpathLanding:
         ws_root = _seed_workspace(g, "feat-x")
         member_dir = ws_root / "repo_a"
         member_dir.mkdir(parents=True, exist_ok=True)
-        env = _conversation_env(g)
+        env = dict(g["env"])
         session_id = "22222222-2222-4222-8222-222222222222"
 
         archive = _archive_bytes(
@@ -1619,7 +1614,7 @@ class TestConversationDestinationCollision:
         ws_root = _seed_workspace(g, "feat-x")
         (ws_root / "repo.a").mkdir(parents=True, exist_ok=True)
         (ws_root / "repo" / "a").mkdir(parents=True, exist_ok=True)
-        env = _conversation_env(g)
+        env = dict(g["env"])
 
         session_a = "33333333-3333-4333-8333-333333333333"
         session_b = "44444444-4444-4444-8444-444444444444"
@@ -1669,7 +1664,7 @@ class TestConversationRerun:
 
         g = one_member_group
         ws_root = _seed_workspace(g, "feat-x")
-        env = _conversation_env(g)
+        env = dict(g["env"])
         session_id = "55555555-5555-4555-8555-555555555555"
 
         for n in (1, 2):
@@ -1702,7 +1697,7 @@ class TestConversationArchiveMemberConfinement:
 
         g = one_member_group
         _seed_workspace(g, "feat-x")
-        env = _conversation_env(g)
+        env = dict(g["env"])
         session_id = "66666666-6666-4666-8666-666666666666"
 
         archive = _archive_bytes(
@@ -1731,7 +1726,7 @@ class TestConversationNestedSubtreeRewrite:
 
         g = one_member_group
         ws_root = _seed_workspace(g, "feat-x")
-        env = _conversation_env(g)
+        env = dict(g["env"])
         session_id = "77777777-7777-4777-8777-777777777777"
         sender_root = "/home/sender/some-other-workspace"
 
@@ -1768,7 +1763,7 @@ class TestConversationNestedRootOutsideWorkspaceRefused:
 
         g = one_member_group
         ws_root = _seed_workspace(g, "feat-x")
-        env = _conversation_env(g)
+        env = dict(g["env"])
         session_id = "88888888-8888-4888-8888-888888888888"
         sender_root = "/home/sender/some-other-workspace"
 
@@ -1808,7 +1803,7 @@ class TestConversationUnknownRootRefused:
 
         g = one_member_group
         ws_root = _seed_workspace(g, "feat-x")
-        env = _conversation_env(g)
+        env = dict(g["env"])
         session_id = "99999999-9999-4999-8999-999999999999"
 
         archive = _archive_bytes(json.dumps({"type": "summary"}).encode() + b"\n")

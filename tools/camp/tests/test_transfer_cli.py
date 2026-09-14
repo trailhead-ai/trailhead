@@ -1123,6 +1123,15 @@ def _peer_child_env(peer_cfg: Path, peer_state: Path, peer_claude_dir: Path) -> 
     return child_env
 
 
+def _peer_file_snapshot(root: Path) -> dict[str, bytes]:
+    """Every regular file under *root*, by relative path, with its bytes — so
+    a test can assert a refused transfer left the peer's whole state
+    directory untouched rather than merely that some named path is absent."""
+    return {
+        str(p.relative_to(root)): p.read_bytes() for p in sorted(root.rglob("*")) if p.is_file()
+    }
+
+
 def _peer_runner(peer_cfg: Path, peer_state: Path, peer_claude_dir: Path):
     """A `Runner` that runs the actual `camp transfer-receive begin|finish
     ...` invocation `move_workspace` assembled, parsed off the ssh argv, as a
@@ -2179,14 +2188,7 @@ class TestMoveWorkspaceEndToEnd:
         peer_manifest = manifest_path_for("testgroup", g["slug"], env=g["peer_env"])
         assert peer_manifest.is_file(), "begin must have seeded the manifest before history failed"
 
-        def _snapshot(root: Path) -> dict[str, bytes]:
-            return {
-                str(p.relative_to(root)): p.read_bytes()
-                for p in sorted(root.rglob("*"))
-                if p.is_file()
-            }
-
-        before_refusal = _snapshot(g["peer_state"])
+        before_refusal = _peer_file_snapshot(g["peer_state"])
         with pytest.raises(OverwriteNeeded) as overwrite_exc:
             move_workspace(
                 host=g["host"],
@@ -2200,7 +2202,7 @@ class TestMoveWorkspaceEndToEnd:
                 stream_spawn=g["stream_spawn"],
             )
         assert "--overwrite" in overwrite_exc.value.detail
-        after_refusal = _snapshot(g["peer_state"])
+        after_refusal = _peer_file_snapshot(g["peer_state"])
         assert before_refusal == after_refusal
 
         result = move_workspace(
@@ -2367,14 +2369,7 @@ class TestMoveWorkspaceEndToEnd:
         peer_manifest = manifest_path_for("testgroup", g["slug"], env=g["peer_env"])
         write_central_manifest(peer_manifest, {"owner": None})
 
-        def _snapshot(root: Path) -> dict[str, bytes]:
-            return {
-                str(p.relative_to(root)): p.read_bytes()
-                for p in sorted(root.rglob("*"))
-                if p.is_file()
-            }
-
-        before = _snapshot(g["peer_state"])
+        before = _peer_file_snapshot(g["peer_state"])
 
         with pytest.raises(UnattributedCollision) as exc_info:
             move_workspace(
@@ -2390,7 +2385,7 @@ class TestMoveWorkspaceEndToEnd:
             )
 
         assert exc_info.value.kind == "workspace"
-        after = _snapshot(g["peer_state"])
+        after = _peer_file_snapshot(g["peer_state"])
         assert before == after
 
     def test_branch_collision_refuses_through_the_real_promotion_and_leaves_branch_sha_unchanged(
@@ -2411,14 +2406,7 @@ class TestMoveWorkspaceEndToEnd:
         _git(g["peer_repo"], "branch", g["branch"])
         before_sha = _git_out(g["peer_repo"], "rev-parse", g["branch"])
 
-        def _snapshot(root: Path) -> dict[str, bytes]:
-            return {
-                str(p.relative_to(root)): p.read_bytes()
-                for p in sorted(root.rglob("*"))
-                if p.is_file()
-            }
-
-        before = _snapshot(g["peer_state"])
+        before = _peer_file_snapshot(g["peer_state"])
 
         with pytest.raises(UnattributedCollision) as exc_info:
             move_workspace(
@@ -2440,7 +2428,7 @@ class TestMoveWorkspaceEndToEnd:
         after_sha = _git_out(g["peer_repo"], "rev-parse", g["branch"])
         assert after_sha == before_sha
 
-        after = _snapshot(g["peer_state"])
+        after = _peer_file_snapshot(g["peer_state"])
         assert before == after
         assert not manifest_path_for("testgroup", g["slug"], env=g["peer_env"]).exists()
         assert not workspace_dir("testgroup", g["slug"], env=g["peer_env"]).exists()
