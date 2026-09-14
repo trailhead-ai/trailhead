@@ -16,7 +16,11 @@ Test contract (see task/a-group-config-reduces-to-a-comparable-policy-projection
   TOML key reordering.
 - every excluded path field (repo_root, launch.roots, shared_vault root) is
   pinned individually: changing it alone causes no divergence.
-- schema-coverage: every key a loaded group config carries is classified.
+- schema-coverage: every key a loaded group config carries is classified,
+  including member-level and task-level keys, not only top-level ones.
+- a member's task list is compared order-sensitively (it is an execution
+  order); shared_vaults and lore_scopes are compared order-insensitively
+  (they are declarations, not a sequence).
 """
 
 from __future__ import annotations
@@ -33,7 +37,11 @@ if str(_PLUGIN_DIR) not in sys.path:
 
 from camp.group.config import load_group  # noqa: E402
 from camp.group.policy import (  # noqa: E402
+    EXCLUDED_MEMBER_KEYS,
+    EXCLUDED_TASK_KEYS,
     EXCLUDED_TOP_LEVEL_KEYS,
+    INCLUDED_MEMBER_KEYS,
+    INCLUDED_TASK_KEYS,
     INCLUDED_TOP_LEVEL_KEYS,
     compare_group_policy,
     project_group_policy,
@@ -691,6 +699,144 @@ root = "/srv/lore/two"
 
 
 # ---------------------------------------------------------------------------
+# A member's task list is an execution order and compares order-sensitively;
+# shared_vaults/lore_scopes are declarations and compare order-insensitively.
+# ---------------------------------------------------------------------------
+
+
+def test_member_task_reorder_compares_as_differing(tmp_path: Path) -> None:
+    a = _write(
+        tmp_path,
+        "a",
+        """\
+[group]
+name = "g"
+[[members]]
+name = "m"
+repo_root = "/tmp/m"
+tasks = ["first", "second"]
+[tasks.first]
+[[tasks.first.steps]]
+name = "first"
+cmd = ["make", "first"]
+[tasks.second]
+[[tasks.second.steps]]
+name = "second"
+cmd = ["make", "second"]
+""",
+    )
+    b = _write(
+        tmp_path,
+        "b",
+        """\
+[group]
+name = "g"
+[[members]]
+name = "m"
+repo_root = "/tmp/m"
+tasks = ["second", "first"]
+[tasks.first]
+[[tasks.first.steps]]
+name = "first"
+cmd = ["make", "first"]
+[tasks.second]
+[[tasks.second.steps]]
+name = "second"
+cmd = ["make", "second"]
+""",
+    )
+    result = compare_group_policy(
+        project_group_policy(load_group(a)), project_group_policy(load_group(b))
+    )
+    assert result.matches is False
+    assert any("task order" in d for d in result.differences)
+
+
+def test_shared_vaults_reorder_compares_as_matching(tmp_path: Path) -> None:
+    a = _write(
+        tmp_path,
+        "a",
+        """\
+[group]
+name = "g"
+[[members]]
+name = "m"
+repo_root = "/tmp/m"
+[[shared_vaults]]
+name = "trailhead"
+root = "/srv/lore"
+[[shared_vaults]]
+name = "personal"
+root = "/srv/lore2"
+""",
+    )
+    b = _write(
+        tmp_path,
+        "b",
+        """\
+[group]
+name = "g"
+[[members]]
+name = "m"
+repo_root = "/tmp/m"
+[[shared_vaults]]
+name = "personal"
+root = "/srv/lore2"
+[[shared_vaults]]
+name = "trailhead"
+root = "/srv/lore"
+""",
+    )
+    result = compare_group_policy(
+        project_group_policy(load_group(a)), project_group_policy(load_group(b))
+    )
+    assert result.matches is True
+    assert result.differences == ()
+
+
+def test_lore_scopes_reorder_compares_as_matching(tmp_path: Path) -> None:
+    a = _write(
+        tmp_path,
+        "a",
+        """\
+[group]
+name = "g"
+[[members]]
+name = "m"
+repo_root = "/tmp/m"
+[[lore_scopes]]
+scope = "product"
+name = "trailhead"
+[[lore_scopes]]
+scope = "team"
+name = "notes"
+""",
+    )
+    b = _write(
+        tmp_path,
+        "b",
+        """\
+[group]
+name = "g"
+[[members]]
+name = "m"
+repo_root = "/tmp/m"
+[[lore_scopes]]
+scope = "team"
+name = "notes"
+[[lore_scopes]]
+scope = "product"
+name = "trailhead"
+""",
+    )
+    result = compare_group_policy(
+        project_group_policy(load_group(a)), project_group_policy(load_group(b))
+    )
+    assert result.matches is True
+    assert result.differences == ()
+
+
+# ---------------------------------------------------------------------------
 # Schema-coverage: every key a loaded group config carries is classified as
 # included or excluded — an unhandled key fails this test.
 # ---------------------------------------------------------------------------
@@ -738,6 +884,62 @@ name = "trailhead"
         key
         for key in cfg
         if key not in INCLUDED_TOP_LEVEL_KEYS and key not in EXCLUDED_TOP_LEVEL_KEYS
+    ]
+    assert unclassified == []
+
+
+def test_schema_coverage_every_member_key_is_classified(tmp_path: Path) -> None:
+    cfg_path = _write(
+        tmp_path,
+        "g",
+        """\
+[group]
+name = "g"
+[[members]]
+name = "m"
+repo_root = "/tmp/m"
+excluded = ["build/"]
+tasks = ["seed"]
+
+[tasks.seed]
+[[tasks.seed.steps]]
+name = "seed"
+cmd = ["make", "seed"]
+""",
+    )
+    cfg = load_group(cfg_path)
+    member = cfg["members"][0]
+    unclassified = [
+        key for key in member if key not in INCLUDED_MEMBER_KEYS and key not in EXCLUDED_MEMBER_KEYS
+    ]
+    assert unclassified == []
+
+
+def test_schema_coverage_every_task_key_is_classified(tmp_path: Path) -> None:
+    cfg_path = _write(
+        tmp_path,
+        "g",
+        """\
+[group]
+name = "g"
+[[members]]
+name = "m"
+repo_root = "/tmp/m"
+tasks = ["seed"]
+
+[tasks.seed]
+timeout_seconds = 30
+capability = "seeds the db"
+cleanup = ["make", "clean"]
+[[tasks.seed.steps]]
+name = "seed"
+cmd = ["make", "seed"]
+""",
+    )
+    cfg = load_group(cfg_path)
+    task = cfg["members"][0]["tasks"][0]
+    unclassified = [
+        key for key in task if key not in INCLUDED_TASK_KEYS and key not in EXCLUDED_TASK_KEYS
     ]
     assert unclassified == []
 

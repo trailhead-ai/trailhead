@@ -1236,7 +1236,7 @@ def test_doctor_probe_group_policy_matches_projection_computed_directly(
     groups_dir = tmp_path / "groups"
     groups_dir.mkdir()
     _write_group(groups_dir, "levr.toml", "levr", account="acct-levr")
-    monkeypatch.setattr(cli_common, "_groups_dir", lambda: groups_dir)
+    monkeypatch.setattr(cli_common, "_groups_dir", lambda env=None: groups_dir)
 
     monkeypatch.setenv("CAMP_TEST_ASDF_PRESENT", "1")
     monkeypatch.setenv("CAMP_TEST_TMUX_PRESENT", "1")
@@ -1250,6 +1250,35 @@ def test_doctor_probe_group_policy_matches_projection_computed_directly(
     expected = project_group_policy(load_group(groups_dir / "levr.toml"))
     row = next(r for r in report[DOCTOR_PROBE_GROUP_POLICY_KEY] if r["group"] == "levr")
     assert row["projection"] == expected
+
+
+def test_doctor_group_policy_reads_through_the_injected_env_not_real_os_environ(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """M3: `_doctor_group_policy(env=...)` must resolve the groups
+    directory through the INJECTED `env`, never through the real
+    `os.environ` — proven directly against `_doctor_group_policy` itself
+    (every other probe test here monkeypatches `_groups_dir` outright,
+    which papers over this exact gap: a caller passing a hermetic env
+    must not silently read the operator's real config directory)."""
+    from camp.spine import _doctor_group_policy
+
+    # The real os.environ's own CAMP_CONFIG_DIR points at an empty
+    # directory with no groups — if `env=` is ignored, this is what
+    # `_doctor_group_policy` would read from instead of the injected one.
+    real_config_dir = tmp_path / "real-config-should-be-ignored"
+    monkeypatch.setenv("CAMP_CONFIG_DIR", str(real_config_dir))
+    monkeypatch.setenv("HOME", str(tmp_path / "real-home-should-be-ignored"))
+
+    injected_config_dir = tmp_path / "injected-config"
+    groups_dir = injected_config_dir / "groups"
+    groups_dir.mkdir(parents=True)
+    _write_group(groups_dir, "isolated.toml", "isolated")
+    env = {"CAMP_CONFIG_DIR": str(injected_config_dir), "HOME": str(tmp_path / "home")}
+
+    rows = _doctor_group_policy(env=env)
+
+    assert any(r["group"] == "isolated" for r in rows), rows
 
 
 def test_doctor_probe_group_policy_wire_shape_pins_normal_absent_and_unreadable(
@@ -1271,7 +1300,7 @@ def test_doctor_probe_group_policy_wire_shape_pins_normal_absent_and_unreadable(
     groups_dir.mkdir()
     _write_group(groups_dir, "good.toml", "good")
     (groups_dir / "broken.toml").write_text("not valid toml [[[", encoding="utf-8")
-    monkeypatch.setattr(cli_common, "_groups_dir", lambda: groups_dir)
+    monkeypatch.setattr(cli_common, "_groups_dir", lambda env=None: groups_dir)
 
     monkeypatch.setenv("CAMP_TEST_ASDF_PRESENT", "1")
     monkeypatch.setenv("CAMP_TEST_TMUX_PRESENT", "1")
@@ -1310,7 +1339,7 @@ def test_doctor_probe_group_policy_no_groups_yields_empty_list_not_absent(
 
     groups_dir = tmp_path / "groups"
     groups_dir.mkdir()
-    monkeypatch.setattr(cli_common, "_groups_dir", lambda: groups_dir)
+    monkeypatch.setattr(cli_common, "_groups_dir", lambda env=None: groups_dir)
 
     monkeypatch.setenv("CAMP_TEST_ASDF_PRESENT", "1")
     monkeypatch.setenv("CAMP_TEST_TMUX_PRESENT", "1")
@@ -1339,7 +1368,7 @@ def test_doctor_probe_group_policy_one_malformed_file_does_not_lose_the_rest(
     _write_group(groups_dir, "alpha.toml", "alpha")
     _write_group(groups_dir, "gamma.toml", "gamma")
     (groups_dir / "broken.toml").write_text("not valid toml [[[", encoding="utf-8")
-    monkeypatch.setattr(cli_common, "_groups_dir", lambda: groups_dir)
+    monkeypatch.setattr(cli_common, "_groups_dir", lambda env=None: groups_dir)
 
     monkeypatch.setenv("CAMP_TEST_ASDF_PRESENT", "1")
     monkeypatch.setenv("CAMP_TEST_TMUX_PRESENT", "1")

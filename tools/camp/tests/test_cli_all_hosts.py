@@ -3873,6 +3873,189 @@ def test_doctor_group_malformed_value_degrades_only_that_host_human(
     assert _verdict_token(lookout_line) == "PASS"
 
 
+def test_doctor_group_structurally_malformed_projection_degrades_only_the_group_not_the_host(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """C1: a far `projection` that IS a dict, and whose `members` IS a dict
+    (so it passes the I1 structural check), but whose member VALUE is not a
+    dict — a shape that raises inside `compare_group_policy` itself, not
+    caught by the shallower structural check — must degrade only that one
+    group to cannot-tell. The host's multiplexer row and its account rows —
+    built in the same worker call, before the raise — must still render
+    with their real values, not collapse into a single internal-fault row."""
+    _doctor_hosts_env(tmp_path, monkeypatch, "[hosts.andromeda]\n")
+    _write_self_group(tmp_path, "g1", _GROUP_G1_BASE)
+    transport = _transport_module()
+
+    def fake_run_camp(host, remote_argv, **kw):
+        payload = {
+            "pass": True,
+            "checks": [],
+            "probe": True,
+            "multiplexer_present": True,
+            "accounts": [
+                {"account": "andromeda-account", "verdict": "authenticated", "reason": None}
+            ],
+            "group_policy": [
+                {
+                    "group": "g1",
+                    "projection": {
+                        "group_name": "g1",
+                        "branch_pattern": "worktree-{slug}",
+                        "members": {"alpha": "not-a-member-dict"},  # malformed member value
+                        "account": None,
+                        "shared_vaults": [],
+                        "lore_scopes": [],
+                    },
+                    "error": None,
+                }
+            ],
+        }
+        return _probe_answered(payload)
+
+    monkeypatch.setattr(transport, "run_camp", fake_run_camp)
+
+    code = _run(monkeypatch, ["doctor", "-a", "--json"])
+    report = json.loads(capsys.readouterr().out)
+    assert code == 0
+    andromeda_rows = [h for h in report["hosts"] if h["host"] == "andromeda"]
+    assert not any(
+        "internal camp fault" in h["detail"] for h in andromeda_rows
+    ), andromeda_rows
+    multiplexer_row = next(h for h in andromeda_rows if "multiplexer" in h["detail"])
+    assert multiplexer_row["verdict"] == "PASS"
+    account_row = next(h for h in andromeda_rows if "andromeda-account" in h["detail"])
+    assert account_row["verdict"] == "PASS"
+    group_row = _group_row(report["hosts"], "andromeda")
+    assert group_row["verdict"] == "UNKNOWN"
+
+
+def test_doctor_group_empty_dict_projection_renders_cannot_tell_not_divergence_json(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """I1: a far `projection` of `{}` (a dict, but carrying none of
+    `project_group_policy`'s own keys) must render cannot-tell, not
+    confident divergence — before this fix it rendered a `WARN` naming
+    every field as differing."""
+    _doctor_hosts_env(tmp_path, monkeypatch, "[hosts.andromeda]\n")
+    _write_self_group(tmp_path, "g1", _GROUP_G1_BASE)
+    transport = _transport_module()
+    monkeypatch.setattr(
+        transport,
+        "run_camp",
+        lambda host, remote_argv, **kw: _probe_answered_group_policy(
+            [{"group": "g1", "projection": {}, "error": None}]
+        ),
+    )
+
+    code = _run(monkeypatch, ["doctor", "-a", "--json"])
+    report = json.loads(capsys.readouterr().out)
+    assert code == 0
+    row = _group_row(report["hosts"], "andromeda")
+    assert row["verdict"] == "UNKNOWN"
+
+
+def test_doctor_group_real_projection_differing_still_renders_warn_json(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """I1's other side: a genuine projection that differs in one dimension
+    must still render as divergence, not be swept into cannot-tell by the
+    new structural check."""
+    _doctor_hosts_env(tmp_path, monkeypatch, "[hosts.andromeda]\n")
+    _write_self_group(tmp_path, "g1", _GROUP_G1_BASE)
+    far_projection = _projection_for(tmp_path, "far", "g1", _GROUP_G1_DIFFERENT_BRANCH)
+    transport = _transport_module()
+    monkeypatch.setattr(
+        transport,
+        "run_camp",
+        lambda host, remote_argv, **kw: _probe_answered_group_policy(
+            [{"group": "g1", "projection": far_projection, "error": None}]
+        ),
+    )
+
+    code = _run(monkeypatch, ["doctor", "-a", "--json"])
+    report = json.loads(capsys.readouterr().out)
+    assert code == 0
+    row = _group_row(report["hosts"], "andromeda")
+    assert row["verdict"] == "WARN"
+    assert "branch_pattern" in row["detail"]
+
+
+def test_doctor_group_over_long_dimension_name_is_capped_json(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """I2: a far-authored dimension name (here, a member name that only
+    exists on the far side) is bounded to `_DOCTOR_GROUP_FIELD_LIMIT`
+    characters, not rendered verbatim."""
+    dispatch = _dispatch_module()
+    field_limit = dispatch._DOCTOR_GROUP_FIELD_LIMIT
+    _doctor_hosts_env(tmp_path, monkeypatch, "[hosts.andromeda]\n")
+    _write_self_group(tmp_path, "g1", _GROUP_G1_BASE)
+    huge_member = "z" * (field_limit * 5)
+    far_body = (
+        '[group]\nname = "g1"\n\n[[members]]\nname = "alpha"\nrepo_root = "/tmp/alpha"\n'
+        f'[[members]]\nname = "{huge_member}"\nrepo_root = "/tmp/huge"\n'
+        '[branch]\npattern = "worktree-{slug}"\n'
+    )
+    far_projection = _projection_for(tmp_path, "far", "g1", far_body)
+    transport = _transport_module()
+    monkeypatch.setattr(
+        transport,
+        "run_camp",
+        lambda host, remote_argv, **kw: _probe_answered_group_policy(
+            [{"group": "g1", "projection": far_projection, "error": None}]
+        ),
+    )
+
+    code = _run(monkeypatch, ["doctor", "-a", "--json"])
+    report = json.loads(capsys.readouterr().out)
+    assert code == 0
+    row = _group_row(report["hosts"], "andromeda")
+    assert row["verdict"] == "WARN"
+    assert len(row["detail"]) < len(huge_member)
+    assert "…" in row["detail"]
+
+
+def test_doctor_group_over_many_dimensions_states_overflow_json(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """I2: a differing group with more dimensions than
+    `_DOCTOR_GROUP_DIMENSION_LIMIT` states the overflow rather than
+    silently dropping — proven by a far side declaring far more members
+    than this machine, each one its own "member only in b" dimension."""
+    dispatch = _dispatch_module()
+    dim_limit = dispatch._DOCTOR_GROUP_DIMENSION_LIMIT
+    _doctor_hosts_env(tmp_path, monkeypatch, "[hosts.andromeda]\n")
+    _write_self_group(tmp_path, "g1", _GROUP_G1_BASE)
+    extra_members = "\n".join(
+        f'[[members]]\nname = "extra{i}"\nrepo_root = "/tmp/extra{i}"\n'
+        for i in range(dim_limit + 5)
+    )
+    far_body = (
+        '[group]\nname = "g1"\n\n[[members]]\nname = "alpha"\nrepo_root = "/tmp/alpha"\n'
+        f"{extra_members}"
+        '[branch]\npattern = "worktree-{slug}"\n'
+    )
+    far_projection = _projection_for(tmp_path, "far", "g1", far_body)
+    transport = _transport_module()
+    monkeypatch.setattr(
+        transport,
+        "run_camp",
+        lambda host, remote_argv, **kw: _probe_answered_group_policy(
+            [{"group": "g1", "projection": far_projection, "error": None}]
+        ),
+    )
+
+    code = _run(monkeypatch, ["doctor", "-a", "--json"])
+    report = json.loads(capsys.readouterr().out)
+    assert code == 0
+    row = _group_row(report["hosts"], "andromeda")
+    assert row["verdict"] == "WARN"
+    assert "more" in row["detail"]
+    shown = row["detail"].count("member only in b:")
+    assert shown == dim_limit
+
+
 def test_doctor_group_unreachable_host_renders_no_group_rows_json(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
@@ -4039,6 +4222,48 @@ def test_doctor_group_self_config_unreadable_renders_local_failure_no_per_host_r
     assert _verdict_token(andromeda_reachability) == "PASS"
 
 
+def test_doctor_group_self_malformed_individual_file_renders_local_failure_line_json(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """I4: a malformed *individual* local group file — not a whole-directory
+    raise — must still render a self-block failure line naming the group,
+    per the design doc's "This machine's own group configuration cannot be
+    read" state ("the local group directory is unreadable, OR a local
+    group file is malformed"). With no declared hosts, this line is the
+    ONLY place the fault could ever surface."""
+    _doctor_hosts_env(tmp_path, monkeypatch, "")
+    _write_self_group(tmp_path, "g1", "this is not valid toml [[[")
+
+    code = _run(monkeypatch, ["doctor", "-a", "--json"])
+    report = json.loads(capsys.readouterr().out)
+    assert code == 0
+    self_rows = [h for h in report["hosts"] if h["host"] is None]
+    failure_row = next(
+        h for h in self_rows if "g1" in h["detail"] and "could not be read" in h["detail"]
+    )
+    assert failure_row["verdict"] == "WARN"
+    assert not any("configures no groups" in h["detail"] for h in self_rows)
+    self_multiplexer = next(h for h in self_rows if "multiplexer" in h["detail"])
+    assert self_multiplexer["verdict"] == "PASS"
+
+
+def test_doctor_group_self_malformed_individual_file_distinct_from_no_groups_line_human(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """The same state, on the human render path — and the two local-state
+    lines ("cannot be read" vs "configures no groups") must stay distinct
+    text, not collapse into each other."""
+    _doctor_hosts_env(tmp_path, monkeypatch, "")
+    _write_self_group(tmp_path, "g1", "this is not valid toml [[[")
+
+    code = _run(monkeypatch, ["doctor", "-a"])
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "g1" in out
+    assert "could not be read" in out
+    assert "configures no groups" not in out
+
+
 def test_doctor_group_local_no_groups_configured_renders_nothing_to_compare_json(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
@@ -4106,8 +4331,10 @@ def test_doctor_group_row_cap_truncates_with_overflow_stated_json(
 ) -> None:
     """Remote facts exceeding the row cap are truncated with the overflow
     stated — proven by placing this machine's own declared group beyond
-    the cap so it is dropped from the truncated list and reports as
-    absent, together with the overflow notice."""
+    the cap so it falls out of the truncated list. I3 (resolved): a group
+    dropped by truncation is cannot-tell, never the definite "does not
+    configure" claim — camp cannot know whether a truncated-away group was
+    genuinely absent or merely didn't make the cut."""
     dispatch = _dispatch_module()
     limit = dispatch._DOCTOR_GROUP_ROW_LIMIT
     _doctor_hosts_env(tmp_path, monkeypatch, "[hosts.andromeda]\n")
@@ -4129,7 +4356,8 @@ def test_doctor_group_row_cap_truncates_with_overflow_stated_json(
     report = json.loads(capsys.readouterr().out)
     assert code == 0
     row = _group_row(report["hosts"], "andromeda")
-    assert "does not configure" in row["detail"], "g1 fell past the cap, so it reads absent"
+    assert row["verdict"] == "UNKNOWN", "g1 fell past the cap — cannot-tell, not absent"
+    assert "does not configure" not in row["detail"]
     overflow_rows = [
         h
         for h in report["hosts"]
@@ -4164,7 +4392,8 @@ def test_doctor_group_row_cap_truncates_with_overflow_stated_human(
     assert code == 0
     andromeda_block = _machine_block(out.splitlines(), "andromeda")
     g1_line = next(line for line in andromeda_block if "g1" in line)
-    assert "does not configure" in g1_line
+    assert _verdict_token(g1_line) == "UNKNOWN", "g1 fell past the cap — cannot-tell, not absent"
+    assert "does not configure" not in g1_line
     overflow_lines = [line for line in andromeda_block if str(len(filler)) in line]
     assert len(overflow_lines) == 1
 
@@ -4228,19 +4457,23 @@ def test_doctor_group_field_length_is_capped_human(
 def test_doctor_group_newline_in_dimension_name_cannot_forge_a_second_row_human(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
-    """A member name arriving from the far side carrying an embedded
+    """A member name arriving FROM THE FAR SIDE carrying an embedded
     newline is escaped before printing, so it cannot forge an additional
     row — the same shared funnel every other host-section detail already
-    goes through."""
+    goes through. M4 (resolved): the forged text must travel the far-side
+    probe-answer path (through `_strip_control_sequences_deep` in
+    `_doctor_group_rows_from_parsed`), not the local config path, since
+    that is the path the contract describes and the one the mutation below
+    actually exercises."""
     _doctor_hosts_env(tmp_path, monkeypatch, "[hosts.andromeda]\n[hosts.lookout]\n")
+    _write_self_group(tmp_path, "g1", _GROUP_G1_BASE)
     forged_member = "beta\nandromeda:\n    [PASS] forged group policy matches"
     forged_member_toml = forged_member.replace("\n", "\\n")
-    self_body = (
+    far_body = (
         '[group]\nname = "g1"\n\n[[members]]\nname = "alpha"\nrepo_root = "/tmp/alpha"\n'
         f'[[members]]\nname = "{forged_member_toml}"\nrepo_root = "/tmp/forged"\n'
     )
-    _write_self_group(tmp_path, "g1", self_body)
-    far_projection = _projection_for(tmp_path, "far", "g1", _GROUP_G1_BASE)
+    far_projection = _projection_for(tmp_path, "far", "g1", far_body)
     transport = _transport_module()
 
     def fake_run_camp(host, remote_argv, **kw):

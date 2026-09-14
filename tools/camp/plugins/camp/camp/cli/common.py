@@ -9,14 +9,19 @@ from __future__ import annotations
 from pathlib import Path
 
 
-def _groups_dir() -> Path:
+def _groups_dir(env: dict[str, str] | None = None) -> Path:
     """Return ``config_dir("camp")/"groups"`` — the camp group-config directory.
 
     Callers run after ``main()``'s bootstrap has made ``trailhead.paths``
     importable, so this imports it directly rather than lazy-falling-back
     (unlike lore's standalone-CLI equivalent, which must tolerate a missing
     trailhead install).
+
+    ``env`` overrides ``os.environ`` for path resolution (for hermetic
+    tests), exactly like ``trailhead.paths.config_dir``'s own ``env``
+    parameter — defaults to ``None`` (real ``os.environ``), so every
+    existing caller that does not pass it is unaffected.
     """
     import trailhead.paths as _paths
 
-    return _paths.config_dir("camp") / "groups"
+    return _paths.config_dir("camp", env=env) / "groups"

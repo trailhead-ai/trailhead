@@ -1268,7 +1268,7 @@ def _doctor_group_policy(env: dict[str, str] | None = None) -> list[dict[str, An
     from .group.policy import project_group_policy
 
     rows: list[dict[str, Any]] = []
-    directory = _groups_dir()
+    directory = _groups_dir(env=env)
     if directory.is_dir():
         for path in sorted(directory.glob("*.toml")):
             try:

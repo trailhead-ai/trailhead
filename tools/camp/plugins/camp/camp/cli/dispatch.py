@@ -1210,6 +1210,13 @@ _DOCTOR_ACCOUNT_FIELD_LIMIT = 200
 _DOCTOR_GROUP_ROW_LIMIT = 50
 _DOCTOR_GROUP_FIELD_LIMIT = 200
 
+#: A differing group's dimension list is remote-influenced too (a member or
+#: task name that only exists on one side becomes part of the dimension
+#: string `compare_group_policy` names), so it gets the same row-style cap
+#: as the group list above: shown up to this many, overflow stated rather
+#: than silently dropped.
+_DOCTOR_GROUP_DIMENSION_LIMIT = 20
+
 
 def _doctor_truncate_field(value: object, limit: int) -> object:
     """Bound one remote-authored string to `limit` characters, marking the
@@ -1339,6 +1346,38 @@ def _doctor_group_error_text(value: object) -> str:
     return bounded if isinstance(bounded, str) else "an unspecified error"
 
 
+#: The keys `camp.group.policy.project_group_policy` always emits — the
+#: minimum shape that separates a genuine projection (as a far camp's own
+#: `_doctor_group_policy` produces) from a payload that merely happens to be
+#: a dict, e.g. `{}`. A structurally-wrong-but-dict-shaped projection (a
+#: `members` that is a list, a member value that is not a dict, a `tasks`
+#: that is a dict) still passes this check — it is caught instead by the
+#: `compare_group_policy` guard below, which degrades only that one group
+#: rather than the whole host.
+_GROUP_PROJECTION_REQUIRED_KEYS = frozenset(
+    {"group_name", "branch_pattern", "members", "account", "shared_vaults", "lore_scopes"}
+)
+
+
+def _doctor_group_projection_is_well_formed(value: object) -> bool:
+    """Minimum structural check on a far side's `projection` value — the
+    boundary between "a real projection that genuinely differs" (WARN) and
+    "not a projection at all" (UNKNOWN). `{}` (a dict, but carrying none of
+    `project_group_policy`'s own keys) must fail this check: rendering it as
+    confident divergence is the exact false answer I1 named."""
+    if not isinstance(value, dict):
+        return False
+    if not _GROUP_PROJECTION_REQUIRED_KEYS.issubset(value):
+        return False
+    if not isinstance(value.get("members"), dict):
+        return False
+    if not isinstance(value.get("shared_vaults"), list):
+        return False
+    if not isinstance(value.get("lore_scopes"), list):
+        return False
+    return True
+
+
 def _doctor_group_unknown_rows(
     host_name: str, group_names: "Iterable[str]", detail: str
 ) -> list[dict[str, Any]]:
@@ -1463,14 +1502,30 @@ def _doctor_group_rows_from_parsed(
             continue
         far_by_group[name] = entry
 
+    # A row cap truncates `bounded` above, so a local group absent from
+    # `far_by_group` may simply have fallen past the cap rather than being
+    # genuinely undeclared — camp cannot tell the two apart, so it must not
+    # claim the definite "does not configure" answer for either (I3).
+    truncated = reported_count > _DOCTOR_GROUP_ROW_LIMIT
+
     for name in sorted(self_projections):
         entry = far_by_group.get(name)
         if entry is None:
-            rows.append(
-                _doctor_host_row(
-                    host_name, "WARN", f"{name}: {host_name} does not configure this group"
+            if truncated:
+                rows.append(
+                    _doctor_host_row(
+                        host_name,
+                        "UNKNOWN",
+                        f"{name}: {host_name} reported more groups than are shown, so "
+                        "it cannot be determined whether it configures this group",
+                    )
                 )
-            )
+            else:
+                rows.append(
+                    _doctor_host_row(
+                        host_name, "WARN", f"{name}: {host_name} does not configure this group"
+                    )
+                )
             continue
         error = entry.get("error")
         if error is not None:
@@ -1484,7 +1539,7 @@ def _doctor_group_rows_from_parsed(
             )
             continue
         far_projection = entry.get("projection")
-        if not isinstance(far_projection, dict):
+        if not _doctor_group_projection_is_well_formed(far_projection):
             rows.append(
                 _doctor_host_row(
                     host_name,
@@ -1494,11 +1549,37 @@ def _doctor_group_rows_from_parsed(
                 )
             )
             continue
-        comparison = compare_group_policy(self_projections[name], far_projection)
+        try:
+            comparison = compare_group_policy(self_projections[name], far_projection)
+        except Exception:  # noqa: BLE001 — a dict-shaped but structurally-wrong far projection
+            # (`members` values that are not dicts, a member's `tasks` that is a
+            # dict rather than a list, …) must degrade only THIS group to
+            # cannot-tell — never the host's whole fan-out contribution, which
+            # would cost its already-built multiplexer and account rows too
+            # (the consumer-side twin of `cmd_doctor`'s own producer-side guard).
+            rows.append(
+                _doctor_host_row(
+                    host_name,
+                    "UNKNOWN",
+                    f"{name}: {host_name}'s group policy answer was malformed, so "
+                    "divergence cannot be determined",
+                )
+            )
+            continue
         if comparison.matches:
             rows.append(_doctor_host_row(host_name, "PASS", f"{name}: group policy matches"))
         else:
-            dims = ", ".join(comparison.differences)
+            total_dims = len(comparison.differences)
+            bounded_dims = [
+                _doctor_truncate_field(d, _DOCTOR_GROUP_FIELD_LIMIT)
+                for d in comparison.differences[:_DOCTOR_GROUP_DIMENSION_LIMIT]
+            ]
+            dims = ", ".join(bounded_dims)
+            if total_dims > _DOCTOR_GROUP_DIMENSION_LIMIT:
+                dims += (
+                    f", and {total_dims - _DOCTOR_GROUP_DIMENSION_LIMIT} more "
+                    "dimension(s) not shown"
+                )
             rows.append(
                 _doctor_host_row(host_name, "WARN", f"{name}: group policy differs — {dims}")
             )
@@ -1725,8 +1806,13 @@ def _doctor_self_rows(
     reports on, rather than a second, possibly different, attempt. A total
     failure (`self_group_failure` set) renders the local-failure line; a
     genuinely empty local group-config directory (no groups, no failures)
-    renders the distinct nothing-to-compare line; anything else renders no
-    extra line here — the per-host rows already say what needs saying.
+    renders the distinct nothing-to-compare line; a malformed *individual*
+    group file (present in `self_group_unreadable`, even alongside groups
+    that DID read fine) renders its own line per unreadable group, since
+    that fault would otherwise be invisible here whenever there are no
+    declared hosts to carry the per-host cannot-tell rows that already name
+    it; anything else renders no extra line here — the per-host rows already
+    say what needs saying.
     """
     from ..spine import _doctor_account_roster, _doctor_multiplexer_present
 
@@ -1748,6 +1834,16 @@ def _doctor_self_rows(
         )
     elif not self_group_projections and not self_group_unreadable:
         rows.append(_doctor_host_row(self_name, "PASS", "this machine configures no groups"))
+    elif self_group_unreadable:
+        for name in sorted(self_group_unreadable):
+            rows.append(
+                _doctor_host_row(
+                    self_name,
+                    "WARN",
+                    f"this machine's own configuration for group {name} could not be "
+                    f"read — {self_group_unreadable[name]}",
+                )
+            )
 
     return rows
 

@@ -38,6 +38,19 @@ legacy-synthesized task (from `bootstrap` or `[[members.hooks]]`) omits the
 always carries both, even when unset — so the raw dicts fail `==` while every
 field extracted via `.get()` is identical. Every per-task field below is
 extracted key-by-key with `.get()` for exactly that reason.
+
+**Order sensitivity is deliberately asymmetric between two list-shaped fields,
+and the asymmetry is not a bug:**
+
+- A member's `tasks` list is an execution order — this module's own opening
+  paragraph calls it "its declared, ordered task list" — so two hosts running
+  the same tasks in a different order have different policy, and
+  `compare_group_policy` compares that order.
+- `shared_vaults` and `lore_scopes` are declarations, not a sequence to
+  execute — a pure reordering of either carries no policy difference, so both
+  are compared order-insensitively.
+
+Do not "fix" one to match the other; they measure different things.
 """
 
 from __future__ import annotations
@@ -52,6 +65,20 @@ INCLUDED_TOP_LEVEL_KEYS = frozenset(
     {"group", "members", "branch_pattern", "shared_vaults", "lore_scopes", "launch"}
 )
 EXCLUDED_TOP_LEVEL_KEYS = frozenset({"_toml_path", "harness"})
+
+# Per-member keys `load_group` may return on a member dict, classified the
+# same way as the top-level keys above — a member field added later and
+# never classified here fails a schema-coverage test loudly instead of
+# silently falling out of the projection.
+INCLUDED_MEMBER_KEYS = frozenset({"name", "base", "tasks"})
+EXCLUDED_MEMBER_KEYS = frozenset({"repo_root", "excluded"})
+
+# Per-task keys `load_group` may return on a resolved task dict, classified
+# the same way.
+INCLUDED_TASK_KEYS = frozenset(
+    {"name", "phase", "required", "timeout_seconds", "cleanup", "capability", "steps"}
+)
+EXCLUDED_TASK_KEYS: frozenset[str] = frozenset()
 
 
 def _project_task(task: dict[str, Any]) -> dict[str, Any]:
@@ -145,8 +172,10 @@ def compare_group_policy(a: dict[str, Any], b: dict[str, Any]) -> PolicyComparis
         if member_a.get("base") != member_b.get("base"):
             differences.append(f"member:{name}.base")
 
-        tasks_a = {t.get("name"): t for t in member_a.get("tasks") or []}
-        tasks_b = {t.get("name"): t for t in member_b.get("tasks") or []}
+        tasks_a_list = member_a.get("tasks") or []
+        tasks_b_list = member_b.get("tasks") or []
+        tasks_a = {t.get("name"): t for t in tasks_a_list}
+        tasks_b = {t.get("name"): t for t in tasks_b_list}
         for task_name in sorted(set(tasks_a) - set(tasks_b)):
             differences.append(f"member:{name}.task only in a: {task_name}")
         for task_name in sorted(set(tasks_b) - set(tasks_a)):
@@ -155,11 +184,31 @@ def compare_group_policy(a: dict[str, Any], b: dict[str, Any]) -> PolicyComparis
             if tasks_a[task_name] != tasks_b[task_name]:
                 differences.append(f"member:{name}.task:{task_name}")
 
+        # A member's task list is an execution order (module docstring),
+        # so two sides running the same tasks in a different order still
+        # differ — checked only over the tasks common to both sides, since
+        # a set difference is already reported above and must not also be
+        # read as a reordering.
+        common_order_a = [t.get("name") for t in tasks_a_list if t.get("name") in tasks_b]
+        common_order_b = [t.get("name") for t in tasks_b_list if t.get("name") in tasks_a]
+        if common_order_a != common_order_b:
+            differences.append(f"member:{name}.task order")
+
     if a.get("account") != b.get("account"):
         differences.append("account")
-    if a.get("shared_vaults") != b.get("shared_vaults"):
+
+    # shared_vaults/lore_scopes are declarations, not an execution
+    # sequence (module docstring), so both compare order-insensitively —
+    # deliberately the opposite of the member task-list comparison above.
+    if sorted(a.get("shared_vaults") or []) != sorted(b.get("shared_vaults") or []):
         differences.append("shared_vaults")
-    if a.get("lore_scopes") != b.get("lore_scopes"):
+
+    def _lore_scope_key(ls: dict[str, Any]) -> tuple[Any, Any]:
+        return (ls.get("scope"), ls.get("name"))
+
+    if sorted(a.get("lore_scopes") or [], key=_lore_scope_key) != sorted(
+        b.get("lore_scopes") or [], key=_lore_scope_key
+    ):
         differences.append("lore_scopes")
 
     return PolicyComparison(matches=not differences, differences=tuple(differences))
