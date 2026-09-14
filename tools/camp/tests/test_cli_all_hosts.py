@@ -3631,6 +3631,38 @@ def test_doctor_group_far_individual_unreadable_group_renders_cannot_tell_not_ab
     assert "does not configure" not in g2_row["detail"]
 
 
+def test_doctor_group_sole_unnamed_unreadable_group_is_not_read_as_whole_collection_failure_json(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """A far host whose ONLY entry is one individually-unreadable group
+    emits a single-element list whose `group` is None — the same arity and
+    the same null name as the whole-collection failure marker. The two are
+    still distinguishable on the wire: an individual error row carries the
+    file it failed to read, the whole-collection marker carries no `file`
+    at all. Read as a whole-collection failure, the detail blames the far
+    camp for producing no answer when it actually produced one and named a
+    single unreadable file, so the operator is pointed at the wrong fault.
+    """
+    _doctor_hosts_env(tmp_path, monkeypatch, "[hosts.andromeda]\n")
+    _write_self_group(tmp_path, "g1", _GROUP_G1_BASE)
+    transport = _transport_module()
+    monkeypatch.setattr(
+        transport,
+        "run_camp",
+        lambda host, remote_argv, **kw: _probe_answered_group_policy(
+            [{"group": None, "file": "mystery", "projection": None, "error": "bad toml"}]
+        ),
+    )
+
+    code = _run(monkeypatch, ["doctor", "-a", "--json"])
+    report = json.loads(capsys.readouterr().out)
+    assert code == 0
+    row = next(h for h in report["hosts"] if h["host"] == "andromeda" and "g1" in h["detail"])
+    assert row["verdict"] == "UNKNOWN"
+    assert "has a group configuration it could not read" in row["detail"]
+    assert "could not produce its group policy answer" not in row["detail"]
+
+
 def test_doctor_group_differing_projection_renders_a_differing_row_naming_dimensions_json(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:

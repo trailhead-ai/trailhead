@@ -1496,10 +1496,18 @@ def _doctor_group_rows_from_parsed(
     reported_count = len(far_value)
     bounded = _strip_control_sequences_deep(far_value[:_DOCTOR_GROUP_ROW_LIMIT])
 
+    # The whole-collection failure marker and a single individually-unreadable
+    # group have the same arity and the same null `group`. They stay apart on
+    # one key: an individual error row names the `file` it could not read, and
+    # the whole-collection marker — produced before any file was reached — has
+    # none. Without that check a far host whose only group file is unreadable
+    # is reported as having produced no answer at all, pointing the operator at
+    # the far camp rather than at the one file that is actually broken.
     if (
         len(bounded) == 1
         and isinstance(bounded[0], dict)
         and bounded[0].get("group") is None
+        and "file" not in bounded[0]
     ):
         return rows + _doctor_group_unknown_rows(
             host_name,
