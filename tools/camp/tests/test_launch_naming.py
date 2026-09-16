@@ -108,5 +108,74 @@ def test_is_retired_session_name_rejects_hex_tail_wrong_length():
 def test_ambiguous_slug_round_trips_through_both_functions():
     from camp.launch.naming import is_retired_session_name, workspace_session_name
 
-    name = workspace_session_name("mygroup", "proj-deadbeef")
+    # A slug with no unsafe characters passes through the escape scheme
+    # unchanged, so it can still coincide with the retired pattern -- the
+    # ambiguity this test pins is between the two naming schemes, not a
+    # guarantee about any particular slug spelling.
+    name = workspace_session_name("mygroup", "deadbeef")
     assert is_retired_session_name(name) is True
+
+
+def test_spelled_out_dot_word_does_not_collide_with_literal_dot():
+    from camp.launch.naming import workspace_session_name
+
+    literal = workspace_session_name("a.b", "x")
+    spelled_out = workspace_session_name("a-dot-b", "x")
+    assert literal != spelled_out
+
+
+def test_spelled_out_colon_word_does_not_collide_with_literal_colon():
+    from camp.launch.naming import workspace_session_name
+
+    literal = workspace_session_name("a:b", "x")
+    spelled_out = workspace_session_name("a-colon-b", "x")
+    assert literal != spelled_out
+
+
+def test_hyphen_join_does_not_collide_across_the_group_slug_boundary():
+    from camp.launch.naming import workspace_session_name
+
+    name_a = workspace_session_name("a", "b-c")
+    name_b = workspace_session_name("a-b", "c")
+    assert name_a != name_b
+
+
+def test_hyphen_join_does_not_collide_for_a_realistic_group_and_slug():
+    from camp.launch.naming import workspace_session_name
+
+    # This repository's own shape: group "trailhead", slug "camp-cli" must
+    # not derive the same session name as group "trailhead-camp", slug "cli".
+    name_a = workspace_session_name("trailhead", "camp-cli")
+    name_b = workspace_session_name("trailhead-camp", "cli")
+    assert name_a != name_b
+
+
+def test_derivation_is_injective_over_every_unsafe_character():
+    from camp.launch.naming import workspace_session_name
+
+    # Every character sanitize_name_component folds to "-", not just "."
+    # and ":" -- exercise the full unsafe set plus "-" itself (which is
+    # "safe" for sanitize_name_component but ambiguous for the join), plus
+    # a couple of control characters whose hex codepoint reads as a valid
+    # hex digit run once escaped, so an escape sequence with no unambiguous
+    # end marker could be confused with a literal digit/hex-letter run
+    # immediately following it.
+    unsafe_chars = "-.:!@#$%^&*()+=[]{}|;'\",<>/?~` \x02\x1f"
+    pairs = []
+    for ch in unsafe_chars:
+        pairs.append((f"a{ch}b", "x"))
+        pairs.append(("x", f"a{ch}b"))
+        pairs.append((f"g{ch}", f"{ch}s"))
+    # a raw control character followed by a literal digit/hex-letter run
+    # must not collide with a different unsafe character whose own hex
+    # code happens to spell out that same run (e.g. \x02 followed by "1b"
+    # must differ from "!" (0x21) followed by "b")
+    pairs.append(("a\x021b", "x"))
+    pairs.append(("a!b", "x"))
+    # dedupe identical pairs (e.g. across characters that produce the same
+    # literal component) while preserving the pair-vs-name relationship
+    pairs = list(dict.fromkeys(pairs))
+
+    names = {workspace_session_name(group, slug) for group, slug in pairs}
+
+    assert len(names) == len(pairs)
