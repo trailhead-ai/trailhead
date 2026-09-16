@@ -485,7 +485,7 @@ def test_camp_foreach_passes_a_payload_flag_named_like_all_groups_through_unchan
     assert "-g --all-groups" in result.stdout
 
 
-@pytest.mark.parametrize("flag", ["--json", "--fail-fast", "--dry-run"])
+@pytest.mark.parametrize("flag", ["--json", "--fail-fast", "--dry-run", "--dry-run=x"])
 def test_camp_foreach_passes_a_payload_flag_it_declares_itself_through_unchanged(
     tmp_path: Path, flag: str
 ) -> None:

@@ -508,9 +508,15 @@ def main() -> None:
         _cmd_which()
         return
 
-    # Read (never consume) --dry-run; spine re-checks it on its own path.
+    # Read (never consume) --dry-run; spine re-checks it on its own path. An
+    # opaque payload is excluded from the argv read for the reason
+    # `_OPAQUE_PAYLOAD_VERBS` exists: a `--dry-run` past the wrapped command is
+    # that command's, so reading it here would both refuse a legal invocation
+    # and answer for a flag camp was never given. The env switch is unaffected.
     dry_run = bool(os.environ.get("CAMP_DRY_RUN")) or (
-        bool(argv) and read_dry_run_option(argv, verb=argv[0])
+        bool(argv)
+        and _resolve_verb(argv[0])[0] not in _OPAQUE_PAYLOAD_VERBS
+        and read_dry_run_option(argv, verb=argv[0])
     )
 
     first = argv[0] if argv else None

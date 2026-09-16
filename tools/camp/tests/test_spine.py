@@ -1329,3 +1329,30 @@ def test_a_non_opaque_verb_still_has_its_dry_run_consumed(
     monkeypatch.setattr(sys, "argv", ["camp", "sync", "--dry-run"])
     spine.main()
     assert seen == {"rest": [], "dry_run": True}
+
+
+@pytest.mark.parametrize(
+    ("env_value", "expected"),
+    [("1", True), (None, False)],
+    ids=["env-set", "env-unset"],
+)
+def test_the_env_dry_run_switch_still_reaches_an_opaque_verb(
+    monkeypatch: pytest.MonkeyPatch, env_value: str | None, expected: bool
+) -> None:
+    """`CAMP_DRY_RUN=1` is documented as equivalent to `--dry-run`, and it has to
+    keep reaching `foreach` above all.
+
+    Excluding foreach's payload from the ARGV read must not also discard the
+    ENVIRONMENT read: foreach is the one verb that shells out an arbitrary
+    command into every member worktree, so this is the switch with the most to
+    lose. The failure direction that matters is the safety switch silently
+    ceasing to switch.
+    """
+    if env_value is None:
+        monkeypatch.delenv("CAMP_DRY_RUN", raising=False)
+    else:
+        monkeypatch.setenv("CAMP_DRY_RUN", env_value)
+
+    seen = _run_spine(monkeypatch, ["foreach", "echo", "hello"])
+    assert seen["dry_run"] is expected
+    assert seen["rest"] == ["echo", "hello"]

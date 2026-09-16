@@ -1525,7 +1525,11 @@ def main() -> None:
 
     verb = argv[0] if argv else None
     if verb is not None and resolve_verb(verb)[0] in _OPAQUE_PAYLOAD_VERBS:
-        dry_run = False
+        # Only the ARGV read is excluded. `CAMP_DRY_RUN` is documented as
+        # equivalent to `--dry-run` and names no token in the payload, so it
+        # still applies — and applies most here, since this is the verb that
+        # shells an arbitrary command into every member worktree.
+        dry_run = bool(os.environ.get("CAMP_DRY_RUN"))
     else:
         dry_run = _is_dry_run(argv, verb=verb)
         argv = [a for a in argv if a != "--dry-run"]
