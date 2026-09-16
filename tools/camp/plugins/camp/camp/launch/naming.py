@@ -1,39 +1,41 @@
 """The group-qualified tmux session name, and the retired-name recognizer.
 
-A workspace's tmux session is named ``camp-<group>-<slug>``. The derivation's
-one binding property: it is injective on the ``(group, slug)`` pair — two
-different pairs never produce the same name. That is what the group
-qualification is *for* — the derived name is the contract the door, stopping,
-and reconciliation slices resolve their tmux session through, and it is used
-to decide whether a tmux session belongs to a given workspace. Two workspaces
-colliding onto one name means one workspace's session gets attributed to
-another.
-
-Injectivity is established in two steps, applied to each component
-separately before the two are joined:
+A workspace's tmux session is named ``camp-<group>-<slug>``. The property
+this derivation owes: when two workspaces share a slug, their groups must
+still resolve to different session names — a listing or a stopping slice
+that only ever compares within one slug must never see two workspaces
+collapse onto one session. This holds for *any* two distinct groups sharing
+a slug, not just ones that happen to look alike, because it is established
+component-by-component before the two are joined:
 
 1. :func:`_escape_component` maps *raw* to a string drawn only from
-   ``[A-Za-z0-9_]`` — every character outside ``[A-Za-z0-9]``, including
-   ``-`` and ``_`` themselves, is replaced by ``_<hex>_`` (the escape
-   character is escaped first, so a literal ``_`` in the input and an
-   escape-introducer can never be confused). This is a uniquely-decodable
-   code: scanning left to right, a bare ``_`` can only be the start of an
-   escape sequence, since every literal ``_`` in the input was itself
-   escaped. Two different raw strings therefore always escape to two
-   different strings.
+   ``[A-Za-z0-9_-]`` — every character outside ``[A-Za-z0-9-]``, including
+   ``_`` itself, is replaced by ``_<hex>_`` (the escape character is escaped
+   first, so a literal ``_`` in the input and an escape-introducer can never
+   be confused). ``-`` is left alone: it is common in real group and slug
+   names and escaping it made every ordinary name harder to read and type
+   for no gain the join needs. This is still a uniquely-decodable code:
+   scanning left to right, a bare ``_`` can only be the start of an escape
+   sequence, since every literal ``_`` in the input was itself escaped. Two
+   different raw strings therefore always escape to two different strings.
 2. The escaped output is folded through
    :func:`~camp.launch.recovery.sanitize_name_component` — the same rule the
    launch engine already applies to every other tmux name component — which
-   is the identity on ``[A-Za-z0-9_]`` (nothing left to fold), so this step
+   is the identity on ``[A-Za-z0-9_-]`` (nothing left to fold), so this step
    changes nothing except mapping an empty component to its fallback word.
 
-Because neither escaped, sanitized component can contain a literal ``-``,
-joining them with a single literal ``-`` is unambiguous: the interior ``-``
-in the assembled name is never mistaken for one internal to either
-component, so the pair cannot be reconstructed two different ways. This is
-what makes the join injective, not just the folding — joining two components
-that could themselves contain ``-`` (as ``sanitize_name_component`` alone
-allows) is exactly the defect this scheme avoids.
+Two components that are equal as *strings* only reach that equality by
+having equal raw input (step 1 is injective), so for a fixed slug, two
+distinct groups always escape to distinct group components, and therefore
+always join to distinct names — the property this module owes. What is
+lost by leaving ``-`` literal is join-level injectivity over the *pair*: the
+assembled name no longer lets a reader tell where the group component ends
+and the slug component begins, so two different (group, slug) pairs whose
+concatenation coincides — e.g. ``("trailhead", "camp-cli")`` and
+``("trailhead-camp", "cli")`` — derive the same name. This is a known,
+accepted limitation, not a defect this module attempts to close: it only
+becomes observable when both pairs are listed side by side, and it never
+causes two workspaces sharing a slug to collide.
 
 This is deliberately pure — no I/O, no tmux, no filesystem — so it can be
 established, and its edge cases pinned, before any of those consumers exist.
@@ -68,11 +70,13 @@ _RETIRED_SESSION_NAME_RE = re.compile(
 
 
 #: Characters that pass through :func:`_escape_component` unescaped. Anything
-#: outside this set — including ``-`` and ``_`` — is replaced by an escape
-#: sequence, so the escaped output never contains a literal ``-`` and the
-#: later ``-`` join between components is unambiguous.
+#: outside this set — including ``_`` itself, so it can serve as the escape
+#: introducer — is replaced by an escape sequence. ``-`` is included: it
+#: stays literal in the escaped output, which is what makes the join between
+#: components no longer unambiguous at the pair level (see the module
+#: docstring's known limitation).
 _UNESCAPED = frozenset(
-    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-"
 )
 
 
@@ -87,8 +91,8 @@ def workspace_session_name(group_name: str, slug: str) -> str:
 
     Both components are escaped with :func:`_escape_component` and then
     folded through :func:`sanitize_name_component` before joining — see the
-    module docstring for why that combination is injective on the
-    ``(group_name, slug)`` pair.
+    module docstring for why that keeps two distinct groups sharing one slug
+    from ever colliding, and for the known limitation this leaves open.
     """
     group_component = sanitize_name_component(_escape_component(group_name))
     slug_component = sanitize_name_component(_escape_component(slug))
