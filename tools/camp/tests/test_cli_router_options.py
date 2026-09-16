@@ -33,7 +33,12 @@ _PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
 if str(_PLUGIN_DIR) not in sys.path:
     sys.path.insert(0, str(_PLUGIN_DIR))
 
-from camp.cli.dispatch import read_group_option, read_router_options  # noqa: E402
+from camp.cli.dispatch import (  # noqa: E402
+    read_dry_run_option,
+    read_group_option,
+    read_json_option,
+    read_router_options,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -169,3 +174,37 @@ def test_group_option_does_not_mutate_its_input() -> None:
     argv = ["--group", "trailhead", "--json"]
     read_group_option(argv)
     assert argv == ["--group", "trailhead", "--json"]
+
+
+# ---------------------------------------------------------------------------
+# A router-level refusal still names the verb the operator typed.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("verb", ["status", "list", "foreach"])
+@pytest.mark.parametrize(
+    ("reader", "argv", "option"),
+    [
+        (read_dry_run_option, ["--dry-run=1"], "--dry-run"),
+        (read_json_option, ["--json=1"], "--json"),
+    ],
+    ids=["dry-run", "json"],
+)
+def test_a_router_reader_refuses_in_the_typed_verbs_name(
+    verb: str, reader, argv: list[str], option: str, capsys
+) -> None:
+    """These readers run BEFORE the verb is dispatched, but the operator typed a
+    verb and the refusal has to name it.
+
+    A reader that hardcoded its own prefix would report `camp camp:` — naming a
+    verb that does not exist — for a mistake the operator made on a real one.
+    Varying the verb across the same input is what pins that the name is read
+    rather than baked in.
+    """
+    with pytest.raises(SystemExit) as exc:
+        reader(argv, verb=verb)
+    assert exc.value.code == 1
+    err = capsys.readouterr().err
+    assert err.startswith(f"camp {verb}: ")
+    assert "camp camp" not in err
+    assert option in err

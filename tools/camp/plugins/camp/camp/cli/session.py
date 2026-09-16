@@ -97,11 +97,11 @@ def _named_slug(parsed) -> str | None:
     them as one — naming only one spelling would let the other through
     silently. Held here so the three such checks cannot drift apart.
 
-    Only whether a workspace was named, and which value to quote back, depend
-    on this. Which spelling WINS when both are given is
-    `dispatch._slug_from_name_or_cwd`'s decision, not this function's.
+    Precedence matches `dispatch._slug_from_name_or_cwd`, which is what
+    actually resolves the workspace: ``--name`` first. A refusal that quoted the
+    other spelling would name a value the resolver would have discarded.
     """
-    return parsed.slug if parsed.slug is not None else parsed.name
+    return parsed.name if parsed.name is not None else parsed.slug
 
 
 def _refusal(exc: Exception) -> str:

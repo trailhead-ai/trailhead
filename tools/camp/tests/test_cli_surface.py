@@ -485,6 +485,39 @@ def test_camp_foreach_passes_a_payload_flag_named_like_all_groups_through_unchan
     assert "-g --all-groups" in result.stdout
 
 
+@pytest.mark.parametrize("flag", ["--json", "--fail-fast", "--dry-run"])
+def test_camp_foreach_passes_a_payload_flag_it_declares_itself_through_unchanged(
+    tmp_path: Path, flag: str
+) -> None:
+    """The three flags `camp foreach` DECLARES are the ones most likely to be
+    eaten out of its payload, because camp has a use for each.
+
+    Past the wrapped command they are the command's. `--json` is the pinned
+    regression: camp used to filter its own flag names out of the payload, so
+    `camp foreach git status --json` reached git without it. `--dry-run` was
+    read even earlier, before the verb was classified, which both stripped the
+    token and silently put camp into dry-run.
+    """
+    worktree = tmp_path / "trailhead" / ".claude" / "worktrees" / "myslug"
+    worktree.mkdir(parents=True)
+    (worktree / ".workspace-manifest.json").write_text(
+        '{"name": "myslug", "repos": [{"name": "repo-a"}]}', encoding="utf-8"
+    )
+    env = {
+        "WORKSPACE_ROOT": str(tmp_path),
+        "CAMP_CONFIG_DIR": str(tmp_path / "config"),
+        "CAMP_STATE_DIR": str(tmp_path / "state"),
+    }
+
+    result = _run(["foreach", "--name", "myslug", "echo", "hello", flag], env=env)
+
+    assert result.returncode == 0, result.stderr
+    # The command ran for real and received the token.
+    assert f"hello {flag}" in result.stdout, result.stdout
+    # ...and camp did not act on it itself.
+    assert "[dry-run]" not in result.stdout, result.stdout
+
+
 def _assert_clean_refusal(result, *, needle: str, verb: str) -> None:
     assert result.returncode != 0, result.stdout
     assert result.stdout == ""

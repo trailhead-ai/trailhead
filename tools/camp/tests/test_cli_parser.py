@@ -274,8 +274,9 @@ def test_help_flags_are_not_claimed_by_a_verb_parser(flag: str, capsys) -> None:
     menu rather than an argparse dump.
 
     Stock argparse would claim both, print its own usage, and exit 0 — silently
-    shadowing the help camp actually wrote. A verb parser must instead treat
-    them as flags it does not declare, which is what reaches camp's help.
+    shadowing the help camp actually wrote. Undeclared, they are refused like
+    any other unknown flag, which is a refusal the operator can act on rather
+    than an argparse dump that looks like camp's own help but is not.
     """
     with pytest.raises(SystemExit) as exc:
         _launch_parser().parse_args([flag])

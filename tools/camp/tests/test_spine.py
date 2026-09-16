@@ -1258,3 +1258,74 @@ def test_help_states_the_kill_exit_code_for_a_session_that_did_not_stop(capsys) 
 
     assert "Exit codes (camp kill):" in text
     assert "still running after the stop" in text
+
+
+# ---------------------------------------------------------------------------
+# foreach's opaque payload survives spine's own --dry-run handling.
+# ---------------------------------------------------------------------------
+
+
+def _spine():
+    import importlib
+
+    return importlib.import_module("camp.spine")
+
+
+def _run_spine(monkeypatch: pytest.MonkeyPatch, argv: list[str]) -> dict:
+    """Drive `spine.main()` with `cmd_foreach` intercepted, returning what it
+    was handed."""
+    spine = _spine()
+    seen: dict = {}
+
+    def _capture(rest, dry_run=False):
+        seen["rest"] = rest
+        seen["dry_run"] = dry_run
+
+    monkeypatch.setattr(spine, "cmd_foreach", _capture)
+    monkeypatch.setattr(sys, "argv", ["camp", *argv])
+    spine.main()
+    return seen
+
+
+def test_a_dry_run_inside_foreachs_payload_belongs_to_the_wrapped_command(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`camp foreach echo hello --dry-run` runs `echo hello --dry-run` for real.
+
+    The token sits after the wrapped command, so it is the command's. Reading it
+    as camp's does two wrong things at once: camp silently enters dry-run and
+    executes nothing, and the command it claims it would have run is not the one
+    that was typed.
+    """
+    seen = _run_spine(monkeypatch, ["foreach", "--name", "w1", "echo", "hello", "--dry-run"])
+    assert seen["rest"] == ["--name", "w1", "echo", "hello", "--dry-run"]
+    assert seen["dry_run"] is False
+
+
+def test_camps_own_dry_run_still_reaches_foreach_before_the_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The pair: before the wrapped command, ``--dry-run`` is still camp's.
+
+    Position is the whole distinction, so both sides have to be pinned — a fix
+    that simply stopped reading the flag for `foreach` would pass the test above
+    and break this one.
+    """
+    seen = _run_spine(monkeypatch, ["foreach", "--dry-run", "echo", "hello"])
+    assert seen["rest"] == ["--dry-run", "echo", "hello"]
+
+
+def test_a_non_opaque_verb_still_has_its_dry_run_consumed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`sync` has no opaque payload, so camp reads and removes the flag as it
+    always has — the exclusion is scoped to the verbs that forward a payload,
+    not applied to every verb."""
+    spine = _spine()
+    seen: dict = {}
+    monkeypatch.setattr(
+        spine, "cmd_sync", lambda rest, dry_run=False: seen.update(rest=rest, dry_run=dry_run)
+    )
+    monkeypatch.setattr(sys, "argv", ["camp", "sync", "--dry-run"])
+    spine.main()
+    assert seen == {"rest": [], "dry_run": True}

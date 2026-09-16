@@ -3467,3 +3467,65 @@ def test_doctor_account_field_length_is_capped_human(
     assert _verdict_token(line) == "WARN"
     assert "…" in line
     assert len(line) < len(huge_reason)
+
+
+# ---------------------------------------------------------------------------
+# Widening does not buy an exemption from the unknown-flag refusal.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["list", "-ag", "--bogus"],
+        ["list", "--all-hosts", "--group", "testgrp", "--bogus"],
+        ["doctor", "-a", "--bogus"],
+    ],
+    ids=["list-bundled", "list-long", "doctor"],
+)
+def test_a_widened_invocation_still_refuses_an_unknown_flag(
+    hosts_and_group_env,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture,
+    argv: list[str],
+) -> None:
+    """Asking the question of every machine does not widen which flags exist.
+
+    The narrow spellings of these verbs refuse an undeclared flag; the widened
+    spellings must refuse it identically, or the same typo means "tell me" on
+    one invocation and "unknown flag" on the other. The refusal must also come
+    BEFORE any host is contacted — an invocation camp is going to reject should
+    not cost a network round trip to every declared machine.
+    """
+    transport = _transport_module()
+
+    def _never(*a, **kw):
+        raise AssertionError("no host may be contacted for a refused invocation")
+
+    monkeypatch.setattr(transport, "run_camp", _never)
+
+    code = _run(monkeypatch, argv)
+    assert code == 1
+    assert "unknown flag '--bogus'" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("verb", ["list", "doctor"])
+def test_the_widened_and_narrow_spellings_refuse_identically(
+    hosts_and_group_env,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture,
+    verb: str,
+) -> None:
+    """The pair that shows it is the same refusal, not two that happen to
+    coincide: same verb, same bad flag, widened and not."""
+    transport = _transport_module()
+    monkeypatch.setattr(transport, "run_camp", lambda *a, **kw: _answered([]))
+
+    narrow_code = _run(monkeypatch, [verb, "--bogus"])
+    narrow_err = capsys.readouterr().err
+
+    widened_code = _run(monkeypatch, [verb, "-a", "--bogus"])
+    widened_err = capsys.readouterr().err
+
+    assert (narrow_code, narrow_err) == (widened_code, widened_err)
+    assert narrow_code == 1
