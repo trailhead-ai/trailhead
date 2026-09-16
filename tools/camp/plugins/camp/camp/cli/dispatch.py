@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from typing import Any
+    from typing import Any, NoReturn
 
     from ..host.config import Host
     from ..host.relay import HostAnswer
@@ -223,6 +223,31 @@ def read_group_option(args: list[str]) -> str | None:
     parser = CampParser(verb="camp")
     parser.add_argument("--group", nargs="?", const="", default=None)
     return parser.parse_known_args(args)[0].group
+
+
+def _refuse_host_flag(verb: str) -> "NoReturn":
+    """Refuse ``--host`` on a verb that has no meaning for it.
+
+    The one place this refusal is worded, so the verbs dispatched before the
+    router's own ``--host`` handling (``group``, ``groups``, ``transfer-probe``,
+    ``transfer-receive``) and the applicability check in `main()` cannot come to
+    say it differently.
+    """
+    print(f"camp {verb}: {HOST_FLAG} has no meaning here", file=sys.stderr)
+    sys.exit(1)
+
+
+def _refuse_host_flag_if_present(verb: str, rest: list[str]) -> None:
+    """Refuse ``--host`` on a verb that returns from `main()` before the router
+    ever reads it.
+
+    A verb dispatched ahead of the ``--host`` block — because it must answer
+    without a resolved group — would otherwise answer LOCALLY at exit 0 with
+    ``--host`` silently dropped. Reading the option here costs nothing (no config
+    is opened) and keeps the silent-drop closed for every such verb alike.
+    """
+    if read_router_options(verb, rest)[0].host is not None:
+        _refuse_host_flag(verb)
 
 
 def _resolve_connect_timeout(verb: str, *, hosts_error: str | None = None) -> float:
@@ -521,9 +546,7 @@ def main() -> None:
 
     # 'group' is the new name for 'init'; 'init' redirects to 'group'.
     if first == "group":
-        if read_router_options(first, argv[1:])[0].host is not None:
-            print(f"camp {first}: {HOST_FLAG} has no meaning here", file=sys.stderr)
-            sys.exit(1)
+        _refuse_host_flag_if_present(first, argv[1:])
         from .group import _cmd_group_cli
         _cmd_group_cli(argv[1:])
         return
@@ -538,9 +561,7 @@ def main() -> None:
     # instead of refusing (the same silent-drop class already fixed once
     # for --all-groups + --group).
     if first == "groups":
-        if read_router_options(first, argv[1:])[0].host is not None:
-            print(f"camp {first}: {HOST_FLAG} has no meaning here", file=sys.stderr)
-            sys.exit(1)
+        _refuse_host_flag_if_present(first, argv[1:])
         from .group import _cmd_groups_cli
         _cmd_groups_cli(argv[1:])
         return
@@ -552,9 +573,7 @@ def main() -> None:
     # refusal that never gets the chance to say so. --host has no meaning
     # here either — this verb never asks a third host about itself.
     if first == "transfer-probe":
-        if read_router_options(first, argv[1:])[0].host is not None:
-            print(f"camp {first}: {HOST_FLAG} has no meaning here", file=sys.stderr)
-            sys.exit(1)
+        _refuse_host_flag_if_present(first, argv[1:])
         from .transfer import _cmd_transfer_probe_cli
         _cmd_transfer_probe_cli(argv[1:])
         return
@@ -565,9 +584,7 @@ def main() -> None:
     # valid, distinct answer this verb must produce itself. --host has no
     # meaning here either — this verb never asks a third host about itself.
     if first == "transfer-receive":
-        if read_router_options(first, argv[1:])[0].host is not None:
-            print(f"camp {first}: {HOST_FLAG} has no meaning here", file=sys.stderr)
-            sys.exit(1)
+        _refuse_host_flag_if_present(first, argv[1:])
         from .transfer import _cmd_transfer_receive_cli
         _cmd_transfer_receive_cli(argv[1:])
         return
@@ -713,8 +730,7 @@ def main() -> None:
         # ever have been accepted.
         canonical, _kind = _resolve_verb(first) if first else (first, "live")
         if canonical not in _HOST_VERBS:
-            print(f"camp {first}: {HOST_FLAG} has no meaning here", file=sys.stderr)
-            sys.exit(1)
+            _refuse_host_flag(first)
         if host_name == "":
             print(f"camp {first}: {HOST_FLAG} requires a value", file=sys.stderr)
             sys.exit(1)

@@ -89,6 +89,21 @@ _AMBIGUOUS_EXIT_CODE = 2
 _RECOVERABLE_DEFAULT_LIMIT = 20
 
 
+def _named_slug(parsed) -> str | None:
+    """The workspace the operator named, in whichever of its two spellings.
+
+    A bare positional and ``--name <slug>`` are the same thing, so every check
+    that refuses a workspace alongside a rooting or widening flag must treat
+    them as one — naming only one spelling would let the other through
+    silently. Held here so the three such checks cannot drift apart.
+
+    Only whether a workspace was named, and which value to quote back, depend
+    on this. Which spelling WINS when both are given is
+    `dispatch._slug_from_name_or_cwd`'s decision, not this function's.
+    """
+    return parsed.slug if parsed.slug is not None else parsed.name
+
+
 def _refusal(exc: Exception) -> str:
     """Re-prefix an engine refusal as a `camp launch:` line.
 
@@ -1003,11 +1018,7 @@ def _cmd_launch_group_cli(
     directory = parsed.dir
     as_json = parsed.json
 
-    # `--name <slug>` and a bare positional are two spellings of the SAME thing
-    # — the workspace to launch into — so the mutual-exclusion checks below
-    # must treat them as one. Checking only the positional would let
-    # `--dir X --name Y` through, silently ignoring the slug.
-    named_slug = parsed.slug if parsed.slug is not None else parsed.name
+    named_slug = _named_slug(parsed)
 
     if directory is not None and resume_ref is not None:
         _die(
@@ -1488,9 +1499,7 @@ def refuse_sessions_local_only_options(parsed, *, widening_flag: str) -> None:
             "camp sessions: --limit only widens --recoverable, which has no "
             f"meaning with {widening_flag}"
         )
-    # Either spelling of the workspace — the positional or `--name` — is the
-    # narrowing this refuses; naming only one would let the other through.
-    named_slug = parsed.slug if parsed.slug is not None else parsed.name
+    named_slug = _named_slug(parsed)
     if named_slug is not None:
         _die(
             f"camp sessions: {widening_flag} widens the machine axis — a "
@@ -1851,9 +1860,7 @@ def _cmd_sessions_group_cli(
     directory = parsed.dir
     limit_raw = parsed.limit
 
-    # Two spellings of the workspace to scope to; the exclusion checks below
-    # treat them as one, exactly as `camp launch` does.
-    named_slug = parsed.slug if parsed.slug is not None else parsed.name
+    named_slug = _named_slug(parsed)
 
     if not recoverable and (show_all or limit_raw is not None):
         _die(

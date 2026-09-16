@@ -88,7 +88,7 @@ def _parse_init_args(args: list[str]) -> dict:
 
     return {
         "group_name": parsed.group_name,
-        "members": [_parse_member(spec) for spec in parsed.member or []],
+        "members": [_parse_member(parser, spec) for spec in parsed.member or []],
         "branch_pattern": parsed.branch_pattern,
         "force": parsed.force,
         "allow_missing": parsed.allow_missing,
@@ -96,30 +96,20 @@ def _parse_init_args(args: list[str]) -> dict:
     }
 
 
-def _parse_member(raw: str) -> dict[str, str]:
+def _parse_member(parser: CampParser, raw: str) -> dict[str, str]:
     """Parse a NAME=PATH member spec, splitting on the FIRST '=' only.
 
-    Rejects empty NAME or empty PATH. Exits non-zero with a legible error.
+    Rejects empty NAME or empty PATH. Refuses through *parser*, so a member spec
+    the parser accepted but this validation rejects reads in the same voice as
+    every other `camp group` refusal rather than reproducing the prefix here.
     """
     if "=" not in raw:
-        print(
-            f"camp group: malformed --member {raw!r} — expected NAME=PATH",
-            file=sys.stderr,
-        )
-        sys.exit(1)
+        parser.die(f"malformed --member {raw!r} — expected NAME=PATH")
     name, path = raw.split("=", 1)
     if not name:
-        print(
-            f"camp group: malformed --member {raw!r} — member NAME must not be empty",
-            file=sys.stderr,
-        )
-        sys.exit(1)
+        parser.die(f"malformed --member {raw!r} — member NAME must not be empty")
     if not path:
-        print(
-            f"camp group: malformed --member {raw!r} — member PATH must not be empty",
-            file=sys.stderr,
-        )
-        sys.exit(1)
+        parser.die(f"malformed --member {raw!r} — member PATH must not be empty")
     return {"name": name, "repo_root": path}
 
 
