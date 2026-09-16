@@ -471,6 +471,26 @@ def _is_ref_addressed_launch(verb: str, rest: list[str]) -> bool:
     return any(arg == RESUME_FLAG or arg.startswith(f"{RESUME_FLAG}=") for arg in rest)
 
 
+def _refuse_meta_route_surplus(verb: str, rest: list[str]) -> None:
+    """Refuse any token given to a meta route, which accepts none.
+
+    ``version``, ``which`` and ``session-bootstrap`` answer without resolving a
+    group and take neither options nor arguments. They are declared here as
+    empty parsers rather than checked with a bare truthiness test so a surplus
+    token is classified and worded by the same seam every other verb refuses
+    through — an unknown flag and an unexpected argument read differently, and
+    a route with no flags of its own is where that distinction is most likely
+    to be the operator's only clue.
+
+    *verb* is the canonical name even when the operator reached the route by
+    its flag spelling: ``--version`` and ``version`` are one route, so its
+    refusals should not vary by which spelling arrived.
+    """
+    from .parser import CampParser
+
+    CampParser(verb=verb).parse_args(rest)
+
+
 def main() -> None:
     global _TRAILHEAD_PATHS_OK
     argv = sys.argv[1:]
@@ -500,11 +520,13 @@ def main() -> None:
     # Handle meta-flags before dispatch (--version / --which)
     if argv and argv[0] in ("--version", "version"):
         from .status import _cmd_version
+        _refuse_meta_route_surplus("version", argv[1:])
         _cmd_version()
         return
 
     if argv and argv[0] in ("--which", "which"):
         from .status import _cmd_which
+        _refuse_meta_route_surplus("which", argv[1:])
         _cmd_which()
         return
 
@@ -534,6 +556,7 @@ def main() -> None:
     # ---------------------------------------------------------------------------
     if first == "session-bootstrap":
         from ..launch.hook_handlers import cmd_session_bootstrap
+        _refuse_meta_route_surplus("session-bootstrap", argv[1:])
         cmd_session_bootstrap()
         return
 
