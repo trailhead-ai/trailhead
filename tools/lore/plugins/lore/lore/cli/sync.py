@@ -96,6 +96,7 @@ from pathlib import Path
 
 from .. import locking
 from .common import (
+    SYNC_REFUSAL_MESSAGES,
     _git,
     _resolve_all_vaults,
     _resolve_lore_state_dir,
@@ -106,6 +107,7 @@ from .common import (
     _vault_unpushed,
     _vault_upstream_ref,
     machine_state_key,
+    vault_refusal_condition,
 )
 
 DEFAULT_SYNC_MSG = "lore: sync vault"
@@ -719,6 +721,14 @@ def cmd_sync(args) -> int:
             say_err(
                 f"error: not its own git toplevel: {vault_path} — skipped\n"
                 "         (vault may be a subdirectory of a larger repo, or not a git repo)"
+            )
+            commit_rc[name] = 1
+            continue
+        refusal = vault_refusal_condition(vault_path)
+        if refusal is not None:
+            say_err(
+                f"error: refused — {SYNC_REFUSAL_MESSAGES[refusal]}: "
+                f"{vault_path} — skipped"
             )
             commit_rc[name] = 1
             continue

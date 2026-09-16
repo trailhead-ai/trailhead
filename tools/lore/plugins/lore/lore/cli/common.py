@@ -441,6 +441,110 @@ def _vault_mid_rebase(vault: Path) -> bool:
     return False
 
 
+def _vault_mid_merge(vault: Path) -> bool:
+    """Return ``True`` iff a merge stopped on conflicts, ``MERGE_HEAD`` still present.
+
+    Probed the same way as :func:`_vault_mid_rebase` — via ``rev-parse
+    --git-path`` rather than a hand-built ``.git/...`` path — so a linked
+    worktree's separate git-dir resolves correctly.
+    """
+    rc, out, _ = _git(vault, "rev-parse", "--git-path", "MERGE_HEAD")
+    if rc != 0 or not out:
+        return False
+    path = Path(out)
+    if not path.is_absolute():
+        path = vault / path
+    return path.exists()
+
+
+def _vault_detached_head(vault: Path) -> bool:
+    """Return ``True`` iff HEAD is not attached to any branch.
+
+    ``git symbolic-ref -q HEAD`` succeeds whenever HEAD points to a ref — even
+    an unborn branch with zero commits — and fails ONLY when HEAD is a bare
+    commit SHA, which is the actual detached-head condition. That is why this
+    is the probe used here instead of :func:`_vault_head_branch`, whose
+    ``None`` return conflates detached HEAD with other edge cases that are not
+    an actual refusal condition.
+    """
+    rc, _, _ = _git(vault, "symbolic-ref", "-q", "HEAD")
+    return rc != 0
+
+
+def _vault_stale_lock(vault: Path) -> bool:
+    """Return ``True`` iff a leftover ``index.lock`` sits in the git dir.
+
+    This is git's OWN lock file — distinct from lore's ``.lore.lock`` write
+    lock in :mod:`lore.locking` — created by any git process about to write
+    the index and normally removed when that process exits cleanly. A process
+    killed by SIGKILL (e.g. the daemon's own process-group kill; see
+    ``decision/outpost-bounds-a-timed-out-vault-advance-by-killing-the-process-group``)
+    never runs its own cleanup, so the file is left behind and every
+    subsequent git write in this vault fails with "Unable to create
+    '.git/index.lock': File exists." until a human deletes it by hand.
+    """
+    rc, out, _ = _git(vault, "rev-parse", "--git-path", "index.lock")
+    if rc != 0 or not out:
+        return False
+    path = Path(out)
+    if not path.is_absolute():
+        path = vault / path
+    return path.exists()
+
+
+#: Closed set of conditions ``lore sync`` refuses a vault outright for, before
+#: touching it (staging, locking, or committing). A caller — the per-vault
+#: outcome document a later task builds, or a stderr message — branches on
+#: these STABLE tokens, never on prose derived from git or the forge.
+SYNC_REFUSAL_MID_REBASE = "mid-rebase"
+SYNC_REFUSAL_MID_MERGE = "mid-merge"
+SYNC_REFUSAL_DETACHED_HEAD = "detached-head"
+SYNC_REFUSAL_STALE_LOCK = "stale-lock"
+
+SYNC_REFUSAL_CONDITIONS = frozenset(
+    {
+        SYNC_REFUSAL_MID_REBASE,
+        SYNC_REFUSAL_MID_MERGE,
+        SYNC_REFUSAL_DETACHED_HEAD,
+        SYNC_REFUSAL_STALE_LOCK,
+    }
+)
+
+#: The human-readable phrasing for each :data:`SYNC_REFUSAL_CONDITIONS`
+#: member. This dict is the ONLY place condition prose is authored — a caller
+#: renders a message FROM the condition value, never the other way; the
+#: condition value itself never carries git or remote output.
+SYNC_REFUSAL_MESSAGES = {
+    SYNC_REFUSAL_MID_REBASE: "vault is mid-rebase",
+    SYNC_REFUSAL_MID_MERGE: "vault is mid-merge",
+    SYNC_REFUSAL_DETACHED_HEAD: "vault is on a detached HEAD",
+    SYNC_REFUSAL_STALE_LOCK: "vault has a stale git lock (index.lock)",
+}
+
+
+def vault_refusal_condition(vault: Path) -> "str | None":
+    """Return the :data:`SYNC_REFUSAL_CONDITIONS` member found at ``vault``, or
+    ``None`` when none apply.
+
+    Checked BEFORE any staging, locking, or committing — each of these
+    conditions makes writing to the vault unsafe (a stranded resolution, a
+    checkout with no branch to land a commit on, a lock left by a killed
+    process). Order here IS significant, unlike a first glance suggests: a
+    vault mid-rebase also reads as detached (git checks out the upstream
+    commit directly while replaying), so mid-rebase must be probed before
+    detached-head or a rebase would misreport as a plain detached checkout.
+    """
+    if _vault_stale_lock(vault):
+        return SYNC_REFUSAL_STALE_LOCK
+    if _vault_mid_rebase(vault):
+        return SYNC_REFUSAL_MID_REBASE
+    if _vault_mid_merge(vault):
+        return SYNC_REFUSAL_MID_MERGE
+    if _vault_detached_head(vault):
+        return SYNC_REFUSAL_DETACHED_HEAD
+    return None
+
+
 #: Drift codes returned by :func:`_vault_drift`. Callers branch on these STABLE
 #: tokens, never on the human phrasing beside them — the prose is free to be
 #: reworded without silently changing which remedy a caller prints.
