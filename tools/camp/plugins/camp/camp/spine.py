@@ -450,8 +450,17 @@ def cmd_ls(args: list[str]) -> None:
     render_workspace_list(entries, as_json=as_json)
 
 
-def cmd_help(_args: list[str]) -> None:
-    """Print the curated grouped help menu."""
+def cmd_help(args: list[str]) -> None:
+    """Print the curated grouped help menu, refusing any token given to it.
+
+    The menu is the whole answer: there is no per-verb help to select and no
+    option to vary it, so anything passed alongside is a token camp would
+    otherwise discard while still exiting 0 — reporting success for a request
+    it did not answer.
+    """
+    from .cli.parser import CampParser
+
+    CampParser(verb="help").parse_args(args)
     print(
         "camp — group worktree orchestration\n"
         "\n"
