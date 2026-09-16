@@ -143,25 +143,21 @@ def _cmd_transfer_probe_cli(args: list[str]) -> None:
     # reports `--group` first — the order a caller fixes them in.
     group_name = parsed.group
     if not group_name:
-        print("camp transfer-probe: --group is required", file=sys.stderr)
-        sys.exit(1)
+        parser.die("--group is required")
 
     slug = parsed.slug
     if not slug:
-        print("camp transfer-probe: --slug is required", file=sys.stderr)
-        sys.exit(1)
+        parser.die("--slug is required")
 
     try:
         self_name = self_host_name()
     except HostConfigError as e:
-        print(f"camp transfer-probe: {e}", file=sys.stderr)
-        sys.exit(1)
+        parser.die(str(e))
 
     try:
         groups = load_all_groups(_groups_dir())
     except GroupConfigError as e:
-        print(f"camp transfer-probe: {e}", file=sys.stderr)
-        sys.exit(1)
+        parser.die(str(e))
 
     answer = build_probe_answer(
         group_name=group_name,
@@ -235,23 +231,21 @@ def _cmd_transfer_receive_cli(args: list[str]) -> None:
         sys.exit(1)
 
     phase = args[0]
-    parsed = _build_receive_parser(phase).parse_args(args[1:])
+    parser = _build_receive_parser(phase)
+    parsed = parser.parse_args(args[1:])
 
     group_name = parsed.group
     if not group_name:
-        print("camp transfer-receive: --group is required", file=sys.stderr)
-        sys.exit(1)
+        parser.die("--group is required")
 
     slug = parsed.slug
     if not slug:
-        print("camp transfer-receive: --slug is required", file=sys.stderr)
-        sys.exit(1)
+        parser.die("--slug is required")
 
     try:
         groups = load_all_groups(_groups_dir())
     except GroupConfigError as e:
-        print(f"camp transfer-receive: {e}", file=sys.stderr)
-        sys.exit(1)
+        parser.die(str(e))
 
     # Each branch below gathers only the arguments its own phase adds; the
     # call/refusal/print tail is shared, so every phase answers on stdout and
@@ -262,27 +256,17 @@ def _cmd_transfer_receive_cli(args: list[str]) -> None:
     phase_kwargs: dict = {}
     if phase == "begin":
         if not parsed.owner:
-            print("camp transfer-receive: --owner is required for begin", file=sys.stderr)
-            sys.exit(1)
+            parser.die("--owner is required for begin")
         phase_kwargs = {"sender": parsed.owner, "overwrite": parsed.overwrite}
     elif phase == "claim":
         if not parsed.owner:
-            print("camp transfer-receive: --owner is required for claim", file=sys.stderr)
-            sys.exit(1)
+            parser.die("--owner is required for claim")
         phase_kwargs = {"sender": parsed.owner}
     elif phase == "conversations":
         if not parsed.session_id:
-            print(
-                "camp transfer-receive: --session-id is required for conversations",
-                file=sys.stderr,
-            )
-            sys.exit(1)
+            parser.die("--session-id is required for conversations")
         if not parsed.subpath:
-            print(
-                "camp transfer-receive: --subpath is required for conversations",
-                file=sys.stderr,
-            )
-            sys.exit(1)
+            parser.die("--subpath is required for conversations")
         phase_kwargs = {
             "session_id": parsed.session_id,
             "subpath": parsed.subpath,
@@ -290,11 +274,7 @@ def _cmd_transfer_receive_cli(args: list[str]) -> None:
         }
     elif phase in ("history", "worktree"):
         if not parsed.member:
-            print(
-                f"camp transfer-receive: --member is required for {phase}",
-                file=sys.stderr,
-            )
-            sys.exit(1)
+            parser.die(f"--member is required for {phase}")
         phase_kwargs = {"member": parsed.member}
         if phase == "history":
             phase_kwargs["bundle_bytes"] = sys.stdin.buffer.read()
