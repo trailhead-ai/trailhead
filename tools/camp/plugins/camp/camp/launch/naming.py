@@ -1,15 +1,42 @@
 """The group-qualified tmux session name, and the retired-name recognizer.
 
-A workspace's tmux session is named ``camp-<group>-<slug>``: both halves are
-folded through :func:`~camp.launch.recovery.sanitize_name_component`, the same
-rule the launch engine already applies to every other tmux name component, so
-a group or slug carrying a tmux target separator (``.`` or ``:``) still yields
-a name tmux can address and later find again.
+A workspace's tmux session is named ``camp-<group>-<slug>``. The derivation's
+one binding property: it is injective on the ``(group, slug)`` pair — two
+different pairs never produce the same name. That is what the group
+qualification is *for* — the derived name is the contract the door, stopping,
+and reconciliation slices resolve their tmux session through, and it is used
+to decide whether a tmux session belongs to a given workspace. Two workspaces
+colliding onto one name means one workspace's session gets attributed to
+another.
 
-This is the contract the door, stopping, and reconciliation slices resolve
-their tmux session through. It is deliberately pure — no I/O, no tmux, no
-filesystem — so it can be established, and its edge cases pinned, before any
-of those consumers exist.
+Injectivity is established in two steps, applied to each component
+separately before the two are joined:
+
+1. :func:`_escape_component` maps *raw* to a string drawn only from
+   ``[A-Za-z0-9_]`` — every character outside ``[A-Za-z0-9]``, including
+   ``-`` and ``_`` themselves, is replaced by ``_<hex>_`` (the escape
+   character is escaped first, so a literal ``_`` in the input and an
+   escape-introducer can never be confused). This is a uniquely-decodable
+   code: scanning left to right, a bare ``_`` can only be the start of an
+   escape sequence, since every literal ``_`` in the input was itself
+   escaped. Two different raw strings therefore always escape to two
+   different strings.
+2. The escaped output is folded through
+   :func:`~camp.launch.recovery.sanitize_name_component` — the same rule the
+   launch engine already applies to every other tmux name component — which
+   is the identity on ``[A-Za-z0-9_]`` (nothing left to fold), so this step
+   changes nothing except mapping an empty component to its fallback word.
+
+Because neither escaped, sanitized component can contain a literal ``-``,
+joining them with a single literal ``-`` is unambiguous: the interior ``-``
+in the assembled name is never mistaken for one internal to either
+component, so the pair cannot be reconstructed two different ways. This is
+what makes the join injective, not just the folding — joining two components
+that could themselves contain ``-`` (as ``sanitize_name_component`` alone
+allows) is exactly the defect this scheme avoids.
+
+This is deliberately pure — no I/O, no tmux, no filesystem — so it can be
+established, and its edge cases pinned, before any of those consumers exist.
 
 ``is_retired_session_name`` recognizes the OTHER naming scheme this module
 does not mint: the one-session-per-conversation form camp used before the
@@ -40,38 +67,31 @@ _RETIRED_SESSION_NAME_RE = re.compile(
 )
 
 
-#: ``sanitize_name_component`` folds every tmux target separator to the same
-#: ``-``, so ``"a.b"`` and ``"a:b"`` would fold identically and two distinct
-#: workspaces would mint the same session name. Each named separator is
-#: spelled out to a distinct, already-safe word before folding, so the
-#: distinction survives the fold instead of being erased by it. The raw
-#: string still goes through :func:`sanitize_name_component` unmodified —
-#: this only changes what reaches it.
-_SEPARATOR_SPELLINGS = {
-    ".": "-dot-",
-    ":": "-colon-",
-}
+#: Characters that pass through :func:`_escape_component` unescaped. Anything
+#: outside this set — including ``-`` and ``_`` — is replaced by an escape
+#: sequence, so the escaped output never contains a literal ``-`` and the
+#: later ``-`` join between components is unambiguous.
+_UNESCAPED = frozenset(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+)
 
 
-def _spell_out_separators(raw: str) -> str:
-    for separator, spelling in _SEPARATOR_SPELLINGS.items():
-        raw = raw.replace(separator, spelling)
-    return raw
+def _escape_component(raw: str) -> str:
+    return "".join(
+        ch if ch in _UNESCAPED else f"_{ord(ch):x}_" for ch in raw
+    )
 
 
 def workspace_session_name(group_name: str, slug: str) -> str:
     """The tmux session name for the workspace at *slug* in group *group_name*.
 
-    Both components are folded through :func:`sanitize_name_component` before
-    joining, so a separator either one carries never reaches the tmux name.
-    A tmux target separator is spelled out to a distinct word first (see
-    :data:`_SEPARATOR_SPELLINGS`), so two components differing only in which
-    separator character they carry still fold to different names — a plain
-    character-for-character fold would collapse them, since every unsafe
-    character (including every separator) folds to the same ``-``.
+    Both components are escaped with :func:`_escape_component` and then
+    folded through :func:`sanitize_name_component` before joining — see the
+    module docstring for why that combination is injective on the
+    ``(group_name, slug)`` pair.
     """
-    group_component = sanitize_name_component(_spell_out_separators(group_name))
-    slug_component = sanitize_name_component(_spell_out_separators(slug))
+    group_component = sanitize_name_component(_escape_component(group_name))
+    slug_component = sanitize_name_component(_escape_component(slug))
     return f"camp-{group_component}-{slug_component}"
 
 
