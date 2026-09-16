@@ -93,6 +93,12 @@ def _cmd_status_group_cli(
     (they may be multi-line stderr excerpts); read --json for the full map.
 
     Fleet view (no slug): the git-status table across all worktrees (exit 0).
+
+    `--stale` is a fleet question — it ranks the group's workspaces by idleness
+    — so it answers in the fleet view even when the current directory sits in a
+    workspace, annotating each row with `idle_days` against a `--days`
+    threshold. Paired with an explicit `--name` it refuses instead: that is two
+    typed flags asking for different views, and widening would drop one.
     """
     import json as _json
     from ..provision.lifecycle import cmd_status_group, provision_status_code, status_header
@@ -105,20 +111,24 @@ def _cmd_status_group_cli(
     parsed = parser.parse_args(args)
     as_json = parsed.json
 
+    # `--name` selects one workspace and `--stale` ranks the group's, so the two
+    # ask for different views. Both are things the operator typed, and widening
+    # to the fleet would answer by discarding one of them.
+    if parsed.stale and parsed.name is not None:
+        parser.die(
+            "--name and --stale are mutually exclusive — --name selects one "
+            "workspace and --stale ranks the group's"
+        )
+
     # Resolve a slug from --name or cwd; if found, emit the provision-state view.
     slug = _slug_from_name_or_cwd(
         group, verb="status", name=parsed.name, allow_none=True, env=env
     )
 
-    if slug is not None:
-        if parsed.stale:
-            # The scoped view reports provisioning state for one named
-            # workspace; idleness is a comparison across the group's
-            # workspaces, so there is nothing here for it to rank.
-            parser.die(
-                "--stale ranks the group's workspaces by idleness — it has no "
-                "meaning for the single-workspace view"
-            )
+    # A slug resolved from cwd is an inference, not an instruction: `--stale`
+    # widens past it to the fleet the flag is about. Nothing the operator typed
+    # is dropped doing so — the explicit collision is already refused above.
+    if slug is not None and not parsed.stale:
         try:
             code, report = provision_status_code(group, slug, env=env)
         except Exception as e:

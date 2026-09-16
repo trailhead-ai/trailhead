@@ -277,6 +277,7 @@ def aged_group(group_env, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(
         spine, "_last_commit_epoch", lambda p: now - ages.get(str(p), 0.0) * _DAY
     )
+    group_env["paths"] = {"fresh-ws": fresh, "old-ws": old}
     return group_env
 
 
@@ -341,23 +342,55 @@ def test_group_status_days_refuses_a_non_integer_exactly_as_the_standalone_path_
     )
 
 
-def test_stale_is_refused_for_the_single_workspace_view(
+def test_stale_and_an_explicitly_named_workspace_are_mutually_exclusive(
     aged_group, monkeypatch: pytest.MonkeyPatch, capsys
 ) -> None:
-    """Naming one workspace leaves nothing to rank.
+    """Two flags the operator typed that ask for different views.
 
-    The scoped view reports provisioning state for the workspace the operator
-    named; idleness is a comparison across the group's workspaces. Accepting the
-    flag and quietly dropping it is the failure this refusal exists to prevent.
+    ``--name`` selects one workspace; ``--stale`` ranks the group's. Widening
+    to the fleet here would discard a ``--name`` that was typed on purpose,
+    which is the silently-dropped-flag failure this surface exists to refuse.
     """
     code = _run_status(
         monkeypatch, ["status", "--group", "testgrp", "--name", "old-ws", "--stale"]
     )
     assert code == 1
     assert capsys.readouterr().err == (
-        "camp status: --stale ranks the group's workspaces by idleness — it has "
-        "no meaning for the single-workspace view\n"
+        "camp status: --name and --stale are mutually exclusive — --name "
+        "selects one workspace and --stale ranks the group's\n"
     )
+
+
+def test_stale_widens_a_cwd_resolved_view_to_the_fleet(
+    aged_group, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    """Run from inside a workspace, ``--stale`` answers for the whole group.
+
+    Nothing was typed to select that one workspace — the slug came from the
+    current directory — so there is no operator intent for the flag to
+    contradict, and the fleet ranking is the only reading that answers
+    anything at all.
+    """
+    import json
+
+    monkeypatch.chdir(aged_group["paths"]["old-ws"])
+    code = _run_status(monkeypatch, ["status", "--group", "testgrp", "--stale", "--json"])
+    assert code == 0
+    rows = {w["slug"]: w for w in json.loads(capsys.readouterr().out)["worktrees"]}
+    assert set(rows) == {"old-ws", "fresh-ws"}, (
+        "the fleet view must carry every workspace, not just the one cwd sat in"
+    )
+    assert rows["old-ws"]["stale"] is True
+    assert rows["fresh-ws"]["stale"] is False
+
+
+def test_without_stale_a_cwd_resolved_view_stays_scoped(
+    aged_group, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    """The control: the widening is ``--stale``'s doing, not the directory's."""
+    monkeypatch.chdir(aged_group["paths"]["old-ws"])
+    _run_status(monkeypatch, ["status", "--group", "testgrp"])
+    assert "camp status: old-ws —" in capsys.readouterr().out
 
 
 def test_the_same_scoped_invocation_without_stale_is_accepted(
