@@ -123,6 +123,38 @@ UNANSWERED = _Unanswered()
 
 
 @dataclass(frozen=True)
+class TmuxSession:
+    """One session tmux reported, as its name and live window count."""
+
+    name: str
+    windows: int
+
+
+@dataclass(frozen=True)
+class SessionListing:
+    """Every session tmux holds right now, as answered by
+    :meth:`Tmux.list_sessions`.
+
+    ``sessions`` is empty when tmux genuinely answered "no server running" —
+    the answered-empty case, never folded into :data:`UNANSWERED`. ``dropped``
+    counts rows tmux printed that could not be parsed (no delimiter, or a
+    non-numeric window count) and were excluded from ``sessions`` without
+    failing the rest of the answer, so a caller can tell "one row was
+    unparseable" apart from "the answer was empty".
+    """
+
+    sessions: tuple[TmuxSession, ...]
+    dropped: int = 0
+
+
+#: The one substring tmux prints on stderr for the non-zero exit that means
+#: "no server is running" — confirmed against tmux 3.7c. Every OTHER non-zero
+#: exit (an unsafe socket directory, an unreachable socket, or any stderr not
+#: yet observed) is an outage and must never be read as an empty listing.
+_NO_SERVER_STDERR_MARKER = "No such file or directory"
+
+
+@dataclass(frozen=True)
 class StopOutcome:
     """Base of the closed set of stop outcomes. Never returned itself."""
 
@@ -213,6 +245,40 @@ class Tmux:
         """Issue the kill. The result is deliberately unread — absence of the
         name afterwards is the only evidence this engine accepts."""
         self._run(["kill-session", "-t", f"={name}"])
+
+    def list_sessions(self) -> SessionListing | _Unanswered:
+        """Every session tmux currently holds, or ``UNANSWERED``.
+
+        Reads ``#{session_windows}|#{session_name}`` — the count first,
+        because it is always digits and a session name may legitimately
+        contain the delimiter, so the name is parsed as the remainder after
+        the FIRST ``|`` and can never be misread as a name-first field.
+
+        Extends this seam's tri-state rather than reusing :meth:`has_session`'s
+        contract: a general listing command's non-zero exit has no single
+        documented meaning, unlike a scoped existence query's. Only the
+        no-server condition on stderr is answered as empty; every other
+        non-zero exit, and an unanswerable ``_run``, is ``UNANSWERED``.
+        """
+        done = self._run(["list-sessions", "-F", "#{session_windows}|#{session_name}"])
+        if done is None:
+            return UNANSWERED
+        if done.returncode != 0:
+            if _NO_SERVER_STDERR_MARKER in (done.stderr or ""):
+                return SessionListing(sessions=())
+            return UNANSWERED
+
+        sessions: list[TmuxSession] = []
+        dropped = 0
+        for line in done.stdout.splitlines():
+            if not line:
+                continue
+            count, separator, name = line.partition("|")
+            if not separator or not count.isdigit():
+                dropped += 1
+                continue
+            sessions.append(TmuxSession(name=name, windows=int(count)))
+        return SessionListing(sessions=tuple(sessions), dropped=dropped)
 
 
 def anchor_session_id(env: Mapping[str, str]) -> str | None:
