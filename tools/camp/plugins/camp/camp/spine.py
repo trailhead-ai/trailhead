@@ -915,19 +915,6 @@ def _last_commit_epoch(wt_path: Path) -> float | None:
         return None
 
 
-def _activity_epoch(repos: list[dict[str, Any]]) -> float | None:
-    best: float | None = None
-    for repo in repos:
-        wt_path_str = repo.get("path", "")
-        if not wt_path_str:
-            continue
-        epoch = _last_commit_epoch(Path(wt_path_str))
-        if epoch is not None:
-            if best is None or epoch > best:
-                best = epoch
-    return best
-
-
 def _build_worktree_entry(
     slug: str,
     manifest: dict[str, Any],
@@ -957,18 +944,52 @@ def _build_worktree_entry(
     }
 
 
+def stale_days_or_die(value: str | None) -> int:
+    """The ``--days`` threshold, or the default when it was not given.
+
+    Shared by both status paths so the refusal for a non-integer is worded once:
+    a flag that behaves identically on two paths must also refuse identically,
+    or the operator learns which code answered rather than what they typed.
+    """
+    if value is None:
+        return _DEFAULT_STALE_DAYS
+    try:
+        return int(value)
+    except ValueError:
+        _die(f"camp status: --days requires an integer argument, got {value!r}")
+
+
+def stale_verdict(paths: list[Path], *, threshold_days: int) -> tuple[int, bool]:
+    """Judge one workspace idle or not, from its member worktree *paths*.
+
+    A workspace is as idle as its LIVELIEST member: work on any one member is
+    work on the workspace, so the most recent commit across *paths* decides.
+    Paths git cannot answer for contribute nothing, and a workspace with no
+    answer at all is treated as idle AT the threshold — landing it on the stale
+    side rather than reporting it as freshly active.
+
+    Shared by the standalone status and the group-resolved one so that
+    ``--stale`` means the same thing whichever path answers it.
+    """
+    epoch = None
+    for path in paths:
+        candidate = _last_commit_epoch(path)
+        if candidate is not None and (epoch is None or candidate > epoch):
+            epoch = candidate
+
+    if epoch is None:
+        idle_days = threshold_days
+    else:
+        idle_days = int((time.time() - epoch) / 86400)
+    return idle_days, idle_days >= threshold_days
+
+
 def _annotate_stale(worktrees: list[dict[str, Any]], *, threshold_days: int) -> None:
-    now = time.time()
     for wt in worktrees:
-        repos = wt.get("repos", [])
-        epoch = _activity_epoch(repos)
-        if epoch is None:
-            idle_days = threshold_days
-        else:
-            elapsed = now - epoch
-            idle_days = int(elapsed / 86400)
+        paths = [Path(r["path"]) for r in wt.get("repos", []) if r.get("path")]
+        idle_days, stale = stale_verdict(paths, threshold_days=threshold_days)
         wt["idle_days"] = idle_days
-        wt["stale"] = idle_days >= threshold_days
+        wt["stale"] = stale
 
 
 def _print_status_human(
@@ -1049,15 +1070,7 @@ def cmd_status(args: list[str], dry_run: bool = False) -> None:
     as_json = parsed.json
     check_stale = parsed.stale
 
-    stale_days = _DEFAULT_STALE_DAYS
-    if parsed.days is not None:
-        try:
-            stale_days = int(parsed.days)
-        except ValueError:
-            _die(
-                f"camp status: --days requires an integer argument, "
-                f"got {parsed.days!r}"
-            )
+    stale_days = stale_days_or_die(parsed.days)
 
     workspace_root = _workspace_root()
 
