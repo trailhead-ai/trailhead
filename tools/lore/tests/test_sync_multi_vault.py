@@ -1108,6 +1108,190 @@ def _strand_mid_rebase(vault: Path, tmp_path: Path) -> Path:
     return vault
 
 
+# ── lore sync: pre-flight refusal of an already-stranded vault ─────────────
+
+
+def _snapshot(vault: Path) -> tuple[str, str]:
+    return (
+        _git(vault, "status", "--porcelain").stdout,
+        _git(vault, "rev-parse", "HEAD").stdout,
+    )
+
+
+def _touch_stale_lock(vault: Path) -> Path:
+    """Leave a stale ``index.lock`` behind, the state a SIGKILLed git leaves."""
+    git_path = _git(vault, "rev-parse", "--git-path", "index.lock").stdout.strip()
+    lock = vault / git_path
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    lock.touch()
+    return lock
+
+
+def _strand_mid_merge(vault: Path, tmp_path: Path) -> Path:
+    """Leave ``vault`` stopped on a genuine merge conflict, ``MERGE_HEAD`` intact."""
+    remote = _make_bare_remote(tmp_path / f"{vault.name}-remote.git")
+    _wire_remote(vault, remote)
+    branch = _git(vault, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
+
+    _git(vault, "checkout", "-b", "feature")
+    (vault / "README.md").write_text("feature edit\n")
+    _git(vault, "add", "-A")
+    _git(vault, "commit", "-m", "feature edit")
+
+    _git(vault, "checkout", branch)
+    (vault / "README.md").write_text("main edit\n")
+    _git(vault, "add", "-A")
+    _git(vault, "commit", "-m", "main edit")
+
+    rc = _git(vault, "merge", "feature", "--no-edit")
+    assert rc.returncode != 0, "the fixture must actually conflict"
+    assert (vault / ".git" / "MERGE_HEAD").exists(), "the vault must be stranded mid-merge"
+    return vault
+
+
+def _detach_head(vault: Path) -> None:
+    """Check out ``vault``'s current commit directly, detaching HEAD."""
+    head = _git(vault, "rev-parse", "HEAD").stdout.strip()
+    rc = _git(vault, "checkout", head)
+    assert rc.returncode == 0, rc.stderr
+    rc_sym = _git(vault, "symbolic-ref", "-q", "HEAD")
+    assert rc_sym.returncode != 0, "the fixture must actually detach HEAD"
+
+
+def test_sync_refuses_a_stale_index_lock(tmp_path):
+    """A leftover ``index.lock`` (a SIGKILLed git's own mess) must be refused by
+    name, not silently attempted and left half-broken."""
+    config_home = tmp_path / "config"
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(parents=True)
+    good = _make_vault(tmp_path / "v-good")
+    stuck = _make_vault(tmp_path / "v-stuck", dirty=False)
+    write_vault_config(
+        config_home,
+        [("good", "default", good), ("stuck", "product", stuck)],
+    )
+    _touch_stale_lock(stuck)
+    before = _snapshot(stuck)
+
+    r = run_cli(["sync"], config_home=config_home, state_dir=state_dir)
+    assert r.returncode == 1
+    assert "stuck" in r.stderr
+    assert "stale" in r.stderr.lower() and "lock" in r.stderr.lower()
+
+    after = _snapshot(stuck)
+    assert after == before, "a refused vault must be byte-identical after"
+    assert _commit_count(good) == 2, "an unrelated clean vault must still complete its loop"
+
+
+def test_sync_refuses_a_mid_rebase_vault(tmp_path):
+    config_home = tmp_path / "config"
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(parents=True)
+    good = _make_vault(tmp_path / "v-good")
+    stuck = _make_vault(tmp_path / "v-stuck", dirty=False)
+    write_vault_config(
+        config_home,
+        [("good", "default", good), ("stuck", "product", stuck)],
+    )
+    _strand_mid_rebase(stuck, tmp_path)
+    before = _snapshot(stuck)
+
+    r = run_cli(["sync"], config_home=config_home, state_dir=state_dir)
+    assert r.returncode == 1
+    assert "stuck" in r.stderr
+    assert "mid-rebase" in r.stderr
+
+    after = _snapshot(stuck)
+    assert after == before, "a refused vault must be byte-identical after"
+    assert _commit_count(good) == 2, "an unrelated clean vault must still complete its loop"
+
+
+def test_sync_refuses_a_mid_merge_vault(tmp_path):
+    config_home = tmp_path / "config"
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(parents=True)
+    good = _make_vault(tmp_path / "v-good")
+    stuck = _make_vault(tmp_path / "v-stuck", dirty=False)
+    write_vault_config(
+        config_home,
+        [("good", "default", good), ("stuck", "product", stuck)],
+    )
+    _strand_mid_merge(stuck, tmp_path)
+    before = _snapshot(stuck)
+
+    r = run_cli(["sync"], config_home=config_home, state_dir=state_dir)
+    assert r.returncode == 1
+    assert "stuck" in r.stderr
+    assert "mid-merge" in r.stderr
+
+    after = _snapshot(stuck)
+    assert after == before, "a refused vault must be byte-identical after"
+    assert _commit_count(good) == 2, "an unrelated clean vault must still complete its loop"
+
+
+def test_sync_refuses_a_detached_head_vault(tmp_path):
+    config_home = tmp_path / "config"
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(parents=True)
+    good = _make_vault(tmp_path / "v-good")
+    stuck = _make_vault(tmp_path / "v-stuck", dirty=False)
+    write_vault_config(
+        config_home,
+        [("good", "default", good), ("stuck", "product", stuck)],
+    )
+    _detach_head(stuck)
+    before = _snapshot(stuck)
+
+    r = run_cli(["sync"], config_home=config_home, state_dir=state_dir)
+    assert r.returncode == 1
+    assert "stuck" in r.stderr
+    assert "detached" in r.stderr.lower()
+
+    after = _snapshot(stuck)
+    assert after == before, "a refused vault must be byte-identical after"
+    assert _commit_count(good) == 2, "an unrelated clean vault must still complete its loop"
+
+
+def test_sync_refusal_message_names_the_found_condition(tmp_path):
+    """The message must vary with the condition actually found — a mid-merge
+    vault and a detached-head vault must produce DIFFERENT messages — and must
+    never leak raw git or remote output (a URL, `fatal:`, `CONFLICT`, ...).
+
+    The two vaults are deliberately named ``alpha``/``bravo`` rather than
+    ``merging``/``detached`` — naming a vault after the condition it is
+    stranded in would let the vault's own output label satisfy a substring
+    check for free, without the message itself ever varying.
+    """
+    config_home = tmp_path / "config"
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(parents=True)
+    alpha = _make_vault(tmp_path / "v-alpha", dirty=False)  # stranded mid-merge
+    bravo = _make_vault(tmp_path / "v-bravo", dirty=False)  # stranded detached
+    write_vault_config(
+        config_home,
+        [("alpha", "default", alpha), ("bravo", "product", bravo)],
+    )
+    remote_url = str((tmp_path / "v-alpha-remote.git").resolve())
+    _strand_mid_merge(alpha, tmp_path)
+    _detach_head(bravo)
+
+    r = run_cli(["sync"], config_home=config_home, state_dir=state_dir)
+    assert r.returncode == 1
+
+    alpha_line = next(line for line in r.stderr.splitlines() if "alpha" in line)
+    bravo_line = next(line for line in r.stderr.splitlines() if "bravo" in line)
+    assert alpha_line != bravo_line, (
+        "the message must name the found condition, not a fixed string"
+    )
+    assert "mid-merge" in alpha_line and "mid-merge" not in bravo_line
+    assert "detached" in bravo_line.lower() and "detached" not in alpha_line.lower()
+
+    for line in (alpha_line, bravo_line):
+        assert remote_url not in line, "no remote output may appear in the message"
+        for git_word in ("fatal:", "CONFLICT", "Auto-merging", "Automatic merge"):
+            assert git_word not in line, f"no raw git output ({git_word!r}) may appear"
+
+
 def test_flush_sync_tail_skips_a_mid_resolution_vault_without_aborting_it(tmp_path):
     """A vault mid-resolution must be skipped, not synced — syncing it would abort
     the very rebase `lore resolve` is in the middle of settling, throwing away
