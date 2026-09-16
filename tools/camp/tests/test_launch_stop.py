@@ -27,6 +27,12 @@ Test contract:
 - A tmux that does not answer is its own refusal, never a stop: absence of the
   name is the only evidence of success, and an unanswered question is not
   absence. Every wait the engine takes is bounded.
+- ``Tmux.list_sessions`` extends the same tri-state to a general listing
+  rather than a scoped existence query: a no-server condition on stderr is the
+  only non-zero exit answered as empty, every other non-zero exit (and an
+  unanswerable ``_run``) is UNANSWERED, and a malformed row is dropped without
+  blanking the rest of the answer — with the drop counted so a caller can tell
+  the two apart.
 
 Nothing here shells out: the harness is a stand-in and tmux is an in-memory
 fake, so the engine is exercised on a machine with no tmux and no harness.
@@ -131,9 +137,16 @@ class _FakeHarness:
 class _FakeTmux:
     """tmux, as a dict of session name -> pane start command."""
 
-    def __init__(self, panes: dict[str, str] | None = None, *, undead: bool = False) -> None:
+    def __init__(
+        self,
+        panes: dict[str, str] | None = None,
+        *,
+        undead: bool = False,
+        windows: dict[str, int] | None = None,
+    ) -> None:
         self.panes = dict(panes or {})
         self.undead = undead
+        self.windows = dict(windows or {})
         self.killed: list[str] = []
 
     def has_session(self, name: str) -> bool:
@@ -146,6 +159,16 @@ class _FakeTmux:
         self.killed.append(name)
         if not self.undead:
             self.panes.pop(name, None)
+
+    def list_sessions(self):
+        from camp.launch.stop import SessionListing, TmuxSession
+
+        return SessionListing(
+            sessions=tuple(
+                TmuxSession(name=name, windows=self.windows.get(name, 1))
+                for name in self.panes
+            ),
+        )
 
 
 def _launched_pane(harness, session_id: str, derived_name: str, workspace: Path) -> str:
@@ -961,3 +984,270 @@ def test_a_harness_that_raises_composing_the_binding_refuses_rather_than_raising
     assert isinstance(outcome, stop.Refused)
     assert outcome.reason == stop.REFUSED_NOT_CAMP_LAUNCHED
     assert tmux.killed == []
+
+
+# ---------------------------------------------------------------------------
+# Enumeration — Tmux.list_sessions
+#
+# Every test below drives the real seam (stop.Tmux()) with subprocess.run
+# stubbed at the module level, per the pattern the pane_command tri-state
+# tests above already use — never a fixed constant, never _FakeTmux, because
+# the property under test is what Tmux.list_sessions does with what tmux
+# printed.
+# ---------------------------------------------------------------------------
+
+
+def _completed(*, returncode: int, stdout: str = "", stderr: str = ""):
+    import subprocess as _subprocess
+
+    return _subprocess.CompletedProcess(
+        args=["tmux"], returncode=returncode, stdout=stdout, stderr=stderr
+    )
+
+
+def test_list_sessions_answers_empty_when_tmux_reports_no_rows(monkeypatch) -> None:
+    from camp.launch import stop
+
+    monkeypatch.setattr(
+        stop.subprocess, "run", lambda *a, **k: _completed(returncode=0, stdout="")
+    )
+
+    result = stop.Tmux().list_sessions()
+
+    assert isinstance(result, stop.SessionListing)
+    assert result.sessions == ()
+
+
+def test_list_sessions_parses_one_session(monkeypatch) -> None:
+    from camp.launch import stop
+
+    monkeypatch.setattr(
+        stop.subprocess,
+        "run",
+        lambda *a, **k: _completed(returncode=0, stdout="3|camp-feat-a-11112222\n"),
+    )
+
+    result = stop.Tmux().list_sessions()
+
+    assert isinstance(result, stop.SessionListing)
+    assert result.sessions == (stop.TmuxSession(name="camp-feat-a-11112222", windows=3),)
+
+
+def test_list_sessions_parses_many_sessions(monkeypatch) -> None:
+    from camp.launch import stop
+
+    stdout = "1|camp-feat-a-11112222\n2|camp-feat-b-22223333\n5|not-camp-at-all\n"
+    monkeypatch.setattr(
+        stop.subprocess, "run", lambda *a, **k: _completed(returncode=0, stdout=stdout)
+    )
+
+    result = stop.Tmux().list_sessions()
+
+    assert isinstance(result, stop.SessionListing)
+    assert result.sessions == (
+        stop.TmuxSession(name="camp-feat-a-11112222", windows=1),
+        stop.TmuxSession(name="camp-feat-b-22223333", windows=2),
+        stop.TmuxSession(name="not-camp-at-all", windows=5),
+    )
+
+
+def test_list_sessions_reads_the_window_count_per_row_not_a_default(monkeypatch) -> None:
+    """Two sessions in one answer, with DIFFERENT counts — this fails if the
+    count comes from a length or a hardcoded default rather than the row."""
+    from camp.launch import stop
+
+    stdout = "1|camp-feat-a-11112222\n7|camp-feat-b-22223333\n"
+    monkeypatch.setattr(
+        stop.subprocess, "run", lambda *a, **k: _completed(returncode=0, stdout=stdout)
+    )
+
+    result = stop.Tmux().list_sessions()
+
+    counts = {s.name: s.windows for s in result.sessions}
+    assert counts == {"camp-feat-a-11112222": 1, "camp-feat-b-22223333": 7}
+
+
+def test_a_session_name_containing_the_delimiter_is_parsed_whole(monkeypatch) -> None:
+    """This is the test that fails if the fields are ordered name-first or the
+    split on the delimiter is unbounded rather than split-once."""
+    from camp.launch import stop
+
+    monkeypatch.setattr(
+        stop.subprocess,
+        "run",
+        lambda *a, **k: _completed(returncode=0, stdout="9|foo|bar\n"),
+    )
+
+    result = stop.Tmux().list_sessions()
+
+    assert result.sessions == (stop.TmuxSession(name="foo|bar", windows=9),)
+
+
+def test_a_session_name_carrying_a_pipe_survives_intact_with_the_correct_count(
+    monkeypatch,
+) -> None:
+    """Measured as legal on tmux 3.7c via
+    ``rename-session -t x 'camp-pipe|9|evil-1a2b3c4d'`` — a real input, not a
+    hypothetical."""
+    from camp.launch import stop
+
+    monkeypatch.setattr(
+        stop.subprocess,
+        "run",
+        lambda *a, **k: _completed(returncode=0, stdout="9|camp-pipe|9|evil-1a2b3c4d\n"),
+    )
+
+    result = stop.Tmux().list_sessions()
+
+    assert result.sessions == (
+        stop.TmuxSession(name="camp-pipe|9|evil-1a2b3c4d", windows=9),
+    )
+
+
+def test_a_no_server_condition_answers_empty_not_unanswered(monkeypatch) -> None:
+    """A machine with no tmux server genuinely has zero sessions — the ONE
+    non-zero exit that means empty rather than unanswered."""
+    from camp.launch import stop
+
+    monkeypatch.setattr(
+        stop.subprocess,
+        "run",
+        lambda *a, **k: _completed(
+            returncode=1,
+            stderr="error connecting to /tmp/tmux-501/default (No such file or directory)",
+        ),
+    )
+
+    result = stop.Tmux().list_sessions()
+
+    assert isinstance(result, stop.SessionListing)
+    assert result.sessions == ()
+
+
+def test_an_unsafe_socket_directory_is_unanswered_not_empty(monkeypatch) -> None:
+    """A live outage, not an empty server: this is the test that fails if the
+    implementation keys on the exit status alone."""
+    from camp.launch import stop
+
+    monkeypatch.setattr(
+        stop.subprocess,
+        "run",
+        lambda *a, **k: _completed(
+            returncode=1,
+            stderr="directory /tmp/tmux-501 has unsafe permissions",
+        ),
+    )
+
+    result = stop.Tmux().list_sessions()
+
+    assert result is stop.UNANSWERED
+
+
+def test_an_unreachable_socket_is_unanswered_not_empty(monkeypatch) -> None:
+    from camp.launch import stop
+
+    monkeypatch.setattr(
+        stop.subprocess,
+        "run",
+        lambda *a, **k: _completed(
+            returncode=1,
+            stderr="error connecting to /some/very/long/path (File name too long)",
+        ),
+    )
+
+    result = stop.Tmux().list_sessions()
+
+    assert result is stop.UNANSWERED
+
+
+def test_an_unrecognised_stderr_on_non_zero_exit_routes_to_unanswered(monkeypatch) -> None:
+    """The conservative default: a future tmux rewording degrades to unknown
+    rather than to a confident wrong answer."""
+    from camp.launch import stop
+
+    monkeypatch.setattr(
+        stop.subprocess,
+        "run",
+        lambda *a, **k: _completed(returncode=1, stderr="some new tmux error text"),
+    )
+
+    result = stop.Tmux().list_sessions()
+
+    assert result is stop.UNANSWERED
+
+
+def test_an_os_error_launching_tmux_is_unanswered(monkeypatch) -> None:
+    from camp.launch import stop
+
+    def _raise(*args, **kwargs):
+        raise OSError("tmux not found")
+
+    monkeypatch.setattr(stop.subprocess, "run", _raise)
+
+    assert stop.Tmux().list_sessions() is stop.UNANSWERED
+
+
+def test_a_timeout_expired_launching_tmux_is_unanswered(monkeypatch) -> None:
+    import subprocess as _subprocess
+
+    from camp.launch import stop
+
+    def _raise(*args, **kwargs):
+        raise _subprocess.TimeoutExpired(cmd="tmux", timeout=1)
+
+    monkeypatch.setattr(stop.subprocess, "run", _raise)
+
+    assert stop.Tmux().list_sessions() is stop.UNANSWERED
+
+
+def test_a_malformed_row_with_no_delimiter_is_dropped_and_reported(monkeypatch) -> None:
+    """One bad row must not blank the listing, and the drop must be visible —
+    a caller must be able to tell 'one row was unparseable' apart from 'the
+    answer was empty'."""
+    from camp.launch import stop
+
+    stdout = "garbage-no-delimiter\n3|camp-feat-a-11112222\n"
+    monkeypatch.setattr(
+        stop.subprocess, "run", lambda *a, **k: _completed(returncode=0, stdout=stdout)
+    )
+
+    result = stop.Tmux().list_sessions()
+
+    assert result.sessions == (stop.TmuxSession(name="camp-feat-a-11112222", windows=3),)
+    assert result.dropped == 1
+
+
+def test_a_malformed_row_with_a_non_numeric_count_is_dropped_and_reported(
+    monkeypatch,
+) -> None:
+    from camp.launch import stop
+
+    stdout = "not-a-number|camp-feat-a-11112222\n3|camp-feat-b-22223333\n"
+    monkeypatch.setattr(
+        stop.subprocess, "run", lambda *a, **k: _completed(returncode=0, stdout=stdout)
+    )
+
+    result = stop.Tmux().list_sessions()
+
+    assert result.sessions == (stop.TmuxSession(name="camp-feat-b-22223333", windows=3),)
+    assert result.dropped == 1
+
+
+def test_list_sessions_argv_is_list_sessions_with_dash_f(  # inert-gate: allow seam wiring, no input to vary
+    monkeypatch,
+) -> None:
+    from camp.launch import stop
+
+    captured: dict[str, Any] = {}
+
+    def _record(args, **kwargs):
+        captured["args"] = args
+        return _completed(returncode=0, stdout="")
+
+    monkeypatch.setattr(stop.subprocess, "run", _record)
+
+    stop.Tmux().list_sessions()
+
+    assert captured["args"][0] == "tmux"
+    assert "list-sessions" in captured["args"]
+    assert "-F" in captured["args"]
