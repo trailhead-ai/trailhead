@@ -58,6 +58,7 @@ import sys
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn
+from .parser import CampParser, group_verb_parser
 
 if TYPE_CHECKING:
     from ..host.config import Host
@@ -100,19 +101,6 @@ def _refusal(exc: Exception) -> str:
     if message.startswith(prefix):
         message = message[len(prefix) :]
     return f"camp launch: {message}"
-
-
-def _consume_flag(args: list[str], flag: str) -> bool:
-    """Remove every *flag* from *args* in place, reporting whether one was there.
-
-    Removal matters as much as detection: the remaining args are what slug
-    resolution reads positionally, and a leftover flag sitting at args[0] would
-    be resolved as a slug and die naming the wrong problem.
-    """
-    present = flag in args
-    while flag in args:
-        args.remove(flag)
-    return present
 
 
 def launch_and_confirm(
@@ -998,21 +986,28 @@ def _cmd_launch_group_cli(
     from ..group.config import load_all_groups
     from ..launch.recovery import derive_name_component, is_workspace_root
     from ..launch.session import LaunchError
-    from ..spine import _consume_flag_value, _die
+    from ..spine import _die
     from .common import _groups_dir
-    from .dispatch import _slug_from_args_or_cwd
+    from .dispatch import _slug_from_name_or_cwd
 
-    rest = list(args)
-    explicit_group = _consume_flag_value(rest, "--group")
-    resume_ref = _consume_flag_value(rest, RESUME_FLAG)
-    directory = _consume_flag_value(rest, "--dir")
-    as_json = _consume_flag(rest, "--json")
+    parser = group_verb_parser("launch")
+    parser.add_argument(RESUME_FLAG, metavar="REF")
+    parser.add_argument("--dir", metavar="PATH")
+    parser.add_argument("--json", action="store_true")
+    parser.add_argument("--name", metavar="SLUG")
+    parser.add_argument("slug", nargs="?")
+    parsed = parser.parse_args(args)
 
-    if directory is None and "--dir" in rest:
-        # `--dir` with nothing after it: consumed by neither branch above.
-        _die("camp launch: --dir requires a directory path")
-    if resume_ref is None and RESUME_FLAG in rest:
-        _die("camp launch: --resume requires a session reference")
+    explicit_group = parsed.group
+    resume_ref = parsed.resume
+    directory = parsed.dir
+    as_json = parsed.json
+
+    # `--name <slug>` and a bare positional are two spellings of the SAME thing
+    # — the workspace to launch into — so the mutual-exclusion checks below
+    # must treat them as one. Checking only the positional would let
+    # `--dir X --name Y` through, silently ignoring the slug.
+    named_slug = parsed.slug if parsed.slug is not None else parsed.name
 
     if directory is not None and resume_ref is not None:
         _die(
@@ -1022,7 +1017,7 @@ def _cmd_launch_group_cli(
         )
 
     if resume_ref is not None:
-        if rest:
+        if named_slug is not None:
             _die(
                 "camp launch: --resume and a workspace slug are mutually exclusive "
                 "— a launch re-enters an existing session or starts a new one in a "
@@ -1054,7 +1049,7 @@ def _cmd_launch_group_cli(
     camp_managed_root = False
 
     if directory is not None:
-        if rest:
+        if named_slug is not None:
             _die(
                 "camp launch: --dir and a workspace slug are mutually exclusive — a "
                 "launch is rooted at a named directory or at a workspace, never both"
@@ -1104,8 +1099,8 @@ def _cmd_launch_group_cli(
             env=dict(env) if env is not None else dict(os.environ),
         )
     else:
-        slug = _slug_from_args_or_cwd(
-            rest, group, verb="launch", consume_positional=True, env=env
+        slug = _slug_from_name_or_cwd(
+            group, verb="launch", name=parsed.name, positional=parsed.slug, env=env
         )
 
     try:
@@ -1421,12 +1416,50 @@ def _list_recoverable(
         )
 
 
-def refuse_sessions_local_only_options(rest: list[str], *, widening_flag: str) -> None:
+def local_sessions_parser() -> CampParser:
+    """The parser for a LOCAL `camp sessions` — every option the verb offers.
+
+    ``--group`` rides along from the router; the rest are the verb's own. The
+    widened form below declares the same options so that each one can be refused
+    in its own words, rather than reaching the generic unknown-flag refusal that
+    would not say WHY the option stops meaning anything once the machine axis
+    widens.
+    """
+    parser = group_verb_parser("sessions")
+    parser.add_argument("--json", action="store_true")
+    parser.add_argument("--recoverable", action="store_true")
+    parser.add_argument("--all", action="store_true")
+    parser.add_argument("--dir", metavar="PATH")
+    parser.add_argument("--limit", metavar="COUNT")
+    parser.add_argument("--name", metavar="SLUG")
+    parser.add_argument("slug", nargs="?")
+    return parser
+
+
+def widened_sessions_parser() -> CampParser:
+    """The parser for a `camp sessions` whose machine axis has been widened.
+
+    Deliberately the SAME declaration as the local form: the options below are
+    not accepted here, but they must still PARSE here so that
+    `refuse_sessions_local_only_options` can refuse each one by name. A parser
+    that simply omitted them would answer every one with "unknown flag", which
+    is untrue — they are camp's options, they just have no meaning once the
+    question is asked of more than this machine.
+    """
+    return local_sessions_parser()
+
+
+def refuse_sessions_local_only_options(parsed, *, widening_flag: str) -> None:
     """Refuse the five `camp sessions` options that narrow or reshape the
     LOCAL question — meaningless once *widening_flag* (``--host`` or
     ``--all-hosts``) has widened the machine axis to a remote or merged
     answer: ``--recoverable``, ``--all``, ``--dir``, ``--limit``, and a
     positional workspace slug.
+
+    Takes the namespace `widened_sessions_parser` produced, so the set of
+    options refused here is exactly the set that parser declares — the two
+    cannot drift into refusing something nothing accepts, or accepting
+    something nothing refuses.
 
     Shared by `_cmd_sessions_host_cli` (``--host``) and the `-a`/
     ``--all-hosts`` wiring in `cli/dispatch.py`, so both widening forms
@@ -1434,50 +1467,34 @@ def refuse_sessions_local_only_options(rest: list[str], *, widening_flag: str) -
     """
     from ..spine import _die
 
-    if "--recoverable" in rest:
+    if parsed.recoverable:
         _die(
             f"camp sessions: --recoverable has no meaning with {widening_flag} "
             "— a widened machine is always asked for its own live sessions"
         )
-    if "--all" in rest:
+    if parsed.all:
         _die(
             "camp sessions: --all only widens --recoverable, which has no "
             f"meaning with {widening_flag}"
         )
-    if "--dir" in rest or any(a.startswith("--dir=") for a in rest):
+    if parsed.dir is not None:
         _die(
             f"camp sessions: --dir has no meaning with {widening_flag} — a "
             "widened machine answers for every one of its own groups, not a "
             "local directory"
         )
-    if "--limit" in rest or any(a.startswith("--limit=") for a in rest):
+    if parsed.limit is not None:
         _die(
             "camp sessions: --limit only widens --recoverable, which has no "
             f"meaning with {widening_flag}"
         )
-
-    # `--json` and (on the `-a`/`--all-hosts` path only — `--host` never
-    # sees one, refused together with `--group` upstream) a `--group
-    # <name>` pair are the widened form's own recognized options, not a
-    # leftover positional. Stripped before the catch-all below so neither
-    # is mistaken for a workspace slug.
-    positional = []
-    skip_next = False
-    for arg in rest:
-        if skip_next:
-            skip_next = False
-            continue
-        if arg == "--group":
-            skip_next = True
-            continue
-        if arg == "--json" or arg.startswith("--group="):
-            continue
-        positional.append(arg)
-
-    if positional:
+    # Either spelling of the workspace — the positional or `--name` — is the
+    # narrowing this refuses; naming only one would let the other through.
+    named_slug = parsed.slug if parsed.slug is not None else parsed.name
+    if named_slug is not None:
         _die(
             f"camp sessions: {widening_flag} widens the machine axis — a "
-            f"workspace slug ({positional[0]!r}) has no meaning alongside it"
+            f"workspace slug ({named_slug!r}) has no meaning alongside it"
         )
 
 
@@ -1525,10 +1542,10 @@ def _cmd_sessions_host_cli(
     if connect_timeout is None:
         connect_timeout = DEFAULT_CONNECT_TIMEOUT_SECONDS
 
-    rest = list(args)
-    as_json = _consume_flag(rest, "--json")
+    parsed = widened_sessions_parser().parse_args(args)
+    as_json = parsed.json
 
-    refuse_sessions_local_only_options(rest, widening_flag="--host")
+    refuse_sessions_local_only_options(parsed, widening_flag="--host")
 
     def _render_human_rows(rows: list[dict]) -> None:
         for row in rows:
@@ -1610,14 +1627,19 @@ def _cmd_launch_host_cli(
     """
     from ..host.relay import Certainty, answer_object_for_host
     from ..host.transport import DEFAULT_CONNECT_TIMEOUT_SECONDS
-    from ..spine import _consume_flag_value, _die
+    from ..spine import _die
 
     if connect_timeout is None:
         connect_timeout = DEFAULT_CONNECT_TIMEOUT_SECONDS
 
-    rest = list(args)
-    as_json = _consume_flag(rest, "--json")
-    group = _consume_flag_value(rest, "--group")
+    parser = CampParser(verb="launch")
+    parser.add_argument("--group")
+    parser.add_argument("--json", action="store_true")
+    parser.add_argument("slugs", nargs="*")
+    parsed = parser.parse_args(args)
+    as_json = parsed.json
+    group = parsed.group
+    rest = parsed.slugs
     if group is None:
         # Unreachable in practice — dispatch.py's --host handling already
         # requires --group for a state-changing verb before this function is
@@ -1816,24 +1838,22 @@ def _cmd_sessions_group_cli(
     reading as complete.
     """
     from ..group.manifest import workspace_dir
-    from ..spine import _consume_flag_value, _die
-    from .dispatch import _slug_from_args_or_cwd
+    from ..spine import _die
+    from .dispatch import _slug_from_name_or_cwd
 
-    rest = list(args)
-    # Already resolved upstream to select `group`, so consuming it here is
-    # just removing it from `rest` — the resolved name (`group["group"]["name"]`)
-    # is what the live listing filters by below, not this raw flag value.
-    _consume_flag_value(rest, "--group")
-    as_json = _consume_flag(rest, "--json")
-    recoverable = _consume_flag(rest, "--recoverable")
-    show_all = _consume_flag(rest, "--all")
-    directory = _consume_flag_value(rest, "--dir")
-    limit_raw = _consume_flag_value(rest, "--limit")
+    # `--group` is declared and ignored: it was already resolved upstream to
+    # select `group`, and the resolved name (`group["group"]["name"]`) is what
+    # the live listing filters by below, never this raw flag value.
+    parsed = local_sessions_parser().parse_args(args)
+    as_json = parsed.json
+    recoverable = parsed.recoverable
+    show_all = parsed.all
+    directory = parsed.dir
+    limit_raw = parsed.limit
 
-    if directory is None and "--dir" in rest:
-        _die("camp sessions: --dir requires a directory path")
-    if limit_raw is None and "--limit" in rest:
-        _die("camp sessions: --limit requires a count")
+    # Two spellings of the workspace to scope to; the exclusion checks below
+    # treat them as one, exactly as `camp launch` does.
+    named_slug = parsed.slug if parsed.slug is not None else parsed.name
 
     if not recoverable and (show_all or limit_raw is not None):
         _die(
@@ -1860,7 +1880,7 @@ def _cmd_sessions_group_cli(
     if directory is not None:
         if not directory.strip():
             _die("camp sessions: --dir requires a directory path")
-        if rest:
+        if named_slug is not None:
             _die(
                 "camp sessions: --dir and a workspace slug are mutually exclusive "
                 "— a listing is scoped to a named directory or to a workspace, "
@@ -1876,14 +1896,19 @@ def _cmd_sessions_group_cli(
         # narrow-vs-widen contradiction `cli/dispatch.py` refuses for
         # `--group` alongside `--all-groups`, refused here before a group is
         # loaded or a store is read (both happen further down this function).
-        if rest:
+        if named_slug is not None:
             _die(
                 "camp sessions: --all-groups and a workspace slug name every "
                 "group and one workspace at once — pass one or the other"
             )
     else:
-        slug = _slug_from_args_or_cwd(
-            rest, group, verb="sessions", consume_positional=True, allow_none=True, env=env
+        slug = _slug_from_name_or_cwd(
+            group,
+            verb="sessions",
+            name=parsed.name,
+            positional=parsed.slug,
+            allow_none=True,
+            env=env,
         )
         if slug:
             scope = workspace_dir(group["group"]["name"], slug, env=env)
@@ -2257,11 +2282,18 @@ def _cmd_kill_cli(args: list[str], env: dict[str, str] | None = None) -> None:
     """
     from ..launch.recovery import Ambiguous, NoMatch
     from ..launch.stop import AlreadyDown, Refused, StillPresent, stop_session
-    from ..spine import _consume_flag_value, _die
+    from ..spine import _die
 
-    rest = list(args)
-    _consume_flag_value(rest, "--group")  # a ref names the session; no group needed
-    as_json = _consume_flag(rest, "--json")
+    # `--group` is declared and ignored: a ref names the session outright, so
+    # no group is needed to resolve one. It stays declared because the router
+    # forwards it, and refusing the router's own flag would be a false error.
+    parser = CampParser(verb="kill")
+    parser.add_argument("--group")
+    parser.add_argument("--json", action="store_true")
+    parser.add_argument("refs", nargs="*")
+    parsed = parser.parse_args(args)
+    as_json = parsed.json
+    rest = parsed.refs
 
     if not rest:
         _die(
@@ -2405,8 +2437,12 @@ def _cmd_kill_host_cli(
     if connect_timeout is None:
         connect_timeout = DEFAULT_CONNECT_TIMEOUT_SECONDS
 
-    rest = list(args)
-    as_json = _consume_flag(rest, "--json")
+    parser = CampParser(verb="kill")
+    parser.add_argument("--json", action="store_true")
+    parser.add_argument("refs", nargs="*")
+    parsed = parser.parse_args(args)
+    as_json = parsed.json
+    rest = parsed.refs
 
     if not rest:
         _die(
@@ -2690,10 +2726,9 @@ def _cmd_attach_cli(args: list[str], env: dict[str, str] | None = None) -> None:
     from ..attach.prefix_warning import warn_if_nested
     from ..attach.resolve import Ambiguous, NoMatch, NotRunning, Resolved, resolve_attach_ref
     from ..host.handoff import handoff, local_argv
-    from ..spine import _consume_flag_value, _die
+    from ..spine import _die
 
-    rest = list(args)
-    _consume_flag_value(rest, "--group")  # a ref names the session; no group needed
+    # `--group` is declared and ignored: a ref names the session outright.
     # `--json` is accepted on the plain `<ref>` form too (no `--resolve`/
     # `--list`) — deliberately, not an oversight. It changes nothing about
     # the success path (a handoff has no JSON shape to offer), and its only
@@ -2701,9 +2736,17 @@ def _cmd_attach_cli(args: list[str], env: dict[str, str] | None = None) -> None:
     # supports both a human and a machine-readable rendering for every
     # ref-addressed verb. Refusing it here would make attach the one verb
     # that treats a harmless, already-supported flag as an error.
-    as_json = _consume_flag(rest, "--json")
-    resolve_only = _consume_flag(rest, "--resolve")
-    list_only = _consume_flag(rest, "--list")
+    parser = CampParser(verb="attach")
+    parser.add_argument("--group")
+    parser.add_argument("--json", action="store_true")
+    parser.add_argument("--resolve", action="store_true")
+    parser.add_argument("--list", action="store_true")
+    parser.add_argument("refs", nargs="*")
+    parsed = parser.parse_args(args)
+    as_json = parsed.json
+    resolve_only = parsed.resolve
+    list_only = parsed.list
+    rest = parsed.refs
 
     if len(rest) > 1:
         _die(
@@ -2851,7 +2894,9 @@ def _cmd_attach_host_cli(
     if connect_timeout is None:
         connect_timeout = DEFAULT_CONNECT_TIMEOUT_SECONDS
 
-    rest = list(args)
+    parser = CampParser(verb="attach")
+    parser.add_argument("refs", nargs="*")
+    rest = parser.parse_args(args).refs
     if len(rest) != 1:
         _die(
             f"camp attach: --host requires exactly one session reference, got "

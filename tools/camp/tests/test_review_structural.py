@@ -5,7 +5,7 @@ The hidden `camp inject --drain` PostToolUse hook fires on every Bash
   ~1700-line spine module on its account, and must skip the cold-subprocess
   ensure_trailhead_importable() bootstrap. The drain still works.
 
-`_slug_from_args_or_cwd` dropped `env`, breaking the "all callers pass
+`_slug_from_name_or_cwd` dropped `env`, breaking the "all callers pass
   the same env" invariant. resolve_from_cwd derives camp_state_dir from
   state_dir("camp", env=env) when not given camp_state_dir, so a non-None env
   must reach it — otherwise a slug-from-cwd handler resolves against a different
@@ -115,7 +115,7 @@ class TestFix6InjectIsLight:
 
 
 # ===========================================================================
-# _slug_from_args_or_cwd threads env to resolve_from_cwd
+# _slug_from_name_or_cwd threads env to resolve_from_cwd
 # ===========================================================================
 
 
@@ -127,7 +127,7 @@ class TestFix7SlugFromCwdThreadsEnv:
         won't resolve from inside the env's workspace dir."""
         from camp.group.resolve import central_state_dir
 
-        # `_slug_from_args_or_cwd` moved to camp.cli.dispatch (the shared router).
+        # `_slug_from_name_or_cwd` lives in camp.cli.dispatch (the shared router).
         camp_cli = importlib.import_module("camp.cli.dispatch")
 
         # Two distinct state roots: the env points at one; os.environ at another.
@@ -146,7 +146,7 @@ class TestFix7SlugFromCwdThreadsEnv:
         ws.mkdir(parents=True)
         monkeypatch.chdir(ws)
 
-        slug = camp_cli._slug_from_args_or_cwd([], group, verb="status", allow_none=True, env=env)
+        slug = camp_cli._slug_from_name_or_cwd(group, verb="status", allow_none=True, env=env)
         assert slug == "feat-x", (
             "slug-from-cwd must resolve against the env's state dir (env threaded "
             "into resolve_from_cwd), not os.environ"
@@ -234,10 +234,10 @@ class TestGroupResolutionBareExceptNarrowed:
         with pytest.raises(group_resolve.GroupConfinementError):
             camp_cli._resolve_group_for_command([])
 
-    def test_slug_from_args_or_cwd_propagates_unexpected_exception(self, monkeypatch):
-        """The bare `except Exception: slug = None` in _slug_from_args_or_cwd had the
-        same problem — a genuinely unexpected exception from resolve_from_cwd must
-        propagate, not be silently coerced into slug=None."""
+    def test_slug_from_name_or_cwd_propagates_unexpected_exception(self, monkeypatch):
+        """A genuinely unexpected exception from resolve_from_cwd must propagate
+        rather than being coerced into slug=None: only the documented
+        GroupResolutionError means "no slug resolves here"."""
         camp_cli = importlib.import_module("camp.cli.dispatch")
 
         import camp.group.resolve as group_resolve
@@ -249,7 +249,7 @@ class TestGroupResolutionBareExceptNarrowed:
 
         group = {"group": {"name": "grp"}, "members": [], "branch_pattern": "worktree-{slug}"}
         with pytest.raises(TypeError, match="simulated bug"):
-            camp_cli._slug_from_args_or_cwd([], group, verb="status", allow_none=True)
+            camp_cli._slug_from_name_or_cwd(group, verb="status", allow_none=True)
 
 
 # ===========================================================================

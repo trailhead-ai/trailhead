@@ -15,6 +15,7 @@ import os
 import sys
 
 from .dispatch import _BIN_DIR
+from .parser import CampParser, group_verb_parser
 
 
 _GROUP_HELP = """\
@@ -44,67 +45,54 @@ Options:
 """
 
 
+#: The branch name camp derives for a workspace when the operator names no
+#: pattern of their own. Declared here rather than inline as the parser's
+#: default so `_GROUP_HELP` above and the parser quote the same string.
+_DEFAULT_BRANCH_PATTERN = "worktree-{slug}"
+
+
+def _build_group_parser() -> CampParser:
+    """The `camp group` parser — the declared shape of every flag the verb takes.
+
+    The group name is declared ``nargs="?"`` rather than required so that its
+    absence refuses in camp's words ("a group name is required") instead of
+    argparse's, which names the destination and reads like a stack trace. The
+    check for it lives in `_parse_init_args` immediately below.
+    """
+    parser = CampParser(verb="group")
+    # `default=None` rather than `default=[]`: before 3.13, an append action
+    # mutates the default object it is given, so a list literal accumulates
+    # members across every parse a single parser performs. camp supports 3.11.
+    parser.add_argument("--member", action="append", metavar="NAME=PATH", default=None)
+    parser.add_argument("--branch-pattern", default=_DEFAULT_BRANCH_PATTERN)
+    parser.add_argument("--force", action="store_true")
+    parser.add_argument("--allow-missing", action="store_true")
+    parser.add_argument("--scaffold", action="store_true")
+    parser.add_argument("group_name", nargs="?")
+    return parser
+
+
 def _parse_init_args(args: list[str]) -> dict:
-    """Parse `camp init` args into {group_name, members, branch_pattern, force,
-    allow_missing, scaffold}. Exits non-zero on malformed input."""
-    members: list[dict[str, str]] = []
-    branch_pattern = "worktree-{slug}"
-    force = False
-    allow_missing = False
-    scaffold = False
-    group_name: str | None = None
+    """Parse `camp group` args into {group_name, members, branch_pattern, force,
+    allow_missing, scaffold}. Exits non-zero on malformed input.
 
-    i = 0
-    while i < len(args):
-        arg = args[i]
-        if arg == "--member":
-            if i + 1 >= len(args):
-                print("camp group: --member requires a NAME=PATH value", file=sys.stderr)
-                sys.exit(1)
-            members.append(_parse_member(args[i + 1]))
-            i += 2
-        elif arg.startswith("--member="):
-            members.append(_parse_member(arg[len("--member="):]))
-            i += 1
-        elif arg == "--branch-pattern":
-            if i + 1 >= len(args):
-                print("camp group: --branch-pattern requires a value", file=sys.stderr)
-                sys.exit(1)
-            branch_pattern = args[i + 1]
-            i += 2
-        elif arg.startswith("--branch-pattern="):
-            branch_pattern = arg[len("--branch-pattern="):]
-            i += 1
-        elif arg == "--force":
-            force = True
-            i += 1
-        elif arg == "--allow-missing":
-            allow_missing = True
-            i += 1
-        elif arg == "--scaffold":
-            scaffold = True
-            i += 1
-        elif arg.startswith("-"):
-            print(f"camp group: unknown flag {arg!r}", file=sys.stderr)
-            sys.exit(1)
-        else:
-            if group_name is not None:
-                print(f"camp group: unexpected argument {arg!r}", file=sys.stderr)
-                sys.exit(1)
-            group_name = arg
-            i += 1
+    Member specs are validated after the parse, not during it, so that a
+    malformed ``NAME=PATH`` reports its own reason rather than argparse's
+    generic invalid-value wording.
+    """
+    parser = _build_group_parser()
+    parsed = parser.parse_args(args)
 
-    if group_name is None:
-        print("camp group: a group name is required", file=sys.stderr)
-        sys.exit(1)
+    if parsed.group_name is None:
+        parser.die("a group name is required")
 
     return {
-        "group_name": group_name,
-        "members": members,
-        "branch_pattern": branch_pattern,
-        "force": force,
-        "allow_missing": allow_missing,
-        "scaffold": scaffold,
+        "group_name": parsed.group_name,
+        "members": [_parse_member(spec) for spec in parsed.member or []],
+        "branch_pattern": parsed.branch_pattern,
+        "force": parsed.force,
+        "allow_missing": parsed.allow_missing,
+        "scaffold": parsed.scaffold,
     }
 
 
@@ -244,7 +232,11 @@ def _cmd_groups_cli(args: list[str]) -> None:
     from ..group.config import GroupConfigError, GroupConfigNotFound, load_group
     from .common import _groups_dir
 
-    as_json = "--json" in args
+    # Groupless by contract — `--group` is deliberately NOT declared here, so
+    # passing it refuses rather than being silently ignored.
+    parser = CampParser(verb="groups")
+    parser.add_argument("--json", action="store_true")
+    as_json = parser.parse_args(args).json
 
     entries: list[dict] = []
     groups_dir = _groups_dir()
@@ -348,18 +340,22 @@ def _cmd_new_group_cli(
     `--activate`'s — independently, so passing one flag never disables what
     the other does.
     """
-    from ..spine import _resolve_slug, _consume_flag_value, _die
+    from ..spine import _resolve_slug, _die
     from ..provision.provision import bring_up_workspace
     from ..group.manifest import workspace_dir, manifest_path_for
 
-    rest = list(args)
-    _consume_flag_value(rest, "--group")  # already resolved upstream; drop it
+    parser = group_verb_parser("new", dry_run=True)
+    parser.add_argument("--launch", action="store_true")
+    parser.add_argument("--no-wait", action="store_true")
+    parser.add_argument("--activate", action="store_true")
+    parser.add_argument("--json", action="store_true")
+    parser.add_argument("slug", nargs="?")
+    parsed = parser.parse_args(args)
 
-    launch = "--launch" in rest
-    no_wait = "--no-wait" in rest
-    activate = "--activate" in rest
-    as_json = "--json" in rest
-    rest = [arg for arg in rest if arg not in ("--launch", "--no-wait", "--activate", "--json")]
+    launch = parsed.launch
+    no_wait = parsed.no_wait
+    activate = parsed.activate
+    as_json = parsed.json
 
     # --json only has a defined meaning alongside --launch: it exists to carry the
     # session id next to the path. Refusing it outright beats inventing a second
@@ -367,11 +363,11 @@ def _cmd_new_group_cli(
     if as_json and not launch:
         _die("camp new: --json requires --launch")
 
-    if not rest:
+    if parsed.slug is None:
         print("camp new: a slug is required\n  usage: camp new <slug>", file=sys.stderr)
         sys.exit(1)
 
-    slug = _resolve_slug(rest[0], context="new")
+    slug = _resolve_slug(parsed.slug, context="new")
 
     group_name = group["group"]["name"]
     if not group["members"]:

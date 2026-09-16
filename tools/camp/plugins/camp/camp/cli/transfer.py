@@ -124,20 +124,29 @@ from __future__ import annotations
 import json
 import sys
 
+from .parser import CampParser, group_verb_parser
+
 
 def _cmd_transfer_probe_cli(args: list[str]) -> None:
     from ..group.config import GroupConfigError, load_all_groups
     from ..host.config import HostConfigError, self_host_name
-    from ..spine import _consume_flag_value
     from ..transfer.probe import build_probe_answer
     from .common import _groups_dir
 
-    group_name = _consume_flag_value(args, "--group")
+    parser = CampParser(verb="transfer-probe")
+    parser.add_argument("--group")
+    parser.add_argument("--slug")
+    parsed = parser.parse_args(args)
+
+    # Both are checked here rather than declared ``required=True`` so the
+    # refusal names the flag in camp's words, and so an invocation missing both
+    # reports `--group` first — the order a caller fixes them in.
+    group_name = parsed.group
     if not group_name:
         print("camp transfer-probe: --group is required", file=sys.stderr)
         sys.exit(1)
 
-    slug = _consume_flag_value(args, "--slug")
+    slug = parsed.slug
     if not slug:
         print("camp transfer-probe: --slug is required", file=sys.stderr)
         sys.exit(1)
@@ -176,6 +185,33 @@ def _cmd_transfer_probe_cli(args: list[str]) -> None:
 _PHASES = ("begin", "claim", "conversations", "finish", "history", "worktree")
 
 
+def _build_receive_parser(phase: str) -> CampParser:
+    """The parser for one `camp transfer-receive` phase.
+
+    Built per phase rather than as one parser over the union of every phase's
+    flags, so that a flag belonging to another phase (``--member`` on
+    ``begin``) is refused rather than silently accepted and dropped. ``--group``
+    and ``--slug`` are common to every phase; the rest are the phase's own.
+
+    Nothing is declared ``required``: each phase checks its own flags after the
+    parse so the refusal can name the phase it is required FOR, which argparse's
+    generic wording cannot.
+    """
+    parser = CampParser(verb="transfer-receive")
+    parser.add_argument("--group")
+    parser.add_argument("--slug")
+    if phase in ("begin", "claim"):
+        parser.add_argument("--owner")
+    if phase == "begin":
+        parser.add_argument("--overwrite", action="store_true")
+    if phase == "conversations":
+        parser.add_argument("--session-id")
+        parser.add_argument("--subpath")
+    if phase in ("history", "worktree"):
+        parser.add_argument("--member")
+    return parser
+
+
 def _cmd_transfer_receive_cli(args: list[str]) -> None:
     """camp transfer-receive begin|finish|history|worktree --group <g> --slug <s> [...]
 
@@ -185,7 +221,6 @@ def _cmd_transfer_receive_cli(args: list[str]) -> None:
     module docstring for each phase's contract.
     """
     from ..group.config import GroupConfigError, load_all_groups
-    from ..spine import _consume_flag_value
     from ..transfer import receive as receive_mod
     from .common import _groups_dir
 
@@ -200,14 +235,14 @@ def _cmd_transfer_receive_cli(args: list[str]) -> None:
         sys.exit(1)
 
     phase = args[0]
-    rest = args[1:]
+    parsed = _build_receive_parser(phase).parse_args(args[1:])
 
-    group_name = _consume_flag_value(rest, "--group")
+    group_name = parsed.group
     if not group_name:
         print("camp transfer-receive: --group is required", file=sys.stderr)
         sys.exit(1)
 
-    slug = _consume_flag_value(rest, "--slug")
+    slug = parsed.slug
     if not slug:
         print("camp transfer-receive: --slug is required", file=sys.stderr)
         sys.exit(1)
@@ -226,46 +261,41 @@ def _cmd_transfer_receive_cli(args: list[str]) -> None:
     # any other attribute of that module through it.
     phase_kwargs: dict = {}
     if phase == "begin":
-        owner = _consume_flag_value(rest, "--owner")
-        if not owner:
+        if not parsed.owner:
             print("camp transfer-receive: --owner is required for begin", file=sys.stderr)
             sys.exit(1)
-        phase_kwargs = {"sender": owner, "overwrite": "--overwrite" in rest}
+        phase_kwargs = {"sender": parsed.owner, "overwrite": parsed.overwrite}
     elif phase == "claim":
-        owner = _consume_flag_value(rest, "--owner")
-        if not owner:
+        if not parsed.owner:
             print("camp transfer-receive: --owner is required for claim", file=sys.stderr)
             sys.exit(1)
-        phase_kwargs = {"sender": owner}
+        phase_kwargs = {"sender": parsed.owner}
     elif phase == "conversations":
-        session_id = _consume_flag_value(rest, "--session-id")
-        if not session_id:
+        if not parsed.session_id:
             print(
                 "camp transfer-receive: --session-id is required for conversations",
                 file=sys.stderr,
             )
             sys.exit(1)
-        subpath = _consume_flag_value(rest, "--subpath")
-        if not subpath:
+        if not parsed.subpath:
             print(
                 "camp transfer-receive: --subpath is required for conversations",
                 file=sys.stderr,
             )
             sys.exit(1)
         phase_kwargs = {
-            "session_id": session_id,
-            "subpath": subpath,
+            "session_id": parsed.session_id,
+            "subpath": parsed.subpath,
             "archive_stream": sys.stdin.buffer,
         }
     elif phase in ("history", "worktree"):
-        member = _consume_flag_value(rest, "--member")
-        if not member:
+        if not parsed.member:
             print(
                 f"camp transfer-receive: --member is required for {phase}",
                 file=sys.stderr,
             )
             sys.exit(1)
-        phase_kwargs = {"member": member}
+        phase_kwargs = {"member": parsed.member}
         if phase == "history":
             phase_kwargs["bundle_bytes"] = sys.stdin.buffer.read()
         else:
@@ -653,24 +683,29 @@ def _cmd_transfer_group_cli(
 
     from ..group.manifest import ManifestError, manifest_path_for, owner_of, read_central_manifest
     from ..host.config import HostConfigError, load_hosts, self_host_name
-    from ..spine import _consume_flag_value, _die
+    from ..spine import _die
     from ..transfer.preflight import MemberDeclaration, Verdict, compose_preflight
     from ..transfer.probe import InvalidSlugForTransport, probe_peer
-    from .dispatch import _slug_from_args_or_cwd
+    from .dispatch import _slug_from_name_or_cwd
     from .session import _parsable_groups
 
-    as_json = "--json" in args
-    overwrite = "--overwrite" in args
-    filtered = [a for a in args if a not in ("--json", "--dry-run", "--overwrite")]
-    _consume_flag_value(filtered, "--group")  # already resolved upstream; drop it
+    parser = group_verb_parser("transfer", dry_run=True)
+    parser.add_argument("--json", action="store_true")
+    parser.add_argument("--overwrite", action="store_true")
+    parser.add_argument("--to", metavar="PEER")
+    parser.add_argument("--name", metavar="SLUG")
+    parser.add_argument("slug", nargs="?")
+    parsed = parser.parse_args(args)
 
-    peer_name = _consume_flag_value(filtered, "--to")
+    as_json = parsed.json
+    overwrite = parsed.overwrite
+    peer_name = parsed.to
 
     if not peer_name:
         _die("camp transfer: --to <peer> is required", code=EXIT_ERROR)
 
-    slug = _slug_from_args_or_cwd(
-        filtered, group, verb="transfer", consume_positional=True, env=env
+    slug = _slug_from_name_or_cwd(
+        group, verb="transfer", name=parsed.name, positional=parsed.slug, env=env
     )
 
     group_name = group["group"]["name"]

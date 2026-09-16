@@ -9,7 +9,8 @@ from __future__ import annotations
 import sys
 from typing import TYPE_CHECKING
 
-from .dispatch import _slug_from_args_or_cwd
+from .dispatch import _slug_from_name_or_cwd
+from .parser import CampParser, group_verb_parser
 
 if TYPE_CHECKING:
     from ..host.config import Host
@@ -113,7 +114,10 @@ def _cmd_ls_group_cli(
     """
     from ..provision.lifecycle import cmd_ls_group, render_workspace_list
 
-    as_json = "--json" in args
+    parser = group_verb_parser("list")
+    parser.add_argument("--json", action="store_true")
+    as_json = parser.parse_args(args).json
+
     entries = cmd_ls_group(group, env=env)
     render_workspace_list(entries, as_json=as_json)
 
@@ -153,7 +157,10 @@ def _cmd_ls_all_groups_cli(args: list[str], env: dict[str, str] | None) -> None:
     )
     from .common import _groups_dir
 
-    as_json = "--json" in args
+    parser = CampParser(verb="list")
+    parser.add_argument("--json", action="store_true")
+    as_json = parser.parse_args(args).json
+
     groups, unparsable = answerable_groups_or_refuse(_groups_dir(), verb="list")
 
     if not groups:
@@ -201,7 +208,9 @@ def _cmd_ls_host_cli(
     if connect_timeout is None:
         connect_timeout = DEFAULT_CONNECT_TIMEOUT_SECONDS
 
-    as_json = "--json" in args
+    parser = CampParser(verb="list")
+    parser.add_argument("--json", action="store_true")
+    as_json = parser.parse_args(args).json
 
     def _render_human_rows(rows: list[dict]) -> None:
         for row in rows:
@@ -264,14 +273,24 @@ def _cmd_activate_group_cli(
     from ..group.config import GroupConfigError
     from ..launch.profile import resolve_harness_profile
 
-    background = "--background" in args
-    filtered = [a for a in args if a != "--background"]
-    slug = _slug_from_args_or_cwd(filtered, group, verb="activate", env=env)
+    parser = group_verb_parser("activate")
+    parser.add_argument("--background", action="store_true")
+    parser.add_argument("--name", metavar="SLUG")
+    parser.add_argument("member", nargs="?")
+    parsed = parser.parse_args(args)
 
-    if not filtered:
+    # The workspace is resolved BEFORE the member name is checked for, so an
+    # invocation that names neither still reports the slug problem first, which
+    # is the order the two messages are written to be read in.
+    slug = _slug_from_name_or_cwd(
+        group, verb="activate", name=parsed.name, env=env
+    )
+
+    if parsed.member is None:
         _die("camp activate: a member name is required\n  usage: camp activate <member>")
 
-    member_name = filtered[0]
+    background = parsed.background
+    member_name = parsed.member
 
     if background:
         try:
@@ -306,17 +325,18 @@ def _cmd_pwd_group_cli(
 
     Security contract: stdout carries ONLY the path; diagnostics go to stderr.
     """
-    from ..spine import _resolve_slug, _consume_flag_value
+    from ..spine import _resolve_slug
     from ..launch.shell_integration import cmd_pwd, WorkspaceNotFoundError
 
-    filtered = list(args)
-    _consume_flag_value(filtered, "--group")  # already resolved upstream; drop it
+    parser = group_verb_parser("pwd")
+    parser.add_argument("slug", nargs="?")
+    parsed = parser.parse_args(args)
 
-    if not filtered:
+    if parsed.slug is None:
         print("camp pwd: a slug is required\n  usage: camp pwd <slug>", file=sys.stderr)
         sys.exit(1)
 
-    slug = _resolve_slug(filtered[0], context="pwd")
+    slug = _resolve_slug(parsed.slug, context="pwd")
 
     try:
         ws_dir = cmd_pwd(group, slug, env=env)

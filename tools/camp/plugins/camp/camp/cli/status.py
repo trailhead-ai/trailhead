@@ -10,7 +10,8 @@ from __future__ import annotations
 
 import sys
 
-from .dispatch import _SELF, _VERSION, _slug_from_args_or_cwd
+from .dispatch import _SELF, _VERSION, _slug_from_name_or_cwd
+from .parser import group_verb_parser
 
 
 def _cmd_version() -> None:
@@ -96,11 +97,16 @@ def _cmd_status_group_cli(
     import json as _json
     from ..provision.lifecycle import cmd_status_group, provision_status_code, status_header
 
-    as_json = "--json" in args
-    filtered = [a for a in args if a != "--json"]
+    parser = group_verb_parser("status", dry_run=True)
+    parser.add_argument("--json", action="store_true")
+    parser.add_argument("--name", metavar="SLUG")
+    parsed = parser.parse_args(args)
+    as_json = parsed.json
 
     # Resolve a slug from --name or cwd; if found, emit the provision-state view.
-    slug = _slug_from_args_or_cwd(filtered, group, verb="status", allow_none=True, env=env)
+    slug = _slug_from_name_or_cwd(
+        group, verb="status", name=parsed.name, allow_none=True, env=env
+    )
 
     if slug is not None:
         try:

@@ -13,6 +13,8 @@ Notable structure:
 
 from __future__ import annotations
 
+import argparse
+
 import json
 import os
 import re
@@ -33,6 +35,7 @@ from .workspace.verb_taxonomy import (
     needs_group_message,
     resolve_verb,
 )
+from .cli.parser import CampParser
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -181,7 +184,15 @@ def _workspace_root() -> Path:
 
 
 def _is_dry_run(argv: list[str]) -> bool:
-    return bool(os.environ.get("CAMP_DRY_RUN")) or "--dry-run" in argv
+    """True when this invocation is a dry run, by flag or by environment.
+
+    Reads ``--dry-run`` through the shared router-level reader so spine's
+    fallback path and `cli/dispatch`'s group-aware path cannot come to
+    different conclusions about the same argv.
+    """
+    from .cli.dispatch import read_dry_run_option
+
+    return bool(os.environ.get("CAMP_DRY_RUN")) or read_dry_run_option(argv)
 
 
 def _dry_run_print(cmd: list[str], *, env_extras: dict[str, str] | None = None) -> None:
@@ -263,23 +274,6 @@ def _resolve_slug(raw: str, *, context: str = "argument") -> str:
 # ---------------------------------------------------------------------------
 # Manifest / cwd resolution
 # ---------------------------------------------------------------------------
-
-
-def _consume_flag_value(args: list[str], flag: str) -> str | None:
-    """Consume the first `--flag <value>` / `--flag=value` from args, in place."""
-    prefix = f"{flag}="
-    i = 0
-    while i < len(args):
-        if args[i] == flag and i + 1 < len(args):
-            value = args[i + 1]
-            del args[i : i + 2]
-            return value
-        if args[i].startswith(prefix):
-            value = args[i][len(prefix) :]
-            del args[i]
-            return value
-        i += 1
-    return None
 
 
 def _read_manifest(path: Path) -> dict[str, Any] | None:
@@ -369,18 +363,26 @@ def _no_worktree_error() -> NoReturn:
 # ---------------------------------------------------------------------------
 
 
+#: The age, in days, past which `camp status --stale` flags a worktree when
+#: the operator names no `--days` of their own.
+_DEFAULT_STALE_DAYS = 7
+
+
 def _resolve_target(
-    args: list[str],
+    name: str | None = None,
     *,
     allow_missing: bool = False,
 ) -> tuple[str, Path]:
-    """Parse --name from args (consuming it) and resolve (slug, wt_path).
+    """Resolve (slug, wt_path) from an already-parsed *name*, else from cwd.
 
-    Falls back to cwd walk-up if --name is not provided.
+    *name* is what the caller's own parser produced for ``--name``; this
+    function no longer reads argv, so a verb declares the flag once and the
+    resolver only decides what to do with its value.
+
+    Falls back to a cwd walk-up when *name* is None.
     Returns (slug, worktree_path). Exits non-zero if resolution fails.
     """
     workspace_root = _workspace_root()
-    name = _consume_flag_value(args, "--name")
 
     if name is not None:
         slug = _resolve_slug(name, context="--name")
@@ -410,7 +412,9 @@ def _resolve_target(
 
 def cmd_path(args: list[str], dry_run: bool = False) -> None:
     """camp path [--name <slug>] — print worktree directory."""
-    slug, wt_path = _resolve_target(args)
+    parser = CampParser(verb="path")
+    parser.add_argument("--name", metavar="SLUG")
+    slug, wt_path = _resolve_target(parser.parse_args(args).name)
     print(str(wt_path))
 
 
@@ -427,7 +431,10 @@ def cmd_ls(args: list[str]) -> None:
     """
     from .provision.lifecycle import render_workspace_list
 
-    as_json = "--json" in args
+    parser = CampParser(verb="list")
+    parser.add_argument("--json", action="store_true")
+    as_json = parser.parse_args(args).json
+
     workspace_root = _workspace_root()
     entries = [
         {
@@ -666,8 +673,13 @@ def cmd_sync(args: list[str], dry_run: bool = False) -> None:
     Currently operates on the trailhead repo only; operating on group-config
     members is future work.
     """
-    as_json = "--json" in args
-    force = "--force" in args
+    parser = CampParser(verb="sync")
+    parser.add_argument("--json", action="store_true")
+    parser.add_argument("--force", action="store_true")
+    parser.add_argument("--dry-run", action="store_true")
+    parsed = parser.parse_args(args)
+    as_json = parsed.json
+    force = parsed.force
 
     workspace_root = _workspace_root()
     # Currently trailhead only; group members are a future expansion.
@@ -781,11 +793,23 @@ def cmd_foreach(args: list[str], dry_run: bool = False) -> None:
 
     Run <cmd> in each member worktree of the resolved camp. shell=False.
     """
-    fail_fast = "--fail-fast" in args
-    as_json = "--json" in args
-    filtered = [a for a in args if a not in ("--fail-fast", "--json")]
+    # `payload` is declared REMAINDER so option parsing STOPS at the first
+    # non-option token: everything from the wrapped command onwards is forwarded
+    # verbatim, including tokens that spell camp's own flags. `camp foreach git
+    # log -g` sends `-g` to git, and `camp foreach git status --json` sends
+    # `--json` to git rather than reading it as camp's own.
+    parser = CampParser(verb="foreach")
+    parser.add_argument("--name", metavar="SLUG")
+    parser.add_argument("--fail-fast", action="store_true")
+    parser.add_argument("--json", action="store_true")
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("payload", nargs=argparse.REMAINDER)
+    parsed = parser.parse_args(args)
 
-    slug, wt = _resolve_target(filtered)
+    fail_fast = parsed.fail_fast
+    as_json = parsed.json
+
+    slug, wt = _resolve_target(parsed.name)
 
     manifest_path = wt / _MANIFEST_FILENAME
     if not manifest_path.is_file():
@@ -795,7 +819,7 @@ def cmd_foreach(args: list[str], dry_run: bool = False) -> None:
         _die(f"camp foreach: could not read manifest at {manifest_path}")
 
     repos = manifest.get("repos") or []
-    cmd_list = filtered
+    cmd_list = parsed.payload
     if not cmd_list:
         _die(
             "camp foreach: a command is required\n"
@@ -1008,37 +1032,31 @@ def cmd_status(args: list[str], dry_run: bool = False) -> None:
     block retains stale_registry_instances / orphaned_git_worktrees (always
     empty) for output-shape stability.
     """
-    as_json = "--json" in args
-    filtered_args = [a for a in args if a != "--json"]
+    parser = CampParser(verb="status")
+    parser.add_argument("--json", action="store_true")
+    parser.add_argument("--stale", action="store_true")
+    parser.add_argument("--days", metavar="N")
+    parser.add_argument("--name", metavar="SLUG")
+    parser.add_argument("--group")
+    parser.add_argument("--dry-run", action="store_true")
+    parsed = parser.parse_args(args)
 
-    check_stale = "--stale" in filtered_args
-    filtered_args = [a for a in filtered_args if a != "--stale"]
+    as_json = parsed.json
+    check_stale = parsed.stale
 
-    stale_days = 7
-    i = 0
-    while i < len(filtered_args):
-        if filtered_args[i] == "--days" and i + 1 < len(filtered_args):
-            try:
-                stale_days = int(filtered_args[i + 1])
-            except ValueError:
-                _die(
-                    f"camp status: --days requires an integer argument, "
-                    f"got {filtered_args[i + 1]!r}"
-                )
-            del filtered_args[i : i + 2]
-            continue
-        elif filtered_args[i].startswith("--days="):
-            try:
-                stale_days = int(filtered_args[i][len("--days=") :])
-            except ValueError:
-                _die(f"camp status: --days= requires an integer argument, got {filtered_args[i]!r}")
-            del filtered_args[i]
-            continue
-        i += 1
+    stale_days = _DEFAULT_STALE_DAYS
+    if parsed.days is not None:
+        try:
+            stale_days = int(parsed.days)
+        except ValueError:
+            _die(
+                f"camp status: --days requires an integer argument, "
+                f"got {parsed.days!r}"
+            )
 
     workspace_root = _workspace_root()
 
-    name = _consume_flag_value(list(filtered_args), "--name")
+    name = parsed.name
 
     if name is not None:
         slug = _resolve_slug(name, context="--name")
@@ -1103,9 +1121,13 @@ def _parse_last_json_line(stdout: str) -> dict[str, Any]:
 
 def cmd_rebase(args: list[str], dry_run: bool = False) -> None:
     """camp rebase [--onto <branch>] [--name <slug>]"""
-    filtered = list(args)
-    onto = _consume_flag_value(filtered, "--onto")
-    slug, _wt_path = _resolve_target(filtered)
+    parser = CampParser(verb="rebase")
+    parser.add_argument("--onto", metavar="BRANCH")
+    parser.add_argument("--name", metavar="SLUG")
+    parser.add_argument("--dry-run", action="store_true")
+    parsed = parser.parse_args(args)
+    onto = parsed.onto
+    slug, _wt_path = _resolve_target(parsed.name)
 
     canonical_root = _canonical_root()
     rebase_script = canonical_root / "scripts" / "pickup-rebase.sh"
@@ -1393,8 +1415,13 @@ def cmd_doctor(
              `self_host_name`'s own default — production callers never pass
              this.
     """
-    as_json = "--json" in args
-    as_probe = DOCTOR_PROBE_FLAG in args
+    parser = CampParser(verb="doctor")
+    parser.add_argument("--json", action="store_true")
+    parser.add_argument(DOCTOR_PROBE_FLAG, dest="probe", action="store_true")
+    parser.add_argument("--dry-run", action="store_true")
+    parsed = parser.parse_args(args)
+    as_json = parsed.json
+    as_probe = parsed.probe
 
     if as_probe and not as_json:
         # The far side's probe answer is reported only in machine-readable

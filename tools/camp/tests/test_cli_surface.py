@@ -858,9 +858,10 @@ def test_all_groups_and_host_with_a_missing_host_value_still_refuses(
 
 
 # ---------------------------------------------------------------------------
-# read_host_option — direct unit tests. The CLI-level refusals above prove
-# the message an operator sees; these prove the argv `read_host_option`
-# hands back to its caller, which a subprocess-level assertion cannot see.
+# --host, read directly off the router. The CLI-level refusals above prove the
+# message an operator sees; these prove the VALUE and the remaining argv that
+# `read_router_options` hands its caller, which a subprocess-level assertion
+# cannot see.
 # ---------------------------------------------------------------------------
 
 
@@ -871,44 +872,47 @@ def _dispatch_module():
     return dispatch
 
 
-def test_read_host_option_swallows_nothing_when_the_value_is_missing_before_a_flag() -> None:
-    """`--host --group g` must raise before consuming `--group` as the host
-    value — the defect this fix closes did exactly that."""
+@pytest.mark.parametrize(
+    "following",
+    [["--group", "g"], ["--all-groups"], []],
+)
+def test_host_takes_no_following_flag_as_its_name(following: list[str]) -> None:
+    """`--host` with a flag after it — or nothing at all — names no host.
+
+    A host name never starts with a dash, so consuming the next token would
+    both invent a host and silence the refusal that token was meant to trigger.
+    The result is "" (present, valueless), never the following flag's text.
+    """
+    dispatch = _dispatch_module()
+    args = ["--host", *following]
+    parsed, _rest = dispatch.read_router_options("list", args)
+    assert parsed.host == ""
+
+
+def test_reading_the_router_options_does_not_mutate_the_caller_argv() -> None:
+    """The caller re-reads this list afterwards — for `--group`, and to forward
+    it to a handler — so the read must leave it exactly as it was."""
     dispatch = _dispatch_module()
     args = ["--host", "--group", "g"]
-    with pytest.raises(dispatch._HostFlagMissingValue):
-        dispatch.read_host_option(args)
-    # read_host_option operates on a copy; the caller's own list, and thus
-    # what a caller re-reads after catching the exception, is untouched.
+    dispatch.read_router_options("list", args)
     assert args == ["--host", "--group", "g"]
 
 
-def test_read_host_option_swallows_nothing_when_the_value_is_missing_before_all_groups() -> None:
+def test_host_empty_equals_value_is_present_but_valueless() -> None:
+    """`--host=` is an empty name, which is never resolvable — it must read as
+    valueless rather than as the empty string being a host called ""."""
     dispatch = _dispatch_module()
-    args = ["--host", "--all-groups"]
-    with pytest.raises(dispatch._HostFlagMissingValue):
-        dispatch.read_host_option(args)
-    assert args == ["--host", "--all-groups"]
+    parsed, _rest = dispatch.read_router_options("list", ["--host="])
+    assert parsed.host == ""
 
 
-def test_read_host_option_trailing_token_still_raises() -> None:
-    """Regression guard: the originally-implemented case must not break."""
+def test_host_parses_a_real_name_and_consumes_exactly_its_two_tokens() -> None:
+    """The mirror of the refusals above: a real name is taken, and only the
+    flag and its value are removed from what the handler receives."""
     dispatch = _dispatch_module()
-    with pytest.raises(dispatch._HostFlagMissingValue):
-        dispatch.read_host_option(["--host"])
-
-
-def test_read_host_option_empty_equals_value_raises_missing_value() -> None:
-    dispatch = _dispatch_module()
-    with pytest.raises(dispatch._HostFlagMissingValue):
-        dispatch.read_host_option(["--host="])
-
-
-def test_read_host_option_parses_a_real_host_name_and_never_mistakes_it_for_a_flag() -> None:
-    dispatch = _dispatch_module()
-    remaining, host_name = dispatch.read_host_option(["--host", "andromeda"])
-    assert host_name == "andromeda"
-    assert remaining == []
+    parsed, rest = dispatch.read_router_options("list", ["--host", "andromeda", "--json"])
+    assert parsed.host == "andromeda"
+    assert rest == ["--json"]
 
 
 def test_camp_foreach_passes_a_payload_flag_named_like_host_through_unchanged(

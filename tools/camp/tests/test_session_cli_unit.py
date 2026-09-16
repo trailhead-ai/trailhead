@@ -81,7 +81,7 @@ class TestSessionsSlugScopingResolvesTheWorkspace:
             "camp.group.manifest.workspace_dir", lambda group, slug, env=None: link
         )
         monkeypatch.setattr(
-            "camp.cli.dispatch._slug_from_args_or_cwd",
+            "camp.cli.dispatch._slug_from_name_or_cwd",
             lambda *a, **k: "feat-x",
         )
 
@@ -117,7 +117,7 @@ class TestLaunchJsonCarriesTheEngineReportedTmuxName:
         from camp.launch.session import LaunchedSession
 
         monkeypatch.setattr(
-            "camp.cli.dispatch._slug_from_args_or_cwd", lambda *a, **k: "feat-x"
+            "camp.cli.dispatch._slug_from_name_or_cwd", lambda *a, **k: "feat-x"
         )
         monkeypatch.setattr(
             cli_session,
@@ -153,7 +153,7 @@ class TestLocalLaunchUnaffectedByHostLaunch:
         from camp.launch.session import LaunchedSession
 
         monkeypatch.setattr(
-            "camp.cli.dispatch._slug_from_args_or_cwd", lambda *a, **k: "feat-x"
+            "camp.cli.dispatch._slug_from_name_or_cwd", lambda *a, **k: "feat-x"
         )
         monkeypatch.setattr(
             cli_session,
@@ -188,7 +188,7 @@ class TestLocalLaunchUnaffectedByHostLaunch:
         from camp.launch.session import LaunchedSession
 
         monkeypatch.setattr(
-            "camp.cli.dispatch._slug_from_args_or_cwd", lambda *a, **k: "feat-x"
+            "camp.cli.dispatch._slug_from_name_or_cwd", lambda *a, **k: "feat-x"
         )
         monkeypatch.setattr(
             cli_session,

@@ -186,23 +186,46 @@ def test_bundled_and_split_forms_are_byte_identical_to_each_other(
 # ---------------------------------------------------------------------------
 
 
-def test_split_bundled_short_flags_passes_through_a_token_with_a_foreign_character() -> None:
+@pytest.mark.parametrize(
+    ("token", "all_groups", "all_hosts", "survives"),
+    [
+        ("-ag", True, True, False),
+        ("-ga", True, True, False),
+        ("-a", False, True, False),
+        ("-g", True, False, False),
+        # A bundle whose FIRST character is not one of camp's own is left
+        # whole — nothing is harvested out of the middle of it.
+        ("-la", False, False, True),
+        # A bundle that STARTS with one of camp's own is split, and the
+        # unrecognized tail is handed on as its own token. Either way the
+        # invocation refuses rather than silently succeeding; the two cases
+        # differ only in which token the refusal names ('-la' versus '-l').
+        ("-gl", True, False, False),
+    ],
+)
+def test_a_bundle_splits_only_from_a_leading_camp_short_flag(
+    token: str, all_groups: bool, all_hosts: bool, survives: bool
+) -> None:
+    """The splitter's actual decision, both ways: which bundles expand into
+    camp's widening flags, and which pass through whole to the verb."""
     dispatch = _dispatch_module()
-    # 'l' is not one of camp's own short flags — the whole token must be
-    # left completely untouched, not partially split.
-    assert dispatch.split_bundled_short_flags(["-la", "-ag", "--group"]) == [
-        "-la",
-        "-a",
-        "-g",
-        "--group",
-    ]
+    parsed, rest = dispatch.read_router_options("list", [token, "--group"])
+    assert (parsed.all_groups, parsed.all_hosts) == (all_groups, all_hosts)
+    assert (token in rest) is survives
 
 
 def test_a_short_token_not_wholly_camp_flags_is_never_read_as_all_hosts(
     hosts_and_group_env, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
-    """`-la` is not wholly `a`/`g` and must pass through unsplit — it must
-    never trigger the all-hosts (or all-groups) dispatch path at all."""
+    """`-la` is not wholly `a`/`g`, so the router must not split it into camp's
+    own short flags — it reaches the verb as one opaque token.
+
+    The verb then refuses it, because `camp list` declares no `-la`. That
+    refusal is the point of the assertion below: the token must die as an
+    UNKNOWN FLAG at the leaf, never be read as a widening option by the router.
+    An earlier form of this test asserted exit 0 instead, back when an
+    undeclared flag was silently dropped by every verb.
+    """
     dispatch = _dispatch_module()
 
     def _boom(*args, **kwargs):
@@ -212,24 +235,71 @@ def test_a_short_token_not_wholly_camp_flags_is_never_read_as_all_hosts(
     monkeypatch.setattr(dispatch, "_dispatch_all_groups_command", _boom)
 
     code = _run(monkeypatch, ["list", "-la", "--group", "testgrp", "--json"])
-    assert code == 0
-    # The plain single-group list answer — no traceback, no host key.
-    rows = json.loads(capsys.readouterr().out)
-    assert rows == []
+    captured = capsys.readouterr()
+    assert code == 1
+    assert captured.err == "camp list: unknown flag '-la'\n"
+    assert captured.out == ""
 
 
-def test_foreachs_opaque_payload_is_never_scanned_for_bundled_short_flags(
+def test_a_bundled_token_wholly_of_camp_flags_still_widens(
+    hosts_and_group_env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The pair to the case above: `-ag` IS wholly camp's own short flags, so
+    the router splits it and the widening dispatch runs.
+
+    Together the two pin the splitter's actual decision — which tokens it will
+    expand — rather than just one side of it.
+    """
+    dispatch = _dispatch_module()
+    seen: list[tuple] = []
+
+    monkeypatch.setattr(
+        dispatch,
+        "_dispatch_all_hosts_command",
+        lambda verb, rest, **kw: seen.append((verb, kw.get("all_groups"))),
+    )
+
+    _run(monkeypatch, ["list", "-ag", "--json"])
+    assert seen == [("list", True)]
+
+
+@pytest.mark.parametrize("token", ["-la", "-gl", "-gj", "-lg"])
+def test_no_malformed_bundle_ever_silently_succeeds(
+    hosts_and_group_env, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture, token: str
+) -> None:
+    """Whichever way a malformed bundle splits, the invocation REFUSES.
+
+    This is the property that actually matters, and the one that holds across
+    every spelling: an operator who mistypes a bundle is told, rather than
+    getting an answer to a question they did not ask. Which token the refusal
+    names is a detail; that there is a refusal is not.
+    """
+    # No `--group` here: a bundle carrying `-g` widens to every group, which
+    # would collide with a named one and refuse for THAT reason instead — a
+    # refusal, but not the one this test is about.
+    code = _run(monkeypatch, ["list", token])
+    assert code != 0
+    assert "unknown flag" in capsys.readouterr().err
+
+
+def test_foreachs_opaque_payload_is_never_read_for_camps_own_options(
     hosts_and_group_env, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """`camp foreach` forwards its payload verbatim, so tokens inside it that
+    happen to spell camp's own options must never be read as camp's.
+
+    `-ag` and `-g` here belong to the wrapped command. If the router read
+    either, the invocation would dispatch as a widened answer instead of
+    running the command — so the assertion is that neither widening dispatch
+    is ever reached.
+    """
     dispatch = _dispatch_module()
-    calls: list[list[str]] = []
-    original = dispatch.split_bundled_short_flags
 
-    def _spy(args):
-        calls.append(list(args))
-        return original(args)
+    def _boom(*args, **kwargs):
+        raise AssertionError("foreach's payload must never be read as a widening option")
 
-    monkeypatch.setattr(dispatch, "split_bundled_short_flags", _spy)
+    monkeypatch.setattr(dispatch, "_dispatch_all_hosts_command", _boom)
+    monkeypatch.setattr(dispatch, "_dispatch_all_groups_command", _boom)
     # foreach falls through to the standalone no-group registry when no
     # workspace resolves, which reads $WORKSPACE_ROOT (default $HOME/code)
     # — a real HOME must never be touched by a test (see conftest.py's
@@ -241,8 +311,6 @@ def test_foreachs_opaque_payload_is_never_scanned_for_bundled_short_flags(
         dispatch.main()
     except SystemExit:
         pass
-
-    assert calls == [], "foreach's own argv must never reach the splitter"
 
 
 # ---------------------------------------------------------------------------

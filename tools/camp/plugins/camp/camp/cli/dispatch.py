@@ -1,4 +1,4 @@
-"""camp CLI top-level dispatch — the hand-rolled verb router.
+"""camp CLI top-level dispatch — the verb router.
 
 Two orthogonal concerns, kept distinct:
   (a) The thin ``cli/camp`` shim puts ``plugins/camp/`` on ``sys.path`` (so the
@@ -56,7 +56,7 @@ _VERSION = "0.1.0"
 _TRAILHEAD_PATHS_OK = False
 
 #: The two spellings of the widen-to-every-group option, and the only verbs it
-#: has any meaning for. Held here, once, so `read_all_groups_option` (the
+#: has any meaning for. Held here, once, so `read_router_options` (the
 #: reader `main()` consults for every verb) and its applicability check can
 #: never drift against each other.
 ALL_GROUPS_FLAGS = ("--all-groups", "-g")
@@ -94,99 +94,11 @@ _ALL_HOSTS_VERBS = frozenset({"list", "sessions", "attach", "doctor"})
 #: must never be scanned for camp's widen-to-every-group option at all.
 _OPAQUE_PAYLOAD_VERBS = frozenset({"foreach"})
 
-#: The characters `split_bundled_short_flags` is willing to expand a
-#: bundled single-dash token into — camp's own short flags, and only these
-#: two. Held here, once, so the splitter and the two readers above
-#: (`ALL_GROUPS_FLAGS`'s `-g`, `ALL_HOSTS_FLAGS`'s `-a`) cannot drift apart
-#: on what counts as one of camp's own short options.
-_BUNDLED_SHORT_FLAG_CHARS = frozenset({"a", "g"})
-
-
-def split_bundled_short_flags(args: list[str]) -> list[str]:
-    """Split a bundled single-dash token (``-ag``, ``-ga``, ``-aa``, …) into
-    its individual short flags, ONE token per character, order-preserving.
-
-    Deliberately conservative: a token is split ONLY when EVERY character
-    after the leading dash is one of camp's own short flags (`a`, `g`) —
-    `_BUNDLED_SHORT_FLAG_CHARS`. Anything else (a verb's own short option, a
-    flag value, a long `--flag`, a bare `-`) passes through completely
-    unchanged, so no verb's own argument can ever be corrupted by this scan.
-    An already-bare `-a` or `-g` is untouched too (nothing to split).
-    """
-    out: list[str] = []
-    for arg in args:
-        if (
-            len(arg) > 2
-            and arg[0] == "-"
-            and arg[1] != "-"
-            and all(c in _BUNDLED_SHORT_FLAG_CHARS for c in arg[1:])
-        ):
-            out.extend(f"-{c}" for c in arg[1:])
-        else:
-            out.append(arg)
-    return out
-
-
-def _read_widening_option(
-    args: list[str], flags: tuple[str, ...]
-) -> tuple[list[str], bool]:
-    """Consume every token in *args* spelling one of *flags*, order-preserving.
-
-    Returns ``(remaining, present)``. The one scan behind both widening
-    options below, so the two axes cannot drift on how their option is
-    consumed — only on which spellings name it.
-    """
-    remaining: list[str] = []
-    present = False
-    for arg in args:
-        if arg in flags:
-            present = True
-        else:
-            remaining.append(arg)
-    return remaining, present
-
-
-def read_all_groups_option(args: list[str]) -> tuple[list[str], bool]:
-    """Consume every ``--all-groups``/``-g`` from *args*, order-preserving.
-
-    Returns ``(remaining, present)``. This is the ONE reader both `camp list`
-    and `camp sessions` are widened through — `main()` calls it exactly once,
-    on the raw argv, before a verb is classified or a group is resolved, so
-    the two entry points cannot drift on what spells the option or where its
-    applicability is decided.
-    """
-    return _read_widening_option(args, ALL_GROUPS_FLAGS)
-
-
-def read_all_hosts_option(args: list[str]) -> tuple[list[str], bool]:
-    """Consume every ``--all-hosts``/``-a`` from *args*, order-preserving.
-
-    Returns ``(remaining, present)`` — the same shape as
-    `read_all_groups_option`. `main()` calls it exactly once, on the raw
-    argv (after `split_bundled_short_flags` has already separated a bundled
-    ``-ag`` into its own ``-a``/``-g`` tokens), before a verb is classified
-    or a group is resolved.
-    """
-    return _read_widening_option(args, ALL_HOSTS_FLAGS)
-
-
-def _flag_present(args: list[str], flag: str) -> bool:
-    """True when *flag* appears in *args* in either spelling (``--x`` /
-    ``--x=value``).
-
-    A presence scan only — nothing is consumed, because `main()`'s collision
-    refusals must SEE a flag in an argv the refused command never gets to
-    run. One scanner for every such check, so `--group`'s collision test and
-    `--host`'s cannot drift apart on what counts as "present".
-    """
-    return any(a == flag or a.startswith(f"{flag}=") for a in args)
-
-
 #: The one spelling of the resolve-a-single-declared-remote-host option, and
-#: the only verbs it has any meaning for. Held here, once, so
-#: `read_host_option` (the reader `main()` consults for every verb) and its
-#: applicability check can never drift against each other — the same shape as
-#: `ALL_GROUPS_FLAGS` / `_ALL_GROUPS_VERBS` above.
+#: the only verbs it has any meaning for. Held here, once, so the reader
+#: `main()` consults for every verb and its applicability check can never
+#: drift against each other — the same shape as `ALL_GROUPS_FLAGS` /
+#: `_ALL_GROUPS_VERBS` above.
 #:
 #: "attach" carries its reference across untouched rather than going through
 #: the JSON relay transport `_dispatch_host_command` builds for "list"/
@@ -206,13 +118,13 @@ _HOST_VERBS = frozenset({"list", "sessions", "attach", "launch", "kill"})
 #: changes state, not because it merely "has no meaning" — where every
 #: other `_HOST_VERBS` member gets the generic refusal.
 #:
-#: This set drives ONLY the --all-hosts wording now. It used to also decide
-#: the --group requirement below, but "kill" joining it broke that
-#: coincidence: a stop is groupless (the reference names the session, and
-#: the far side resolves it against its own pool exactly as it would
-#: locally), so "kill" belongs here for the all-hosts refusal but must NOT
-#: pick up "launch"'s --group requirement — see `_GROUP_REQUIRED_HOST_VERBS`
-#: below, which holds only "launch".
+#: This set drives ONLY the --all-hosts wording. It used to also decide the
+#: --group requirement below, but "kill" joining it broke that coincidence:
+#: a stop is groupless (the reference names the session, and the far side
+#: resolves it against its own pool exactly as it would locally), so "kill"
+#: belongs here for the all-hosts refusal but must NOT pick up "launch"'s
+#: --group requirement — see `_GROUP_REQUIRED_HOST_VERBS` below, which holds
+#: only "launch".
 _STATE_CHANGING_HOST_VERBS = frozenset({"launch", "kill"})
 
 #: The subset of `_HOST_VERBS` for which `--host` requires an explicit
@@ -229,48 +141,88 @@ _STATE_CHANGING_HOST_VERBS = frozenset({"launch", "kill"})
 _GROUP_REQUIRED_HOST_VERBS = frozenset({"launch"})
 
 
-class _HostFlagMissingValue(Exception):
-    """Raised by `read_host_option` when ``--host`` is the final token in
-    *args*, with no following value and no ``=value`` — a name camp cannot
-    resolve, so it must refuse rather than silently drop the flag or swallow
-    the next argument as its value."""
+def read_router_options(verb: str, args: list[str]) -> "tuple[Any, list[str]]":
+    """Read the options the ROUTER owns, returning them plus the untouched rest.
 
+    The four router-level options — the two widening axes and ``--host`` — must
+    be known before a verb is classified or a group is resolved, so that a
+    refusal costs nothing: not one config file has been read and no machine has
+    been contacted. Everything else in *args* belongs to the verb and is
+    returned in the order it was typed, for the handler to parse with its own
+    declaration.
 
-def read_host_option(args: list[str]) -> tuple[list[str], str | None]:
-    """Consume ``--host <name>``/``--host=value`` from *args*.
+    Bundled short flags (``-ag``, ``-ga``) split here because argparse splits
+    them, and only when EVERY character is one of camp's own short options — a
+    token like ``-la`` is not camp's ``-l`` plus camp's ``-a``, so it passes
+    through whole and is refused by the verb it was aimed at.
 
-    Delegates the actual consumption to `_consume_flag_value` (spine.py),
-    which already supports both spellings — but that helper takes whatever
-    token follows ``--host`` as its value, whatever it is. A host name never
-    begins with ``-``, so before delegating, this scans for the first
-    ``--host`` occurrence and refuses up front when the next token is
-    another flag (or absent) — otherwise a flag like ``--group`` or
-    ``--all-groups`` gets silently swallowed as the host name, and the very
-    refusal that flag should have triggered downstream never fires. Nothing
-    is consumed from *args* before that refusal: it raises against a plain
-    scan, never against the mutated copy `_consume_flag_value` would have
-    produced. That same scan is also what refuses a trailing ``--host`` with
-    nothing after it at all. ``--host=`` (an empty value after the equals
-    sign) refuses after delegating, since an empty host name is never a
-    resolvable one either.
-    Returns ``(remaining, host_name)``; `host_name` is `None` when `--host`
-    is absent. Raises `_HostFlagMissingValue` when the value is missing.
+    ``--host`` is declared ``nargs="?"`` so that ABSENT (None) and
+    PRESENT-BUT-VALUELESS ("") stay distinguishable. `main()` refuses those two
+    differently: a verb ``--host`` has no meaning for is told THAT, even when
+    the flag also carries no value, because reporting a missing value first
+    would name a value that would never have been accepted anyway. A host name
+    never begins with a dash, so a following flag is never taken as one.
+
+    ``--group`` is deliberately NOT declared here — see `read_group_option`.
     """
-    from ..spine import _consume_flag_value
+    from .parser import CampParser
 
-    remaining = list(args)
-    for i, arg in enumerate(remaining):
-        if arg == HOST_FLAG:
-            if i + 1 >= len(remaining) or remaining[i + 1].startswith("-"):
-                raise _HostFlagMissingValue()
-            break
-        if arg.startswith(f"{HOST_FLAG}="):
-            break
+    parser = CampParser(verb=verb)
+    parser.add_argument(*ALL_GROUPS_FLAGS, dest="all_groups", action="store_true")
+    parser.add_argument(*ALL_HOSTS_FLAGS, dest="all_hosts", action="store_true")
+    parser.add_argument(HOST_FLAG, nargs="?", const="", default=None)
+    return parser.parse_known_args(args)
 
-    host_name = _consume_flag_value(remaining, HOST_FLAG)
-    if host_name == "":
-        raise _HostFlagMissingValue()
-    return remaining, host_name
+
+def read_dry_run_option(args: list[str]) -> bool:
+    """Read ``--dry-run`` from *args* WITHOUT consuming it.
+
+    The flag is global in the sense that `main()` must know it before a verb is
+    dispatched, and per-verb in the sense that only a state-changing verb
+    declares and honours it. This reader answers the first question; the verb's
+    own declaration answers the second, which is what makes `--dry-run` on a
+    read-only verb a refusal rather than a silent no-op.
+    """
+    from .parser import CampParser
+
+    parser = CampParser(verb="camp")
+    parser.add_argument("--dry-run", action="store_true")
+    return parser.parse_known_args(args)[0].dry_run
+
+
+def read_json_option(args: list[str]) -> bool:
+    """Read ``--json`` from *args* WITHOUT consuming it.
+
+    The widened-answer dispatchers need to know whether the operator asked for
+    the machine-readable shape while still forwarding argv whole to the handlers
+    that render it. Non-consuming for the same reason `read_group_option` is.
+    """
+    from .parser import CampParser
+
+    parser = CampParser(verb="camp")
+    parser.add_argument("--json", action="store_true")
+    return parser.parse_known_args(args)[0].json
+
+
+def read_group_option(args: list[str]) -> str | None:
+    """Read ``--group``'s value from *args* WITHOUT consuming it.
+
+    `main()` has to see this flag to refuse it alongside a widening option, but
+    must not take it: `camp launch --host <machine> --group <name>` forwards the
+    group name across to the far side, so a router that consumed it would strip
+    the value the remote invocation is assembled from. Every group-aware handler
+    declares ``--group`` itself and ignores it.
+
+    Returns None when the flag is absent and "" when it is present with no value
+    — the same absent-versus-valueless distinction `read_router_options` draws
+    for ``--host``, and for the same reason: a malformed ``--group`` must still
+    trigger a collision refusal rather than read as "no group named".
+    """
+    from .parser import CampParser
+
+    parser = CampParser(verb="camp")
+    parser.add_argument("--group", nargs="?", const="", default=None)
+    return parser.parse_known_args(args)[0].group
 
 
 def _resolve_connect_timeout(verb: str, *, hosts_error: str | None = None) -> float:
@@ -397,15 +349,11 @@ def _resolve_group_for_command(argv: list[str]) -> tuple[dict | None, dict[str, 
     except ImportError:
         return None, None
 
-    # Check for --group flag
-    group_override: str | None = None
-    for i, arg in enumerate(argv):
-        if arg == "--group" and i + 1 < len(argv):
-            group_override = argv[i + 1]
-            break
-        if arg.startswith("--group="):
-            group_override = arg[len("--group="):]
-            break
+    # Read `--group` through the one shared reader, so the name this resolves a
+    # config from and the name `main()`'s collision refusals see can never come
+    # from two different readings of the same argv. Non-consuming: `argv` is
+    # forwarded whole to the handler afterwards.
+    group_override = read_group_option(argv)
 
     config_dir = _groups_dir()
 
@@ -434,31 +382,37 @@ def _resolve_group_for_command(argv: list[str]) -> tuple[dict | None, dict[str, 
         return None, None
 
 
-def _slug_from_args_or_cwd(
-    args: list[str],
+def _slug_from_name_or_cwd(
     group: dict,
     *,
     verb: str,
-    consume_positional: bool = False,
+    name: str | None = None,
+    positional: str | None = None,
     allow_none: bool = False,
     env: dict[str, str] | None = None,
 ) -> str | None:
-    """Resolve a slug from --name, an optional positional, or cwd.
+    """Resolve a workspace slug from an explicit name, a positional, or cwd.
 
-    Consumes `--name <slug>` from args in place. If absent and consume_positional
-    is set, takes args[0] as the slug. Otherwise resolves from cwd against the
-    ALREADY-RESOLVED group (no reload of all configs). On no resolution, _die with
-    a uniform message — unless allow_none, in which case None is returned (the
-    caller falls back, e.g. status's fleet view).
+    Takes values a verb's own parser has ALREADY produced rather than an argv
+    list to scan: precedence between the three sources is this function's whole
+    job, and reading argv here as well would put the same flag in two places.
+
+    Precedence, highest first: *name* (what the operator typed after
+    ``--name``), then *positional* (offered only by the verbs that take a bare
+    slug), then the workspace the current directory sits in — resolved against
+    the ALREADY-RESOLVED *group*, with no reload of every config.
+
+    With nothing resolved, refuses naming *verb* — unless *allow_none*, where
+    None comes back instead because the caller has its own answer for the empty
+    case (``camp status``'s fleet view is the one that does).
     """
-    from ..spine import _consume_flag_value, _resolve_slug, _die
+    from ..spine import _resolve_slug, _die
     from ..group.resolve import resolve_from_cwd, GroupResolutionError
 
-    name = _consume_flag_value(args, "--name")
     if name is not None:
         return _resolve_slug(name, context="--name")
-    if consume_positional and args:
-        return _resolve_slug(args[0], context="argument")
+    if positional is not None:
+        return _resolve_slug(positional, context="argument")
 
     try:
         # Thread env so the cwd slug resolution derives camp_state_dir from the
@@ -528,21 +482,17 @@ def main() -> None:
         _cmd_which()
         return
 
-    # Strip --dry-run for command dispatch (spine re-checks it)
-    dry_run = "--dry-run" in argv or bool(os.environ.get("CAMP_DRY_RUN"))
+    # Read (never consume) --dry-run; spine re-checks it on its own path.
+    dry_run = read_dry_run_option(argv) or bool(os.environ.get("CAMP_DRY_RUN"))
 
     first = argv[0] if argv else None
 
-    # Split a bundled short-flag token (`-ag`, `-ga`, …) into its individual
-    # flags BEFORE anything downstream reads argv — the one place this must
-    # happen so every later reader (`read_all_groups_option`,
-    # `read_all_hosts_option`, `_flag_present`, `_resolve_group_for_command`,
-    # the group-aware dispatch) sees the same expanded tokens regardless of
-    # how the operator spelled it. `foreach`'s opaque payload is excluded —
-    # its own argv is forwarded verbatim to the wrapped command and must
-    # never be rewritten.
-    if first is not None and first not in _OPAQUE_PAYLOAD_VERBS:
-        argv = [first, *split_bundled_short_flags(argv[1:])]
+    # A bundled short-flag token (`-ag`, `-ga`, …) needs no pre-pass here:
+    # `read_router_options` parses argv with argparse, which splits a bundle
+    # into its individual short options natively, and only when every
+    # character in it is one of camp's own. `argv` therefore stays exactly as
+    # the operator typed it — including `foreach`'s opaque payload, which is
+    # forwarded verbatim to the wrapped command and must never be rewritten.
 
     # ---------------------------------------------------------------------------
     # Hook handler subcommands (session-bootstrap, worktree-cleanup)
@@ -555,8 +505,11 @@ def main() -> None:
 
     if first == "worktree-cleanup":
         from ..launch.hook_handlers import cmd_worktree_cleanup
-        force = "--force" in argv[1:]
-        cmd_worktree_cleanup(force=force)
+        from .parser import CampParser
+
+        parser = CampParser(verb="worktree-cleanup")
+        parser.add_argument("--force", action="store_true")
+        cmd_worktree_cleanup(force=parser.parse_args(argv[1:]).force)
         return
 
     # Hidden inject hook handler (PostToolUse → drain the inject queue).
@@ -568,7 +521,7 @@ def main() -> None:
 
     # 'group' is the new name for 'init'; 'init' redirects to 'group'.
     if first == "group":
-        if _flag_present(argv[1:], HOST_FLAG):
+        if read_router_options(first, argv[1:])[0].host is not None:
             print(f"camp {first}: {HOST_FLAG} has no meaning here", file=sys.stderr)
             sys.exit(1)
         from .group import _cmd_group_cli
@@ -585,7 +538,7 @@ def main() -> None:
     # instead of refusing (the same silent-drop class already fixed once
     # for --all-groups + --group).
     if first == "groups":
-        if _flag_present(argv[1:], HOST_FLAG):
+        if read_router_options(first, argv[1:])[0].host is not None:
             print(f"camp {first}: {HOST_FLAG} has no meaning here", file=sys.stderr)
             sys.exit(1)
         from .group import _cmd_groups_cli
@@ -599,7 +552,7 @@ def main() -> None:
     # refusal that never gets the chance to say so. --host has no meaning
     # here either — this verb never asks a third host about itself.
     if first == "transfer-probe":
-        if _flag_present(argv[1:], HOST_FLAG):
+        if read_router_options(first, argv[1:])[0].host is not None:
             print(f"camp {first}: {HOST_FLAG} has no meaning here", file=sys.stderr)
             sys.exit(1)
         from .transfer import _cmd_transfer_probe_cli
@@ -612,7 +565,7 @@ def main() -> None:
     # valid, distinct answer this verb must produce itself. --host has no
     # meaning here either — this verb never asks a third host about itself.
     if first == "transfer-receive":
-        if _flag_present(argv[1:], HOST_FLAG):
+        if read_router_options(first, argv[1:])[0].host is not None:
             print(f"camp {first}: {HOST_FLAG} has no meaning here", file=sys.stderr)
             sys.exit(1)
         from .transfer import _cmd_transfer_receive_cli
@@ -631,8 +584,9 @@ def main() -> None:
     # one file has been read yet and no harness has been asked anything.
     # ---------------------------------------------------------------------------
     scan_rest = argv[1:] if first and first not in _OPAQUE_PAYLOAD_VERBS else []
-    scan_rest, all_groups = read_all_groups_option(scan_rest)
-    scan_rest, all_hosts = read_all_hosts_option(scan_rest)
+    router_options, scan_rest = read_router_options(first or "camp", scan_rest)
+    all_groups = router_options.all_groups
+    all_hosts = router_options.all_hosts
 
     # ---------------------------------------------------------------------------
     # --all-hosts / -a — read at the same early point as --all-groups, and
@@ -667,7 +621,7 @@ def main() -> None:
         # --host names one declared machine; --all-hosts names every declared
         # machine plus this one. Refused like the --all-groups/--host
         # collision above rather than accepted as redundant.
-        if _flag_present(scan_rest, HOST_FLAG):
+        if router_options.host is not None:
             print(
                 f"camp {canonical}: --all-hosts and {HOST_FLAG} name every "
                 "machine and one machine at once — pass one or the other",
@@ -712,7 +666,7 @@ def main() -> None:
         if canonical not in _ALL_GROUPS_VERBS:
             print(f"camp {first}: --all-groups has no meaning here", file=sys.stderr)
             sys.exit(1)
-        if _flag_present(scan_rest, "--group"):
+        if read_group_option(scan_rest) is not None:
             print(
                 f"camp {canonical}: --all-groups and --group name every group and "
                 "one group at once — pass one or the other",
@@ -721,16 +675,13 @@ def main() -> None:
             sys.exit(1)
         # --host names "every group on a named remote host"; --all-groups
         # names "every group on this machine". Different scopes, so refused
-        # like the --group collision above rather than accepted as
-        # redundant — detected through the same `_flag_present` scanner the
-        # --group check uses, so a valueless `--host` (caught properly by
-        # read_host_option
-        # when reached on its own) is still caught here rather than silently
-        # dispatching --all-groups's local answer. This check must live
-        # INSIDE the all_groups branch: --all-groups is consumed and
-        # dispatched before read_host_option ever runs below, so without it
-        # --host is silently dropped.
-        if _flag_present(scan_rest, HOST_FLAG):
+        # like the --group collision above rather than accepted as redundant.
+        # The check reads the PRESENCE of --host, not its value, so a valueless
+        # `--host` is caught here too rather than silently dispatching
+        # --all-groups's local answer. It must live INSIDE the all_groups
+        # branch: --all-groups dispatches before the --host handling below is
+        # ever reached, so without it --host would be silently dropped.
+        if router_options.host is not None:
             print(
                 f"camp {canonical}: --all-groups and {HOST_FLAG} name every group "
                 "on this machine and every group on a named remote host at once "
@@ -753,21 +704,19 @@ def main() -> None:
     # report "requires a value" on a verb where no value would ever be
     # accepted anyway.
     # ---------------------------------------------------------------------------
-    if _flag_present(scan_rest, HOST_FLAG):
+    host_name = router_options.host
+    if host_name is not None:
+        # Applicability is checked BEFORE the value: a verb --host has no
+        # meaning for is refused with "has no meaning here" even when --host
+        # is also missing its value — a value check that ran first would
+        # instead report "requires a value" on a verb where no value would
+        # ever have been accepted.
         canonical, _kind = _resolve_verb(first) if first else (first, "live")
         if canonical not in _HOST_VERBS:
             print(f"camp {first}: {HOST_FLAG} has no meaning here", file=sys.stderr)
             sys.exit(1)
-
-    try:
-        scan_rest, host_name = read_host_option(scan_rest)
-    except _HostFlagMissingValue:
-        print(f"camp {first}: {HOST_FLAG} requires a value", file=sys.stderr)
-        sys.exit(1)
-    if host_name is not None:
-        canonical, _kind = _resolve_verb(first) if first else (first, "live")
-        if canonical not in _HOST_VERBS:
-            print(f"camp {first}: {HOST_FLAG} has no meaning here", file=sys.stderr)
+        if host_name == "":
+            print(f"camp {first}: {HOST_FLAG} requires a value", file=sys.stderr)
             sys.exit(1)
         if canonical in _GROUP_REQUIRED_HOST_VERBS:
             # A state-changing verb sends --group across untouched — the far
@@ -782,7 +731,7 @@ def main() -> None:
             # never inferred"). Checked here, before hosts.toml is even
             # read, so the refusal costs nothing and no connection is ever
             # attempted.
-            if not _flag_present(scan_rest, "--group"):
+            if read_group_option(scan_rest) is None:
                 print(
                     f"camp {canonical}: {HOST_FLAG} requires an explicit "
                     "--group <name> — the far side resolves no group from "
@@ -791,7 +740,7 @@ def main() -> None:
                     file=sys.stderr,
                 )
                 sys.exit(1)
-        elif _flag_present(scan_rest, "--group"):
+        elif read_group_option(scan_rest) is not None:
             print(
                 f"camp {canonical}: {HOST_FLAG} and --group name one remote "
                 "host and one local group at once — pass one or the other",
@@ -922,7 +871,7 @@ def _dispatch_all_hosts_command(
     from ..host.config import HostConfigError, load_hosts, self_host_name
     from ..host.merge import answer_all_hosts_concurrently, merge_all_hosts_answer
 
-    if all_groups and _flag_present(rest, "--group"):
+    if all_groups and read_group_option(rest) is not None:
         print(
             f"camp {verb}: --all-groups and --group name every group and "
             "one group at once — pass one or the other",
@@ -931,11 +880,16 @@ def _dispatch_all_hosts_command(
         sys.exit(1)
 
     if verb == "sessions":
-        from .session import refuse_sessions_local_only_options
+        from .session import (
+            refuse_sessions_local_only_options,
+            widened_sessions_parser,
+        )
 
-        refuse_sessions_local_only_options(rest, widening_flag="--all-hosts")
+        refuse_sessions_local_only_options(
+            widened_sessions_parser().parse_args(rest), widening_flag="--all-hosts"
+        )
 
-    as_json = _flag_present(rest, "--json")
+    as_json = read_json_option(rest)
 
     group: dict | None = None
     narrow_group: str | None = None
@@ -1600,7 +1554,7 @@ def _dispatch_doctor_all_hosts(rest: list[str]) -> None:
     from ..host.merge import answer_all_hosts_concurrently
     from ..spine import _doctor_local_checks
 
-    as_json = _flag_present(rest, "--json")
+    as_json = read_json_option(rest)
 
     try:
         hosts = load_hosts()
