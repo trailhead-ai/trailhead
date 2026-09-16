@@ -31,18 +31,23 @@ def _cmd_inject_cli(args: list[str]) -> None:
     --workspace, when given, names the queue root directly (bypassing the cwd
     resolution) — used by tests and any caller that already knows it.
 
-    The --workspace parse is inlined here (rather than reusing
-    spine._consume_flag_value) so the per-Bash-call drain path never imports the
-    heavy spine module.
+    Argument parsing goes through `CampParser` like every other verb, but its
+    refusal is swallowed: this route is a PostToolUse hook, and a non-zero exit
+    here surfaces as a warning on EVERY Bash tool call. A malformed invocation
+    is camp calling its own hidden route wrongly, never an operator typo, so the
+    honest response is to drain nothing and exit 0 rather than to break the
+    session's tooling over it. `parser` imports only argparse — the module this
+    route stays clear of is the heavy `spine`, not the parser seam.
     """
-    workspace: str | None = None
-    for i, arg in enumerate(args):
-        if arg == "--workspace" and i + 1 < len(args):
-            workspace = args[i + 1]
-            break
-        if arg.startswith("--workspace="):
-            workspace = arg[len("--workspace="):]
-            break
+    from .parser import CampParser
+
+    parser = CampParser(verb="inject")
+    parser.add_argument("--drain", action="store_true")
+    parser.add_argument("--workspace", metavar="DIR")
+    try:
+        workspace = parser.parse_args(args).workspace
+    except SystemExit:
+        sys.exit(0)
 
     code = 0
     try:

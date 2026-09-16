@@ -7,11 +7,38 @@ workspaces: run the per-member provisioner (``setup``, plus its read-only
 """
 from __future__ import annotations
 
+import argparse
+
 import os
 import sys
 from pathlib import Path
 
-from .dispatch import _slug_from_args_or_cwd
+from .dispatch import _slug_from_name_or_cwd
+from .parser import group_verb_parser
+
+
+#: The branch `camp rebase` rebases onto when the operator names none.
+_DEFAULT_REBASE_ONTO = "origin/main"
+
+
+def _build_setup_parser():
+    """The `camp setup` parser — one declaration covering both of the verb's modes.
+
+    `--status` selects the read-only mode rather than naming a separate verb, so
+    both modes share this parser and the handler branches on the parsed flag.
+
+    `--retry` is declared although it was removed: an operator who still types it
+    should reach the explanation of where the behavior went, and a flag that is
+    not declared can only produce the generic unknown-flag refusal.
+    """
+    parser = group_verb_parser("setup", dry_run=True)
+    parser.add_argument("--status", action="store_true")
+    parser.add_argument("--retry", action="store_true")
+    parser.add_argument("--background", action="store_true")
+    parser.add_argument("--json", action="store_true")
+    parser.add_argument("--name", metavar="SLUG")
+    parser.add_argument("slug", nargs="?")
+    return parser
 
 
 def _cmd_setup_group_cli(
@@ -42,29 +69,32 @@ def _cmd_setup_group_cli(
     """
     import json as _json
     from ..provision.lifecycle import cmd_setup_group
-    from ..spine import _consume_flag_value, _die
+    from ..spine import _die
+
+    parsed = _build_setup_parser().parse_args(args)
 
     # Read-only status mode (the SessionStart hook runs `camp setup --status`).
-    # Parsed BEFORE slug resolution so `--status` is never normalized into a slug.
-    # NEVER mutates (no reconcile, no worktree add, no manifest write) and ALWAYS
-    # exits 0 — a non-zero SessionStart hook exit surfaces as a warning every time.
-    if "--status" in args:
-        _cmd_setup_status_cli(args, group, env)
+    # Dispatched BEFORE slug resolution so `--status` is never normalized into a
+    # slug. NEVER mutates (no reconcile, no worktree add, no manifest write) and
+    # ALWAYS exits 0 — a non-zero SessionStart hook exit surfaces as a warning
+    # every time.
+    if parsed.status:
+        _cmd_setup_status_cli(parsed, group, env)
         return
 
-    # Reject the removed --retry flag with a legible error.
-    if "--retry" in args:
+    # Reject the removed --retry flag with a legible error. It stays DECLARED so
+    # that typing it reaches this explanation rather than the generic
+    # unknown-flag refusal, which would not say where the behavior went.
+    if parsed.retry:
         _die(
             "camp setup: --retry flag has been removed. "
             "Run 'camp setup' (no flag) to retry pending/failed members."
         )
 
-    background = "--background" in args
-    as_json = "--json" in args
-    filtered = [a for a in args if a not in ("--background", "--json")]
-    _consume_flag_value(filtered, "--group")  # already resolved upstream; drop it
-    slug = _slug_from_args_or_cwd(
-        filtered, group, verb="setup", consume_positional=True, env=env
+    background = parsed.background
+    as_json = parsed.json
+    slug = _slug_from_name_or_cwd(
+        group, verb="setup", name=parsed.name, positional=parsed.slug, env=env
     )
 
     if dry_run:
@@ -93,26 +123,32 @@ def _cmd_setup_group_cli(
 
 
 def _cmd_setup_status_cli(
-    args: list[str],
+    parsed: "argparse.Namespace",
     group: dict,
     env: dict[str, str] | None,
 ) -> None:
     """camp setup --status — read-only provision-status summary for the SessionStart hook.
 
-    Resolves the slug from --name or cwd (the hook runs in the workspace dir),
-    prints a concise human-readable summary to STDOUT (so the hook surfaces it as
-    session context), and ALWAYS exits 0. It never mutates: no reconcile, no
-    worktree add, no manifest write, no junk dir. The structured 0/2/3 exit codes
-    stay on `camp status` for direct agent use, NOT on `--status`.
+    Takes the namespace `_cmd_setup_group_cli` already produced rather than argv:
+    both modes are spellings of one verb with one flag set, and parsing it twice
+    is how the two could come to disagree about what `--name` meant.
+
+    Resolves the slug from --name, the positional, or cwd (the hook runs in the
+    workspace dir), prints a concise human-readable summary to STDOUT (so the
+    hook surfaces it as session context), and ALWAYS exits 0. It never mutates:
+    no reconcile, no worktree add, no manifest write, no junk dir. The structured
+    0/2/3 exit codes stay on `camp status` for direct agent use, NOT on
+    `--status`.
     """
     from ..provision.lifecycle import provision_status_code
 
-    filtered = [a for a in args if a not in ("--status", "--background", "--json")]
-    from ..spine import _consume_flag_value
-    _consume_flag_value(filtered, "--group")  # already resolved upstream; drop it
-
-    slug = _slug_from_args_or_cwd(
-        filtered, group, verb="setup", consume_positional=True, allow_none=True, env=env
+    slug = _slug_from_name_or_cwd(
+        group,
+        verb="setup",
+        name=parsed.name,
+        positional=parsed.slug,
+        allow_none=True,
+        env=env,
     )
 
     if slug is None:
@@ -146,8 +182,12 @@ def _cmd_sync_group_cli(
     import json as _json
     from ..provision.lifecycle import cmd_sync_group
 
-    as_json = "--json" in args
-    force = "--force" in args
+    parser = group_verb_parser("sync", dry_run=True)
+    parser.add_argument("--force", action="store_true")
+    parser.add_argument("--json", action="store_true")
+    parsed = parser.parse_args(args)
+    as_json = parsed.json
+    force = parsed.force
 
     if dry_run:
         print(f"[dry-run] would sync group {group['group']['name']!r}", file=sys.stderr)
@@ -289,13 +329,16 @@ def _cmd_remove_group_cli(
     from ..group.manifest import manifest_path_for, workspace_dir
     from ..host import HostConfigError
     from ..provision.reconcile import reconcile_break
-    from ..spine import _consume_flag_value, _die
+    from ..spine import _die
 
-    force = "--force" in args
-    filtered = [a for a in args if a != "--force"]
-    _consume_flag_value(filtered, "--group")  # already resolved upstream; drop it
-    slug = _slug_from_args_or_cwd(
-        filtered, group, verb="remove", consume_positional=True, env=env
+    parser = group_verb_parser("remove", dry_run=True)
+    parser.add_argument("--force", action="store_true")
+    parser.add_argument("--name", metavar="SLUG")
+    parser.add_argument("slug", nargs="?")
+    parsed = parser.parse_args(args)
+    force = parsed.force
+    slug = _slug_from_name_or_cwd(
+        group, verb="remove", name=parsed.name, positional=parsed.slug, env=env
     )
 
     # Classify the cwd BEFORE teardown: afterwards the cwd inode may no longer
@@ -420,12 +463,15 @@ def _cmd_rebase_group_cli(
 ) -> None:
     """camp rebase [--onto <branch>] [--name <slug>]"""
     import subprocess
-    from ..spine import _consume_flag_value, _die
+    from ..spine import _die
     from ..group.manifest import manifest_path_for, read_central_manifest
 
-    filtered = list(args)
-    onto = _consume_flag_value(filtered, "--onto") or "origin/main"
-    slug = _slug_from_args_or_cwd(filtered, group, verb="rebase", env=env)
+    parser = group_verb_parser("rebase", dry_run=True)
+    parser.add_argument("--onto", default=_DEFAULT_REBASE_ONTO)
+    parser.add_argument("--name", metavar="SLUG")
+    parsed = parser.parse_args(args)
+    onto = parsed.onto
+    slug = _slug_from_name_or_cwd(group, verb="rebase", name=parsed.name, env=env)
 
     group_name = group["group"]["name"]
     mpath = manifest_path_for(group_name, slug, env=env)

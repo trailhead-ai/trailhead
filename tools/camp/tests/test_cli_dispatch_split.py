@@ -2,10 +2,10 @@
 
 `cli/camp` was split from a ~1173-line monolith into `camp.cli.{dispatch,status,
 group,lifecycle,workspace,inject}`, with `dispatch.main` routing verb strings to
-handlers now living in sibling modules. camp's dispatch is hand-rolled (not
-argparse), so alias resolution and the unknown-command / bare-slug error paths
-are more fragile than a declarative parser split. These tests exercise the REAL
-`cli/camp` binary end-to-end and assert:
+handlers now living in sibling modules. Verb routing — alias resolution, the
+disabled/legacy tables, the bare-slug refusal — is camp's own, decided before
+any verb's parser runs, so it is not covered by the per-verb flag declarations.
+These tests exercise the REAL `cli/camp` binary end-to-end and assert:
 
 1. Smoke: every verb group (top-level meta-flags + each verb, via the group-aware
    path where relevant) runs without a Python traceback — proving every handler
