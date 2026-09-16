@@ -100,6 +100,8 @@ def _cmd_status_group_cli(
     parser = group_verb_parser("status", dry_run=True)
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--name", metavar="SLUG")
+    parser.add_argument("--stale", action="store_true")
+    parser.add_argument("--days", metavar="N")
     parsed = parser.parse_args(args)
     as_json = parsed.json
 
@@ -109,6 +111,14 @@ def _cmd_status_group_cli(
     )
 
     if slug is not None:
+        if parsed.stale:
+            # The scoped view reports provisioning state for one named
+            # workspace; idleness is a comparison across the group's
+            # workspaces, so there is nothing here for it to rank.
+            parser.die(
+                "--stale ranks the group's workspaces by idleness — it has no "
+                "meaning for the single-workspace view"
+            )
         try:
             code, report = provision_status_code(group, slug, env=env)
         except Exception as e:
@@ -128,8 +138,16 @@ def _cmd_status_group_cli(
                     print(f"    {task_name}: {info.get('state', '?')}")
         sys.exit(code)
 
+    from ..spine import stale_days_or_die
+
+    # Validated whether or not --stale was passed, matching the standalone path:
+    # a malformed --days is a typo worth reporting either way.
+    stale_days = stale_days_or_die(parsed.days) if parsed.stale else None
+    if not parsed.stale:
+        stale_days_or_die(parsed.days)
+
     try:
-        result = cmd_status_group(group, slug=None, env=env)
+        result = cmd_status_group(group, slug=None, env=env, stale_days=stale_days)
     except Exception as e:
         print(f"camp status: {e}", file=sys.stderr)
         sys.exit(1)
@@ -164,4 +182,5 @@ def _cmd_status_group_cli(
                     flags += f" +{ahead}ahead"
                 parts.append(f"{name_str}{flags}")
         repo_str = "  ".join(parts) if parts else "(no members)"
-        print(f"{slug:<24}  {branch:<30}  {repo_str}")
+        stale_marker = f"  [STALE {wt.get('idle_days', 0)}d]" if wt.get("stale") else ""
+        print(f"{slug:<24}  {branch:<30}  {repo_str}{stale_marker}")

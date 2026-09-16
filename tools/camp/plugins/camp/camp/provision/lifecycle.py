@@ -61,6 +61,7 @@ def cmd_status_group(
     slug: str | None = None,
     *,
     env: dict[str, str] | None = None,
+    stale_days: int | None = None,
 ) -> dict[str, Any]:
     """Return status for one (slug) or all (slug=None) worktrees in the group.
 
@@ -78,6 +79,11 @@ def cmd_status_group(
                 }
             ]
         }
+
+    *stale_days*, when given, additionally annotates each worktree with
+    ``idle_days`` and ``stale`` against that threshold. Opt-in because it costs
+    a ``git log`` per member; its absence is what makes ``--stale`` observable
+    rather than a flag that changes nothing.
     """
     if slug is not None:
         # Scoped: one worktree
@@ -109,16 +115,24 @@ def cmd_status_group(
             st = _git_repo_status(wt_path)
             member_statuses.append({"name": m["name"], **st})
 
-        worktrees.append(
-            {
-                "slug": slug_name,
-                "branch": data.get("branch", ""),
-                "manifest_path": str(mpath),
-                "members": member_statuses,
-                "dev_env_instance": None,
-                "fire_state": None,
-            }
-        )
+        entry = {
+            "slug": slug_name,
+            "branch": data.get("branch", ""),
+            "manifest_path": str(mpath),
+            "members": member_statuses,
+            "dev_env_instance": None,
+            "fire_state": None,
+        }
+        if stale_days is not None:
+            from ..spine import stale_verdict
+
+            idle_days, stale = stale_verdict(
+                [Path(m["worktree_path"]) for m in data.get("members", [])],
+                threshold_days=stale_days,
+            )
+            entry["idle_days"] = idle_days
+            entry["stale"] = stale
+        worktrees.append(entry)
 
     return {"worktrees": worktrees}
 
