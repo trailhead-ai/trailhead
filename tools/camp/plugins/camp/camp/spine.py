@@ -183,7 +183,7 @@ def _workspace_root() -> Path:
 # ---------------------------------------------------------------------------
 
 
-def _is_dry_run(argv: list[str]) -> bool:
+def _is_dry_run(argv: list[str], *, verb: str | None = None) -> bool:
     """True when this invocation is a dry run, by flag or by environment.
 
     Reads ``--dry-run`` through the shared router-level reader so spine's
@@ -192,7 +192,9 @@ def _is_dry_run(argv: list[str]) -> bool:
     """
     from .cli.dispatch import read_dry_run_option
 
-    return bool(os.environ.get("CAMP_DRY_RUN")) or read_dry_run_option(argv)
+    return bool(os.environ.get("CAMP_DRY_RUN")) or (
+        bool(argv) and read_dry_run_option(argv, verb=verb or argv[0])
+    )
 
 
 def _dry_run_print(cmd: list[str], *, env_extras: dict[str, str] | None = None) -> None:
@@ -808,6 +810,9 @@ def cmd_foreach(args: list[str], dry_run: bool = False) -> None:
 
     fail_fast = parsed.fail_fast
     as_json = parsed.json
+    # Declared on this parser AND passed in by the fallback dispatcher: whichever
+    # entry point read it, one of the two carries it.
+    dry_run = dry_run or parsed.dry_run
 
     slug, wt = _resolve_target(parsed.name)
 
@@ -1510,8 +1515,20 @@ def cmd_legacy_redirect(old_verb: str, new_verb: str) -> None:
 def main() -> None:
     argv = sys.argv[1:]
 
-    dry_run = _is_dry_run(argv)
-    argv = [a for a in argv if a != "--dry-run"]
+    # `foreach` forwards everything after its own options verbatim, so a
+    # `--dry-run` sitting in that payload belongs to the wrapped command. Reading
+    # it here would put camp into dry-run over a flag aimed elsewhere, and
+    # removing it would hand the command a different invocation than the one
+    # typed. The verb declares and honours its own instead; the router draws the
+    # same line with the same set.
+    from .cli.dispatch import _OPAQUE_PAYLOAD_VERBS
+
+    verb = argv[0] if argv else None
+    if verb is not None and resolve_verb(verb)[0] in _OPAQUE_PAYLOAD_VERBS:
+        dry_run = False
+    else:
+        dry_run = _is_dry_run(argv, verb=verb)
+        argv = [a for a in argv if a != "--dry-run"]
 
     if not argv:
         cmd_help([])

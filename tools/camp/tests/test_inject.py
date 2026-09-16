@@ -21,6 +21,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
@@ -620,3 +622,67 @@ class TestEnqueueNoticeAndStaleness:
         assert ctx.index("MEMBER-DOC-FIRST") < ctx.index("NOTICE-SECOND") < ctx.index(
             "MEMBER-DOC-THIRD"
         )
+
+
+# ---------------------------------------------------------------------------
+# The hook contract: inject never fails a tool call, however it is invoked.
+# ---------------------------------------------------------------------------
+
+
+class TestInjectNeverFailsTheToolCall:
+    """`camp inject` is wired as a PostToolUse hook, so a non-zero exit from it
+    surfaces as a warning on EVERY Bash tool call in the session.
+
+    A malformed invocation here is camp calling its own hidden route wrongly,
+    never an operator typo, so the contract is to drain nothing and exit 0. The
+    same argv against any other verb exits 1 — that contrast is the behaviour,
+    and it is why this cannot be pinned by checking inject alone.
+    """
+
+    @pytest.mark.parametrize(
+        "args",
+        [
+            ["inject", "--bogus"],
+            ["inject", "--drain", "--bogus"],
+            ["inject", "--workspace"],
+            ["inject", "unexpected-positional"],
+        ],
+        ids=["unknown-flag", "unknown-flag-with-drain", "missing-value", "positional"],
+    )
+    def test_a_malformed_invocation_exits_zero(self, tmp_path: Path, args: list[str]):
+        result = _run_cli(args, env=_state_env(tmp_path / "state"), cwd=tmp_path)
+        assert result.returncode == 0, (
+            f"inject must never fail a tool call.\n"
+            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+
+    def test_the_same_malformed_argv_is_refused_on_an_ordinary_verb(self, tmp_path: Path):
+        """The control: `--bogus` is genuinely a refusal everywhere else, so the
+        exit 0 above is inject's contract rather than camp accepting the flag."""
+        result = _run_cli(["list", "--bogus"], env=_state_env(tmp_path / "state"), cwd=tmp_path)
+        assert result.returncode == 1
+        assert "unknown flag '--bogus'" in result.stderr
+
+    def test_a_malformed_invocation_drains_nothing(self, tmp_path: Path):
+        """Exiting 0 must not be achieved by draining the queue anyway — the
+        queued docs are still there for the next well-formed drain."""
+        from camp.launch.inject import enqueue_doc
+
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        enqueue_doc(ws, "STILL-QUEUED-marker")
+
+        bad = _run_cli(
+            ["inject", "--drain", "--workspace", str(ws), "--bogus"],
+            env=_state_env(tmp_path / "state"),
+            cwd=tmp_path,
+        )
+        assert bad.returncode == 0
+        assert "STILL-QUEUED-marker" not in bad.stdout
+
+        good = _run_cli(
+            ["inject", "--drain", "--workspace", str(ws)],
+            env=_state_env(tmp_path / "state"),
+            cwd=tmp_path,
+        )
+        assert "STILL-QUEUED-marker" in good.stdout

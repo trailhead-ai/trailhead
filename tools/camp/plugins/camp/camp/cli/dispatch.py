@@ -31,6 +31,7 @@ if TYPE_CHECKING:
 
     from ..host.config import Host
     from ..host.relay import HostAnswer
+    from .parser import CampParser
 
 # Single source of truth for the verb dispatch tables. verb_taxonomy is a
 # tiny pure-data module (no regex/subprocess/spine), so importing it at module
@@ -174,7 +175,7 @@ def read_router_options(verb: str, args: list[str]) -> "tuple[Any, list[str]]":
     return parser.parse_known_args(args)
 
 
-def read_dry_run_option(args: list[str]) -> bool:
+def read_dry_run_option(args: list[str], *, verb: str = "camp") -> bool:
     """Read ``--dry-run`` from *args* WITHOUT consuming it.
 
     The flag is global in the sense that `main()` must know it before a verb is
@@ -185,12 +186,12 @@ def read_dry_run_option(args: list[str]) -> bool:
     """
     from .parser import CampParser
 
-    parser = CampParser(verb="camp")
+    parser = CampParser(verb=verb)
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_known_args(args)[0].dry_run
 
 
-def read_json_option(args: list[str]) -> bool:
+def read_json_option(args: list[str], *, verb: str = "camp") -> bool:
     """Read ``--json`` from *args* WITHOUT consuming it.
 
     The widened-answer dispatchers need to know whether the operator asked for
@@ -199,7 +200,7 @@ def read_json_option(args: list[str]) -> bool:
     """
     from .parser import CampParser
 
-    parser = CampParser(verb="camp")
+    parser = CampParser(verb=verb)
     parser.add_argument("--json", action="store_true")
     return parser.parse_known_args(args)[0].json
 
@@ -508,7 +509,9 @@ def main() -> None:
         return
 
     # Read (never consume) --dry-run; spine re-checks it on its own path.
-    dry_run = read_dry_run_option(argv) or bool(os.environ.get("CAMP_DRY_RUN"))
+    dry_run = bool(os.environ.get("CAMP_DRY_RUN")) or (
+        bool(argv) and read_dry_run_option(argv, verb=argv[0])
+    )
 
     first = argv[0] if argv else None
 
@@ -864,6 +867,37 @@ def _dispatch_all_groups_command(verb: str, rest: list[str]) -> None:
         sys.exit(1)
 
 
+def widened_answer_parser(verb: str) -> "CampParser":
+    """The parser a widened (``--all-hosts``) answer is read through.
+
+    Deliberately the SAME declaration as the verb's narrow form, for the reason
+    `session.widened_sessions_parser` already gives: widening the machine axis
+    changes which MACHINES answer, never which flags exist. A widened form that
+    declared fewer options would refuse a flag its narrow spelling accepts; one
+    that parsed nothing at all — which is what the merged `list` and `doctor`
+    answers used to do — silently ignores a flag its narrow spelling refuses.
+    Both are the same defect, in opposite directions.
+
+    `sessions` is not handled here: it declares the same options but refuses
+    several of them BY NAME once widened, which `refuse_sessions_local_only_options`
+    does with the namespace `session.widened_sessions_parser` produces.
+    """
+    from .parser import CampParser, group_verb_parser
+    from ..spine import DOCTOR_PROBE_FLAG
+
+    if verb == "doctor":
+        # doctor is not group-scoped, so it does not take the router's --group.
+        parser = CampParser(verb="doctor")
+        parser.add_argument("--json", action="store_true")
+        parser.add_argument(DOCTOR_PROBE_FLAG, dest="probe", action="store_true")
+        parser.add_argument("--dry-run", action="store_true")
+        return parser
+
+    parser = group_verb_parser(verb)
+    parser.add_argument("--json", action="store_true")
+    return parser
+
+
 def _dispatch_all_hosts_command(
     verb: str, rest: list[str], *, all_groups: bool, argv: list[str]
 ) -> None:
@@ -904,8 +938,10 @@ def _dispatch_all_hosts_command(
         refuse_sessions_local_only_options(
             widened_sessions_parser().parse_args(rest), widening_flag="--all-hosts"
         )
+    else:
+        widened_answer_parser(verb).parse_args(rest)
 
-    as_json = read_json_option(rest)
+    as_json = read_json_option(rest, verb=verb)
 
     group: dict | None = None
     narrow_group: str | None = None
@@ -1570,7 +1606,7 @@ def _dispatch_doctor_all_hosts(rest: list[str]) -> None:
     from ..host.merge import answer_all_hosts_concurrently
     from ..spine import _doctor_local_checks
 
-    as_json = read_json_option(rest)
+    as_json = widened_answer_parser("doctor").parse_args(rest).json
 
     try:
         hosts = load_hosts()

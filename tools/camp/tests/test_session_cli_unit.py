@@ -601,3 +601,42 @@ class TestLiveSessionPoolBoundsAHangingStore:
         assert records == answer
         assert len(failures) == 1
         assert failures[0]["account"] == "/acct/hangs"
+
+
+# ---------------------------------------------------------------------------
+# `--name <slug>` and a bare positional are one workspace, resolved one way.
+# ---------------------------------------------------------------------------
+
+
+def test_a_widened_refusal_quotes_the_same_spelling_the_resolver_would_pick(capsys) -> None:
+    """Both spellings given at once: the refusal must quote whichever one would
+    actually have been acted on.
+
+    `dispatch._slug_from_name_or_cwd` resolves `--name` ahead of a positional,
+    so a refusal that quoted the positional would name a value the resolver
+    would have discarded — telling the operator their invocation failed over a
+    workspace it was never going to use.
+    """
+    import pytest
+    from camp.cli.session import local_sessions_parser, refuse_sessions_local_only_options
+
+    parsed = local_sessions_parser().parse_args(["--name", "from-flag", "from-positional"])
+    with pytest.raises(SystemExit):
+        refuse_sessions_local_only_options(parsed, widening_flag="--all-hosts")
+
+    err = capsys.readouterr().err
+    assert "'from-flag'" in err
+    assert "from-positional" not in err
+
+
+def test_either_spelling_alone_is_still_refused(capsys) -> None:
+    """The precedence above must not be achieved by ignoring one spelling: each
+    on its own still reaches the refusal, quoting itself."""
+    import pytest
+    from camp.cli.session import local_sessions_parser, refuse_sessions_local_only_options
+
+    for argv, quoted in ((["--name", "only-flag"], "only-flag"), (["only-positional"], "only-positional")):
+        parsed = local_sessions_parser().parse_args(argv)
+        with pytest.raises(SystemExit):
+            refuse_sessions_local_only_options(parsed, widening_flag="--all-hosts")
+        assert f"'{quoted}'" in capsys.readouterr().err
