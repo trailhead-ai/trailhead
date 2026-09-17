@@ -147,7 +147,9 @@ class TestFlushDirtySession:
     def _vault_with_a_stray_file(self, tmp_path):
         vault, state = _make_vault(tmp_path)
         _git_init(vault)
-        decisions = vault / "decisions"
+        # A real record kind directory — `lore sync`'s commit scope only ever
+        # stages a kind directory, `sites/`, or the root `.gitignore`.
+        decisions = vault / "decision"
         decisions.mkdir(parents=True, exist_ok=True)
         (decisions / ".keep").write_text("")
         assert _candidate(vault, state).returncode == 0
