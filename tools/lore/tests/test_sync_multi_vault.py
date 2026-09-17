@@ -1936,7 +1936,6 @@ def test_push_retry_moved_once_reintegrates_and_pushes_with_one_attempt(tmp_path
     assert ending == sync_mod.PUBLISH_OK
     assert attempts_used == 1
     assert _commit_count(remote) == _commit_count(vault)
-    assert (remote / "hooks").exists() or True  # bare remote has no worktree to check
     # The commit really landed on the forge, not just locally.
     r = subprocess.run(
         ["git", "-C", str(remote), "log", "--format=%s"], capture_output=True, text=True
@@ -2099,7 +2098,9 @@ def test_push_retry_never_leaks_git_or_remote_stderr(tmp_path):
     assert bad_remote_path not in combined
     assert "fatal:" not in combined
     assert "hint:" not in combined
-    assert "rejected" not in combined.lower() or "the published history did not move" in combined
+    assert "rejected" not in combined.lower(), (
+        f"git's own rejection text must never reach operator-facing output; combined={combined!r}"
+    )
 
 
 def test_push_retry_leaves_the_vault_clean_in_every_ending(tmp_path):
@@ -2188,6 +2189,80 @@ def test_push_retry_replay_conflict_aborts_cleanly(tmp_path):
     assert not (vault / ".git" / "rebase-apply").exists()
     assert _git(vault, "status", "--porcelain").stdout.strip() == ""
     assert _git(vault, "rev-parse", "HEAD").stdout.strip() == before_head
+
+
+def _make_single_shot_race_hook(vault: Path, other: Path) -> None:
+    """A client-side pre-push hook that, on its FIRST invocation only, pushes
+    ``other``'s already-committed record to origin — simulating a second
+    device winning the race between THIS vault's pull (which found nothing to
+    integrate) and its own push attempt. The hook disables itself after firing
+    once, via a marker file, so the retried push (after the publish replay)
+    is not rejected again — this reproduces exactly one moved-history publish
+    retry, not `_make_moving_forge`'s unbounded loop."""
+    marker = vault / ".git" / "raced-once"
+    hook = vault / ".git" / "hooks" / "pre-push"
+    hook.write_text(
+        "#!/bin/sh\n"
+        f"MARKER={shlex.quote(str(marker))}\n"
+        'if [ -e "$MARKER" ]; then exit 0; fi\n'
+        'touch "$MARKER"\n'
+        f"cd {shlex.quote(str(other))} || exit 0\n"
+        "git push -q origin HEAD >/dev/null 2>&1\n"
+        "exit 0\n"
+    )
+    hook.chmod(0o755)
+
+
+def test_sync_reindexes_records_integrated_by_the_publish_replay(tmp_path):
+    """A vault whose push loses a race — another device publishes between this
+    vault's pull (which found nothing behind) and its own push attempt — is
+    rejected, refetches, and REPLAYS the winner's commit before retrying the
+    push. That replayed record must be reindexed exactly like an ordinary
+    pull: the module's whole reindex rule exists so a record landed on disk
+    this run is never invisible to `lore search`, and a record that arrived
+    via the publish retry's replay is landed on disk exactly the same way a
+    pull lands one.
+    """
+    config_home = tmp_path / "config"
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(parents=True)
+    default = _make_vault(tmp_path / "v-default", dirty=True)
+    remote = _make_bare_remote(tmp_path / "remote.git")
+    _wire_remote(default, remote)
+
+    other = _clone_as_second_device(remote, tmp_path / "device-b")
+    (other / "decision").mkdir()
+    (other / "decision" / "from-b.md").write_text("# Chose the quokka renderer\n")
+    (other / "decision" / "from-b.json").write_text(
+        json.dumps(
+            {
+                "title": "Chose the quokka renderer",
+                "status": "active",
+                "created-at": "2026-07-29",
+                "updated-at": "2026-07-29",
+            }
+        )
+    )
+    _git(other, "add", "-A")
+    _git(other, "commit", "-m", "device B decision")
+    # Deliberately NOT pushed yet — the race hook pushes it at the moment
+    # `default` attempts its own push, i.e. strictly after `default`'s pull
+    # already ran and found nothing behind.
+
+    _make_single_shot_race_hook(default, other)
+
+    write_vault_config(config_home, [("default", "default", default)])
+    r = run_cli(["sync"], config_home=config_home, state_dir=state_dir)
+    assert r.returncode == 0, r.stderr
+    assert "Reindexed" in r.stdout, (
+        f"a record integrated by the publish replay must trigger a reindex; stdout={r.stdout!r}"
+    )
+
+    s = run_cli(["search", "quokka"], config_home=config_home, state_dir=state_dir)
+    assert s.returncode == 0, s.stderr
+    assert "from-b" in s.stdout, (
+        f"the replayed record must be searchable; stdout={s.stdout!r}"
+    )
 
 
 # ── lore sync --json: a determinate per-vault outcome ──────────────────────
@@ -2410,6 +2485,47 @@ def test_json_pull_only_offline_gets_no_outcome_entry(tmp_path):
     doc = _extract_json_report(r.stdout)
     matches = [v for v in doc["vaults"] if v["vault"] == "default"]
     assert matches == [], f"an offline pull-only vault must get no outcome entry: {matches}"
+
+
+def test_json_lock_acquisition_failure_gets_no_outcome_entry(tmp_path):
+    """A vault whose write-lock acquisition itself fails (here: something other
+    than a plain file occupies the lock path, e.g. a read-only vault root
+    would raise the same `OSError`) never reaches a determinate outcome this
+    run — it must get no entry, exactly like a missing vault or a git error
+    while staging, even though the schema string previously named only those
+    two cases plus one more."""
+    config_home = tmp_path / "config"
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(parents=True)
+    default = _make_vault(tmp_path / "v-default", dirty=True)
+    # Occupy the lock path with a directory: `open(lock_path, "a")` raises
+    # `IsADirectoryError`, an `OSError`, exactly the failure class a read-only
+    # vault root would also raise on lock-file creation.
+    (default / ".lore.lock").mkdir()
+
+    write_vault_config(config_home, [("default", "default", default)])
+    r = run_cli(["sync", "--json"], config_home=config_home, state_dir=state_dir)
+
+    assert r.returncode == 1
+    assert "failed to acquire vault lock" in r.stderr
+    doc = _extract_json_report(r.stdout)
+    matches = [v for v in doc["vaults"] if v["vault"] == "default"]
+    assert matches == [], f"a vault whose lock acquisition failed must get no entry: {matches}"
+
+
+def test_json_target_selection_failure_prints_no_document_at_all(tmp_path):
+    """An unknown `--vault` name fails BEFORE any vault is even selected — the
+    run never reaches the point of building a document, so `--json` prints
+    none at all, not an empty one."""
+    config_home, state_dir, _vaults = _three_vaults(tmp_path)
+
+    r = run_cli(
+        ["sync", "--vault", "nope", "--json"], config_home=config_home, state_dir=state_dir
+    )
+
+    assert r.returncode == 1
+    assert "unknown vault" in r.stderr.lower()
+    assert "{" not in r.stdout, f"no document should be printed at all; stdout={r.stdout!r}"
 
 
 def test_json_outcome_holding_hook_rejection_matches_replay_conflict_holding(tmp_path):
@@ -2656,6 +2772,22 @@ def test_json_unresolved_vault_does_not_strand_the_others(tmp_path):
     branch = _git(conflicted, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
     behind = _git(conflicted, "rev-list", "--count", f"HEAD..origin/{branch}").stdout.strip()
     assert behind == "3", f"expected the ref database to reflect all 3 remote commits, got {behind}"
+
+
+def test_render_sync_json_rejects_an_outcome_outside_the_closed_vocabulary():
+    """`SYNC_OUTCOMES` is a closed set the schema string promises callers can
+    rely on; nothing enforced that promise in code before this fix. A caller
+    bug that slips an outcome outside the set must fail loudly here, not
+    silently ship a value `--json` consumers were told could never appear."""
+    import pytest
+
+    with pytest.raises(ValueError):
+        sync_mod.render_sync_json([("default", "not-a-real-outcome", None)])
+
+    # A member of the real vocabulary still renders normally — the input that
+    # varies the check's answer.
+    doc = sync_mod.render_sync_json([("default", "converged", None)])
+    assert doc["vaults"] == [{"vault": "default", "outcome": "converged"}]
 
 
 def test_json_report_parses_and_prose_is_unchanged_without_json(tmp_path):
