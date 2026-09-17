@@ -12,6 +12,17 @@ workspace's own derived name (:func:`~camp.launch.naming.workspace_session_name`
 is that workspace's session, full stop. Only what tmux reports that is NOT
 claimed by any workspace this way is tested against the retired
 one-session-per-conversation form (:func:`~camp.launch.naming.is_retired_session_name`).
+
+The claiming set and the reporting set are deliberately NOT the same set. A
+group-scoped caller reports rows for one group, but tmux is host-wide, so a
+sibling group's LIVE session would otherwise be claimed by nobody, fall
+through to the retired-form check — which any slug that is or ends in 8 hex
+characters satisfies — and be reported as a leftover. That is not a
+cosmetic misreading: the operator's remedy for a leftover is
+``tmux kill-session``, so it would aim a destructive action at another
+group's in-use session. ``host_claimed_names`` is therefore the whole host's
+claiming set, supplied by the caller (this module does no I/O), while
+*workspaces* remains only what the caller was asked to report on.
 Resemblance grants no adoption: a leftover session whose name merely
 *contains* a workspace's slug, or a retired session whose component happens
 to match one, is never folded into that workspace's row — only an exact
@@ -177,8 +188,21 @@ def classify_sessions(
     listing: SessionListing | _Unanswered,
     *,
     scope: DisclosureScope,
+    host_claimed_names: Sequence[str] = (),
 ) -> Classification:
-    """Classify *workspaces* against tmux's *listing*. See the module docstring."""
+    """Classify *workspaces* against tmux's *listing*. See the module docstring.
+
+    *host_claimed_names* is the claiming set: every session name a workspace
+    ANYWHERE on this host derives, which is a superset of the names
+    *workspaces* itself derives. A session in it is some workspace's own
+    session and so is never a leftover, whether or not the workspace that
+    named it is one this call was asked about. Supplying it is what keeps
+    the claiming set and the reporting set separate — see the module
+    docstring — and the caller reads it, because this classifier does no
+    I/O. Omitted, every session not claimed by *workspaces* is a leftover
+    candidate, which is the right answer only for a caller that already
+    knows it holds the whole host.
+    """
     if isinstance(listing, _Unanswered):
         rows = tuple(
             WorkspaceSession(slug=w.slug, path=w.path, state=STATE_UNKNOWN)
@@ -189,7 +213,7 @@ def classify_sessions(
         )
 
     by_name = {session.name: session for session in listing.sessions}
-    claimed: set[str] = set()
+    claimed: set[str] = set(host_claimed_names)
 
     workspace_rows: list[WorkspaceSession] = []
     for w in workspaces:

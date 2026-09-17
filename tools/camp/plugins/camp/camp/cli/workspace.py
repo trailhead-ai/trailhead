@@ -105,7 +105,11 @@ def _merged_widened_entries(
     counted. Leftover (unmanaged) sessions are host-wide, not per-group, so
     they are deduped by `tmux_session` name: one leftover appears once,
     however many of the groups enumerated it, and they sort after every
-    workspace row. Notices are returned rather
+    workspace row. This dedup is only ever between leftover rows — a
+    session that belongs to one of the merged groups is not a leftover in
+    ANY group's listing (`cmd_ls_group` claims against the whole host), so
+    it reaches this merge exactly once, as its own group's workspace row.
+    Notices are returned rather
     than printed, because one of the two callers must not print at all.
     """
     from ..launch.inventory import DisclosureScope

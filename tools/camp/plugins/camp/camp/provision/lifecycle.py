@@ -64,6 +64,52 @@ def _list_group_worktrees(
     return results
 
 
+def host_claimed_session_names(*, env: dict[str, str] | None = None) -> set[str]:
+    """Every tmux session name a camp workspace ANYWHERE on this host
+    derives — the claiming set
+    :func:`~camp.launch.inventory.classify_sessions` tests a leftover
+    candidate against.
+
+    This is the I/O half of keeping the claiming set wider than the
+    reporting set (see that function's module docstring): a group-scoped
+    listing reports one group's rows but must not call a sibling group's
+    live session a leftover, because the operator's remedy for a leftover
+    kills it.
+
+    Walks the camp state root — ``state_dir("camp")/<group>/worktrees/<slug>/``,
+    the layout :func:`~camp.group.resolve.central_state_dir` and
+    :func:`_list_group_worktrees` already define — rather than loading group
+    configs, so a workspace still counts as claiming its name even when its
+    group's TOML is missing or unparsable, and no TOML is parsed to answer a
+    question that only needs two directory names. A non-group file at the
+    root (camp keeps lockfiles there) has no ``worktrees`` directory and is
+    skipped.
+
+    Returns NAMES only, and the group-scoped caller uses them only to
+    suppress a row it would otherwise have printed — never to print one —
+    so reading a sibling group's directory names narrows this answer rather
+    than widening its disclosure.
+    """
+    import trailhead.paths as _paths  # lazy: guard already ran at entry point
+
+    kwargs: dict[str, Any] = {}
+    if env is not None:
+        kwargs["env"] = env
+    root = _paths.state_dir("camp", **kwargs)
+    if not root.is_dir():
+        return set()
+
+    names: set[str] = set()
+    for group_dir in sorted(root.iterdir()):
+        worktrees_dir = group_dir / "worktrees"
+        if not worktrees_dir.is_dir():
+            continue
+        for entry in sorted(worktrees_dir.iterdir()):
+            if (entry / "manifest.json").is_file():
+                names.add(workspace_session_name(group_dir.name, entry.name))
+    return names
+
+
 # ---------------------------------------------------------------------------
 # Public command functions
 # ---------------------------------------------------------------------------
@@ -204,7 +250,13 @@ def cmd_ls_group(
     real :class:`~camp.launch.stop.Tmux`) and runs
     :func:`~camp.launch.inventory.classify_sessions` against the group's own
     workspaces, so every one of `camp list`'s four local axes gains the
-    state column from this one wiring. *scope* controls whether leftover
+    state column from this one wiring.
+
+    Reports rows for this group's workspaces, but claims sessions against
+    :func:`host_claimed_session_names` — the whole host's. tmux is
+    host-wide, so without that a sibling group's live session is claimed by
+    nobody here and is reported as a leftover to clean up, which the
+    operator does by killing it. *scope* controls whether leftover
     (unmanaged) sessions come back as named rows
     (:data:`~camp.launch.inventory.DisclosureScope.WIDENED`) or only as a
     count (:data:`~camp.launch.inventory.DisclosureScope.GROUP`, the
@@ -238,7 +290,12 @@ def cmd_ls_group(
         workspaces.append(Workspace(group=group_name, slug=slug_name, path=ws_path))
 
     listing = tmux.list_sessions()
-    classification = classify_sessions(workspaces, listing, scope=scope)
+    classification = classify_sessions(
+        workspaces,
+        listing,
+        scope=scope,
+        host_claimed_names=host_claimed_session_names(env=env),
+    )
 
     by_slug = {row.slug: row for row in classification.workspaces}
     for e in entries:

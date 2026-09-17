@@ -333,3 +333,59 @@ def test_dropped_count_is_carried_through_from_the_enumeration():
         [], SessionListing(sessions=()), scope=inventory.DisclosureScope.GROUP
     )
     assert result_zero.dropped == 0
+
+
+def test_a_sibling_groups_live_session_is_not_a_leftover_when_the_host_claims_it():
+    """A group-scoped call knows only its OWN workspaces, so a live session
+    belonging to a sibling group on the same machine falls through to the
+    retired-form check and matches (any slug ending in 8 hex characters
+    does). `host_claimed_names` is the host's full claiming set, which the
+    caller supplies — the classifier stays pure — and a name in it is
+    neither named nor counted as a leftover."""
+    inventory, SessionListing, TmuxSession, _ = _import()
+
+    ours = inventory.Workspace(group="groupa", slug="web", path="/w/web")
+    sibling_live_name = "camp-groupb-deadbeef"
+    listing = SessionListing(
+        sessions=(TmuxSession(name=sibling_live_name, windows=3),)
+    )
+
+    unclaimed = inventory.classify_sessions(
+        [ours], listing, scope=inventory.DisclosureScope.WIDENED
+    )
+    assert unclaimed.unmanaged_count == 1
+    assert [u.name for u in unclaimed.unmanaged] == [sibling_live_name]
+
+    claimed = inventory.classify_sessions(
+        [ours],
+        listing,
+        scope=inventory.DisclosureScope.WIDENED,
+        host_claimed_names=(sibling_live_name,),
+    )
+    assert claimed.unmanaged == ()
+    assert claimed.unmanaged_count == 0
+
+
+def test_host_claimed_names_narrows_only_the_leftovers_never_a_workspace_row():
+    """The host's claiming set suppresses a leftover; it must not touch the
+    asked group's own rows, including the case where the group's own live
+    session name is in the set (it always is — the group is part of the
+    host)."""
+    inventory, SessionListing, TmuxSession, _ = _import()
+
+    ours = inventory.Workspace(group="groupa", slug="web", path="/w/web")
+    our_name = inventory_name(inventory, ours)
+    listing = SessionListing(sessions=(TmuxSession(name=our_name, windows=2),))
+
+    result = inventory.classify_sessions(
+        [ours],
+        listing,
+        scope=inventory.DisclosureScope.WIDENED,
+        host_claimed_names=(our_name, "camp-groupb-deadbeef"),
+    )
+    assert result.workspaces == (
+        inventory.WorkspaceSession(
+            slug="web", path="/w/web", state=inventory.STATE_RUNNING, windows=2
+        ),
+    )
+    assert result.unmanaged == ()
