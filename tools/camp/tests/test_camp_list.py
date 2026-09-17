@@ -1,7 +1,8 @@
-"""Tests for camp list (alias ls) — slug + absolute path output.
+"""Tests for camp list (alias ls) — slug + session state + absolute path output.
 
 Test contract:
-1. `camp list` prints one `slug abs-path` line per workspace to stdout, exit 0.
+1. `camp list` prints one `slug state abs-path` line per workspace to stdout,
+   exit 0.
 2. Empty group → no stdout, exit 0.
 3. `ls` alias → identical output to `list`; no harness launched, no state mutated.
 
@@ -16,7 +17,6 @@ import importlib
 import inspect
 import json
 import os
-import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -35,10 +35,10 @@ if str(_PLUGIN_DIR) not in sys.path:
 # tmux isolation — every test in this file that does not deliberately drive
 # tmux state must not observe whatever tmux server happens to be running on
 # the machine executing the suite (a real dev machine routinely has real
-# camp sessions, and even a CI box may have a stray leftover). The in-process
-# helper is for tests calling `cmd_ls_group`/`_cmd_ls_group_cli` directly; the
-# subprocess stub is for the `subprocess.run([..., "camp", ...])` fixtures,
-# put first on PATH so it shadows any real `tmux` binary.
+# camp sessions, and even a CI box may have a stray leftover). `_FakeTmux` is
+# for tests calling `cmd_ls_group`/`_cmd_ls_group_cli` directly; the
+# subprocess fixtures inherit conftest's `_sandbox_tmux` no-server stub
+# through `os.environ["PATH"]`.
 # ---------------------------------------------------------------------------
 
 
@@ -53,32 +53,6 @@ class _FakeTmux:
 
     def list_sessions(self):
         return self._listing
-
-
-_NOOP_TMUX_STUB = (
-    "#!/usr/bin/env python3\n"
-    "import sys\n"
-    'args = sys.argv[1:]\n'
-    'if args and args[0] == "list-sessions":\n'
-    '    sys.stderr.write("error connecting to /tmp/nonexistent (No such file or directory)\\n")\n'
-    "    sys.exit(1)\n"
-    "sys.exit(1)\n"
-)
-
-
-def _write_noop_tmux_stub(bin_dir: Path) -> None:
-    """A `tmux` stand-in that always answers "no server running" —
-    deterministically empty, regardless of what is actually on the host."""
-    bin_dir.mkdir(parents=True, exist_ok=True)
-    tmux = bin_dir / "tmux"
-    tmux.write_text(_NOOP_TMUX_STUB, encoding="utf-8")
-    tmux.chmod(tmux.stat().st_mode | stat.S_IEXEC)
-
-
-def _prepend_noop_tmux_to_path(tmp_path: Path, env: dict) -> None:
-    bin_dir = tmp_path / "noop-tmux-bin"
-    _write_noop_tmux_stub(bin_dir)
-    env["PATH"] = f"{bin_dir}{os.pathsep}{env.get('PATH', '')}"
 
 
 def _load_cli_module():
@@ -441,7 +415,6 @@ def list_cli_env(tmp_path):
     env = {**os.environ}
     env["CAMP_CONFIG_DIR"] = str(config_dir)
     env["CAMP_STATE_DIR"] = str(state_dir)
-    _prepend_noop_tmux_to_path(tmp_path, env)
 
     ws_alpha = _seed_manifest_raw("listgroup", "ws-alpha", state_dir=state_dir)
     ws_beta = _seed_manifest_raw("listgroup", "ws-beta", state_dir=state_dir)
@@ -539,7 +512,6 @@ class TestListEmptySubprocess:
         env = {**os.environ}
         env["CAMP_CONFIG_DIR"] = str(config_dir)
         env["CAMP_STATE_DIR"] = str(state_dir)
-        _prepend_noop_tmux_to_path(tmp_path, env)
 
         r = subprocess.run(
             [sys.executable, str(_CLI_CAMP), "list", "--group", "emptygroup"],
@@ -576,7 +548,6 @@ def two_group_list_cli_env(tmp_path):
     env = {**os.environ}
     env["CAMP_CONFIG_DIR"] = str(config_dir)
     env["CAMP_STATE_DIR"] = str(state_dir)
-    _prepend_noop_tmux_to_path(tmp_path, env)
 
     ws_a = _seed_manifest_raw("groupa", "ws-a", state_dir=state_dir)
     ws_b = _seed_manifest_raw("groupb", "ws-b", state_dir=state_dir)
@@ -672,7 +643,6 @@ class TestListAllGroups:
         env = {**os.environ}
         env["CAMP_CONFIG_DIR"] = str(config_dir)
         env["CAMP_STATE_DIR"] = str(state_dir)
-        _prepend_noop_tmux_to_path(tmp_path, env)
         env_dict = {"env": env}
 
         _seed_manifest_raw("zzzgroup", "slug-in-zzz", state_dir=state_dir)
@@ -733,7 +703,6 @@ def no_group_env(tmp_path):
     env["CAMP_CONFIG_DIR"] = str(config_dir)
     env["CAMP_STATE_DIR"] = str(state_dir)
     env["WORKSPACE_ROOT"] = str(workspace_root)
-    _prepend_noop_tmux_to_path(tmp_path, env)
 
     return {"env": env, "tmp_path": tmp_path}
 
@@ -771,7 +740,6 @@ class TestListAllGroupsNarrows:
         env["CAMP_CONFIG_DIR"] = str(config_dir)
         env["CAMP_STATE_DIR"] = str(state_dir)
         env["WORKSPACE_ROOT"] = str(workspace_root)
-        _prepend_noop_tmux_to_path(tmp_path, env)
         env_dict = {"env": env}
 
         _seed_manifest_raw("onlygroup", "ws-only", state_dir=state_dir)
@@ -804,7 +772,6 @@ class TestListAllGroupsNarrows:
         env = {**os.environ}
         env["CAMP_CONFIG_DIR"] = str(config_dir)
         env["CAMP_STATE_DIR"] = str(state_dir)
-        _prepend_noop_tmux_to_path(tmp_path, env)
         env_dict = {"env": env}
 
         _seed_manifest_raw("goodgroup", "ws-good", state_dir=state_dir)
@@ -871,7 +838,6 @@ class TestListAllGroupsNarrows:
         env = {**os.environ}
         env["CAMP_CONFIG_DIR"] = str(config_dir)
         env["CAMP_STATE_DIR"] = str(state_dir)
-        _prepend_noop_tmux_to_path(tmp_path, env)
         env_dict = {"env": env}
 
         r = _camp_from(env_dict, tmp_path, "list", "--all-groups", "--json")
