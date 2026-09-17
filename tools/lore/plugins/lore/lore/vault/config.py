@@ -7,10 +7,10 @@ the lightweight query helpers ``is_shared`` / ``is_configured_vault``, the
 **config-based active-vault resolver** ``resolve_active_vault`` (returns the
 ``default``-scope vault path, or the floor ``state_dir("lore")/vaults/default``),
 the **config-mutation API:** ``add_vault_entry``, ``remove_vault_entry``,
-``write_config_atomic``, and ``read_record_url_base`` — a separate, permissive
-read of the optional top-level ``record_url_base`` string key, the one
-additive key ``load_config``'s validated ``list[Vault]`` does not carry
-forward.
+``write_config_atomic``, ``read_record_url_base``, and ``read_publish_retry_max``
+— separate, permissive reads of optional top-level keys (``record_url_base`` and
+``publish_retry_max`` respectively) that ``load_config``'s validated
+``list[Vault]`` does not carry forward.
 
 **Mutation API:**
 
@@ -397,6 +397,36 @@ def read_record_url_base(env: dict | None = None) -> str | None:
         return None
     value = data.get("record_url_base") if isinstance(data, dict) else None
     return value if isinstance(value, str) else None
+
+
+# ---------------------------------------------------------------------------
+# read_publish_retry_max
+# ---------------------------------------------------------------------------
+
+
+def read_publish_retry_max(env: dict | None = None) -> int | None:
+    """Return the top-level ``publish_retry_max`` int from config.json, or ``None``.
+
+    Mirrors :func:`read_record_url_base`: a separate, permissive read of the same
+    file for one additive key ``load_config``'s validated ``list[Vault]`` does not
+    carry forward. ``None`` covers every case that isn't a present int value: the
+    file is missing, unreadable, not valid JSON, or valid JSON with the key absent,
+    non-integer, or a bool (``bool`` is an ``int`` subclass in Python, and ``true``/
+    ``false`` are never a meaningful retry count).
+
+    Args:
+        env: Optional ``{str: str}`` XDG environment override, forwarded to
+             :func:`_resolve_config_path` (see that function's ``env`` docs).
+    """
+    try:
+        config_path = _resolve_config_path(env=env)
+        data = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    value = data.get("publish_retry_max") if isinstance(data, dict) else None
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value
 
 
 # ---------------------------------------------------------------------------
