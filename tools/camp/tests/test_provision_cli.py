@@ -104,7 +104,13 @@ class TestCampNew:
         """camp new seeds pending, spawns the detached provisioner, which drives
         every member to ready. The workspace dir + setup.log exist."""
         r = _camp(
-            cli_env, "new", "feat-x", "--group", "mygroup", extra_env={"CAMP_TEST_NO_EXEC": "1"}
+            cli_env,
+            "new",
+            "feat-x",
+            "--group",
+            "mygroup",
+            "--no-session",
+            extra_env={"CAMP_TEST_NO_EXEC": "1"},
         )
         assert r.returncode == 0, f"camp new failed: {r.stderr}"
 
@@ -136,7 +142,13 @@ class TestCampSetup:
         # CAMP_TEST_NO_EXEC still spawns the bg provisioner, so instead drive setup
         # directly on a fresh slug by seeding through camp new then setup --retry.
         r = _camp(
-            cli_env, "new", "feat-s", "--group", "mygroup", extra_env={"CAMP_TEST_NO_EXEC": "1"}
+            cli_env,
+            "new",
+            "feat-s",
+            "--group",
+            "mygroup",
+            "--no-session",
+            extra_env={"CAMP_TEST_NO_EXEC": "1"},
         )
         assert r.returncode == 0, r.stderr
 
@@ -473,6 +485,7 @@ cmd = {json.dumps(step_cmd)}
             slug,
             "--group",
             activate_cli_env["group_name"],
+            "--no-session",
             extra_env={"CAMP_TEST_NO_EXEC": "1"},
         )
         assert r.returncode == 0, f"camp new failed: {r.stderr}"
@@ -513,6 +526,7 @@ cmd = {json.dumps(step_cmd)}
             slug,
             "--group",
             activate_cli_env["group_name"],
+            "--no-session",
             extra_env={"CAMP_TEST_NO_EXEC": "1"},
         )
         assert r.returncode == 0, f"camp new failed: {r.stderr}"

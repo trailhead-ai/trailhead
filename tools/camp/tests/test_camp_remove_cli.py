@@ -129,9 +129,11 @@ def remove_env(tmp_path: Path):
     )
     assert r.returncode == 0, f"group authoring failed: {r.stderr}"
 
-    # Provision a workspace via camp new (no harness exec needed)
+    # Provision a workspace via camp new (no harness exec needed). --no-session:
+    # this fixture only needs the workspace provisioned, not the tmux session
+    # `camp new` now creates by default.
     r2 = subprocess.run(
-        [sys.executable, str(_CLI_CAMP), "new", "ws-slug", "--group", "rmgroup"],
+        [sys.executable, str(_CLI_CAMP), "new", "ws-slug", "--group", "rmgroup", "--no-session"],
         capture_output=True,
         text=True,
         env={**env, "CAMP_TEST_NO_EXEC": "1"},
@@ -884,7 +886,9 @@ class TestRemoveReturnPath:
         g = inproc_group
         monkeypatch.delenv("CAMP_SHELL_INTEGRATION", raising=False)
 
-        group_cli._cmd_new_group_cli(["feat-new"], g["group"], g["env"], dry_run=False)
+        group_cli._cmd_new_group_cli(
+            ["feat-new", "--no-session"], g["group"], g["env"], dry_run=False
+        )
         new_err = capsys.readouterr().err
 
         monkeypatch.chdir(self._ws_dir(g))
