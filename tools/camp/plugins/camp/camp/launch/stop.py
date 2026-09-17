@@ -58,6 +58,7 @@ waits is a handful of seconds — a few calls, plus the budget, and no more.
 
 from __future__ import annotations
 
+import re
 import shlex
 import subprocess
 import time
@@ -147,11 +148,17 @@ class SessionListing:
     dropped: int = 0
 
 
-#: The one substring tmux prints on stderr for the non-zero exit that means
-#: "no server is running" — confirmed against tmux 3.7c. Every OTHER non-zero
-#: exit (an unsafe socket directory, an unreachable socket, or any stderr not
-#: yet observed) is an outage and must never be read as an empty listing.
-_NO_SERVER_STDERR_MARKER = "No such file or directory"
+#: The whole stderr line tmux prints for the non-zero exit that means "no
+#: server is running" — `error connecting to <socket> (No such file or
+#: directory)`, confirmed against tmux 3.7c. Matched as that shape rather
+#: than on the trailing phrase alone, which any number of unrelated
+#: failures also carry (a config file tmux could not source, a wrapper
+#: script's own complaint). Every OTHER non-zero exit (an unsafe socket
+#: directory, an unreachable socket, or any stderr not yet observed) is an
+#: outage and must never be read as an empty listing.
+_NO_SERVER_STDERR_RE = re.compile(
+    r"error connecting to .*\(No such file or directory\)"
+)
 
 
 @dataclass(frozen=True)
@@ -257,14 +264,17 @@ class Tmux:
         Extends this seam's tri-state rather than reusing :meth:`has_session`'s
         contract: a general listing command's non-zero exit has no single
         documented meaning, unlike a scoped existence query's. Only the
-        no-server condition on stderr is answered as empty; every other
-        non-zero exit, and an unanswerable ``_run``, is ``UNANSWERED``.
+        no-server condition on stderr — tmux's own whole
+        connect-failure line, :data:`_NO_SERVER_STDERR_RE`, not the
+        trailing phrase an unrelated error may also carry — is answered as
+        empty; every other non-zero exit, and an unanswerable ``_run``, is
+        ``UNANSWERED``.
         """
         done = self._run(["list-sessions", "-F", "#{session_windows}|#{session_name}"])
         if done is None:
             return UNANSWERED
         if done.returncode != 0:
-            if _NO_SERVER_STDERR_MARKER in (done.stderr or ""):
+            if _NO_SERVER_STDERR_RE.search(done.stderr or ""):
                 return SessionListing(sessions=())
             return UNANSWERED
 

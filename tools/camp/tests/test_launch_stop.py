@@ -1124,6 +1124,29 @@ def test_a_no_server_condition_answers_empty_not_unanswered(monkeypatch) -> None
     assert result.sessions == ()
 
 
+def test_an_unrelated_error_mentioning_a_missing_file_is_unanswered(monkeypatch) -> None:
+    """The no-server condition is `error connecting to <socket> (No such
+    file or directory)`. A non-zero exit that merely CARRIES that phrase —
+    a config file tmux could not source, a shell wrapper's own complaint —
+    is an outage, and reading it as an empty server would render every
+    workspace `none` during a live one: a wrong answer wearing a right
+    answer's clothes."""
+    from camp.launch import stop
+
+    monkeypatch.setattr(
+        stop.subprocess,
+        "run",
+        lambda *a, **k: _completed(
+            returncode=1,
+            stderr="/etc/tmux.conf: 3: No such file or directory",
+        ),
+    )
+
+    result = stop.Tmux().list_sessions()
+
+    assert result is stop.UNANSWERED
+
+
 def test_an_unsafe_socket_directory_is_unanswered_not_empty(monkeypatch) -> None:
     """A live outage, not an empty server: this is the test that fails if the
     implementation keys on the exit status alone."""
