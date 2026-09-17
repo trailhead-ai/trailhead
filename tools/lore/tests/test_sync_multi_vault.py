@@ -2042,13 +2042,26 @@ def test_push_retry_hook_rejection_ends_holding_consumes_zero_and_stays_clean(tm
     assert _git(vault, "rev-parse", "HEAD").stdout.strip() == before_head
 
 
+def _assert_no_git_or_remote_leak(lines: list[str], path_name: str) -> None:
+    """No stderr from git or the remote reaches ``lines`` — asserted for ONE
+    ending path at a time, so a leak on one path's output can never be masked
+    by another path's differently-shaped output (see
+    ``test_push_retry_never_leaks_git_or_remote_stderr``)."""
+    combined = "\n".join(lines)
+    assert "fatal:" not in combined, f"{path_name}: fatal: leaked; combined={combined!r}"
+    assert "hint:" not in combined, f"{path_name}: hint: leaked; combined={combined!r}"
+    assert "rejected" not in combined.lower(), (
+        f"{path_name}: git's own rejection text must never reach operator-facing "
+        f"output; combined={combined!r}"
+    )
+
+
 def test_push_retry_never_leaks_git_or_remote_stderr(tmp_path):
     """No stderr from git or the remote reaches any message — across the
-    moved-history, exhausted, unreachable, and hook-rejection paths. lore's
-    stderr embeds the remote URL verbatim, a credential in a team-synced
-    vault."""
-    all_lines: list[str] = []
-
+    moved-history, exhausted, unreachable, and hook-rejection paths, each
+    asserted SEPARATELY so a leak on one ending can never be masked by
+    another ending's differently-shaped output. lore's stderr embeds the
+    remote URL verbatim, a credential in a team-synced vault."""
     # Moved-once path.
     vault, remote = _make_pushed_vault(tmp_path, "leak-a")
     other = _clone_as_second_device(remote, tmp_path / "leak-device-b")
@@ -2061,7 +2074,7 @@ def test_push_retry_never_leaks_git_or_remote_stderr(tmp_path):
     _git(vault, "commit", "-m", "device a")
     say, say_err, lines = _quiet_emitters()
     sync_mod._push_one(vault, say, say_err, committed=True, max_attempts=3)
-    all_lines += lines
+    _assert_no_git_or_remote_leak(lines, "moved-once")
 
     # Exhausted path.
     vault2, remote2 = _make_pushed_vault(tmp_path, "leak-loop")
@@ -2071,7 +2084,7 @@ def test_push_retry_never_leaks_git_or_remote_stderr(tmp_path):
     _git(vault2, "commit", "-m", "local")
     say2, say_err2, lines2 = _quiet_emitters()
     sync_mod._push_one(vault2, say2, say_err2, committed=True, max_attempts=2)
-    all_lines += lines2
+    _assert_no_git_or_remote_leak(lines2, "exhausted")
 
     # Unreachable path.
     vault3, _ = _make_pushed_vault(tmp_path, "leak-gone")
@@ -2082,7 +2095,11 @@ def test_push_retry_never_leaks_git_or_remote_stderr(tmp_path):
     _git(vault3, "commit", "-m", "local")
     say3, say_err3, lines3 = _quiet_emitters()
     sync_mod._push_one(vault3, say3, say_err3, committed=True, max_attempts=3)
-    all_lines += lines3
+    _assert_no_git_or_remote_leak(lines3, "unreachable")
+    combined3 = "\n".join(lines3)
+    assert bad_remote_path not in combined3, (
+        f"unreachable: remote path leaked; combined={combined3!r}"
+    )
 
     # Hook-rejection path.
     vault4, remote4 = _make_pushed_vault(tmp_path, "leak-hook")
@@ -2092,15 +2109,7 @@ def test_push_retry_never_leaks_git_or_remote_stderr(tmp_path):
     _git(vault4, "commit", "-m", "local")
     say4, say_err4, lines4 = _quiet_emitters()
     sync_mod._push_one(vault4, say4, say_err4, committed=True, max_attempts=3)
-    all_lines += lines4
-
-    combined = "\n".join(all_lines)
-    assert bad_remote_path not in combined
-    assert "fatal:" not in combined
-    assert "hint:" not in combined
-    assert "rejected" not in combined.lower(), (
-        f"git's own rejection text must never reach operator-facing output; combined={combined!r}"
-    )
+    _assert_no_git_or_remote_leak(lines4, "hook-rejection")
 
 
 def test_push_retry_leaves_the_vault_clean_in_every_ending(tmp_path):
@@ -2170,7 +2179,11 @@ def test_push_retry_replay_conflict_aborts_cleanly(tmp_path):
     """When the replay itself cannot be integrated cleanly (a genuine content
     conflict, not just a moved-but-compatible history), the rebase is aborted
     and the vault is left exactly as it was — no mid-rebase state, no partial
-    commit — mirroring `_pull_one`'s own conflict-abort contract."""
+    commit — mirroring `_pull_one`'s own conflict-abort contract. This is the
+    ONE test reaching `_push_one`'s `if rc_rebase != 0:` branch (`cli/sync.py`),
+    so it pins the branch's specific ending, exit code, and operator-facing
+    message — not just the vault's on-disk state, which a wrong or missing
+    message could satisfy identically."""
     vault, remote = _make_pushed_vault(tmp_path, "conflict")
     _make_conflicting_forge(tmp_path, "conflict", vault, remote)
 
@@ -2180,11 +2193,16 @@ def test_push_retry_replay_conflict_aborts_cleanly(tmp_path):
     before_head = _git(vault, "rev-parse", "HEAD").stdout.strip()
 
     say, say_err, lines = _quiet_emitters()
-    rc, ending, _attempts = sync_mod._push_one(
+    rc, ending, attempts = sync_mod._push_one(
         vault, say, say_err, committed=True, max_attempts=3
     )
 
     assert rc == 1, lines
+    assert ending == sync_mod.PUBLISH_HOLDING, lines
+    assert attempts == 1, lines
+    assert any(
+        "replaying onto the moved history failed" in ln for ln in lines
+    ), f"the replay-failure branch's own message must reach the operator; lines={lines!r}"
     assert not (vault / ".git" / "rebase-merge").exists()
     assert not (vault / ".git" / "rebase-apply").exists()
     assert _git(vault, "status", "--porcelain").stdout.strip() == ""

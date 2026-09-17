@@ -657,3 +657,23 @@ def test_read_publish_retry_max_non_int_value_returns_none(tmp_path):
     )
     result = cfg.read_publish_retry_max(env=env)
     assert result is None
+
+
+def test_read_publish_retry_max_no_config_file_returns_none(tmp_path):
+    """No config.json at all returns None."""
+    cfg = vc()
+    env = _make_env(tmp_path)
+    result = cfg.read_publish_retry_max(env=env)
+    assert result is None
+
+
+def test_read_publish_retry_max_malformed_json_returns_none(tmp_path):
+    """Malformed JSON in config.json returns None (matches the docstring's
+    "unreadable, or not valid JSON" branch)."""
+    cfg = vc()
+    env = _make_env(tmp_path)
+    config_lore_dir = tmp_path / "config" / "lore"
+    config_lore_dir.mkdir(parents=True, exist_ok=True)
+    (config_lore_dir / "config.json").write_text("{ not valid json }")
+    result = cfg.read_publish_retry_max(env=env)
+    assert result is None
