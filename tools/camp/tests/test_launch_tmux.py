@@ -237,3 +237,60 @@ def test_list_sessions_answers_session_listing_only_on_the_no_server_shape(monke
         lambda *a, **k: _completed(returncode=1, stderr="unsafe permissions\n"),
     )
     assert tmux_module.Tmux().list_sessions() is tmux_module.UNANSWERED
+
+
+def test_new_session_composes_no_command_and_no_argv_of_its_own(monkeypatch):
+    """`new_session` is a thin wrapper over `spawn_session` with an empty
+    command — it must not build a second `new-session` argv of its own.
+    An empty command leaves the pane running tmux's configured default
+    shell, which is exactly the login-shell window the workspace door
+    needs."""
+    import camp.launch.tmux as tmux_module
+
+    calls: list[list[str]] = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(list(argv))
+        return _completed(returncode=0)
+
+    monkeypatch.setattr(tmux_module.subprocess, "run", fake_run)
+
+    tmux_module.Tmux().new_session(
+        "my-ws", cwd="/tmp/ws", env={"FOO": "bar"}, timeout=5
+    )
+
+    assert calls == [["tmux", "new-session", "-d", "-s", "my-ws", "-c", "/tmp/ws"]]
+
+
+def test_new_session_names_with_s_unprefixed_while_a_target_in_the_same_flow_is_qualified(
+    monkeypatch,
+):
+    """The `=` property re-asserted at this new call site: `new_session`'s
+    `-s` carries the bare name, never `target(name)`, while a `-t` call
+    against the same name in the same flow (`has_session`) is `=`-exact.
+    Reverting `new_session` to pass `target(name)` to `-s` makes this go
+    red — every later `=<name>` target would then miss the session it just
+    created."""
+    import camp.launch.tmux as tmux_module
+
+    calls: list[list[str]] = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(list(argv))
+        return _completed(returncode=0)
+
+    monkeypatch.setattr(tmux_module.subprocess, "run", fake_run)
+
+    name = "my-workspace"
+    tmux = tmux_module.Tmux()
+    tmux.new_session(name, cwd="/tmp/ws", env={}, timeout=5)
+    tmux.has_session(name)
+
+    new_session_call, has_session_call = calls
+    assert new_session_call[new_session_call.index("-s") + 1] == name
+    assert (
+        has_session_call[has_session_call.index("-t") + 1] == tmux_module.target(name)
+    )
+    assert new_session_call[new_session_call.index("-s") + 1] != tmux_module.target(
+        name
+    )
