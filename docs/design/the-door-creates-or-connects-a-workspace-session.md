@@ -386,6 +386,23 @@ answer meaning zero sessions, recognised on its own stderr shape, and the door r
 "no session exists" and creates one — which starts the server as a side effect, exactly as
 `tmux new-session` does from any shell.
 
+`camp new` reaches this same probe through its own door dispatch, but its half of the
+contradiction is different: the workspace it just created is real and usable on disk, so an
+unreachable tmux is not a reason to hand the operator a failure alongside it.
+
+```
+$ camp new camp-cli
+/state/g/worktrees/camp-cli
+$ echo $status
+0
+```
+
+with `camp new: warning — <derived session name> — tmux did not answer — <tmux's own stderr
+line>` on stderr, and the same object shape `--json` prints on success, with `outcome:
+"workspace-only"`, `tmux_session: null`, `attached: false`, and `session_error` carrying the
+warning's reason. The workspace is the deliverable here, not the session, so it succeeds with
+a warning instead of refusing.
+
 ## State — The session could not be created
 
 tmux answered, camp asked for a session, and it did not appear.
@@ -411,3 +428,19 @@ tmux 3.7c, and a reworded or localised message would turn a benign race into a h
 an unrecognised create failure re-asks `has-session` before refusing: a session that is there
 is `connected` whatever tmux called the collision, and only a create that failed with nothing
 behind it is a refusal.
+
+`camp new` reaches the same create attempt, and the same re-probe, through its own door
+dispatch — but a create that fails with nothing behind it is not this refusal for `camp new`.
+The workspace it created is real and usable, so it reports the same `workspace-only` outcome
+this state's tmux-unreachable case reports, carrying tmux's own stderr in `session_error`
+rather than refusing:
+
+```
+$ camp new camp-cli
+/state/g/worktrees/camp-cli
+$ echo $status
+0
+```
+
+with `camp new: warning — <derived session name> — failed to create workspace session — <tmux's
+own stderr>` on stderr.
