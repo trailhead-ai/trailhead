@@ -70,16 +70,39 @@ def groupless_env(tmp_path: Path) -> dict[str, str]:
     return {"CAMP_CONFIG_DIR": str(tmp_path), "CAMP_STATE_DIR": str(tmp_path / "state")}
 
 
+class _FakeConciergeTmux:
+    """A minimal `Tmux` stand-in for the create path `camp new` now reaches
+    unconditionally: no session named yet, so the door's one create call
+    always succeeds. Nothing here answers `switch_client` or attaches —
+    the concierge's own invocation carries no terminal, so the door never
+    reaches the handover arm."""
+
+    def has_session(self, name: str):
+        return False
+
+    def new_session(self, name, *, cwd, env=None, timeout=None):
+        import subprocess
+
+        return subprocess.CompletedProcess(args=["tmux"], returncode=0, stdout="", stderr="")
+
+
 @pytest.fixture()
 def group_env(tmp_path, monkeypatch):
     """A one-member group `camp new` can really create a workspace in.
 
     The detached provisioner is stubbed out: the emitter's key set is what is
-    under test, not the background work the workspace then schedules.
+    under test, not the background work the workspace then schedules. `camp
+    new`'s default path now creates the workspace's tmux session
+    unconditionally, so this fixture also injects HOME (the credential-store
+    guard reads it from the explicit `env` this module passes, not the
+    sandboxed ambient one) and a fake `Tmux` (`camp.launch.stop.Tmux`, the
+    same factory attribute `_open_workspace_door`'s own tests monkeypatch).
     """
+    import camp.launch.stop as stop_module
     import camp.provision.provision as provision
 
     monkeypatch.setattr(provision, "spawn_detached_provisioner", lambda **kw: None)
+    monkeypatch.setattr(stop_module, "Tmux", lambda *a, **k: _FakeConciergeTmux())
     repo = tmp_path / "repo_a"
     init_git_repo(repo)
     return {
@@ -95,7 +118,10 @@ def group_env(tmp_path, monkeypatch):
             ],
             "branch_pattern": "worktree-{slug}",
         },
-        "env": {"CAMP_STATE_DIR": str(tmp_path / "state")},
+        "env": {
+            "CAMP_STATE_DIR": str(tmp_path / "state"),
+            "HOME": str(tmp_path / "home"),
+        },
     }
 
 
@@ -309,8 +335,14 @@ def test_the_shape_check_catches_a_renamed_key(capsys, group_env) -> None:
     assert unemitted == [["session", "tmux_name", "workspace"]]
 
 
-def test_both_launch_paths_print_the_same_success_shape(capsys, group_env) -> None:
-    """The document shows one object for both launch paths; that is only honest
-    while the two emitters agree — and they are separate functions."""
+def test_create_and_reuse_paths_now_print_different_shapes(capsys, group_env) -> None:
+    """The create path (`camp new`) no longer starts a harness conversation —
+    it routes through the same door `camp attach` opens — so its object and
+    the reuse path's (`camp launch`) are genuinely different now, and the
+    document says so. Varies the two commands and checks the divergence is
+    real, not merely undocumented."""
     shapes = _emitted_key_sets(capsys, group_env)
-    assert shapes["camp new --json"] == shapes["camp launch --json"]
+    assert shapes["camp new --json"] != shapes["camp launch --json"]
+    assert "outcome" in shapes["camp new --json"]
+    assert "session_id" in shapes["camp launch --json"]
+    assert "session_id" not in shapes["camp new --json"]
