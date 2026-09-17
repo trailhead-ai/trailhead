@@ -184,6 +184,109 @@ def test_slug_control_sequence_cannot_forge_a_second_stdout_line(
     assert "forged-slug" in lines[0]
 
 
+def test_state_control_sequence_cannot_forge_a_second_stdout_line(
+    hosts_env, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """A `--host` peer controls every string in its JSON answer, `state`
+    included. An embedded newline there forges a whole extra row that reads
+    as a genuine unmanaged-session line — the same forgery the `slug` pin
+    above closes, on the field the state column added."""
+    transport = _transport_module()
+    forged_state = "running\ncamp-forged-slug unmanaged -"
+    remote_rows = [
+        {
+            "ok": True,
+            "slug": "real-slug",
+            "branch": "b",
+            "workspace_path": "/z",
+            "group": "g",
+            "state": forged_state,
+        },
+    ]
+    outcome = transport.Answered(
+        stdout=json.dumps(remote_rows), stderr="", exit_code=0
+    )
+    _rig(monkeypatch, outcome)
+
+    code = _run(monkeypatch, ["list", "--host", "andromeda"])
+
+    captured = capsys.readouterr()
+    assert code == 0
+    lines = [ln for ln in captured.out.splitlines() if ln]
+    assert len(lines) == 1, f"state forged a second stdout line: {lines!r}"
+    assert "\\x0a" in lines[0]
+    assert "camp-forged-slug" in lines[0]
+
+
+def test_window_count_control_sequence_cannot_forge_a_second_stdout_line(
+    hosts_env, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """`window_count` is interpolated into the state field (`running:3`), so
+    a peer that answers a non-integer there reaches stdout through the same
+    hole. Nothing on the wire constrains it to an integer."""
+    transport = _transport_module()
+    remote_rows = [
+        {
+            "ok": True,
+            "slug": "real-slug",
+            "branch": "b",
+            "workspace_path": "/z",
+            "group": "g",
+            "state": "running",
+            "window_count": "3\ncamp-forged-slug unmanaged -",
+        },
+    ]
+    outcome = transport.Answered(
+        stdout=json.dumps(remote_rows), stderr="", exit_code=0
+    )
+    _rig(monkeypatch, outcome)
+
+    code = _run(monkeypatch, ["list", "--host", "andromeda"])
+
+    captured = capsys.readouterr()
+    assert code == 0
+    lines = [ln for ln in captured.out.splitlines() if ln]
+    assert len(lines) == 1, f"window_count forged a second stdout line: {lines!r}"
+    assert "\\x0a" in lines[0]
+    assert "camp-forged-slug" in lines[0]
+
+
+def test_unmanaged_count_control_sequence_cannot_forge_a_second_stdout_line(
+    hosts_env, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """The leftover-count summary row interpolates the peer's own
+    `unmanaged_count` into its line — the third field the state column
+    added that reaches stdout, and the only one that renders a whole line of
+    its own."""
+    transport = _transport_module()
+    remote_rows = [
+        {
+            "ok": True,
+            "slug": None,
+            "branch": "",
+            "workspace_path": None,
+            "group": None,
+            "state": None,
+            "window_count": None,
+            "tmux_session": None,
+            "unmanaged_count": "1\ncamp-forged-slug unmanaged -",
+        },
+    ]
+    outcome = transport.Answered(
+        stdout=json.dumps(remote_rows), stderr="", exit_code=0
+    )
+    _rig(monkeypatch, outcome)
+
+    code = _run(monkeypatch, ["list", "--host", "andromeda"])
+
+    captured = capsys.readouterr()
+    assert code == 0
+    lines = [ln for ln in captured.out.splitlines() if ln]
+    assert len(lines) == 1, f"unmanaged_count forged a second stdout line: {lines!r}"
+    assert "\\x0a" in lines[0]
+    assert "camp-forged-slug" in lines[0]
+
+
 def test_every_relayed_row_gains_host_key(
     hosts_env, monkeypatch, capsys: pytest.CaptureFixture
 ) -> None:

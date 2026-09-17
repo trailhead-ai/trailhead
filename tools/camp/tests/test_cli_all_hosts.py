@@ -813,6 +813,46 @@ def test_sessions_human_output_renders_answered_rows_under_their_machine(
     assert lines[3] == "lookout"
 
 
+def test_list_merged_human_output_state_control_sequence_cannot_forge_a_second_line(
+    hosts_and_group_env, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """The `-a` merged renderer prints every row through the same
+    `render_list_row_human` the `--host` axis uses, so a peer-supplied
+    `state` must not be able to forge an extra line under a machine's
+    header here either."""
+    transport = _transport_module()
+
+    def fake_run_camp(host, remote_argv, **kw):
+        if host.ssh == "andromeda":
+            return _answered(
+                [
+                    {
+                        "ok": True,
+                        "slug": "real-slug",
+                        "branch": "b",
+                        "workspace_path": "/remote/ws",
+                        "group": "testgrp",
+                        "state": "running\ncamp-forged-slug unmanaged -",
+                        "window_count": 1,
+                        "tmux_session": "camp-testgrp-real-slug",
+                    }
+                ]
+            )
+        return _answered([])
+
+    monkeypatch.setattr(transport, "run_camp", fake_run_camp)
+
+    code = _run(monkeypatch, ["list", "-a", "--group", "testgrp"])
+    out = capsys.readouterr().out
+    assert code == 0
+
+    lines = [ln for ln in out.splitlines() if ln]
+    # "this machine" / "andromeda" / the one row / "lookout" — never a fifth.
+    assert len(lines) == 4, f"state forged an extra merged line: {lines!r}"
+    assert "\\x0a" in lines[2]
+    assert "camp-forged-slug" in lines[2]
+
+
 def test_sessions_human_output_session_id_control_sequence_cannot_forge_a_second_line(
     hosts_and_group_env, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
