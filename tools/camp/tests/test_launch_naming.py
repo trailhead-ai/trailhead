@@ -94,11 +94,36 @@ def test_component_level_injectivity_across_folded_characters():
     # must differ from "!" (0x21) followed by "b")
     components.append("a\x021b")
     components.append("a!b")
+    # Components whose escaped form begins or ends with a hyphen -- the
+    # shapes above never reach them, and they are exactly where a fold that
+    # discards boundary hyphens collapses distinct components onto one name.
+    components += ["a", "a-", "-a", "--a--", "-", "--", "a--b"]
     components = list(dict.fromkeys(components))  # dedupe, keep order
 
     names = {workspace_session_name("fixedgroup", slug) for slug in components}
 
     assert len(names) == len(components)
+
+
+def test_boundary_hyphen_survives_so_same_slug_different_groups_never_collide():
+    from camp.launch.naming import workspace_session_name
+
+    # AC13: two workspaces sharing a slug in different groups must never
+    # resolve to one session name. "camp-cli" and "camp-cli-" are both legal
+    # group names (_VALID_GROUP_RE is ^[a-z0-9-]+$), and differ only at a
+    # boundary hyphen.
+    name_a = workspace_session_name("camp-cli", "web")
+    name_b = workspace_session_name("camp-cli-", "web")
+    assert name_a != name_b
+
+
+def test_a_group_that_is_only_hyphens_does_not_collide_with_the_fallback_word():
+    from camp.launch.naming import workspace_session_name
+
+    # "-" is a legal group name, and folding it away lands it on
+    # sanitize_name_component's fallback word -- which a group literally
+    # called "dir" also lands on.
+    assert workspace_session_name("-", "web") != workspace_session_name("dir", "web")
 
 
 def test_known_residual_concatenation_collision():
