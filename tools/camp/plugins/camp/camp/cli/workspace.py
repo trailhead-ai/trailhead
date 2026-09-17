@@ -57,6 +57,18 @@ def render_list_row_human(row: dict) -> str:
     `workspace_path`, so a caller can degrade that one row — the same two
     keys `render_workspace_list` indexes directly.
 
+    Every field in the row is peer-supplied — a declared host controls each
+    string in the JSON answer it sends back — so the WHOLE composed line
+    goes through `printable_path` rather than the two fields the local
+    renderer escapes individually. `state`, the `window_count`
+    interpolated into it, and a count row's `unmanaged_count` are as
+    forgeable as `slug` is: a newline in any of them reads as a second,
+    entirely fabricated row. Escaping the composed line rather than each
+    field keeps that closed by construction as fields are added, and is
+    idempotent (an escape sequence contains no control characters), so the
+    join's own literal spaces are the only thing it passes through
+    untouched.
+
     `state` and `window_count` are read with the SAME fallbacks the local
     renderer applies (`camp.launch.inventory.format_state`): a row relayed
     by a camp predating the state column carries neither, and renders `-`
@@ -72,12 +84,12 @@ def render_list_row_human(row: dict) -> str:
     from ..launch.recovery import printable_path
 
     if "unmanaged_count" in row:
-        return format_unmanaged_summary(row["unmanaged_count"])
+        return printable_path(format_unmanaged_summary(row["unmanaged_count"]))
 
     first = row["slug"] if row["slug"] is not None else row["tmux_session"]
     state = format_state(row.get("state"), row.get("window_count"))
     path = format_path(row["workspace_path"])
-    return f"{printable_path(first)} {state} {printable_path(path)}"
+    return printable_path(f"{first} {state} {path}")
 
 
 def _merged_widened_entries(
