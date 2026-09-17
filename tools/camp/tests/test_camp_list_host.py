@@ -119,8 +119,8 @@ def test_many_rows_relay_in_remote_order_never_resorted(
     alpha) — pinning that the local side never re-sorts them."""
     transport = _transport_module()
     remote_rows = [
-        {"ok": True, "slug": "zeta", "branch": "b", "workspace_path": "/z", "group": "g"},
-        {"ok": True, "slug": "alpha", "branch": "b", "workspace_path": "/a", "group": "g"},
+        {"ok": True, "slug": "zeta", "branch": "b", "workspace_path": "/z", "group": "g", "state": "none"},
+        {"ok": True, "slug": "alpha", "branch": "b", "workspace_path": "/a", "group": "g", "state": "none"},
     ]
     outcome = transport.Answered(
         stdout=json.dumps(remote_rows), stderr="", exit_code=0
@@ -140,8 +140,8 @@ def test_many_rows_human_path_preserves_order(
 ) -> None:
     transport = _transport_module()
     remote_rows = [
-        {"ok": True, "slug": "zeta", "branch": "b", "workspace_path": "/z", "group": "g"},
-        {"ok": True, "slug": "alpha", "branch": "b", "workspace_path": "/a", "group": "g"},
+        {"ok": True, "slug": "zeta", "branch": "b", "workspace_path": "/z", "group": "g", "state": "none"},
+        {"ok": True, "slug": "alpha", "branch": "b", "workspace_path": "/a", "group": "g", "state": "none"},
     ]
     outcome = transport.Answered(
         stdout=json.dumps(remote_rows), stderr="", exit_code=0
@@ -153,7 +153,7 @@ def test_many_rows_human_path_preserves_order(
     captured = capsys.readouterr()
     assert code == 0
     lines = [ln for ln in captured.out.splitlines() if ln]
-    assert lines == ["zeta /z", "alpha /a"]
+    assert lines == ["zeta none /z", "alpha none /a"]
 
 
 def test_slug_control_sequence_cannot_forge_a_second_stdout_line(
@@ -167,7 +167,7 @@ def test_slug_control_sequence_cannot_forge_a_second_stdout_line(
     transport = _transport_module()
     forged_slug = "real-slug\nforged-slug /evil/path"
     remote_rows = [
-        {"ok": True, "slug": forged_slug, "branch": "b", "workspace_path": "/z", "group": "g"},
+        {"ok": True, "slug": forged_slug, "branch": "b", "workspace_path": "/z", "group": "g", "state": "none"},
     ]
     outcome = transport.Answered(
         stdout=json.dumps(remote_rows), stderr="", exit_code=0
@@ -189,7 +189,7 @@ def test_every_relayed_row_gains_host_key(
 ) -> None:
     transport = _transport_module()
     remote_rows = [
-        {"ok": True, "slug": "ws-a", "branch": "b", "workspace_path": "/a", "group": "g"},
+        {"ok": True, "slug": "ws-a", "branch": "b", "workspace_path": "/a", "group": "g", "state": "none"},
     ]
     outcome = transport.Answered(
         stdout=json.dumps(remote_rows), stderr="", exit_code=0
@@ -238,6 +238,7 @@ def test_non_ascii_bytes_in_relayed_row_decode_and_render_unmangled(
             "branch": "b",
             "workspace_path": "/répertoire/café",
             "group": "gröup",
+            "state": "none",
         }
     ]
     _install_fake_ssh(tmp_path, monkeypatch, json.dumps(remote_rows, ensure_ascii=False))
@@ -250,7 +251,7 @@ def test_non_ascii_bytes_in_relayed_row_decode_and_render_unmangled(
 
     code = _run(monkeypatch, ["list", "--host", "andromeda"])
     out = capsys.readouterr().out
-    assert "café-projet /répertoire/café" in out
+    assert "café-projet none /répertoire/café" in out
 
 
 # ---------------------------------------------------------------------------
@@ -583,7 +584,7 @@ def test_a_row_missing_a_required_key_does_not_crash_and_other_rows_still_render
     transport = _transport_module()
     remote_rows = [
         {"ok": True, "workspace_path": "/ws/feat-x"},  # missing slug
-        {"ok": True, "slug": "alpha", "workspace_path": "/ws/alpha"},
+        {"ok": True, "slug": "alpha", "workspace_path": "/ws/alpha", "state": "none"},
     ]
     outcome = transport.Answered(stdout=json.dumps(remote_rows), stderr="", exit_code=0)
     _rig(monkeypatch, outcome)
