@@ -92,3 +92,67 @@ def test_bin_help_from_tmp_cwd():
     bin_result = run_bin(["--help"], cwd="/tmp")
     assert bin_result.returncode == 0
     assert "lore" in bin_result.stdout.lower()
+
+
+# ---- which tree answers: sibling cli/ vs $CLAUDE_PLUGIN_ROOT ------------------
+
+
+def _plant_tree(root: Path, marker: str, *, with_cli: bool = True) -> Path:
+    """Build a synthetic plugin tree whose CLI prints *marker*; return its bin/lore.
+
+    The wrapper under test is copied in verbatim, so the tree exercises the real
+    resolution logic rather than a restatement of it.
+    """
+    (root / "bin").mkdir(parents=True)
+    wrapper = root / "bin" / "lore"
+    wrapper.write_bytes(BIN_PATH.read_bytes())
+    wrapper.chmod(0o755)
+    if with_cli:
+        (root / "cli").mkdir()
+        cli = root / "cli" / "lore"
+        cli.write_text(f"print({marker!r})\n", encoding="utf-8")
+        cli.chmod(0o755)
+    return wrapper
+
+
+def test_bin_runs_its_own_tree_not_the_env_tree(tmp_path):
+    """The wrapper's own sibling cli/ wins over a $CLAUDE_PLUGIN_ROOT elsewhere.
+
+    A wrapper invoked out of a specific checkout must run *that* checkout's CLI.
+    Deferring to the harness-supplied plugin root instead makes an absolute-path
+    invocation silently run a different, possibly older build.
+    """
+    _plant_tree(tmp_path / "env_tree", "env")
+    wrapper = _plant_tree(tmp_path / "own_tree", "own")
+
+    result = subprocess.run(
+        [str(wrapper)],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "CLAUDE_PLUGIN_ROOT": str(tmp_path / "env_tree")},
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "own"
+
+
+def test_bin_without_a_sibling_cli_fails_in_its_own_tree(tmp_path):
+    """No sibling cli/ is a failure in this tree, not a silent hop to another one.
+
+    A marketplace install copies a plugin directory whole — a tree carrying bin/ has
+    cli/ beside it, and $CLAUDE_PLUGIN_ROOT names that same copy. An env root can
+    therefore never supply a CLI the sibling lookup would not already find in the same
+    place; consulting it can only ever run a tree the caller did not name.
+    """
+    _plant_tree(tmp_path / "env_tree", "env")
+    wrapper = _plant_tree(tmp_path / "own_tree", "own", with_cli=False)
+
+    result = subprocess.run(
+        [str(wrapper)],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "CLAUDE_PLUGIN_ROOT": str(tmp_path / "env_tree")},
+    )
+
+    assert result.returncode != 0
+    assert str(tmp_path / "own_tree" / "cli" / "lore") in result.stderr
