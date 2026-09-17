@@ -3,11 +3,12 @@
 Camp talks to tmux through exactly this module. `Tmux` answers the three
 tri-state questions the stop engine was built around (`has_session`,
 `pane_command`, `list_sessions`) and owns every other tmux invocation camp
-performs — spawning a session (`spawn_session`), stating its environment
-(`set_environment`), reading its pane (`capture_pane`), and signalling it
-(`kill_session`). Nothing outside this module builds a `["tmux", ...]` argv
-of its own; a caller that needs tmux constructs (or is handed) a `Tmux` and
-asks it.
+performs — spawning a session with an explicit command and a scrubbed
+environment (`spawn_session`), starting a bare login-shell window over it
+(`new_session`), stating its environment (`set_environment`), reading its
+pane (`capture_pane`), and signalling it (`kill_session`). Nothing outside
+this module builds a `["tmux", ...]` argv of its own; a caller that needs
+tmux constructs (or is handed) a `Tmux` and asks it.
 
 The `=`-target property
 ------------------------
@@ -43,6 +44,7 @@ this seam must never be told.
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 from dataclasses import dataclass
@@ -254,6 +256,32 @@ class Tmux:
             capture_output=True,
             text=True,
             timeout=timeout,
+        )
+
+    def new_session(
+        self,
+        name: str,
+        *,
+        cwd: object,
+        env: Mapping[str, str] | None = None,
+        timeout: float | None = None,
+    ) -> subprocess.CompletedProcess:
+        """Start a detached session named *name*, holding one window running
+        the environment's default shell — no command, no environment scrub.
+
+        A thin wrapper over :meth:`spawn_session` with *command* empty: an
+        empty command leaves tmux to start whatever shell it is configured
+        with in the pane, which is exactly a login-shell window. This keeps
+        the `new-session` argv built in exactly one place — this method
+        composes none of its own. *env* defaults to the current process
+        environment, unmodified: the workspace door scrubs nothing.
+        """
+        return self.spawn_session(
+            name,
+            cwd=cwd,
+            command=(),
+            env=dict(os.environ) if env is None else env,
+            timeout=timeout if timeout is not None else self._timeout,
         )
 
     def set_environment(

@@ -1,0 +1,200 @@
+"""Tests for launch/workspace_session.py — the function that turns a
+resolved workspace into a live tmux session.
+
+Test contract (task/the-seam-creates-a-workspace-session-rooted-at-the-workspace):
+- Creating against a name no session holds produces a session at exactly
+  that name, rooted at the workspace directory, varied across two different
+  workspace directories.
+- The derived name varies with the group; creating in one leaves the
+  other's session untouched.
+- Creating against a name that already exists returns the already-existed
+  answer, not the created one, and issues no second create — driven
+  through a fake tmux whose `new_session` fails with the duplicate line.
+- A create that fails for any other reason returns the failed answer
+  carrying tmux's own stderr verbatim, varied across two different stderr
+  strings.
+- A workspace directory at or under a credential store is refused and no
+  session is created.
+- (The `-s`-unprefixed / `-t`-qualified property re-asserted at this call
+  site is pinned in `test_launch_tmux.py`, against the seam's own
+  `new_session`, which this module's only tmux call goes through.)
+
+Every test here drives `create_workspace_session` against a hand-rolled
+fake `Tmux` stand-in that records what it was called with — this module
+never builds its own `["tmux", ...]` argv, so there is nothing for a fake
+subprocess to intercept; what there IS to test is that this function calls
+the seam with the right name, the right cwd, and interprets the seam's
+answer correctly.
+"""
+
+from __future__ import annotations
+
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
+if str(_PLUGIN_DIR) not in sys.path:
+    sys.path.insert(0, str(_PLUGIN_DIR))
+
+
+class _FakeTmux:
+    """Records every `new_session` call and answers with a fixed result."""
+
+    def __init__(self, *, returncode: int = 0, stderr: str = "") -> None:
+        self._returncode = returncode
+        self._stderr = stderr
+        self.calls: list[dict[str, object]] = []
+
+    def new_session(self, name, *, cwd, env=None, timeout=None):
+        self.calls.append({"name": name, "cwd": cwd, "env": env})
+        return subprocess.CompletedProcess(
+            args=["tmux"],
+            returncode=self._returncode,
+            stdout="",
+            stderr=self._stderr,
+        )
+
+
+def test_creating_against_a_free_name_produces_a_session_at_that_name_rooted_at_the_workspace_dir(
+    tmp_path,
+):
+    from camp.launch.workspace_session import (
+        WorkspaceSessionOutcome,
+        create_workspace_session,
+    )
+    from camp.launch.naming import workspace_session_name
+
+    home = tmp_path / "home"
+    home.mkdir()
+    env = {"HOME": str(home)}
+
+    ws_dir_a = tmp_path / "workspace-a"
+    ws_dir_a.mkdir()
+    fake_a = _FakeTmux()
+    result_a = create_workspace_session(
+        "trailhead", "camp-cli", ws_dir_a, env=env, tmux=fake_a
+    )
+
+    ws_dir_b = tmp_path / "workspace-b"
+    ws_dir_b.mkdir()
+    fake_b = _FakeTmux()
+    result_b = create_workspace_session(
+        "trailhead", "camp-cli", ws_dir_b, env=env, tmux=fake_b
+    )
+
+    expected_name = workspace_session_name("trailhead", "camp-cli")
+    assert result_a.outcome is WorkspaceSessionOutcome.CREATED
+    assert result_a.session_name == expected_name
+    assert fake_a.calls[0]["name"] == expected_name
+    assert Path(fake_a.calls[0]["cwd"]) == ws_dir_a.resolve()
+
+    assert result_b.outcome is WorkspaceSessionOutcome.CREATED
+    assert Path(fake_b.calls[0]["cwd"]) == ws_dir_b.resolve()
+    assert fake_a.calls[0]["cwd"] != fake_b.calls[0]["cwd"], (
+        "rooting must follow the workspace directory passed in, not a "
+        "default shared across calls"
+    )
+
+
+def test_the_derived_name_varies_with_the_group_and_creating_one_leaves_the_other_untouched(
+    tmp_path,
+):
+    from camp.launch.workspace_session import create_workspace_session
+    from camp.launch.naming import workspace_session_name
+
+    home = tmp_path / "home"
+    home.mkdir()
+    env = {"HOME": str(home)}
+    ws_dir = tmp_path / "workspace"
+    ws_dir.mkdir()
+
+    fake_a = _FakeTmux()
+    fake_b = _FakeTmux()
+
+    create_workspace_session("group-a", "camp-cli", ws_dir, env=env, tmux=fake_a)
+    create_workspace_session("group-b", "camp-cli", ws_dir, env=env, tmux=fake_b)
+
+    name_a = fake_a.calls[0]["name"]
+    name_b = fake_b.calls[0]["name"]
+    assert name_a != name_b
+    assert name_a == workspace_session_name("group-a", "camp-cli")
+    assert name_b == workspace_session_name("group-b", "camp-cli")
+    assert len(fake_a.calls) == 1, "group-a's seam must not see group-b's create"
+    assert len(fake_b.calls) == 1, "group-b's seam must not see group-a's create"
+
+
+def test_a_free_name_that_races_to_duplicate_reports_already_existed_not_created(
+    tmp_path,
+):
+    from camp.launch.workspace_session import (
+        WorkspaceSessionOutcome,
+        create_workspace_session,
+    )
+
+    home = tmp_path / "home"
+    home.mkdir()
+    ws_dir = tmp_path / "workspace"
+    ws_dir.mkdir()
+    fake = _FakeTmux(
+        returncode=1, stderr="duplicate session: camp-trailhead-camp-cli\n"
+    )
+
+    result = create_workspace_session(
+        "trailhead", "camp-cli", ws_dir, env={"HOME": str(home)}, tmux=fake
+    )
+
+    assert result.outcome is WorkspaceSessionOutcome.ALREADY_EXISTED
+    assert len(fake.calls) == 1, "a duplicate answer must not trigger a retry create"
+
+
+@pytest.mark.parametrize(
+    "stderr",
+    [
+        "sessions should be nested with care, unset TMUX to force\n",
+        "error: unsafe socket directory\n",
+    ],
+)
+def test_a_create_failure_for_any_other_reason_returns_failed_with_tmuxs_stderr_verbatim(
+    tmp_path, stderr
+):
+    from camp.launch.workspace_session import (
+        WorkspaceSessionOutcome,
+        create_workspace_session,
+    )
+
+    home = tmp_path / "home"
+    home.mkdir()
+    ws_dir = tmp_path / "workspace"
+    ws_dir.mkdir()
+    fake = _FakeTmux(returncode=1, stderr=stderr)
+
+    result = create_workspace_session(
+        "trailhead", "camp-cli", ws_dir, env={"HOME": str(home)}, tmux=fake
+    )
+
+    assert result.outcome is WorkspaceSessionOutcome.FAILED
+    assert result.error == stderr, "the reported error must be tmux's own stderr, unsummarized"
+
+
+def test_a_workspace_directory_under_a_credential_store_is_refused_before_any_session_is_created(
+    tmp_path,
+):
+    from camp.launch.session import LaunchError
+    from camp.launch.workspace_session import create_workspace_session
+
+    home = tmp_path / "home"
+    home.mkdir()
+    ws_dir = home / ".ssh" / "sub"
+    ws_dir.mkdir(parents=True)
+    fake = _FakeTmux()
+
+    with pytest.raises(LaunchError):
+        create_workspace_session(
+            "trailhead", "camp-cli", ws_dir, env={"HOME": str(home)}, tmux=fake
+        )
+
+    assert fake.calls == [], "no create attempt may reach tmux once the credential rule refuses"
