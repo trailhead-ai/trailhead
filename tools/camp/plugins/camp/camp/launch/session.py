@@ -83,6 +83,7 @@ from .recovery import (
     sanitize_name_component,
     workspace_root_for,
 )
+from .tmux import Tmux
 
 if TYPE_CHECKING:
     # Annotation-only: trailhead is imported inside functions on this module's
@@ -669,6 +670,7 @@ def launch_session(
     trust_scope: Path | None = None,
     resume_session_id: str | None = None,
     camp_managed_root: bool = False,
+    tmux: Tmux | None = None,
 ) -> LaunchedSession:
     """Spawn a detached, tmux-hosted harness session; return its handles.
 
@@ -705,6 +707,8 @@ def launch_session(
             "a launch rooted at a named directory requires both name_component "
             "and trust_scope"
         )
+
+    tmux = tmux if tmux is not None else Tmux()
 
     env = dict(env if env is not None else os.environ)
     profile = resolve_harness_profile(group)
@@ -811,17 +815,17 @@ def launch_session(
     # request and the new pane inherits the SERVER's environment, not this
     # process's. Only the pane-level `env -u` holds in both cases — fresh server
     # and pre-existing one alike. Both scrubs are applied; neither is redundant.
-    argv = ["tmux", "new-session", "-d", "-s", tmux_name, "-c", str(launch_dir), "env"]
+    pane_command = ["env"]
     for name in scrub:
-        argv += ["-u", name]
+        pane_command += ["-u", name]
     # The account binding rides the same pane-level `env` invocation, and for the
     # same reason the scrub does: a pre-existing tmux SERVER's environment, not
     # camp's, is what a new pane inherits, so a server started under a different
     # account would otherwise place every session on that account. Sorted so the
     # pane a stop reads back is the same string every time.
     for key, value in sorted(account_binding.items()):
-        argv += [f"{key}={value}"]
-    argv += list(harness_argv)
+        pane_command += [f"{key}={value}"]
+    pane_command += list(harness_argv)
 
     if resume_session_id is None:
         _report_live_sessions(harness, launch_dir, launch_env)
@@ -845,25 +849,14 @@ def launch_session(
         running under a name it is about to tell the operator it could not
         claim.
         """
-        try:
-            subprocess.run(
-                ["tmux", "kill-session", "-t", name],
-                capture_output=True,
-                text=True,
-                timeout=_KILL_SESSION_TIMEOUT_SECONDS,
-            )
-        except (OSError, subprocess.TimeoutExpired):
-            pass
+        tmux.kill_session(name, timeout=_KILL_SESSION_TIMEOUT_SECONDS)
 
     try:
-        spawned = subprocess.run(
-            argv,
-            cwd=str(launch_dir),
+        spawned = tmux.spawn_session(
+            tmux_name,
+            cwd=launch_dir,
+            command=pane_command,
             env=spawn_env,
-            start_new_session=True,
-            stdin=subprocess.DEVNULL,
-            capture_output=True,
-            text=True,
             timeout=_SPAWN_TIMEOUT_SECONDS,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
@@ -888,7 +881,7 @@ def launch_session(
             f"{tmux_name}: {detail}"
         )
 
-    _state_session_environment(tmux_name, account_binding, scrub, spawn_env)
+    _state_session_environment(tmux, tmux_name, account_binding, scrub, spawn_env)
 
     return LaunchedSession(
         session_id=session_id,
@@ -901,6 +894,7 @@ def launch_session(
 
 
 def _state_session_environment(
+    tmux: Tmux,
     tmux_name: str,
     account_binding: dict[str, str],
     scrub: list[str],
@@ -934,20 +928,14 @@ def _state_session_environment(
     operands += [[key, value] for key, value in sorted(account_binding.items())]
 
     for operand in operands:
-        argv = ["tmux", "set-environment", "-t", tmux_name, *operand]
-        try:
-            stated = subprocess.run(
-                argv,
-                env=env,
-                capture_output=True,
-                text=True,
-                timeout=_SET_ENVIRONMENT_TIMEOUT_SECONDS,
-            )
-        except (OSError, subprocess.TimeoutExpired) as exc:
-            detail = str(exc)
+        stated = tmux.set_environment(
+            tmux_name, operand, env=env, timeout=_SET_ENVIRONMENT_TIMEOUT_SECONDS
+        )
+        if stated is None:
+            detail = "tmux did not answer"
+        elif stated.returncode == 0:
+            continue
         else:
-            if stated.returncode == 0:
-                continue
             detail = (stated.stderr or "").strip() or f"exit status {stated.returncode}"
         print(
             f"camp: could not state the session environment for {tmux_name} "
@@ -1000,7 +988,7 @@ def _sanitize_pane_excerpt(text: str) -> str:
     return "\n".join(lines)
 
 
-def _capture_pane(tmux_name: str) -> str | None:
+def _capture_pane(tmux: Tmux, tmux_name: str) -> str | None:
     """What the pane is showing — read while the session still exists.
 
     Best-effort and bounded. Every failure returns None rather than raising: the
@@ -1011,17 +999,12 @@ def _capture_pane(tmux_name: str) -> str | None:
     unavailability.
     """
     try:
-        captured = subprocess.run(
-            ["tmux", "capture-pane", "-p", "-t", tmux_name],
-            capture_output=True,
-            text=True,
-            timeout=_PANE_CAPTURE_TIMEOUT_SECONDS,
-        )
+        raw = tmux.capture_pane(tmux_name, timeout=_PANE_CAPTURE_TIMEOUT_SECONDS)
     except Exception:  # noqa: BLE001 — best-effort probe, never blocks the kill
         return None
-    if captured.returncode != 0:
+    if raw is None:
         return None
-    return _sanitize_pane_excerpt(captured.stdout or "") or None
+    return _sanitize_pane_excerpt(raw) or None
 
 
 def _seeded_trust_fact(launched: LaunchedSession, env: dict[str, str]) -> str:
@@ -1182,6 +1165,7 @@ def confirm_session(
     timeout: float = _CONFIRM_POLL_TIMEOUT_SECONDS,
     sleep=time.sleep,
     clock=time.monotonic,
+    tmux: Tmux | None = None,
 ) -> None:
     """Confirm *launched* registered with the harness, or kill it and refuse.
 
@@ -1219,6 +1203,7 @@ def confirm_session(
     """
     from trailhead.harness import HarnessError
 
+    tmux = tmux if tmux is not None else Tmux()
     env = dict(env if env is not None else os.environ)
     start = clock()
     poll_count = 0
@@ -1244,7 +1229,7 @@ def confirm_session(
     # Before the kill, and bounded so it cannot delay one: the kill is what
     # destroys the pane, so a capture that ran after it would report nothing on
     # every launch that ever stalls.
-    pane = _capture_pane(launched.tmux_name)
+    pane = _capture_pane(tmux, launched.tmux_name)
     message = _confirmation_failure_message(
         launched,
         env=env,
@@ -1253,20 +1238,14 @@ def confirm_session(
         interval=interval,
         pane=pane,
     )
-    try:
-        kill = subprocess.run(
-            ["tmux", "kill-session", "-t", launched.tmux_name],
-            capture_output=True,
-            text=True,
-            timeout=_KILL_SESSION_TIMEOUT_SECONDS,
-        )
-    except (OSError, subprocess.TimeoutExpired) as exc:
+    kill = tmux.kill_session(launched.tmux_name, timeout=_KILL_SESSION_TIMEOUT_SECONDS)
+    if kill is None:
         print(
-            f"camp: failed to kill tmux session {launched.tmux_name}: {exc}",
+            f"camp: failed to kill tmux session {launched.tmux_name}: "
+            "tmux did not answer",
             file=sys.stderr,
         )
-        raise LaunchError(message) from exc
-    if kill.returncode != 0:
+    elif kill.returncode != 0:
         print(
             f"camp: failed to kill tmux session {launched.tmux_name}: "
             f"{(kill.stderr or '').strip() or kill.returncode}",

@@ -467,7 +467,10 @@ class TestSpawnShape:
 
         assert killed, "a timed-out spawn left the session name unreclaimed"
         assert killed[0][:3] == ["tmux", "kill-session", "-t"]
-        assert killed[0][3].startswith("camp-feat-x-")
+        # `-t` targets are always `=`-exact — see `camp.launch.tmux.target` —
+        # never prefix-matched, so the reclaim cannot collide with an
+        # unrelated session whose name happens to start with this one's.
+        assert killed[0][3].startswith("=camp-feat-x-")
 
     def test_a_spawn_that_fails_outright_reclaims_nothing(self, rig):
         """An OSError means the process never ran, so there is nothing to kill.
@@ -1362,7 +1365,7 @@ class TestConfirmSession:
 
         kill_calls = [c for c in confirm_rig["calls"] if c[:2] == ["tmux", "kill-session"]]
         assert len(kill_calls) == 1
-        assert kill_calls[0] == ["tmux", "kill-session", "-t", "camp-feat-x-abcd1234"]
+        assert kill_calls[0] == ["tmux", "kill-session", "-t", "=camp-feat-x-abcd1234"]
         assert "trust" in str(excinfo.value).lower()
 
     def test_a_resumed_session_that_never_confirms_is_killed_and_refused(
@@ -1391,7 +1394,7 @@ class TestConfirmSession:
             )
 
         kill_calls = [c for c in confirm_rig["calls"] if c[:2] == ["tmux", "kill-session"]]
-        assert kill_calls == [["tmux", "kill-session", "-t", tmux_name]]
+        assert kill_calls == [["tmux", "kill-session", "-t", f"={tmux_name}"]]
         assert RESUME_ID in str(excinfo.value)
 
     def test_failing_kill_is_reported_on_stderr_naming_the_session(
@@ -1593,7 +1596,7 @@ class TestConfirmFailureReport:
         self._timeout(session, confirm_rig["launched"])
 
         capture = [c for c in calls if c[:2] == ["tmux", "capture-pane"]]
-        assert capture == [["tmux", "capture-pane", "-p", "-t", "camp-feat-x-abcd1234"]]
+        assert capture == [["tmux", "capture-pane", "-p", "-t", "=camp-feat-x-abcd1234"]]
 
     def test_a_pane_readable_only_before_the_kill_still_reaches_the_message(
         self, confirm_rig, monkeypatch
@@ -3068,7 +3071,7 @@ def _session_env_calls(rig, tmux_name: str) -> list[list[str]]:
     calls = []
     for call in rig["setenv"].calls:
         argv = list(call["argv"])
-        assert argv[:4] == ["tmux", "set-environment", "-t", tmux_name], argv
+        assert argv[:4] == ["tmux", "set-environment", "-t", f"={tmux_name}"], argv
         calls.append(argv[4:])
     return calls
 

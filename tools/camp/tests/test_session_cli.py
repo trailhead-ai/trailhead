@@ -1598,7 +1598,7 @@ def test_camp_launch_resume_that_never_confirms_is_killed_by_its_exact_name(
     assert "could not be confirmed" in result.stderr
     tmux_name = f"camp-feat-one-{_UUID_A[:8]}"
     kills = [argv for argv in _tmux_argv(cli_env) if argv[0] == "kill-session"]
-    assert kills == [["kill-session", "-t", tmux_name]]
+    assert kills == [["kill-session", "-t", f"={tmux_name}"]]
     assert _state_tree(cli_env) == before
 
 
@@ -3401,6 +3401,72 @@ def test_camp_kill_stops_a_launched_session(cli_env) -> None:
     assert session_id in result.stderr
     assert "stopped" in result.stderr
     assert result.stdout == f"{session_id}\n"  # stdout is the session id alone
+
+
+def test_camp_kill_of_a_name_that_prefixes_another_live_session_never_touches_it(
+    cli_env, monkeypatch
+) -> None:
+    """`camp kill` targets `-t` `=`-exact. The default `_TMUX_STUB` already
+    resolves a target by exact dict-key lookup (it strips `=` and looks the
+    result up directly), so it cannot distinguish "qualified" from "not" —
+    only a stub that reproduces tmux's OWN bare-target prefix fallback can.
+    This swaps one in for this test alone: a bare `-t` resolves by prefix
+    when there is no exact match; an `=`-qualified one never does.
+
+    Fails against a naive "strip the `=` and match exactly, whether or not
+    one was given" reading of the property, and against the pre-task code
+    (bare `-t` throughout), which would resolve the kill against whichever
+    live session the short name happens to prefix.
+    """
+    session_id = _launched_session(cli_env)
+    tmux_name = f"camp-feat-kill-{session_id[:8]}"
+
+    # A second, unrelated live session whose name the one being killed is a
+    # STRICT PREFIX of. Seeded directly into the table the stub reads, the
+    # same mechanism `test_camp_list.py`'s real-parser test uses.
+    table = json.loads(cli_env["tmux_table_file"].read_text(encoding="utf-8"))
+    survivor = f"{tmux_name}-longer"
+    table[survivor] = "sleep 100000"
+    cli_env["tmux_table_file"].write_text(json.dumps(table), encoding="utf-8")
+
+    prefix_matching_stub = _TMUX_STUB.replace(
+        "def _target():\n"
+        "    for i, arg in enumerate(args):\n"
+        '        if arg == "-t" and i + 1 < len(args):\n'
+        '            return args[i + 1].lstrip("=")\n'
+        "    return None\n",
+        "def _target():\n"
+        "    for i, arg in enumerate(args):\n"
+        '        if arg == "-t" and i + 1 < len(args):\n'
+        "            raw = args[i + 1]\n"
+        '            if raw.startswith("="):\n'
+        "                return raw[1:]\n"
+        "            table = _table()\n"
+        "            if raw in table:\n"
+        "                return raw\n"
+        "            matches = [n for n in table if n.startswith(raw)]\n"
+        "            return matches[0] if len(matches) == 1 else None\n"
+        "    return None\n",
+    )
+    assert prefix_matching_stub != _TMUX_STUB, "the stub's _target() shape moved"
+    stub_dir = cli_env["tmp_path"] / "prefix-matching-tmux"
+    stub_dir.mkdir()
+    stub_path = stub_dir / "tmux"
+    stub_path.write_text(prefix_matching_stub, encoding="utf-8")
+    stub_path.chmod(0o755)
+
+    result = _camp(
+        cli_env,
+        "kill",
+        session_id[:8],
+        cwd=cli_env["tmp_path"],
+        extra_env={"PATH": f"{stub_dir}{os.pathsep}{cli_env['env']['PATH']}"},
+    )
+
+    assert result.returncode == 0, result.stderr
+    table_after = json.loads(cli_env["tmux_table_file"].read_text(encoding="utf-8"))
+    assert survivor in table_after, "the colliding, unrelated session was killed"
+    assert tmux_name not in table_after
 
 
 def test_camp_kill_is_reachable_with_no_group_resolvable(cli_env) -> None:

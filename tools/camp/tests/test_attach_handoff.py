@@ -69,7 +69,7 @@ def test_local_argv_names_the_derived_name_not_the_harness_name():
 
     argv = handoff.local_argv(candidate.derived_name)
 
-    assert argv == ["tmux", "attach", "-t", "camp-my-session-abcd1234"]
+    assert argv == ["tmux", "attach", "-t", "=camp-my-session-abcd1234"]
     assert harness_own_name not in argv
 
 

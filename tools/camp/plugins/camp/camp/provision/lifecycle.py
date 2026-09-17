@@ -41,7 +41,7 @@ from ..launch.inventory import (
     format_unmanaged_summary,
 )
 from ..launch.naming import workspace_session_name
-from ..launch.stop import Tmux, _Unanswered
+from ..launch.tmux import Tmux, _Unanswered
 
 
 def _list_group_worktrees(
