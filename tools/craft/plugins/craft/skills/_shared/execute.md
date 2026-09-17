@@ -35,15 +35,17 @@ record you are building came from — ask `lore vault resolve --kind task --json
 field — and if that disagrees with where you actually found the record, name the record's own vault
 and say so rather than guessing.
 
-**The remaining `lore` commands take the elected vault too.** `lore task graph`,
-`lore record create`, and `lore session candidate` each accept `--vault NAME`. Name
-`<elected-vault>` on every `lore record create` and `lore session candidate` in this procedure —
-those are writes, and an unqualified write resolves to the *default* vault rather than the elected
-one. `lore record create`'s routing scopes (`--team <scope>` and its `--repo` / `--product` /
-`--suite` siblings) stamp the record's scope alongside `--vault`, not instead of it.
-`lore task graph`'s literal calls below leave the flag unpinned, so check the render against
-`<elected-vault>` before acting on it: a render that does not match the vault the task came from is
-the ambiguous case below, not a fact.
+**The remaining `lore` commands take the elected vault too.** `lore task graph` and
+`lore record create` each accept `--vault NAME`. Name `<elected-vault>` on every
+`lore record create` in this procedure — those are writes, and an unqualified write resolves to the
+*default* vault rather than the elected one. **`lore session candidate` is the exception: it takes
+no vault at all.** A session record is the operator's own capture log and is written only to the
+default vault, so there is nothing to elect — pass `--vault` and the command exits nonzero.
+`lore record create`'s routing scopes (`--team <scope>` and its `--repo` / `--product` / `--suite`
+siblings) stamp the record's scope alongside `--vault`, not instead of it. `lore task graph`'s
+literal calls below leave the flag unpinned, so check the render against `<elected-vault>` before
+acting on it: a render that does not match the vault the task came from is the ambiguous case below,
+not a fact.
 
 
 <!-- toc:start -->
@@ -681,7 +683,7 @@ Then complete the ritual:
 - **Update touched area/subsystem profiles** with what actually changed (via the `lore` CLI), so the
   next agent inherits current ground truth.
 - **Capture prover-validated assumptions** and any decisions / lessons / follow-ups surfaced during
-  the build as **session candidates** (`lore session candidate --vault <elected-vault> …`) — they
+  the build as **session candidates** (`lore session candidate …`, no vault — see above) — they
   become durable records at flush.
 - **Record criterion observations, as evidence arrives.** For each identifier the parent's
   `**Covers:**` field names, once that criterion's evidence is actually in hand — a green automated

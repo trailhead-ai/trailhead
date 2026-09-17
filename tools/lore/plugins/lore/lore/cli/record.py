@@ -954,6 +954,18 @@ def _cmd_record_create(args) -> int:
     for flag in _SCOPE_FLAGS:
         val = getattr(args, flag, None)
         if val:
+            if kind == "session":
+                # A session record lives only in the default vault, so a typed
+                # scope flag on one is a contradiction rather than a preference:
+                # honoring it would route to default anyway while stamping a
+                # namesake sidecar field naming a vault the record is not in.
+                # Refuse instead of silently rewriting what the operator asked for.
+                print(
+                    f"error: a session record is written only to the default vault; "
+                    f"drop --{flag}",
+                    file=sys.stderr,
+                )
+                return 1
             participating_scopes[flag] = val
             sidecar[flag] = val  # one input → both routing and field; field can never contradict vault
 
@@ -967,6 +979,15 @@ def _cmd_record_create(args) -> int:
         # destination-vault computation below is bypassed.
         named_vault = _resolve_named_vault(vault_name)
         if named_vault is None:
+            return 1
+        if kind == "session" and named_vault.scope != "default":
+            # ``--vault`` bypasses routing entirely, so the kind pin in
+            # ``vault_resolve`` never sees this path — it needs its own refusal.
+            print(
+                f"error: a session record is written only to the default vault; "
+                f"--vault {named_vault.name} names a {named_vault.scope}-scope vault",
+                file=sys.stderr,
+            )
             return 1
         vault_root = Path(named_vault.path)
         shared_flag = vault_config_mod.shared_flag(named_vault)
@@ -987,7 +1008,10 @@ def _cmd_record_create(args) -> int:
             cwd = Path.cwd()
         except OSError:
             cwd = None
-        if cwd is not None:
+        # Seeding is skipped for a session record: it is pinned to the default
+        # vault, so an inherited camp-group scope could only stamp a sidecar field
+        # naming a vault the record does not live in.
+        if cwd is not None and kind != "session":
             for seed_scope, seed_name in _resolve_group_scopes(
                 cwd=cwd, groups_dir=_resolve_groups_dir()
             ).items():

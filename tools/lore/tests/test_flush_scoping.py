@@ -544,14 +544,16 @@ class TestKqlInjectionSafety:
 
 
 # ---------------------------------------------------------------------------
-# Cross-vault resolution — a session captured with `--vault <non-default>`
+# Cross-vault resolution — a session record sitting in a non-default vault
 # ---------------------------------------------------------------------------
 #
-# `lore session candidate --vault NAME` writes the session record into the
-# ELECTED vault, but session resolution used to read only the active
-# (`default`-scope) vault. Such a session was then invisible to
-# `lore session show` and permanently un-flushable by every flush scope.
-# These tests pin the vault-aware resolution that closes that.
+# Capture writes only into the default vault (see `test_session_vault_pin.py`),
+# but session records planted in product/team vaults by earlier captures are real
+# data on real installs: hundreds of them, dozens still dirty. Session resolution
+# therefore reads EVERY configured vault, so such a record stays visible to
+# `lore session show` and flushable by every flush scope until a migration
+# relocates it. These tests pin that reachability, planting the record on disk the
+# way a pre-pin capture left it.
 
 class _Install(NamedTuple):
     """A provisioned two-vault install: the paths every cross-vault test threads.
@@ -641,14 +643,40 @@ def _run_cfg(args, inst: _Install, *, stdin_text=None, env_extra=None):
                 stdin_text=stdin_text, env_extra=extra)
 
 
-def _candidate_into(vault_name, inst: _Install, sid):
-    """Capture a candidate into the NAMED vault via `session candidate --vault`."""
-    return _run_cfg(
-        ["session", "candidate", "--session-id", sid, "--kind", "spec",
-         "--phase", "Plan", "--vault", vault_name],
-        inst,
-        stdin_text="a candidate\n",
+def _candidate_into(vault_name, inst: _Install, sid, *, body="a candidate\n"):
+    """Plant a dirty session record in the NAMED vault and index it.
+
+    The destination is no longer electable at capture time, so the on-disk record
+    is written directly — byte-identical to what a capture produced before the pin
+    — and `lore reindex` then builds the global index row the batch/KQL flush
+    paths read. Returns the reindex result so callers can assert the setup
+    succeeded the way they did when this was a capture.
+    """
+    vault = {"default": inst.default_vault}.get(vault_name, inst.other)
+    session_dir = vault / "session"
+    session_dir.mkdir(parents=True, exist_ok=True)
+    (session_dir / f"{sid}.json").write_text(
+        json.dumps(
+            {
+                "version": "v1",
+                "kind": "session",
+                "title": sid,
+                "status": "dirty",
+                "created-at": "2026-08-10T00:00:00Z",
+                "created-by": "tester@example.com",
+                "updated-at": "2026-08-10T00:00:00Z",
+                "updated-by": "tester@example.com",
+                "annotations": {},
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
     )
+    (session_dir / f"{sid}.md").write_text(
+        f"# session: {sid}\n- candidate 2026-08-10T00:00:00Z kind=spec phase=Plan\n  {body}",
+        encoding="utf-8",
+    )
+    return _run_cfg(["reindex"], inst)
 
 
 class TestCrossVaultSessionResolution:
@@ -754,16 +782,8 @@ class TestCrossVaultSessionResolution:
         wrong half were printed — which is the half the operator then acts on.
         """
         inst = _two_vault_install(tmp_path)
-        assert _run_cfg(
-            ["session", "candidate", "--session-id", SID_C, "--kind", "spec",
-             "--phase", "Plan", "--vault", "default"],
-            inst, stdin_text="BODY-IN-DEFAULT\n",
-        ).returncode == 0
-        assert _run_cfg(
-            ["session", "candidate", "--session-id", SID_C, "--kind", "spec",
-             "--phase", "Plan", "--vault", "trailhead"],
-            inst, stdin_text="BODY-IN-TRAILHEAD\n",
-        ).returncode == 0
+        assert _candidate_into("default", inst, SID_C, body="BODY-IN-DEFAULT\n").returncode == 0
+        assert _candidate_into("trailhead", inst, SID_C, body="BODY-IN-TRAILHEAD\n").returncode == 0
 
         r = _run_cfg(["session", "show", "--session-id", SID_C], inst)
         assert r.returncode == 0, r.stderr
@@ -784,11 +804,7 @@ class TestCrossVaultSessionResolution:
         key = "my-worktree"
         env = {"CLAUDE_PROJECT_DIR": str(worktree)}
 
-        assert _run_cfg(
-            ["session", "candidate", "--kind", "spec", "--phase", "Plan",
-             "--vault", "trailhead"],
-            inst, stdin_text="a candidate\n", env_extra=env,
-        ).returncode == 0
+        assert _candidate_into("trailhead", inst, key).returncode == 0
         assert (inst.other / "session" / f"{key}.json").exists()
         _commit_baseline(inst.other)
         before = _commit_count(inst.other)

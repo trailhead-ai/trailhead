@@ -13,7 +13,7 @@ from .common import (
     _read_stdin_body,
     _resolve_all_vaults_strict,
 )
-from .record import _render_record, _resolve_named_vault
+from .record import _render_record
 
 
 def _session_id_from_args_or_env(args) -> str:
@@ -80,14 +80,14 @@ def _cmd_session_show(args) -> int:
     to read the current session — its sidecar carries the ``flushed-at``
     watermark that flush needs and that never lands in the index.
 
-    **All vaults, not just the active one.** ``lore session candidate --vault
-    NAME`` elects the destination vault deliberately (a dispatched agent's cwd is
-    not the operator's, so active-vault resolution is cwd-blind), so a session can
-    legitimately live outside the active vault. Reading only the active vault
-    reported "no session record resolved" for a session that plainly exists.
+    **All vaults, not just the default one.** Capture writes only into the
+    default vault (``vault_config.session_vault``), but product/team vaults still
+    hold session records written before that pin — hundreds of them on a real
+    install, dozens still dirty. Reading only the default vault reports "no session
+    record resolved" for one of those, which plainly exists.
 
-    **Multi-hit:** the same key captured into more than one vault splits the
-    session across them. Exactly one record is rendered — the active vault's if it
+    **Multi-hit:** a key held by more than one vault splits the session across
+    them. Exactly one record is rendered — the active vault's if it
     holds the key, else the first hit in config order — and a stderr notice NAMES
     every vault holding it, so the operator can see that what they are reading is
     a part rather than the whole. Rendering is unambiguous; the ambiguity is
@@ -282,15 +282,10 @@ def _cmd_session_candidate(args) -> int:
     ``record_store.neutralize_fences``; the sidecar-ensure-dirty + body-append +
     reindex are ONE race-safe critical section via ``session_store.capture_candidate``.
 
-    ``--vault NAME`` resolves the destination vault via
-    :func:`record._resolve_named_vault` instead of
-    ``vault_config.resolve_active_vault()`` — the same cwd-blind hazard those
-    other ``--vault`` flags close: a dispatched agent's cwd is not the
-    operator's, so the active-vault resolution can silently pick a vault other
-    than the one the caller elected. An unknown ``--vault`` name errors
-    ``lore: <msg>`` + nonzero before any session-key resolution or write.
-    Omitting ``--vault`` preserves the existing active-vault-resolution
-    behavior unchanged.
+    **The destination is not electable.** Every candidate lands in the vault
+    ``vault_config.session_vault`` names — the ``default``-scope one — because a
+    session record is the operator's own capture log and belongs nowhere else. The
+    capture primitive refuses any other destination as a backstop.
 
     **A vault mid-resolution warns but still captures.** ``record create`` and
     ``flush`` refuse outright at a vault stopped mid-rebase; a candidate does
@@ -304,14 +299,7 @@ def _cmd_session_candidate(args) -> int:
     from ..vault import vault as vault_mod
     from . import resolve_state as resolve_state_mod
 
-    vault_name = getattr(args, "vault", None)
-    if vault_name:
-        named_vault = _resolve_named_vault(vault_name)
-        if named_vault is None:
-            return 1
-        vault_root = str(named_vault.path)
-    else:
-        vault_root = str(vault_config_mod.resolve_active_vault())
+    vault_root = str(vault_config_mod.session_vault())
 
     # A candidate capture is NOT fenced off a mid-resolution vault the way
     # ``record create`` is: losing a finding is worse than capturing it into a
@@ -384,13 +372,15 @@ def _cmd_session_referenced(args) -> int:
     one race-safe critical section via ``session_store.capture_referenced``.
 
     **Resolved across EVERY configured vault**, exactly as ``show`` and ``flush``
-    are: ``session candidate --vault NAME`` elects where the session record lives,
-    so pinning ``referenced`` to the active vault meant a ``--vault``-captured
-    session had no record where this looked — and the no-op-on-non-existent
-    contract then swallowed the write silently, everywhere. The reference is
+    are: a session record written before capture was pinned to the default vault
+    can still be sitting in a product/team vault, and pinning ``referenced`` to
+    the default vault would leave it with no record where this looks — which the
+    no-op-on-non-existent contract then swallows silently. The reference is
     appended to the existing record in EVERY vault holding the key, consistent
     with flush flushing every dirty instance of a split session; a key no vault
-    holds is still the inert no-op (exit 0, nothing created).
+    holds is still the inert no-op (exit 0, nothing created). This surface appends
+    only to a record that already exists, so it can never put a session record in a
+    vault the pin would refuse.
 
     ``shared: true`` vaults are excluded from the fan-out and named in a notice:
     this is a WRITE into a record body, and a shared vault is untrusted
@@ -492,11 +482,6 @@ def add_session_subparser(sub) -> None:
     p_session_candidate.add_argument(
         "--phase", required=True,
         help="The session phase the candidate was proposed in (e.g. Plan, Build).",
-    )
-    p_session_candidate.add_argument(
-        "--vault", dest="vault", default=None, metavar="NAME",
-        help="Write the candidate into exactly this configured vault by name, "
-             "instead of the cwd-blind active-vault resolution.",
     )
     p_session_candidate.set_defaults(func=cmd_session)
 

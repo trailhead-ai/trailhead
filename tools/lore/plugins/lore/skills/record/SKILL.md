@@ -46,6 +46,11 @@ lore session referenced <kind>/<record-name>
 Candidates are cheap and lazy-created — capture liberally. `/lore:flush` applies
 judgment later, promoting the keepers into durable records.
 
+The session note itself always lives in your **default vault** — it is your own
+capture log, not team memory, so there is no vault to choose here and no flag to
+pass. The records `/lore:flush` promotes out of it route by scope as usual, so a
+finding about a product still lands in that product's vault.
+
 ### A persistent vault record — `lore record create` (the exception)
 
 Reserved for a deliberately **authored artifact** (a `task`, `spec`, or `area`
