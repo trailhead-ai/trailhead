@@ -227,7 +227,7 @@ class TestNoBackfillAcrossFullLifecycle:
         assert "owner" not in read_central_manifest(mpath)
 
         # listed
-        entries = cmd_ls_group(g["group"], env=env)
+        entries = cmd_ls_group(g["group"], env=env).entries
         assert any(e["slug"] == slug for e in entries)
         assert "owner" not in read_central_manifest(mpath)
 

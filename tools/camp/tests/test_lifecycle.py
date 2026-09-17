@@ -1076,7 +1076,7 @@ class TestCmdStatusAndLs:
         reconcile_worktree(g["group"], "alpha", env=g["env"])
         reconcile_worktree(g["group"], "beta", env=g["env"])
 
-        entries = cmd_ls_group(g["group"], env=g["env"])
+        entries = cmd_ls_group(g["group"], env=g["env"]).entries
         slugs = [e["slug"] for e in entries]
         assert "alpha" in slugs
         assert "beta" in slugs
@@ -1086,7 +1086,7 @@ class TestCmdStatusAndLs:
         from camp.provision.lifecycle import cmd_ls_group
 
         g = two_member_group
-        entries = cmd_ls_group(g["group"], env=g["env"])
+        entries = cmd_ls_group(g["group"], env=g["env"]).entries
         assert entries == []
 
 
