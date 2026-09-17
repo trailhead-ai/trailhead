@@ -3182,8 +3182,6 @@ def test_bare_camp_new_output_is_unchanged(cli_env) -> None:
         "camp new: created workspace 'feat-o' — provisioning in the background\n"
         "  check provisioning: camp status feat-o\n"
         "  activates when ready, or run: camp activate feat-o\n"
-        '  tip: run eval "$(trailhead shellenv)" so `camp new` cd\'s you in '
-        "automatically\n"
     )
 
 

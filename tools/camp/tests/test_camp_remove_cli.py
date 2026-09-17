@@ -871,6 +871,29 @@ class TestRemoveReturnPath:
         captured = capsys.readouterr()
         assert "trailhead shellenv" in captured.err
 
+    def test_new_and_remove_differ_on_the_nudge_under_the_same_env(
+        self, inproc_group, monkeypatch, capsys
+    ):
+        """The wrapper's `new` arm is gone; its `remove` arm isn't. Run both
+        commands with the exact same (marker-absent) environment and confirm
+        they diverge: `new` stays quiet, `remove` still nudges."""
+        import camp.cli.group as group_cli
+
+        self._patch_ok_break(monkeypatch)
+        cli = _load_cli_module()
+        g = inproc_group
+        monkeypatch.delenv("CAMP_SHELL_INTEGRATION", raising=False)
+
+        group_cli._cmd_new_group_cli(["feat-new"], g["group"], g["env"], dry_run=False)
+        new_err = capsys.readouterr().err
+
+        monkeypatch.chdir(self._ws_dir(g))
+        cli._cmd_remove_group_cli(["feat-x"], g["group"], g["env"], dry_run=False)
+        remove_err = capsys.readouterr().err
+
+        assert "shellenv" not in new_err
+        assert "trailhead shellenv" in remove_err
+
     def test_failed_removal_from_inside_emits_no_path(self, inproc_group, monkeypatch, capsys):
         """On failure the workspace may still exist — stdout must stay EMPTY so
         the wrapper leaves the shell where it is."""

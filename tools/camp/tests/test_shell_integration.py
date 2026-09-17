@@ -324,3 +324,30 @@ class TestCampPwdErrors:
         assert "--group" in result.stderr or "group" in result.stderr.lower(), (
             f"Expected error mentioning --group in stderr: {result.stderr!r}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Seam smoke: the real `bin/trailhead` entry point actually regenerates the
+# one-arm `camp()` wrapper — not just the `shellenv_lines()` function called
+# directly. `trailhead install`'s only shellenv-facing behavior is printing
+# the `eval "$(bin/trailhead shellenv)"` hint line (it writes no file that
+# embeds the function body), so the wiring this smoke proves is that running
+# the installed binary's `shellenv` subcommand — the command that line
+# evaluates — reflects the one-arm change end to end.
+# ---------------------------------------------------------------------------
+
+_BIN_TRAILHEAD = _REPO_ROOT / "bin" / "trailhead"
+
+
+class TestBinTrailheadRegeneratesShellenv:
+    # inert-gate: allow wiring smoke — proves the installed CLI entry point
+    # emits the one-arm function; no input varies its answer.
+    def test_shellenv_output_contains_the_one_arm_function(self) -> None:
+        proc = subprocess.run(
+            [sys.executable, str(_BIN_TRAILHEAD), "shellenv", "--shell", "bash"],
+            capture_output=True,
+            text=True,
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert "remove|rm)" in proc.stdout
+        assert "new|remove|rm)" not in proc.stdout

@@ -56,7 +56,7 @@ function camp_cd
 end
 ```
 
-### `camp new` and `camp remove` change your shell's directory
+### `camp remove` changes your shell's directory
 
 camp never starts, stops, or replaces a process, and it cannot change your shell's
 working directory on its own — it only *answers* where to go, as exactly one line
@@ -67,8 +67,12 @@ on stdout. Acting on that answer takes a shell function, which is what the
 eval "$(/path/to/trailhead/bin/trailhead shellenv)"
 ```
 
-The wrapper it defines intercepts `camp new` and `camp remove` and does the `cd`
-for you. Without it, the printed path is inert — use `cd "$(camp pwd <slug>)"`.
+The wrapper it defines intercepts `camp remove` (and `camp rm`) and does the `cd`
+for you, back to the group's first-member repo. Without it, the printed path is
+inert — use `cd "$(camp pwd <slug>)"`.
+
+`camp new` needs no such wrapper: it hands your terminal to a tmux session already
+rooted at the new workspace, so there is nowhere left to `cd`.
 
 ## Detached sessions
 

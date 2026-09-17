@@ -16,6 +16,9 @@ Test contract:
   handler returns without waiting for it) and is a clean no-op for a member
   that declares no activate-phase task. Without `--activate`, no activate-phase
   work is triggered at all.
+- `camp new` never prints the shellenv-install nudge, marker set or not — the
+  door drops the shell into a tmux session already rooted at the workspace, so
+  there is nothing left for the wrapper's `cd` to do.
 """
 
 from __future__ import annotations
@@ -295,40 +298,38 @@ class TestLaunchJsonCarriesTheEngineReportedTmuxName:
 
 
 class TestShellIntegrationNudge:
-    """Bare `camp new` nudges to install the trailhead shellenv wrapper.
+    """`camp new` never nudges to install the trailhead shellenv wrapper.
 
-    The `camp()` shell wrapper exports CAMP_SHELL_INTEGRATION=1 around `camp new`
-    so the handler can tell a wrapper-driven run (which will cd for the user) from
-    a bare-binary run (which leaves the user where they were and so needs the nudge).
+    The wrapper's `new` arm is gone — the door hands the terminal to a tmux
+    session already rooted at the workspace, so there is no `cd` left for the
+    wrapper to do and nothing to nudge the user to install it for. This is the
+    inverse of the old contract: no nudge fires regardless of the
+    CAMP_SHELL_INTEGRATION marker, which `camp remove` alone still reads.
     """
 
-    def test_bare_run_prints_shellenv_nudge_to_stderr(
-        self, camp_cli, group_env, capsys, monkeypatch
-    ):
+    def test_bare_run_prints_no_nudge(self, camp_cli, group_env, capsys, monkeypatch):
         monkeypatch.delenv("CAMP_SHELL_INTEGRATION", raising=False)
         g = group_env
         camp_cli._cmd_new_group_cli(["feat-x"], g["group"], g["env"], dry_run=False)
         captured = capsys.readouterr()
-        assert "trailhead shellenv" in captured.err, (
-            "a bare `camp new` must nudge the user to install the shellenv wrapper"
+        assert "shellenv" not in captured.err, (
+            "a bare `camp new` must not nudge to install the shellenv wrapper — "
+            "the wrapper no longer intercepts `new`"
         )
         # The path still goes to stdout untouched.
         ws = _workspace_dir(g["env"], "feat-x")
         assert captured.out == f"{ws}\n"
 
-    def test_marker_present_suppresses_the_nudge(
+    def test_marker_present_also_prints_no_nudge(
         self, camp_cli, group_env, capsys, monkeypatch
     ):
         monkeypatch.setenv("CAMP_SHELL_INTEGRATION", "1")
         g = group_env
         camp_cli._cmd_new_group_cli(["feat-x"], g["group"], g["env"], dry_run=False)
         captured = capsys.readouterr()
-        assert "trailhead shellenv" not in captured.err, (
-            "with the wrapper active (marker set) the handler must stay quiet — "
-            "the wrapper does the cd"
-        )
+        assert "shellenv" not in captured.err
 
-    def test_nudge_also_fires_on_existing_workspace_reentry(
+    def test_no_nudge_on_existing_workspace_reentry(
         self, camp_cli, group_env, capsys, monkeypatch
     ):
         monkeypatch.delenv("CAMP_SHELL_INTEGRATION", raising=False)
@@ -338,7 +339,7 @@ class TestShellIntegrationNudge:
         capsys.readouterr()
         camp_cli._cmd_new_group_cli(["feat-x"], g["group"], g["env"], dry_run=False)
         err = capsys.readouterr().err
-        assert "trailhead shellenv" in err
+        assert "shellenv" not in err
 
 
 class TestInputCharset:
