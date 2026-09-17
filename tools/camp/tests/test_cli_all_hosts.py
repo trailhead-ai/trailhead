@@ -14,6 +14,7 @@ from __future__ import annotations
 import importlib
 import json
 import os
+import stat
 import sys
 from pathlib import Path
 
@@ -34,6 +35,31 @@ def _transport_module():
     return importlib.import_module("camp.host.transport")
 
 
+#: A `tmux` stand-in that always answers "no server running" — the LOCAL
+#: side of every merged (`-a`/`--all-hosts`) answer in this file now reads
+#: real tmux via `cmd_ls_group`, and this suite must not observe whatever
+#: tmux server happens to be running on the machine executing it (the same
+#: hazard `test_camp_list.py` isolates against).
+_NOOP_TMUX_STUB = (
+    "#!/usr/bin/env python3\n"
+    "import sys\n"
+    'args = sys.argv[1:]\n'
+    'if args and args[0] == "list-sessions":\n'
+    '    sys.stderr.write("error connecting to /tmp/nonexistent (No such file or directory)\\n")\n'
+    "    sys.exit(1)\n"
+    "sys.exit(1)\n"
+)
+
+
+def _prepend_noop_tmux_to_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    bin_dir = tmp_path / "noop-tmux-bin"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    tmux = bin_dir / "tmux"
+    tmux.write_text(_NOOP_TMUX_STUB, encoding="utf-8")
+    tmux.chmod(tmux.stat().st_mode | stat.S_IEXEC)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+
+
 @pytest.fixture()
 def hosts_and_group_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """CAMP_CONFIG_DIR with one real, empty group ("testgrp") and hosts.toml
@@ -50,6 +76,7 @@ def hosts_and_group_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
     )
     monkeypatch.setenv("CAMP_CONFIG_DIR", str(tmp_path))
     monkeypatch.setenv("CAMP_STATE_DIR", str(tmp_path / "state"))
+    _prepend_noop_tmux_to_path(tmp_path, monkeypatch)
 
 
 def _seed_local_workspace(group_name: str, slug: str, *, env: dict) -> None:
@@ -99,6 +126,7 @@ def hosts_and_group_env_with_local_workspace(
     )
     monkeypatch.setenv("CAMP_CONFIG_DIR", str(tmp_path))
     monkeypatch.setenv("CAMP_STATE_DIR", str(tmp_path / "state"))
+    _prepend_noop_tmux_to_path(tmp_path, monkeypatch)
     _seed_local_workspace("testgrp", "local-ws", env=os.environ)
 
 
@@ -443,7 +471,10 @@ def test_human_output_grouped_by_machine_local_first_then_declared_order(
     def fake_run_camp(host, remote_argv, **kw):
         if host.ssh == "andromeda":
             return _answered(
-                [{"ok": True, "slug": "remoteA", "workspace_path": "/r/a", "branch": "", "group": "testgrp"}]
+                [{
+                    "ok": True, "slug": "remoteA", "workspace_path": "/r/a",
+                    "branch": "", "group": "testgrp", "state": "none",
+                }]
             )
         return transport.Unreachable(reason="connect timed out")
 
@@ -457,7 +488,7 @@ def test_human_output_grouped_by_machine_local_first_then_declared_order(
     assert lines[0] == "this machine"
     assert lines[1].startswith("  ") and lines[1].split()[0] == "local-ws"
     assert lines[2] == "andromeda"
-    assert lines[3] == "  remoteA /r/a"
+    assert lines[3] == "  remoteA none /r/a"
     assert lines[4] == "lookout"
     assert lines[5].strip() != ""  # the failure line lookout owes
     assert "remoteA" not in lines[5]
@@ -485,6 +516,7 @@ def self_name_collides_with_declared_host_env(
     )
     monkeypatch.setenv("CAMP_CONFIG_DIR", str(tmp_path))
     monkeypatch.setenv("CAMP_STATE_DIR", str(tmp_path / "state"))
+    _prepend_noop_tmux_to_path(tmp_path, monkeypatch)
 
 
 def test_self_name_colliding_with_a_declared_host_prints_the_machine_once(
@@ -497,7 +529,10 @@ def test_self_name_colliding_with_a_declared_host_prints_the_machine_once(
         transport,
         "run_camp",
         lambda host, remote_argv, **kw: _answered(
-            [{"ok": True, "slug": "remote1", "workspace_path": "/r/1", "branch": "", "group": "testgrp"}]
+            [{
+                "ok": True, "slug": "remote1", "workspace_path": "/r/1",
+                "branch": "", "group": "testgrp", "state": "none",
+            }]
         ),
     )
 
@@ -508,9 +543,9 @@ def test_self_name_colliding_with_a_declared_host_prints_the_machine_once(
     lines = out.splitlines()
     assert lines.count("andromeda") == 1
     assert lines[0] == "andromeda"
-    assert lines[1] == "  remote1 /r/1"
+    assert lines[1] == "  remote1 none /r/1"
     assert lines[2] == "lookout"
-    assert lines[3] == "  remote1 /r/1"
+    assert lines[3] == "  remote1 none /r/1"
 
 
 def test_zero_state_prints_every_machines_header_with_nothing_beneath(
@@ -876,7 +911,7 @@ def test_a_malformed_remote_row_is_skipped_with_a_notice_other_rows_still_render
             return _answered(
                 [
                     {"ok": True, "workspace_path": "/ws/feat-x", "group": "testgrp"},  # missing slug
-                    {"ok": True, "slug": "alpha", "workspace_path": "/ws/alpha", "group": "testgrp"},
+                    {"ok": True, "slug": "alpha", "workspace_path": "/ws/alpha", "group": "testgrp", "state": "none"},
                 ]
             )
         return _answered([])
@@ -902,7 +937,10 @@ def test_isolation_a_malformed_row_on_one_host_does_not_affect_another_hosts_row
         if host.ssh == "andromeda":
             return _answered([{"ok": True, "workspace_path": "/ws/feat-x"}])  # missing slug
         return _answered(
-            [{"ok": True, "slug": "beta", "workspace_path": "/ws/beta", "branch": "", "group": "testgrp"}]
+            [{
+                "ok": True, "slug": "beta", "workspace_path": "/ws/beta",
+                "branch": "", "group": "testgrp", "state": "none",
+            }]
         )
 
     monkeypatch.setattr(transport, "run_camp", fake_run_camp)
@@ -916,7 +954,7 @@ def test_isolation_a_malformed_row_on_one_host_does_not_affect_another_hosts_row
     assert lines[0] == "this machine"
     assert lines[1] == "andromeda"
     assert lines[2] == "lookout"
-    assert lines[3] == "  beta /ws/beta"
+    assert lines[3] == "  beta none /ws/beta"
 
 
 def test_exit_code_is_unaffected_by_a_malformed_remote_row(
@@ -944,7 +982,10 @@ def test_a_malformed_local_row_is_skipped_consistently_with_remote_rows(
         return (
             [
                 {"ok": True, "workspace_path": "/ws/local-broken"},  # missing slug
-                {"ok": True, "slug": "local-ok", "workspace_path": "/ws/local-ok", "branch": "", "group": "testgrp"},
+                {
+                    "ok": True, "slug": "local-ok", "workspace_path": "/ws/local-ok",
+                    "branch": "", "group": "testgrp", "state": "none",
+                },
             ],
             [],
             0,

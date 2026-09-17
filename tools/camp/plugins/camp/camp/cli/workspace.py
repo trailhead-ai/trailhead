@@ -7,7 +7,7 @@ workspace's resolved path. (Workspace *creation* — ``new`` — lives in ``grou
 from __future__ import annotations
 
 import sys
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from .dispatch import _slug_from_name_or_cwd
 from .parser import CampParser, group_verb_parser
@@ -20,7 +20,9 @@ def _project_list_rows(entries: list[dict]) -> list[dict]:
     """Project `cmd_ls_group`'s entries onto the fixed `camp list` JSON row
     shape — the same projection `render_workspace_list` applies inline,
     factored out so the `-a`/`--all-hosts` local answer below can build the
-    same row shape without printing.
+    same row shape without printing. An unmanaged entry's `slug` is `None`
+    — passed through as-is, the same discriminator `render_workspace_list`
+    and `render_list_row_human` both key off of.
     """
     return [
         {
@@ -29,14 +31,22 @@ def _project_list_rows(entries: list[dict]) -> list[dict]:
             "branch": e.get("branch", ""),
             "workspace_path": e["workspace_path"],
             "group": e.get("group"),
+            "state": e.get("state"),
+            "window_count": e.get("window_count"),
+            "tmux_session": e.get("tmux_session"),
         }
         for e in entries
     ]
 
 
 def render_list_row_human(row: dict) -> str:
-    """One answered `camp list` row, human-rendered — the ``slug
+    """One answered `camp list` row, human-rendered — the ``slug state
     workspace_path`` line, from a JSON-shaped row rather than an entry.
+
+    An unmanaged row (`slug` is `None`) prints its `tmux_session` in the
+    first column instead — the same rule `render_workspace_list` applies
+    locally, so a relayed or merged unmanaged row reads identically to one
+    rendered on this machine.
 
     The one place a relayed or merged `camp list` row is turned into its
     human line: both `_cmd_ls_host_cli`'s `--host` callback and the
@@ -46,7 +56,11 @@ def render_list_row_human(row: dict) -> str:
     """
     from ..launch.recovery import printable_path
 
-    return f"{printable_path(row['slug'])} {printable_path(row['workspace_path'])}"
+    first = row["slug"] if row["slug"] is not None else row["tmux_session"]
+    return (
+        f"{printable_path(first)} {row['state']} "
+        f"{printable_path(row['workspace_path'])}"
+    )
 
 
 def local_list_answer(
@@ -66,13 +80,22 @@ def local_list_answer(
     merge with other machines' answers can afford — the caller decides what
     to do with a total failure, exactly as `_sessions_live_answer` already
     does for `camp sessions`' own `-a` path.
+
+    Always reads tmux at :data:`~camp.launch.inventory.DisclosureScope.WIDENED`
+    — this IS the `-a`/`--all-hosts` axis, which has already opted into
+    seeing leftover sessions named rather than merely counted, regardless of
+    whether the group axis was itself widened. Leftover sessions are
+    host-wide, not per-group, so merging several groups' answers dedupes
+    them by `tmux_session` name rather than repeating one leftover once per
+    group that happened to enumerate it.
     """
+    from ..launch.inventory import DisclosureScope
     from ..provision.lifecycle import cmd_ls_group, load_answerable_groups
     from .common import _groups_dir
 
     if not all_groups:
-        entries = cmd_ls_group(group, env=None)
-        return _project_list_rows(entries), [], 0
+        listing = cmd_ls_group(group, env=None, scope=DisclosureScope.WIDENED)
+        return _project_list_rows(listing.entries + listing.unmanaged), [], 0
 
     notices: list[str] = []
     groups, unparsable = load_answerable_groups(_groups_dir())
@@ -89,8 +112,15 @@ def local_list_answer(
         return [], notices, 0
 
     entries: list[dict] = []
+    seen_unmanaged: set[str] = set()
     for g in groups:
-        entries.extend(cmd_ls_group(g, env=None))
+        listing = cmd_ls_group(g, env=None, scope=DisclosureScope.WIDENED)
+        entries.extend(listing.entries)
+        for u in listing.unmanaged:
+            if u["tmux_session"] in seen_unmanaged:
+                continue
+            seen_unmanaged.add(u["tmux_session"])
+            entries.append(u)
     entries.sort(key=lambda e: e.get("group") or "")
 
     rows = _project_list_rows(entries)
@@ -102,15 +132,25 @@ def _cmd_ls_group_cli(
     args: list[str],
     group: dict,
     env: dict[str, str] | None,
+    *,
+    tmux: Any | None = None,
 ) -> None:
     """camp list [--json]  (alias: ls)
 
-    Prints one 'slug abs-path' line per workspace to stdout; exits 0.
-    Empty group → no stdout, exit 0. Pure read: no state mutation, no harness exec.
+    Prints one 'slug state abs-path' line per workspace to stdout; exits 0.
+    Empty group → no stdout, exit 0. Reads tmux (once, via `cmd_ls_group`) to
+    annotate each row with its session state — a tmux read, not a harness
+    exec or a state mutation.
 
     Human + --json output is produced by the SHARED render_workspace_list,
     the same renderer spine.main's no-group `cmd_ls` uses, so the surface is
-    identical regardless of cwd.
+    identical regardless of cwd. Leftover (unmanaged) tmux sessions are
+    counted, never named, at this group-scoped axis — see
+    `cmd_ls_group`'s default `DisclosureScope.GROUP`.
+
+    *tmux* — the same injectable seam `cmd_ls_group` itself exposes,
+    threaded through so an in-process test can drive tmux state without a
+    real subprocess; `None` (the default) means the real `Tmux()`.
     """
     from ..provision.lifecycle import cmd_ls_group, render_workspace_list
 
@@ -118,11 +158,17 @@ def _cmd_ls_group_cli(
     parser.add_argument("--json", action="store_true")
     as_json = parser.parse_args(args).json
 
-    entries = cmd_ls_group(group, env=env)
-    render_workspace_list(entries, as_json=as_json)
+    listing = cmd_ls_group(group, env=env, tmux=tmux)
+    if listing.notice:
+        print(listing.notice, file=sys.stderr)
+    render_workspace_list(
+        listing.entries, as_json=as_json, unmanaged_count=listing.unmanaged_count
+    )
 
 
-def _cmd_ls_all_groups_cli(args: list[str], env: dict[str, str] | None) -> None:
+def _cmd_ls_all_groups_cli(
+    args: list[str], env: dict[str, str] | None, *, tmux: Any | None = None
+) -> None:
     """camp list --all-groups/-g [--json] — every configured group's workspaces, merged.
 
     Reached only from ``cli/dispatch.py``'s early `--all-groups`/`-g` handling,
@@ -150,6 +196,7 @@ def _cmd_ls_all_groups_cli(args: list[str], env: dict[str, str] | None) -> None:
     the reason on stderr instead, exiting nonzero only when every group
     failed to parse.
     """
+    from ..launch.inventory import DisclosureScope
     from ..provision.lifecycle import (
         answerable_groups_or_refuse,
         cmd_ls_group,
@@ -169,8 +216,19 @@ def _cmd_ls_all_groups_cli(args: list[str], env: dict[str, str] | None) -> None:
         return
 
     entries: list[dict] = []
+    seen_unmanaged: set[str] = set()
+    notice_printed = False
     for group in groups:
-        entries.extend(cmd_ls_group(group, env=env))
+        listing = cmd_ls_group(group, env=env, scope=DisclosureScope.WIDENED, tmux=tmux)
+        if listing.notice and not notice_printed:
+            print(listing.notice, file=sys.stderr)
+            notice_printed = True
+        entries.extend(listing.entries)
+        for u in listing.unmanaged:
+            if u["tmux_session"] in seen_unmanaged:
+                continue
+            seen_unmanaged.add(u["tmux_session"])
+            entries.append(u)
     entries.sort(key=lambda e: e.get("group") or "")
 
     render_workspace_list(entries, as_json=as_json, group_failures=unparsable)

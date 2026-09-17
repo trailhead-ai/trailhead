@@ -16,6 +16,7 @@ import importlib
 import inspect
 import json
 import os
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -28,6 +29,56 @@ _CLI_CAMP = _PLUGIN_DIR / "cli" / "camp"
 
 if str(_PLUGIN_DIR) not in sys.path:
     sys.path.insert(0, str(_PLUGIN_DIR))
+
+
+# ---------------------------------------------------------------------------
+# tmux isolation — every test in this file that does not deliberately drive
+# tmux state must not observe whatever tmux server happens to be running on
+# the machine executing the suite (a real dev machine routinely has real
+# camp sessions, and even a CI box may have a stray leftover). The in-process
+# helper is for tests calling `cmd_ls_group`/`_cmd_ls_group_cli` directly; the
+# subprocess stub is for the `subprocess.run([..., "camp", ...])` fixtures,
+# put first on PATH so it shadows any real `tmux` binary.
+# ---------------------------------------------------------------------------
+
+
+class _FakeTmux:
+    """An injectable `Tmux` double answering exactly the (canned) listing it
+    was constructed with — no subprocess, no host tmux state."""
+
+    def __init__(self, listing=None):
+        from camp.launch.stop import SessionListing
+
+        self._listing = listing if listing is not None else SessionListing(sessions=())
+
+    def list_sessions(self):
+        return self._listing
+
+
+_NOOP_TMUX_STUB = (
+    "#!/usr/bin/env python3\n"
+    "import sys\n"
+    'args = sys.argv[1:]\n'
+    'if args and args[0] == "list-sessions":\n'
+    '    sys.stderr.write("error connecting to /tmp/nonexistent (No such file or directory)\\n")\n'
+    "    sys.exit(1)\n"
+    "sys.exit(1)\n"
+)
+
+
+def _write_noop_tmux_stub(bin_dir: Path) -> None:
+    """A `tmux` stand-in that always answers "no server running" —
+    deterministically empty, regardless of what is actually on the host."""
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    tmux = bin_dir / "tmux"
+    tmux.write_text(_NOOP_TMUX_STUB, encoding="utf-8")
+    tmux.chmod(tmux.stat().st_mode | stat.S_IEXEC)
+
+
+def _prepend_noop_tmux_to_path(tmp_path: Path, env: dict) -> None:
+    bin_dir = tmp_path / "noop-tmux-bin"
+    _write_noop_tmux_stub(bin_dir)
+    env["PATH"] = f"{bin_dir}{os.pathsep}{env.get('PATH', '')}"
 
 
 def _load_cli_module():
@@ -107,7 +158,7 @@ class TestCmdLsGroupWorkspacePath:
         env = {"CAMP_STATE_DIR": str(tmp_path / "state")}
         _seed_manifest("wpg", "feat-q", env=env)
 
-        entries = cmd_ls_group(group, env=env)
+        entries = cmd_ls_group(group, env=env, tmux=_FakeTmux()).entries
 
         assert len(entries) == 1
         assert "workspace_path" in entries[0], (
@@ -121,7 +172,7 @@ class TestCmdLsGroupWorkspacePath:
         env = {"CAMP_STATE_DIR": str(tmp_path / "state")}
         _seed_manifest("wpg", "feat-q", env=env)
 
-        entries = cmd_ls_group(group, env=env)
+        entries = cmd_ls_group(group, env=env, tmux=_FakeTmux()).entries
 
         path = entries[0]["workspace_path"]
         assert path, "workspace_path must not be empty"
@@ -135,7 +186,7 @@ class TestCmdLsGroupWorkspacePath:
         env = {"CAMP_STATE_DIR": str(tmp_path / "state")}
         _seed_manifest("wpg", "feat-q", env=env)
 
-        entries = cmd_ls_group(group, env=env)
+        entries = cmd_ls_group(group, env=env, tmux=_FakeTmux()).entries
 
         expected = str(workspace_dir("wpg", "feat-q", env=env))
         assert entries[0]["workspace_path"] == expected, (
@@ -149,7 +200,7 @@ class TestCmdLsGroupWorkspacePath:
         group = _make_group("wpg")
         env = {"CAMP_STATE_DIR": str(tmp_path / "state")}
 
-        entries = cmd_ls_group(group, env=env)
+        entries = cmd_ls_group(group, env=env, tmux=_FakeTmux()).entries
 
         assert entries == [], f"empty group must return [], got {entries!r}"
 
@@ -161,7 +212,7 @@ class TestCmdLsGroupWorkspacePath:
         _seed_manifest("wpg", "alpha", env=env)
         _seed_manifest("wpg", "beta", env=env)
 
-        entries = cmd_ls_group(group, env=env)
+        entries = cmd_ls_group(group, env=env, tmux=_FakeTmux()).entries
 
         assert len(entries) == 2
         for e in entries:
@@ -175,20 +226,22 @@ class TestCmdLsGroupWorkspacePath:
 
 
 class TestListOutput:
-    """_cmd_ls_group_cli prints one 'slug abs-path' line per workspace to stdout."""
+    """_cmd_ls_group_cli prints one 'slug state abs-path' line per workspace
+    to stdout — state in the middle so the path stays the line's last field."""
 
     def test_single_workspace_stdout(self, camp_cli, tmp_path, capsys):
         group = _make_group("listgrp")
         env = {"CAMP_STATE_DIR": str(tmp_path / "state")}
         ws = _seed_manifest("listgrp", "feat-x", env=env)
 
-        camp_cli._cmd_ls_group_cli([], group, env)
+        camp_cli._cmd_ls_group_cli([], group, env, tmux=_FakeTmux())
 
         out = capsys.readouterr().out
         lines = [ln for ln in out.splitlines() if ln]
         assert len(lines) == 1, f"expected 1 line, got {len(lines)}: {lines!r}"
-        slug, path = lines[0].split(None, 1)
+        slug, state, path = lines[0].split(None, 2)
         assert slug == "feat-x", f"slug mismatch: {slug!r}"
+        assert state == "none", f"state mismatch: {state!r}"
         assert path == str(ws), f"path mismatch: {path!r}"
 
     def test_path_in_output_is_absolute(self, camp_cli, tmp_path, capsys):
@@ -196,11 +249,11 @@ class TestListOutput:
         env = {"CAMP_STATE_DIR": str(tmp_path / "state")}
         _seed_manifest("listgrp", "feat-x", env=env)
 
-        camp_cli._cmd_ls_group_cli([], group, env)
+        camp_cli._cmd_ls_group_cli([], group, env, tmux=_FakeTmux())
 
         out = capsys.readouterr().out
         line = out.strip()
-        _, path = line.split(None, 1)
+        _, _, path = line.split(None, 2)
         assert Path(path).is_absolute(), f"path in output must be absolute, got {path!r}"
 
     def test_multiple_workspaces_one_line_each(self, camp_cli, tmp_path, capsys):
@@ -209,29 +262,31 @@ class TestListOutput:
         ws1 = _seed_manifest("listgrp", "alpha", env=env)
         ws2 = _seed_manifest("listgrp", "beta", env=env)
 
-        camp_cli._cmd_ls_group_cli([], group, env)
+        camp_cli._cmd_ls_group_cli([], group, env, tmux=_FakeTmux())
 
         out = capsys.readouterr().out
         lines = [ln for ln in out.splitlines() if ln]
         assert len(lines) == 2, f"expected 2 lines, got {len(lines)}: {lines!r}"
-        slugs = {ln.split(None, 1)[0] for ln in lines}
+        slugs = {ln.split(None, 2)[0] for ln in lines}
         assert slugs == {"alpha", "beta"}
-        paths = {ln.split(None, 1)[1] for ln in lines}
+        paths = {ln.split(None, 2)[2] for ln in lines}
         assert str(ws1) in paths, f"{ws1} not in output paths {paths}"
         assert str(ws2) in paths, f"{ws2} not in output paths {paths}"
 
     def test_no_header_lines_in_output(self, camp_cli, tmp_path, capsys):
-        """stdout must contain only 'slug path' lines — no table headers."""
+        """stdout must contain only 'slug state path' lines — no table
+        headers. The state column adds no header of its own."""
         group = _make_group("listgrp")
         env = {"CAMP_STATE_DIR": str(tmp_path / "state")}
         _seed_manifest("listgrp", "feat-x", env=env)
 
-        camp_cli._cmd_ls_group_cli([], group, env)
+        camp_cli._cmd_ls_group_cli([], group, env, tmux=_FakeTmux())
 
         out = capsys.readouterr().out
         assert "SLUG" not in out, "output must not contain a 'SLUG' header"
         assert "BRANCH" not in out, "output must not contain a 'BRANCH' header"
         assert "GROUP" not in out, "output must not contain a 'GROUP' header"
+        assert "STATE" not in out, "output must not contain a 'STATE' header"
         assert "---" not in out, "output must not contain a separator line"
 
 
@@ -246,14 +301,23 @@ class TestListJson:
     # an unparsable-group failure row (`{"ok": False, "group": None,
     # "reason": ...}`) and a consumer never has to test for a key's absence.
     # See docs/design/cross-group-cross-account-listing.md, lines 165-170.
-    _FIXED_KEYS = {"slug", "branch", "workspace_path", "group", "ok"}
+    _FIXED_KEYS = {
+        "slug",
+        "branch",
+        "workspace_path",
+        "group",
+        "ok",
+        "state",
+        "window_count",
+        "tmux_session",
+    }
 
     def test_json_carries_workspace_path(self, camp_cli, tmp_path, capsys):
         group = _make_group("listgrp")
         env = {"CAMP_STATE_DIR": str(tmp_path / "state")}
         ws = _seed_manifest("listgrp", "feat-x", env=env)
 
-        camp_cli._cmd_ls_group_cli(["--json"], group, env)
+        camp_cli._cmd_ls_group_cli(["--json"], group, env, tmux=_FakeTmux())
 
         rows = json.loads(capsys.readouterr().out)
         assert len(rows) == 1
@@ -264,7 +328,7 @@ class TestListJson:
         group = _make_group("listgrp")
         env = {"CAMP_STATE_DIR": str(tmp_path / "state")}
 
-        camp_cli._cmd_ls_group_cli(["--json"], group, env)
+        camp_cli._cmd_ls_group_cli(["--json"], group, env, tmux=_FakeTmux())
 
         assert json.loads(capsys.readouterr().out) == []
 
@@ -280,11 +344,20 @@ class TestListJson:
         env = {"CAMP_STATE_DIR": str(tmp_path / "state")}
         _seed_manifest("listgrp", "feat-x", env=env)
 
-        camp_cli._cmd_ls_group_cli(["--json"], group, env)
+        camp_cli._cmd_ls_group_cli(["--json"], group, env, tmux=_FakeTmux())
 
         rows = json.loads(capsys.readouterr().out)
         assert len(rows) == 1
-        assert set(rows[0].keys()) == {"ok", "slug", "branch", "workspace_path", "group"}
+        assert set(rows[0].keys()) == {
+            "ok",
+            "slug",
+            "branch",
+            "workspace_path",
+            "group",
+            "state",
+            "window_count",
+            "tmux_session",
+        }
         assert "host" not in rows[0]
 
     def test_shared_renderer_projects_both_sources_to_one_schema(self, capsys):
@@ -313,7 +386,7 @@ class TestListEmpty:
         group = _make_group("listgrp")
         env = {"CAMP_STATE_DIR": str(tmp_path / "state")}
 
-        camp_cli._cmd_ls_group_cli([], group, env)
+        camp_cli._cmd_ls_group_cli([], group, env, tmux=_FakeTmux())
 
         out = capsys.readouterr().out
         assert out == "", f"empty group must produce no stdout, got {out!r}"
@@ -368,6 +441,7 @@ def list_cli_env(tmp_path):
     env = {**os.environ}
     env["CAMP_CONFIG_DIR"] = str(config_dir)
     env["CAMP_STATE_DIR"] = str(state_dir)
+    _prepend_noop_tmux_to_path(tmp_path, env)
 
     ws_alpha = _seed_manifest_raw("listgroup", "ws-alpha", state_dir=state_dir)
     ws_beta = _seed_manifest_raw("listgroup", "ws-beta", state_dir=state_dir)
@@ -401,10 +475,10 @@ class TestListSubprocess:
         r = _camp(list_cli_env, "list", "--group", "listgroup")
         assert r.returncode == 0
         lines = [ln for ln in r.stdout.splitlines() if ln]
-        slugs = {ln.split(None, 1)[0] for ln in lines}
+        slugs = {ln.split(None, 2)[0] for ln in lines}
         assert "ws-alpha" in slugs, f"ws-alpha missing from output: {r.stdout!r}"
         assert "ws-beta" in slugs, f"ws-beta missing from output: {r.stdout!r}"
-        paths = {ln.split(None, 1)[1] for ln in lines}
+        paths = {ln.split(None, 2)[2] for ln in lines}
         assert str(list_cli_env["ws_alpha"]) in paths, (
             f"ws_alpha path missing from output: {r.stdout!r}"
         )
@@ -413,15 +487,16 @@ class TestListSubprocess:
         )
 
     def test_list_stdout_only_slug_path_lines(self, list_cli_env):
-        """stdout contains only 'slug abs-path' lines, no headers or noise."""
+        """stdout contains only 'slug state abs-path' lines, no headers or
+        noise."""
         r = _camp(list_cli_env, "list", "--group", "listgroup")
         assert r.returncode == 0
         for line in r.stdout.splitlines():
             if not line:
                 continue
-            parts = line.split(None, 1)
-            assert len(parts) == 2, f"line {line!r} is not 'slug path'"
-            slug, path = parts
+            parts = line.split(None, 2)
+            assert len(parts) == 3, f"line {line!r} is not 'slug state path'"
+            slug, state, path = parts
             assert Path(path).is_absolute(), f"path {path!r} in output must be absolute"
 
 
@@ -464,6 +539,7 @@ class TestListEmptySubprocess:
         env = {**os.environ}
         env["CAMP_CONFIG_DIR"] = str(config_dir)
         env["CAMP_STATE_DIR"] = str(state_dir)
+        _prepend_noop_tmux_to_path(tmp_path, env)
 
         r = subprocess.run(
             [sys.executable, str(_CLI_CAMP), "list", "--group", "emptygroup"],
@@ -500,6 +576,7 @@ def two_group_list_cli_env(tmp_path):
     env = {**os.environ}
     env["CAMP_CONFIG_DIR"] = str(config_dir)
     env["CAMP_STATE_DIR"] = str(state_dir)
+    _prepend_noop_tmux_to_path(tmp_path, env)
 
     ws_a = _seed_manifest_raw("groupa", "ws-a", state_dir=state_dir)
     ws_b = _seed_manifest_raw("groupb", "ws-b", state_dir=state_dir)
@@ -532,7 +609,7 @@ class TestListAllGroups:
         )
         assert r.returncode == 0, f"stdout: {r.stdout}\nstderr: {r.stderr}"
         lines = [ln for ln in r.stdout.splitlines() if ln]
-        slugs = {ln.split(None, 1)[0] for ln in lines}
+        slugs = {ln.split(None, 2)[0] for ln in lines}
         assert slugs == {"ws-a", "ws-b"}
 
     def test_json_carries_the_group_each_row_belongs_to(
@@ -546,7 +623,16 @@ class TestListAllGroups:
         rows = json.loads(r.stdout)
         assert {row["group"] for row in rows} == {"groupa", "groupb"}
         assert {row["slug"] for row in rows} == {"ws-a", "ws-b"}
-        assert set(rows[0].keys()) == {"ok", "slug", "branch", "workspace_path", "group"}
+        assert set(rows[0].keys()) == {
+            "ok",
+            "slug",
+            "branch",
+            "workspace_path",
+            "group",
+            "state",
+            "window_count",
+            "tmux_session",
+        }
         assert rows[0]["ok"] is True
 
     def test_short_and_long_spellings_produce_byte_identical_output(
@@ -586,6 +672,7 @@ class TestListAllGroups:
         env = {**os.environ}
         env["CAMP_CONFIG_DIR"] = str(config_dir)
         env["CAMP_STATE_DIR"] = str(state_dir)
+        _prepend_noop_tmux_to_path(tmp_path, env)
         env_dict = {"env": env}
 
         _seed_manifest_raw("zzzgroup", "slug-in-zzz", state_dir=state_dir)
@@ -601,7 +688,7 @@ class TestListAllGroups:
         single-group `camp list` surface."""
         r = _camp(list_cli_env, "list", "--group", "listgroup")
         assert r.returncode == 0, r.stderr
-        lines = {ln.split(None, 1)[0] for ln in r.stdout.splitlines() if ln}
+        lines = {ln.split(None, 2)[0] for ln in r.stdout.splitlines() if ln}
         assert lines == {"ws-alpha", "ws-beta"}
 
     def test_all_groups_with_a_named_group_refuses(self, two_group_list_cli_env) -> None:
@@ -646,6 +733,7 @@ def no_group_env(tmp_path):
     env["CAMP_CONFIG_DIR"] = str(config_dir)
     env["CAMP_STATE_DIR"] = str(state_dir)
     env["WORKSPACE_ROOT"] = str(workspace_root)
+    _prepend_noop_tmux_to_path(tmp_path, env)
 
     return {"env": env, "tmp_path": tmp_path}
 
@@ -683,6 +771,7 @@ class TestListAllGroupsNarrows:
         env["CAMP_CONFIG_DIR"] = str(config_dir)
         env["CAMP_STATE_DIR"] = str(state_dir)
         env["WORKSPACE_ROOT"] = str(workspace_root)
+        _prepend_noop_tmux_to_path(tmp_path, env)
         env_dict = {"env": env}
 
         _seed_manifest_raw("onlygroup", "ws-only", state_dir=state_dir)
@@ -715,6 +804,7 @@ class TestListAllGroupsNarrows:
         env = {**os.environ}
         env["CAMP_CONFIG_DIR"] = str(config_dir)
         env["CAMP_STATE_DIR"] = str(state_dir)
+        _prepend_noop_tmux_to_path(tmp_path, env)
         env_dict = {"env": env}
 
         _seed_manifest_raw("goodgroup", "ws-good", state_dir=state_dir)
@@ -781,6 +871,7 @@ class TestListAllGroupsNarrows:
         env = {**os.environ}
         env["CAMP_CONFIG_DIR"] = str(config_dir)
         env["CAMP_STATE_DIR"] = str(state_dir)
+        _prepend_noop_tmux_to_path(tmp_path, env)
         env_dict = {"env": env}
 
         r = _camp_from(env_dict, tmp_path, "list", "--all-groups", "--json")
@@ -789,3 +880,243 @@ class TestListAllGroupsNarrows:
         assert {row["slug"] for row in rows} == {"ws-pop"}
         assert {row["group"] for row in rows} == {"populated"}
         assert r.stderr == ""
+
+
+# ---------------------------------------------------------------------------
+# camp list — the tmux session state column
+# (task/carry-session-state-into-camp-list-on-every-dispatch-axis)
+#
+# The host-relay and --all-hosts axes are pinned in test_camp_list_host.py
+# and test_cli_all_hosts.py respectively — their remote-row fixtures now
+# carry `state` and their human-line assertions include it, so this file
+# covers the two purely-local axes (group-scoped, --all-groups) plus every
+# other test-contract item.
+# ---------------------------------------------------------------------------
+
+
+def _write_config_group(tmp_path: Path, group_name: str) -> tuple[Path, Path]:
+    """A CAMP_CONFIG_DIR/CAMP_STATE_DIR pair with *group_name* declared as a
+    real group config — what `_cmd_ls_all_groups_cli` (which discovers
+    groups from the real environment, bypassing any `env=` dict) needs."""
+    config_dir = tmp_path / "camp-config"
+    groups_dir = config_dir / "groups"
+    groups_dir.mkdir(parents=True, exist_ok=True)
+    state_dir = tmp_path / "camp-state"
+    state_dir.mkdir(parents=True, exist_ok=True)
+    _write_group_toml(groups_dir, group_name)
+    return config_dir, state_dir
+
+
+class TestStateColumnAcrossDispatchAxes:
+    """Bullet 1: the state column reaches the operator on every local
+    `camp list` dispatch axis — verified against the dispatch graph
+    (`cmd_ls_group`'s callers), not the shared renderer alone."""
+
+    def test_group_scoped_axis_carries_state(self, camp_cli, tmp_path, capsys):
+        from camp.launch.naming import workspace_session_name
+        from camp.launch.stop import SessionListing, TmuxSession
+
+        group = _make_group("axisgrp")
+        env = {"CAMP_STATE_DIR": str(tmp_path / "state")}
+        _seed_manifest("axisgrp", "feat-x", env=env)
+        name = workspace_session_name("axisgrp", "feat-x")
+        tmux = _FakeTmux(SessionListing(sessions=(TmuxSession(name=name, windows=2),)))
+
+        camp_cli._cmd_ls_group_cli(["--json"], group, env, tmux=tmux)
+
+        rows = json.loads(capsys.readouterr().out)
+        assert rows[0]["state"] == "running"
+        assert rows[0]["window_count"] == 2
+
+    def test_all_groups_axis_carries_state(self, camp_cli, tmp_path, capsys, monkeypatch):
+        from camp.launch.naming import workspace_session_name
+        from camp.launch.stop import SessionListing, TmuxSession
+
+        config_dir, state_dir = _write_config_group(tmp_path, "axisgrp2")
+        monkeypatch.setenv("CAMP_CONFIG_DIR", str(config_dir))
+        monkeypatch.setenv("CAMP_STATE_DIR", str(state_dir))
+        _seed_manifest_raw("axisgrp2", "feat-y", state_dir=state_dir)
+        name = workspace_session_name("axisgrp2", "feat-y")
+        tmux = _FakeTmux(SessionListing(sessions=(TmuxSession(name=name, windows=3),)))
+
+        camp_cli._cmd_ls_all_groups_cli(["--json"], None, tmux=tmux)
+
+        rows = json.loads(capsys.readouterr().out)
+        assert rows[0]["state"] == "running"
+        assert rows[0]["window_count"] == 3
+
+
+class TestStateVariesWithTmuxAnswer:
+    """Bullet 4: the state printed for ONE fixed workspace varies only with
+    what tmux reported — running (with a count), then absent, then
+    unanswered."""
+
+    def test_running_then_none_then_unanswered(self, camp_cli, tmp_path, capsys):
+        from camp.launch.naming import workspace_session_name
+        from camp.launch.stop import SessionListing, TmuxSession, UNANSWERED
+
+        group = _make_group("varygrp")
+        env = {"CAMP_STATE_DIR": str(tmp_path / "state")}
+        _seed_manifest("varygrp", "feat-v", env=env)
+        name = workspace_session_name("varygrp", "feat-v")
+
+        running = _FakeTmux(SessionListing(sessions=(TmuxSession(name=name, windows=4),)))
+        camp_cli._cmd_ls_group_cli(["--json"], group, env, tmux=running)
+        rows = json.loads(capsys.readouterr().out)
+        assert rows[0]["state"] == "running"
+        assert rows[0]["window_count"] == 4
+
+        none_answer = _FakeTmux(SessionListing(sessions=()))
+        camp_cli._cmd_ls_group_cli(["--json"], group, env, tmux=none_answer)
+        rows = json.loads(capsys.readouterr().out)
+        assert rows[0]["state"] == "none"
+        assert rows[0]["window_count"] is None
+
+        unanswered = _FakeTmux(UNANSWERED)
+        camp_cli._cmd_ls_group_cli(["--json"], group, env, tmux=unanswered)
+        rows = json.loads(capsys.readouterr().out)
+        assert rows[0]["state"] == "unknown"
+        assert rows[0]["window_count"] is None
+
+
+class TestUnmanagedRow:
+    """Bullet 5: an unmanaged (leftover) row prints the tmux name in the
+    first column and `-` for the path; its JSON row carries `slug: null`.
+    Assert this on the widened (`--all-groups`) axis."""
+
+    def test_unmanaged_row_json_and_human_shape(self, camp_cli, tmp_path, capsys, monkeypatch):
+        from camp.launch.stop import SessionListing, TmuxSession
+
+        config_dir, state_dir = _write_config_group(tmp_path, "unmgrp")
+        monkeypatch.setenv("CAMP_CONFIG_DIR", str(config_dir))
+        monkeypatch.setenv("CAMP_STATE_DIR", str(state_dir))
+
+        leftover = "camp-oldproj-a1b2c3d4"
+        tmux = _FakeTmux(SessionListing(sessions=(TmuxSession(name=leftover, windows=5),)))
+
+        camp_cli._cmd_ls_all_groups_cli(["--json"], None, tmux=tmux)
+        rows = json.loads(capsys.readouterr().out)
+        assert len(rows) == 1
+        assert rows[0]["slug"] is None
+        assert rows[0]["tmux_session"] == leftover
+        assert rows[0]["window_count"] == 5
+
+        camp_cli._cmd_ls_all_groups_cli([], None, tmux=tmux)
+        out = capsys.readouterr().out
+        first, state, path = out.strip().split(None, 2)
+        assert first == leftover
+        assert state == "unmanaged"
+        assert path == "-"
+
+
+class TestDisclosureBoundary:
+    """Bullet 6: with a leftover session present, the group-scoped listing's
+    stdout contains the count line and does NOT contain the leftover's name
+    anywhere — human or --json — while the same fixture under --all-groups
+    does."""
+
+    def test_group_scoped_hides_leftover_all_groups_names_it(
+        self, camp_cli, tmp_path, capsys, monkeypatch
+    ):
+        from camp.launch.stop import SessionListing, TmuxSession
+
+        config_dir, state_dir = _write_config_group(tmp_path, "discgrp")
+        monkeypatch.setenv("CAMP_CONFIG_DIR", str(config_dir))
+        monkeypatch.setenv("CAMP_STATE_DIR", str(state_dir))
+        env = {"CAMP_STATE_DIR": str(state_dir)}
+        _seed_manifest("discgrp", "feat-d", env=env)
+        group = _make_group("discgrp")
+
+        leftover = "camp-oldproj-a1b2c3d4"
+        tmux = _FakeTmux(SessionListing(sessions=(TmuxSession(name=leftover, windows=2),)))
+
+        camp_cli._cmd_ls_group_cli([], group, env, tmux=tmux)
+        human_out = capsys.readouterr().out
+        assert leftover not in human_out
+        assert "1 unmanaged camp sessions" in human_out
+
+        camp_cli._cmd_ls_group_cli(["--json"], group, env, tmux=tmux)
+        json_out = capsys.readouterr().out
+        assert leftover not in json_out
+        rows = json.loads(json_out)
+        assert any(r.get("unmanaged_count") == 1 for r in rows)
+
+        camp_cli._cmd_ls_all_groups_cli(["--json"], None, tmux=tmux)
+        widened_out = capsys.readouterr().out
+        assert leftover in widened_out
+
+
+class TestSessionNameEscaping:
+    """Bullet 7: a tmux session name carrying `|` renders as one row with
+    the right count (legal on tmux 3.7c — the enumeration format reads the
+    count first for exactly this reason); a name carrying a control
+    character renders escaped rather than raw.
+
+    Neither character can appear in a name `is_retired_session_name`
+    recognizes (its component charset is `[A-Za-z0-9_-]` — see
+    `camp/launch/naming.py`), so neither can reach `camp list`'s unmanaged
+    row end to end without failing the shipped, pinned classifier's own
+    filter — that filter is Task 3's, out of this task's footprint. This
+    class evidences the property at the two components that ARE this
+    task's: the stub's `list-sessions` arm faithfully round-trips a `|`
+    through the real, pinned `Tmux.list_sessions()` parser, and
+    `render_workspace_list` escapes a control character in a tmux-supplied
+    name it is handed directly."""
+
+    def test_pipe_name_round_trips_through_the_real_parser(self, tmp_path, monkeypatch):
+        import importlib.util
+
+        from camp.launch.stop import Tmux
+
+        source_path = Path(__file__).resolve().parent / "test_session_cli.py"
+        spec = importlib.util.spec_from_file_location(
+            "camp_tests_session_cli_stub_source", source_path
+        )
+        assert spec and spec.loader
+        session_cli_mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(session_cli_mod)
+        stub_source = session_cli_mod._TMUX_STUB
+
+        bin_dir = tmp_path / "fakebin"
+        bin_dir.mkdir()
+        tmux_bin = bin_dir / "tmux"
+        tmux_bin.write_text(stub_source, encoding="utf-8")
+        tmux_bin.chmod(0o755)
+
+        table_file = tmp_path / "table.json"
+        pipe_name = "camp-pipe|9|evil-1a2b3c4d"
+        table_file.write_text(json.dumps({pipe_name: "sleep 1"}), encoding="utf-8")
+        windows_file = tmp_path / "windows.json"
+        windows_file.write_text(json.dumps({pipe_name: 3}), encoding="utf-8")
+
+        # Drive the pinned Tmux() seam for real, PATH pointed at the stub —
+        # never at the actual `tmux` binary — via subprocess.run's ambient
+        # environment, which `monkeypatch.setenv` controls for this test.
+        monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+        monkeypatch.setenv("CAMP_FAKE_TMUX_TABLE_FILE", str(table_file))
+        monkeypatch.setenv("CAMP_FAKE_TMUX_WINDOWS_FILE", str(windows_file))
+
+        result = Tmux().list_sessions()
+
+        assert len(result.sessions) == 1
+        assert result.sessions[0].name == pipe_name
+        assert result.sessions[0].windows == 3
+
+    def test_control_character_in_a_tmux_supplied_name_renders_escaped(self, capsys):
+        from camp.provision.lifecycle import render_workspace_list
+
+        entry = {
+            "slug": None,
+            "branch": "",
+            "workspace_path": "-",
+            "group": None,
+            "state": "unmanaged",
+            "window_count": 1,
+            "tmux_session": "camp-ctrl-\x07-name",
+        }
+
+        render_workspace_list([entry], as_json=False)
+        out = capsys.readouterr().out
+        assert "\x07" not in out
+        assert "\\x07" in out
+        assert len(out.splitlines()) == 1

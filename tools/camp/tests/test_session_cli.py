@@ -104,6 +104,9 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 _PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
 _CLI_CAMP = _PLUGIN_DIR / "cli" / "camp"
 
+if str(_PLUGIN_DIR) not in sys.path:
+    sys.path.insert(0, str(_PLUGIN_DIR))
+
 _SITECUSTOMIZE = '''
 """Registers a fake harness so a camp CLI subprocess can launch and enumerate."""
 import os
@@ -343,6 +346,28 @@ elif args and args[0] == "kill-session":
                 rows = [r for r in handle.read().splitlines() if r.split("\\t")[0] != dead]
             with open(rows_path, "w") as handle:
                 handle.write("".join(f"{r}\\n" for r in rows))
+elif args and args[0] == "list-sessions":
+    fail_mode = os.environ.get("CAMP_FAKE_TMUX_LIST_SESSIONS_FAIL")
+    if fail_mode == "no-server":
+        sys.stderr.write("error connecting to /tmp/fake (No such file or directory)\\n")
+        sys.exit(1)
+    if fail_mode == "unsafe-permissions":
+        sys.stderr.write("directory /tmp/fake has unsafe permissions\\n")
+        sys.exit(1)
+    table = _table()
+    windows_path = os.environ.get("CAMP_FAKE_TMUX_WINDOWS_FILE")
+    windows = {}
+    if windows_path and os.path.exists(windows_path):
+        with open(windows_path) as handle:
+            windows = json.load(handle)
+    for name in table:
+        count = windows.get(name, 1)
+        # Window count first, name as the remainder, "|"-delimited to match
+        # what the real Tmux.list_sessions() seam asks tmux to format
+        # (`#{session_windows}|#{session_name}`) and parses on the FIRST
+        # "|" — a session name may legally carry one of its own, so the
+        # count is never read out of the name's tail.
+        print(f"{count}|{name}")
 '''
 
 
@@ -3709,3 +3734,115 @@ def test_camp_launch_resume_with_history_does_not_claim_history_was_lost(
     assert result.returncode == 0, result.stderr
     assert "NO PRIOR HISTORY" not in result.stderr
     assert "history_restored" not in json.loads(result.stdout)
+
+
+# ---------------------------------------------------------------------------
+# camp list — the tmux session state column, end to end through the REAL
+# `cli/camp` binary and the `_TMUX_STUB`'s `list-sessions` arm. The bulk of
+# the state-column contract is pinned in test_camp_list.py via the injectable
+# `_FakeTmux` seam; these four pin the properties that need a real subprocess
+# boundary (an unmanaged session's presence must never provoke a kill, a
+# real non-zero tmux exit's stderr text distinguishes outage from empty, and
+# the fake's own `list-sessions` arm is what the window-count/credential-store
+# pins exercise).
+# ---------------------------------------------------------------------------
+
+
+def test_list_kills_nothing_with_an_unmanaged_session_present(cli_env) -> None:
+    """AC54: `camp list` never kills a session — including a leftover
+    (unmanaged) one it merely counts or names. Run the subject end to end and
+    assert the observable consequence in the tmux argv log, not the absence
+    of a code path."""
+    _new_workspace(cli_env, "feat-safe")
+    cli_env["tmux_table_file"].write_text(
+        json.dumps({"camp-oldproj-a1b2c3d4": "sleep 1"}), encoding="utf-8"
+    )
+
+    result = _camp(cli_env, "list", "--group", "mygroup")
+
+    assert result.returncode == 0, result.stderr
+    kills = [argv for argv in _tmux_argv(cli_env) if argv[0] == "kill-session"]
+    assert kills == [], f"camp list must issue no kill-session, got {kills!r}"
+
+
+def test_list_state_column_needs_no_credential_store(cli_env, tmp_path) -> None:
+    """The state column is a pure tmux read: with no harness account
+    configured on the group (mygroup declares none) AND `CLAUDE_CONFIG_DIR`
+    pointed at an empty directory, the running workspace's state still comes
+    back correctly. This pins the retired account-scoping defect: nothing in
+    the state derivation path may consult a credential store."""
+    from camp.launch.naming import workspace_session_name
+
+    empty_claude_dir = tmp_path / "empty-claude-config"
+    empty_claude_dir.mkdir()
+    _new_workspace(cli_env, "feat-cred")
+    name = workspace_session_name("mygroup", "feat-cred")
+    cli_env["tmux_table_file"].write_text(
+        json.dumps({name: "sleep 1"}), encoding="utf-8"
+    )
+
+    result = _camp(
+        cli_env, "list", "--group", "mygroup", "--json",
+        extra_env={"CLAUDE_CONFIG_DIR": str(empty_claude_dir)},
+    )
+
+    assert result.returncode == 0, result.stderr
+    rows = json.loads(result.stdout)
+    row = next(r for r in rows if r["slug"] == "feat-cred")
+    assert row["state"] == "running"
+
+
+def test_list_distinguishes_outage_from_empty(cli_env) -> None:
+    """Same non-zero exit status, two different tmux stderr texts, two
+    different listings. UNSAFE-PERMISSIONS is an outage tmux never actually
+    answered: `unknown` rows plus a stderr notice. NO-SERVER is tmux
+    genuinely answering "nothing is running": `none` rows and silence on
+    stderr. The outage case must never be read as the empty case."""
+    _new_workspace(cli_env, "feat-outage")
+
+    outage = _camp(
+        cli_env, "list", "--group", "mygroup",
+        extra_env={"CAMP_FAKE_TMUX_LIST_SESSIONS_FAIL": "unsafe-permissions"},
+    )
+    assert outage.returncode == 0, outage.stderr
+    _, outage_state, _ = outage.stdout.strip().split(None, 2)
+    assert outage_state == "unknown"
+    assert outage.stderr.strip() != ""
+
+    empty = _camp(
+        cli_env, "list", "--group", "mygroup",
+        extra_env={"CAMP_FAKE_TMUX_LIST_SESSIONS_FAIL": "no-server"},
+    )
+    assert empty.returncode == 0, empty.stderr
+    _, empty_state, _ = empty.stdout.strip().split(None, 2)
+    assert empty_state == "none"
+    assert empty.stderr == ""
+
+
+def test_list_window_counts_differ_between_two_running_workspaces(cli_env) -> None:
+    """Two running workspaces in ONE listing carry DIFFERENT window counts,
+    driven by the fake's per-session windows data — showing the count is
+    per-session, not per-listing."""
+    from camp.launch.naming import workspace_session_name
+
+    _new_workspace(cli_env, "feat-w1")
+    _new_workspace(cli_env, "feat-w2")
+    name1 = workspace_session_name("mygroup", "feat-w1")
+    name2 = workspace_session_name("mygroup", "feat-w2")
+    cli_env["tmux_table_file"].write_text(
+        json.dumps({name1: "sleep 1", name2: "sleep 1"}), encoding="utf-8"
+    )
+    windows_file = cli_env["tmp_path"] / "windows.json"
+    windows_file.write_text(json.dumps({name1: 2, name2: 5}), encoding="utf-8")
+
+    result = _camp(
+        cli_env, "list", "--group", "mygroup", "--json",
+        extra_env={"CAMP_FAKE_TMUX_WINDOWS_FILE": str(windows_file)},
+    )
+
+    assert result.returncode == 0, result.stderr
+    rows = json.loads(result.stdout)
+    counts = {row["slug"]: row["window_count"] for row in rows}
+    assert counts["feat-w1"] == 2
+    assert counts["feat-w2"] == 5
+    assert counts["feat-w1"] != counts["feat-w2"]
