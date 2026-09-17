@@ -307,6 +307,27 @@ class Tmux:
             env=env,
         )
 
+    def switch_client(
+        self, name: str, *, timeout: float | None = None
+    ) -> subprocess.CompletedProcess | None:
+        """Move the current tmux client to session *name* — ``switch-client``.
+
+        Deliberately never exec'd by any caller: `switch-client` returns
+        immediately where `attach-session` blocks, so an exec'd
+        `switch-client` leaves the calling pane with no process, and tmux
+        tears down the pane, the window, and (when that window was its
+        last) the whole source session — see
+        `camp/host/handoff.py`'s module docstring and
+        `docs/design/the-door-creates-or-connects-a-workspace-session.md`'s
+        "Handing over the terminal". The caller runs this as an ordinary
+        subprocess and exits on its own result, the same way
+        :meth:`kill_session`'s own caller inspects that call's result
+        instead of trusting a re-poll alone.
+
+        Returns ``None`` when tmux could not be asked at all.
+        """
+        return self._run(["switch-client", "-t", target(name)], timeout=timeout)
+
     def capture_pane(
         self, name: str, *, timeout: float | None = None
     ) -> str | None:
