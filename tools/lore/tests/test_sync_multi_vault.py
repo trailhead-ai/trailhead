@@ -22,7 +22,9 @@ Covers:
   - a diverged vault is rebased onto origin and then pushed
   - a rebase conflict aborts cleanly: no mid-rebase state, exit 1, `lore resolve` named
   - a conflicted vault does not strand the others (per-vault isolation holds)
-  - an unreachable remote makes fetch soft: notice, exit 0, commit still lands
+  - an unreachable remote with nothing committed this run stays soft (converged);
+    with an unpublished commit it is `holding`, exit non-zero — a host must
+    never report hoarded work as `converged`
   - an unborn (`git init` + `remote add`) vault adopts the remote branch
   - an unborn vault with no matching remote branch is reported, not silent
   - a pulled record becomes visible to `lore search` (reindex is not vacuous)
@@ -38,7 +40,8 @@ Covers:
 
 ``lore flush``:
   - the sync tail: the full commit → pull → push flow over every writable vault
-  - a tail conflict exits 0 and names `lore resolve <vault>`; offline stays soft
+  - a tail conflict exits 0 and names `lore resolve <vault>`; offline with an
+    unpublished commit is `holding`, exit non-zero (same rule as full sync)
   - shared vaults are outside the tail (the shared-vault write gate)
   - ``--no-sync`` opts out: session-record commit only, and names what it left
 """
@@ -49,6 +52,7 @@ import importlib
 import json
 import os
 import shlex
+import shutil
 import subprocess
 import sys
 import time
@@ -395,8 +399,12 @@ def test_status_flags_a_remote_without_an_upstream_as_never_pushed(tmp_path):
     assert "lore sync --vault default" in r.stdout
 
 
-def test_sync_soft_network_failure_does_not_fail_the_run_or_block_other_vaults(tmp_path):
-    """An unreachable remote is soft: exit 0, and later vaults still commit.
+def test_sync_soft_network_failure_does_not_strand_other_vaults(tmp_path):
+    """An unreachable remote holds ITS OWN vault (offline with a just-committed,
+    unpublished change is `holding`, not `converged` — see the module's
+    `_pull_and_push_one` docstring) but never strands a later vault: the commit
+    lands before the network is touched, and `later` still commits and the run
+    still attempts it.
 
     The fetch is the first network probe, so it is the one that reports; the
     push is then skipped rather than double-reporting the same dead remote.
@@ -412,8 +420,9 @@ def test_sync_soft_network_failure_does_not_fail_the_run_or_block_other_vaults(t
     )
 
     r = run_cli(["sync"], config_home=config_home, state_dir=state_dir)
-    assert r.returncode == 0, (
-        f"a network failure is soft — the commit is durable; stderr={r.stderr!r}"
+    assert r.returncode != 0, (
+        f"the broken vault is holding an unpublished commit — the run must "
+        f"exit non-zero; stderr={r.stderr!r}"
     )
     assert "fetch failed" in r.stderr
     assert _commit_count(broken) == 2, "the commit must land before the network is touched"
@@ -552,8 +561,12 @@ def test_sync_rebase_conflict_aborts_cleanly_and_fails_hard(tmp_path):
     assert (default / "task" / "README.md").read_text() == "edited on device A\n"
 
 
-def test_sync_unreachable_remote_makes_fetch_soft(tmp_path):
-    """Offline is soft: the commit lands, one notice fires, exit stays 0."""
+def test_sync_unreachable_remote_with_a_just_committed_change_holds(tmp_path):
+    """Offline with a commit this run just made: the commit still lands and one
+    fetch-failure notice fires, but the run exits NON-ZERO — the vault is
+    holding unpublished work on this machine, which is the `holding` outcome,
+    never `converged`. This supersedes the prior "offline is soft, exit stays
+    0" contract for exactly this shape (see `_pull_and_push_one`'s docstring)."""
     config_home = tmp_path / "config"
     state_dir = tmp_path / "state"
     state_dir.mkdir(parents=True)
@@ -567,8 +580,9 @@ def test_sync_unreachable_remote_makes_fetch_soft(tmp_path):
     write_vault_config(config_home, [("default", "default", default)])
 
     r = run_cli(["sync"], config_home=config_home, state_dir=state_dir)
-    assert r.returncode == 0, (
-        f"a fetch failure is soft — the commit is durable; stderr={r.stderr!r}"
+    assert r.returncode != 0, (
+        f"an offline vault holding an unpublished commit must exit non-zero; "
+        f"stderr={r.stderr!r}"
     )
     assert "fetch failed" in r.stderr
     assert _commit_count(default) == 2, "the commit must land before fetch is attempted"
@@ -1039,7 +1053,14 @@ def test_flush_sync_tail_conflict_exits_zero_and_names_lore_resolve(tmp_path):
 
 
 def test_flush_sync_tail_offline_is_soft(tmp_path):
-    """Offline: exit 0, the work is committed locally, and the notice says so."""
+    """Offline: `lore flush`'s own exit code is always dropped for the sync tail
+    (see `cmd_flush`'s docstring — "neither ending changes the exit code"), so
+    it stays 0 and the work is committed locally either way. But the tail's
+    per-vault `cmd_sync` call now reports `holding` for exactly this shape (an
+    unpublished commit behind an unreachable remote — see
+    `_pull_and_push_one`), so `_sync_tail_notice` now fires where it
+    previously did not: the flush names the vault and a remedy, not just the
+    raw "fetch failed" line."""
     config_home = tmp_path / "config"
     state_dir = tmp_path / "state"
     state_dir.mkdir(parents=True)
@@ -1052,9 +1073,13 @@ def test_flush_sync_tail_offline_is_soft(tmp_path):
     before = _commit_count(default)
 
     r = run_cli(["flush"], config_home=config_home, state_dir=state_dir)
-    assert r.returncode == 0, f"a network failure stays soft; stderr={r.stderr!r}"
+    assert r.returncode == 0, f"the flush's own exit code is never the tail's; stderr={r.stderr!r}"
     assert _commit_count(default) == before + 1, "the tail's commit must still land"
     assert "fetch failed" in r.stderr
+    assert "did not complete" in r.stderr and "'default'" in r.stderr, (
+        f"the tail must now name the held vault, since it no longer reports "
+        f"success for a vault holding an unpublished commit; stderr={r.stderr!r}"
+    )
 
 
 def test_flush_sync_tail_never_touches_a_shared_vault(tmp_path):
@@ -1356,12 +1381,134 @@ def test_flush_sync_tail_skips_a_mid_resolution_vault_without_aborting_it(tmp_pa
     assert "lore resolve v-stuck" in r.stderr
 
 
+# ── lore sync: TRACKED content is always in scope, regardless of allow-list ─
+#
+# The commit-scope allow-list (record kinds, `sites/`, root `.gitignore`) was
+# only ever meant to bound NEW, untracked content. A vault adopted via `lore
+# vault add --path <existing repo>` can carry tracked content outside it (a
+# root README, say), and a kind directory can be removed wholesale (its
+# pathspec then absent from the allow-list's own existence filter) — both must
+# still be committed, never silently read as "nothing to commit".
+
+
+def test_sync_commits_a_tracked_root_file_outside_the_commit_scope_allowlist(tmp_path):
+    """An adopted repo's tracked root README, outside every allow-listed kind
+    directory / `sites/` / `.gitignore`: editing it must still be committed.
+    Before the fix, the status probe was scoped to the same allow-list used for
+    staging, so this edit was invisible and the vault read as clean forever."""
+    config_home = tmp_path / "config"
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(parents=True)
+    default = _make_vault(tmp_path / "v-default", dirty=False)
+    (default / "README.md").write_text("adopted repo readme\n")
+    _git(default, "add", "-A")
+    _git(default, "commit", "-m", "adopt: pre-existing root README")
+    (default / "README.md").write_text("adopted repo readme, edited\n")
+    write_vault_config(config_home, [("default", "default", default)])
+    before = _commit_count(default)
+
+    r = run_cli(["sync"], config_home=config_home, state_dir=state_dir)
+    assert r.returncode == 0, r.stderr
+    assert "Nothing to commit" not in r.stdout, (
+        f"a tracked root file outside the allow-list must not read as clean; "
+        f"stdout={r.stdout!r}"
+    )
+    assert _commit_count(default) > before, "the README edit must be committed"
+    name_status = _git(
+        default, "show", "--name-status", "--pretty=format:", "HEAD"
+    ).stdout.strip()
+    assert name_status == "M\tREADME.md", name_status
+    assert _git(default, "status", "--porcelain").stdout.strip() == "", (
+        "the vault must end clean once the tracked edit is committed"
+    )
+
+
+def test_sync_commits_a_wholesale_removed_kind_directory_as_a_deletion(tmp_path):
+    """Removing an ENTIRE kind directory (not one file inside it) makes the
+    allow-list's own existence filter drop that kind's pathspec entirely — the
+    directory no longer exists to name. The deletion is a change to already-
+    tracked content, so it must still be staged and committed unscoped."""
+    config_home = tmp_path / "config"
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(parents=True)
+    default = _make_vault(tmp_path / "v-default", dirty=False)
+    write_vault_config(config_home, [("default", "default", default)])
+    assert (default / "task").is_dir()
+
+    shutil.rmtree(default / "task")
+
+    r = run_cli(["sync"], config_home=config_home, state_dir=state_dir)
+    assert r.returncode == 0, r.stderr
+    name_status = _git(
+        default, "show", "--name-status", "--pretty=format:", "HEAD"
+    ).stdout.strip()
+    assert name_status == "D\ttask/README.md", name_status
+    assert _git(default, "status", "--porcelain").stdout.strip() == "", (
+        "the vault must end clean once the wholesale removal is committed"
+    )
+
+
+def test_sync_reports_untracked_content_outside_the_allowlist_in_a_notice(tmp_path):
+    """Untracked content outside the allow-list (not `outpost/`, which has its
+    own dedicated carve-out) is never staged — but it must be named in a
+    notice, not silently swallowed, and it must not block the rest of the
+    vault's in-scope content from committing."""
+    config_home = tmp_path / "config"
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(parents=True)
+    default = _make_vault(tmp_path / "v-default", dirty=True)  # task/record.md: in scope
+    (default / "junk.txt").write_text("scratch notes, never meant to be committed\n")
+    write_vault_config(config_home, [("default", "default", default)])
+
+    r = run_cli(["sync"], config_home=config_home, state_dir=state_dir)
+    assert r.returncode == 0, r.stderr
+    assert "junk.txt" in r.stderr, f"the stray file must be named in a notice; stderr={r.stderr!r}"
+    assert "task/record.md" in _git(default, "ls-files").stdout.split(), (
+        "in-scope content must still be committed alongside the notice"
+    )
+    assert "junk.txt" in _git(default, "status", "--porcelain").stdout, (
+        "the stray file must remain uncommitted"
+    )
+
+
 # ── lore sync: commit scope is bounded to records and sites ────────────────
 #
 # `outpost/` is a vault's free-write daemon-config zone (like `sites/`), but
 # unlike `sites/` it is an operator's local working set, never content to
 # publish — so `lore sync`'s own commit step must never stage it, regardless
 # of what a vault's `.gitignore` does or doesn't cover.
+
+
+def test_sync_integrates_a_behind_vault_carrying_an_untracked_outpost_dir(tmp_path):
+    """A vault one commit behind origin, carrying an untracked `outpost/`
+    directory: it must still be read as clean and must still integrate. Before
+    the fix, `_vault_is_dirty` counted `outpost/` as dirt, so ANY vault
+    carrying it — every daemon-managed vault — never integrated, via
+    `--pull-only` or the implicit pull that runs on every write."""
+    config_home = tmp_path / "config"
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(parents=True)
+    default = _make_vault(tmp_path / "v-default", dirty=False)
+    remote = _make_bare_remote(tmp_path / "remote.git")
+    _wire_remote(default, remote)
+    other = _clone_as_second_device(remote, tmp_path / "device-b")
+    (other / "theirs.md").write_text("# device B\n")
+    _git(other, "add", "-A")
+    _git(other, "commit", "-m", "device B record")
+    _git(other, "push", "origin")
+
+    (default / "outpost").mkdir()
+    (default / "outpost" / "config.json").write_text('{"tracked": false}\n')
+    write_vault_config(config_home, [("default", "default", default)])
+
+    r = run_cli(["sync", "--pull-only"], config_home=config_home, state_dir=state_dir)
+    assert r.returncode == 0, r.stderr
+    assert (default / "theirs.md").exists(), (
+        "a vault carrying an untracked outpost/ must still integrate a clean pull"
+    )
+    assert (default / "outpost" / "config.json").exists(), (
+        "outpost/ itself must be left exactly where it was"
+    )
 
 
 def test_sync_outpost_edit_is_never_committed_and_stays_unstaged(tmp_path):
@@ -2193,6 +2340,76 @@ def test_json_outcome_holding_diverged_unsettleable(tmp_path):
         _git(remote, "rev-parse", "HEAD").stdout.strip()
     assert (default / "task" / "README.md").read_text() == "edited on device A\n"
     _assert_no_mid_rebase(default)
+
+
+def test_json_outcome_holding_offline_with_a_just_committed_change(tmp_path):
+    """Offline, with a commit landed THIS RUN and never published: `holding`,
+    never `converged` — the design doc's "host hoarding work" case, which the
+    full loop must never report as nothing-left-to-do."""
+    config_home = tmp_path / "config"
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(parents=True)
+    default = _make_vault(tmp_path / "v-default", dirty=False)
+    remote = _make_bare_remote(tmp_path / "remote.git")
+    _wire_remote(default, remote)
+    _git(default, "remote", "set-url", "origin", str(tmp_path / "gone.git"))
+    (default / "task" / "record.md").write_text("# a record\n")
+
+    write_vault_config(config_home, [("default", "default", default)])
+    r = run_cli(["sync", "--json"], config_home=config_home, state_dir=state_dir)
+    assert r.returncode != 0
+
+    doc = _extract_json_report(r.stdout)
+    entry = _vault_outcome(doc, "default")
+    assert entry["outcome"] == "holding"
+    assert "condition" not in entry
+    assert _git(default, "log", "--oneline").stdout.strip().splitlines().__len__() == 2, (
+        "the commit must land even though it could not be published"
+    )
+
+
+def test_json_outcome_converged_offline_with_nothing_to_publish(tmp_path):
+    """Offline, but with NOTHING committed this run and nothing already
+    unpushed: `converged` still holds — the exception in
+    `test_json_outcome_holding_offline_with_a_just_committed_change` is for
+    unpublished work specifically, not for offline in general."""
+    config_home = tmp_path / "config"
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(parents=True)
+    default = _make_vault(tmp_path / "v-default", dirty=False)
+    remote = _make_bare_remote(tmp_path / "remote.git")
+    _wire_remote(default, remote)
+    _git(default, "remote", "set-url", "origin", str(tmp_path / "gone.git"))
+
+    write_vault_config(config_home, [("default", "default", default)])
+    r = run_cli(["sync", "--json"], config_home=config_home, state_dir=state_dir)
+    assert r.returncode == 0, r.stderr
+
+    doc = _extract_json_report(r.stdout)
+    entry = _vault_outcome(doc, "default")
+    assert entry["outcome"] == "converged"
+
+
+def test_json_pull_only_offline_gets_no_outcome_entry(tmp_path):
+    """`--pull-only` never publishes, so an offline fetch there can never be
+    hoarding anything — the loop could not determine an outcome at all, so it
+    must claim none: no entry in the report, and this vault's own exit stays
+    0."""
+    config_home = tmp_path / "config"
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(parents=True)
+    default = _make_vault(tmp_path / "v-default", dirty=False)
+    remote = _make_bare_remote(tmp_path / "remote.git")
+    _wire_remote(default, remote)
+    _git(default, "remote", "set-url", "origin", str(tmp_path / "gone.git"))
+
+    write_vault_config(config_home, [("default", "default", default)])
+    r = run_cli(["sync", "--pull-only", "--json"], config_home=config_home, state_dir=state_dir)
+    assert r.returncode == 0, r.stderr
+
+    doc = _extract_json_report(r.stdout)
+    matches = [v for v in doc["vaults"] if v["vault"] == "default"]
+    assert matches == [], f"an offline pull-only vault must get no outcome entry: {matches}"
 
 
 def test_json_outcome_holding_hook_rejection_matches_replay_conflict_holding(tmp_path):

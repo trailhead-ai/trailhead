@@ -100,8 +100,12 @@ def bootstrap_vault(vaults_root: Path, vault_path: Path | None = None) -> Path:
 # ``session/<key>.lock`` flock sidecars the capture path creates AND the
 # ``.lore.lock`` write lock at the vault root: without this, ``lore sync``'s
 # ``git add -A`` (the only catch-all stage path) would commit them. The flush
-# commit path uses explicit paths and is unaffected.
-_GITIGNORE_PATTERNS = ("*.lock",)
+# commit path uses explicit paths and is unaffected. ``outpost/`` is the
+# daemon's own per-vault configuration carve-out (`lore.rules.trailhead-lore`) —
+# a free-write zone `lore sync` never commits (`cli/sync.py`'s
+# `_STATUS_EXCLUDE_PATHSPECS`) — so a freshly scaffolded vault should not even
+# offer it up to `git status` as untracked.
+_GITIGNORE_PATTERNS = ("*.lock", "outpost/")
 
 
 def scaffold_gitignore(vault: Path) -> None:

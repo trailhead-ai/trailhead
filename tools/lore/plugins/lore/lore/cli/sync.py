@@ -286,6 +286,13 @@ PULL_OK = "ok"
 PULL_OFFLINE = "offline"
 PULL_FAILED = "failed"
 
+#: :func:`_pull_only_one`'s own outcome for a dirty tree it deliberately did not
+#: rebase (see its docstring) — distinct from :data:`PULL_OK`, which a caller
+#: must be able to tell apart from "nothing needed doing". A dirty tree failed
+#: to integrate is not converged: something is uncommitted, and only the full
+#: `lore sync` (which commits before it rebases) can clear it.
+PULL_DIRTY = "dirty"
+
 
 def _fetch_origin(vault: Path, say_err, *, pull_only: bool = False) -> bool:
     """Fetch ``origin``. Returns ``True`` on success, reporting on failure.
@@ -308,16 +315,35 @@ def _fetch_origin(vault: Path, say_err, *, pull_only: bool = False) -> bool:
     return False
 
 
+#: ``git status``/``git add`` pathspec-magic exclusions applied to every UNSCOPED
+#: probe of a vault's tree: the write-lock sidecar (merely taking the lock
+#: create-or-opens it) and the ``outpost/`` daemon-config carve-out (deliberately
+#: never committed — see :func:`_vault_is_dirty`). Excluding via pathspec magic
+#: means a vault whose OWN ``.gitignore`` was scaffolded before ``outpost/`` was
+#: added to :data:`config.installer._GITIGNORE_PATTERNS` still reads clean,
+#: without depending on that vault ever being re-scaffolded.
+_STATUS_EXCLUDE_PATHSPECS = (
+    f":(exclude){locking.VAULT_LOCK_NAME}",
+    ":(exclude)outpost/",
+)
+
+
 def _vault_is_dirty(vault: Path) -> bool:
     """Return ``True`` iff ``vault``'s working tree has changes to commit.
 
-    Excludes the write-lock sidecar for the same reason
-    :func:`_stage_and_commit_one` does: merely taking the lock create-or-opens
-    ``.lore.lock``, so counting it would make every locked vault read as dirty.
+    Excludes the same two paths :data:`_STATUS_EXCLUDE_PATHSPECS` (and
+    :func:`_stage_and_commit_one`) excludes: the write-lock sidecar — merely
+    taking the lock create-or-opens ``.lore.lock``, so counting it would make
+    every locked vault read as dirty — and the ``outpost/`` daemon-config
+    carve-out, which is deliberately never committed. Excluding ``outpost/``
+    here, not just at the commit-scope allow-list, matters because this
+    function gates whether ``--pull-only`` integrates at all
+    (:func:`_pull_only_one`) and whether the implicit pull's own pull-only call
+    does the same: without it, ANY vault carrying an `outpost/` directory —
+    which is every daemon-managed vault — reads as permanently dirty and never
+    integrates.
     """
-    rc, out, _ = _git(
-        vault, "status", "--porcelain", "--", ".", f":(exclude){locking.VAULT_LOCK_NAME}"
-    )
+    rc, out, _ = _git(vault, "status", "--porcelain", "--", ".", *_STATUS_EXCLUDE_PATHSPECS)
     return rc != 0 or bool(out.strip())
 
 
@@ -344,7 +370,10 @@ def _pull_only_one(vault: Path, say, say_err) -> tuple[str, int]:
     (worse, for a caller that asked for nothing destructive) stashes them. So the
     fetch still runs — it touches no file — and the operator is told how far
     behind the vault is, which is the whole actionable content of the pull they
-    did not get.
+    did not get. **This returns :data:`PULL_DIRTY`, never :data:`PULL_OK`** — a
+    dirty tree that could not be integrated is not "nothing needed doing", and a
+    caller that collapsed the two would report a vault holding uncommitted work
+    as converged.
     """
     rc_remote, remote_url, _ = _git(vault, "remote", "get-url", "origin")
     if rc_remote != 0 or not remote_url:
@@ -360,7 +389,7 @@ def _pull_only_one(vault: Path, say, say_err) -> tuple[str, int]:
                 f"notice: {behind} commit(s) behind origin — the working tree is not "
                 "clean, so nothing was integrated; run `lore sync` to commit and pull"
             )
-        return PULL_OK, 0
+        return PULL_DIRTY, 0
 
     return _pull_one(vault, say, say_err, already_fetched=True)
 
@@ -627,36 +656,87 @@ def _push_one(
 #: absent — the write lock sidecar and never part of the commit scope.
 _COMMIT_SCOPE_ROOT_FILES = (".gitignore",)
 
+def _untracked_allowlist_pathspecs(vault: Path) -> list[str]:
+    """The allow-listed pathspecs an UNTRACKED addition may be staged under in
+    *vault*: every record kind directory, the ``sites/`` free-write zone, and
+    the scaffolded root ``.gitignore`` — filtered to what actually exists on
+    disk.
 
-def _commit_scope_pathspecs(vault: Path) -> list[str]:
-    """The allow-listed pathspecs a commit may stage in *vault*: every record kind
-    directory, the ``sites/`` free-write zone, and the scaffolded root
-    ``.gitignore`` — filtered to what actually exists on disk.
+    This bounds only NEW, untracked content. Tracked content is never bounded
+    by this list — see :func:`_stage_and_commit_one`, which stages every
+    tracked modification and deletion unscoped so a tracked file outside this
+    allow-list (an adopted repo's root ``README.md``, say) is never silently
+    left uncommittable, and a wholesale-removed kind directory's deletion is
+    never invisible because the directory no longer exists to name here.
 
     ``outpost/`` and ``.lore.lock`` are never named, so neither can ever be
-    staged regardless of what a vault's own ``.gitignore`` says. The filter to
-    existing paths is required, not an optimization: ``git add -A -- <pathspec
-    ...>`` exits 128 and stages NOTHING AT ALL the moment one named pathspec is
-    absent from disk, and most real vaults do not carry every record kind.
+    staged as a new addition regardless of what a vault's own ``.gitignore``
+    says. The filter to existing paths is required, not an optimization: ``git
+    add -A -- <pathspec ...>`` exits 128 and stages NOTHING AT ALL the moment
+    one named pathspec is absent from disk, and most real vaults do not carry
+    every record kind.
     """
     candidates = sorted(record_model.KINDS) + [_SITES_DIR, *_COMMIT_SCOPE_ROOT_FILES]
     return [name for name in candidates if (vault / name).exists()]
 
 
+def _stray_untracked_paths(status_lines: list[str], allowed_tops: set[str]) -> list[str]:
+    """Untracked paths in *status_lines* whose top-level component is not one of
+    *allowed_tops* — content that will never be staged and must be reported
+    rather than silently swallowed. Tracked lines (any code other than ``??``)
+    are never strays: they are always in scope (see
+    :func:`_stage_and_commit_one`)."""
+    strays = []
+    for line in status_lines:
+        if not line.startswith("??"):
+            continue
+        path = line[3:].strip()
+        top = path.split("/", 1)[0]
+        if top not in allowed_tops:
+            strays.append(path)
+    return strays
+
+
+def _probe_vault_status(vault: Path) -> tuple[int, list[str], list[str], list[str], str]:
+    """Run one UNSCOPED status probe. Returns ``(rc, all_lines, committable_lines,
+    strays, stderr)``. ``committable_lines`` is every line that staging will
+    actually pick up — every tracked change, plus untracked additions under
+    :func:`_untracked_allowlist_pathspecs`. ``strays`` is untracked content
+    outside that allow-list, which staging will never touch.
+    """
+    rc, status_out, stderr = _git(vault, "status", "--porcelain", "--", ".", *_STATUS_EXCLUDE_PATHSPECS)
+    if rc != 0:
+        return rc, [], [], [], stderr
+    lines = [ln for ln in status_out.splitlines() if ln.strip()]
+    allowed = set(_untracked_allowlist_pathspecs(vault))
+    strays = _stray_untracked_paths(lines, allowed)
+    stray_set = set(strays)
+    committable = [
+        ln for ln in lines
+        if not (ln.startswith("??") and ln[3:].strip() in stray_set)
+    ]
+    return rc, lines, committable, strays, stderr
+
+
 def _stage_and_commit_one(vault: Path, message: str, say, say_err) -> tuple[int, bool]:
-    """Stage + commit one vault's record trees and ``sites/`` under its write lock.
+    """Stage + commit one vault's tracked content and allow-listed new content
+    under its write lock.
 
     Returns ``(exit_code, committed)``.
 
-    **The commit scope is bounded to :func:`_commit_scope_pathspecs`** — every
-    record kind directory, ``sites/``, and the scaffolded root ``.gitignore``,
-    filtered to what exists. A vault's ``outpost/`` daemon configuration and its
-    ``.lore.lock`` write-lock sidecar are never named as pathspecs, so neither
-    can ever be staged: ``git add -A -- <pathspec ...>`` only ever touches the
-    trees it is explicitly told about. This is why ``status`` is also scoped to
-    the SAME pathspec list here — a change confined to ``outpost/`` must read as
-    "nothing to commit", not as a dirty tree whose ``git add`` then silently
-    stages nothing and leaves ``git commit`` with an empty index.
+    **Tracked content is always in scope.** Every tracked modification and
+    deletion is staged unscoped (``git add -u -- .`` semantics) — a vault's
+    ``.gitignore`` and ``outpost/`` carve-out excepted via
+    :data:`_STATUS_EXCLUDE_PATHSPECS`, which the dirtiness judgment below uses
+    too, so "clean" means clean and a change confined to ``outpost/`` reads as
+    "nothing to commit" rather than a dirty tree that ``git add`` then silently
+    drops. **Only untracked ADDITIONS are bounded** — to
+    :func:`_untracked_allowlist_pathspecs` (every record kind directory,
+    ``sites/``, and the scaffolded root ``.gitignore``) — which is what the
+    bounding was ever for: keeping ``outpost/`` and stray junk out of a commit,
+    not dropping content already in the vault's history. An untracked path
+    outside that allow-list is never staged and never silently swallowed either
+    — see :func:`_stray_untracked_paths` — it is named in a notice instead.
 
     Probed twice, deliberately, though :func:`cmd_sync` — this function's only
     caller — already holds every target's lock before calling in, so neither
@@ -672,39 +752,52 @@ def _stage_and_commit_one(vault: Path, message: str, say, say_err) -> tuple[int,
     No network runs in here — see the module docstring.
     """
 
-    def _status(pathspecs: list[str]) -> tuple[int, str, str]:
-        if not pathspecs:
-            return 0, "", ""
-        return _git(vault, "status", "--porcelain", "--", *pathspecs)
-
-    pathspecs = _commit_scope_pathspecs(vault)
-    rc, status_out, stderr = _status(pathspecs)
+    rc, _lines, committable, _strays, stderr = _probe_vault_status(vault)
     if rc != 0:
         say_err(f"error: git status failed: {stderr} — skipped")
         return 1, False
-    if not status_out.strip():
+    if not committable:
         say("Nothing to commit — vault is clean.")
         return 0, False
 
     with locking.vault_write_lock(vault):
-        pathspecs = _commit_scope_pathspecs(vault)
-        rc, status_out, stderr = _status(pathspecs)
+        rc, _lines, committable, strays, stderr = _probe_vault_status(vault)
         if rc != 0:
             say_err(f"error: git status failed: {stderr} — skipped")
             return 1, False
 
-        if not status_out.strip():
+        if strays:
+            say_err(
+                "notice: untracked and outside the commit scope — never staged: "
+                + ", ".join(strays)
+            )
+
+        if not committable:
             say("Nothing to commit — vault is clean.")
             return 0, False
 
-        rc, _, stderr = _git(vault, "add", "-A", "--", *pathspecs)
-        if rc != 0:
-            say_err(f"error: git add failed: {stderr} — skipped")
-            return 1, False
-        # Belt-and-braces: `.lore.lock` is never one of `pathspecs` above, so it
-        # cannot have been staged by the `add` — this unstages it anyway in case
-        # a future pathspec ever collided with the lock sidecar's name. `reset`
-        # never errors on an ignored or never-staged path.
+        # `git add -u -- .` refuses outright on an unborn branch ("pathspec '.'
+        # did not match any file(s) known to git", exit 128) — with zero
+        # commits there is by definition nothing tracked yet for `-u` to
+        # update, so it is skipped rather than treated as a real failure. A
+        # never-committed vault (`lore vault add --path <existing repo>`
+        # before its first sync) is exactly this shape.
+        rc_head, _, _ = _git(vault, "rev-parse", "--verify", "-q", "HEAD")
+        if rc_head == 0:
+            rc, _, stderr = _git(vault, "add", "-u", "--", ".")
+            if rc != 0:
+                say_err(f"error: git add failed: {stderr} — skipped")
+                return 1, False
+        allowlisted = _untracked_allowlist_pathspecs(vault)
+        if allowlisted:
+            rc, _, stderr = _git(vault, "add", "-A", "--", *allowlisted)
+            if rc != 0:
+                say_err(f"error: git add failed: {stderr} — skipped")
+                return 1, False
+        # Belt-and-braces: `.lore.lock` is never staged by either `add` above —
+        # this unstages it anyway in case a future pathspec ever collided with
+        # the lock sidecar's name. `reset` never errors on an ignored or
+        # never-staged path.
         rc, _, stderr = _git(vault, "reset", "-q", "--", locking.VAULT_LOCK_NAME)
         if rc != 0:
             say_err(f"error: git reset (unstaging lock file) failed: {stderr} — skipped")
@@ -744,11 +837,24 @@ def _pull_and_push_one(
     never reaches the forge (offline, no remote, detached HEAD) leaves the
     vault still unpushed afterward, so ``published`` stays ``False`` exactly
     where the existing soft-network contract already treats it as a no-op.
+
+    **An offline fetch that leaves local work unpublished is `holding`, not
+    `converged`.** A vault that just committed (or already carried an unpushed
+    commit) and then found the forge unreachable is hoarding work on this
+    machine — the exact condition the design doc wants visible, never silently
+    reported as nothing-left-to-do. This is a decided exception to the general
+    "offline stays quiet" rule: quiet is right when there is genuinely nothing
+    this host is holding, wrong when there is. `_vault_unpushed` is checked
+    BEFORE any push attempt runs (none does, on this path) — the same read
+    :data:`had_something_to_publish` below uses once :func:`_push_one` is
+    reached.
     """
     pull_state, pulled = _pull_one(vault, say, say_err)
     if pull_state == PULL_FAILED:
         return 1, 0, PUBLISH_OK, False
     if pull_state == PULL_OFFLINE:
+        if committed or _vault_unpushed(vault):
+            return 1, 0, PUBLISH_HOLDING, False
         return 0, 0, PUBLISH_OK, False
 
     had_something_to_publish = committed or _vault_unpushed(vault)
@@ -1096,13 +1202,25 @@ def cmd_sync(args) -> int:
         say, say_err = _make_emitters(name, width)
         if pull_only:
             state, pulled = _pull_only_one(Path(vault), say, say_err)
-            rc_one = 1 if state == PULL_FAILED else 0
-            # `--pull-only` never publishes, so the only two reachable
-            # outcomes are the pre-existing "holding" shape (a conflict this
-            # run could not integrate — vault left clean and diverged, exactly
-            # like the full loop's own PULL_FAILED) and "converged" (fetched
-            # and, if anything was behind, integrated cleanly).
-            outcomes[name] = "holding" if state == PULL_FAILED else "converged"
+            # `--pull-only` never publishes, so there are three reachable
+            # outcomes, not two: the pre-existing "holding" shape
+            # (`PULL_FAILED` — a conflict this run could not integrate, vault
+            # left clean and diverged); a NEW "holding" shape (`PULL_DIRTY` —
+            # the tree had something uncommitted this run deliberately did not
+            # touch, so it is not converged either, exactly the same exit-code
+            # rule as a refused vault: a person must run the full sync);
+            # "converged" (`PULL_OK` — fetched and, if anything was behind,
+            # integrated cleanly); and `PULL_OFFLINE`, which gets NO entry at
+            # all — the loop could not determine an outcome, so it must not
+            # claim one, and the exit code for this vault stays 0.
+            if state == PULL_OFFLINE:
+                rc_one = 0
+            elif state in (PULL_FAILED, PULL_DIRTY):
+                rc_one = 1
+                outcomes[name] = "holding"
+            else:
+                rc_one = 0
+                outcomes[name] = "converged"
         else:
             rc_one, pulled, ending, published = _pull_and_push_one(
                 Path(vault), say, say_err, committed=committed_map.get(name, False)
