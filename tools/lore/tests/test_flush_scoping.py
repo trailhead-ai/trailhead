@@ -543,20 +543,8 @@ class TestKqlInjectionSafety:
         )
 
 
-# ---------------------------------------------------------------------------
-# Cross-vault resolution — a session record sitting in a non-default vault
-# ---------------------------------------------------------------------------
-#
-# Capture writes only into the default vault (see `test_session_vault_pin.py`),
-# but session records planted in product/team vaults by earlier captures are real
-# data on real installs: hundreds of them, dozens still dirty. Session resolution
-# therefore reads EVERY configured vault, so such a record stays visible to
-# `lore session show` and flushable by every flush scope until a migration
-# relocates it. These tests pin that reachability, planting the record on disk the
-# way a pre-pin capture left it.
-
 class _Install(NamedTuple):
-    """A provisioned two-vault install: the paths every cross-vault test threads.
+    """A provisioned two-vault install: the paths these tests thread.
 
     Carried as ONE value rather than passed as separate ``config_home`` /
     ``state`` / ``default_vault`` arguments, so a test reads as what it exercises
@@ -568,17 +556,14 @@ class _Install(NamedTuple):
     other: Path
 
 
-def _two_vault_install(tmp_path, *, other_shared: bool = False) -> _Install:
+def _two_vault_install(tmp_path) -> _Install:
     """Provision a two-vault install.
 
     A ``default``-scope vault plus a ``product``-scope ``trailhead`` vault — both
-    git toplevels so the flush commit path runs for real. Mirrors the shape that
-    exposed the defect: the operator's active vault is ``default`` while the
-    session lives in ``trailhead``.
+    git toplevels so the flush commit path runs for real. The session vault is
+    ``default``; the second is the sibling a session record must never be read
+    from, flushed in, or written to.
 
-    ``other_shared`` marks the second vault ``shared: true`` — an untrusted,
-    multi-user vault. ``write_vault_config`` writes ``(name, scope, path)``
-    triples only, so the flag is stamped onto the written config afterwards.
     """
     config_home = tmp_path / "config"
     state = tmp_path / "state"
@@ -595,23 +580,11 @@ def _two_vault_install(tmp_path, *, other_shared: bool = False) -> _Install:
             ("trailhead", "product", other_vault),
         ],
     )
-    if other_shared:
-        _set_vault_shared(config_home, "trailhead")
     return _Install(config_home, state, default_vault, other_vault)
 
 
 def _config_path(config_home: Path) -> Path:
     return config_home / "lore" / "config.json"
-
-
-def _set_vault_shared(config_home: Path, name: str) -> None:
-    """Mark the named vault ``shared: true`` in an already-written config."""
-    path = _config_path(config_home)
-    cfg = json.loads(path.read_text())
-    for entry in cfg["vaults"]:
-        if entry["name"] == name:
-            entry["shared"] = True
-    path.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
 
 
 def _drop_vault_from_config(config_home: Path, name: str) -> None:
@@ -643,256 +616,146 @@ def _run_cfg(args, inst: _Install, *, stdin_text=None, env_extra=None):
                 stdin_text=stdin_text, env_extra=extra)
 
 
-def _candidate_into(vault_name, inst: _Install, sid, *, body="a candidate\n"):
-    """Plant a dirty session record in the NAMED vault and index it.
+def _plant_session(vault: Path, key: str, *, body="a candidate\n", status="dirty") -> None:
+    """Write a session record straight onto disk in *vault*.
 
-    The destination is no longer electable at capture time, so the on-disk record
-    is written directly — byte-identical to what a capture produced before the pin
-    — and `lore reindex` then builds the global index row the batch/KQL flush
-    paths read. Returns the reindex result so callers can assert the setup
-    succeeded the way they did when this was a capture.
+    The only way a record reaches a non-default vault now: a teammate captured it
+    and it arrived through that vault's shared remote. Capture itself refuses any
+    vault but the default one, so there is no CLI path that produces this.
     """
-    vault = {"default": inst.default_vault}.get(vault_name, inst.other)
     session_dir = vault / "session"
     session_dir.mkdir(parents=True, exist_ok=True)
-    (session_dir / f"{sid}.json").write_text(
-        json.dumps(
-            {
-                "version": "v1",
-                "kind": "session",
-                "title": sid,
-                "status": "dirty",
-                "created-at": "2026-08-10T00:00:00Z",
-                "created-by": "tester@example.com",
-                "updated-at": "2026-08-10T00:00:00Z",
-                "updated-by": "tester@example.com",
-                "annotations": {},
-            },
-            indent=2,
-        ),
+    (session_dir / f"{key}.json").write_text(
+        json.dumps({
+            "version": "v1", "kind": "session", "title": key, "status": status,
+            "created-at": "2026-08-10T00:00:00Z", "created-by": "tester@example.com",
+            "updated-at": "2026-08-10T00:00:00Z", "updated-by": "tester@example.com",
+            "annotations": {},
+        }, indent=2),
         encoding="utf-8",
     )
-    (session_dir / f"{sid}.md").write_text(
-        f"# session: {sid}\n- candidate 2026-08-10T00:00:00Z kind=spec phase=Plan\n  {body}",
+    (session_dir / f"{key}.md").write_text(
+        f"# session: {key}\n- candidate 2026-08-10T00:00:00Z kind=spec phase=Plan\n  {body}",
         encoding="utf-8",
     )
-    return _run_cfg(["reindex"], inst)
 
 
-class TestCrossVaultSessionResolution:
+# ---------------------------------------------------------------------------
+# Session resolution is the default vault, and only the default vault
+# ---------------------------------------------------------------------------
+#
+# Session records live only in the default vault. A `session/` record in a
+# product/team vault is a TEAMMATE's, arriving through that vault's shared remote
+# — never this operator's to render, flush, or append a reference to. These pin
+# that the session surfaces answer from the default vault regardless of what a
+# sibling vault holds under the same key.
 
-    def test_session_show_resolves_a_non_default_vault_session(self, tmp_path):
+
+class TestSessionResolutionIsDefaultVaultOnly:
+
+    def test_show_renders_the_default_vault_record_and_misses_a_sibling_one(
+        self, tmp_path
+    ):
+        """Varying input: which vault holds the key."""
         inst = _two_vault_install(tmp_path)
-        assert _candidate_into("trailhead", inst, SID_A).returncode == 0
-        assert (inst.other / "session" / f"{SID_A}.json").exists()
-        assert not (inst.default_vault / "session" / f"{SID_A}.json").exists()
+        _plant_session(inst.default_vault, SID_A, body="BODY-IN-DEFAULT\n")
+        _plant_session(inst.other, SID_B, body="BODY-IN-TRAILHEAD\n")
+        assert _run_cfg(["reindex"], inst).returncode == 0
+
+        mine = _run_cfg(["session", "show", "--session-id", SID_A], inst)
+        assert mine.returncode == 0, mine.stderr
+        assert "BODY-IN-DEFAULT" in mine.stdout
+
+        theirs = _run_cfg(["session", "show", "--session-id", SID_B], inst)
+        assert theirs.returncode != 0
+        assert "BODY-IN-TRAILHEAD" not in theirs.stdout
+
+    def test_show_on_a_split_key_renders_default_without_a_notice(self, tmp_path):
+        """Both vaults hold the key: default's body is rendered, alone.
+
+        Varying input: the body each vault holds under the one key. No
+        multiple-vaults notice is emitted, because the sibling record is not part
+        of this operator's session at all.
+        """
+        inst = _two_vault_install(tmp_path)
+        _plant_session(inst.default_vault, SID_A, body="BODY-IN-DEFAULT\n")
+        _plant_session(inst.other, SID_A, body="BODY-IN-TRAILHEAD\n")
+        assert _run_cfg(["reindex"], inst).returncode == 0
 
         r = _run_cfg(["session", "show", "--session-id", SID_A], inst)
         assert r.returncode == 0, r.stderr
-        assert SID_A in r.stdout
+        assert "BODY-IN-DEFAULT" in r.stdout
+        assert "BODY-IN-TRAILHEAD" not in r.stdout
+        assert "multiple vaults" not in r.stderr
 
-    def test_capture_into_a_non_default_vault_is_kql_discoverable(self, tmp_path):
-        """The incident's observed index miss: `kind:session status:dirty` found
-        nothing in the non-default vault. Capture indexes globally with the
-        ELECTED vault root, so the record must be discoverable immediately."""
+    def test_flush_by_id_flushes_default_and_leaves_a_sibling_record_dirty(
+        self, tmp_path
+    ):
+        """Varying input: which vault holds the dirty record."""
         inst = _two_vault_install(tmp_path)
-        assert _candidate_into("trailhead", inst, SID_A).returncode == 0
-
-        r = _run_cfg(["search", "kind:session status:dirty", "--json"], inst)
-        assert r.returncode == 0, r.stderr
-        ids = [h["id"] for h in json.loads(r.stdout)["hits"]]
-        assert f"{inst.other}/session/{SID_A}" in ids, ids
-
-    def test_no_arg_flush_flushes_the_non_default_vault_session(self, tmp_path):
-        inst = _two_vault_install(tmp_path)
-        assert _candidate_into("trailhead", inst, SID_A).returncode == 0
-        _commit_baseline(inst.other)
-        before = _commit_count(inst.other)
-
-        r = _run_cfg(["flush", "--session-id", SID_A], inst)
-        assert r.returncode == 0, r.stderr
-
-        sidecar = _sidecar(inst.other, SID_A)
-        assert sidecar["status"] == "clean"
-        assert sidecar["annotations"]["flushed-at"]
-        assert _commit_count(inst.other) == before + 1, (
-            "flush must commit in the holding vault"
-        )
-
-    def test_flush_all_reaches_the_non_default_vault_session(self, tmp_path):
-        inst = _two_vault_install(tmp_path)
-        assert _candidate_into("trailhead", inst, SID_A).returncode == 0
-        _commit_baseline(inst.other)
-
-        r = _run_cfg(["flush", "all"], inst)
-        assert r.returncode == 0, r.stderr
-        assert _sidecar(inst.other, SID_A)["status"] == "clean"
-
-    def test_flush_kql_scope_reaches_the_non_default_vault_session(self, tmp_path):
-        inst = _two_vault_install(tmp_path)
-        assert _candidate_into("trailhead", inst, SID_A).returncode == 0
-        _commit_baseline(inst.other)
-
-        r = _run_cfg(["flush", "kind:session"], inst)
-        assert r.returncode == 0, r.stderr
-        assert _sidecar(inst.other, SID_A)["status"] == "clean"
-
-    def test_batch_flush_spanning_two_vaults_flushes_both(self, tmp_path):
-        """A batch whose hits span vaults must flush each in ITS OWN vault —
-        not run every key against the active one."""
-        inst = _two_vault_install(tmp_path)
-        assert _candidate_into("default", inst, SID_A).returncode == 0
-        assert _candidate_into("trailhead", inst, SID_B).returncode == 0
+        _plant_session(inst.default_vault, SID_A)
+        _plant_session(inst.other, SID_B)
         _commit_baseline(inst.default_vault)
         _commit_baseline(inst.other)
+        assert _run_cfg(["reindex"], inst).returncode == 0
+
+        assert _run_cfg(["flush", "--session-id", SID_A], inst).returncode == 0
+        assert _sidecar(inst.default_vault, SID_A)["status"] == "clean"
+
+        before = _commit_count(inst.other)
+        r = _run_cfg(["flush", "--session-id", SID_B], inst)
+        assert r.returncode == 0, r.stderr
+        assert _sidecar(inst.other, SID_B)["status"] == "dirty", (
+            "a session record in a sibling vault is not this operator's to flush"
+        )
+        assert _commit_count(inst.other) == before, "and nothing may be committed there"
+
+    def test_flush_all_leaves_a_sibling_vaults_dirty_session_alone(self, tmp_path):
+        """`flush all` discovers through the index, which spans every vault.
+
+        Varying input: which vault holds each dirty record. The default vault's is
+        flushed; a teammate's in the product vault is left exactly as it was —
+        flushing it would commit and push under this operator's identity.
+        """
+        inst = _two_vault_install(tmp_path)
+        _plant_session(inst.default_vault, SID_A)
+        _plant_session(inst.other, SID_B)
+        _commit_baseline(inst.default_vault)
+        _commit_baseline(inst.other)
+        assert _run_cfg(["reindex"], inst).returncode == 0
+        before = _commit_count(inst.other)
 
         r = _run_cfg(["flush", "all"], inst)
         assert r.returncode == 0, r.stderr
         assert _sidecar(inst.default_vault, SID_A)["status"] == "clean"
-        assert _sidecar(inst.other, SID_B)["status"] == "clean"
+        assert _sidecar(inst.other, SID_B)["status"] == "dirty"
+        assert _commit_count(inst.other) == before
 
-    def test_same_key_in_two_vaults_flushes_both(self, tmp_path):
-        """The split-session case: one session key captured into two vaults.
-        No-arg flush flushes every dirty instance, each in its own vault."""
+    def test_referenced_appends_to_default_only(self, tmp_path):
+        """Varying input: which vault holds the record under the key."""
         inst = _two_vault_install(tmp_path)
-        assert _candidate_into("default", inst, SID_C).returncode == 0
-        assert _candidate_into("trailhead", inst, SID_C).returncode == 0
-        _commit_baseline(inst.default_vault)
-        _commit_baseline(inst.other)
+        _plant_session(inst.default_vault, SID_A)
+        _plant_session(inst.other, SID_A)
+        assert _run_cfg(["reindex"], inst).returncode == 0
 
-        r = _run_cfg(["flush", "--session-id", SID_C], inst)
-        assert r.returncode == 0, r.stderr
-        assert _sidecar(inst.default_vault, SID_C)["status"] == "clean"
-        assert _sidecar(inst.other, SID_C)["status"] == "clean"
-
-    def test_session_show_renders_one_and_warns_naming_both_vaults(self, tmp_path):
-        inst = _two_vault_install(tmp_path)
-        assert _candidate_into("default", inst, SID_C).returncode == 0
-        assert _candidate_into("trailhead", inst, SID_C).returncode == 0
-
-        r = _run_cfg(["session", "show", "--session-id", SID_C], inst)
-        assert r.returncode == 0, r.stderr
-        assert "default" in r.stderr and "trailhead" in r.stderr, r.stderr
-
-    def test_session_show_renders_the_active_vaults_body_on_a_split(self, tmp_path):
-        """The split-session render rule, on the BODY not just the notice.
-
-        Both vaults hold the key; the active (`default`) vault's record is the
-        one rendered. Asserting only the stderr notice would pass even if the
-        wrong half were printed — which is the half the operator then acts on.
-        """
-        inst = _two_vault_install(tmp_path)
-        assert _candidate_into("default", inst, SID_C, body="BODY-IN-DEFAULT\n").returncode == 0
-        assert _candidate_into("trailhead", inst, SID_C, body="BODY-IN-TRAILHEAD\n").returncode == 0
-
-        r = _run_cfg(["session", "show", "--session-id", SID_C], inst)
-        assert r.returncode == 0, r.stderr
-        assert "BODY-IN-DEFAULT" in r.stdout, r.stdout
-        assert "BODY-IN-TRAILHEAD" not in r.stdout, r.stdout
-
-    def test_true_no_arg_flush_reaches_a_non_default_vault_session(self, tmp_path):
-        """No `--session-id` at all: the worktree-fallback key path.
-
-        Every other cross-vault flush test passes `--session-id`, so the key
-        resolution that a real operator hits — no flag, no env, worktree name —
-        was never exercised across vaults. `CLAUDE_PROJECT_DIR` pins the detected
-        worktree name so the key is deterministic.
-        """
-        inst = _two_vault_install(tmp_path)
-        worktree = tmp_path / "my-worktree"
-        worktree.mkdir()
-        key = "my-worktree"
-        env = {"CLAUDE_PROJECT_DIR": str(worktree)}
-
-        assert _candidate_into("trailhead", inst, key).returncode == 0
-        assert (inst.other / "session" / f"{key}.json").exists()
-        _commit_baseline(inst.other)
-        before = _commit_count(inst.other)
-
-        r = _run_cfg(["flush"], inst, env_extra=env)
-        assert r.returncode == 0, r.stderr
-        sidecar = _sidecar(inst.other, key)
-        assert sidecar["status"] == "clean"
-        assert sidecar["annotations"]["flushed-at"]
-        assert _commit_count(inst.other) == before + 1
-
-
-# ---------------------------------------------------------------------------
-# per-touched-vault push — a commit is only pushable by the repo carrying it
-# ---------------------------------------------------------------------------
-
-class TestBatchPushesPerTouchedVault:
-
-    def test_batch_spanning_two_vaults_pushes_both(self, tmp_path):
-        """A batch that commits in two vaults must push BOTH, not one.
-
-        Real bare remotes rather than a patched `_git`: the assertion is that the
-        commits actually ARRIVED, which a push-counting stub cannot show.
-        """
-        inst = _two_vault_install(tmp_path)
-        assert _candidate_into("default", inst, SID_A).returncode == 0
-        assert _candidate_into("trailhead", inst, SID_B).returncode == 0
-
-        remotes = {}
-        for name, vault in (("default", inst.default_vault), ("trailhead", inst.other)):
-            _commit_baseline(vault)
-            remote = tmp_path / f"{name}.git"
-            subprocess.run(["git", "init", "--bare", str(remote)],
-                           check=True, capture_output=True)
-            subprocess.run(["git", "-C", str(vault), "remote", "add", "origin",
-                            str(remote)], check=True, capture_output=True)
-            branch = subprocess.run(
-                ["git", "-C", str(vault), "rev-parse", "--abbrev-ref", "HEAD"],
-                capture_output=True, text=True).stdout.strip()
-            subprocess.run(["git", "-C", str(vault), "push", "-u", "origin", branch],
-                           check=True, capture_output=True)
-            remotes[name] = remote
-
-        r = _run_cfg(["flush", "all"], inst)
-        assert r.returncode == 0, r.stderr
-        assert _commit_count(remotes["default"]) == _commit_count(inst.default_vault), (
-            "the default vault's flush commit must have been pushed"
+        r = _run_cfg(
+            ["session", "referenced", "decision/some-thing", "--session-id", SID_A],
+            inst,
         )
-        assert _commit_count(remotes["trailhead"]) == _commit_count(inst.other), (
-            "the second touched vault must be pushed too, not just the first"
-        )
+        assert r.returncode == 0, r.stderr
+        assert "decision/some-thing" in (
+            inst.default_vault / "session" / f"{SID_A}.md"
+        ).read_text()
+        assert "decision/some-thing" not in (
+            inst.other / "session" / f"{SID_A}.md"
+        ).read_text()
 
 
 # ---------------------------------------------------------------------------
-# `session referenced` — cross-vault, same resolution as show/flush
+# `session referenced` — the inert no-op when the session vault lacks the key
 # ---------------------------------------------------------------------------
 
-class TestReferencedCrossVault:
-    """`referenced` must reach the session wherever it lives.
-
-    Pinned to the active vault, a `--vault`-captured session had no record in the
-    active vault — so `referenced` hit its no-op-on-non-existent contract and
-    silently logged NOTHING, anywhere.
-    """
-
-    def _body(self, vault: Path, key: str) -> str:
-        return (vault / "session" / f"{key}.md").read_text()
-
-    def test_referenced_appends_to_a_non_default_vault_session(self, tmp_path):
-        inst = _two_vault_install(tmp_path)
-        assert _candidate_into("trailhead", inst, SID_A).returncode == 0
-
-        r = _run_cfg(["session", "referenced", "task/some-task",
-                      "--session-id", SID_A], inst)
-        assert r.returncode == 0, r.stderr
-        assert "task/some-task" in self._body(inst.other, SID_A)
-
-    def test_referenced_appends_to_every_vault_holding_the_key(self, tmp_path):
-        """The split-session case, consistent with flush flushing every instance."""
-        inst = _two_vault_install(tmp_path)
-        assert _candidate_into("default", inst, SID_C).returncode == 0
-        assert _candidate_into("trailhead", inst, SID_C).returncode == 0
-
-        r = _run_cfg(["session", "referenced", "task/some-task",
-                      "--session-id", SID_C], inst)
-        assert r.returncode == 0, r.stderr
-        assert "task/some-task" in self._body(inst.default_vault, SID_C)
-        assert "task/some-task" in self._body(inst.other, SID_C)
+class TestReferencedOnAMissingSession:
 
     def test_referenced_on_a_session_no_vault_holds_creates_nothing(self, tmp_path):
         """The no-op contract survives the cross-vault resolution."""
@@ -927,7 +790,7 @@ class TestUnreadableConfigFailsClosed:
         refusal — rather than for the incidental "no session anywhere".
         """
         inst = _two_vault_install(tmp_path)
-        assert _candidate_into("default", inst, SID_A).returncode == 0
+        _plant_session(inst.default_vault, SID_A)
         _commit_baseline(inst.default_vault)
         (inst.config_home / "lore" / "config.json").write_text("{ not json at all")
         return inst
@@ -960,120 +823,38 @@ class TestUnreadableConfigFailsClosed:
 
 
 # ---------------------------------------------------------------------------
-# shared vaults — untrusted content never actuates a write / commit / push
-# ---------------------------------------------------------------------------
-#
-# A `shared: true` vault is a multi-user vault whose content is untrusted input.
-# Cross-vault session resolution made every configured vault a WRITE target: a
-# dirty session record planted in a shared vault would be flipped, committed and
-# pushed under the local user's git identity by a bare `lore flush`. The write /
-# push fan-out therefore excludes shared vaults by default — and says so, rather
-# than skipping silently, so an operator whose session really does live there is
-# not left wondering why nothing happened.
-
-class TestSharedVaultsAreNotWritten:
-
-    def _dirty_session_in_shared_vault(self, tmp_path, sid=SID_A) -> _Install:
-        """A dirty session record sitting in the `shared: true` vault.
-
-        Captured while the vault is still trusted, then flipped shared — the
-        capture path is not what is under test here; the flush fan-out is.
-        """
-        inst = _two_vault_install(tmp_path)
-        assert _candidate_into("trailhead", inst, sid).returncode == 0
-        _commit_baseline(inst.other)
-        _set_vault_shared(inst.config_home, "trailhead")
-        return inst
-
-    def test_no_arg_flush_skips_a_shared_vault_session(self, tmp_path):
-        inst = self._dirty_session_in_shared_vault(tmp_path)
-        before = _commit_count(inst.other)
-
-        r = _run_cfg(["flush", "--session-id", SID_A], inst)
-        assert r.returncode == 0, r.stderr
-        assert _sidecar(inst.other, SID_A)["status"] == "dirty", (
-            "a shared vault's session must not be flipped by a local flush"
-        )
-        assert _commit_count(inst.other) == before, (
-            "a shared vault must not be committed to under the local identity"
-        )
-
-    def test_no_arg_flush_names_the_skipped_shared_vault(self, tmp_path):
-        inst = self._dirty_session_in_shared_vault(tmp_path)
-        r = _run_cfg(["flush", "--session-id", SID_A], inst)
-        output = r.stdout + r.stderr
-        assert "shared" in output.lower(), output
-        assert "trailhead" in output, output
-
-    def test_flush_all_skips_a_shared_vault_session(self, tmp_path):
-        inst = self._dirty_session_in_shared_vault(tmp_path)
-        before = _commit_count(inst.other)
-
-        r = _run_cfg(["flush", "all"], inst)
-        assert r.returncode == 0, r.stderr
-        assert _sidecar(inst.other, SID_A)["status"] == "dirty"
-        assert _commit_count(inst.other) == before
-        output = r.stdout + r.stderr
-        assert "shared" in output.lower() and "trailhead" in output, output
-
-    def test_flush_all_still_flushes_the_trusted_vault_alongside(self, tmp_path):
-        """Excluding shared vaults must not weaken the trusted fan-out."""
-        inst = self._dirty_session_in_shared_vault(tmp_path)
-        assert _candidate_into("default", inst, SID_B).returncode == 0
-        _commit_baseline(inst.default_vault)
-
-        r = _run_cfg(["flush", "all"], inst)
-        assert r.returncode == 0, r.stderr
-        assert _sidecar(inst.default_vault, SID_B)["status"] == "clean"
-        assert _sidecar(inst.other, SID_A)["status"] == "dirty"
-
-    def test_session_referenced_does_not_write_into_a_shared_vault(self, tmp_path):
-        inst = self._dirty_session_in_shared_vault(tmp_path)
-        body_before = (inst.other / "session" / f"{SID_A}.md").read_text()
-
-        r = _run_cfg(["session", "referenced", "task/some-task",
-                      "--session-id", SID_A], inst)
-        assert r.returncode == 0, r.stderr
-        assert (inst.other / "session" / f"{SID_A}.md").read_text() == body_before, (
-            "referenced must not append into an untrusted vault's session record"
-        )
-
-
-# ---------------------------------------------------------------------------
 # stale index rows — the `vault` column is cross-checked against live config
 # ---------------------------------------------------------------------------
 
 class TestStaleIndexRowIsSkipped:
     """Batch discovery reads the index's `vault` column; the index outlives config.
 
-    A row indexed under a vault that has since been removed from `config.json`
-    named a path this install no longer governs. Acting on it verbatim let a
-    stale (or planted) row steer a flip + commit at an arbitrary path, so hits
-    are intersected with the live configured vault set and anything else is
-    skipped with a notice.
+    A row indexed under a vault since removed from `config.json` names a path this
+    install no longer governs. Acting on it verbatim would let a stale (or
+    planted) row steer a flip + commit at an arbitrary path — so a hit is flushed
+    only when its vault IS the session vault.
     """
 
     def test_flush_all_skips_a_hit_whose_vault_left_the_config(self, tmp_path):
+        """Varying input: whether the hit's vault is the session vault.
+
+        The default vault's dirty session is flushed in the same run that leaves
+        the dropped vault's record untouched, so this cannot pass by flushing
+        nothing at all.
+        """
         inst = _two_vault_install(tmp_path)
-        assert _candidate_into("trailhead", inst, SID_A).returncode == 0
+        _plant_session(inst.other, SID_A)
+        _plant_session(inst.default_vault, SID_B)
         _commit_baseline(inst.other)
+        _commit_baseline(inst.default_vault)
+        assert _run_cfg(["reindex"], inst).returncode == 0
         before = _commit_count(inst.other)
         _drop_vault_from_config(inst.config_home, "trailhead")
 
         r = _run_cfg(["flush", "all"], inst)
         assert r.returncode == 0, r.stderr
+        assert _sidecar(inst.default_vault, SID_B)["status"] == "clean"
         assert _sidecar(inst.other, SID_A)["status"] == "dirty", (
             "an unconfigured vault must not be written to"
         )
         assert _commit_count(inst.other) == before
-
-    def test_the_skipped_stale_hit_is_named(self, tmp_path):
-        inst = _two_vault_install(tmp_path)
-        assert _candidate_into("trailhead", inst, SID_A).returncode == 0
-        _commit_baseline(inst.other)
-        _drop_vault_from_config(inst.config_home, "trailhead")
-
-        r = _run_cfg(["flush", "all"], inst)
-        output = r.stdout + r.stderr
-        assert str(inst.other) in output, output
-        assert "configured" in output.lower(), output

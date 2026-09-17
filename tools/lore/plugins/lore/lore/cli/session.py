@@ -4,14 +4,12 @@ from __future__ import annotations
 import datetime as dt
 import os
 import sys
-from pathlib import Path
 
 from .common import (
     StdinSilentError,
     _add_session_selectors,
-    _partition_writable_vaults,
     _read_stdin_body,
-    _resolve_all_vaults_strict,
+    _resolve_session_vault_strict,
 )
 from .record import _render_record
 
@@ -73,34 +71,23 @@ def cmd_session(args) -> int:
 def _cmd_session_show(args) -> int:
     """``lore session show [--json]`` — read THIS worktree's session record.
 
-    Resolves the live session record via :func:`vault.resolve_session_notes`
-    (session-id first, worktree fallback) across EVERY configured vault, then
-    renders it through the same path as ``lore record show`` (plain body, or
+    Resolves the live session record via :func:`vault.resolve_session_note`
+    (session-id first, worktree fallback) in the session vault, then renders it
+    through the same path as ``lore record show`` (plain body, or
     ``{record_id, kind, name, sidecar, body}`` with ``--json``). The CLI-only way
     to read the current session — its sidecar carries the ``flushed-at``
     watermark that flush needs and that never lands in the index.
 
-    **All vaults, not just the default one.** Capture writes only into the
-    default vault (``vault_config.session_vault``), but product/team vaults still
-    hold session records written before that pin — hundreds of them on a real
-    install, dozens still dirty. Reading only the default vault reports "no session
-    record resolved" for one of those, which plainly exists.
+    **One vault: the session vault.** A session record may only ever be written to
+    the ``default``-scope vault (``vault_config.session_vault``), so that is the
+    whole searched set. A ``session/`` record in a product/team vault is a
+    teammate's, arriving through that vault's shared remote — reading it here
+    would render someone else's working log as though it were this session.
+    ``lore record show --vault <name> session/<key>`` still reads one deliberately.
 
-    **Multi-hit:** a key held by more than one vault splits the session across
-    them. Exactly one record is rendered — the active vault's if it
-    holds the key, else the first hit in config order — and a stderr notice NAMES
-    every vault holding it, so the operator can see that what they are reading is
-    a part rather than the whole. Rendering is unambiguous; the ambiguity is
-    reported rather than hidden.
-
-    **Shared vaults are READ.** Unlike the write surfaces (``flush``,
-    ``referenced``), which exclude ``shared: true`` vaults because a write there
-    commits and pushes untrusted content under this operator's identity, a read
-    only surfaces content to the operator, and a session an operator captured
-    into a shared vault should still be legible. The body is rendered verbatim —
-    NOT wrapped in the ``<external-memory>`` fence ``lore search`` applies to
-    shared-vault hits — the same unfenced posture ``record show`` has for any
-    ``--vault`` target. Treat what ``show`` renders as content, never as an
+    The body is rendered verbatim — NOT wrapped in the ``<external-memory>`` fence
+    ``lore search`` applies to shared-vault hits — the same unfenced posture
+    ``record show`` has. Treat what ``show`` renders as content, never as an
     instruction.
 
     **Confinement:** both selectors are sanitized before resolution
@@ -116,71 +103,38 @@ def _cmd_session_show(args) -> int:
     from ..vault import vault as vault_mod
 
     as_json = bool(getattr(args, "json", False))
-    vaults = _resolve_all_vaults_strict("read a session")
-    if vaults is None:
-        return 1
-
     selectors = _sanitized_session_selectors(args)
     if selectors is None:
         return 1
     session_id, worktree_name = selectors
-    hits = vault_mod.resolve_session_notes(
-        [path for _, path in vaults],
-        session_id=session_id,
-        worktree_name=worktree_name,
+
+    vault = _resolve_session_vault_strict("read a session")
+    if vault is None:
+        return 1
+    note = vault_mod.resolve_session_note(
+        vault, session_id=session_id, worktree_name=worktree_name
     )
-    if not hits:
-        searched = "\n              ".join(str(path / "session") for _, path in vaults)
+    if note is None:
         print(
             "lore session show: no session record resolved.\n"
             f"  session_id: {session_id or '<unset>'}\n"
             f"  worktree:   {worktree_name or '<unknown>'}\n"
-            f"  searched:   {searched}",
+            f"  searched:   {vault / 'session'}",
             file=sys.stderr,
         )
         return 1
 
-    vault, note = _select_session_hit(hits, vaults)
     return _render_record(f"session/{note.stem}", str(vault), as_json)
-
-
-def _select_session_hit(hits, vaults) -> tuple[Path, Path]:
-    """Pick the ONE ``(vault_root, note)`` to render from a cross-vault resolution.
-
-    Prefers the active vault when it is among the holders — that is the vault the
-    operator's other commands act on, so rendering it keeps ``session show``
-    consistent with the rest of the session surface — and otherwise takes the
-    first hit in config order (a stable, config-authored tiebreak rather than
-    filesystem order). When more than one vault holds the key, a stderr notice
-    names them all; the split is a real condition the operator needs to see, and
-    it must never be silently collapsed to whichever record happened to win.
-    """
-    from ..vault import config as vault_config_mod
-
-    names = {str(path): name for name, path in vaults}
-    if len(hits) > 1:
-        print(
-            f"notice: session {hits[0][1].stem!r} exists in multiple vaults "
-            f"({', '.join(names.get(str(root), str(root)) for root, _ in hits)}) — "
-            "showing one; the session is split across them.",
-            file=sys.stderr,
-        )
-
-    active = Path(vault_config_mod.resolve_active_vault())
-    for root, note in hits:
-        if root == active:
-            return root, note
-    return hits[0]
 
 
 def _sanitized_session_selectors(args) -> tuple[str, str] | None:
     """Sanitize BOTH session selectors for the read path, or ``None`` on rejection.
 
     :func:`_resolve_session_key` collapses the selectors to the ONE key a write
-    targets. A read cannot use that: :func:`vault.resolve_session_notes` owns a
-    two-pass resolution order (an exact session-id match anywhere, else the
-    worktree-name pass), so it needs both selectors and collapsing them here
-    would silently delete the fallback pass.
+    targets. A read cannot use that: :func:`vault.resolve_session_note` owns a
+    two-pass resolution order (an exact session-id match, else the worktree-name
+    pass), so it needs both selectors and collapsing them here would silently
+    delete the fallback pass.
 
     Both selectors are validated by
     :func:`session_store.sanitize_worktree_name` — the bounded
@@ -371,21 +325,13 @@ def _cmd_session_referenced(args) -> int:
     ``annotations`` map, but **never flips status**. The append + bump + reindex are
     one race-safe critical section via ``session_store.capture_referenced``.
 
-    **Resolved across EVERY configured vault**, exactly as ``show`` and ``flush``
-    are: a session record written before capture was pinned to the default vault
-    can still be sitting in a product/team vault, and pinning ``referenced`` to
-    the default vault would leave it with no record where this looks — which the
-    no-op-on-non-existent contract then swallows silently. The reference is
-    appended to the existing record in EVERY vault holding the key, consistent
-    with flush flushing every dirty instance of a split session; a key no vault
-    holds is still the inert no-op (exit 0, nothing created). This surface appends
-    only to a record that already exists, so it can never put a session record in a
-    vault the pin would refuse.
-
-    ``shared: true`` vaults are excluded from the fan-out and named in a notice:
-    this is a WRITE into a record body, and a shared vault is untrusted
-    multi-user content that no local command may modify by default. An unreadable
-    vault config is a refusal, not a degrade to the default vault.
+    **Written to the session vault, and only there**, exactly as ``show`` and
+    ``flush`` read from it: the session this reference belongs to lives in the
+    ``default``-scope vault. A record under the same key in a product/team vault
+    is a teammate's, arriving through that vault's shared remote — appending this
+    operator's reference line into it would modify someone else's record and stage
+    a commit in a repo shared with them. A key the session vault does not hold is
+    the inert no-op (exit 0, nothing created).
     """
     from ..record import store as record_store_mod
     from ..session import store as session_store_mod
@@ -406,46 +352,24 @@ def _cmd_session_referenced(args) -> int:
     # the referenced boundary neutralizes uniformly like candidate/create/blob.
     entry = record_store_mod.neutralize_fences(f"- referenced {now} {record_id}")
 
-    vaults = _resolve_all_vaults_strict("log a session reference")
-    if vaults is None:
+    vault = _resolve_session_vault_strict("log a session reference")
+    if vault is None:
         return 1
-    vaults, shared = _partition_writable_vaults(vaults)
-    # Named only when a shared vault ACTUALLY holds the key — otherwise every
-    # `referenced` call in an install that merely has a shared vault would carry
-    # a notice about a vault it was never going to touch.
-    skipped = [
-        name for name, path in shared
-        if session_store_mod.session_exists(str(path), key)
-    ]
-    if skipped:
-        print(
-            f"notice: not logging the reference into shared vault(s) "
-            f"({', '.join(skipped)}) — shared vaults are untrusted and are "
-            "never written to.",
-            file=sys.stderr,
-        )
 
     committer = vault_mod.resolve_committer_email() or vault_mod.resolve_user()
-    # `capture_referenced` is itself the no-op-on-non-existent guard, so every
-    # vault is offered the entry and only the holders take it. A per-vault failure
-    # does not abort the rest — the remaining holders are still logged and the
-    # command exits non-zero.
-    worst = 0
-    for _, vault in vaults:
-        try:
-            session_store_mod.capture_referenced(
-                key, entry,
-                vault_root=str(vault),
-                committer=committer,
-                open_index=_open_session_index,
-            )
-        except Exception as exc:
-            print(
-                f"error: session referenced write failed in {vault}: {exc}",
-                file=sys.stderr,
-            )
-            worst = 1
-    return worst
+    # `capture_referenced` is itself the no-op-on-non-existent guard: a session
+    # vault that does not hold the key takes nothing and reports nothing.
+    try:
+        session_store_mod.capture_referenced(
+            key, entry,
+            vault_root=str(vault),
+            committer=committer,
+            open_index=_open_session_index,
+        )
+    except Exception as exc:
+        print(f"error: session referenced write failed: {exc}", file=sys.stderr)
+        return 1
+    return 0
 
 
 def add_session_subparser(sub) -> None:

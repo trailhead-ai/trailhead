@@ -266,6 +266,31 @@ def _resolve_all_vaults_strict(what: str) -> list[tuple[str, Path]] | None:
     return vaults
 
 
+def _resolve_session_vault_strict(what: str) -> Path | None:
+    """The session vault, REFUSING on an unreadable config.
+
+    A session record lives in the ``default``-scope vault, which
+    ``vault_config.session_vault`` resolves. That resolver degrades a
+    missing/malformed config to the conventional floor path, which is right for a
+    vanilla install (no config means the floor IS the only vault) and wrong for a
+    BROKEN one: the operator's default vault may be configured at some other path,
+    and degrading would read — or flush and commit — at a path that is not their
+    vault at all, reporting a confident wrong answer either way.
+
+    Returns the vault path, or ``None`` after printing the diagnostic; the caller
+    then exits non-zero having touched nothing. *what* names the operation being
+    refused (e.g. ``"flush"``). Same refusing posture as
+    :func:`_resolve_all_vaults_strict`.
+    """
+    _, error = _resolve_all_vaults()
+    if error is not None:
+        print(f"error: {error}", file=sys.stderr)
+        print(f"  Aborting — refusing to {what} against an unresolved vault set.",
+              file=sys.stderr)
+        return None
+    return Path(vault_config_mod.session_vault())
+
+
 def _shared_vault_paths() -> set[str]:
     """Resolved paths of every ``shared: true`` vault in the live config.
 
