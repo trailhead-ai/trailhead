@@ -10,11 +10,15 @@ Three layered guards keep this suite off the operator's live Claude Code state
   an immediate error rather than a silent write;
 - ``_forbid_live_trust_writes`` watches the real file for trust entries a
   subprocess added, which neither of the other two can see.
+
+A fourth guard, ``_sandbox_tmux``, keeps the suite off the operator's live tmux
+server, which `camp list` reads to answer its session-state column.
 """
 from __future__ import annotations
 
 import json
 import os
+import stat
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -117,3 +121,40 @@ def _forbid_live_trust_writes(tmp_path: Path) -> Iterator[None]:
         "HOME instead of a sandbox: give every subprocess environment (and every "
         "`env=` argument) a tmp_path-rooted HOME."
     )
+
+
+#: A `tmux` stand-in that answers every invocation the way a machine with no
+#: tmux server answers: exit 1, with the stderr marker `Tmux.list_sessions`
+#: reads as "answered, and the answer is empty". Written as a script rather
+#: than a `monkeypatch.setattr` because camp reaches tmux by name through
+#: `PATH` (`camp/launch/stop.py`'s `subprocess.run(["tmux", ...])`), so a
+#: subprocess-spawning test is only covered at the `PATH` level.
+_NO_SERVER_TMUX_STUB = (
+    "#!/usr/bin/env python3\n"
+    "import sys\n"
+    'sys.stderr.write("error connecting to /tmp/no-such-tmux '
+    '(No such file or directory)\\n")\n'
+    "sys.exit(1)\n"
+)
+
+
+@pytest.fixture(autouse=True)
+def _sandbox_tmux(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep the suite off whatever tmux server the developer is running.
+
+    `camp list` reads tmux to answer its session-state column, which makes any
+    test that reaches that path observe the real sessions on the machine
+    executing it — so the suite's answer depends on who ran it and what they
+    had open, and a listing assertion passes on a quiet laptop and fails on a
+    busy one. Prepending a no-server stub to `PATH` makes the ambient answer
+    "no sessions" everywhere, deterministically.
+
+    A test that drives tmux state prepends its own stub afterwards, which wins
+    on `PATH` order; this fixture only sets the floor.
+    """
+    bin_dir = tmp_path / "sandbox-tmux-bin"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    stub = bin_dir / "tmux"
+    stub.write_text(_NO_SERVER_TMUX_STUB, encoding="utf-8")
+    stub.chmod(stub.stat().st_mode | stat.S_IEXEC)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
