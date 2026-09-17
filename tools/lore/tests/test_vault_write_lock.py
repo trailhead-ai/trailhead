@@ -584,3 +584,74 @@ class TestLockContract:
         vault.mkdir()
         with locking.vault_write_lock(vault):
             assert (vault / ".lore.lock").exists()
+
+
+# ---------------------------------------------------------------------------
+# blocking=False — the sync sweep's non-blocking opt-in
+# ---------------------------------------------------------------------------
+
+class TestNonBlockingAcquisition:
+    def test_blocking_false_raises_immediately_on_real_contention(self, tmp_path):
+        """A GENUINE second process holding the lock makes ``blocking=False``
+        raise ``BlockingIOError`` right away — no poll, no wait, no fallback."""
+        locking = load_script("lore.locking")
+        vault = tmp_path / "vault"
+        vault.mkdir()
+
+        holder = _spawn_holder(vault, hold_for=2.0)
+        try:
+            t0 = time.monotonic()
+            with pytest.raises(BlockingIOError):
+                with locking.vault_write_lock(vault, blocking=False):
+                    pass
+            elapsed = time.monotonic() - t0
+        finally:
+            holder.wait(timeout=15)
+        assert elapsed < 1.0, (
+            f"blocking=False waited {elapsed:.3f}s — it must never wait out "
+            "the holder"
+        )
+
+    def test_blocking_false_still_acquires_when_uncontended(self, tmp_path):
+        """Same entry point, one input varied: no holder → it just acquires."""
+        locking = load_script("lore.locking")
+        vault = tmp_path / "vault"
+        vault.mkdir()
+        with locking.vault_write_lock(vault, blocking=False):
+            assert (vault / ".lore.lock").exists()
+
+    def test_record_write_still_blocks_behind_a_held_vault_lock(self, tmp_path):
+        """A record write (`lore record update`) is unaffected: it still
+        blocks rather than giving up, because a write that gave up would lose
+        the write."""
+        vault = tmp_path / "vault"
+        vault.mkdir()
+        state = tmp_path / "state"
+        state.mkdir()
+        config_home = state / "_xdg_config"
+        write_default_config(config_home, vault)
+
+        r = run_cli(
+            ["record", "create", "--kind", "decision", "--title", "still blocks"],
+            vault=vault, state_dir=state, stdin_text="seed\n",
+        )
+        assert r.returncode == 0, r.stderr
+        rid = r.stdout.strip()
+
+        holder = _spawn_holder(vault, hold_for=1.0)
+        try:
+            t0 = time.monotonic()
+            r2 = run_cli(
+                ["record", "update", rid, "--keyword", "kept"],
+                vault=vault, state_dir=state,
+            )
+            elapsed = time.monotonic() - t0
+        finally:
+            holder.wait(timeout=15)
+
+        assert r2.returncode == 0, r2.stderr
+        assert elapsed >= 0.4, (
+            f"record update did not block behind the held lock ({elapsed:.3f}s)"
+        )
+        sidecar = json.loads((vault / f"{rid}.json").read_text(encoding="utf-8"))
+        assert "kept" in sidecar.get("keywords", [])

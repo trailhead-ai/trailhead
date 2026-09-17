@@ -114,6 +114,13 @@ from .init import _SITES_DIR
 
 DEFAULT_SYNC_MSG = "lore: sync vault"
 
+#: The per-vault outcome when that vault's write lock is already held by a
+#: concurrent writer at the moment the sweep/manual `lore sync` tries to
+#: acquire it — a readable value, not a message string a caller has to parse
+#: back out of stdout. A person at a terminal is not stranded behind the
+#: holder: the vault is skipped for this run and reported, not waited on.
+SYNC_IN_PROGRESS = "in-progress"
+
 
 def _make_emitters(name: str, width: int):
     """Return ``(say, say_err)`` writers that label output with the vault name.
@@ -705,6 +712,19 @@ def cmd_sync(args) -> int:
     true`` vaults too and a shared vault must never be committed or pushed by an
     agent-actuated write). Keep it that way: coupling this function to argparse,
     or making any of those three attributes mandatory, breaks that caller.
+
+    **The commit-phase lock acquisition is non-blocking by default, blocking
+    only when the caller opts in.** ``blocking = getattr(args, "blocking",
+    True)`` — the sweep/manual ``lore sync`` CLI path sets ``blocking=False``
+    explicitly (see ``add_sync_subparser``) so a person at a terminal is never
+    stranded behind another writer holding the vault; a contended vault raises
+    ``BlockingIOError`` at the ExitStack acquisition, is reported as
+    :data:`SYNC_IN_PROGRESS`, skipped for the WHOLE run (commit phase and
+    pull/push phase both), and counted a SUCCESS, not a failure — exit 0.
+    ``_flush_sync_tail``'s ``SimpleNamespace`` carries no ``blocking`` attribute
+    at all, so ``getattr`` defaults it to ``True``: the tail keeps the original
+    always-blocks behavior, because a flush that gave up on its own sync tail
+    would report success while leaving the just-flushed record unpushed.
     """
     targets, rc = _select_targets(getattr(args, "vault", None))
     if rc != 0:
@@ -712,11 +732,13 @@ def cmd_sync(args) -> int:
 
     message = getattr(args, "message", None) or DEFAULT_SYNC_MSG
     pull_only = bool(getattr(args, "pull_only", False))
+    blocking = bool(getattr(args, "blocking", True))
     width = max(len(name) for name, _ in targets) + 1  # + ':'
 
     say_map = {name: _make_emitters(name, width) for name, _ in targets}
     commit_rc: dict[str, int] = {}
     committed_map: dict[str, bool] = {}
+    outcomes: dict[str, str] = {}
     valid_targets: list[tuple[str, Path]] = []
 
     for name, vault in targets:
@@ -767,7 +789,27 @@ def cmd_sync(args) -> int:
             locked: list[tuple[str, Path]] = []
             for name, vault_path in sorted_targets:
                 try:
-                    stack.enter_context(locking.vault_write_lock(vault_path))
+                    stack.enter_context(
+                        locking.vault_write_lock(vault_path, blocking=blocking)
+                    )
+                except BlockingIOError:
+                    # Contention, not breakage — `BlockingIOError` is an
+                    # `OSError` subclass, so this must be caught FIRST or the
+                    # generic handler below misreports "in progress" as
+                    # "broken". Never reached when blocking=True: the plain
+                    # blocking flock below never raises this.
+                    #
+                    # No `commit_rc[name]` entry is set here (unlike the
+                    # `pull_only` branch above, which must set one — it never
+                    # populates `outcomes` at all): the pull/push loop below
+                    # checks `outcomes` BEFORE it ever reads `commit_rc`, so
+                    # this vault is skipped there on the `outcomes` entry
+                    # alone. Mutation-checked: setting `commit_rc[name] = 0`
+                    # here changed nothing observable.
+                    say, _say_err = say_map[name]
+                    say(f"sync already in progress for {name!r} — skipped")
+                    outcomes[name] = SYNC_IN_PROGRESS
+                    continue
                 except OSError as exc:
                     say_err = say_map[name][1]
                     say_err(f"error: failed to acquire vault lock: {exc} — skipped")
@@ -793,6 +835,13 @@ def cmd_sync(args) -> int:
     failed: list[str] = []
     total_pulled = 0
     for name, vault in targets:
+        if outcomes.get(name) == SYNC_IN_PROGRESS:
+            # Already reported; skipped for the WHOLE run, not just the commit
+            # phase — pull/push would re-take this same vault's lock (inside
+            # `_pull_one`'s rebase/reset, always blocking) and strand the
+            # terminal exactly where the non-blocking commit phase just
+            # refused to.
+            continue
         if commit_rc.get(name, 1) != 0:
             failed.append(name)
             continue
@@ -851,4 +900,8 @@ def add_sync_subparser(sub) -> None:
         "--pull-only", action="store_true",
         help="Fetch and integrate origin only — never stage, commit, or push",
     )
-    p_sync.set_defaults(func=cmd_sync)
+    # Explicit opt-in to the non-blocking commit-phase lock acquisition — see
+    # `cmd_sync`'s docstring. `_flush_sync_tail`'s SimpleNamespace carries no
+    # `blocking` attribute at all, so it keeps `cmd_sync`'s always-blocks
+    # default instead of inheriting this parser default.
+    p_sync.set_defaults(func=cmd_sync, blocking=False)

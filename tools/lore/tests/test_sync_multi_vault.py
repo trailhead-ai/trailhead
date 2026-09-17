@@ -28,6 +28,9 @@ Covers:
   - a pulled record becomes visible to `lore search` (reindex is not vacuous)
   - `--pull-only` covers every vault without committing or pushing any of them
   - `--pull-only --vault <name>` narrows to one, same as a full sync
+  - a vault whose write lock is held by a GENUINE second process ends the sync
+    immediately (in-progress, exit 0), never a partial commit; the uncontended
+    vaults in the same run still complete their whole commit -> pull -> push
 
 ``lore status``:
   - flags never-committed / uncommitted / remote-less vaults, per vault
@@ -45,9 +48,11 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from conftest import write_vault_config
+from test_vault_write_lock import _spawn_holder
 
 REPO_ROOT = Path(__file__).parent.parent
 PLUGIN_ROOT = REPO_ROOT / "plugins" / "lore"
@@ -1502,3 +1507,117 @@ def test_sync_commits_successfully_when_a_kind_directory_is_missing(tmp_path):
     r = run_cli(["sync"], config_home=config_home, state_dir=state_dir)
     assert r.returncode == 0, r.stderr
     assert "task/record.md" in _git(default, "ls-files").stdout.split()
+
+
+# ── lore sync: a contended vault lock ends the run immediately ────────────
+
+
+def _two_vaults(tmp_path: Path):
+    """Return ``(config_home, state_dir, {name: path})`` for a 2-vault install."""
+    config_home = tmp_path / "config"
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(parents=True, exist_ok=True)
+    vaults = {
+        "held": _make_vault(tmp_path / "v-held"),
+        "free": _make_vault(tmp_path / "v-free"),
+    }
+    write_vault_config(
+        config_home,
+        [("held", "default", vaults["held"]), ("free", "product", vaults["free"])],
+    )
+    return config_home, state_dir, vaults
+
+
+class TestContendedVaultLock:
+    def test_contended_sync_ends_immediately_names_the_vault_and_exits_zero(self, tmp_path):
+        """With the lock held by a GENUINE second process, `lore sync --vault
+        <name>` returns well under the holder's lifetime, names the vault and
+        says a sync is already in progress, and exits 0 — the person at the
+        terminal is not stranded behind the holder."""
+        config_home, state_dir, vaults = _three_vaults_for_lock(tmp_path)
+        held = vaults["trailhead"]
+
+        holder = _spawn_holder(held, hold_for=5.0)
+        try:
+            t0 = time.monotonic()
+            r = run_cli(
+                ["sync", "--vault", "trailhead"],
+                config_home=config_home, state_dir=state_dir,
+            )
+            elapsed = time.monotonic() - t0
+        finally:
+            holder.wait(timeout=15)
+
+        assert r.returncode == 0, r.stderr
+        assert elapsed < 2.0, (
+            f"sync waited {elapsed:.3f}s — it must not wait out the 5s holder"
+        )
+        assert "trailhead" in r.stdout
+        assert "in progress" in r.stdout.lower(), r.stdout
+
+    def test_uncontended_sync_still_acquires_the_lock_and_commits(self, tmp_path):
+        """Same entry point, same code path — the ONE input varied is whether
+        another process holds the lock. Uncontended, it still does the full
+        commit -> pull -> push work."""
+        config_home, state_dir, vaults = _three_vaults_for_lock(tmp_path)
+        vault = vaults["trailhead"]
+
+        r = run_cli(
+            ["sync", "--vault", "trailhead"],
+            config_home=config_home, state_dir=state_dir,
+        )
+        assert r.returncode == 0, r.stderr
+        assert _commit_count(vault) == 2, "the uncontended vault must still commit"
+        assert _git(vault, "status", "--porcelain").stdout.strip() == ""
+
+    def test_contended_run_leaves_the_vault_byte_identical(self, tmp_path):
+        """No partial commit: contended, the vault's tree and history are
+        untouched down to the byte."""
+        config_home, state_dir, vaults = _three_vaults_for_lock(tmp_path)
+        held = vaults["trailhead"]
+        record_path = held / "task" / "record.md"
+        before_bytes = record_path.read_bytes()
+        before_head = _git(held, "rev-parse", "HEAD").stdout.strip()
+        before_status = _git(held, "status", "--porcelain").stdout
+
+        holder = _spawn_holder(held, hold_for=3.0)
+        try:
+            r = run_cli(
+                ["sync", "--vault", "trailhead"],
+                config_home=config_home, state_dir=state_dir,
+            )
+        finally:
+            holder.wait(timeout=15)
+        (held / "_held").unlink(missing_ok=True)  # the holder's own marker file
+
+        assert r.returncode == 0, r.stderr
+        assert record_path.read_bytes() == before_bytes
+        assert _git(held, "rev-parse", "HEAD").stdout.strip() == before_head
+        assert _git(held, "status", "--porcelain").stdout == before_status
+
+    def test_multi_vault_run_reports_two_different_answers(self, tmp_path):
+        """One vault's lock is held, the other's is free — ONE run, and each
+        vault gets its own answer: the free vault completes its whole loop,
+        the held one reports in-progress. Neither strands the other."""
+        config_home, state_dir, vaults = _two_vaults(tmp_path)
+        held, free = vaults["held"], vaults["free"]
+
+        holder = _spawn_holder(held, hold_for=5.0)
+        try:
+            r = run_cli(["sync"], config_home=config_home, state_dir=state_dir)
+        finally:
+            holder.wait(timeout=15)
+
+        assert r.returncode == 0, r.stderr
+        assert _commit_count(held) == 1, "the held vault must not have committed"
+        assert _commit_count(free) == 2, "the free vault must have completed its sync"
+        assert _git(free, "status", "--porcelain").stdout.strip() == ""
+        assert "in progress" in r.stdout.lower()
+        held_lines = [ln for ln in r.stdout.splitlines() if "held:" in ln]
+        assert held_lines and "in progress" in held_lines[0].lower()
+
+
+def _three_vaults_for_lock(tmp_path: Path):
+    """Reuse `_three_vaults` — the extra vaults just prove the held one does
+    not strand the other configured vaults either."""
+    return _three_vaults(tmp_path)
