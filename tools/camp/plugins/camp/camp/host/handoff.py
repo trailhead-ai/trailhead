@@ -59,6 +59,25 @@ def local_argv(derived_name: str) -> list[str]:
     return ["tmux", "attach", "-t", target(derived_name)]
 
 
+def door_argv(derived_name: str) -> list[str]:
+    """argv for the door's outside-tmux handover: ``tmux attach-session -t
+    =<derived_name>``.
+
+    Distinct from :func:`local_argv` (``tmux attach``, the retired ref
+    path's own spelling): the door composes the full ``attach-session``
+    subcommand name, matching the transcript
+    ``docs/design/the-door-creates-or-connects-a-workspace-session.md``'s
+    "Handing over the terminal" section pins, since it names both calls —
+    ``attach-session`` and ``switch-client`` — by their full names side by
+    side.
+
+    ``derived_name`` must be the resolved workspace session's own derived
+    name (:func:`~camp.launch.naming.workspace_session_name`) — never the
+    harness's own session id.
+    """
+    return ["tmux", "attach-session", "-t", target(derived_name)]
+
+
 def remote_argv(
     host: Host,
     ref: str,

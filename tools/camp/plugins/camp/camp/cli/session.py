@@ -61,6 +61,7 @@ from typing import TYPE_CHECKING, NoReturn
 from .parser import CampParser, group_verb_parser
 
 if TYPE_CHECKING:
+    from ..attach.door_target import ResolvedWorkspace
     from ..host.config import Host
 
 #: Bounds for `camp new --launch`'s provisioning wait. Provisioning clones and
@@ -2742,6 +2743,144 @@ def _resolve_group_for_attach(
         return None
 
 
+def _refuse_door(outcome, reason: str, *, as_json: bool) -> NoReturn:
+    """One refusal for `_open_workspace_door`: `camp attach: <reason>` on
+    stderr under the plain form, or `{"ok": false, "reason": <reason>}` on
+    stdout under `--json` — the same `ok`-flagged shape every other `camp
+    attach` JSON answer already carries. *outcome* supplies only the exit
+    status; `camp.launch.door`'s own docstring is explicit that a
+    refusal's message is composed by the code that constructs it, never
+    read back out of that module.
+    """
+    from ..launch.door import exit_status
+    from ..spine import _die
+
+    if as_json:
+        print(json.dumps({"ok": False, "reason": reason}))
+        sys.exit(exit_status(outcome))
+    _die(f"camp attach: {reason}")
+
+
+def _open_workspace_door(
+    target: "ResolvedWorkspace",
+    *,
+    tmux,
+    resolved_env: dict[str, str],
+    as_json: bool,
+    interactive: bool,
+) -> None:
+    """Create or connect the workspace `target` resolved to, then hand the
+    terminal over — the door itself, wiring together the seam, the create
+    engine, and the outcome type this task's dependencies each built.
+
+    One `has_session` probe decides create-vs-connect: present is
+    `connected`; absent dispatches `create_workspace_session`, whose own
+    three answers fold in — created, already-existed (another camp won the
+    race, reported as connected), and any other failure, which re-probes
+    `has_session` before refusing rather than trusting tmux's own stderr
+    text alone (a reworded or localised "duplicate session" line would
+    otherwise turn a benign race into a hard failure). `has_session`
+    answering `None` — tmux never answered at all — is its own refusal:
+    every outcome the door reports is a claim about the session, so unlike
+    `camp list` there is no half-answer left to print.
+
+    The handover is two arms on two different seams, chosen by whether the
+    caller is already inside tmux (`TMUX` set, per
+    `camp.attach.prefix_warning.inside_multiplexer`) — see
+    `docs/design/the-door-creates-or-connects-a-workspace-session.md`'s
+    "Handing over the terminal". Outside tmux, the door hands off through
+    the exec seam (`camp.host.handoff.handoff`), which blocks for the
+    session's life and never returns on success. Inside tmux, it runs
+    `switch-client` through the ordinary `Tmux` seam instead — never
+    exec'd, because `switch-client` returns immediately and an exec'd one
+    would tear down the calling pane, and often the whole source session,
+    rather than moving the client; the door exits on that call's own
+    result. `attached` in the printed report is true on both handover arms
+    and false whenever `interactive` is false — without a terminal the
+    session is still created or connected, but nothing is handed over and
+    neither seam is touched.
+    """
+    from ..attach.prefix_warning import inside_multiplexer
+    from ..host.handoff import door_argv, handoff
+    from ..launch.door import (
+        Connected,
+        Created,
+        RefusedCreateFailed,
+        RefusedTmuxUnanswered,
+        exit_status,
+        render_human,
+        render_json,
+    )
+    from ..launch.naming import workspace_session_name
+    from ..launch.workspace_session import (
+        WorkspaceSessionOutcome,
+        create_workspace_session,
+    )
+
+    derived_name = workspace_session_name(target.group, target.slug)
+    present = tmux.has_session(derived_name)
+
+    if present is None:
+        _refuse_door(
+            RefusedTmuxUnanswered(),
+            "tmux did not answer — run `camp list` to see what camp can still tell",
+            as_json=as_json,
+        )
+        return
+
+    if present:
+        outcome_cls = Connected
+    else:
+        result = create_workspace_session(
+            target.group, target.slug, target.path, env=resolved_env, tmux=tmux
+        )
+        if result.outcome is WorkspaceSessionOutcome.CREATED:
+            outcome_cls = Created
+        elif result.outcome is WorkspaceSessionOutcome.ALREADY_EXISTED:
+            outcome_cls = Connected
+        elif tmux.has_session(derived_name):
+            # Unrecognised create failure — re-probe before refusing, per
+            # the council finding this task carries: the duplicate-session
+            # marker is pinned against tmux 3.7c's exact wording, and a
+            # reworded or localised message must not turn a benign race
+            # into a hard failure.
+            outcome_cls = Connected
+        else:
+            _refuse_door(
+                RefusedCreateFailed(),
+                f"failed to create workspace session — {result.error}",
+                as_json=as_json,
+            )
+            return
+
+    outcome = outcome_cls(
+        slug=target.slug,
+        group=target.group,
+        tmux_session=derived_name,
+        workspace_path=target.path,
+        attached=interactive,
+    )
+
+    if as_json:
+        print(json.dumps(render_json(outcome)))
+    else:
+        print(render_human(outcome))
+
+    if not interactive:
+        sys.exit(exit_status(outcome))
+
+    if inside_multiplexer(resolved_env):
+        switched = tmux.switch_client(derived_name)
+        sys.exit(switched.returncode if switched is not None else 1)
+
+    handoff(door_argv(derived_name))
+    # A real exec never returns on success — this line only runs when a
+    # test's injected exec seam returns instead of replacing the process,
+    # and it must still end the invocation here rather than falling back
+    # into `_cmd_attach_cli`'s ref-path branches below.
+    sys.exit(0)
+
+
 def _cmd_attach_cli(args: list[str], env: dict[str, str] | None = None) -> None:
     """camp attach [<ref>] [--resolve --json] [--list --json].
 
@@ -2846,27 +2985,23 @@ def _cmd_attach_cli(args: list[str], env: dict[str, str] | None = None) -> None:
                     for e in listing.entries
                 ]
 
+            interactive = sys.stdin.isatty() and sys.stdout.isatty()
             target = resolve_attach_target(
                 ref,
                 group_name=group_name,
                 workspaces=_group_workspaces,
-                isatty=sys.stdin.isatty() and sys.stdout.isatty(),
+                isatty=interactive,
                 stdin=sys.stdin,
                 stdout=sys.stdout,
             )
 
             if isinstance(target, ResolvedWorkspace):
-                # The dispatch that decides created-vs-connected and hands
-                # over the terminal is a later task's work
-                # (`task/camp-attach-opens-the-door-and-hands-over-the-
-                # terminal`) — this task is pure resolution and must create
-                # nothing, attach nothing, and run no tmux, so it stops
-                # here with a named, non-crashing refusal rather than
-                # guessing at the door's action.
-                _die(
-                    f"camp attach: workspace {target.slug!r} resolved in "
-                    f"group {target.group!r} — opening its session is not "
-                    "wired up yet"
+                _open_workspace_door(
+                    target,
+                    tmux=tmux,
+                    resolved_env=resolved_env,
+                    as_json=as_json,
+                    interactive=interactive,
                 )
             if isinstance(target, (RefusedNoTerminal, RefusedEmptyGroup)):
                 _die(refusal_message(target, group_name=group_name))

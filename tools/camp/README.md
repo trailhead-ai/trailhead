@@ -245,6 +245,15 @@ same unambiguous prefix `camp kill` and `camp launch --resume` already
 accept, resolved by the identical rule so the three verbs never drift into
 three grammars.
 
+From inside a configured group (or with `--group`), `<ref>` is checked against that
+group's own workspace slugs first: a match creates or connects that workspace's
+tmux session — creating it if nothing is running yet, joining it if something
+already is — and hands you the terminal the same way. A `<ref>` matching no
+workspace falls through to the session-reference form below, unchanged. Outside
+tmux this attaches directly; from inside an existing tmux session it moves your
+client there instead of nesting, so hopping between workspaces never tears down
+the one you came from.
+
 `<ref> --host <name>` carries the reference across untouched: the named
 machine's own camp resolves it and refuses in its own words, exactly as if
 you had run `camp attach <ref>` there yourself. `<ref> -a` instead asks

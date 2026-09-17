@@ -192,6 +192,22 @@ def test_set_environment_targets_the_exact_name_not_a_prefix(monkeypatch):
     assert calls == [["tmux", "set-environment", "-t", "=feat", "-r", "SOME_VAR"]]
 
 
+def test_switch_client_targets_the_exact_name_not_a_prefix(monkeypatch):
+    import camp.launch.tmux as tmux_module
+
+    calls: list[list[str]] = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(list(argv))
+        return _completed(returncode=0)
+
+    monkeypatch.setattr(tmux_module.subprocess, "run", fake_run)
+
+    tmux_module.Tmux().switch_client("feat")
+
+    assert calls == [["tmux", "switch-client", "-t", "=feat"]]
+
+
 def test_has_session_tri_state_true_false_none(monkeypatch):
     """The pinned contract: True, False, or None — never a fourth answer,
     and an unanswerable call is never folded into False."""
