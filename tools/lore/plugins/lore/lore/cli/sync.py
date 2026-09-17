@@ -95,6 +95,7 @@ import sys
 import time
 from contextlib import ExitStack
 from pathlib import Path
+from typing import Callable
 
 from .. import locking
 from ..record import model as record_model
@@ -180,10 +181,13 @@ _SYNC_REPORT_SCHEMA = (
     "no other value is ever emitted. "
     '"condition" is present only when "outcome" is "refused", naming which '
     "SYNC_REFUSAL_CONDITIONS member (mid-rebase, mid-merge, detached-head, "
-    "stale-lock) was found. A vault that never reached a determinate outcome "
-    "this run (missing, not its own git toplevel, or a git error while "
-    "staging) has no entry — its failure is reported on stderr and reflected "
-    "only in the exit code, exactly as without --json."
+    "stale-lock) was found. A vault that did not reach a determinate outcome "
+    "this run — for ANY reason, including but not limited to a missing "
+    "vault, a git error while staging, or a failed lock acquisition — has no "
+    "entry; its failure is reported on stderr and reflected only in the exit "
+    "code, exactly as without --json. A run that fails before any vault is "
+    "even selected (an unreadable config, or an unknown --vault name) prints "
+    "no document at all."
 )
 
 
@@ -195,9 +199,20 @@ def render_sync_json(entries: list[tuple[str, str, "str | None"]]) -> dict:
     :data:`SYNC_OUTCOMES`; *condition* is non-``None`` only for a "refused"
     outcome. Mirrors `cli/resolve.py`'s `render_json` — a plain dict, printed
     with ``json.dumps(..., indent=2)`` by the caller.
+
+    Raises:
+        ValueError: if *outcome* is not a member of :data:`SYNC_OUTCOMES` —
+            the schema string promises callers a closed vocabulary, and this
+            is what makes that promise a guarantee rather than a claim
+            resting on review.
     """
     vaults = []
     for name, outcome, condition in entries:
+        if outcome not in SYNC_OUTCOMES:
+            raise ValueError(
+                f"outcome {outcome!r} for vault {name!r} is not in SYNC_OUTCOMES: "
+                f"{sorted(SYNC_OUTCOMES)}"
+            )
         entry: dict = {"vault": name, "outcome": outcome}
         if condition is not None:
             entry["condition"] = condition
@@ -537,7 +552,13 @@ def _refetch_discriminator(vault: Path, branch: str) -> tuple[bool, bool]:
 
 
 def _push_one(
-    vault: Path, say, say_err, *, committed: bool, max_attempts: int | None = None
+    vault: Path,
+    say,
+    say_err,
+    *,
+    committed: bool,
+    max_attempts: int | None = None,
+    on_replay: Callable[[int], None] | None = None,
 ) -> tuple[int, str, int]:
     """Push ``vault`` to origin, replaying onto a moved history when rejected.
 
@@ -549,6 +570,14 @@ def _push_one(
     history kept moving past ``max_attempts`` (default
     :func:`resolve_publish_retry_max`). ``attempts_used`` counts only the
     moved-history case — the one condition a retry can actually clear.
+
+    ``on_replay``, when given, is called once per successful replay with the
+    number of commits that replay's rebase integrated from origin — the same
+    quantity :func:`_pull_one` returns for an ordinary pull. A vault whose push
+    loses a race fetches and rebases a peer's commits onto its own tree exactly
+    like a pull does, so those commits must count toward the caller's reindex
+    decision the same way a pull's commits do; a caller that ignores
+    ``on_replay`` gets the previous behavior unchanged.
 
     Skipped silently when the vault is clean AND already in sync with its
     upstream — the common case across a multi-vault sync, where an unconditional
@@ -635,6 +664,15 @@ def _push_one(
             )
             return 1, PUBLISH_RETRIES_EXHAUSTED, attempts_used
 
+        # Count what the replay is about to integrate BEFORE rebasing — the
+        # same measurement `_pull_one` takes of its own rebase, and for the
+        # same reason: once the rebase replays local commits on top,
+        # `HEAD..origin/<branch>` no longer names the commits that just landed.
+        rc_count, count_out, _ = _git(
+            vault, "rev-list", "--count", f"HEAD..origin/{branch}"
+        )
+        replayed = int(count_out) if rc_count == 0 and count_out.isdigit() else 0
+
         # Tree mutation — locked, exactly like `_pull_one`'s rebase. The abort
         # is part of the same critical section: the vault must not be
         # observable mid-rebase.
@@ -650,6 +688,9 @@ def _push_one(
         if rc_rebase != 0:
             say_err("error: replaying onto the moved history failed — publish skipped")
             return 1, PUBLISH_HOLDING, attempts_used
+
+        if on_replay is not None and replayed:
+            on_replay(replayed)
 
 
 #: The root file lore scaffolds that IS committed. ``.lore.lock`` is deliberately
@@ -817,7 +858,12 @@ def _pull_and_push_one(
 ) -> tuple[int, int, str, bool]:
     """Pull then push one vault, given whether this run just committed to it.
 
-    Returns ``(exit_code, commits_pulled, ending, published)``. ``ending`` is
+    Returns ``(exit_code, commits_pulled, ending, published)``. ``commits_pulled``
+    includes commits integrated by the publish retry's replay
+    (:func:`_push_one`'s ``on_replay``), not just :func:`_pull_one`'s own pull —
+    a vault whose push loses a race replays a peer's commits onto its tree just
+    as surely as a pull does, and the caller's reindex decision must not miss
+    them. ``ending`` is
     :func:`_push_one`'s outcome (:data:`PUBLISH_OK` for every path that never
     reaches a push attempt — a failed or skipped pull). Kept separate from
     :func:`_stage_and_commit_one` so :func:`cmd_sync` can run every target's
@@ -858,13 +904,21 @@ def _pull_and_push_one(
         return 0, 0, PUBLISH_OK, False
 
     had_something_to_publish = committed or _vault_unpushed(vault)
-    rc, ending, _attempts = _push_one(vault, say, say_err, committed=committed)
+    replayed_total = 0
+
+    def _record_replay(n: int) -> None:
+        nonlocal replayed_total
+        replayed_total += n
+
+    rc, ending, _attempts = _push_one(
+        vault, say, say_err, committed=committed, on_replay=_record_replay
+    )
     published = (
         had_something_to_publish
         and ending == PUBLISH_OK
         and not _vault_unpushed(vault)
     )
-    return rc, pulled, ending, published
+    return rc, pulled + replayed_total, ending, published
 
 
 # ---------------------------------------------------------------------------
@@ -1260,10 +1314,11 @@ def cmd_sync(args) -> int:
         # Printed LAST and unconditionally — an addition to the prose above,
         # never a replacement for it (see `cmd_sync`'s docstring on
         # `--json`). Only vaults that reached one of `SYNC_OUTCOMES`'s six
-        # determinate outcomes this run get an entry; a vault that never
-        # existed, was not its own git toplevel, or hit a bare git error
-        # while staging has no outcome to report and is reflected only in the
-        # exit code and stderr, exactly as without `--json`.
+        # determinate outcomes this run get an entry; a vault that did not —
+        # for any reason (never existed, not its own git toplevel, a bare git
+        # error while staging, a failed lock acquisition, ...) — has no
+        # outcome to report and is reflected only in the exit code and
+        # stderr, exactly as without `--json`.
         entries = [
             (name, outcomes[name], refusal_conditions.get(name))
             for name, _vault in targets
