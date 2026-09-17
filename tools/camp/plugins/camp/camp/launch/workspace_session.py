@@ -28,6 +28,22 @@ it has to re-parse: :data:`WorkspaceSessionOutcome.CREATED`,
 exact stderr shape — see :data:`_DUPLICATE_SESSION_MARKER`), or
 :data:`WorkspaceSessionOutcome.FAILED`, carrying tmux's own stderr verbatim
 and unsummarized.
+
+The door's own step
+-------------------
+:func:`create_or_connect_workspace_session` is the probe-then-create step
+both doors onto a workspace session share — `camp attach`'s
+(`cli/session.py:_open_workspace_door`) and `camp new`'s
+(`cli/group.py:_door_dispatch_for_new`). It also composes the
+operator-facing *reason* for each of its two failure states, because both
+callers report that sentence word for word and only what happened at the
+tmux boundary can say it.
+
+What it deliberately does NOT decide is what a caller does with a failure.
+`camp attach` refuses and exits non-zero, because the session is all it
+has; `camp new` reports a workspace-only success and exits 0, because the
+workspace is real on disk either way. That asymmetry stays at the call
+sites.
 """
 
 from __future__ import annotations
@@ -99,3 +115,78 @@ def create_workspace_session(
     if _DUPLICATE_SESSION_MARKER in stderr:
         return WorkspaceSessionResult(WorkspaceSessionOutcome.ALREADY_EXISTED, name)
     return WorkspaceSessionResult(WorkspaceSessionOutcome.FAILED, name, error=stderr)
+
+
+class DoorState(Enum):
+    """What one pass through the door found at the tmux boundary."""
+
+    CONNECTED = "connected"
+    CREATED = "created"
+    TMUX_UNANSWERED = "tmux_unanswered"
+    CREATE_FAILED = "create_failed"
+
+
+#: The operator-facing sentence for :data:`DoorState.TMUX_UNANSWERED`. It
+#: points at `camp list`, which degrades and still prints rows where the door
+#: cannot: every outcome the door reports is a claim about the session, so an
+#: unanswered probe leaves it no half-answer to give.
+_TMUX_UNANSWERED_REASON = "tmux did not answer — run `camp list` to see what camp can still tell"
+
+
+@dataclass(frozen=True)
+class DoorProbe:
+    """One pass through the door: what state it reached, the session name it
+    derived getting there, and — for the two failure states only — the
+    operator-facing ``reason`` both callers report verbatim.
+    """
+
+    state: DoorState
+    session_name: str
+    reason: str | None = None
+
+
+def create_or_connect_workspace_session(
+    group_name: str,
+    slug: str,
+    workspace_dir: Path,
+    *,
+    env: Mapping[str, str] | None = None,
+    tmux: Tmux,
+) -> DoorProbe:
+    """Probe for the workspace's session and create it when there is none.
+
+    One `has_session` probe decides: present is
+    :data:`DoorState.CONNECTED`; absent dispatches
+    :func:`create_workspace_session`, whose three answers fold in — created,
+    already-existed (another camp won the race, which is a connect), and any
+    other failure, which re-probes `has_session` before giving up rather than
+    trusting tmux's stderr text alone. A probe tmux never answers at all is
+    :data:`DoorState.TMUX_UNANSWERED`, distinct from a create that was
+    attempted and failed (:data:`DoorState.CREATE_FAILED`, carrying tmux's
+    own words).
+
+    *tmux* is required, never defaulted: both callers inject the seam their
+    own wiring resolved, and a default constructed here would silently
+    bypass it.
+    """
+    name = workspace_session_name(group_name, slug)
+    present = tmux.has_session(name)
+
+    if present is None:
+        return DoorProbe(DoorState.TMUX_UNANSWERED, name, reason=_TMUX_UNANSWERED_REASON)
+
+    if present:
+        return DoorProbe(DoorState.CONNECTED, name)
+
+    result = create_workspace_session(group_name, slug, workspace_dir, env=env, tmux=tmux)
+    if result.outcome is WorkspaceSessionOutcome.CREATED:
+        return DoorProbe(DoorState.CREATED, name)
+    if result.outcome is WorkspaceSessionOutcome.ALREADY_EXISTED:
+        return DoorProbe(DoorState.CONNECTED, name)
+    if tmux.has_session(name):
+        return DoorProbe(DoorState.CONNECTED, name)
+    return DoorProbe(
+        DoorState.CREATE_FAILED,
+        name,
+        reason=f"failed to create workspace session — {result.error}",
+    )

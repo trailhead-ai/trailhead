@@ -37,16 +37,12 @@ slug AND no terminal never occur apart — a slug given short-circuits before
 the terminal is ever consulted, and a slug absent WITH a terminal goes to
 the picker, never a refusal for the terminal alone), and its own text calls
 this "the no-terminal refusal" verbatim — so it maps to
-``RefusedNoTerminal``, not the vaguer ``RefusedNoSlug`` door.py also
-defines. ``RefusedNoSlug`` and ``RefusedNoWorkspace`` are therefore UNREACHABLE
-from this module: ``RefusedNoWorkspace``'s docstring ("The given slug names
-no workspace in the resolved group") reads as a perfect fit for the
-fall-through state, but the design doc is explicit that state falls through
-to the retired ref path instead — "Once the retirement slice removes the
-ref path, this refusal becomes the door's own" — so it belongs to that
-later slice, not this one. ``RefusedNoSlug`` has no state left to name once
-``RefusedNoTerminal`` covers the one combined "no slug, no terminal" case;
-it is dead vocabulary as things stand, which the executor report calls out.
+``RefusedNoTerminal``. ``RefusedNoWorkspace`` is UNREACHABLE from this
+module: its docstring ("The given slug names no workspace in the resolved
+group") reads as a perfect fit for the fall-through state, but the design
+doc is explicit that state falls through to the retired ref path instead —
+"Once the retirement slice removes the ref path, this refusal becomes the
+door's own" — so it belongs to that later slice, not this one.
 
 The picker's re-prompt loop is `camp.attach.picker`'s own
 (:func:`~camp.attach.picker._prompt_for_index`), generalized there and
