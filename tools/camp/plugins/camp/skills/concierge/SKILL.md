@@ -148,9 +148,20 @@ harness session exists yet. The reuse path prints `{"workspace": …,
 `account_binding` is the environment the harness resolved that into, so a
 defaulted launch says which account it landed on rather than passing silently.
 
+A third `outcome` value, `workspace-only`, means the workspace was created
+but its tmux session could not be — tmux was unreachable, or the create
+itself failed. It prints `{"ok": true, "outcome": "workspace-only", "slug":
+…, "group": …, "workspace_path": …, "tmux_session": null, "attached": false,
+"session_error": …}` — still `ok: true` and still exit 0, because the
+workspace is real and usable; `session_error` carries tmux's own words on
+why the session isn't there yet. Report the workspace as delivered and
+relay `session_error` as a caveat, then point at `camp attach <slug>` to
+retry creating the session directly.
+
 - The create path holds the workspace and its shell to be the deliverable. It
-  exits 0 whenever the workspace exists and its tmux session is created or
-  already running, whatever the provisioning state.
+  exits 0 whenever the workspace exists — its tmux session created, already
+  running, or (`workspace-only`) not created at all — whatever the
+  provisioning state.
 - The reuse path holds the harness session to be the deliverable. Its refusal
   prints nothing at all on stdout and exits non-zero, with camp's reason on
   stderr. There is no JSON to parse there — take the reason from stderr.

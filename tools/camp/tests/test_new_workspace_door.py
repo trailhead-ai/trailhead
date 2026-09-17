@@ -94,21 +94,41 @@ class _DoorTmux:
     two calls the door dispatch and `create_workspace_session` issue.
     `switch_client` is included for completeness; the tests here never set
     `TMUX`, so the exec (attach-session) arm is the one exercised.
+
+    `present` is the FIRST `has_session` answer; `reprobe` is every answer
+    after the first (the unrecognised-create-failure re-probe) — `None`
+    means "same as `present`", matching `test_attach_door_dispatch.py`'s
+    own double so the two failure-arm fixtures share one shape.
     """
 
-    def __init__(self, *, present: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        present: bool | None = False,
+        reprobe: bool | None = None,
+        create_returncode: int = 0,
+        create_stderr: str = "",
+    ) -> None:
         self._present = present
+        self._reprobe = present if reprobe is None else reprobe
+        self._create_returncode = create_returncode
+        self._create_stderr = create_stderr
         self.has_session_calls: list[str] = []
         self.new_session_calls: list[dict[str, object]] = []
         self.switch_client_calls: list[str] = []
 
     def has_session(self, name: str) -> bool | None:
         self.has_session_calls.append(name)
-        return self._present
+        return self._present if len(self.has_session_calls) == 1 else self._reprobe
 
     def new_session(self, name, *, cwd, env=None, timeout=None):
         self.new_session_calls.append({"name": name, "cwd": cwd, "env": env})
-        return subprocess.CompletedProcess(args=["tmux"], returncode=0, stdout="", stderr="")
+        return subprocess.CompletedProcess(
+            args=["tmux"],
+            returncode=self._create_returncode,
+            stdout="",
+            stderr=self._create_stderr,
+        )
 
     def switch_client(self, name: str):
         self.switch_client_calls.append(name)
@@ -397,3 +417,174 @@ def test_concierge_exact_invocation_succeeds_and_emits_expected_keys(
         "attached",
     }
     assert payload["attached"] is False, "the concierge's call carries no terminal"
+
+
+# ---------------------------------------------------------------------------
+# Operator decision at Phase 1: `camp new` succeeds with a warning when its
+# session can't be created — the workspace is real and usable, so this is
+# not a refusal. Both failure arms (`has_session` unanswered, create failed)
+# take this path; `camp attach`'s own door is untouched and still refuses
+# (pinned separately in `test_attach_door_dispatch.py`).
+#
+# `_run_capturing_exit` covers both a bare `return` (this codebase's own
+# convention for a non-interactive success, e.g.
+# `test_json_without_launch_succeeds_and_emits_the_door_object` above) and an
+# explicit `sys.exit` — pinning "exits 0" must hold under either shape,
+# since the pre-fix code takes the `sys.exit(1)` shape and the fix may or
+# may not choose to exit explicitly.
+# ---------------------------------------------------------------------------
+
+
+def _run_capturing_exit(fn, *args, **kwargs) -> int:
+    try:
+        fn(*args, **kwargs)
+    except SystemExit as exc:
+        return 0 if exc.code is None else exc.code
+    return 0
+
+
+def test_tmux_unreachable_exits_zero_with_path_on_stdout_and_warning_on_stderr(
+    camp_cli, group_env, monkeypatch, capsys
+):
+    from camp.group.manifest import workspace_dir
+
+    g = group_env
+    tmux = _DoorTmux(present=None)
+    _wire_tmux(monkeypatch, tmux)
+
+    code = _run_capturing_exit(
+        camp_cli._cmd_new_group_cli, ["feat-unreachable"], g["group"], g["env"], dry_run=False
+    )
+
+    assert code == 0
+    captured = capsys.readouterr()
+    ws_dir = workspace_dir("g", "feat-unreachable", env=g["env"])
+    assert captured.out.rstrip("\n").splitlines()[-1] == str(ws_dir), (
+        "stdout's final line is exactly the workspace path"
+    )
+    derived = _derived_name("g", "feat-unreachable")
+    assert derived in captured.err, "the warning names the unreached session"
+    assert tmux.new_session_calls == [], "tmux never answered, so no create was attempted"
+
+
+@pytest.mark.parametrize(
+    "injected_stderr",
+    ["error connecting to /tmp/x (permission denied)", "no server running on socket /tmp/y"],
+    ids=["permission-denied", "no-server"],
+)
+def test_create_failure_exits_zero_with_path_on_stdout_and_reason_on_stderr(
+    camp_cli, group_env, monkeypatch, capsys, injected_stderr
+):
+    """Varies the injected tmux error text across two distinct values and
+    asserts each one reaches stderr verbatim — the test must depend on the
+    input, not merely on the failure arm being taken."""
+    from camp.group.manifest import workspace_dir
+
+    g = group_env
+    tmux = _DoorTmux(present=False, create_returncode=1, create_stderr=injected_stderr)
+    _wire_tmux(monkeypatch, tmux)
+
+    code = _run_capturing_exit(
+        camp_cli._cmd_new_group_cli, ["feat-createfail"], g["group"], g["env"], dry_run=False
+    )
+
+    assert code == 0
+    captured = capsys.readouterr()
+    ws_dir = workspace_dir("g", "feat-createfail", env=g["env"])
+    assert captured.out.rstrip("\n").splitlines()[-1] == str(ws_dir)
+    assert injected_stderr in captured.err, "tmux's own words reach stderr, varying with input"
+
+
+@pytest.mark.parametrize(
+    "tmux_factory",
+    [
+        lambda: _DoorTmux(present=None),
+        lambda: _DoorTmux(present=False, create_returncode=1, create_stderr="boom"),
+    ],
+    ids=["tmux-unreachable", "create-failed"],
+)
+def test_neither_failure_arm_reaches_exec_or_switch_client_seam(
+    camp_cli, group_env, monkeypatch, capsys, tmux_factory
+):
+    g = group_env
+    tmux = tmux_factory()
+    _wire_tmux(monkeypatch, tmux)
+    _raising_handoff(monkeypatch)
+    fake_stdin = _FakeTTY()
+    fake_stdout = _FakeTTY()
+    monkeypatch.setattr(sys, "stdin", fake_stdin)
+    monkeypatch.setattr(sys, "stdout", fake_stdout)
+
+    code = _run_capturing_exit(
+        camp_cli._cmd_new_group_cli, ["feat-noexec"], g["group"], g["env"], dry_run=False
+    )
+
+    assert code == 0
+    assert tmux.switch_client_calls == [], "the switch-client seam must never be reached"
+
+
+@pytest.mark.parametrize(
+    "tmux_factory",
+    [
+        lambda: _DoorTmux(present=None),
+        lambda: _DoorTmux(present=False, create_returncode=1, create_stderr="disk full"),
+    ],
+    ids=["tmux-unreachable", "create-failed"],
+)
+def test_json_on_each_failure_arm_emits_exactly_one_workspace_only_object(
+    camp_cli, group_env, monkeypatch, capsys, tmux_factory
+):
+    from camp.group.manifest import workspace_dir
+
+    g = group_env
+    tmux = tmux_factory()
+    _wire_tmux(monkeypatch, tmux)
+
+    code = _run_capturing_exit(
+        camp_cli._cmd_new_group_cli, ["feat-jsonfail", "--json"], g["group"], g["env"], dry_run=False
+    )
+
+    assert code == 0
+    captured = capsys.readouterr()
+    lines = [line for line in captured.out.splitlines() if line.strip()]
+    assert len(lines) == 1, f"exactly one object on stdout, got: {lines!r}"
+    payload = json.loads(lines[0])
+
+    ws_dir = workspace_dir("g", "feat-jsonfail", env=g["env"])
+    assert payload == {
+        "ok": True,
+        "outcome": "workspace-only",
+        "slug": "feat-jsonfail",
+        "group": "g",
+        "workspace_path": str(ws_dir),
+        "tmux_session": None,
+        "attached": False,
+        "session_error": payload.get("session_error"),
+    }
+    assert payload["session_error"], "session_error must carry the reason, non-empty"
+
+
+def test_concierge_invocation_exits_zero_on_a_failure_arm_with_documented_keys(
+    camp_cli, group_env, monkeypatch, capsys
+):
+    """The concierge's exact documented invocation
+    (`skills/concierge/SKILL.md:120`) must still succeed and emit an object
+    when the session can't be created — the create path's deliverable is
+    the workspace, not the session."""
+    g = group_env
+    tmux = _DoorTmux(present=None)
+    _wire_tmux(monkeypatch, tmux)
+
+    code = _run_capturing_exit(
+        camp_cli._cmd_new_group_cli,
+        ["feat-concierge-fail", "--launch", "--no-wait", "--json"],
+        g["group"],
+        g["env"],
+        dry_run=False,
+    )
+
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is True
+    assert payload["outcome"] == "workspace-only"
+    assert "session_error" in payload

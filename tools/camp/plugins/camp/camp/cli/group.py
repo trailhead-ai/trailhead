@@ -478,6 +478,61 @@ def _cmd_new_group_cli(
     )
 
 
+def _workspace_only_payload(
+    *, slug: str, group_name: str, ws_dir, session_error: str
+) -> dict:
+    """The `--json` object for `camp new`'s workspace-only outcome — the
+    workspace exists but its tmux session does not, whether tmux was
+    unreachable or the create attempt itself failed. One outcome value
+    covers both causes; no consumer needs to branch on which one happened,
+    only on `session_error`, which carries tmux's own words wherever tmux
+    supplied them. The sole place this key set is assembled — both call
+    sites in `_door_dispatch_for_new` build the object here, never ad hoc.
+    """
+    return {
+        "ok": True,
+        "outcome": "workspace-only",
+        "slug": slug,
+        "group": group_name,
+        "workspace_path": str(ws_dir),
+        "tmux_session": None,
+        "attached": False,
+        "session_error": session_error,
+    }
+
+
+def _report_workspace_only(
+    *,
+    as_json: bool,
+    slug: str,
+    group_name: str,
+    ws_dir,
+    derived_name: str,
+    session_error: str,
+) -> None:
+    """Report `camp new`'s workspace-only outcome and return — never exits
+    and never raises. The workspace is real and usable, so this is success
+    with a warning, not a refusal: exactly the workspace path on stdout (or
+    the `--json` object replacing it), and a warning naming the unreached
+    session on stderr under the plain form.
+    """
+    if as_json:
+        print(
+            json.dumps(
+                _workspace_only_payload(
+                    slug=slug,
+                    group_name=group_name,
+                    ws_dir=ws_dir,
+                    session_error=session_error,
+                )
+            )
+        )
+        return
+
+    print(str(ws_dir))
+    print(f"camp new: warning — {derived_name} — {session_error}", file=sys.stderr)
+
+
 def _door_dispatch_for_new(
     *,
     group_name: str,
@@ -502,6 +557,11 @@ def _door_dispatch_for_new(
     outcome goes to stderr instead of stdout, and `--json` prints the door's
     object as the ONE thing on stdout, replacing the path line, exactly as
     `camp attach --json` already does.
+
+    Unlike `camp attach`'s own door, neither tmux-unreachable nor a failed
+    create is a refusal here: the workspace was already created and is
+    usable on disk, so both arms report it through `_report_workspace_only`
+    and return, without touching the exec or `switch-client` seam.
     """
     from ..attach.prefix_warning import inside_multiplexer
     from ..host.handoff import door_argv, handoff
@@ -512,7 +572,6 @@ def _door_dispatch_for_new(
         WorkspaceSessionOutcome,
         create_workspace_session,
     )
-    from ..spine import _die
 
     resolved_env = dict(env) if env is not None else dict(os.environ)
     tmux = Tmux()
@@ -520,7 +579,16 @@ def _door_dispatch_for_new(
     present = tmux.has_session(derived_name)
 
     if present is None:
-        _die("camp new: tmux did not answer — run `camp list` to see what camp can still tell")
+        _report_workspace_only(
+            as_json=as_json,
+            slug=slug,
+            group_name=group_name,
+            ws_dir=ws_dir,
+            derived_name=derived_name,
+            session_error=(
+                "tmux did not answer — run `camp list` to see what camp can still tell"
+            ),
+        )
         return
 
     if present:
@@ -537,7 +605,14 @@ def _door_dispatch_for_new(
             # or localised "duplicate session" stderr line.
             outcome_cls = Connected
         else:
-            _die(f"camp new: failed to create workspace session — {result.error}")
+            _report_workspace_only(
+                as_json=as_json,
+                slug=slug,
+                group_name=group_name,
+                ws_dir=ws_dir,
+                derived_name=derived_name,
+                session_error=f"failed to create workspace session — {result.error}",
+            )
             return
 
     outcome = outcome_cls(

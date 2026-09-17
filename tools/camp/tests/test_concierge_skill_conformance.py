@@ -86,24 +86,18 @@ class _FakeConciergeTmux:
         return subprocess.CompletedProcess(args=["tmux"], returncode=0, stdout="", stderr="")
 
 
-@pytest.fixture()
-def group_env(tmp_path, monkeypatch):
-    """A one-member group `camp new` can really create a workspace in.
+class _UnreachableConciergeTmux:
+    """A `Tmux` stand-in for `camp new`'s workspace-only outcome: tmux never
+    answers, so the door reports the workspace with a warning rather than a
+    session — the shape `SKILL.md` documents as the third `outcome` value."""
 
-    The detached provisioner is stubbed out: the emitter's key set is what is
-    under test, not the background work the workspace then schedules. `camp
-    new`'s default path now creates the workspace's tmux session
-    unconditionally, so this fixture also injects HOME (the credential-store
-    guard reads it from the explicit `env` this module passes, not the
-    sandboxed ambient one) and a fake `Tmux` (`camp.launch.stop.Tmux`, the
-    same factory attribute `_open_workspace_door`'s own tests monkeypatch).
-    """
-    import camp.launch.stop as stop_module
-    import camp.provision.provision as provision
+    def has_session(self, name: str):
+        return None
 
-    monkeypatch.setattr(provision, "spawn_detached_provisioner", lambda **kw: None)
-    monkeypatch.setattr(stop_module, "Tmux", lambda *a, **k: _FakeConciergeTmux())
-    repo = tmp_path / "repo_a"
+
+def _build_group_env(tmp_path, *, subdir: str = "") -> dict:
+    base = tmp_path / subdir if subdir else tmp_path
+    repo = base / "repo_a"
     init_git_repo(repo)
     return {
         "group": {
@@ -119,10 +113,34 @@ def group_env(tmp_path, monkeypatch):
             "branch_pattern": "worktree-{slug}",
         },
         "env": {
-            "CAMP_STATE_DIR": str(tmp_path / "state"),
-            "HOME": str(tmp_path / "home"),
+            "CAMP_STATE_DIR": str(base / "state"),
+            "HOME": str(base / "home"),
         },
     }
+
+
+@pytest.fixture()
+def group_env(tmp_path):
+    """A one-member group `camp new` can really create a workspace in.
+
+    Does NOT monkeypatch `Tmux` itself — the two `group_env*` fixtures are
+    both requested by the same test in `_emitted_key_sets`, and fixture
+    setup runs before the test body, so a fixture-level monkeypatch here
+    would be overwritten by the other fixture's before either `camp new`
+    call runs. `_emitted_key_sets` applies each fixture's `Tmux` double
+    immediately before the matching call instead.
+    """
+    return _build_group_env(tmp_path)
+
+
+@pytest.fixture()
+def group_env_session_unreachable(tmp_path):
+    """The same one-member group, but tmux never answers — exercises `camp
+    new`'s workspace-only outcome, the shape `SKILL.md` now documents as a
+    third `outcome` value. See `group_env`'s docstring for why this fixture
+    does not monkeypatch `Tmux` itself.
+    """
+    return _build_group_env(tmp_path, subdir="unreachable")
 
 
 # ---------------------------------------------------------------------------
@@ -281,13 +299,19 @@ def _printed_object(capsys) -> dict:
     return json.loads(out)
 
 
-def _emitted_key_sets(capsys, group_env) -> dict[str, frozenset[str]]:
+def _emitted_key_sets(
+    capsys, monkeypatch, group_env, group_env_session_unreachable
+) -> dict[str, frozenset[str]]:
     """Run every emitter the document quotes; return what each really printed.
 
     Read off the printed bytes, not the source: an emitter that assembles one
     dict and prints another passes any check made against its dict literals.
     """
+    import camp.launch.stop as stop_module
+    import camp.provision.provision as provision
     from camp.cli.session import _candidate_payload, _report_launched, _report_stop
+
+    monkeypatch.setattr(provision, "spawn_detached_provisioner", lambda **kw: None)
 
     shapes: dict[str, frozenset[str]] = {}
 
@@ -302,6 +326,8 @@ def _emitted_key_sets(capsys, group_env) -> dict[str, frozenset[str]]:
     )
 
     group = importlib.import_module("camp.cli.group")
+
+    monkeypatch.setattr(stop_module, "Tmux", lambda *a, **k: _FakeConciergeTmux())
     group._cmd_new_group_cli(
         ["feat-x", "--launch", "--no-wait", "--json"],
         group_env["group"],
@@ -310,13 +336,24 @@ def _emitted_key_sets(capsys, group_env) -> dict[str, frozenset[str]]:
     )
     shapes["camp new --json"] = frozenset(_printed_object(capsys))
 
+    monkeypatch.setattr(stop_module, "Tmux", lambda *a, **k: _UnreachableConciergeTmux())
+    group._cmd_new_group_cli(
+        ["feat-y", "--launch", "--no-wait", "--json"],
+        group_env_session_unreachable["group"],
+        group_env_session_unreachable["env"],
+        dry_run=False,
+    )
+    shapes["camp new --json workspace-only"] = frozenset(_printed_object(capsys))
+
     return shapes
 
 
 def test_every_documented_json_shape_is_one_camp_prints(
-    skill_text, capsys, group_env
+    skill_text, capsys, monkeypatch, group_env, group_env_session_unreachable
 ) -> None:
-    known = set(_emitted_key_sets(capsys, group_env).values())
+    known = set(
+        _emitted_key_sets(capsys, monkeypatch, group_env, group_env_session_unreachable).values()
+    )
     unemitted = [sorted(s) for s in _documented_key_sets(skill_text) if s not in known]
     assert unemitted == [], f"documented shapes no camp emitter prints: {unemitted}"
 
@@ -327,22 +364,30 @@ def test_the_document_quotes_a_json_shape_at_all(skill_text: str) -> None:
     assert _documented_key_sets(skill_text)
 
 
-def test_the_shape_check_catches_a_renamed_key(capsys, group_env) -> None:
+def test_the_shape_check_catches_a_renamed_key(
+    capsys, monkeypatch, group_env, group_env_session_unreachable
+) -> None:
     """A key the document quotes but no emitter prints, proven to fail."""
     fabricated = 'It prints `{"workspace": …, "session": …, "tmux_name": …}` on success.'
-    known = set(_emitted_key_sets(capsys, group_env).values())
+    known = set(
+        _emitted_key_sets(capsys, monkeypatch, group_env, group_env_session_unreachable).values()
+    )
     unemitted = [sorted(s) for s in _documented_key_sets(fabricated) if s not in known]
     assert unemitted == [["session", "tmux_name", "workspace"]]
 
 
-def test_create_and_reuse_paths_now_print_different_shapes(capsys, group_env) -> None:
+def test_create_and_reuse_paths_now_print_different_shapes(
+    capsys, monkeypatch, group_env, group_env_session_unreachable
+) -> None:
     """The create path (`camp new`) no longer starts a harness conversation —
     it routes through the same door `camp attach` opens — so its object and
     the reuse path's (`camp launch`) are genuinely different now, and the
     document says so. Varies the two commands and checks the divergence is
     real, not merely undocumented."""
-    shapes = _emitted_key_sets(capsys, group_env)
+    shapes = _emitted_key_sets(capsys, monkeypatch, group_env, group_env_session_unreachable)
     assert shapes["camp new --json"] != shapes["camp launch --json"]
     assert "outcome" in shapes["camp new --json"]
     assert "session_id" in shapes["camp launch --json"]
     assert "session_id" not in shapes["camp new --json"]
+    assert "session_error" in shapes["camp new --json workspace-only"]
+    assert "session_error" not in shapes["camp new --json"]
