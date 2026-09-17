@@ -56,16 +56,26 @@ and silently defaults back to production regardless of intent.
 
 ## Commands
 
-Requires **Python 3.11+**, **zero third-party runtime deps** (stdlib only; system
-`python3` may be too old — `direnv` provisions a 3.11+ `.venv` carrying pytest and
-pytest-xdist).
+Requires **Python 3.11+**, **zero third-party runtime deps** (stdlib only). The
+test suite needs pytest and pytest-xdist, which live in a project-local `.venv`
+that `scripts/bootstrap-venv` creates and converges. `.envrc` runs it on shell
+entry, and camp runs it when provisioning a worktree; run it by hand in a
+checkout that has had neither.
+
+**Invoke the venv's interpreter explicitly: `.venv/bin/python`.** A
+non-interactive shell — which is what an agent's tool calls get — never loads
+direnv, so bare `python3` there is the system interpreter (3.9 on macOS), and
+`addopts`' `-n auto` fails against it for want of xdist. An interactive shell
+that has run `direnv allow` in *this* checkout gets `.venv/bin` on PATH and can
+use bare `python`; direnv trusts by path, so every worktree needs its own allow.
 
 ```sh
+scripts/bootstrap-venv            # create/converge .venv (idempotent, cheap to re-run)
 pip install -e .                  # editable install (optional; bin/trailhead works without it)
-python -m pytest                  # whole suite (root pyproject testpaths span CLI + all tool tests)
-python -m pytest trailhead/tests/test_compose.py             # one CLI test file
-python -m pytest trailhead/tests/test_paths.py::TestMacosBranch  # one class/test
-python -m pytest tools/lore/tests                            # one tool's suite
+.venv/bin/python -m pytest        # whole suite (root pyproject testpaths span CLI + all tool tests)
+.venv/bin/python -m pytest trailhead/tests/test_compose.py             # one CLI test file
+.venv/bin/python -m pytest trailhead/tests/test_paths.py::TestMacosBranch  # one class/test
+.venv/bin/python -m pytest tools/lore/tests                            # one tool's suite
 
 bin/trailhead install             # auto-detect harness, install all plugins + camp/lore CLIs
 bin/trailhead install --harness claude_code --plugin lore --plugin craft
@@ -83,7 +93,7 @@ config of their own). `tools/camp`,
 Wherever `-n auto` IS in effect, `--pdb` does not work, and `-p no:xdist` is
 **not** a valid way to go serial — xdist stays registered either way. The only
 serial escape hatch is `-n 0`, e.g.
-`python -m pytest -n 0 --pdb trailhead/tests/test_paths.py::TestMacosBranch`.
+`.venv/bin/python -m pytest -n 0 --pdb trailhead/tests/test_paths.py::TestMacosBranch`.
 
 There is no separate lint step configured in-repo. Path resolvers accept injected
 `platform=` / `env=` — use those plus `tmp_path` so tests never touch real

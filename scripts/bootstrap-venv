@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+# scripts/bootstrap-venv — create or converge the project .venv.
+#
+# trailhead has zero third-party RUNTIME deps, but the test suite needs pytest,
+# and the root pyproject.toml's `addopts` applies `-n auto`, so it needs
+# pytest-xdist too. The venv carries those and nothing else.
+#
+# It also pins the interpreter: on macOS the system python3 is 3.9 — no
+# `tomllib`, no `X | None` — which breaks the suite and the bin/* wrappers that
+# shell out to python3. The candidate list is ordered newest-first, and the first
+# name that both exists and meets the floor wins.
+#
+# Two callers, one behaviour: .envrc runs this on shell entry, and camp runs it
+# when provisioning a worktree (a fresh worktree path is untrusted by direnv and
+# non-interactive shells never load direnv at all, so neither can rely on the
+# other having gone first). Re-running is cheap by design — an already-converged
+# venv costs one import check.
+
+set -euo pipefail
+
+FLOOR="3.11"
+CANDIDATES="python3.14 python3.13 python3.12 python3.11 python3"
+
+# Symlink-safe self-resolution (macOS does not ship GNU readlink -f).
+SOURCE="${BASH_SOURCE[0]}"
+while [ -L "$SOURCE" ]; do
+    DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+    SOURCE="$(readlink "$SOURCE")"
+    [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+REPO_ROOT="$(cd -P "$SCRIPT_DIR/.." && pwd)"
+VENV="$REPO_ROOT/.venv"
+
+_version_of() {
+    local out
+    out="$("$1" --version 2>&1)" || return 1
+    printf '%s' "$out" | grep -oE '[0-9]+\.[0-9]+' | head -1
+}
+
+_version_ge() {
+    local c_major="${1%%.*}" c_minor="${1#*.}" f_major="${2%%.*}" f_minor="${2#*.}"
+    if [ "$c_major" -gt "$f_major" ]; then return 0; fi
+    if [ "$c_major" -lt "$f_major" ]; then return 1; fi
+    [ "$c_minor" -ge "$f_minor" ]
+}
+
+if [ ! -x "$VENV/bin/python" ]; then
+    CHOSEN=""
+    LAST_FOUND=""
+    for candidate in $CANDIDATES; do
+        command -v "$candidate" >/dev/null 2>&1 || continue
+        version="$(_version_of "$candidate")" || continue
+        LAST_FOUND="$version"
+        if _version_ge "$version" "$FLOOR"; then
+            CHOSEN="$candidate"
+            break
+        fi
+    done
+
+    if [ -z "$CHOSEN" ]; then
+        echo "bootstrap-venv: no Python >= ${FLOOR} on PATH (found ${LAST_FOUND:-none}); \
+install one and re-run" >&2
+        exit 1
+    fi
+
+    echo "bootstrap-venv: creating .venv with $CHOSEN"
+    "$CHOSEN" -m venv "$VENV"
+    # Unpinned deliberately: CI pins these for reproducible runs, and a second
+    # pin here would be a copy to keep in sync with .github/workflows/tests.yml.
+    "$VENV/bin/python" -m pip install --quiet --upgrade pip pytest pytest-xdist
+    exit 0
+fi
+
+# Converge a venv that predates pytest-xdist. An import check rather than an
+# unconditional install keeps the common path cheap.
+if ! "$VENV/bin/python" -c 'import xdist' >/dev/null 2>&1; then
+    echo "bootstrap-venv: installing pytest-xdist into the existing .venv"
+    "$VENV/bin/python" -m pip install --quiet pytest-xdist
+fi

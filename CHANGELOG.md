@@ -5,6 +5,18 @@ format described by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+- `scripts/bootstrap-venv` creates and converges the project `.venv` carrying
+  pytest and pytest-xdist, and `.envrc` now calls it rather than carrying its
+  own copy. The bootstrap has one home, so a caller that cannot rely on direnv
+  reaches the same venv: direnv trusts by path, so every git worktree starts
+  untrusted, and a non-interactive shell never loads direnv at all. The script
+  picks the newest 3.11+ interpreter on PATH and exits non-zero naming the floor
+  when there is none, instead of silently leaving no venv behind.
+- `CLAUDE.md` now tells agents to invoke `.venv/bin/python` explicitly. An
+  agent's tool calls run in a non-interactive shell, where bare `python3` is the
+  system interpreter — 3.9 on macOS — and the root `pyproject.toml`'s `-n auto`
+  fails against it for want of xdist.
+
 - The leak gate now runs as a pre-commit hook for this repo. `pre-commit
   install` wires it alongside ruff and the Conventional Commits check, so a
   private string on a shippable plugin surface is refused at commit time
