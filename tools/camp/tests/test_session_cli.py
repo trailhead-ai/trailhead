@@ -460,7 +460,14 @@ def _camp(cli_env, *args, extra_env=None, cwd=None):
 
 
 def _new_workspace(cli_env, slug: str, group: str = "mygroup"):
-    result = _camp(cli_env, "new", slug, "--group", group)
+    """Seed a workspace for a test that needs one to exist — not `camp new`'s
+    own door dispatch, which every other caller of this helper (`camp
+    launch`, `camp sessions`, `camp kill`, `camp list`) then drives its own
+    session lifecycle against. `--no-session` keeps this helper from also
+    creating the workspace's tmux session, which would otherwise show up as
+    an extra, untracked session alongside whatever the calling test starts
+    itself."""
+    result = _camp(cli_env, "new", slug, "--group", group, "--no-session")
     assert result.returncode == 0, result.stderr
     _wait_for_workspace_ready(cli_env, slug, group=group)
     return result.stdout.strip()
@@ -3068,11 +3075,16 @@ def test_camp_sessions_recoverable_scan_stays_within_its_budget(cli_env) -> None
 
 # ---------------------------------------------------------------------------
 # camp new --launch
+#
+# `--launch` is now a no-op notice on the default (door) path — see
+# "camp new default door" below. These tests pin the OLD launch-engine
+# behaviour, which is only reachable through `--no-session`, the escape hatch
+# that reproduces exactly what `camp new` did before the door existed.
 # ---------------------------------------------------------------------------
 
 
 def test_camp_new_launch_stdout_is_the_workspace_path_alone(cli_env) -> None:
-    result = _camp(cli_env, "new", "feat-h", "--group", "mygroup", "--launch")
+    result = _camp(cli_env, "new", "feat-h", "--group", "mygroup", "--no-session", "--launch")
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip().endswith("/feat-h")
@@ -3082,7 +3094,7 @@ def test_camp_new_launch_stdout_is_the_workspace_path_alone(cli_env) -> None:
 
 
 def test_camp_new_launch_failure_keeps_the_path_and_exit_zero(cli_env) -> None:
-    result = _camp(cli_env, "new", "feat-i", "--group", "badgroup", "--launch")
+    result = _camp(cli_env, "new", "feat-i", "--group", "badgroup", "--no-session", "--launch")
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip().endswith("/feat-i")
@@ -3107,7 +3119,9 @@ def test_camp_launch_json_names_the_account_it_chose(cli_env) -> None:
 
 
 def test_camp_new_launch_json_emits_workspace_and_session_id(cli_env) -> None:
-    result = _camp(cli_env, "new", "feat-j", "--group", "mygroup", "--launch", "--json")
+    result = _camp(
+        cli_env, "new", "feat-j", "--group", "mygroup", "--no-session", "--launch", "--json"
+    )
 
     assert result.returncode == 0, result.stderr
     payload = json.loads(result.stdout)
@@ -3127,7 +3141,9 @@ def test_camp_new_launch_json_emits_workspace_and_session_id(cli_env) -> None:
 
 
 def test_camp_new_launch_json_failure_nulls_the_session_id(cli_env) -> None:
-    result = _camp(cli_env, "new", "feat-k", "--group", "badgroup", "--launch", "--json")
+    result = _camp(
+        cli_env, "new", "feat-k", "--group", "badgroup", "--no-session", "--launch", "--json"
+    )
 
     assert result.returncode == 0, result.stderr
     payload = json.loads(result.stdout)
@@ -3145,7 +3161,9 @@ def test_camp_new_launch_json_failure_nulls_the_session_id(cli_env) -> None:
 
 
 def test_camp_new_no_wait_skips_the_wait_and_names_camp_status(cli_env) -> None:
-    result = _camp(cli_env, "new", "feat-l", "--group", "mygroup", "--launch", "--no-wait")
+    result = _camp(
+        cli_env, "new", "feat-l", "--group", "mygroup", "--no-session", "--launch", "--no-wait"
+    )
 
     assert result.returncode == 0, result.stderr
     assert "camp new: --no-wait" in result.stderr
@@ -3155,7 +3173,7 @@ def test_camp_new_no_wait_skips_the_wait_and_names_camp_status(cli_env) -> None:
 
 def test_camp_new_launch_waits_for_provisioning_then_confirms(cli_env) -> None:
     """The two bounded waits run back to back, in that order."""
-    result = _camp(cli_env, "new", "feat-m", "--group", "mygroup", "--launch")
+    result = _camp(cli_env, "new", "feat-m", "--group", "mygroup", "--no-session", "--launch")
 
     assert result.returncode == 0, result.stderr
     waited = result.stderr.index("camp new: waiting for provisioning")
@@ -3163,16 +3181,22 @@ def test_camp_new_launch_waits_for_provisioning_then_confirms(cli_env) -> None:
     assert waited < confirmed
 
 
-def test_camp_new_json_without_launch_is_refused(cli_env) -> None:
+def test_camp_new_json_without_launch_succeeds(cli_env) -> None:
+    """`--json` no longer requires `--launch` — the door's own object is the
+    machine answer for `camp new` itself, on the default (door) path."""
     result = _camp(cli_env, "new", "feat-n", "--group", "mygroup", "--json")
 
-    assert result.returncode != 0
-    assert result.stdout == ""
-    assert "camp new: --json requires --launch" in result.stderr
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["ok"] is True
+    assert payload["outcome"] == "created"
+    assert payload["slug"] == "feat-n"
+    assert payload["workspace_path"].endswith("/feat-n")
 
 
 def test_bare_camp_new_output_is_unchanged(cli_env) -> None:
-    """Regression pin: adding --launch must not perturb the bare surface."""
+    """Regression pin: stdout stays exactly the path line — the door's outcome
+    line is appended to stderr instead of perturbing it."""
     result = _camp(cli_env, "new", "feat-o", "--group", "mygroup")
 
     assert result.returncode == 0, result.stderr
@@ -3182,6 +3206,7 @@ def test_bare_camp_new_output_is_unchanged(cli_env) -> None:
         "camp new: created workspace 'feat-o' — provisioning in the background\n"
         "  check provisioning: camp status feat-o\n"
         "  activates when ready, or run: camp activate feat-o\n"
+        "created camp-mygroup-feat-o\n"
     )
 
 
@@ -3261,7 +3286,9 @@ def test_camp_new_without_activate_never_triggers_activate_phase_work(cli_env) -
     task execution, even once the member reaches boot-readiness."""
     _author_activate_group(cli_env, "actgroup2")
 
-    result = _camp(cli_env, "new", "feat-noact", "--group", "actgroup2", "--launch")
+    result = _camp(
+        cli_env, "new", "feat-noact", "--group", "actgroup2", "--no-session", "--launch"
+    )
 
     assert result.returncode == 0, result.stderr
     assert "camp launch: confirmed session" in result.stderr
@@ -3283,7 +3310,9 @@ def test_camp_new_launch_proceeds_once_boot_ready_with_activate_work_still_outst
     activate-phase work that nothing has triggered yet."""
     _author_activate_group(cli_env, "actgroup3")
 
-    result = _camp(cli_env, "new", "feat-lo", "--group", "actgroup3", "--launch")
+    result = _camp(
+        cli_env, "new", "feat-lo", "--group", "actgroup3", "--no-session", "--launch"
+    )
 
     assert result.returncode == 0, result.stderr
     assert "camp launch: confirmed session" in result.stderr
@@ -3298,7 +3327,15 @@ def test_camp_new_activate_on_a_group_with_no_activate_tasks_is_a_clean_no_op(cl
 
 def test_camp_new_activate_composes_with_no_wait(cli_env) -> None:
     result = _camp(
-        cli_env, "new", "feat-anw", "--group", "mygroup", "--launch", "--no-wait", "--activate"
+        cli_env,
+        "new",
+        "feat-anw",
+        "--group",
+        "mygroup",
+        "--no-session",
+        "--launch",
+        "--no-wait",
+        "--activate",
     )
 
     assert result.returncode == 0, result.stderr
