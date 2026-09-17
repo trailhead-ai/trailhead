@@ -1250,3 +1250,130 @@ class TestReviewRepairs:
         )
 
         assert capsys.readouterr().out.split() == ["s", "-", "/ws/s"]
+
+
+class TestSiblingGroupSessionsAreNotLeftovers:
+    """A leftover is a session no workspace ON THE HOST claims. Each
+    `cmd_ls_group` call knows only its own group's workspaces, so a sibling
+    group's LIVE session used to fall through to the retired-form check —
+    which any slug that is or ends in 8 hex characters satisfies — and be
+    reported as something the operator should clean up. The design doc's
+    remedy for an unmanaged session is `tmux kill-session`, so the
+    consequence was destructive: killing another group's in-use session.
+    """
+
+    def test_group_scoped_listing_does_not_report_a_sibling_groups_live_session(
+        self, camp_cli, tmp_path, capsys
+    ):
+        from camp.launch.naming import workspace_session_name
+        from camp.launch.stop import SessionListing, TmuxSession
+
+        state_dir = tmp_path / "state"
+        env = {"CAMP_STATE_DIR": str(state_dir)}
+        _seed_manifest("groupa", "web", env=env)
+        _seed_manifest("groupb", "deadbeef", env=env)
+        sibling_live = workspace_session_name("groupb", "deadbeef")
+
+        tmux = _FakeTmux(
+            SessionListing(sessions=(TmuxSession(name=sibling_live, windows=3),))
+        )
+        camp_cli._cmd_ls_group_cli(["--json"], _make_group("groupa"), env, tmux=tmux)
+
+        rows = json.loads(capsys.readouterr().out)
+        summary = [r for r in rows if "unmanaged_count" in r]
+        assert summary == [], (
+            f"groupa reported a sibling group's live session as a leftover: {rows!r}"
+        )
+        assert [r["slug"] for r in rows] == ["web"]
+
+    def test_a_leftover_no_group_claims_is_still_reported(
+        self, camp_cli, tmp_path, capsys
+    ):
+        """The narrowing must not be a blanket suppression: a retired-form
+        session no workspace on the host claims is still counted. This is
+        the same call as the test above with one input changed — whether a
+        workspace exists for the session's name."""
+        from camp.launch.stop import SessionListing, TmuxSession
+
+        state_dir = tmp_path / "state"
+        env = {"CAMP_STATE_DIR": str(state_dir)}
+        _seed_manifest("groupa", "web", env=env)
+
+        tmux = _FakeTmux(
+            SessionListing(
+                sessions=(TmuxSession(name="camp-groupb-deadbeef", windows=3),)
+            )
+        )
+        camp_cli._cmd_ls_group_cli(["--json"], _make_group("groupa"), env, tmux=tmux)
+
+        rows = json.loads(capsys.readouterr().out)
+        summary = [r for r in rows if "unmanaged_count" in r]
+        assert len(summary) == 1
+        assert summary[0]["unmanaged_count"] == 1
+
+    def test_no_sibling_groups_name_reaches_a_group_scoped_answer(
+        self, camp_cli, tmp_path, capsys
+    ):
+        """Suppressing the phantom row reads another group's manifests. That
+        is local same-machine state read only to REMOVE a row, so it must
+        never put a sibling group's name, slug, or path into the answer —
+        the disclosure boundary
+        `docs/design/cross-group-cross-account-listing.md` narrowed."""
+        from camp.launch.naming import workspace_session_name
+        from camp.launch.stop import SessionListing, TmuxSession
+
+        state_dir = tmp_path / "state"
+        env = {"CAMP_STATE_DIR": str(state_dir)}
+        _seed_manifest("groupa", "web", env=env)
+        _seed_manifest("groupb", "deadbeef", env=env)
+        _seed_manifest("secretgrp", "acquisition-target", env=env)
+        sibling_live = workspace_session_name("groupb", "deadbeef")
+
+        tmux = _FakeTmux(
+            SessionListing(sessions=(TmuxSession(name=sibling_live, windows=3),))
+        )
+        camp_cli._cmd_ls_group_cli([], _make_group("groupa"), env, tmux=tmux)
+        human = capsys.readouterr().out
+
+        camp_cli._cmd_ls_group_cli(["--json"], _make_group("groupa"), env, tmux=tmux)
+        as_json = capsys.readouterr().out
+
+        for surface in (human, as_json):
+            for foreign in ("groupb", "deadbeef", "secretgrp", "acquisition-target"):
+                assert foreign not in surface, (
+                    f"{foreign!r} leaked into a groupa-scoped answer: {surface!r}"
+                )
+
+    def test_widened_listing_reports_a_live_session_once_not_twice(
+        self, camp_cli, tmp_path, capsys, monkeypatch
+    ):
+        """Under `--all-groups` the same tmux session appeared twice: once
+        correctly as groupb's `running` workspace row, once as an
+        `unmanaged` row groupa contributed. `_merged_widened_entries`'
+        dedup collapses duplicate unmanaged names across groups but never
+        checked a leftover against a sibling group's workspace row."""
+        from camp.launch.naming import workspace_session_name
+        from camp.launch.stop import SessionListing, TmuxSession
+
+        config_dir = tmp_path / "camp-config"
+        groups_dir = config_dir / "groups"
+        groups_dir.mkdir(parents=True)
+        state_dir = tmp_path / "camp-state"
+        state_dir.mkdir(parents=True)
+        _write_group_toml(groups_dir, "groupa")
+        _write_group_toml(groups_dir, "groupb")
+        monkeypatch.setenv("CAMP_CONFIG_DIR", str(config_dir))
+        monkeypatch.setenv("CAMP_STATE_DIR", str(state_dir))
+        _seed_manifest_raw("groupa", "web", state_dir=state_dir)
+        _seed_manifest_raw("groupb", "deadbeef", state_dir=state_dir)
+        live = workspace_session_name("groupb", "deadbeef")
+
+        tmux = _FakeTmux(SessionListing(sessions=(TmuxSession(name=live, windows=3),)))
+        camp_cli._cmd_ls_all_groups_cli(["--json"], None, tmux=tmux)
+
+        rows = json.loads(capsys.readouterr().out)
+        matching = [r for r in rows if r.get("tmux_session") == live]
+        assert len(matching) == 1, f"{live} appeared {len(matching)} times: {rows!r}"
+        assert matching[0]["slug"] == "deadbeef"
+        assert matching[0]["state"] == "running"
+        assert matching[0]["window_count"] == 3
