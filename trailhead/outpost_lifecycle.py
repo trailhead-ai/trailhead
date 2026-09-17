@@ -1,7 +1,7 @@
-"""Lifecycle management for the outpost daemon: ``trailhead outpost start|stop|status|restart``.
+"""Lifecycle management for the outpost daemon: ``trailhead outpost start|stop|status|restart|open``.
 
 Outpost is a long-running local Node/TS daemon (loopback only, port 7313) plus a
-web UI. There is no supervisor (no launchd/systemd) in this version — these four
+web UI. There is no supervisor (no launchd/systemd) in this version — these
 verbs ARE the stable management interface. A supervised backend can slot in behind
 the same verbs later.
 
@@ -35,6 +35,10 @@ Contract & invariants
   this via its own ``/health`` probe.
 * **Idempotence.** A second ``start`` while already running is a no-op. ``stop`` on a
   stopped daemon is a no-op.
+* **``open`` never starts anything.** It is a read-only convenience over a daemon
+  someone else started: it confirms ``/health`` answers, then hands the loopback
+  UI URL to the platform browser. A daemon that isn't answering is a named error
+  pointing at ``trailhead outpost start`` — never a browser tab onto a dead port.
 * **Rebuild-before-restart.** ``restart`` resolves the checkout, runs the (injectable,
   default ``["npm", "run", "build"]``) full build with ``cwd=<checkout>``, THEN calls
   ``stop`` then ``start``. The build runs *before* stop: a nonzero build exit raises
@@ -71,6 +75,7 @@ import time
 import tomllib
 import urllib.error
 import urllib.request
+import webbrowser
 from pathlib import Path
 
 from trailhead.paths import config_dir, ensure_dir, state_dir
@@ -420,6 +425,42 @@ def status(
     contract_version = health.get("contract_version")
     print(f"outpost: running (pid {pid}); /health ok, contract_version={contract_version}.")
     return EXIT_RUNNING
+
+
+def open_ui(
+    *,
+    env: dict[str, str] | None = None,
+    port: int = DAEMON_PORT,
+    health_timeout: float = 2.0,
+    opener=webbrowser.open,
+) -> int:
+    """Open the outpost web UI in the platform's default browser.
+
+    Read-only: it spawns nothing and touches no pidfile. The daemon must already
+    be answering ``/health`` — the same identity probe the other verbs use, so a
+    stale pidfile or an unrelated process on the port can't pass for a running
+    UI. When it isn't, this raises OutpostLifecycleError naming the start verb
+    rather than handing the browser a URL that will fail to connect.
+
+    ``opener`` is the injectable browser seam (default :func:`webbrowser.open`,
+    stdlib and cross-platform — matching this module's no-macOS-assumptions
+    invariant). It returns False when no browser could be launched at all, which
+    is likewise a named error: silently printing success there would leave the
+    operator waiting on a window that is never going to appear.
+    """
+    if _probe_health(port, health_timeout) is None:
+        raise OutpostLifecycleError(
+            f"outpost is not answering on {DAEMON_HOST}:{port}; "
+            "start it with 'trailhead outpost start'."
+        )
+
+    url = f"http://{DAEMON_HOST}:{port}/"
+    if not opener(url):
+        raise OutpostLifecycleError(
+            f"could not launch a browser for {url}; open it manually."
+        )
+    print(f"opened {url}")
+    return 0
 
 
 def restart(
