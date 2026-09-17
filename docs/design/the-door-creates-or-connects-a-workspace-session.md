@@ -145,10 +145,26 @@ TMUX unset     ->  tmux attach-session -t =camp-trailhead-camp-cli
 TMUX set       ->  tmux switch-client  -t =camp-trailhead-camp-cli
 ```
 
-Both go through the existing exec seam (`camp/host/handoff.py`), which flushes stdout and
-stderr and then replaces camp's process image. Camp prints its outcome line *before* the
-handover, and the flush is what makes that line survive an exec that discards process memory
-rather than draining it.
+The two calls differ in how they are invoked, and the difference is load-bearing.
+
+`attach-session` goes through the existing exec seam (`camp/host/handoff.py`), which flushes
+stdout and stderr and then replaces camp's process image. It has to: attach blocks for the life
+of the session and must own the terminal, so leaving a camp process parked above it for hours
+buys nothing.
+
+`switch-client` is **not** exec'd. It returns immediately — moving a client is a request to the
+server, not a session to sit inside — so camp runs it as an ordinary subprocess and exits on its
+own result.
+
+Exec'ing it instead would destroy the session the operator came from. Measured on tmux 3.7c: the
+exec replaces the calling shell, `switch-client` exits at once, and the pane is left with no
+process at all — so tmux closes the pane, closes the window, and destroys the session when that
+window was its last. Camp's own workspace sessions hold exactly one window, so an operator
+hopping from workspace A to workspace B would take A down on the way out. Running it as a
+subprocess leaves the calling shell alive and the source session intact.
+
+Camp prints its outcome line *before* the handover either way, and on the exec path the flush is
+what makes that line survive an exec that discards process memory rather than draining it.
 
 `switch-client` is not a nicety. From outside tmux, `attach-session` takes over the terminal,
 which is right. From inside one it nests a second tmux in the first, and the nested session's
