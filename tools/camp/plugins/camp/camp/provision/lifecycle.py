@@ -32,9 +32,13 @@ from ..group.manifest import (
 )
 from ..launch.inventory import (
     DisclosureScope,
+    STATE_NONE,
     STATE_UNMANAGED,
     Workspace,
     classify_sessions,
+    format_path,
+    format_state,
+    format_unmanaged_summary,
 )
 from ..launch.naming import workspace_session_name
 from ..launch.stop import Tmux, _Unanswered
@@ -160,7 +164,8 @@ class GroupListing:
     (:func:`~camp.launch.naming.workspace_session_name` is pure).
 
     ``unmanaged`` holds one dict per leftover session, in the same shape a
-    workspace row uses (``slug: None``, ``workspace_path: "-"``) so a
+    workspace row uses (``slug: None``, ``workspace_path: None`` — the row
+    owns no path, and says so the same way it says it owns no slug) so a
     caller merging it into ``entries`` for a widened answer needs no
     special case. It is populated only when *scope* was
     :data:`~camp.launch.inventory.DisclosureScope.WIDENED`; ``unmanaged_count``
@@ -179,16 +184,11 @@ class GroupListing:
     notice: str | None
 
 
-#: The stderr line owed when tmux's enumeration never answered at all —
-#: mirrors the wording `camp kill` already uses for the same tri-state
-#: (`cli/session.py`'s REFUSED_TMUX_UNANSWERED message), since neither seam
-#: can recover tmux's own stderr text: `Tmux.list_sessions` collapses every
-#: non-"no server" non-zero exit to the UNANSWERED sentinel without
-#: preserving it (see `launch/stop.py`).
-_TMUX_UNANSWERED_NOTICE = (
-    "camp list: tmux did not answer, so camp cannot tell whether any "
-    "workspace has a session"
-)
+#: The stderr line owed when tmux's enumeration never answered at all.
+#: Carries no tmux stderr text of its own because neither seam can recover
+#: it: `Tmux.list_sessions` collapses every non-"no server" non-zero exit to
+#: the UNANSWERED sentinel without preserving it (see `launch/stop.py`).
+_TMUX_UNANSWERED_NOTICE = "camp list: tmux did not answer — session state is unknown"
 
 
 def cmd_ls_group(
@@ -244,7 +244,11 @@ def cmd_ls_group(
     for e in entries:
         row = by_slug[e["slug"]]
         e["state"] = row.state
-        e["window_count"] = row.windows
+        # A running session with no windows exists in no circumstance, so 0
+        # is the true count for a workspace with no session — a null there
+        # would only invite a caller to special-case it. An unknown row
+        # keeps its null: nothing about that workspace was observed.
+        e["window_count"] = 0 if row.state == STATE_NONE else row.windows
 
     unmanaged = [
         {
@@ -252,7 +256,7 @@ def cmd_ls_group(
             "branch": "",
             "manifest_path": None,
             "group": None,
-            "workspace_path": "-",
+            "workspace_path": None,
             "state": STATE_UNMANAGED,
             "window_count": u.windows,
             "tmux_session": u.name,
@@ -284,6 +288,24 @@ _LIST_JSON_KEYS = (
 )
 
 
+def unmanaged_count_row(count: int) -> dict[str, Any]:
+    """The one `--json` row a group-scoped answer carries in place of naming
+    its leftover sessions: the fixed `_LIST_JSON_KEYS` schema with every
+    field null, plus `unmanaged_count`.
+
+    Built here, and read by both `camp list --json` surfaces that answer at
+    :data:`~camp.launch.inventory.DisclosureScope.GROUP` — this module's
+    `render_workspace_list` and `cli/workspace.py`'s `local_list_answer` —
+    so the two can never drift on what a count row looks like.
+    """
+    return {
+        **{key: None for key in _LIST_JSON_KEYS},
+        "ok": True,
+        "branch": "",
+        "unmanaged_count": count,
+    }
+
+
 def render_workspace_list(
     entries: list[dict[str, Any]],
     *,
@@ -300,10 +322,12 @@ def render_workspace_list(
     `None` for the standalone fallback, which has no group to derive a
     session name from — those rows render `-` for `state`). An entry whose
     `slug` is `None` is an unmanaged row: its `tmux_session` prints in the
-    slug column instead, and its `workspace_path` is always `-`. Output:
+    slug column instead, and its `workspace_path` is `None`, which the
+    human rendering — and only the human rendering — states as `-`. Output:
       - human: one `slug state workspace_path` line per entry (state in the
-        middle so the path stays the line's last field); empty → no
-        stdout. Every tmux-supplied name goes through `printable_path` so a
+        middle so the path stays the line's last field), with a running
+        session's window count in the state field (`running:3`, via
+        `format_state`); empty → no stdout. Every tmux-supplied name goes through `printable_path` so a
         stray control character cannot forge a second line.
       - --json: a list of {ok, slug, branch, workspace_path, group, state,
         window_count, tmux_session} dicts (the fixed _LIST_JSON_KEYS
@@ -332,10 +356,10 @@ def render_workspace_list(
     the leftover sessions themselves into `entries` (a
     :data:`~camp.launch.inventory.DisclosureScope.GROUP` answer). When
     positive: human output gains one extra summary line
-    (``"N unmanaged camp sessions — `camp list -g` to name them"``); --json
-    gains one extra row carrying only ``{"ok": True, "unmanaged_count": N}``
-    — no `slug` key, so a consumer filtering on that key's presence skips
-    it automatically. Zero (the default, and always the caller's choice for
+    (`format_unmanaged_summary`); --json gains one extra row carrying the
+    fixed key set with every field null, plus ``unmanaged_count`` — a
+    consumer tells it from a workspace row by that key's presence, never by
+    a key a workspace row would have had. Zero (the default, and always the caller's choice for
     a WIDENED answer where the rows already name the leftovers) adds
     nothing.
     """
@@ -362,21 +386,17 @@ def render_workspace_list(
             for detail in (group_failures or [])
         ]
         if unmanaged_count:
-            rows.append({"ok": True, "unmanaged_count": unmanaged_count})
+            rows.append(unmanaged_count_row(unmanaged_count))
         print(_json.dumps(rows))
         return
 
     for e in entries:
         first = e["slug"] if e.get("slug") is not None else e.get("tmux_session")
-        state = e.get("state") or "-"
-        print(
-            f"{printable_path(first)} {state} {printable_path(e['workspace_path'])}"
-        )
+        state = format_state(e.get("state"), e.get("window_count"))
+        path = format_path(e["workspace_path"])
+        print(f"{printable_path(first)} {state} {printable_path(path)}")
     if unmanaged_count:
-        print(
-            f"{unmanaged_count} unmanaged camp sessions — "
-            "`camp list -g` to name them"
-        )
+        print(format_unmanaged_summary(unmanaged_count))
 
 
 def load_answerable_groups(groups_dir: Path) -> tuple[list[dict[str, Any]], list[str]]:

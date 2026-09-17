@@ -936,7 +936,9 @@ class TestStateVariesWithTmuxAnswer:
         camp_cli._cmd_ls_group_cli(["--json"], group, env, tmux=none_answer)
         rows = json.loads(capsys.readouterr().out)
         assert rows[0]["state"] == "none"
-        assert rows[0]["window_count"] is None
+        # 0, not null: a running session with no windows exists in no
+        # circumstance, so zero is the true count (design doc).
+        assert rows[0]["window_count"] == 0
 
         unanswered = _FakeTmux(UNANSWERED)
         camp_cli._cmd_ls_group_cli(["--json"], group, env, tmux=unanswered)
@@ -999,7 +1001,7 @@ class TestDisclosureBoundary:
         camp_cli._cmd_ls_group_cli([], group, env, tmux=tmux)
         human_out = capsys.readouterr().out
         assert leftover not in human_out
-        assert "1 unmanaged camp sessions" in human_out
+        assert "1 unmanaged camp session —" in human_out
 
         camp_cli._cmd_ls_group_cli(["--json"], group, env, tmux=tmux)
         json_out = capsys.readouterr().out
@@ -1086,3 +1088,165 @@ class TestSessionNameEscaping:
         assert "\x07" not in out
         assert "\\x07" in out
         assert len(out.splitlines()) == 1
+
+
+class TestReviewRepairs:
+    """The whole-change review's rendering and JSON-shape findings, each
+    pinned by the surface an operator or a parser actually reads."""
+
+    def test_human_row_carries_the_window_count_beside_running(
+        self, camp_cli, tmp_path, capsys
+    ):
+        """AC50: the human row is the only surface an operator reads, and it
+        must carry the running session's window count — `running:<n>`, the
+        design doc's state vocabulary."""
+        from camp.launch.naming import workspace_session_name
+        from camp.launch.stop import SessionListing, TmuxSession
+
+        group = _make_group("wingrp")
+        env = {"CAMP_STATE_DIR": str(tmp_path / "state")}
+        _seed_manifest("wingrp", "feat-w", env=env)
+        name = workspace_session_name("wingrp", "feat-w")
+
+        three = _FakeTmux(SessionListing(sessions=(TmuxSession(name=name, windows=3),)))
+        camp_cli._cmd_ls_group_cli([], group, env, tmux=three)
+        assert capsys.readouterr().out.split()[1] == "running:3"
+
+        one = _FakeTmux(SessionListing(sessions=(TmuxSession(name=name, windows=1),)))
+        camp_cli._cmd_ls_group_cli([], group, env, tmux=one)
+        assert capsys.readouterr().out.split()[1] == "running:1"
+
+    def test_window_count_is_zero_for_a_workspace_with_no_session(
+        self, camp_cli, tmp_path, capsys
+    ):
+        """A running session with no windows exists in no circumstance, so
+        zero is the true count for a `none`-state row and a null would only
+        invite a caller to special-case it."""
+        group = _make_group("zerogrp")
+        env = {"CAMP_STATE_DIR": str(tmp_path / "state")}
+        _seed_manifest("zerogrp", "feat-z", env=env)
+
+        camp_cli._cmd_ls_group_cli(["--json"], group, env, tmux=_FakeTmux())
+
+        rows = json.loads(capsys.readouterr().out)
+        assert rows[0]["state"] == "none"
+        assert rows[0]["window_count"] == 0
+
+    def test_unmanaged_row_json_path_is_null_and_human_path_is_a_dash(
+        self, camp_cli, tmp_path, capsys, monkeypatch
+    ):
+        """The unmanaged row already says "no such thing" with `slug: null`;
+        its path must say it the same way rather than making a parser
+        string-compare for a human sentinel."""
+        from camp.launch.stop import SessionListing, TmuxSession
+
+        config_dir, state_dir = _write_config_group(tmp_path, "nullpathgrp")
+        monkeypatch.setenv("CAMP_CONFIG_DIR", str(config_dir))
+        monkeypatch.setenv("CAMP_STATE_DIR", str(state_dir))
+        leftover = "camp-oldproj-a1b2c3d4"
+        tmux = _FakeTmux(SessionListing(sessions=(TmuxSession(name=leftover, windows=5),)))
+
+        camp_cli._cmd_ls_all_groups_cli(["--json"], None, tmux=tmux)
+        rows = json.loads(capsys.readouterr().out)
+        assert rows[0]["tmux_session"] == leftover
+        assert rows[0]["workspace_path"] is None
+
+        camp_cli._cmd_ls_all_groups_cli([], None, tmux=tmux)
+        assert capsys.readouterr().out.split() == [leftover, "unmanaged", "-"]
+
+    def test_unmanaged_summary_line_agrees_in_number_with_its_count(
+        self, camp_cli, tmp_path, capsys
+    ):
+        from camp.launch.stop import SessionListing, TmuxSession
+
+        group = _make_group("pluralgrp")
+        env = {"CAMP_STATE_DIR": str(tmp_path / "state")}
+
+        one = _FakeTmux(
+            SessionListing(sessions=(TmuxSession(name="camp-old-a1b2c3d4", windows=1),))
+        )
+        camp_cli._cmd_ls_group_cli([], group, env, tmux=one)
+        assert "1 unmanaged camp session —" in capsys.readouterr().out
+
+        two = _FakeTmux(
+            SessionListing(
+                sessions=(
+                    TmuxSession(name="camp-old-a1b2c3d4", windows=1),
+                    TmuxSession(name="camp-older-b2c3d4e5", windows=2),
+                )
+            )
+        )
+        camp_cli._cmd_ls_group_cli([], group, env, tmux=two)
+        assert "2 unmanaged camp sessions —" in capsys.readouterr().out
+
+    def test_unanswered_notice_uses_the_designed_wording(
+        self, camp_cli, tmp_path, capsys
+    ):
+        from camp.launch.stop import UNANSWERED
+
+        group = _make_group("noticegrp")
+        env = {"CAMP_STATE_DIR": str(tmp_path / "state")}
+        _seed_manifest("noticegrp", "feat-n", env=env)
+
+        camp_cli._cmd_ls_group_cli([], group, env, tmux=_FakeTmux(UNANSWERED))
+
+        captured = capsys.readouterr()
+        assert captured.err.strip() == (
+            "camp list: tmux did not answer — session state is unknown"
+        )
+        assert captured.out.split()[1] == "unknown"
+
+    def test_unmanaged_rows_sort_after_the_workspace_rows(
+        self, camp_cli, tmp_path, capsys, monkeypatch
+    ):
+        """A leftover session belongs to no group, and sorting on the group
+        name alone floats it above every workspace row."""
+        from camp.launch.stop import SessionListing, TmuxSession
+
+        config_dir, state_dir = _write_config_group(tmp_path, "sortgrp")
+        monkeypatch.setenv("CAMP_CONFIG_DIR", str(config_dir))
+        monkeypatch.setenv("CAMP_STATE_DIR", str(state_dir))
+        _seed_manifest_raw("sortgrp", "feat-s", state_dir=state_dir)
+        leftover = "camp-oldproj-a1b2c3d4"
+        tmux = _FakeTmux(SessionListing(sessions=(TmuxSession(name=leftover, windows=1),)))
+
+        camp_cli._cmd_ls_all_groups_cli([], None, tmux=tmux)
+
+        lines = [ln for ln in capsys.readouterr().out.splitlines() if ln]
+        assert [ln.split()[0] for ln in lines] == ["feat-s", leftover]
+
+    def test_the_unmanaged_count_json_row_carries_the_full_key_set(
+        self, camp_cli, tmp_path, capsys
+    ):
+        """`_LIST_JSON_KEYS` promises a parser never KeyErrors on a `camp
+        list --json` row; the count row was the one row without the keys."""
+        from camp.launch.stop import SessionListing, TmuxSession
+
+        group = _make_group("keysgrp")
+        env = {"CAMP_STATE_DIR": str(tmp_path / "state")}
+        tmux = _FakeTmux(
+            SessionListing(sessions=(TmuxSession(name="camp-old-a1b2c3d4", windows=1),))
+        )
+
+        camp_cli._cmd_ls_group_cli(["--json"], group, env, tmux=tmux)
+
+        rows = json.loads(capsys.readouterr().out)
+        summary = [r for r in rows if "unmanaged_count" in r]
+        assert len(summary) == 1
+        assert summary[0]["unmanaged_count"] == 1
+        for key in ("ok", "slug", "branch", "workspace_path", "group", "state",
+                    "window_count", "tmux_session"):
+            assert key in summary[0]
+        assert summary[0]["slug"] is None
+
+    def test_a_no_group_fallback_entry_renders_a_dash_in_the_state_column(self, capsys):
+        """The legacy registry fallback has no group, so no session name is
+        derivable — the human row says so in the state column."""
+        from camp.provision.lifecycle import render_workspace_list
+
+        render_workspace_list(
+            [{"slug": "s", "branch": "b2", "workspace_path": "/ws/s", "group": None}],
+            as_json=False,
+        )
+
+        assert capsys.readouterr().out.split() == ["s", "-", "/ws/s"]

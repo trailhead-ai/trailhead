@@ -3541,3 +3541,158 @@ def test_the_widened_and_narrow_spellings_refuse_identically(
 
     assert (narrow_code, narrow_err) == (widened_code, widened_err)
     assert narrow_code == 1
+
+
+# ---------------------------------------------------------------------------
+# Disclosure boundary and tmux notices on the merged machine axis — the
+# whole-change review's C2 and I2 findings.
+# ---------------------------------------------------------------------------
+
+
+def _stub_tmux(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, body: str) -> None:
+    """Prepend a `tmux` stub to PATH whose `list-sessions` behaviour is
+    *body* (python source appended to a `sys.exit`-less preamble).
+
+    camp reaches tmux by name through PATH (`launch/stop.py`), and this axis
+    reads it through the real `Tmux()` seam with no injection point, so PATH
+    is where a test drives it. conftest's `_sandbox_tmux` sets the no-server
+    floor; this wins on PATH order.
+    """
+    import stat
+
+    bin_dir = tmp_path / "tmux-stub-bin"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    stub = bin_dir / "tmux"
+    stub.write_text("#!/usr/bin/env python3\nimport sys\n" + body, encoding="utf-8")
+    stub.chmod(stub.stat().st_mode | stat.S_IEXEC)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+
+
+_LEFTOVER_LOCAL = "camp-localleft-a1b2c3d4"
+_LEFTOVER_REMOTE = "camp-remoteleft-b2c3d4e5"
+
+_TMUX_ONE_LEFTOVER = (
+    'sys.stdout.write("2|' + _LEFTOVER_LOCAL + '\\n")\nsys.exit(0)\n'
+)
+_TMUX_OUTAGE = (
+    'sys.stderr.write("directory /private/tmp/bad has unsafe permissions\\n")\n'
+    "sys.exit(1)\n"
+)
+
+
+def _remote_unmanaged_row() -> dict:
+    return {
+        "ok": True, "slug": None, "branch": "", "workspace_path": None,
+        "group": None, "state": "unmanaged", "window_count": 3,
+        "tmux_session": _LEFTOVER_REMOTE,
+    }
+
+
+def test_group_narrowed_all_hosts_answer_names_no_leftover_on_either_machine(
+    hosts_and_group_env, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    """A leftover session belongs to no group, so a listing narrowed to ONE
+    group must not name one — the disclosure boundary
+    `docs/design/cross-group-cross-account-listing.md` already narrowed
+    group-scoped session queries for. The same invocation must apply that
+    boundary to this machine and to a peer alike: the remote rows were
+    already dropped by the group filter, so the local half must not be
+    named either. The count still comes through, which is what a
+    group-scoped answer owes.
+    """
+    transport = _transport_module()
+    _stub_tmux(tmp_path, monkeypatch, _TMUX_ONE_LEFTOVER)
+    monkeypatch.setattr(
+        transport,
+        "run_camp",
+        lambda host, remote_argv, **kw: _answered([_remote_unmanaged_row()]),
+    )
+
+    code = _run(monkeypatch, ["list", "-a", "--group", "testgrp", "--json"])
+
+    captured = capsys.readouterr()
+    assert code == 0
+    assert _LEFTOVER_LOCAL not in captured.out
+    assert _LEFTOVER_REMOTE not in captured.out
+    rows = json.loads(captured.out)
+    assert [r["unmanaged_count"] for r in rows if "unmanaged_count" in r] == [1]
+
+
+def test_group_narrowed_all_hosts_human_answer_counts_the_leftover_it_hides(
+    hosts_and_group_env, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    transport = _transport_module()
+    _stub_tmux(tmp_path, monkeypatch, _TMUX_ONE_LEFTOVER)
+    monkeypatch.setattr(
+        transport,
+        "run_camp",
+        lambda host, remote_argv, **kw: _answered([_remote_unmanaged_row()]),
+    )
+
+    code = _run(monkeypatch, ["list", "-a", "--group", "testgrp"])
+
+    captured = capsys.readouterr()
+    assert code == 0
+    assert _LEFTOVER_LOCAL not in captured.out
+    assert "1 unmanaged camp session —" in captured.out
+    assert "skipping" not in captured.err
+
+
+def test_all_groups_all_hosts_answer_still_names_the_leftover(
+    hosts_and_group_env, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    """The widening an operator asks for: with no group narrowing the
+    answer, the leftover is named rather than counted — the other side of
+    the boundary above, so the narrow case's silence is the scope talking
+    and not the rows having gone missing."""
+    transport = _transport_module()
+    _stub_tmux(tmp_path, monkeypatch, _TMUX_ONE_LEFTOVER)
+    monkeypatch.setattr(
+        transport, "run_camp", lambda host, remote_argv, **kw: _answered([])
+    )
+
+    code = _run(monkeypatch, ["list", "-ag", "--json"])
+
+    captured = capsys.readouterr()
+    assert code == 0
+    assert _LEFTOVER_LOCAL in captured.out
+    assert not any("unmanaged_count" in r for r in json.loads(captured.out))
+
+
+def test_the_tmux_outage_notice_reaches_the_group_narrowed_all_hosts_axis(
+    hosts_and_group_env, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    """An unanswerable tmux renders every local row `unknown`; the notice
+    is the only thing that says why, and the group axis already prints it."""
+    transport = _transport_module()
+    _stub_tmux(tmp_path, monkeypatch, _TMUX_OUTAGE)
+    monkeypatch.setattr(
+        transport, "run_camp", lambda host, remote_argv, **kw: _answered([])
+    )
+
+    code = _run(monkeypatch, ["list", "-a", "--group", "testgrp"])
+
+    captured = capsys.readouterr()
+    assert code == 0
+    assert "tmux did not answer" in captured.err
+
+
+def test_the_tmux_outage_notice_reaches_the_all_groups_all_hosts_axis(
+    hosts_and_group_env, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    transport = _transport_module()
+    _stub_tmux(tmp_path, monkeypatch, _TMUX_OUTAGE)
+    monkeypatch.setattr(
+        transport, "run_camp", lambda host, remote_argv, **kw: _answered([])
+    )
+
+    code = _run(monkeypatch, ["list", "-ag"])
+
+    captured = capsys.readouterr()
+    assert code == 0
+    assert "tmux did not answer" in captured.err
