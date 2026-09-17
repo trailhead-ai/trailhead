@@ -398,18 +398,6 @@ def _cmd_new_group_cli(
         file=sys.stderr,
     )
 
-    # Nudge the user to install the trailhead shellenv `camp()` wrapper
-    # so `camp new` auto-cd's the parent shell. The wrapper exports
-    # CAMP_SHELL_INTEGRATION around its `camp new` call — when that marker is set the
-    # wrapper is active and will cd for the user, so we stay quiet. When it is absent
-    # this is a bare-binary run: the path printed below is the user's only handle.
-    if "CAMP_SHELL_INTEGRATION" not in os.environ:
-        print(
-            '  tip: run eval "$(trailhead shellenv)" so `camp new` cd\'s you in '
-            "automatically",
-            file=sys.stderr,
-        )
-
     launched_session = None
     if launch:
         from .session import launch_for_new, wait_for_provisioning
