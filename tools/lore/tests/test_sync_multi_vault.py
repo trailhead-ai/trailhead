@@ -2343,9 +2343,8 @@ def test_json_unresolved_vault_does_not_strand_the_others(tmp_path):
     _git(other, "add", "-A")
     _git(other, "commit", "-m", "device B edit")
     _git(other, "push", "origin")
-    # Two more commits land on origin AFTER the conflicting one, so the
-    # conflicted vault's behind-count is only current if it was re-fetched
-    # after its own rebase attempt aborted.
+    # Two more commits land on origin AFTER the conflicting one, so a vault
+    # whose ref database went stale would report a behind-count below 3.
     (other / "task" / "extra1.md").write_text("extra 1\n")
     _git(other, "add", "-A")
     _git(other, "commit", "-m", "extra 1")
@@ -2374,8 +2373,10 @@ def test_json_unresolved_vault_does_not_strand_the_others(tmp_path):
     _assert_no_mid_rebase(conflicted)
 
     # The behind-count is current: `git rev-list --count HEAD..origin/<branch>`
-    # sees all 3 of device B's commits, proving the aborted rebase re-fetched
-    # rather than reporting a stale ref database.
+    # sees all 3 of device B's commits. The fetch runs before the rebase
+    # attempt and `git rebase --abort` leaves remote-tracking refs alone, so a
+    # vault parked in `holding` still reports an accurate distance from the
+    # published history.
     branch = _git(conflicted, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
     behind = _git(conflicted, "rev-list", "--count", f"HEAD..origin/{branch}").stdout.strip()
     assert behind == "3", f"expected the ref database to reflect all 3 remote commits, got {behind}"
