@@ -595,3 +595,69 @@ def test_a_row_missing_a_required_key_does_not_crash_and_other_rows_still_render
     assert code == 0
     assert "alpha" in captured.out
     assert "Traceback" not in captured.err
+
+
+def test_a_relayed_row_without_a_state_key_still_prints_its_workspace(
+    hosts_env, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """A camp predating the state column answers rows with no `state` key.
+    The local renderer falls back to `-` for exactly that; the relayed
+    renderer must agree rather than raising and having the per-row
+    degradation guard drop every workspace off stdout."""
+    transport = _transport_module()
+    remote_rows = [
+        {"ok": True, "slug": "zeta", "branch": "b", "workspace_path": "/z", "group": "g"},
+        {"ok": True, "slug": "alpha", "branch": "b", "workspace_path": "/a", "group": "g"},
+    ]
+    outcome = transport.Answered(stdout=json.dumps(remote_rows), stderr="", exit_code=0)
+    _rig(monkeypatch, outcome)
+
+    code = _run(monkeypatch, ["list", "--host", "andromeda"])
+
+    captured = capsys.readouterr()
+    assert code == 0
+    assert [ln for ln in captured.out.splitlines() if ln] == ["zeta - /z", "alpha - /a"]
+    assert "skipping" not in captured.err
+
+
+def test_a_relayed_running_row_carries_its_window_count(
+    hosts_env, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """AC50 on the relayed axis: the window count reaches the operator here
+    too, in the same `running:<n>` field the local renderer prints."""
+    transport = _transport_module()
+    remote_rows = [
+        {
+            "ok": True, "slug": "zeta", "branch": "b", "workspace_path": "/z",
+            "group": "g", "state": "running", "window_count": 4,
+        },
+    ]
+    outcome = transport.Answered(stdout=json.dumps(remote_rows), stderr="", exit_code=0)
+    _rig(monkeypatch, outcome)
+
+    _run(monkeypatch, ["list", "--host", "andromeda"])
+
+    assert [ln for ln in capsys.readouterr().out.splitlines() if ln] == [
+        "zeta running:4 /z"
+    ]
+
+
+def test_a_relayed_unmanaged_row_prints_a_dash_for_its_null_path(
+    hosts_env, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    transport = _transport_module()
+    remote_rows = [
+        {
+            "ok": True, "slug": None, "branch": "", "workspace_path": None,
+            "group": None, "state": "unmanaged", "window_count": 2,
+            "tmux_session": "camp-oldproj-a1b2c3d4",
+        },
+    ]
+    outcome = transport.Answered(stdout=json.dumps(remote_rows), stderr="", exit_code=0)
+    _rig(monkeypatch, outcome)
+
+    _run(monkeypatch, ["list", "--host", "andromeda"])
+
+    assert [ln for ln in capsys.readouterr().out.splitlines() if ln] == [
+        "camp-oldproj-a1b2c3d4 unmanaged -"
+    ]

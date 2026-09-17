@@ -128,6 +128,50 @@ class Classification:
     dropped: int
 
 
+#: The human row's field for a row that has no value to print there — a
+#: leftover session has no workspace path, and a no-group fallback row has
+#: no derivable session name and so no state. Data says ``None``; only the
+#: human rendering says ``-``.
+HUMAN_ABSENT = "-"
+
+
+def format_state(state: str | None, windows: int | None) -> str:
+    """The state field as a human row prints it.
+
+    :data:`STATE_RUNNING` renders with its window count appended
+    (``running:3``) — the count is the one piece of size information in the
+    row and the human row is the only surface an operator reads, so a bare
+    ``running`` drops it on the floor. A row with no state at all (the
+    no-group registry fallback, or a row relayed by a camp predating the
+    column) renders :data:`HUMAN_ABSENT`.
+
+    Shared by both renderers — ``render_workspace_list``'s local rows and
+    ``render_list_row_human``'s relayed or merged ones — so a row reads the
+    same whichever machine answered it. A relayed ``running`` row carrying
+    no count still renders bare, because there is no count to state.
+    """
+    if not state:
+        return HUMAN_ABSENT
+    if state == STATE_RUNNING and windows is not None:
+        return f"{state}:{windows}"
+    return state
+
+
+def format_path(path: str | None) -> str:
+    """The path field as a human row prints it — :data:`HUMAN_ABSENT` for a
+    row that owns no path (an unmanaged session). Shared by both renderers
+    for the same reason :func:`format_state` is."""
+    return HUMAN_ABSENT if path is None else path
+
+
+def format_unmanaged_summary(count: int) -> str:
+    """The one line a group-scoped answer owes about leftover sessions it
+    counted but did not name. Agrees in number with *count*, and names the
+    widening an operator asks for to see them."""
+    sessions = "session" if count == 1 else "sessions"
+    return f"{count} unmanaged camp {sessions} — `camp list -g` to name them"
+
+
 def classify_sessions(
     workspaces: Sequence[Workspace],
     listing: SessionListing | _Unanswered,

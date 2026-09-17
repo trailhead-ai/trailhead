@@ -46,21 +46,38 @@ def render_list_row_human(row: dict) -> str:
     An unmanaged row (`slug` is `None`) prints its `tmux_session` in the
     first column instead — the same rule `render_workspace_list` applies
     locally, so a relayed or merged unmanaged row reads identically to one
-    rendered on this machine.
+    rendered on this machine. A leftover-count row (`unmanaged_count`
+    present — the group-scoped answer's summary, which names no leftover)
+    renders that same summary line instead of a workspace line.
 
     The one place a relayed or merged `camp list` row is turned into its
     human line: both `_cmd_ls_host_cli`'s `--host` callback and the
     `-a`/`--all-hosts` merged renderer in `cli/dispatch.py` print one row at
-    a time through it. Raises `KeyError` on a row missing a key it needs, so
-    a caller can degrade that one row.
+    a time through it. Raises `KeyError` on a row missing `slug` or
+    `workspace_path`, so a caller can degrade that one row — the same two
+    keys `render_workspace_list` indexes directly.
+
+    `state` and `window_count` are read with the SAME fallbacks the local
+    renderer applies (`camp.launch.inventory.format_state`): a row relayed
+    by a camp predating the state column carries neither, and renders `-`
+    rather than taking the whole listing's stdout down with it. A `None`
+    `workspace_path` — an unmanaged row, which owns no path — renders `-`
+    for the same reason.
     """
+    from ..launch.inventory import (
+        format_path,
+        format_state,
+        format_unmanaged_summary,
+    )
     from ..launch.recovery import printable_path
 
+    if "unmanaged_count" in row:
+        return format_unmanaged_summary(row["unmanaged_count"])
+
     first = row["slug"] if row["slug"] is not None else row["tmux_session"]
-    return (
-        f"{printable_path(first)} {row['state']} "
-        f"{printable_path(row['workspace_path'])}"
-    )
+    state = format_state(row.get("state"), row.get("window_count"))
+    path = format_path(row["workspace_path"])
+    return f"{printable_path(first)} {state} {printable_path(path)}"
 
 
 def _merged_widened_entries(
@@ -75,7 +92,8 @@ def _merged_widened_entries(
     groups' listings, so they can never drift on how a leftover session is
     counted. Leftover (unmanaged) sessions are host-wide, not per-group, so
     they are deduped by `tmux_session` name: one leftover appears once,
-    however many of the groups enumerated it. Notices are returned rather
+    however many of the groups enumerated it, and they sort after every
+    workspace row. Notices are returned rather
     than printed, because one of the two callers must not print at all.
     """
     from ..launch.inventory import DisclosureScope
@@ -94,7 +112,10 @@ def _merged_widened_entries(
                 continue
             seen_unmanaged.add(u["tmux_session"])
             entries.append(u)
-    entries.sort(key=lambda e: e.get("group") or "")
+    # A leftover session belongs to no group, so it sorts AFTER every
+    # workspace row rather than floating above them on an empty group name:
+    # the rows a widened listing was asked for come first.
+    entries.sort(key=lambda e: (e.get("group") is None, e.get("group") or ""))
     return entries, notices
 
 
@@ -116,20 +137,39 @@ def local_list_answer(
     to do with a total failure, exactly as `_sessions_live_answer` already
     does for `camp sessions`' own `-a` path.
 
-    Always reads tmux at :data:`~camp.launch.inventory.DisclosureScope.WIDENED`
-    — this IS the `-a`/`--all-hosts` axis, which has already opted into
-    seeing leftover sessions named rather than merely counted, regardless of
-    whether the group axis was itself widened. The `--all-groups` branch
-    merges through :func:`_merged_widened_entries`, which owns how several
-    groups' leftovers collapse to one row each.
+    Reads tmux at the scope the GROUP axis asked for: a leftover session
+    belongs to no group — its name predates the group-qualified scheme and
+    cannot be attributed to one — so narrowing to one group and naming one
+    would put another group's project names into this answer, which is the
+    disclosure boundary `docs/design/cross-group-cross-account-listing.md`
+    already narrowed group-scoped session queries for. `-a` widens the
+    MACHINE axis, not the group axis, and the remote half of this same
+    answer is narrowed by that filter
+    (:func:`~camp.host.merge.merge_all_hosts_answer`'s `group=`) — so
+    naming this machine's leftovers here would also make the policy differ
+    between this machine and a peer inside one command. The narrow branch
+    therefore counts them (:func:`~camp.provision.lifecycle.unmanaged_count_row`,
+    the same row the group-scoped `camp list --json` carries), and only the
+    `--all-groups` branch — which crosses groups by construction — names
+    them, merged through :func:`_merged_widened_entries`.
+
+    Notices are carried, never dropped: an unanswerable tmux renders every
+    row `unknown`, and the notice is the only thing that says why.
     """
     from ..launch.inventory import DisclosureScope
-    from ..provision.lifecycle import cmd_ls_group, load_answerable_groups
+    from ..provision.lifecycle import (
+        cmd_ls_group,
+        load_answerable_groups,
+        unmanaged_count_row,
+    )
     from .common import _groups_dir
 
     if not all_groups:
-        listing = cmd_ls_group(group, env=None, scope=DisclosureScope.WIDENED)
-        return _project_list_rows(listing.entries + listing.unmanaged), [], 0
+        listing = cmd_ls_group(group, env=None, scope=DisclosureScope.GROUP)
+        rows = _project_list_rows(listing.entries)
+        if listing.unmanaged_count:
+            rows.append(unmanaged_count_row(listing.unmanaged_count))
+        return rows, ([listing.notice] if listing.notice else []), 0
 
     notices: list[str] = []
     groups, unparsable = load_answerable_groups(_groups_dir())
@@ -145,7 +185,8 @@ def local_list_answer(
         notices.append("camp list: no groups configured — nothing to list")
         return [], notices, 0
 
-    entries, _notices = _merged_widened_entries(groups, env=None)
+    entries, tmux_notices = _merged_widened_entries(groups, env=None)
+    notices.extend(tmux_notices)
 
     rows = _project_list_rows(entries)
     rows += [{"ok": False, "group": None, "reason": d} for d in unparsable]
