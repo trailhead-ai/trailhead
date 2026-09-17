@@ -73,7 +73,11 @@ def _make_vault(path: Path, *, commit: bool = True, dirty: bool = True) -> Path:
     subprocess.run(["git", "init", str(path)], check=True, capture_output=True)
     for key, val in (("user.email", "t@e.st"), ("user.name", "Test"), ("commit.gpgsign", "false")):
         _git(path, "config", key, val)
-    (path / "README.md").write_text("vault\n")
+    # Record content lives under a kind directory — a real vault has no loose
+    # file at its root besides `.gitignore`, and `lore sync`'s commit scope
+    # only ever stages a kind directory, `sites/`, or that one root file.
+    (path / "task").mkdir(parents=True, exist_ok=True)
+    (path / "task" / "README.md").write_text("vault\n")
     # Mirrors what `config.installer` scaffolds into every real vault. Lore's
     # write locks are `*.lock` sidecars living inside the vault, so a fixture
     # without this would test a vault shape no install ever has.
@@ -82,7 +86,7 @@ def _make_vault(path: Path, *, commit: bool = True, dirty: bool = True) -> Path:
         _git(path, "add", "-A")
         _git(path, "commit", "-m", "init")
     if dirty:
-        (path / "record.md").write_text("# a record\n")
+        (path / "task" / "record.md").write_text("# a record\n")
     return path
 
 
@@ -487,7 +491,9 @@ def test_sync_diverged_vault_rebases_then_pushes(tmp_path):
     _git(other, "commit", "-m", "device B record")
     _git(other, "push", "origin")
 
-    (default / "ours.md").write_text("# device A\n")
+    # In scope so `lore sync`'s own commit step stages and commits it — the
+    # local half of the divergence the test is proving gets integrated.
+    (default / "task" / "ours.md").write_text("# device A\n")
 
     write_vault_config(config_home, [("default", "default", default)])
     r = run_cli(["sync"], config_home=config_home, state_dir=state_dir)
@@ -495,7 +501,7 @@ def test_sync_diverged_vault_rebases_then_pushes(tmp_path):
     assert "Pulled 1 commit(s) from origin." in r.stdout
     assert "Pushed to origin." in r.stdout
     assert (default / "theirs.md").exists()
-    assert (default / "ours.md").exists()
+    assert (default / "task" / "ours.md").exists()
     # Both devices' commits are on the remote — nothing left ahead or behind.
     assert _commit_count(Path(remote)) == _commit_count(default)
 
@@ -510,12 +516,16 @@ def test_sync_rebase_conflict_aborts_cleanly_and_fails_hard(tmp_path):
     _wire_remote(default, remote)
 
     other = _clone_as_second_device(remote, tmp_path / "device-b")
-    (other / "README.md").write_text("edited on device B\n")
+    # Both sides edit the SAME already-tracked record file — an in-scope path,
+    # so the LOCAL edit is one `lore sync`'s own commit step actually stages,
+    # which is what makes this a genuine same-file conflict rather than an
+    # uncommitted modification the rebase never sees.
+    (other / "task" / "README.md").write_text("edited on device B\n")
     _git(other, "add", "-A")
     _git(other, "commit", "-m", "device B edit")
     _git(other, "push", "origin")
 
-    (default / "README.md").write_text("edited on device A\n")
+    (default / "task" / "README.md").write_text("edited on device A\n")
 
     write_vault_config(config_home, [("default", "default", default)])
     r = run_cli(["sync"], config_home=config_home, state_dir=state_dir)
@@ -529,7 +539,7 @@ def test_sync_rebase_conflict_aborts_cleanly_and_fails_hard(tmp_path):
     assert not (default / ".git" / "rebase-merge").exists()
     assert not (default / ".git" / "rebase-apply").exists()
     assert _git(default, "status", "--porcelain").stdout.strip() == ""
-    assert (default / "README.md").read_text() == "edited on device A\n"
+    assert (default / "task" / "README.md").read_text() == "edited on device A\n"
 
 
 def test_sync_unreachable_remote_makes_fetch_soft(tmp_path):
@@ -543,7 +553,7 @@ def test_sync_unreachable_remote_makes_fetch_soft(tmp_path):
     # Simulate going offline AFTER the upstream is established.
     _git(default, "remote", "set-url", "origin", str(tmp_path / "gone.git"))
 
-    (default / "record.md").write_text("# a record\n")
+    (default / "task" / "record.md").write_text("# a record\n")
     write_vault_config(config_home, [("default", "default", default)])
 
     r = run_cli(["sync"], config_home=config_home, state_dir=state_dir)
@@ -592,7 +602,7 @@ def test_sync_pull_sets_up_a_no_upstream_branch_against_an_existing_remote_branc
     assert r.returncode == 0, r.stderr
     assert "Pulled" in r.stdout
     assert "Pushed to origin." in r.stdout
-    assert (device_b / "README.md").exists(), "device A's history must be integrated"
+    assert (device_b / "task" / "README.md").exists(), "device A's history must be integrated"
     assert _commit_count(Path(remote)) == _commit_count(device_b)
 
 
@@ -701,11 +711,11 @@ def test_sync_conflicting_vault_does_not_strand_the_others(tmp_path):
     remote_a = _make_bare_remote(tmp_path / "remote-a.git")
     _wire_remote(conflicted, remote_a)
     other_a = _clone_as_second_device(remote_a, tmp_path / "device-b-a")
-    (other_a / "README.md").write_text("edited on device B\n")
+    (other_a / "task" / "README.md").write_text("edited on device B\n")
     _git(other_a, "add", "-A")
     _git(other_a, "commit", "-m", "device B edit")
     _git(other_a, "push", "origin")
-    (conflicted / "README.md").write_text("edited on device A\n")
+    (conflicted / "task" / "README.md").write_text("edited on device A\n")
 
     # Vault 2 is healthy and behind the remote.
     healthy = _make_vault(tmp_path / "v-healthy", dirty=True)
@@ -760,7 +770,7 @@ def test_sync_unborn_vault_adopts_the_remote_branch(tmp_path):
     r = run_cli(["sync"], config_home=config_home, state_dir=state_dir)
     assert r.returncode == 0, r.stderr
     assert "Pulled 1 commit(s) from origin." in r.stdout
-    assert (fresh / "README.md").exists(), "the remote history must be adopted"
+    assert (fresh / "task" / "README.md").exists(), "the remote history must be adopted"
 
     # Converged: upstream is set, and a second sync is a quiet no-op.
     r2 = run_cli(["sync"], config_home=config_home, state_dir=state_dir)
@@ -946,7 +956,7 @@ def test_flush_sync_tail_commits_and_pushes_unrelated_dirty_files(tmp_path):
     default = _make_vault(tmp_path / "v-default", dirty=False)
     remote = _make_bare_remote(tmp_path / "remote.git")
     _wire_remote(default, remote)
-    (default / "stray.md").write_text("# not staged by the flush\n")
+    (default / "task" / "stray.md").write_text("# not staged by the flush\n")
     write_vault_config(config_home, [("default", "default", default)])
 
     r = run_cli(["flush"], config_home=config_home, state_dir=state_dir)
@@ -971,7 +981,7 @@ def test_flush_no_sync_preserves_the_explicit_paths_behavior(tmp_path):
     default = _make_vault(tmp_path / "v-default", dirty=False)
     remote = _make_bare_remote(tmp_path / "remote.git")
     _wire_remote(default, remote)
-    (default / "stray.md").write_text("# not staged by the flush\n")
+    (default / "task" / "stray.md").write_text("# not staged by the flush\n")
     write_vault_config(config_home, [("default", "default", default)])
     before = _commit_count(default)
 
@@ -994,12 +1004,14 @@ def test_flush_sync_tail_conflict_exits_zero_and_names_lore_resolve(tmp_path):
     _wire_remote(default, remote)
 
     other = _clone_as_second_device(remote, tmp_path / "device-b")
-    (other / "README.md").write_text("edited on device B\n")
+    # In scope so the sync tail's own commit step stages the local edit — the
+    # genuine same-file conflict this test depends on.
+    (other / "task" / "README.md").write_text("edited on device B\n")
     _git(other, "add", "-A")
     _git(other, "commit", "-m", "device B edit")
     _git(other, "push", "origin")
 
-    (default / "README.md").write_text("edited on device A\n")
+    (default / "task" / "README.md").write_text("edited on device A\n")
     write_vault_config(config_home, [("default", "default", default)])
 
     r = run_cli(["flush"], config_home=config_home, state_dir=state_dir)
@@ -1013,7 +1025,7 @@ def test_flush_sync_tail_conflict_exits_zero_and_names_lore_resolve(tmp_path):
     # The vault is left consistent: the abort is verified, not assumed.
     assert not (default / ".git" / "rebase-merge").exists()
     assert not (default / ".git" / "rebase-apply").exists()
-    assert (default / "README.md").read_text() == "edited on device A\n"
+    assert (default / "task" / "README.md").read_text() == "edited on device A\n"
 
 
 def test_flush_sync_tail_offline_is_soft(tmp_path):
@@ -1025,7 +1037,7 @@ def test_flush_sync_tail_offline_is_soft(tmp_path):
     remote = _make_bare_remote(tmp_path / "remote.git")
     _wire_remote(default, remote)
     _git(default, "remote", "set-url", "origin", str(tmp_path / "gone.git"))
-    (default / "stray.md").write_text("# not staged by the flush\n")
+    (default / "task" / "stray.md").write_text("# not staged by the flush\n")
     write_vault_config(config_home, [("default", "default", default)])
     before = _commit_count(default)
 
@@ -1043,7 +1055,7 @@ def test_flush_sync_tail_never_touches_a_shared_vault(tmp_path):
     state_dir.mkdir(parents=True)
     default = _make_vault(tmp_path / "v-default", dirty=False)
     shared = _make_vault(tmp_path / "v-shared", dirty=False)
-    (default / "stray.md").write_text("# mine\n")
+    (default / "task" / "stray.md").write_text("# mine\n")
     (shared / "planted.md").write_text("# someone else's\n")
     write_vault_config(
         config_home,
@@ -1332,3 +1344,161 @@ def test_flush_sync_tail_skips_a_mid_resolution_vault_without_aborting_it(tmp_pa
     assert "stuck" in r.stderr and "mid-resolution" in r.stderr
     # The remedy names the vault's DIRECTORY, per `resolve_state.resolve_remedy`.
     assert "lore resolve v-stuck" in r.stderr
+
+
+# ── lore sync: commit scope is bounded to records and sites ────────────────
+#
+# `outpost/` is a vault's free-write daemon-config zone (like `sites/`), but
+# unlike `sites/` it is an operator's local working set, never content to
+# publish — so `lore sync`'s own commit step must never stage it, regardless
+# of what a vault's `.gitignore` does or doesn't cover.
+
+
+def test_sync_outpost_edit_is_never_committed_and_stays_unstaged(tmp_path):
+    """A vault with an uncommitted `outpost/` edit AND an uncommitted record
+    edit: the record is committed; `outpost/` is left uncommitted and unstaged."""
+    config_home = tmp_path / "config"
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(parents=True)
+    default = _make_vault(tmp_path / "v-default")  # dirty=True: task/record.md uncommitted
+    (default / "outpost").mkdir()
+    (default / "outpost" / "config.json").write_text('{"tracked": false}\n')
+    write_vault_config(config_home, [("default", "default", default)])
+
+    r = run_cli(["sync"], config_home=config_home, state_dir=state_dir)
+    assert r.returncode == 0, r.stderr
+
+    tracked = _git(default, "ls-files").stdout.split()
+    assert "task/record.md" in tracked, "the record edit must still be committed"
+
+    # `--untracked-files=all` so an untracked file inside an untracked
+    # directory is reported by its own path, not collapsed to `outpost/`.
+    status = _git(default, "status", "--porcelain", "--untracked-files=all").stdout
+    outpost_line = next(line for line in status.splitlines() if "outpost/config.json" in line)
+    assert outpost_line.startswith("??"), (
+        f"outpost/ must be left uncommitted AND unstaged: {outpost_line!r}"
+    )
+
+
+def test_sync_outpost_only_change_commits_nothing_and_ends_clean(tmp_path):
+    """A vault whose ONLY uncommitted change is under `outpost/`: nothing is
+    committed, and the loop still completes and ends clean (exit 0), never
+    tripping over an empty staged index."""
+    config_home = tmp_path / "config"
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(parents=True)
+    default = _make_vault(tmp_path / "v-default", dirty=False)
+    (default / "outpost").mkdir()
+    (default / "outpost" / "config.json").write_text('{"tracked": false}\n')
+    write_vault_config(config_home, [("default", "default", default)])
+    before = _commit_count(default)
+
+    r = run_cli(["sync"], config_home=config_home, state_dir=state_dir)
+    assert r.returncode == 0, r.stderr
+    assert "Nothing to commit" in r.stdout
+    assert _commit_count(default) == before, "an outpost-only change must not be committed"
+    assert "config.json" in _git(
+        default, "status", "--porcelain", "--untracked-files=all"
+    ).stdout, (
+        "the outpost/ file must remain exactly where it was"
+    )
+
+
+def test_sync_commits_a_deleted_record_file_as_a_deletion(tmp_path):
+    """A deleted record file is committed as a deletion."""
+    config_home = tmp_path / "config"
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(parents=True)
+    default = _make_vault(tmp_path / "v-default")  # dirty=True: uncommitted task/record.md
+    write_vault_config(config_home, [("default", "default", default)])
+    r0 = run_cli(["sync"], config_home=config_home, state_dir=state_dir)
+    assert r0.returncode == 0, r0.stderr
+    assert "task/record.md" in _git(default, "ls-files").stdout.split()
+
+    (default / "task" / "record.md").unlink()
+    r = run_cli(["sync"], config_home=config_home, state_dir=state_dir)
+    assert r.returncode == 0, r.stderr
+
+    assert "task/record.md" not in _git(default, "ls-files").stdout.split()
+    name_status = _git(
+        default, "show", "--name-status", "--pretty=format:", "HEAD"
+    ).stdout.strip()
+    assert name_status == "D\ttask/record.md", name_status
+
+
+def test_sync_commits_an_untracked_record_file_as_an_addition(tmp_path):
+    """An untracked record file is committed as an addition — the staging is
+    not `--update`-shaped (a `git add -u` would silently skip a new file)."""
+    config_home = tmp_path / "config"
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(parents=True)
+    default = _make_vault(tmp_path / "v-default", dirty=False)
+    (default / "task" / "brand-new.md").write_text("# never seen before\n")
+    write_vault_config(config_home, [("default", "default", default)])
+
+    r = run_cli(["sync"], config_home=config_home, state_dir=state_dir)
+    assert r.returncode == 0, r.stderr
+    assert "task/brand-new.md" in _git(default, "ls-files").stdout.split()
+
+
+def test_sync_commits_an_untracked_sites_file(tmp_path):
+    """An untracked file under `sites/` is committed — the free-write zone is
+    content and must publish, unlike `outpost/`."""
+    config_home = tmp_path / "config"
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(parents=True)
+    default = _make_vault(tmp_path / "v-default", dirty=False)
+    (default / "sites" / "my-site").mkdir(parents=True)
+    (default / "sites" / "my-site" / "index.html").write_text("<html></html>\n")
+    write_vault_config(config_home, [("default", "default", default)])
+
+    r = run_cli(["sync"], config_home=config_home, state_dir=state_dir)
+    assert r.returncode == 0, r.stderr
+    assert "sites/my-site/index.html" in _git(default, "ls-files").stdout.split()
+
+
+def test_sync_never_commits_the_lock_file_with_a_predating_gitignore(tmp_path):
+    """`.lore.lock` is never committed, even in a vault whose `.gitignore`
+    predates the scaffolded `*.lock` pattern — the existing belt-and-braces
+    unstage must keep holding regardless of what the commit-scope pathspecs are."""
+    config_home = tmp_path / "config"
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(parents=True)
+    default = tmp_path / "v-default"
+    default.mkdir()
+    subprocess.run(["git", "init", str(default)], check=True, capture_output=True)
+    for key, val in (("user.email", "t@e.st"), ("user.name", "Test"), ("commit.gpgsign", "false")):
+        _git(default, "config", key, val)
+    (default / "task").mkdir()
+    (default / "task" / "README.md").write_text("vault\n")
+    # Predates the scaffolded `*.lock` pattern entirely — no lock ignore at all.
+    (default / ".gitignore").write_text("*.tmp\n")
+    _git(default, "add", "-A")
+    _git(default, "commit", "-m", "init")
+    (default / "task" / "record.md").write_text("# a record\n")
+
+    write_vault_config(config_home, [("default", "default", default)])
+    r = run_cli(["sync"], config_home=config_home, state_dir=state_dir)
+    assert r.returncode == 0, r.stderr
+
+    tracked = _git(default, "ls-files").stdout.split()
+    assert "task/record.md" in tracked, "the real change must still be committed"
+    assert ".lore.lock" not in tracked, (
+        "the write-lock sidecar sync itself creates must never be committed, "
+        "gitignored or not"
+    )
+
+
+def test_sync_commits_successfully_when_a_kind_directory_is_missing(tmp_path):
+    """A vault missing at least one kind directory (the common case — no real
+    vault carries all nine record kinds) still commits its records
+    successfully, rather than fataling on an absent pathspec."""
+    config_home = tmp_path / "config"
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(parents=True)
+    default = _make_vault(tmp_path / "v-default")  # only `task/` exists on disk
+    write_vault_config(config_home, [("default", "default", default)])
+
+    r = run_cli(["sync"], config_home=config_home, state_dir=state_dir)
+    assert r.returncode == 0, r.stderr
+    assert "task/record.md" in _git(default, "ls-files").stdout.split()

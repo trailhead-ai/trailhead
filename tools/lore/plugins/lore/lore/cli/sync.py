@@ -95,6 +95,7 @@ from contextlib import ExitStack
 from pathlib import Path
 
 from .. import locking
+from ..record import model as record_model
 from .common import (
     SYNC_REFUSAL_MESSAGES,
     _git,
@@ -109,6 +110,7 @@ from .common import (
     machine_state_key,
     vault_refusal_condition,
 )
+from .init import _SITES_DIR
 
 DEFAULT_SYNC_MSG = "lore: sync vault"
 
@@ -395,56 +397,62 @@ def _push_one(vault: Path, say, say_err, *, committed: bool) -> int:
     return 0
 
 
+#: The root file lore scaffolds that IS committed. ``.lore.lock`` is deliberately
+#: absent — the write lock sidecar and never part of the commit scope.
+_COMMIT_SCOPE_ROOT_FILES = (".gitignore",)
+
+
+def _commit_scope_pathspecs(vault: Path) -> list[str]:
+    """The allow-listed pathspecs a commit may stage in *vault*: every record kind
+    directory, the ``sites/`` free-write zone, and the scaffolded root
+    ``.gitignore`` — filtered to what actually exists on disk.
+
+    ``outpost/`` and ``.lore.lock`` are never named, so neither can ever be
+    staged regardless of what a vault's own ``.gitignore`` says. The filter to
+    existing paths is required, not an optimization: ``git add -A -- <pathspec
+    ...>`` exits 128 and stages NOTHING AT ALL the moment one named pathspec is
+    absent from disk, and most real vaults do not carry every record kind.
+    """
+    candidates = sorted(record_model.KINDS) + [_SITES_DIR, *_COMMIT_SCOPE_ROOT_FILES]
+    return [name for name in candidates if (vault / name).exists()]
+
+
 def _stage_and_commit_one(vault: Path, message: str, say, say_err) -> tuple[int, bool]:
-    """Stage + commit one vault's whole tree under its write lock.
+    """Stage + commit one vault's record trees and ``sites/`` under its write lock.
 
     Returns ``(exit_code, committed)``.
 
-    **The lock file itself is excluded from every ``status``/``add`` call here**,
-    not just left to whatever ``.gitignore`` the vault happens to carry.
-    ``config.installer``'s ``scaffold_gitignore`` covers real vaults, but this
-    function must not depend on that: without the exclusion, the mere act of
-    taking the write lock — which create-or-opens ``<vault_root>/.lore.lock`` —
-    would make an otherwise-clean, ungitignored vault read as dirty and "commit"
-    nothing but its own lock sidecar. That would also break a freshly ``git
-    init``-ed vault's unborn-adoption path in :func:`_pull_one`, which assumes an
-    unborn HEAD implies a clean tree. Excluding the lock file makes that true
-    unconditionally, which is what lets :func:`cmd_sync` safely hold every
-    configured vault's lock for its ENTIRE multi-target commit phase (see its
-    docstring) instead of only locking vaults already known to be dirty.
-
-    The ``status`` probes use a ``:(exclude)`` pathspec for this — safe there,
-    since ``status`` never complains about ignored paths. ``add`` can't use the
-    same trick: git treats an *explicitly named* pathspec — even an exclude-only
-    one with no positive match — as an explicit request, and errors out ("The
-    following paths are ignored…") the moment that name also happens to be
-    gitignored (as ``.lore.lock`` is, in every scaffolded vault). So staging
-    instead runs a bare ``git add -A`` (no pathspec — the one shape where git
-    silently skips ignored paths instead of erroring on them) and then unstages
-    the lock file explicitly with ``git reset``, which never errors whether or
-    not the path was staged. Net effect is the same: the lock file is never part
-    of the commit, whether or not the vault's own ``.gitignore`` already excludes it.
+    **The commit scope is bounded to :func:`_commit_scope_pathspecs`** — every
+    record kind directory, ``sites/``, and the scaffolded root ``.gitignore``,
+    filtered to what exists. A vault's ``outpost/`` daemon configuration and its
+    ``.lore.lock`` write-lock sidecar are never named as pathspecs, so neither
+    can ever be staged: ``git add -A -- <pathspec ...>`` only ever touches the
+    trees it is explicitly told about. This is why ``status`` is also scoped to
+    the SAME pathspec list here — a change confined to ``outpost/`` must read as
+    "nothing to commit", not as a dirty tree whose ``git add`` then silently
+    stages nothing and leaves ``git commit`` with an empty index.
 
     Probed twice, deliberately, though :func:`cmd_sync` — this function's only
-    caller — already holds every target's lock (lock file created) before
-    calling in, so neither probe here ever finds a vault genuinely un-locked;
-    the exclusion above is what keeps that pre-existing lock file from making
-    an otherwise-clean vault read as dirty regardless. The REPEAT under
-    ``with locking.vault_write_lock(vault)`` below (a reentrant no-op against
-    the lock cmd_sync already holds) exists because staging what the first
-    probe saw would only be safe if this vault's tree can't change between the
-    two reads — true for a standalone caller taking the lock fresh here, and
-    still asserted defensively even though cmd_sync's own batched acquisition
-    already rules out a concurrent cross-vault ``move_record`` doing exactly
-    that in between.
+    caller — already holds every target's lock before calling in, so neither
+    probe here ever finds a vault genuinely un-locked. The REPEAT under ``with
+    locking.vault_write_lock(vault)`` below (a reentrant no-op against the lock
+    cmd_sync already holds) exists because staging what the first probe saw
+    would only be safe if this vault's tree — and its set of kind directories —
+    can't change between the two reads: true for a standalone caller taking the
+    lock fresh here, and still asserted defensively even though cmd_sync's own
+    batched acquisition already rules out a concurrent cross-vault
+    ``move_record`` doing exactly that in between.
 
     No network runs in here — see the module docstring.
     """
-    lock_exclude = f":(exclude){locking.VAULT_LOCK_NAME}"
 
-    # `status --porcelain` reports untracked files too, so nothing is missed —
-    # except the lock sidecar itself, deliberately (see above).
-    rc, status_out, stderr = _git(vault, "status", "--porcelain", "--", ".", lock_exclude)
+    def _status(pathspecs: list[str]) -> tuple[int, str, str]:
+        if not pathspecs:
+            return 0, "", ""
+        return _git(vault, "status", "--porcelain", "--", *pathspecs)
+
+    pathspecs = _commit_scope_pathspecs(vault)
+    rc, status_out, stderr = _status(pathspecs)
     if rc != 0:
         say_err(f"error: git status failed: {stderr} — skipped")
         return 1, False
@@ -453,7 +461,8 @@ def _stage_and_commit_one(vault: Path, message: str, say, say_err) -> tuple[int,
         return 0, False
 
     with locking.vault_write_lock(vault):
-        rc, status_out, stderr = _git(vault, "status", "--porcelain", "--", ".", lock_exclude)
+        pathspecs = _commit_scope_pathspecs(vault)
+        rc, status_out, stderr = _status(pathspecs)
         if rc != 0:
             say_err(f"error: git status failed: {stderr} — skipped")
             return 1, False
@@ -462,14 +471,14 @@ def _stage_and_commit_one(vault: Path, message: str, say, say_err) -> tuple[int,
             say("Nothing to commit — vault is clean.")
             return 0, False
 
-        # Bare `-A`, no pathspec — see the docstring for why an explicit
-        # exclude pathspec errors here (unlike for `status`).
-        rc, _, stderr = _git(vault, "add", "-A")
+        rc, _, stderr = _git(vault, "add", "-A", "--", *pathspecs)
         if rc != 0:
             say_err(f"error: git add failed: {stderr} — skipped")
             return 1, False
-        # Unstage the lock sidecar if it got swept up (i.e. wasn't already
-        # gitignored). `reset` never errors on an ignored or never-staged path.
+        # Belt-and-braces: `.lore.lock` is never one of `pathspecs` above, so it
+        # cannot have been staged by the `add` — this unstages it anyway in case
+        # a future pathspec ever collided with the lock sidecar's name. `reset`
+        # never errors on an ignored or never-staged path.
         rc, _, stderr = _git(vault, "reset", "-q", "--", locking.VAULT_LOCK_NAME)
         if rc != 0:
             say_err(f"error: git reset (unstaging lock file) failed: {stderr} — skipped")

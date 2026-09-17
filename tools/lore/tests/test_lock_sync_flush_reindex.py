@@ -205,7 +205,7 @@ class TestSyncLockScope:
         _git(peer, "push", "origin", "HEAD")
 
         # Local dirt, so add + commit run too.
-        (vault / "record.md").write_text("# a record\n", encoding="utf-8")
+        (vault / "task" / "record.md").write_text("# a record\n", encoding="utf-8")
 
         with _lock_depth_probe(sync) as events:
             rc = _sync_via_cmd(sync, vault, tmp_path, monkeypatch)
@@ -246,7 +246,7 @@ class TestSyncLockScope:
             rc = _sync_via_cmd(sync, vault, tmp_path, monkeypatch)
 
         assert rc == 0
-        assert (vault / "README.md").exists(), "the unborn vault never adopted the remote branch"
+        assert (vault / "task" / "README.md").exists(), "the unborn vault never adopted the remote branch"
         seen = _depths(events, "reset")
         assert seen, "reset --hard never ran"
         assert all(d >= 1 for d in seen), f"reset --hard ran OUTSIDE the vault lock: {seen}"
@@ -308,13 +308,13 @@ class TestSyncLockScope:
         """Records are committed; the lock sidecar sync itself created is not."""
         sync = load_script("lore.cli.sync")
         vault = _git_vault(tmp_path / "vault")
-        (vault / "record.md").write_text("# a record\n", encoding="utf-8")
+        (vault / "task" / "record.md").write_text("# a record\n", encoding="utf-8")
 
         rc = _sync_via_cmd(sync, vault, tmp_path, monkeypatch)
 
         assert rc == 0
         tracked = _git(vault, "ls-files").stdout.split()
-        assert "record.md" in tracked
+        assert "task/record.md" in tracked
         assert ".lore.lock" not in tracked
 
 
@@ -347,8 +347,8 @@ class TestCmdSyncBatchedLockPhase:
         remote_b = _make_bare_remote(tmp_path / "remote-b.git")
         _wire_remote(vault_a, remote_a, track=True)
         _wire_remote(vault_b, remote_b, track=True)
-        (vault_a / "record.md").write_text("# a\n", encoding="utf-8")
-        (vault_b / "record.md").write_text("# b\n", encoding="utf-8")
+        (vault_a / "task" / "record.md").write_text("# a\n", encoding="utf-8")
+        (vault_b / "task" / "record.md").write_text("# b\n", encoding="utf-8")
 
         config_home = tmp_path / "cfg"
         write_vault_config(
@@ -392,8 +392,8 @@ class TestCmdSyncBatchedLockPhase:
         rc = sync.cmd_sync(_Args())
 
         assert rc == 0
-        assert _git(vault_a, "ls-files").stdout.split().count("record.md") == 1
-        assert _git(vault_b, "ls-files").stdout.split().count("record.md") == 1
+        assert _git(vault_a, "ls-files").stdout.split().count("task/record.md") == 1
+        assert _git(vault_b, "ls-files").stdout.split().count("task/record.md") == 1
 
         both = frozenset(str(v.resolve()) for v in (vault_a, vault_b))
         commit_events = [(op, roots) for op, roots in events if op in ("add", "commit", "reset")]
@@ -424,8 +424,8 @@ class TestCmdSyncBatchedLockPhase:
         locking = _locking()
         vault_a = _git_vault(tmp_path / "a")
         vault_b = _git_vault(tmp_path / "b")
-        (vault_a / "record.md").write_text("# a\n", encoding="utf-8")
-        (vault_b / "record.md").write_text("# b\n", encoding="utf-8")
+        (vault_a / "task" / "record.md").write_text("# a\n", encoding="utf-8")
+        (vault_b / "task" / "record.md").write_text("# b\n", encoding="utf-8")
         before_a = _git(vault_a, "rev-parse", "HEAD").stdout.strip()
         before_b = _git(vault_b, "rev-parse", "HEAD").stdout.strip()
 
@@ -470,8 +470,8 @@ class TestCmdSyncBatchedLockPhase:
         locking = _locking()
         vault_a = _git_vault(tmp_path / "a")
         vault_b = _git_vault(tmp_path / "ab")
-        (vault_a / "record.md").write_text("# a\n", encoding="utf-8")
-        (vault_b / "record.md").write_text("# b\n", encoding="utf-8")
+        (vault_a / "task" / "record.md").write_text("# a\n", encoding="utf-8")
+        (vault_b / "task" / "record.md").write_text("# b\n", encoding="utf-8")
 
         config_home = tmp_path / "cfg"
         write_vault_config(
@@ -497,7 +497,7 @@ class TestCmdSyncBatchedLockPhase:
 
         assert rc == 1, "vault_b's (ab's) broken lock should still fail the overall run"
         tracked_a = _git(vault_a, "ls-files").stdout.split()
-        assert "record.md" in tracked_a, (
+        assert "task/record.md" in tracked_a, (
             "vault_a should have committed despite vault_b's lock failure"
         )
         assert _git(vault_b, "status", "--porcelain").stdout.strip() != "", (
@@ -520,8 +520,8 @@ class TestCmdSyncBatchedLockPhase:
         locking = _locking()
         vault_a = _git_vault(tmp_path / "a")
         vault_b = _git_vault(tmp_path / "b")
-        (vault_a / "record.md").write_text("# a\n", encoding="utf-8")
-        (vault_b / "record.md").write_text("# b\n", encoding="utf-8")
+        (vault_a / "task" / "record.md").write_text("# a\n", encoding="utf-8")
+        (vault_b / "task" / "record.md").write_text("# b\n", encoding="utf-8")
 
         config_home = tmp_path / "cfg"
         write_vault_config(
@@ -546,7 +546,7 @@ class TestCmdSyncBatchedLockPhase:
         assert rc == 0, "both commits landed; a later unlock failure must not fail the run"
         for name, vault in (("vault_a", vault_a), ("vault_b", vault_b)):
             tracked = _git(vault, "ls-files").stdout.split()
-            assert "record.md" in tracked, f"{name} should have committed its record"
+            assert "task/record.md" in tracked, f"{name} should have committed its record"
 
     def test_acquisition_order_routes_through_the_shared_sort_key(
         self, tmp_path, monkeypatch
@@ -574,9 +574,9 @@ class TestCmdSyncBatchedLockPhase:
         vault_c = _git_vault(tmp_path / "c")
         vault_b = _git_vault(tmp_path / "b")
         vault_a = _git_vault(tmp_path / "a")
-        (vault_a / "record.md").write_text("# a\n", encoding="utf-8")
-        (vault_b / "record.md").write_text("# b\n", encoding="utf-8")
-        (vault_c / "record.md").write_text("# c\n", encoding="utf-8")
+        (vault_a / "task" / "record.md").write_text("# a\n", encoding="utf-8")
+        (vault_b / "task" / "record.md").write_text("# b\n", encoding="utf-8")
+        (vault_c / "task" / "record.md").write_text("# c\n", encoding="utf-8")
 
         config_home = tmp_path / "cfg"
         write_vault_config(
@@ -647,7 +647,8 @@ class TestCmdSyncBatchedLockPhase:
         (vault / "README.md").write_text("vault\n", encoding="utf-8")
         _git(vault, "add", "-A")
         _git(vault, "commit", "-m", "init")
-        (vault / "record.md").write_text("# a record\n", encoding="utf-8")
+        (vault / "task").mkdir()
+        (vault / "task" / "record.md").write_text("# a record\n", encoding="utf-8")
 
         config_home = tmp_path / "cfg"
         write_default_config(config_home, vault)
@@ -659,7 +660,7 @@ class TestCmdSyncBatchedLockPhase:
 
         assert rc == 0
         tracked = _git(vault, "ls-files").stdout.split()
-        assert "record.md" in tracked, "the real change was not committed"
+        assert "task/record.md" in tracked, "the real change was not committed"
         assert ".lore.lock" not in tracked, (
             "the lock sidecar cmd_sync itself creates was committed alongside "
             "the real change — the vault has no *.lock ignore of its own"
