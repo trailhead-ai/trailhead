@@ -750,14 +750,36 @@ def validate_stamp_neutralize(
     return stamped, safe_body
 
 
+def _assert_session_destination(location: RecordLocation, env: dict | None) -> None:
+    """Refuse a ``session``-kind write aimed outside the default-scope vault.
+
+    Imported lazily so this module's import graph stays free of the vault-config
+    layer for every caller that never writes a session record.
+    """
+    if location.kind != "session":
+        return
+    from ..vault import config as vault_config
+
+    vault_config.assert_session_vault(location.vault_root, env=env)
+
+
 def validate_and_write(
     location: RecordLocation,
     sidecar: dict[str, Any],
     body: str,
     conn,
     shared: int = 0,
+    env: dict | None = None,
 ) -> RecordId:
     """Validate, stamp provenance, and durably write a record.
+
+    **A ``session`` record is refused outside the default vault.** This module is
+    the single importable write API into the vault, which makes it the one place
+    every present and future session-record producer must pass through — so the
+    session-vault rule (``vault_config.assert_session_vault``) is enforced here,
+    before validation and before anything is written. ``env`` is the injectable
+    XDG override that guard resolves the configured default vault through; ``None``
+    reads the ambient environment, as the rest of this module does.
 
     Pipeline (text-wins / index-derived):
       1-4. Validate + stamp provenance + neutralize fences via
@@ -779,6 +801,7 @@ def validate_and_write(
 
     Returns the vault-relative ``RecordId``.
     """
+    _assert_session_destination(location, env)
     stamped, safe_body = validate_stamp_neutralize(location, sidecar, body)
 
     # Steps 5-6 are the destination vault's critical section: a concurrent writer
@@ -819,6 +842,7 @@ def move_record(
     new_sidecar: dict | None = None,
     new_body: str | None = None,
     shared: int = 0,
+    env: dict | None = None,
 ) -> RecordId:
     """Relocate a record to a new vault/path.
 
@@ -859,8 +883,13 @@ def move_record(
     ``record update`` does exactly that, and this function's own acquisition then
     becomes a reentrant depth bump.
 
+    A ``session`` record may be relocated only INTO the default vault — the same
+    rule :func:`validate_and_write` enforces, applied to the destination, so a
+    move cannot do what a write may not.
+
     Returns the new ``RecordId``.
     """
+    _assert_session_destination(new_location, env)
     old_root = old_vault_root if old_vault_root is not None else _active_vault_root()
     old_kind, old_name, old_body_path, old_sidecar_path = _confine_record_id(old_id, old_root)
 

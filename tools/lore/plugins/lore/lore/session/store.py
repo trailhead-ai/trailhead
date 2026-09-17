@@ -253,6 +253,7 @@ def capture_candidate(
     vault_root: str,
     committer: str,
     open_index: Callable[[], Any],
+    env: dict | None = None,
 ) -> None:
     """Race-safe materialize-or-update the session record and append *entry*.
 
@@ -271,7 +272,19 @@ def capture_candidate(
     Caller MUST pass an already-sanitized *key* (see :func:`sanitize_session_id` /
     :func:`sanitize_worktree_name`) — this primitive trusts its input as a safe
     filename and does not re-validate.
+
+    **Destination is fenced to the default vault.** This is where a session record
+    is born, so it is where the session-vault rule bites: a *vault_root* naming
+    anything but the configured default vault raises
+    :class:`vault_config.SessionVaultError` before the directory is created and
+    before the lock is taken, leaving nothing behind. *env* is the injectable XDG
+    override the guard resolves that vault through. An install with no
+    ``config.json`` has no vault to leak into and is not fenced.
     """
+    from ..vault import config as vault_config
+
+    vault_config.assert_session_vault(vault_root, env=env)
+
     session_dir = Path(vault_root) / "session"
     session_dir.mkdir(parents=True, exist_ok=True)
     body_path = session_dir / f"{key}.md"

@@ -311,12 +311,12 @@ def resolve_session_notes(
 ) -> list[tuple[Path, Path]]:
     """Resolve the session note across EVERY configured vault.
 
-    The multi-vault counterpart to :func:`resolve_session_note`. A session record
-    is written into whichever vault the capture elected (``lore session candidate
-    --vault NAME``), not necessarily the active one, so any surface that means
-    "this session" in the whole-install sense — ``lore session show``, ``lore
-    flush`` — must search all of them. Resolving only the active vault makes a
-    session captured with ``--vault`` invisible and un-flushable.
+    The multi-vault counterpart to :func:`resolve_session_note`. New captures land
+    only in the default vault (``vault_config.session_vault``), but session records
+    written into product/team vaults before that pin are still on disk, so any
+    surface that means "this session" in the whole-install sense — ``lore session
+    show``, ``lore flush`` — must search all of them. Resolving only the default
+    vault makes such a record invisible and un-flushable.
 
     *vaults* is the ordered vault-root sequence to search (config order; the
     caller enumerates them, keeping this module free of config concerns).

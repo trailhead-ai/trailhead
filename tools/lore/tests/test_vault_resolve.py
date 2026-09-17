@@ -179,7 +179,9 @@ def test_team_wins_over_default_when_only_team_supplied():
         _make_vault("default", "default"),
         _make_vault("my-team", "team"),  # no allowlist → all kinds eligible
     ]
-    result = mod.resolve_vault({"team": "my-team"}, "session", config)
+    # A kind that ROUTES: ``session`` is pinned to the default vault by kind, so
+    # it cannot show scope precedence at all (see test_session_vault_pin.py).
+    result = mod.resolve_vault({"team": "my-team"}, "lesson", config)
     assert result.name == "my-team"
     assert result.scope == "team"
 

@@ -8,7 +8,12 @@ supplied on the command line, the record's kind, and the loaded vault config.
 
     repo > product > suite > team > default
 
-**Resolution algorithm:**
+**The ``session`` kind is pinned, not routed.**  A session record is the
+operator's own capture log and may live only in the ``default``-scope vault (see
+``vault_config.session_vault``), so ``kind == "session"`` elects ``default``
+outright and no supplied scope is consulted.
+
+**Resolution algorithm** (every other kind):
 
 1. For each scope in ``participating_scopes``, normalize the supplied name
    (``/`` → ``_`` via :func:`vault_config.normalize_vault_name`) and look up
@@ -143,6 +148,14 @@ def explain_resolution(participating_scopes: dict, kind: str, config: list) -> R
         if vault.scope == "default":
             default_vault = vault
         config_by_scope_name[(vault.scope, vault.name)] = vault
+
+    # A session record is the operator's own capture log and may live ONLY in the
+    # default-scope vault (``vault_config.session_vault``). The kind decides
+    # outright, so no supplied scope — typed flag or camp-group binding — can
+    # elect anything else, and there is nothing to report as skipped: no vault was
+    # passed over for ineligibility, the destination was never in question.
+    if kind == "session" and default_vault is not None:
+        return Resolution(default_vault, None, None, [])
 
     normalized_participants: dict = {
         scope: _vc.normalize_vault_name(name) for scope, name in participating_scopes.items()

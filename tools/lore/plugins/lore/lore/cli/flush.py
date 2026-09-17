@@ -418,12 +418,13 @@ def _flush_current_session(args, *, push: bool) -> int:
         Anything else dirty in the vault is committed by the sync tail
         afterwards, in its own commit — see :func:`_flush_sync_tail`.
 
-    **All vaults, not just the active one.** `lore session candidate --vault NAME`
-    writes the session record into the ELECTED vault, so pinning the flush to the
-    active vault left such a session permanently un-flushable — reported as "no
-    session exists" while sitting `dirty` on disk with an empty watermark. The
-    session KEY itself is vault-independent (a session id or the worktree name),
-    so resolution is simply "which vaults hold `session/<key>`".
+    **All vaults, not just the default one.** Capture writes only into the default
+    vault, but a session record sitting in a product/team vault from before that
+    pin is still real, still dirty, and still its author's to flush; pinning the
+    flush to the default vault would leave it permanently un-flushable — reported
+    as "no session exists" while sitting `dirty` on disk with an empty watermark.
+    The session KEY itself is vault-independent (a session id or the worktree
+    name), so resolution is simply "which vaults hold `session/<key>`".
 
     A key held by more than one vault is a session split across them: EVERY dirty
     instance is flushed, each as its own flip + commit in its own vault. Flushing

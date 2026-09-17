@@ -109,6 +109,14 @@ class VaultConfigError(Exception):
     """
 
 
+class SessionVaultError(Exception):
+    """A session-record write was aimed at a vault other than the default one.
+
+    Carries both paths in its message so the CLI layer can re-emit it as a clean
+    non-zero stderr line. Raised by :func:`assert_session_vault`.
+    """
+
+
 # ---------------------------------------------------------------------------
 # Vault model
 # ---------------------------------------------------------------------------
@@ -294,6 +302,73 @@ def resolve_active_vault(env: dict | None = None) -> Path:
         return next(v.path for v in vaults if v.scope == "default")
     except Exception:
         return floor
+
+
+# ---------------------------------------------------------------------------
+# The session vault — the one destination a session record may be written to
+# ---------------------------------------------------------------------------
+
+
+def _configured_default_vault(env: dict | None = None) -> Path | None:
+    """Return the ``default``-scope vault's path, or ``None`` when no config loads.
+
+    The strict half of :func:`resolve_active_vault`: where that function degrades
+    a missing/malformed/invalid config to the floor path, this one reports the
+    degrade as ``None`` so a caller can tell "no configured vaults at all" apart
+    from "configured, and this is the default one". :func:`assert_session_vault`
+    needs exactly that distinction — there is nothing to fence when an install has
+    no config to route between (Axiom 3).
+    """
+    try:
+        config_path = _resolve_config_path(env=env)
+        vaults = load_config(str(config_path), env=env)
+    except Exception:
+        return None
+    return next((v.path for v in vaults if v.scope == "default"), None)
+
+
+def session_vault(env: dict | None = None) -> Path:
+    """Return the ONE vault a session record may be written into.
+
+    A session record is the operator's own capture log — it is keyed by a harness
+    session id, rides one machine and one identity, and is flushed by its author.
+    It therefore belongs in the personal ``default``-scope vault and nowhere else:
+    a product/team vault syncs to a shared remote, so a session captured there
+    publishes one operator's raw working log to everyone on that remote and splits
+    the session across vaults for its own author.
+
+    This is a distinct seam from :func:`resolve_active_vault` even though both
+    resolve the ``default``-scope vault today. "Where does a write go by default"
+    and "where may a session record EVER live" are different questions, and only
+    the second one is a rule. Should the active vault ever become cwd-derived,
+    session capture must not follow it.
+    """
+    return resolve_active_vault(env=env)
+
+
+def assert_session_vault(vault_root, env: dict | None = None) -> None:
+    """Raise :class:`SessionVaultError` unless *vault_root* is the session vault.
+
+    The enforcement backstop under every session-record producer — the capture
+    primitives, the generic record write API, and anything written later by
+    someone who never read :func:`session_vault`'s contract. Routing refuses a
+    non-default destination earlier and with a better message; this is what makes
+    the rule hold when a caller bypasses routing entirely.
+
+    **A config-less install is not fenced.** With no loadable ``config.json``
+    there are no configured vaults to route between — the single vanilla vault IS
+    the floor — so there is no non-default vault for a session to leak into and
+    nothing to enforce. Comparison is on the resolved real path, so a symlinked
+    or non-normalized root naming the default vault is accepted.
+    """
+    expected = _configured_default_vault(env=env)
+    if expected is None:
+        return
+    if os.path.realpath(str(vault_root)) != os.path.realpath(str(expected)):
+        raise SessionVaultError(
+            f"session records are written only to the default vault ({expected}); "
+            f"refused a session write to {vault_root}"
+        )
 
 
 # ---------------------------------------------------------------------------
