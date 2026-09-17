@@ -1414,6 +1414,65 @@ def test_sync_outpost_only_change_commits_nothing_and_ends_clean(tmp_path):
     )
 
 
+def test_sync_commits_a_root_gitignore_edit_and_ends_clean(tmp_path):
+    """A vault with an uncommitted edit to its root `.gitignore` and no other
+    change: the sync commits the edit and the vault ends clean. `.gitignore`
+    is a scaffolded root file within the commit scope — deliberately, so a
+    scaffold change still propagates to peers — unlike `outpost/`, which never
+    is."""
+    config_home = tmp_path / "config"
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(parents=True)
+    default = _make_vault(tmp_path / "v-default", dirty=False)
+    (default / ".gitignore").write_text("*.lock\n*.tmp\n")
+    write_vault_config(config_home, [("default", "default", default)])
+    before = _commit_count(default)
+
+    r = run_cli(["sync"], config_home=config_home, state_dir=state_dir)
+    assert r.returncode == 0, r.stderr
+
+    assert _commit_count(default) > before, "the .gitignore edit must be committed"
+    name_status = _git(
+        default, "show", "--name-status", "--pretty=format:", "HEAD"
+    ).stdout.strip()
+    assert name_status == "M\t.gitignore", name_status
+    assert _git(default, "status", "--porcelain").stdout == "", (
+        "the vault must end clean once its only change is committed"
+    )
+
+
+def test_sync_commits_a_root_gitignore_edit_but_leaves_outpost_uncommitted(tmp_path):
+    """A vault with an uncommitted `.gitignore` edit AND an uncommitted
+    `outpost/` edit: the `.gitignore` is committed, the `outpost/` edit is
+    left uncommitted and unstaged. The input varied against the previous test
+    is which root-adjacent content is in scope — `.gitignore` is, `outpost/`
+    is not."""
+    config_home = tmp_path / "config"
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(parents=True)
+    default = _make_vault(tmp_path / "v-default", dirty=False)
+    (default / ".gitignore").write_text("*.lock\n*.tmp\n")
+    (default / "outpost").mkdir()
+    (default / "outpost" / "config.json").write_text('{"tracked": false}\n')
+    write_vault_config(config_home, [("default", "default", default)])
+
+    r = run_cli(["sync"], config_home=config_home, state_dir=state_dir)
+    assert r.returncode == 0, r.stderr
+
+    name_status = _git(
+        default, "show", "--name-status", "--pretty=format:", "HEAD"
+    ).stdout.strip()
+    assert name_status == "M\t.gitignore", (
+        f"the .gitignore edit must be committed: {name_status!r}"
+    )
+
+    status = _git(default, "status", "--porcelain", "--untracked-files=all").stdout
+    outpost_line = next(line for line in status.splitlines() if "outpost/config.json" in line)
+    assert outpost_line.startswith("??"), (
+        f"outpost/ must be left uncommitted AND unstaged: {outpost_line!r}"
+    )
+
+
 def test_sync_commits_a_deleted_record_file_as_a_deletion(tmp_path):
     """A deleted record file is committed as a deletion."""
     config_home = tmp_path / "config"
