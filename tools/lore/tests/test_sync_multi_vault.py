@@ -1890,6 +1890,14 @@ def _make_moving_forge(tmp_path: Path, name: str, vault: Path, remote: Path) -> 
     ):
         _git(attacker, "config", key, val)
 
+    # The vault's real branch is whatever `init.defaultBranch` produced when it
+    # was created -- never assume "main": a machine/CI image with no override
+    # (e.g. GitHub-hosted `ubuntu-latest`) falls back to a compiled-in default,
+    # and a hardcoded `refs/heads/main` here would push to a ref the vault's
+    # own branch never shares, so the "attack" never collides with the real
+    # push at all.
+    branch = _git(vault, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
+
     hook = vault / ".git" / "hooks" / "pre-push"
     hook.write_text(
         "#!/bin/sh\n"
@@ -1897,7 +1905,7 @@ def _make_moving_forge(tmp_path: Path, name: str, vault: Path, remote: Path) -> 
         "echo \"advance-$$-$(date +%s%N)\" >> attack.txt\n"
         "git add -A >/dev/null 2>&1\n"
         "git commit -q -m advance >/dev/null 2>&1\n"
-        "git push -q origin HEAD:refs/heads/main >/dev/null 2>&1\n"
+        f"git push -q origin HEAD:refs/heads/{shlex.quote(branch)} >/dev/null 2>&1\n"
         "exit 0\n"
     )
     hook.chmod(0o755)
@@ -2162,6 +2170,9 @@ def _make_conflicting_forge(tmp_path: Path, name: str, vault: Path, remote: Path
     ):
         _git(attacker, "config", key, val)
 
+    # See `_make_moving_forge`'s comment: never assume "main".
+    branch = _git(vault, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
+
     hook = vault / ".git" / "hooks" / "pre-push"
     hook.write_text(
         "#!/bin/sh\n"
@@ -2169,7 +2180,7 @@ def _make_conflicting_forge(tmp_path: Path, name: str, vault: Path, remote: Path
         "echo attacker-line > task/README.md\n"
         "git add -A >/dev/null 2>&1\n"
         "git commit -q -m attacker-edit >/dev/null 2>&1\n"
-        "git push -q origin HEAD:refs/heads/main >/dev/null 2>&1\n"
+        f"git push -q origin HEAD:refs/heads/{shlex.quote(branch)} >/dev/null 2>&1\n"
         "exit 0\n"
     )
     hook.chmod(0o755)
