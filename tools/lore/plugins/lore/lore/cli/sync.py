@@ -89,6 +89,7 @@ this from a hang.
 """
 from __future__ import annotations
 
+import json
 import os
 import sys
 import time
@@ -147,6 +148,61 @@ PUBLISH_HOLDING = "holding"
 #: maximum. Hard failure — distinct from a generic push failure so a caller
 #: can tell "the forge just won't sit still" apart from "something is broken".
 PUBLISH_RETRIES_EXHAUSTED = "retries-exhausted"
+
+#: The closed outcome vocabulary `lore sync --json` reports, one member per
+#: vault entry in :func:`render_sync_json`'s document. Three members are the
+#: exact literal values of this module's own outcome constants above
+#: (:data:`SYNC_IN_PROGRESS`, :data:`PUBLISH_HOLDING`,
+#: :data:`PUBLISH_RETRIES_EXHAUSTED`) — `cmd_sync` stores those constants
+#: directly into its `outcomes` dict, so no separate mapping step exists for
+#: them. "converged", "published", and "refused" are decided in `cmd_sync`
+#: itself (there is no dedicated constant for each — see its outcome-derivation
+#: comment) and asserted here as the literal strings a caller reads. No value
+#: outside this set is ever emitted; a caller may treat it as a closed enum.
+SYNC_OUTCOMES = frozenset(
+    {
+        SYNC_IN_PROGRESS,
+        "converged",
+        "published",
+        PUBLISH_HOLDING,
+        "refused",
+        PUBLISH_RETRIES_EXHAUSTED,
+    }
+)
+
+#: The report schema, documented once and shown both on `lore sync --help`
+#: (where the reader is choosing a form) and on `--json` itself — mirrors
+#: `cli/resolve.py`'s `_REPORT_SCHEMA`.
+_SYNC_REPORT_SCHEMA = (
+    'The machine-readable report is: {"schema", "vaults":[{"vault","outcome"'
+    '[,"condition"]}]}. "outcome" is one of "in-progress", "converged", '
+    '"published", "holding", "refused", "retries-exhausted" — a CLOSED set; '
+    "no other value is ever emitted. "
+    '"condition" is present only when "outcome" is "refused", naming which '
+    "SYNC_REFUSAL_CONDITIONS member (mid-rebase, mid-merge, detached-head, "
+    "stale-lock) was found. A vault that never reached a determinate outcome "
+    "this run (missing, not its own git toplevel, or a git error while "
+    "staging) has no entry — its failure is reported on stderr and reflected "
+    "only in the exit code, exactly as without --json."
+)
+
+
+def render_sync_json(entries: list[tuple[str, str, "str | None"]]) -> dict:
+    """Render `lore sync --json`'s report payload.
+
+    *entries* is ``[(vault_name, outcome, condition_or_None), ...]``, in the
+    order the vaults were synced. *outcome* must be a member of
+    :data:`SYNC_OUTCOMES`; *condition* is non-``None`` only for a "refused"
+    outcome. Mirrors `cli/resolve.py`'s `render_json` — a plain dict, printed
+    with ``json.dumps(..., indent=2)`` by the caller.
+    """
+    vaults = []
+    for name, outcome, condition in entries:
+        entry: dict = {"vault": name, "outcome": outcome}
+        if condition is not None:
+            entry["condition"] = condition
+        vaults.append(entry)
+    return {"schema": _SYNC_REPORT_SCHEMA, "vaults": vaults}
 
 
 def resolve_publish_retry_max(env: dict | None = None) -> int:
@@ -494,9 +550,11 @@ def _push_one(
     (:data:`PUBLISH_RETRIES_EXHAUSTED`, exit 1) rather than the generic soft
     push-failure notice, so a caller can tell "the forge just won't sit still"
     apart from "the network is down". A rejection where the history did NOT
-    move is :data:`PUBLISH_HOLDING` — soft (exit 0), consumes no attempt, and
+    move is :data:`PUBLISH_HOLDING` — HARD (exit 1), consumes no attempt, and
     leaves the local commit exactly where it landed for a person (or a later
-    sweep) to settle; see the module's outcome constants.
+    sweep) to settle; see the module's outcome constants. Both
+    :data:`PUBLISH_HOLDING` producers (this one and the replay-conflict path
+    below) exit non-zero identically — a person must act either way.
     """
     rc_remote, remote_url, _ = _git(vault, "remote", "get-url", "origin")
     if rc_remote != 0 or not remote_url:
@@ -538,7 +596,7 @@ def _push_one(
                 "notice: the push did not go through and the published history "
                 "did not move — needs a person; re-run `lore sync` later"
             )
-            return 0, PUBLISH_HOLDING, attempts_used
+            return 1, PUBLISH_HOLDING, attempts_used
 
         attempts_used += 1
         if attempts_used >= max_attempts:
@@ -663,25 +721,44 @@ def _stage_and_commit_one(vault: Path, message: str, say, say_err) -> tuple[int,
 
 def _pull_and_push_one(
     vault: Path, say, say_err, *, committed: bool
-) -> tuple[int, int, str]:
+) -> tuple[int, int, str, bool]:
     """Pull then push one vault, given whether this run just committed to it.
 
-    Returns ``(exit_code, commits_pulled, ending)``. ``ending`` is
+    Returns ``(exit_code, commits_pulled, ending, published)``. ``ending`` is
     :func:`_push_one`'s outcome (:data:`PUBLISH_OK` for every path that never
     reaches a push attempt — a failed or skipped pull). Kept separate from
     :func:`_stage_and_commit_one` so :func:`cmd_sync` can run every target's
     stage+commit phase under ONE combined lock (see its docstring) before
     running each target's network-touching pull/push tail separately, one
     vault at a time.
+
+    ``published`` is ``True`` only when this call actually landed a commit on
+    the forge — the signal :func:`cmd_sync` needs to tell its "converged"
+    outcome (nothing was ahead, or nothing left this machine) apart from
+    "published" (something was ahead and it landed), which :data:`PUBLISH_OK`
+    alone cannot say: it also covers every existing no-op (nothing to push, no
+    origin remote, an unreachable forge). Derived the same way
+    :func:`_push_one`'s own skip check does — from :func:`_vault_unpushed`,
+    never from git or remote text — read once before the push attempt (had
+    anything to publish at all) and once after (did it land): a push that
+    never reaches the forge (offline, no remote, detached HEAD) leaves the
+    vault still unpushed afterward, so ``published`` stays ``False`` exactly
+    where the existing soft-network contract already treats it as a no-op.
     """
     pull_state, pulled = _pull_one(vault, say, say_err)
     if pull_state == PULL_FAILED:
-        return 1, 0, PUBLISH_OK
+        return 1, 0, PUBLISH_OK, False
     if pull_state == PULL_OFFLINE:
-        return 0, 0, PUBLISH_OK
+        return 0, 0, PUBLISH_OK, False
 
+    had_something_to_publish = committed or _vault_unpushed(vault)
     rc, ending, _attempts = _push_one(vault, say, say_err, committed=committed)
-    return rc, pulled, ending
+    published = (
+        had_something_to_publish
+        and ending == PUBLISH_OK
+        and not _vault_unpushed(vault)
+    )
+    return rc, pulled, ending, published
 
 
 # ---------------------------------------------------------------------------
@@ -903,6 +980,7 @@ def cmd_sync(args) -> int:
     commit_rc: dict[str, int] = {}
     committed_map: dict[str, bool] = {}
     outcomes: dict[str, str] = {}
+    refusal_conditions: dict[str, str] = {}
     valid_targets: list[tuple[str, Path]] = []
 
     for name, vault in targets:
@@ -926,6 +1004,8 @@ def cmd_sync(args) -> int:
                 f"{vault_path} — skipped"
             )
             commit_rc[name] = 1
+            outcomes[name] = "refused"
+            refusal_conditions[name] = refusal
             continue
         valid_targets.append((name, vault_path))
 
@@ -1017,14 +1097,29 @@ def cmd_sync(args) -> int:
         if pull_only:
             state, pulled = _pull_only_one(Path(vault), say, say_err)
             rc_one = 1 if state == PULL_FAILED else 0
+            # `--pull-only` never publishes, so the only two reachable
+            # outcomes are the pre-existing "holding" shape (a conflict this
+            # run could not integrate — vault left clean and diverged, exactly
+            # like the full loop's own PULL_FAILED) and "converged" (fetched
+            # and, if anything was behind, integrated cleanly).
+            outcomes[name] = "holding" if state == PULL_FAILED else "converged"
         else:
-            rc_one, pulled, ending = _pull_and_push_one(
+            rc_one, pulled, ending, published = _pull_and_push_one(
                 Path(vault), say, say_err, committed=committed_map.get(name, False)
             )
             if ending in (PUBLISH_HOLDING, PUBLISH_RETRIES_EXHAUSTED):
                 # Readable value, not a message string to parse back out —
                 # same shape as `outcomes[name] = SYNC_IN_PROGRESS` above.
                 outcomes[name] = ending
+            elif rc_one != 0:
+                # PULL_FAILED: a genuine content conflict during integration —
+                # the rebase was aborted, so the vault is clean and diverged,
+                # holding its own commit(s) for `lore resolve` to settle.
+                outcomes[name] = PUBLISH_HOLDING
+            elif published:
+                outcomes[name] = "published"
+            else:
+                outcomes[name] = "converged"
         total_pulled += pulled
         if rc_one != 0:
             failed.append(name)
@@ -1041,14 +1136,30 @@ def cmd_sync(args) -> int:
         else:
             print(f"  Reindexed {count} record(s) after pull.")
 
+    rc_final = 1 if failed else 0
+
+    if bool(getattr(args, "json", False)):
+        # Printed LAST and unconditionally — an addition to the prose above,
+        # never a replacement for it (see `cmd_sync`'s docstring on
+        # `--json`). Only vaults that reached one of `SYNC_OUTCOMES`'s six
+        # determinate outcomes this run get an entry; a vault that never
+        # existed, was not its own git toplevel, or hit a bare git error
+        # while staging has no outcome to report and is reflected only in the
+        # exit code and stderr, exactly as without `--json`.
+        entries = [
+            (name, outcomes[name], refusal_conditions.get(name))
+            for name, _vault in targets
+            if name in outcomes
+        ]
+        print(json.dumps(render_sync_json(entries), indent=2))
+
     if failed:
         print(
             f"error: {len(failed)} of {len(targets)} vault(s) failed to sync: "
             f"{', '.join(failed)}",
             file=sys.stderr,
         )
-        return 1
-    return 0
+    return rc_final
 
 
 def add_sync_subparser(sub) -> None:
@@ -1067,6 +1178,10 @@ def add_sync_subparser(sub) -> None:
     p_sync.add_argument(
         "--pull-only", action="store_true",
         help="Fetch and integrate origin only — never stage, commit, or push",
+    )
+    p_sync.add_argument(
+        "--json", action="store_true",
+        help=f"Also print a machine-readable per-vault outcome report. {_SYNC_REPORT_SCHEMA}",
     )
     # Explicit opt-in to the non-blocking commit-phase lock acquisition — see
     # `cmd_sync`'s docstring. `_flush_sync_tail`'s SimpleNamespace carries no
