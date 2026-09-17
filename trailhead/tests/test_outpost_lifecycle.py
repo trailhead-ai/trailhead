@@ -653,7 +653,7 @@ def test_restart_build_failure_includes_stdout_diagnostics(outpost, tmp_path):
 
 def test_outpost_verbs_parse():
     parser = cli._build_parser()
-    for verb in ("start", "stop", "status", "restart"):
+    for verb in ("start", "stop", "status", "restart", "open"):
         args = parser.parse_args(["outpost", verb])
         assert args.command == "outpost"
         assert args.outpost_command == verb
@@ -757,3 +757,64 @@ def test_restart_hands_an_explicit_window_to_the_liveness_check(monkeypatch, tmp
     )
 
     assert seen == [7.5]
+
+
+# ---------------------------------------------------------------------------
+# open — hand the running daemon's UI URL to the browser
+# ---------------------------------------------------------------------------
+
+
+class _RecordingOpener:
+    """Stands in for webbrowser.open: records the URLs it was handed and
+    reports whether a browser was successfully launched."""
+
+    def __init__(self, result: bool = True):
+        self.result = result
+        self.urls: list[str] = []
+
+    def __call__(self, url: str) -> bool:
+        self.urls.append(url)
+        return self.result
+
+
+def test_open_hands_the_running_daemons_url_to_the_browser(outpost):
+    assert _start(outpost) == 0
+    assert _wait_until(lambda: _health_reachable(outpost.port), timeout=5.0)
+    opener = _RecordingOpener()
+
+    rc = outpost_lifecycle.open_ui(env=outpost.env, port=outpost.port, opener=opener)
+
+    assert rc == 0
+    assert opener.urls == [f"http://127.0.0.1:{outpost.port}/"]
+
+
+def test_open_refuses_and_opens_nothing_when_the_daemon_is_not_answering(outpost):
+    opener = _RecordingOpener()
+
+    with pytest.raises(OutpostLifecycleError) as exc:
+        outpost_lifecycle.open_ui(env=outpost.env, port=outpost.port, opener=opener)
+
+    assert "trailhead outpost start" in str(exc.value)
+    assert opener.urls == []
+
+
+def test_open_raises_when_no_browser_could_be_launched(outpost):
+    assert _start(outpost) == 0
+    assert _wait_until(lambda: _health_reachable(outpost.port), timeout=5.0)
+    opener = _RecordingOpener(result=False)
+
+    with pytest.raises(OutpostLifecycleError) as exc:
+        outpost_lifecycle.open_ui(env=outpost.env, port=outpost.port, opener=opener)
+
+    assert f"http://127.0.0.1:{outpost.port}/" in str(exc.value)
+
+
+def test_cli_open_verb_dispatches_to_open_ui(monkeypatch):
+    """`trailhead outpost open` routes to the open verb, not to another one."""
+    called: list[str] = []
+    monkeypatch.setattr(cli, "open_ui", lambda: called.append("open") or 0)
+    monkeypatch.setattr(cli, "status", lambda: called.append("status") or 0)
+    monkeypatch.setattr(sys, "argv", ["trailhead", "outpost", "open"])
+
+    assert cli.main() == 0
+    assert called == ["open"]
