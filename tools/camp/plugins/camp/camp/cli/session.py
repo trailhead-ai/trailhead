@@ -2770,38 +2770,25 @@ def _open_workspace_door(
     interactive: bool,
 ) -> None:
     """Create or connect the workspace `target` resolved to, then hand the
-    terminal over — the door itself, wiring together the seam, the create
-    engine, and the outcome type this task's dependencies each built.
+    terminal over — `camp attach`'s door.
 
-    One `has_session` probe decides create-vs-connect: present is
-    `connected`; absent dispatches `create_workspace_session`, whose own
-    three answers fold in — created, already-existed (another camp won the
-    race, reported as connected), and any other failure, which re-probes
-    `has_session` before refusing rather than trusting tmux's own stderr
-    text alone (a reworded or localised "duplicate session" line would
-    otherwise turn a benign race into a hard failure). `has_session`
-    answering `None` — tmux never answered at all — is its own refusal:
-    every outcome the door reports is a claim about the session, so unlike
-    `camp list` there is no half-answer left to print.
+    The tmux boundary is
+    `launch.workspace_session.create_or_connect_workspace_session` (the
+    probe, the create, and the race re-probe, shared with `camp new`'s door
+    at `cli/group.py:_door_dispatch_for_new`); the handover is
+    `host.handoff.hand_over_to_session` (the exec and `switch-client` arms).
+    What is `camp attach`'s alone, and stays here, is that BOTH failure
+    states are refusals — the session is all this verb has, so an
+    unanswered tmux or a failed create ends in `camp attach: …` and a
+    non-zero exit, where `camp new` reports a workspace-only success.
 
-    The handover is two arms on two different seams, chosen by whether the
-    caller is already inside tmux (`TMUX` set, per
-    `camp.attach.prefix_warning.inside_multiplexer`) — see
-    `docs/design/the-door-creates-or-connects-a-workspace-session.md`'s
-    "Handing over the terminal". Outside tmux, the door hands off through
-    the exec seam (`camp.host.handoff.handoff`), which blocks for the
-    session's life and never returns on success. Inside tmux, it runs
-    `switch-client` through the ordinary `Tmux` seam instead — never
-    exec'd, because `switch-client` returns immediately and an exec'd one
-    would tear down the calling pane, and often the whole source session,
-    rather than moving the client; the door exits on that call's own
-    result. `attached` in the printed report is true on both handover arms
-    and false whenever `interactive` is false — without a terminal the
+    Success prints the outcome line on stdout (or the `--json` object),
+    then hands over. `attached` in that report is true on both handover
+    arms and false whenever `interactive` is false — without a terminal the
     session is still created or connected, but nothing is handed over and
-    neither seam is touched.
+    neither handover seam is touched.
     """
-    from ..attach.prefix_warning import inside_multiplexer
-    from ..host.handoff import door_argv, handoff
+    from ..host.handoff import hand_over_to_session
     from ..launch.door import (
         Connected,
         Created,
@@ -2811,52 +2798,24 @@ def _open_workspace_door(
         render_human,
         render_json,
     )
-    from ..launch.naming import workspace_session_name
-    from ..launch.workspace_session import (
-        WorkspaceSessionOutcome,
-        create_workspace_session,
+    from ..launch.workspace_session import DoorState, create_or_connect_workspace_session
+
+    probe = create_or_connect_workspace_session(
+        target.group, target.slug, target.path, env=resolved_env, tmux=tmux
     )
 
-    derived_name = workspace_session_name(target.group, target.slug)
-    present = tmux.has_session(derived_name)
-
-    if present is None:
-        _refuse_door(
-            RefusedTmuxUnanswered(),
-            "tmux did not answer — run `camp list` to see what camp can still tell",
-            as_json=as_json,
-        )
+    if probe.state is DoorState.TMUX_UNANSWERED:
+        _refuse_door(RefusedTmuxUnanswered(), probe.reason, as_json=as_json)
+        return
+    if probe.state is DoorState.CREATE_FAILED:
+        _refuse_door(RefusedCreateFailed(), probe.reason, as_json=as_json)
         return
 
-    if present:
-        outcome_cls = Connected
-    else:
-        result = create_workspace_session(
-            target.group, target.slug, target.path, env=resolved_env, tmux=tmux
-        )
-        if result.outcome is WorkspaceSessionOutcome.CREATED:
-            outcome_cls = Created
-        elif result.outcome is WorkspaceSessionOutcome.ALREADY_EXISTED:
-            outcome_cls = Connected
-        elif tmux.has_session(derived_name):
-            # Unrecognised create failure — re-probe before refusing, per
-            # the council finding this task carries: the duplicate-session
-            # marker is pinned against tmux 3.7c's exact wording, and a
-            # reworded or localised message must not turn a benign race
-            # into a hard failure.
-            outcome_cls = Connected
-        else:
-            _refuse_door(
-                RefusedCreateFailed(),
-                f"failed to create workspace session — {result.error}",
-                as_json=as_json,
-            )
-            return
-
+    outcome_cls = Created if probe.state is DoorState.CREATED else Connected
     outcome = outcome_cls(
         slug=target.slug,
         group=target.group,
-        tmux_session=derived_name,
+        tmux_session=probe.session_name,
         workspace_path=target.path,
         attached=interactive,
     )
@@ -2869,16 +2828,7 @@ def _open_workspace_door(
     if not interactive:
         sys.exit(exit_status(outcome))
 
-    if inside_multiplexer(resolved_env):
-        switched = tmux.switch_client(derived_name)
-        sys.exit(switched.returncode if switched is not None else 1)
-
-    handoff(door_argv(derived_name))
-    # A real exec never returns on success — this line only runs when a
-    # test's injected exec seam returns instead of replacing the process,
-    # and it must still end the invocation here rather than falling back
-    # into `_cmd_attach_cli`'s ref-path branches below.
-    sys.exit(0)
+    hand_over_to_session(tmux, probe.session_name, env=resolved_env)
 
 
 def _cmd_attach_cli(args: list[str], env: dict[str, str] | None = None) -> None:
@@ -3014,25 +2964,13 @@ def _cmd_attach_cli(args: list[str], env: dict[str, str] | None = None) -> None:
             # reaches this assertion: `resolve_attach_target` only returns
             # `NotAWorkspace` when a ref was given.
 
-    if list_only:
-        print(json.dumps(_attach_pool_payload(local_pool(
-            harness=harness,
-            tmux=tmux,
-            transcripts=transcripts,
-            live_records=live,
-            groups=groups,
-            env=resolved_env,
-            machine=machine,
-        ))))
-        sys.exit(0)
-
-    if ref is None:
-        # The workspace precedence above did not resolve a group (or the
-        # sibling `--group`/cwd resolution failed) — degrade to the
-        # pre-existing session picker rather than refuse outright, the same
-        # tolerance `_parsable_groups` already applies to a malformed
-        # sibling config.
-        pool = local_pool(
+    def _read_local_pool():
+        # The two reference-less forms read the identical pool: `--list
+        # --json` dumps it for the cross-host picker to merge, the bare form
+        # presents it. Read lazily, never before the workspace precedence
+        # above has had its say — a probe or a door invocation must not pay
+        # for a pool read it will not use.
+        return local_pool(
             harness=harness,
             tmux=tmux,
             transcripts=transcripts,
@@ -3041,6 +2979,18 @@ def _cmd_attach_cli(args: list[str], env: dict[str, str] | None = None) -> None:
             env=resolved_env,
             machine=machine,
         )
+
+    if list_only:
+        print(json.dumps(_attach_pool_payload(_read_local_pool())))
+        sys.exit(0)
+
+    if ref is None:
+        # The workspace precedence above did not resolve a group (or the
+        # sibling `--group`/cwd resolution failed) — degrade to the
+        # pre-existing session picker rather than refuse outright, the same
+        # tolerance `_parsable_groups` already applies to a malformed
+        # sibling config.
+        pool = _read_local_pool()
         result = pick_session(
             pool,
             stdin=sys.stdin,

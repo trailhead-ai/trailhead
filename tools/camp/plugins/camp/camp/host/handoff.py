@@ -38,9 +38,10 @@ from __future__ import annotations
 
 import os
 import sys
-from typing import Callable, Sequence
+from typing import Callable, Mapping, NoReturn, Sequence
 
-from ..launch.tmux import target
+from ..attach.prefix_warning import inside_multiplexer
+from ..launch.tmux import Tmux, target
 from .config import Host
 from .transport import DEFAULT_CONNECT_TIMEOUT_SECONDS, quote_and_join
 
@@ -130,3 +131,35 @@ def handoff(argv: Sequence[str], *, exec_seam: ExecSeam = default_exec_seam) -> 
     except OSError as exc:
         print(f"camp: {exc}", file=sys.stderr)
         sys.exit(1)
+
+
+def hand_over_to_session(
+    tmux: Tmux, derived_name: str, *, env: Mapping[str, str]
+) -> NoReturn:
+    """Give this terminal to the workspace session *derived_name* and end the
+    invocation — the door's handover, shared by `camp attach` and `camp new`.
+
+    Two arms on two different seams, chosen by whether the caller is already
+    inside tmux (``TMUX`` set, per
+    :func:`camp.attach.prefix_warning.inside_multiplexer`) — see
+    ``docs/design/the-door-creates-or-connects-a-workspace-session.md``'s
+    "Handing over the terminal". Outside tmux, the door hands off through the
+    exec seam, which blocks for the session's life and never returns on
+    success. Inside tmux, it runs ``switch-client`` through the ordinary
+    :class:`~camp.launch.tmux.Tmux` seam instead — never exec'd, because
+    ``switch-client`` returns immediately and an exec'd one would tear down
+    the calling pane, and often the whole source session, rather than moving
+    the client — and exits on that call's own result, treating a tmux that
+    could not be asked at all (``None``) as a failure.
+
+    Never returns: the exec arm's fall-through only runs when a test's
+    injected exec seam returns instead of replacing the process, and even
+    then the invocation must end here rather than falling back into the
+    caller's remaining branches.
+    """
+    if inside_multiplexer(env):
+        switched = tmux.switch_client(derived_name)
+        sys.exit(switched.returncode if switched is not None else 1)
+
+    handoff(door_argv(derived_name))
+    sys.exit(0)

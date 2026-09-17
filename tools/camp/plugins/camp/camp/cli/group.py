@@ -300,15 +300,12 @@ def _cmd_new_group_cli(
     when ready / via `camp activate <slug>`. That next-step guidance is part of the
     stderr confirmation so the user is not stranded.
 
-    Creating the workspace's tmux session and handing the terminal over is now
-    unconditional — `_door_dispatch_for_new` below reuses the same seams and
-    outcome type `camp attach`'s own door dispatch
-    (`cli/session.py:_open_workspace_door`) is built from
-    (`launch.workspace_session.create_workspace_session`,
-    `launch.door.Created`/`Connected`/`render_human`/`render_json`,
-    `host.handoff.door_argv`/`handoff`, `attach.prefix_warning.inside_multiplexer`)
-    but reports on `camp new`'s own stream contract instead of reusing that
-    function's print calls directly: the outcome line belongs on stderr here,
+    Creating the workspace's tmux session and handing the terminal over is
+    unconditional — `_door_dispatch_for_new` below goes through the same
+    create-or-connect step and the same handover `camp attach`'s own door
+    (`cli/session.py:_open_workspace_door`) goes through, and renders the
+    outcome with the same `launch.door` renderers, but reports on `camp
+    new`'s own stream contract: the outcome line belongs on stderr here,
     where the door prints it to stdout for `camp attach`.
 
     `--no-attach` creates the workspace and its session but never touches the
@@ -545,80 +542,50 @@ def _door_dispatch_for_new(
     """Create-or-connect the workspace's tmux session and, when *interactive*,
     hand the terminal over — `camp new`'s own door dispatch.
 
-    Reuses every seam and pure value `camp attach`'s door dispatch
-    (`cli/session.py:_open_workspace_door`) is built from —
-    `launch.workspace_session.create_workspace_session`, the `Tmux` seam
-    (`launch.stop.Tmux`, the same factory attribute attach's own tests
-    monkeypatch), `launch.door`'s `Created`/`Connected`/`render_human`/
-    `render_json`, and `host.handoff.door_argv`/`handoff` plus
-    `attach.prefix_warning.inside_multiplexer` for the handover arm — but
-    prints on `camp new`'s own stream contract: the workspace path already
-    went to stdout as the caller's only stdout line, so a human-readable
-    outcome goes to stderr instead of stdout, and `--json` prints the door's
-    object as the ONE thing on stdout, replacing the path line, exactly as
-    `camp attach --json` already does.
+    The tmux boundary is
+    `launch.workspace_session.create_or_connect_workspace_session` (the
+    probe, the create, and the race re-probe, shared with `camp attach`'s
+    door at `cli/session.py:_open_workspace_door`); the handover is
+    `host.handoff.hand_over_to_session` (the exec and `switch-client` arms).
+    The `Tmux` seam is constructed from `launch.stop`'s re-export — the same
+    factory attribute attach's own tests monkeypatch.
 
-    Unlike `camp attach`'s own door, neither tmux-unreachable nor a failed
-    create is a refusal here: the workspace was already created and is
-    usable on disk, so both arms report it through `_report_workspace_only`
-    and return, without touching the exec or `switch-client` seam.
+    What is `camp new`'s alone, and stays here, is both halves of its
+    reporting. The stream contract: the workspace path is the caller's only
+    stdout line, so a human-readable outcome goes to stderr, and `--json`
+    prints one object on stdout in place of the path line. And the failure
+    posture: neither an unanswered tmux nor a failed create is a refusal
+    here, because the workspace was already created and is usable on disk,
+    so both report through `_report_workspace_only` and return with exit 0,
+    where `camp attach` refuses.
     """
-    from ..attach.prefix_warning import inside_multiplexer
-    from ..host.handoff import door_argv, handoff
+    from ..host.handoff import hand_over_to_session
     from ..launch.door import Connected, Created, render_human, render_json
-    from ..launch.naming import workspace_session_name
     from ..launch.stop import Tmux
-    from ..launch.workspace_session import (
-        WorkspaceSessionOutcome,
-        create_workspace_session,
-    )
+    from ..launch.workspace_session import DoorState, create_or_connect_workspace_session
 
     resolved_env = dict(env) if env is not None else dict(os.environ)
     tmux = Tmux()
-    derived_name = workspace_session_name(group_name, slug)
-    present = tmux.has_session(derived_name)
+    probe = create_or_connect_workspace_session(
+        group_name, slug, ws_dir, env=resolved_env, tmux=tmux
+    )
 
-    if present is None:
+    if probe.state in (DoorState.TMUX_UNANSWERED, DoorState.CREATE_FAILED):
         _report_workspace_only(
             as_json=as_json,
             slug=slug,
             group_name=group_name,
             ws_dir=ws_dir,
-            derived_name=derived_name,
-            session_error=(
-                "tmux did not answer — run `camp list` to see what camp can still tell"
-            ),
+            derived_name=probe.session_name,
+            session_error=probe.reason,
         )
         return
 
-    if present:
-        outcome_cls = Connected
-    else:
-        result = create_workspace_session(group_name, slug, ws_dir, env=resolved_env, tmux=tmux)
-        if result.outcome is WorkspaceSessionOutcome.CREATED:
-            outcome_cls = Created
-        elif result.outcome is WorkspaceSessionOutcome.ALREADY_EXISTED:
-            outcome_cls = Connected
-        elif tmux.has_session(derived_name):
-            # Unrecognised create failure — re-probe before refusing, mirroring
-            # `_open_workspace_door`'s own locale-robustness against a reworded
-            # or localised "duplicate session" stderr line.
-            outcome_cls = Connected
-        else:
-            _report_workspace_only(
-                as_json=as_json,
-                slug=slug,
-                group_name=group_name,
-                ws_dir=ws_dir,
-                derived_name=derived_name,
-                session_error=f"failed to create workspace session — {result.error}",
-            )
-            return
-
+    outcome_cls = Created if probe.state is DoorState.CREATED else Connected
     outcome = outcome_cls(
         slug=slug,
         group=group_name,
-        tmux_session=derived_name,
+        tmux_session=probe.session_name,
         workspace_path=ws_dir,
         attached=interactive,
     )
@@ -632,14 +599,7 @@ def _door_dispatch_for_new(
     if not interactive:
         return
 
-    if inside_multiplexer(resolved_env):
-        switched = tmux.switch_client(derived_name)
-        sys.exit(switched.returncode if switched is not None else 1)
-
-    handoff(door_argv(derived_name))
-    # A real exec never returns on success — this line only runs when a
-    # test's injected exec seam returns instead of replacing the process.
-    sys.exit(0)
+    hand_over_to_session(tmux, probe.session_name, env=resolved_env)
 
 
 def _author_group(

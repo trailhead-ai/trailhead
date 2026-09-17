@@ -6,12 +6,12 @@ nothing here does I/O, prints, or touches tmux. The dispatch that decides
 which member applies, and the CLI wiring that prints and exits, are later
 tasks' work; this module only defines what can be said and how it renders.
 
-Eight members. Two are the door's successes — :class:`Created` and
+Seven members. Two are the door's successes — :class:`Created` and
 :class:`Connected` — carrying the fields a caller needs to report on and to
-hand off the terminal with. The other six are refusals, one per way the door
-declines to act: :class:`RefusedNoSlug`, :class:`RefusedNoWorkspace`,
-:class:`RefusedNoTerminal`, :class:`RefusedEmptyGroup`,
-:class:`RefusedTmuxUnanswered`, :class:`RefusedCreateFailed`. See
+hand off the terminal with. The other five are refusals, one per way the door
+declines to act: :class:`RefusedNoWorkspace`, :class:`RefusedNoTerminal`,
+:class:`RefusedEmptyGroup`, :class:`RefusedTmuxUnanswered`,
+:class:`RefusedCreateFailed`. See
 ``docs/design/the-door-creates-or-connects-a-workspace-session.md`` for the
 state each corresponds to; the slug-resolution refusals are constructed by
 the task that resolves a slug into a workspace or a refusal, and the tmux
@@ -76,11 +76,6 @@ class Connected(DoorOutcome):
     tmux_session: str
     workspace_path: Path
     attached: bool
-
-
-@dataclass(frozen=True)
-class RefusedNoSlug(DoorOutcome):
-    """No slug was given and there is nothing to resolve one from."""
 
 
 @dataclass(frozen=True)
@@ -159,7 +154,6 @@ def render_json(outcome: DoorOutcome) -> dict:
 _EXIT_STATUS: dict[type, int] = {
     Created: 0,
     Connected: 0,
-    RefusedNoSlug: 1,
     RefusedNoWorkspace: 1,
     RefusedNoTerminal: 1,
     RefusedEmptyGroup: 1,
