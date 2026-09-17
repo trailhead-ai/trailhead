@@ -281,7 +281,7 @@ def resolve_session_note(
     worktree_name: str | None = None,
     cwd: Path | None = None,
 ) -> Path | None:
-    """Resolve the session note for the current session.
+    """Resolve the session record for the current session in *vault*.
 
     Order: exact session-id match (cwd-independent) → worktree-name fallback.
     Both resolve the singular session record ``session/<key>.{md,json}`` (the
@@ -291,65 +291,24 @@ def resolve_session_note(
     :func:`detect_worktree_name` when not supplied. Returns None when nothing
     resolves.
 
-    The single-vault narrowing of :func:`resolve_session_notes`, which owns the
-    resolution order — one core, so the single- and multi-vault answers can never
-    diverge. Prefer the plural form for any surface that means "this session" in
-    the whole-install sense: a session captured with ``--vault`` does not live in
-    the active vault, and this form cannot see it.
+    **One vault, because a session lives in exactly one.** Callers pass
+    ``vault_config.session_vault`` — the default-scope vault a session record may
+    be written to. A ``session/`` record in any other vault belongs to a teammate
+    and arrived through that vault's shared remote; it is not part of this
+    operator's session and must not be rendered, flushed, or appended to as
+    though it were.
+
+    The two strategies are tried in order, never interleaved: an exact
+    session-id match wins outright, and only an empty id pass falls back to the
+    worktree-name pass.
     """
-    hits = resolve_session_notes(
-        [vault], session_id=session_id, worktree_name=worktree_name, cwd=cwd
-    )
-    return hits[0][1] if hits else None
-
-
-def resolve_session_notes(
-    vaults,
-    session_id: str | None = None,
-    worktree_name: str | None = None,
-    cwd: Path | None = None,
-) -> list[tuple[Path, Path]]:
-    """Resolve the session note across EVERY configured vault.
-
-    The multi-vault counterpart to :func:`resolve_session_note`. New captures land
-    only in the default vault (``vault_config.session_vault``), but session records
-    written into product/team vaults before that pin are still on disk, so any
-    surface that means "this session" in the whole-install sense — ``lore session
-    show``, ``lore flush`` — must search all of them. Resolving only the default
-    vault makes such a record invisible and un-flushable.
-
-    *vaults* is the ordered vault-root sequence to search (config order; the
-    caller enumerates them, keeping this module free of config concerns).
-    Returns ``[(vault_root, note_path), …]`` — one entry per vault that holds the
-    resolved key, in the given order — or ``[]`` when nothing resolves.
-
-    The two resolution strategies are tried as WHOLE PASSES across all vaults,
-    never interleaved per vault: an exact session-id match anywhere wins outright,
-    and only a completely empty id pass falls back to the worktree-name pass. A
-    per-vault order would otherwise let one vault's weaker worktree match preempt
-    another vault's exact id match purely by config position.
-
-    More than one entry is a legitimate outcome — the same key captured into two
-    vaults splits the session — so callers must decide explicitly what to do with
-    a multi-hit result rather than assuming a single answer.
-    """
-    roots = [Path(v) for v in vaults]
-
     if session_id:
-        by_id = [
-            (root, note)
-            for root in roots
-            if (note := find_session_note_by_session_id(root, session_id)) is not None
-        ]
-        if by_id:
-            return by_id
+        note = find_session_note_by_session_id(vault, session_id)
+        if note is not None:
+            return note
 
     if worktree_name is None:
         worktree_name = detect_worktree_name(cwd)
     if not worktree_name:
-        return []
-    return [
-        (root, note)
-        for root in roots
-        if (note := find_session_note(root, worktree_name=worktree_name)) is not None
-    ]
+        return None
+    return find_session_note(vault, worktree_name=worktree_name)

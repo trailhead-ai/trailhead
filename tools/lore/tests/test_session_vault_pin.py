@@ -19,7 +19,6 @@ the single vanilla vault IS the floor — so the seam guard has nothing to enfor
 there and stays out of the way (Axiom 3: support vanilla usage).
 """
 
-import json
 import subprocess
 import sys
 from pathlib import Path
@@ -280,49 +279,3 @@ class TestWriteSeamRefusesANonDefaultVault:
             env={"XDG_STATE_HOME": str(state), "XDG_CONFIG_HOME": str(tmp_path / "noconfig")},
         )
         assert _session_exists(vault, SID)
-
-
-# ---------------------------------------------------------------------------
-# Legacy sessions already sitting in a non-default vault stay readable until the
-# one-shot migration moves them. The pin is on WRITES, not on reads.
-# ---------------------------------------------------------------------------
-
-
-def _plant_legacy_session(vault: Path, key: str, *, status: str = "dirty") -> None:
-    """Write a session record straight onto disk, as a pre-pin capture left it."""
-    session_dir = vault / "session"
-    session_dir.mkdir(parents=True, exist_ok=True)
-    sidecar = {
-        "version": "v1",
-        "kind": "session",
-        "title": key,
-        "status": status,
-        "created-at": "2026-08-10T00:00:00Z",
-        "created-by": "tom@example.com",
-        "updated-at": "2026-08-10T00:00:00Z",
-        "updated-by": "tom@example.com",
-        "annotations": {},
-    }
-    (session_dir / f"{key}.json").write_text(json.dumps(sidecar, indent=2))
-    (session_dir / f"{key}.md").write_text(
-        f"# session: {key}\n- candidate 2026-08-10T00:00:00Z kind=spec phase=Plan\n  legacy\n"
-    )
-
-
-class TestLegacySessionsStayReadable:
-
-    def test_session_show_still_resolves_a_planted_non_default_session(self, tmp_path):
-        """Varying input: which vault holds the key.
-
-        The 229 sessions already in product/team vaults must stay reachable until
-        the migration relocates them — the pin governs new writes only.
-        """
-        inst = _Install(tmp_path)
-        _plant_legacy_session(inst.other, SID)
-
-        shown = inst.run(["session", "show", "--session-id", SID])
-        assert shown.returncode == 0, shown.stderr
-        assert SID in shown.stdout
-
-        missing = inst.run(["session", "show", "--session-id", OTHER_SID])
-        assert missing.returncode != 0
