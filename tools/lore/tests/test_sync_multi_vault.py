@@ -46,6 +46,7 @@ Covers:
 from __future__ import annotations
 
 import importlib
+import json
 import os
 import shlex
 import subprocess
@@ -1813,7 +1814,9 @@ def test_push_retry_unreachable_forge_consumes_no_attempts_and_stays_soft(tmp_pa
 def test_push_retry_hook_rejection_ends_holding_consumes_zero_and_stays_clean(tmp_path):
     """A hook/protected-branch rejection is not a moved history: it ends
     `holding`, consumes zero attempts, never retries, and leaves the vault
-    clean (the local commit stays, nothing is torn down)."""
+    clean (the local commit stays, nothing is torn down). It exits non-zero,
+    matching the genuine-replay-conflict `holding` path — a person must act
+    either way (see the exit-code rule in the module's `_push_one` docstring)."""
     vault, remote = _make_pushed_vault(tmp_path, "hook")
     _write_plain_rejecting_hook(remote)
 
@@ -1827,7 +1830,7 @@ def test_push_retry_hook_rejection_ends_holding_consumes_zero_and_stays_clean(tm
         vault, say, say_err, committed=True, max_attempts=3
     )
 
-    assert rc == 0, lines
+    assert rc == 1, lines
     assert ending == sync_mod.PUBLISH_HOLDING
     assert attempts_used == 0
     assert _git(vault, "status", "--porcelain").stdout.strip() == ""
@@ -1979,3 +1982,521 @@ def test_push_retry_replay_conflict_aborts_cleanly(tmp_path):
     assert not (vault / ".git" / "rebase-apply").exists()
     assert _git(vault, "status", "--porcelain").stdout.strip() == ""
     assert _git(vault, "rev-parse", "HEAD").stdout.strip() == before_head
+
+
+# ── lore sync --json: a determinate per-vault outcome ──────────────────────
+#
+# `lore sync --json` reports a closed six-literal outcome per vault:
+# in-progress, converged, published, holding, refused, retries-exhausted.
+# Every test below runs the CLI end to end against a real fixture — never a
+# unit call — because the outcome is derived from git state `cmd_sync`
+# observes across its whole loop, not from any one function's return value.
+
+
+def _extract_json_report(stdout: str) -> dict:
+    """Pull the trailing JSON document out of ``--json``'s stdout.
+
+    Prose stays the default output and is never suppressed (the JSON is an
+    ADDITION, not a replacement — see `cmd_sync`'s docstring) so the report is
+    the last thing printed. `json.dumps(doc, indent=2)` always opens with a
+    line that is exactly ``{`` — no prose line in this module ever is — which
+    anchors the split reliably without guessing at brace-matching.
+    """
+    lines = stdout.splitlines()
+    start = next(i for i, ln in enumerate(lines) if ln == "{")
+    return json.loads("\n".join(lines[start:]))
+
+
+def _vault_outcome(doc: dict, name: str) -> dict:
+    matches = [v for v in doc["vaults"] if v["vault"] == name]
+    assert len(matches) == 1, f"expected exactly one entry for {name!r}, got {matches}"
+    return matches[0]
+
+
+def _assert_no_mid_rebase(vault: Path) -> None:
+    assert not (vault / ".git" / "rebase-merge").exists()
+    assert not (vault / ".git" / "rebase-apply").exists()
+    assert _git(vault, "status", "--porcelain").stdout.strip() == ""
+
+
+def test_json_outcome_converged_behind_only(tmp_path):
+    """A vault strictly behind, nothing local: converged, at the published
+    history, never mid-rebase."""
+    config_home = tmp_path / "config"
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(parents=True)
+    default = _make_vault(tmp_path / "v-default", dirty=False)
+    remote = _make_bare_remote(tmp_path / "remote.git")
+    _wire_remote(default, remote)
+
+    other = _clone_as_second_device(remote, tmp_path / "device-b")
+    (other / "theirs.md").write_text("# device B\n")
+    _git(other, "add", "-A")
+    _git(other, "commit", "-m", "device B record")
+    _git(other, "push", "origin")
+
+    write_vault_config(config_home, [("default", "default", default)])
+    r = run_cli(["sync", "--json"], config_home=config_home, state_dir=state_dir)
+    assert r.returncode == 0, r.stderr
+
+    doc = _extract_json_report(r.stdout)
+    entry = _vault_outcome(doc, "default")
+    assert entry["outcome"] == "converged"
+    assert "condition" not in entry
+    assert _git(default, "rev-parse", "HEAD").stdout.strip() == \
+        _git(remote, "rev-parse", "HEAD").stdout.strip()
+    _assert_no_mid_rebase(default)
+
+
+def test_json_outcome_published_ahead_only(tmp_path):
+    """A clean vault with only local, uncommitted work: publishes, and the
+    forge ends up carrying the commit."""
+    config_home = tmp_path / "config"
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(parents=True)
+    default = _make_vault(tmp_path / "v-default", dirty=True)
+    remote = _make_bare_remote(tmp_path / "remote.git")
+    _wire_remote(default, remote)
+    (default / "task" / "record.md").write_text("# a record\n")
+
+    write_vault_config(config_home, [("default", "default", default)])
+    r = run_cli(["sync", "--json"], config_home=config_home, state_dir=state_dir)
+    assert r.returncode == 0, r.stderr
+
+    doc = _extract_json_report(r.stdout)
+    entry = _vault_outcome(doc, "default")
+    assert entry["outcome"] == "published"
+    assert "condition" not in entry
+    assert _git(default, "rev-parse", "HEAD").stdout.strip() == \
+        _git(remote, "rev-parse", "HEAD").stdout.strip()
+    _assert_no_mid_rebase(default)
+
+
+def test_json_outcome_published_diverged_settleable(tmp_path):
+    """Local dirt plus a compatible remote commit: replays and publishes."""
+    config_home = tmp_path / "config"
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(parents=True)
+    default = _make_vault(tmp_path / "v-default", dirty=False)
+    remote = _make_bare_remote(tmp_path / "remote.git")
+    _wire_remote(default, remote)
+
+    other = _clone_as_second_device(remote, tmp_path / "device-b")
+    (other / "theirs.md").write_text("# device B\n")
+    _git(other, "add", "-A")
+    _git(other, "commit", "-m", "device B record")
+    _git(other, "push", "origin")
+
+    (default / "task" / "ours.md").write_text("# device A\n")
+
+    write_vault_config(config_home, [("default", "default", default)])
+    r = run_cli(["sync", "--json"], config_home=config_home, state_dir=state_dir)
+    assert r.returncode == 0, r.stderr
+
+    doc = _extract_json_report(r.stdout)
+    entry = _vault_outcome(doc, "default")
+    assert entry["outcome"] == "published"
+    assert (default / "theirs.md").exists()
+    assert (default / "task" / "ours.md").exists()
+    assert _git(default, "rev-parse", "HEAD").stdout.strip() == \
+        _git(remote, "rev-parse", "HEAD").stdout.strip()
+    _assert_no_mid_rebase(default)
+
+
+def test_json_outcome_holding_diverged_unsettleable(tmp_path):
+    """A genuine both-sides content conflict: holding, vault clean and
+    diverged, the local commit kept — never mid-rebase."""
+    config_home = tmp_path / "config"
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(parents=True)
+    default = _make_vault(tmp_path / "v-default", dirty=False)
+    remote = _make_bare_remote(tmp_path / "remote.git")
+    _wire_remote(default, remote)
+
+    other = _clone_as_second_device(remote, tmp_path / "device-b")
+    (other / "task" / "README.md").write_text("edited on device B\n")
+    _git(other, "add", "-A")
+    _git(other, "commit", "-m", "device B edit")
+    _git(other, "push", "origin")
+
+    (default / "task" / "README.md").write_text("edited on device A\n")
+
+    write_vault_config(config_home, [("default", "default", default)])
+    r = run_cli(["sync", "--json"], config_home=config_home, state_dir=state_dir)
+    assert r.returncode == 1
+
+    doc = _extract_json_report(r.stdout)
+    entry = _vault_outcome(doc, "default")
+    assert entry["outcome"] == "holding"
+    assert "condition" not in entry
+    # Diverged: the local commit landed and is NOT what the remote carries.
+    assert _git(default, "rev-parse", "HEAD").stdout.strip() != \
+        _git(remote, "rev-parse", "HEAD").stdout.strip()
+    assert (default / "task" / "README.md").read_text() == "edited on device A\n"
+    _assert_no_mid_rebase(default)
+
+
+def test_json_outcome_holding_hook_rejection_matches_replay_conflict_holding(tmp_path):
+    """The two `holding` producers — a hook rejection that never moved the
+    published history, and a genuine replay conflict — must be
+    indistinguishable in both the emitted document and the run's exit code.
+    They once differed: the hook-rejection path exited 0 while the
+    replay-conflict path exited 1, so `holding` silently split into two
+    different runtime behaviours behind one outcome literal."""
+    # -- Producer 1: hook rejection, no history movement --------------------
+    config_home_hook = tmp_path / "config-hook"
+    state_dir_hook = tmp_path / "state-hook"
+    state_dir_hook.mkdir(parents=True)
+    hook_vault = _make_vault(tmp_path / "v-hook", dirty=False)
+    hook_remote = _make_bare_remote(tmp_path / "hook-remote.git")
+    _wire_remote(hook_vault, hook_remote)
+    _write_plain_rejecting_hook(hook_remote)
+    (hook_vault / "task" / "local.md").write_text("local change\n")
+
+    write_vault_config(config_home_hook, [("default", "default", hook_vault)])
+    r_hook = run_cli(
+        ["sync", "--json"], config_home=config_home_hook, state_dir=state_dir_hook
+    )
+    doc_hook = _extract_json_report(r_hook.stdout)
+    entry_hook = _vault_outcome(doc_hook, "default")
+
+    # -- Producer 2: genuine replay conflict ---------------------------------
+    config_home_conflict = tmp_path / "config-conflict"
+    state_dir_conflict = tmp_path / "state-conflict"
+    state_dir_conflict.mkdir(parents=True)
+    conflict_vault = _make_vault(tmp_path / "v-conflict", dirty=False)
+    conflict_remote = _make_bare_remote(tmp_path / "conflict-remote.git")
+    _wire_remote(conflict_vault, conflict_remote)
+
+    other = _clone_as_second_device(conflict_remote, tmp_path / "device-conflict-b")
+    (other / "task" / "README.md").write_text("edited on device B\n")
+    _git(other, "add", "-A")
+    _git(other, "commit", "-m", "device B edit")
+    _git(other, "push", "origin")
+    (conflict_vault / "task" / "README.md").write_text("edited on device A\n")
+
+    write_vault_config(config_home_conflict, [("default", "default", conflict_vault)])
+    r_conflict = run_cli(
+        ["sync", "--json"], config_home=config_home_conflict, state_dir=state_dir_conflict
+    )
+    doc_conflict = _extract_json_report(r_conflict.stdout)
+    entry_conflict = _vault_outcome(doc_conflict, "default")
+
+    # -- Both producers: same outcome, same document shape, same exit code --
+    assert r_hook.returncode == 1, r_hook.stderr
+    assert r_conflict.returncode == 1, r_conflict.stderr
+    assert entry_hook["outcome"] == "holding"
+    assert entry_conflict["outcome"] == "holding"
+    assert set(entry_hook.keys()) == set(entry_conflict.keys())
+    assert "condition" not in entry_hook
+    assert "condition" not in entry_conflict
+
+
+def test_json_outcome_refused_stranded_vault(tmp_path):
+    """A vault already mid-rebase: refused, with its condition named, and
+    left byte-identical."""
+    config_home = tmp_path / "config"
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(parents=True)
+    stuck = _make_vault(tmp_path / "v-stuck", dirty=False)
+    write_vault_config(config_home, [("stuck", "default", stuck)])
+    _strand_mid_rebase(stuck, tmp_path)
+    before = _snapshot(stuck)
+
+    r = run_cli(["sync", "--json"], config_home=config_home, state_dir=state_dir)
+    assert r.returncode == 1
+
+    doc = _extract_json_report(r.stdout)
+    entry = _vault_outcome(doc, "stuck")
+    assert entry["outcome"] == "refused"
+    assert entry["condition"] == "mid-rebase"
+    assert _snapshot(stuck) == before, "a refused vault must be byte-identical after"
+    # Still genuinely mid-rebase — refusal never touches it, but it must
+    # never be reported as something else either.
+    assert (stuck / ".git" / "rebase-merge").exists()
+
+
+def test_json_outcome_retries_exhausted_moving_forge(tmp_path):
+    """A forge that keeps moving on every attempt: retries-exhausted, and the
+    vault ends clean (never mid-rebase) with its commit intact locally."""
+    config_home = tmp_path / "config"
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(parents=True)
+    default = _make_vault(tmp_path / "v-default", dirty=False)
+    remote = _make_bare_remote(tmp_path / "remote.git")
+    _wire_remote(default, remote)
+    _make_moving_forge(tmp_path, "exhaust", default, remote)
+
+    (default / "task" / "local.md").write_text("local change\n")
+
+    write_vault_config(config_home, [("default", "default", default)])
+    env = {"LORE_PUBLISH_RETRY_MAX": "2"}
+    r = subprocess.run(
+        [sys.executable, str(CLI_PATH), "sync", "--json"],
+        capture_output=True, text=True,
+        env={
+            **os.environ, **env,
+            "XDG_CONFIG_HOME": str(config_home), "XDG_STATE_HOME": str(state_dir),
+            "HOME": str(state_dir / "home"), "LORE_EMAIL": "tester@example.com",
+        },
+    )
+    assert r.returncode == 1
+
+    doc = _extract_json_report(r.stdout)
+    entry = _vault_outcome(doc, "default")
+    assert entry["outcome"] == "retries-exhausted"
+    assert "condition" not in entry
+    _assert_no_mid_rebase(default)
+    assert _git(default, "log", "-1", "--format=%s").stdout.strip() == "lore: sync vault"
+
+
+def test_json_outcome_in_progress_contended_vault(tmp_path):
+    """A vault whose write lock is held by a genuine second process: reported
+    in-progress, exits zero, and is left completely untouched."""
+    config_home, state_dir, vaults = _three_vaults_for_lock(tmp_path)
+    held = vaults["trailhead"]
+    record_path = held / "task" / "record.md"
+    before_bytes = record_path.read_bytes()
+
+    holder = _spawn_holder(held, hold_for=5.0)
+    try:
+        r = run_cli(
+            ["sync", "--vault", "trailhead", "--json"],
+            config_home=config_home, state_dir=state_dir,
+        )
+    finally:
+        holder.wait(timeout=15)
+    (held / "_held").unlink(missing_ok=True)
+
+    assert r.returncode == 0, r.stderr
+    doc = _extract_json_report(r.stdout)
+    entry = _vault_outcome(doc, "trailhead")
+    assert entry["outcome"] == "in-progress"
+    assert "condition" not in entry
+    assert record_path.read_bytes() == before_bytes
+    assert not (held / ".git" / "rebase-merge").exists()
+    assert not (held / ".git" / "rebase-apply").exists()
+
+
+def test_json_multi_vault_run_reports_three_different_outcomes(tmp_path):
+    """One run, three vaults, three DIFFERENT outcomes in one document — the
+    varied input is the vault set; a single exit code could not carry this."""
+    config_home = tmp_path / "config"
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(parents=True)
+
+    # Vault A: behind-only -> converged.
+    a = _make_vault(tmp_path / "v-a", dirty=False)
+    remote_a = _make_bare_remote(tmp_path / "a-remote.git")
+    _wire_remote(a, remote_a)
+    device_b_a = _clone_as_second_device(remote_a, tmp_path / "a-device-b")
+    (device_b_a / "theirs.md").write_text("# device B\n")
+    _git(device_b_a, "add", "-A")
+    _git(device_b_a, "commit", "-m", "device B record")
+    _git(device_b_a, "push", "origin")
+
+    # Vault B: ahead-only -> published.
+    b = _make_vault(tmp_path / "v-b", dirty=True)
+    remote_b = _make_bare_remote(tmp_path / "b-remote.git")
+    _wire_remote(b, remote_b)
+
+    # Vault C: already mid-rebase -> refused.
+    c = _make_vault(tmp_path / "v-c", dirty=False)
+    _strand_mid_rebase(c, tmp_path)
+
+    write_vault_config(
+        config_home,
+        [("a", "default", a), ("b", "product", b), ("c", "repo", c)],
+    )
+    r = run_cli(["sync", "--json"], config_home=config_home, state_dir=state_dir)
+    assert r.returncode == 1  # vault c's refusal is a hard failure this run
+
+    doc = _extract_json_report(r.stdout)
+    outcomes = {v["vault"]: v["outcome"] for v in doc["vaults"]}
+    assert outcomes == {"a": "converged", "b": "published", "c": "refused"}
+    assert len({outcomes["a"], outcomes["b"], outcomes["c"]}) == 3
+
+
+def test_json_unresolved_vault_does_not_strand_the_others(tmp_path):
+    """After a run where one vault could not be resolved (a genuine
+    conflict), every OTHER vault is clean and at the published history, and
+    the unresolved vault has still been fetched — its behind-count is
+    current, not stale."""
+    config_home = tmp_path / "config"
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(parents=True)
+
+    good = _make_vault(tmp_path / "v-good", dirty=False)
+    good_remote = _make_bare_remote(tmp_path / "good-remote.git")
+    _wire_remote(good, good_remote)
+    good_device_b = _clone_as_second_device(good_remote, tmp_path / "good-device-b")
+    (good_device_b / "theirs.md").write_text("# device B\n")
+    _git(good_device_b, "add", "-A")
+    _git(good_device_b, "commit", "-m", "device B record")
+    _git(good_device_b, "push", "origin")
+
+    conflicted = _make_vault(tmp_path / "v-conflicted", dirty=False)
+    conflicted_remote = _make_bare_remote(tmp_path / "conflicted-remote.git")
+    _wire_remote(conflicted, conflicted_remote)
+    other = _clone_as_second_device(conflicted_remote, tmp_path / "conflicted-device-b")
+    (other / "task" / "README.md").write_text("edited on device B\n")
+    _git(other, "add", "-A")
+    _git(other, "commit", "-m", "device B edit")
+    _git(other, "push", "origin")
+    # Two more commits land on origin AFTER the conflicting one, so the
+    # conflicted vault's behind-count is only current if it was re-fetched
+    # after its own rebase attempt aborted.
+    (other / "task" / "extra1.md").write_text("extra 1\n")
+    _git(other, "add", "-A")
+    _git(other, "commit", "-m", "extra 1")
+    (other / "task" / "extra2.md").write_text("extra 2\n")
+    _git(other, "add", "-A")
+    _git(other, "commit", "-m", "extra 2")
+    _git(other, "push", "origin")
+    (conflicted / "task" / "README.md").write_text("edited on device A\n")
+
+    write_vault_config(
+        config_home, [("good", "default", good), ("conflicted", "product", conflicted)],
+    )
+    r = run_cli(["sync", "--json"], config_home=config_home, state_dir=state_dir)
+    assert r.returncode == 1
+
+    doc = _extract_json_report(r.stdout)
+    good_entry = _vault_outcome(doc, "good")
+    conflicted_entry = _vault_outcome(doc, "conflicted")
+    assert good_entry["outcome"] == "converged"
+    assert conflicted_entry["outcome"] == "holding"
+
+    assert _git(good, "status", "--porcelain").stdout.strip() == ""
+    assert _git(good, "rev-parse", "HEAD").stdout.strip() == \
+        _git(good_remote, "rev-parse", "HEAD").stdout.strip()
+    _assert_no_mid_rebase(good)
+    _assert_no_mid_rebase(conflicted)
+
+    # The behind-count is current: `git rev-list --count HEAD..origin/<branch>`
+    # sees all 3 of device B's commits, proving the aborted rebase re-fetched
+    # rather than reporting a stale ref database.
+    branch = _git(conflicted, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
+    behind = _git(conflicted, "rev-list", "--count", f"HEAD..origin/{branch}").stdout.strip()
+    assert behind == "3", f"expected the ref database to reflect all 3 remote commits, got {behind}"
+
+
+def test_json_report_parses_and_prose_is_unchanged_without_json(tmp_path):
+    """The document parses as JSON and carries the schema string; prose
+    output is byte-identical whether or not --json is given."""
+    config_home = tmp_path / "config"
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(parents=True)
+    default = _make_vault(tmp_path / "v-default", dirty=True)
+    remote = _make_bare_remote(tmp_path / "remote.git")
+    _wire_remote(default, remote)
+    write_vault_config(config_home, [("default", "default", default)])
+
+    r_plain = run_cli(["sync"], config_home=config_home, state_dir=state_dir)
+    assert r_plain.returncode == 0, r_plain.stderr
+
+    default2 = _make_vault(tmp_path / "v-default2", dirty=True)
+    remote2 = _make_bare_remote(tmp_path / "remote2.git")
+    _wire_remote(default2, remote2)
+    config_home2 = tmp_path / "config2"
+    write_vault_config(config_home2, [("default", "default", default2)])
+    r_json = subprocess.run(
+        [sys.executable, str(CLI_PATH), "sync", "--json"],
+        capture_output=True, text=True,
+        env={
+            **os.environ,
+            "XDG_CONFIG_HOME": str(config_home2), "XDG_STATE_HOME": str(state_dir),
+            "HOME": str(state_dir / "home"), "LORE_EMAIL": "tester@example.com",
+        },
+    )
+    assert r_json.returncode == 0, r_json.stderr
+
+    doc = _extract_json_report(r_json.stdout)
+    assert doc["schema"] == sync_mod._SYNC_REPORT_SCHEMA
+    assert doc["vaults"] == [{"vault": "default", "outcome": "published"}]
+
+    # The prose lines that precede the JSON block, in order, must equal the
+    # plain run's full stdout — `--json` adds the document, it changes nothing
+    # about what was already printed.
+    json_start = r_json.stdout.splitlines().index("{")
+    prose_lines = r_json.stdout.splitlines()[:json_start]
+    assert "\n".join(prose_lines).strip() == r_plain.stdout.strip()
+
+
+def test_json_single_vault_host_runs_the_whole_loop(tmp_path):
+    """A single-vault host with no peers runs the whole loop, conflict
+    handling included — the loop does not require a multi-vault config to
+    behave correctly."""
+    config_home = tmp_path / "config"
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(parents=True)
+    solo = _make_vault(tmp_path / "v-solo", dirty=False)
+    remote = _make_bare_remote(tmp_path / "remote.git")
+    _wire_remote(solo, remote)
+
+    other = _clone_as_second_device(remote, tmp_path / "solo-device-b")
+    (other / "task" / "README.md").write_text("edited on device B\n")
+    _git(other, "add", "-A")
+    _git(other, "commit", "-m", "device B edit")
+    _git(other, "push", "origin")
+    (solo / "task" / "README.md").write_text("edited on device A\n")
+
+    write_vault_config(config_home, [("solo", "default", solo)])
+    r = run_cli(["sync", "--json"], config_home=config_home, state_dir=state_dir)
+    assert r.returncode == 1
+
+    doc = _extract_json_report(r.stdout)
+    assert len(doc["vaults"]) == 1
+    entry = doc["vaults"][0]
+    assert entry["vault"] == "solo"
+    assert entry["outcome"] == "holding"
+    _assert_no_mid_rebase(solo)
+
+
+def test_json_terminal_invocation_matches_a_direct_call(tmp_path):
+    """Running the loop from a terminal (subprocess, argv, `--json`) produces
+    the SAME end vault state as driving `cmd_sync` directly via a bare
+    `SimpleNamespace` — the non-CLI shape a future sweep uses, mirroring how
+    `flush`'s own tail already drives it. One behavioural test, not a claim."""
+    from types import SimpleNamespace
+
+    def _fixture(root: Path):
+        vault = _make_vault(root / "v", dirty=False)
+        remote = _make_bare_remote(root / "remote.git")
+        _wire_remote(vault, remote)
+        (vault / "task" / "record.md").write_text("# a record\n")
+        return vault, remote
+
+    terminal_vault, terminal_remote = _fixture(tmp_path / "terminal")
+    direct_vault, direct_remote = _fixture(tmp_path / "direct")
+
+    terminal_config = tmp_path / "terminal-config"
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(parents=True)
+    write_vault_config(terminal_config, [("v", "default", terminal_vault)])
+    r = run_cli(["sync", "--json"], config_home=terminal_config, state_dir=state_dir)
+    assert r.returncode == 0, r.stderr
+
+    direct_config = tmp_path / "direct-config"
+    write_vault_config(direct_config, [("v", "default", direct_vault)])
+    old_env = dict(os.environ)
+    os.environ["XDG_CONFIG_HOME"] = str(direct_config)
+    os.environ["XDG_STATE_HOME"] = str(state_dir)
+    os.environ["HOME"] = str(state_dir / "home")
+    os.environ["LORE_EMAIL"] = "tester@example.com"
+    try:
+        rc = sync_mod.cmd_sync(
+            SimpleNamespace(vault=None, message=None, pull_only=False)
+        )
+    finally:
+        os.environ.clear()
+        os.environ.update(old_env)
+
+    assert rc == 0
+    assert _git(terminal_vault, "rev-parse", "HEAD").stdout.strip() == \
+        _git(terminal_remote, "rev-parse", "HEAD").stdout.strip()
+    assert _git(direct_vault, "rev-parse", "HEAD").stdout.strip() == \
+        _git(direct_remote, "rev-parse", "HEAD").stdout.strip()
+    assert _git(terminal_vault, "status", "--porcelain").stdout.strip() == ""
+    assert _git(direct_vault, "status", "--porcelain").stdout.strip() == ""
+    assert _commit_count(terminal_vault) == _commit_count(direct_vault)
