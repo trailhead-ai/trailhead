@@ -4,32 +4,32 @@
 # Claude Code auto-adds a plugin's bin/ directory to Bash PATH when the plugin
 # is enabled, so this wrapper makes bare `camp` resolve for any install.
 #
-# Resolution order:
-#   1. ${CLAUDE_PLUGIN_ROOT}/cli/camp  — set by Claude Code at plugin load time
-#   2. Self-relative (macOS-safe, no GNU readlink -f): resolve symlinks via a
-#      while loop, then find cli/camp as a sibling of bin/
+# Resolution: self-relative (macOS-safe, no GNU readlink -f) — resolve
+# symlinks via a while loop, then find cli/camp as a sibling of bin/. The two
+# are siblings under plugins/camp/, so cli/camp is at <plugin_root>/cli/camp
+# regardless of how this wrapper was invoked.
 #
-# bin/ and cli/ are siblings under plugins/camp/, so cli/camp is at
-# <plugin_root>/cli/camp regardless of how this wrapper was invoked.
+# The sibling is the only thing consulted. An install copies a plugin directory
+# whole, so a tree carrying this wrapper carries cli/camp beside it, and
+# ${CLAUDE_PLUGIN_ROOT} names that same copy — it can never supply a CLI this
+# lookup would not already find in the same place. It CAN name a different copy,
+# whenever the wrapper is invoked out of a tree the running session did not load
+# from, and preferring it there runs code the caller did not ask for, silently
+# and with a zero exit.
 
 set -euo pipefail
 
-if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -x "${CLAUDE_PLUGIN_ROOT}/cli/camp" ]; then
-    PLUGIN_DIR="${CLAUDE_PLUGIN_ROOT}"
-    CLI="${CLAUDE_PLUGIN_ROOT}/cli/camp"
-else
-    # Symlink-safe self-resolution (macOS does not ship GNU readlink -f).
-    SOURCE="${BASH_SOURCE[0]}"
-    while [ -L "$SOURCE" ]; do
-        DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
-        SOURCE="$(readlink "$SOURCE")"
-        # Handle relative symlinks.
-        [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
-    done
-    BIN_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
-    PLUGIN_DIR="$(cd -P "$BIN_DIR/.." && pwd)"
-    CLI="$PLUGIN_DIR/cli/camp"
-fi
+# Symlink-safe self-resolution (macOS does not ship GNU readlink -f).
+SOURCE="${BASH_SOURCE[0]}"
+while [ -L "$SOURCE" ]; do
+    DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+    SOURCE="$(readlink "$SOURCE")"
+    # Handle relative symlinks.
+    [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+BIN_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+PLUGIN_DIR="$(cd -P "$BIN_DIR/.." && pwd)"
+CLI="$PLUGIN_DIR/cli/camp"
 
 # Interpreter selection — a bare `python3` on a non-interactive ssh PATH can
 # resolve to an interpreter far below the repo's declared floor (e.g. macOS
@@ -38,13 +38,13 @@ fi
 # searching upward from PLUGIN_DIR (bounded, so it can never drift into an
 # unbounded walk), so it can never drift from the declared value either, and
 # search every `python3` on PATH (in PATH order) for one that satisfies it.
-# On the ${CLAUDE_PLUGIN_ROOT}-resolved branch, PLUGIN_DIR is a composed
-# plugin tree that may carry no pyproject.toml at all in any ancestor — that
-# is a real, if currently latent, case (Claude Code installs a plugin copy
-# with no such file), not a bug in the search: when the floor can't be
-# determined, proceed on bare `python3` with a loud stderr notice rather than
-# silently skipping the check or hard-failing an install with no floor to
-# enforce.
+# In an installed plugin, PLUGIN_DIR may carry no pyproject.toml in any
+# ancestor within the bound: an install copies the plugin directory whole, and
+# this repo's declaration sits at tools/camp/, two levels above the copied
+# tree, so it is not part of what lands. That is a real case, not a bug in the
+# search: when the floor can't be determined, proceed on bare `python3` with a
+# loud stderr notice rather than silently skipping the check or hard-failing an
+# install with no floor to enforce.
 
 _read_requires_python_floor() {
     local pyproject="$1"

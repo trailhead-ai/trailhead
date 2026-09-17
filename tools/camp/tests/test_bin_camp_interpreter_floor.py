@@ -108,13 +108,10 @@ def _run(
     path_dirs: list[Path],
     *,
     coreutils_root: Path,
-    extra_env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     coreutils = _coreutils_dir(coreutils_root)
     path_value = ":".join(str(d) for d in [*path_dirs, coreutils])
     env = {"PATH": path_value}
-    if extra_env:
-        env.update(extra_env)
     return subprocess.run(
         [_BASH, str(bin_camp), "--help"],
         capture_output=True,
@@ -123,19 +120,23 @@ def _run(
     )
 
 
-def _build_claude_plugin_root_fixture(
+def _build_installed_plugin_fixture(
     tmp_path: Path, *, requires_python: str | None
-) -> tuple[Path, Path]:
-    """Build a composed ${CLAUDE_PLUGIN_ROOT}-shaped plugin tree — cli/camp present
-    directly under the root, no bin/ sibling required since that branch never
-    self-resolves. *requires_python* of None omits pyproject.toml entirely
-    (from the root and every ancestor up to the search bound), reproducing the
-    real composed-install case where no such file exists to find. Returns
-    (bin_camp_path, plugin_root_path).
+) -> Path:
+    """Build an installed-plugin-shaped tree and return its bin/camp.
+
+    A marketplace install copies a plugin directory whole, so bin/ and cli/ arrive
+    without the repo's ``tools/camp/pyproject.toml`` two levels above them. Any
+    declaration therefore sits at the plugin root itself, or nowhere at all —
+    *requires_python* of None omits it from the root and every ancestor up to the
+    search bound, reproducing the real installed case with no floor to find.
     """
     plugin_root = tmp_path / "composed" / "plugins" / "camp"
     cli_dir = plugin_root / "cli"
+    bin_dir = plugin_root / "bin"
     cli_dir.mkdir(parents=True)
+    bin_dir.mkdir(parents=True)
+
     cli_camp = cli_dir / "camp"
     cli_camp.write_text("# dummy cli entry point, never actually run by these tests\n")
     cli_camp.chmod(cli_camp.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
@@ -152,11 +153,10 @@ def _build_claude_plugin_root_fixture(
             )
         )
 
-    bin_camp = tmp_path / "bin_camp_copy"
+    bin_camp = bin_dir / "camp"
     bin_camp.write_text(_REAL_BIN_CAMP.read_text())
     bin_camp.chmod(bin_camp.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
-
-    return bin_camp, plugin_root
+    return bin_camp
 
 
 def test_satisfying_interpreter_elsewhere_on_path_is_invoked_over_low_bare_python3(
@@ -262,17 +262,16 @@ def test_floor_moves_with_the_declared_requires_python_not_a_hardcoded_copy(
     assert "3.11" in rejected.stderr, rejected.stderr
 
 
-def test_claude_plugin_root_branch_rejects_below_floor_and_selects_satisfying(
+def test_installed_plugin_tree_rejects_below_floor_and_selects_satisfying(
     tmp_path: Path,
 ) -> None:
-    """The ${CLAUDE_PLUGIN_ROOT} resolution branch (Resolution order #1) must
-    apply the same floor check as the self-relative branch — a composed plugin
-    tree with a discoverable pyproject.toml rejects a below-floor bare python3
-    and selects a satisfying interpreter found elsewhere on PATH.
+    """An installed plugin tree applies the same floor check as a repo checkout —
+    with a discoverable pyproject.toml it rejects a below-floor bare python3 and
+    selects a satisfying interpreter found elsewhere on PATH. The declaration sits
+    at the plugin root here rather than two levels up, so this also pins that the
+    upward search finds it at level zero.
     """
-    bin_camp, plugin_root = _build_claude_plugin_root_fixture(
-        tmp_path, requires_python=">=3.11"
-    )
+    bin_camp = _build_installed_plugin_fixture(tmp_path, requires_python=">=3.11")
 
     low_dir = tmp_path / "low-bin"
     high_dir = tmp_path / "high-bin"
@@ -283,7 +282,6 @@ def test_claude_plugin_root_branch_rejects_below_floor_and_selects_satisfying(
         bin_camp,
         [low_dir, high_dir],
         coreutils_root=tmp_path,
-        extra_env={"CLAUDE_PLUGIN_ROOT": str(plugin_root)},
     )
 
     assert result.returncode == 0, f"stdout: {result.stdout}\nstderr: {result.stderr}"
@@ -291,17 +289,15 @@ def test_claude_plugin_root_branch_rejects_below_floor_and_selects_satisfying(
     assert "RAN:low:" not in result.stdout, result.stdout
 
 
-def test_claude_plugin_root_branch_with_no_discoverable_floor_notices_and_proceeds(
+def test_no_discoverable_floor_notices_and_proceeds(
     tmp_path: Path,
 ) -> None:
-    """A composed plugin tree with no pyproject.toml in any ancestor up to the
+    """An installed plugin tree with no pyproject.toml in any ancestor up to the
     search bound must not silently skip the floor check — it prints a stderr
     notice naming that it could not determine the required version, then
     proceeds on whatever python3 resolves to (not a hard failure).
     """
-    bin_camp, plugin_root = _build_claude_plugin_root_fixture(
-        tmp_path, requires_python=None
-    )
+    bin_camp = _build_installed_plugin_fixture(tmp_path, requires_python=None)
 
     only_dir = tmp_path / "only-bin"
     _write_stub_interpreter(only_dir, version="3.9.6", marker="whatever")
@@ -310,7 +306,6 @@ def test_claude_plugin_root_branch_with_no_discoverable_floor_notices_and_procee
         bin_camp,
         [only_dir],
         coreutils_root=tmp_path,
-        extra_env={"CLAUDE_PLUGIN_ROOT": str(plugin_root)},
     )
 
     assert result.returncode == 0, f"stdout: {result.stdout}\nstderr: {result.stderr}"
@@ -328,7 +323,7 @@ def test_declaration_far_above_the_plugin_root_is_not_adopted_as_the_floor(
     silently lowering the floor this check exists to enforce, or raising it until
     camp refuses to run at all.
     """
-    bin_camp, plugin_root = _build_claude_plugin_root_fixture(tmp_path, requires_python=None)
+    bin_camp = _build_installed_plugin_fixture(tmp_path, requires_python=None)
 
     # Three levels above the plugin root (camp -> plugins -> composed -> tmp_path):
     # far outside anything the launcher's own install owns.
@@ -350,7 +345,6 @@ def test_declaration_far_above_the_plugin_root_is_not_adopted_as_the_floor(
         bin_camp,
         [interp_dir],
         coreutils_root=tmp_path,
-        extra_env={"CLAUDE_PLUGIN_ROOT": str(plugin_root)},
     )
 
     assert "3.99" not in result.stderr, (

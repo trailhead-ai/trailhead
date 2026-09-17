@@ -4,30 +4,31 @@
 # Claude Code auto-adds a plugin's bin/ directory to Bash PATH when the plugin
 # is enabled, so this wrapper makes bare `portage` resolve for any install.
 #
-# Resolution order:
-#   1. ${CLAUDE_PLUGIN_ROOT}/cli/portage  — set by Claude Code at plugin load time
-#   2. Self-relative (macOS-safe, no GNU readlink -f): resolve symlinks via a
-#      while loop, then find cli/portage as a sibling of bin/
+# Resolution: self-relative (macOS-safe, no GNU readlink -f) — resolve
+# symlinks via a while loop, then find cli/portage as a sibling of bin/. The two
+# are siblings under plugins/portage/, so cli/portage is at <plugin_root>/cli/portage
+# regardless of how this wrapper was invoked.
 #
-# bin/ and cli/ are siblings under plugins/portage/, so cli/portage is at
-# <plugin_root>/cli/portage regardless of how this wrapper was invoked.
+# The sibling is the only thing consulted. An install copies a plugin directory
+# whole, so a tree carrying this wrapper carries cli/portage beside it, and
+# ${CLAUDE_PLUGIN_ROOT} names that same copy — it can never supply a CLI this
+# lookup would not already find in the same place. It CAN name a different copy,
+# whenever the wrapper is invoked out of a tree the running session did not load
+# from, and preferring it there runs code the caller did not ask for, silently
+# and with a zero exit.
 
 set -euo pipefail
 
-if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -x "${CLAUDE_PLUGIN_ROOT}/cli/portage" ]; then
-    CLI="${CLAUDE_PLUGIN_ROOT}/cli/portage"
-else
-    # Symlink-safe self-resolution (macOS does not ship GNU readlink -f).
-    SOURCE="${BASH_SOURCE[0]}"
-    while [ -L "$SOURCE" ]; do
-        DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
-        SOURCE="$(readlink "$SOURCE")"
-        # Handle relative symlinks.
-        [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
-    done
-    BIN_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
-    PLUGIN_DIR="$(cd -P "$BIN_DIR/.." && pwd)"
-    CLI="$PLUGIN_DIR/cli/portage"
-fi
+# Symlink-safe self-resolution (macOS does not ship GNU readlink -f).
+SOURCE="${BASH_SOURCE[0]}"
+while [ -L "$SOURCE" ]; do
+    DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+    SOURCE="$(readlink "$SOURCE")"
+    # Handle relative symlinks.
+    [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+BIN_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+PLUGIN_DIR="$(cd -P "$BIN_DIR/.." && pwd)"
+CLI="$PLUGIN_DIR/cli/portage"
 
 exec python3 "$CLI" "$@"
