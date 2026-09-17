@@ -13,8 +13,8 @@ component-by-component before the two are joined:
    ``_`` itself, is replaced by ``_<hex>_`` (the escape character is escaped
    first, so a literal ``_`` in the input and an escape-introducer can never
    be confused). ``-`` is left alone: it is common in real group and slug
-   names and escaping it made every ordinary name harder to read and type
-   for no gain the join needs. This is still a uniquely-decodable code:
+   names, and escaping it would make every ordinary name harder to read and
+   type for no gain the join needs. This is a uniquely-decodable code:
    scanning left to right, a bare ``_`` can only be the start of an escape
    sequence, since every literal ``_`` in the input was itself escaped. Two
    different raw strings therefore always escape to two different strings.
@@ -27,9 +27,9 @@ component-by-component before the two are joined:
 Two components that are equal as *strings* only reach that equality by
 having equal raw input (step 1 is injective), so for a fixed slug, two
 distinct groups always escape to distinct group components, and therefore
-always join to distinct names — the property this module owes. What is
-lost by leaving ``-`` literal is join-level injectivity over the *pair*: the
-assembled name no longer lets a reader tell where the group component ends
+always join to distinct names — the property this module owes. What leaving
+``-`` literal gives up is join-level injectivity over the *pair*: the
+assembled name does not let a reader tell where the group component ends
 and the slug component begins, so two different (group, slug) pairs whose
 concatenation coincides — e.g. ``("trailhead", "camp-cli")`` and
 ``("trailhead-camp", "cli")`` — derive the same name. This is a known,
@@ -72,9 +72,9 @@ _RETIRED_SESSION_NAME_RE = re.compile(
 #: Characters that pass through :func:`_escape_component` unescaped. Anything
 #: outside this set — including ``_`` itself, so it can serve as the escape
 #: introducer — is replaced by an escape sequence. ``-`` is included: it
-#: stays literal in the escaped output, which is what makes the join between
-#: components no longer unambiguous at the pair level (see the module
-#: docstring's known limitation).
+#: stays literal in the escaped output, which is what leaves the join between
+#: components ambiguous at the pair level (see the module docstring's known
+#: limitation).
 _UNESCAPED = frozenset(
     "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-"
 )

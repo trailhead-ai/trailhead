@@ -63,6 +63,41 @@ def render_list_row_human(row: dict) -> str:
     )
 
 
+def _merged_widened_entries(
+    groups: list[dict], *, env: dict[str, str] | None, tmux: Any | None = None
+) -> tuple[list[dict], list[str]]:
+    """Every group's rows read at
+    :data:`~camp.launch.inventory.DisclosureScope.WIDENED`, merged into one
+    group-sorted list, alongside each group's tmux-unanswered notice.
+
+    The one place the two widened local answers — `local_list_answer`'s
+    `--all-groups` branch and `_cmd_ls_all_groups_cli` — merge several
+    groups' listings, so they can never drift on how a leftover session is
+    counted. Leftover (unmanaged) sessions are host-wide, not per-group, so
+    they are deduped by `tmux_session` name: one leftover appears once,
+    however many of the groups enumerated it. Notices are returned rather
+    than printed, because one of the two callers must not print at all.
+    """
+    from ..launch.inventory import DisclosureScope
+    from ..provision.lifecycle import cmd_ls_group
+
+    entries: list[dict] = []
+    notices: list[str] = []
+    seen_unmanaged: set[str] = set()
+    for group in groups:
+        listing = cmd_ls_group(group, env=env, scope=DisclosureScope.WIDENED, tmux=tmux)
+        if listing.notice:
+            notices.append(listing.notice)
+        entries.extend(listing.entries)
+        for u in listing.unmanaged:
+            if u["tmux_session"] in seen_unmanaged:
+                continue
+            seen_unmanaged.add(u["tmux_session"])
+            entries.append(u)
+    entries.sort(key=lambda e: e.get("group") or "")
+    return entries, notices
+
+
 def local_list_answer(
     group: dict | None, *, all_groups: bool
 ) -> tuple[list[dict], list[str], int]:
@@ -84,10 +119,9 @@ def local_list_answer(
     Always reads tmux at :data:`~camp.launch.inventory.DisclosureScope.WIDENED`
     — this IS the `-a`/`--all-hosts` axis, which has already opted into
     seeing leftover sessions named rather than merely counted, regardless of
-    whether the group axis was itself widened. Leftover sessions are
-    host-wide, not per-group, so merging several groups' answers dedupes
-    them by `tmux_session` name rather than repeating one leftover once per
-    group that happened to enumerate it.
+    whether the group axis was itself widened. The `--all-groups` branch
+    merges through :func:`_merged_widened_entries`, which owns how several
+    groups' leftovers collapse to one row each.
     """
     from ..launch.inventory import DisclosureScope
     from ..provision.lifecycle import cmd_ls_group, load_answerable_groups
@@ -111,17 +145,7 @@ def local_list_answer(
         notices.append("camp list: no groups configured — nothing to list")
         return [], notices, 0
 
-    entries: list[dict] = []
-    seen_unmanaged: set[str] = set()
-    for g in groups:
-        listing = cmd_ls_group(g, env=None, scope=DisclosureScope.WIDENED)
-        entries.extend(listing.entries)
-        for u in listing.unmanaged:
-            if u["tmux_session"] in seen_unmanaged:
-                continue
-            seen_unmanaged.add(u["tmux_session"])
-            entries.append(u)
-    entries.sort(key=lambda e: e.get("group") or "")
+    entries, _notices = _merged_widened_entries(groups, env=None)
 
     rows = _project_list_rows(entries)
     rows += [{"ok": False, "group": None, "reason": d} for d in unparsable]
@@ -196,10 +220,8 @@ def _cmd_ls_all_groups_cli(
     the reason on stderr instead, exiting nonzero only when every group
     failed to parse.
     """
-    from ..launch.inventory import DisclosureScope
     from ..provision.lifecycle import (
         answerable_groups_or_refuse,
-        cmd_ls_group,
         render_workspace_list,
     )
     from .common import _groups_dir
@@ -215,21 +237,9 @@ def _cmd_ls_all_groups_cli(
         render_workspace_list([], as_json=as_json, group_failures=unparsable)
         return
 
-    entries: list[dict] = []
-    seen_unmanaged: set[str] = set()
-    notice_printed = False
-    for group in groups:
-        listing = cmd_ls_group(group, env=env, scope=DisclosureScope.WIDENED, tmux=tmux)
-        if listing.notice and not notice_printed:
-            print(listing.notice, file=sys.stderr)
-            notice_printed = True
-        entries.extend(listing.entries)
-        for u in listing.unmanaged:
-            if u["tmux_session"] in seen_unmanaged:
-                continue
-            seen_unmanaged.add(u["tmux_session"])
-            entries.append(u)
-    entries.sort(key=lambda e: e.get("group") or "")
+    entries, notices = _merged_widened_entries(groups, env=env, tmux=tmux)
+    if notices:
+        print(notices[0], file=sys.stderr)
 
     render_workspace_list(entries, as_json=as_json, group_failures=unparsable)
 

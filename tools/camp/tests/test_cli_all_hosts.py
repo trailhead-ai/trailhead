@@ -14,7 +14,6 @@ from __future__ import annotations
 import importlib
 import json
 import os
-import stat
 import sys
 from pathlib import Path
 
@@ -35,31 +34,6 @@ def _transport_module():
     return importlib.import_module("camp.host.transport")
 
 
-#: A `tmux` stand-in that always answers "no server running" — the LOCAL
-#: side of every merged (`-a`/`--all-hosts`) answer in this file now reads
-#: real tmux via `cmd_ls_group`, and this suite must not observe whatever
-#: tmux server happens to be running on the machine executing it (the same
-#: hazard `test_camp_list.py` isolates against).
-_NOOP_TMUX_STUB = (
-    "#!/usr/bin/env python3\n"
-    "import sys\n"
-    'args = sys.argv[1:]\n'
-    'if args and args[0] == "list-sessions":\n'
-    '    sys.stderr.write("error connecting to /tmp/nonexistent (No such file or directory)\\n")\n'
-    "    sys.exit(1)\n"
-    "sys.exit(1)\n"
-)
-
-
-def _prepend_noop_tmux_to_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    bin_dir = tmp_path / "noop-tmux-bin"
-    bin_dir.mkdir(parents=True, exist_ok=True)
-    tmux = bin_dir / "tmux"
-    tmux.write_text(_NOOP_TMUX_STUB, encoding="utf-8")
-    tmux.chmod(tmux.stat().st_mode | stat.S_IEXEC)
-    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
-
-
 @pytest.fixture()
 def hosts_and_group_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """CAMP_CONFIG_DIR with one real, empty group ("testgrp") and hosts.toml
@@ -76,7 +50,6 @@ def hosts_and_group_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
     )
     monkeypatch.setenv("CAMP_CONFIG_DIR", str(tmp_path))
     monkeypatch.setenv("CAMP_STATE_DIR", str(tmp_path / "state"))
-    _prepend_noop_tmux_to_path(tmp_path, monkeypatch)
 
 
 def _seed_local_workspace(group_name: str, slug: str, *, env: dict) -> None:
@@ -126,7 +99,6 @@ def hosts_and_group_env_with_local_workspace(
     )
     monkeypatch.setenv("CAMP_CONFIG_DIR", str(tmp_path))
     monkeypatch.setenv("CAMP_STATE_DIR", str(tmp_path / "state"))
-    _prepend_noop_tmux_to_path(tmp_path, monkeypatch)
     _seed_local_workspace("testgrp", "local-ws", env=os.environ)
 
 
@@ -516,7 +488,6 @@ def self_name_collides_with_declared_host_env(
     )
     monkeypatch.setenv("CAMP_CONFIG_DIR", str(tmp_path))
     monkeypatch.setenv("CAMP_STATE_DIR", str(tmp_path / "state"))
-    _prepend_noop_tmux_to_path(tmp_path, monkeypatch)
 
 
 def test_self_name_colliding_with_a_declared_host_prints_the_machine_once(
