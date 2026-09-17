@@ -614,3 +614,46 @@ def test_read_record_url_base_non_string_value_returns_none(tmp_path):
     )
     result = cfg.read_record_url_base(env=env)
     assert result is None
+
+
+# ---------------------------------------------------------------------------
+# 8. read_publish_retry_max
+# ---------------------------------------------------------------------------
+
+
+def test_read_publish_retry_max_present_returns_value(tmp_path):
+    """config.json carrying publish_retry_max returns that int value."""
+    cfg = vc()
+    env = _make_env(tmp_path)
+    _write_lore_config(
+        tmp_path,
+        {"vaults": [{"name": "default", "scope": "default"}], "publish_retry_max": 7},
+    )
+    result = cfg.read_publish_retry_max(env=env)
+    assert result == 7
+
+
+def test_read_publish_retry_max_key_absent_returns_none(tmp_path):
+    """config.json present but with no publish_retry_max key returns None."""
+    cfg = vc()
+    env = _make_env(tmp_path)
+    _write_lore_config(
+        tmp_path,
+        {"vaults": [{"name": "default", "scope": "default"}]},
+    )
+    result = cfg.read_publish_retry_max(env=env)
+    assert result is None
+
+
+def test_read_publish_retry_max_non_int_value_returns_none(tmp_path):
+    """A ``publish_retry_max`` key holding a non-int value (including a bool,
+    which is an ``int`` subclass in Python but never a meaningful retry count)
+    returns None."""
+    cfg = vc()
+    env = _make_env(tmp_path)
+    _write_lore_config(
+        tmp_path,
+        {"vaults": [{"name": "default", "scope": "default"}], "publish_retry_max": True},
+    )
+    result = cfg.read_publish_retry_max(env=env)
+    assert result is None

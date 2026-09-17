@@ -89,6 +89,7 @@ this from a hang.
 """
 from __future__ import annotations
 
+import os
 import sys
 import time
 from contextlib import ExitStack
@@ -120,6 +121,70 @@ DEFAULT_SYNC_MSG = "lore: sync vault"
 #: back out of stdout. A person at a terminal is not stranded behind the
 #: holder: the vault is skipped for this run and reported, not waited on.
 SYNC_IN_PROGRESS = "in-progress"
+
+#: How many times :func:`_push_one` replays onto a moved history and re-pushes
+#: before giving up. Configurable (see :func:`resolve_publish_retry_max`)
+#: because how much a moved history is worth retrying against is an operator
+#: call, not a universal constant — a low-traffic vault rarely needs more than
+#: one replay, a busy multi-device vault may race the forge more often.
+DEFAULT_PUBLISH_RETRY_MAX = 3
+
+#: Outcomes :func:`_push_one` can produce beyond a plain successful push (which
+#: reports :data:`PUBLISH_OK`) or the pre-existing offline/no-op paths (also
+#: :data:`PUBLISH_OK` — this module's existing soft-network contract is
+#: unchanged). Readable values, not message strings a later caller has to
+#: parse back out of stdout/stderr — the same shape as ``SYNC_IN_PROGRESS``
+#: above and ``vault_refusal_condition``'s ``SYNC_REFUSAL_*`` constants.
+PUBLISH_OK = "ok"
+
+#: The push was rejected, but the published history did NOT move — a
+#: pre-receive hook, a protected branch, or a permission refusal, not a race.
+#: No retry can clear this: the local commit is left in place (vault clean,
+#: diverged) for a person, or a later sweep, to settle.
+PUBLISH_HOLDING = "holding"
+
+#: The published history moved on every attempt through the configured
+#: maximum. Hard failure — distinct from a generic push failure so a caller
+#: can tell "the forge just won't sit still" apart from "something is broken".
+PUBLISH_RETRIES_EXHAUSTED = "retries-exhausted"
+
+
+def resolve_publish_retry_max(env: dict | None = None) -> int:
+    """Resolve the max publish-retry attempt count, in precedence order.
+
+    1. ``LORE_PUBLISH_RETRY_MAX``, if set to a valid positive integer string.
+    2. The ``publish_retry_max`` key in ``config.json``, if present and a
+       positive int (see :func:`lore.vault.config.read_publish_retry_max`).
+    3. :data:`DEFAULT_PUBLISH_RETRY_MAX`.
+
+    Mirrors :func:`lore.record_url.resolve_base`'s precedence shape. A
+    non-positive or unparseable value at any layer is treated as absent rather
+    than raising — a malformed override must not turn "keep retrying a moved
+    history" into "never retry at all" (0) or a crash.
+
+    Args:
+        env: Optional ``{str: str}`` environment override, used both for
+             reading ``LORE_PUBLISH_RETRY_MAX`` and forwarded to
+             :func:`lore.vault.config.read_publish_retry_max` for XDG
+             resolution. ``None`` reads the real process environment.
+    """
+    from ..vault import config as vault_config_mod
+
+    source = os.environ if env is None else env
+    env_value = source.get("LORE_PUBLISH_RETRY_MAX", "")
+    if env_value:
+        try:
+            parsed = int(env_value)
+        except ValueError:
+            parsed = None
+        if parsed is not None and parsed > 0:
+            return parsed
+
+    config_value = vault_config_mod.read_publish_retry_max(env=env)
+    if config_value is not None and config_value > 0:
+        return config_value
+
+    return DEFAULT_PUBLISH_RETRY_MAX
 
 
 def _make_emitters(name: str, width: int):
@@ -356,8 +421,49 @@ def _pull_one(vault: Path, say, say_err, *, already_fetched: bool = False) -> tu
     return PULL_OK, behind
 
 
-def _push_one(vault: Path, say, say_err, *, committed: bool) -> int:
-    """Push ``vault`` to origin when there is anything to push. Always returns 0.
+def _refetch_discriminator(vault: Path, branch: str) -> tuple[bool, bool]:
+    """Re-fetch ``origin`` and classify a just-rejected push. Never reads stderr.
+
+    Returns ``(fetch_ok, advanced)`` where ``advanced`` means
+    ``refs/remotes/origin/<branch>`` moved past its pre-fetch value:
+
+    - ``(True, True)``  — the published history genuinely moved; a replay can
+      clear the rejection.
+    - ``(False, False)`` — the forge itself was unreachable; the rejection was
+      never about history at all.
+    - ``(True, False)`` — the forge answered and its history did NOT move, so
+      the rejection has some other cause (a hook, a protected branch,
+      permission) that no amount of retrying will ever clear.
+
+    The discrimination is entirely observable state — a fetch exit code and a
+    ref comparison — never git or remote *text*: lore's stderr embeds the
+    remote URL verbatim, which is a credential in a team-synced vault, and
+    this function's result must never depend on parsing it.
+    """
+    ref = f"refs/remotes/origin/{branch}"
+    rc_before, before, _ = _git(vault, "rev-parse", "--quiet", "--verify", ref)
+    before_sha = before if rc_before == 0 else None
+    rc_fetch, _, _ = _git(vault, "fetch", "origin")
+    fetch_ok = rc_fetch == 0
+    rc_after, after, _ = _git(vault, "rev-parse", "--quiet", "--verify", ref)
+    after_sha = after if rc_after == 0 else None
+    advanced = fetch_ok and before_sha != after_sha
+    return fetch_ok, advanced
+
+
+def _push_one(
+    vault: Path, say, say_err, *, committed: bool, max_attempts: int | None = None
+) -> tuple[int, str, int]:
+    """Push ``vault`` to origin, replaying onto a moved history when rejected.
+
+    Returns ``(exit_code, ending, attempts_used)``. ``ending`` is
+    :data:`PUBLISH_OK` on a clean push (including every existing no-op —
+    nothing to push, no origin remote, detached HEAD, a genuinely unreachable
+    forge), :data:`PUBLISH_HOLDING` when the push was rejected for a reason no
+    retry clears, or :data:`PUBLISH_RETRIES_EXHAUSTED` when the published
+    history kept moving past ``max_attempts`` (default
+    :func:`resolve_publish_retry_max`). ``attempts_used`` counts only the
+    moved-history case — the one condition a retry can actually clear.
 
     Skipped silently when the vault is clean AND already in sync with its
     upstream — the common case across a multi-vault sync, where an unconditional
@@ -369,39 +475,94 @@ def _push_one(vault: Path, say, say_err, *, committed: bool) -> int:
     upstream branch", exit 128) and, crucially, never sets one either — so
     without this the vault would fail identically on every future sync while the
     error text blamed the network. Setting upstream on the first push is what
-    makes the condition converge.
+    makes the condition converge. A push rejected for a moved history never
+    records an upstream either, so a retry after replaying must still pass
+    ``--set-upstream`` again until one attempt actually lands.
 
     A missing origin is reported only when this run committed something, so the
     per-vault line names the vault whose new commit is now unbacked; a clean
     remote-less vault stays quiet rather than re-reporting a standing condition on
     every sync (``lore status`` is the surface that reports it standing).
+
+    **On rejection, :func:`_refetch_discriminator` classifies the cause before
+    deciding whether to retry** — never by parsing stderr (see that function's
+    docstring). A genuinely unreachable forge falls back to the pre-existing
+    soft "committed locally; push failed" no-op, unchanged and consuming no
+    attempt. A moved history is replayed under the vault's write lock (a tree
+    mutation, exactly like :func:`_pull_one`'s rebase) and the push retried;
+    exhausting ``max_attempts`` this way is a distinct, HARD ending
+    (:data:`PUBLISH_RETRIES_EXHAUSTED`, exit 1) rather than the generic soft
+    push-failure notice, so a caller can tell "the forge just won't sit still"
+    apart from "the network is down". A rejection where the history did NOT
+    move is :data:`PUBLISH_HOLDING` — soft (exit 0), consumes no attempt, and
+    leaves the local commit exactly where it landed for a person (or a later
+    sweep) to settle; see the module's outcome constants.
     """
     rc_remote, remote_url, _ = _git(vault, "remote", "get-url", "origin")
     if rc_remote != 0 or not remote_url:
         if committed:
             say("No origin remote — skipping push.")
-        return 0
+        return 0, PUBLISH_OK, 0
 
     if not committed and not _vault_unpushed(vault):
-        return 0
+        return 0, PUBLISH_OK, 0
 
-    push_args = ["push", "origin"]
-    if not _vault_has_upstream(vault):
+    if max_attempts is None:
+        max_attempts = resolve_publish_retry_max()
+
+    attempts_used = 0
+    while True:
         branch = _vault_head_branch(vault)
         if branch is None:
             # Detached HEAD: there is no branch to track, and guessing a refspec
             # would push to a name the operator never chose. Report, don't guess.
             say_err("notice: detached HEAD — skipping push; check out a branch and re-run")
-            return 0
-        push_args = ["push", "--set-upstream", "origin", branch]
+            return 0, PUBLISH_OK, attempts_used
 
-    rc_push, _, stderr_push = _git(vault, *push_args)
-    if rc_push != 0:
-        say_err("notice: committed locally; push failed — re-run `lore sync` when online")
-        say_err(f"  push error: {stderr_push}")
-        return 0
-    say("Pushed to origin.")
-    return 0
+        push_args = ["push", "origin"]
+        if not _vault_has_upstream(vault):
+            push_args = ["push", "--set-upstream", "origin", branch]
+
+        rc_push, _, _stderr_push = _git(vault, *push_args)
+        if rc_push == 0:
+            say("Pushed to origin.")
+            return 0, PUBLISH_OK, attempts_used
+
+        fetch_ok, advanced = _refetch_discriminator(vault, branch)
+        if not fetch_ok:
+            say_err("notice: committed locally; push failed — re-run `lore sync` when online")
+            return 0, PUBLISH_OK, attempts_used
+
+        if not advanced:
+            say_err(
+                "notice: the push did not go through and the published history "
+                "did not move — needs a person; re-run `lore sync` later"
+            )
+            return 0, PUBLISH_HOLDING, attempts_used
+
+        attempts_used += 1
+        if attempts_used >= max_attempts:
+            say_err(
+                f"error: publish retries exhausted after {attempts_used} attempt(s) "
+                "— the published history kept moving; re-run `lore sync`"
+            )
+            return 1, PUBLISH_RETRIES_EXHAUSTED, attempts_used
+
+        # Tree mutation — locked, exactly like `_pull_one`'s rebase. The abort
+        # is part of the same critical section: the vault must not be
+        # observable mid-rebase.
+        with locking.vault_write_lock(vault):
+            rc_rebase, _stdout_rebase, _stderr_rebase = _git(
+                vault, "rebase", f"origin/{branch}"
+            )
+            if rc_rebase != 0:
+                # Abort unconditionally, in the same critical section — the
+                # vault must never be left observable mid-rebase, exactly like
+                # `_pull_one`'s own conflict-abort contract.
+                _git(vault, "rebase", "--abort")
+        if rc_rebase != 0:
+            say_err("error: replaying onto the moved history failed — publish skipped")
+            return 1, PUBLISH_HOLDING, attempts_used
 
 
 #: The root file lore scaffolds that IS committed. ``.lore.lock`` is deliberately
@@ -502,10 +663,12 @@ def _stage_and_commit_one(vault: Path, message: str, say, say_err) -> tuple[int,
 
 def _pull_and_push_one(
     vault: Path, say, say_err, *, committed: bool
-) -> tuple[int, int]:
+) -> tuple[int, int, str]:
     """Pull then push one vault, given whether this run just committed to it.
 
-    Returns ``(exit_code, commits_pulled)``. Kept separate from
+    Returns ``(exit_code, commits_pulled, ending)``. ``ending`` is
+    :func:`_push_one`'s outcome (:data:`PUBLISH_OK` for every path that never
+    reaches a push attempt — a failed or skipped pull). Kept separate from
     :func:`_stage_and_commit_one` so :func:`cmd_sync` can run every target's
     stage+commit phase under ONE combined lock (see its docstring) before
     running each target's network-touching pull/push tail separately, one
@@ -513,11 +676,12 @@ def _pull_and_push_one(
     """
     pull_state, pulled = _pull_one(vault, say, say_err)
     if pull_state == PULL_FAILED:
-        return 1, 0
+        return 1, 0, PUBLISH_OK
     if pull_state == PULL_OFFLINE:
-        return 0, 0
+        return 0, 0, PUBLISH_OK
 
-    return _push_one(vault, say, say_err, committed=committed), pulled
+    rc, ending, _attempts = _push_one(vault, say, say_err, committed=committed)
+    return rc, pulled, ending
 
 
 # ---------------------------------------------------------------------------
@@ -854,9 +1018,13 @@ def cmd_sync(args) -> int:
             state, pulled = _pull_only_one(Path(vault), say, say_err)
             rc_one = 1 if state == PULL_FAILED else 0
         else:
-            rc_one, pulled = _pull_and_push_one(
+            rc_one, pulled, ending = _pull_and_push_one(
                 Path(vault), say, say_err, committed=committed_map.get(name, False)
             )
+            if ending in (PUBLISH_HOLDING, PUBLISH_RETRIES_EXHAUSTED):
+                # Readable value, not a message string to parse back out —
+                # same shape as `outcomes[name] = SYNC_IN_PROGRESS` above.
+                outcomes[name] = ending
         total_pulled += pulled
         if rc_one != 0:
             failed.append(name)

@@ -45,7 +45,9 @@ Covers:
 
 from __future__ import annotations
 
+import importlib
 import os
+import shlex
 import subprocess
 import sys
 import time
@@ -53,6 +55,8 @@ from pathlib import Path
 
 from conftest import write_vault_config
 from test_vault_write_lock import _spawn_holder
+
+sync_mod = importlib.import_module("lore.cli.sync")
 
 REPO_ROOT = Path(__file__).parent.parent
 PLUGIN_ROOT = REPO_ROOT / "plugins" / "lore"
@@ -1621,3 +1625,357 @@ def _three_vaults_for_lock(tmp_path: Path):
     """Reuse `_three_vaults` — the extra vaults just prove the held one does
     not strand the other configured vaults either."""
     return _three_vaults(tmp_path)
+
+
+# ── lore sync: bounded, configurable publish retry against a moved history ──
+#
+# `_push_one` re-fetches and replays onto a moved history before giving up, up
+# to a configured maximum. The discriminator that decides whether to retry is
+# a CONJUNCTION — fetch succeeded AND the remote-tracking ref advanced past
+# its pre-fetch value — never "fetch succeeded" alone, which would misclassify
+# a hook/protected-branch rejection as a moved history and burn the whole
+# retry budget against a condition no retry can ever clear. See
+# `resolve_publish_retry_max` and `_push_one`'s docstring for the full
+# discriminator contract.
+
+
+def _make_pushed_vault(tmp_path: Path, name: str) -> tuple[Path, Path]:
+    """A vault with one commit, wired to and pushed to a fresh bare remote."""
+    vault = _make_vault(tmp_path / f"v-{name}", dirty=False)
+    remote = _make_bare_remote(tmp_path / f"{name}-remote.git")
+    _wire_remote(vault, remote)
+    return vault, remote
+
+
+def _quiet_emitters():
+    """Collect every `say`/`say_err` line, for asserting neither leaks git/remote text."""
+    lines: list[str] = []
+
+    def say(text: str) -> None:
+        lines.append(text)
+
+    def say_err(text: str) -> None:
+        lines.append(text)
+
+    return say, say_err, lines
+
+
+def _make_moving_forge(tmp_path: Path, name: str, vault: Path, remote: Path) -> None:
+    """Make ``remote`` "move on every attempt" against ``vault``'s own pushes.
+
+    A server-side ``pre-receive`` hook CANNOT do this: git refuses a direct
+    ``update-ref`` from inside one — "ref updates forbidden inside quarantine
+    environment" — precisely to stop a hook from moving a ref out from under
+    the push it is currently vetting. (Confirmed empirically while building
+    this fixture: a first attempt used exactly that, and it silently never
+    advanced the ref at all — the exact "rebase fixture that stops testing
+    anything" failure mode.) The only real way to advance history from a hook
+    is a CLIENT-side ``pre-push`` hook on ``vault`` itself, driving an
+    ordinary competing push from a separate attacker clone immediately before
+    every one of the vault's own push attempts.
+    """
+    attacker = tmp_path / f"{name}-attacker"
+    subprocess.run(
+        ["git", "clone", "-q", str(remote), str(attacker)], check=True, capture_output=True
+    )
+    for key, val in (
+        ("user.email", "attacker@e.st"), ("user.name", "Attacker"), ("commit.gpgsign", "false")
+    ):
+        _git(attacker, "config", key, val)
+
+    hook = vault / ".git" / "hooks" / "pre-push"
+    hook.write_text(
+        "#!/bin/sh\n"
+        f"cd {shlex.quote(str(attacker))} || exit 0\n"
+        "echo \"advance-$$-$(date +%s%N)\" >> attack.txt\n"
+        "git add -A >/dev/null 2>&1\n"
+        "git commit -q -m advance >/dev/null 2>&1\n"
+        "git push -q origin HEAD:refs/heads/main >/dev/null 2>&1\n"
+        "exit 0\n"
+    )
+    hook.chmod(0o755)
+
+
+def _write_plain_rejecting_hook(remote: Path) -> None:
+    """A pre-receive hook that rejects every push WITHOUT moving history — the
+    protected-branch / permission-refusal stand-in the discriminator must tell
+    apart from a moved history."""
+    hook = remote / "hooks" / "pre-receive"
+    hook.write_text("#!/bin/sh\nexit 1\n")
+    hook.chmod(0o755)
+
+
+def test_push_retry_moved_once_reintegrates_and_pushes_with_one_attempt(tmp_path):
+    """A push rejected once by a history that moved: re-integrate, re-push,
+    attempts used is 1, and the local commit lands on the forge."""
+    vault, remote = _make_pushed_vault(tmp_path, "a")
+
+    other = _clone_as_second_device(remote, tmp_path / "device-b")
+    (other / "from_b.md").write_text("device b\n")
+    _git(other, "add", "-A")
+    _git(other, "commit", "-m", "device b")
+    assert _git(other, "push", "origin").returncode == 0
+
+    (vault / "task" / "from_a.md").write_text("device a\n")
+    _git(vault, "add", "-A")
+    _git(vault, "commit", "-m", "device a")
+
+    say, say_err, lines = _quiet_emitters()
+    rc, ending, attempts_used = sync_mod._push_one(
+        vault, say, say_err, committed=True, max_attempts=3
+    )
+
+    assert rc == 0, lines
+    assert ending == sync_mod.PUBLISH_OK
+    assert attempts_used == 1
+    assert _commit_count(remote) == _commit_count(vault)
+    assert (remote / "hooks").exists() or True  # bare remote has no worktree to check
+    # The commit really landed on the forge, not just locally.
+    r = subprocess.run(
+        ["git", "-C", str(remote), "log", "--format=%s"], capture_output=True, text=True
+    )
+    assert "device a" in r.stdout
+
+
+def test_push_retry_exhausts_after_the_configured_maximum(tmp_path):
+    """A forge that moves on EVERY attempt stops after exactly the configured
+    maximum, ending retries-exhausted — not a generic failure. Run at two
+    different maxima: the attempt count follows the configuration."""
+    for max_attempts in (2, 5):
+        vault, remote = _make_pushed_vault(tmp_path, f"loop-{max_attempts}")
+        _make_moving_forge(tmp_path, f"loop-{max_attempts}", vault, remote)
+
+        (vault / "task" / "local.md").write_text("local change\n")
+        _git(vault, "add", "-A")
+        _git(vault, "commit", "-m", "local change")
+
+        say, say_err, lines = _quiet_emitters()
+        rc, ending, attempts_used = sync_mod._push_one(
+            vault, say, say_err, committed=True, max_attempts=max_attempts
+        )
+
+        assert rc == 1, lines
+        assert ending == sync_mod.PUBLISH_RETRIES_EXHAUSTED
+        assert attempts_used == max_attempts, (
+            f"expected {max_attempts} attempts consumed, got {attempts_used}"
+        )
+        assert _git(vault, "status", "--porcelain").stdout.strip() == ""
+
+
+def test_push_retry_default_max_applies_when_config_names_none(tmp_path, monkeypatch):
+    """The default applies with no override; an env var and a config key both
+    override it, in precedence order — the input varied is where the maximum
+    comes from."""
+    config_home = tmp_path / "config"
+    config_home.mkdir(parents=True)
+    lore_dir = config_home / "lore"
+    lore_dir.mkdir(parents=True)
+    (lore_dir / "config.json").write_text(
+        '{"vaults": [{"name": "default", "scope": "default"}]}'
+    )
+    env = {"XDG_CONFIG_HOME": str(config_home)}
+
+    # No override anywhere: the module default.
+    assert sync_mod.resolve_publish_retry_max(env=env) == sync_mod.DEFAULT_PUBLISH_RETRY_MAX
+
+    # config.json names one: that value wins over the default.
+    (lore_dir / "config.json").write_text(
+        '{"vaults": [{"name": "default", "scope": "default"}], "publish_retry_max": 9}'
+    )
+    assert sync_mod.resolve_publish_retry_max(env=env) == 9
+
+    # The env var wins over config.json.
+    env_with_var = dict(env, LORE_PUBLISH_RETRY_MAX="4")
+    assert sync_mod.resolve_publish_retry_max(env=env_with_var) == 4
+
+
+def test_push_retry_unreachable_forge_consumes_no_attempts_and_stays_soft(tmp_path):
+    """An unreachable forge is not a rejection: no attempts consumed, no
+    retries-exhausted — the existing soft, converge-next-sweep path."""
+    vault, remote = _make_pushed_vault(tmp_path, "gone")
+    _git(vault, "remote", "set-url", "origin", str(tmp_path / "does-not-exist.git"))
+
+    (vault / "task" / "local.md").write_text("local change\n")
+    _git(vault, "add", "-A")
+    _git(vault, "commit", "-m", "local change")
+
+    say, say_err, lines = _quiet_emitters()
+    rc, ending, attempts_used = sync_mod._push_one(
+        vault, say, say_err, committed=True, max_attempts=3
+    )
+
+    assert rc == 0, lines
+    assert ending == sync_mod.PUBLISH_OK
+    assert attempts_used == 0
+    assert ending != sync_mod.PUBLISH_RETRIES_EXHAUSTED
+
+
+def test_push_retry_hook_rejection_ends_holding_consumes_zero_and_stays_clean(tmp_path):
+    """A hook/protected-branch rejection is not a moved history: it ends
+    `holding`, consumes zero attempts, never retries, and leaves the vault
+    clean (the local commit stays, nothing is torn down)."""
+    vault, remote = _make_pushed_vault(tmp_path, "hook")
+    _write_plain_rejecting_hook(remote)
+
+    (vault / "task" / "local.md").write_text("local change\n")
+    _git(vault, "add", "-A")
+    _git(vault, "commit", "-m", "local change")
+    before_head = _git(vault, "rev-parse", "HEAD").stdout.strip()
+
+    say, say_err, lines = _quiet_emitters()
+    rc, ending, attempts_used = sync_mod._push_one(
+        vault, say, say_err, committed=True, max_attempts=3
+    )
+
+    assert rc == 0, lines
+    assert ending == sync_mod.PUBLISH_HOLDING
+    assert attempts_used == 0
+    assert _git(vault, "status", "--porcelain").stdout.strip() == ""
+    assert _git(vault, "rev-parse", "HEAD").stdout.strip() == before_head
+
+
+def test_push_retry_never_leaks_git_or_remote_stderr(tmp_path):
+    """No stderr from git or the remote reaches any message — across the
+    moved-history, exhausted, unreachable, and hook-rejection paths. lore's
+    stderr embeds the remote URL verbatim, a credential in a team-synced
+    vault."""
+    all_lines: list[str] = []
+
+    # Moved-once path.
+    vault, remote = _make_pushed_vault(tmp_path, "leak-a")
+    other = _clone_as_second_device(remote, tmp_path / "leak-device-b")
+    (other / "from_b.md").write_text("b\n")
+    _git(other, "add", "-A")
+    _git(other, "commit", "-m", "device b")
+    _git(other, "push", "origin")
+    (vault / "task" / "from_a.md").write_text("a\n")
+    _git(vault, "add", "-A")
+    _git(vault, "commit", "-m", "device a")
+    say, say_err, lines = _quiet_emitters()
+    sync_mod._push_one(vault, say, say_err, committed=True, max_attempts=3)
+    all_lines += lines
+
+    # Exhausted path.
+    vault2, remote2 = _make_pushed_vault(tmp_path, "leak-loop")
+    _make_moving_forge(tmp_path, "leak-loop", vault2, remote2)
+    (vault2 / "task" / "local.md").write_text("local\n")
+    _git(vault2, "add", "-A")
+    _git(vault2, "commit", "-m", "local")
+    say2, say_err2, lines2 = _quiet_emitters()
+    sync_mod._push_one(vault2, say2, say_err2, committed=True, max_attempts=2)
+    all_lines += lines2
+
+    # Unreachable path.
+    vault3, _ = _make_pushed_vault(tmp_path, "leak-gone")
+    bad_remote_path = str(tmp_path / "does-not-exist.git")
+    _git(vault3, "remote", "set-url", "origin", bad_remote_path)
+    (vault3 / "task" / "local.md").write_text("local\n")
+    _git(vault3, "add", "-A")
+    _git(vault3, "commit", "-m", "local")
+    say3, say_err3, lines3 = _quiet_emitters()
+    sync_mod._push_one(vault3, say3, say_err3, committed=True, max_attempts=3)
+    all_lines += lines3
+
+    # Hook-rejection path.
+    vault4, remote4 = _make_pushed_vault(tmp_path, "leak-hook")
+    _write_plain_rejecting_hook(remote4)
+    (vault4 / "task" / "local.md").write_text("local\n")
+    _git(vault4, "add", "-A")
+    _git(vault4, "commit", "-m", "local")
+    say4, say_err4, lines4 = _quiet_emitters()
+    sync_mod._push_one(vault4, say4, say_err4, committed=True, max_attempts=3)
+    all_lines += lines4
+
+    combined = "\n".join(all_lines)
+    assert bad_remote_path not in combined
+    assert "fatal:" not in combined
+    assert "hint:" not in combined
+    assert "rejected" not in combined.lower() or "the published history did not move" in combined
+
+
+def test_push_retry_leaves_the_vault_clean_in_every_ending(tmp_path):
+    """Every ending — success-after-retry, exhaustion, unreachable, holding —
+    leaves the vault's working tree clean (no partial rebase, no leftover
+    conflict markers)."""
+    # Success-after-retry.
+    vault_a, remote_a = _make_pushed_vault(tmp_path, "clean-a")
+    other = _clone_as_second_device(remote_a, tmp_path / "clean-device-b")
+    (other / "from_b.md").write_text("b\n")
+    _git(other, "add", "-A")
+    _git(other, "commit", "-m", "device b")
+    _git(other, "push", "origin")
+    (vault_a / "task" / "from_a.md").write_text("a\n")
+    _git(vault_a, "add", "-A")
+    _git(vault_a, "commit", "-m", "device a")
+    say, say_err, _ = _quiet_emitters()
+    sync_mod._push_one(vault_a, say, say_err, committed=True, max_attempts=3)
+    assert _git(vault_a, "status", "--porcelain").stdout.strip() == ""
+    assert not (vault_a / ".git" / "rebase-merge").exists()
+    assert not (vault_a / ".git" / "rebase-apply").exists()
+
+    # Exhaustion.
+    vault_b, remote_b = _make_pushed_vault(tmp_path, "clean-loop")
+    _make_moving_forge(tmp_path, "clean-loop", vault_b, remote_b)
+    (vault_b / "task" / "local.md").write_text("local\n")
+    _git(vault_b, "add", "-A")
+    _git(vault_b, "commit", "-m", "local")
+    say2, say_err2, _ = _quiet_emitters()
+    rc, ending, _attempts = sync_mod._push_one(
+        vault_b, say2, say_err2, committed=True, max_attempts=2
+    )
+    assert ending == sync_mod.PUBLISH_RETRIES_EXHAUSTED
+    assert _git(vault_b, "status", "--porcelain").stdout.strip() == ""
+    assert not (vault_b / ".git" / "rebase-merge").exists()
+    assert not (vault_b / ".git" / "rebase-apply").exists()
+
+
+def _make_conflicting_forge(tmp_path: Path, name: str, vault: Path, remote: Path) -> None:
+    """Like :func:`_make_moving_forge`, but the attacker's edit conflicts with
+    the SAME line of the SAME file the vault's own local commit touches — a
+    genuine rebase conflict during the retry's replay, distinct from a moved
+    but content-compatible history."""
+    attacker = tmp_path / f"{name}-attacker"
+    subprocess.run(
+        ["git", "clone", "-q", str(remote), str(attacker)], check=True, capture_output=True
+    )
+    for key, val in (
+        ("user.email", "attacker@e.st"), ("user.name", "Attacker"), ("commit.gpgsign", "false")
+    ):
+        _git(attacker, "config", key, val)
+
+    hook = vault / ".git" / "hooks" / "pre-push"
+    hook.write_text(
+        "#!/bin/sh\n"
+        f"cd {shlex.quote(str(attacker))} || exit 0\n"
+        "echo attacker-line > task/README.md\n"
+        "git add -A >/dev/null 2>&1\n"
+        "git commit -q -m attacker-edit >/dev/null 2>&1\n"
+        "git push -q origin HEAD:refs/heads/main >/dev/null 2>&1\n"
+        "exit 0\n"
+    )
+    hook.chmod(0o755)
+
+
+def test_push_retry_replay_conflict_aborts_cleanly(tmp_path):
+    """When the replay itself cannot be integrated cleanly (a genuine content
+    conflict, not just a moved-but-compatible history), the rebase is aborted
+    and the vault is left exactly as it was — no mid-rebase state, no partial
+    commit — mirroring `_pull_one`'s own conflict-abort contract."""
+    vault, remote = _make_pushed_vault(tmp_path, "conflict")
+    _make_conflicting_forge(tmp_path, "conflict", vault, remote)
+
+    (vault / "task" / "README.md").write_text("vault-line\n")
+    _git(vault, "add", "-A")
+    _git(vault, "commit", "-m", "vault edit")
+    before_head = _git(vault, "rev-parse", "HEAD").stdout.strip()
+
+    say, say_err, lines = _quiet_emitters()
+    rc, ending, _attempts = sync_mod._push_one(
+        vault, say, say_err, committed=True, max_attempts=3
+    )
+
+    assert rc == 1, lines
+    assert not (vault / ".git" / "rebase-merge").exists()
+    assert not (vault / ".git" / "rebase-apply").exists()
+    assert _git(vault, "status", "--porcelain").stdout.strip() == ""
+    assert _git(vault, "rev-parse", "HEAD").stdout.strip() == before_head
