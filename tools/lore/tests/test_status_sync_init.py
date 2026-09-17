@@ -274,25 +274,24 @@ def _make_sync_vault_with_failing_remote(tmp_path: Path) -> Path:
     return vault
 
 
-def test_sync_exits_zero_when_push_fails_but_commit_succeeds(tmp_path):
-    """When commit succeeds but push fails (offline/auth), lore sync must exit 0
-    and print a prominent notice — commit is durable, push failure is soft."""
+def test_sync_exits_nonzero_holding_when_offline_with_unpublished_commit(tmp_path):
+    """When commit succeeds but the vault cannot reach the forge (offline/auth),
+    `lore sync` commits durably but exits NON-ZERO — the commit is held on this
+    machine, unpublished, and that needs a person to get online. This is a
+    decided contract change from the prior "push failure is soft" behavior:
+    an offline host that is HOARDING committed work must never report the same
+    quiet `converged`/exit-0 outcome as a host with nothing left to publish."""
     vault = _make_sync_vault_with_failing_remote(tmp_path)
     (vault / "session" / "README.md").write_text("vault updated\n")
 
     r = run_cli(["sync"], seed_vault=vault)
-    assert r.returncode == 0, (
-        f"sync must exit 0 when commit succeeded but push failed; "
-        f"stdout={r.stdout!r} stderr={r.stderr!r}"
+    assert r.returncode != 0, (
+        f"sync must exit non-zero when local work is committed but unreachable "
+        f"to publish; stdout={r.stdout!r} stderr={r.stderr!r}"
     )
     combined = r.stdout + r.stderr
-    # Must have printed a notice about push failure / re-run
-    assert (
-        "push failed" in combined.lower()
-        or "re-run" in combined.lower()
-        or "online" in combined.lower()
-        or "lore sync" in combined
-    ), f"sync must print a soft-failure notice; got: {combined!r}"
+    # Must have printed a notice naming the held vault
+    assert "vault" in combined.lower(), f"sync must name the held vault; got: {combined!r}"
 
     # The commit must have been made
     log = subprocess.run(
@@ -301,7 +300,7 @@ def test_sync_exits_zero_when_push_fails_but_commit_succeeds(tmp_path):
         text=True,
     )
     assert len(log.stdout.strip().splitlines()) == 2, (
-        "commit must have been made before push was attempted"
+        "commit must have been made even though the vault could not publish it"
     )
 
 
