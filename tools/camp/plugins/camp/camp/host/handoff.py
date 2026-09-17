@@ -1,6 +1,10 @@
 """The interactive attach handoff: replaces this process, local or remote.
 
-Local: ``tmux attach -t <derived name>``. Remote: ``ssh -t <destination>
+Local: ``tmux attach -t =<derived name>`` — `=`-qualified through
+:func:`camp.launch.tmux.target`, the one tmux invocation in camp that
+bypasses the `Tmux` class itself (an interactive `exec`, which cannot go
+through `subprocess.run`) but still routes its target through the seam's
+own normalization. Remote: ``ssh -t <destination>
 <camp_bin> attach <ref>``, carrying the per-host camp location the host
 declaration already holds and the same fixed connection options the listing
 transport pins (``host/transport.py``) — non-interactive authentication,
@@ -36,6 +40,7 @@ import os
 import sys
 from typing import Callable, Sequence
 
+from ..launch.tmux import target
 from .config import Host
 from .transport import DEFAULT_CONNECT_TIMEOUT_SECONDS, quote_and_join
 
@@ -51,7 +56,7 @@ def local_argv(derived_name: str) -> list[str]:
     :class:`camp.launch.recovery.SessionCandidate`) — never the harness's own
     session name, which addresses nothing in tmux.
     """
-    return ["tmux", "attach", "-t", derived_name]
+    return ["tmux", "attach", "-t", target(derived_name)]
 
 
 def remote_argv(

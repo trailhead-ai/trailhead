@@ -355,7 +355,7 @@ def test_bare_local_picker_handoff_uses_the_derived_name_not_the_session_id(
     code = _run(["attach"], monkeypatch)
 
     assert code == 0
-    assert seen == [["tmux", "attach", "-t", derived]]
+    assert seen == [["tmux", "attach", "-t", f"={derived}"]]
 
 
 def test_ref_form_reaches_local_resolution(
@@ -446,7 +446,7 @@ def test_ref_form_local_handoff_uses_the_derived_name_not_the_session_id(
     code = _run(["attach", _UUID_A[:8]], monkeypatch)
 
     assert code == 0
-    assert seen == [["tmux", "attach", "-t", derived]]
+    assert seen == [["tmux", "attach", "-t", f"={derived}"]]
 
 
 def test_host_form_reaches_the_untouched_pass_through(
@@ -622,7 +622,7 @@ def test_dash_a_ref_form_local_match_hands_off_using_the_derived_name_not_the_se
     code = _run(["attach", _UUID_A[:8], "-a"], monkeypatch)
 
     assert code == 0
-    assert seen == [["tmux", "attach", "-t", derived]]
+    assert seen == [["tmux", "attach", "-t", f"={derived}"]]
 
 
 def test_dash_a_with_two_machines_matching_refuses_and_names_both(
@@ -1133,7 +1133,7 @@ def test_dash_a_bare_picker_local_selection_uses_the_derived_name_not_the_sessio
     code = _run(["attach", "-a"], monkeypatch)
 
     assert code == 0
-    assert seen == [["tmux", "attach", "-t", derived]]
+    assert seen == [["tmux", "attach", "-t", f"={derived}"]]
 
 
 # ---------------------------------------------------------------------------
