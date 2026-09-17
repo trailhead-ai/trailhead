@@ -12,17 +12,25 @@ component-by-component before the two are joined:
    ``[A-Za-z0-9_-]`` — every character outside ``[A-Za-z0-9-]``, including
    ``_`` itself, is replaced by ``_<hex>_`` (the escape character is escaped
    first, so a literal ``_`` in the input and an escape-introducer can never
-   be confused). ``-`` is left alone: it is common in real group and slug
-   names, and escaping it would make every ordinary name harder to read and
-   type for no gain the join needs. This is a uniquely-decodable code:
-   scanning left to right, a bare ``_`` can only be the start of an escape
-   sequence, since every literal ``_`` in the input was itself escaped. Two
-   different raw strings therefore always escape to two different strings.
+   be confused). An INTERIOR ``-`` is left literal: it is common in real
+   group and slug names, and escaping it would make every ordinary name
+   harder to read and type for no gain the join needs. A ``-`` at either
+   BOUNDARY of a component is escaped, because step 2 strips boundary
+   hyphens and so would discard it — and discarding it is not cosmetic:
+   ``a`` and ``a-`` are both legal group names, and folding both to ``a``
+   is exactly the same-slug-two-groups collision this module exists to
+   prevent. This is a uniquely-decodable code: scanning left to right, a
+   bare ``_`` can only be the start of an escape sequence, since every
+   literal ``_`` in the input was itself escaped, and every other character
+   of the output stands for itself. Two different raw strings therefore
+   always escape to two different strings.
 2. The escaped output is folded through
    :func:`~camp.launch.recovery.sanitize_name_component` — the same rule the
    launch engine already applies to every other tmux name component — which
-   is the identity on ``[A-Za-z0-9_-]`` (nothing left to fold), so this step
-   changes nothing except mapping an empty component to its fallback word.
+   is the identity on ``[A-Za-z0-9_-]`` (nothing left to fold) and whose
+   boundary-hyphen strip has nothing to strip, since step 1 left no hyphen
+   at either boundary. So this step changes nothing except mapping an empty
+   component to its fallback word.
 
 Two components that are equal as *strings* only reach that equality by
 having equal raw input (step 1 is injective), so for a fixed slug, two
@@ -71,18 +79,29 @@ _RETIRED_SESSION_NAME_RE = re.compile(
 
 #: Characters that pass through :func:`_escape_component` unescaped. Anything
 #: outside this set — including ``_`` itself, so it can serve as the escape
-#: introducer — is replaced by an escape sequence. ``-`` is included: it
-#: stays literal in the escaped output, which is what leaves the join between
-#: components ambiguous at the pair level (see the module docstring's known
-#: limitation).
+#: introducer — is replaced by an escape sequence. ``-`` is included, and so
+#: stays literal wherever it is not at a component boundary (the boundary
+#: case is escaped — see :func:`_escape_component`); that literal interior
+#: hyphen is what leaves the join between components ambiguous at the pair
+#: level (see the module docstring's known limitation).
 _UNESCAPED = frozenset(
     "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-"
 )
 
 
 def _escape_component(raw: str) -> str:
+    """Escape *raw* so no two distinct inputs can fold onto one component.
+
+    A ``-`` at either boundary is escaped along with everything outside
+    :data:`_UNESCAPED`, so :func:`sanitize_name_component`'s boundary-hyphen
+    strip has nothing left to discard — see the module docstring.
+    """
+    last = len(raw) - 1
     return "".join(
-        ch if ch in _UNESCAPED else f"_{ord(ch):x}_" for ch in raw
+        ch
+        if ch in _UNESCAPED and not (ch == "-" and i in (0, last))
+        else f"_{ord(ch):x}_"
+        for i, ch in enumerate(raw)
     )
 
 
