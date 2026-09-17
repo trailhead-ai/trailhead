@@ -102,19 +102,29 @@ def _resolve_key(lock_path: Path) -> Path:
     return lock_path.resolve()
 
 
-def _acquire(lock_fd, scope: str, label: str, notice_after: float) -> None:
-    """Blocking ``LOCK_EX``, reporting a wait that runs past *notice_after*.
+def _acquire(
+    lock_fd, scope: str, label: str, notice_after: float, *, blocking: bool = True
+) -> None:
+    """``LOCK_EX``, reporting a wait that runs past *notice_after* — or, with
+    ``blocking=False``, a single non-blocking attempt that raises
+    ``BlockingIOError`` outright on contention instead of ever waiting.
 
-    Fast path is a single non-blocking attempt. On contention we poll until the
-    threshold, print the notice once, then fall back to a plain blocking
-    ``flock`` — so the contract stays "blocks until acquired", never "fails".
+    Fast path is a single non-blocking attempt. On contention **and**
+    ``blocking=True`` we poll until the threshold, print the notice once, then
+    fall back to a plain blocking ``flock`` — so that contract stays "blocks
+    until acquired, never fails". ``blocking=False`` is for a caller (the sync
+    sweep / manual ``lore sync``) that must never be stranded behind another
+    writer: it re-raises the same ``BlockingIOError`` the fast path just caught,
+    with no poll and no fallback, so contention is reported to the caller
+    immediately rather than waited out.
     """
     fileno = lock_fd.fileno()
     try:
         fcntl.flock(fileno, fcntl.LOCK_EX | fcntl.LOCK_NB)
         return
     except BlockingIOError:
-        pass
+        if not blocking:
+            raise
 
     deadline = time.monotonic() + notice_after
     while time.monotonic() < deadline:
@@ -141,6 +151,8 @@ def _flock(
     scope: str,
     label: str,
     notice_after: float = LOCK_WAIT_NOTICE_SECONDS,
+    *,
+    blocking: bool = True,
 ) -> Iterator[None]:
     """Hold an exclusive, reentrant-per-thread flock on *lock_path*.
 
@@ -148,6 +160,11 @@ def _flock(
     (``v`` and ``v/../v``, or a symlinked root) must share one depth entry, or a
     nested acquisition written differently misses the bump and self-deadlocks on
     the flock this thread already holds.
+
+    ``blocking=False`` only changes what happens on a FRESH (non-reentrant)
+    acquisition attempt — see :func:`_acquire`. A reentrant nested acquisition
+    (this thread already holds the lock) never touches the OS flock at all, so
+    it always succeeds regardless of ``blocking``.
     """
     key = str(_resolve_key(lock_path))
     depths = _depths()
@@ -163,7 +180,7 @@ def _flock(
     lock_fd = open(lock_path, "a")  # create-or-open, no truncate
     depths[key] = 1
     try:
-        _acquire(lock_fd, scope, label, notice_after)
+        _acquire(lock_fd, scope, label, notice_after, blocking=blocking)
         yield
     finally:
         depths[key] -= 1
@@ -185,15 +202,24 @@ def vault_write_lock(
     vault_root: str | Path,
     *,
     notice_after: float = LOCK_WAIT_NOTICE_SECONDS,
+    blocking: bool = True,
 ):
     """Serialize writes to one vault on ``<vault_root>/.lore.lock``.
 
     Wrap the whole critical section — naming/placement, the body+sidecar write,
     and the index upsert — so a concurrent writer can never interleave between
     the collision check and the write, nor between the write and the reindex.
+
+    ``blocking=False`` is the one carve-out from this module's own "acquisition
+    blocks; it never fails" contract, added for ``cli.sync.cmd_sync``'s
+    commit-phase lock acquisition: a person waiting on ``lore sync`` must not be
+    stranded behind another writer holding the same vault. It raises
+    ``BlockingIOError`` on contention instead of waiting — every other caller
+    (record create/update/delete, ``lore flush``'s tail) keeps the default,
+    always-blocks behavior, because a write that gave up would lose the write.
     """
     root = Path(vault_root)
-    return _flock(root / VAULT_LOCK_NAME, "vault", str(root), notice_after)
+    return _flock(root / VAULT_LOCK_NAME, "vault", str(root), notice_after, blocking=blocking)
 
 
 def vault_lock_sort_key(vault_root: str | Path) -> str:

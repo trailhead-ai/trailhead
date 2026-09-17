@@ -25,14 +25,23 @@ SYNTHETIC — zero private tokens (public repo).
 """
 from __future__ import annotations
 
+import importlib
 import json
 import subprocess
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
-from conftest import load_script, make_vault as _make_vault, run_cli as _run
+from conftest import (
+    load_script,
+    make_vault as _make_vault,
+    run_cli as _run,
+    write_default_config,
+)
+from test_vault_write_lock import _spawn_holder
 
 SID = "11111111-2222-4333-8444-555555555555"
 
@@ -371,3 +380,91 @@ class TestParseFlushedAtReader:
         assert len(outstanding) == len(body_lines), (
             "corrupt watermark must treat ALL candidates as outstanding"
         )
+
+
+# ---------------------------------------------------------------------------
+# the sync tail races a held vault lock — it must still land its write
+# ---------------------------------------------------------------------------
+
+class TestSyncTailRacesAHeldLock:
+
+    def test_sync_tail_call_shape_still_lands_write_despite_a_held_lock(self, tmp_path):
+        """`_flush_sync_tail` calls `cmd_sync` with a bare
+        `SimpleNamespace(vault=name, message=None, pull_only=False)` — no
+        `blocking` attribute at all. Driving that EXACT call shape against a
+        vault whose write lock a GENUINE second OS process holds must still
+        block until the lock frees, then land its own commit and push — never
+        a zero return with the write skipped. This fails against a naive
+        change that makes `cmd_sync`'s own lock acquisition non-blocking
+        regardless of what `args` carries, because the tail's namespace would
+        then hit that same non-blocking skip and report success while the
+        write it is called to reuse never lands.
+        """
+        vault, state = _make_vault(tmp_path)
+        _git_init(vault)
+        remote = tmp_path / "remote.git"
+        subprocess.run(["git", "init", "--bare", str(remote)],
+                        check=True, capture_output=True)
+        subprocess.run(["git", "-C", str(vault), "remote", "add", "origin", str(remote)],
+                        check=True, capture_output=True)
+
+        decisions = vault / "decision"
+        decisions.mkdir(parents=True, exist_ok=True)
+        (decisions / ".keep").write_text("")
+        assert _candidate(vault, state).returncode == 0
+        _commit_baseline(vault)
+        subprocess.run(["git", "-C", str(vault), "push", "-u", "origin", "HEAD"],
+                        check=True, capture_output=True)
+
+        # Seed a real flush — its own session commit — with the tail
+        # suppressed, so the tail's exact call shape can be driven (and its
+        # lock contended) separately, below.
+        r = _run(["flush", "--session-id", SID, "--no-sync"], vault=vault,
+                  state_dir=state,
+                  env_extra={"CLAUDE_CODE_SESSION_ID": "", "CLAUDE_SESSION_ID": ""})
+        assert r.returncode == 0, r.stderr
+        assert _sidecar(vault)["status"] == "clean"
+
+        # A file only the TAIL's own `cmd_sync` call — never the flush's own
+        # session commit — can land.
+        (decisions / "left-dirty.md").write_text("still uncommitted after the flush\n")
+
+        # The autouse `_isolate_ambient_env` fixture already pins HOME /
+        # XDG_STATE_HOME / XDG_CONFIG_HOME to tmp_path-scoped dirs matching
+        # `make_vault`'s own state dir — write the ambient config there so an
+        # IN-PROCESS `cmd_sync` call (not a CLI subprocess) resolves the same
+        # vault the CLI calls above already used.
+        write_default_config(tmp_path / "config", vault)
+        sync_mod = importlib.import_module("lore.cli.sync")
+
+        holder = _spawn_holder(vault, hold_for=1.0)
+        try:
+            t0 = time.monotonic()
+            rc = sync_mod.cmd_sync(
+                SimpleNamespace(vault="default", message=None, pull_only=False)
+            )
+            elapsed = time.monotonic() - t0
+        finally:
+            holder.wait(timeout=15)
+        (vault / "_held").unlink(missing_ok=True)  # the holder's own marker file
+
+        assert rc == 0, "the tail's own call must still succeed once the lock frees"
+        assert elapsed >= 0.5, (
+            f"cmd_sync did not block on the held lock ({elapsed:.3f}s) — the "
+            "SimpleNamespace `_flush_sync_tail` passes carries no `blocking` "
+            "attribute, so it must default to blocking, never skip"
+        )
+        status = subprocess.run(
+            ["git", "-C", str(vault), "status", "--porcelain"],
+            capture_output=True, text=True,
+        ).stdout
+        assert "left-dirty.md" not in status, "the tail must commit it, not skip it"
+        local_head = subprocess.run(
+            ["git", "-C", str(vault), "rev-parse", "HEAD"],
+            capture_output=True, text=True,
+        ).stdout.strip()
+        remote_head = subprocess.run(
+            ["git", "--git-dir", str(remote), "rev-parse", "HEAD"],
+            capture_output=True, text=True,
+        ).stdout.strip()
+        assert remote_head == local_head, "the tail must push it, not leave it local-only"
